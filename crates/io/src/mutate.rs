@@ -220,6 +220,20 @@ fn gltf_survives_mutation() {
     survives("glTF (.gltf)", &mutations(&gltf, true, 0x917), usize::MAX, |b| crate::read_gltf(b, "fuzz.gltf", &mut no_files).ok().map(|_| 1));
 }
 
+/// An IGES file read with "Import with cadmpeg" (cadmpeg's IGES decoder, then the records): a
+/// cylinder as a manifold solid B-rep (186), as SolidCraft's IGES export writes it.
+#[test]
+fn iges_read_by_cadmpeg_survives_mutation() {
+    let pin = solidcraft_kernel::cylinder(Vec3::ZERO, Vec3::Z, 5.0, 12.0).unwrap();
+    let body = solidcraft_kernel::ExportBody { name: "Pin".into(), body: &pin, color: None };
+    let good = solidcraft_kernel::iges_export_bodies(&[body], &Default::default()).unwrap().into_bytes();
+    let read = |b: &[u8]| {
+        crate::step_import_feature_read(b, "fuzz.igs", crate::StepNames::default(), crate::StepReader::Cadmpeg).ok().map(|f| f.import.bodies.len())
+    };
+    assert_eq!(read(&good), Some(1));
+    survives("IGES (cadmpeg)", &mutations(&good, true, 0x1635), usize::MAX, read);
+}
+
 #[test]
 fn designs_survive_mutation() {
     let mut doc = solidcraft_doc::Document::new("Fuzz");
@@ -237,11 +251,15 @@ fn designs_survive_mutation() {
     survives("design container", &mutations(&container, false, 0xde5), usize::MAX, |b| {
         let _ = crate::read_design_preview(b);
         let _ = crate::read_design_thumbnail(b);
+        let _ = crate::design_text(b);
         crate::read_design(b).ok().map(|d| d.features.len())
     });
     let json = crate::write_design(&doc).unwrap();
     assert!(crate::read_design(&json).is_ok());
-    survives("design JSON", &mutations(&json, true, 0xde6), usize::MAX, |b| crate::read_design(b).ok().map(|d| d.features.len()));
+    survives("design JSON", &mutations(&json, true, 0xde6), usize::MAX, |b| {
+        let _ = crate::design_text(b);
+        crate::read_design(b).ok().map(|d| d.features.len())
+    });
 }
 
 /// A design with two drawings, each drawing it and another design's file, as a container and as
@@ -408,7 +426,13 @@ fn paper_scenes_survive_mutation_into_pdf() {
     ];
     let scene = Scene::new(p(420.0, 297.0), vec![Group { object: 7, kind: ObjectKind::DrawingBorder, items }]);
     let json = serde_json::to_vec(&scene).unwrap();
-    let options = crate::paper::PdfOptions { layers: true, title: Some("Sheet 1".into()), output_time: Some(1_761_436_800), actual_size: false };
+    let options = crate::paper::PdfOptions {
+        layers: true,
+        title: Some("Sheet 1".into()),
+        output_time: Some(1_761_436_800),
+        actual_size: false,
+        text: crate::paper::PdfText::Outlines,
+    };
     let write = |b: &[u8]| -> Option<usize> {
         let scene: Scene = serde_json::from_slice(b).ok()?;
         crate::paper::paper_pdf(&scene.prepare().ok()?, &options).ok().map(|(bytes, _)| bytes.len())

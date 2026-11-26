@@ -3,8 +3,8 @@ use solidcraft_doc::FeatureKind;
 use solidcraft_doc::frame::{self, MAX_MEMBERS};
 
 use super::{
-    FrameMemberParams, MultiTrimParams, ProfileInsertParams, ProfileInsertResult, ProfileListParams, ProfileListResult, ProfilePropertiesParams,
-    ProfilePropertiesResult, RemoveMemberParams,
+    CopeDxfParams, CopeDxfResult, CopeParams, FrameMemberParams, MultiTrimParams, ProfileInsertParams, ProfileInsertResult, ProfileListParams,
+    ProfileListResult, ProfilePropertiesParams, ProfilePropertiesResult, RemoveMemberParams, TrimParams,
 };
 use crate::Session;
 use crate::schema::features::FeatureResult;
@@ -45,6 +45,7 @@ fn schemas_and_the_key_check_agree() {
             "anchor",
             "angle",
             "body_name",
+            "continuous",
             "coped",
             "corner",
             "corners",
@@ -52,6 +53,7 @@ fn schemas_and_the_key_check_agree() {
             "fit_ends",
             "flip",
             "gap",
+            "groups",
             "lines",
             "locate",
             "mirror",
@@ -64,6 +66,7 @@ fn schemas_and_the_key_check_agree() {
             "profile_sketch",
             "profiles",
             "sketch",
+            "up",
         ],
     );
     assert_keys(input_schema_for::<ProfileListParams>(), &["family"]);
@@ -151,6 +154,32 @@ fn strict_keeps_todays_errors() {
         member(json!({"participants": 5})),
         member(json!({"participants": [5]})),
         member(json!({"participants": ["Nobody"]})),
+        member(json!({"groups": []})),
+        member(json!({"groups": "all"})),
+        member(json!({"groups": [1]})),
+        member(json!({"groups": [{}]})),
+        member(json!({"groups": [{"lines": null}]})),
+        member(json!({"groups": [{"lines": []}]})),
+        member(json!({"groups": [{"lines": ["l1", "l1"]}]})),
+        member(json!({"groups": [{"lines": ["l1"]}, {"lines": ["l1"]}]})),
+        member(json!({"groups": [{"lines": ["l1"], "anchor": "middle"}]})),
+        member(json!({"groups": [{"lines": ["l1"], "angle": true}]})),
+        member(json!({"groups": [{"lines": ["l1"], "mirror": "yes"}]})),
+        member(json!({"groups": [{"lines": ["l1"], "body_name": ""}]})),
+        member(json!({"groups": [{"lines": ["l1"]}], "mirror": false})),
+        member(json!({"groups": [{"lines": ["l1"], "locate": [1]}]})),
+        member(json!({"groups": [{"lines": ["l1"], "locate": [0, "up"]}]})),
+        member(json!({"groups": [{"lines": ["l1"], "locate": false}]})),
+        member(json!({"groups": [{"lines": ["l1"], "locate": [0, 0, 0]}]})),
+        member(json!({"groups": [{"lines": ["l1"], "locate": ["right", 0]}]})),
+        member(json!({"groups": [{"lines": ["l1"], "locate": [null, 0]}]})),
+        member(json!({"groups": [{"lines": ["l1"], "locate": [0, null]}]})),
+        member(json!({"groups": [{"lines": ["l1"], "locate": [frame::MAX_PROFILE_SIZE + 1.0, 0]}]})),
+        member(json!({"groups": [{"lines": ["l1"], "locate": [-frame::MAX_PROFILE_SIZE - 1.0, 0]}]})),
+        member(json!({"groups": [{"lines": ["l1"], "locate": [0, frame::MAX_PROFILE_SIZE + 1.0]}]})),
+        member(json!({"groups": [{"lines": ["l1"], "locate": [0, -frame::MAX_PROFILE_SIZE - 1.0]}]})),
+        member(json!({"groups": [{"lines": ["l1"]}, {"lines": ["l2"], "locate": [1]}]})),
+        member(json!({"groups": [{"lines": ["l1"]}], "locate": [0, 0]})),
         // frame.profile.list
         ("frame.profile.list", json!({"family": "XYZ"})),
         ("frame.profile.list", json!({"family": 5})),
@@ -230,6 +259,12 @@ fn the_types_read_each_key_as_the_handlers_do() {
         (member(json!({"lines": null})), true),
         (member(json!({"lines": []})), false),
         (member(json!({"lines": [line, line]})), false),
+        (member(json!({"groups": [{"lines": [line]}]})), true),
+        (member(json!({"groups": [{"lines": [line], "locate": null}]})), true),
+        (member(json!({"groups": [{"lines": [line], "locate": [frame::MAX_PROFILE_SIZE, -frame::MAX_PROFILE_SIZE]}]})), true),
+        (member(json!({"groups": [{"lines": [line], "locate": [-frame::MAX_PROFILE_SIZE, frame::MAX_PROFILE_SIZE]}]})), true),
+        (member(json!({"groups": [{"lines": [line], "locate": [frame::MAX_PROFILE_SIZE + 1.0, 0]}]})), false),
+        (member(json!({"groups": [{"lines": [line], "locate": [0, -frame::MAX_PROFILE_SIZE - 1.0]}]})), false),
         (member(json!({"body_name": "Rail"})), true),
         (member(json!({"body_name": "  Rail  "})), true),
         (member(json!({"body_name": null})), true),
@@ -728,4 +763,176 @@ fn member_replies_match_the_output_schema() {
 fn s_first_sketch_call(s: &mut Session, line: &str) -> Value {
     let id = first_sketch(s);
     s.execute("frame.member", &json!({"sketch": id, "profile": tube(), "lines": [line]})).unwrap_or_else(|e| panic!("{e}"))
+}
+
+#[test]
+fn groups_are_in_the_contract_and_run_in_strict_mode() {
+    let (mut s, lines) = frame_session(ParamCheck::Strict);
+    let p = json!({"sketch": "Frame", "profile": tube(), "groups": [
+        {"lines": [&lines[0]], "anchor": "bottom_left", "angle": "90 deg", "mirror": true, "body_name": "Rail"},
+        {"lines": [&lines[1]], "anchor": null, "locate": [10, 5], "angle": null, "mirror": null, "body_name": null}
+    ]});
+    assert!(issues("frame.member", &p).is_empty(), "{:?}", issues("frame.member", &p));
+    let schema = input_schema_for::<FrameMemberParams>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &p));
+    let reply = s.execute("frame.member", &p).unwrap();
+    matches(output_schema_for::<FeatureResult>(), "frame.member", &reply);
+    assert_eq!(reply["created_bodies"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn the_group_contract_retains_flat_corner_and_pair_options_and_refuses_joined_groups() {
+    let schema = input_schema_for::<FrameMemberParams>();
+    let valid = |p: &Value| conforms(schema.as_value(), schema.as_value(), p);
+    let groups = json!([{"lines": ["a"]}, {"lines": ["b"]}]);
+    assert!(valid(&json!({"sketch": 1, "profile": tube(), "groups": groups, "corner": "none"})));
+    for extra in [
+        json!({"corner": "auto"}),
+        json!({"corner": "butt"}),
+        json!({"fit_ends": true}),
+        json!({"coped": true}),
+        json!({"flip": true}),
+        json!({"gap": "0 mm"}),
+        json!({"pairs": [{"a": {"type": "origin"}, "b": {"vertex": [0, 0, 10]}}]}),
+    ] {
+        let mut p = json!({"sketch": 1, "profile": tube(), "groups": groups});
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        assert!(!valid(&p), "{p}");
+    }
+    // Main's normal sketch-or-pairs and profile alternatives remain in allOf.
+    assert!(valid(
+        &json!({"profile": tube(), "pairs": [{"a": {"type": "origin"}, "b": {"vertex": [0, 0, 10]}}], "corner": "auto", "fit_ends": true, "coped": true, "gap": "2 mm"})
+    ));
+    assert!(valid(&json!({"sketch": 1, "profile": tube(), "groups": [{"lines": ["a"]}], "corner": "auto"})));
+    assert!(!valid(&json!({"profile": tube(), "groups": groups})));
+    assert!(!valid(&json!({"sketch": 1, "groups": groups})));
+    assert!(!valid(&json!({"sketch": 1, "profile": tube(), "profile_sketch": 2, "groups": groups})));
+}
+
+#[test]
+fn the_group_schema_requires_lines_and_refuses_mixed_placement() {
+    let schema = input_schema_for::<FrameMemberParams>();
+    for (extra, takes) in [
+        (json!({"groups": [{"lines": ["l1"]}]}), true),
+        (json!({"groups": null}), true),
+        (json!({"groups": []}), false),
+        (json!({"groups": vec![json!({"lines": ["l1"]}); MAX_MEMBERS + 1]}), false),
+        (json!({"groups": "all"}), false),
+        (json!({"groups": [1]}), false),
+        (json!({"groups": [{}]}), false),
+        (json!({"groups": [{"lines": null}]}), false),
+        (json!({"groups": [{"lines": []}]}), false),
+        (json!({"groups": [{"lines": ["l1", "l1"]}]}), false),
+        (json!({"groups": [{"lines": ["l1"], "anchor": "middle"}]}), false),
+        (json!({"groups": [{"lines": ["l1"], "mirror": "yes"}]}), false),
+        (json!({"groups": [{"lines": ["l1"]}], "angle": "90 deg"}), false),
+        (json!({"groups": [{"lines": ["l1"]}], "lines": ["l2"]}), false),
+        (json!({"groups": [{"lines": ["l1"]}], "mirror": false}), false),
+        (json!({"groups": [{"lines": ["l1"]}], "continuous": true}), false),
+        (json!({"groups": [{"lines": ["l1"]}], "continuous": false}), false),
+        (json!({"groups": [{"lines": ["l1"]}], "continuous": null}), true),
+        (json!({"groups": null, "lines": ["l1"], "continuous": true}), true),
+        (json!({"groups": [{"lines": ["l1"], "continuous": true}]}), false),
+        (json!({"groups": [{"lines": ["l1"], "continuous": false}]}), false),
+        (json!({"groups": [{"lines": ["l1"]}], "anchor": "origin"}), false),
+        (json!({"groups": [{"lines": ["l1"]}], "body_name": "Rail"}), false),
+        (json!({"groups": [{"lines": ["l1"]}], "locate": [0, 0]}), false),
+        (json!({"groups": [{"lines": ["l1"], "locate": [10, 5]}]}), true),
+        (json!({"groups": [{"lines": ["l1"], "locate": null}]}), true),
+        (json!({"groups": [{"lines": ["l1"], "locate": [frame::MAX_PROFILE_SIZE, -frame::MAX_PROFILE_SIZE]}]}), true),
+        (json!({"groups": [{"lines": ["l1"], "locate": [-frame::MAX_PROFILE_SIZE, frame::MAX_PROFILE_SIZE]}]}), true),
+        (json!({"groups": [{"lines": ["l1"], "locate": [frame::MAX_PROFILE_SIZE + 1.0, 0]}]}), false),
+        (json!({"groups": [{"lines": ["l1"], "locate": [-frame::MAX_PROFILE_SIZE - 1.0, 0]}]}), false),
+        (json!({"groups": [{"lines": ["l1"], "locate": [0, frame::MAX_PROFILE_SIZE + 1.0]}]}), false),
+        (json!({"groups": [{"lines": ["l1"], "locate": [0, -frame::MAX_PROFILE_SIZE - 1.0]}]}), false),
+        (json!({"groups": [{"lines": ["l1"], "locate": [10]}]}), false),
+        (json!({"groups": [{"lines": ["l1"], "locate": [0, 0, 0]}]}), false),
+        (json!({"groups": [{"lines": ["l1"]}], "angle": null, "mirror": null}), true),
+    ] {
+        let mut p = json!({"sketch": "Frame", "profile": tube()});
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        assert_eq!(conforms(schema.as_value(), schema.as_value(), &p), takes, "{p}");
+    }
+}
+
+#[test]
+fn schemas_cover_trim_parameters_and_results() {
+    let schema = input_schema_for::<TrimParams>();
+    assert_keys(schema.clone(), &["body_name", "body_names", "end", "gap", "members", "name", "participants", "to"]);
+    for to in [
+        json!("Post"),
+        json!({"member": {"feature": 3, "line": "l1"}, "side": "left"}),
+        json!({"feature": "Members", "line": "l1"}),
+        json!({"plane": "YZ"}),
+        json!({"plane": {"face": [150, 0, 0], "body": "Block", "index": 2, "path": []}}),
+        json!({"plane_ref": {"type": "origin", "name": "YZ"}}),
+    ] {
+        let p = json!({"members": ["Rail", {"feature": 3, "line": "l2"}], "to": to, "gap": "2 mm", "end": "start"});
+        assert!(serde_json::from_value::<TrimParams>(p.clone()).is_ok(), "{p}");
+        assert!(conforms(schema.as_value(), schema.as_value(), &p), "{p}");
+    }
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    for (command, params) in [
+        ("sketch.create", json!({"plane": "XY", "name": "Line"})),
+        ("sketch.line", json!({"points": [[0, 0], [100, 0]]})),
+        ("sketch.finish", json!({})),
+        ("frame.member", json!({"sketch": "Line", "profile": {"kind": "bar", "width": 10, "height": 10}, "body_name": "Bar"})),
+    ] {
+        s.execute(command, &params).unwrap();
+    }
+    let mut p = json!({"members": "Bar", "to": {"plane": {"origin": [150, 0, 0], "normal": [1, 0, 0]}}});
+    assert!(conforms(schema.as_value(), schema.as_value(), &p));
+    let before = s.doc.features.len();
+    p["gaap"] = json!(2);
+    assert!(s.execute("frame.trim", &p).unwrap_err().to_string().contains("gaap"));
+    assert_eq!(s.doc.features.len(), before);
+    p.as_object_mut().unwrap().remove("gaap");
+    let result = s.execute("frame.trim", &p).unwrap();
+    let output = output_schema_for::<FeatureResult>();
+    assert!(conforms(output.as_value(), output.as_value(), &result), "{result}");
+    assert_eq!(result["changed_bodies"], json!(["Bar"]));
+}
+
+#[test]
+fn continuous_member_matches_the_strict_contract_and_result_schema() {
+    let schema = input_schema_for::<FrameMemberParams>();
+    let p = json!({"sketch": "Chassis", "lines": ["l1", "a1", "l2"], "continuous": true,
+        "profile": {"kind": "round_tube", "diameter": "20 mm", "wall": 2}, "names": {"$path": "Hoop"}});
+    assert!(conforms(schema.as_value(), schema.as_value(), &p));
+    assert!(serde_json::from_value::<FrameMemberParams>(p).is_ok());
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    s.execute("sketch.create", &json!({"plane": "XY", "name": "Line"})).unwrap();
+    s.execute("sketch.line", &json!({"points": [[0, 0], [100, 0]]})).unwrap();
+    s.execute("sketch.finish", &json!({})).unwrap();
+    let p = json!({"sketch": "Line", "lines": ["l1"], "continuous": true, "profile": {"kind": "bar", "width": 10, "height": 5}});
+    let result = s.execute("frame.member", &p).unwrap();
+    let schema = output_schema_for::<FeatureResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &result), "{result}");
+    let mut unknown = p;
+    unknown["typo"] = json!(true);
+    assert!(s.execute("frame.member", &unknown).unwrap_err().to_string().contains("typo"));
+}
+
+#[test]
+fn cope_contracts_and_physical_dxf_reply_conform() {
+    assert_keys(input_schema_for::<CopeParams>(), &["body_name", "body_names", "end", "member", "name", "participants", "tools"]);
+    assert_keys(input_schema_for::<CopeDxfParams>(), &["end", "member", "path", "seam", "tolerance"]);
+    let p = json!({"member":"Rail", "end":"end", "seam":"45 deg", "tolerance":0.01});
+    let schema = input_schema_for::<CopeDxfParams>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &p));
+    assert!(serde_json::from_value::<CopeDxfParams>(p).is_ok());
+    let p = json!({"member":"Rail", "tools":["Post"], "end":"start"});
+    let schema = input_schema_for::<CopeParams>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &p));
+    let out = serde_json::json!({
+        "member":"Rail", "end":"start", "units":"mm", "scale":1.0, "outer_diameter":40.0,
+        "circumference":125.66370614359172, "seam":0.0, "origin":[0.0,0.0,0.0], "component":0,
+        "axis":[1.0,0.0,0.0], "seam_direction":[0.0,1.0,0.0], "wrap_direction":"right_hand_about_inward_axis",
+        "tolerance":0.01, "segments":1, "max_segments":65536, "profile":[[0.0,20.0],[125.66370614359172,20.0]], "dxf":"drawing"
+    });
+    let schema = output_schema_for::<CopeDxfResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &out));
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    let err = s.execute("frame.export_cope_dxf", &json!({"member":"Rail", "end":"start", "typo":true})).unwrap_err();
+    assert!(err.to_string().contains("typo"));
 }

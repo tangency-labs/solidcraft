@@ -177,6 +177,7 @@ impl Tokens {
             sel_edge_rim: Color32::from_rgb(127, 191, 255),
             hover_edge: Color32::from_rgb(0, 0, 0),
             hover_edge_halo: Color32::from_rgb(203, 203, 203),
+            hover_edge_lit: Color32::from_rgb(255, 128, 0),
             hover_face_lift: 40,
             sel_profile: Color32::from_rgb(26, 84, 167),
             sel_profile_edge: Color32::from_rgb(47, 109, 198),
@@ -304,6 +305,25 @@ impl Tokens {
             paper_prussian_blue_ink: Color32::from_rgb(0xD6, 0xE3, 0xEC),
             paper_dark: Color32::from_rgb(0x2B, 0x2F, 0x36),
             paper_dark_ink: Color32::from_rgb(0xD9, 0xDD, 0xE3),
+            // Hidden, centre, dimension, dimension text and note (`PaperLine`) on a white and a
+            // dark sheet (#18989): teal, red, violet, a deeper or lighter violet, and rose. Every
+            // pair, the ink too, stays apart (CIEDE2000 10 or more) for normal vision and each
+            // colour vision simulation (`colour_vision_tests`), so no mode changes them. The white
+            // set is the print colours too; a blueprint sheet keeps its one white ink.
+            paper_lines: [
+                Color32::from_rgb(0x17, 0x9C, 0x97),
+                Color32::from_rgb(0xFC, 0x34, 0x1C),
+                Color32::from_rgb(0x9A, 0x65, 0xEE),
+                Color32::from_rgb(0x41, 0x10, 0xB2),
+                Color32::from_rgb(0x97, 0x40, 0x60),
+            ],
+            paper_dark_lines: [
+                Color32::from_rgb(0x1D, 0xAD, 0xA4),
+                Color32::from_rgb(0xF8, 0x18, 0x2C),
+                Color32::from_rgb(0x99, 0x70, 0xD9),
+                Color32::from_rgb(0xE6, 0xAE, 0xE9),
+                Color32::from_rgb(0xFF, 0x7B, 0xB0),
+            ],
             interference: Color32::from_rgb(235, 45, 40),
             comb_envelope: Color32::from_rgb(130, 40, 175),
             comb_teeth: Color32::from_rgb(215, 105, 0),

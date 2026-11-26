@@ -246,6 +246,7 @@ mod imp {
         match turn {
             crate::FilletTurn::Mitre => Turn::Mitre,
             crate::FilletTurn::Swept => Turn::Swept,
+            crate::FilletTurn::Auto => Turn::Auto,
         }
     }
 
@@ -509,7 +510,7 @@ mod imp {
                 }
                 e => failed(what, "operation", e),
             })?;
-            // Checked here unless the evaluation's validation mode leaves it to the feature's end
+            // Checked here when the evaluation's validation mode checks each step
             // (`crate::validation`).
             let step = crate::validation::step();
             if step == crate::validation::Step::Check {

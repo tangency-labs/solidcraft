@@ -3,6 +3,10 @@
 //! module hands the body over, takes the result back and words the refusals.
 
 use solidcore_ops::stretch::{Crossing, Refusal, Refused};
+
+/// How a sketch plane lies to a stretch, and a sketch plane in the world, for Edit sketch
+/// (`solidcore_ops::stretch`): the engine reaches solidcore through this crate.
+pub use solidcore_ops::stretch::{Lies as StretchLies, SketchPlane as StretchSketchPlane};
 use solidcore_record::Vec3;
 
 use crate::{Body, KernelError, Result};
@@ -62,6 +66,12 @@ pub fn stretch_proposal(body: &Body, normal: Vec3, from: Option<Vec3>) -> Result
 pub fn same_part(a: &Body, b: &Body) -> bool {
     let (Ok(x), Ok(y)) = (crate::measure(a), crate::measure(b)) else { return false };
     solidcore_ops::stretch::same_part((arr(x.bbox.min), arr(x.bbox.max), x.volume), (arr(y.bbox.min), arr(y.bbox.max), y.volume))
+}
+
+/// How a sketch plane with normal `plane_normal` lies to a stretch along `normal`
+/// ([`solidcore_ops::stretch::plane_lies`]).
+pub fn stretch_plane_lies(plane_normal: Vec3, normal: Vec3) -> StretchLies {
+    solidcore_ops::stretch::plane_lies(arr(plane_normal), arr(normal))
 }
 
 fn arr(v: Vec3) -> [f64; 3] {

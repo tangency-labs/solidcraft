@@ -7,11 +7,11 @@
 
 use std::collections::HashSet;
 
-use solidcore_ops::stretch::{self, Lies, SketchPlane};
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::{Document, FeatureKind, ModelState, StretchDirection};
 use solidcraft_geom::prelude::*;
+use solidcraft_kernel::{StretchLies as Lies, StretchSketchPlane as SketchPlane};
 use solidcraft_sketch::{ConstraintKind, CurveKind, Sketch};
 
 use crate::Session;
@@ -53,7 +53,7 @@ pub(super) fn changes(s: &Session, state: &ModelState, body: &str, planned: &[Pl
     for p in planned {
         let n = arr(p.direction.vector());
         let cut = arr(p.cut);
-        let lies = stretch::plane_lies(arr(normal), n);
+        let lies = solidcraft_kernel::stretch_plane_lies(normal, p.direction.vector());
         match lies {
             // Along the Extrude: its depth grows, when the side that moves is the far cap.
             Lies::Along(with_normal) => {
@@ -78,8 +78,9 @@ pub(super) fn changes(s: &Session, state: &ModelState, body: &str, planned: &[Pl
             if f.id > made_by && related.contains(&f.id) && !matches!(f.kind, FeatureKind::Sketch { .. }) {
                 for point in f.kind.face_points_mut() {
                     // A picked point is an axis of no length: beyond the cut it moves with the part.
-                    let (moved, ..) = stretch::moved_axis(arr(*point), n, 0.0, 0.0, cut, n, p.distance);
-                    *point = Vec3::new(moved[0], moved[1], moved[2]);
+                    let (moved, ..) =
+                        solidcraft_kernel::stretch_axis(*point, p.direction.vector(), 0.0, 0.0, p.cut, p.direction.vector(), p.distance);
+                    *point = moved;
                 }
             }
             if !sketches.contains(&f.id) {
@@ -88,7 +89,7 @@ pub(super) fn changes(s: &Session, state: &ModelState, body: &str, planned: &[Pl
             let FeatureKind::Sketch { sketch, .. } = &mut f.kind else { continue };
             let Some(solved) = state.sketch(f.id) else { continue };
             let plane = solved.plane;
-            if stretch::plane_lies(arr(plane.normal()), n) != Lies::InPlane {
+            if solidcraft_kernel::stretch_plane_lies(plane.normal(), p.direction.vector()) != Lies::InPlane {
                 continue;
             }
             let on = SketchPlane { origin: arr(plane.origin), x_axis: arr(plane.x), y_axis: arr(plane.y) };

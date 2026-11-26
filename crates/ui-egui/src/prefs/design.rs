@@ -9,8 +9,11 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         "ui.angle_decimals",
         "prefs.parameter_list_rows",
         "prefs.origin_plane_names",
+        "prefs.origin_plane_size",
         "prefs.stand_up_unknown",
         "prefs.export_name",
+        "prefs.designs_folder",
+        "prefs.exports_folder",
     ]
     .into_iter()
     .map(|id| ui_kit::ContentWidth::label(ui, app.tr(id)))
@@ -21,24 +24,27 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::settings_heading(ui, app.tr("prefs.design"), app.tr("prefs.design_note"));
         ui_kit::settings_section(ui, "units", app.tr("prefs.units_precision"), |ui| {
             ui_kit::settings_form(ui, label_width, |ui| {
+                let locked = app.policy.locks("default_units");
                 ui_kit::row(ui, app.tr("ui.units_of_new_designs"), |ui| {
                     let mut selected = UNITS.iter().position(|u| *u == app.preferences.default_units).unwrap_or(0);
-                    ui_kit::segmented(
-                        ui,
-                        &mut selected,
-                        UNITS,
-                        ui_kit::Segments {
-                            intrinsic: true,
-                            targets: &[
-                                "prefs:default_units:mm",
-                                "prefs:default_units:cm",
-                                "prefs:default_units:m",
-                                "prefs:default_units:in",
-                                "prefs:default_units:ft",
-                            ],
-                            ..Default::default()
-                        },
-                    );
+                    crate::policy::row(ui, locked, |ui| {
+                        ui_kit::segmented(
+                            ui,
+                            &mut selected,
+                            UNITS,
+                            ui_kit::Segments {
+                                intrinsic: true,
+                                targets: &[
+                                    "prefs:default_units:mm",
+                                    "prefs:default_units:cm",
+                                    "prefs:default_units:m",
+                                    "prefs:default_units:in",
+                                    "prefs:default_units:ft",
+                                ],
+                                ..Default::default()
+                            },
+                        )
+                    });
                     if let Some(unit) = UNITS.get(selected)
                         && app.preferences.default_units != *unit
                     {
@@ -53,11 +59,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         crate::scenario::publish_target("prefs:length_decimals", response.rect);
                     });
                     ui.add_space(t.space_6);
-                    let sample = format_length(
-                        12.5 * unit_scale(&app.preferences.default_units).0,
-                        &app.preferences.default_units,
-                        app.preferences.length_decimals,
-                    );
+                    let sample = length_decimals_sample(&app.preferences.default_units, app.preferences.length_decimals);
                     ui_kit::settings_precision_sample(ui, &sample);
                 });
                 ui_kit::row(ui, app.tr("ui.angle_decimals"), |ui| {
@@ -132,20 +134,58 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 });
                 // Each kind's built-ins, by size: the kind is the row's, so each shows its paper's title.
+                // A template file chosen (#22120) is the list's first entry, by its file name; Choose
+                // File… picks one.
+                let can_browse = app.services.pick_open.is_some();
+                let mut browse = None;
                 let p = &mut app.preferences;
                 for (label, id, chosen, assembly) in [
                     ("ui.template_for_new_part_drawings", "pref_part_drawing_template", &mut p.part_drawing_template, false),
                     ("ui.template_for_new_assembly_drawings", "pref_assembly_drawing_template", &mut p.assembly_drawing_template, true),
                 ] {
-                    let names: Vec<&str> = template::BUILT_INS.iter().copied().filter(|name| super::is_template_for(name, assembly)).collect();
-                    let titles: Vec<String> = names.iter().filter_map(|name| template::title(name)).collect();
+                    let file = super::is_template_file(chosen).then(|| chosen.clone());
+                    let mut names: Vec<String> =
+                        template::BUILT_INS.iter().copied().filter(|name| super::is_template_for(name, assembly)).map(str::to_string).collect();
+                    let mut titles: Vec<String> = names.iter().filter_map(|name| template::title(name)).collect();
+                    if let Some(file) = &file {
+                        let shown = std::path::Path::new(file).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| file.clone());
+                        names.insert(0, file.clone());
+                        titles.insert(0, solidcraft_ui_text::format("ui.template_file_entry", &[("name", &shown)]));
+                    }
                     let titles: Vec<&str> = titles.iter().map(String::as_str).collect();
+                    // Choose File… at the right, as the folder rows' Browse; the dropdown fills the rest.
                     ui_kit::row(ui, solidcraft_ui_text::tr(label), |ui| {
-                        let mut selected = names.iter().position(|name| *name == chosen.as_str()).unwrap_or(0);
-                        ui_kit::dropdown(ui, id, &mut selected, &titles);
-                        if let Some(name) = names.get(selected) {
-                            *chosen = (*name).to_string();
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if can_browse {
+                                let response = ui_kit::button(ui, solidcraft_ui_text::tr("ui.template_file_choose"), ui_kit::Button::Normal);
+                                crate::scenario::publish_target(&format!("prefs:{id}:choose_file"), response.rect);
+                                if response.clicked() {
+                                    browse = Some(assembly);
+                                }
+                            }
+                            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                let mut selected = names.iter().position(|name| name == chosen).unwrap_or(0);
+                                let response = ui_kit::dropdown(ui, id, &mut selected, &titles);
+                                if let Some(file) = &file {
+                                    response.on_hover_text(file.as_str());
+                                }
+                                if let Some(name) = names.get(selected) {
+                                    chosen.clone_from(name);
+                                }
+                            });
+                        });
+                    });
+                }
+                if let Some(assembly) = browse {
+                    app.pick_open_for(&["scdwg", "json"], move |app, path| {
+                        // Preferences closed (Cancel or OK) while the dialog was open: its answer
+                        // belongs to nothing any more.
+                        if !app.prefs_window.shell.open {
+                            return;
                         }
+                        let Some(path) = path.filter(|path| super::is_template_file(path)) else { return };
+                        let p = &mut app.preferences;
+                        *(if assembly { &mut p.assembly_drawing_template } else { &mut p.part_drawing_template }) = path;
                     });
                 }
                 let label = app.tr("ui.sheet_page.colour").to_owned();
@@ -233,6 +273,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_target("prefs:heal_tolerance_defects", heal.rect);
         });
         export_name(app, ui, label_width);
+        folders(app, ui, label_width);
         origin_plane_names(app, ui, label_width);
         ui_kit::settings_section(ui, "linked_designs", app.tr("prefs.linked_designs"), |ui| {
             let response = setting::update_changed_links(app, ui);
@@ -254,11 +295,22 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_target("prefs:names_from_file", response.rect);
         });
         ui_kit::settings_section(ui, "assemblies", app.tr("prefs.assemblies"), |ui| {
+            let response = setting::joint_moving_first(app, ui);
+            crate::scenario::publish_target("prefs:joint_moving_first", response.rect);
+
             ui.horizontal_wrapped(|ui| {
                 let response = setting::joint_drag_trackball(app, ui).backing_on_hover_text(app.tr("prefs.joint_drag_trackball_help"));
                 crate::scenario::publish_target("prefs:joint_drag_trackball", response.rect);
                 if !crate::ui_kit::settings_search::suppress_chrome(ui) {
                     ui_kit::help_icon(ui, app.tr("prefs.joint_drag_trackball_help"));
+                }
+            });
+            // Components pasted from another design go to the target's origin (#17621).
+            ui.horizontal_wrapped(|ui| {
+                let response = setting::paste_components_at_origin(app, ui);
+                crate::scenario::publish_target("prefs:paste_components_at_origin", response.rect);
+                if !crate::ui_kit::settings_search::suppress_chrome(ui) {
+                    ui_kit::help_icon(ui, app.tr("prefs.paste_components_at_origin_help"));
                 }
             });
         });
@@ -285,6 +337,86 @@ fn export_name(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
                 ui_kit::Text::Hint("export_name"),
             );
         }
+        // GLB export's node tree (#5296); off writes the flat file of SolidCraft 0.40.
+        ui.horizontal_wrapped(|ui| {
+            let response = setting::glb_export_hierarchy(app, ui);
+            crate::scenario::publish_target("prefs:glb_export_hierarchy", response.rect);
+            if !crate::ui_kit::settings_search::suppress_chrome(ui) {
+                ui_kit::help_icon(ui, app.tr("ui.glb_export_hierarchy_help"));
+            }
+        });
+    });
+}
+
+/// The folders Save and the export dialogs open in (#5522). Only a host that can pick a folder
+/// shows them: the web app saves through the browser and has no folders.
+fn folders(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
+    if app.services.pick_folder.is_none() {
+        return;
+    }
+    ui_kit::settings_section(ui, "folders", app.tr("prefs.folders"), |ui| {
+        ui_kit::settings_form(ui, label_width, |ui| {
+            folder_row(app, ui, Folder::Designs);
+            folder_row(app, ui, Folder::Exports);
+        });
+    });
+}
+
+/// One of the folder settings.
+#[derive(Clone, Copy)]
+enum Folder {
+    Designs,
+    Exports,
+}
+
+impl Folder {
+    fn value(self, prefs: &mut Prefs) -> &mut String {
+        match self {
+            Self::Designs => &mut prefs.designs_folder,
+            Self::Exports => &mut prefs.exports_folder,
+        }
+    }
+
+    /// The setting's name: its label's message id and its scenario target.
+    fn name(self) -> &'static str {
+        match self {
+            Self::Designs => "designs_folder",
+            Self::Exports => "exports_folder",
+        }
+    }
+}
+
+/// A folder setting: the path, typed or chosen with Browse…, and Clear to go back to the folder
+/// last used.
+fn folder_row(app: &mut SolveApp, ui: &mut egui::Ui, folder: Folder) {
+    let name = folder.name();
+    let label = app.tr(&format!("prefs.{name}")).to_string();
+    let help = app.tr(&format!("prefs.{name}_help")).to_string();
+    let hint = app.tr("prefs.folder_hint").to_string();
+    let browse = app.tr("prefs.folder_browse").to_string();
+    let clear = app.tr("ui.clear").to_string();
+    ui_kit::settings_row_help(ui, &label, &help, |ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let response = ui_kit::button(ui, browse, ui_kit::Button::Normal);
+            crate::scenario::publish_target(&format!("prefs:{name}:browse"), response.rect);
+            if response.clicked() {
+                let current = folder.value(&mut app.preferences).clone();
+                app.pick_folder(&current, move |app, path| {
+                    if let Some(path) = path {
+                        *folder.value(&mut app.preferences) = path;
+                    }
+                });
+            }
+            if !folder.value(&mut app.preferences).is_empty() {
+                let response = ui_kit::button(ui, clear, ui_kit::Button::Normal);
+                crate::scenario::publish_target(&format!("prefs:{name}:clear"), response.rect);
+                if response.clicked() {
+                    folder.value(&mut app.preferences).clear();
+                }
+            }
+            let (_, response) = ui_kit::text_field_reserving(ui, folder.value(&mut app.preferences), &hint, 0.0);
+            crate::scenario::publish_target(&format!("prefs:{name}"), response.rect);
+        });
     });
 }
 
@@ -319,13 +451,42 @@ fn origin_plane_names(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
                     }
                 }
             });
+            ui_kit::settings_row_help(ui, app.tr("prefs.origin_display"), app.tr("prefs.origin_display_note"), |ui| {
+                let mut selected = OriginDisplay::ALL.iter().position(|display| *display == app.preferences.hide_origin).unwrap_or(0);
+                let options = OriginDisplay::ALL.map(|display| app.tr(display.label_id()));
+                if ui_kit::segmented(
+                    ui,
+                    &mut selected,
+                    &options,
+                    ui_kit::Segments {
+                        intrinsic: true,
+                        targets: &["prefs:hide_origin:shown", "prefs:hide_origin:automatic", "prefs:hide_origin:hidden"],
+                        ..Default::default()
+                    },
+                ) && let Some(display) = OriginDisplay::ALL.get(selected)
+                {
+                    app.preferences.hide_origin = *display;
+                }
+            });
+            // (#21191) how large the planes' squares are drawn, as a share of their default size
+            ui_kit::row(ui, app.tr("prefs.origin_plane_size"), |ui| {
+                let response = ui_kit::slider(
+                    ui,
+                    &mut app.preferences.origin_plane_scale,
+                    ORIGIN_PLANE_SCALE,
+                    ui_kit::Slider { step: Some(0.25), format: |v| format!("{:.0} %", v * 100.0), ..Default::default() },
+                );
+                crate::scenario::publish_target("prefs:origin_plane_scale", response.rect);
+            });
         });
-        let response = setting::hide_origin(app, ui);
-        crate::scenario::publish_target("prefs:hide_origin", response.rect);
-        crate::scenario::publish_target("dialog:Hide origin by default", response.rect);
         let response = setting::origin_axes_across_view(app, ui).backing_on_hover_text(app.tr("prefs.origin_axes_across_view_help"));
         crate::scenario::publish_target("prefs:origin_axes_across_view", response.rect);
         let response = setting::browser_hover_shows_origin(app, ui).backing_on_hover_text(app.tr("prefs.browser_hover_shows_origin_help"));
         crate::scenario::publish_target("prefs:browser_hover_shows_origin", response.rect);
     });
+}
+
+/// The Length decimals example: 12.5 in `units` (not 12.5 mm), with `decimals`.
+pub(super) fn length_decimals_sample(units: &str, decimals: u8) -> String {
+    format_length(12.5 / unit_scale(units).0, units, decimals)
 }

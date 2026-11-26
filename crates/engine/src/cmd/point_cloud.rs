@@ -4,7 +4,7 @@
 use serde_json::Value;
 use solidcraft_doc::Mat;
 use solidcraft_doc::point_cloud::{
-    ColorBy, Colors, Complex, Filter, Keep, MAX_COORD, MAX_FILTERS, MAX_NAMES, MAX_POINTS, POINT_SIZE, PointCloud, Points, UNITS, unit_scale,
+    ColorBy, Colors, Complex, Filter, Keep, MAX_COORD, MAX_FILTERS, MAX_NAMES, MAX_POINTS, POINT_SIZE, PointCloud, Points, UNITS, Up, unit_scale,
 };
 
 use super::CommandSpec;
@@ -24,22 +24,22 @@ const DELETE_CONTRACT: TypedContract<PointCloudDeleteParams> = TypedContract::ne
 const LIST_CONTRACT: TypedContract<PointCloudListParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("pointcloud.insert", "Insert Point Cloud", crate::checked!("pointcloud.insert", insert))
+    CommandSpec::new("pointcloud.insert", "Insert Point Cloud", crate::checked!("pointcloud.insert", insert)).begins_edit()
         .at("SOLID", "INSERT")
         .icon("import")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<PointCloudInsertResult>)
-        .params("path: .ply, .pcd, .e57, .xyz, .pts or .asc file (its points join the design as a point cloud: drawn as points, never a body; a PLY's red, green and blue, a PCD's packed rgb or an E57's colours are its colours, the other properties of a PLY or PCD and an E57's intensity can colour and filter it; every scan of an E57 file is read, each moved by its pose; a PLY's edge and face elements become segments and triangles, a segment with width and height properties drawn as a bead) → cloud, name, points, segments, triangles, source_points, bounds, warnings; name?; units?: mm|cm|m|in|ft (the file's length unit, default mm, m for an E57 file); max_points?: most points kept (default 5000000, at most 20000000; a larger file is thinned evenly); center?: bool (move the cloud so the middle of its base sits at the origin); point_size?: pixels (0.5…16, default 2); color_by?: file|single|height or a property's name (the file's colours, the default; one colour; a ramp by height, blue low to red high; or by any property of the file, a ramp over its values or a palette for whole numbers); color?: [r, g, b] 0…1 (the single colour; given alone it sets color_by single, null sets color_by file); color_range?: [low, high] the ramp runs between (design Z in mm by height), or null for the automatic range (by height all but the lowest and highest 2 % of the points; by a property the values it takes over what the filters keep); height_range?: the same as color_range; filters?: [{property, range: [low, high]} or {property, values: [whole numbers]} for a property with named values], or null (only what every filter keeps is shown)"),
+        .params("path: .ply, .pcd, .e57, .xyz, .pts or .asc file (its points join the design as a point cloud: drawn as points, never a body; a PLY's red, green and blue, a PCD's packed rgb or an E57's colours are its colours, the other properties of a PLY or PCD and an E57's intensity can colour and filter it; every scan of an E57 file is read, each moved by its pose; a PLY's edge and face elements become segments and triangles, a segment with width and height properties drawn as a bead) → cloud, name, points, segments, triangles, source_points, bounds, warnings; name?; units?: mm|cm|m|in|ft (the file's length unit, default mm, m for an E57 file); up?: z|y (the file's up axis, default z; y turns the points a quarter turn about X so a scan written with Y up stands on the design's Z); max_points?: most points kept (default 5000000, at most 20000000; a larger file is thinned evenly); center?: bool (move the cloud so the middle of its base sits at the origin); point_size?: pixels (0.5…16, default 2); color_by?: file|single|height or a property's name (the file's colours, the default; one colour; a ramp by height, blue low to red high; or by any property of the file, a ramp over its values or a palette for whole numbers); color?: [r, g, b] 0…1 (the single colour; given alone it sets color_by single, null sets color_by file); color_range?: [low, high] the ramp runs between (design Z in mm by height), or null for the automatic range (by height all but the lowest and highest 2 % of the points; by a property the values it takes over what the filters keep); height_range?: the same as color_range; filters?: [{property, range: [low, high]} or {property, values: [whole numbers]} for a property with named values], or null (only what every filter keeps is shown)"),
     CommandSpec::new("pointcloud.edit", "Edit Point Cloud", crate::checked!("pointcloud.edit", edit))
         .icon("edit")
         .contract(&EDIT_CONTRACT)
         .output(output_schema_for::<PointCloudEditResult>)
-        .params("cloud: id or name; name?; visible?; point_size?: pixels (0.5…16); color_by?: file|single|height or a property's name (the file's colours, the default; one colour; a ramp by height, blue low to red high; or by any property of the file, a ramp over its values or a palette for whole numbers); color?: [r, g, b] 0…1 (the single colour; given alone it sets color_by single, null sets color_by file); color_range?: [low, high] the ramp runs between (design Z in mm by height), or null for the automatic range (by height all but the lowest and highest 2 % of the points; by a property the values it takes over what the filters keep); height_range?: the same as color_range; units?: mm|cm|m|in|ft (the file's length unit: the points are scaled from the unit they came in as); matrix?: [12 or 16 numbers] (where the cloud sits: a rigid row-major 3x4 or 4x4 matrix, as occurrence.move takes it); tolerance?; filters?: [{property, range: [low, high]} or {property, values: [whole numbers]} for a property with named values], or null (only what every filter keeps is shown) → cloud"),
+        .params("cloud: id or name; name?; visible?; point_size?: pixels (0.5…16); color_by?: file|single|height or a property's name (the file's colours, the default; one colour; a ramp by height, blue low to red high; or by any property of the file, a ramp over its values or a palette for whole numbers); color?: [r, g, b] 0…1 (the single colour; given alone it sets color_by single, null sets color_by file); color_range?: [low, high] the ramp runs between (design Z in mm by height), or null for the automatic range (by height all but the lowest and highest 2 % of the points; by a property the values it takes over what the filters keep); height_range?: the same as color_range; units?: mm|cm|m|in|ft (the file's length unit: the points are scaled from the unit they came in as); up?: z|y (the file's up axis: the points are turned from the one they came in with, in the cloud's own frame, so its placement is kept); matrix?: [12 or 16 numbers] (where the cloud sits: a rigid row-major 3x4 or 4x4 matrix, as occurrence.move takes it); tolerance?; filters?: [{property, range: [low, high]} or {property, values: [whole numbers]} for a property with named values], or null (only what every filter keeps is shown) → cloud"),
     CommandSpec::new("pointcloud.reload", "Reload Point Cloud", crate::checked!("pointcloud.reload", reload))
         .icon("import")
         .contract(&RELOAD_CONTRACT)
         .output(output_schema_for::<PointCloudReloadResult>)
-        .params("cloud: id or name (its file is read again from where it was inserted; name, placement, units, colouring and the filters on properties it still has are kept; read under the limit it was inserted with, so a file that grew is thinned only past that limit) → cloud, points, segments, triangles, warnings"),
+        .params("cloud: id or name (its file is read again from where it was inserted; name, placement, units, up axis, colouring and the filters on properties it still has are kept; read under the limit it was inserted with, so a file that grew is thinned only past that limit) → cloud, points, segments, triangles, warnings"),
     CommandSpec::new("pointcloud.delete", "Delete Point Cloud", crate::checked!("pointcloud.delete", delete))
         .icon("delete")
         .contract(&DELETE_CONTRACT)
@@ -51,7 +51,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .doc_only()
         .contract(&LIST_CONTRACT)
         .output(output_schema_for::<PointCloudListResult>)
-        .params("→ clouds: [{cloud, name, file, source (the file's path, read again by pointcloud.reload), points, segments, triangles, source_points, units, visible, point_size, color_by (file, single, height or a property's name), color, colored, properties: [{name, integer, span, names}], filters, color_range (the ramp's now, exact over what the filters keep), height_range (the ramp's own range or the automatic one by height), height_auto, bounds: [[x,y,z], [x,y,z]] in the design, matrix}]"),
+        .params("→ clouds: [{cloud, name, file, source (the file's path, read again by pointcloud.reload), points, segments, triangles, source_points, units, up, visible, point_size, color_by (file, single, height or a property's name), color, colored, properties: [{name, integer, span, names}], filters, color_range (the ramp's now, exact over what the filters keep), height_range (the ramp's own range or the automatic one by height), height_auto, bounds: [[x,y,z], [x,y,z]] in the design, matrix}]"),
 ];
 
 fn units_of(p: &Value, cmd: &str) -> Result<Option<(&'static str, f64)>> {
@@ -63,6 +63,14 @@ fn units_of(p: &Value, cmd: &str) -> Result<Option<(&'static str, f64)>> {
             .map(|(name, k)| Some((*name, *k)))
             .ok_or_else(|| bad(cmd, format!("`units` must be one of mm, cm, m, in, ft (not `{u}`)"))),
         Some(_) => Err(bad(cmd, "`units` must be one of mm, cm, m, in, ft")),
+    }
+}
+
+/// `up`: absent (`None`), or the file's up axis, `z` or `y`.
+fn up_of(p: &Value, cmd: &str) -> Result<Option<Up>> {
+    match p.get("up") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v.as_str().and_then(Up::parse).map(Some).ok_or_else(|| bad(cmd, "`up` must be z or y")),
     }
 }
 
@@ -237,6 +245,7 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     let size = point_size(p, cmd)?.unwrap_or(2.0);
     let colors = (color_by(p, cmd)?, color(p, cmd)?, height_range(p, cmd)?);
     let center = bool_(p, "center").unwrap_or(false);
+    let up = up_of(p, cmd)?.unwrap_or_default();
     let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::PointCloud).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let read = solidcraft_io::read_point_cloud(&bytes, path, scale, max_points).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let warnings = read.warnings;
@@ -257,6 +266,7 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
         colors: Colors(read.colors.into()),
         source_points: read.source_points,
         units: units.into(),
+        up: Up::Z,
         transform: solidcraft_doc::IDENTITY,
         point_size: size,
         color_by: ColorBy::File,
@@ -269,6 +279,8 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
         source: std::path::absolute(path).map(|a| a.to_string_lossy().to_string()).unwrap_or_else(|_| path.to_string()),
         max_points: Some(max_points as u64),
     };
+    // The points are read as the file has them, then stood up, before `center` looks at them.
+    cloud.set_up(up);
     set_colors(&mut cloud, colors.0, colors.1, colors.2);
     check_properties(&cloud, cmd)?;
     if center && let Some((lo, hi)) = cloud.local_bounds() {
@@ -310,6 +322,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     let colors = (color_by(p, cmd)?, color(p, cmd)?, height_range(p, cmd)?);
     let filters = filters(p, cmd)?;
     let units = units_of(p, cmd)?;
+    let up = up_of(p, cmd)?;
     let placement = match p.get("matrix") {
         None | Some(Value::Null) => None,
         Some(m) => Some(super::component::matrix::rigid(m, super::component::matrix::tolerance(p, cmd)?, cmd)?),
@@ -330,6 +343,9 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
             c.points = Points::new(c.points.values().iter().map(|v| (f64::from(*v) * f) as f32).collect());
         }
         c.units = unit.into();
+    }
+    if let Some(u) = up {
+        c.set_up(u);
     }
     if let Some(m) = placement {
         c.transform = m;
@@ -364,8 +380,8 @@ fn reload_limit(c: &PointCloud) -> usize {
     c.max_points.map_or(solidcraft_io::DEFAULT_MAX_POINTS, |n| usize::try_from(n).unwrap_or(MAX_POINTS))
 }
 
-/// Read the cloud's file again where it was read from, keeping its name, placement, units and
-/// how it is shown.
+/// Read the cloud's file again where it was read from, keeping its name, placement, units, up
+/// axis and how it is shown.
 /// The path comes from the design, which may be someone else's, so it is a design path: one on
 /// another computer is refused from its text until the user allows that server.
 fn reload(s: &mut Session, p: &Value) -> Result<Value> {
@@ -386,11 +402,15 @@ fn reload(s: &mut Session, p: &Value) -> Result<Value> {
         EngineError::Other(format!("{path}: {e}"))
     })?;
     let read = solidcraft_io::read_point_cloud(&bytes, &path, scale, max_points).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    // The file is read as it has its points, then stood up as the cloud was.
+    let up = c.up;
+    c.up = Up::Z;
     c.origin = read.origin;
     c.points = Points::new(read.points.into());
     c.colors = Colors(read.colors.into());
     c.source_points = read.source_points;
     c.complex = read.complex;
+    c.set_up(up);
     // What the file no longer has is no longer coloured or filtered by.
     let names: Vec<String> = c.property_names().map(str::to_string).collect();
     c.filters.retain(|f| names.contains(&f.property) && !picks_from_no_names(&c.complex, f));
@@ -432,6 +452,7 @@ fn list(s: &mut Session, _: &Value) -> Result<Value> {
             triangles: c.complex.triangle_count(),
             source_points: c.source_points,
             units: c.units.clone(),
+            up: c.up.name().to_string(),
             visible: c.visible,
             point_size: c.point_size,
             color_by: c.colored_property().filter(|_| c.color_by == ColorBy::Property).unwrap_or(c.color_by.name()).to_string(),
@@ -864,6 +885,58 @@ mod tests {
     }
 
     #[test]
+    fn a_y_up_scan_is_stood_up_on_insert_and_turned_back_in_edit() {
+        let d = dir("up");
+        let path = ply(&d, "phone.ply", &[[1.0, 2.0, 3.0], [4.0, 10.0, -6.0]], true);
+        let at = |s: &Session, i: usize| s.doc.point_clouds[0].world_point(i).map(|p| [p.x, p.y, p.z]);
+        let mut s = Session::default();
+        // Y up: a quarter turn about X takes the file's Y to the design's Z.
+        let r = s.execute("pointcloud.insert", &json!({"path": path, "up": "y"})).unwrap();
+        let id = r["cloud"].as_u64().unwrap();
+        assert_eq!(r["bounds"], json!([[1.0, -3.0, 2.0], [4.0, 6.0, 10.0]]));
+        assert_eq!((at(&s, 0), at(&s, 1)), (Some([1.0, -3.0, 2.0]), Some([4.0, 6.0, 10.0])));
+        assert_eq!(s.doc.point_clouds[0].colors.get(1), Some([1, 100, 200]), "the colours stay with their points");
+        assert_eq!(s.execute("pointcloud.list", &json!({})).unwrap()["clouds"][0]["up"], "y");
+        // Clicking a point finds it where it stands.
+        let pick = |s: &mut Session, x: f64, y: f64| {
+            s.execute("view.pick", &json!({"rays": [{"origin": [x, y, 50], "dir": [0, 0, -1]}], "cloud_radius": 0.5})).unwrap()["hits"][0].clone()
+        };
+        let hit = pick(&mut s, 4.0, 6.0);
+        assert_eq!((hit["point_index"].as_u64(), &hit["point"]), (Some(1), &json!([4.0, 6.0, 10.0])));
+        // The turn is in the cloud's own frame: a placement is kept through it, and Z up puts the
+        // points back as the file has them.
+        s.execute("pointcloud.edit", &json!({"cloud": id, "matrix": [1, 0, 0, 100, 0, 1, 0, 0, 0, 0, 1, 0]})).unwrap();
+        assert_eq!(at(&s, 0), Some([101.0, -3.0, 2.0]));
+        s.execute("pointcloud.edit", &json!({"cloud": id, "up": "z"})).unwrap();
+        assert_eq!((at(&s, 0), at(&s, 1)), (Some([101.0, 2.0, 3.0]), Some([104.0, 10.0, -6.0])));
+        // Turned back, clicking finds the point where it now is, and nothing where it stood.
+        assert_eq!(pick(&mut s, 104.0, 10.0)["point"], json!([104.0, 10.0, -6.0]));
+        assert_eq!(pick(&mut s, 104.0, 6.0), serde_json::Value::Null);
+        let listed = s.execute("pointcloud.list", &json!({})).unwrap();
+        assert_eq!((listed["clouds"][0]["up"].as_str(), listed["clouds"][0]["matrix"][3].as_f64()), (Some("z"), Some(100.0)));
+        // With the units in one edit, then undone in one step.
+        s.execute("pointcloud.edit", &json!({"cloud": id, "up": "y", "units": "cm"})).unwrap();
+        assert_eq!(at(&s, 1), Some([140.0, 60.0, 100.0]));
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(at(&s, 1), Some([104.0, 10.0, -6.0]));
+        // A reload reads the file as it has its points and stands them up again.
+        s.execute("pointcloud.edit", &json!({"cloud": id, "up": "y"})).unwrap();
+        let before = s.doc.point_clouds.clone();
+        s.execute("pointcloud.reload", &json!({"cloud": id})).unwrap();
+        assert_eq!(s.doc.point_clouds, before);
+        // Saved with the design; a design that does not say reads as Z up.
+        let opened = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
+        assert_eq!(opened.point_clouds, s.doc.point_clouds);
+        s.execute("pointcloud.edit", &json!({"cloud": id, "up": "z"})).unwrap();
+        let file = solidcraft_io::write_design_container(&s.doc).unwrap();
+        assert_eq!(solidcraft_io::read_design(&file).unwrap().point_clouds[0].up, solidcraft_doc::point_cloud::Up::Z);
+        // Centred after the turn: the middle of its base, as it stands, at the origin.
+        let r = s.execute("pointcloud.insert", &json!({"path": path, "up": "y", "center": true})).unwrap();
+        assert_eq!(r["bounds"], json!([[-1.5, -4.5, 0.0], [1.5, 4.5, 8.0]]));
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
     fn an_e57_scan_is_read_in_metres_unless_another_unit_is_given() {
         let d = dir("e57");
         let path = d.join("site.e57");
@@ -906,6 +979,9 @@ mod tests {
             json!({"path": bad.to_string_lossy()}),
             json!({"path": d.join("a.stl").to_string_lossy()}),
             json!({"path": path, "units": "parsec"}),
+            json!({"path": path, "up": "x"}),
+            json!({"path": path, "up": "Y-up"}),
+            json!({"path": path, "up": 1}),
             json!({"path": path, "units": 3}),
             json!({"path": path, "max_points": 0}),
             json!({"path": path, "max_points": -5}),
@@ -930,6 +1006,8 @@ mod tests {
             json!({"cloud": id, "matrix": [2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]}),
             json!({"cloud": id, "matrix": "x"}),
             json!({"cloud": id, "units": "km"}),
+            json!({"cloud": id, "up": "-z"}),
+            json!({"cloud": id, "up": true}),
             json!({"cloud": id, "point_size": -1}),
         ] {
             assert!(s.execute("pointcloud.edit", &p).is_err(), "{p}");

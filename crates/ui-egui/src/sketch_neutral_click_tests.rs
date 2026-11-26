@@ -1,5 +1,113 @@
 use crate::scenario::Harness;
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
+
+/// #16994: the point a click places lands where the pointer is. The horizontal or vertical
+/// inference turns the line to the axis, and the end of the line moves with it: on a long line
+/// at a small angle the end landed millimetres away from the pointer, so the geometry had to be
+/// nudged into place afterwards. The inference turns the line only while its end stays within
+/// the pointer's reach, the reach every other snap uses.
+#[test]
+fn a_line_end_that_turns_to_an_axis_stays_within_the_pointer_reach() {
+    use solidcore_record::Vec2;
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.call("ui.view", json!({"view": "top"}));
+    h.settle();
+    h.app.cam.distance = 120.0;
+    h.settle();
+    h.step(&json!({"start": "sketch.line"})).unwrap();
+    h.step(&json!({"click": {"sketch": [0, 0]}})).unwrap();
+    h.frames(2);
+    // The end of the line: 45 mm along and two degrees off the horizontal, near enough for the
+    // inference, which turns the line and moves its end about 1.6 mm from the pointer.
+    let end = [44.972, 1.570];
+    h.step(&json!({"move": {"sketch": end}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click": {"sketch": end}})).unwrap();
+    h.frames(2);
+    let sid = h.app.session.active_sketch.unwrap();
+    let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+    let placed = sk.points.iter().map(|p| p.pos).find(|p| p.dist(Vec2::ZERO) > 1.0).expect("the line's end is in the sketch");
+    let off = placed.dist(Vec2::new(end[0], end[1]));
+    assert!(off < 0.5, "the end landed {off} mm from the pointer: {placed:?}");
+}
+
+/// A line the pointer holds within the reach of the axis still turns to it, and still gets its
+/// Horizontal constraint: the inference is bounded, not gone (#16994).
+#[test]
+fn a_line_end_within_the_pointer_reach_still_turns_to_the_axis() {
+    use solidcore_record::Vec2;
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.call("ui.view", json!({"view": "top"}));
+    h.settle();
+    h.app.cam.distance = 120.0;
+    h.settle();
+    h.step(&json!({"start": "sketch.line"})).unwrap();
+    h.step(&json!({"click": {"sketch": [0, 0]}})).unwrap();
+    h.frames(2);
+    // 45 mm along and 0.2 mm up: the pointer is within the reach of the horizontal through the
+    // start, so the line turns to it.
+    let end = [45.0, 0.2];
+    h.step(&json!({"move": {"sketch": end}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click": {"sketch": end}})).unwrap();
+    h.frames(2);
+    let sid = h.app.session.active_sketch.unwrap();
+    let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+    let placed = sk.points.iter().map(|p| p.pos).find(|p| p.dist(Vec2::ZERO) > 1.0).expect("the line's end is in the sketch");
+    assert!(placed.y.abs() < 1e-9, "the line is horizontal: {placed:?}");
+    assert!(
+        sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Horizontal { .. })),
+        "the line is constrained: {:?}",
+        sk.constraints
+    );
+}
+
+/// A picture of the view with the line being drawn: where the pointer is (the ring) and where
+/// the line's end goes (the band). The evidence for the pull request.
+#[test]
+fn evidence_the_line_end_lands_away_from_the_pointer() {
+    let Ok(dir) = std::env::var("SOLIDCRAFT_16994_EVIDENCE") else { return };
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.call("ui.view", json!({"view": "top"}));
+    h.settle();
+    h.app.cam.distance = 120.0;
+    h.settle();
+    h.step(&json!({"start": "sketch.line"})).unwrap();
+    h.step(&json!({"click": {"sketch": [0, 0]}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"move": {"sketch": [44.972, 1.570]}})).unwrap();
+    h.frames(2);
+    let rect = h.app.viewport.rect.expect("the viewport");
+    let ctx = crate::fonts::test_context();
+    let mut textures = std::collections::HashMap::new();
+    let mut last = None;
+    for _ in 0..4 {
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))),
+            focused: true,
+            ..Default::default()
+        };
+        let app = &mut h.app;
+        let output = ctx.run_ui(raw, |ui| {
+            app.logic(ui.ctx());
+            app.ui(ui);
+        });
+        crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+        last = Some(output);
+    }
+    let output = last.expect("a frame");
+    std::fs::create_dir_all(&dir).unwrap();
+    crate::ui_kit::test_raster(&ctx, output.shapes, output.pixels_per_point, rect, &textures)
+        .save(std::path::Path::new(&dir).join("line-end.png"))
+        .unwrap();
+}
 
 #[test]
 fn repeated_first_point_is_neutral_and_drawing_can_continue() {

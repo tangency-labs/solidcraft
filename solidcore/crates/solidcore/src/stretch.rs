@@ -438,7 +438,7 @@ pub fn band(
             }
             continue;
         }
-        match wall_error(surface, n, hi - lo, &mut work) {
+        match wall_error(surface, n, hi - lo, &mut work, true) {
             Some(e) if e <= eps => {}
             _ => return Ok(crosses(Crossing::CurvedFace, None)),
         }
@@ -482,7 +482,7 @@ pub fn proposed_cut(
             if let Some((_, axis, _)) = cylinder_of(surface) {
                 return 1.0 - axis.dot(n).abs() <= SQUARE;
             }
-            wall_error(surface, n, size, &mut work).is_some_and(|e| e <= size * 1e-9)
+            wall_error(surface, n, size, &mut work, false).is_some_and(|e| e <= size * 1e-9)
         });
         if wall {
             continue;

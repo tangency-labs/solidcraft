@@ -872,6 +872,7 @@ fn a_blend(depth: u32) -> blend::BlendDefinitionRecord {
         SupportRecord::Nurbs {
             kind: SupportKindRecord::Plane,
             form: form.clone(),
+            revolution: None,
         }
     };
     BlendDefinitionRecord {
@@ -880,6 +881,7 @@ fn a_blend(depth: u32) -> blend::BlendDefinitionRecord {
             SupportRecord::Nurbs {
                 kind: SupportKindRecord::Plane,
                 form,
+                revolution: None,
             },
         ],
         sides: [1., 1.],
@@ -939,6 +941,64 @@ fn a_blend_face_is_its_definition_on_its_net() {
     assert!(
         damaged.validate().is_err(),
         "a definition's numbers are finite"
+    );
+}
+
+/// A chamfer of setbacks held at every station: its kind is written only where it is not
+/// offsets (so every older record reads and writes as before), it has the edge for its
+/// radius, a wedge of 0, and no distance and angle yet.
+#[test]
+fn a_chamfer_of_setbacks_is_its_kind_and_the_edge() {
+    use blend::{
+        BlendDefinitionRecord, ChamferKindRecord, ChamferRecord, ChamferSizeRecord, RadiusRecord,
+    };
+    let offsets = ChamferRecord {
+        size: ChamferSizeRecord::Distances([1., 2.]),
+        wedge: 1.5,
+        kind: ChamferKindRecord::Offsets,
+    };
+    let old = r#"{"size":{"Distances":[1.0,2.0]},"wedge":1.5}"#;
+    assert_eq!(serde_json::to_string(&offsets).unwrap(), old);
+    assert_eq!(serde_json::from_str::<ChamferRecord>(old).unwrap(), offsets);
+    let mut d = a_blend(1);
+    d.order = 0;
+    d.radius = RadiusRecord::Edge;
+    d.chamfer = Some(ChamferRecord {
+        size: ChamferSizeRecord::Chord(1.5),
+        wedge: 0.,
+        kind: ChamferKindRecord::Setbacks,
+    });
+    d.validate().unwrap_or_else(|e| panic!("{e}"));
+    let text = serde_json::to_string(&d).unwrap();
+    assert!(text.contains(r#""radius":"Edge""#) && text.contains(r#""kind":"Setbacks""#));
+    assert_eq!(
+        serde_json::from_str::<BlendDefinitionRecord>(&text).unwrap(),
+        d
+    );
+    let mut wedged = d.clone();
+    if let Some(c) = wedged.chamfer.as_mut() {
+        c.wedge = 1.5;
+    }
+    assert!(wedged.validate().is_err(), "a setbacks wedge");
+    let mut angled = d.clone();
+    if let Some(c) = angled.chamfer.as_mut() {
+        c.size = ChamferSizeRecord::DistanceAngle {
+            distance: 1.,
+            angle: 0.5,
+        };
+    }
+    assert!(
+        angled.validate().is_err(),
+        "setbacks by a distance and an angle"
+    );
+    let mut balled = d.clone();
+    balled.radius = RadiusRecord::Constant { offsets: [1., 1.] };
+    assert!(balled.validate().is_err(), "setbacks with a ball");
+    let mut bare = a_blend(1);
+    bare.radius = RadiusRecord::Edge;
+    assert!(
+        bare.validate().is_err(),
+        "the edge without a chamfer of setbacks"
     );
 }
 

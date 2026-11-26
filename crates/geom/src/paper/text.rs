@@ -270,15 +270,24 @@ impl TextRun {
     /// turned by `angle` about `origin`. Fill them nonzero (the module's notes). `font` is the font
     /// the run names; a glyph it doesn't hold draws nothing, which `validate` rules out.
     pub fn outlines<'a>(&'a self, font: &'a Font) -> impl Iterator<Item = Loop2> + 'a {
-        let turn = Vec2::from_angle(self.angle);
         self.glyphs.iter().filter_map(move |g| Some((g, font.glyphs.get(&g.id)?))).flat_map(move |(g, glyph)| {
-            let place = move |p: Vec2| {
-                let along = (p.x + self.slant * p.y) * self.scale + g.x;
-                let up = p.y * self.scale + g.rise;
-                self.origin + Vec2::new(along * turn.x - up * turn.y, along * turn.y + up * turn.x)
-            };
-            glyph.outline.iter().map(move |l| Loop2 { segs: l.segs.iter().map(|s| s.map_controls(place)).collect() })
+            let place = self.placement(g);
+            glyph.outline.iter().map(move |l| Loop2 { segs: l.segs.iter().map(|s| s.map_controls(&place)).collect() })
         })
+    }
+
+    /// Where a point of glyph `g`'s outline, in font units, lands on the sheet, in millimetres: scaled,
+    /// leaned by `slant`, moved along the baseline by the glyph's `x` and up by its `rise`, then turned
+    /// by `angle` about `origin`. The one rule for placing a glyph, which a writer that sets real text
+    /// (PDF) reads its glyph's matrix from.
+    pub fn placement(&self, g: &PlacedGlyph) -> impl Fn(Vec2) -> Vec2 + use<> {
+        let turn = Vec2::from_angle(self.angle);
+        let (scale, slant, origin, x, rise) = (self.scale, self.slant, self.origin, g.x, g.rise);
+        move |p: Vec2| {
+            let along = (p.x + slant * p.y) * scale + x;
+            let up = p.y * scale + rise;
+            origin + Vec2::new(along * turn.x - up * turn.y, along * turn.y + up * turn.x)
+        }
     }
 
     fn check(&self, font: &Font) -> Result<()> {

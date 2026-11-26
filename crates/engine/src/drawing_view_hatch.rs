@@ -13,7 +13,7 @@
 //!   drafting tells touching parts apart.
 //! - The base spacing is [`SPACING_LINES`] narrow line widths of the view's line group, so a
 //!   heavier line group hatches more openly.
-//! - **The lines come from the drawing's hatcher** ([`solidcore_ops::hatch::generate`], #7064), one
+//! - **The lines come from the drawing's hatcher** ([`Pattern::marks`], #7064), one
 //!   plain family per body. It takes straight-sided outlines, so each cut face's outline is followed
 //!   to within [`FLATTEN_MM`] on paper as a closed polygon, under the line that draws it. A body the hatcher
 //!   refuses (a budget, an uncertain contact) is drawn unhatched, and the view says which and why.
@@ -23,16 +23,17 @@
 use std::collections::BTreeMap;
 use std::f64::consts::FRAC_PI_4;
 
-use solidcore_ops::hatch::{Mark, generate};
 use solidcore_record::brep::Loop;
-use solidcore_record::hatch::{Family, Pattern};
+use solidcore_record::profile::line_family::LineFamily;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcraft_doc::drawing::hatch::Pattern;
 use solidcraft_doc::drawing::view::Cut;
 use solidcraft_geom::Similarity2;
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::prelude::*;
 use solidcraft_kernel::history::{FaceOrigin, History};
+use solidcraft_kernel::services::profile::Mark;
 use solidcraft_kernel::{Body, PlanarPiece};
 use solidcraft_viewport::hatch::{CutPart, HATCH_COLOURS, hatches as pick, seed};
 
@@ -148,11 +149,11 @@ pub fn hatches(set: &ShownSet, cut: &Cut, frame: &ViewFrame, group: LineGroup) -
 /// Plain lines at `angle`, `spacing_mm` apart through the paper's origin, across `regions`, each
 /// followed as a closed polygon; or why the hatcher refused one.
 fn lines_across(regions: &[Region2], angle: f64, spacing_mm: f64) -> std::result::Result<Vec<Seg2>, String> {
-    let family = Family { angle, origin: Vec2::ZERO, delta_x: 0.0, delta_y: spacing_mm, dashes: Vec::new() };
+    let family = LineFamily { angle, origin: Vec2::ZERO, delta_x: 0.0, delta_y: spacing_mm, dashes: Vec::new() };
     let pattern = Pattern { name: "SECTION".into(), description: "A section's plain hatch lines".into(), families: vec![family] };
     let mut out = Vec::new();
     for region in regions {
-        let marks = generate(&pattern, &polygonal(region)).map_err(|e| e.to_string())?;
+        let marks = pattern.marks(&polygonal(region)).map_err(|e| e.to_string())?;
         out.extend(marks.into_iter().filter_map(|mark| match mark {
             Mark::Line { a, b } => Some(Seg2::Line { a, b }),
             Mark::Dot { .. } => None,

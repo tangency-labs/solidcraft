@@ -9,34 +9,38 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::settings_profiles::section(app, ui);
         ui_kit::settings_section(ui, "language", app.tr("ui.language"), |ui| {
             ui_kit::settings_form(ui, labels, |ui| {
+                let locked = app.policy.locks("language");
                 ui_kit::row(ui, app.tr("prefs.interface_language"), |ui| {
-                    ui_kit::settings_control_width(ui, t.space_24 * 11.0 + t.space_16, |ui| {
-                        ui_kit::dropdown_menu(
-                            ui,
-                            "pref_language",
-                            &if app.preferences.language == solidcraft_ui_text::SYSTEM {
-                                app.tr("prefs.language_system").to_owned()
-                            } else {
-                                solidcraft_ui_text::Locale::for_language(&app.preferences.language).display_name().into_owned()
-                            },
-                            |ui| {
-                                if ui_kit::list_picker(
-                                    ui,
-                                    solidcraft_ui_text::SYSTEM,
-                                    app.tr("prefs.language_system"),
-                                    app.preferences.language == solidcraft_ui_text::SYSTEM,
-                                )
-                                .clicked()
-                                {
-                                    app.preferences.language = solidcraft_ui_text::SYSTEM.into();
-                                }
-                                for locale in crate::i18n::LOCALES {
-                                    if ui_kit::list_picker(ui, locale.id, &locale.display_name(), app.preferences.language == locale.id).clicked() {
-                                        app.preferences.language = locale.id.into();
+                    crate::policy::row(ui, locked, |ui| {
+                        ui_kit::settings_control_width(ui, t.space_24 * 11.0 + t.space_16, |ui| {
+                            ui_kit::dropdown_menu(
+                                ui,
+                                "pref_language",
+                                &if app.preferences.language == solidcraft_ui_text::SYSTEM {
+                                    app.tr("prefs.language_system").to_owned()
+                                } else {
+                                    solidcraft_ui_text::Locale::for_language(&app.preferences.language).display_name().into_owned()
+                                },
+                                |ui| {
+                                    if ui_kit::list_picker(
+                                        ui,
+                                        solidcraft_ui_text::SYSTEM,
+                                        app.tr("prefs.language_system"),
+                                        app.preferences.language == solidcraft_ui_text::SYSTEM,
+                                    )
+                                    .clicked()
+                                    {
+                                        app.preferences.language = solidcraft_ui_text::SYSTEM.into();
                                     }
-                                }
-                            },
-                        );
+                                    for locale in crate::i18n::LOCALES {
+                                        if ui_kit::list_picker(ui, locale.id, &locale.display_name(), app.preferences.language == locale.id).clicked()
+                                        {
+                                            app.preferences.language = locale.id.into();
+                                        }
+                                    }
+                                },
+                            );
+                        })
                     });
                 });
             });
@@ -61,12 +65,20 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         });
         ui_kit::settings_section(ui, "saving", app.tr("prefs.saving"), |ui| {
-            ui_kit::checkbox(ui, app.tr("Reopen the designs that were open when SolidCraft was last closed"), &mut app.preferences.reopen_designs);
+            let locked = app.policy.locks("reopen_designs");
+            let reopen = crate::policy::row(ui, locked, |ui| {
+                ui_kit::checkbox(ui, app.tr("Reopen the designs that were open when SolidCraft was last closed"), &mut app.preferences.reopen_designs)
+            });
+            crate::scenario::publish_target("prefs:reopen_designs", reopen.rect);
             // Only the web app keeps designs in the browser (#10220).
             if app.services.browser_files.is_some() {
                 let tip = app.tr("prefs.keep_unsaved_in_browser_tip").to_string();
                 ui_kit::checkbox(ui, app.tr("prefs.keep_unsaved_in_browser"), &mut app.preferences.keep_unsaved_in_browser)
                     .backing_on_hover_text(tip);
+                if !app.preferences.keep_unsaved_in_browser {
+                    let response = setting::recover_after_browser_leave(app, ui);
+                    crate::scenario::publish_target("prefs:recover_after_browser_leave", response.rect);
+                }
                 if app.preferences.keep_unsaved_in_browser {
                     let tip = app.tr("prefs.keep_unsaved_also_asks_tip").to_string();
                     ui_kit::checkbox(ui, app.tr("prefs.keep_unsaved_also_asks"), &mut app.preferences.keep_unsaved_also_asks)
@@ -180,16 +192,26 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let cadmpeg = setting::cadmpeg_import(app, ui);
             crate::scenario::publish_target("prefs:cadmpeg_import", cadmpeg.rect);
         });
+        ui_kit::settings_section(ui, "cadmpeg_export", app.tr("prefs.cadmpeg_export"), |ui| {
+            let cadmpeg = setting::cadmpeg_export(app, ui);
+            crate::scenario::publish_target("prefs:cadmpeg_export", cadmpeg.rect);
+        });
         ui_kit::settings_section(ui, "dialogs", app.tr("prefs.dialogs"), |ui| {
             let right_click = setting::right_click_confirms(app, ui);
             crate::scenario::publish_target("prefs:right_click_confirms", right_click.rect);
+            let import_options = setting::ask_import_options(app, ui);
+            crate::scenario::publish_target("prefs:ask_import_options", import_options.rect);
             let first_letter = setting::dialog_first_letter_buttons(app, ui).backing_on_hover_text(app.tr("prefs.dialog_first_letter_buttons_help"));
             crate::scenario::publish_target("prefs:dialog_first_letter_buttons", first_letter.rect);
         });
         ui_kit::settings_section(ui, "community", app.tr("prefs.community"), |ui| {
-            let donate = setting::show_donate_button(app, ui).backing_on_hover_text(app.tr("prefs.show_donate_button_help"));
+            let locked = app.policy.locks("show_donate_button");
+            let donate = crate::policy::row(ui, locked, |ui| setting::show_donate_button(app, ui))
+                .backing_on_hover_text(app.tr("prefs.show_donate_button_help"));
             crate::scenario::publish_target("prefs:show_donate_button", donate.rect);
-            let discord = setting::show_discord_button(app, ui).backing_on_hover_text(app.tr("prefs.show_discord_button_help"));
+            let locked = app.policy.locks("show_discord_button");
+            let discord = crate::policy::row(ui, locked, |ui| setting::show_discord_button(app, ui))
+                .backing_on_hover_text(app.tr("prefs.show_discord_button_help"));
             crate::scenario::publish_target("prefs:show_discord_button", discord.rect);
         });
         ui_kit::settings_section(ui, "updates", app.tr("prefs.updates"), |ui| {

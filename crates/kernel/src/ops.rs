@@ -1,23 +1,16 @@
 //! Operations on bodies: booleans, placements and splits by a plane, through SMLib. Bodies apart
 //! from each other join without any intersection work, their records side by side.
 
-use serde::{Deserialize, Serialize};
+use crate::placement::Rigid;
 use solidcore_record::Vec3;
 use solidcore_record::brep::part;
-use solidcraft_geom::brep::placement::Rigid;
 use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::history::{BodyHistory, History};
 use crate::{KernelError, Result, guard};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum BoolOp {
-    Union,
-    Cut,
-    Intersect,
-}
+pub use solidcraft_kernel_api::BoolOp;
 
 /// Boolean of two bodies in SMLib. The result may be empty (`Ok(None)`) for a cut that removes
 /// everything or an intersection of disjoint bodies. A result SMLib's check refuses is an error.
@@ -113,10 +106,15 @@ pub fn union_apart(bodies: &[Body]) -> Result<Option<Body>> {
         if any_two_meet(&vertex_boxes) {
             return Ok(None);
         }
-        let mut boxes = Vec::with_capacity(bodies.len());
-        for b in bodies {
-            boxes.push(b.exact_bounds()?.inflated(2.0 * b.record().tolerance));
-        }
+        let cold = bodies.iter().filter(|b| !b.has_cached_bounds()).count();
+        let boxes: Vec<solidcraft_geom::Aabb3> = if cold > 1 {
+            crate::par::map_on_threads(bodies, 16, |b| b.exact_bounds().map(|bb| bb.inflated(2.0 * b.record().tolerance)))
+                .into_iter()
+                .map(|r| r.unwrap_or_else(|| Err(KernelError::Internal("parallel bounds worker failed".into()))))
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            bodies.iter().map(|b| b.exact_bounds().map(|bb| bb.inflated(2.0 * b.record().tolerance))).collect::<Result<Vec<_>>>()?
+        };
         if any_two_meet(&boxes) {
             return Ok(None);
         }
@@ -215,8 +213,8 @@ pub fn transform_matrix(body: &Body, m: [[f64; 4]; 4]) -> Result<Body> {
     }
     let exact = match Rigid::of_matrix(&m) {
         // (a body with a blend by its definition is moved by the kernel, the definition with it)
-        Some(motion) => solidcraft_geom::brep::placement::moved(body.record(), &motion),
-        None => solidcraft_geom::brep::placement::mapped(body.record(), &m),
+        Some(motion) => crate::placement::moved(body.record(), &motion),
+        None => crate::placement::mapped(body.record(), &m),
     };
     let (placed, sources, paint) = match exact {
         Some(record) => {

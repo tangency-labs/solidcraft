@@ -1086,6 +1086,80 @@ fn one_fillet_over_stacked_boxes_saved_named_on_the_lower_asks_for_the_upper_edg
     assert!(solid_at(&s, [24.8, -24.8, 20.0]) && solid_at(&s, [-24.8, -24.8, 45.0]), "nothing is rounded");
 }
 
+/// A round saved on a whole closed edge builds again where a whole-turn revolve join's turned
+/// seam split that edge (#21997): the join turns its tool off the body's seam, and the turned
+/// seam vertex lands on the closed edge where the ring's outer surface meets the joined wedge's
+/// base, splitting it into numbered pieces. The saved whole-edge name finds the pieces that join
+/// back into that one closed curve, and every piece is rounded. A pick on another edge still
+/// asks for the saved edge again, and rounds nothing.
+#[test]
+fn a_round_saved_on_a_whole_closed_edge_builds_again_where_a_seam_split_it() {
+    let mut s = Session::default();
+    // A ring (outer radius 30) and a wedge joined on with a corner of its profile exactly on the
+    // ring's outer surface: the corner's circle, at radius 30 and z -5, is the edge that splits.
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "A"}));
+    run(&mut s, "sketch.line", json!({"points": [[10, 0], [30, 0], [30, 20], [10, 20]], "closed": true}));
+    run(&mut s, "sketch.line", json!({"points": [[0, -5], [0, 25]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.revolve",
+        json!({"sketch": "A", "profiles": [0], "axis": {"type": "sketch_line", "curve": "l5"}, "angle": "360 deg", "operation": "new", "name": "Ring", "body_name": "Body1"}),
+    );
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "B"}));
+    run(&mut s, "sketch.line", json!({"points": [[30, 5], [34, 5], [34, 12], [27, 12]], "closed": true}));
+    run(&mut s, "sketch.line", json!({"points": [[0, -5], [0, 25]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.revolve",
+        json!({"sketch": "B", "profiles": [0], "axis": {"type": "sketch_line", "curve": "l5"}, "angle": "360 deg", "operation": "join", "name": "Wedge"}),
+    );
+    // A round of 1 mm on both pieces of the split circle, as a pick made today stores it: the
+    // pieces meet at the seams (angle 0 and 0.5 rad), and each pick sits between them.
+    let on_circle = |angle: f64| [30.0 * angle.cos(), 30.0 * angle.sin(), -5.0];
+    let volume = |s: &mut Session| run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+    let sharp = volume(&mut s);
+    run(&mut s, "solid.fillet", json!({"edges": [on_circle(std::f64::consts::PI), on_circle(0.25)], "radius": 1, "name": "Round"}));
+    assert_eq!(error(&s, "Round"), None);
+    let names = s.doc.feature(id(&s, "Round")).unwrap().edge_names.clone();
+    let whole = match names[0].rsplit_once('~') {
+        Some((stem, number)) if !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()) => stem,
+        _ => panic!("the round's edges are not numbered pieces: {names:?}"),
+    };
+    assert_eq!(names, [format!("{whole}~1"), format!("{whole}~2")], "the seam split the circle into two pieces");
+    // The corner is concave, so the round on both pieces adds material.
+    let both_pieces = volume(&mut s);
+    assert!(both_pieces > sharp + 0.1, "the round on both pieces adds material: {sharp} -> {both_pieces}");
+    // As a design saved before the split stored it: one whole-edge name and one pick on it.
+    let mut reopen = |picks: Vec<[f64; 3]>| {
+        let round = id(&s, "Round");
+        let feature = s.doc_mut().feature_mut(round).unwrap();
+        feature.edge_names = vec![whole.to_string()];
+        feature.edge_refs = Vec::new();
+        let solidcraft_doc::FeatureKind::Fillet { edges, .. } = &mut feature.kind else { panic!("Round is not a fillet") };
+        *edges = picks.iter().map(|p| solidcraft_doc::Position(Vec3::new(p[0], p[1], p[2]))).collect();
+        let mut cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        cold.model.no_cache = true;
+        cold.refresh();
+        cold
+    };
+    let mut cold = reopen(vec![on_circle(std::f64::consts::PI)]);
+    assert_eq!(error(&cold, "Round"), None, "the whole-edge name finds the pieces of the split circle");
+    assert_eq!(reselect(&cold, "Round"), None);
+    let whole_edge = volume(&mut cold);
+    assert!(
+        (whole_edge - both_pieces).abs() < 1e-6 * both_pieces,
+        "the whole-edge name rounds the same as both pieces: {both_pieces} vs {whole_edge}"
+    );
+    assert!(warning(&cold, "Round").as_deref().is_some_and(|w| w.contains("2 pieces")), "{:?}", warning(&cold, "Round"));
+    // A pick on the ring's top rim, an edge the saved name never named: the reference asks for
+    // the saved edge again, and nothing is rounded.
+    let mut cold = reopen(vec![[-30.0, 0.0, -20.0]]);
+    assert_eq!(reselect(&cold, "Round").as_deref(), Some(whole));
+    assert!((volume(&mut cold) - sharp).abs() < 1e-6 * sharp, "nothing is rounded");
+}
+
 /// A shell opened by a point pick on a bar's end face keeps opening that face when a parameter
 /// edit moves the bar so the stored point no longer lies on it (it now lies on the bottom face).
 /// The point is moved onto the named face clear of its edges: the face's nearest point to the old
@@ -1407,5 +1481,79 @@ fn a_reference_beside_a_thread_s_groove_never_moves_to_another_face_when_the_thr
             let on: Vec<f64> = faces.iter().filter(|(f, _, _)| f == n).map(|(_, _, c)| c[2]).collect();
             assert!(on.len() == 1 && (on[0] - z).abs() < 1e-3, "{name}: {n} is now at {on:?} in {faces:?}");
         }
+    }
+}
+
+#[test]
+fn a_sketch_attaches_to_a_chamfer_that_takes_the_whole_side_wall() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 85.5, "width": 85.5, "height": 11, "corner": [0, 0, 0], "body_name": "B"}));
+    let bottom = [[42.75, 0., 0.], [42.75, 85.5, 0.], [0., 42.75, 0.], [85.5, 42.75, 0.]];
+    run(&mut s, "solid.chamfer", json!({"edges": bottom, "distance": "11", "distance2": "1.75"}));
+    assert!(names(&s, "B").iter().all(|(_, exact)| *exact), "{:?}", names(&s, "B"));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [84.6745, 79.3562, 5.8114]}}));
+}
+
+/// The issue's design (#21293): a revolved part, two revolve cuts, and a sketch projecting two
+/// edges of the second cut's groove.
+fn revolve_with_two_cuts_projected() -> (Session, u64) {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "YZ"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 100], [6, 100]]}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": [6, 100], "through": [20, 65], "end": [25, 30]}));
+    run(&mut s, "sketch.line", json!({"points": [[25, 30], [25, 0], [0, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"axis": "Z", "angle": "360 deg"}));
+    for groove in [[[26, -20], [23, -22], [26, -24]], [[22, -80], [12, -85], [22, -90]]] {
+        run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+        run(&mut s, "sketch.line", json!({"points": groove, "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.revolve", json!({"axis": "Z", "angle": "360 deg", "operation": "cut"}));
+    }
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": "30"}));
+    let profile = run(&mut s, "sketch.create", json!({"plane": "Plane1", "name": "Projection"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [9.585, 9.585, 84.222]}, {"edge": [-9.585, -9.585, 84.222]}]}));
+    run(&mut s, "sketch.finish", json!({}));
+    (s, profile)
+}
+
+#[test]
+fn saved_projections_of_a_revolve_cuts_flanks_open_with_0_45_numbered_names() {
+    let (s, profile) = revolve_with_two_cuts_projected();
+    let (first, cut) = (id(&s, "Revolve1"), id(&s, "Revolve3"));
+    let state = s.model.state();
+    let expected = &state.sketch(profile).unwrap().sketch;
+    assert_eq!(expected.links.len(), 2);
+    assert!(expected.links.iter().all(|link| !link.lost));
+    // 0.45.0 named both flanks of the second cut's groove after its first line, numbered, and
+    // the face they cut without the other cut's flank (#21293). Synthetic saved links of that form.
+    let old = |n: u32, tie: u32| format!("F{first}:side:a1#[F{first}:side:l3]|F{cut}:side:l1#{n}~{tie}");
+    for names in [None, Some([old(1, 2), old(2, 1)]), Some([old(2, 2), old(1, 1)])] {
+        let mut doc = solidcraft_doc::Document::clone(&s.doc);
+        if let Some(names) = &names {
+            let solidcraft_doc::FeatureKind::Sketch { sketch, .. } = &mut doc.feature_mut(profile).unwrap().kind else { panic!("sketch") };
+            for (link, name) in sketch.links.iter_mut().zip(names) {
+                link.edge_name = Some(name.clone());
+            }
+        }
+        let mut cold = Session::new(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap());
+        cold.model.no_cache = true;
+        cold.refresh();
+        assert_eq!(error(&cold, "Projection"), None, "{names:?}");
+        let reopened = cold.model.state();
+        let actual = &reopened.sketch(profile).unwrap().sketch;
+        assert!(actual.links.iter().all(|link| !link.lost), "{names:?}");
+        assert_eq!(actual.curves, expected.curves, "{names:?}");
+        assert_eq!(actual.points, expected.points, "{names:?}");
+    }
+    // A point off the edge and a name whose other face is numbered too find nothing.
+    let near = Vec3::new(9.585, 9.585, 84.222);
+    for (name, at) in [(old(1, 2), near + Vec3::new(0., 0., 3.)), (format!("F{first}:side:a1#2#[F{first}:side:l3]|F{cut}:side:l1#1~2"), near)] {
+        let mut doc = solidcraft_doc::Document::clone(&s.doc);
+        let solidcraft_doc::FeatureKind::Sketch { sketch, .. } = &mut doc.feature_mut(profile).unwrap().kind else { panic!("sketch") };
+        sketch.links[0].edge_name = Some(name.clone());
+        sketch.links[0].source = solidcraft_sketch::LinkSource::Edge { body: "Body1".into(), at };
+        let cold = Session::new(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap());
+        assert!(error(&cold, "Projection").is_some(), "{name} at {at:?}");
     }
 }

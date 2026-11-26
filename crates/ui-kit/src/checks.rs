@@ -126,6 +126,44 @@ fn check_row(ui: &mut Ui, label: &str, icon: &str, value: &mut bool, mixed: bool
 #[path = "checks_tests.rs"]
 pub(super) mod tests;
 
+/// The size of [`switch_at`]'s pill.
+pub fn switch_size() -> egui::Vec2 {
+    let t = Tokens::get();
+    vec2(t.space_24 + t.space_8, t.space_16 + t.space_2)
+}
+
+/// A slide switch (a knob in a pill) at an explicit rect, for a settings card's on/off.
+pub fn switch_at(ui: &mut Ui, rect: Rect, label: &str, value: &mut bool) -> Response {
+    let t = Tokens::get();
+    let mut response = ui.interact(rect, ui.make_persistent_id(("switch", label)), egui::Sense::click());
+    if response.clicked() {
+        *value = !*value;
+        response.mark_changed();
+    }
+    let on = *value;
+    let fill = if on {
+        t.form_primary_fill
+    } else if response.hovered() {
+        t.form_dim
+    } else {
+        t.control_border
+    };
+    ui.painter().rect_filled(rect, rect.height() / 2.0, fill);
+    let knob = rect.height() / 2.0 - t.space_2;
+    let x = if on { rect.right() - t.space_2 - knob } else { rect.left() + t.space_2 + knob };
+    ui.painter().circle_filled(pos2(x, rect.center().y), knob, if on { t.on_accent } else { t.form_ink });
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            rect.expand(t.space_2),
+            rect.height() / 2.0 + t.space_2,
+            egui::Stroke::new(t.space_2, t.form_primary),
+            egui::StrokeKind::Outside,
+        );
+    }
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), on, label));
+    response.backing_on_hover_text(label)
+}
+
 /// A checkbox at an explicit square, for vertically centred settings-card actions.
 pub fn checkbox_at(ui: &mut Ui, rect: Rect, label: &str, value: &mut bool) -> Response {
     let mut response = ui.interact(rect, ui.make_persistent_id(("checkbox", label)), egui::Sense::click());

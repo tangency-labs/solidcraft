@@ -1449,7 +1449,9 @@ impl ExecutiveAccess<Handle> for Access {
 /// `-2`).
 const OP_P2: &str = "blend::fillet_executive::p2: ";
 
-/// The p2 module's operation: its null objects, typed, are `Missing` blend failures of it.
+/// The p2 module's operation: its null objects, typed, are blend failures of it that keep
+/// the status `SM_ERR_NULL_POINTER` (a `Defect` for an object the executive built, the
+/// named cause for the caller's missing law list; #19823).
 const P2_OP: &str = "blend::fillet_executive::p2";
 
 /// The `SmStatus` of a Rust error.
@@ -1458,13 +1460,11 @@ fn status_of(e: &SolidError) -> f64 {
         SolidError::Upstream {
             operation, code, ..
         } if *code == SM_ERR_NULL_POINTER && operation.starts_with(OP_P2) => NULL_DEREF,
-        // the p2 module's own null objects, typed (#13790): a `Missing` blend failure of
-        // the module's operation
+        // the p2 module's own null objects, typed (#13790, #19823): a blend failure of the
+        // module's operation keeping `SM_ERR_NULL_POINTER`
         e if e.operation() == P2_OP
-            && matches!(
-                e.blend_failure(),
-                Some(solidcore::error::blend::BlendFailure::Missing(_))
-            ) =>
+            && e.blend_failure().is_some()
+            && solidcore::error::upstream_status(e) == Some(SM_ERR_NULL_POINTER) =>
         {
             NULL_DEREF
         }
@@ -1805,7 +1805,7 @@ fn exec(sub: usize, n: usize, bx: &BoxIn) -> Result<Output, HarnessError> {
             Err(e) => return Ok(error_output(&e)),
         };
         let Some([e1, e2]) = split.edges else {
-            return Ok(values_output(vec![f64::from(split.status())]));
+            return Ok(values_output(vec![f64::from(crate::output::split_edge_status(split))]));
         };
         {
             let b = access
@@ -2355,6 +2355,23 @@ pub(crate) use loader::{loader_rust, LoaderScript};
 mod tests {
     use super::*;
     use solidcore::blend::fillet_executive::p2::{with_temporary_radius_change, TemporaryRadiusChange};
+
+    /// tangency-labs/solidcraft#18634: `set_params_short_box_regression`'s 1e-3 box at
+    /// (1e6, -1e6, 0) was refused by its constructor (status 1001), as main's
+    /// position-scaled degeneracy floor refused sides up to about 1e-9 times the
+    /// coordinate. It now builds, and the case's result is the one the same box gets at
+    /// the origin: where the box is no longer decides what `set_params` answers.
+    #[test]
+    fn far_short_box_sets_params_as_at_the_origin() {
+        let far = crate::case::regression_case(&Runner, "set_params_short_box_regression");
+        assert_eq!(far.inputs["box"]["origin"], serde_json::json!([1e6, -1e6, 0.0]));
+        let mut near = far.clone();
+        near.inputs["box"]["origin"] = serde_json::json!([0.0, 0.0, 0.0]);
+        let (far_out, near_out) = (Runner.run_rust(&far).unwrap(), Runner.run_rust(&near).unwrap());
+        assert_eq!(far_out.error, None);
+        assert_eq!(far_out.rejected, None);
+        assert_eq!(far_out, near_out);
+    }
 
     #[test]
     fn temporary_radius_setup_error_never_enters_the_filleting_body() {

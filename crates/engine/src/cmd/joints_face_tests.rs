@@ -14,6 +14,106 @@ fn near(a: Vec3, b: Vec3) -> bool {
 }
 
 #[test]
+fn secondary_construction_axis_tracks_two_associative_hole_centres() {
+    use solidcraft_doc::{Document, apply_vector};
+    let mut s = Session::default();
+    run(&mut s, "parameters.change", json!({"name": "DX", "expression": "8 mm"}));
+    run(&mut s, "parameters.change", json!({"name": "DY", "expression": "6 mm"}));
+    run(&mut s, "solid.box", json!({"length": 30, "width": 30, "height": 4}));
+    run(&mut s, "solid.hole", json!({"position": [5, 5, 4], "diameter": 2}));
+    run(&mut s, "solid.hole", json!({"position": ["5 mm + DX", "5 mm + DY", 4], "diameter": 2}));
+    run(&mut s, "construct.point.center", json!({"of": {"edge": [6, 5, 4]}, "name": "First"}));
+    run(&mut s, "construct.point.center", json!({"of": {"edge": [14, 11, 4]}, "name": "Second"}));
+    let id = run(
+        &mut s,
+        "construct.axis.two_points",
+        json!({
+            "a": {"construct_point": "First"}, "b": {"construct_point": "Second"}, "name": "Between",
+        }),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+    let x = json!({"reference": {"type": "construction", "feature": id}});
+    run(&mut s, "joint.origin", json!({"occurrence": 0, "circle": [5, 5, 4], "z": [0, 0, 1], "x": x, "name": "OnHole"}));
+    let check = |s: &Session, expected: Vec3| {
+        let o = &s.doc.assembly.origins.iter().find(|o| o.name == "OnHole").unwrap().origin;
+        assert!(matches!(o.snap, Snap::CircleCenter { x: Some(XRef::Reference { .. }), .. }));
+        let m = solidcraft_doc::joints::resolve_origin(&s.doc, &s.model.state(), o).unwrap();
+        assert!(near(apply_vector(&m, Vec3::X), expected));
+        assert!(near(solidcraft_doc::apply_point(&m, Vec3::ZERO), Vec3::new(5.0, 5.0, 4.0)));
+    };
+    check(&s, Vec3::new(0.8, 0.6, 0.0));
+    run(&mut s, "parameters.change", json!({"name": "DX", "expression": "6 mm"}));
+    run(&mut s, "parameters.change", json!({"name": "DY", "expression": "8 mm"}));
+    check(&s, Vec3::new(0.6, 0.8, 0.0));
+    let mut reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    reopened.refresh();
+    check(&reopened, Vec3::new(0.6, 0.8, 0.0));
+    let before = reopened.doc.clone();
+    for z in [json!([0, 0, 1]), Value::Null] {
+        assert!(
+            reopened
+                .execute(
+                    "joint.origin",
+                    &json!({"occurrence": 0, "circle": [5, 5, 4], "z": z,
+            "x": {"reference": {"type": "construction", "feature": 999999}}, "name": "Bad"})
+                )
+                .is_err()
+        );
+        assert_eq!(reopened.doc, before);
+    }
+}
+
+#[test]
+fn secondary_construction_axis_follows_centres_when_the_other_cylinder_tilts() {
+    use solidcraft_doc::{Document, apply_vector};
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "radius": 1, "height": 2, "operation": "new", "body_name": "First"}));
+    let other = run(
+        &mut s,
+        "solid.cylinder",
+        json!({"base": [8, 6, 4], "axis": [1, 0, 0], "radius": 1, "height": 2,
+        "operation": "new", "body_name": "Other"}),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+    run(&mut s, "construct.point.center", json!({"of": {"edge": [1, 0, 2]}, "name": "FirstCenter"}));
+    run(&mut s, "construct.point.center", json!({"of": {"edge": [8, 7, 4]}, "name": "OtherCenter"}));
+    let axis = run(
+        &mut s,
+        "construct.axis.two_points",
+        json!({"a": {"construct_point": "FirstCenter"},
+        "b": {"construct_point": "OtherCenter"}, "name": "Between"}),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+    run(
+        &mut s,
+        "joint.origin",
+        json!({"occurrence": 0, "circle": [0, 0, 2], "z": [0, 0, 1],
+        "x": {"reference": {"type": "construction", "feature": axis}}, "name": "Clocked"}),
+    );
+    let check = |s: &Session| {
+        let o = &s.doc.assembly.origins.iter().find(|o| o.name == "Clocked").unwrap().origin;
+        let m = solidcraft_doc::joints::resolve_origin(&s.doc, &s.model.state(), o).unwrap();
+        assert!(near(apply_vector(&m, Vec3::X), Vec3::new(0.8, 0.6, 0.0)));
+        assert!(near(apply_vector(&m, Vec3::Z), Vec3::Z));
+        assert!(near(solidcraft_doc::apply_point(&m, Vec3::ZERO), Vec3::new(0.0, 0.0, 2.0)));
+    };
+    check(&s);
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": other, "command": "solid.cylinder",
+        "params": {"base": [8, 6, 4], "axis": [0, 1, 0], "radius": 1, "height": 2, "operation": "new", "body_name": "Other"}}),
+    );
+    check(&s);
+    let mut reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    reopened.refresh();
+    check(&reopened);
+}
+
+#[test]
 fn joint_origin_names_in_face_or_circle_explain_the_correct_form() {
     let mut s = Session::default();
     for (name, corner) in [("A", [0, 0, 0]), ("B", [40, 0, 0])] {
@@ -45,6 +145,480 @@ fn joint_origin_names_in_face_or_circle_explain_the_correct_form() {
 /// Widths swept: small steps (a hole's wall in a 1 mm plate is a few long facets, and a pick
 /// stored at the old width lies beside the moved hole) and large ones.
 const WIDTHS: [f64; 9] = [302.0, 304.0, 310.0, 330.0, 400.0, 450.0, 510.0, 301.0, 300.0];
+
+#[test]
+fn secondary_alignment_circle_centers_clock_parallel_hole_origins_and_recompute() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.change", json!({"name":"guideY","expression":"20 mm"}));
+    for (name, corner, first_hole, guide_hole) in [("A", 0, 20, 80), ("B", 150, 170, 230)] {
+        run(&mut s, "component.activate", json!({"component":"root"}));
+        run(&mut s, "component.create", json!({"name":name}));
+        run(&mut s, "solid.box", json!({"length":100,"width":80,"height":10,"corner":[corner,0,0]}));
+        run(&mut s, "solid.hole", json!({"position":[first_hole,20,10],"diameter":6}));
+        run(&mut s, "solid.hole", json!({"position":[guide_hole,"guideY",10],"diameter":6}));
+    }
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    run(&mut s, "occurrence.ground", json!({"occurrence":"A:1","grounded":true}));
+    let names = |s: &Session, component: &str, wall_pick: Vec3, end_pick: Vec3| {
+        let c = s.doc.find_component(component).unwrap();
+        let st = s.model.state();
+        let wall = solidcraft_doc::joints::face_name_at(&s.doc, &st, c, wall_pick, true).unwrap();
+        let end = solidcraft_doc::joints::face_name_at(&s.doc, &st, c, end_pick, false).unwrap();
+        json!({"reference":{"type":"circle_center","name":wall,"end":end}})
+    };
+    let (a, b) = (
+        names(&s, "A", Vec3::new(83.0, 20.0, 5.0), Vec3::new(50.0, 40.0, 10.0)),
+        names(&s, "B", Vec3::new(233.0, 20.0, 5.0), Vec3::new(200.0, 40.0, 10.0)),
+    );
+    let p = json!({"name":"Clocked","type":"rigid","a":{"occurrence":"A","circle":[23,20,9]},"b":{"occurrence":"B","circle":[173,20,9]},"a_alignment":a,"b_alignment":b});
+    run(&mut s, "joint.create", p);
+    run(&mut s, "parameters.change", json!({"name":"guideY","expression":"40 mm"}));
+    let joint = &s.doc.assembly.joints[0];
+    let frame = solidcraft_doc::joints::resolve_origin(&s.doc, &s.model.state(), &joint.a).unwrap();
+    let x = Vec3::new(frame[0][0], frame[0][1], frame[0][2]);
+    // The independent direction of the 60-by-20 fixture is (3/sqrt(10), 1/sqrt(10), 0).
+    assert!(near(x, Vec3::new(0.9486832980505138, 0.31622776601683794, 0.0)));
+    let reopened: solidcraft_doc::Document = serde_json::from_value(serde_json::to_value(&*s.doc).unwrap()).unwrap();
+    assert_eq!(reopened.assembly.joints, s.doc.assembly.joints);
+    let before = s.doc.clone();
+    let wrong = s.execute("joint.edit", &json!({"joint":"Clocked","b_alignment":a})).unwrap_err().to_string();
+    assert!(wrong.contains("origin's component"), "{wrong}");
+    assert_eq!(s.doc, before);
+    let mut missing = b.clone();
+    missing["reference"]["end"] = json!("missing-end");
+    assert!(s.execute("joint.edit", &json!({"joint":"Clocked","b_alignment":missing})).is_err());
+    let c = s.doc.find_component("A").unwrap();
+    let first = solidcraft_doc::joints::face_name_at(&s.doc, &s.model.state(), c, Vec3::new(23.0, 20.0, 5.0), true).unwrap();
+    let mut coincident = a.clone();
+    coincident["reference"]["name"] = json!(first);
+    let error = s.execute("joint.edit", &json!({"joint":"Clocked","a_alignment":coincident})).unwrap_err().to_string();
+    assert!(error.contains("primary axis"), "{error}");
+    assert_eq!(s.doc, before);
+    // Explicit Axis mode remains directional, so parallel hole axes are still refused.
+    assert!(
+        s.execute("joint.edit", &json!({"joint":"Clocked","a_alignment":{"reference":{"type":"cylinder","name":a["reference"]["name"]}}}))
+            .unwrap_err()
+            .to_string()
+            .contains("parallel")
+    );
+}
+
+#[test]
+fn secondary_alignment_hole_axis_keeps_identity_but_rejects_ambiguous_seam_and_wrong_owner() {
+    let (mut s, _, _, mut p) = alignment_boxes();
+    run(&mut s, "component.activate", json!({"component":"A"}));
+    run(&mut s, "solid.hole", json!({"position":[10,10,10],"diameter":6}));
+    let st = s.model.state();
+    let body = st.body("Body1").unwrap();
+    let names = solidcraft_doc::naming::edge_names(body);
+    // Current exact topology has no unverified seam in this fixture. A saved tie-break
+    // token is nevertheless an ambiguous identity and must never be guessed on reload.
+    let seam = format!("{}~1", names.iter().find(|name| !name.is_empty() && !name.contains('~')).unwrap());
+    p["a_alignment"] = json!({"reference":{"type":"edge","name":seam}});
+    assert!(s.execute("joint.create", &p).unwrap_err().to_string().contains("ambiguous"));
+    let component = s.doc.find_component("A").unwrap();
+    let wall = solidcraft_doc::joints::face_name_at(&s.doc, &st, component, Vec3::new(13.0, 10.0, 5.0), true).unwrap();
+    // Use X-facing primaries so the hole's Z axis supplies a valid secondary direction.
+    p["a"]["face"] = json!([20, 10, 5]);
+    p["b"]["face"] = json!([30, 10, 5]);
+    p["a_alignment"] = json!({"reference":{"type":"cylinder","name":wall}});
+    p.as_object_mut().unwrap().remove("b_alignment");
+    run(&mut s, "joint.create", p);
+    let before = s.doc.clone();
+    let error =
+        s.execute("joint.edit", &json!({"joint":"Aligned","b_alignment":{"reference":{"type":"cylinder","name":wall}}})).unwrap_err().to_string();
+    assert!(error.contains("origin's component"), "{error}");
+    assert_eq!(s.doc, before);
+}
+
+fn alignment_boxes() -> (Session, String, String, Value) {
+    let mut s = Session::default();
+    run(&mut s, "parameters.change", json!({"name": "jointTurn", "expression": "17 deg"}));
+    for (name, x) in [("A", 0), ("B", 30)] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]}));
+    }
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.ground", json!({"occurrence": "A:1", "grounded": true}));
+    let name = |c, p| solidcraft_doc::joints::face_name_at(&s.doc, &s.model.state(), s.doc.find_component(c).unwrap(), p, false).unwrap();
+    let a = name("A", Vec3::new(20.0, 10.0, 5.0));
+    let b = name("B", Vec3::new(40.0, 20.0, 5.0));
+    let p = json!({"type": "rigid", "name": "Aligned", "angle": "jointTurn",
+        "a": {"occurrence": "A", "face": [10, 10, 10]}, "b": {"occurrence": "B", "face": [40, 10, 0]},
+        "a_alignment": {"face": a}, "b_alignment": {"face": b}});
+    (s, a, b, p)
+}
+
+#[test]
+fn coderabbit_review_primary_replacement_preserves_planar_alignment() {
+    for (side, occurrence, parallel_pick) in [("a", "A", Vec3::new(20.0, 10.0, 5.0)), ("b", "B", Vec3::new(40.0, 20.0, 5.0))] {
+        let (mut s, _, _, p) = alignment_boxes();
+        let component = s.doc.find_component(occurrence).unwrap();
+        let parallel = solidcraft_doc::joints::face_name_at(&s.doc, &s.model.state(), component, parallel_pick, false).unwrap();
+        run(&mut s, "joint.create", p);
+        let before = s.doc.assembly.joints[0].clone();
+        let old = if side == "a" { &before.a.snap } else { &before.b.snap };
+        let Snap::FaceCenter { face: Some(primary), x: old_x, .. } = old else { panic!("saved planar-aligned face") };
+        run(&mut s, "joint.edit", json!({"joint":"Aligned", side:{"occurrence":occurrence, "face":primary}}));
+        let current = &s.doc.assembly.joints[0];
+        let Snap::FaceCenter { x, .. } = (if side == "a" { &current.a.snap } else { &current.b.snap }) else {
+            panic!("restored planar-aligned face")
+        };
+        assert_eq!(x, old_x);
+        let before = s.doc.clone();
+        assert!(s.execute("joint.edit", &json!({"joint":"Aligned", side:{"occurrence":occurrence,"face":parallel}})).is_err());
+        assert_eq!(s.doc, before);
+    }
+}
+
+#[test]
+fn secondary_alignment_refuses_duplicate_incident_faces_on_a_single_rim_cap() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 10}));
+    let cap = solidcraft_doc::joints::face_name_at(&s.doc, &s.model.state(), 0, Vec3::new(0.0, 0.0, 10.0), false).unwrap();
+    // The cap has only one boundary edge: repeating it must not identify the cap/wall rim.
+    let invalid = format!("{cap}|{cap}");
+    let before = s.doc.clone();
+    let error = s
+        .execute(
+            "joint.origin",
+            &json!({"name":"Bad", "occurrence":0, "plane":"YZ",
+        "x":{"reference":{"type":"edge","name":invalid}}}),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("ambiguous"), "{error}");
+    assert_eq!(s.doc, before);
+}
+
+#[test]
+fn secondary_alignment_inspection_reports_secondary_topology() {
+    let (mut s, a, _, p) = alignment_boxes();
+    run(&mut s, "joint.create", p);
+    let r = run(&mut s, "joint.inspect", json!({"joint":"Aligned"}));
+    let refs = r["joints"][0]["a"]["references"].as_array().unwrap();
+    assert_eq!(refs.iter().filter(|r| r["role"] == "x").count(), 1);
+    assert!(refs.iter().any(|r| r["role"] == "x" && r.to_string().contains(&a)));
+}
+
+#[test]
+fn secondary_alignment_refuses_nested_primary_paths_before_resolving_geometry() {
+    let (s, _, _, _) = alignment_boxes();
+    let mut origin = solidcraft_doc::joints::JointOrigin::new(
+        0,
+        Snap::Plane { plane: Box::new(solidcraft_doc::PlaneRef::Origin { name: "XY".into() }), pick: None, x: None },
+    );
+    origin.inside = vec![999];
+    let error =
+        super::alignment_param(&s, origin, Some(&json!({"reference":{"type":"origin_axis","axis":"X"}})), "joint.create").unwrap_err().to_string();
+    assert!(error.contains("nested occurrence paths"), "{error}");
+}
+
+#[test]
+fn secondary_alignment_feedback_named_edges_save_reopen_and_reject_missing_identity() {
+    let (mut s, _, _, mut p) = alignment_boxes();
+    let state = s.model.state();
+    let component = s.doc.find_component("A").unwrap();
+    let mut faces = [
+        solidcraft_doc::joints::face_name_at(&s.doc, &state, component, Vec3::new(10.0, 10.0, 0.0), false).unwrap(),
+        solidcraft_doc::joints::face_name_at(&s.doc, &state, component, Vec3::new(10.0, 0.0, 5.0), false).unwrap(),
+    ];
+    faces.sort();
+    let name = faces.join("|");
+    p["a_alignment"] = json!({"reference":{"type":"edge","name":name},"reverse":true});
+    run(&mut s, "joint.create", p);
+    let frame = solidcraft_doc::joints::resolve_origin(&s.doc, &s.model.state(), &s.doc.assembly.joints[0].a).unwrap();
+    let x = Vec3::new(frame[0][0], frame[0][1], frame[0][2]);
+    assert!(near(x, Vec3::X) || near(x, -Vec3::X));
+    let path = std::env::temp_dir().join(format!("solidcraft-directional-alignment-{}.solidcraft", std::process::id()));
+    run(&mut s, "file.save", json!({"path":path}));
+    run(&mut s, "file.new", json!({}));
+    run(&mut s, "doc.open", json!({"path":path}));
+    let old = s.doc.assembly.joints[0].clone();
+    assert!(matches!(&old.a.snap, Snap::FaceCenter { x: Some(XRef::Reference { reverse: true, .. }), .. }));
+    assert!(s.execute("joint.edit", &json!({"joint":"Aligned","a_alignment":{"reference":{"type":"edge","name":"missing"}}})).is_err());
+    assert_eq!(s.doc.assembly.joints[0], old);
+    run(&mut s, "joint.edit", json!({"joint":"Aligned","a_alignment":null}));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.assembly.joints[0], old);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn secondary_alignment_feedback_construction_and_component_axes_keep_author_identity() {
+    let (mut s, _, _, mut p) = alignment_boxes();
+    run(&mut s, "component.activate", json!({"component":"A"}));
+    run(&mut s, "construct.axis.two_points", json!({"a":{"point":[0,0,0]},"b":{"point":[20,0,0]},"name":"GuideAxis"}));
+    let axis = s.doc.features.iter().find(|f| f.name == "GuideAxis").unwrap().id;
+    run(&mut s, "construct.plane.three_points", json!({"a":{"point":[0,0,0]},"b":{"point":[0,10,0]},"c":{"point":[0,0,10]},"name":"GuidePlane"}));
+    let plane = s.doc.features.iter().find(|f| f.name == "GuidePlane").unwrap().id;
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    p["a_alignment"] = json!({"reference":{"type":"construction","feature":axis}});
+    run(&mut s, "joint.create", p);
+    for reference in
+        [json!({"type":"construction_plane","feature":plane}), json!({"type":"origin_axis","axis":"X"}), json!({"type":"origin_plane","plane":"YZ"})]
+    {
+        run(&mut s, "joint.edit", json!({"joint":"Aligned","a_alignment":{"reference":reference}}));
+        let frame = solidcraft_doc::joints::resolve_origin(&s.doc, &s.model.state(), &s.doc.assembly.joints[0].a).unwrap();
+        assert!(near(Vec3::new(frame[0][0], frame[0][1], frame[0][2]), Vec3::X));
+    }
+    let old = s.doc.assembly.joints[0].clone();
+    for reference in [json!({"type":"construction","feature":99999}), json!({"type":"origin_axis","axis":"Z"})] {
+        assert!(s.execute("joint.edit", &json!({"joint":"Aligned","a_alignment":{"reference":reference}})).is_err());
+        assert_eq!(s.doc.assembly.joints[0], old);
+    }
+    assert!(s.execute("joint.edit", &json!({"joint":"Aligned","b_alignment":{"reference":{"type":"construction","feature":axis}}})).is_err());
+    assert_eq!(s.doc.assembly.joints[0], old);
+}
+
+#[test]
+fn secondary_alignment_feedback_sketch_line_is_saved_by_sketch_and_curve_identity() {
+    let (mut s, _, _, mut p) = alignment_boxes();
+    run(&mut s, "component.activate", json!({"component":"A"}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"AlignmentSketch"}));
+    let sketch = s.active_sketch.unwrap();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[20,0]]}));
+    let curve = s.model.state().sketch(sketch).unwrap().sketch.curves[0].id.clone();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    p["a_alignment"] = json!({"reference":{"type":"sketch_line","sketch":sketch,"curve":curve}});
+    run(&mut s, "joint.create", p);
+    let old = s.doc.assembly.joints[0].clone();
+    let frame = solidcraft_doc::joints::resolve_origin(&s.doc, &s.model.state(), &old.a).unwrap();
+    assert!(near(Vec3::new(frame[0][0], frame[0][1], frame[0][2]), Vec3::X));
+    assert!(
+        s.execute("joint.edit", &json!({"joint":"Aligned","a_alignment":{"reference":{"type":"sketch_line","sketch":sketch,"curve":"gone"}}}))
+            .is_err()
+    );
+    assert_eq!(s.doc.assembly.joints[0], old);
+}
+
+#[test]
+fn secondary_alignment_feedback_cylinder_and_circular_edge_follow_geometry_changes() {
+    let (mut s, _, _, mut p) = alignment_boxes();
+    run(&mut s, "component.activate", json!({"component":"A"}));
+    run(&mut s, "parameters.change", json!({"name":"guideRadius","expression":"5 mm"}));
+    run(&mut s, "solid.cylinder", json!({"base":[70,0,0],"axis":[1,0,0],"radius":"guideRadius","height":20,"body_name":"Guide"}));
+    let component = s.doc.find_component("A").unwrap();
+    let face = solidcraft_doc::joints::face_name_at(&s.doc, &s.model.state(), component, Vec3::new(80.0, 5.0, 0.0), true).unwrap();
+    p["a_alignment"] = json!({"reference":{"type":"cylinder","name":face}});
+    run(&mut s, "joint.create", p);
+    run(&mut s, "parameters.change", json!({"name":"guideRadius","expression":"7 mm"}));
+    let state = s.model.state();
+    let cap = solidcraft_doc::joints::face_name_at(&s.doc, &state, component, Vec3::new(70.0, 0.0, 0.0), false).unwrap();
+    let mut faces = [face, cap];
+    faces.sort();
+    let edge = faces.join("|");
+    run(&mut s, "joint.edit", json!({"joint":"Aligned","a_alignment":{"reference":{"type":"edge","name":edge}}}));
+    run(&mut s, "parameters.change", json!({"name":"guideRadius","expression":"9 mm"}));
+    let frame = solidcraft_doc::joints::resolve_origin(&s.doc, &s.model.state(), &s.doc.assembly.joints[0].a).unwrap();
+    let x = Vec3::new(frame[0][0], frame[0][1], frame[0][2]);
+    assert!(near(x, Vec3::X) || near(x, -Vec3::X));
+    assert!(near(place(&s, "B", Vec3::new(40.0, 10.0, 0.0)), Vec3::new(10.0, 10.0, 10.0)));
+}
+
+#[test]
+fn secondary_alignment_inverts_each_frame_without_changing_angle_or_anchor() {
+    let (mut s, a, b, p) = alignment_boxes();
+    run(&mut s, "joint.create", p);
+    let old = s.doc.assembly.joints[0].clone();
+    for ra in [false, true] {
+        for rb in [false, true] {
+            for flip in [false, true] {
+                run(
+                    &mut s,
+                    "joint.edit",
+                    json!({"joint": "Aligned", "flip": flip,
+                    "a_alignment": {"face": a, "reverse": ra}, "b_alignment": {"face": b, "reverse": rb}}),
+                );
+                let j = &s.doc.assembly.joints[0];
+                assert_eq!(j.exprs.angle.as_deref(), Some("jointTurn"));
+                assert!((j.angle - 0.29670597283903605).abs() < 1e-10);
+                for (origin, want) in [(&j.a, if ra { -Vec3::X } else { Vec3::X }), (&j.b, if rb { -Vec3::Y } else { Vec3::Y })] {
+                    let m = solidcraft_doc::joints::resolve_origin(&s.doc, &s.model.state(), origin).unwrap();
+                    assert!(near(Vec3::new(m[0][0], m[0][1], m[0][2]), want));
+                }
+                assert!(near(place(&s, "B", Vec3::new(40.0, 10.0, 0.0)), Vec3::new(10.0, 10.0, 10.0)));
+                // Fixed endpoints: the anchor plus or minus (cos(17deg), sin(17deg), 0).
+                let expected = if ra == rb {
+                    Vec3::new(10.956304755963036, 10.292371704722737, 10.0)
+                } else {
+                    Vec3::new(9.043695244036964, 9.707628295277263, 10.0)
+                };
+                assert!(near(place(&s, "B", Vec3::new(40.0, 11.0, 0.0)), expected), "{ra} {rb} {flip}");
+            }
+        }
+    }
+    // Primary references stay by name, including after clearing the secondary direction.
+    run(&mut s, "joint.edit", json!({"joint": "Aligned", "a_alignment": null}));
+    let j = &s.doc.assembly.joints[0];
+    assert_eq!(j.a.occurrence, old.a.occurrence);
+    assert!(
+        matches!((&j.a.snap, &old.a.snap), (Snap::FaceCenter { face: a, x: Some(XRef::Dir(_)), .. }, Snap::FaceCenter { face: b, .. }) if a == b)
+    );
+    assert!(matches!(&j.b.snap, Snap::FaceCenter { x: Some(XRef::Planar { .. }), .. }));
+}
+
+#[test]
+fn secondary_alignment_keeps_motion_values_limits_and_degrees_of_freedom() {
+    for kind in [
+        "rigid",
+        "revolute",
+        "slider",
+        "cylindrical",
+        "pin_slot",
+        "planar",
+        "ball",
+        "parallel",
+        "perpendicular",
+        "angle",
+        "point_on_plane",
+        "point_on_line",
+        "line_on_plane",
+    ] {
+        let (mut s, a, b, mut p) = alignment_boxes();
+        p["type"] = json!(kind);
+        p.as_object_mut().unwrap().remove("a_alignment");
+        p.as_object_mut().unwrap().remove("b_alignment");
+        run(&mut s, "joint.create", p);
+        let n = s.doc.assembly.joints[0].values.len();
+        for i in 0..n {
+            run(&mut s, "joint.limits", json!({"joint": "Aligned", "index": i, "min": -20, "max": 20}));
+        }
+        let before = s.doc.assembly.joints[0].clone();
+        let dof = run(&mut s, "joint.list", json!({}))["dof"].clone();
+        run(&mut s, "joint.edit", json!({"joint": "Aligned", "a_alignment": {"face": a, "reverse": true}, "b_alignment": {"face": b}}));
+        let after = &s.doc.assembly.joints[0];
+        assert_eq!(
+            (&after.values, &after.limits, &after.exprs, after.angle, after.offset),
+            (&before.values, &before.limits, &before.exprs, before.angle, before.offset),
+            "{kind}"
+        );
+        assert_eq!(run(&mut s, "joint.list", json!({}))["dof"], dof, "{kind}");
+        run(
+            &mut s,
+            "joint.edit",
+            json!({"joint":"Aligned","type":kind,"offset":before.offset,"flip":before.flip,
+            "a_alignment":{"face":a,"reverse":false},"b_alignment":{"face":b}}),
+        );
+        let after = &s.doc.assembly.joints[0];
+        assert_eq!((&after.values, &after.limits, &after.exprs), (&before.values, &before.limits, &before.exprs), "unchanged UI fields: {kind}");
+    }
+}
+
+#[test]
+fn secondary_alignment_invalid_edits_are_atomic() {
+    let (mut s, a, b, p) = alignment_boxes();
+    run(&mut s, "joint.create", p);
+    let top = solidcraft_doc::joints::face_name_at(&s.doc, &s.model.state(), s.doc.find_component("A").unwrap(), Vec3::new(10.0, 10.0, 10.0), false)
+        .unwrap();
+    for alignment in [
+        json!({"face": b}),
+        json!({"face": "missing"}),
+        json!({"face": top}),
+        json!({"face": a, "reverse": "yes"}),
+        json!({"face": a, "occurrence": "B"}),
+        json!([0, 0, 0]),
+    ] {
+        let before = serde_json::to_value(&*s.doc).unwrap();
+        assert!(s.execute("joint.edit", &json!({"joint": "Aligned", "angle": 90, "a_alignment": alignment})).is_err(), "{alignment}");
+        assert_eq!(serde_json::to_value(&*s.doc).unwrap(), before);
+    }
+    let component = s.doc.find_component("A").unwrap();
+    let second = run(&mut s, "occurrence.copy", json!({"component": component, "translate": [100,0,0]}))["occurrence"].clone();
+    assert!(
+        s.execute("joint.edit", &json!({"joint":"Aligned", "a_alignment":{"face":a,"occurrence":second}})).is_err(),
+        "same definition, different occurrence is still a mismatch"
+    );
+    // An explicit point's x support remains independent; alignment UI doesn't turn it into a face.
+    assert!(s.execute("joint.create", &json!({"type": "rigid", "a": {"occurrence": "A", "point": [0,0,0]}, "b": {"occurrence": "B", "point": [0,0,0]}, "a_alignment": {"face": a}})).is_err());
+}
+
+#[test]
+fn secondary_alignment_roundtrips_and_reports_a_lost_reference() {
+    let (mut s, _, b, p) = alignment_boxes();
+    run(&mut s, "joint.create", p);
+    let path = std::env::temp_dir().join(format!("solidcraft-secondary-alignment-{}.solidcraft", std::process::id()));
+    run(&mut s, "file.save", json!({"path": path}));
+    run(&mut s, "file.new", json!({}));
+    run(&mut s, "doc.open", json!({"path": path}));
+    run(&mut s, "parameters.change", json!({"name": "jointTurn", "expression": "32 deg"}));
+    assert_eq!(s.doc.assembly.joints[0].exprs.angle.as_deref(), Some("jointTurn"));
+    assert!((s.doc.assembly.joints[0].angle - 0.5585053606381855).abs() < 1e-10);
+    let before = s.doc.assembly.joints[0].clone();
+    run(&mut s, "joint.edit", json!({"joint": "Aligned", "b_alignment": {"face": b, "reverse": true}}));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.assembly.joints[0], before);
+    run(&mut s, "edit.redo", json!({}));
+    let placed = place(&s, "B", Vec3::new(40.0, 10.0, 0.0));
+    // A serialized reference which later disappears is reported, never replaced by nearby geometry.
+    if let Snap::FaceCenter { x, .. } = &mut s.doc_mut().assembly.joints[0].a.snap {
+        *x = Some(XRef::Planar { planar_face: "missing".into(), reverse: false });
+    }
+    let r = run(&mut s, "joint.solve", json!({}));
+    assert_eq!(r["errors"].as_array().unwrap().len(), 1);
+    assert!(near(place(&s, "B", Vec3::new(40.0, 10.0, 0.0)), placed));
+    let r = run(&mut s, "joint.edit", json!({"joint":"Aligned", "a_alignment":null}));
+    assert_eq!(r["errors"].as_array().unwrap().len(), 0);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn secondary_alignment_follows_a_parametric_guide_face_instead_of_a_captured_vector() {
+    let (mut s, _, _, mut p) = alignment_boxes();
+    run(&mut s, "component.activate", json!({"component":"A"}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[70,0,0],"body_name":"Guide","operation":"new"}));
+    run(&mut s, "parameters.change", json!({"name":"guideTurn","expression":"0 deg"}));
+    run(&mut s, "solid.move", json!({"bodies":["Guide"],"axis":[0,0,1],"angle":"guideTurn"}));
+    let component = s.doc.find_component("A").unwrap();
+    let face = solidcraft_doc::joints::face_name_at(&s.doc, &s.model.state(), component, Vec3::new(80.0, 5.0, 5.0), false).unwrap();
+    p["a_alignment"] = json!({"face":face});
+    run(&mut s, "joint.create", p);
+    // Fixed endpoint oracles include the authored 17deg joint turn: 57deg, -8deg and 97deg.
+    for (degrees, expected) in [
+        (40.0, Vec3::new(10.544639035015027, 10.838670567945424, 10.0)),
+        (-25.0, Vec3::new(10.990268068741571, 9.860826899039934, 10.0)),
+        (80.0, Vec3::new(9.878130656594853, 10.992546151641322, 10.0)),
+    ] {
+        run(&mut s, "parameters.change", json!({"name":"guideTurn","expression":format!("{degrees} deg")}));
+        let r = run(&mut s, "joint.solve", json!({}));
+        assert_eq!(r["errors"].as_array().unwrap().len(), 0, "{r}");
+        assert!(near(place(&s, "B", Vec3::new(40.0, 11.0, 0.0)), expected), "{degrees}");
+        assert!(near(place(&s, "B", Vec3::new(40.0, 10.0, 0.0)), Vec3::new(10.0, 10.0, 10.0)));
+    }
+}
+
+#[test]
+fn secondary_alignment_on_round_origins_keeps_the_named_end_as_geometry_changes() {
+    let mut s = tray();
+    let named = |component, point| {
+        solidcraft_doc::joints::face_name_at(&s.doc, &s.model.state(), s.doc.find_component(component).unwrap(), point, false).unwrap()
+    };
+    let a = named("Tray", Vec3::new(300.0, 50.0, 0.5));
+    let b = named("Bracket", Vec3::new(120.0, 210.0, 10.0));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type":"rigid","angle":0,"name":"RoundAligned",
+        "a":{"occurrence":"Tray","circle":[283,50,0.8]},"b":{"occurrence":"Bracket","circle":[113,210,0.4]},
+        "a_alignment":{"face":a},"b_alignment":{"face":b}}),
+    );
+    on_the_hole(&s, 300.0);
+    let old = s.doc.assembly.joints[0].clone();
+    let Snap::CircleCenter { face: Some(wall), .. } = &old.a.snap else { panic!("named round origin") };
+    assert!(
+        s.execute("joint.edit", &json!({"joint":"RoundAligned", "a_alignment":{"face":wall}})).is_err(),
+        "a cylindrical alignment face must not become a captured direction"
+    );
+    width(&mut s, 330.0);
+    on_the_hole(&s, 330.0);
+    for (before, after) in [(&old.a, &s.doc.assembly.joints[0].a), (&old.b, &s.doc.assembly.joints[0].b)] {
+        assert!(
+            matches!((&before.snap,&after.snap),(Snap::CircleCenter{face:a,end:ae,..},Snap::CircleCenter{face:b,end:be,x:Some(XRef::Planar{..}),..}) if a==b && ae==be)
+        );
+    }
+}
 
 /// A tray: a 1 mm plate `W` wide (a parameter, 300 mm to start) and 100 deep, with a 6 mm hole
 /// 20 mm in from its right edge (an expression); grounded. A bracket: a 20 x 20 x 2 foot with a
@@ -594,4 +1168,205 @@ fn planar_face_with_hole_locates_outline_centre_from_brep_loops() {
     let point = solidcraft_doc::apply_point(&frame, Vec3::ZERO);
     // The plate outline is [-50, 50] in X and Y, centered at (0, 0), so outline centre is at (0, 0, 10).
     assert!((point.x).abs() < 1e-4 && (point.y).abs() < 1e-4 && (point.z - 10.0).abs() < 1e-4, "expected (0, 0, 10), got {point:?}");
+}
+
+/// Plate spanning x in [PX, PX + 5], y in [0, 100], z in [0, 100] with an X-axis Ø6 through-hole
+/// at (y = 50, z = 50), plus a washer component with an X-axis Ø6 bore (x in [0, 2]).
+fn plate_and_washer() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "PX", "expression": "1015 mm"}));
+    run(&mut s, "component.create", json!({"name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 5, "width": 100, "height": 100, "corner": ["PX", 0, 0], "body_name": "Plate"}));
+    run(&mut s, "solid.cylinder", json!({"base": ["PX - 5 mm", 50, 50], "axis": [1, 0, 0], "radius": 3, "height": 15, "operation": "cut"}));
+    let plate = occ(&s, "Plate");
+    run(&mut s, "occurrence.ground", json!({"occurrence": plate, "grounded": true}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Washer"}));
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [1, 0, 0], "radius": 6, "height": 2, "body_name": "Washer"}));
+    run(&mut s, "solid.cylinder", json!({"base": [-1, 0, 0], "axis": [1, 0, 0], "radius": 3, "height": 4, "operation": "cut"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    s
+}
+
+/// Adding a chamfer to a through-hole entry keeps an existing `insert` joint on the plate's
+/// planar face instead of shifting inward to the recessed cylinder-cone rim, while still
+/// following the plate face when the plate translates (#22049).
+#[test]
+fn insert_joint_on_hole_rim_stays_on_plate_face_after_chamfer_and_follows_plate_translation() {
+    let mut s = plate_and_washer();
+    let r = run(
+        &mut s,
+        "assembly.constraint.create",
+        json!({
+            "type": "insert",
+            "name": "WasherSeat",
+            "a": {"occurrence": "Plate", "circle": [1015, 53, 50]},
+            "b": {"occurrence": "Washer", "circle": [2, 3, 0]},
+        }),
+    );
+    assert_eq!(r["errors"], json!([]), "{r}");
+    assert!(near(place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0)), Vec3::new(1015.0, 50.0, 50.0)));
+    assert!(near(place(&s, "Washer", Vec3::new(0.0, 0.0, 0.0)), Vec3::new(1013.0, 50.0, 50.0)));
+
+    // Add a 0.5 x 45 deg chamfer to the hole entry on the plate.
+    run(&mut s, "component.activate", json!({"component": "Plate"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[1015, 53, 50]], "distance": 0.5, "body": "Plate"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+
+    let solved = run(&mut s, "joint.solve", json!({}));
+    assert_eq!(solved["errors"], json!([]), "{solved}");
+    let seat = place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0));
+    assert!(near(seat, Vec3::new(1015.0, 50.0, 50.0)), "washer must stay on plate face x = 1015, not shift inward: {seat:?}");
+    assert!(near(place(&s, "Washer", Vec3::new(0.0, 0.0, 0.0)), Vec3::new(1013.0, 50.0, 50.0)));
+
+    let inspected = run(&mut s, "joint.inspect", json!({"joint": "WasherSeat"}));
+    let oa = &inspected["joints"][0]["a"]["frame"]["origin"];
+    let za = &inspected["joints"][0]["a"]["frame"]["z"];
+    assert!(near(Vec3::new(oa[0].as_f64().unwrap(), oa[1].as_f64().unwrap(), oa[2].as_f64().unwrap()), Vec3::new(1015.0, 50.0, 50.0)), "{inspected}");
+    assert!(near(Vec3::new(za[0].as_f64().unwrap(), za[1].as_f64().unwrap(), za[2].as_f64().unwrap()), -Vec3::X), "{inspected}");
+
+    // Translating the plate still moves the washer with the plate face.
+    run(&mut s, "parameters.change", json!({"name": "PX", "expression": "1025 mm"}));
+    let solved = run(&mut s, "joint.solve", json!({}));
+    assert_eq!(solved["errors"], json!([]), "{solved}");
+    let moved = place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0));
+    assert!(near(moved, Vec3::new(1025.0, 50.0, 50.0)), "washer must follow translated plate face to x = 1025: {moved:?}");
+
+    // Chamfering the opposite end of the hole as well leaves the origin on the x = 1025 face.
+    run(&mut s, "component.activate", json!({"component": "Plate"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[1030, 53, 50]], "distance": 0.5, "body": "Plate"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let solved = run(&mut s, "joint.solve", json!({}));
+    assert_eq!(solved["errors"], json!([]), "{solved}");
+    let both_chamfered = place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0));
+    assert!(near(both_chamfered, Vec3::new(1025.0, 50.0, 50.0)), "{both_chamfered:?}");
+
+    // Explicit `circle` (cylinder wall) + `end` (planar plate face across the chamfer) is
+    // accepted by both `joint.origin` and `joint.edit`, while an unrelated side face is refused.
+    let wall = face_name(&mut s, "Plate", Vec3::new(1027.5, 53.0, 50.0));
+    let front = face_name(&mut s, "Plate", Vec3::new(1025.0, 10.0, 10.0));
+    let side = face_name(&mut s, "Plate", Vec3::new(1027.5, 0.0, 50.0));
+    assert!(!wall.is_empty() && !front.is_empty() && !side.is_empty());
+    run(&mut s, "joint.origin", json!({"name": "WallOnFront", "occurrence": "Plate", "circle": wall, "end": front}));
+    let (pt, z) = origin_frame(&s, "WallOnFront").unwrap();
+    assert!(near(pt, Vec3::new(1025.0, 50.0, 50.0)) && near(z, -Vec3::X), "{pt:?} {z:?}");
+    let edited = run(&mut s, "joint.edit", json!({"joint": "WasherSeat", "a": {"occurrence": "Plate", "circle": wall, "end": front}}));
+    assert_eq!(edited["errors"], json!([]), "{edited}");
+    assert!(near(place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0)), Vec3::new(1025.0, 50.0, 50.0)));
+    assert!(s.execute("joint.origin", &json!({"name": "BadEnd", "occurrence": "Plate", "circle": wall, "end": side})).is_err());
+}
+
+/// Picking `circle` on the outer circular rim (edge or centre) of a chamfered or countersunk
+/// hole succeeds and places the origin on the planar face along the cone's axis (#22049).
+#[test]
+fn circle_origin_accepts_chamfer_and_countersink_outer_rim() {
+    let mut s = plate_and_washer();
+    run(&mut s, "component.activate", json!({"component": "Plate"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[1015, 53, 50]], "distance": 0.5, "body": "Plate"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+
+    // Outer chamfer rim edge is at x = 1015, radius = 3.5 -> point [1015, 53.5, 50].
+    let r = run(
+        &mut s,
+        "assembly.constraint.create",
+        json!({
+            "type": "insert",
+            "name": "OnChamferRim",
+            "a": {"occurrence": "Plate", "circle": [1015, 53.5, 50]},
+            "b": {"occurrence": "Washer", "circle": [2, 3, 0]},
+        }),
+    );
+    assert_eq!(r["errors"], json!([]), "{r}");
+    let snap = origin(&s, "OnChamferRim", true);
+    assert!(matches!(&snap, Snap::CircleCenter { face: Some(_), end: Some(_), .. }), "outer rim keeps cone face and planar end: {snap:?}");
+    assert!(near(place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0)), Vec3::new(1015.0, 50.0, 50.0)));
+
+    // joint.edit with `circle` on the chamfer outer rim also succeeds.
+    let edited = run(&mut s, "joint.edit", json!({"joint": "OnChamferRim", "a": {"occurrence": "Plate", "circle": [1015, 53.5, 50]}}));
+    assert_eq!(edited["errors"], json!([]), "{edited}");
+    assert!(near(place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0)), Vec3::new(1015.0, 50.0, 50.0)));
+
+    // Picking the chamfer outer rim by its centre (with and without z, as the UI sends) keeps a
+    // persistent CircleCenter origin rather than falling back to a static Point.
+    run(&mut s, "joint.origin", json!({"name": "ChamferCenter", "occurrence": "Plate", "circle": [1015, 50, 50]}));
+    run(&mut s, "joint.origin", json!({"name": "ChamferCenterZ", "occurrence": "Plate", "circle": [1015, 50, 50], "z": [-1, 0, 0]}));
+    for name in ["ChamferCenter", "ChamferCenterZ"] {
+        let jo = s.doc.assembly.origins.iter().find(|o| o.name == name).unwrap();
+        assert!(matches!(&jo.origin.snap, Snap::CircleCenter { face: Some(_), end: Some(_), .. }), "{name}: {:?}", jo.origin.snap);
+        let (pt, z) = origin_frame(&s, name).unwrap();
+        assert!(near(pt, Vec3::new(1015.0, 50.0, 50.0)) && near(z, -Vec3::X), "{name}: {pt:?} {z:?}");
+    }
+
+    // Translating the plate moves all chamfer-rim origins with the plate face.
+    run(&mut s, "parameters.change", json!({"name": "PX", "expression": "1030 mm"}));
+    assert!(near(place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0)), Vec3::new(1030.0, 50.0, 50.0)));
+    for name in ["ChamferCenter", "ChamferCenterZ"] {
+        let (pt, z) = origin_frame(&s, name).unwrap();
+        assert!(near(pt, Vec3::new(1030.0, 50.0, 50.0)) && near(z, -Vec3::X), "{name}: {pt:?} {z:?}");
+    }
+
+    // Countersunk hole outer rim (Ø10 countersink on Ø6 bore at z = 10 -> outer rim radius 5).
+    let mut cs = Session::default();
+    run(&mut cs, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [0, 0, 0]}));
+    run(
+        &mut cs,
+        "solid.hole",
+        json!({"position": [20, 20, 10], "diameter": 6, "depth": 10, "type": "countersink", "cs_diameter": 10, "cs_angle": "90 deg"}),
+    );
+    run(&mut cs, "joint.origin", json!({"name": "CsRim", "occurrence": 0, "circle": [25, 20, 10]}));
+    run(&mut cs, "joint.origin", json!({"name": "CsCenter", "occurrence": 0, "circle": [20, 20, 10], "z": [0, 0, 1]}));
+    for name in ["CsRim", "CsCenter"] {
+        let jo = cs.doc.assembly.origins.iter().find(|o| o.name == name).unwrap();
+        assert!(matches!(&jo.origin.snap, Snap::CircleCenter { face: Some(_), end: Some(_), .. }), "{name}: {:?}", jo.origin.snap);
+        let (pt, z) = origin_frame(&cs, name).unwrap();
+        assert!(near(pt, Vec3::new(20.0, 20.0, 10.0)) && near(z, Vec3::Z), "{name}: {pt:?} {z:?}");
+    }
+}
+
+/// Adding a chamfer to a linked plate part and running `component.update_links` keeps an
+/// existing `insert` joint on the plate's planar face (#22049).
+#[test]
+fn linked_plate_chamfer_keeps_insert_joint_on_plate_face_through_update_links() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-chamfer-link-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let plate_path = dir.join("plate.solidcraft");
+
+    let mut plate = Session::default();
+    run(&mut plate, "solid.box", json!({"length": 5, "width": 100, "height": 100, "corner": [1015, 0, 0], "body_name": "Plate"}));
+    run(&mut plate, "solid.cylinder", json!({"base": [1010, 50, 50], "axis": [1, 0, 0], "radius": 3, "height": 15, "operation": "cut"}));
+    run(&mut plate, "file.save", json!({"path": plate_path}));
+
+    let mut asm = Session::default();
+    run(&mut asm, "component.insert_design", json!({"path": plate_path, "name": "Plate"}));
+    let plate_occ = occ(&asm, "Plate");
+    run(&mut asm, "occurrence.ground", json!({"occurrence": plate_occ, "grounded": true}));
+    run(&mut asm, "component.create", json!({"name": "Washer"}));
+    run(&mut asm, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [1, 0, 0], "radius": 6, "height": 2, "body_name": "Washer"}));
+    run(&mut asm, "solid.cylinder", json!({"base": [-1, 0, 0], "axis": [1, 0, 0], "radius": 3, "height": 4, "operation": "cut"}));
+    run(&mut asm, "component.activate", json!({"component": "root"}));
+
+    let r = run(
+        &mut asm,
+        "assembly.constraint.create",
+        json!({
+            "type": "insert",
+            "name": "WasherSeat",
+            "a": {"occurrence": "Plate", "circle": [1015, 53, 50]},
+            "b": {"occurrence": "Washer", "circle": [2, 3, 0]},
+        }),
+    );
+    assert_eq!(r["errors"], json!([]), "{r}");
+    assert!(near(place(&asm, "Washer", Vec3::new(2.0, 0.0, 0.0)), Vec3::new(1015.0, 50.0, 50.0)));
+
+    run(&mut plate, "solid.chamfer", json!({"edges": [[1015, 53, 50]], "distance": 0.5, "body": "Plate"}));
+    run(&mut plate, "file.save", json!({}));
+
+    let update = run(&mut asm, "component.update_links", json!({}));
+    assert_eq!(update["updated"], json!(["Plate"]), "{update}");
+    let solved = run(&mut asm, "joint.solve", json!({}));
+    assert_eq!(solved["errors"], json!([]), "{solved}");
+    let seat = place(&asm, "Washer", Vec3::new(2.0, 0.0, 0.0));
+    assert!(near(seat, Vec3::new(1015.0, 50.0, 50.0)), "washer shifted inward after linked chamfer update: {seat:?}");
+
+    let _ = std::fs::remove_dir_all(&dir);
 }
