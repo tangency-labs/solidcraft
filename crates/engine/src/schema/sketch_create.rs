@@ -81,6 +81,15 @@ pub enum ConstructionMethod {
     Bisector,
 }
 
+/// `sketch.crosshairs`: a fixed horizontal and vertical construction line through the sketch's
+/// origin (#22234).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CrosshairsParams {
+    /// The sketch (default: the one being edited).
+    pub sketch: Option<SketchRef>,
+}
+
 /// The curves and constraints created, together with the sketch solve.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ConstructionLineResult {

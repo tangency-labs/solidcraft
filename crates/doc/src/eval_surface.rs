@@ -336,7 +336,13 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
                 f,
             )?;
-            if extent.through_all || extent.taper.is_some() || extent.from.is_some() || extent.symmetric_offset {
+            if extent.through_all
+                || extent.through_all2
+                || extent.taper.is_some()
+                || extent.to2.is_some()
+                || extent.from.is_some()
+                || extent.symmetric_offset
+            {
                 return Err(DocError::Invalid(
                     "not supported yet: a surface extrude through all, from an object, with a taper, or with symmetric offset".into(),
                 ));
@@ -351,7 +357,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 None if *to_next => sheet_to_next(doc, f, st, &ss, &chains, extent, off)?,
                 None => {
                     let d = val(vals, &extent.distance, Kind::Length)?;
-                    let (a, b) = extent_sides(vals, extent, d, extent.direction)?;
+                    let (a, b) = extent_sides(vals, extent, d, extent.direction, None)?;
                     kernel::extrude_sheet(&ss.plane, &chains, a + off, b + off)?
                 }
             };
@@ -740,7 +746,7 @@ fn sheet_to_object(
         if (end - start).abs() < 1e-9 {
             return Err(DocError::Invalid("the To object is where the surface extrude starts".into()));
         }
-        let (a, b) = extent_sides(vals, extent, end - start, crate::Direction::Positive)?;
+        let (a, b) = extent_sides(vals, extent, end - start, crate::Direction::Positive, None)?;
         return Ok(kernel::extrude_sheet(plane, chains, a + start, b + start)?);
     };
     if to_offset.abs() > 1e-9 {

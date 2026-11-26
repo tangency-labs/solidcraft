@@ -59,7 +59,9 @@ impl StraightPreview {
             }
         }
         if app.session.doc.units != "mm"
-            || ["distance2", "start_offset", "from", "to", "to_offset", "thin"].iter().any(|key| params.get(*key).is_some())
+            || ["distance2", "start_offset", "from", "to", "to_offset", "to2", "to_offset2", "through_all2", "thin"]
+                .iter()
+                .any(|key| params.get(*key).is_some())
             || params.get("through_all").and_then(Value::as_bool) == Some(true)
         {
             return None;
