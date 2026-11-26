@@ -2931,6 +2931,7 @@ mod face_snap_tests {
         let mut seen = Vec::new();
         for name in ["C", "B"] {
             let faces = h.app.session.world_state().unwrap().body(name).unwrap().body.faces(1e-3).unwrap();
+            // The second pass reads the planar face cache.
             for _ in 0..2 {
                 for f in faces.iter() {
                     let hit = Hit::Face { body: name.into(), index: f.index, point: f.centroid };
@@ -2954,6 +2955,28 @@ mod face_snap_tests {
                 }
             }
         }
+    }
+
+    /// The flat bottom of a cone revolved about the y axis is a plane made by a revolution: it is
+    /// picked for New Sketch with its normal out of the material, and nothing is meshed.
+    #[test]
+    fn hovering_a_revolved_flat_disk_for_a_sketch_plane_meshes_nothing() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points": [[0, 0], [20, 0], [0, 5]], "closed": true})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.revolve", json!({"axis": "y", "operation": "new", "body_name": "D"})).unwrap();
+        let faces = h.app.session.world_state().unwrap().body("D").unwrap().body.faces(1e-3).unwrap();
+        let disk = faces.iter().find(|f| f.plane_normal.is_some()).unwrap();
+        let normal = disk.plane_normal.unwrap();
+        assert!(normal.dot(Vec3::new(0.0, -1.0, 0.0)) > 1.0 - 1e-9, "the bottom's normal points out of the cone: {normal:?}");
+
+        h.app.start("sketch.create");
+        take_snap_work();
+        let d = h.app.dialog.as_ref().unwrap();
+        let hit = Hit::Face { body: "D".into(), index: disk.index, point: disk.centroid };
+        assert!(d.candidate_on(&h.app.session, &hit, None).is_some(), "the flat disk is picked");
+        assert_eq!(take_snap_work().0, 0, "a plane is decided by its surface: nothing is meshed");
     }
 
     #[test]
@@ -3055,10 +3078,10 @@ fn sketch_curve_edge(s: &Session, sel: &Sel) -> Option<Sel> {
 }
 
 /// The plane of planar face `face` of `body`: a point on it and its normal, out of the material.
-/// A B-rep face goes by its exact surface whatever its kind ([`Body::planar_face`]), so hovering
-/// it tessellates nothing. Only a mesh body's face is judged by the mesh ([`ModelBody::joint_faces`]).
+/// A B-rep face goes by its exact surface ([`Body::sketch_plane_of_face`]), so hovering it
+/// tessellates nothing. Only a mesh body's face is judged by the mesh ([`ModelBody::joint_faces`]).
 ///
-/// [`Body::planar_face`]: solidcraft_engine::kernel::Body::planar_face
+/// [`Body::sketch_plane_of_face`]: solidcraft_engine::kernel::Body::sketch_plane_of_face
 /// [`ModelBody::joint_faces`]: solidcraft_engine::doc::ModelBody::joint_faces
 pub fn planar_face(s: &Session, body: &str, face: usize) -> Option<(Vec3, Vec3)> {
     let st = crate::open_meshing::session_world(s);
@@ -3070,7 +3093,8 @@ pub fn planar_face(s: &Session, body: &str, face: usize) -> Option<(Vec3, Vec3)>
     if let Some(found) = known {
         return found;
     }
-    let found = st.body(body).and_then(|b| face_plane(b, face));
+    // Undecided (the kernel was stopped or re-entered): answer None without keeping it.
+    let found = st.body(body).map_or(Some(None), |b| face_plane(b, face))?;
     FACE_PLANES.with(|c| {
         let mut c = c.borrow_mut();
         if !c.0.as_ref().is_some_and(|k| std::sync::Arc::ptr_eq(k, &st)) {
@@ -3081,17 +3105,22 @@ pub fn planar_face(s: &Session, body: &str, face: usize) -> Option<(Vec3, Vec3)>
     found
 }
 
-/// [`planar_face`] of one body, without the cache.
-fn face_plane(b: &solidcraft_engine::doc::ModelBody, face: usize) -> Option<(Vec3, Vec3)> {
-    let exact = b.body.planar_face(face).map(|plane| (plane.origin, plane.normal()));
-    if exact.is_some() || !b.body.is_mesh() {
-        return exact;
+/// [`planar_face`] of one body, without the cache. The outer `None` is an undecided answer.
+fn face_plane(b: &solidcraft_engine::doc::ModelBody, face: usize) -> Option<Option<(Vec3, Vec3)>> {
+    if !b.body.is_mesh() {
+        return match b.body.sketch_plane_of_face(face) {
+            solidcraft_engine::kernel::SketchPlane::Flat(plane) => Some(Some((plane.origin, plane.normal()))),
+            solidcraft_engine::kernel::SketchPlane::NotFlat => Some(None),
+            solidcraft_engine::kernel::SketchPlane::Undecided => None,
+        };
+    }
+    if let Some(plane) = b.body.planar_face(face) {
+        return Some(Some((plane.origin, plane.normal())));
     }
     #[cfg(test)]
     SNAP_WORK.with(|w| w.set((w.get().0 + 1, w.get().1)));
-    let faces = b.joint_faces().ok()?;
-    let f = faces.iter().find(|f| f.index == face)?;
-    Some((f.centroid, f.plane_normal?))
+    let Ok(faces) = b.joint_faces() else { return Some(None) };
+    Some(faces.iter().find(|f| f.index == face).and_then(|f| Some((f.centroid, f.plane_normal?))))
 }
 
 /// The fillet or chamfer feature whose blend a body face is (a piece or copy of one too).
