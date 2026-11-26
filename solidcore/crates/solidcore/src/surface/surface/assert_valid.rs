@@ -137,8 +137,8 @@ use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::solution_array::{OperandObject, SolutionType};
 use crate::geom::tol::{
-    approx_tol3d, approx_tol_3d, are_same, are_same_to_tol, is_degenerate_curve, is_zero,
-    is_zero_to_tol, tol3d, xsect_tol_3d_from_zones, zone_tol_3d_of_curve, SmallTopoType,
+    approx_tol3d, approx_tol_3d, are_same, are_same_to_tol, coincidence_tol_3d,
+    is_degenerate_curve, is_zero, is_zero_to_tol, tol3d, zone_tol_3d_of_curve, SmallTopoType,
     ANG_TOL_DEG, ZONE_TOL_3D,
 };
 use crate::geom::vector3d::asin as sm_asin;
@@ -684,8 +684,10 @@ fn assert_test_surface6(k: &Kernel, s: &Surface) -> Result<bool> {
             continue;
         }
 
-        // Look for partial coincidence or G0 discontinuous
-        let x_tol = xsect_tol_3d_from_zones(
+        // Look for partial coincidence or G0 discontinuous (coincidence rule: larger of the two
+        // boundary zone tolerances and contact tolerance, so a valid open surface wider than the
+        // zone tolerance in `(tol, 2 * tol]` is not refused as partially coincident)
+        let x_tol = coincidence_tol_3d(
             k,
             zone_tol_3d_of_curve(k, &crv1)?,
             zone_tol_3d_of_curve(k, &crv2)?,

@@ -966,6 +966,9 @@ pub struct Stitch<'c> {
     /// Remove sliver faces smaller than tolerance first (`m_bRemoveLaminarSlivers`,
     /// default `FALSE`).
     pub remove_laminar_slivers: bool,
+    /// When true, vertex/edge matching uses `tol_3d` directly instead of widening to
+    /// `max(tol_3d, tol_a + tol_b)` (for sweeps whose walls and caps share exact curves).
+    pub(crate) strict_tolerance: bool,
     /// When `Some`, the stitch records what it closed: the entities, the gap it
     /// enclosed, and the tolerance growth its editing applied (not upstream,
     /// solidcore#2975). Nothing else changes.
@@ -1340,6 +1343,7 @@ impl<'c> Stitch<'c> {
             split_edges_with_vertices: true,
             making_manifold_solid: true,
             remove_laminar_slivers: false,
+            strict_tolerance: false,
             report_gaps: None,
             pending_covers: Vec::new(),
         }

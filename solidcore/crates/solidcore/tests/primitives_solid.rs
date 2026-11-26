@@ -244,3 +244,135 @@ fn small_boxes_at_1e4_answer_as_at_the_origin() {
         assert_eq!(far, near, "{s:e}");
     }
 }
+
+/// Linear sweeps stitch walls and caps from identical profile curves, so pass 1 stitches at
+/// `brep.tolerance()` (1e-5) rather than `2 * brep.tolerance()` (2e-5). Valid profile edges
+/// and distinct parallel segments separated by `(1e-5, 2e-5]` must neither be squeezed out
+/// (leaving an open solid) nor welded across the gap (`SmBrep::Test #2` / `SmFace::Test #33`).
+#[test]
+fn linear_sweep_preserves_edges_and_gaps_between_one_and_two_zone_tolerances() {
+    use solidcore::curve::curve::Curve;
+    use solidcore::curve::line::Line;
+    use solidcore::math::Vec3;
+    use solidcore::sweep::api_brep::create_linear_sweep;
+    use solidcore::topology::brep::p2::is_manifold_solid;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+    use solidcore::Kernel;
+
+    let poly = |pts: &[[f64; 2]]| -> Vec<Curve> {
+        pts.windows(2)
+            .map(|w| {
+                Curve::from(
+                    Line::create_line_segment(
+                        3,
+                        Vec3::new(w[0][0], w[0][1], 0.0),
+                        Vec3::new(w[1][0], w[1][1], 0.0),
+                        None,
+                    )
+                    .unwrap(),
+                )
+            })
+            .collect()
+    };
+
+    for d in [1.1e-5, 1.3169768e-5, 1.9e-5] {
+        // (1) Profile with a micro-step of width d in (1e-5, 2e-5]:
+        let step_curves = poly(&[
+            [0.0, 0.0],
+            [30.0, 0.0],
+            [30.0, 30.0],
+            [0.0, 30.0],
+            [0.0, 16.0],
+            [-d, 16.0],
+            [-d, 14.0],
+            [0.0, 14.0],
+            [0.0, 0.0],
+        ]);
+        let refs: Vec<Option<&Curve>> = step_curves.iter().map(Some).collect();
+        let mut k = Kernel::default();
+        let mut b = create_linear_sweep(&mut k, &refs, Vec3::Z, 10.0, true).unwrap();
+        let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        let lamina = b
+            .edge_list()
+            .iter()
+            .filter(|&&e| solidcore::topology::edge::is_lamina(&b, e).unwrap_or(false))
+            .count();
+        assert!(
+            is_manifold_solid(&b).unwrap(),
+            "step d={d:e}: not a closed solid (faces={}, edges={}, verts={}, lamina={}, check={:?})",
+            b.face_list().len(),
+            b.edge_list().len(),
+            b.vertex_list().len(),
+            lamina,
+            check.lines()
+        );
+        assert!(check.is_valid(), "step d={d:e}: {:?}", check.lines());
+
+        // (2) Profile with an inner notch stopping d short of the outer wall (parallel edges d apart):
+        let gap_curves = poly(&[
+            [0.0, 0.0],
+            [30.0, 0.0],
+            [30.0, 30.0],
+            [0.0, 30.0],
+            [0.0, 16.0],
+            [30.0 - d, 16.0],
+            [30.0 - d, 14.0],
+            [0.0, 14.0],
+            [0.0, 0.0],
+        ]);
+        let gap_refs: Vec<Option<&Curve>> = gap_curves.iter().map(Some).collect();
+        let mut k = Kernel::default();
+        let mut b = create_linear_sweep(&mut k, &gap_refs, Vec3::Z, 10.0, true).unwrap();
+        assert!(
+            is_manifold_solid(&b).unwrap(),
+            "gap d={d:e}: not a closed solid"
+        );
+        let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        assert!(check.is_valid(), "gap d={d:e}: {:?}", check.lines());
+
+        // (3) Standalone narrow sliver rectangle of width d in (1e-5, 2e-5]:
+        let sliver_curves = poly(&[
+            [-14.625 - d, -1.0],
+            [-14.625, -1.0],
+            [-14.625, 1.0],
+            [-14.625 - d, 1.0],
+            [-14.625 - d, -1.0],
+        ]);
+        let sliver_refs: Vec<Option<&Curve>> = sliver_curves.iter().map(Some).collect();
+        let mut k = Kernel::default();
+        k.fixes = solidcore::kernel::UpstreamFixes::all();
+        let mut b = create_linear_sweep(&mut k, &sliver_refs, Vec3::Z, 10.0, true).unwrap();
+        assert!(
+            is_manifold_solid(&b).unwrap(),
+            "sliver d={d:e}: not a closed solid"
+        );
+        let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        assert!(check.is_valid(), "sliver d={d:e}: {:?}", check.lines());
+
+        // (4) Outer rectangle with a narrow sliver inner hole of width d in (1e-5, 2e-5]:
+        let mut hole_curves = poly(&[
+            [-16.5, -47.5],
+            [16.5, -47.5],
+            [16.5, 47.5],
+            [-16.5, 47.5],
+            [-16.5, -47.5],
+        ]);
+        hole_curves.extend(poly(&[
+            [-14.625 - d, -1.0],
+            [-14.625 - d, 1.0],
+            [-14.625, 1.0],
+            [-14.625, -1.0],
+            [-14.625 - d, -1.0],
+        ]));
+        let hole_refs: Vec<Option<&Curve>> = hole_curves.iter().map(Some).collect();
+        let mut k = Kernel::default();
+        k.fixes = solidcore::kernel::UpstreamFixes::all();
+        let mut b = create_linear_sweep(&mut k, &hole_refs, Vec3::Z, 10.0, true).unwrap();
+        assert!(
+            is_manifold_solid(&b).unwrap(),
+            "sliver hole d={d:e}: not a closed solid"
+        );
+        let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        assert!(check.is_valid(), "sliver hole d={d:e}: {:?}", check.lines());
+    }
+}

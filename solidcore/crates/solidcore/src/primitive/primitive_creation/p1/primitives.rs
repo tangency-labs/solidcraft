@@ -336,15 +336,9 @@ fn stitch_faces_of(
     }
 }
 
-/// Stitches the walls of an uncapped sweep, whose lamina edges are the profile's two
-/// copies by construction, in the first pass only
-/// ([`stitch_and_orient_open`](crate::topology::brep::p5::stitch_and_orient_open)): the
-/// walls meet at the profile's shared curve ends, and the second pass would squeeze out
-/// a profile edge shorter than its tolerance, leaving the wall's loop open. Not upstream
-/// (WR-18515).
-fn stitch_open(k: &mut Kernel, b: &mut Brep) -> Result<()> {
+fn stitch_sweep(k: &mut Kernel, b: &mut Brep) -> Result<()> {
     use crate::query::brep::BrepIdentity;
-    use crate::topology::brep::p5::{stitch_and_orient_open, StitchAndOrientOptions};
+    use crate::topology::brep::p5::stitch_and_orient_exact_sweep;
     let keys = |object| {
         crate::topology::brep::p2::caller_cache_key(&crate::topology::loopuse::notify_ref, object)
     };
@@ -352,7 +346,26 @@ fn stitch_open(k: &mut Kernel, b: &mut Brep) -> Result<()> {
         keys: &keys,
         ..BrepIdentity::default()
     });
-    stitch_and_orient_open(k, b, &StitchAndOrientOptions::default(), identity)
+    stitch_and_orient_exact_sweep(k, b, identity, true)
+}
+
+/// Stitches the walls of an uncapped sweep, whose lamina edges are the profile's two
+/// copies by construction, in the first pass only
+/// ([`stitch_and_orient_exact_sweep`](crate::topology::brep::p5::stitch_and_orient_exact_sweep)):
+/// the walls meet at the profile's shared curve ends, and the second pass would squeeze out
+/// a profile edge shorter than its tolerance, leaving the wall's loop open. Not upstream
+/// (WR-18515).
+fn stitch_open(k: &mut Kernel, b: &mut Brep) -> Result<()> {
+    use crate::query::brep::BrepIdentity;
+    use crate::topology::brep::p5::stitch_and_orient_exact_sweep;
+    let keys = |object| {
+        crate::topology::brep::p2::caller_cache_key(&crate::topology::loopuse::notify_ref, object)
+    };
+    let identity = Some(BrepIdentity {
+        keys: &keys,
+        ..BrepIdentity::default()
+    });
+    stitch_and_orient_exact_sweep(k, b, identity, false)
 }
 
 /// `CreatePlanarFaceWith3DCurves`; `None` when the curves bound no face.
@@ -1567,7 +1580,11 @@ impl PrimitiveCreation {
                 } else {
                     None
                 };
-                stitch_solid(k, brep, outside)?;
+                if outside.is_some() {
+                    stitch_solid(k, brep, outside)?;
+                } else {
+                    stitch_sweep(k, brep)?;
+                }
             } else {
                 // the profile's two copies stay open: the walls are a sheet
                 stitch_open(k, brep)?;

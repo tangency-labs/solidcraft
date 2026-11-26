@@ -661,8 +661,11 @@ impl Stitch<'_> {
                         }
 
                         // split edges when vertex is within tolerance
-                        let this_tol =
-                            smos_max(tol_3d, vertex::tolerance(b, v)? + edge::tolerance(b, e)?);
+                        let this_tol = if self.strict_tolerance {
+                            tol_3d
+                        } else {
+                            smos_max(tol_3d, vertex::tolerance(b, v)? + edge::tolerance(b, e)?)
+                        };
                         let split =
                             self.edit_test_and_split_edge(k, b, e, vertex::point(b, v)?, this_tol)?;
 
@@ -791,10 +794,14 @@ impl Stitch<'_> {
                         continue;
                     };
 
-                    let test_tol = smos_max(
-                        tol_3d,
-                        vertex::tolerance(b, test_v)? + vertex::tolerance(b, v)?,
-                    );
+                    let test_tol = if self.strict_tolerance {
+                        tol_3d
+                    } else {
+                        smos_max(
+                            tol_3d,
+                            vertex::tolerance(b, test_v)? + vertex::tolerance(b, v)?,
+                        )
+                    };
 
                     // done looking when pTestV is too far along the vector
                     if tv_param - v_param > test_tol {
@@ -852,8 +859,11 @@ impl Stitch<'_> {
 
                     // skip vertices farther apart than allowed stitching tolerance +
                     // vertex tolerances
-                    let this_tol =
-                        smos_max(tol_3d, vertex::tolerance(b, v)? + vertex::tolerance(b, cv)?);
+                    let this_tol = if self.strict_tolerance {
+                        tol_3d
+                    } else {
+                        smos_max(tol_3d, vertex::tolerance(b, v)? + vertex::tolerance(b, cv)?)
+                    };
                     if choice.max_distance > this_tol {
                         if let Some(min_gap) = out.min_unstitched_vert_gap.as_mut() {
                             if dist_to_v < *min_gap {
@@ -1088,8 +1098,11 @@ impl Stitch<'_> {
                     let te_curve = curve_of(b, test_e)?;
 
                     // select new tolerance
-                    let this_tol =
-                        smos_max(tol_3d, edge::tolerance(b, test_e)? + edge::tolerance(b, e)?);
+                    let this_tol = if self.strict_tolerance {
+                        tol_3d
+                    } else {
+                        smos_max(tol_3d, edge::tolerance(b, test_e)? + edge::tolerance(b, e)?)
+                    };
 
                     let mid_pnt = e_curve.evaluate_point(k, e_ivl.evaluate(0.5))?;
 
