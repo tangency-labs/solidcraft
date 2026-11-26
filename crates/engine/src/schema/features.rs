@@ -133,6 +133,17 @@ pub struct ExtrudeParams {
     /// and `distance2` along it. A negative distance only turns its own side over.
     #[serde(default)]
     pub distance2: Option<LengthExpr>,
+    /// Two Sides: the second side runs through everything in the way instead of `distance2`.
+    #[serde(default)]
+    pub through_all2: Option<bool>,
+    /// Two Sides: the second side extrudes up to this face, vertex or point (To Object for the
+    /// second side) instead of `distance2`.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "ToPoint")]
+    pub to2: Option<ToPoint>,
+    /// How far past `to2` to go.
+    #[serde(default)]
+    pub to_offset2: Option<LengthExpr>,
     /// Start this far from the sketch plane, along its normal.
     #[serde(default)]
     pub start_offset: Option<LengthExpr>,
@@ -874,10 +885,15 @@ pub struct MirrorParams {
     /// The features to mirror, by name. Read when `bodies` lists none.
     #[serde(default)]
     pub features: Option<NameList>,
-    /// The bodies to mirror, by name as the viewport shows them: a further instance's copy goes
-    /// where that instance is.
+    /// The bodies to mirror, by name as the viewport shows them (or explicitly qualified as
+    /// `NAME (Occ:1)`): a further instance's copy goes where that instance is.
     #[serde(default)]
     pub bodies: Option<NameList>,
+    /// Optional per-body occurrence paths from the root (`[]` for a root body), one per entry in
+    /// `bodies`, matching the stored feature definition (`timeline.inspect` / `timeline.edit`).
+    /// Omit to resolve placements from `bodies` names.
+    #[serde(default)]
+    pub placements: Option<Vec<Vec<u64>>>,
     /// The plane to mirror across. The mirror follows a construction plane, and an explicit
     /// plane's origin given as length expressions.
     pub plane: PlaneParam,
@@ -1136,6 +1152,11 @@ pub struct PatternCircularParams {
     #[serde(default, deserialize_with = "reversed_flag", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub reversed: Option<bool>,
+    /// Join the bodies copied from and their copies where they touch or overlap, so a part
+    /// patterned from one piece is one body at any count; copies that touch nothing stay bodies of
+    /// their own (#21625). Default: false, every copy a body of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
@@ -1357,6 +1378,11 @@ pub struct PatternRectangularParams {
     /// As `copy_at_end1`, along the second direction.
     #[serde(default, deserialize_with = "copy_at_end2")]
     pub copy_at_end2: Option<bool>,
+    /// Join the bodies copied from and their copies where they touch or overlap, so a part
+    /// patterned from one piece is one body at any count; copies that touch nothing stay bodies of
+    /// their own (#21625). Default: false, every copy a body of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

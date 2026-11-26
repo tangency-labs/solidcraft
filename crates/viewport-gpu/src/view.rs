@@ -3025,10 +3025,14 @@ impl Batches {
             g.run(device, queue, encoder, vp, size, hidden, changed, &self.instanced, indirect, self.edges.as_mut(), hover);
             return;
         }
-        if changed && let Some(indirect) = self.indirect.as_mut() {
+        if let Some(indirect) = self.indirect.as_mut()
+            && (changed || indirect.args_missing())
+        {
             indirect.write(device, queue, &self.instanced);
         }
-        if edges_changed && let Some(edges) = self.edges.as_mut() {
+        if let Some(edges) = self.edges.as_mut()
+            && (edges_changed || edges.args_missing())
+        {
             edges.write(device, queue, &edges::Part::of_draws(&self.instanced));
         }
     }

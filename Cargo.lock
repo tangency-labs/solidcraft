@@ -6062,6 +6062,7 @@ name = "solidcore"
 version = "1.0.1"
 dependencies = [
  "serde",
+ "spade",
  "thiserror 2.0.21",
 ]
 
@@ -6346,6 +6347,7 @@ dependencies = [
  "solidcore-record",
  "solidcore-tess",
  "thiserror 2.0.21",
+ "unicode-general-category",
 ]
 
 [[package]]
@@ -6403,6 +6405,7 @@ dependencies = [
  "quick-xml",
  "rand 0.8.8",
  "rustix 1.1.6",
+ "ruzstd",
  "same-file",
  "serde",
  "serde_bytes",
@@ -6670,6 +6673,7 @@ dependencies = [
  "serde_json",
  "solidcraft-color",
  "solidcraft-icon-svg",
+ "solidcraft-panel-layout",
  "solidcraft-theme",
  "solidcraft-ui-registry",
  "solidcraft-ui-text",
