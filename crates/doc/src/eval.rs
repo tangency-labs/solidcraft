@@ -6617,10 +6617,17 @@ pub fn select_profiles(ss: &SolvedSketch, sel: &ProfileSel) -> Result<Vec<Region
         }
         ProfileSel::Points { points } => {
             let mut v = Vec::new();
+            let mut taken = std::collections::BTreeSet::new();
             for p in points {
                 // Innermost profile containing the point.
-                let found = solidcraft_sketch::profile_at_point(ps, *p).and_then(|i| ps.get(i));
-                v.push(found.ok_or_else(|| DocError::Unknown(format!("profile at {:?} in {}", [p.x, p.y], ss.name)))?.region.clone());
+                let index = solidcraft_sketch::profile_at_point(ps, *p);
+                let found = index.and_then(|i| ps.get(i));
+                let found = found.ok_or_else(|| DocError::Unknown(format!("profile at {:?} in {}", [p.x, p.y], ss.name)))?;
+                // Points a change of the regions brought into one region (the halves of a lens a
+                // line no longer cuts) take it once (#22390).
+                if index.is_some_and(|i| taken.insert(i)) {
+                    v.push(found.region.clone());
+                }
             }
             v
         }

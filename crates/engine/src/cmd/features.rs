@@ -723,7 +723,7 @@ pub(super) fn feature_sketch(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
 /// Profiles picked by index or point are stored by the curve ids of each profile's outer loop
 /// as the sketch is now solved, so they follow the geometry when parameters move it. A pick
 /// whose curves would not find that same profile again (two profiles bounded by the same
-/// curves) stays as given. Curve picks are checked: one that names no profile, or several, is
+/// curves) stays as given: by its points, or by its indices. Curve picks are checked: one that names no profile, or several, is
 /// refused now rather than failing later.
 ///
 /// `exact` keeps each index or point pick to the region it names. Otherwise a pick on a drawn
@@ -739,6 +739,7 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind, exact: bool) 
         if matches!(sel, ProfileSel::Indices { indices } if indices.is_empty()) {
             continue;
         }
+        let mut given_points = None;
         let indices = match sel {
             ProfileSel::Indices { indices } => {
                 let have = ss.profiles.len();
@@ -764,6 +765,7 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind, exact: bool) 
                 if let Some(i) = indices.iter().find(|i| !seen.insert(**i)) {
                     return Err(EngineError::Other(format!("two profile points pick the same profile ({i}) in {}", ss.name)));
                 }
+                given_points = Some(points.clone());
                 indices
             }
             ProfileSel::Curves { loops } => {
@@ -798,8 +800,16 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind, exact: bool) 
             }
             ProfileSel::All => continue,
         };
-        let picked = if exact { indices } else { drawn_profile_regions(ss, &indices) };
+        let picked = if exact { indices.clone() } else { drawn_profile_regions(ss, &indices) };
         let captured = solidcraft_doc::capture_profile_selection(ss, &picked)?;
+        // Twins (regions the curves around them can't tell apart, such as the halves of a lens a
+        // line cuts) are captured by their numbers, which name other regions or none once a
+        // parameter changes the sketch's regions. A pick by points keeps its points instead: each
+        // finds the region it lies in (#22390).
+        let captured = match (captured, given_points) {
+            (ProfileSel::Indices { .. }, Some(points)) if picked == indices => ProfileSel::Points { points },
+            (captured, _) => captured,
+        };
         *sel = match captured {
             ProfileSel::OffsetBoundaries { associations }
                 if associations.iter().any(|id| {
