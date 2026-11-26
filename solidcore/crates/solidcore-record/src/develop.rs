@@ -200,6 +200,9 @@ pub enum Relief {
     /// end, cut from `depth` inside the panel's tangent line out through its edge. None is cut
     /// in a panel that runs on less far than that.
     Slot { width: f64, depth: f64 },
+    /// The bend relief of `Slot` with a round inner end: a half round `width` across in place
+    /// of the slot's square end, reaching `depth` inside the panel's tangent line at its deepest.
+    Obround { width: f64, depth: f64 },
     /// Torn tight against a surface across the bend, as where a rip parts the panels beyond a
     /// corner: past the end both panels stop at their tangent lines, as at a notch, and the
     /// zone's end runs from its given end on the `a` panel's tangent line to its given end on
