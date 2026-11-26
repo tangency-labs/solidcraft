@@ -409,13 +409,29 @@ impl SurfaceSheet {
             }
         }
         // The panels first, along their anchors as they are; then the bends.
-        for &(j, end, _, side) in &cuts {
+        for &(j, end, u_bend, side) in &cuts {
             let (Some((a, b)), Some(Joint { b: on_f, .. })) = (side, self.sheet.joints.get(j).cloned()) else { continue };
             let Some(m) = (b - a).normalized() else { continue };
             let Some(s) = cross_lines((on_f.origin, on_f.dir), (a, m)).map(|c| (c - on_f.origin).dot(on_f.dir)) else { continue };
             let Some(region) = self.sheet.panels.get(on_f.panel).map(|x| x.region.clone()) else { continue };
+            let cant = "a flange runs into the panel beside its own, and its side can't be cut back";
             let Some((region, _)) = to_line(&region, &on_f, -1.0, end, s, m)? else {
-                return err("a flange runs into the panel beside its own, and its side can't be cut back");
+                return err(cant);
+            };
+            // Between the anchor and the panel's start the metal is the bend's. Where the side
+            // would pass the bend's square end there (a wall beside running in across the panel
+            // at an acute corner), it follows that end up to the panel's start instead: the panel
+            // left past it would lie in the bend's corner against its end.
+            let (vf, along, into) = (on_f.origin + on_f.dir * end, if end == 0.0 { on_f.dir } else { -on_f.dir }, -on_f.dir.perp());
+            let (foot, past) = (on_f.origin + on_f.dir * s, |p: Vec2| (p - vf).dot(along) < u_bend - 1e-9);
+            let region = if past(foot) || past(a) {
+                let p0 = vf + along * u_bend;
+                let Some(region) = foot_moved(&region, foot, &[p0, p0 + into * (a - vf).dot(into), a], (on_f.origin, on_f.dir), tol) else {
+                    return err(cant);
+                };
+                region
+            } else {
+                region
             };
             if let Some(x) = self.sheet.panels.get_mut(on_f.panel) {
                 x.region = region;
@@ -3630,6 +3646,32 @@ fn fill_bites(region: &Region2, at: Vec2, reach: f64) -> Region2 {
         segs.remove(i);
     }
     Region2 { outer: Loop2 { segs }, holes: region.holes.clone() }
+}
+
+/// `region` with the corner `from`, where its side leaves the anchor line `(o, d)` (a point and
+/// its direction), replaced by the points `path`, listed from the anchor's end to the side's; the
+/// two straight edges there run to the path's ends. None where `from` is no corner between two
+/// straight edges.
+fn foot_moved(region: &Region2, from: Vec2, path: &[Vec2], (o, d): (Vec2, Vec2), tol: f64) -> Option<Region2> {
+    let mut segs = region.outer.segs.clone();
+    let n = segs.len();
+    let k = (0..n).find(|k| segs.get(*k).is_some_and(|s| s.end().dist(from) <= tol))?;
+    let next = (k + 1) % n;
+    let (Seg2::Line { a: p, .. }, Seg2::Line { b: q, .. }) = (*segs.get(k)?, *segs.get(next)?) else { return None };
+    // The loop comes to the corner along the anchor, or along the side.
+    let mut chain = vec![p];
+    if (p - o).cross(d).abs() <= tol {
+        chain.extend_from_slice(path);
+    } else {
+        chain.extend(path.iter().rev());
+    }
+    chain.push(q);
+    chain.dedup_by(|x, y| x.dist(*y) <= tol);
+    let mut lines: Vec<Seg2> = chain.windows(2).map(|w| Seg2::Line { a: w[0], b: w[1] }).collect();
+    let last = lines.pop()?;
+    *segs.get_mut(next)? = last;
+    segs.splice(k..=k, lines);
+    Some(Region2 { outer: Loop2 { segs }, holes: region.holes.clone() })
 }
 
 fn cross_lines((p, u): (Vec2, Vec2), (q, w): (Vec2, Vec2)) -> Option<Vec2> {
