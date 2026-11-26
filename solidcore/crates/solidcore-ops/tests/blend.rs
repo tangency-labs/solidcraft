@@ -1933,6 +1933,65 @@ fn a_variable_round_s_net_is_certified_on_wide_pieces() {
     assert_eq!(rounds, 1);
 }
 
+/// tangency-labs/solidcraft#18324: a kernel a boolean copies for its workers shares the
+/// certificates the parent finished. The design there reads its one round again on a kernel
+/// another pool made (a copy, or the session's own), and paid the 4.5 s certificate a second
+/// time for a record an identical key already held. A kernel sharing the parent's
+/// recertify memo certifies nothing the parent certified, and builds the same body; with a
+/// memo of its own it certifies again, as before.
+#[test]
+fn a_kernel_sharing_a_recertify_memo_certifies_nothing_the_parent_did() {
+    all_fixes();
+    let b = make_box([0.0; 3], [10.0, 20.0, 30.0]).unwrap();
+    let e = edge_at(&b, [10.0, 10.0, 30.0]);
+    let start = vertex_at(&b, [10.0, 0.0, 30.0]);
+    fillet_variable(&b, e, start, 1, &[0.0, 0.0, 1.0, 1.0], &[2.0, 5.0]).unwrap();
+    let (record, _) = b.to_record().unwrap();
+    let blends = record
+        .faces
+        .iter()
+        .filter(|f| matches!(f.surface, solidcore_record::brep::Surface::Blend { .. }))
+        .count() as u64;
+    assert!(blends > 0, "the variable round kept no definition");
+    let mut parent = Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        memoize_curve_caches: true,
+        ..Kernel::default()
+    };
+    let certified = |k: &mut Kernel| {
+        let before = k.work_counters.blends_recertified();
+        let (mut made, _) = solidcore_convert::brep::to_kernel(k, &record, true).unwrap();
+        let (again, _) = solidcore_convert::brep::to_record(k, &mut made).unwrap();
+        (k.work_counters.blends_recertified() - before, again)
+    };
+    // the parent certifies every blend the record holds
+    let (first, once) = certified(&mut parent);
+    assert_eq!(first, blends, "the parent's read certifies each blend");
+    // a kernel sharing the parent's memo (a boolean's copy of it) certifies none of them
+    // again, and builds the same body
+    let mut copy = Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        memoize_curve_caches: true,
+        recertify_memo: std::sync::Arc::clone(&parent.recertify_memo),
+        ..Kernel::default()
+    };
+    let (second, twice) = certified(&mut copy);
+    assert_eq!(
+        second, 0,
+        "the copy re-certified what the parent had finished"
+    );
+    assert_eq!(once, twice, "the copy's read built a different body");
+    // a kernel with a memo of its own certifies them again, as a kernel on its own always did
+    let mut own = Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        memoize_curve_caches: true,
+        ..Kernel::default()
+    };
+    let (third, thrice) = certified(&mut own);
+    assert_eq!(third, blends, "an unrelated kernel certifies again");
+    assert_eq!(once, thrice, "an unrelated kernel built a different body");
+}
+
 /// tangency-labs/solidcraft#17640: a kernel certifies a record's procedural blend once. Every
 /// boolean in an application gives back a record that the next operation reads again, and each
 /// read gave every blend its definition back and certified its net again (6 s a boolean on a
@@ -2218,6 +2277,70 @@ fn a_variable_round_with_a_corner_in_its_law_is_its_balls_union() {
         let want: Vec<Option<usize>> = (0..radii.len() - 1).map(Some).collect();
         assert_eq!(pieces, want, "{radii:?} from {from:?}");
         assert_eq!(zones, dips, "{radii:?} from {from:?}");
+    }
+}
+
+/// A law with a corner rounds the edges of a slot and a step as it rounds a block's outside
+/// edge (#21179): the trace lands on the law's corner, and takes the through point there
+/// whatever its tangent's sign, which is the surfaces' and not the trace's. Each round adds
+/// or removes its balls' union along the edge, the faces square to it going on past its ends
+/// (the volumes the kernel's `wr685_law_corners` checks against the union's integral), and is
+/// a valid body: a peak, a dip, and a corner off the middle.
+#[test]
+fn a_variable_round_with_a_corner_in_its_law_rounds_a_slots_and_a_steps_edge() {
+    use solidcore_ops::{boolean::boolean, BooleanOp};
+    all_fixes();
+    let cut = |origin, size| {
+        let block = make_box([-30.0, -9.5, 0.0], [30.0, 19.0, 30.0]).unwrap();
+        let tool = make_box(origin, size).unwrap();
+        boolean(block, tool, BooleanOp::Subtract).unwrap().unwrap()
+    };
+    let slot = cut([-5.0, -10.0, 12.0], [12.0, 20.0, 6.0]);
+    let step = cut([-5.0, -10.0, 20.0], [12.0, 20.0, 20.0]);
+    // the law's corner and its radii
+    let laws = [
+        (0.5, [1.0, 2.0, 1.0]),
+        (0.5, [1.0, 0.5, 1.0]),
+        (0.3, [1.0, 2.0, 1.0]),
+    ];
+    // the body, a point of the edge, its start, and what each law's round adds
+    let (l6, l19, l10) = (
+        [2.900200, 0.744330, 2.883669],
+        [9.479435, 2.376334, 9.472978],
+        [4.942629, 1.247737, 4.931130],
+    );
+    let edges = [
+        (
+            &slot,
+            [-5.0, -9.5, 15.0],
+            [-5.0, -9.5, 12.0],
+            l6.map(|v| -v),
+        ),
+        (&slot, [-5.0, 0.0, 12.0], [-5.0, -9.5, 12.0], l19),
+        (&step, [-5.0, 0.0, 20.0], [-5.0, -9.5, 20.0], l19),
+        (
+            &step,
+            [-5.0, -9.5, 25.0],
+            [-5.0, -9.5, 20.0],
+            l10.map(|v| -v),
+        ),
+    ];
+    for (body, at, start, added) in edges {
+        for ((corner, radii), want) in laws.into_iter().zip(added) {
+            let b = body.copy().unwrap();
+            let before = volume(&b);
+            let knots = [0.0, 0.0, corner, 1.0, 1.0];
+            fillet_variable_from(&b, edge_at(&b, at), start, 1, &knots, &radii).unwrap();
+            let got = volume(&b) - before;
+            assert!(
+                (got - want).abs() <= 1e-4 * want.abs(),
+                "{at:?} {radii:?} at {corner}: {got}, want {want}"
+            );
+            assert!(
+                b.check(CheckLevel::All).unwrap().is_valid(),
+                "{at:?} {radii:?} at {corner}"
+            );
+        }
     }
 }
 
