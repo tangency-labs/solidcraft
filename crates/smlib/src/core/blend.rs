@@ -222,7 +222,8 @@ fn failed(call: &'static str, body: &Body, e: Error) -> Error {
 
 /// A refusal of a solidcore-ops blend as SolidCraft's error: the refusals SolidCraft words itself
 /// by their fields as they are (a blend too large with the largest size that builds, a setback
-/// too short, a swept turn not built, a corner no blend handles), the kernel's statuses as the
+/// too short, a swept turn not built, a corner no blend handles, what the kernel cannot build
+/// yet with its reason as [`Error::Unported`]), the kernel's statuses as the
 /// status, the blend refusals and failures ops types carried as they are ([`Error::Refused`]),
 /// and every other error as any solidcore-ops call's ([`super::call::error`]).
 pub(super) fn refused(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) -> Error {
@@ -239,7 +240,9 @@ pub(super) fn refused(call: &'static str, e: solidcore_ops::Error, detail: Optio
         Ops::TurnRefused { room, why, at } => Error::TurnRefused { room, why, at },
         Ops::NoEffect => Error::NoEffect,
         Ops::Unsupported(why) if why == MIXED_CORNER_RAILS_CROSS => Error::Unported(MIXED_CORNER_UNSUPPORTED),
-        Ops::Unsupported(_) | Ops::Unported(_) => Error::Unsupported,
+        // what the kernel cannot build yet, in its own words
+        Ops::Unsupported(why) => Error::Unported(why),
+        Ops::Unported(_) => Error::Unsupported,
         e @ (Ops::BlendFailed { .. }
         | Ops::BlendNotCertified { .. }
         | Ops::EdgeNotBlendable { .. }
