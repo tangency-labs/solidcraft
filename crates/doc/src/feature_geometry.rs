@@ -15,9 +15,9 @@ pub fn restored_thread_pick(saved: Vec3, resolved: Vec3) -> Vec3 {
     let saved_coords = [saved.x, saved.y, saved.z];
     let resolved_coords = [resolved.x, resolved.y, resolved.z];
     let (Ok(change), Ok(saved_scale), Ok(resolved_scale)) = (
-        solidcraft_kernel::services::point_distance(saved_coords, resolved_coords),
-        solidcraft_kernel::services::point_distance(saved_coords, [0.0; 3]),
-        solidcraft_kernel::services::point_distance(resolved_coords, [0.0; 3]),
+        solidcraft_kernel::points::point_distance(saved_coords, resolved_coords),
+        solidcraft_kernel::points::point_distance(saved_coords, [0.0; 3]),
+        solidcraft_kernel::points::point_distance(resolved_coords, [0.0; 3]),
     ) else {
         return resolved;
     };
