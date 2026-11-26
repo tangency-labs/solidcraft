@@ -59,6 +59,9 @@ pub struct Place {
     /// The dots per inch an SVG's pixels are read at; 96 is CSS's, and what the command does
     /// without one. Not used for a DXF (#20240).
     pub dpi: f64,
+    /// The resolution `natural` and `middle` were read at; it trails `dpi` while the file is
+    /// being measured again.
+    pub measured_dpi: f64,
     /// How far, in mm, a removed edge may lie from the outline kept: lines that meet end to end
     /// are followed with fewer edges (see `sketch.insert_svg`'s `simplify`). 0 keeps every edge as
     /// drawn. A drawing with more edges than the largest sketch takes starts at a small distance
@@ -172,6 +175,7 @@ fn open_with_bounds(app: &mut SolveApp, command: &str, path: String, bounds: Opt
         angle: 0.0,
         natural,
         dpi: DEFAULT_DPI,
+        measured_dpi: DEFAULT_DPI,
         simplify,
         middle,
         align: Align::Middle,
@@ -194,14 +198,54 @@ fn measured(bounds: Option<&Value>) -> (Option<(f64, f64)>, Option<(f64, f64)>, 
     (natural, middle, edges)
 }
 
-/// `sketch.drawing_bounds` for an SVG read at `dpi`, on the window's thread: asked again when the
-/// Resolution row changes.
-fn bounds_at(app: &mut SolveApp, path: &str, dpi: f64) -> Option<Value> {
-    let mut params = json!({"path": path, "format": "svg"});
-    if dpi != DEFAULT_DPI {
-        params["dpi"] = json!(dpi);
+/// The file being measured again beside the window, for a new Resolution.
+pub struct Remeasure {
+    path: String,
+    dpi: f64,
+    done: Receiver<Result<Value, String>>,
+}
+
+/// Keeps `natural` and `middle` at the Resolution row's value: the file is measured on a worker
+/// thread, one read at a time, so dragging the value reads only the latest one once the read under
+/// way is done. An answer for another file or resolution is dropped. With no thread to read on
+/// (the browser), the file is read here.
+fn remeasure(app: &mut SolveApp, p: &mut Place) {
+    if let Some(job) = app.insert_remeasure.take() {
+        let answer = match job.done.try_recv() {
+            Err(TryRecvError::Empty) => {
+                app.insert_remeasure = Some(job);
+                return;
+            }
+            answer => answer.ok().and_then(Result::ok),
+        };
+        if job.path == p.path && job.dpi == p.dpi {
+            take_measure(p, job.dpi, answer.as_ref());
+        }
     }
-    app.session.execute("sketch.drawing_bounds", &params).ok()
+    if p.dpi == p.measured_dpi || !(1.0..=10000.0).contains(&p.dpi) {
+        return;
+    }
+    let given = json!({"path": p.path, "format": "svg", "dpi": p.dpi});
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut copy = app.session.scratch();
+        let asked = given.clone();
+        let (tx, done) = std::sync::mpsc::channel();
+        let worker = std::thread::Builder::new().name("drawing bounds".into()).spawn(move || {
+            let _ = tx.send(copy.execute("sketch.drawing_bounds", &asked).map_err(|e| e.to_string()));
+        });
+        if worker.is_ok() {
+            app.insert_remeasure = Some(Remeasure { path: p.path.clone(), dpi: p.dpi, done });
+            return;
+        }
+    }
+    let answer = app.session.execute("sketch.drawing_bounds", &given).ok();
+    take_measure(p, p.dpi, answer.as_ref());
+}
+
+fn take_measure(p: &mut Place, dpi: f64, bounds: Option<&Value>) {
+    (p.natural, p.middle, _) = measured(bounds);
+    p.measured_dpi = dpi;
 }
 
 /// A starting Simplify distance (mm) for a drawing with `edges` entities: none while the largest
@@ -251,15 +295,20 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, p: &mut Place) {
         form_row(ui, solidcraft_ui_text::tr("ui.insert_drawing.resolution"), |ui| {
             let r = crate::ui_kit::number_field(ui, &mut p.dpi, 1.0..=10000.0, 1.0, " dpi");
             crate::scenario::publish_handle("dialog:insert:dpi", r.rect.center());
-            if r.changed() && p.dpi.is_finite() && p.dpi >= 1.0 {
-                (p.natural, p.middle, _) = measured(bounds_at(app, &p.path, p.dpi).as_ref());
-            }
         });
+        remeasure(app, p);
+        if app.insert_remeasure.is_some() {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+        }
     }
     // The size in millimetres follows the scale and the other way round; the aspect is kept.
     if let Some((nw, nh)) = p.natural {
         for (label, natural, handle) in [("Width", nw, "dialog:insert:width"), ("Height", nh, "dialog:insert:height")] {
             form_row(ui, label, |ui| {
+                // The size shown is for the old resolution until the file has been measured.
+                if p.dpi != p.measured_dpi {
+                    ui.disable();
+                }
                 let mut mm = natural * p.scale;
                 let r = crate::ui_kit::number_field(ui, &mut mm, 0.001..=natural * MAX_SCALE, 0.5, " mm");
                 if r.changed() && mm.is_finite() && mm > 0.0 {
@@ -481,6 +530,7 @@ mod tests {
             middle: Some((10.0, 5.0)),
             align: Align::Middle,
             dpi: DEFAULT_DPI,
+            measured_dpi: DEFAULT_DPI,
             simplify: 0.0,
         };
         let mut p = p;
@@ -523,6 +573,7 @@ mod tests {
             middle: None,
             align: Align::Middle,
             dpi: DEFAULT_DPI,
+            measured_dpi: DEFAULT_DPI,
             simplify: 0.0,
         };
         let q = placed(solidcore_record::Vec2::new(10.0, 5.0), &p);
@@ -741,6 +792,7 @@ mod tests {
             angle: 0.0,
             natural: None,
             dpi: DEFAULT_DPI,
+            measured_dpi: DEFAULT_DPI,
             simplify: 0.0,
             middle: None,
             align: Align::Middle,
@@ -757,6 +809,32 @@ mod tests {
         open(&mut h.app, "sketch.insert_dxf", svg_file("dpi.dxf"));
         h.frames(2);
         assert!(handle_at("dialog:insert:dpi").is_none(), "no resolution for a DXF");
+    }
+
+    /// A new Resolution measures the file again, beside the window.
+    #[test]
+    fn a_new_resolution_measures_the_file_again() {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        let px = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 144 72"><rect width="144" height="72"/></svg>"#;
+        open(&mut h.app, "sketch.insert_svg", svg_text_file("pixels.svg", px));
+        let place = |h: &mut Harness| match h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            Some(Kind::InsertDrawing(p)) => p.clone(),
+            other => panic!("{other:?}"),
+        };
+        if let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            p.dpi = 72.0;
+        }
+        let started = std::time::Instant::now();
+        while place(&mut h).measured_dpi != 72.0 {
+            assert!(started.elapsed().as_secs() < 30, "the file was never measured again");
+            h.frames(1);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let (w, height) = place(&mut h).natural.expect("a size");
+        assert!((w - 50.8).abs() < 1e-6 && (height - 25.4).abs() < 1e-6, "{w} x {height}");
+        assert!(h.app.insert_remeasure.is_none());
     }
 
     /// Cancel adds nothing; a bad scale is refused.
@@ -776,6 +854,7 @@ mod tests {
             angle: 0.0,
             natural: None,
             dpi: DEFAULT_DPI,
+            measured_dpi: DEFAULT_DPI,
             middle: None,
             align: Align::Middle,
             simplify: 0.0,

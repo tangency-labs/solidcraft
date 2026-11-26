@@ -56,7 +56,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo().read_only()
         .contract(&DRAWING_BOUNDS_CONTRACT)
         .output(output_schema_for::<DrawingBoundsResult>)
-        .params("path | text: SVG or DXF (by `format`: \"svg\" | \"dxf\", default by the file name, else SVG); returns min, max, width and height of the drawn geometry in the file's own size, how many drawn elements it has (`edges`, about what the insert adds curves for), and for an SVG with a viewBox (or width and height) its sheet: {min, max, width, height}"),
+        .params("path | text: SVG or DXF (by `format`: \"svg\" | \"dxf\", default by the file name, else SVG); dpi?: SVG only, the dots per inch its pixels are read at, 1 to 10000 (default 96); returns min, max, width and height of the drawn geometry in the file's own size, how many drawn elements it has (`edges`, about what the insert adds curves for), and for an SVG with a viewBox (or width and height) its sheet: {min, max, width, height}"),
     CommandSpec::new("sketch.export_dxf", "Save As DXF", crate::checked!("sketch.export_dxf", export_dxf))
         .icon("sketch_dxf")
         .noundo()
@@ -327,7 +327,8 @@ fn drawing_bounds(_s: &mut Session, p: &Value) -> Result<Value> {
     };
     let (geom, bounds, text, _) = read_drawing(p, cmd, svg)?;
     // Only an SVG names a sheet, and only when it says how big its sheet is.
-    let sheet = svg.then(|| solidcraft_io::svg_sheet(&text)).flatten().map(drawing_box);
+    let dpi = dpi_of(p, cmd, svg)?;
+    let sheet = svg.then(|| solidcraft_io::svg_sheet_at(&text, dpi)).flatten().map(drawing_box);
     reply(cmd, DrawingBoundsResult { drawing: drawing_box(bounds), sheet, edges: geom.len(), param_warnings: Vec::new() })
 }
 
@@ -1585,6 +1586,10 @@ EOF
         near(size(px, json!({"dpi": 72, "width": 10})), (10.0, 5.0));
         // The sheet is read at the same dpi.
         near(size(px, json!({"dpi": 72, "size_from": "viewbox"})), (25.4, 12.7));
+        // Measuring takes the same `dpi`, for the drawing and for its sheet.
+        let b = Session::default().execute("sketch.drawing_bounds", &json!({"text": px, "dpi": 72})).unwrap();
+        near((b["width"].as_f64().unwrap(), b["height"].as_f64().unwrap()), (25.4, 12.7));
+        near((b["sheet"]["width"].as_f64().unwrap(), b["sheet"]["height"].as_f64().unwrap()), (50.8, 25.4));
         // A file with its own size in millimetres is not a matter of pixels.
         let mm =
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm" viewBox="0 0 200 100"><rect width="200" height="100"/></svg>"#;

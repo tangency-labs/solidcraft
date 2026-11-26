@@ -821,6 +821,10 @@ pub struct DrawingBoundsParams {
     #[serde(default, deserialize_with = "drawing_format", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "drawing_format_schema")]
     pub format: Option<String>,
+    /// The dots per inch an SVG's pixels are read at, 1 to 10000, as `sketch.insert_svg`'s
+    /// `dpi`. Default: 96. For SVG drawings; a DXF has no pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dpi: Option<f64>,
 }
 
 /// The `anyOf` saying a drawing must come from `text` or from a `path` the handler reads.
@@ -829,7 +833,7 @@ fn source_any_of() -> Value {
     serde_json::json!([{"required": ["text"]}, {"required": ["path"], "properties": {"path": read_path}}])
 }
 
-/// `sketch.drawing_bounds` reads no key but these three, so only the source rule applies.
+/// `sketch.drawing_bounds` has no rule across its keys but the source one.
 fn bounds_source_required(schema: &mut Schema) {
     schema.insert("anyOf".into(), source_any_of());
 }
