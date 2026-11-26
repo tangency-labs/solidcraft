@@ -7202,13 +7202,8 @@ fn join_pattern_copies(st: &mut ModelState, f: &Feature, features: &[FeatureId],
         return Ok(());
     }
     let Some(kept) = st.bodies.get(*first).cloned() else { return Ok(()) };
-    let mut joined = kept.traced();
-    for i in rest {
-        let Some(b) = st.bodies.get(*i) else { continue };
-        let body = crate::flush_join::join_bodies(&joined.body, &b.body, "the pattern's join produced nothing")
-            .map_err(|e| DocError::Invalid(format!("joining the pattern's copies: {e}")))?;
-        joined = Traced::step(body, &[&joined, &b.traced()]);
-    }
+    let others: Vec<Traced> = rest.iter().filter_map(|i| st.bodies.get(*i).map(ModelBody::traced)).collect();
+    let joined = join_union_batch(&kept.traced(), &others, true).map_err(|e| DocError::Invalid(format!("joining the pattern's copies: {e}")))?;
     let pieces = joined.body.lumps()?;
     let lineages = crate::lineage::Lineage::lumps(&joined.body, joined.lineage.as_ref(), &pieces);
     // The joined bodies go; the first piece takes the first one's place and name.
@@ -8109,9 +8104,6 @@ fn apply_traced_with(
         Operation::Cut | Operation::Intersect => {
             let bop = if op == Operation::Cut { BoolOp::Cut } else { BoolOp::Intersect };
             let tools = if op == Operation::Cut { clear_tools_as_one(tools)? } else { tools };
-            // Each target's pieces before the cut: a body joined from separate pieces stays one.
-            let affected: std::collections::BTreeMap<String, usize> =
-                target_idx.iter().filter_map(|i| state.bodies.get(*i)).map(|b| (b.name.clone(), b.body.lumps().map_or(1, |l| l.len()))).collect();
             let mut remove = Vec::new();
             // A cut hands a body its tools cannot reach back as it was, but only after a whole
             // boolean: in a design of many bodies that was most of a hole's time (#10225). A body
@@ -8124,6 +8116,7 @@ fn apply_traced_with(
             // box of the body's vertices, which lies inside its exact box.
             let reach: Option<Vec<Option<solidcraft_geom::Aabb3>>> =
                 (op == Operation::Cut && !tools.iter().any(|t| t.body.is_mesh())).then(|| tools.iter().map(|t| more::exact_box(&t.body)).collect());
+            let mut jobs: Vec<(usize, Option<Mat>)> = Vec::new();
             for &ti in &target_idx {
                 let Some(target) = state.bodies.get(ti) else { continue };
                 // The tools meet the target where it is shown: in its frame (#3383).
@@ -8140,22 +8133,28 @@ fn apply_traced_with(
                 {
                     continue;
                 }
-                #[cfg(test)]
-                cost_tests::count(|c| c.cut += 1);
+                jobs.push((ti, into));
+            }
+            enum CutOutcome {
+                Replace(Box<Traced>),
+                Remove,
+            }
+            let run_one = |&(ti, into): &(usize, Option<Mat>)| -> Result<CutOutcome> {
+                let Some(target) = state.bodies.get(ti) else { return Err(DocError::Invalid("body".into())) };
                 let placed;
-                let tools: &[Traced] = match into {
+                let local_tools: &[Traced] = match into {
                     Some(into) => {
                         placed = tools.iter().map(|t| tool_in(t, Some(into))).collect::<Result<Vec<_>>>()?;
                         &placed
                     }
                     None => &tools,
                 };
-                let acc = target.cut(tools, bop)?;
+                let acc = target.cut(local_tools, bop)?;
                 if op == Operation::Intersect && acc.as_ref().is_none_or(|b| b.body.face_count() == 0) {
                     // A tool that meets the body yet leaves nothing is a failed boolean, not an empty result.
                     let mut met = false;
                     if !named && !target.body.is_mesh() {
-                        for t in tools {
+                        for t in local_tools {
                             if target.body.meets(&t.body)? {
                                 met = true;
                                 break;
@@ -8165,17 +8164,37 @@ fn apply_traced_with(
                     if named || met {
                         return Err(empty_intersection(&[target.name.as_str()]));
                     }
-                    remove.push(ti);
-                    continue;
+                    return Ok(CutOutcome::Remove);
                 }
                 match acc {
-                    Some(b) => {
+                    Some(b) => Ok(CutOutcome::Replace(Box::new(b))),
+                    None if op == Operation::Cut && !more::tools_may_cover(&target.body, local_tools) => Err(more::failed_cut(&target.name)),
+                    None => Ok(CutOutcome::Remove),
+                }
+            };
+            let outcomes: Vec<Result<CutOutcome>> = if jobs.len() > 1 {
+                kernel::map_on_threads(&jobs, 16, run_one)
+                    .into_iter()
+                    .map(|r| r.unwrap_or_else(|| Err(DocError::Invalid("cut worker failed".into()))))
+                    .collect()
+            } else {
+                jobs.iter().map(run_one).collect()
+            };
+            // Each cut target's piece count before the cut: a body joined from separate pieces
+            // stays one, and untouched targets never extract lumps.
+            let mut affected: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+            for ((ti, _), outcome) in jobs.into_iter().zip(outcomes) {
+                #[cfg(test)]
+                cost_tests::count(|c| c.cut += 1);
+                match outcome? {
+                    CutOutcome::Replace(b) => {
                         if let Some(mb) = state.bodies.get_mut(ti) {
-                            *mb = mb.remade(b);
+                            let had = if mb.body.is_mesh() { 1 } else { mb.body.record().material_regions().len().max(1) };
+                            affected.insert(mb.name.clone(), had);
+                            *mb = mb.remade(*b);
                         }
                     }
-                    None if op == Operation::Cut && !more::tools_may_cover(&target.body, tools) => return Err(more::failed_cut(&target.name)),
-                    None => remove.push(ti),
+                    CutOutcome::Remove => remove.push(ti),
                 }
             }
             if op == Operation::Intersect && target_idx.iter().all(|i| remove.contains(i)) {
@@ -8212,6 +8231,11 @@ fn apply_traced_with(
                     split.push(mb);
                     continue;
                 };
+                let region_count = if mb.body.is_mesh() { 1 } else { mb.body.record().material_regions().len().max(1) };
+                if region_count <= had {
+                    split.push(mb);
+                    continue;
+                }
                 let pieces = mb.body.lumps().unwrap_or_else(|_| vec![mb.body.clone()]);
                 if pieces.len() <= had {
                     split.push(mb);
@@ -8340,6 +8364,7 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
     }
     let mut joined = Vec::new();
     let mut pending: Vec<PendingJoin> = Vec::new();
+    let mut target_boxes: std::collections::HashMap<String, Option<solidcraft_geom::Aabb3>> = std::collections::HashMap::new();
     let mut rest = tools.into_iter();
     while let Some(tool) = rest.next() {
         // Once bridging merges all remaining targets into one, the rest need no contact tests
@@ -8375,10 +8400,33 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
             if mb.body.is_mesh() || (!met.is_empty() && sheet) {
                 continue;
             }
-            #[cfg(test)]
-            cost_tests::count(|c| c.contact_tests += 1);
             // Each body is met where it is shown: the tool goes into its frame (#3383).
-            let mut hit = mb.body.meets(&tool_in(&tool, tool_frame(name))?.body)?;
+            let placed_storage;
+            let (placed_body, placed_box) = match tool_frame(name) {
+                Some(m) => {
+                    placed_storage = tool_in(&tool, Some(m))?;
+                    (&placed_storage.body, join_tool_bounds(&placed_storage.body))
+                }
+                None => (&tool.body, *tool_box.get_or_insert_with(|| join_tool_bounds(&tool.body))),
+            };
+            // Distant targets whose inflated exact boxes cannot reach the tool never pay for
+            // `Body::meets`'s fine (`1e-4` chord) contact tessellation.
+            let mb_box = *target_boxes.entry(name.clone()).or_insert_with(|| join_tool_bounds(&mb.body));
+            let apart = match (placed_box, mb_box) {
+                (Some(tb), Some(bb)) => {
+                    let reach = mb.body.size().max(placed_body.size());
+                    let margin = (reach * 1e-3).max(1e-4) + 2.0 * (mb.body.record().tolerance + placed_body.record().tolerance);
+                    margin.is_finite() && !tb.inflated(margin).meets(&bb)
+                }
+                _ => false,
+            };
+            let mut hit = if apart {
+                false
+            } else {
+                #[cfg(test)]
+                cost_tests::count(|c| c.contact_tests += 1);
+                mb.body.meets(placed_body)?
+            };
             if !hit && let Some(batch) = pending.iter().find(|p| p.keep == *name) {
                 hit = tool_meets_pending(mb.body.size(), &tool, &mut tool_box, batch)?;
             }
@@ -8435,6 +8483,10 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
         let absorbed: std::collections::BTreeSet<String> = met.into_iter().skip(1).collect();
         if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == keep) {
             *mb = mb.remade(acc);
+        }
+        target_boxes.remove(&keep);
+        for name in &absorbed {
+            target_boxes.remove(name);
         }
         state.bodies.retain(|b| !absorbed.contains(&b.name));
         for t in state.threads.iter_mut().filter(|t| absorbed.contains(&t.body)) {
@@ -8993,8 +9045,8 @@ pub fn edge_names_for(st: &ModelState, body: &Option<crate::BodyName>, pts: &[Ve
         let at: Vec<Vec3> = idx.iter().filter_map(|i| pts.get(*i).copied()).collect();
         let names = match kernel::blend_edges(&b.body, &at) {
             Ok(edges) => {
-                let all = crate::naming::edge_names(b);
-                edges.iter().map(|e| all.get(*e).cloned().unwrap_or_default()).collect()
+                let all = crate::naming::edge_name_index(b);
+                edges.iter().map(|e| all.names.get(*e).cloned().unwrap_or_default()).collect()
             }
             Err(_) => crate::naming::edge_names_at(b, &at),
         };
@@ -12944,15 +12996,28 @@ fn mirror_matrix(pl: &Plane) -> Mat {
 /// of nested ones; perforated plates and perfboard grids need a few thousand (#3042).
 const MAX_INSTANCES: usize = 10_000;
 
-/// The copies of body `n` (source `s` of `count`) a body pattern makes, one per matrix of
-/// `mats` past the first. Picked where a placement (`path`) shows it, the body is copied where
-/// that placement shows it, and its copies go into the component that placement shows, as a
-/// mirror's do. A body of another component, picked by its own name, is copied as the pattern
-/// moves it in the world and kept beside its source, in its component (#4763).
-#[allow(clippy::too_many_arguments)]
-fn pattern_body(doc: &Document, f: &Feature, st: &mut ModelState, mats: &[Mat], count: usize, s: usize, n: &str, path: Option<&[u64]>) -> Result<()> {
+/// Prepared source body and per-instance transforms for one source body of a body pattern.
+struct PreparedPatternBody {
+    mb: ModelBody,
+    component: Option<u64>,
+    locals: Vec<Mat>,
+}
+
+/// Prepare the copies of body `n` a body pattern makes, one per matrix of `mats`. Picked where
+/// a placement (`path`) shows it, the body is copied where that placement shows it, and its
+/// copies go into the component that placement shows, as a mirror's do. A body of another
+/// component, picked by its own name, is copied as the pattern moves it in the world and kept
+/// beside its source, in its component (#4763).
+fn prepare_pattern_body(
+    doc: &Document,
+    f: &Feature,
+    st: &ModelState,
+    here: &Mat,
+    mats: &[Mat],
+    n: &str,
+    path: Option<&[u64]>,
+) -> Result<PreparedPatternBody> {
     let mb = st.body(n).cloned().ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
-    let here = doc.component_transform(f.component);
     let singular = || DocError::Invalid(format!("the component holding `{n}` has a singular placement"));
     // How a pattern matrix (in this feature's component) moves the body's own geometry, and
     // the component its copies go into when it is not this feature's.
@@ -12964,39 +13029,125 @@ fn pattern_body(doc: &Document, f: &Feature, st: &mut ModelState, mats: &[Mat], 
         None if mb.component != f.component => {
             let frame = doc.component_transform(mb.component);
             let inverse = |m: &Mat| crate::mat_inverse(m).ok_or_else(singular);
-            (Some(mb.component), Some((crate::mat_mul(&inverse(&frame)?, &here), crate::mat_mul(&inverse(&here)?, &frame))))
+            (Some(mb.component), Some((crate::mat_mul(&inverse(&frame)?, here), crate::mat_mul(&inverse(here)?, &frame))))
         }
         None => (None, None),
+    };
+    let locals = mats
+        .iter()
+        .map(|m| match &frames {
+            Some((into, from)) => crate::mat_mul(into, &crate::mat_mul(m, from)),
+            None => *m,
+        })
+        .collect();
+    Ok(PreparedPatternBody { mb, component, locals })
+}
+
+/// Copy all `bodies` across every transform in `mats`, running independent `transform_matrix`
+/// calls in parallel while committing copies, names and skipped-body notes in exact source and
+/// instance order.
+#[allow(clippy::too_many_arguments)]
+fn pattern_bodies(
+    doc: &Document,
+    f: &Feature,
+    st: &mut ModelState,
+    mats: &[Mat],
+    bodies: &[crate::BodyName],
+    placements: &[Vec<u64>],
+    warning: &mut Option<String>,
+) -> Result<()> {
+    let here = doc.component_transform(f.component);
+    let prepared: Vec<Result<PreparedPatternBody>> =
+        bodies.iter().enumerate().map(|(s, n)| prepare_pattern_body(doc, f, st, &here, mats, n, placements.get(s).map(Vec::as_slice))).collect();
+    let mut jobs: Vec<(usize, usize)> = Vec::new();
+    for (s, entry) in prepared.iter().enumerate() {
+        if let Ok(p) = entry {
+            for k in 0..p.locals.len() {
+                jobs.push((s, k));
+            }
+        }
+    }
+    let run_one = |&(s, k): &(usize, usize)| -> Result<Body> {
+        let Some(Ok(p)) = prepared.get(s) else { return Err(DocError::Invalid("pattern body".into())) };
+        let Some(&local) = p.locals.get(k) else { return Err(DocError::Invalid("pattern transform".into())) };
+        Ok(kernel::transform_matrix(&p.mb.body, local)?)
+    };
+    let mut transformed = if jobs.len() > 1 {
+        kernel::map_on_threads(&jobs, 16, run_one)
+            .into_iter()
+            .map(|r| r.unwrap_or_else(|| Err(DocError::Invalid("pattern copy worker failed".into()))))
+            .collect::<Vec<_>>()
+            .into_iter()
+    } else {
+        jobs.iter().map(run_one).collect::<Vec<_>>().into_iter()
     };
     // Named against an index of the names in use: searching every body for every name tried
     // took time cubic in the copies.
     let mut names = BodyNames::new(st);
-    let mut made = Vec::with_capacity(mats.len());
-    for (k, m) in mats.iter().enumerate() {
-        let local = match &frames {
-            Some((into, from)) => crate::mat_mul(into, &crate::mat_mul(m, from)),
-            None => *m,
+    let count = bodies.len();
+    let mut skipped = Vec::new();
+    let mut left_out = Vec::new();
+    let mut first_error = None;
+    for (s, (n, entry)) in bodies.iter().zip(prepared).enumerate() {
+        let p = match entry {
+            Ok(p) => p,
+            Err(e) => {
+                skipped.push(n.to_string());
+                left_out.push(s);
+                first_error.get_or_insert(e);
+                continue;
+            }
         };
-        let copy = moved_copy(&mb, kernel::transform_matrix(&mb.body, local)?, k + 1);
-        let slot = pattern_name_slot(f.body_names.len(), count, mats.len(), s, k, f.pattern_names_in_order);
-        let name = pattern_copy_name(&mut names, f, slot, &mb.name);
-        made.push((name, copy, local));
-    }
-    // Only once every copy of this body is made: a body that fails leaves none behind.
-    for (name, copy, local) in made {
-        copy_sheet(st, &mb.name, &name, &local);
-        let mut body = ModelBody::traced_new(name, copy, f.id);
-        // A copy is its source moved: it is drawn from the source's triangles and display plans,
-        // moved, rather than meshed and planned again for every copy.
-        body.mesh_placement = placed_mesh::PlacedMesh::new(&mb, &local).map(Arc::new);
-        if let Some(c) = component.filter(|c| *c != f.component) {
-            // Kept in that component as a moved body is (and through later features).
-            body.component = c;
-            body.transferred = true;
+        let mut copies: Vec<(Body, Mat)> = Vec::with_capacity(p.locals.len());
+        let mut body_err: Option<DocError> = None;
+        for local in p.locals {
+            let res = transformed.next().unwrap_or_else(|| Err(DocError::Invalid("missing pattern copy".into())));
+            match res {
+                Ok(body) if body_err.is_none() => copies.push((body, local)),
+                Ok(_) => {}
+                Err(e) => {
+                    body_err.get_or_insert(e);
+                }
+            }
         }
-        st.bodies.push(body);
+        if let Some(e) = body_err {
+            // Only once every copy of this body is made: a body that fails leaves none behind.
+            skipped.push(n.to_string());
+            left_out.push(s);
+            first_error.get_or_insert(e);
+            continue;
+        }
+        for (k, (body, local)) in copies.into_iter().enumerate() {
+            let copy = moved_copy(&p.mb, body, k + 1);
+            let slot = pattern_name_slot(f.body_names.len(), count, mats.len(), s, k, f.pattern_names_in_order);
+            let name = pattern_copy_name(&mut names, f, slot, &p.mb.name);
+            copy_sheet(st, &p.mb.name, &name, &local);
+            let mut mb = ModelBody::traced_new(name, copy, f.id);
+            // A copy is its source moved: it is drawn from the source's triangles and display plans,
+            // moved, rather than meshed and planned again for every copy.
+            mb.mesh_placement = placed_mesh::PlacedMesh::new(&p.mb, &local).map(Arc::new);
+            if let Some(c) = p.component.filter(|c| *c != f.component) {
+                // Kept in that component as a moved body is (and through later features).
+                mb.component = c;
+                mb.transferred = true;
+            }
+            st.bodies.push(mb);
+        }
     }
-    Ok(())
+    // Kept so the names stored for the left-out copies stay theirs when the session pins
+    // the names the copies have now (`Feature::pattern_pins`).
+    st.pattern_left_out.remove(&f.id);
+    if !left_out.is_empty() {
+        st.pattern_left_out.insert(f.id, left_out);
+    }
+    match first_error {
+        Some(e) if skipped.len() == bodies.len() => Err(e),
+        Some(e) => {
+            append_warning(warning, pattern_skipped_note(&skipped, &e));
+            Ok(())
+        }
+        None => Ok(()),
+    }
 }
 
 /// The warning of a body pattern that left out the bodies `skipped`, the first for `why`.
@@ -17381,27 +17532,7 @@ fn eval_feature_kind(
             // copied (gone, its placement gone, or its geometry refused by the move) is left out
             // with a warning: the others are still copied, and only a pattern that copies none
             // fails.
-            let mut skipped = Vec::new();
-            let mut left_out = Vec::new();
-            let mut first_error = None;
-            for (s, n) in bodies.iter().enumerate() {
-                if let Err(e) = pattern_body(doc, f, st, &mats, bodies.len(), s, n, placements.get(s).map(Vec::as_slice)) {
-                    skipped.push(n.to_string());
-                    left_out.push(s);
-                    first_error.get_or_insert(e);
-                }
-            }
-            // Kept so the names stored for the left-out copies stay theirs when the session pins
-            // the names the copies have now (`Feature::pattern_pins`).
-            st.pattern_left_out.remove(&f.id);
-            if !left_out.is_empty() {
-                st.pattern_left_out.insert(f.id, left_out);
-            }
-            match first_error {
-                Some(e) if skipped.len() == bodies.len() => return Err(e),
-                Some(e) => append_warning(warning, pattern_skipped_note(&skipped, &e)),
-                None => {}
-            }
+            pattern_bodies(doc, f, st, &mats, bodies, placements, warning)?;
             if *join { join_pattern_copies(st, f, features, bodies, before) } else { Ok(()) }
         }
         FeatureKind::Mirror { features, plane, bodies, combine, placements } => {
@@ -17413,59 +17544,138 @@ fn eval_feature_kind(
             // Copies evaluated on each frame a placement is dragged, which nothing cuts or joins:
             // searching their revolved faces again was nearly all that took.
             let shown_only = !*combine && !placements.is_empty() && placement_reuse::copies_only_shown(doc, f);
+            struct MirrorPrep {
+                index: usize,
+                mb: ModelBody,
+                component: Option<u64>,
+                copy: Mat,
+                own: Mat,
+            }
+            enum MirrorOut {
+                Copy(Box<Traced>),
+                Combined(Vec<(Body, Option<crate::lineage::Lineage>)>),
+            }
+            let mut prepped = Vec::with_capacity(bodies.len());
+            let mut prep_err: Option<DocError> = None;
+            let mut seen = std::collections::HashSet::with_capacity(bodies.len());
+            let mut unique_targets = true;
             for (k, n) in bodies.iter().enumerate() {
-                let i = st.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
-                let Some(mb) = st.bodies.get(i).cloned() else { continue };
-                // A body picked where a placement shows it is mirrored there: the copy goes beside
-                // it into the component that placement shows, a joined body stays in its own frame.
-                let (component, copy, own) = match mirrored_placement(doc, f.component, &mb, placements.get(k).map(Vec::as_slice))? {
-                    Some((component, frame, source)) => {
-                        let singular = || DocError::Invalid(format!("the placement `{n}` was mirrored at is singular"));
-                        let inverse = |m: &Mat| crate::mat_inverse(m).ok_or_else(singular);
-                        // The plane and both frames are in this feature's component: the body
-                        // mirrored there, so where the component itself is placed does not count.
-                        let mirrored = crate::mat_mul(&m, &source);
-                        (Some(component), crate::mat_mul(&inverse(&frame)?, &mirrored), crate::mat_mul(&inverse(&source)?, &mirrored))
+                let item = (|| -> Result<Option<MirrorPrep>> {
+                    let i = st.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
+                    let Some(mb) = st.bodies.get(i).cloned() else { return Ok(None) };
+                    // A body picked where a placement shows it is mirrored there: the copy goes beside
+                    // it into the component that placement shows, a joined body stays in its own frame.
+                    let (component, copy, own) = match mirrored_placement(doc, f.component, &mb, placements.get(k).map(Vec::as_slice))? {
+                        Some((component, frame, source)) => {
+                            let singular = || DocError::Invalid(format!("the placement `{n}` was mirrored at is singular"));
+                            let inverse = |m: &Mat| crate::mat_inverse(m).ok_or_else(singular);
+                            // The plane and both frames are in this feature's component: the body
+                            // mirrored there, so where the component itself is placed does not count.
+                            let mirrored = crate::mat_mul(&m, &source);
+                            (Some(component), crate::mat_mul(&inverse(&frame)?, &mirrored), crate::mat_mul(&inverse(&source)?, &mirrored))
+                        }
+                        None => (None, m, m),
+                    };
+                    Ok(Some(MirrorPrep { index: i, mb, component, copy, own }))
+                })();
+                match item {
+                    Ok(Some(p)) => {
+                        if !seen.insert(p.index) {
+                            unique_targets = false;
+                        }
+                        prepped.push(p);
                     }
-                    None => (None, m, m),
-                };
+                    Ok(None) => {}
+                    Err(e) => {
+                        prep_err = Some(e);
+                        break;
+                    }
+                }
+            }
+            let run_one = |p: &MirrorPrep| -> Result<MirrorOut> {
                 let copied = if shown_only {
-                    kernel::place_matrix(&mb.body, copy)
+                    kernel::place_matrix(&p.mb.body, p.copy)
                 } else {
-                    kernel::transform_matrix(&mb.body, if *combine { own } else { copy })
+                    kernel::transform_matrix(&p.mb.body, if *combine { p.own } else { p.copy })
                 };
-                let mirrored = moved_copy(&mb, copied?, 1);
+                let mirrored = moved_copy(&p.mb, copied?, 1);
                 if *combine {
+                    let joined = crate::flush_join::join_bodies(&p.mb.body, &mirrored.body, "the mirror join produced nothing")?;
+                    let joined = Traced::step(joined, &[&p.mb.traced(), &mirrored]);
+                    let pieces = joined.body.lumps()?;
+                    let lineages = crate::lineage::Lineage::lumps(&joined.body, joined.lineage.as_ref(), &pieces);
+                    Ok(MirrorOut::Combined(pieces.into_iter().zip(lineages).collect()))
+                } else {
+                    Ok(MirrorOut::Copy(Box::new(mirrored)))
+                }
+            };
+            if !*combine || unique_targets {
+                let results: Vec<Result<MirrorOut>> = if prepped.len() > 1 {
+                    kernel::map_on_threads(&prepped, 16, run_one)
+                        .into_iter()
+                        .map(|r| r.unwrap_or_else(|| Err(DocError::Invalid("mirror worker failed".into()))))
+                        .collect()
+                } else {
+                    prepped.iter().map(run_one).collect()
+                };
+                for (p, res) in prepped.into_iter().zip(results) {
+                    match res? {
+                        MirrorOut::Combined(parts) => {
+                            for (k, (piece, lineage)) in parts.into_iter().enumerate() {
+                                if k == 0 {
+                                    if let Some(slot) = st.bodies.get_mut(p.index) {
+                                        *slot = ModelBody::new(p.mb.name.clone(), piece, p.mb.feature).with_lineage(lineage);
+                                    }
+                                } else {
+                                    let name = copy_body_name(st, f, output, &p.mb.name);
+                                    st.bodies.push(ModelBody::new(name, piece, f.id).with_lineage(lineage));
+                                    output += 1;
+                                }
+                            }
+                        }
+                        MirrorOut::Copy(mirrored) => {
+                            let name = copy_body_name(st, f, output, &p.mb.name);
+                            copy_sheet(st, &p.mb.name, &name, &p.copy);
+                            let mut body = ModelBody::traced_new(name, *mirrored, f.id);
+                            if !placements.is_empty() {
+                                body.mirrored_mesh = placed_mesh::PlacedMesh::mirrored(&p.mb, &body.body, &p.copy).map(Arc::new);
+                            }
+                            if let Some(c) = p.component.filter(|c| *c != f.component) {
+                                // Kept in that component as a moved body is (and through later features).
+                                body.component = c;
+                                body.transferred = true;
+                            }
+                            st.bodies.push(body);
+                            output += 1;
+                        }
+                    }
+                }
+            } else {
+                // Rare duplicate target with `combine`: apply sequentially so later entries see
+                // the updated target body.
+                for p in prepped {
+                    let Some(mb) = st.bodies.get(p.index).cloned() else { continue };
+                    let copied = kernel::transform_matrix(&mb.body, p.own)?;
+                    let mirrored = moved_copy(&mb, copied, 1);
                     let joined = crate::flush_join::join_bodies(&mb.body, &mirrored.body, "the mirror join produced nothing")?;
                     let joined = Traced::step(joined, &[&mb.traced(), &mirrored]);
                     let pieces = joined.body.lumps()?;
                     let lineages = crate::lineage::Lineage::lumps(&joined.body, joined.lineage.as_ref(), &pieces);
-                    for (k, (p, lineage)) in pieces.into_iter().zip(lineages).enumerate() {
+                    for (k, (piece, lineage)) in pieces.into_iter().zip(lineages).enumerate() {
                         if k == 0 {
-                            if let Some(slot) = st.bodies.get_mut(i) {
-                                *slot = ModelBody::new(mb.name.clone(), p, mb.feature).with_lineage(lineage);
+                            if let Some(slot) = st.bodies.get_mut(p.index) {
+                                *slot = ModelBody::new(mb.name.clone(), piece, mb.feature).with_lineage(lineage);
                             }
                         } else {
                             let name = copy_body_name(st, f, output, &mb.name);
-                            st.bodies.push(ModelBody::new(name, p, f.id).with_lineage(lineage));
+                            st.bodies.push(ModelBody::new(name, piece, f.id).with_lineage(lineage));
                             output += 1;
                         }
                     }
-                } else {
-                    let name = copy_body_name(st, f, output, &mb.name);
-                    copy_sheet(st, &mb.name, &name, &copy);
-                    let mut body = ModelBody::traced_new(name, mirrored, f.id);
-                    if !placements.is_empty() {
-                        body.mirrored_mesh = placed_mesh::PlacedMesh::mirrored(&mb, &body.body, &copy).map(Arc::new);
-                    }
-                    if let Some(c) = component.filter(|c| *c != f.component) {
-                        // Kept in that component as a moved body is (and through later features).
-                        body.component = c;
-                        body.transferred = true;
-                    }
-                    st.bodies.push(body);
-                    output += 1;
                 }
+            }
+            if let Some(e) = prep_err {
+                return Err(e);
             }
             Ok(())
         }
@@ -17555,12 +17765,22 @@ fn eval_feature_kind(
                     notes.push(w);
                 }
             }
-            let mut blended = Vec::new();
-            for (ti, edges) in without_smooth(st, picks, &mut notes)? {
+            let active_groups = without_smooth(st, picks, &mut notes)?;
+            struct BlendGroupOut {
+                ti: usize,
+                nb: Traced,
+                edges: Vec<Vec3>,
+                used: Option<Vec<f64>>,
+                tapered: Tapered,
+                middles: Vec<Vec3>,
+                group_notes: Vec<String>,
+            }
+            let run_group = |(ti, edges): &(usize, Vec<Vec3>)| -> Result<BlendGroupOut> {
+                let ti = *ti;
                 let Some(mb) = st.bodies.get(ti) else { return Err(DocError::Invalid("body".into())) };
                 let picked = edges.len();
-                let beyond = if chain { Ok(Vec::new()) } else { chain_beyond_picks(&mb.body, &edges) };
-                let edges = if chain { kernel::tangent_chain(&mb.body, &edges)? } else { edges };
+                let beyond = if chain { Ok(Vec::new()) } else { chain_beyond_picks(&mb.body, edges) };
+                let edges = if chain { kernel::tangent_chain(&mb.body, edges)? } else { edges.clone() };
                 let mut note = None;
                 let propagated = edges.len() > picked;
                 // This body's edges' own radii, found by their resolved points.
@@ -17568,19 +17788,34 @@ fn eval_feature_kind(
                     each_r.as_ref().map(|_| edges.iter().map(|e| radius_of.get(&key(ti, e)).map_or(r, |(_, x)| *x)).collect());
                 let (nb, used, tapered) = blend_body(vals, f, mb, &edges, r, each.as_deref(), &mut note)
                     .map_err(|e| if propagated { with_propagation_hint(e) } else { e })?;
+                let mut group_notes = Vec::new();
                 if let Some(n) = note {
-                    notes.push(n);
+                    group_notes.push(n);
                 }
                 if let Some(n) = left_sharp_note(&nb.body, &beyond, picked, &f.kind) {
-                    notes.push(n);
+                    group_notes.push(n);
                 }
-                reduced |= used.is_some();
-                fitted.extend(used.unwrap_or_else(|| vec![r; edges.len()]));
-                tapered_all.extend(tapered);
                 // A pattern repeats each edge at a moved copy of a point on it: the edge's middle,
                 // never the pick, which at a vertex two edges share finds either on a copy (#16934).
                 let middles = kernel::blend_edge_middles(&mb.body, &edges)?;
-                if each.is_some() {
+                Ok(BlendGroupOut { ti, nb, edges, used, tapered, middles, group_notes })
+            };
+            let group_results: Vec<Result<BlendGroupOut>> = if active_groups.len() > 1 {
+                kernel::map_on_threads(&active_groups, 16, run_group)
+                    .into_iter()
+                    .map(|r| r.unwrap_or_else(|| Err(DocError::Invalid("blend worker failed".into()))))
+                    .collect()
+            } else {
+                active_groups.iter().map(run_group).collect()
+            };
+            let mut blended = Vec::with_capacity(group_results.len());
+            for res in group_results {
+                let BlendGroupOut { ti, nb, edges, used, tapered, middles, group_notes } = res?;
+                notes.extend(group_notes);
+                reduced |= used.is_some();
+                fitted.extend(used.unwrap_or_else(|| vec![r; edges.len()]));
+                tapered_all.extend(tapered);
+                if each_r.is_some() {
                     // Per-edge radii: each blended edge's middle with its pick and radius.
                     by_pick.extend(edges.iter().zip(&middles).filter_map(|(e, m)| radius_of.get(&key(ti, e)).map(|(i, x)| (*i, *m, *x))));
                 }
@@ -17838,12 +18073,48 @@ fn eval_feature_kind(
                 [0.0, 0.0, k[2], 0.0],
                 [o.x * (1.0 - k[0]), o.y * (1.0 - k[1]), o.z * (1.0 - k[2]), 1.0],
             ];
+            let mut indices = Vec::with_capacity(bodies.len());
+            let mut prep_err: Option<DocError> = None;
+            let mut seen = std::collections::HashSet::with_capacity(bodies.len());
+            let mut unique_targets = true;
             for n in bodies {
-                let i = st.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
-                if let Some(mb) = st.bodies.get_mut(i) {
-                    let nb = Traced::step(kernel::transform_matrix(&mb.body, m)?, &[&mb.traced()]);
-                    *mb = mb.remade(nb);
+                match st.bodies.iter().position(|b| &b.name == n) {
+                    Some(i) => {
+                        if !seen.insert(i) {
+                            unique_targets = false;
+                        }
+                        indices.push(i);
+                    }
+                    None => {
+                        prep_err = Some(DocError::Unknown(format!("body `{n}`")));
+                        break;
+                    }
                 }
+            }
+            if unique_targets && indices.len() > 1 {
+                let scaled: Vec<Result<Traced>> = kernel::map_on_threads(&indices, 16, |&i| {
+                    let Some(mb) = st.bodies.get(i) else { return Err(DocError::Invalid("body".into())) };
+                    Ok(Traced::step(kernel::transform_matrix(&mb.body, m)?, &[&mb.traced()]))
+                })
+                .into_iter()
+                .map(|r| r.unwrap_or_else(|| Err(DocError::Invalid("scale worker failed".into()))))
+                .collect();
+                for (i, nb) in indices.into_iter().zip(scaled) {
+                    let nb = nb?;
+                    if let Some(mb) = st.bodies.get_mut(i) {
+                        *mb = mb.remade(nb);
+                    }
+                }
+            } else {
+                for i in indices {
+                    if let Some(mb) = st.bodies.get_mut(i) {
+                        let nb = Traced::step(kernel::transform_matrix(&mb.body, m)?, &[&mb.traced()]);
+                        *mb = mb.remade(nb);
+                    }
+                }
+            }
+            if let Some(e) = prep_err {
+                return Err(e);
             }
             Ok(())
         }
@@ -17942,30 +18213,76 @@ fn eval_feature_kind(
             };
             // With `copy` set, the source body is kept in place and the transform lands on a new
             // body pushed beside it instead of replacing it.
-            let mut output = 0;
-            for n in bodies {
-                let i = st.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
-                let Some(mb) = st.bodies.get(i).cloned() else { continue };
-                let nb = kernel::transform(&mb.body, t, origin, axis, ang)?;
-                if *copy {
-                    let mut motion = crate::rigid(t, origin, axis, ang);
-                    let nb = if let Some(frame) = copy_frames.get(output).filter(|m| !crate::is_identity(m)) {
-                        motion = crate::mat_mul(frame, &motion);
-                        kernel::transform_matrix(&nb, *frame)?
-                    } else {
-                        nb
-                    };
-                    let traced = moved_copy(&mb, nb, 1);
-                    let name = copy_body_name(st, f, output, &mb.name);
-                    copy_sheet(st, &mb.name, &name, &motion);
-                    st.bodies.push(ModelBody::traced_new(name, traced, f.id));
-                    output += 1;
-                } else if let Some(slot) = st.bodies.get_mut(i) {
-                    *slot = mb.remade(Traced::step(nb, &[&mb.traced()]));
+            let base_motion = crate::rigid(t, origin, axis, ang);
+            let mut prepped = Vec::with_capacity(bodies.len());
+            let mut prep_err: Option<DocError> = None;
+            let mut seen = std::collections::HashSet::with_capacity(bodies.len());
+            let mut unique_targets = true;
+            for (output, n) in bodies.iter().enumerate() {
+                match st.bodies.iter().position(|b| &b.name == n) {
+                    Some(i) => {
+                        if !seen.insert(i) {
+                            unique_targets = false;
+                        }
+                        if let Some(mb) = st.bodies.get(i).cloned() {
+                            prepped.push((i, output, mb));
+                        }
+                    }
+                    None => {
+                        prep_err = Some(DocError::Unknown(format!("body `{n}`")));
+                        break;
+                    }
                 }
             }
+            let transform_one = |(_, output, mb): &(usize, usize, ModelBody)| -> Result<(Body, Mat)> {
+                if *copy && let Some(frame) = copy_frames.get(*output).filter(|m| !crate::is_identity(m)) {
+                    if !(t.is_finite() && origin.is_finite() && ang.is_finite()) {
+                        return Err(kernel::KernelError::Invalid("non-finite transform".into()).into());
+                    }
+                    if ang.abs() > 1e-12 && !(axis.is_finite() && (axis.x * axis.x + axis.y * axis.y + axis.z * axis.z) > 1e-24) {
+                        return Err(kernel::KernelError::Invalid("rotation axis".into()).into());
+                    }
+                    let motion = crate::mat_mul(frame, &base_motion);
+                    return Ok((kernel::transform_matrix(&mb.body, motion)?, motion));
+                }
+                Ok((kernel::transform(&mb.body, t, origin, axis, ang)?, base_motion))
+            };
+            if *copy || unique_targets {
+                let moved: Vec<Result<(Body, Mat)>> = if prepped.len() > 1 {
+                    kernel::map_on_threads(&prepped, 16, transform_one)
+                        .into_iter()
+                        .map(|r| r.unwrap_or_else(|| Err(DocError::Invalid("move worker failed".into()))))
+                        .collect()
+                } else {
+                    prepped.iter().map(transform_one).collect()
+                };
+                for ((i, output, mb), res) in prepped.into_iter().zip(moved) {
+                    let (nb, motion) = res?;
+                    if *copy {
+                        let traced = moved_copy(&mb, nb, 1);
+                        let name = copy_body_name(st, f, output, &mb.name);
+                        copy_sheet(st, &mb.name, &name, &motion);
+                        st.bodies.push(ModelBody::traced_new(name, traced, f.id));
+                    } else if let Some(slot) = st.bodies.get_mut(i) {
+                        *slot = mb.remade(Traced::step(nb, &[&mb.traced()]));
+                    }
+                }
+            } else {
+                // Rare duplicate target without `copy`: apply sequentially so later entries move
+                // the updated body.
+                for (i, _, _) in prepped {
+                    let Some(mb) = st.bodies.get(i).cloned() else { continue };
+                    let nb = kernel::transform(&mb.body, t, origin, axis, ang)?;
+                    if let Some(slot) = st.bodies.get_mut(i) {
+                        *slot = mb.remade(Traced::step(nb, &[&mb.traced()]));
+                    }
+                }
+            }
+            if let Some(e) = prep_err {
+                return Err(e);
+            }
             if !*copy {
-                move_constructions_with(doc, st, bodies, &crate::rigid(t, origin, axis, ang));
+                move_constructions_with(doc, st, bodies, &base_motion);
             }
             Ok(())
         }
@@ -19052,19 +19369,11 @@ pub fn world_state_moved_reusing(
     // went through all bodies, each time searching (a large assembly paid this every command).
     let feature_components: std::collections::HashMap<u64, u64> = doc.features.iter().rev().map(|f| (f.id, f.component)).collect();
     let comp_of_feature = |id: u64| feature_components.get(&id).copied().unwrap_or(0);
-    let first_path = |comp: u64| -> Vec<u64> {
-        let mut path = Vec::new();
-        let mut c = comp;
-        for _ in 0..1000 {
-            if c == 0 {
-                break;
-            }
-            let Some(o) = doc.occurrence_of(c) else { break };
-            path.insert(0, o.id);
-            c = o.parent;
-        }
-        path
-    };
+    let mut first_occ_by_comp: std::collections::HashMap<u64, &crate::Occurrence> = std::collections::HashMap::new();
+    for o in &doc.occurrences {
+        first_occ_by_comp.entry(o.component).or_insert(o);
+    }
+    let mut first_paths: std::collections::HashMap<u64, Vec<u64>> = std::collections::HashMap::new();
     let mut out = ModelState { body_counter: st.body_counter, ..Default::default() };
     let placements = doc.placements_moved(moves);
     // A body moved in from another component keeps its place (its offset).
@@ -19084,14 +19393,22 @@ pub fn world_state_moved_reusing(
     for (b, owner) in st.bodies.iter().zip(&owners).rev() {
         first_body.insert(b.name.as_str(), (b, *owner));
     }
-    let tap_frames: Vec<(u64, Option<&crate::Mat>)> = st
-        .threads
-        .iter()
-        .map(|t| match first_body.get(t.body.as_str()) {
+    let mut sketches_by_comp: std::collections::HashMap<u64, Vec<_>> = std::collections::HashMap::new();
+    for s in &st.sketches {
+        sketches_by_comp.entry(comp_of_feature(s.feature)).or_default().push(s);
+    }
+    let mut construct_by_comp: std::collections::HashMap<u64, Vec<_>> = std::collections::HashMap::new();
+    for c in &st.construct {
+        construct_by_comp.entry(comp_of_feature(c.feature)).or_default().push(c);
+    }
+    let mut threads_by_comp: std::collections::HashMap<u64, Vec<_>> = std::collections::HashMap::new();
+    for t in &st.threads {
+        let (owner, offset) = match first_body.get(t.body.as_str()) {
             Some((body, owner)) => (*owner, doc.model_body_offset(body)),
             None => (comp_of_feature(t.feature), None),
-        })
-        .collect();
+        };
+        threads_by_comp.entry(owner).or_default().push((t, offset));
+    }
     for (comp, path, m) in &placements {
         for b in bodies_of(*comp) {
             let bm = body_matrix(b, m);
@@ -19110,7 +19427,24 @@ pub fn world_state_moved_reusing(
         None => placed_fresh.next().flatten(),
     });
     for (comp, path, m) in placements {
-        let primary = path == first_path(comp);
+        let primary = path.as_slice()
+            == first_paths
+                .entry(comp)
+                .or_insert_with(|| {
+                    let mut fp = Vec::new();
+                    let mut c = comp;
+                    for _ in 0..1000 {
+                        if c == 0 {
+                            break;
+                        }
+                        let Some(o) = first_occ_by_comp.get(&c).copied() else { break };
+                        fp.push(o.id);
+                        c = o.parent;
+                    }
+                    fp.reverse();
+                    fp
+                })
+                .as_slice();
         let ident = crate::is_identity(&m);
         for b in bodies_of(comp) {
             let bm = body_matrix(b, &m);
@@ -19145,7 +19479,7 @@ pub fn world_state_moved_reusing(
             out.bodies.push(placed);
         }
         if primary {
-            for s in st.sketches.iter().filter(|s| comp_of_feature(s.feature) == comp) {
+            for s in sketches_by_comp.get(&comp).into_iter().flatten().copied() {
                 if ident {
                     // In place: shared as it is.
                     out.sketches.push(s.clone());
@@ -19163,13 +19497,13 @@ pub fn world_state_moved_reusing(
             // The component's construction planes, axes and points where it is placed: once the
             // design has a component the root's constructions are built in this state
             // (`construction_state`), and one built on another finds it here by name.
-            for c in st.construct.iter().filter(|c| comp_of_feature(c.feature) == comp) {
+            for c in construct_by_comp.get(&comp).into_iter().flatten().copied() {
                 let geom = if ident { c.geom.clone() } else { c.geom.placed(&m) };
                 out.construct.push(crate::construct::Construct { geom, ..c.clone() });
             }
         }
         // Unlike editable sketch guides, cosmetic surfaces belong to every occurrence.
-        for (t, (_, offset)) in st.threads.iter().zip(&tap_frames).filter(|(_, (owner, _))| *owner == comp) {
+        for (t, offset) in threads_by_comp.get(&comp).into_iter().flatten().copied() {
             let mut t2 = t.clone();
             t2.body = names.name(&t.body, comp, &path);
             let frame = offset.map(|offset| crate::mat_mul(&m, offset)).unwrap_or(m);

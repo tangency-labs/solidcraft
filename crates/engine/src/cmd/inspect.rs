@@ -951,7 +951,7 @@ fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
                 index: f.index,
                 name: names.get(f.index).cloned(),
                 exact: solidcraft_doc::naming::face_name_exact(b, f.index),
-                area: f.area,
+                area: super::measure_exact::face_area(&b.body, f.index).unwrap_or(f.area),
                 centroid: f.centroid.into(),
                 plane_normal: f.plane_normal.map(Into::into),
                 point: spot.map(|x| x.point.into()),

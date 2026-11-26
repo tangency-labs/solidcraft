@@ -219,8 +219,10 @@ pub enum Turn {
     /// Each turn is [`Turn::Swept`] where the kernel builds it (the rolling ball can pass the
     /// side edge: it and the rounds differ in convexity, and the rounds are constant, of one
     /// radius, at a straight side edge square to them) and [`Turn::Mitre`] where it does not.
-    /// Decided per corner before anything is built, so it is never refused where the mitre
-    /// would have been made. Chamfers, which have no swept turn, are mitred.
+    /// Decided per corner before anything is built; where the blend with those turns does not
+    /// build (a swept turn that leaves a round no room beside another of its corners), the
+    /// blend is mitred, so it is never refused where the mitre would have been made. Chamfers,
+    /// which have no swept turn, are mitred.
     Auto,
 }
 
@@ -1848,7 +1850,25 @@ fn blend_impl(
                 .unwrap_or(0.0)
         })
         .collect();
-    let blended = blend_session(body, order, kind, edges, &each, setbacks, corners, options);
+    let blended = match blend_session(body, order, kind, edges, &each, setbacks, corners, options) {
+        // Auto never refuses a blend the mitre builds: its swept turns are chosen per corner
+        // ([`TurnChoice::Auto`]), each one the blend corner builds on its own, but a swept turn
+        // can still leave a round no room beside another corner of it (a round shorter than its
+        // radius between a swept turn and a mitre: its rail trimmed past the swept turn's
+        // section). Where the blend with Auto's turns does not build, it is the mitred blend,
+        // run on the untouched `body`; the mitre's refusal is the answer where that does not
+        // build either.
+        Err(e)
+            if turn == Turn::Auto && !matches!(e, Error::Cancelled | Error::OutOfFuel { .. }) =>
+        {
+            let mitred = BlendOptions {
+                turn: Turn::Mitre,
+                ..options
+            };
+            blend_session(body, order, kind, edges, &each, setbacks, corners, mitred)
+        }
+        other => other,
+    };
     match blended {
         // (not upstream) An equal chamfer or a constant round the kernel refuses as too large
         // for a face beside an edge or fails to build: where every picked edge is straight

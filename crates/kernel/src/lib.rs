@@ -147,6 +147,8 @@ mod smlib_sweeps;
 mod smlib_sweeps_tests;
 mod smooth_edges;
 #[cfg(test)]
+mod sphere_area_tests;
+#[cfg(test)]
 mod sphere_lens_tests;
 mod splitface;
 mod step;
@@ -320,6 +322,7 @@ pub use distance::faces_closest;
 pub use distance::interiors_disjoint;
 pub use distance::overlap_witness;
 pub use distance::point_closest;
+pub use distance::segment_closest;
 pub use dome::dome;
 pub use draft_corners::CornerFill;
 pub use draft_corners::CornerOption;
