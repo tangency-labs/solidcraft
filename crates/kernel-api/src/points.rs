@@ -53,4 +53,7 @@ pub trait Points: Backend {
     /// Centroids of `tool`'s planar faces that lie back to back on a planar face of `target`; `None`
     /// where either record doesn't convert or the kernel fails.
     fn flush_contact_points(&self, target: &Brep, tool: &Brep) -> Option<Vec<[f64; 3]>>;
+    /// `direction` made unit, however short it is: only a direction that is exactly zero or not
+    /// finite has none.
+    fn unit_direction(&self, direction: [f64; 3]) -> Option<[f64; 3]>;
 }

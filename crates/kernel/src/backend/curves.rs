@@ -6,7 +6,7 @@ use solidcore_record::brep::{Curve, Curve2};
 use solidcore_record::curve_query::{Crossing, CubicPiece, CurvePoint, CurveRayPoint, FitSplineBounds, PlaneSection};
 use solidcore_record::projection::PlanarSpline;
 use solidcore_record::{Plane, Vec2};
-use solidcraft_kernel_api::{CurveRefused, Curves};
+use solidcraft_kernel_api::{CurveRefused, CurveSample, Curves};
 
 use super::Solidcore;
 
@@ -50,6 +50,16 @@ impl Curves for Solidcore {
 
     fn closest_to_ray(&self, curve: &Curve, origin: [f64; 3], direction: [f64; 3], tolerance: f64) -> Result<Option<CurveRayPoint>, CurveRefused> {
         curve::closest_to_ray(curve, origin, direction, tolerance).map_err(refused)
+    }
+
+    fn arc_length(&self, curve: &Curve, interval: Option<[f64; 2]>) -> Result<f64, CurveRefused> {
+        curve::arc_length(curve, interval).map_err(refused)
+    }
+
+    fn point_at_arc_length(&self, curve: &Curve, interval: Option<[f64; 2]>, from_end: bool, distance: f64) -> Result<CurveSample, CurveRefused> {
+        curve::point_at_arc_length(curve, interval, from_end, distance)
+            .map(|s| CurveSample { parameter: s.parameter, point: s.point, tangent: s.tangent, past_end: s.past_end })
+            .map_err(refused)
     }
 
     fn fit_spline_bounds(&self, pieces: &[[[f64; 3]; 4]], near: &[(usize, [f64; 3])]) -> Result<FitSplineBounds, CurveRefused> {

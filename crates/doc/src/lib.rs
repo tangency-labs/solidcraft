@@ -91,6 +91,7 @@ mod points;
 mod profile_refs;
 pub mod progress;
 mod thread_catalog;
+pub mod worker_scope;
 pub use thread_catalog::DRILL_ALLOWANCE;
 pub use thread_catalog::TaperDrill;
 pub use thread_catalog::TappedThread;
@@ -154,6 +155,7 @@ pub use sheet_surface_features::OUTSIDE_BEND_OPEN;
 pub mod text_params;
 pub mod thread_forms;
 pub mod tolerance;
+pub mod weld_seam;
 pub mod weld_spot;
 
 pub use assembly::BomType;

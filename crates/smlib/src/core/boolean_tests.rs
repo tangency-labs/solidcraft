@@ -543,6 +543,29 @@ mod history {
         assert_eq!(h.faces.iter().flat_map(|f| f.origins.iter().map(|o| o.0)).max(), Some(2), "{h:?}");
     }
 
+    /// A plate, three pegs standing in it apart from each other and a box far from all, in one
+    /// `union_all`: the pegs and the far box are put beside each other with no boolean, then
+    /// joined to the plate by one, and every face still names its operand. The plate keeps its
+    /// six faces (its top holed), each peg its wall and top (its foot lies inside the plate), and
+    /// the far box its six. The far box's faces and each peg's top are whole and where they
+    /// were: Kept; each peg's wall lost the 2 mm inside the plate: Modified.
+    #[test]
+    fn a_union_of_bodies_apart_names_each() {
+        let plate = tagged_box([0.0; 3], [30.0, 10.0, 10.0], 0);
+        let pegs: Vec<Brep> =
+            [(5.0, 1), (15.0, 2), (25.0, 3)].into_iter().map(|(x, operand)| tagged_cylinder([x, 5.0, 8.0], 2.0, 12.0, operand)).collect();
+        let far = tagged_box([100.0, 0.0, 0.0], [5.0; 3], 4);
+        let mut all = vec![&plate];
+        all.extend(pegs.iter());
+        all.push(&far);
+        let h = Brep::union_all(&all).unwrap().history().unwrap();
+        let of = |operand: usize| h.faces.iter().filter(|f| f.origins.len() == 1 && f.origins[0].0 == operand).count();
+        assert_eq!(h.faces.len(), 6 + 3 * 2 + 6, "{h:?}");
+        assert_eq!((of(0), of(1), of(2), of(3), of(4)), (6, 2, 2, 2, 6), "{h:?}");
+        let kept = |operand: usize| h.faces.iter().filter(|f| f.origins.len() == 1 && f.origins[0].0 == operand && f.change == Change::Kept).count();
+        assert_eq!((kept(1), kept(2), kept(3), kept(4)), (1, 1, 1, 6), "{h:?}");
+    }
+
     /// `boolean_tagged` and `union_all_tagged` preserve operand provenance tags for unions.
     #[test]
     fn tagged_boolean_and_union_all_keep_operand_origins() {

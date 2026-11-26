@@ -648,3 +648,70 @@ fn an_offset_face_is_written_within_the_tolerance_its_record_states() {
     let largest = largest_edge_tolerance(&shelled);
     assert!(largest > 2.0 * 1e-5 && largest_edge_tolerance(&fin) == 1e-5, "{largest}");
 }
+
+/// A rotated cuboid keeps its geometry when each plane origin moves within its plane.
+/// Once imported, its record must be a fixed point, including the UV trims and domains.
+#[test]
+fn a_planar_body_record_stabilizes_after_one_import() {
+    use crate::Brep;
+    let (s, c) = 0.37_f64.sin_cos();
+    let matrix = [[c, s, 0., 0.], [-s, c, 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]];
+    let body = Brep::make_box([1., -2., 3.], [10., 20., 30.]).unwrap().transformed(&matrix).unwrap();
+    let mut rec = body.to_native().unwrap();
+    for f in &mut rec.faces {
+        let b::Surface::Plane { origin, u_axis, v_axis } = &mut f.surface else { panic!("expected a plane") };
+        // O' = O + 2U - 3V, (u',v') = (u-2,v+3): exactly the same affine surface.
+        for i in 0..3 {
+            origin[i] += 2.0 * u_axis[i] - 3.0 * v_axis[i];
+        }
+        f.domain[0] = f.domain[0].map(|t| t - 2.0);
+        f.domain[1] = f.domain[1].map(|t| t + 3.0);
+        for l in &mut f.loops {
+            let b::Loop::Edges { edges } = l else { panic!("expected edges") };
+            for e in edges {
+                match &mut e.pcurve {
+                    b::Curve2::Spline { points, .. } => {
+                        for p in points {
+                            p[0] -= 2.0;
+                            p[1] += 3.0;
+                        }
+                    }
+                    b::Curve2::RationalSpline { homogeneous, .. } => {
+                        for p in homogeneous {
+                            p[0] -= 2.0 * p[2];
+                            p[1] += 3.0 * p[2];
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let first = Brep::from_record(&rec, true).unwrap().to_native().unwrap();
+    let first_bytes = serde_json::to_vec(&first).unwrap();
+    rec = first;
+    for round in 1..=8 {
+        let back = Brep::from_record(&rec, true).unwrap();
+        let next = back.to_native().unwrap();
+        assert!(serde_json::to_vec(&next).unwrap() == first_bytes, "round {round}: record changed");
+        assert_eq!(back.counts().unwrap(), [6, 12, 8]);
+        let m = back.mass_properties(1e-8).unwrap();
+        assert!(rel(m.volume, 6000.0) < 1e-9);
+        assert!(rel(m.area, 2200.0) < 1e-9);
+        let centroid = [6.0 * c - 8.0 * s, 6.0 * s + 8.0 * c, 18.0];
+        let moments = [650000.0 * c * c + 500000.0 * s * s, 650000.0 * s * s + 500000.0 * c * c, 250000.0];
+        let products = [0.0, 0.0, -150000.0 * c * s];
+        for i in 0..3 {
+            assert!((m.centroid[i] - centroid[i]).abs() < 1e-7);
+            assert!((m.moments[i] - moments[i]).abs() / 650000.0 < 1e-9);
+            assert!((m.products[i] - products[i]).abs() / 650000.0 < 1e-9);
+        }
+        let (lo, hi) = back.bounds().unwrap();
+        let expected_lo = [c - 18.0 * s, s - 2.0 * c, 3.0];
+        let expected_hi = [11.0 * c + 2.0 * s, 11.0 * s + 18.0 * c, 33.0];
+        for i in 0..3 {
+            assert!((lo[i] - expected_lo[i]).abs() < 1e-7);
+            assert!((hi[i] - expected_hi[i]).abs() < 1e-7);
+        }
+        rec = next;
+    }
+}
