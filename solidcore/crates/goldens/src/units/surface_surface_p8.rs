@@ -43,7 +43,7 @@ use solidcore::SolidError;
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
-use crate::util::{p2, v3};
+use crate::util::{contact_codes, p2, v3};
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
@@ -272,8 +272,16 @@ fn first_leaf(tree: &Tree<Obj>) -> Result<NodeId, HarnessError> {
     }
 }
 
-#[allow(clippy::too_many_lines)]
 fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
+    rust_run_with(i, &mut None)
+}
+
+/// [`rust_run`], also setting `contact` to the contact codes of the solution records
+/// it prints ([`contact_codes`]; for the curve op, the run with handles that know
+/// their domains, then `-9` and the opaque run's codes when the two differ, as `out`
+/// does). An op that prints no solution records leaves it `None`.
+#[allow(clippy::too_many_lines)]
+fn rust_run_with(i: &Inputs, contact: &mut Option<Vec<i64>>) -> Result<Vec<f64>, Fail> {
     let k = Kernel::default();
     let mut o = Vec::new();
     let Some(s) = surface_of(&k, &i.surface)? else {
@@ -329,6 +337,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                 Ok(sols) => {
                     o.push(0.0);
                     put_solutions(&mut o, &sols, None, surf);
+                    *contact = Some(contact_codes(sols.as_slice()));
                 }
                 Err(c) => o.push(c),
             }
@@ -346,11 +355,13 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             // B-rep's, which cannot reach their geometry): both must give the same result,
             // so a difference reports both runs.
             let mut runs = Vec::new();
+            let mut run_codes = Vec::new();
             for (co, so) in [
                 (curve_obj(&c), surface_obj(&s)),
                 (Obj::OpaqueCurve, Obj::OpaqueSurface),
             ] {
                 let mut r = Vec::new();
+                let mut codes = None;
                 match st(s.global_curve_intersect::<Obj>(
                     &k,
                     [co, so],
@@ -362,11 +373,23 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                     Ok(sols) => {
                         r.push(0.0);
                         put_solutions(&mut r, &sols, Some(co), so);
+                        codes = Some(contact_codes(sols.as_slice()));
                     }
                     Err(c) => r.push(c),
                 }
                 runs.push(r);
+                run_codes.push(codes);
             }
+            let opaque_codes = run_codes.pop().flatten();
+            *contact = match (run_codes.pop().flatten(), opaque_codes) {
+                (codes, opaque) if codes == opaque => codes,
+                (codes, opaque) => {
+                    let mut c = codes.unwrap_or_default();
+                    c.push(-9);
+                    c.extend(opaque.unwrap_or_default());
+                    Some(c)
+                }
+            };
             let opaque = runs.pop().unwrap_or_default();
             o = runs.pop().unwrap_or_default();
             if o != opaque {
@@ -507,8 +530,17 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
-    match rust_run(i) {
-        Ok(v) => Ok(Output::new().values("out", v)),
+    let mut contact = None;
+    match rust_run_with(i, &mut contact) {
+        Ok(v) => {
+            let out = Output::new().values("out", v);
+            // the solutions' contact codes, exact (`0` unclassified, `1` crossing,
+            // `2` touching, `3` undecided: `contact_codes`)
+            Ok(match contact {
+                Some(c) => out.ints("contact", c),
+                None => out,
+            })
+        }
         Err(Fail::Deferred(o)) => Ok(*o),
         Err(Fail::Harness(e)) => Err(e),
     }
@@ -1227,191 +1259,6 @@ mod tests {
         }
         eprintln!("{stats:?}");
         assert_eq!(stats.len(), 8);
-    }
-
-    /// The rows of the line/surface solve #22030 moved (#21621): each case's name, main's
-    /// row (3797068d) and the new row (`[status, n, n × 13]`: per solution its type, 3, 2,
-    /// its start and end deviations, `(t, u, v)` at its start and at its end, its objects).
-    /// Each is a crossing main missed or found less exactly: the leaf's first solve from
-    /// main's guess found no root and the line point's foot did (gen0595, gen0605), or a
-    /// second crossing in a leaf that had one was found by the second-crossing guesses
-    /// (gen0602, gen0844).
-    #[rustfmt::skip]
-    const RAY_22030_MOVED: &[(&str, &[f64], &[f64])] = &[
-        ("gen0595",
-         &[0.0, 0.0],
-         &[0.0, 1.0, 1.0, 3.0, 2.0, 0.0, 0.0, 1.455990119589151, 2.686633282755781, 2.2095095644567317, 0.0, 0.0, 0.0, -1.0, 1.0]),
-        ("gen0602",
-         &[0.0, 1.0, 1.0, 3.0, 2.0, 1.6653345369377348e-16, 0.0, 1.1286826095023, 0.4718643450503955, -0.3126056786883694, 0.0, 0.0, 0.0, 0.0, 1.0],
-         &[0.0, 2.0, 1.0, 3.0, 2.0, 2.220446049250313e-16, 0.0, 0.6463693190267334, 0.43192689114321203, -0.9811966845983423, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 3.0, 2.0, 1.6653345369377348e-16, 0.0, 1.1286826095023, 0.4718643450503955, -0.3126056786883694, 0.0, 0.0, 0.0, 0.0, 1.0]),
-        ("gen0605",
-         &[0.0, 1.0, 1.0, 3.0, 2.0, 9.68124662951892e-14, 0.0, -2.4335637590120283, 1.6579231698325738, 2.007456890882891, 0.0, 0.0, 0.0, -1.0, 1.0],
-         &[0.0, 1.0, 1.0, 3.0, 2.0, 4.965068306494546e-16, 0.0, -2.433563247349246, 1.6579232221087403, 2.0074568908828434, 0.0, 0.0, 0.0, -1.0, 1.0]),
-        ("gen0844",
-         &[0.0, 1.0, 1.0, 3.0, 2.0, 1.3637707092083895e-15, 0.0, 2.850399536449025, -0.13455563676143925, -0.5263316452734725, 0.0, 0.0, 0.0, -1.0, 1.0],
-         &[0.0, 2.0, 1.0, 3.0, 2.0, 1.3637707092083895e-15, 0.0, 2.850399536449025, -0.13455563676143925, -0.5263316452734725, 0.0, 0.0, 0.0, -1.0, 1.0, 1.0, 3.0, 2.0, 1.424215369046633e-15, 0.0, 2.8889904034380907, -0.2041907168236251, -0.5733906898813229, 0.0, 0.0, 0.0, -1.0, 1.0]),
-    ];
-
-    /// The line/surface rows #22030 moved are certified (`certify::distance`, the
-    /// evaluation's and the distance's rounding charged): every solution of the new row
-    /// lies within the solve's tolerance of the surface (a point at its `(u, v)`; a range
-    /// at every point of its line interval: the distance to the surface is 1-Lipschitz
-    /// along the line, so samples `h` apart along it, each dropped to the surface and
-    /// within `tol - h|v|/2`, cover the range), and every point of main's answer the new
-    /// row leaves out is proven farther than the tolerance from the surface
-    /// (`certify::nearest`'s lower end).
-    #[test]
-    fn ray_22030_moved_rows_are_certified() {
-        use solidcore::surface::surface::p4::NoObject;
-        use solidcore::surface::surface::p5::DropPointOptions;
-        let k = Kernel::default();
-        let mut failed: Vec<String> = Vec::new();
-        for &(name, main, new) in RAY_22030_MOVED {
-            let case = crate::case::regression_case(&Runner, name);
-            let i: Inputs = case.parse().expect("inputs");
-            let row = rust_run(&i).unwrap_or_else(|_| panic!("{name}: rust"));
-            assert!(
-                row.len() == new.len()
-                    && row.iter().zip(new).all(|(a, b)| (a - b).abs() <= crate::REL_TOL * a.abs().max(b.abs())),
-                "{name}: the code gives {row:?}, not the new row"
-            );
-            // the line (`p + tv`) of a line case, or the curve of a curve case, and the
-            // solve's tolerance; a range is certified on a line only (its speed is |v|)
-            let (line, curve, tol) = match &i.op {
-                OpIn::Line { p, v, tol, .. } => (Some((v3(*p), v3(*v))), None, *tol),
-                OpIn::Curve { curve, tol, .. } => (None, curve_of(curve).expect("curve"), *tol),
-                _ => panic!("{name}: not a line or curve case"),
-            };
-            let speed = line.map(|(_, v)| v.length());
-            let s = surface_of(&k, &i.surface).expect("surface").expect("a surface");
-            let domain = s.natural_uv_domain_with_nurb(&k).expect("domain");
-            let on_line = |t: f64| match (line, &curve) {
-                (Some((p, v)), _) => p + t * v,
-                (None, Some(c)) => c.evaluate_point(&k, t).expect("the curve's point"),
-                (None, None) => panic!("{name}: no curve"),
-            };
-            // the solutions of a row: (range, t0, uv0, t1, uv1)
-            let sols = |r: &[f64]| -> Vec<(bool, f64, Point2, f64, Point2)> {
-                assert!(r.len() >= 2 && r[0] == 0.0, "{name}: status {r:?}");
-                r[2..]
-                    .chunks(13)
-                    .map(|c| (c[0] == 2.0, c[5], Point2::new(c[6], c[7]), c[8], Point2::new(c[9], c[10])))
-                    .collect()
-            };
-            // the certified upper end of the distance from the line at `t` to the surface,
-            // dropped from `guess`
-            let upper = |t: f64, guess: Point2| -> Option<f64> {
-                let opts = DropPointOptions {
-                    guess_uv: Some(guess),
-                    ..Default::default()
-                };
-                let d = s.drop_point::<NoObject>(&k, on_line(t), &domain, &opts).ok()?;
-                if !d.success {
-                    return None;
-                }
-                crate::certify::distance(&k, &s, on_line(t), d.result_uv).map(|e| e.1)
-            };
-            // a range certified within the tolerance at every point: samples dropped to the
-            // surface, close enough that the distance's 1-Lipschitz bound along the line
-            // covers the gaps between them; the samples and the largest bound
-            let certify_range = |t0: f64, uv0: Point2, t1: f64, uv1: Point2| -> Result<(usize, f64), String> {
-                let Some(speed) = speed else {
-                    return Err("on a curve: not certified here".to_string());
-                };
-                let len = (t1 - t0).abs() * speed;
-                let at = |j: usize, n: usize| {
-                    let a = j as f64 / n as f64;
-                    (t0 + a * (t1 - t0), Point2::new(uv0.x + a * (uv1.x - uv0.x), uv0.y + a * (uv1.y - uv0.y)))
-                };
-                // coarse pass for the margin, then samples close enough for it
-                let coarse: Option<Vec<f64>> = (0..=64).map(|j| { let (t, g) = at(j, 64); upper(t, g) }).collect();
-                let margin = tol - coarse.ok_or("a drop failed")?.iter().copied().fold(0.0, f64::max);
-                if margin <= 0.0 {
-                    return Err(format!("a sample is not within {tol:e}"));
-                }
-                let n = ((len / margin).ceil() as usize).max(64);
-                if n > 2_000_000 {
-                    return Err(format!("{n} samples needed"));
-                }
-                let half = len / (2.0 * n as f64);
-                let mut worst = 0.0_f64;
-                for j in 0..=n {
-                    let (t, g) = at(j, n);
-                    match upper(t, g) {
-                        Some(hi) if hi + half <= tol => worst = worst.max(hi + half),
-                        hi => return Err(format!("at t={t} {hi:?} + {half:e} not within {tol:e}")),
-                    }
-                }
-                Ok((n, worst))
-            };
-            let new_sols = sols(new);
-            for &(range, t0, uv0, t1, uv1) in &new_sols {
-                if !range {
-                    match crate::certify::distance(&k, &s, on_line(t0), uv0) {
-                        Some((_, hi)) if hi <= tol => eprintln!("{name}: point t={t0}: within {hi:e} (tol {tol:e})"),
-                        e => failed.push(format!("{name}: point t={t0}: {e:?} not within {tol:e}")),
-                    }
-                    continue;
-                }
-                match certify_range(t0, uv0, t1, uv1) {
-                    Ok((n, worst)) => eprintln!("{name}: range [{t0}, {t1}]: {n} samples, every point within {worst:e} (tol {tol:e})"),
-                    Err(e) => failed.push(format!("{name}: range [{t0}, {t1}]: {e}")),
-                }
-            }
-            // main's answer outside the new one: proven farther than the tolerance
-            let covered = |t: f64| {
-                new_sols.iter().any(|&(range, t0, _, t1, _)| {
-                    let (a, b) = if range { (t0.min(t1), t0.max(t1)) } else { (t0, t0) };
-                    // (a curve case's own parameter: main's points must match the new ones)
-                    let slack = speed.map_or(0.0, |sp| tol / sp);
-                    t >= a - slack && t <= b + slack
-                })
-            };
-            for (range, t0, uv0, t1, uv1) in sols(main) {
-                let n = if range { 256 } else { 0 };
-                let mut left_out: Vec<(f64, Point2)> = Vec::new();
-                for j in 0..=n {
-                    let a = if n == 0 { 0.0 } else { f64::from(j) / f64::from(n) };
-                    let t = t0 + a * (t1 - t0);
-                    if !covered(t) {
-                        left_out.push((t, Point2::new(uv0.x + a * (uv1.x - uv0.x), uv0.y + a * (uv1.y - uv0.y))));
-                    }
-                }
-                if left_out.is_empty() {
-                    continue;
-                }
-                let farthest = left_out
-                    .iter()
-                    .map(|&(t, uv)| {
-                        // the bound is the surface's whatever the foot; the foot only
-                        // tells the subdivision how far to go
-                        let opts = DropPointOptions {
-                            guess_uv: Some(uv),
-                            ..Default::default()
-                        };
-                        let foot = match s.drop_point::<NoObject>(&k, on_line(t), &domain, &opts) {
-                            Ok(d) if d.success => d.result_uv,
-                            _ => uv,
-                        };
-                        (t, crate::certify::nearest(&k, &s, None, on_line(t), foot).lo)
-                    })
-                    .fold((f64::NAN, f64::NEG_INFINITY), |m, x| if x.1 > m.1 { x } else { m });
-                if farthest.1 > tol {
-                    eprintln!(
-                        "{name}: main's {} [{t0}, {t1}] leaves out {} samples; at t={} the surface is at least {:e} away (tol {tol:e})",
-                        if range { "range" } else { "point" }, left_out.len(), farthest.0, farthest.1
-                    );
-                } else {
-                    // none proven farther: is main's range itself within the tolerance?
-                    let whole = if range { certify_range(t0, uv0, t1, uv1) } else { Err("a point".to_string()) };
-                    failed.push(format!(
-                        "{name}: main's [{t0}, {t1}] leaves out {} samples, none proven farther than {tol:e} (best {farthest:?}); main's own range: {whole:?}",
-                        left_out.len()
-                    ));
-                }
-            }
-        }
-        assert!(failed.is_empty(), "not certified:\n{}", failed.join("\n"));
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]

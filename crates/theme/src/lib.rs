@@ -45,9 +45,9 @@ thread_local! {
     /// The 3D view's own dark or light when Preferences give it one ([`ViewportTheme`], #4146),
     /// per thread like the rest. `None`: the view is as dark as the window.
     static VIEWPORT_DARK: Cell<Option<bool>> = const { Cell::new(None) };
-    /// The 3D view's background colour when Preferences give it one (#7688), per thread like the
+    /// The 3D view's background when Preferences give it one (#7688, #9230), per thread like the
     /// rest. `None`: the theme's gradient.
-    static VIEWPORT_BACKGROUND: Cell<Option<[u8; 3]>> = const { Cell::new(None) };
+    static VIEWPORT_BACKGROUND: Cell<Option<ViewBackground>> = const { Cell::new(None) };
     /// The last published frame, guarded by every palette input so another app/context cannot
     /// reuse it after changing the thread's theme. Resolution/fade state lives in that context.
     static PUBLISHED: Cell<Option<PublishedTab>> = const { Cell::new(None) };
@@ -62,7 +62,7 @@ pub struct Environment {
     pub logo: bool,
     pub accent: Option<Color32>,
     pub viewport: Option<bool>,
-    pub background: Option<[u8; 3]>,
+    pub background: Option<ViewBackground>,
 }
 
 impl Environment {
@@ -665,6 +665,46 @@ pub fn panel_fallback_tokens(mut authored: Tokens) -> Tokens {
     authored
 }
 
+/// Keep a theme's panel colours and lift only the canonical panel inks that miss
+/// 4.5:1 on any of the given opaque `fills`. A failing ink moves toward the
+/// theme's own primary text first, so it keeps the theme's hue, and toward
+/// white or black (trying both) only when the primary text is not readable either. Inks
+/// that already pass, and translucent inks, stay as authored; a pair that
+/// still fails is left for [`panel_fallback_tokens`].
+pub fn panel_readable_inks(mut tokens: Tokens, fills: &[Color32]) -> Tokens {
+    let fills: Vec<Color32> = fills.iter().map(|fill| fill.to_opaque()).collect();
+    let Some(first) = fills.first().copied() else {
+        return tokens;
+    };
+    let passes = |ink: Color32| fills.iter().all(|fill| contrast_ratio(ink, *fill) >= 4.5);
+    // The nearer pole first; fills of different lightness may need the other one.
+    let (pole, other) = if panel_luminance(first) < 0.18 { (Color32::WHITE, Color32::BLACK) } else { (Color32::BLACK, Color32::WHITE) };
+    let primary = if tokens.text.a() == 255 && passes(tokens.text) { tokens.text } else { pole };
+    let lift = |ink: Color32| -> Color32 {
+        if ink.a() != 255 || passes(ink) {
+            return ink;
+        }
+        // Walk toward the primary ink, then toward each pole, in small steps,
+        // and keep the first colour that reads on every fill.
+        for target in [primary, pole, other] {
+            for step in 1..=64_u16 {
+                let mix = |a: u8, b: u8| ((u16::from(a) * (64 - step) + u16::from(b) * step + 32) / 64) as u8;
+                let candidate = Color32::from_rgb(mix(ink.r(), target.r()), mix(ink.g(), target.g()), mix(ink.b(), target.b()));
+                if passes(candidate) {
+                    return candidate;
+                }
+            }
+        }
+        ink
+    };
+    tokens.text = lift(tokens.text);
+    tokens.text_dim = lift(tokens.text_dim);
+    tokens.form_ink = lift(tokens.form_ink);
+    tokens.form_dim = lift(tokens.form_dim);
+    tokens.dialog_label = lift(tokens.dialog_label);
+    tokens
+}
+
 /// Raise a captured panel fill to the first quantized alpha that protects all
 /// canonical inks. None reports an authored pair that fails at full opacity.
 pub fn panel_surface_fill(fill: Color32, tokens: &Tokens, requested: f32) -> Option<Color32> {
@@ -855,8 +895,25 @@ pub fn viewport_dark() -> bool {
     VIEWPORT_DARK.get().unwrap_or_else(is_dark)
 }
 
-/// The 3D view's own background colour, or `None` for the theme's gradient (#7688).
-pub fn viewport_background() -> Option<[u8; 3]> {
+/// The 3D view's background of the user's own (Preferences › Interface › Background): top to
+/// bottom, with an optional colour halfway. Top and bottom alike are one colour (#7688), different
+/// ones a gradient (#9230).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ViewBackground {
+    pub top: [u8; 3],
+    pub middle: Option<[u8; 3]>,
+    pub bottom: [u8; 3],
+}
+
+impl ViewBackground {
+    /// One colour over the whole view.
+    pub fn flat(colour: [u8; 3]) -> Self {
+        Self { top: colour, middle: None, bottom: colour }
+    }
+}
+
+/// The 3D view's own background, or `None` for the theme's gradient (#7688, #9230).
+pub fn viewport_background() -> Option<ViewBackground> {
     VIEWPORT_BACKGROUND.get()
 }
 
@@ -869,6 +926,38 @@ pub fn set_published(published: Option<PublishedTab>) {
 /// this cached policy; it must retain its existing scene backplate when the option is absent/off.
 pub fn tab_surfaces_enabled() -> bool {
     PUBLISHED.get().is_some_and(|p| p.environment == Environment::current() && p.tab_surfaces)
+}
+
+/// A kind of line on a drawing sheet that has its own screen colour (#18989): its place in
+/// [`Tokens::paper_lines`] and [`Tokens::paper_dark_lines`]. The visible edges are the sheet's ink.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PaperLine {
+    /// Hidden lines.
+    Hidden,
+    /// Centre lines and centre marks.
+    Centre,
+    /// Dimension lines, extension lines and arrows.
+    Dimension,
+    /// Dimension text.
+    DimensionText,
+    /// Note text and leaders.
+    Note,
+}
+
+impl PaperLine {
+    /// Every kind, in the order of the sets.
+    pub const ALL: [PaperLine; 5] = [PaperLine::Hidden, PaperLine::Centre, PaperLine::Dimension, PaperLine::DimensionText, PaperLine::Note];
+
+    /// Its place in a set ([`Tokens::paper_lines`]).
+    pub const fn index(self) -> usize {
+        self as usize
+    }
+
+    /// Whether it is text, which needs more contrast with its paper than a line (WCAG 1.4.3 and
+    /// 1.4.11).
+    pub const fn is_text(self) -> bool {
+        matches!(self, PaperLine::DimensionText | PaperLine::Note)
+    }
 }
 
 /// Colour vision modes (#778): a second set of values for the colours that carry a meaning, for
@@ -1155,6 +1244,9 @@ pub struct Tokens {
     /// Hovered edge: dark core with a light halo.
     pub hover_edge: Color32,
     pub hover_edge_halo: Color32,
+    /// A hovered edge in Fillet and Chamfer, whose edge input also takes faces (Preferences ›
+    /// Graphics): a colour none of the model's edges have, so the edge a click takes stands out.
+    pub hover_edge_lit: Color32,
     /// How much lighter a hovered face is (grey levels).
     pub hover_face_lift: u8,
     /// Selected profile fill and outline.
@@ -1210,6 +1302,8 @@ pub struct Tokens {
     /// Viewport background (top and bottom of the gradient; equal for a flat fill).
     pub viewport_top: Color32,
     pub viewport_bottom: Color32,
+    /// A colour halfway down the viewport's gradient, the user's own (#9230). Themes have none.
+    pub viewport_middle: Option<Color32>,
     pub grid: Color32,
     pub grid_major: Color32,
     /// A whole selected body.
@@ -1348,6 +1442,15 @@ pub struct Tokens {
     pub paper_prussian_blue_ink: Color32,
     pub paper_dark: Color32,
     pub paper_dark_ink: Color32,
+    /// Colours for each kind of line on a drawing sheet, beside its ink (which draws the visible
+    /// edges), in [`PaperLine`] order (#18989): on a white sheet (also the print colours) and on a
+    /// dark one. A blueprint or Prussian blue sheet keeps its one white ink, as a real blueprint
+    /// does. Each colour stays apart from the others and from the ink for normal vision and for
+    /// every colour vision mode, so no mode changes them, and reads on its paper (WCAG: 3:1 for a
+    /// line, 4.5:1 for text). The line types still carry the meaning: a colour is extra help (D26
+    /// of #13159).
+    pub paper_lines: [Color32; 5],
+    pub paper_dark_lines: [Color32; 5],
     /// Interference: the clash fill, before its shading.
     pub interference: Color32,
     /// Curvature Comb: the envelope through the teeth tips (purple) and the teeth, the scaled
@@ -1527,13 +1630,18 @@ impl Tokens {
         if let Some(inset) = &mut self.borders.primary_inset {
             adjust(&mut inset.stroke.color);
         }
+        if let Some(middle) = &mut self.viewport_middle {
+            adjust(middle);
+        }
     }
 
-    /// These tokens with the 3D view's background one flat colour (#7688), or as they are for `None`.
-    pub fn with_background(mut self, colour: Option<[u8; 3]>) -> Tokens {
-        if let Some([r, g, b]) = colour {
+    /// These tokens with the 3D view's background the user's own: one flat colour (#7688) or a
+    /// gradient, with or without a colour halfway (#9230). As they are for `None`.
+    pub fn with_background(mut self, background: Option<ViewBackground>) -> Tokens {
+        if let Some(ViewBackground { top: [r, g, b], middle, bottom: [r2, g2, b2] }) = background {
             self.viewport_top = Color32::from_rgb(r, g, b);
-            self.viewport_bottom = self.viewport_top;
+            self.viewport_middle = middle.map(|[r, g, b]| Color32::from_rgb(r, g, b));
+            self.viewport_bottom = Color32::from_rgb(r2, g2, b2);
         }
         self
     }
@@ -1550,6 +1658,7 @@ impl Tokens {
             sel_edge_rim: view.sel_edge_rim,
             hover_edge: view.hover_edge,
             hover_edge_halo: view.hover_edge_halo,
+            hover_edge_lit: view.hover_edge_lit,
             hover_face_lift: view.hover_face_lift,
             sel_profile: view.sel_profile,
             sel_profile_edge: view.sel_profile_edge,
@@ -1580,6 +1689,7 @@ impl Tokens {
             navigator_text: view.navigator_text,
             navigator_hover: view.navigator_hover,
             viewport_top: view.viewport_top,
+            viewport_middle: view.viewport_middle,
             viewport_bottom: view.viewport_bottom,
             grid: view.grid,
             grid_major: view.grid_major,
@@ -1719,9 +1829,9 @@ pub fn set_viewport_dark(dark: Option<bool>) {
     VIEWPORT_DARK.set(dark);
 }
 
-/// Give the 3D view a background colour of its own (#7688), or `None` for the theme's gradient.
-pub fn set_viewport_background(colour: Option<[u8; 3]>) {
-    VIEWPORT_BACKGROUND.set(colour);
+/// Give the 3D view a background of its own (#7688, #9230), or `None` for the theme's gradient.
+pub fn set_viewport_background(background: Option<ViewBackground>) {
+    VIEWPORT_BACKGROUND.set(background);
 }
 
 fn visuals(dark: bool) -> egui::Visuals {
@@ -1801,6 +1911,50 @@ mod tests {
                 assert!(ratio >= 1.5, "isoparm {ratio:.2} on the viewport background {background:?}");
             }
         }
+    }
+
+    /// Each kind of line on a drawing sheet (#18989) reads on its paper in both bases and every
+    /// colour vision mode (WCAG: 3:1 for a line, 4.5:1 for text), as the sheet's ink does, and no
+    /// mode changes them: they are measured apart for every eye in `colour_vision_tests`.
+    #[test]
+    fn each_kind_of_sheet_line_reads_on_its_paper() {
+        for dark in [false, true] {
+            for mode in ColorVision::ALL {
+                let t = Tokens::themed(dark, mode);
+                let sheets = [("white", t.paper_white, t.paper_ink, t.paper_lines), ("dark", t.paper_dark, t.paper_dark_ink, t.paper_dark_lines)];
+                for (sheet, paper, ink, lines) in sheets {
+                    assert!(contrast_ratio(ink, paper) >= 4.5, "{sheet}: the ink");
+                    for kind in PaperLine::ALL {
+                        let colour = lines[kind.index()];
+                        let (ratio, least) = (contrast_ratio(colour, paper), if kind.is_text() { 4.5 } else { 3.0 });
+                        assert!(colour.a() == 255 && ratio >= least, "{sheet}, dark {dark}, {mode:?}: {kind:?} {ratio:.2} < {least}");
+                    }
+                }
+                let base = if dark { Tokens::dark() } else { Tokens::light() };
+                assert_eq!([t.paper_lines, t.paper_dark_lines], [base.paper_lines, base.paper_dark_lines], "{mode:?} leaves them as they are");
+            }
+        }
+        assert_eq!(PaperLine::ALL.map(PaperLine::index), [0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn panel_readable_inks_try_the_other_pole_when_the_nearer_one_cannot_pass_every_fill() {
+        let mut tokens = Tokens::dark();
+        let grey = Color32::from_gray(128);
+        tokens.text = grey;
+        tokens.text_dim = grey;
+        tokens.form_ink = grey;
+        tokens.form_dim = grey;
+        tokens.dialog_label = grey;
+        let fills = [Color32::from_gray(117), Color32::from_gray(120)];
+        let lifted = panel_readable_inks(tokens, &fills);
+        for ink in [lifted.text, lifted.text_dim, lifted.form_ink, lifted.form_dim, lifted.dialog_label] {
+            for fill in fills {
+                assert!(contrast_ratio(ink, fill) >= 4.5, "{ink:?} on {fill:?}");
+            }
+        }
+        let passing = panel_readable_inks(Tokens::dark(), &[Tokens::dark().panel]);
+        assert_eq!(passing.text, Tokens::dark().text, "a readable ink stays as authored");
     }
 
     #[test]

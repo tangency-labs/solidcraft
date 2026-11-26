@@ -8,7 +8,7 @@ no plugin code.
 
 | Item | Purpose |
 |---|---|
-| `PluginHost` | App command catalog and execution, transactions, file authorization, logging, progress and cancellation |
+| `PluginHost` | App command catalog and execution, transactions, file authorization, optional per-user settings, logging, progress and cancellation |
 | `CommandSchema`, `Effect` | Command input/output schemas and read/edit effects |
 | `Manifest`, `RuntimeManifest`, `Entry`, `UiSlot` | Package metadata, executable entries, declared inputs and placement preferences |
 | `parse_manifest`, `valid_id` | Bounded parsing and validation; package ids must match folder names |
@@ -36,12 +36,31 @@ succeeds and the app commits. File publication after app commit is not atomic ac
 multiple targets; a publication failure can leave files changed. These contracts do not
 promise atomic rollback of all external effects.
 
+The additive `user-storage@0.1` capability exposes `user-storage` in the current command
+world and the additive `importer-plugin-with-storage` world in `craft:plugin@0.2.0`. The
+existing `importer-plugin` world is unchanged, so existing importers keep loading and running.
+Importers request `user-storage@0.1` alongside `formats@0.2`; importing the interface without
+the manifest capability grants no access. `PluginHost::user_storage_get/set/remove/list` default
+to refusal, so existing hosts still compile. Hosts that implement them authenticate the calling
+plugin, keep JSON values outside designs, and stage changes until commit. Importers can read
+during an import, but staged writes commit only after the host validates and accepts
+the successful import. Failed or cancelled imports, including invalid output designs, discard
+all staged settings. `check_user_storage` enforces 128 keys and 64 KiB for the entire compact
+JSON map; `check_user_storage_key` enforces 1–128 UTF-8 bytes
+without control characters. The app chooses the per-user location and removal policy.
+Importer settings share the calling plugin's store, budgets and removal policy with its command
+entries. Settings writes are external effects and do not add design undo steps.
+
 ## Limits and permissions
 
-Invocation defaults are 10,000,000 fuel, 64 MiB memory and a 5000 ms deadline.
-`HostLimits` defaults to 100,000,000,000 fuel and 128 MiB. Callers must check requested
-budgets against their ceilings before execution. Fuel must be positive, memory is
-1..4096 MiB and the deadline is 1..30000 ms. Manifests are capped at 64 KiB.
+Invocation defaults are 10,000,000 fuel, 64 MiB memory, 256 host calls and a 5000 ms
+guest compute deadline. Existing limits objects may omit `host_calls` to retain 256.
+`HostLimits` defaults to 100,000,000,000 fuel, 128 MiB, 256 host calls and a 30000 ms
+command deadline ceiling. The app retains the 600000 ms default importer ceiling.
+Callers must check requested budgets against their ceilings before execution. Fuel,
+host calls and deadline milliseconds are positive `u64` values; memory is 1..4096 MiB.
+Larger declarations require raised host ceilings and renewed content approval.
+Manifests are capped at 64 KiB.
 
 Commands are exact ids, intersected with the app catalog. A catalog command may carry a
 sensitive `group`; the guest calls it only when `permissions.command_groups` requests the

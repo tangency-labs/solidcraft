@@ -5,9 +5,10 @@ use solidcraft_geom::prelude::*;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashSet};
 
+use solidcore_record::frame::{PieceData, Segment};
 use solidcore_record::{Plane, Region2, Vec2, Vec3};
 use solidcraft_kernel as kernel;
-use solidcraft_kernel::services::frame_member as stock;
+use solidcraft_kernel::{PathFailure, PathRefusal};
 use solidcraft_sketch::CurveKind;
 
 use super::{ModelBody, ModelState, SolvedSketch, new_name, path_in_frame, sketch_in_feature_frame};
@@ -36,9 +37,15 @@ pub(super) fn uses(st: &ModelState, kind: &FeatureKind) -> Result<bool> {
 /// Path stock has no straight corner/cut model yet. Refuse saved settings too;
 /// none of the ordinary finishing options may silently disappear on this route.
 fn check_options(kind: &FeatureKind) -> Result<()> {
-    let FeatureKind::FrameMember { corner, corners, fit_ends, coped, flip, gap, continuous, pairs, groups, .. } = kind else {
+    let FeatureKind::FrameMember { corner, corners, fit_ends, coped, flip, gap, continuous, pairs, groups, up, .. } = kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
+    if !up.is_z() {
+        return Err(DocError::Invalid(
+            "not supported yet: curved or continuous members take world Z as up; use separate Frame Members for straight lines with another up axis"
+                .into(),
+        ));
+    }
     if !groups.is_empty() {
         return Err(DocError::Invalid(
             "not supported yet: curved or continuous members cannot be combined with groups; use separate Frame Members".into(),
@@ -67,9 +74,9 @@ pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
     for (id, path) in ids.iter().zip(&paths) {
         let first = path.first().ok_or_else(|| DocError::Invalid("a member path is empty".into()))?;
         let body = if let [piece] = path.as_slice()
-            && let Some(length) = piece.geometry.line_length().map_err(|e| path_error(path, e))?
+            && let Some(length) = kernel::stock_line_length(&piece.geometry).map_err(|e| path_error(path, e))?
         {
-            let data = piece.geometry.data();
+            let data = piece.geometry;
             let plane = member_plane(data.a, data.b, turn, at, centre, turns.get(id).copied())
                 .ok_or_else(|| DocError::Invalid(format!("line `{id}`: no plane square to it")))?;
             let mut bodies = kernel::extrude(&plane, &regions, 0.0, length)?;
@@ -78,10 +85,10 @@ pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
                 _ => return Err(DocError::Invalid("the member is not one solid".into())),
             }
         } else {
-            let plane = stock::section_plane(&first.geometry, at, turn).map_err(|e| path_error(path, e))?;
+            let plane = kernel::stock_section_plane(&first.geometry, at, turn).map_err(|e| path_error(path, e))?;
             let region = regions.first().ok_or_else(|| DocError::Invalid("the member profile has no area".into()))?;
             let geometry: Vec<_> = path.iter().map(|p| p.geometry).collect();
-            stock::check_bend_clearance(&geometry, region, at, turn).map_err(|e| path_error(path, e))?;
+            kernel::check_bend_clearance(&geometry, region, at, turn).map_err(|e| path_error(path, e))?;
             kernel::sweep(&plane, region, &path.iter().map(path_segment).collect::<Vec<_>>())?
         };
         made.push(crate::lineage::numbered_tool(body));
@@ -123,7 +130,7 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mode
         if ps.sketch.wires.is_empty() { Cow::Owned(sketch_in_feature_frame(doc, ps, f.component)?) } else { path_in_frame(doc, ps, f.component)? };
     let mut paths = member_paths(mapped.as_ref(), lines, *continuous)?;
     for (id, a, b) in super::pair_lines(doc, vals, f, st, pairs)? {
-        let geometry = stock::line(a, b).map_err(|e| DocError::Invalid(format!("pair `{id}`: {e}")))?;
+        let geometry = kernel::stock_line(a, b).map_err(|e| DocError::Invalid(format!("pair `{id}`: {e}")))?;
         paths.push(vec![Piece { id, geometry }]);
     }
     let ids = path_keys(&paths, *continuous);
@@ -136,11 +143,11 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mode
 }
 
 fn member_plane(a: Vec3, b: Vec3, turn: f64, at: Vec2, centre: Vec2, own: Option<f64>) -> Option<Plane> {
-    let (x, y) = frame::member_axes(b - a, turn)?;
+    let (x, y) = frame::member_axes(b - a, turn, frame::UpAxis::Z)?;
     let origin = a - x * at.x - y * at.y;
     let Some(t) = own else { return Plane::new(origin, x, y) };
     let pivot = origin + x * centre.x + y * centre.y;
-    let (x, y) = frame::member_axes(b - a, turn + t.rem_euclid(std::f64::consts::TAU))?;
+    let (x, y) = frame::member_axes(b - a, turn + t.rem_euclid(std::f64::consts::TAU), frame::UpAxis::Z)?;
     Plane::new(pivot - x * centre.x - y * centre.y, x, y)
 }
 
@@ -164,12 +171,10 @@ pub(super) fn member_section(
     let [piece] = path.as_slice() else {
         return Err(DocError::Invalid("not supported yet: end caps on curved frame members".into()));
     };
-    let length = piece
-        .geometry
-        .line_length()
+    let length = kernel::stock_line_length(&piece.geometry)
         .map_err(|e| path_error(path, e))?
         .ok_or_else(|| DocError::Invalid("not supported yet: end caps on curved frame members".into()))?;
-    let data = piece.geometry.data();
+    let data = piece.geometry;
     let plane = member_plane(data.a, data.b, turn, at, centre, turns.get(line).copied())
         .ok_or_else(|| DocError::Invalid(format!("line `{line}`: no plane square to it")))?;
     let region = regions.into_iter().next().ok_or_else(|| DocError::Invalid("the member profile has no area".into()))?;
@@ -190,10 +195,10 @@ pub(super) fn member_pivot(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
     let [piece] = path.as_slice() else {
         return Err(DocError::Invalid("not supported yet: rotation on curved frame members".into()));
     };
-    if piece.geometry.line_length().map_err(|e| path_error(path, e))?.is_none() {
+    if kernel::stock_line_length(&piece.geometry).map_err(|e| path_error(path, e))?.is_none() {
         return Err(DocError::Invalid("not supported yet: rotation on curved frame members".into()));
     }
-    let data = piece.geometry.data();
+    let data = piece.geometry;
     let plane =
         member_plane(data.a, data.b, turn, at, centre, None).ok_or_else(|| DocError::Invalid(format!("line `{line}`: no plane square to it")))?;
     Ok(plane.origin + plane.x * centre.x + plane.y * centre.y + (data.b - data.a) * 0.5)
@@ -227,7 +232,7 @@ pub(super) fn member_segments(doc: &Document, st: &ModelState, f: &Feature) -> R
         .into_iter()
         .zip(paths)
         .filter_map(|(id, path)| {
-            let (a, b) = (path.first()?.geometry.data().a, path.last()?.geometry.data().b);
+            let (a, b) = (path.first()?.geometry.a, path.last()?.geometry.b);
             Some((id, crate::apply_point(&transform, a), crate::apply_point(&transform, b)))
         })
         .collect())
@@ -242,28 +247,28 @@ fn path_keys(paths: &[Vec<Piece>], continuous: bool) -> Vec<String> {
 /// A sketch identity paired with exact geometry validated and prepared by solidcore.
 struct Piece {
     id: String,
-    geometry: stock::Piece,
+    geometry: PieceData,
 }
 
 /// Convert the prepared segment to the existing sweep boundary, field for field.
 fn path_segment(piece: &Piece) -> kernel::PathSeg {
-    match piece.geometry.data().segment {
-        stock::Segment::Line { a, b } => kernel::PathSeg::Line { a, b },
-        stock::Segment::Arc { a, center, axis, angle } => kernel::PathSeg::Arc { a, center, axis, angle },
+    match piece.geometry.segment {
+        Segment::Line { a, b } => kernel::PathSeg::Line { a, b },
+        Segment::Arc { a, center, axis, angle } => kernel::PathSeg::Arc { a, center, axis, angle },
     }
 }
 
 /// Name the sketch curve a path refusal points at, so the user can find the bad pick.
-fn path_error(path: &[Piece], e: stock::Failure) -> DocError {
+fn path_error(path: &[Piece], e: PathFailure) -> DocError {
     let id = |i: usize| path.get(i).map_or("?", |p| p.id.as_str());
     let message = match e {
-        stock::Failure::Geometry(stock::Refusal::Connection(i)) => {
+        PathFailure::Refused { why: PathRefusal::Connection(i), .. } => {
             format!("continuous member: `{}` is not connected end to end in path order; pick the curves in order along the path", id(i))
         }
-        stock::Failure::Geometry(stock::Refusal::Tangency(i)) => {
+        PathFailure::Refused { why: PathRefusal::Tangency(i), .. } => {
             format!("continuous member: `{}` is not tangent to the previous curve; draw a bend arc", id(i))
         }
-        stock::Failure::Geometry(stock::Refusal::Bend(i)) => format!("arc `{}`: the bend radius is too small for the anchored profile", id(i)),
+        PathFailure::Refused { why: PathRefusal::Bend(i), .. } => format!("arc `{}`: the bend radius is too small for the anchored profile", id(i)),
         e => e.to_string(),
     };
     DocError::Invalid(message)
@@ -275,7 +280,8 @@ fn curve_piece(ss: &SolvedSketch, id: &str) -> Result<Piece> {
     let sk = &ss.sketch;
     let geometry = if let Some(w) = sk.wire_index(id).and_then(|i| sk.wires.get(i)) {
         if let Some(arc) = w.arc {
-            stock::spatial_arc(arc.start, arc.end, arc.center, arc.normal, arc.radius).map_err(|e| DocError::Invalid(format!("arc `{id}`: {e}")))?
+            kernel::stock_spatial_arc(arc.start, arc.end, arc.center, arc.normal, arc.radius)
+                .map_err(|e| DocError::Invalid(format!("arc `{id}`: {e}")))?
         } else if let Some(line) = wire_line(w)? {
             line
         } else {
@@ -289,7 +295,7 @@ fn curve_piece(ss: &SolvedSketch, id: &str) -> Result<Piece> {
         let [segment] = segments.as_slice() else {
             return Err(DocError::Invalid(format!("not supported yet: `{id}` must be a straight line or an open circular arc")));
         };
-        stock::planar(&ss.plane, segment).map_err(|e| DocError::Invalid(format!("curve `{id}`: {e}")))?
+        kernel::stock_planar(&ss.plane, segment).map_err(|e| DocError::Invalid(format!("curve `{id}`: {e}")))?
     } else {
         return Err(DocError::Unknown(format!("path curve `{id}` in {}", ss.name)));
     };
@@ -320,7 +326,7 @@ fn member_paths(ss: &SolvedSketch, ids: &[String], continuous: bool) -> Result<V
         return Ok(pieces.into_iter().map(|p| vec![p]).collect());
     }
     let mut geometry: Vec<_> = pieces.iter().map(|p| p.geometry).collect();
-    stock::orient(&mut geometry).map_err(|e| path_error(&pieces, e))?;
+    kernel::orient_stock(&mut geometry).map_err(|e| path_error(&pieces, e))?;
     for (p, geometry) in pieces.iter_mut().zip(geometry) {
         p.geometry = geometry;
     }
@@ -335,9 +341,9 @@ fn default_member_lines(ss: &SolvedSketch) -> Result<Vec<Piece>> {
         if !c.construction && !c.centerline && c.link.is_none() && matches!(c.kind, CurveKind::Line { .. }) {
             let segments = sk.segs(ci);
             if let [segment] = segments.as_slice() {
-                match stock::planar(&ss.plane, segment) {
+                match kernel::stock_planar(&ss.plane, segment) {
                     Ok(geometry) => out.push(Piece { id: c.id.clone(), geometry }),
-                    Err(stock::Failure::Geometry(stock::Refusal::Line)) => {}
+                    Err(PathFailure::Refused { why: PathRefusal::Line, .. }) => {}
                     Err(e) => return Err(path_error(&[], e)),
                 }
             }
@@ -358,7 +364,7 @@ fn default_member_lines(ss: &SolvedSketch) -> Result<Vec<Piece>> {
 }
 
 /// A drawn line's defining points, or one linked exact line on its retained interval.
-pub(super) fn wire_line(w: &solidcraft_sketch::Wire) -> Result<Option<stock::Piece>> {
+pub(super) fn wire_line(w: &solidcraft_sketch::Wire) -> Result<Option<PieceData>> {
     if w.arc.is_some() {
         return Ok(None);
     }
@@ -366,15 +372,45 @@ pub(super) fn wire_line(w: &solidcraft_sketch::Wire) -> Result<Option<stock::Pie
         && w.exact.is_empty()
         && let [a, b] = w.fit.as_slice()
     {
-        stock::line(*a, *b)
+        kernel::stock_line(*a, *b)
     } else if let [solidcraft_sketch::WireCurve { curve: solidcore_record::brep::Curve::Line { start, end }, interval }] = w.exact.as_slice() {
-        stock::retained_line(Vec3::from(*start), Vec3::from(*end), *interval)
+        kernel::stock_retained_line(Vec3::from(*start), Vec3::from(*end), *interval)
     } else {
         return Ok(None);
     };
     match line {
         Ok(line) => Ok(Some(line)),
-        Err(stock::Failure::Geometry(stock::Refusal::Line)) => Ok(None),
+        Err(PathFailure::Refused { why: PathRefusal::Line, .. }) => Ok(None),
         Err(e) => Err(path_error(&[], e)),
     }
+}
+
+/// Retained end datums for the same ordered physical paths this module emitted.
+/// The caller certifies only final bodies of structurally pristine frames.
+pub(super) fn cope_records(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &ModelState,
+) -> Result<BTreeMap<String, crate::frame_cope::RoundMember>> {
+    let FeatureKind::FrameMember { profile, continuous, .. } = &f.kind else {
+        return Err(DocError::Invalid("not a frame member feature".into()));
+    };
+    let Layout { paths, at, turn, .. } = layout(doc, vals, f, st)?;
+    let mut records = BTreeMap::new();
+    for (id, path) in path_keys(&paths, *continuous).into_iter().zip(paths) {
+        let straight_frame = if let [piece] = path.as_slice()
+            && kernel::stock_line_length(&piece.geometry).map_err(|e| path_error(&path, e))?.is_some()
+        {
+            let (plane, length, _, _) = member_section(doc, vals, f, st, &id)?;
+            Some((plane, length))
+        } else {
+            None
+        };
+        let geometry: Vec<_> = path.iter().map(|p| p.geometry).collect();
+        if let Some(record) = super::round_record(vals, profile, at, turn, &geometry, straight_frame)? {
+            records.insert(id, record);
+        }
+    }
+    Ok(records)
 }
