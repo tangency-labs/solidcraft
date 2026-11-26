@@ -2509,7 +2509,7 @@ fn export_from_a_selected_browser_body_includes_all_selected_bodies() {
 fn appearance_parent_click_opens_editor_after_hovering_quick_choices() {
     use crate::scenario::{Harness, rect_of};
     let mut h = Harness::new();
-    h.app = sample_app();
+    *h.app = sample_app();
     let name = body(&h.app);
     h.frames(3);
     context_menu::open_for(&mut h.app, pos2(400.0, 180.0), Target::Body { name: name.clone() });
@@ -2530,7 +2530,7 @@ fn appearance_parent_click_opens_editor_after_hovering_quick_choices() {
 fn appearance_hovered_quick_choice_applies_without_opening_editor() {
     use crate::scenario::Harness;
     let mut h = Harness::new();
-    h.app = sample_app();
+    *h.app = sample_app();
     let name = body(&h.app);
     let rows = context_menu::items(&h.app, &Target::Body { name: name.clone() });
     let appearance = find(&rows, "Appearance");
@@ -2551,7 +2551,7 @@ fn appearance_hovered_quick_choice_applies_without_opening_editor() {
 fn appearance_submenu_keyboard_opens_beside_parent_and_left_returns_to_it() {
     use crate::scenario::{Harness, rect_of};
     let mut h = Harness::new();
-    h.app = sample_app();
+    *h.app = sample_app();
     h.frames(3);
     let target = Target::Body { name: body(&h.app) };
     let rows = context_menu::items(&h.app, &target);
@@ -2577,7 +2577,7 @@ fn appearance_submenu_keyboard_opens_beside_parent_and_left_returns_to_it() {
 fn appearance_submenu_closes_when_the_pointer_moves_to_another_row() {
     use crate::scenario::{Harness, rect_of};
     let mut h = Harness::new();
-    h.app = sample_app();
+    *h.app = sample_app();
     h.frames(3);
     let target = Target::Body { name: body(&h.app) };
     let rows = context_menu::items(&h.app, &target);
@@ -2626,7 +2626,7 @@ fn only_one_row_is_lit_while_a_flyout_is_closing() {
             .collect()
     }
     let mut h = Harness::new();
-    h.app = sample_app();
+    *h.app = sample_app();
     h.frames(3);
     let target = Target::Body { name: body(&h.app) };
     let rows = context_menu::items(&h.app, &target);
@@ -2660,7 +2660,7 @@ fn only_one_row_is_lit_while_a_flyout_is_closing() {
 /// open in a harness with the pointer on the menu.
 fn component_menu() -> (crate::scenario::Harness, u64) {
     let mut h = crate::scenario::Harness::new();
-    h.app = sample_app();
+    *h.app = sample_app();
     let b = body(&h.app);
     h.app.run("component.from_bodies", json!({"bodies": [b]})).unwrap();
     let c = h.app.session.doc.components[0].id;
@@ -3105,6 +3105,75 @@ fn the_history_bar_feature_menu_is_reported_and_picked() {
     }
     h.frames(2);
     assert!(h.app.session.doc.feature(id).is_none(), "the features after the marker are deleted");
+}
+
+#[test]
+fn control_polygon_menu_makes_the_spline_sides_pickable() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    let spline =
+        h.app.run("sketch.spline.control_point", json!({"points":[[0,0],[0,60],[80,60],[80,0]]})).unwrap()["curves"][0].as_str().unwrap().to_owned();
+    h.app.session.selection = vec![solidcraft_engine::Sel::SketchCurve { id: spline.clone(), sketch: None }];
+    let item = context_menu::items(&h.app, &Target::Viewport)
+        .into_iter()
+        .find(|item| item.id == "sketch.spline.control_polygon")
+        .expect("the spline offers Add Control Polygon");
+    context_menu::run_item(&mut h.app, &item, pos2(400.0, 300.0));
+    let st = h.app.session.model.state();
+    let side = st
+        .sketch(sketch)
+        .unwrap()
+        .sketch
+        .curves
+        .iter()
+        .filter(|curve| curve.spline_control_polygon_of.as_deref() == Some(spline.as_str()))
+        .nth(1)
+        .unwrap()
+        .id
+        .clone();
+    h.app.session.selection.clear();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.frames(3);
+    h.step(&json!({"click":{"sketch":[25,60]}})).unwrap();
+    assert!(
+        h.app.session.selection.iter().any(|item| matches!(item, solidcraft_engine::Sel::SketchCurve { id, .. } if id == &side)),
+        "{:?}",
+        h.app.session.selection
+    );
+}
+
+#[test]
+fn drawn_control_polygon_uses_the_palette_checkbox() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.options", json!({"snap":false})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.spline.control_point"})).unwrap();
+    for point in [[0, 0], [0, 30], [40, 30], [40, 0]] {
+        h.step(&json!({"click":{"sketch":point}})).unwrap();
+    }
+    h.step(&json!({"click":{"sketch":[40,0]},"button":"right"})).unwrap();
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.settle();
+    let check = |h: &crate::scenario::Harness, shown: bool| {
+        let state = h.app.session.model.state();
+        let sk = &state.sketch(sketch).unwrap().sketch;
+        let guides: Vec<_> = (0..sk.curves.len()).filter(|&index| sk.is_control_polygon_segment(index)).collect();
+        assert_eq!(guides.len(), 3);
+        assert_eq!(!sk.view.hide_control_polygons, shown);
+        assert!(guides.iter().all(|&index| solidcraft_engine::view::sketch_curve_visible(sk, index) == shown));
+    };
+    check(&h, true);
+    h.step(&json!({"click":{"handle":"sketch_palette:options_fold"}})).unwrap();
+    h.settle();
+    for shown in [false, true] {
+        h.step(&json!({"click":{"handle":"sketch_palette:toggle:show_control_polygons"}})).unwrap();
+        h.settle();
+        check(&h, shown);
+    }
 }
 
 /// A right-click menu taller than the window (a spline with stored tangent handles in a short

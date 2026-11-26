@@ -3,8 +3,8 @@
 Frames and weldments (#4003) are structural members (tube, angle, channel, beam, an aluminium
 extrusion of your own) laid along the lines of a frame sketch. This page covers what has landed:
 members and their profiles, corner cuts, the weld gap, end caps, mounting plates, bolted end plates,
-attached gusset plates, and trimming or extending to members, planes and faces.
-Welds and the cut list follow.
+attached gusset plates, trimming or extending to members, planes and faces, and retained round-tube
+copes with printable DXF templates. Welds and the cut list follow.
 
 ## The workflow
 
@@ -26,8 +26,93 @@ Welds and the cut list follow.
 {"command": "frame.member", "params": {"sketch": "Frame", "lines": ["l5", "l6"], "profile_sketch": "45x45 section", "anchor": "bottom_left", "angle": "90 deg"}}
 ```
 
+A run drawn as several lines end to end makes one member per line. To make it one member at its
+full length, select the lines in the sketch and use **Merge Lines** (SKETCH › MODIFY or the
+right-click menu, `sketch.merge_lines`, #20317). The first selected line keeps its id and runs the
+whole length. Its direction relations stay and the pieces' lengths go. A line ending between the
+pieces stays on the merged line. A Frame Member already built on the sketch names the merged line
+in place of the ones that went, and drops their names and corner overrides; a Rotate step on a
+line that went turns the merged member. Separate Frame Members on different lines of the run each
+name the merged line, so they overlap: delete the extra ones. Merge Lines takes lines of a 2D
+sketch; 3D sketch lines (`sketch.line3d`) are refused with `unknown curve`.
+
+```json
+{"command": "sketch.merge_lines", "params": {"curves": ["l1", "l2", "l3"]}}
+```
+
 Members are ordinary bodies: mirror, pattern, move, drill and combine them with the usual
 commands. Where members meet they overlap unless you choose a corner type (see Corners) or use Trim/Extend.
+
+## Round-tube cope templates
+
+`frame.cope` cuts a round-tube member to the **outside** of one or more straight mating round
+tubes. It fills the mating bores for the subtraction, so it removes the whole end stub instead
+of leaving disconnected material inside a mate. The target keeps its name and physical-member
+identity; the saved feature retains the member names and selected path end. Profile and path
+edits, rename, undo/redo and reopening reevaluate the same cut. Change the treatment with
+`timeline.redefine` and `command: "frame.cope"`.
+
+```json
+{"command":"frame.cope","params":{"member":"Rail","tools":["Post","Brace"],"end":"start","name":"Rail joint"}}
+{"command":"frame.export_cope_dxf","params":{"member":"Rail","end":"start","seam":"30 deg","tolerance":0.01,"path":"rail-start.dxf"}}
+```
+
+Both commands are available through the command registry, CLI, MCP and desktop control channel.
+They currently have no dedicated interactive dialog. `end` is required: `start` or `end` of the
+original ordered member path. Export omits `path` to return DXF text. It does not change the
+design or undo history; file output uses the scoped VFS and an atomic replacement, after the
+entire drawing has been validated.
+
+The template develops the **outer** cylindrical surface, with X from zero to `OD × π` and Y
+measured inward from the original stock end's section centre. Keep the material on the positive-Y side of
+`CUT_PROFILE`. Two copies of the seam terminate this open polyline; there is no closing segment
+across the sheet. `seam` is in radians, or an angle expression, from the member's effective
+section X, including Rotate Member on straight stock and transported frames through bends.
+Wrap direction follows the right-hand rule about the inward axial direction. At the
+far end the section Y is reversed, so the same convention still points into the stock. The
+reply and DXF notes identify the component, original endpoint, inward direction, seam radial
+direction, member and end. Coordinates and tolerances are **millimetres**, regardless of the
+design's display units. Print at **100%**, turn off fit-to-page and measure the 100 mm scale
+check before using the template. No kerf allowance is applied.
+
+For a member radius r and mate radius R, with axes meeting at the datum and joint angle a,
+write w = radial(theta) · mate_axis. The exit station is
+`(cos(a)*w + sqrt(w*w + sin(a)^2*(R*R-r*r))) / sin(a)^2`. The largest exit station among the
+mates selects the surviving side. Equal perpendicular tubes give `r * |cos(theta)|` when the
+mate lies along the section X. This is the same cylindrical envelope used by the solid cut.
+
+Sampling does not depend on viewport tessellation. Each exit function has the conservative
+derivative bound `L = r*(1+|cos(a)|)/sin(a)`; their maximum has the largest such bound, even at
+cusps and cutter switches. With angular step h, axial interpolation error is at most `L*h/2`
+and wrapped radial sag at most `r*h*h/8`. Each gets half the requested tolerance. The default is
+0.01 mm, allowed range 0.001–1 mm. Output is capped at 65,536 segments and 16 cutters; requests
+that exceed the bound fail before writing a file and suggest a larger tolerance.
+
+Supported stock is a built-in round-tube member with a straight cylindrical terminal. A straight
+member's datum follows its actual section centre, including an anchor offset and Rotate Member's
+turn about the profile centre. A target containing tangent bends must keep its round section
+centred on the path; its terminals use the transported frames. Mates must be straight round-tube members in
+the same component, at least the target OD. A mate may already be coped at its ends when the
+joint stays clear of those copes, so a brace can be coped after the rail it lands on. The
+reverse is not checked: coping a mate's end after another member was coped against it does not
+test whether that end cut reaches the earlier joint, so keep end cuts clear of joints. Their
+axes must meet at the selected endpoint (sketch roundoff up to 0.0000001 mm is snapped to that
+datum), with joint sine at least 0.001, and their caps must be clear of the cut. Conservative
+clearance bounds refuse a cutter that may also touch a bend or another portion of the target,
+and end cuts that may cross. Rectangular sections, off-axis joints, smaller mates, arc-only
+ends, modified/offset/transferred bodies, flattening bends and machine cutting programs are
+refused. Each refusal names the mate and the condition that failed, such as how far the end is
+from the mate's axis. Unsupported geometry never produces a nominal-stock template that could be
+mistaken for the actual cut. The fit, the reach of the cut and the template are computed by
+solidcore's `tube_cope` kernel module.
+
+Retained cope/export stock requires **Corner Type: None** (the default), no overrides, Fit Ends,
+Coped, Flip or explicit gap. Point-pair and mixed sketch/pair members keep their physical member
+identities under None. Auto and other corner/finishing modes still build normally, but their
+fitted, notched, split or otherwise finished bodies do not receive nominal-stock certificates;
+cope/export refuses them explicitly. An open-end hint or a display centreline is not proof of
+pristine stock. Saving, thinning and reopening a cache cannot restore a certificate for an
+ineligible source frame.
 
 The **Weldments** ribbon tab gathers the frame commands: New Sketch, Frame Member, End Cap,
 Mounting Plate, Gusset, Trim/Extend and Parameters. Like Sheet Metal it is always there, and it selects itself when a
@@ -44,6 +129,7 @@ frame member, end cap, mounting plate or gusset is the selected body (or the las
 Curved and continuous stock currently requires **Corner Type: None**, no corner overrides,
 Fit Ends, Coped, Flip or gap. Unsupported combinations are refused before changing the design.
 Curved and continuous members cannot yet be combined with multiple placement groups.
+They also take world Z as up: an **Up Axis** other than Z is refused for them.
 Separate curved members may share a plain None feature with point-pair members. Ordinary straight
 members and point pairs retain Auto, corner, fitting and gap behavior described below.
 - **Section (optional)**: pick the section's region in another sketch (the ring between two
@@ -52,8 +138,8 @@ members and point pairs retain Auto, corner, fitting and gap behavior described 
 - **Corner Type**, **Flip** and **Corner Overrides** cut the members where two of them meet, as
   under Corners below, and **Gap** leaves a weld gap at each welded end (see Multi-trim and the weld
   gap). A new Frame Member and the command both start on None.
-- **Anchor**, **Angle** and **Mirror** place the section on each line, as below. **Name** names
-  the members (default: after the profile).
+- **Anchor**, **Angle**, **Mirror** and **Up Axis** place the section on each line, as below.
+  **Name** names the members (default: after the profile).
 - **Offset A** and **Offset B** move the section from its anchor by a length, along the
   section's own axes as drawn (A across its width, B across its height; they turn with **Angle**,
   so they are not the world's X and Y): Anchor **Bottom Middle** with Offset B `50 mm` puts a
@@ -483,6 +569,11 @@ placement axes, expressions and hole-pattern limits.
   about the line, counter-clockwise looking back from the line's end; `mirror` mirrors it across
   its y axis first. A line leaning less than 10⁻⁶ rad from vertical counts as vertical, so
   rounding in a 3D sketch never turns a post a quarter turn.
+- `up`: `X`, `-X`, `Y`, `-Y`, `Z` or `-Z`, the world axis that is up for the profile (default `Z`,
+  saved only when it is not). A part drawn with Y up takes `Y`: its members need no `angle`, and
+  lines along Y are its vertical members, their x along world X (world Y when X is up).
+  Under Auto, a member whose section Auto lines up (one in a sketch plane, or in a chain of
+  members in one plane) takes that plane's normal as up instead (see Auto).
 - Bodies are named after `body_name`, or the standard size (`RSC 203x89`), the profile
   (`Rect Tube 40x40x3`) or the profile sketch, then numbered on past names already taken (`(2)`, `(3)`…). Each member's name is kept
   with its line (the feature's `names`), so deleting or adding a line, or deleting another
@@ -511,8 +602,8 @@ The result is one tube, with two straight lengths of 200 and 300 mm and a 100 mm
 bend radius. Its nominal centreline length is `500 + 50π` mm. Grouping three separate
 members or combining their solids does not record this continuous manufacturing path.
 
-Bend-list output and flattened round-tube cope DXF templates are subsequent fabrication
-steps tracked under #4003. A continuous member does not yet produce either export.
+Bend-list output is a subsequent fabrication step tracked under #9795. Straight cylindrical
+terminals of continuous round-tube members support retained copes and DXF templates, above.
 
 Every built-in profile is SolidCraft's own parametric definition, built in code
 (`solidcraft_doc::frame`). Standard steel sizes (below) fill in a profile's dimensions from a

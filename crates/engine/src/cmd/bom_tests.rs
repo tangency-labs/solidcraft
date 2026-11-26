@@ -129,6 +129,7 @@ fn inserted_design_carries_its_part_properties_into_the_bom() {
     let source = dir.join("plate.solidcraft");
     let metadata = json!({
         "part_number": "PL-6624", "description": "Mounting plate", "revision": "B",
+        "material": "CRS, 16 ga", "finish": "Zinc plate, clear",
         "author": "Example author", "license": "CC0-1.0", "com.example.catalog": {"stock": 12}
     });
     let mut part = Session::default();
@@ -149,6 +150,7 @@ fn inserted_design_carries_its_part_properties_into_the_bom() {
         assert_eq!(bom["rows"][0]["part_number"], "PL-6624");
         assert_eq!(bom["rows"][0]["description"], "Mounting plate");
         assert_eq!(bom["rows"][0]["revision"], "B");
+        assert_eq!(bom["rows"][0]["finish"], "Zinc plate, clear", "a single part's own finish is its component's once inserted");
         assert_eq!(bom["rows"][0]["count"], 1);
         assert_eq!(s.undo.len(), undo + 1, "insertion including properties is one undo step");
         run(&mut s, "edit.undo", json!({}));
@@ -189,9 +191,9 @@ fn csv_quotes_every_field_and_json_writes_the_rows() {
     let text = std::fs::read_to_string(&csv).unwrap();
     assert_eq!(
         text,
-        "\"item\",\"part_number\",\"description\",\"revision\",\"count\",\"definition\",\"material\",\"quantity\"\n\
-         \"1\",\"PL-100\",\"Plate, 3 mm\",\"B\",\"3\",\"Plate\",\"Default\",\"\"\n\
-         \"2\",\"PN-040\",\"Pin \"\"short\"\", 4 mm\",\"\",\"2\",\"Pin\",\"Default\",\"\"\n"
+        "\"item\",\"part_number\",\"description\",\"revision\",\"count\",\"definition\",\"material\",\"quantity\",\"finish\"\n\
+         \"1\",\"PL-100\",\"Plate, 3 mm\",\"B\",\"3\",\"Plate\",\"Default\",\"\",\"\"\n\
+         \"2\",\"PN-040\",\"Pin \"\"short\"\", 4 mm\",\"\",\"2\",\"Pin\",\"Default\",\"\",\"zinc\"\n"
     );
     let json_path = dir.join("bom.json");
     run(&mut s, "assembly.bom", json!({"path": json_path, "levels": "top"}));
@@ -200,6 +202,58 @@ fn csv_quotes_every_field_and_json_writes_the_rows() {
     assert_eq!(back["rows"][1]["definition"], "Hinge");
     assert!(s.execute("assembly.bom", &json!({"path": dir.join("bom.txt")})).is_err(), "unknown extension");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A part's finish is a part property beside its material: set by `component.metadata.set` (a
+/// parameter or in `values`), read by `component.metadata`, listed by `assembly.bom` (rows, JSON and
+/// CSV, where a part with only a free `finish` property shows that), one undo step, no geometry,
+/// saved with the part.
+#[test]
+fn a_finish_is_a_part_property_every_list_and_file_shows() {
+    let mut s = assembly();
+    let undo = s.undo.len();
+    s.evaluations = 0;
+    let r = run(&mut s, "component.metadata.set", json!({"component": "Plate", "finish": "Powder coat, RAL 9005, matt"}));
+    assert_eq!(r["changed"], json!(["finish"]));
+    assert_eq!((s.undo.len(), s.evaluations), (undo + 1, 0), "one undo step, no geometry");
+    let r = run(&mut s, "component.metadata.set", json!({"component": "Plate", "values": {"finish": "Passiv\u{e9}, #4 brushed"}}));
+    assert_eq!(r["changed"], json!(["finish"]));
+    run(&mut s, "component.metadata.set", json!({"component": "Plate", "finish": "Powder coat, RAL 9005, matt"}));
+    assert_eq!(run(&mut s, "component.metadata", json!({"component": "Plate"}))["finish"], "Powder coat, RAL 9005, matt");
+    assert_eq!(run(&mut s, "component.metadata", json!({"component": "Pin"}))["finish"], Value::Null);
+    let finishes = |r: &Value| r["rows"].as_array().unwrap().iter().map(|r| r["finish"].clone()).collect::<Vec<_>>();
+    let flat = run(&mut s, "assembly.bom", json!({}));
+    assert_eq!(finishes(&flat), [json!("Powder coat, RAL 9005, matt"), json!("zinc")], "the Pin has the free property only: {flat}");
+    let dir = scratch("finish");
+    let csv = dir.join("bom.csv");
+    run(&mut s, "assembly.bom", json!({"path": csv}));
+    let text = std::fs::read_to_string(&csv).unwrap();
+    let column: Vec<&str> = text.lines().map(|l| l.rsplit("\",\"").next().unwrap_or("")).collect();
+    assert_eq!(column, ["finish\"", "Powder coat, RAL 9005, matt\"", "zinc\""], "the last column: {text}");
+    let path = dir.join("part.solidcraft");
+    run(&mut s, "file.save_as", json!({"path": path, "format": "container"}));
+    let mut back = Session::default();
+    run(&mut back, "doc.open", json!({"path": path}));
+    assert_eq!(finishes(&run(&mut back, "assembly.bom", json!({}))), finishes(&flat));
+    run(&mut s, "component.metadata.set", json!({"component": "Plate", "finish": null}));
+    assert_eq!(finishes(&run(&mut s, "assembly.bom", json!({})))[0], json!(""), "cleared");
+    for hostile in [json!("a\u{7}b"), json!("x".repeat(solidcraft_doc::metadata::MAX_TEXT_BYTES + 1)), json!(5), json!({"a": 1}), json!(["x"])] {
+        let before = s.doc.components.clone();
+        assert!(s.execute("component.metadata.set", &json!({"component": "Plate", "finish": hostile})).is_err(), "{hostile}");
+        assert_eq!(s.doc.components, before);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A design of one part lists itself (#19883), over its own material and finish properties.
+#[test]
+fn a_single_part_design_lists_its_own_material_and_finish() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "document.metadata.set", json!({"values": {"material": "CRS, 16 ga", "finish": "Zinc plate, clear"}}));
+    let r = run(&mut s, "assembly.bom", json!({}));
+    let row = &r["rows"][0];
+    assert_eq!((&row["material"], &row["finish"], &row["static"]), (&json!("CRS, 16 ga"), &json!("Zinc plate, clear"), &json!(["material"])), "{r}");
 }
 
 /// A field that a spreadsheet would run as a formula gets a `'` first, so it opens as text
@@ -212,7 +266,7 @@ fn a_csv_field_a_spreadsheet_would_run_opens_as_text() {
     let csv = dir.join("bom.csv");
     run(&mut s, "assembly.bom", json!({"path": csv}));
     let text = std::fs::read_to_string(&csv).unwrap();
-    assert!(text.contains("\n\"1\",\"'=1+1\",\"'-5 mm shim\",\"'@A\",\"3\",\"Plate\",\"Default\",\"\"\n"), "{text}");
+    assert!(text.contains("\n\"1\",\"'=1+1\",\"'-5 mm shim\",\"'@A\",\"3\",\"Plate\",\"Default\",\"\",\"\"\n"), "{text}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -229,9 +283,9 @@ fn a_part_a_configuration_switches_off_leaves_the_bill_of_materials() {
     let plate = ("PL-100".to_string(), "Plate".to_string(), 3);
     let pins = ("PN-040".to_string(), "Pin".to_string(), 2);
     let csv = dir.join("bom.csv");
-    let header = "\"item\",\"part_number\",\"description\",\"revision\",\"count\",\"definition\",\"material\",\"quantity\"\n\
-                  \"1\",\"PL-100\",\"Plate, 3 mm\",\"B\",\"3\",\"Plate\",\"Default\",\"\"\n";
-    let pin_line = "\"2\",\"PN-040\",\"Pin 4 x 30\",\"\",\"2\",\"Pin\",\"Default\",\"\"\n";
+    let header = "\"item\",\"part_number\",\"description\",\"revision\",\"count\",\"definition\",\"material\",\"quantity\",\"finish\"\n\
+                  \"1\",\"PL-100\",\"Plate, 3 mm\",\"B\",\"3\",\"Plate\",\"Default\",\"\",\"\"\n";
+    let pin_line = "\"2\",\"PN-040\",\"Pin 4 x 30\",\"\",\"2\",\"Pin\",\"Default\",\"\",\"zinc\"\n";
     for (row, listed) in [("No pins", false), ("Default", true)] {
         run(&mut s, "config.activate", json!({"row": row}));
         let r = run(&mut s, "assembly.bom", json!({"path": csv}));
@@ -320,7 +374,7 @@ fn a_components_refusals_speak_of_part_properties() {
     assert!(
         bogus.ends_with(
             "`bogus` is not a part property: SolidCraft's are project, part_number, revision, author, organization, description, \
-             license, bom_type, material, bom_quantity, virtual; another tool's data goes under a reverse-DNS key such as \
+             material, finish, license, bom_type, bom_quantity, virtual; another tool's data goes under a reverse-DNS key such as \
              `com.example.tool`"
         ),
         "{bogus}"
@@ -329,8 +383,8 @@ fn a_components_refusals_speak_of_part_properties() {
     assert!(refusal(&mut s, json!({"component": "Pin", "values": {"": "x"}})).contains("`` is not a part property"));
     // Nothing to change: the same list as before the table.
     assert!(refusal(&mut s, json!({"component": "Pin"})).ends_with(
-        "give part_number, description, revision, bom_type, material, bom_quantity, virtual, values or properties (project, \
-         part_number, revision, author, organization, description, license, bom_type, material, bom_quantity, virtual)"
+        "give part_number, description, revision, material, finish, bom_type, bom_quantity, virtual, values or properties (project, \
+         part_number, revision, author, organization, description, material, finish, license, bom_type, bom_quantity, virtual)"
     ));
     // Only the bill of materials' keys are parameters of their own; the others go in `values`.
     assert!(refusal(&mut s, json!({"component": "Pin", "author": "Jane"})).contains("give part_number, description, revision"));
@@ -575,7 +629,7 @@ fn group_children_keeps_an_inseparable_parts_purchased_children_in_its_row() {
     run(&mut s, "assembly.bom", json!({"group_children": true, "path": path}));
     let text = std::fs::read_to_string(path).unwrap();
     let rows: Vec<&str> = text.lines().skip(1).collect();
-    assert_eq!(rows, ["\"1\",\"SUB-1\",\"\",\"\",\"2\",\"Sub\",\"\",\"\"", "\"1.1\",\"M2x10\",\"\",\"\",\"4\",\"Screw\",\"\",\"\""]);
+    assert_eq!(rows, ["\"1\",\"SUB-1\",\"\",\"\",\"2\",\"Sub\",\"\",\"\",\"\"", "\"1.1\",\"M2x10\",\"\",\"\",\"4\",\"Screw\",\"\",\"\",\"\""]);
 
     // In its own context the component still lists all its parts, regardless of its type.
     let own = run(&mut s, "assembly.bom", json!({"component": "Sub", "group_children": true}));
@@ -1203,6 +1257,10 @@ fn a_static_material_is_what_every_list_says_until_it_is_cleared() {
     let mut back = Session::default();
     run(&mut back, "doc.open", json!({"path": path}));
     assert_eq!(bom(&mut back, json!({"levels": "all", "mass": true})), all);
+    // A part saved before finishes existed reads back as it did: its typed material, and no finish.
+    let rows = run(&mut back, "assembly.bom", json!({"levels": "all"}));
+    assert!(rows["rows"].as_array().unwrap().iter().all(|r| r["finish"] == ""), "{rows}");
+    assert_eq!(back.doc.metadata.text("material"), None, "and the design holds none");
     // Cleared, by empty text or null: the worked-out materials again.
     run(&mut s, "component.metadata.set", json!({"component": "Block", "material": ""}));
     run(&mut s, "component.metadata.set", json!({"component": "Frame", "material": null}));
@@ -1310,8 +1368,10 @@ fn hostile_static_materials_are_refused_without_a_change() {
     ] {
         assert!(s.execute("component.metadata.set", &p).is_err(), "{p}");
     }
-    assert!(s.execute("document.metadata.set", &json!({"key": "material", "value": "Steel"})).is_err(), "not a design property");
-    assert!(s.execute("document.metadata.set", &json!({"values": {"material": "Steel"}})).is_err());
+    // A design that is one part holds its own material (#20114), with the same checks.
+    for hostile in [json!("a\u{7}b"), json!(7.85), json!({"name": "Steel"}), json!("x".repeat(solidcraft_doc::metadata::MAX_TEXT_BYTES + 1))] {
+        assert!(s.execute("document.metadata.set", &json!({"key": "material", "value": hostile})).is_err(), "{hostile}");
+    }
     assert_eq!(s.undo.len(), undo, "nothing changed");
     let block = run(&mut s, "component.metadata", json!({"component": "Block"}));
     assert_eq!((block["part_number"].as_str(), block["material"].as_str()), (None, Some("Steel bar")), "all or nothing");
@@ -2111,8 +2171,8 @@ fn a_virtual_component_is_listed_with_its_quantity_and_weighs_nothing() {
     let csv = scratch("quantity").join("bom.csv");
     run(&mut s, "assembly.bom", json!({"path": csv}));
     let text = std::fs::read_to_string(&csv).unwrap();
-    assert!(text.lines().next().unwrap().ends_with(",\"quantity\""), "{text}");
-    assert!(text.lines().any(|l| l.contains("\"Cable\"") && l.ends_with(",\"4000 mm\"")), "{text}");
+    assert!(text.lines().next().unwrap().contains(",\"quantity\","), "{text}");
+    assert!(text.lines().any(|l| l.contains("\"Cable\"") && l.contains(",\"4000 mm\",")), "{text}");
     // A parameter edit changes the quantity; renaming it keeps it working.
     run(&mut s, "parameters.change", json!({"name": "span", "expression": "1.5"}));
     assert_eq!(cable_row(&run(&mut s, "assembly.bom", json!({})))["quantity"], 6000.0);
@@ -2222,4 +2282,71 @@ fn hostile_quantities_are_refused_without_a_change() {
     }
     assert_eq!(s.doc.to_json(), design);
     assert_eq!(s.undo.len(), undo);
+}
+
+/// With `mass`, the CSV ends in a `mass_g` column carrying each row's mass as JSON gives it, an
+/// empty field where JSON has null; without it the columns are unchanged.
+#[test]
+fn csv_with_mass_ends_in_each_rows_mass_in_grams() {
+    let dir = scratch("csv-mass");
+    let mut s = frame();
+    let csv = dir.join("bom.csv");
+    let read = |s: &mut Session, p: Value| {
+        run(s, "assembly.bom", p);
+        let text = std::fs::read_to_string(&csv).unwrap();
+        let field = |l: &str| l.strip_prefix('"').and_then(|l| l.strip_suffix('"')).unwrap().split("\",\"").map(String::from).collect::<Vec<_>>();
+        text.lines().map(field).collect::<Vec<_>>()
+    };
+    let lines = read(&mut s, json!({"path": csv, "mass": true}));
+    let header = ["item", "part_number", "description", "revision", "count", "definition", "material", "quantity", "finish", "mass_g"];
+    assert_eq!(lines[0], header);
+    let listed = run(&mut s, "assembly.bom", json!({"mass": true}));
+    let rows = listed["rows"].as_array().unwrap();
+    assert_eq!(lines.len(), rows.len() + 1, "{lines:?}");
+    let mut by_definition = std::collections::BTreeMap::new();
+    for (line, row) in lines[1..].iter().zip(rows) {
+        assert_eq!((line.len(), line[5].as_str()), (header.len(), row["definition"].as_str().unwrap()), "{line:?}");
+        let mass = (!line[9].is_empty()).then(|| line[9].parse::<f64>().unwrap());
+        assert_eq!(mass, row["mass_g"].as_f64(), "the CSV's mass is the JSON's: {line:?} {row}");
+        by_definition.insert(line[5].clone(), mass.map(|g| (g * 1e6).round() / 1e6));
+    }
+    // A steel block 100 x 50 x 10 (50 cm³ at 7.85 g/cm³) and a cube of 10 (1 cm³) at the default
+    // 1.29 g/cm³; grease has no bodies, so no mass.
+    let closed = |cm3: f64, density: f64| Some(Some((cm3 * density * 1e6).round() / 1e6));
+    assert_eq!(by_definition.get("Block").copied(), closed(100.0 * 50.0 * 10.0 / 1000.0, 7.85), "{by_definition:?}");
+    assert_eq!(by_definition.get("Spacer").copied(), closed(10.0 * 10.0 * 10.0 / 1000.0, 1.29), "{by_definition:?}");
+    assert_eq!(by_definition.get("Grease"), Some(&None));
+    // Without mass the columns stay as they were.
+    let plain = read(&mut s, json!({"path": csv}));
+    assert_eq!(plain[0], header[..9]);
+    assert!(plain.iter().all(|l| l.len() == 9), "{plain:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The CSV writes a mass in the very text the JSON file writes it: a whole number keeps its `.0`,
+/// and a tiny mass takes JSON's exponent.
+#[test]
+fn csv_writes_each_mass_as_the_json_file_writes_it() {
+    let dir = scratch("csv-mass-text");
+    let (csv, json_path) = (dir.join("bom.csv"), dir.join("bom.json"));
+    // Cubes at the default 1.29 g/cm³: 1,000 cm³ is 1,290 g; 1e-9 cm³
+    // needs an exponent.
+    for (side, want) in [(100.0, Some("1290.0")), (0.01, None)] {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "Cube"}));
+        run(&mut s, "solid.box", json!({"length": side, "width": side, "height": side}));
+        run(&mut s, "assembly.bom", json!({"path": csv, "mass": true}));
+        run(&mut s, "assembly.bom", json!({"path": json_path, "mass": true}));
+        let text = std::fs::read_to_string(&csv).unwrap();
+        let field = text.lines().nth(1).and_then(|l| l.rsplit(",\"").next()).unwrap().trim_end_matches('"').to_string();
+        let file = std::fs::read_to_string(&json_path).unwrap();
+        let number = file.split("\"mass_g\": ").nth(1).unwrap().split([',', '\n']).next().unwrap().to_string();
+        assert_eq!(field, number, "cube of {side} mm: CSV {text} JSON {file}");
+        if let Some(want) = want {
+            assert_eq!(number, want, "cube of {side} mm");
+        } else {
+            assert!(number.contains('e'), "cube of {side} mm: {number}");
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }

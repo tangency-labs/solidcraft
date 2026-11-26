@@ -3168,6 +3168,140 @@ mod tests {
         }
     }
 
+    /// #21882: a classification `combine_in_brep` onto the chain's middle vertex `v1` with
+    /// a propagated surf/surf/surf point `sss`.
+    fn sss_combine(
+        edge1: u8,
+        sss: Point3,
+    ) -> (Kernel, Brep, [VertexId; 4], [EdgeId; 2], [Point3; 2]) {
+        use crate::intersect::point_class::{CombineBrep, PointClassType, PointClassification};
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        let k = Kernel::default();
+        let (mut b, v, e) = chain(true, Vec3::X, Vec3::Y);
+        if edge1 == 3 {
+            let quarter = Extent1d::from_min_max(0.0, 90.0);
+            let frame = crate::geom::axis2_placement::Axis2Placement::default();
+            let c = Curve::from(
+                crate::curve::ellipse::Ellipse::create_canonical(
+                    &k,
+                    &frame,
+                    2.0,
+                    1.0,
+                    Some(&quarter),
+                    None,
+                )
+                .unwrap(),
+            );
+            let iv = c.natural_interval();
+            let (p0, p1) = (
+                c.evaluate_point(&k, iv.min()).unwrap(),
+                c.evaluate_point(&k, iv.max()).unwrap(),
+            );
+            let rec = b.edge_mut(e[1]).unwrap();
+            rec.curve = Some(c);
+            rec.interval = iv;
+            b.edge_mut(e[0]).unwrap().curve =
+                Some(Curve::from(Line::from_points(Vec3::ZERO, p0, 3)));
+            b.vertex_mut(v[1]).unwrap().point = p0;
+            b.vertex_mut(v[2]).unwrap().point = p1;
+        } else if edge1 > 0 {
+            let cp = |x: f64, y: f64| CPoint::new(x, y, 0.0, NOW);
+            let (pw, knots) = if edge1 == 1 {
+                let pw = vec![cp(1.0, 0.0), cp(1.4, 0.3), cp(0.8, 0.7), cp(1.0, 1.0)];
+                (pw, vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0])
+            } else {
+                let pw = vec![
+                    cp(1.0, -0.5),
+                    cp(1.3, 0.0),
+                    cp(0.7, 0.4),
+                    cp(1.2, 0.8),
+                    cp(0.9, 1.2),
+                    cp(1.0, 1.6),
+                ];
+                (
+                    pw,
+                    vec![-1.0, -1.0, -1.0, -1.0, 0.5, 1.5, 2.0, 2.0, 2.0, 2.0],
+                )
+            };
+            let c = Curve::from(BSplineCurve::from_nurb(
+                NurbCurve::new(pw, 3, knots).unwrap(),
+                3,
+                false,
+            ));
+            let (p0, p1) = (
+                c.evaluate_point(&k, 0.0).unwrap(),
+                c.evaluate_point(&k, 1.0).unwrap(),
+            );
+            b.edge_mut(e[1]).unwrap().curve = Some(c);
+            b.edge_mut(e[0]).unwrap().curve =
+                Some(Curve::from(Line::from_points(Vec3::ZERO, p0, 3)));
+            b.vertex_mut(v[1]).unwrap().point = p0;
+            b.vertex_mut(v[2]).unwrap().point = p1;
+        }
+        let mut pc = PointClassification::new(ZONE_TOL_3D);
+        pc.set_class_object(PointClassType::Vertex, Some(Ent(EntityRef::Vertex(v[1]))));
+
+        let mut other = PointClassification::new(ZONE_TOL_3D);
+        other.set_class_object(PointClassType::Point, None);
+        other.set_sss_point(sss);
+
+        let mut records = crate::topology::topology::NotifyRecords::new();
+        let mut attributes = AttributeStore::default();
+        let mut env = crate::topology::edge::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &crate::topology::loopuse::notify_ref,
+        };
+        let before = [b.vertex(v[0]).unwrap().point, b.vertex(v[2]).unwrap().point];
+        pc.combine_in_brep(
+            &other,
+            CombineBrep {
+                k: &k,
+                brep: &mut b,
+                target: EntityRef::Vertex(v[1]),
+                handle: &Ent,
+                notifications: &mut env,
+            },
+        )
+        .unwrap();
+        (k, b, v, e, before)
+    }
+
+    #[test]
+    fn issue_21882_combine_in_brep_sss_point_carries_edge_ends() {
+        for edge1 in 0..3 {
+            for sss in [
+                Point3::new(0.2, 0.3, 0.0),
+                Point3::new(20.0, 3.0, 4.0),
+                Point3::new(10.0, -10.0, 20.0),
+            ] {
+                let (k, b, v, e, before) = sss_combine(edge1, sss);
+                let moved = b.vertex(v[1]).unwrap();
+                assert_eq!(moved.point, sss);
+                assert!(moved.tolerance <= ZONE_TOL_3D, "{}", moved.tolerance);
+                let (ok, far) = ends_on_vertices(&k, &b, &[v[0], v[1], v[2]]);
+                assert!(ok, "edge1 {edge1} sss {sss:?}: {far:?}");
+                // the far ends stay where they were, on their own vertices
+                let c0 = b.edge(e[0]).unwrap().curve.as_ref().unwrap();
+                assert_eq!(c0.evaluate_point(&k, 0.0).unwrap(), before[0]);
+                let c1 = b.edge(e[1]).unwrap().curve.as_ref().unwrap();
+                assert!(c1.evaluate_point(&k, 1.0).unwrap().distance(before[1]) < 1e-12);
+                assert!(matches!(c0.kind(), CurveKind::Line(_)));
+                if edge1 == 0 {
+                    assert!(matches!(c1.kind(), CurveKind::Line(_)));
+                } else {
+                    let CurveKind::BSpline(s) = c1.kind() else {
+                        panic!("edge 1 not a B-spline")
+                    };
+                    assert_eq!(s.degree().unwrap(), 3);
+                }
+            }
+        }
+    }
+
     /// #21511: whether the point lies on the curve is decided by the global closest point,
     /// not by a foot near the old end. A wire unit-circle arc from 0° to 270° whose start
     /// vertex moves to the 180° point is re-trimmed to 180°..270° and stays a circle; a

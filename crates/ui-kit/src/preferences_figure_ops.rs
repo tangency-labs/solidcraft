@@ -363,27 +363,35 @@ pub fn paint_navigation_axes(p: &Painter, rect: Rect, axes: &[NavigatorAxis]) {
     }
 }
 
-/// A generic body (a hexagonal prism) in the navigator palette: the user's own body stands in its place.
+/// An original flanged body in the navigator palette: the user's chosen body stands in its place.
 pub fn paint_navigation_custom(p: &Painter, rect: Rect) {
     let Some((p, scale)) = navigation_canvas(p, rect) else { return };
     let t = Tokens::get();
     let ctx = Ctx { t: &t, sample: None, palette: Palette::Navigator, origin: rect.min, scale };
     let c = rect.center();
-    let (radius, height) = (34.0 * scale, 26.0 * scale);
-    let top: Vec<Pos2> = (0..6)
-        .map(|i| {
-            let a = std::f32::consts::FRAC_PI_3 * i as f32;
-            c + vec2(a.cos() * radius, a.sin() * radius * 0.5 - height * 0.5)
-        })
-        .collect();
     let line = Stroke::new(1.4 * scale, ctx.ink(Ink::Line, 1.0));
-    // The three faces toward the viewer, then the top over them.
-    for (i, ink) in [(0, Ink::Right), (1, Ink::Left), (2, Ink::Left)] {
-        let (a, b) = (top[i], top[i + 1]);
-        let side = vec![a, b, b + vec2(0.0, height), a + vec2(0.0, height)];
-        p.add(Shape::convex_polygon(side, ctx.ink(ink, 1.0), line));
+    // Draw the lower flange, stem and upper flange from back to front. Curved faces
+    // distinguish a body chosen from the design from a built-in view cube.
+    for (radius, top, bottom) in [(33.0, 15.0, 25.0), (14.0, -16.0, 15.0), (24.0, -25.0, -15.0)] {
+        let radius = radius * scale;
+        let top = c + vec2(0.0, top * scale);
+        let bottom = c + vec2(0.0, bottom * scale);
+        let ellipse = vec2(radius, radius * 0.4);
+        p.add(Shape::ellipse_filled(bottom, ellipse, ctx.ink(Ink::Right, 1.0)));
+        p.add(Shape::ellipse_stroke(bottom, ellipse, line));
+        let side = Rect::from_min_max(top - vec2(radius, 0.0), bottom + vec2(radius, 0.0));
+        p.rect_filled(side, CornerRadius::ZERO, ctx.ink(Ink::Right, 1.0));
+        p.rect_filled(Rect::from_min_max(side.min, bottom), CornerRadius::ZERO, ctx.ink(Ink::Left, 1.0));
+        for x in [-radius, radius] {
+            p.line_segment([top + vec2(x, 0.0), bottom + vec2(x, 0.0)], line);
+        }
+        p.add(Shape::ellipse_filled(top, ellipse, ctx.ink(Ink::Top, 1.0)));
+        p.add(Shape::ellipse_stroke(top, ellipse, line));
     }
-    p.add(Shape::convex_polygon(top, ctx.ink(Ink::Top, 1.0), line));
+    let bore = c - vec2(0.0, 25.0 * scale);
+    let bore_radii = vec2(6.0 * scale, 2.4 * scale);
+    p.add(Shape::ellipse_filled(bore, bore_radii, ctx.ink(Ink::Right, 1.0)));
+    p.add(Shape::ellipse_stroke(bore, bore_radii, line));
 }
 
 /// Preserve the mouse's figure palette, with slightly stronger lettering.

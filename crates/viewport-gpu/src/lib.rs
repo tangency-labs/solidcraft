@@ -197,7 +197,9 @@ fn open_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue)> {
     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some("headless device"),
         required_features: depth_features(adapter),
-        required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
+        // Never more than the adapter offers: older drivers report fewer colour attachments
+        // (2 on Debian 11's Mesa 20.3) than the downlevel defaults' 8; the viewport uses 2.
+        required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()).or_worse_values_from(&adapter.limits()),
         ..Default::default()
     }))
     .map_err(|e| GpuError::Device(e.to_string()))
