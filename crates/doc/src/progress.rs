@@ -145,9 +145,23 @@ thread_local! {
 
 /// Run `f` with `progress` watching every evaluation it makes on this thread.
 pub fn watch<R>(progress: Arc<Progress>, f: impl FnOnce() -> R) -> R {
+    watch_at(progress, 0, f)
+}
+
+/// Run `f` on a worker thread under the caller's `progress` as a nested evaluation (`depth >= 1`),
+/// so cooperative cancellation (`Progress::cancel`, kernel `Stop`/`Watch`, sketch `cancel`) reaches
+/// the worker without overwriting the outer timeline's feature progress or triggering `hold_at`.
+pub fn watch_nested<R>(progress: Option<Arc<Progress>>, f: impl FnOnce() -> R) -> R {
+    match progress {
+        Some(progress) => watch_at(progress, 1, f),
+        None => f(),
+    }
+}
+
+fn watch_at<R>(progress: Arc<Progress>, depth: usize, f: impl FnOnce() -> R) -> R {
     let kernel = Arc::new(KernelWatch(progress.clone()));
     let stop = progress.stop.clone();
-    let previous = CURRENT.with(|c| c.replace(Some(Current { progress, depth: 0 })));
+    let previous = CURRENT.with(|c| c.replace(Some(Current { progress, depth })));
     struct Restore(Option<Option<Current>>);
     impl Drop for Restore {
         fn drop(&mut self) {
@@ -203,6 +217,16 @@ impl Evaluation {
     /// the evaluation cache is shared with the model a preview was copied from (#7167).
     pub(crate) fn cancelled(&self) -> bool {
         CURRENT.with(|c| c.borrow().as_ref().is_some_and(|cur| cur.progress.is_cancelled()))
+    }
+
+    /// Feature index at which the outer evaluation is configured to pause (`usize::MAX` when none
+    /// or for nested evaluations). Parallel prefetch waves never decode features at or past this
+    /// index so `Progress::hold_at` pauses before they run.
+    pub(crate) fn hold_limit(&self) -> usize {
+        if !self.outer {
+            return usize::MAX;
+        }
+        CURRENT.with(|c| c.borrow().as_ref().map_or(usize::MAX, |cur| cur.progress.hold.load(Ordering::Relaxed)))
     }
 
     /// Feature `index` is next. True when the watcher asked to stop: skip it.

@@ -319,10 +319,5 @@
   },
   "topology.brep_mirror": {
     "mat0076": "tangency-labs/solidcraft#17271: transform_matrix reports success from a Level-2-valid input but produces an invalid body (17 geometric reports, including the main's unchanged 3D loop gap 3.419267465560401 > 2.1633192809335735e-5); not a valid transformed solid"
-  },
-  "topology.brep_planar_section": {
-    "upstream_torus_a_plane0": "tangency-labs/solidcraft#19274: the plane at the torus' bounding box touches it at one point; the tangent curve tracer returns a curve 0.175 long through that point (inside the 0.01 tolerance) where the section is that point, and without the tracer the section was empty",
-    "upstream_torus_a_plane6": "tangency-labs/solidcraft#19274: the plane at the torus' bounding box touches it at one point; the tangent curve tracer returns a curve 0.175 long through that point (inside the 0.01 tolerance) where the section is that point, and without the tracer the section was empty",
-    "upstream_torus_c_plane0": "tangency-labs/solidcraft#19274: the plane at the torus' bounding box touches it at one point; the tangent curve tracer returns a curve 0.175 long through that point (inside the 0.01 tolerance) where the section is that point, and without the tracer the section was empty"
   }
 }
