@@ -219,6 +219,33 @@ fn edit_gear_refuses_when_the_component_holds_features_that_are_not_the_gears() 
 }
 
 #[test]
+fn edit_gear_refuses_a_swapped_feature_though_the_count_still_matches() {
+    let mut s = Session::default();
+    let g = run(&mut s, "gear.insert", json!({"module": 2, "teeth": 20, "face_width": 10}));
+    let comp = g["component"].as_u64().unwrap_or(0);
+    // Take the gear's last feature out and put a user's sketch in its place: same count.
+    let last = s.doc.features.iter().rev().find(|f| f.component == comp).map(|f| f.id).unwrap_or(0);
+    assert!(s.doc_mut().delete_feature(last).is_ok());
+    run(&mut s, "component.activate", json!({"component": comp}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let features = s.doc.features.len();
+    assert!(s.execute("gear.edit", &json!({"component": comp, "teeth": 24})).is_err());
+    assert_eq!(s.doc.features.len(), features);
+}
+
+#[test]
+fn turning_a_double_helical_gear_into_a_ring_drops_the_flag_but_an_explicit_true_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "gear.insert", json!({"module": 2, "teeth": 20, "helix_angle": 20, "double_helical": true}));
+    run(&mut s, "gear.edit", json!({"component": "Spur Gear M2 Z20", "internal": true, "teeth": 40}));
+    assert!(s.doc.gears.values().all(|g| g.internal && !g.double_helical));
+    let before = s.doc.gears.clone();
+    assert!(s.execute("gear.edit", &json!({"component": "Internal Gear M2 Z40", "double_helical": true})).is_err());
+    assert_eq!(s.doc.gears, before);
+}
+
+#[test]
 fn an_internal_or_bored_gear_keeps_its_values_through_save_and_reopen() {
     let mut s = Session::default();
     run(&mut s, "gear.insert", json!({"module": 2, "teeth": 30, "internal": true, "rim_thickness": 5}));

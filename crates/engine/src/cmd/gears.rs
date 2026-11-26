@@ -320,13 +320,14 @@ fn saved_values(was: &SpurGear) -> Value {
     })
 }
 
-/// How many features building this gear makes: built in a throwaway copy of the session.
-fn own_feature_count(s: &Session, g: &GearSpec, e: &Extent, cmd: &str) -> Result<usize> {
+/// The kinds of feature building this gear makes, in timeline order: built in a throwaway copy of
+/// the session. A component whose features read differently holds something that is not the gear's.
+fn own_feature_kinds(s: &Session, g: &GearSpec, e: &Extent, cmd: &str) -> Result<Vec<&'static str>> {
     let mut probe = s.scratch();
     let c = probe.execute("component.create", &json!({"name": "probe", "grounded": false}))?;
     let comp = c["component"].as_u64().unwrap_or(0);
     build(&mut probe, g, e, cmd)?;
-    Ok(probe.doc.features.iter().filter(|f| f.component == comp).count())
+    Ok(probe.doc.features.iter().filter(|f| f.component == comp).map(|f| f.kind.type_name()).collect())
 }
 
 /// Change a gear's values and rebuild its teeth in place; the component, its placement and its
@@ -368,6 +369,9 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     if merged["internal"] == json!(true) && absent("profile_shift") {
         merged["profile_shift"] = json!(0);
     }
+    if merged["internal"] == json!(true) && absent("double_helical") {
+        merged["double_helical"] = json!(false);
+    }
     if merged["internal"] == json!(true) && absent("bore_diameter") {
         merged["bore_diameter"] = json!(0);
     } else if merged["internal"] != json!(true) && absent("rim_thickness") {
@@ -381,17 +385,31 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
         let occ = s.doc.occurrences.iter().find(|o| o.component == comp).map(|o| o.id).unwrap_or(0);
         return reply(&g, comp, occ, name);
     }
-    let ids: Vec<u64> = s.doc.features.iter().filter(|f| f.component == comp).map(|f| f.id).collect();
+    let own: Vec<(u64, &'static str)> = s.doc.features.iter().filter(|f| f.component == comp).map(|f| (f.id, f.kind.type_name())).collect();
+    let ids: Vec<u64> = own.iter().map(|(id, _)| *id).collect();
     // The gear's own features are all this deletes. Anything else made in the component (a sketch,
-    // a cut) would go with them and take its dependents along, so refuse instead.
+    // a cut) would go with them and take its dependents along, so refuse instead: the features
+    // must be the kinds, in the order, that building the saved gear makes, and nothing outside the
+    // component may build on them.
     let (was_g, was_ext) = spec(&saved_values(&was), cmd)?;
-    if ids.len() != own_feature_count(s, &was_g, &was_ext, cmd)? {
+    let expected = own_feature_kinds(s, &was_g, &was_ext, cmd)?;
+    if own.iter().map(|(_, k)| *k).ne(expected.iter().copied()) {
         return Err(bad(cmd, "this gear's component holds features that are not the gear's own; edit it by hand, or insert a new gear"));
+    }
+    if s.doc.features.iter().any(|f| f.component != comp && f.kind.input_sketches().iter().any(|sk| ids.contains(sk))) {
+        return Err(bad(cmd, "another feature is built on this gear's sketches; edit it by hand, or insert a new gear"));
     }
     s.refresh();
     let before: Vec<(u64, String)> = s.model.results.iter().filter_map(|r| r.error.clone().map(|e| (r.id, e))).collect();
     for id in ids.iter().rev() {
-        let _ = s.doc_mut().delete_feature(*id);
+        // A sketch goes with its extrude, so one already gone is no failure; any other is.
+        if s.doc.feature(*id).is_none() {
+            continue;
+        }
+        let gone = s.doc_mut().delete_feature(*id).map_err(|e| bad(cmd, format!("could not remove the old teeth: {e}")))?;
+        if let Some(extra) = gone.iter().find(|g| !ids.contains(g)) {
+            return Err(bad(cmd, format!("removing the old teeth would also remove feature {extra}, which is not the gear's own")));
+        }
     }
     let active = s.active_component;
     s.execute("component.activate", &json!({"component": comp}))?;
