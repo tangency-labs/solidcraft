@@ -128,11 +128,11 @@ fn point2(p: [f64; 2]) -> Result<solidcore::Point2> {
     Ok(solidcore::Point2::new(p[0], p[1]))
 }
 
-/// Mass properties of a body at unit density (mm, mmÂ², mmÂ³, mmâµ), and what they are worth.
+/// Mass properties of a body at unit density (mm, mm², mm³, mm⁵), and what they are worth.
 ///
 /// **Requested accuracy, estimated, not proved.** The kernel's integrator holds its error
 /// ESTIMATE under `requested_accuracy`; that is not a bound, and nothing may treat it as one.
-/// For a density Ï the mass is ÏÂ·`volume` and the inertia scales by Ï.
+/// For a density ρ the mass is ρ·`volume` and the inertia scales by ρ.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MassPropertiesEstimate {
     /// The accuracy the integrator's error estimate was held to (not a proved bound).
@@ -147,9 +147,9 @@ pub struct MassPropertiesEstimate {
     /// The centre of mass; of the area for a body with no material.
     pub centroid: [f64; 3],
     /// Ixx, Iyy, Izz about axes through the centroid parallel to the world axes:
-    /// âˆ«(yÂ²+zÂ²), âˆ«(zÂ²+xÂ²), âˆ«(xÂ²+yÂ²) dV.
+    /// ∫(y²+z²), ∫(z²+x²), ∫(x²+y²) dV.
     pub moments: [f64; 3],
-    /// Iyz, Izx, Ixy about the centroid: âˆ«yz, âˆ«zx, âˆ«xy dV relative to it.
+    /// Iyz, Izx, Ixy about the centroid: ∫yz, ∫zx, ∫xy dV relative to it.
     pub products: [f64; 3],
     /// The inertia tensor about the centroid (row-major), the kernel's: whose off-diagonal
     /// terms are the negated products.
@@ -516,7 +516,7 @@ pub struct RayHit {
     /// The face, edge or vertex it meets.
     pub entity: RayEntity,
     /// The distance from the ray's origin along its unit direction: the hit point is
-    /// `origin + distance Â· direction / |direction|`.
+    /// `origin + distance · direction / |direction|`.
     pub distance: f64,
 }
 
@@ -813,7 +813,7 @@ impl Body {
     }
 
     /// How far the body reaches along the normal of the plane through `origin` with axes `x`
-    /// and `y` (`x Ã— y` made unit), measured from that plane: the least and the greatest level
+    /// and `y` (`x × y` made unit), measured from that plane: the least and the greatest level
     /// of its points, `[low, high]`. A copy of the body is moved rigidly into the plane's own
     /// frame ([`solidcore::Transform::into_plane_frame`]: the normal becomes Z) and its exact box
     /// read there ([`Body::bounds`]'s), so the span is the body's own, not the shadow of its
@@ -2147,7 +2147,7 @@ impl Body {
     }
 
     /// `count` points of record edge `edge`'s curve inside the edge, never at its ends: the
-    /// kernel's evaluation of the curve at the fractions k / (count + 1), k = 1 â€¦ count, of the
+    /// kernel's evaluation of the curve at the fractions k / (count + 1), k = 1 … count, of the
     /// edge's parameter interval. They are spaced evenly in parameter, not in length: on a
     /// line they are evenly spaced along it, on a rational arc or a spline they need not be. One
     /// point is [`Body::edge_middle`]'s. For a caller that checks what happened along an edge,
@@ -2896,7 +2896,7 @@ pub(crate) mod tests {
     }
 
     /// Separated unit boxes: the selected top at z = 1 and bottom at z = 4 come nearest
-    /// at corners (1, 1, 1) and (3, 4, 4), sqrt(2Â² + 3Â² + 3Â²) = sqrt(22) apart.
+    /// at corners (1, 1, 1) and (3, 4, 4), sqrt(2² + 3² + 3²) = sqrt(22) apart.
     #[test]
     fn closest_faces_keep_their_trimmed_boundaries() {
         all_fixes();
@@ -2928,7 +2928,7 @@ pub(crate) mod tests {
     fn centroid_and_mean_radius_and_displacement_adapt_kernel_results() {
         let summary = centroid_and_mean_radius(&[[0.0, 0.0], [6.0, 0.0], [0.0, 6.0]]).unwrap();
         assert_eq!(summary.centroid, [2.0, 2.0]);
-        // (2âˆš2 + 4âˆš5) / 3, evaluated independently.
+        // (2√2 + 4√5) / 3, evaluated independently.
         let expected = 3.924_233_011_581_783;
         assert!((summary.mean_distance - expected).abs() <= 2.0 * f64::EPSILON * expected);
         assert_eq!(
@@ -3410,8 +3410,8 @@ pub(crate) mod tests {
         }
 
         // `Body::face_normal_at_point` tests membership in the Euclidean `face_point_tol` band
-        // (2 * tol here): `face_pt` (1.5 * tol) and `edge_pt` (sqrt(2) * 1.2 * tol â‰ˆ 1.70 * tol)
-        // lie within it, whereas `vertex_pt` (sqrt(3) * 1.2 * tol â‰ˆ 2.08 * tol) lies outside it
+        // (2 * tol here): `face_pt` (1.5 * tol) and `edge_pt` (sqrt(2) * 1.2 * tol ≈ 1.70 * tol)
+        // lie within it, whereas `vertex_pt` (sqrt(3) * 1.2 * tol ≈ 2.08 * tol) lies outside it
         // and proves `classify_points_with_normals` falls back to the located vertex hit.
         for p in [face_pt, edge_pt] {
             let Some(normal) = b.face_normal_at_point(&order, x0_face, p).unwrap() else {
@@ -3728,9 +3728,9 @@ pub(crate) mod tests {
         assert_eq!(lengths, [4, 4, 4]);
     }
 
-    /// A cylinder r 2, h 5 and a ball r 3: the side's area 2Ï€rh and centroid on the axis at mid
-    /// height, a cap's area Ï€rÂ² and its normal âˆ“z, the rims' length 2Ï€r with their middles on
-    /// the rim circles, a seam's length h; the ball's area 4Ï€rÂ², not planar.
+    /// A cylinder r 2, h 5 and a ball r 3: the side's area 2πrh and centroid on the axis at mid
+    /// height, a cap's area πr² and its normal ∓z, the rims' length 2πr with their middles on
+    /// the rim circles, a seam's length h; the ball's area 4πr², not planar.
     #[test]
     fn curved_faces_and_edges_measure_their_closed_forms() {
         use std::f64::consts::PI;
@@ -3809,8 +3809,8 @@ pub(crate) mod tests {
             (lo + 5.0).abs() < 1e-9 && (hi - 5.0).abs() < 1e-9,
             "{lo} {hi}"
         );
-        // x = Z and y = (1, -1, 0)/âˆš2 make the normal x Ã— y = (1, 1, 0)/âˆš2: the box's corners
-        // reach from 0 to 20/âˆš2 along it.
+        // x = Z and y = (1, -1, 0)/√2 make the normal x × y = (1, 1, 0)/√2: the box's corners
+        // reach from 0 to 20/√2 along it.
         let s = std::f64::consts::FRAC_1_SQRT_2;
         let [lo, hi] = b
             .levels_along([0.0; 3], [0.0, 0.0, 1.0], [s, -s, 0.0])
@@ -3913,8 +3913,8 @@ pub(crate) mod tests {
         assert_eq!(b.edge_middle(&o, 12), Err(Error::Argument));
     }
 
-    /// An L-block (the boxes [0,2]Ã—[0,1]Ã—[0,1] and [0,1]Ã—[1,2]Ã—[0,1]): volume 3, centroid
-    /// (5/6, 5/6, 1/2), âˆ«xy dV about it 7/4 âˆ’ 3Â·(5/6)Â² = âˆ’1/3 and the other products 0, so
+    /// An L-block (the boxes [0,2]×[0,1]×[0,1] and [0,1]×[1,2]×[0,1]): volume 3, centroid
+    /// (5/6, 5/6, 1/2), ∫xy dV about it 7/4 − 3·(5/6)² = −1/3 and the other products 0, so
     /// its tensor's xy terms are +1/3 (the negated product) and the rest of it off the diagonal 0.
     #[test]
     fn an_l_block_tensor_holds_its_negated_product() {
