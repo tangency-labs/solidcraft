@@ -82,8 +82,8 @@ pub(crate) fn start(app: &mut SolveApp) {
     match (printed, &app.services.open_bytes) {
         (Ok(printed), Some(open)) => match open(&name, "application/pdf", &printed.bytes) {
             Ok(()) => {
-                let outside = serde_json::to_value(&printed.outside_sheet).unwrap_or_default();
-                app.set_status(opened_status(super::export::outside_count(&outside)), false);
+                let objects = printed.outside_sheet.iter().map(|finding| (finding.object.kind, &finding.object.id));
+                app.set_status(opened_status(super::export::distinct(objects)), false);
             }
             Err(e) => app.set_status(format!("{}: {e}", tr("ui.drawing_print.failed")), true),
         },

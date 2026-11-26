@@ -222,7 +222,7 @@ pub struct ExportResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub annotation_failures: Vec<SheetAnnotationFailure>,
     /// What lies outside the sheets written, as `drawing.check` lists it (`outside_sheet`): the
-    /// file is written all the same, cut at the paper. In page order, then by the record each names.
+    /// file is written all the same. In page order, then by the record each names.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outside_sheet: Vec<Finding>,
     /// Each balloon of a view on the sheet, as `drawing.scene` reports it.

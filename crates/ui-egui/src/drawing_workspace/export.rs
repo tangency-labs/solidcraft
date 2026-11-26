@@ -61,12 +61,16 @@ fn file_name(app: &SolveApp, form: ExportForm, sheet: Option<u64>) -> String {
     }
 }
 
-/// How many objects `outside` names, each once: the `outside_sheet` of a `drawing.export` or
-/// `drawing.print` reply. A view listed twice (outside its drawing space, and its centre marks off
-/// the paper) is one object. None for a reply without the list, as another export's.
-pub(crate) fn outside_count(outside: &Value) -> usize {
-    let objects = outside.as_array().into_iter().flatten().map(|finding| finding["object"].to_string());
+/// How many different objects `objects` holds: the one counting rule for what lies outside a sheet.
+/// A view listed twice (outside its drawing space, and its centre marks off the paper) is one object.
+pub(crate) fn distinct<T: std::hash::Hash + Eq>(objects: impl Iterator<Item = T>) -> usize {
     objects.collect::<std::collections::HashSet<_>>().len()
+}
+
+/// How many objects `outside` names, each once ([`distinct`]): the `outside_sheet` of a
+/// `drawing.export` or `drawing.print` reply. None for a reply without the list, as another export's.
+pub(crate) fn outside_count(outside: &Value) -> usize {
+    distinct(outside.as_array().into_iter().flatten().map(|finding| finding["object"].to_string()))
 }
 
 /// The status once an export is written to `path`, with `reply` what the command answered: where it
@@ -234,6 +238,18 @@ pub(super) mod tests {
         let said = h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
         assert_eq!(said, solidcraft_ui_text::format(key, &[("path", &path), ("count", &count.to_string())]));
         assert!(said.contains(&path) && said.contains(&count.to_string()), "{said}");
+    }
+
+    /// An object listed twice is counted once, and a reply without the list counts none.
+    #[test]
+    fn objects_outside_the_sheet_are_counted_once_each() {
+        let view = json!({"kind": "outside_sheet", "sheet": "s", "object": {"kind": "view", "id": "a"}, "why": "outside its drawing space"});
+        let marks = json!({"kind": "outside_sheet", "sheet": "s", "object": {"kind": "view", "id": "a"}, "why": "its centre marks"});
+        let dimension = json!({"kind": "outside_sheet", "sheet": "s", "object": {"kind": "dimension", "id": "b"}, "why": "off the paper"});
+        let reply = json!({"path": "sheet.pdf", "outside_sheet": [view, marks, dimension]});
+        assert_eq!(outside_count(&reply["outside_sheet"]), 2);
+        assert_eq!(outside_count(&json!({"path": "view.dxf"})["outside_sheet"]), 0, "a reply without the list");
+        assert_eq!(outside_count(&json!([])), 0);
     }
 
     /// The parameters each choice gives `drawing.export`.
