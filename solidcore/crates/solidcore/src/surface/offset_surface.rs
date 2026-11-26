@@ -3428,9 +3428,9 @@ fn extend_from_base(
         // clamped to its domain as to a singular side: its end knot, bit for bit
         let ext = extended.natural_uv_domain_with_nurb(k)?;
         if turn.rot == 0 {
-            uv_out.y = uv_out.y.clamp(ext.min().y, ext.max().y);
+            uv_out.y = uv_out.y.max(ext.min().y).min(ext.max().y);
         } else {
-            uv_out.x = uv_out.x.clamp(ext.min().x, ext.max().x);
+            uv_out.x = uv_out.x.max(ext.min().x).min(ext.max().x);
         }
         return Ok(Some(extended));
     }

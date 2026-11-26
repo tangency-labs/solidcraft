@@ -273,7 +273,7 @@ fn at_most_one_turn(
     worst: &mut f64,
 ) -> Result<(), String> {
     // (the angle's allowance holds for ends within tau <= rho / 2 of the circle)
-    if !(2.0 * tau <= rho) {
+    if 2.0 * tau > rho || tau.is_nan() || rho.is_nan() {
         return Err(format!(
             "{what}: radius {rho:e} within the rounding {tau:e}"
         ));
