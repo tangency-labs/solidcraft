@@ -786,6 +786,19 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
                 continue;
             };
 
+            // Not upstream (#22030): a root from the foot or a second-crossing guess must
+            // be a crossing, where the line meets the surface (a deviation at the scale of
+            // the line point's rounding, as negative ray hits are measured below), not a
+            // point where it only comes within the tolerance: those are main's (its
+            // near-tangent classification and coincident ranges), and one added in a
+            // coincident stretch splits main's range there.
+            if foot_at == Some(index) || second_at.contains(&index) {
+                let crossing = EFF_ZERO * (1.0 + self.line_point.max_dimension());
+                if hit.deviation > crossing {
+                    continue;
+                }
+            }
+
             // Not upstream (#22030): a second-crossing guess that ends on a root already
             // found in this leaf (within the tolerance along the line), or on one the line
             // runs along the surface to (a coincident stretch, which main's combination
