@@ -1,6 +1,7 @@
 # A tour of the window
 
-![The SolidCraft window with the sample plate open, its parts numbered 1 to 8](../media/ui-tour/window.png)
+<img class="dark-ui" src="../media/ui-tour/window.png" alt="The SolidCraft window with the sample plate open, its parts numbered 1 to 8">
+<img class="light-ui" src="../media/ui-tour/window.light.png" alt="The SolidCraft window with the sample plate open, its parts numbered 1 to 8">
 
 **1** Title bar · **2** Toolbar · **3** Browser · **4** Viewport · **5** Axis view ·
 **6** Navigation bar · **7** Timeline · **8** Command search
@@ -14,20 +15,39 @@ view.
 - **Title bar.** On Windows and Linux the application bar is the window's title bar. On the left:
   the File menu (New, Open, Save, Save As, Export…), undo and redo, the Home tab (the start page)
   and one tab per open design (each with its own undo history, selection and camera; a dot marks
-  unsaved changes). On the right: Report a bug, Help (?), Preferences (which hold the theme) and the
-  window's buttons. On Linux, to have your desktop's own title bar and window buttons instead, set
+  unsaved changes). Files dragged from a file manager onto the tabs open there, each as a design
+  in a new tab: a mark shows the place between the tabs. A CAD, mesh, drawing or point cloud file
+  dropped there becomes a design of its own; dropped on the view instead, it is inserted into a
+  design that has features. Double-click a design's tab, or right-click it and choose **Rename**, to
+  rename the design: type the name, then press Enter or click elsewhere to keep it, or Esc to leave
+  the old one (Preferences › Interface turns the double-click off, for a double-click that maximizes
+  the window instead; **Rename** stays in the menu). **Duplicate** in a design tab's right-click menu
+  opens a copy of the design in a new tab next to it, named "… copy" and not saved yet. **Save**
+  and **Save As…** in the same menu save that tab's design (it is shown first), as the File menu's
+  do. With a design's views shown as tabs inside its tab, the chevron right after its + folds them
+  away to save room, leaving the design's name and how many views it has; the chevron brings them
+  back. On the right: Report a bug,
+  Help (?), Preferences (which hold the theme) and the window's buttons. On Linux, to have your
+  desktop's own title bar and window buttons instead, set
   `SOLIDCRAFT_TITLEBAR=system` or put `"titlebar": "system"` in `graphics.json` in the settings
   folder (see [Troubleshooting](troubleshooting.md#reset-the-settings)) and restart; `app` (the
   default) puts the application bar back.
+  The operating system's window title automatically shows the active design, such as
+  `Bracket — SolidCraft`. Unsaved changes add an asterisk: `Bracket * — SolidCraft`.
+  Taskbars and window switchers use this title; the application bar itself is unchanged.
+  With no design open, the title is `SolidCraft`.
 - **Toolbar.** The workspace switcher (DESIGN) sits on the left. The tabs (MODEL, SURFACE,
   ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW and SHEET METAL) hold sections of commands. SKETCH appears while
   editing a sketch; SHEET METAL is always there and is highlighted for the active sheet body. Both select automatically
   when entered, and the other tabs remain available. Click a
-  panel's name for all its commands. Drag a command from the dropdown onto a panel's label
+  panel's name for all its commands. With **Switch panel menus on hover** enabled in
+  **Preferences > Layout > Toolbar tabs**, click once to open a menu, then hover another
+  panel's name to switch. Move outside the ribbon and open menu to close it.
+  Drag a command from the dropdown onto a panel's label
   or empty space to append it; the insertion line shows its destination. Drop onto an existing
   button to insert before it. Buttons can also move between panels, and the layout is saved.
   Click the **+** after the tabs, right-click a tab or empty toolbar space, or use
-  **Preferences > Interface > Toolbar tabs** to hide or restore tabs. Every existing tab,
+  **Preferences > Layout > Toolbar tabs** to hide or restore tabs. Every existing tab,
   including Sheet Metal and Weldments, stays visible by default. Tabs you hide stay hidden in every
   design until you show them again. Hidden tabs keep
   their customised buttons, commands in search and shortcuts; with all tabs hidden, **+** remains.
@@ -35,12 +55,18 @@ view.
   origin, bodies, sketches, construction planes, canvases, joints and components. The eye at the
   row's right end shows or hides an item (**Preferences › Interface › Eye next to the fold arrow**
   puts it back beside the fold arrow; press an eye and drag up or down over other eyes to show or hide them all at once, as one undo step), a component's radio button makes it the active component,
-  and right-clicking any row gives that item's menu. Right-click the design or a component and choose **Expand All** or
-  **Collapse All** to open or close every folder under that row (the design row stays visible
-  when the whole tree is collapsed). Components start closed, so a large assembly opens as a
+  and right-clicking any row gives that item's menu. Right-click the design or a component and choose
+  **Organize → Collapse All** to close every component, folder and group in the whole tree, at
+  every level (the design row stays open, so its first level stays listed). On the design,
+  **Organize → Expand All** opens everything; on a component, **Expand Below** and **Collapse
+  Below** open or close only the rows under it. Components start closed, so a large assembly opens as a
   short list; open one with its fold arrow, or use **Find in Browser** on a body to open the rows
   down to it (**Preferences › Interface › Components start open** opens every component from the
-  start, as before). Rows drag into groups and other components. **Preferences ›
+  start, as before). **Preferences › Layout › Browser rows start closed** (off by default) starts
+  folders closed too, and components whatever **Components start open** says: they open with
+  their arrow, **Expand All**, or **Find in Browser** on a body, face or edge in the view, which
+  opens just the rows down to that body, and a pick in the view leaves the Browser as it is. Rows
+  drag into groups and other components. **Preferences ›
   Interface › Bodies folders** sets when a component's bodies sit in a Bodies folder of their own:
   **Several bodies only** (the default) lists a component's body straight under it when it has
   only one and no groups, **Never** lists every component's bodies and groups straight under it
@@ -66,6 +92,11 @@ view.
   off: scroll zooms like the wheel); mouse wheels zoom and the thumb wheel pans sideways.
   On Linux, pinch needs the native Wayland window system
   (see [Troubleshooting](troubleshooting.md)).
+  In the web app, turn on **Pencil mode** in **Preferences › Sketch** to work with a pen such as
+  Apple Pencil and your fingers. A pen tap adds an item to the selection or removes it. A pen
+  double-tap selects the item's whole body, or its whole sketch. A pen tap on empty space clears
+  the selection. Fingers in the view only move the view, and a finger double-tap on a flat face
+  starts a sketch on it. Buttons and panels take finger taps as usual.
   To zoom with vertical two-finger scroll while holding a key, choose the key in Navigation › Zoom with two-finger scroll while holding (Cmd on macOS or Ctrl on Windows/Linux, Alt, or Control). It is off until you choose one.
   With the **Fusion** preset and two-finger pan enabled, hold **Shift** while scrolling with
   two fingers to orbit freely instead of panning. No click is needed. Releasing Shift returns
@@ -75,6 +106,11 @@ view.
   in the default and Inventor presets. In every preset, Ctrl+left drag (Cmd on macOS) that starts
   on empty space orbits; a Ctrl+click still adds to the selection. Shift+right-drag snaps to the nearest standard or
   diagonal view; Shift does not request snapping when the preset already requires it to orbit.
+  (In the web app in Firefox, Shift+right-click opens Firefox's menu instead; see
+  [Shift+right-click in Firefox](getting-started.md#shiftright-click-in-firefox).)
+  An orbit drag that reaches the edge of the view carries on: the cursor reappears at the opposite
+  edge, so you can keep turning round the model without letting go (not on Wayland or in the browser).
+  **Preferences › Navigation › Wrap the cursor while orbiting** turns this off.
 
   Enable **Preferences → Navigation → Free orbit** to rotate the mouse and 3D mouse continuously
   through both poles, preserving roll. During an orbit drag, Shift snaps the view direction and
@@ -112,7 +148,7 @@ view.
   home, framing what is shown now (Navigation › **Middle double-click** can make it Fit, which
   keeps the orientation, or turn it off).
   Interface › **OK and Cancel in the view's corner** puts a large check and cross at the view's
-  top right while a dialog or a sketch is open, and moves the axis view or cube down below them.
+  top right while a dialog or a sketch is open, and moves the axis view down below them.
   With a dialog open they do what its OK and Cancel do (the check is grey whenever OK is); in a
   sketch without a dialog they are Finish Sketch and Cancel Sketch.
   **View angles** in the navigation bar's View menu (or Preferences › Graphics, or the
@@ -134,6 +170,10 @@ view.
   value box in the viewport. Preferences › Interface › **Dialogs** › *In the left column* opens
   them in the browser's place instead (and the History's, when it is at the left), at least as
   wide as that column; the column comes back as it was when the dialog closes.
+  While a dialog
+  holds the column, the view's top-left corner shows the design's name: click it to open the
+  Origin, Bodies and (with the History at the left) the features over the view, and click a row
+  to pick it for the dialog's active box.
   Interface › **Dialog buttons** › **Top** puts OK, Cancel and Apply in
   the dialog's title row, right of the title, where they stay while sections open and close;
   Cancel then also takes the place of the close button. Enter and Esc work as before. The Sketch
@@ -163,6 +203,11 @@ view.
   different folders, the sketch keeps a row of its own. The timeline along the bottom always lists
   features in creation order.
   Feature Folders can contain joints as well as features; closing a folder hides both behind one tile.
+  Click the view button in the History's header, with History placed at the **Bottom**, for a multi-track
+  component matrix view that maps features across their owning components, visualizes cross-component actions
+  with vertical connectors, highlights topological dependency corridors `[ ... ]` for safe reordering,
+  and supports folder grouping and cascading suppression (the 2D Timeline applies only to bottom placement;
+  placing History at the left or in the browser activates the 1D view). See [2D Timeline](timeline-2d.md).
 - **Status bar** (off by default: Preferences › Interface › **Status bar**). A thin bar along
   the window's bottom edge, below the timeline. From the right: the design's units (click them
   to change the design's units, one undo step), the open sketch's state in its colour (under
@@ -206,6 +251,22 @@ General › **Show text under ribbon icons** is a separate, saved option for eit
 layout. Turn it off for shorter icon-only command buttons; tooltips, section names
 and command menus remain available.
 
+**Quick-access bar.** Right-click any ribbon button, a row of a section's drop-down or a command
+search result and choose **Add to Quick Access**: the command's icon joins the application bar,
+after Save, Undo and Redo. A click starts the command as its ribbon button does; drag a button
+along the bar to reorder it; right-click it and choose **Remove from Quick Access** to take it off.
+The bar is empty, and so not shown, until a command is added, and holds up to 24 commands. Narrow
+windows hide it with Undo and Redo. It is saved with the toolbar's customisations, so it is
+exported with the keyboard shortcuts and carried by settings profiles.
+
+Layout › **Show only the ribbon's tabs** (off by default) folds the ribbon to its tab
+row, so the view gets the room its panels took. Click a tab to show its panels over the view; they
+close again when a command starts, when the pointer leaves them, when Escape is pressed or when the
+open tab is clicked again. The command **Ribbon Tabs Only** (VIEW tab, the toolbar's right-click
+menu and command search) switches the option, so it can be given a key in Keyboard Shortcuts:
+choose it again to keep the whole ribbon shown. Scripts run `view.ribbon_tabs_only` with
+`{"on": true}` or `{"on": false}`, or with no parameters to switch.
+
 Interface › Layout › **Show origin and bodies at the top** (off by default) puts the active
 component's Bodies folder and the Origin (planes, axes and point) at the top of the History when
 it sits on the left or under the browser and is wide enough for names. They are the browser's own
@@ -218,6 +279,11 @@ shortcut and help; the arrow keys move across and between rows. Rest the pointer
 two seconds and a pin in its corner can be clicked to pin it to the ribbon or remove it (a
 quicker click anywhere on the icon starts the command). Right-clicking the icon, or dragging it
 onto the ribbon, also pins it; a pinned command always shows its pin.
+
+To change the order of a section's menu, drag a command to another place in it (list or large
+icons): a line shows where it will go. A command stays within its group (Edges, Faces, …). The
+order is kept with the toolbar, and **Reset Toolbar** restores it. Two menus keep their built-in
+order and can't be rearranged: Sketch › **Create** and the **»** overflow menu.
 
 Interface › **Leave pinned commands out of the drop-down menus** (off by default) lists in a
 section's menu only the commands that are not already buttons on the ribbon. When the window is
@@ -269,7 +335,7 @@ colours and corner radii by name:
 Colours are `#rrggbb`, or `#rrggbbaa` for translucent ones. A few colours, such as the four
 Continuity Analysis seams (`continuity`), take a list. Any colour the file leaves out keeps the
 base palette's value. `axis_x`, `axis_y` and `axis_z` colour every X, Y and Z axis: the origin,
-the view triad, the navigation cube and the Move gizmo. A file from an earlier version may set
+the view triad, the axes navigator and the Move gizmo. A file from an earlier version may set
 `triad` or `gizmo` instead; it still reads, and those colours now go to every axis.
 
 `radii` is optional. Its six keys above accept integers from 0 to 32 in logical UI points;
@@ -484,6 +550,18 @@ A choice comparison must name a declared choice. Unknown option ids, mixed compa
 malformed values are refused with the overlay's one-based position. An overlay may override
 `colors`, `radii`, `borders` and `icon_palette`; all their existing key and value checks apply.
 Overlays only select literal tables: there are no scripts, expressions or interpolation.
+
+The optional boolean `accepts_accent` (default `false`) lets the Accent preference apply over the
+theme. Under the themes, **Accent** then puts another accent colour over it: the theme's own (the
+default), one of eight presets, or any colour from the colour picker. It recolours the accent, the
+selected row, the primary buttons, the selection in the view and the File view's primary action;
+the Sketch, Surface and other tabs keep their own colours. A theme without the field shows the
+row disabled, with the reason "This theme keeps its own accent", and ignores a saved accent, which
+is kept for a theme that accepts one. The built-in Light and Dark accept an accent, as do the
+built-in themes Akari, Blueprint, Catppuccin Mocha, Clay, Clay Dark, Cupertino, Graphite, Gruvbox
+Dark and Light, Nord, Nosferatu, Okibi, One Dark, Onyx and Tokyo Night. The others keep their own
+accent: the 1-bit themes, CGA, High Contrast, the green and amber phosphor themes, Platinum 9,
+SolidCraft 95 and the Solarized themes, whose colours are the theme's identity or a fixed standard.
 
 The optional integer `requires` defaults to 1; this app supports levels through 2. A larger level
 loads the authored base value tables, disables options and overlays, and exposes a

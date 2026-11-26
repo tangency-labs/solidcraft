@@ -1,0 +1,6 @@
+{
+  "unit": "surface.sphere",
+  "cases": [
+    {"name": "fuzz00721_circle_axis_length_overflows", "origin": "fuzz-out/n2000/surface.sphere/fuzz00721.json (crash: cpp: killed by signal 11)", "issue": "UB-227", "cpp": "harness: invalid argument: circle: axis length overflows", "rust": "ok", "inputs": {"args": {"dom": {"kind": "natural"}, "other_dom": {"kind": "natural"}}, "cone": {"h": 4.95, "origin": [0.0636, 0.936, -0.159], "r0": 3.86, "r1": 5.21, "x": [0.405, 0.908, 0.106], "y": [-0.594, 0.174, 0.786]}, "op": "isect_cone", "sphere": {"circle": {"c": [0.0, 0.0, 0.0], "d": [-90.0, 86.0], "r": 3.21, "x": [0.0, 1.0, 0.0], "y": [-1e+300, 0.0, 0.0]}, "mode": 1, "origin": [0.0, 0.0, 0.0], "radius": 3.21, "x": [0.0, 1.0, 0.0], "y": [0.0, 0.0, 1.0]}}}
+  ]
+}

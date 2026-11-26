@@ -7,7 +7,7 @@ use crate::Services;
 use crate::dialogs::{apply_commands, for_feature as edit_dialog};
 
 /// A 100 x 60 base flange on XY (2.5 mm steel).
-fn plate(mode: crate::shell::LayoutMode) -> SolveApp {
+fn plate(mode: crate::ui_kit::LayoutMode) -> SolveApp {
     let mut s = Session::default();
     s.execute("sketch.create", &json!({"plane": "XY", "name": "Base"})).unwrap();
     s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
@@ -21,7 +21,7 @@ fn plate(mode: crate::shell::LayoutMode) -> SolveApp {
 /// dialog's height, angle and bend position; Edit Feature brings the edges back.
 #[test]
 fn flange_follows_the_picks() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut app = plate(mode);
         let sk = app.session.doc.features[0].id;
         app.session.selection = vec![Sel::Profile { sketch: sk, index: 0 }];
@@ -31,7 +31,7 @@ fn flange_follows_the_picks() {
         assert_eq!(c[0].1["type"], "base");
         assert_eq!(c[0].1["profiles"], json!([0]));
         run_all(&mut app, c);
-        assert_eq!(app.session.model.state().sheets.len(), 1);
+        assert_eq!(app.session.model.state().surface_sheets.len(), 1);
         // Four edge flanges at once, 20 high, outside.
         let edges: Vec<Sel> = [[50.0, 0.0, 2.5], [50.0, 60.0, 2.5], [0.0, 30.0, 2.5], [100.0, 30.0, 2.5]]
             .iter()
@@ -92,10 +92,126 @@ fn a_click_on_the_bottom_edge_makes_an_edge_flange() {
     assert_eq!(c[0].1["type"], "edge", "{:?}", c[0].1);
 }
 
+/// The Flange window has no thickness, bend radius or K-factor of its own: a line under its Rule
+/// box says they are changed in Sheet Metal Rules (#17421).
+#[test]
+fn flange_window_says_where_the_rule_values_are_changed() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let sk = h.app.session.doc.features[0].id;
+    h.app.session.selection = vec![Sel::Profile { sketch: sk, index: 0 }];
+    h.app.start("sheet.flange");
+    h.frames(3);
+    let note = crate::scenario::rect_of("dialog:note:sheet_flange_rule_values");
+    assert!(note.is_some_and(|r| r.width() > 0.0), "the note under the Rule box is shown");
+    // The whole sentence is shown: it wraps over lines rather than being cut to one.
+    let line = solidcraft_theme::Tokens::get().font_small * 1.5;
+    assert!(note.is_some_and(|r| r.height() > line + solidcraft_theme::Tokens::get().space_4 * 2.0), "{note:?}");
+    let text = solidcraft_ui_text::tr("ui.sheet_flange_rule_values");
+    assert!(text.contains(solidcraft_ui_text::tr("cmd.sheet_manage_rules")), "{text}");
+}
+
+/// egui wraps a right-to-left note as one string, so the lines of a wrapped Arabic or Hebrew
+/// sentence would come out in reverse order: those notes are split with `\n` at a clause, and
+/// each line fits the control column unwrapped, so every line is reordered on its own.
+#[test]
+fn flange_rule_note_in_arabic_and_hebrew_keeps_its_lines_unwrapped() {
+    for language in ["ar", "he"] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = language.into();
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let sk = h.app.session.doc.features[0].id;
+        h.app.session.selection = vec![Sel::Profile { sketch: sk, index: 0 }];
+        h.app.start("sheet.flange");
+        h.frames(4);
+        let lines = {
+            let _language = solidcraft_ui_text::scope(language);
+            solidcraft_ui_text::tr("ui.sheet_flange_rule_values").lines().count()
+        };
+        assert!(lines > 1, "{language}: the note is split at a clause");
+        let rows = h
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if solidcraft_ui_text::bidi::has_rtl(&text.galley.job.text) && text.galley.job.text.contains('K') => {
+                    Some(text.galley.rows.len())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{language}: the note is drawn"));
+        assert_eq!(rows, lines, "{language}: each line of the note fits without wrapping");
+    }
+}
+
+#[test]
+fn contour_flange_options_round_trip_through_feature_editing() {
+    let mut app = plate(crate::ui_kit::LayoutMode::Docked);
+    app.run("sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, -1]}, "name": "Contour"})).unwrap();
+    app.run("sketch.line", json!({"points": [[0, 0], [40, 0], [40, -30]], "ids": ["l1", "l2"]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run(
+        "sheet.flange",
+        json!({
+            "type": "contour",
+            "sketch": "Contour",
+            "curves": ["l1", "l2"],
+            "distance": "20 mm",
+            "radius": "1.5 mm",
+            "orientation": "side2",
+            "symmetric": true
+        }),
+    )
+    .unwrap();
+
+    let feature = app.session.doc.features.last().unwrap().clone();
+    let edit = edit_dialog(&app, feature.id, None).unwrap();
+    assert!(matches!(
+        &edit.kind,
+        Kind::Sheet(Sm::Flange { ty: 2, radius, orientation: 2, symmetric: true, .. }) if radius == "1.5 mm"
+    ));
+    let commands = apply_commands(&app, &edit).unwrap();
+    assert_eq!(commands[0].0, "timeline.redefine");
+    assert_eq!(commands[0].1["params"]["orientation"], "side2");
+    assert_eq!(commands[0].1["params"]["symmetric"], true);
+    assert_eq!(commands[0].1["params"]["radius"], "1.5 mm");
+}
+
+/// A contour flange saved before it had an orientation, with Other side ticked: Edit Feature
+/// shows Other side ticked and Flip as saved, and applying the dialog unchanged leaves the
+/// flange where it was, its width still on the other side of the sketch plane.
+#[test]
+fn an_older_other_side_contour_flange_stays_put_through_editing() {
+    let mut app = plate(crate::ui_kit::LayoutMode::Docked);
+    app.run("sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, -1]}, "name": "Contour"})).unwrap();
+    app.run("sketch.line", json!({"points": [[0, 0], [40, 0], [40, -30]], "ids": ["l1", "l2"]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("sheet.flange", json!({"type": "contour", "sketch": "Contour", "curves": ["l1", "l2"], "distance": "20 mm", "reverse": true})).unwrap();
+    let feature = app.session.doc.features.last().unwrap().clone();
+    assert!(matches!(&feature.kind, solidcraft_engine::doc::FeatureKind::SheetContour { orientation: None, reverse: true, flip: false, .. }));
+    let bounds = |app: &SolveApp| {
+        let body = app.session.model.state().bodies.last().map(|b| b.body.clone()).unwrap();
+        solidcraft_engine::kernel::measure(&body).unwrap().bbox
+    };
+    let before = bounds(&app);
+
+    let edit = edit_dialog(&app, feature.id, None).unwrap();
+    assert!(matches!(&edit.kind, Kind::Sheet(Sm::Flange { ty: 2, reverse: true, flip: false, orientation: 1, symmetric: false, .. })));
+    let commands = apply_commands(&app, &edit).unwrap();
+    assert_eq!(commands[0].1["params"]["reverse"], true);
+    assert_eq!(commands[0].1["params"]["flip"], false);
+    run_all(&mut app, commands);
+    let after = bounds(&app);
+    assert!(before.min.dist(after.min) < 1e-9 && before.max.dist(after.max) < 1e-9, "{before:?} became {after:?}");
+}
+
 /// Hem takes edges and an optional gap; rules make and pick a rule with its expressions.
 #[test]
 fn hem_and_rules() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut app = plate(mode);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
         app.session.selection = edge_sel(&app.session, Vec3::new(50.0, 0.0, 2.5)).into_iter().collect();
@@ -133,7 +249,7 @@ fn hem_and_rules() {
 
 #[test]
 fn flat_exports_use_the_save_picker() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         use std::sync::{Arc, Mutex};
         let mut app = plate(mode);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
@@ -143,9 +259,9 @@ fn flat_exports_use_the_save_picker() {
             captured.lock().unwrap().push((name.to_string(), extensions.iter().map(|x| x.to_string()).collect::<Vec<_>>()));
             Box::pin(std::future::ready(None))
         }));
-        assert_eq!(export_flat(&mut app, "Base", "csv"), "Choose an export file…");
+        assert_eq!(export_flat(&mut app, "Base", None), "Choose an export file…");
         crate::file_picker::tick(&mut app, &crate::fonts::test_context());
-        assert_eq!(export_flat(&mut app, "Base", "dxf"), "Choose an export file…");
+        assert_eq!(export_flat(&mut app, "Base", Some(DxfExportOptions::default())), "Choose an export file…");
         crate::file_picker::tick(&mut app, &crate::fonts::test_context());
         let picks = picks.lock().unwrap();
         assert!(picks[0].0.ends_with("-Base.csv"));
@@ -157,7 +273,7 @@ fn flat_exports_use_the_save_picker() {
 
 #[test]
 fn shallow_pocket_overlay_labels_depth_without_drawing_a_through_void() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut app = plate(mode);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
         app.run("sketch.create", json!({"plane": "XY", "name": "Pocket"})).unwrap();
@@ -173,7 +289,7 @@ fn shallow_pocket_overlay_labels_depth_without_drawing_a_through_void() {
         *data = Some(Ok(flat));
         let ctx = crate::fonts::test_context();
         let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
-            let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("flat-pocket-test")));
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("flat-pocket-test")));
             assert!(overlay(&mut app, &painter, Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 900.0)), &dialog));
         });
         let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|text| text.galley.text()).collect();
@@ -225,7 +341,7 @@ fn flat_pattern_shows_each_side_of_the_flat_size_whole() {
 
 #[test]
 fn flat_pattern_islands_fit_before_the_actual_command_panel() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut app = plate(mode);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
         app.run("sketch.create", json!({"plane": "XY", "name": "Retain"})).unwrap();
@@ -247,11 +363,11 @@ fn flat_pattern_islands_fit_before_the_actual_command_panel() {
         let viewport = Rect::from_min_max(pos2(250.0, crate::toolbar::APP_BAR_HEIGHT + crate::toolbar::RIBBON_HEIGHT), pos2(1400.0, 832.0));
         let browser = Rect::from_min_max(viewport.min, viewport.min + vec2(250.0, 450.0));
         let history = Rect::from_min_max(pos2(viewport.left(), viewport.bottom() - 40.0), viewport.max);
-        if mode == crate::shell::LayoutMode::Floating {
+        if mode == crate::ui_kit::LayoutMode::Floating {
             app.shell.content = Some(Rect::from_min_max(pos2(browser.right(), viewport.top()), pos2(viewport.right(), history.top())));
         }
         let ctx = crate::fonts::test_context();
-        let id = egui::Id::new(("sc_dialog", "FLAT PATTERN"));
+        let id = egui::Id::unique(("sc_dialog", "FLAT PATTERN"));
         let mut output = egui::FullOutput::default();
         for _ in 0..3 {
             output =
@@ -262,7 +378,7 @@ fn flat_pattern_islands_fit_before_the_actual_command_panel() {
                         .show(ui.ctx(), |ui| {
                             ui.label("Flat size: 50 × 10 × 2.5 mm");
                         });
-                    let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("island-fit")));
+                    let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::unique("island-fit")));
                     assert!(overlay(
                         &mut app,
                         &painter,
@@ -286,7 +402,7 @@ fn flat_pattern_islands_fit_before_the_actual_command_panel() {
             outlines.iter().flat_map(|p| &p.points).all(|p| p.x <= panel.left() - 19.0),
             "both complete islands must remain exposed before the command panel: {panel:?}"
         );
-        if mode == crate::shell::LayoutMode::Floating {
+        if mode == crate::ui_kit::LayoutMode::Floating {
             assert!(
                 outlines.iter().flat_map(|p| &p.points).all(|p| !browser.contains(*p) && !history.contains(*p)),
                 "flat pattern fits clear of the shell cards"
@@ -297,7 +413,7 @@ fn flat_pattern_islands_fit_before_the_actual_command_panel() {
 
 #[test]
 fn coincident_top_and_bottom_pocket_depths_share_a_readable_annotation() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut app = plate(mode);
         app.run("sheet.flange", json!({"sketch":"Base"})).unwrap();
         app.run("sketch.create", json!({"plane":"XY","name":"Retain"})).unwrap();
@@ -314,7 +430,7 @@ fn coincident_top_and_bottom_pocket_depths_share_a_readable_annotation() {
         *data = Some(Ok(flat));
         let ctx = crate::fonts::test_context();
         let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
-            let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("coincident-pocket-test")));
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("coincident-pocket-test")));
             assert!(overlay(&mut app, &painter, Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 900.0)), &dialog));
         });
         let labels: Vec<_> =
@@ -329,7 +445,7 @@ fn coincident_top_and_bottom_pocket_depths_share_a_readable_annotation() {
 
 #[test]
 fn pocket_export_button_uses_the_picker_and_preserves_depth_layers() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.set", json!({"layout":mode}));
         for (command, params) in [
@@ -354,7 +470,9 @@ fn pocket_export_button_uses_the_picker_and_preserves_depth_layers() {
         h.app.start("sheet.flat_pattern");
         h.settle();
         let undo = h.app.session.undo.len();
-        h.step(&json!({"widget":"Export DXF…"})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:sheet_dxf:options"}})).unwrap();
+        assert!(!path.exists(), "opening the options does not export");
+        h.step(&json!({"click":{"handle":"dialog:sheet_dxf:save"}})).unwrap();
         let exported = std::fs::read_to_string(&path).expect("actual Export DXF button writes the picker destination");
         assert!(exported.contains("POCKET_BOTTOM_Z0.000000_TO_1.000000_MM"));
         assert!(exported.contains("OUTLINE"));
@@ -366,11 +484,11 @@ fn pocket_export_button_uses_the_picker_and_preserves_depth_layers() {
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn bend_table_picker_writes_the_current_body() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut app = plate(mode);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
         app.run("sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20})).unwrap();
-        let body = app.session.model.state().sheets[0].body.clone();
+        let body = app.session.model.state().surface_sheets[0].body.clone();
         let path = std::env::temp_dir().join(format!("solidcraft-bend-table-{}.csv", std::process::id()));
         let output = path.to_string_lossy().into_owned();
         let chosen = output.clone();
@@ -379,7 +497,7 @@ fn bend_table_picker_writes_the_current_body() {
             Box::pin(std::future::ready(Some(chosen.clone())))
         }));
         let undo = app.session.undo.len();
-        assert_eq!(export_flat(&mut app, &body, "csv"), "Choose an export file…");
+        assert_eq!(export_flat(&mut app, &body, None), "Choose an export file…");
         crate::file_picker::tick(&mut app, &crate::fonts::test_context());
         assert_eq!(app.status.as_ref().map(|s| &s.0), Some(&format!("Exported {output}")));
         let contents = std::fs::read_to_string(&path).unwrap();
@@ -394,7 +512,8 @@ fn bend_table_picker_writes_the_current_body() {
 /// made with it, and the dialog shows it the next time.
 #[test]
 fn rules_dialog_picks_the_corner_relief_shape() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    use solidcraft_engine::doc::develop::{CornerRelief, JointKind, Relief};
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.set", json!({"layout":mode}));
         h.app
@@ -408,10 +527,12 @@ fn rules_dialog_picks_the_corner_relief_shape() {
         h.app.run("sketch.finish", json!({})).unwrap();
         h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
         h.app.run("sheet.flange", json!({"edges": [[60, 0, 2], [120, 45, 2], [60, 90, 2], [0, 45, 2]], "height": 20, "angle": "72 deg"})).unwrap();
-        // The rounds in the base of the tray, and the shape the open dialog shows.
+        // The tray's corners relieved with a round (a corner's relief belongs to the two bends that
+        // meet there, and is cut from the flat wherever it reaches; the flat-first sheet drew it
+        // in the base's outline), and the shape the open dialog shows.
         let rounds = |app: &SolveApp| {
             let state = app.session.model.state();
-            state.sheets.last().map(|s| s.base.outer.segs.iter().filter(|g| matches!(g, solidcore_record::Seg2::Arc { .. })).count())
+            state.surface_sheets.last().map(|s| s.sheet.corners.iter().filter(|c| c.relief == CornerRelief::Round).count())
         };
         let shown = |app: &SolveApp| match app.dialog.as_ref().map(|d| &d.kind) {
             Some(Kind::Sheet(Sm::Rules { relief, .. })) => Some(*relief),
@@ -438,7 +559,14 @@ fn rules_dialog_picks_the_corner_relief_shape() {
         h.step(&json!({"widget": "OK"})).unwrap();
         assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
         assert_eq!(h.app.session.doc.sheet_rule(None).corner_relief_shape, "tear");
-        let torn = h.app.session.model.state().sheets.last().map(|s| s.flanges.iter().filter(|f| f.tear == (true, true)).count());
+        // Both ends of a bend are its joint's: each of the four bends is torn at both its corners.
+        let torn = h.app.session.model.state().surface_sheets.last().map(|s| {
+            s.sheet
+                .joints
+                .iter()
+                .filter(|j| matches!(&j.kind, JointKind::Bend(b) if matches!(b.relief, (Relief::Tear { .. }, Relief::Tear { .. }))))
+                .count()
+        });
         assert_eq!((rounds(&h.app), torn), (Some(0), Some(4)));
     }
 }
@@ -447,7 +575,7 @@ fn rules_dialog_picks_the_corner_relief_shape() {
 /// of the part made with it, and the dialog shows it the next time.
 #[test]
 fn rules_dialog_sets_how_bend_angles_read() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.set", json!({"layout":mode}));
         h.app.run("sheet.manage_rules", json!({"name": "AL2", "thickness": "2 mm", "bend_radius": "1 mm", "active": true})).unwrap();
@@ -492,6 +620,7 @@ fn rules_dialog_sets_how_bend_angles_read() {
 /// the size the dialog shows reach the part, the bends and the flat pattern.
 #[test]
 fn the_rule_manager_relieves_a_corner_that_is_not_square() {
+    use solidcraft_engine::doc::develop::CornerRelief;
     let mut h = crate::scenario::Harness::new();
     h.app
         .run(
@@ -510,17 +639,27 @@ fn the_rule_manager_relieves_a_corner_that_is_not_square() {
             json!({"edges": [[60, 0, 2], [142.5, 38.9711431703, 2], [105, 77.9422863406, 2], [22.5, 38.9711431703, 2]], "height": 38.6, "angle": "90 deg"}),
         )
         .unwrap();
-    // The base of the notch has its four corners, and the bends run the whole length of the edges.
-    let base = |app: &SolveApp| {
-        let state = app.session.model.state();
-        state.sheets.last().map(|s| (s.base.outer.segs.len(), s.flanges.iter().map(|f| s.zone_span(f).1 - s.zone_span(f).0).collect::<Vec<_>>()))
+    // The corners a relief cuts (a round or a square: a corner's relief belongs to the two bends
+    // that meet there and is cut from the flat wherever it reaches; the flat-first sheet drew a
+    // kite in its base's outline), and the bends' lengths in the flat pattern's bend table.
+    let base = |app: &mut SolveApp| {
+        let cut = app
+            .session
+            .model
+            .state()
+            .surface_sheets
+            .last()
+            .map(|s| s.sheet.corners.iter().filter(|c| matches!(c.relief, CornerRelief::Round | CornerRelief::Square)).count())?;
+        let flat = app.session.execute("sheet.flat_pattern", &json!({})).ok()?;
+        let bends: Vec<f64> = flat["bends"].as_array()?.iter().map(|b| b["length"].as_f64().unwrap_or(f64::NAN)).collect();
+        Some((cut, bends))
     };
     let shown = |app: &SolveApp| match app.dialog.as_ref().map(|d| &d.kind) {
         Some(Kind::Sheet(Sm::Rules { relief, .. })) => Some(*relief),
         _ => None,
     };
-    let (segs, notch_bends) = base(&h.app).expect("the sheet");
-    assert_eq!(segs, 4, "the notch cuts nothing out of the base");
+    let (cut, notch_bends) = base(&mut h.app).expect("the sheet");
+    assert_eq!(cut, 0, "the notch cuts nothing out of the flat");
     h.step(&json!({"start": "sheet.manage_rules"})).unwrap();
     h.frames(3);
     assert_eq!(shown(&h.app), Some(0), "a rule starts with the notch");
@@ -534,11 +673,21 @@ fn the_rule_manager_relieves_a_corner_that_is_not_square() {
     assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
     assert_eq!(h.app.session.doc.sheet_rule(None).corner_relief_shape, "rectangular");
     assert_eq!(h.app.session.doc.sheet_rule(None).corner_relief, "8 mm");
-    // A kite at each of the four corners: two more edges than the notch's four.
-    let (segs, relieved) = base(&h.app).expect("the sheet");
-    assert_eq!(segs, 12, "a kite at each corner of the base");
+    // A relief at each of the four corners: a parallelogram centered where the two zones' center
+    // lines cross, c = 3 − π/2 in from both edges (the tangent lines R + T = 3 in, the zones
+    // BA = π wide outside them), its sides along the two bends 4 from there. The notch ends each
+    // zone square across from where the tangent lines cross, (π/2)/tan(α/2) along the bend past
+    // the zones' crossing (α the corner's angle), and the relief's side along the other bend
+    // crosses the bend's center line 4/sin α past it: each end is 4/sin α − (π/2)/tan(α/2)
+    // shorter. Each bend has a 60° end and a 120° end, so it is
+    // (4/sin 60° − (π/2)/tan 30°) + (4/sin 120° − (π/2)/tan 60°) = (16 − 2π)/√3 shorter (the
+    // flat-first kite, set on the base's corner, took 4 off each end).
+    let (cut, relieved) = base(&mut h.app).expect("the sheet");
+    assert_eq!(cut, 4, "a relief at each corner of the base");
+    let shorter = (16.0 - 2.0 * std::f64::consts::PI) / 3f64.sqrt();
+    assert!(notch_bends.len() == 4 && relieved.len() == 4, "{notch_bends:?} and {relieved:?}");
     for (was, now) in notch_bends.iter().zip(&relieved) {
-        assert!((was - now - 8.0).abs() < 1e-6, "{notch_bends:?} and {relieved:?}: the bends are 8 mm shorter");
+        assert!((was - now - shorter).abs() < 1e-6, "{notch_bends:?} and {relieved:?}: the bends are {shorter} mm shorter");
     }
     // The flat pattern is one loop, and the part folds.
     let flat = h.app.session.execute("sheet.flat_pattern", &json!({})).expect("the flat pattern");
@@ -551,7 +700,7 @@ fn the_rule_manager_relieves_a_corner_that_is_not_square() {
 /// a shape and a size reach the feature, Edit Feature shows them again, and Rule takes them back.
 #[test]
 fn flange_dialog_picks_a_corner_relief_of_its_own() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.set", json!({"layout":mode}));
         h.app
@@ -599,13 +748,16 @@ fn flange_dialog_picks_a_corner_relief_of_its_own() {
         assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
         assert_eq!(relief(&h.app), Some((Some("round".into()), Some("6 mm".into()))));
         assert!(h.app.session.model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", h.app.session.model.results);
+        // The corners relieved with a round: a corner's relief belongs to the two bends that meet
+        // there and is cut from the flat wherever it reaches (the flat-first sheet drew it as an
+        // arc of its base's outline). The two flanges make one corner, at the origin.
         let arcs = |app: &SolveApp| {
             app.session
                 .model
                 .state()
-                .sheets
+                .surface_sheets
                 .last()
-                .map(|s| s.base.outer.segs.iter().filter(|g| matches!(g, solidcore_record::Seg2::Arc { .. })).count())
+                .map(|s| s.sheet.corners.iter().filter(|c| c.relief == solidcraft_engine::doc::develop::CornerRelief::Round).count())
         };
         assert_eq!(arcs(&h.app), Some(1), "the round is cut at the one corner the two flanges make");
         // Edit Feature shows both again; Rule and an empty size take the feature back to the rule's relief.
@@ -625,9 +777,72 @@ fn flange_dialog_picks_a_corner_relief_of_its_own() {
     }
 }
 
+/// The Flange dialog's Bend Relief Shape row: Rule (the default) leaves the shape to the rule, a
+/// shape reaches the feature, Edit Feature shows it again, and Rule takes it back.
+#[test]
+fn flange_dialog_picks_a_bend_relief_shape_of_its_own() {
+    let mut h = crate::scenario::Harness::new();
+    h.app
+        .run(
+            "sheet.manage_rules",
+            json!({"name": "AL2", "thickness": "2 mm", "k_factor": 0.5, "bend_radius": "1 mm", "relief_width": "2 mm", "relief_depth": "1 mm", "active": true}),
+        )
+        .unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[0, 0], [160, 0], [160, 30], [20, 30], [20, 60], [0, 60]], "closed": true})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    h.app.session.selection = edge_sel(&h.app.session, Vec3::new(90.0, 30.0, 2.0)).into_iter().collect();
+    assert_eq!(h.app.session.selection.len(), 1);
+    h.app.start("sheet.flange");
+    h.frames(3);
+    if let Some(Kind::Sheet(Sm::Flange { height, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *height = "15 mm".into();
+    }
+    let shown = |app: &SolveApp| match app.dialog.as_ref().map(|d| &d.kind) {
+        Some(Kind::Sheet(Sm::Flange { bend_relief, .. })) => Some(*bend_relief),
+        _ => None,
+    };
+    let saved = |app: &SolveApp| match &app.session.doc.features.last().map(|f| &f.kind) {
+        Some(FeatureKind::SheetFlange { bend_relief_shape, .. }) => Some(bend_relief_shape.clone()),
+        _ => None,
+    };
+    // Untouched, the dialog asks for nothing: the rule's shape.
+    assert_eq!(shown(&h.app), Some(0));
+    let d = h.app.dialog.clone().unwrap();
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert!(c[0].1.get("bend_relief_shape").is_none(), "{}", c[0].1);
+    h.step(&json!({"click": {"handle": "dialog:section:Advanced"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Bend Relief Shape"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Bend Relief Shape:Obround"}})).unwrap();
+    assert_eq!(shown(&h.app), Some(2));
+    h.step(&json!({"widget": "OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+    assert_eq!(saved(&h.app), Some(Some("obround".into())));
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", h.app.session.model.results);
+    // The flat's outline, as points: the obround's half round beside the bend's end takes many
+    // more than the rectangular slot's square end.
+    let points = |app: &mut SolveApp| {
+        app.session.execute("sheet.flat_pattern", &json!({})).ok().and_then(|f| f["outline"][0].as_array().map(Vec::len)).unwrap_or(0)
+    };
+    let round = points(&mut h.app);
+    // Edit Feature shows it again; Rule takes the feature back to the rule's rectangular slot.
+    let id = h.app.session.doc.features.last().map(|f| f.id).unwrap();
+    let mut e = edit_dialog(&h.app, id, None).unwrap();
+    assert!(matches!(&e.kind, Kind::Sheet(Sm::Flange { bend_relief: 2, .. })));
+    if let Kind::Sheet(Sm::Flange { bend_relief, .. }) = &mut e.kind {
+        *bend_relief = 0;
+    }
+    let commands = apply_commands(&h.app, &e).unwrap();
+    run_all(&mut h.app, commands);
+    assert_eq!(saved(&h.app), Some(None));
+    let square = points(&mut h.app);
+    assert!(square > 0 && round > square + 4, "{round} vs {square}");
+}
+
 #[test]
 fn pocket_depth_labels_follow_inches_without_changing_flat_data() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut app = plate(mode);
         app.run("document.units", json!({"units":"in"})).unwrap();
         assert_eq!(super::pocket_label(&app, &json!({"side":"top","depth_mm":25.4*0.1234})).as_deref(), Some("Top pocket: 0.1234 in deep"));
@@ -640,7 +855,7 @@ fn pocket_depth_labels_follow_inches_without_changing_flat_data() {
 /// brings them back and rebuilds the same flanges.
 #[test]
 fn edge_flanges_can_have_an_angle_and_a_height_of_their_own() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut app = plate(mode);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
         let edges: Vec<Sel> = [[50.0, 0.0, 2.5], [50.0, 60.0, 2.5], [0.0, 30.0, 2.5], [100.0, 30.0, 2.5]]
@@ -703,7 +918,7 @@ fn edge_flanges_can_have_an_angle_and_a_height_of_their_own() {
 /// one flange command, one body and one undo step, and a bend with no height is refused.
 #[test]
 fn further_bends_in_the_flange_dialog_make_one_chained_flap() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut app = plate(mode);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
         app.run("sheet.flange", json!({"edges": [[0, 30, 2.5]], "height": 30})).unwrap();
@@ -777,7 +992,7 @@ fn add_bend_and_remove_bend_buttons_work() {
 /// reaches the feature, and Edit Feature shows it again.
 #[test]
 fn flange_dialog_measures_the_height_from_the_chosen_datum() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.set", json!({"layout":mode}));
         h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
@@ -859,36 +1074,47 @@ fn flange_dialog_offers_material_outside_and_tangent_bend_positions() {
     assert_eq!(saved, "tangent");
 }
 
-/// Convert takes a fixed face and, for a solid or shelled body, its bend edges; Edit Feature
-/// brings both back.
+/// Convert (#6748) takes the faces that make the sheet and the edges that bend more faces onto
+/// them, on the faces' body; the command refuses faces skipped beside faces picked. Edit Feature
+/// brings the body, the faces and the edges back.
 #[test]
-fn convert_takes_the_fixed_face_and_the_bend_edges() {
+fn convert_takes_the_faces_picked_and_the_bend_edges() {
     let mut s = Session::default();
     s.execute("solid.box", &json!({"length": 100, "width": 60, "height": 30, "body_name": "Tray"})).unwrap();
     s.execute("solid.shell", &json!({"faces": [[50, 30, 30]], "thickness": 2})).unwrap();
     let mut app = SolveApp::new(s, Services::default());
     app.start("sheet.convert");
     let mut d = app.dialog.clone().unwrap();
-    assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), ["Fixed Face", "Bend Edges"]);
-    assert!(apply_commands(&app, &d).is_err(), "nothing to convert without a face");
-    // The face alone is the plate conversion: no `bends`.
-    d.inputs[0].items = face_sel(&app.session, Vec3::new(50.0, 30.0, 0.0)).into_iter().collect();
-    assert!(apply_commands(&app, &d).unwrap()[0].1.get("bends").is_none());
+    assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), ["Body", "Bend Edges", "Skip Faces", "Faces", "Engrave Faces"]);
+    assert!(apply_commands(&app, &d).is_err(), "nothing to convert without a body");
+    // The floor alone: one face, its body, and no `bends`.
+    d.inputs[3].items = face_sel(&app.session, Vec3::new(50.0, 30.0, 0.0)).into_iter().collect();
+    let c = apply_commands(&app, &d).unwrap();
+    assert!(c[0].1.get("bends").is_none() && c[0].1.get("faces").is_none() && c[0].1["body"] == json!("Tray"), "{}", c[0].1);
+    assert_eq!(c[0].1["face"], json!([50.0, 30.0, 0.0]));
+    // A face skipped beside it goes to the command, which refuses it: the faces picked are the
+    // whole sheet.
+    d.inputs[2].items = face_sel(&app.session, Vec3::new(50.0, 0.0, 15.0)).into_iter().collect();
+    let c = apply_commands(&app, &d).unwrap();
+    assert!(c[0].1.get("face").is_some() && c[0].1.get("skip").is_some(), "{}", c[0].1);
+    d.inputs[2].items.clear();
     let edges: Vec<Sel> = [[50.0, 0.0, 0.0], [100.0, 30.0, 0.0], [50.0, 60.0, 0.0], [0.0, 30.0, 0.0]]
         .iter()
         .filter_map(|p| edge_sel(&app.session, Vec3::new(p[0], p[1], p[2])))
         .collect();
     d.inputs[1].items = edges;
     let c = apply_commands(&app, &d).unwrap();
-    assert_eq!(c[0].0, "sheet.convert");
+    assert_eq!((c[0].0.as_str(), c[0].1.get("skip")), ("sheet.convert", None));
     assert_eq!(c[0].1["bends"], json!([[50.0, 0.0, 0.0], [100.0, 30.0, 0.0], [50.0, 60.0, 0.0], [0.0, 30.0, 0.0]]));
     run_all(&mut app, c);
     let bends = |app: &mut SolveApp| app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["bends"].as_array().map(Vec::len);
     assert_eq!(bends(&mut app), Some(4));
-    // Edit Feature: the face and the four edges are back in their rows, and OK rebuilds the sheet.
+    // Edit Feature: the body, the four edges and the face are back in their rows, and OK
+    // rebuilds the sheet.
     let f = app.session.doc.features.last().unwrap().clone();
     let e = edit_dialog(&app, f.id, None).unwrap();
-    assert_eq!((e.inputs[0].items.len(), e.inputs[1].items.len()), (1, 4));
+    assert!(matches!(&e.kind, Kind::Sheet(Sm::Convert { side: 0, .. })));
+    assert_eq!(e.inputs.iter().map(|i| i.items.len()).collect::<Vec<_>>(), [1, 4, 0, 1, 0]);
     let c = apply_commands(&app, &e).unwrap();
     assert_eq!(c[0].0, "timeline.redefine");
     assert_eq!(c[0].1["params"]["bends"].as_array().map(Vec::len), Some(4));
@@ -897,11 +1123,110 @@ fn convert_takes_the_fixed_face_and_the_bend_edges() {
     assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", app.session.model.results);
 }
 
+/// Convert (#6748) fixes no face: it takes the body, the edges that bend and the faces it skips,
+/// and the material's side; a solid tray converts with its top skipped. Edit Feature brings all
+/// of it back.
+#[test]
+fn convert_takes_the_body_its_bends_and_the_faces_it_skips() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 100, "width": 60, "height": 30, "body_name": "Block"})).unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    app.start("sheet.convert");
+    let mut d = app.dialog.clone().unwrap();
+    d.inputs[0].items = vec![Sel::Body { name: "Block".into() }];
+    if let Kind::Sheet(Sm::Convert { side, .. }) = &mut d.kind {
+        *side = 1;
+    }
+    d.inputs[1].items = [[50.0, 0.0, 0.0], [100.0, 30.0, 0.0], [50.0, 60.0, 0.0], [0.0, 30.0, 0.0]]
+        .iter()
+        .filter_map(|p| edge_sel(&app.session, Vec3::new(p[0], p[1], p[2])))
+        .collect();
+    d.inputs[2].items = face_sel(&app.session, Vec3::new(50.0, 30.0, 30.0)).into_iter().collect();
+    let c = apply_commands(&app, &d).unwrap();
+    let p = &c[0].1;
+    assert!(p.get("face").is_none() && p.get("engrave").is_none() && p["direction"] == json!("outside"), "{p}");
+    assert_eq!((p["bends"].as_array().map(Vec::len), p["skip"].as_array().map(Vec::len)), (Some(4), Some(1)));
+    // Faces picked to engrave go to the command as `engrave`, which reads them; none here.
+    d.inputs[4].items = face_sel(&app.session, Vec3::new(50.0, 0.0, 15.0)).into_iter().collect();
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].1["engrave"], json!([[50.0, 0.0, 15.0]]), "{}", c[0].1);
+    d.inputs[4].items.clear();
+    // Inside is the default, and goes unsaid.
+    if let Kind::Sheet(Sm::Convert { side, .. }) = &mut d.kind {
+        *side = 0;
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    assert!(c[0].1.get("direction").is_none());
+    run_all(&mut app, c);
+    let flat = app.session.execute("sheet.flat_pattern", &json!({})).unwrap();
+    assert_eq!(flat["bends"].as_array().map(Vec::len), Some(4), "{flat}");
+    // Edit Feature as the app opens it: rolled back to before the conversion, where the skipped
+    // face still is.
+    let f = app.session.doc.features.last().unwrap().clone();
+    app.edit_feature(f.id);
+    let e = app.dialog.clone().unwrap();
+    assert!(matches!(&e.kind, Kind::Sheet(Sm::Convert { side: 0, .. })));
+    assert_eq!(e.inputs.iter().map(|i| i.items.len()).collect::<Vec<_>>(), [1, 4, 1, 0, 0]);
+}
+
+/// Recognize (#6748) takes a body that is sheet metal already, here a tray shelled 2 thick: it
+/// sends a new rule's name, the rule it makes is the body's 2 mm, and Edit Feature brings the
+/// body back. Convert says such a body is sheet metal already, and never says so of a surface
+/// body.
+#[test]
+fn recognize_makes_the_bodys_rule_and_convert_points_to_it() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 100, "width": 60, "height": 30, "body_name": "Tray"})).unwrap();
+    s.execute("solid.shell", &json!({"faces": [[50, 30, 30]], "thickness": 2})).unwrap();
+    s.execute("sketch.create", &json!({"plane": "XY", "name": "Open"})).unwrap();
+    let made = s.execute("sketch.line", &json!({"points": [[200, 40], [200, 0], [260, 0]]})).unwrap();
+    s.execute("sketch.finish", &json!({})).unwrap();
+    let curves = made["created"]["curves"].clone();
+    s.execute("surface.extrude", &json!({"sketch": "Open", "curves": curves, "distance": 50, "body_name": "Open"})).unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    assert!(own_thickness(&app, "Tray").is_some_and(|t| (t - 2.0).abs() < 1e-9));
+    assert_eq!(own_thickness(&app, "Open"), None, "a surface body is surfaces only");
+    app.start("sheet.recognize");
+    let mut d = app.dialog.clone().unwrap();
+    assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), ["Body", "Surface Face", "Skip Faces", "Bend Edges"]);
+    assert!(apply_commands(&app, &d).is_err(), "nothing to recognize without a body");
+    d.inputs[0].items = vec![Sel::Body { name: "Tray".into() }];
+    if let Kind::Sheet(Sm::Recognize { new_rule, .. }) = &mut d.kind {
+        *new_rule = "Tray rule".into();
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!((c[0].0.as_str(), c[0].1["new_rule"].clone(), c[0].1.get("rule")), ("sheet.recognize", json!("Tray rule"), None));
+    run_all(&mut app, c);
+    let made = app.session.doc.sheet.rules.iter().find(|r| r.name == "Tray rule").map(|r| r.thickness.clone());
+    assert_eq!(made.as_deref(), Some("2 mm"));
+    let f = app.session.doc.features.last().unwrap().clone();
+    let e = edit_dialog(&app, f.id, None).unwrap();
+    assert!(matches!(&e.kind, Kind::Sheet(Sm::Recognize { .. })));
+    assert_eq!(e.inputs[0].items, vec![Sel::Body { name: "Tray".into() }]);
+}
+
+/// What the Recognize dialog reads follows its Surface Face pick, as the command does (#6748).
+/// The 100 x 60 x 30 tray shelled 2 thick inward reads 2.000 mm from its largest face with
+/// another behind it. Picked on its rim at (1, 30, 30), the top of the wall x 0 … 2, it reads no
+/// sheet: the only face level with the rim and facing back at it is the bottom, 30 behind, more
+/// than a sixth of the rim's 116.6 across (√(100² + 60²) = 116.62; 6 · 30 = 180).
+#[test]
+fn recognize_reads_the_body_from_its_surface_face_pick() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 100, "width": 60, "height": 30, "body_name": "Tray"})).unwrap();
+    s.execute("solid.shell", &json!({"faces": [[50, 30, 30]], "thickness": 2, "direction": "inside"})).unwrap();
+    let app = SolveApp::new(s, Services::default());
+    let unpicked = measure_text(&app, "Tray", None, &[]);
+    assert!(unpicked.as_ref().is_ok_and(|t| t.contains("2.000")), "{unpicked:?}");
+    let rim = measure_text(&app, "Tray", Some(Vec3::new(1.0, 30.0, 30.0)), &[]);
+    assert!(rim.as_ref().is_err_and(|e| e.contains("no face behind it")), "{rim:?}");
+}
+
 /// The Path Flange dialog takes the edge and the path's sketch lines: one feature, one body,
 /// and Edit Feature brings the edge and the path back.
 #[test]
 fn path_flange_dialog_follows_the_path() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut app = plate(mode);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
         app.run("sheet.flange", json!({"edges": [[0, 30, 2.5]], "height": 30})).unwrap();
@@ -947,9 +1272,71 @@ fn path_flange_dialog_follows_the_path() {
     }
 }
 
+/// The Tab dialog takes the profile of a sketch on the sheet's face: the profile joins the same
+/// body, and Edit Feature brings the profile back.
+#[test]
+fn tab_dialog_joins_the_profile_to_the_sheet() {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
+        let mut app = plate(mode);
+        app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+        app.run("sketch.create", json!({"plane": {"face": [50, 30, 2.5]}, "name": "Ear"})).unwrap();
+        // From (30, 50) to (70, 90) on the top face: over its y = 60 edge by 30 mm.
+        use solidcraft_engine::geom::prelude::*;
+        let plane = app.session.model.state().sketches.last().map(|ss| ss.plane).unwrap();
+        let (p0, p1) = (plane.to_local(solidcore_record::Vec3::new(30.0, 50.0, 2.5)), plane.to_local(solidcore_record::Vec3::new(70.0, 90.0, 2.5)));
+        app.run("sketch.rectangle.two_point", json!({"p0": [p0.x, p0.y], "p1": [p1.x, p1.y]})).unwrap();
+        app.run("sketch.finish", json!({})).unwrap();
+        let ear = app.session.model.state().sketches.last().map(|ss| ss.feature).unwrap();
+        // The face's projected outline parts the profile: the region past the y = 60 edge.
+        let past = plane.to_local(solidcore_record::Vec3::new(50.0, 80.0, 2.5));
+        let ss = crate::open_meshing::session_world(&app.session).sketch(ear).unwrap().clone();
+        let index = ss.profiles.iter().position(|p| p.region.contains(solidcore_record::Vec2::new(past.x, past.y))).unwrap();
+        app.start("sheet.tab");
+        let mut d = app.dialog.clone().unwrap();
+        assert!(matches!(&d.kind, Kind::Sheet(Sm::Tab {})));
+        assert!(apply_commands(&app, &d).is_err(), "no profile picked yet");
+        d.inputs[0].items = vec![Sel::Profile { sketch: ear, index }];
+        let c = apply_commands(&app, &d).unwrap();
+        assert_eq!(c, vec![("sheet.tab".to_string(), json!({"sketch": ear, "profiles": [index], "exact_regions": true}))]);
+        let features = app.session.doc.features.len();
+        run_all(&mut app, c);
+        assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", app.session.model.results);
+        assert_eq!(app.session.doc.features.len(), features + 1);
+        assert_eq!(app.session.model.state().bodies.len(), 1, "the tab is part of the sheet");
+        let f = app.session.doc.features.last().cloned().unwrap();
+        let e = edit_dialog(&app, f.id, None).unwrap();
+        assert!(matches!(&e.kind, Kind::Sheet(Sm::Tab {})));
+        assert_eq!(e.inputs[0].items, vec![Sel::Profile { sketch: ear, index }]);
+        assert!(apply_commands(&app, &e).is_ok());
+    }
+}
+
+/// A tab of every profile of its sketch (no `profiles`) edited with OK and the picks unchanged
+/// stays every profile, so a profile added to the sketch later joins it too.
+#[test]
+fn an_unchanged_tab_edit_keeps_every_profile() {
+    let mut app = plate(crate::ui_kit::LayoutMode::Floating);
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    app.run("sketch.create", json!({"plane": {"face": [50, 30, 2.5]}, "name": "Ear"})).unwrap();
+    use solidcraft_engine::geom::prelude::*;
+    let plane = app.session.model.state().sketches.last().map(|ss| ss.plane).unwrap();
+    let (p0, p1) = (plane.to_local(solidcore_record::Vec3::new(30.0, 50.0, 2.5)), plane.to_local(solidcore_record::Vec3::new(70.0, 90.0, 2.5)));
+    app.run("sketch.rectangle.two_point", json!({"p0": [p0.x, p0.y], "p1": [p1.x, p1.y]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("sheet.tab", json!({"sketch": "Ear"})).unwrap();
+    let f = app.session.doc.features.last().cloned().unwrap();
+    assert!(matches!(&f.kind, FeatureKind::SheetTab { profiles: ProfileSel::All, .. }), "{:?}", f.kind);
+    let e = edit_dialog(&app, f.id, None).unwrap();
+    assert!(!e.inputs[0].items.is_empty(), "the edit shows the profiles it takes");
+    let c = apply_commands(&app, &e).unwrap();
+    let [(cmd, p)] = <[(String, serde_json::Value); 1]>::try_from(c).unwrap();
+    assert_eq!(cmd, "timeline.redefine");
+    assert_eq!(p["params"]["profiles"], json!("all"), "{p}");
+}
+
 // ---- flat pattern navigation ----
 
-fn flat_app(preset: &str, mode: crate::shell::LayoutMode) -> SolveApp {
+fn flat_app(preset: &str, mode: crate::ui_kit::LayoutMode) -> SolveApp {
     let mut app = plate(mode);
     app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
     let flat = app.session.execute("sheet.flat_pattern", &json!({})).unwrap();
@@ -963,7 +1350,7 @@ fn flat_app(preset: &str, mode: crate::shell::LayoutMode) -> SolveApp {
 
 /// Same view in the flat plane: the Design viewport may anchor a zoom on the model's surface
 /// (a little out of the plane), the flat view anchors on its plane.
-fn same_view(a: &solidcraft_engine::render::Camera, b: &solidcraft_engine::render::Camera) -> bool {
+fn same_view(a: &solidcraft_viewport::Camera, b: &solidcraft_viewport::Camera) -> bool {
     (a.target.x - b.target.x).abs() < 1e-3
         && (a.target.y - b.target.y).abs() < 1e-3
         && (a.distance - b.distance).abs() < 1e-9
@@ -989,7 +1376,7 @@ fn frame(app: &mut SolveApp, ctx: &egui::Context, time: &mut f64, mods: egui::Mo
 /// cursor. The flat view never orbits.
 #[test]
 fn flat_pattern_pans_and_zooms_like_the_design_viewport() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         use egui::{Event, Modifiers, PointerButton};
         let none = Modifiers::NONE;
         let chords = [none, Modifiers::SHIFT, Modifiers::CTRL, Modifiers::ALT, Modifiers::SHIFT | Modifiers::ALT];
@@ -1049,8 +1436,13 @@ fn flat_pattern_pans_and_zooms_like_the_design_viewport() {
                 assert!(panned + zoomed >= 1, "{preset}: the preset has a pan or zoom drag");
                 // The wheel zooms (to the cursor when asked), identically.
                 let before = flat.flat_view.cam;
-                let wheel =
-                    Event::MouseWheel { unit: egui::MouseWheelUnit::Line, delta: vec2(0.0, 3.0), modifiers: none, phase: egui::TouchPhase::Move };
+                let wheel = Event::MouseWheel {
+                    source: egui::MouseWheelSource::Unknown,
+                    unit: egui::MouseWheelUnit::Line,
+                    delta: vec2(0.0, 3.0),
+                    modifiers: none,
+                    phase: egui::TouchPhase::Move,
+                };
                 for (app, ctx, t) in [(&mut flat, &flat_ctx, &mut ft), (&mut design, &design_ctx, &mut dt)] {
                     frame(app, ctx, t, none, vec![Event::PointerMoved(at)]);
                     frame(app, ctx, t, none, vec![wheel.clone()]);
@@ -1077,11 +1469,7 @@ trait IntoNav {
 }
 impl IntoNav for egui::PointerButton {
     fn into_nav(self) -> crate::prefs::NavButton {
-        match self {
-            egui::PointerButton::Middle => crate::prefs::NavButton::Middle,
-            egui::PointerButton::Secondary => crate::prefs::NavButton::Right,
-            _ => crate::prefs::NavButton::Left,
-        }
+        crate::prefs::NavButton::of_pointer(self)
     }
 }
 
@@ -1089,7 +1477,7 @@ impl IntoNav for egui::PointerButton {
 /// camera and selection alone.
 #[test]
 fn design_camera_is_unchanged_while_the_flat_pattern_has_focus() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         use egui::{Event, Modifiers, PointerButton};
         let none = Modifiers::NONE;
         for preset in crate::prefs::NAV_PRESETS.iter().map(|p| p.id) {
@@ -1109,7 +1497,13 @@ fn design_camera_is_unchanged_while_the_flat_pattern_has_focus() {
                     frame(&mut app, &ctx, &mut t, mods, vec![Event::PointerButton { pos: at, button, pressed: false, modifiers: mods }]);
                 }
             }
-            let wheel = Event::MouseWheel { unit: egui::MouseWheelUnit::Line, delta: vec2(0.0, 3.0), modifiers: none, phase: egui::TouchPhase::Move };
+            let wheel = Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
+                unit: egui::MouseWheelUnit::Line,
+                delta: vec2(0.0, 3.0),
+                modifiers: none,
+                phase: egui::TouchPhase::Move,
+            };
             frame(&mut app, &ctx, &mut t, none, vec![wheel]);
             frame(&mut app, &ctx, &mut t, none, vec![Event::Zoom(1.3)]);
             for _ in 0..30 {
@@ -1125,7 +1519,7 @@ fn design_camera_is_unchanged_while_the_flat_pattern_has_focus() {
 /// Fit and Home frame the flat pattern (not the model), and leave the Design camera alone.
 #[test]
 fn fit_and_home_frame_the_flat_pattern() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let ctx = crate::fonts::test_context();
         let mut app = flat_app("fusion", mode);
         let mut t = 0.0;
@@ -1161,7 +1555,7 @@ fn fit_and_home_frame_the_flat_pattern() {
 }
 
 fn perforated_flat() -> (SolveApp, Dialog) {
-    let mut app = plate(crate::shell::LayoutMode::Floating);
+    let mut app = plate(crate::ui_kit::LayoutMode::Floating);
     app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
     app.run("sheet.perforate", json!({"diameter": 3, "pitch": 6})).unwrap();
     let flat = app.session.execute("sheet.flat_pattern", &json!({})).unwrap();
@@ -1177,7 +1571,7 @@ fn flat_circles(app: &mut SolveApp, dialog: &Dialog, rect: Rect) -> Vec<egui::ep
     let ctx = crate::fonts::test_context();
     let input = egui::RawInput { screen_rect: Some(rect), ..Default::default() };
     let output = crate::test_support::frame(&ctx, input, |ui| {
-        let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("perforation-test")));
+        let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("perforation-test")));
         assert!(overlay(app, &painter, rect, dialog));
     });
     output.shapes.into_iter().filter_map(|s| if let egui::Shape::Circle(c) = s.shape { Some(c) } else { None }).collect()
@@ -1186,9 +1580,10 @@ fn flat_circles(app: &mut SolveApp, dialog: &Dialog, rect: Rect) -> Vec<egui::ep
 #[test]
 fn flat_perforations_match_export_centres_and_cutout_style() {
     let (mut app, dialog) = perforated_flat();
+    // The centres the DXF exports (`surface_dxf`): the sheet's flat as it is read.
     let state = crate::open_meshing::session_world(&app.session);
-    let sheet = state.sheets.last().unwrap();
-    let holes = sheet.perforation_holes(&sheet.perforations[0]).unwrap();
+    let sheet = state.surface_sheets.last().unwrap().shown();
+    let holes = sheet.perforation_holes(&sheet.perforations[0]);
     let rect = Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 900.0));
     let circles = flat_circles(&mut app, &dialog, rect);
     assert_eq!(circles.len(), holes.len());
@@ -1209,8 +1604,8 @@ fn flat_perforations_match_export_centres_and_cutout_style() {
     assert_eq!(app.flat_view.perforations.as_ptr(), cached, "navigation reuses the centres");
     app.run("sheet.perforate", json!({"diameter": 2, "pitch": 10})).unwrap();
     let state = crate::open_meshing::session_world(&app.session);
-    let sheet = state.sheets.last().unwrap();
-    let expected: usize = sheet.perforations.iter().map(|p| sheet.perforation_holes(p).unwrap().len()).sum();
+    let sheet = state.surface_sheets.last().unwrap().shown();
+    let expected: usize = sheet.perforations.iter().map(|p| sheet.perforation_holes(p).len()).sum();
     assert!(expected > 155);
     assert_eq!(flat_circles(&mut app, &dialog, rect).len(), expected, "model changes refresh the centres");
 }
@@ -1240,9 +1635,9 @@ fn flat_perforations_cull_offscreen_and_subpixel_holes() {
 #[test]
 fn hem_handle_runs_along_the_hem_to_its_tip() {
     for flipped in [false, true] {
-        let mut app = plate(crate::shell::LayoutMode::Floating);
+        let mut app = plate(crate::ui_kit::LayoutMode::Floating);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
-        let body = app.session.model.state().sheets[0].body.clone();
+        let body = app.session.model.state().surface_sheets[0].body.clone();
         app.session.selection = vec![edge_sel(&app.session, Vec3::new(50.0, 0.0, 2.5)).unwrap()];
         app.start("sheet.hem");
         let mut d = app.dialog.clone().unwrap();
@@ -1285,7 +1680,7 @@ fn inch_sheet_rule_edit_preserves_stored_lengths_and_dimensionless_k_factor() {
 
 #[test]
 fn perforate_toolbar_opens_without_running_empty_parameters() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut app = plate(mode);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
         let features = app.session.doc.features.len();
@@ -1317,9 +1712,9 @@ fn perforate_toolbar_opens_without_running_empty_parameters() {
 #[test]
 fn perforate_ok_targets_the_picked_sheet_and_updates_flat_data() {
     for face in [false, true] {
-        let mut app = plate(crate::shell::LayoutMode::Docked);
+        let mut app = plate(crate::ui_kit::LayoutMode::Docked);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
-        let body = app.session.model.state().sheets[0].body.clone();
+        let body = app.session.model.state().surface_sheets[0].body.clone();
         app.session.selection =
             vec![if face { face_sel(&app.session, Vec3::new(50.0, 30.0, 2.5)).unwrap() } else { Sel::Body { name: body.clone() } }];
         app.start("sheet.perforate");
@@ -1338,9 +1733,9 @@ fn perforate_ok_targets_the_picked_sheet_and_updates_flat_data() {
 
 #[test]
 fn perforate_edit_restores_dimensions_pattern_and_target() {
-    let mut app = plate(crate::shell::LayoutMode::Docked);
+    let mut app = plate(crate::ui_kit::LayoutMode::Docked);
     app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
-    let body = app.session.model.state().sheets[0].body.clone();
+    let body = app.session.model.state().surface_sheets[0].body.clone();
     app.run("sheet.perforate", json!({"body": body, "diameter": "4 mm", "pitch": "9 mm", "margin": "5 mm", "pattern": "square"})).unwrap();
     let feature = app.session.doc.features.last().unwrap();
     let dialog = edit_dialog(&app, feature.id, None).expect("Perforate can be edited");
@@ -1354,20 +1749,903 @@ fn perforate_edit_restores_dimensions_pattern_and_target() {
 
 #[test]
 fn flat_pattern_navigation_slots_hide_orbit_controls_and_keep_fit_home() {
-    let ctx = crate::fonts::test_context();
-    let mut app = flat_app("fusion", crate::shell::LayoutMode::Floating);
-    app.preferences.navigation_bar = serde_json::from_value(json!({
+    let mut h = crate::scenario::Harness::new();
+    *h.app = flat_app("fusion", crate::ui_kit::LayoutMode::Floating);
+    h.app.home.open = false;
+    h.app.preferences.navigation_bar = serde_json::from_value(json!({
         "slots":["orbit","spin","look_at","projection","visual_style","pan","zoom","fit","home","display"]
     }))
     .unwrap();
-    let mut time = 0.0;
-    crate::scenario::clear_handles();
-    frame(&mut app, &ctx, &mut time, egui::Modifiers::NONE, vec![]);
-    assert_eq!(crate::navigation_bar::canvas_caps(&app), crate::navigation::NavCaps { orbit: false, pick: false });
+    h.frames(3);
+    assert_eq!(crate::navigation_bar_view::canvas_caps(&h.app), crate::navigation::NavCaps { orbit: false, pick: false });
     for slot in ["orbit", "spin", "look_at", "projection", "visual_style"] {
         assert!(crate::scenario::handle_at(&format!("nav:slot:{slot}")).is_none(), "{slot}");
     }
     for slot in ["pan", "zoom", "fit", "home", "display"] {
         assert!(crate::scenario::handle_at(&format!("nav:slot:{slot}")).is_some(), "{slot}");
     }
+}
+
+/// Drawing reuses the source flat-pattern inspector without giving its camera to Design.
+#[test]
+fn source_flat_pattern_remains_visible_and_refittable_in_drawing() {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
+        let ctx = crate::fonts::test_context();
+        let mut app = plate(mode);
+        app.run("sheet.flange", json!({"sketch":"Base"})).unwrap();
+        let flat = app.session.execute("sheet.flat_pattern", &json!({})).unwrap();
+        let doc = app.session.doc.clone();
+        let design = app.cam;
+        crate::workspace::enter(&mut app, "drawing").unwrap();
+        app.start("sheet.flat_pattern");
+        let Some(Kind::Sheet(Sm::FlatPattern { data, .. })) = app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("source flat inspector") };
+        *data = Some(Ok(flat));
+        let render = |app: &mut SolveApp| {
+            let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))), ..Default::default() };
+            crate::test_support::frame(&ctx, raw, |ui| app.show_workspace(ui));
+        };
+        render(&mut app);
+        assert!(app.flat_view.fitted, "the Drawing route paints the existing source inspector");
+        let fitted = app.flat_view.cam;
+        for view in ["fit", "home"] {
+            app.flat_view.cam.pan(120.0, -80.0, 600.0);
+            app.animate_view(view);
+            assert!(!app.flat_view.fitted);
+            render(&mut app);
+            assert_eq!(app.flat_view.cam, fitted);
+            assert_eq!(app.cam, design);
+        }
+        app.flat_view.cam.pan(50.0, 50.0, 600.0);
+        app.fit_view();
+        render(&mut app);
+        assert_eq!(app.flat_view.cam, fitted);
+        assert_eq!(app.session.doc, doc);
+        assert_eq!(app.cam, design);
+        assert!(crate::drawing_workspace::active(&app));
+    }
+}
+/// A picked edge split into segments: the dialog sends equal stretches with the rows' angle,
+/// height and turns, and the part builds with two bends.
+#[test]
+fn an_edge_flange_can_be_split_into_segments() {
+    let mut app = plate(crate::ui_kit::LayoutMode::Floating);
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    let edge = edge_sel(&app.session, Vec3::new(50.0, 0.0, 2.5)).unwrap();
+    app.session.selection = vec![edge];
+    app.start("sheet.flange");
+    let mut d = app.dialog.clone().unwrap();
+    let p = edge_point_list(&d.inputs)[0];
+    if let Kind::Sheet(Sm::Flange { height, angle, segments, .. }) = &mut d.kind {
+        *height = "20 mm".into();
+        *angle = "90 deg".into();
+        let slot = segments_slot(segments, p);
+        let list = &mut segments[slot].1;
+        add_segment(list);
+        list[0].height = "20 mm".into();
+        add_segment(list);
+        list[1].height = "10 mm".into();
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(
+        c[0].1["edges"][0]["segments"],
+        json!([{"from": 0.0, "to": 0.5, "height": "20 mm"}, {"from": 0.5, "to": 1.0, "height": "10 mm"}]),
+        "{:?}",
+        c[0].1
+    );
+    run_all(&mut app, c);
+    let bends = app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["bends"].clone();
+    assert_eq!(bends.as_array().map(Vec::len), Some(2), "{bends}");
+    assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", app.session.model.results);
+}
+
+/// Edit Feature on a flange whose edges carry their own segments comes back as it was: the dialog
+/// holds every edge's list with its own fractions, angle, height and side, and OK emits the same
+/// `sheet.flange` parameters, byte for byte (an explicit `flip: false` under a flipped feature
+/// stays explicit, and neither edge takes the other's list).
+#[test]
+fn editing_a_flange_keeps_every_edges_segments() {
+    let mut app = plate(crate::ui_kit::LayoutMode::Floating);
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    let params = json!({
+        "type": "edge",
+        "edges": [
+            {"point": [50.0, 0.0, 2.5], "segments": [
+                {"from": 0.0, "to": 0.3, "angle": "90 deg", "height": "20 mm"},
+                {"from": 0.3, "to": 1.0, "angle": "45 deg", "height": "15 mm", "flip": false}
+            ]},
+            {"point": [50.0, 60.0, 2.5], "segments": [
+                {"from": 0.0, "to": 0.6, "height": "25 mm", "flip": true},
+                {"from": 0.6, "to": 1.0, "height": "10 mm"}
+            ]}
+        ],
+        "height": "20 mm",
+        "angle": "90 deg",
+        "position": "inside",
+        "flip": true
+    });
+    app.run("sheet.flange", params.clone()).unwrap();
+    assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", app.session.model.results);
+    let f = app.session.doc.features.last().unwrap().clone();
+    let e = edit_dialog(&app, f.id, None).unwrap();
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].0, "timeline.redefine");
+    assert_eq!(
+        serde_json::to_string(&c[0].1["params"]).unwrap(),
+        serde_json::to_string(&params).unwrap(),
+        "the edit sends the design back as it was: {}",
+        c[0].1["params"]
+    );
+}
+
+/// A two-stretch edge in the Flange dialog, restored from a design with a stretch boundary that is
+/// not the middle.
+fn two_stretch_flange(h: &mut crate::scenario::Harness) -> u64 {
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    h.app
+        .run(
+            "sheet.flange",
+            json!({
+                "type": "edge",
+                "edges": [{"point": [50.0, 0.0, 2.5], "segments": [
+                    {"from": 0.0, "to": 0.3, "angle": "90 deg", "height": "20 mm"},
+                    {"from": 0.3, "to": 1.0, "angle": "45 deg", "height": "15 mm"}
+                ]}],
+                "height": "20 mm", "angle": "90 deg", "position": "inside", "flip": false
+            }),
+        )
+        .unwrap();
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", h.app.session.model.results);
+    h.app.session.doc.features.last().unwrap().id
+}
+
+/// The dialog's restored stretches, `from`…`to` as typed, per picked edge.
+fn restored_stretches(h: &crate::scenario::Harness) -> Vec<Vec<(String, String)>> {
+    match &h.app.dialog.as_ref().expect("a dialog").kind {
+        Kind::Sheet(Sm::Flange { segments, .. }) => {
+            segments.iter().map(|(_, list)| list.iter().map(|r| (r.from.clone(), r.to.clone())).collect()).collect()
+        }
+        other => panic!("not a flange dialog: {other:?}"),
+    }
+}
+
+/// Deleting a stretch in the Flange dialog keeps the edge a partition the command accepts: the
+/// stretch after the removed one reaches back to the edge's start, and the ends stay at 0 and 1. The
+/// emitted `sheet.flange` covers the whole edge with the surviving stretch's own values, and OK
+/// applies it (#5927, #5928).
+#[test]
+fn deleting_a_segment_in_the_flange_dialog_keeps_the_partition_whole() {
+    let mut h = crate::scenario::Harness::new();
+    let id = two_stretch_flange(&mut h);
+    let count = h.app.session.doc.features.len();
+    h.app.edit_feature(id);
+    h.frames(6);
+    assert_eq!(
+        restored_stretches(&h),
+        vec![vec![("0".to_string(), "0.3".to_string()), ("0.3".to_string(), "1".to_string())]],
+        "the design's own fractions come back"
+    );
+    // The first stretch's bin takes it out; the one after it reaches back to the edge's start.
+    h.step(&json!({"click": {"handle": "dialog:button:Segment 1:Delete"}})).unwrap();
+    h.frames(3);
+    assert_eq!(restored_stretches(&h), vec![vec![("0".to_string(), "1".to_string())]], "the partition stays whole");
+    // The command the dialog would run is a valid partition of the whole edge, with the surviving
+    // stretch's angle and height.
+    let d = h.app.dialog.clone().expect("the dialog is open");
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(c.len(), 1);
+    assert_eq!(c[0].0, "timeline.redefine");
+    assert_eq!(
+        c[0].1["params"]["edges"][0]["segments"],
+        json!([{"from": 0.0, "to": 1.0, "angle": "45 deg", "height": "15 mm"}]),
+        "{}",
+        c[0].1["params"]
+    );
+    // OK submits it: the feature is redefined in place and builds one bend over the whole edge.
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.frames(4);
+    assert!(h.app.dialog.is_none(), "OK applies the repaired list");
+    assert_eq!(h.app.session.doc.features.len(), count, "redefined in place");
+    let f = h.app.session.doc.features.last().unwrap().clone();
+    let FeatureKind::SheetFlange { edges, .. } = &f.kind else { panic!("not a flange feature") };
+    assert_eq!(edges.len(), 1);
+    let segs = &edges[0].segments;
+    assert_eq!(segs.len(), 1, "the surviving stretch is the whole edge: {segs:?}");
+    assert_eq!((segs[0].from, segs[0].to), (0.0, 1.0));
+    assert_eq!(segs[0].angle.as_ref().map(|a| a.as_str()), Some("45 deg"));
+    assert_eq!(segs[0].height.as_ref().map(|a| a.as_str()), Some("15 mm"));
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", h.app.session.model.results);
+    let bends = h.app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["bends"].clone();
+    assert_eq!(bends.as_array().map(Vec::len), Some(1), "one bend over the whole edge: {bends}");
+}
+
+/// Deleting the last stretch reaches the one before it to the edge's end, and deleting the only
+/// stretch left leaves the whole edge (a plain edge point): deleting never leaves a list the
+/// command refuses.
+#[test]
+fn deleting_the_last_or_only_segment_leaves_the_whole_edge() {
+    let mut h = crate::scenario::Harness::new();
+    let id = two_stretch_flange(&mut h);
+    let count = h.app.session.doc.features.len();
+    // The last stretch: the one before it reaches to the edge's end with its own values.
+    h.app.edit_feature(id);
+    h.frames(6);
+    h.step(&json!({"click": {"handle": "dialog:button:Segment 2:Delete"}})).unwrap();
+    h.frames(3);
+    assert_eq!(restored_stretches(&h), vec![vec![("0".to_string(), "1".to_string())]], "the partition stays whole");
+    let d = h.app.dialog.clone().expect("the dialog is open");
+    assert_eq!(
+        apply_commands(&h.app, &d).unwrap()[0].1["params"]["edges"][0]["segments"],
+        json!([{"from": 0.0, "to": 1.0, "angle": "90 deg", "height": "20 mm"}]),
+        "the stretch before the removed one takes its place"
+    );
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.frames(4);
+    assert!(h.app.dialog.is_none(), "OK applies the repaired list");
+    assert_eq!(h.app.session.doc.features.len(), count, "redefined in place");
+    // The only stretch left: removing it leaves the whole edge, a plain point with no segments.
+    h.app.edit_feature(id);
+    h.frames(6);
+    assert_eq!(restored_stretches(&h), vec![vec![("0".to_string(), "1".to_string())]], "one stretch comes back");
+    h.step(&json!({"click": {"handle": "dialog:button:Segment 1:Delete"}})).unwrap();
+    h.frames(3);
+    assert_eq!(restored_stretches(&h), vec![Vec::new()], "no stretches: the whole edge");
+    let d = h.app.dialog.clone().expect("the dialog is open");
+    let params = apply_commands(&h.app, &d).unwrap()[0].1["params"].clone();
+    assert_eq!(params["edges"][0], json!([50.0, 0.0, 2.5]), "the whole edge, as an edge flange was before: {params}");
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.frames(4);
+    assert!(h.app.dialog.is_none(), "OK applies the whole edge");
+    assert_eq!(h.app.session.doc.features.len(), count, "redefined in place");
+    let f = h.app.session.doc.features.last().unwrap().clone();
+    let FeatureKind::SheetFlange { edges, .. } = &f.kind else { panic!("not a flange feature") };
+    assert_eq!(edges.len(), 1);
+    assert!(edges[0].segments.is_empty(), "no segments: the whole edge");
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", h.app.session.model.results);
+    let bends = h.app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["bends"].clone();
+    assert_eq!(bends.as_array().map(Vec::len), Some(1), "one bend over the whole edge: {bends}");
+}
+
+/// A four-stretch edge in the Flange dialog, restored from a design whose boundaries are not equal
+/// (0, 0.1, 0.4, 0.8, 1), each stretch with its own angle and height.
+fn four_stretch_flange(h: &mut crate::scenario::Harness) -> u64 {
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    h.app
+        .run(
+            "sheet.flange",
+            json!({
+                "type": "edge",
+                "edges": [{"point": [50.0, 0.0, 2.5], "segments": [
+                    {"from": 0.0, "to": 0.1, "angle": "90 deg", "height": "20 mm"},
+                    {"from": 0.1, "to": 0.4, "angle": "45 deg", "height": "15 mm"},
+                    {"from": 0.4, "to": 0.8, "angle": "90 deg", "height": "20 mm"},
+                    {"from": 0.8, "to": 1.0, "angle": "45 deg", "height": "15 mm"}
+                ]}],
+                "height": "20 mm", "angle": "90 deg", "position": "inside", "flip": false
+            }),
+        )
+        .unwrap();
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", h.app.session.model.results);
+    h.app.session.doc.features.last().unwrap().id
+}
+
+/// The stretches the dialog holds for the one edge, as `from`…`to` typed, from a design with the
+/// boundaries 0, 0.1, 0.4, 0.8, 1: deleting a stretch whose values are intact bridges the gap from
+/// the neighbours, so only the removed stretch's boundaries change and OK submits a partition the
+/// command accepts (#5927, #5928).
+#[test]
+fn deleting_a_segment_with_its_values_intact_keeps_every_other_boundary() {
+    let mut h = crate::scenario::Harness::new();
+    let id = four_stretch_flange(&mut h);
+    let count = h.app.session.doc.features.len();
+    h.app.edit_feature(id);
+    h.frames(6);
+    assert_eq!(
+        restored_stretches(&h),
+        vec![vec![
+            ("0".to_string(), "0.1".to_string()),
+            ("0.1".to_string(), "0.4".to_string()),
+            ("0.4".to_string(), "0.8".to_string()),
+            ("0.8".to_string(), "1".to_string())
+        ]],
+        "the design's own fractions come back"
+    );
+    // The second stretch's bin takes it out: the first reaches to where the third starts.
+    h.step(&json!({"click": {"handle": "dialog:button:Segment 2:Delete"}})).unwrap();
+    h.frames(3);
+    assert_eq!(
+        restored_stretches(&h),
+        vec![vec![("0".to_string(), "0.4".to_string()), ("0.4".to_string(), "0.8".to_string()), ("0.8".to_string(), "1".to_string())]],
+        "the boundaries 0.4, 0.8 and 1 are where they were"
+    );
+    let d = h.app.dialog.clone().expect("the dialog is open");
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(
+        c[0].1["params"]["edges"][0]["segments"],
+        json!([
+            {"from": 0.0, "to": 0.4, "angle": "90 deg", "height": "20 mm"},
+            {"from": 0.4, "to": 0.8, "angle": "90 deg", "height": "20 mm"},
+            {"from": 0.8, "to": 1.0, "angle": "45 deg", "height": "15 mm"}
+        ]),
+        "{}",
+        c[0].1["params"]
+    );
+    // OK submits it: the feature is redefined in place and builds.
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.frames(4);
+    assert!(h.app.dialog.is_none(), "OK applies the repaired list");
+    assert_eq!(h.app.session.doc.features.len(), count, "redefined in place");
+    let f = h.app.session.doc.features.last().unwrap().clone();
+    let FeatureKind::SheetFlange { edges, .. } = &f.kind else { panic!("not a flange feature") };
+    let segs: Vec<(f64, f64)> = edges[0].segments.iter().map(|s| (s.from, s.to)).collect();
+    assert_eq!(segs, vec![(0.0, 0.4), (0.4, 0.8), (0.8, 1.0)], "a partition of the edge");
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", h.app.session.model.results);
+    assert_eq!(
+        h.app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["bends"].as_array().map(Vec::len),
+        Some(2),
+        "the two bends that are left"
+    );
+}
+
+/// The same delete with the removed stretch's `to` cleared, as a user leaves it mid-edit: the repair
+/// reads the neighbours, not the removed row, so the boundaries the user did not touch stay put
+/// (the untouched 0.8 does not become 2/3) and OK submits a valid partition (#5927, #5928).
+#[test]
+fn deleting_a_mid_edit_segment_keeps_the_boundaries_it_did_not_touch() {
+    let mut h = crate::scenario::Harness::new();
+    let id = four_stretch_flange(&mut h);
+    let count = h.app.session.doc.features.len();
+    h.app.edit_feature(id);
+    h.frames(6);
+    // The user clears the second stretch's `to` in its field.
+    h.step(&json!({"widget": "Segment 2 to"})).unwrap();
+    h.step(&json!({"key": "A", "cmd": true})).unwrap();
+    h.step(&json!({"key": "Delete"})).unwrap();
+    h.frames(3);
+    assert_eq!(restored_stretches(&h)[0][1], ("0.1".to_string(), String::new()), "the removed stretch's `to` is empty, as while editing");
+    // Delete that stretch: the gap is bridged from the neighbours.
+    h.step(&json!({"click": {"handle": "dialog:button:Segment 2:Delete"}})).unwrap();
+    h.frames(3);
+    assert_eq!(
+        restored_stretches(&h),
+        vec![vec![("0".to_string(), "0.4".to_string()), ("0.4".to_string(), "0.8".to_string()), ("0.8".to_string(), "1".to_string())]],
+        "the untouched boundaries 0.8 and 1 did not move"
+    );
+    let d = h.app.dialog.clone().expect("the dialog is open");
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(
+        c[0].1["params"]["edges"][0]["segments"],
+        json!([
+            {"from": 0.0, "to": 0.4, "angle": "90 deg", "height": "20 mm"},
+            {"from": 0.4, "to": 0.8, "angle": "90 deg", "height": "20 mm"},
+            {"from": 0.8, "to": 1.0, "angle": "45 deg", "height": "15 mm"}
+        ]),
+        "{}",
+        c[0].1["params"]
+    );
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.frames(4);
+    assert!(h.app.dialog.is_none(), "OK applies the repaired list");
+    assert_eq!(h.app.session.doc.features.len(), count, "redefined in place");
+    let f = h.app.session.doc.features.last().unwrap().clone();
+    let FeatureKind::SheetFlange { edges, .. } = &f.kind else { panic!("not a flange feature") };
+    let segs: Vec<(f64, f64)> = edges[0].segments.iter().map(|s| (s.from, s.to)).collect();
+    assert_eq!(segs, vec![(0.0, 0.4), (0.4, 0.8), (0.8, 1.0)], "a partition of the edge");
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", h.app.session.model.results);
+}
+
+/// `then` with a split edge is refused, not dropped: the message names the edge and says where the
+/// chain goes instead, and the guide carries the same words (#5927, #5928).
+#[test]
+fn then_with_segments_is_refused_with_a_message() {
+    let mut app = plate(crate::ui_kit::LayoutMode::Floating);
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    let edge = edge_sel(&app.session, Vec3::new(50.0, 0.0, 2.5)).unwrap();
+    app.session.selection = vec![edge];
+    app.start("sheet.flange");
+    let mut d = app.dialog.clone().unwrap();
+    let p = edge_point_list(&d.inputs)[0];
+    if let Kind::Sheet(Sm::Flange { height, angle, segments, then, .. }) = &mut d.kind {
+        *height = "20 mm".into();
+        *angle = "90 deg".into();
+        let slot = segments_slot(segments, p);
+        add_segment(&mut segments[slot].1);
+        add_segment(&mut segments[slot].1);
+        then.push(("45 deg".into(), "20 mm".into(), false));
+    }
+    let error = apply_commands(&app, &d).unwrap_err();
+    assert_eq!(
+        error, "edge 1 is split into segments: a split edge takes no `then`; bend each segment's far edge in its own feature",
+        "the refusal names the edge"
+    );
+    // The guide says the same, so an agent meets the words here and there.
+    assert!(
+        include_str!("../../../skills/solidcraft-sheetmetal/reference.md")
+            .contains("a split edge takes no `then`; bend each segment's far edge in its own feature"),
+        "the guide carries the refusal"
+    );
+    // Without segments the chain still goes.
+    let mut d = d.clone();
+    if let Kind::Sheet(Sm::Flange { segments, .. }) = &mut d.kind {
+        segments.clear();
+    }
+    assert_eq!(apply_commands(&app, &d).unwrap()[0].1["then"], json!([{"height": "20 mm", "angle": "45 deg"}]));
+}
+
+/// A flange on the picked `edges`, each split into the same two stretches with heights and angles
+/// of its own: the dialog's per-edge rows then carry the same labels on every edge.
+fn multi_edge_flange(h: &mut crate::scenario::Harness, edges: &[[f64; 3]], heights: &[(&str, &str)], angles: &[(&str, &str)]) -> u64 {
+    // A window tall enough for every edge's rows: each picked edge adds six rows, and a dialog
+    // taller than the screen has rows below it.
+    h.call("ui.resize", json!({"width": 1600, "height": 2600}));
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    let list: Vec<serde_json::Value> = edges
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            json!({"point": p, "segments": [
+                {"from": 0.0, "to": 0.5, "angle": angles[i].0, "height": heights[i].0},
+                {"from": 0.5, "to": 1.0, "angle": angles[i].1, "height": heights[i].1}
+            ]})
+        })
+        .collect();
+    h.app
+        .run("sheet.flange", json!({"type": "edge", "edges": list, "height": "20 mm", "angle": "90 deg", "position": "inside", "flip": false}))
+        .unwrap();
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", h.app.session.model.results);
+    h.app.session.doc.features.last().unwrap().id
+}
+
+/// The dialog's stretches, per picked edge, as `(from, to, angle, height)` typed.
+fn segment_rows(h: &crate::scenario::Harness) -> Vec<Vec<(String, String, String, String)>> {
+    match &h.app.dialog.as_ref().expect("a dialog").kind {
+        Kind::Sheet(Sm::Flange { segments, .. }) => segments
+            .iter()
+            .map(|(_, list)| list.iter().map(|r| (r.from.clone(), r.to.clone(), r.angle.clone(), r.height.clone())).collect())
+            .collect(),
+        other => panic!("not a flange dialog: {other:?}"),
+    }
+}
+
+/// The number a `height`/`angle` field holds, for comparing a drag's effect.
+fn field_number(text: &str) -> f64 {
+    let number: String = text.chars().take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-').collect();
+    number.parse().unwrap_or_else(|e| panic!("`{text}` is not a number: {e}"))
+}
+
+/// Drag the label of the `k`th row named `text` sideways by `dx` points. Every picked edge's rows
+/// carry the same labels, and the label rects are published in draw order, one per edge, so the
+/// `k`th is the `k`th edge's row.
+fn drag_label(h: &mut crate::scenario::Harness, text: &str, k: usize, dx: f32) {
+    let rects: Vec<egui::Rect> = crate::scenario::rects(&format!("dialog:label:{text}")).into_iter().map(|(_, r)| r).collect();
+    assert!(rects.len() > k, "`{text}`: {} label rects drawn, want one per edge: {rects:?}", rects.len());
+    eprintln!("DEBUG `{text}`[{k}] rects={rects:?} window={:?} content={:?}", crate::scenario::rect_of("dialog:window"), h.ctx.content_rect());
+    let c = rects[k].center();
+    h.step(&json!({"drag": [[c.x, c.y], [c.x + dx, c.y]], "steps": 8})).unwrap();
+    h.frames(3);
+}
+
+/// Two picked edges, each split into two stretches: dragging one edge's label changes that edge's
+/// value alone. The labels repeat, so a row's scrub (label-drag) id must be scoped per edge; with
+/// one shared form scope the rows share the id, the last edge's row takes the drag and every
+/// edge's value moves with it (#5927, #5928).
+#[test]
+fn dragging_one_edges_segment_height_leaves_the_other_edge_alone() {
+    let mut h = crate::scenario::Harness::new();
+    let id = multi_edge_flange(
+        &mut h,
+        &[[50.0, 0.0, 2.5], [50.0, 60.0, 2.5]],
+        &[("20 mm", "15 mm"), ("25 mm", "10 mm")],
+        &[("90 deg", "45 deg"), ("60 deg", "30 deg")],
+    );
+    h.app.edit_feature(id);
+    h.frames(6);
+    let before = segment_rows(&h);
+    assert_eq!(before.len(), 2, "the dialog holds both edges: {before:?}");
+    assert_eq!(
+        before[0],
+        vec![("0".into(), "0.5".into(), "90 deg".into(), "20 mm".into()), ("0.5".into(), "1".into(), "45 deg".into(), "15 mm".into())],
+        "{before:?}"
+    );
+    assert_eq!(
+        before[1],
+        vec![("0".into(), "0.5".into(), "60 deg".into(), "25 mm".into()), ("0.5".into(), "1".into(), "30 deg".into(), "10 mm".into())],
+        "{before:?}"
+    );
+    // Drag edge 2's second stretch's angle label, the last edge in the form: with one shared
+    // scope this drag moved edge 1's angle too, because both rows held the same id.
+    drag_label(&mut h, "Segment 2 angle", 1, 40.0);
+    let after_last = segment_rows(&h);
+    assert_eq!(after_last[0], before[0], "edge 1 is untouched by edge 2's drag: {after_last:?}");
+    assert_ne!(after_last[1][1].2, before[1][1].2, "edge 2's dragged angle moved: {after_last:?}");
+    assert_eq!(after_last[1][0], before[1][0], "edge 2's other stretch stays");
+    // Drag edge 1's first stretch's height label; 40 points moves a 20 mm value by 4 mm.
+    drag_label(&mut h, "Segment 1 height", 0, 40.0);
+    let after = segment_rows(&h);
+    assert_ne!(field_number(&after[0][0].3), field_number(&before[0][0].3), "the dragged edge's height moved: {after:?}");
+    assert_eq!(after[0][0].0, before[0][0].0);
+    assert_eq!(after[0][0].1, before[0][0].1);
+    assert_eq!(after[0][0].2, before[0][0].2, "the dragged row's angle stays");
+    assert_eq!(after[0][1], before[0][1], "the dragged edge's other stretch stays");
+    assert_eq!(after[1], after_last[1], "edge 2's height and angle are untouched by edge 1's drag: {after:?}");
+    // The command the dialog would run carries each drag in its own edge only.
+    let d = h.app.dialog.clone().expect("the dialog is open");
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(c[0].0, "timeline.redefine");
+    let params = &c[0].1["params"];
+    assert_eq!(params["edges"][1]["point"], json!([50.0, 60.0, 2.5]), "{}", params);
+    assert_eq!(params["edges"][1]["segments"][0], json!({"from": 0.0, "to": 0.5, "angle": "60 deg", "height": "25 mm"}), "{}", params);
+    assert_eq!(params["edges"][1]["segments"][1], json!({"from": 0.5, "to": 1.0, "angle": after[1][1].2, "height": "10 mm"}), "{}", params);
+    assert_eq!(params["edges"][0]["segments"][0]["height"], json!(after[0][0].3.clone()), "{}", params);
+    assert_eq!(params["edges"][0]["segments"][0]["angle"], json!("90 deg"), "{}", params);
+    assert_eq!(params["edges"][0]["segments"][1], json!({"from": 0.5, "to": 1.0, "angle": "45 deg", "height": "15 mm"}), "{}", params);
+}
+
+/// Three picked edges with the same two stretches each: dragging one field on each edge changes
+/// that edge's value alone, so every edge's rows hold ids of their own (#5927, #5928).
+#[test]
+fn dragging_each_of_three_edges_fields_changes_only_that_edge() {
+    let mut h = crate::scenario::Harness::new();
+    let id = multi_edge_flange(
+        &mut h,
+        &[[50.0, 0.0, 2.5], [50.0, 60.0, 2.5], [0.0, 30.0, 2.5]],
+        &[("20 mm", "15 mm"), ("25 mm", "10 mm"), ("30 mm", "12 mm")],
+        &[("90 deg", "45 deg"), ("60 deg", "30 deg"), ("80 deg", "40 deg")],
+    );
+    h.app.edit_feature(id);
+    h.frames(6);
+    let mut before = segment_rows(&h);
+    assert_eq!(before.len(), 3, "the dialog holds all three edges: {before:?}");
+    for (edge, label) in [(0usize, "Segment 1 height"), (1, "Segment 2 angle"), (2, "Segment 1 angle")] {
+        drag_label(&mut h, label, edge, 40.0);
+        let after = segment_rows(&h);
+        for other in 0..3 {
+            if other == edge {
+                continue;
+            }
+            assert_eq!(after[other], before[other], "edge {} after dragging edge {}'s `{label}`: {after:?}", other + 1, edge + 1);
+        }
+        let moved = match label {
+            "Segment 1 height" => after[edge][0].3 != before[edge][0].3,
+            "Segment 2 angle" => after[edge][1].2 != before[edge][1].2,
+            _ => after[edge][0].2 != before[edge][0].2,
+        };
+        assert!(moved, "edge {}'s `{label}` moved: {after:?}", edge + 1);
+        before = after;
+    }
+    let d = h.app.dialog.clone().expect("the dialog is open");
+    let params = apply_commands(&h.app, &d).unwrap()[0].1["params"].clone();
+    let seg = |edge: usize, m: usize| params["edges"][edge]["segments"][m].clone();
+    assert_eq!(seg(0, 0)["height"], json!(before[0][0].3.clone()), "{params}");
+    assert_eq!(seg(1, 1)["angle"], json!(before[1][1].2.clone()), "{params}");
+    assert_eq!(seg(2, 0)["angle"], json!(before[2][0].2.clone()), "{params}");
+    // Every stretch the drags did not touch is the design's.
+    assert_eq!(seg(0, 1), json!({"from": 0.5, "to": 1.0, "angle": "45 deg", "height": "15 mm"}), "{params}");
+    assert_eq!(seg(1, 0), json!({"from": 0.0, "to": 0.5, "angle": "60 deg", "height": "25 mm"}), "{params}");
+    assert_eq!(seg(2, 1), json!({"from": 0.5, "to": 1.0, "angle": "40 deg", "height": "12 mm"}), "{params}");
+    assert_eq!(seg(0, 0)["from"], json!(0.0), "{params}");
+    assert_eq!(seg(0, 0)["to"], json!(0.5), "{params}");
+    assert_eq!(seg(1, 1)["height"], json!("10 mm"), "{params}");
+    assert_eq!(seg(2, 0)["height"], json!("30 mm"), "{params}");
+}
+
+/// The byte-identical per-edge round-trip after a label drag: the drag changes the dragged
+/// stretch's height only, the other edge's list comes back byte for byte as the design wrote it,
+/// and Edit Feature on the redefined feature sends the same bytes back (#5927, #5928).
+#[test]
+fn a_dragged_segment_round_trip_keeps_every_other_edge_byte_identical() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.resize", json!({"width": 1600, "height": 2000}));
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    let design = json!({
+        "type": "edge",
+        "edges": [
+            {"point": [50.0, 0.0, 2.5], "segments": [
+                {"from": 0.0, "to": 0.3, "angle": "90 deg", "height": "20 mm"},
+                {"from": 0.3, "to": 1.0, "angle": "45 deg", "height": "15 mm", "flip": false}
+            ]},
+            {"point": [50.0, 60.0, 2.5], "segments": [
+                {"from": 0.0, "to": 0.6, "height": "25 mm", "flip": true},
+                {"from": 0.6, "to": 1.0, "height": "10 mm"}
+            ]}
+        ],
+        "height": "20 mm",
+        "angle": "90 deg",
+        "position": "inside",
+        "flip": true
+    });
+    h.app.run("sheet.flange", design.clone()).unwrap();
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", h.app.session.model.results);
+    let id = h.app.session.doc.features.last().unwrap().id;
+    h.app.edit_feature(id);
+    h.frames(6);
+    let before = segment_rows(&h);
+    assert_eq!(before.len(), 2, "{before:?}");
+    // Drag edge 1's first stretch's height: 20 mm moves by 4 mm at 40 points.
+    drag_label(&mut h, "Segment 1 height", 0, 40.0);
+    let after = segment_rows(&h);
+    assert_eq!(after[1], before[1], "edge 2's list is untouched: {after:?}");
+    assert_ne!(after[0][0].3, before[0][0].3, "edge 1's dragged height moved: {after:?}");
+    assert_eq!(
+        (after[0][0].0.as_str(), after[0][0].1.as_str(), after[0][0].2.as_str()),
+        ("0", "0.3", "90 deg"),
+        "the dragged stretch keeps its bounds and angle"
+    );
+    let d = h.app.dialog.clone().expect("the dialog is open");
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(c[0].0, "timeline.redefine");
+    let params = c[0].1["params"].clone();
+    assert_eq!(
+        serde_json::to_string(&params["edges"][1]).unwrap(),
+        serde_json::to_string(&design["edges"][1]).unwrap(),
+        "the edge the drag did not touch goes back as the design wrote it: {params}"
+    );
+    let mut expected = design.clone();
+    expected["edges"][0]["segments"][0]["height"] = json!(after[0][0].3.clone());
+    assert_eq!(serde_json::to_string(&params).unwrap(), serde_json::to_string(&expected).unwrap(), "only the dragged height differs: {params}");
+    // OK applies it; Edit Feature sends the same parameters back, byte for byte.
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.frames(4);
+    assert!(h.app.dialog.is_none(), "OK applies the dragged value");
+    let f = h.app.session.doc.features.last().unwrap().id;
+    h.app.edit_feature(f);
+    h.frames(6);
+    let d = h.app.dialog.clone().expect("the dialog is open again");
+    let again = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(
+        serde_json::to_string(&again[0].1["params"]).unwrap(),
+        serde_json::to_string(&params).unwrap(),
+        "the edit after the drag is byte-identical: {}",
+        again[0].1["params"]
+    );
+    assert_eq!(segment_rows(&h)[1], before[1], "edge 2 still comes back as it was");
+}
+
+/// A 100 x 60 sheet with a base flange, and the Press-in Hardware dialog open with a place on its top face.
+fn hardware_dialog_on(place: Option<[f64; 3]>) -> (SolveApp, Dialog) {
+    let mut app = plate(crate::ui_kit::LayoutMode::Docked);
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    app.session.selection = place.into_iter().filter_map(|p| face_sel(&app.session, Vec3::new(p[0], p[1], p[2]))).collect();
+    app.start("sheet.hardware");
+    let dialog = app.dialog.clone().expect("Press-in Hardware opens a dialog");
+    (app, dialog)
+}
+
+fn the_hardware_of(app: &SolveApp, id: u64) -> solidcraft_engine::doc::Hardware {
+    match app.session.doc.feature(id).map(|f| f.kind.clone()) {
+        Some(FeatureKind::Hole { hardware: Some(h), .. }) => h,
+        other => panic!("not a hardware hole: {other:?}"),
+    }
+}
+
+/// #17752: the toolbar opens the dialog and runs nothing until OK; the place picked and the kind,
+/// thread and length chosen make the commands; a nut takes no length.
+#[test]
+fn press_in_hardware_dialog_places_the_hardware_where_the_picks_are() {
+    let (mut app, empty) = hardware_dialog_on(None);
+    let features = app.session.doc.features.len();
+    assert!(empty.previews());
+    assert_eq!(app.session.doc.features.len(), features, "nothing is run by opening it");
+    let refusal = apply_commands(&app, &empty).expect_err("no place picked");
+    assert!(refusal.contains("select where the hardware goes"), "{refusal}");
+
+    let (placed_app, mut d) = hardware_dialog_on(Some([50.0, 30.0, 2.5]));
+    app = placed_app;
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!((c.len(), c[0].0.as_str()), (1, "sheet.hardware"));
+    assert_eq!((&c[0].1["kind"], &c[0].1["thread"]), (&json!("nut"), &json!("M3")));
+    assert!(c[0].1.get("length").is_none(), "a nut has no length: {}", c[0].1);
+    let at = |v: &Value| [0, 1, 2].map(|i| v["position"][i].as_f64().unwrap_or(f64::NAN));
+    assert!((at(&c[0].1)[0] - 50.0).abs() < 1e-6 && (at(&c[0].1)[1] - 30.0).abs() < 1e-6, "{}", c[0].1);
+
+    if let Kind::Sheet(Sm::Hardware { kind, thread, length }) = &mut d.kind {
+        (*kind, *thread, *length) = (2, "M4".into(), "8 mm".into());
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!((&c[0].1["kind"], &c[0].1["thread"], &c[0].1["length"]), (&json!("stud"), &json!("M4"), &json!("8 mm")));
+    run_all(&mut app, c);
+    let hole = app.session.doc.features.last().unwrap().id;
+    let h = the_hardware_of(&app, hole);
+    assert_eq!((h.thread.as_str(), h.part.as_str(), h.length.as_ref().map(|e| e.to_string())), ("M4", "stud.m4", Some("8 mm".to_string())));
+    let flat = app.session.execute("sheet.flat_pattern", &json!({})).unwrap();
+    assert_eq!(flat["hardware"][0]["length"], 8.0, "{flat}");
+
+    // A stud without its length is not run.
+    if let Kind::Sheet(Sm::Hardware { length, .. }) = &mut d.kind {
+        length.clear();
+    }
+    assert!(apply_commands(&app, &d).unwrap_err().contains("needs its length"));
+}
+
+/// Sketch points are placed with one command for their sketch, every point picked; Edit Feature
+/// brings the hardware, its length and the points back, and rebuilds it in place with the same command.
+#[test]
+fn press_in_hardware_dialog_takes_sketch_points_and_edits_them() {
+    let (mut app, _) = hardware_dialog_on(None);
+    app.dialog = None;
+    app.run("sketch.create", json!({"plane": {"origin": [0, 0, 2.5], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Pins"})).unwrap();
+    app.run("sketch.point", json!({"point": [20, 30], "id": "a"})).unwrap();
+    app.run("sketch.point", json!({"point": [80, 30], "id": "b"})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    let sketch = app.session.doc.find_feature("Pins").unwrap().id;
+    app.session.selection = ["a", "b"].iter().map(|id| Sel::SketchPoint { id: format!("{sketch}:{id}") }).collect();
+    app.start("sheet.hardware");
+    let mut d = app.dialog.clone().unwrap();
+    if let Kind::Sheet(Sm::Hardware { kind, thread, length }) = &mut d.kind {
+        (*kind, *thread, *length) = (3, "M3".into(), "6 mm".into());
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c.len(), 1, "one command for the sketch: {c:?}");
+    assert_eq!((&c[0].1["sketch"], &c[0].1["points"], &c[0].1["kind"]), (&json!(sketch), &json!(["a", "b"]), &json!("standoff")));
+    run_all(&mut app, c);
+    assert_eq!(app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["hardware"].as_array().map(Vec::len), Some(2));
+
+    let hole = app.session.doc.features.last().unwrap().id;
+    let e = edit_dialog(&app, hole, None).expect("a hardware hole is edited in the Hardware window");
+    assert!(matches!(&e.kind, Kind::Sheet(Sm::Hardware { kind: 3, thread, length }) if thread == "M3" && length == "6 mm"), "{:?}", e.kind);
+    assert_eq!(e.inputs[0].items.len(), 2);
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!((c[0].0.as_str(), c[0].1["command"].as_str()), ("timeline.redefine", Some("sheet.hardware")));
+    assert_eq!((&c[0].1["params"]["points"], &c[0].1["params"]["length"]), (&json!(["a", "b"]), &json!("6 mm")));
+    run_all(&mut app, c);
+    let h = the_hardware_of(&app, hole);
+    assert_eq!((h.kind.name(), h.thread.as_str()), ("standoff", "M3"), "the hardware is kept by the edit");
+}
+
+/// The form: a nut has no length row and a stud has one; its thread is one the table has for the
+/// kind (a thread the new kind lacks falls back to its first); the table's numbers show.
+#[test]
+fn press_in_hardware_form_offers_the_sizes_the_table_has_for_the_kind() {
+    let texts_of = |kind: usize, thread: &str| {
+        let (mut app, mut dialog) = hardware_dialog_on(Some([50.0, 30.0, 2.5]));
+        let ctx = crate::fonts::test_context();
+        if let Kind::Sheet(Sm::Hardware { kind: k, thread: t, .. }) = &mut dialog.kind {
+            (*k, *t) = (kind, thread.into());
+        }
+        let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+            if let Kind::Sheet(k) = &mut dialog.kind {
+                rows(&mut app, ui, k, &mut dialog.inputs);
+            }
+        });
+        let texts: Vec<String> = crate::test_support::text_shapes(&output).map(|text| text.galley.text().to_string()).collect();
+        let Kind::Sheet(Sm::Hardware { thread, .. }) = dialog.kind else { panic!("not the hardware form") };
+        (texts, thread)
+    };
+    let (nut, thread) = texts_of(0, "M3");
+    assert_eq!(thread, "M3");
+    for label in ["Type", "Nut", "Thread", "M3", "Mounting hole 4.25 mm. Sheet at least 0.8 mm thick. Center at least 4.8 mm from an edge or bend."] {
+        assert!(nut.iter().any(|t| t == label), "missing {label}: {nut:?}");
+    }
+    assert!(!nut.iter().any(|t| t == "Length"), "a nut has no length: {nut:?}");
+    let (stud, thread) = texts_of(2, "M8");
+    assert_eq!(thread, "M8", "a stud comes in M8");
+    assert!(stud.iter().any(|t| t == "Length"), "{stud:?}");
+    // The standoffs stop at M5: an M8 left over from a stud is M3.
+    let (standoff, thread) = texts_of(3, "M8");
+    assert_eq!(thread, "M3");
+    assert!(standoff.iter().any(|t| t == "Length"), "{standoff:?}");
+}
+
+/// A sheet too thin is the preview's error, a centre too near an edge its warning, and a good place
+/// has neither: the dialog says why before OK (the form shows both, see the form test).
+#[test]
+fn press_in_hardware_preview_says_what_the_sheet_cannot_hold() {
+    let colors = || crate::preview::Colors {
+        body: [1; 4],
+        added: [2; 4],
+        new_body: [3; 4],
+        removed: [4; 4],
+        lost: [6; 4],
+        selected: [7; 4],
+        mirrored: [6; 4],
+        edge: [5; 4],
+        ghost: false,
+        glass_new: false,
+        tint_new: true,
+        cut_tint: true,
+        replaced_ghost: true,
+    };
+    let preview = |place: [f64; 3], kind: usize, thread: &str| {
+        let (app, mut d) = hardware_dialog_on(Some(place));
+        if let Kind::Sheet(Sm::Hardware { kind: k, thread: t, length }) = &mut d.kind {
+            (*k, *t, *length) = (kind, thread.into(), "8 mm".into());
+        }
+        let commands = crate::dialogs::preview_commands(&app, &d).expect("the inputs make a command");
+        crate::preview::compute(&app.session, &commands, colors())
+    };
+    let good = preview([50.0, 30.0, 2.5], 0, "M3").unwrap_or_else(|e| panic!("{e}"));
+    assert!(good.warning.is_none() && good.error.is_none(), "{:?} {:?}", good.warning, good.error);
+    let near = preview([3.0, 30.0, 2.5], 0, "M3").unwrap_or_else(|e| panic!("{e}"));
+    assert!(near.warning.as_deref().is_some_and(|w| w.contains("3 mm from the nearest edge, cut-out or other hole")), "{:?}", near.warning);
+    // The 2.5 mm sheet is thinner than a flush M6 nut's 3.2 mm.
+    let Err(thin) = preview([50.0, 30.0, 2.5], 1, "M6") else { panic!("a sheet too thin is refused") };
+    assert!(thin.contains("is 2.5 mm thick") && thin.contains("an M6 flush nut") && thin.contains("at least 3.2 mm"), "{thin}");
+    // That refusal says what to change: no Create Issue under it. A kernel failure is no such refusal.
+    assert!(crate::dialogs_sheet::hardware_refusal(&thin));
+    assert!(!crate::dialogs_sheet::hardware_refusal("`Body1`: what Hole1 cut leaves walls that are not square to the sheet: not supported yet"));
+}
+
+/// The window shows a refusal that says what to change (no Create Issue) by reading the engine's
+/// words, so each refusal `sheet.hardware` makes for a choice in the window is built here and must
+/// be one it recognises: rewording one in the engine fails this test and not silently the display.
+#[test]
+fn every_choice_refusal_of_sheet_hardware_is_shown_as_guidance() {
+    let (mut app, _) = hardware_dialog_on(None);
+    app.dialog = None;
+    app.run("solid.box", json!({"corner": [200, 0, 0], "length": 50, "width": 50, "height": 2.5, "body_name": "Block"})).unwrap();
+    let place = |extra: Value| {
+        let mut q = json!({"position": [50, 30, 2.5]});
+        q.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        q
+    };
+    for (what, params) in [
+        ("a size the table lacks", place(json!({"kind": "nut", "thread": "M7"}))),
+        ("a hole off the table's size", place(json!({"kind": "nut", "thread": "M3", "diameter": "4.5 mm"}))),
+        ("a stud without its length", place(json!({"kind": "stud", "thread": "M4"}))),
+        ("a nut with a length", place(json!({"kind": "nut", "thread": "M4", "length": "5 mm"}))),
+        ("a length of nothing", place(json!({"kind": "stud", "thread": "M4", "length": "0 mm"}))),
+        ("a sheet too thin", place(json!({"kind": "flush_nut", "thread": "M6"}))),
+        ("a place that is no sheet", json!({"kind": "nut", "thread": "M3", "position": [225, 25, 2.5]})),
+    ] {
+        let error = app.session.execute("sheet.hardware", &params).expect_err(what).to_string();
+        assert!(hardware_refusal(&error), "{what} is not shown as guidance: {error}");
+    }
+    // A failure of the design is no guidance: it keeps its Create Issue.
+    assert!(!hardware_refusal("`Body1`: what Hole1 cut leaves walls that are not square to the sheet: not supported yet"));
+}
+
+/// Edit Feature carries a custom hole diameter (4.3 mm for an M3 nut) while the size is the one it
+/// was made for; changed to another kind or thread it is the table's again, since the window has no
+/// diameter field and the old one would be refused for the new size.
+#[test]
+fn editing_hardware_keeps_a_custom_hole_only_for_the_size_it_was_made_for() {
+    let (mut app, _) = hardware_dialog_on(None);
+    app.dialog = None;
+    let hole = app.run("sheet.hardware", json!({"kind": "nut", "thread": "M3", "diameter": "4.3 mm", "position": [50, 30, 2.5]})).unwrap()["feature"]
+        .as_u64()
+        .unwrap();
+    let mut e = edit_dialog(&app, hole, None).expect("edit window");
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].1["params"]["diameter"], "4.3 mm", "kept for its own size: {}", c[0].1);
+    if let Kind::Sheet(Sm::Hardware { thread, .. }) = &mut e.kind {
+        *thread = "M4".into();
+    }
+    let c = apply_commands(&app, &e).unwrap();
+    assert!(c[0].1["params"].get("diameter").is_none(), "an M4's hole is the table's, not the M3's 4.3 mm: {}", c[0].1);
+    run_all(&mut app, c);
+    assert_eq!(the_hardware_of(&app, hole).thread, "M4", "and the edit is accepted");
+}
+
+/// An edit rebuilds one feature: a place added on a face to a hole made at sketch points makes two
+/// commands, which an edit refuses rather than quietly applying the first.
+#[test]
+fn editing_hardware_refuses_a_selection_that_makes_more_than_one_command() {
+    let (mut app, _) = hardware_dialog_on(None);
+    app.dialog = None;
+    app.run("sketch.create", json!({"plane": {"origin": [0, 0, 2.5], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Pins"})).unwrap();
+    app.run("sketch.point", json!({"point": [20, 30], "id": "a"})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    let sketch = app.session.doc.find_feature("Pins").unwrap().id;
+    app.run("sheet.hardware", json!({"kind": "nut", "thread": "M3", "sketch": sketch, "points": ["a"]})).unwrap();
+    let hole = app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&app, hole, None).expect("edit window");
+    assert!(apply_commands(&app, &e).is_ok(), "as it was");
+    e.inputs[0].items.push(face_sel(&app.session, Vec3::new(70.0, 30.0, 2.5)).expect("a face place"));
+    let error = apply_commands(&app, &e).expect_err("two commands in an edit");
+    assert!(error.contains("edit changes one feature"), "{error}");
 }

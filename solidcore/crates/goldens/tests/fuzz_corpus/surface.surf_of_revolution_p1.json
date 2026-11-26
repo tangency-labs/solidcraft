@@ -1,0 +1,6 @@
+{
+  "unit": "surface.surf_of_revolution_p1",
+  "cases": [
+    {"name": "fuzz01085_circle_axis_length_overflows", "origin": "fuzz-out/n2000/surface.surf_of_revolution_p1/fuzz01085.json (crash: cpp: killed by signal 11)", "cpp": "harness: invalid argument: circle: axis length overflows", "rust": "ok", "inputs": {"op": "directrix", "surf": {"build": {"domain": [0.0, -64.7, 360.0, 144.0], "mode": "ctor", "origin": [0.0, 0.0, 0.0], "x": [0.0, 1.0, 0.0], "y": [0.0, 0.0, 1.0]}, "gen": {"c": [-0.00744, 1.52, 0.0], "d": [-64.7, 144.0], "kind": "circle", "r": 1.12, "x": [0.0, 1.0, 0.0], "y": [1.0, 0.0, 1e+300]}}, "t": 0.146}}
+  ]
+}

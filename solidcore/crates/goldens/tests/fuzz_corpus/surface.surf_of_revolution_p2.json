@@ -1,0 +1,7 @@
+{
+  "unit": "surface.surf_of_revolution_p2",
+  "cases": [
+    {"name": "fuzz00182_circle_axis_length_overflows", "origin": "fuzz-out/n2000/surface.surf_of_revolution_p2/fuzz00182.json (crash: cpp: killed by signal 11)", "cpp": "harness: invalid argument: circle: axis length overflows", "rust": "ok", "inputs": {"dist": 1.82, "op": "offset", "surf": {"build": {"axis": [1.0, 0.0, 0.0], "mode": "canonical", "point": [2.06, 4.16, 2.03]}, "gen": {"c": [1.53, 6.7, 2.03], "d": [29.1, 181.0], "kind": "circle", "r": 0.545, "x": [0.0, 1e+300, 0.0], "y": [1.0, 0.0, 0.0]}}, "tol": 4.39e-05}},
+    {"name": "fuzz01926_offset_axis_point_above_max_axis", "origin": "fuzz-out/n2000/surface.surf_of_revolution_p2/fuzz01926.json (crash: cpp: killed by signal 11)", "issue": "UB-229", "cpp": "harness: invalid argument: offset: axis point above MAX_AXIS_POINT", "rust": "ok", "inputs": {"dist": 0.25, "op": "offset", "surf": {"build": {"domain": [0, 0.2, 270, 0.8], "mode": "ctor", "origin": [0, 0, -9223372036854775808], "x": [1, 0, 0], "y": [0, 1, 0]}, "gen": {"a": [1, 0, 0], "b": [1, 0, 3], "kind": "line"}}, "tol": 1e-05}}
+  ]
+}

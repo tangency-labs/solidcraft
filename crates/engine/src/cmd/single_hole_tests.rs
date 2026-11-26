@@ -135,6 +135,98 @@ fn a_far_body_does_not_change_a_countersunk_hole() {
     assert_eq!(large_changed, json!(["lid"]), "only the lid is drilled");
 }
 
+fn body_volume(s: &mut Session, name: &str) -> f64 {
+    let m = run(s, "inspect.measure", json!({}));
+    let b = m["bodies"].as_array().and_then(|bs| bs.iter().find(|b| b["name"] == name)).unwrap_or_else(|| panic!("no body {name}: {m}"));
+    b["volume_mm3"].as_f64().unwrap_or(f64::NAN)
+}
+
+/// #17358: a hole whose spot is over an opening in its own body starts there, on the face's plane;
+/// it doesn't slide along its axis onto a body of another component under the opening. A 4 mm
+/// Plate (component Lid, z 12…16) with a Ø5 bore through it, 2 mm above a Block in the root. A
+/// countersunk Ø3.1 hole (Ø7, 90°) at the bore's centre cuts the countersink's ring into the
+/// Plate (from r 3.5 at z 16 to r 2.5 at z 15) and leaves the Block alone: as a Single hole at a
+/// point of a sketch on the Plate's top, and placed by position.
+#[test]
+fn a_hole_over_an_opening_in_its_body_cuts_that_body_not_one_under_it() {
+    let ring = PI / 3.0 * (3.5 * 3.5 + 3.5 * 2.5 + 2.5 * 2.5) - PI * 2.5 * 2.5;
+    let countersink = json!({"diameter": 3.1, "depth": 4, "type": "countersink", "cs_diameter": 7, "cs_angle": 90, "name": "H"});
+    for single in [true, false] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+        run(&mut s, "component.create", json!({"name": "Lid"}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 4, "corner": [0, 0, 12], "operation": "new", "body_name": "Plate"}));
+        run(&mut s, "solid.hole", json!({"position": [20, 20, 16], "diameter": 5, "targets": ["Plate"], "name": "Bore"}));
+        let plate = 6400.0 - PI * 2.5 * 2.5 * 4.0;
+        assert!((body_volume(&mut s, "Plate") - plate).abs() < 1e-3, "the bore goes through the Plate");
+        let mut hole = countersink.clone();
+        if single {
+            run(&mut s, "sketch.create", json!({"plane": {"face": [5, 5, 16]}, "name": "S", "project_edges": false}));
+            run(&mut s, "sketch.point", json!({"point": [20, 20], "id": "m"}));
+            run(&mut s, "sketch.finish", json!({}));
+            let st = s.model.state();
+            let ss = st.sketches.iter().find(|ss| ss.sketch.points.iter().any(|p| p.id == "m")).unwrap();
+            let m = ss.sketch.points.iter().find(|p| p.id == "m").map(|p| ss.plane.to_world(p.pos)).unwrap();
+            assert!(m.dist(Vec3::new(20.0, 20.0, 16.0)) < 1e-9, "the point is the bore's centre on the top: {m:?}");
+            hole["sketch"] = json!("S");
+            hole["points"] = json!(["m"]);
+            hole["single"] = json!(true);
+        } else {
+            hole["position"] = json!([20, 20, 16]);
+        }
+        run(&mut s, "solid.hole", hole);
+        let warning = s.model.result(s.doc.find_feature("H").unwrap().id).unwrap().warning.clone();
+        assert_eq!(warning, None, "single {single}");
+        let cut = plate - body_volume(&mut s, "Plate");
+        assert!((cut - ring).abs() < 1e-3, "single {single}: the Plate loses the countersink's ring, {cut} of {ring} mm³");
+        // The ring is cut at the Plate's top (r 3 is open 0.1 mm under it), not at its bottom.
+        assert!(!solid_at(&s, Vec3::new(23.0, 20.0, 15.9)) && solid_at(&s, Vec3::new(23.0, 20.0, 12.1)), "single {single}: the ring is at the top");
+        assert!((body_volume(&mut s, "Block") - 16_000.0).abs() < 1e-6, "single {single}: the Block is not drilled");
+    }
+}
+
+/// #17358: a Single hole of the root, at a point of a sketch on the top of the Lid's Plate (a face
+/// of a body it doesn't cut), still starts on that face: 8 mm down from z 16 reaches 2 mm into
+/// the Block (top at z 10) under the 2 mm gap, not 8 mm from the Block's top.
+#[test]
+fn a_single_hole_on_another_components_face_starts_on_that_face() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+    run(&mut s, "component.create", json!({"name": "Lid"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 4, "corner": [0, 0, 12], "operation": "new", "body_name": "Plate"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [5, 5, 16]}, "name": "S", "project_edges": false}));
+    run(&mut s, "sketch.point", json!({"point": [10, 10], "id": "m"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "S", "points": ["m"], "single": true, "diameter": 3, "depth": 8, "name": "H"}));
+    let cut = 16_000.0 - body_volume(&mut s, "Block");
+    let bore = PI * 1.5 * 1.5 * 2.0;
+    assert!((cut - bore).abs() < 1e-3, "the Block loses a 2 mm deep bore: {cut} of {bore} mm³");
+    assert!((body_volume(&mut s, "Plate") - 6400.0).abs() < 1e-6, "the Plate is not drilled");
+}
+
+/// #17358: a hole of the root that drills only the Block, placed at points exactly on the round
+/// side of the Lid's Rod (r 5, axis along x at y 20, z 17, 2 mm over the Block), starts on the
+/// Rod: between its mesh's vertices the point lies off the mesh, and the Edit Hole dialog seeds
+/// its Face pick where `hole_start` puts the stored point, which must not be the Block's top.
+#[test]
+fn a_hole_at_a_point_on_a_round_face_of_a_body_it_does_not_cut_starts_on_that_face() {
+    for deg in [3.37f64, 7.5, 10.37] {
+        let p = Vec3::new(20.0, 20.0 + 5.0 * deg.to_radians().sin(), 17.0 + 5.0 * deg.to_radians().cos());
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+        run(&mut s, "component.create", json!({"name": "Lid"}));
+        run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 40, "base": [0, 20, 17], "axis": "X", "operation": "new", "body_name": "Rod"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let hole = json!({"position": [p.x, p.y, p.z], "direction": [0, 0, -1], "diameter": 1, "depth": 1.5, "participants": ["Block"], "name": "H"});
+        run(&mut s, "solid.hole", hole);
+        let f = s.doc.find_feature("H").unwrap().clone();
+        let start = solidcraft_doc::hole_start(&s.model.state(), &f, p, Vec3::new(0.0, 0.0, -1.0));
+        assert!(start.dist(p) < 0.05, "{deg}°: starts on the Rod at {p:?}, not at {start:?}");
+        assert!((body_volume(&mut s, "Block") - 16_000.0).abs() < 1e-6, "{deg}°: the Block is not drilled");
+    }
+}
+
 /// #5041: a countersunk Ø6.4 hole (Ø13.7, 90°) 0.15 mm from a wall standing on the plate cuts
 /// nothing above the entry face: the countersink's rim (y 29.85) stays clear of the wall (y 30).
 /// 10 faces: bottom, the two L-shaped ends, front and back, the plate top, the wall's front and

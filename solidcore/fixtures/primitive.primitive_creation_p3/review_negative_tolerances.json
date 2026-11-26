@@ -1,0 +1,28 @@
+{
+  "cases": [
+    {
+      "name": "negative_skin_approximation_tolerance",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:CreateSkinFromFaces",
+      "inputs": {
+        "op": 4,
+        "data": [-0.00001, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1, 0, 2, 1, 0]
+      }
+    },
+    {
+      "name": "negative_swung_tolerance_without_profiles",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:3030-3052",
+      "inputs": {
+        "op": 6,
+        "data": [1, -0.00001, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0]
+      }
+    },
+    {
+      "name": "negative_swung_tolerance_with_profile",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:3030-3052",
+      "inputs": {
+        "op": 6,
+        "data": [1, -0.00001, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 2, 0, 1]
+      }
+    }
+  ]
+}

@@ -1,0 +1,173 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b16": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b17": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b19"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b20"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b20"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b21"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b19"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b22"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b21"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b23"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b22",
+        "b23"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b24"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "4683-cut-mirrored-loft-with-tilted-last-section",
+  "expected": {
+    "bbox": {
+      "max": [
+        149.034899,
+        303,
+        92
+      ],
+      "min": [
+        -149.034899,
+        -303,
+        -1
+      ]
+    },
+    "body_count": 1,
+    "method": "the mirrored loft is one solid symmetric about YZ; the box (x 91..240, y 90..210, z -2..118) cuts through its tilted end and out of its flat bottom, so the cut leaves one valid closed body. The loft's free-form volume is not closed-form, but its sections pin its box: x to the tilted last section's bottom corners, 149 + 0.034899 = 149.034899 (mirrored, -149.034899), y +-303 and z -1 at the first section's bottom corners (x = 0), z 92 at its crown; the sections' corners (y = 303 - 0.6 x) and crowns (z = 92 - 0.35 x) fall linearly with x through all of them, so the loft between them reaches no further, and the box (x >= 91, y 90..210) takes none of these points. Synthetic sections of the report's shape (a crowned spline over a flat base, narrowing along x), not its numbers",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#4683"
+    ],
+    "what": "a box cut from a 6-section loft (spline crown and a flat bottom at z = -1) whose last section lies on a plane tilted 2 deg off its neighbours', mirrored into one body; the box crosses the tilted end and reaches below the bottom face: truck's result shell was missing a face ('no result')"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 32,
+      "faces": 14,
+      "vertices": 20
+    }
+  },
+  "records": "4683-cut-mirrored-loft-with-tilted-last-section.bodies.json.gz",
+  "result": [
+    {
+      "body": "Top",
+      "made": "b24"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 336887.3582153987,
+      "body_count": 1,
+      "edges": 32,
+      "faces": 14,
+      "vertices": 20,
+      "volume_mm3": 6874211.178883966
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4683"
+  ],
+  "traced_ops": [
+    "loft",
+    "copy",
+    "copy",
+    "tagged",
+    "transform",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a box cut from a 6-section loft (spline crown and a flat bottom at z = -1) whose last section lies on a plane tilted 2 deg off its neighbours', mirrored into one body; the box crosses the tilted end and reaches below the bottom face: truck's result shell was missing a face ('no result')",
+  "why_not": []
+}

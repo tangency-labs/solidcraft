@@ -1,0 +1,1721 @@
+{
+ "coverage": "Upstream Fillet .smb sources (TestFiles/pt_TestFiles/Fillet: box_diff_cyl*, cyl_on_box*, tilt_cyl_on_box) through DoSolidOffset on faces 0..2, inset and outset with convex extension. Both kernels refresh vertex/face gap caches on the source here (CalcVertexFaceGap resets every same-face use), so input.pure compares the gap caches on both sides.",
+ "cases": [
+  {
+   "name": "pe_Fillet_box_diff_cyl_big_rad_f0_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/box_diff_cyl_big_rad.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.001460740788778,
+    "config": {
+     "member_distance": 10.0,
+     "member_approx_tol": 0.001460740788778,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_box_diff_cyl_big_rad_f0_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/box_diff_cyl_big_rad.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.001460740788778,
+    "config": {
+     "member_distance": 10.0,
+     "member_approx_tol": 0.001460740788778,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_box_diff_cyl_big_rad_f1_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/box_diff_cyl_big_rad.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.001460740788778,
+    "config": {
+     "member_distance": 10.0,
+     "member_approx_tol": 0.001460740788778,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_box_diff_cyl_big_rad_f1_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/box_diff_cyl_big_rad.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.001460740788778,
+    "config": {
+     "member_distance": 10.0,
+     "member_approx_tol": 0.001460740788778,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_box_diff_cyl_big_rad_f2_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/box_diff_cyl_big_rad.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 0.001460740788778,
+    "config": {
+     "member_distance": 10.0,
+     "member_approx_tol": 0.001460740788778,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_box_diff_cyl_big_rad_f2_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/box_diff_cyl_big_rad.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 0.001460740788778,
+    "config": {
+     "member_distance": 10.0,
+     "member_approx_tol": 0.001460740788778,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_box_diff_cyl_f0_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/box_diff_cyl.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 0.5,
+     "member_approx_tol": 0.0001,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_box_diff_cyl_f0_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/box_diff_cyl.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 0.5,
+     "member_approx_tol": 0.0001,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_box_diff_cyl_f1_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/box_diff_cyl.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 0.5,
+     "member_approx_tol": 0.0001,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_box_diff_cyl_f1_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/box_diff_cyl.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 0.5,
+     "member_approx_tol": 0.0001,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_box_diff_cyl_f2_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/box_diff_cyl.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 0.5,
+     "member_approx_tol": 0.0001,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_box_diff_cyl_f2_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/box_diff_cyl.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 0.5,
+     "member_approx_tol": 0.0001,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box1_f0_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box1.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 0.9,
+     "member_approx_tol": 0.0001,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box1_f0_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box1.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 0.9,
+     "member_approx_tol": 0.0001,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box1_f1_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box1.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 0.9,
+     "member_approx_tol": 0.0001,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box1_f1_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box1.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 0.9,
+     "member_approx_tol": 0.0001,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box1_f2_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box1.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 0.9,
+     "member_approx_tol": 0.0001,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box1_f2_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box1.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 0.9,
+     "member_approx_tol": 0.0001,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_f0_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 0.375,
+     "member_approx_tol": 0.0001,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_f0_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 0.375,
+     "member_approx_tol": 0.0001,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_f1_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 0.375,
+     "member_approx_tol": 0.0001,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_f1_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 0.375,
+     "member_approx_tol": 0.0001,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_f2_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 0.375,
+     "member_approx_tol": 0.0001,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_f2_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 0.375,
+     "member_approx_tol": 0.0001,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_fillet1_f0_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_fillet1.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 7.5e-05,
+    "config": {
+     "member_distance": 0.375,
+     "member_approx_tol": 7.5e-05,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_fillet1_f0_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_fillet1.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 7.5e-05,
+    "config": {
+     "member_distance": 0.375,
+     "member_approx_tol": 7.5e-05,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_fillet1_f1_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_fillet1.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 7.5e-05,
+    "config": {
+     "member_distance": 0.375,
+     "member_approx_tol": 7.5e-05,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_fillet1_f1_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_fillet1.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 7.5e-05,
+    "config": {
+     "member_distance": 0.375,
+     "member_approx_tol": 7.5e-05,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_fillet1_f2_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_fillet1.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 7.5e-05,
+    "config": {
+     "member_distance": 0.375,
+     "member_approx_tol": 7.5e-05,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_fillet1_f2_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_fillet1.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 7.5e-05,
+    "config": {
+     "member_distance": 0.375,
+     "member_approx_tol": 7.5e-05,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_fillet2_f0_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_fillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 0.75,
+     "member_approx_tol": 0.0001,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_fillet2_f0_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_fillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 0.75,
+     "member_approx_tol": 0.0001,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_fillet2_f1_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_fillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 0.75,
+     "member_approx_tol": 0.0001,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_fillet2_f1_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_fillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 0.75,
+     "member_approx_tol": 0.0001,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_fillet2_f2_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_fillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 0.75,
+     "member_approx_tol": 0.0001,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_fillet2_f2_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_fillet2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 0.75,
+     "member_approx_tol": 0.0001,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_fillet_f0_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_fillet.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 7.5e-05,
+    "config": {
+     "member_distance": 0.375,
+     "member_approx_tol": 7.5e-05,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_fillet_f0_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_fillet.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 7.5e-05,
+    "config": {
+     "member_distance": 0.375,
+     "member_approx_tol": 7.5e-05,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_fillet_f1_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_fillet.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 7.5e-05,
+    "config": {
+     "member_distance": 0.375,
+     "member_approx_tol": 7.5e-05,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_fillet_f1_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_fillet.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 7.5e-05,
+    "config": {
+     "member_distance": 0.375,
+     "member_approx_tol": 7.5e-05,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_fillet_f2_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_fillet.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 7.5e-05,
+    "config": {
+     "member_distance": 0.375,
+     "member_approx_tol": 7.5e-05,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_fillet_f2_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_fillet.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 7.5e-05,
+    "config": {
+     "member_distance": 0.375,
+     "member_approx_tol": 7.5e-05,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_hole_f0_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_hole.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.001777777811686,
+    "config": {
+     "member_distance": 13.1556,
+     "member_approx_tol": 0.001777777811686,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_hole_f0_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_hole.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.001777777811686,
+    "config": {
+     "member_distance": 13.1556,
+     "member_approx_tol": 0.001777777811686,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_hole_f1_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_hole.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.001777777811686,
+    "config": {
+     "member_distance": 13.1556,
+     "member_approx_tol": 0.001777777811686,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_hole_f1_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_hole.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.001777777811686,
+    "config": {
+     "member_distance": 13.1556,
+     "member_approx_tol": 0.001777777811686,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_hole_f2_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_hole.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 0.001777777811686,
+    "config": {
+     "member_distance": 13.1556,
+     "member_approx_tol": 0.001777777811686,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_hole_f2_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_hole.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 0.001777777811686,
+    "config": {
+     "member_distance": 13.1556,
+     "member_approx_tol": 0.001777777811686,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_tan_hole2_f0_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_tan_hole2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.001626666692098,
+    "config": {
+     "member_distance": 10.0,
+     "member_approx_tol": 0.001626666692098,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_tan_hole2_f0_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_tan_hole2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.001626666692098,
+    "config": {
+     "member_distance": 10.0,
+     "member_approx_tol": 0.001626666692098,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_tan_hole2_f1_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_tan_hole2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.001626666692098,
+    "config": {
+     "member_distance": 10.0,
+     "member_approx_tol": 0.001626666692098,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_tan_hole2_f1_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_tan_hole2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.001626666692098,
+    "config": {
+     "member_distance": 10.0,
+     "member_approx_tol": 0.001626666692098,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_tan_hole2_f2_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_tan_hole2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 0.001626666692098,
+    "config": {
+     "member_distance": 10.0,
+     "member_approx_tol": 0.001626666692098,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_tan_hole2_f2_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_tan_hole2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 0.001626666692098,
+    "config": {
+     "member_distance": 10.0,
+     "member_approx_tol": 0.001626666692098,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_tan_hole_f0_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_tan_hole.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.001367821375529,
+    "config": {
+     "member_distance": 11.1404,
+     "member_approx_tol": 0.001367821375529,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_tan_hole_f0_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_tan_hole.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.001367821375529,
+    "config": {
+     "member_distance": 11.1404,
+     "member_approx_tol": 0.001367821375529,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_tan_hole_f1_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_tan_hole.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.001367821375529,
+    "config": {
+     "member_distance": 11.1404,
+     "member_approx_tol": 0.001367821375529,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_tan_hole_f1_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_tan_hole.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.001367821375529,
+    "config": {
+     "member_distance": 11.1404,
+     "member_approx_tol": 0.001367821375529,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_tan_hole_f2_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_tan_hole.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 0.001367821375529,
+    "config": {
+     "member_distance": 11.1404,
+     "member_approx_tol": 0.001367821375529,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_cyl_on_box_w_tan_hole_f2_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/cyl_on_box_w_tan_hole.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 0.001367821375529,
+    "config": {
+     "member_distance": 11.1404,
+     "member_approx_tol": 0.001367821375529,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_tilt_cyl_on_box_f0_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/tilt_cyl_on_box.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.001339890721639,
+    "config": {
+     "member_distance": 11.0492,
+     "member_approx_tol": 0.001339890721639,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_tilt_cyl_on_box_f0_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/tilt_cyl_on_box.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.001339890721639,
+    "config": {
+     "member_distance": 11.0492,
+     "member_approx_tol": 0.001339890721639,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_tilt_cyl_on_box_f1_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/tilt_cyl_on_box.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.001339890721639,
+    "config": {
+     "member_distance": 11.0492,
+     "member_approx_tol": 0.001339890721639,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_tilt_cyl_on_box_f1_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/tilt_cyl_on_box.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.001339890721639,
+    "config": {
+     "member_distance": 11.0492,
+     "member_approx_tol": 0.001339890721639,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_tilt_cyl_on_box_f2_d0_in_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/tilt_cyl_on_box.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 0.001339890721639,
+    "config": {
+     "member_distance": 11.0492,
+     "member_approx_tol": 0.001339890721639,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "pe_Fillet_tilt_cyl_on_box_f2_d0_out_ext",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Fillet/tilt_cyl_on_box.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 0.001339890721639,
+    "config": {
+     "member_distance": 11.0492,
+     "member_approx_tol": 0.001339890721639,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  }
+ ]
+}

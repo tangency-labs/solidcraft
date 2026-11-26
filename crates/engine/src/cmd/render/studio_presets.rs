@@ -1,11 +1,15 @@
 //! Original native studio compositions. Independent of unbound SCENE-* concepts.
 //! Resolution is read-only; publication validates a complete candidate before one undo.
+use crate::schema::TypedContract;
+use crate::schema::render_presets::{
+    CpuProgressive, CpuQualityContext, CpuQualityOptions, CpuQualityPlan, PresetParams, QualityOptions, QualityParams, QualityPlan, QualityResult,
+    QualitySize, StudioComposition,
+};
 use crate::{Result, Session, params::bad};
-use serde::Deserialize;
 use serde_json::{Value, json};
 use solidcraft_doc::{
-    render_resources::GpuHdrEnvironment,
-    render_settings::{RenderJob, RenderSettings, RenderSetup},
+    render_resources::{CpuHdrEnvironment, GpuHdrEnvironment},
+    render_settings::{RenderJob, RenderSettings},
 };
 use solidcraft_render::{
     job::{AreaLights, StudioLighting},
@@ -48,36 +52,23 @@ fn recipe(id: &str, command: &str) -> Result<Value> {
         .and_then(|items| items.iter().find(|item| item["id"].as_str() == Some(id)).cloned())
         .ok_or_else(|| bad(command, "unknown native studio identity; SCENE-* specifications are not executable compositions"))
 }
-fn patch() -> Value {
-    json!({})
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Input {
-    id: String,
-    name: String,
-    #[serde(default = "patch")]
-    set: Value,
-    #[serde(default)]
-    expected_revision: Option<u64>,
-    #[serde(default)]
-    replace_lighting_and_environment: bool,
-    #[serde(default)]
-    replace_stage: bool,
-}
+pub(super) const PRESET_CONTRACT: TypedContract<PresetParams> = TypedContract::new();
+pub(super) const QUALITY_CONTRACT: TypedContract<QualityParams> = TypedContract::new();
+
+/// A fitted studio, checked whole but not yet saved: the settings `apply` would publish, and the
+/// report both commands return (its `setup` is the fitted setup).
 struct Candidate {
     settings: RenderSettings,
-    setup: RenderSetup,
-    report: Value,
+    report: StudioComposition,
 }
-fn candidate(s: &Session, input: &Input, command: &str) -> Result<Candidate> {
+fn candidate(s: &Session, input: &PresetParams, command: &str) -> Result<Candidate> {
     if input.expected_revision.is_some_and(|revision| revision != s.revision) {
         return Err(bad(command, "scene or saved settings changed after review; resolve the composition again"));
     }
     let source = recipe(&input.id, command)?;
     let mut setup = super::patched_settings(s, &input.name, &input.set, command)?;
-    if !matches!(&setup.job, Some(RenderJob::GpuPath { .. })) {
-        return Err(bad(command, "native studio compositions require an explicitly selected GPU path setup; no executor is substituted"));
+    if !matches!(&setup.job, Some(RenderJob::CpuRaytrace { .. } | RenderJob::GpuPath { .. })) {
+        return Err(bad(command, "native studio compositions require an explicitly selected CPU or GPU raytrace setup; no executor is substituted"));
     }
     let old = s.doc.render.setups.get(&input.name);
     let stage_replacement = !setup.stage.is_empty() || old.is_some_and(|saved| !saved.stage.is_empty());
@@ -95,7 +86,13 @@ fn candidate(s: &Session, input: &Input, command: &str) -> Result<Candidate> {
     let hdr = source["hdr"].as_str().ok_or_else(|| bad(command, "native composition has no HDR identity"))?;
     let resource = super::library::hdr_resource(hdr, command)?;
     let resource_id = resource.id();
-    let mut lighting = StudioLighting { environment: [0.0; 3], sun: None, area_lights: AreaLights::default() };
+    let mut lighting = StudioLighting {
+        punctual_lights: Default::default(),
+        directional_lights: Default::default(),
+        environment: [0.0; 3],
+        sun: None,
+        area_lights: AreaLights::default(),
+    };
     let mut panels = Vec::new();
     let mut projection = Value::Null;
     if let Some(rig) = source["rig"].as_str() {
@@ -133,16 +130,31 @@ fn candidate(s: &Session, input: &Input, command: &str) -> Result<Candidate> {
     });
     setup.stage = Stage::new(panels).map_err(|e| bad(command, e.to_string()))?;
     setup.exposure_ev = source["exposure_ev"].as_f64().ok_or_else(|| bad(command, "native composition exposure missing"))?;
-    if let Some(RenderJob::GpuPath { options, .. }) = &mut setup.job {
-        options.environment = None;
-        options.hdr = Some(GpuHdrEnvironment {
-            resource: resource_id,
-            rotation_rad: super::library::hdr_rotation(0.35, command)?,
-            intensity: source["intensity"].as_f64().ok_or_else(|| bad(command, "native composition intensity missing"))?,
-            assume_linear_srgb: false,
-        });
-        options.lighting = Some(lighting);
-    }
+    let executor = match &mut setup.job {
+        Some(RenderJob::CpuRaytrace { options, .. }) => {
+            let hdr_samples = options.hdr.map_or(16, |hdr| hdr.samples);
+            super::library::cpu_studio_lighting(options, &lighting, command)?;
+            options.hdr = Some(CpuHdrEnvironment {
+                resource: resource_id,
+                rotation_rad: super::library::hdr_rotation(0.35, command)?,
+                intensity: source["intensity"].as_f64().ok_or_else(|| bad(command, "native composition intensity missing"))?,
+                samples: hdr_samples,
+            });
+            "cpu-raytrace"
+        }
+        Some(RenderJob::GpuPath { options, .. }) => {
+            options.environment = None;
+            options.hdr = Some(GpuHdrEnvironment {
+                resource: resource_id,
+                rotation_rad: super::library::hdr_rotation(0.35, command)?,
+                intensity: source["intensity"].as_f64().ok_or_else(|| bad(command, "native composition intensity missing"))?,
+                assume_linear_srgb: false,
+            });
+            options.lighting = Some(lighting);
+            "gpu-path"
+        }
+        _ => return Err(bad(command, "choose CPU or GPU ray tracing")),
+    };
     setup.validate().map_err(|e| bad(command, e.to_string()))?;
     super::staging::apply(&mut product, &setup, command)?;
     super::library::rig_clearance(&product, &lighting, command)?;
@@ -150,54 +162,81 @@ fn candidate(s: &Session, input: &Input, command: &str) -> Result<Candidate> {
     settings.resources.insert(resource).map_err(|e| bad(command, e.to_string()))?;
     settings.setups.insert(input.name.clone(), setup.clone());
     settings.validate().map_err(|e| bad(command, e.to_string()))?;
-    let report = json!({"id":input.id,"name":input.name,"revision":s.revision,"source":source,"setup":setup,
-        "resource_sha256":resource_id,"rig_projection":projection,"status":"resolved_native_projection",
-        "document_changed":false,"executor":"gpu-path","requires_lighting_consent":true,"requires_stage_consent":stage_replacement,
-        "replaces":["lighting","environment","passive_stage","exposure"],
-        "preserves":["camera","output_dimensions","sampling","optical_bindings","geometry","engineering_materials","pose","visibility"],
-        "clearance":"conservative subject/stage/emitter AABB separation; not exact contact certification",
-        "limitations":["Authored relative RGB radiance, not measured photometric calibration.","No automatic material or semantic-role assignment.","This composition preserves existing sampling, master retention and medium intent; it does not certify convergence or add terrain, motion or nested-media support."]});
-    Ok(Candidate { settings, setup, report })
+    let report = StudioComposition {
+        id: input.id.clone(),
+        name: input.name.clone(),
+        revision: s.revision,
+        source: source.as_object().cloned().unwrap_or_default(),
+        setup: serde_json::to_value(&setup).map_err(|e| bad(command, e.to_string()))?,
+        resource_sha256: resource_id.to_string(),
+        rig_projection: projection,
+        status: "resolved_native_projection".into(),
+        document_changed: false,
+        executor: executor.into(),
+        requires_lighting_consent: true,
+        requires_stage_consent: stage_replacement,
+        replaces: strings(&["lighting", "environment", "passive_stage", "exposure"]),
+        preserves: strings(&[
+            "camera",
+            "output_dimensions",
+            "sampling",
+            "optical_bindings",
+            "geometry",
+            "engineering_materials",
+            "pose",
+            "visibility",
+        ]),
+        clearance: "conservative subject/stage/emitter AABB separation; not exact contact certification".into(),
+        limitations: strings(&[
+            "Authored relative RGB radiance, not measured photometric calibration.",
+            "No automatic material or semantic-role assignment.",
+            "This composition preserves existing sampling, master retention and medium intent; it does not certify convergence or add terrain, motion or nested-media support.",
+        ]),
+        param_warnings: Vec::new(),
+    };
+    Ok(Candidate { settings, report })
+}
+/// The reply's fixed lists, as owned strings.
+fn strings(items: &[&str]) -> Vec<String> {
+    items.iter().map(|item| (*item).to_owned()).collect()
+}
+fn reply(command: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(command, e.to_string()))
 }
 pub(super) fn resolve(s: &mut Session, params: &Value) -> Result<Value> {
     let command = "render.preset.resolve";
-    let input: Input = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
-    Ok(candidate(s, &input, command)?.report)
+    let input: PresetParams = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+    reply(command, candidate(s, &input, command)?.report)
 }
 pub(super) fn apply(s: &mut Session, params: &Value) -> Result<Value> {
     let command = "render.preset.apply";
-    let input: Input = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+    let input: PresetParams = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
     if input.expected_revision.is_none() || !input.replace_lighting_and_environment {
         return Err(bad(command, "resolve first, then supply expected_revision and explicit lighting/environment/exposure replacement consent"));
     }
     let mut ready = candidate(s, &input, command)?;
-    if ready.report["requires_stage_consent"] == true && !input.replace_stage {
+    if ready.report.requires_stage_consent && !input.replace_stage {
         return Err(bad(command, "existing stage requires explicit replace_stage consent"));
     }
     let changed = ready.settings != *s.doc.render;
     if changed {
         s.doc_mut().render = Arc::new(ready.settings);
     }
-    ready.report["document_changed"] = json!(changed);
-    ready.report["setup"] = json!(ready.setup);
-    Ok(ready.report)
+    ready.report.document_changed = changed;
+    reply(command, ready.report)
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Quality {
-    id: String,
-    variant: String,
-    acknowledge_omissions: bool,
-}
 pub(super) fn quality(s: &mut Session, params: &Value) -> Result<Value> {
     let command = "render.quality.prepare";
-    let input: Quality = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
-    if input.variant != "fixed_samples_png" || !input.acknowledge_omissions {
+    let input: QualityParams = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+    if !matches!(input.variant.as_str(), "fixed_samples_png" | "cpu_progressive_png") || !input.acknowledge_omissions {
         return Err(bad(
             command,
-            "explicit fixed_samples_png projection and omission acknowledgement are required; full Q-* requirements remain unbound",
+            "an explicit fixed_samples_png or cpu_progressive_png projection and omission acknowledgement are required; full Q-* requirements remain unbound",
         ));
+    }
+    if input.variant == "fixed_samples_png" && input.cpu.is_some() {
+        return Err(bad(command, "CPU budget context requires the cpu_progressive_png projection"));
     }
     let source = super::library::item("quality", &input.id, command)?;
     let number = |path: &[&str]| -> Result<u32> {
@@ -208,6 +247,81 @@ pub(super) fn quality(s: &mut Session, params: &Value) -> Result<Value> {
         field.as_u64().and_then(|n| u32::try_from(n).ok()).ok_or_else(|| bad(command, "quality field is not a bounded unsigned integer"))
     };
     let (width, height) = (number(&["resolution", "width"])?, number(&["resolution", "height"])?);
+    if input.variant == "cpu_progressive_png" {
+        if !matches!(input.id.as_str(), "Q-001" | "Q-002" | "Q-003") || source["motion"]["enabled"] != false {
+            return Err(bad(
+                command,
+                "only the three canonical still-image CPU cost budgets are bound; optical/convergence concepts are not CPU presets",
+            ));
+        }
+        let samples = number(&["sampling", "minimum_samples"])?.max(16);
+        let seed = number(&["seed"])?;
+        let context = input.cpu.unwrap_or_default();
+        let production = Some(solidcraft_render::job::CpuProgressiveOptions { samples_per_pixel: samples, seed });
+        let mut eligible = false;
+        let mut selected = None;
+        let mut refusal = None;
+        for budget in solidcraft_render::job::CpuBudget::ALL {
+            eligible |= budget == context.minimum_budget;
+            if !eligible {
+                continue;
+            }
+            let admitted = solidcraft_render::job::cpu_camera_sampling(production, context.adaptive, budget)
+                .and_then(|sampling| budget.validate_image(width, height, sampling));
+            match admitted {
+                Ok(()) => {
+                    selected = Some(budget);
+                    break;
+                }
+                Err(error) => refusal = Some(error),
+            }
+        }
+        let budget = selected
+            .ok_or_else(|| bad(command, refusal.map_or_else(|| "no existing CPU profile admits this budget".to_string(), |e| e.to_string())))?;
+        let plan = CpuQualityPlan {
+            id: input.id,
+            name: source["name"].as_str().map(str::to_owned),
+            variant: input.variant,
+            status: "cpu_cost_budget_projection_not_full_quality_profile".into(),
+            revision: s.revision,
+            document_changed: false,
+            source_unchanged: true,
+            settings: QualitySize { width, height },
+            cpu_options: CpuQualityOptions { progressive: CpuProgressive { samples_per_pixel: samples, seed }, budget },
+            cpu_context: CpuQualityContext { minimum_budget: context.minimum_budget, adaptive: context.adaptive },
+            requires_progressive: true,
+            changed_fields: strings(&["width", "height", "progressive.samples_per_pixel", "progressive.seed", "budget"]),
+            preserves: strings(&[
+                "executor",
+                "camera",
+                "lens",
+                "lighting",
+                "environment",
+                "stage",
+                "optical_bindings",
+                "surface_maps",
+                "aging",
+                "exposure",
+                "tone_map",
+                "finishing",
+                "raw_master",
+                "denoise",
+                "path",
+                "adaptive",
+            ]),
+            omitted: strings(&[
+                "catalog_maximum_samples",
+                "catalog_transport_depth",
+                "catalog_denoise_choice",
+                "adaptive_stopping_and_error_target",
+                "convergence_certification",
+                "time_guarantee",
+            ]),
+            source: source.as_object().cloned().unwrap_or_default(),
+            param_warnings: Vec::new(),
+        };
+        return reply(command, QualityResult::Cpu(plan));
+    }
     let (samples, depth) = (number(&["sampling", "maximum_samples"])?, number(&["transport", "maximum_depth"])?);
     let seed = number(&["seed"])?;
     if solidcraft_render::job::GPU_PATH_LIMITS.fit(u64::from(width), u64::from(height), None) != Some((u64::from(width), u64::from(height)))
@@ -222,12 +336,29 @@ pub(super) fn quality(s: &mut Session, params: &Value) -> Result<Value> {
             "this quality concept exceeds current fixed-sample still-image capabilities; no dimensions, samples or motion are silently reduced",
         ));
     }
-    Ok(json!({"id":input.id,"name":source["name"],"variant":input.variant,"status":"fixed_budget_projection_not_full_quality_profile",
-        "revision":s.revision,"document_changed":false,"source_unchanged":true,
-        "settings":{"width":width,"height":height},"gpu_options":{"samples":samples,"max_depth":depth,"seed":seed,"denoise":source["denoising"]["enabled"]},
-        "preserves":["executor","camera","lighting","environment","stage","optical_bindings","exposure","tone_map"],
-        "omitted":["adaptive_stopping_and_error_target","independent_transmission_depth","authored_russian_roulette_rule","preserved_raw_linear_output","EXR_master","convergence_certification"],
-        "source":source}))
+    let plan = QualityPlan {
+        id: input.id,
+        name: source["name"].as_str().map(str::to_owned),
+        variant: input.variant,
+        status: "fixed_budget_projection_not_full_quality_profile".into(),
+        revision: s.revision,
+        document_changed: false,
+        source_unchanged: true,
+        settings: QualitySize { width, height },
+        gpu_options: QualityOptions { samples, max_depth: depth, seed, denoise: source["denoising"]["enabled"].as_bool() },
+        preserves: strings(&["executor", "camera", "lighting", "environment", "stage", "optical_bindings", "exposure", "tone_map"]),
+        omitted: strings(&[
+            "adaptive_stopping_and_error_target",
+            "independent_transmission_depth",
+            "authored_russian_roulette_rule",
+            "preserved_raw_linear_output",
+            "EXR_master",
+            "convergence_certification",
+        ]),
+        source: source.as_object().cloned().unwrap_or_default(),
+        param_warnings: Vec::new(),
+    };
+    reply(command, QualityResult::Gpu(plan))
 }
 
 #[cfg(test)]

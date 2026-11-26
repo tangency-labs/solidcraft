@@ -1,0 +1,6 @@
+{
+  "unit": "geom.transform",
+  "cases": [
+    {"name": "fuzz01882_pre_filled_solutions", "origin": "fuzz-out/n2000/geom.transform/fuzz01882.json (crash: rust: killed by signal 6 (memory allocation of 4831838208 bytes failed))", "cpp": "harness: invalid argument: pre-filled solutions", "rust": "harness: pre-filled solutions", "inputs": {"n": 2147483648, "op": "global_solve"}}
+  ]
+}

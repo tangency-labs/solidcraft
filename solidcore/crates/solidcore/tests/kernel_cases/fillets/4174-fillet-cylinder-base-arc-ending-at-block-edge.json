@@ -1,0 +1,175 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  8.587616028158761,
+                  6.0417589287318245,
+                  5.0
+                ],
+                [
+                  -10.5,
+                  0.0,
+                  5.0
+                ]
+              ],
+              "index": 15
+            },
+            {
+              "at": [
+                [
+                  10.5,
+                  0.0,
+                  5.0
+                ],
+                [
+                  8.587616028158761,
+                  6.0417589287318245,
+                  5.0
+                ]
+              ],
+              "index": 14
+            }
+          ],
+          "points": [
+            [
+              -3.162246661064005,
+              10.00276382192657,
+              5.000000000000002
+            ],
+            [
+              9.992051077552587,
+              3.1656391571202387,
+              5.000000000000006
+            ]
+          ],
+          "tolerance": 3.342126307100646
+        },
+        "kind": "round",
+        "sizes": [
+          2.0,
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "4174-fillet-cylinder-base-arc-ending-at-block-edge",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "block 40x30x5 + cylinder pi 10.5^2 30 (half of it overhanging the front). The concave round runs round the half of the base circle over the block and ends flush with the front face y = 0: Pappus over 180 deg, pi (10.5 + c)(1 - pi/4) 2^2 with c = 2 - (2/6)/(1-pi/4) the corner region's centroid from the wall",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#4174"
+    ],
+    "volume_mm3": 16420.3385,
+    "what": "the concave arc where a cylinder (r10.5) stands on a block's top, its centre on the block's front edge so the arc runs out at the front face, filleted r2: refused ('each end of the edge must touch exactly one more face')"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 26,
+      "faces": 11,
+      "vertices": 17
+    }
+  },
+  "records": "4174-fillet-cylinder-base-arc-ending-at-block-edge.bodies.json.gz",
+  "result": [
+    {
+      "body": "Block",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 5399.8543841976425,
+      "body_count": 1,
+      "edges": 26,
+      "faces": 11,
+      "vertices": 17,
+      "volume_mm3": 16420.338489442678
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4174"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "the concave arc where a cylinder (r10.5) stands on a block's top, its centre on the block's front edge so the arc runs out at the front face, filleted r2: refused ('each end of the edge must touch exactly one more face')",
+  "why_not": []
+}

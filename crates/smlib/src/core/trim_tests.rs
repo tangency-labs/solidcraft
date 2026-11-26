@@ -126,7 +126,7 @@ fn solidcore_case(name: &str) -> Got {
     let (c, _) = case(name);
     let got = untrim_face(&c.input.core(), c.point, TOL, c.holes, c.outer, c.in_place).map(|b| {
         let (rec, _) = native(&to_arrays(&b).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-        solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
+        solidcore_ops::record_check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
         Measured { area: area(&b, 1e-8).unwrap(), counts: counts(&b).unwrap() }
     });
     judge(name, "solidcore", got)
@@ -194,7 +194,7 @@ fn whole_face(surface: solidcore::surface::surface::Surface) -> Body {
         b.refresh_cached_topology();
         Ok(b)
     })
-    .map(Body::new)
+    .map(Body::from_kernel)
     .unwrap()
 }
 
@@ -266,7 +266,7 @@ fn extend_solidcore(name: &str) -> Got {
     let (sheet, point, distance, how, _) = extend_case(name);
     let got = extend_sheet(&sheet.core(), point, TOL, distance, how).map(|b| {
         let (rec, _) = native(&to_arrays(&b).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-        solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
+        solidcore_ops::record_check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
         Measured { area: area(&b, 1e-8).unwrap(), counts: counts(&b).unwrap() }
     });
     extend_judge(name, "solidcore", got)
@@ -295,6 +295,16 @@ extend_cases!(
     extend_picks_near_no_edge,
 );
 
+#[test]
+fn a_sub_resolution_extension_is_not_reported_as_a_changed_sheet() {
+    let sheet = Sheet::Square.core();
+    let was = native(&to_arrays(&sheet).unwrap()).unwrap().0;
+    for how in [Continuation::Natural, Continuation::Tangent, Continuation::Curvature] {
+        assert_eq!(extend_sheet(&sheet, [10.0, 5.0, 0.0], TOL, 1e-14, how).err(), Some(Error::NotExact));
+        assert_eq!(native(&to_arrays(&sheet).unwrap()).unwrap().0, was);
+    }
+}
+
 /// The capi's argument checks for an extend, before any kernel call, and a body of more than
 /// one face.
 #[test]
@@ -308,6 +318,16 @@ fn hostile_extend_arguments_are_refused() {
     }
     let cube = make_box([0.0; 3], [10.0; 3]).unwrap();
     assert_eq!(extend_sheet(&cube, p, TOL, 5.0, Continuation::Natural).err(), Some(Error::Unsupported));
-    // A face that is not its surface's whole box: a square with a hole.
-    assert_eq!(extend_sheet(&holed_sheet(), [20.0, 5.0, 0.0], TOL, 5.0, Continuation::Natural).err(), Some(Error::Unsupported));
+}
+
+/// A plane face that is not its plane's whole box, a 20 mm square with a 3 mm hole, grows its trim
+/// within the plane: the edge through (20, 5) moves 5 mm out, the hole is kept, so the area is
+/// 25 x 20 less the hole.
+#[test]
+fn a_holed_plane_sheet_grows_its_trim() {
+    let grown = extend_sheet(&holed_sheet(), [20.0, 5.0, 0.0], TOL, 5.0, Continuation::Natural).unwrap();
+    let want = 25.0 * 20.0 - PI * 9.0;
+    let got = area(&grown, 1e-8).unwrap();
+    assert!(rel(got, want) < 1e-6, "area {got}, {want}");
+    assert_eq!(counts(&grown).unwrap()[0], 1);
 }

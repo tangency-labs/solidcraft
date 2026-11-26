@@ -1,0 +1,11 @@
+#### WR-592. `CalcTorusFilletGeom` leaves a rail point within the tolerance of the arc's axis off the axis
+- **Severity:** Wrong result
+- **Area:** Blend (fillet solver)
+- **Location:** `source/SMLib/src/SmFilletSolver.cpp`, `SmFilletSolver::CalcTorusFilletGeom` (def. `:860`): the rail points `sP0`, `sP1` evaluated from the first `SmTsectPnt` go into `SmBSplineCurve::CreateArcFromPoints` as they are (`:926` at 1.0.1).
+- **What happens:** a round along a circular edge is its cross section revolved about the edge arc's axis. Along an earlier round's end arc of the ball's own radius, one rail of the round collapses onto that axis and the surface of revolution is singular there. The rail point comes from the trace, so a model's residues leave it slightly off the axis: with a sketch's 1e-10 residues it was 7e-11 off, the collapsed rail a circle about 1e-10 across, and the surface nearly singular, not exactly. SolidCraft's `smlib_brep_check` refused the result (`SmSurface` test #5, Bad Surf Pole Approximation). A rail point within the tolerance of the axis turns about it in a circle smaller than the tolerance, so it is a point on the axis.
+- **Trigger:** a bar whose profile carries residues of about 1e-10, its front top edge rounded r 2, then its vertical front left edge, its left top edge and the first round's end arc rounded r 2 together (the corner ball's torus along the end arc).
+- **How found:** SolidCraft (rig case `fillets/report-fillet-corner-after-round-running-into-cylinder-solver-residues`, capi test `corner_ball_after_a_round_is_exactly_singular`). The fork's fix is tangency-labs/smlib@994f129, which is not merged upstream.
+- **Confirmed:** no C++ run was made here. The Rust port follows the pinned C++ (`3fd5b95`) and shows the off-axis rail with the flag off.
+- **Rust port:** behaves as upstream by default. With `Kernel::fixes.fillet_torus_rail_on_axis`, each start rail point within `GetThisApproxTol3d()` of the axis is moved to its projection on the axis before the section is built (`blend/fillet_solver/p2.rs`, `FilletSolver::torus_fillet_geom_parts`).
+
+  Tests: `crates/solidcore/tests/wr592_torus_rail_on_axis.rs` (a 41.16 x 16 x 10 bar with 1e-10 residues in its profile; flag on: the collapsed rail spans under 1e-13, flag off: 1.0e-10; both remove 20 r^2 (1 - pi/4) + r^3 (1 - pi/6) within 1e-6).

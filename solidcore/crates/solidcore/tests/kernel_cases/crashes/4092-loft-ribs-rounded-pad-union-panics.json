@@ -1,0 +1,211 @@
+{
+  "area": "crashes",
+  "bodies": {
+    "b63": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b66": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b63"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b64"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b64"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b65"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b66"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b67"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b67"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b68"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b65"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b69"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b68"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b70"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b69",
+        "b70"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b71"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "4092-loft-ribs-rounded-pad-union-panics",
+  "expected": {
+    "bbox": {
+      "max": [
+        35.0,
+        42.0,
+        64.0
+      ],
+      "min": [
+        -35.0,
+        -25.0,
+        0.0
+      ]
+    },
+    "body_count": 1,
+    "method": "the pad (X -8..8, Y 18..25, Z 36..59) overlaps the body, ribs and ring, so the join is one connected solid; the join must succeed with one valid closed solid and no panic. Body: neck pi 18^2 21; the two-section loft is ruled, the circle r 18 paired with the 30 x 20 ellipse by their common angle parameter (the ellipse an affine image of the circle), so each section is an ellipse (18 + 12 l) x (18 + 2 l): 17 pi int (18 + 12 l)(18 + 2 l) dl = 7786 pi (pairing by normals instead, the largest any pairing gives, adds 17 pi * 1.5 = 80, inside the tolerance); the ellipse chamber pi*30*20*22 (z 38..60) and the flange 70 x 50 r 6 (area 3500 - (4 - pi)*36 = 3469.097, z 60..64, holding the chamber): 101181.25. The handle disc (r 12 about (y 30, z 47), x -5..5), the two ribs (the rounded profile, x -8..-4 and 4..8) and the pad (x -8..8, z 36..59 rounded r 3, y 18..25) add, by integrating over x -8..8, z 35..59 the length in y of the union of every part's y-interval less the body's own (grids 400^2..1600^2 agree to 2.4): 5347.9. V = 106529.2. Box: the flange's x +-35, y -25 to the disc's 42, z 0..64",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#4092"
+    ],
+    "volume_mm3": 106529.2,
+    "what": "join extrude of a rounded pad over a lofted body with ring and ribs: repeated truck intersection_curve panics, then 'boolean Union: no result'"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 117,
+      "faces": 41,
+      "vertices": 79
+    }
+  },
+  "records": "4092-loft-ribs-rounded-pad-union-panics.bodies.json.gz",
+  "result": [
+    {
+      "body": "NATIVE_CAP_BODY",
+      "made": "b71"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 16728.30508064293,
+      "body_count": 1,
+      "edges": 110,
+      "faces": 40,
+      "vertices": 73,
+      "volume_mm3": 106529.56957976901
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4092"
+  ],
+  "traced_ops": [
+    "extrude",
+    "loft",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "join extrude of a rounded pad over a lofted body with ring and ribs: repeated truck intersection_curve panics, then 'boolean Union: no result'",
+  "why_not": []
+}

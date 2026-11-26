@@ -13,6 +13,7 @@ python3 tools/oracle-analytic/cases_features.py     # 32-66: fillets, shells, sw
 python3 tools/oracle-analytic/cases_sheet_metal.py  # 67-76: sheet metal
 python3 tools/oracle-analytic/cases_fillets.py      # 77-81: variable, chord-length, tapered and spline fillets
 python3 tools/oracle-analytic/cases_surfaces.py     # 83: boundary surfaces
+python3 tools/oracle-analytic/cases_frames.py       # 96: frame members butted together
 python3 tools/oracle-analytic/cases_workshop.py     # W23 (#4950): parameterized plates, round corners and top chamfer
 ```
 

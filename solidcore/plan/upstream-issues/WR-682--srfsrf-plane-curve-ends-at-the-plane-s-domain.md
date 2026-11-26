@@ -1,0 +1,17 @@
+#### WR-682. `sm_SrfSrfIntersection` doesn't find the curve of a surface and a plane where it leaves the plane's domain between its two given ends
+- **Severity:** Wrong result (status 1001 for a curve that exists)
+- **Area:** Blend (fillet geometry)
+- **Location:** `source/SMLib/src/SmFilletGeom.cpp`, `sm_SrfSrfIntersection`. It meets a plane and a surface with the analytic intersector, bounded by the plane's domain, and then with the two-points and general intersectors, which march both surfaces in their domains.
+- **What happens:** a plane goes on as itself past the face it was made for. Where the curve between two points on both surfaces runs past that domain, all three stop short of the given end, and no candidate reaches both points.
+- **Trigger:** a B-spline cylinder R 10 about z and the plane z = 20 + x / 2 on a patch that holds their ellipse's points at 45 and 135 degrees, but not the arc between them, which reaches y = 10. Status 1001. The fork's commit names the case in a blend: an end section's plane cut by a blend whose rim runs past it.
+- **How found:** the SolidCraft fork's tangency-labs/smlib@5bdcddf (`sm_SurfacePlaneCurve`), @14a6daa (quarter points to a tenth of the tolerance, the start direction) and @4c6571b (a flat surface stays with the analytic intersector). Part of tangency-labs/smlib#78; tracking: tangency-labs/solidcore#2250.
+- **Confirmed:** in the Rust port (`crates/solidcore/tests/wr682_surface_plane_curve.rs`). The fork's C++ was not run here.
+  - Without the flag: status 1001.
+  - With it: the curve starts and ends at the given points to 1e-12, every one of 2001 samples lies on both surfaces to 1e-5, its two uv curves map back onto it to 1e-5, and its length is the closed-form ellipse's to 1e-4, both ways round.
+  - Unchanged, compared in full with the flag on and off: an analytic answer (the cylinder as itself), a flat B-spline surface, a surface touching the plane, an end off a surface.
+- **Rust port:** behaves as upstream by default. With `Kernel::fixes.fillet_surface_plane_curve_on_plane_equation`, `srf_srf_intersection_with_context` calls `blend/fillet_geom/surface_plane_curve.rs` before the two-points intersector.
+- **Deviations:** see the header of `blend/fillet_geom/surface_plane_curve.rs`.
+- **Kept as the fork has them:**
+  - The plane's uv curve runs past the plane's domain, where `Plane::evaluate_point` clamps unless out-of-bounds evaluation is on. Only `evaluate_point_fast` gives the curve there.
+  - The plane's origin is read at uv (0, 0), which clamps too when the domain doesn't hold it.
+  - A trace that runs off the surface's domain isn't stopped by that. It ends at the routine's limit of 100000 steps, which took more than 5 minutes in a debug build (a start direction across a cylinder's seam).

@@ -1,0 +1,3845 @@
+{
+ "cases": [
+  {
+   "name": "ns_ctor_null_domain_state",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "state",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "ns_ctor_null_domain_mid",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval_point",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ]
+    },
+    "t": 0.5
+   }
+  },
+  {
+   "name": "state_line",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "state",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "state_arc_interval_2_5",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "state",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.5,
+         0.3,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 2,
+       "u": [
+        2,
+        2,
+        2,
+        5,
+        5,
+        5
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      1,
+      0,
+      0
+     ],
+     "end": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "state_hermite",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "state",
+    "field": {
+     "curve": {
+      "hermite": {
+       "dim": 2,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        0,
+        0
+       ],
+       "p2": [
+        1,
+        1,
+        0
+       ],
+       "d2": [
+        0,
+        1,
+        0
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      1,
+      0,
+      0
+     ],
+     "end": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "eval_point_line_start",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval_point",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 0.0
+   }
+  },
+  {
+   "name": "eval_point_line_start_band",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval_point",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 1e-08
+   }
+  },
+  {
+   "name": "eval_point_line_start_band_edge",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval_point",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 1.0001e-08
+   }
+  },
+  {
+   "name": "eval_point_line_before",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval_point",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": -0.25
+   }
+  },
+  {
+   "name": "eval_point_line_end",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval_point",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 1.0
+   }
+  },
+  {
+   "name": "eval_point_line_end_band",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval_point",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 0.99999999
+   }
+  },
+  {
+   "name": "eval_point_line_after",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval_point",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 1.5
+   }
+  },
+  {
+   "name": "eval_point_line_mid",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval_point",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 0.5
+   }
+  },
+  {
+   "name": "eval_point_line_quarter",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval_point",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 0.25
+   }
+  },
+  {
+   "name": "eval_point_arc_start",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval_point",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.5,
+         0.3,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 2,
+       "u": [
+        2,
+        2,
+        2,
+        5,
+        5,
+        5
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      1,
+      0,
+      0
+     ],
+     "end": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 2.0
+   }
+  },
+  {
+   "name": "eval_point_arc_end",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval_point",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.5,
+         0.3,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 2,
+       "u": [
+        2,
+        2,
+        2,
+        5,
+        5,
+        5
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      1,
+      0,
+      0
+     ],
+     "end": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 5.0
+   }
+  },
+  {
+   "name": "eval_point_arc_end_band",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval_point",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.5,
+         0.3,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 2,
+       "u": [
+        2,
+        2,
+        2,
+        5,
+        5,
+        5
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      1,
+      0,
+      0
+     ],
+     "end": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 4.999999995
+   }
+  },
+  {
+   "name": "eval_point_arc_mid",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval_point",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.5,
+         0.3,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 2,
+       "u": [
+        2,
+        2,
+        2,
+        5,
+        5,
+        5
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      1,
+      0,
+      0
+     ],
+     "end": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 3.5
+   }
+  },
+  {
+   "name": "eval_n0_line_start",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 0.0,
+    "n": 0
+   }
+  },
+  {
+   "name": "eval_n0_line_end",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 1.0,
+    "n": 0
+   }
+  },
+  {
+   "name": "eval_n0_line_mid",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 0.5,
+    "n": 0
+   }
+  },
+  {
+   "name": "eval_n0_line_before",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": -1e-09,
+    "n": 0
+   }
+  },
+  {
+   "name": "eval_n1_line_start",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 0.0,
+    "n": 1
+   }
+  },
+  {
+   "name": "eval_n1_line_end",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 1.0,
+    "n": 1
+   }
+  },
+  {
+   "name": "eval_n1_line_mid",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 0.5,
+    "n": 1
+   }
+  },
+  {
+   "name": "eval_n1_line_before",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": -1e-09,
+    "n": 1
+   }
+  },
+  {
+   "name": "eval_n2_line_start",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 0.0,
+    "n": 2
+   }
+  },
+  {
+   "name": "eval_n2_line_end",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 1.0,
+    "n": 2
+   }
+  },
+  {
+   "name": "eval_n2_line_mid",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 0.5,
+    "n": 2
+   }
+  },
+  {
+   "name": "eval_n2_line_before",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": -1e-09,
+    "n": 2
+   }
+  },
+  {
+   "name": "eval_n3_line_start",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 0.0,
+    "n": 3
+   }
+  },
+  {
+   "name": "eval_n3_line_end",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 1.0,
+    "n": 3
+   }
+  },
+  {
+   "name": "eval_n3_line_mid",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 0.5,
+    "n": 3
+   }
+  },
+  {
+   "name": "eval_n3_line_before",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": -1e-09,
+    "n": 3
+   }
+  },
+  {
+   "name": "eval_n1_zero_start_tangent_end",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      0,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 1.0,
+    "n": 1
+   }
+  },
+  {
+   "name": "eval_dir_constant_start",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3575 (new SmTangentField(uv, srf, SM_INTERPOLATE_DIR, start, end))",
+   "inputs": {
+    "op": "eval",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 0,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "t": 0.0,
+    "n": 0
+   }
+  },
+  {
+   "name": "equal_self",
+   "upstream_ref": "source/SMLib/src/SmTangentField.cpp:56 (operator==)",
+   "inputs": {
+    "op": "equal",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "flags": 5,
+    "field_b": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "equal_same_surface_same_uv",
+   "upstream_ref": "source/SMLib/src/SmTangentField.cpp:56",
+   "inputs": {
+    "op": "equal",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "flags": 3,
+    "field_b": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "equal_same_surface_copied_uv",
+   "upstream_ref": "source/SMLib/src/SmTangentField.cpp:56",
+   "inputs": {
+    "op": "equal",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "flags": 1,
+    "field_b": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "equal_dir_differs",
+   "upstream_ref": "source/SMLib/src/SmTangentField.cpp:56",
+   "inputs": {
+    "op": "equal",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "flags": 3,
+    "field_b": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 0,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "equal_start_within_scaled_zero",
+   "upstream_ref": "source/SMLib/src/SmTangentField.cpp:56",
+   "inputs": {
+    "op": "equal",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "flags": 3,
+    "field_b": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      5e-13,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "equal_start_above_scaled_zero",
+   "upstream_ref": "source/SMLib/src/SmTangentField.cpp:56",
+   "inputs": {
+    "op": "equal",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "flags": 3,
+    "field_b": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      3e-12,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "equal_other_uv_curve",
+   "upstream_ref": "source/SMLib/src/SmTangentField.cpp:56",
+   "inputs": {
+    "op": "equal",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "flags": 1,
+    "field_b": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.5,
+         0.3,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 2,
+       "u": [
+        2,
+        2,
+        2,
+        5,
+        5,
+        5
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "equal_domain_differs",
+   "upstream_ref": "source/SMLib/src/SmTangentField.cpp:56",
+   "inputs": {
+    "op": "equal",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "flags": 3,
+    "field_b": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      2
+     ]
+    }
+   }
+  },
+  {
+   "name": "equal_other_surface",
+   "upstream_ref": "source/SMLib/src/SmTangentField.cpp:56",
+   "inputs": {
+    "op": "equal",
+    "field": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "flags": 2,
+    "field_b": {
+     "curve": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dir": 1,
+     "start": [
+      0,
+      1,
+      0
+     ],
+     "end": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "create_matching_same",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3230 (SmTangentField::Create(ctx, 2*tol, ...SM_OT_SAME...))",
+   "inputs": {
+    "op": "create",
+    "create": {
+     "tol": 0.002,
+     "base3d": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        0,
+        0
+       ],
+       "p2": [
+        1,
+        0,
+        0
+       ],
+       "d2": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     "base_uv": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "start": {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         0,
+         1,
+         0
+        ],
+        "p2": [
+         0,
+         1,
+         0
+        ],
+        "d2": [
+         0,
+         1,
+         0
+        ]
+       }
+      },
+      "param": 0.0,
+      "opposite": false
+     },
+     "end": {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1,
+         0,
+         0
+        ],
+        "d1": [
+         0,
+         1,
+         1
+        ],
+        "p2": [
+         1,
+         1,
+         1
+        ],
+        "d2": [
+         0,
+         1,
+         1
+        ]
+       }
+      },
+      "param": 0.0,
+      "opposite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "create_matching_end_param1",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3230 (SmTangentField::Create(ctx, 2*tol, ...SM_OT_SAME...))",
+   "inputs": {
+    "op": "create",
+    "create": {
+     "tol": 0.002,
+     "base3d": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        0,
+        0
+       ],
+       "p2": [
+        1,
+        0,
+        0
+       ],
+       "d2": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     "base_uv": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "start": {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         0,
+         1,
+         0
+        ],
+        "p2": [
+         0,
+         1,
+         0
+        ],
+        "d2": [
+         0,
+         1,
+         0
+        ]
+       }
+      },
+      "param": 0.0,
+      "opposite": false
+     },
+     "end": {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1,
+         1,
+         1
+        ],
+        "d1": [
+         0,
+         1,
+         1
+        ],
+        "p2": [
+         1,
+         0,
+         0
+        ],
+        "d2": [
+         0,
+         1,
+         1
+        ]
+       }
+      },
+      "param": 1.0,
+      "opposite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "create_start_mismatch",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3230 (SmTangentField::Create(ctx, 2*tol, ...SM_OT_SAME...))",
+   "inputs": {
+    "op": "create",
+    "create": {
+     "tol": 0.002,
+     "base3d": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        0,
+        0
+       ],
+       "p2": [
+        1,
+        0,
+        0
+       ],
+       "d2": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     "base_uv": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "start": {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         0,
+         1,
+         0
+        ],
+        "p2": [
+         0,
+         1,
+         0
+        ],
+        "d2": [
+         0,
+         1,
+         0
+        ]
+       }
+      },
+      "param": 1.0,
+      "opposite": false
+     },
+     "end": {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1,
+         0,
+         0
+        ],
+        "d1": [
+         0,
+         1,
+         1
+        ],
+        "p2": [
+         1,
+         1,
+         1
+        ],
+        "d2": [
+         0,
+         1,
+         1
+        ]
+       }
+      },
+      "param": 0.0,
+      "opposite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "create_end_mismatch",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3230 (SmTangentField::Create(ctx, 2*tol, ...SM_OT_SAME...))",
+   "inputs": {
+    "op": "create",
+    "create": {
+     "tol": 0.002,
+     "base3d": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        0,
+        0
+       ],
+       "p2": [
+        1,
+        0,
+        0
+       ],
+       "d2": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     "base_uv": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "start": {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         0,
+         1,
+         0
+        ],
+        "p2": [
+         0,
+         1,
+         0
+        ],
+        "d2": [
+         0,
+         1,
+         0
+        ]
+       }
+      },
+      "param": 0.0,
+      "opposite": true
+     },
+     "end": {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1,
+         0,
+         0
+        ],
+        "d1": [
+         0,
+         1,
+         1
+        ],
+        "p2": [
+         1,
+         1,
+         1
+        ],
+        "d2": [
+         0,
+         1,
+         1
+        ]
+       }
+      },
+      "param": 0.5,
+      "opposite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "create_zero_tol_exact",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3230 (SmTangentField::Create(ctx, 2*tol, ...SM_OT_SAME...))",
+   "inputs": {
+    "op": "create",
+    "create": {
+     "tol": 0.0,
+     "base3d": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        0,
+        0
+       ],
+       "p2": [
+        1,
+        0,
+        0
+       ],
+       "d2": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     "base_uv": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "start": {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         0,
+         1,
+         0
+        ],
+        "p2": [
+         0,
+         1,
+         0
+        ],
+        "d2": [
+         0,
+         1,
+         0
+        ]
+       }
+      },
+      "param": 0.0,
+      "opposite": false
+     },
+     "end": {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1,
+         0,
+         0
+        ],
+        "d1": [
+         0,
+         1,
+         1
+        ],
+        "p2": [
+         1,
+         1,
+         1
+        ],
+        "d2": [
+         0,
+         1,
+         1
+        ]
+       }
+      },
+      "param": 0.0,
+      "opposite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "create_start_off_below_tol",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3230 (SmTangentField::Create(ctx, 2*tol, ...SM_OT_SAME...))",
+   "inputs": {
+    "op": "create",
+    "create": {
+     "tol": 0.002,
+     "base3d": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        0,
+        0
+       ],
+       "p2": [
+        1,
+        0,
+        0
+       ],
+       "d2": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     "base_uv": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "start": {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0.001
+        ],
+        "d1": [
+         0,
+         1,
+         0
+        ],
+        "p2": [
+         0,
+         1,
+         0
+        ],
+        "d2": [
+         0,
+         1,
+         0
+        ]
+       }
+      },
+      "param": 0.0,
+      "opposite": false
+     },
+     "end": {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1,
+         0,
+         0
+        ],
+        "d1": [
+         0,
+         1,
+         1
+        ],
+        "p2": [
+         1,
+         1,
+         1
+        ],
+        "d2": [
+         0,
+         1,
+         1
+        ]
+       }
+      },
+      "param": 0.0,
+      "opposite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "create_start_off_above_tol",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3230 (SmTangentField::Create(ctx, 2*tol, ...SM_OT_SAME...))",
+   "inputs": {
+    "op": "create",
+    "create": {
+     "tol": 0.0005,
+     "base3d": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        0,
+        0
+       ],
+       "p2": [
+        1,
+        0,
+        0
+       ],
+       "d2": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     "base_uv": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "start": {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0.001
+        ],
+        "d1": [
+         0,
+         1,
+         0
+        ],
+        "p2": [
+         0,
+         1,
+         0
+        ],
+        "d2": [
+         0,
+         1,
+         0
+        ]
+       }
+      },
+      "param": 0.0,
+      "opposite": false
+     },
+     "end": {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1,
+         0,
+         0
+        ],
+        "d1": [
+         0,
+         1,
+         1
+        ],
+        "p2": [
+         1,
+         1,
+         1
+        ],
+        "d2": [
+         0,
+         1,
+         1
+        ]
+       }
+      },
+      "param": 0.0,
+      "opposite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "create_bspline_base3d",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:3230 (SmTangentField::Create(ctx, 2*tol, ...SM_OT_SAME...))",
+   "inputs": {
+    "op": "create",
+    "create": {
+     "tol": 1e-06,
+     "base3d": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 2,
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     "base_uv": {
+      "bspline": {
+       "dim": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.5,
+         0.3,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         1.7976931348623157e+308,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 2,
+       "u": [
+        2,
+        2,
+        2,
+        5,
+        5,
+        5
+       ]
+      }
+     },
+     "start": {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         0,
+         1,
+         0
+        ],
+        "p2": [
+         0,
+         1,
+         0
+        ],
+        "d2": [
+         0,
+         1,
+         0
+        ]
+       }
+      },
+      "param": 0.0
+     },
+     "end": {
+      "curve": {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         1,
+         0,
+         0
+        ],
+        "d1": [
+         0,
+         1,
+         1
+        ],
+        "p2": [
+         1,
+         1,
+         1
+        ],
+        "d2": [
+         0,
+         1,
+         1
+        ]
+       }
+      },
+      "param": 0.0,
+      "opposite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "read_binary_members",
+   "upstream_ref": "source/SMLib/src/SmCurve.cpp:23731 (SmCurve::ReadFromDB -> SmTangentField::ReadFromDB)",
+   "inputs": {
+    "op": "read_db",
+    "read": {
+     "file_type": 1,
+     "dim": 3,
+     "version": 30,
+     "dir": 1,
+     "vals": [
+      0,
+      1,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_ascii_members",
+   "upstream_ref": "source/SMLib/src/SmCurve.cpp:23731 (SmCurve::ReadFromDB -> SmTangentField::ReadFromDB)",
+   "inputs": {
+    "op": "read_db",
+    "read": {
+     "file_type": 0,
+     "dim": 3,
+     "version": 30,
+     "text": "1 SmTangentField Tangent Dir Interpolation Type \n0 1 0 SmTangentField Start Point CrossTangent vector \n0 0 1 SmTangentField End Point CrossTangent vector \n"
+    }
+   }
+  }
+ ]
+}

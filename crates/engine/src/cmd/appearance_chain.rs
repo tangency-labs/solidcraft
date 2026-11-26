@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::appearance::{AppearanceScope, AppearanceTarget, Look};
 
 use crate::params::bad;
+use crate::schema::appearance::{AppearanceChainResult, AppearanceReplaceResult, ChainStep, LookReply};
 use crate::{Result, Session};
 
 const MAX_TARGETS: usize = 10_000;
@@ -22,7 +23,7 @@ fn component(s: &Session, cmd: &str, value: &Value) -> Result<u64> {
         _ => return Err(bad(cmd, "component must be a name or unsigned id")),
     };
     // A placement's name (`K:2`) means its component, as appearance.assign takes it (#9740).
-    s.component_or_placement(&key).ok_or_else(|| bad(cmd, "unknown or root component"))
+    s.component_or_placement(&key).map_err(|error| bad(cmd, error.to_string()))?.ok_or_else(|| bad(cmd, "unknown or root component"))
 }
 
 pub(super) fn chain(s: &mut Session, p: &Value) -> Result<Value> {
@@ -41,10 +42,12 @@ pub(super) fn chain(s: &mut Session, p: &Value) -> Result<Value> {
         _ => return Err(bad(cmd, "target must be {body}, {body, face}, or {component}")),
     };
     let chain = s.doc.appearance_chain(&s.model.state(), target).map_err(|e| bad(cmd, e.to_string()))?;
-    Ok(json!({
-        "steps": chain.steps().into_iter().map(|(step, look)| json!({"step":step,"look":look.map(super::look_json)})).collect::<Vec<_>>(),
-        "active": chain.active(),
-    }))
+    let reply = AppearanceChainResult {
+        steps: chain.steps().into_iter().map(|(step, look)| ChainStep { step: step.to_string(), look: look.map(LookReply::from) }).collect(),
+        active: chain.active().map(str::to_string),
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 /// A saved in-design look's label is inert; a string explicitly selects a library
@@ -102,14 +105,27 @@ fn scope(s: &Session, cmd: &str, value: &Value) -> Result<AppearanceScope> {
         // Build indexes once: 10000 repeated component targets must not scan a
         // 10000-component design once per target.
         let ids: BTreeSet<_> = s.doc.components.iter().map(|c| c.id).collect();
-        let names: BTreeMap<_, _> = s.doc.components.iter().rev().map(|c| (c.name.as_str(), c.id)).collect();
+        let mut names = BTreeMap::new();
+        for component in &s.doc.components {
+            names.entry(component.name.as_str()).and_modify(|id| *id = None).or_insert(Some(component.id));
+        }
         // A placement's name (`K:2`) means its component (#9740).
         let placements: BTreeMap<_, _> = s.doc.occurrences.iter().rev().map(|o| (o.name.as_str(), o.component)).collect();
         for target in list("components")? {
             let id = match target {
                 Value::String(_) => {
                     let key = name(cmd, target)?;
-                    key.parse::<u64>().ok().filter(|id| ids.contains(id)).or_else(|| names.get(key).copied()).or_else(|| placements.get(key).copied())
+                    if let Some(id) = key.parse::<u64>().ok().filter(|id| id.to_string() == key && ids.contains(id)) {
+                        Some(id)
+                    } else {
+                        match names.get(key) {
+                            Some(Some(id)) => Some(*id),
+                            // Only an ambiguous name needs the full resolver's diagnostic. The
+                            // usual bulk path remains indexed, rather than rescanning per target.
+                            Some(None) => s.doc.resolve_component(key).map_err(|error| bad(cmd, error.to_string()))?,
+                            None => placements.get(key).copied(),
+                        }
+                    }
                 }
                 Value::Number(_) => target.as_u64().filter(|id| ids.contains(id)),
                 _ => None,
@@ -136,5 +152,5 @@ pub(super) fn replace(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         0
     };
-    Ok(json!({"count": count}))
+    serde_json::to_value(AppearanceReplaceResult { count, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
 }

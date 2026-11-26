@@ -1,0 +1,73 @@
+{
+  "area": "sheet-metal",
+  "bodies": {},
+  "calls": [],
+  "case": "634-flange-beside-the-leg-of-an-L-folded",
+  "expected": {
+    "bbox": {
+      "max": [
+        160,
+        60,
+        15
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "the leg stays: bbox y 0..60; the flange stands on the top face of the bar from the base's underside z = 0 to its height 15 (x 0..160 covers the bar and the leg)",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#634"
+    ],
+    "what": "the same bar with its leg and a 15 mm inside flange on the bar's top edge, folded"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 46,
+      "faces": 20,
+      "vertices": 28
+    }
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 15079.64594298509,
+      "body_count": 1,
+      "edges": 42,
+      "faces": 16,
+      "vertices": 28,
+      "volume_mm3": 14127.0795709068
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#634"
+  ],
+  "traced_ops": [
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "boolean2d"
+  ],
+  "ungraded": [],
+  "what": "the same bar with its leg and a 15 mm inside flange on the bar's top edge, folded",
+  "why_not": [
+    "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}

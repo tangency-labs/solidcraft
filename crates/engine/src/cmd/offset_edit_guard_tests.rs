@@ -165,7 +165,7 @@ fn offset_guard_complete_delete_keeps_dangling_profile_loadable_without_circle_r
         "solid.extrude",
         json!({"sketch":sketch,"profiles":{"offset_boundaries":[association]},"distance":2,"operation":"new","name":"OffsetBody","body_name":"Selected"}),
     );
-    run(&mut s, "sketch.edit", json!({"sketch":sketch}));
+    run(&mut s, "sketch.edit", json!({"sketch":sketch,"restore_marker":false}));
     run(&mut s, "sketch.delete", json!({"entities":outputs}));
     let saved = s.doc.to_json();
     let FeatureKind::Extrude { profiles: ProfileSel::OffsetBoundaries { associations }, .. } = &s.doc.find_feature("OffsetBody").unwrap().kind else {

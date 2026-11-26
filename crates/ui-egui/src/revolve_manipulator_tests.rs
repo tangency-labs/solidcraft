@@ -1,6 +1,7 @@
 use crate::scenario::Harness;
 use serde_json::{Value, json};
 use solidcraft_engine::doc::{FeatureKind, kernel};
+use solidcraft_engine::geom::MeshGeom;
 
 fn fixture(mut h: Harness, extra: Value) -> Harness {
     h.app.run("sketch.create", json!({"plane":"XY","name":"Profile"})).unwrap();
@@ -401,4 +402,34 @@ fn reversed_axis_to_object_canvas_sweep_and_preview_follow_the_quarter_target() 
     h.step(&json!({"widget":"OK"})).unwrap();
     assert_eq!(serde_json::to_value(&h.app.session.doc.find_feature("Turn").unwrap().kind).unwrap(), original);
     assert_eq!(h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds(), before);
+}
+
+#[test]
+fn angle_step_arrows_move_a_revolve_angle() {
+    let mut h = fixture(Harness::new(), json!({}));
+    open(&mut h);
+    let shown = |h: &Harness| match &h.app.dialog.as_ref().unwrap().kind {
+        crate::dialogs::Kind::Revolve { angle, .. } => angle.clone(),
+        other => panic!("revolve: {other:?}"),
+    };
+    assert_eq!(shown(&h), "90 deg");
+    h.step(&json!({"click":{"handle":"dialog:Angle up"}})).unwrap();
+    assert_eq!(shown(&h), "100 deg");
+    h.step(&json!({"click":{"handle":"dialog:Angle down"}})).unwrap();
+    assert_eq!(shown(&h), "90 deg");
+    h.step(&json!({"click":{"handle":"dialog:Angle"}})).unwrap();
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"360 deg"})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Angle up"}})).unwrap();
+    assert_eq!(shown(&h), "360 deg", "the up arrow stops at 360 deg");
+    h.step(&json!({"click":{"handle":"dialog:Angle"}})).unwrap();
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"359,5 deg"})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Angle up"}})).unwrap();
+    assert_eq!(shown(&h), "359,5 deg", "the up arrow stops past 360 deg written with a decimal comma");
+    h.step(&json!({"click":{"handle":"dialog:Angle"}})).unwrap();
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"6.2 rad"})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Angle up"}})).unwrap();
+    assert_eq!(shown(&h), "6.2 rad", "the up arrow stops past 360 deg written in radians");
 }

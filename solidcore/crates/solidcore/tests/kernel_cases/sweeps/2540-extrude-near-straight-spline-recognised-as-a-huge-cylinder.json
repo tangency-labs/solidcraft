@@ -1,0 +1,123 @@
+{
+  "area": "sweeps",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "distance": 44.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "nurbs": {
+              "degree": 3,
+              "knots": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "points": [
+                [
+                  -22.0,
+                  -2.808157,
+                  -25.446366,
+                  1.0
+                ],
+                [
+                  -22.0,
+                  -2.828967043,
+                  -25.743002617,
+                  1.0
+                ],
+                [
+                  -22.0,
+                  -2.849776091,
+                  -26.039639304,
+                  1.0
+                ],
+                [
+                  -22.0,
+                  -2.870585,
+                  -26.336276,
+                  1.0
+                ]
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -22.0,
+                2.148371345929137,
+                -26.24121568504867
+              ],
+              "start": [
+                -22.0,
+                -2.870585,
+                -26.336276
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -22.0,
+                -2.808157,
+                -25.446366
+              ],
+              "start": [
+                -22.0,
+                2.148371345929137,
+                -26.24121568504867
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "2540-extrude-near-straight-spline-recognised-as-a-huge-cylinder",
+  "expected": {
+    "body_count": 1,
+    "edges": 9,
+    "faces": 5,
+    "method": "The five points lie in one plane (the issue's sketch plane, origin (-22, 0, 44) with sketch x along +Z and sketch y along -Y, so x = -22; each coordinate here is the nearest double to the exact decimal, not to a floating-point sum), and the extrude runs along that plane's normal with no draft, so the body is a prism and V = 44 * A over the profile's planar area A. A four-point clamped cubic B-spline (knots 0,0,0,0,1,1,1,1) is the cubic Bezier on its control points, so Green's theorem gives A in closed form as the sum of one term per boundary piece, each piece's 1/2 * integral of (x dy - y dx) in the plane's own coordinates (here (y, z), a rotation of the sketch coordinates, so the area is the same either way): A = B + T(p3,p4) + T(p4,p0), with T(a,b) = (ax*by - ay*bx)/2 for a straight segment a->b and B = (1/20) * [6(x0y1 - x1y0) + 3(x0y2 - x2y0) + (x0y3 - x3y0) + 3(x1y2 - x2y1) + 3(x1y3 - x3y1) + 6(x2y3 - x3y2)] for the Bezier p0..p3. With this entry's coordinates |A| = 446048552350889275593/200000000000000000000 = 2.2302427617544462 mm2 and V = 44 * |A| = 4906534075859782031523/50000000000000000000 = 98.130681517195640 mm3. The counts come from the prism: one side face per profile curve plus two caps = 5 faces; 3 * 3 = 9 edges; 2 * 3 = 6 vertices (the spline span has no interior knot, so it stays one face). Volume and counts are invariant under the rigid placement, so they do not depend on reading the sketch frame.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcore#2540"
+    ],
+    "vertices": 6,
+    "volume_mm3": 98.13068151719564,
+    "what": "a triangular profile whose 0.892 mm span is a cubic B-spline 7.1e-7 mm off its chord, extruded 44 mm along the sketch normal as a new body: the solid the profile describes. solidcore#2540 reports this extrude refused, from a cylinder of radius 216985 mm recognised on the swept face; what this kernel's own sweep and recogniser do with the case is measured in plan/findings/sweep.api_brep--2540-near-straight-spline-is-not-a-cylinder.md"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "result": [
+    {
+      "body": "sliver",
+      "made": "b1"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcore#2540"
+  ],
+  "ungraded": [],
+  "what": "a triangular profile whose 0.892 mm span is a cubic B-spline 7.1e-7 mm off its chord, extruded 44 mm along the sketch normal as a new body: the solid the profile describes. solidcore#2540 reports this extrude refused, from a cylinder of radius 216985 mm recognised on the swept face; what this kernel's own sweep and recogniser do with the case is measured in plan/findings/sweep.api_brep--2540-near-straight-spline-is-not-a-cylinder.md",
+  "why_not": []
+}

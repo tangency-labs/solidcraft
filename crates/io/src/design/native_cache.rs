@@ -4,9 +4,10 @@
 //! cache to the exact document, and to the source, platform and geometry kernel that computed it
 //! (docs/design-container.md).
 use super::*;
+use sha2::{Digest, Sha256};
 use solidcraft_doc::{ModelState, SavedModel};
 
-const FORMAT: &str = "solidcraft-model-cache/8";
+const FORMAT: &str = "solidcraft-model-cache/10";
 const PRODUCER: &str = "solidcraft-truck-adapter/4";
 const MANIFEST: &str = "cache/model.json";
 const PAYLOAD: &str = "cache/bodies.bin";
@@ -14,7 +15,15 @@ const PAYLOAD: &str = "cache/bodies.bin";
 const MAX_RECORDS: usize = 200_000;
 /// Distinct stored bodies.
 const MAX_UNIQUE: usize = 100_000;
-const MAX_MANIFEST: usize = 32 << 20;
+/// The smallest cap on `cache/model.json`: what it has always been at the default design file limit.
+const MIN_MANIFEST: usize = 32 << 20;
+
+/// The cap on `cache/model.json`, saving and reading: an eighth of the design file limit in force
+/// (the default 256 MiB gives the 32 MiB it always was), so a design the user allows to be that
+/// large keeps its model cache (#20724). Still bounded by that limit, never unbounded.
+pub(super) fn max_manifest() -> usize {
+    MIN_MANIFEST.max(max_design() / 8)
+}
 
 /// The build that wrote a cache (recorded; earlier builds read only their own caches).
 fn build() -> String {
@@ -34,9 +43,26 @@ fn evaluation() -> String {
 /// what they refuse, so a design opened from it evaluates again.
 pub(super) const KERNEL: &str = "solidcore";
 
+pub(super) fn identity() -> Value {
+    json!([FORMAT, PRODUCER, env!("CARGO_PKG_VERSION"), build()])
+}
+
 /// A 4 x 4 matrix as its 16 numbers, in storage order.
 fn matrix(t: &[[f64; 4]; 4]) -> Vec<f64> {
     t.iter().flatten().copied().collect()
+}
+
+thread_local! {
+    static LAST_CACHE_REFUSAL: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+pub(super) fn set_last_cache_refusal(reason: String) {
+    LAST_CACHE_REFUSAL.with(|r| *r.borrow_mut() = Some(reason));
+}
+
+/// The specific reason saving the model cache was refused during the last write on this thread, if any.
+pub fn take_last_cache_refusal() -> Option<String> {
+    LAST_CACHE_REFUSAL.with(|r| r.borrow_mut().take())
 }
 
 /// Encode a saved model in `space` bytes (manifest and payload together). Identical bodies (the
@@ -45,9 +71,25 @@ fn matrix(t: &[[f64; 4]; 4]) -> Vec<f64> {
 /// keeps fewer states, then its final state only ([`SavedModel::thinned`], #3220); an error when
 /// not even that fits.
 pub(super) fn encode_model(model: &SavedModel, document: &[u8], space: usize) -> Result<(Vec<u8>, Vec<u8>)> {
-    let encoded = Encoded::of(model)?;
+    let encoded = Encoded::of(model, document)?;
     let total = encoded.slices.iter().fold(0usize, |n, s| n.saturating_add(s.len()));
-    let fits = |manifest: &[u8], payload: &[u8]| manifest.len() <= MAX_MANIFEST && manifest.len().saturating_add(payload.len()) <= space;
+    let cap = max_manifest();
+    // Which limit a cache of this size is over, with the sizes, or none.
+    let refusal = |manifest: &[u8], payload: &[u8]| {
+        if manifest.len() > cap {
+            Some(format!("its manifest is {} MB, over the {} MB allowed", manifest.len() >> 20, cap >> 20))
+        } else if manifest.len().saturating_add(payload.len()) > space {
+            Some(format!(
+                "manifest and bodies are {} MB, over the {} MB room in the file",
+                manifest.len().saturating_add(payload.len()) >> 20,
+                space >> 20
+            ))
+        } else {
+            None
+        }
+    };
+    let fits = |manifest: &[u8], payload: &[u8]| refusal(manifest, payload).is_none();
+    let mut why: Option<String> = None;
     if total <= space {
         let every: Vec<usize> = (0..model.bodies.len()).collect();
         if let Ok((manifest, data)) = encoded.cache(&model.records, &every, document)
@@ -55,6 +97,8 @@ pub(super) fn encode_model(model: &SavedModel, document: &[u8], space: usize) ->
         {
             return Ok((manifest, data));
         }
+    } else {
+        why = Some(format!("its bodies are {} MB, over the {} MB room in the file", total >> 20, space >> 20));
     }
     // Fewer states. The bodies are encoded already: a state costs the slices it adds.
     let size = |s: &usize| encoded.slices.get(*s).map_or(0, Vec::len);
@@ -73,6 +117,7 @@ pub(super) fn encode_model(model: &SavedModel, document: &[u8], space: usize) ->
             break;
         }
         let Ok((manifest, data)) = encoded.cache(&thin.records, &kept, document) else {
+            why = Some("it could not be encoded within the record and body limits".into());
             if smallest {
                 break;
             }
@@ -90,15 +135,18 @@ pub(super) fn encode_model(model: &SavedModel, document: &[u8], space: usize) ->
             );
             return Ok((manifest, data));
         }
+        why = refusal(&manifest, &data).or(why);
         if smallest {
             break;
         }
         // What the choice did not count (the bodies' table, the slices) took the room: choose again
         // within that much less than it counted, so each try keeps less.
-        let over = manifest.len().saturating_add(data.len()).saturating_sub(space).max(manifest.len().saturating_sub(MAX_MANIFEST));
+        let over = manifest.len().saturating_add(data.len()).saturating_sub(space).max(manifest.len().saturating_sub(cap));
         budget = counted.saturating_sub(over).saturating_sub(1);
     }
-    log::info!("the model cache ({} MB) does not fit the design file: saved without it", total >> 20);
+    let refusal_reason = why.as_deref().unwrap_or("not even its final state fits the design file budget");
+    log::info!("the model cache ({} MB) does not fit the design file: saved without it ({refusal_reason})", total >> 20,);
+    set_last_cache_refusal(refusal_reason.to_string());
     Err(invalid("model cache size"))
 }
 
@@ -114,12 +162,6 @@ struct Encoded {
     parts: Vec<usize>,
 }
 
-/// What a decoded body must share with the one encoded: its faces, edges, vertices and shells.
-fn same_topology(a: &solidcraft_kernel::Body, b: &solidcraft_kernel::Body) -> bool {
-    let counts = |x: &solidcraft_kernel::Body| (x.face_count(), x.edge_count(), x.vertex_count(), x.shell_count());
-    counts(a) == counts(b)
-}
-
 /// The start of a mesh body's slice. A mesh body (an imported STL or 3MF) has no B-rep for the
 /// native encoding: its slice is its triangles as they are, with its colour and paint, which is
 /// all a mesh body holds. A B-rep slice starts with the native encoding's own tag.
@@ -131,13 +173,19 @@ const MAX_MESH_HEADER: usize = 16 << 20;
 /// colour and paint), then each vertex as three f64 and each triangle as three u32, little-endian.
 fn encode_mesh_body(body: &solidcraft_kernel::Body) -> Option<Vec<u8>> {
     let (positions, triangles) = body.triangle_mesh()?;
+    let normals = body.triangle_corner_normals()?;
     let header =
-        serde_json::to_vec(&json!({"positions": positions.len(), "triangles": triangles.len(), "color": body.color(), "paint": body.paint()}))
+        serde_json::to_vec(&json!({"positions": positions.len(), "triangles": triangles.len(), "corner_normals": normals.len(), "color": body.color(), "paint": body.paint()}))
             .ok()?;
     if header.len() > MAX_MESH_HEADER {
         return None;
     }
-    let size = positions.len().checked_mul(24)?.checked_add(triangles.len().checked_mul(12)?)?.checked_add(12 + header.len())?;
+    let size = positions
+        .len()
+        .checked_mul(24)?
+        .checked_add(triangles.len().checked_mul(12)?)?
+        .checked_add(normals.len().checked_mul(72)?)?
+        .checked_add(12 + header.len())?;
     let mut out = Vec::with_capacity(size);
     out.extend_from_slice(MESH_TAG);
     out.extend_from_slice(&u32::try_from(header.len()).ok()?.to_le_bytes());
@@ -152,6 +200,11 @@ fn encode_mesh_body(body: &solidcraft_kernel::Body) -> Option<Vec<u8>> {
             out.extend_from_slice(&i.to_le_bytes());
         }
     }
+    for n in normals.iter().flatten() {
+        for x in [n.x, n.y, n.z] {
+            out.extend_from_slice(&x.to_le_bytes());
+        }
+    }
     Some(out)
 }
 
@@ -164,15 +217,21 @@ fn decode_mesh_body(bytes: &[u8]) -> Option<solidcraft_kernel::Body> {
     let header: Value = serde_json::from_slice(header).ok()?;
     let count = |key: &str| header.get(key).and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok());
     let (vertices, triangles) = (count("positions")?, count("triangles")?);
+    let normals = count("corner_normals").unwrap_or(0);
+    if normals != 0 && normals != triangles {
+        return None;
+    }
     if triangles > solidcraft_kernel::MAX_TRIANGLES {
         return None;
     }
     // The counts must account for every byte, so nothing is allocated for data that is not there.
     let split = vertices.checked_mul(24)?;
-    if split.checked_add(triangles.checked_mul(12)?)? != data.len() {
+    let normal_start = split.checked_add(triangles.checked_mul(12)?)?;
+    if normal_start.checked_add(normals.checked_mul(72)?)? != data.len() {
         return None;
     }
-    let (coordinates, corners) = data.split_at_checked(split)?;
+    let (coordinates, rest) = data.split_at_checked(split)?;
+    let (corners, shading) = rest.split_at_checked(triangles.checked_mul(12)?)?;
     let f64_at = |c: &[u8], at: usize| c.get(at..at + 8)?.try_into().ok().map(f64::from_le_bytes);
     let u32_at = |c: &[u8], at: usize| c.get(at..at + 4)?.try_into().ok().map(u32::from_le_bytes);
     let positions: Vec<solidcore_record::Vec3> = coordinates
@@ -183,12 +242,21 @@ fn decode_mesh_body(bytes: &[u8]) -> Option<solidcraft_kernel::Body> {
         .collect::<Option<_>>()?;
     let triangles: Vec<[u32; 3]> =
         corners.as_chunks::<12>().0.iter().map(|c| Some([u32_at(c, 0)?, u32_at(c, 4)?, u32_at(c, 8)?])).collect::<Option<_>>()?;
+    let normals: Vec<[solidcore_record::Vec3; 3]> = shading
+        .as_chunks::<72>()
+        .0
+        .iter()
+        .map(|c| {
+            let n = |offset| Some(solidcore_record::Vec3::new(f64_at(c, offset)?, f64_at(c, offset + 8)?, f64_at(c, offset + 16)?));
+            Some([n(0)?, n(24)?, n(48)?])
+        })
+        .collect::<Option<_>>()?;
     let color: Option<[f32; 3]> = serde_json::from_value(header.get("color").cloned().unwrap_or(Value::Null)).ok()?;
     let paint: Option<solidcraft_kernel::Paint> = serde_json::from_value(header.get("paint").cloned().unwrap_or(Value::Null)).ok()?;
     if color.is_some_and(|c| c.iter().any(|x| !x.is_finite())) {
         return None;
     }
-    Some(solidcraft_kernel::mesh_body(&positions, &triangles).ok()?.with_color(color).with_paint(paint))
+    Some(solidcraft_kernel::mesh_body_with_normals(&positions, &triangles, &normals).ok()?.with_color(color).with_paint(paint))
 }
 
 /// A mesh body decoded is the one encoded: the same vertices, bit for bit, the same triangles,
@@ -196,7 +264,10 @@ fn decode_mesh_body(bytes: &[u8]) -> Option<solidcraft_kernel::Body> {
 fn same_mesh(a: &solidcraft_kernel::Body, b: &solidcraft_kernel::Body) -> bool {
     let (Some((pa, ta)), Some((pb, tb))) = (a.triangle_mesh(), b.triangle_mesh()) else { return false };
     let bits = |p: &[solidcore_record::Vec3]| p.iter().map(|v| [v.x.to_bits(), v.y.to_bits(), v.z.to_bits()]).collect::<Vec<_>>();
-    ta == tb && bits(pa) == bits(pb) && a.color() == b.color() && a.paint() == b.paint()
+    let normals = |body: &solidcraft_kernel::Body| {
+        body.triangle_corner_normals().unwrap_or_default().iter().flatten().map(|n| [n.x.to_bits(), n.y.to_bits(), n.z.to_bits()]).collect::<Vec<_>>()
+    };
+    ta == tb && bits(pa) == bits(pb) && normals(a) == normals(b) && a.color() == b.color() && a.paint() == b.paint()
 }
 
 /// A body of the cache's payload, mesh or B-rep by the slice's tag.
@@ -205,7 +276,7 @@ fn decode_cached_body(bytes: &[u8]) -> Option<solidcraft_kernel::Body> {
 }
 
 impl Encoded {
-    fn of(model: &SavedModel) -> Result<Self> {
+    fn of(model: &SavedModel, document: &[u8]) -> Result<Self> {
         // What to encode: every body, and the part every placed copy shows.
         let mut shares: Vec<solidcraft_kernel::DisplayShare> = Vec::new();
         let mut share_index = std::collections::HashMap::new();
@@ -225,24 +296,86 @@ impl Encoded {
         // another body. Then the model isn't kept, and opening the design evaluates it.
         let encoded = solidcraft_kernel::map_on_threads(&bodies, 16, |b| {
             if b.is_mesh() {
-                let bytes = encode_mesh_body(b)?;
-                return decode_mesh_body(&bytes).is_some_and(|back| same_mesh(b, &back)).then_some(bytes);
+                let Some(bytes) = encode_mesh_body(b) else {
+                    return Err("mesh body could not be encoded".into());
+                };
+                let Some(back) = decode_mesh_body(&bytes) else {
+                    return Err("mesh body could not be decoded back".into());
+                };
+                if !same_mesh(b, &back) {
+                    return Err("mesh body differed on round-trip".into());
+                }
+                return Ok(bytes);
             }
-            let bytes = solidcraft_kernel::encode_native_body(b).ok()?;
-            let back = solidcraft_kernel::decode_native_body(&bytes).ok()?;
-            same_topology(b, &back).then_some(bytes)
+            let bytes = solidcraft_kernel::encode_native_body(b).map_err(|e| format!("native body encoding failed: {e}"))?;
+            let back = solidcraft_kernel::decode_native_body(&bytes).map_err(|e| format!("native body decoding failed: {e}"))?;
+            let (fa, ea, va, sa) = (b.face_count(), b.edge_count(), b.vertex_count(), b.shell_count());
+            let (fb, eb, vb, sb) = (back.face_count(), back.edge_count(), back.vertex_count(), back.shell_count());
+            if (fa, ea, va, sa) != (fb, eb, vb, sb) {
+                return Err(format!(
+                    "body differed on round-trip: decoded with {fb} faces, {eb} edges, {vb} vertices vs original {fa} faces, {ea} edges, {va} vertices"
+                ));
+            }
+            Ok(bytes)
         });
         let mut slices = Vec::new();
         let mut by_digest = std::collections::HashMap::new();
         let mut index = Vec::with_capacity(encoded.len());
-        for bytes in encoded {
-            let bytes = bytes.flatten().ok_or_else(|| invalid("body not stored exactly"))?;
-            let next = slices.len();
-            let i = *by_digest.entry(Sha256::digest(&bytes)).or_insert(next);
-            if i == next {
-                slices.push(bytes);
-            }
-            index.push(i);
+        for (idx, res) in encoded.into_iter().enumerate() {
+            let detail = match res {
+                Some(Ok(bytes)) => {
+                    let next = slices.len();
+                    let i = *by_digest.entry(Sha256::digest(&bytes)).or_insert(next);
+                    if i == next {
+                        slices.push(bytes);
+                    }
+                    index.push(i);
+                    continue;
+                }
+                Some(Err(d)) => d,
+                None => "body encoding worker failed".to_string(),
+            };
+            let body_index = if idx < model.bodies.len() {
+                Some(idx)
+            } else {
+                let share_idx = idx - model.bodies.len();
+                placed.iter().position(|p| p.as_ref().map(|(part, _)| *part == share_idx).unwrap_or(false))
+            };
+            let (body_name, feature_id) = body_index
+                .and_then(|bi| {
+                    let model_bodies = model.records.get("model_bodies")?.as_array()?;
+                    for entry in model_bodies {
+                        if entry.get("body").and_then(Value::as_u64) == Some(bi as u64) {
+                            let name = entry.get("name").and_then(Value::as_str).map(String::from);
+                            let feat = entry.get("feature").and_then(Value::as_u64);
+                            return Some((name, feat));
+                        }
+                    }
+                    None
+                })
+                .unwrap_or((None, None));
+            let body_name = body_name.filter(|s| !s.is_empty());
+            let feature_name = feature_id
+                .and_then(|fid| {
+                    let doc_val = serde_json::from_slice::<Value>(document).ok()?;
+                    let features = doc_val.get("features")?.as_array()?;
+                    for f in features {
+                        if f.get("id").and_then(Value::as_u64) == Some(fid) {
+                            return f.get("name").and_then(Value::as_str).map(String::from);
+                        }
+                    }
+                    None
+                })
+                .filter(|s| !s.is_empty());
+            let refusal = match (&body_name, &feature_name) {
+                (Some(b), Some(f)) => format!("body '{b}' in feature '{f}' could not be stored exactly: {detail}"),
+                (Some(b), None) => format!("body '{b}' could not be stored exactly: {detail}"),
+                (None, Some(f)) => format!("a body in feature '{f}' could not be stored exactly: {detail}"),
+                (None, None) => format!("a body could not be stored exactly: {detail}"),
+            };
+            log::info!("the model cache could not be saved: {refusal}");
+            set_last_cache_refusal(refusal.clone());
+            return Err(invalid(refusal));
         }
         let (body_slices, part_slices) = index.split_at_checked(model.bodies.len()).ok_or_else(|| invalid("cached body count"))?;
         Ok(Encoded { slices, bodies: body_slices.iter().copied().zip(placed).collect(), parts: part_slices.to_vec() })
@@ -362,11 +495,10 @@ thread_local! {
     pub(super) static VALIDATED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// A build of unknown source (no git) never trusts a cache, unless `in_tests`: test builds
-/// trust it so the cache tests also pass in a source tarball (the `trust-unknown-source`
-/// feature is only enabled by dev-dependencies).
-pub(super) fn source_trusted(commit: &str, in_tests: bool) -> bool {
-    commit != "unknown" || in_tests
+/// A build whose evaluation source could not be hashed (`"unknown"`) never trusts a cache,
+/// unless `in_tests` (the `trust-unknown-source` feature is only enabled by dev-dependencies).
+pub(super) fn source_trusted(source: &str, in_tests: bool) -> bool {
+    source != "unknown" || in_tests
 }
 
 pub(super) fn read_geometry_with<R: Read + Seek>(reader: &mut PackageReader<R>, document: &[u8]) -> Result<SavedModel> {
@@ -385,7 +517,7 @@ fn read_geometry<R: Read + Seek>(reader: &mut PackageReader<R>, document: &[u8],
     if container.get("format").and_then(Value::as_str) != Some(VERSION) {
         return Err(invalid("container version"));
     }
-    let mut manifest: Value = serde_json::from_slice(&reader.limited_part(MANIFEST, MAX_MANIFEST)?).map_err(invalid)?;
+    let mut manifest: Value = serde_json::from_slice(&reader.limited_part(MANIFEST, max_manifest())?).map_err(invalid)?;
     if !current(&manifest, document) {
         return Err(invalid("model cache key"));
     }
@@ -486,7 +618,7 @@ pub(super) fn geometry_preview(document: &[u8], model: &SavedModel) -> Result<De
             }
         };
         triangles = triangles.saturating_add(faces.len());
-        display_bytes = display_bytes.saturating_add(positions.len().saturating_mul(24)).saturating_add(faces.len().saturating_mul(12));
+        display_bytes = display_bytes.saturating_add(positions.len().saturating_mul(24)).saturating_add(faces.len().saturating_mul(84));
         if triangles > 1_000_000 || display_bytes > 128 << 20 {
             return Err(invalid("regenerated display budget"));
         }
@@ -495,6 +627,7 @@ pub(super) fn geometry_preview(document: &[u8], model: &SavedModel) -> Result<De
             positions: positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
             triangles: faces.iter().flatten().copied().collect(),
             color: entry.body.color(),
+            corner_normals: entry.body.triangle_corner_normals().unwrap_or_default().iter().flatten().flat_map(|n| [n.x, n.y, n.z]).collect(),
         };
         validate_mesh(&displayed)?;
         preview.meshes.push(displayed);

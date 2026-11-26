@@ -1,0 +1,167 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b23": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b26": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b24"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b25"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b26"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b27"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b27"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b28"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b29"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b28"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b30"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b29",
+        "b30"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b31"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "2896-join-arm-end-into-ring-wall",
+  "expected": {
+    "body_count": 1,
+    "method": "ring pi*(30^2-24^2)*6; arm = box 35x10x6 plus the half disc r5 at its end, 6*(350+12.5*pi); the arm's end circle (centre x=34.9, r5) meets the ring's outer circle R30 in a lens of area 0.1232 (closed-form circle-circle lens), so the overlap is 0.739 mm^3 and V = ring + arm - overlap = 8442.14. The overlap is real material, so one fused body",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#2896"
+    ],
+    "volume_mm3": 8442.136556424508,
+    "what": "a join of a ring (R30/R24, 6 tall) and an arm with a convex R5 end whose tip runs 0.1 mm into the ring's outer wall (curved faces that nearly graze)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 10,
+      "vertices": 16
+    }
+  },
+  "records": "2896-join-arm-end-into-ring-wall.bodies.json.gz",
+  "result": [
+    {
+      "body": "Ring",
+      "made": "b31"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 5401.842491139409,
+      "body_count": 1,
+      "edges": 21,
+      "faces": 9,
+      "vertices": 14,
+      "volume_mm3": 8442.136556066931
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#2896"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a join of a ring (R30/R24, 6 tall) and an arm with a convex R5 end whose tip runs 0.1 mm into the ring's outer wall (curved faces that nearly graze)",
+  "why_not": []
+}

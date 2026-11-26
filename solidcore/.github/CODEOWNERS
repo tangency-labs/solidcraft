@@ -1,0 +1,11 @@
+# Code owners: a pull request that changes these paths needs an approving review from an
+# owner listed here before it can merge (the protect-main ruleset's "require review from
+# Code Owners"). Later lines take precedence over earlier ones.
+
+# The generic blend and the procedural-blend definitions it keeps.
+/crates/solidcore/src/blend/                      @jyviko
+/crates/solidcore/src/surface/procedural_blend.rs @jyviko
+/crates/solidcore/src/surface/procedural_blend/   @jyviko
+
+# This file.
+/.github/CODEOWNERS                               @jyviko

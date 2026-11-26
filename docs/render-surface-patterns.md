@@ -13,7 +13,7 @@ preview field; it does not load a texture or displace a surface.
 
 ## Consumer contract
 
-At most 32 effects and reserved slots are admitted. Names are 1–256 UTF-8 bytes,
+At most 32 effects and reserved slots are admitted. Names are 1–512 UTF-8 bytes (`MAX_BODY_NAME_BYTES`),
 without control characters, and must resolve to exactly one captured mesh. The
 frame must be finite and orthonormal with positive handedness. Repeats are within
 0.001–1,000,000 mm; roughness amplitude is within 0–1; bump amplitude is within
@@ -69,10 +69,9 @@ shared surface; mirror/rough reflection through an emitting secondary hit; a rea
 and AA ordered-prefix/coverage/PNG/quantum checks. Existing malformed AA completion
 cases are retained and extended for surface state.
 
-These are source contracts and written regressions. The recovered checkpoint and
-this scratch port have not been compiled or executed in this review. Qualification
-requires the exact candidate's formatting, target layout bound, render CPU ON/OFF
-tests, engine/UI contracts, Clippy, wasm, actual full project CI, and any newly
-exposed visible/native flow. Historical unrelated focal successes or full-CI
-failures remain attached to their original source revisions; they do not qualify
-this port.
+At the recovery handoff these were source contracts and written regressions.
+The combined CPU renderer has since executed analytic gradients, zero identity,
+shared-surface lighting, ordered AA, binding and cancellation/work checks. Current
+combined engine/UI contracts and visible/native flows still need qualification,
+alongside default-feature/platform, Clippy, wasm and full-project gates.
+Historical results remain attached to their original source revisions.

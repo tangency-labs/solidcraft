@@ -1,0 +1,232 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b46"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b46"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b47"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b47"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b48"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b48"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b49"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  20.0,
+                  0.0,
+                  0.0
+                ]
+              ],
+              "index": 9
+            },
+            {
+              "at": [
+                [
+                  0.0,
+                  20.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              ],
+              "index": 7
+            },
+            {
+              "at": [
+                [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  20.0
+                ]
+              ],
+              "index": 8
+            }
+          ],
+          "points": [
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              10.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              10.0
+            ]
+          ],
+          "tolerance": 1.7330508075688775
+        },
+        "kind": "round",
+        "sizes": [
+          19.990000000000002,
+          19.990000000000002,
+          19.990000000000002
+        ]
+      }
+    }
+  ],
+  "case": "477-fillet-cube-corner-rounds-as-wide-as-faces-reduce-fit",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "at radius r the three rounds run (1-pi/4) r^2 along 20 - r past the corner cube [0,r]^3, which loses r^3 less its ball's octant: removed = 3 (1-pi/4) r^2 (20-r) + r^3 (1-pi/6). The search stops within 0.01 of 20; at r = 19.99, V = 4191.931514, and the volume changes 0.3 mm^3 per 0.001 mm of radius there, so the case's tolerance (4.2 mm^3) holds r within 0.013 of it.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#477"
+    ],
+    "volume_mm3": 4191.9315140872695,
+    "what": "the three edges at a 20 mm cube's corner rounded R20 with fit reduce: reduced to the largest that fits, just under 20"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 21,
+      "faces": 10,
+      "vertices": 13
+    }
+  },
+  "records": "477-fillet-cube-corner-rounds-as-wide-as-faces-reduce-fit.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b49"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1571.3679297204076,
+      "body_count": 1,
+      "edges": 21,
+      "faces": 10,
+      "vertices": 13,
+      "volume_mm3": 4191.931514081982
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#477"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "the three edges at a 20 mm cube's corner rounded R20 with fit reduce: reduced to the largest that fits, just under 20",
+  "why_not": []
+}

@@ -1,0 +1,137 @@
+{
+  "area": "assemblies",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                10.0,
+                -10.0,
+                -10.0
+              ],
+              "start": [
+                -10.0,
+                -10.0,
+                -10.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                10.0,
+                10.0,
+                -10.0
+              ],
+              "start": [
+                10.0,
+                -10.0,
+                -10.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -10.0,
+                10.0,
+                -10.0
+              ],
+              "start": [
+                10.0,
+                10.0,
+                -10.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -10.0,
+                -10.0,
+                -10.0
+              ],
+              "start": [
+                -10.0,
+                10.0,
+                -10.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "cov-component-copy-bodies-from-a-turned-part",
+  "expected": {
+    "body_count": 3,
+    "center_of_mass": [
+      0,
+      13.333333,
+      1.666667
+    ],
+    "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); hinge driven to 90 puts ArmBox at (0,20,5); its copy in the root stays there: centres (0,0,-5), (0,20,5), (0,20,5): mean (0,13.333,1.667)",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 12000.0,
+    "what": "the body of an arm turned 90 degrees copied to the root"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 36,
+      "faces": 18,
+      "vertices": 24
+    }
+  },
+  "result": [
+    {
+      "body": "BaseBox",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 5200.0,
+      "body_count": 3,
+      "edges": 36,
+      "faces": 18,
+      "vertices": 24,
+      "volume_mm3": 12000.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "the body of an arm turned 90 degrees copied to the root",
+  "why_not": [
+    "body \"ArmBox (2)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+    "body \"ArmBox\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}

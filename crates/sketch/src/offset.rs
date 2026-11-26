@@ -29,6 +29,7 @@ impl Sketch {
             .find(|o| o.owns_output(output))
             .map(|o| o.distance)
             .or_else(|| self.freeform_offsets.iter().find(|o| o.output == output).map(|o| o.distance))
+            .or_else(|| self.freeform_chain_offsets.iter().find(|o| o.outputs.iter().any(|id| id == output)).map(|o| o.distance))
     }
 
     /// A Parallel between an offset line and the source it follows (#4464). The association
@@ -82,7 +83,13 @@ impl Sketch {
             .iter()
             .find(|o| o.owns_output(output))
             .and_then(|o| o.sources.first().map(|(id, forward)| (id.as_str(), *forward, o.distance)))
-            .or_else(|| self.freeform_offsets.iter().find(|o| o.output == output).map(|o| (o.source.as_str(), o.forward, o.distance)))?;
+            .or_else(|| self.freeform_offsets.iter().find(|o| o.output == output).map(|o| (o.source.as_str(), o.forward, o.distance)))
+            .or_else(|| {
+                self.freeform_chain_offsets
+                    .iter()
+                    .find(|o| o.outputs.iter().any(|id| id == output))
+                    .and_then(|o| o.sources.first().map(|(id, forward)| (id.as_str(), *forward, o.distance)))
+            })?;
         let index = self.curve_index(source)?;
         let segment = self.exact_segs(index).unwrap_or_else(|| self.segs(index)).into_iter().next()?;
         let p = segment.point_at(0.5);
@@ -103,9 +110,21 @@ impl Sketch {
             .filter(|offset| offset.outputs.iter().any(|id| removed.contains(id)))
             .flat_map(|offset| offset.outputs.iter().cloned().chain(offset.topology.iter().flat_map(|t| t.roles.iter().map(|r| r.output.clone()))))
             .chain(self.freeform_offsets.iter().filter(|offset| removed.contains(&offset.output)).map(|offset| offset.output.clone()))
+            .chain(
+                self.freeform_chain_offsets
+                    .iter()
+                    .filter(|offset| {
+                        offset.outputs.iter().any(|id| removed.contains(id)) || offset.sources.iter().any(|(source, _)| removed.contains(source))
+                    })
+                    .flat_map(|offset| offset.outputs.iter().cloned()),
+            )
             .collect::<std::collections::BTreeSet<_>>();
         self.offsets.retain(|offset| !offset.outputs.iter().any(|id| removed.contains(id)));
         self.freeform_offsets.retain(|offset| !removed.contains(&offset.output));
+        // A trimmed chain offset whose source is gone keeps its curves as ordinary geometry.
+        self.freeform_chain_offsets.retain(|offset| {
+            !offset.outputs.iter().any(|id| removed.contains(id)) && !offset.sources.iter().any(|(source, _)| removed.contains(source))
+        });
         self.constraints.retain(|c| !matches!(&c.kind, ConstraintKind::OffsetDistance { output, .. } if released.contains(output)));
         let points = self
             .curves
@@ -198,7 +217,7 @@ impl Sketch {
     }
 
     pub fn refresh_offsets(&mut self) -> Result<(), SketchError> {
-        if self.offsets.is_empty() && self.freeform_offsets.is_empty() {
+        if self.offsets.is_empty() && self.freeform_offsets.is_empty() && self.freeform_chain_offsets.is_empty() {
             return Ok(());
         }
         let mut candidate = self.clone();
@@ -208,8 +227,10 @@ impl Sketch {
                 self.validate(&constraint.kind)?;
                 let analytic = candidate.offsets.iter().position(|o| o.owns_output(output));
                 let freeform = candidate.freeform_offsets.iter().position(|o| o.output == *output);
+                let chain = candidate.freeform_chain_offsets.iter().position(|o| o.outputs.iter().any(|id| id == output));
                 let identity = analytic
                     .or_else(|| freeform.map(|i| candidate.offsets.len() + i))
+                    .or_else(|| chain.map(|i| candidate.offsets.len() + candidate.freeform_offsets.len() + i))
                     .ok_or_else(|| SketchError::Invalid("missing offset dimension association".into()))?;
                 if constraint.driven || !driven.insert(identity) {
                     return Err(SketchError::Invalid("an offset must have exactly one driving distance".into()));
@@ -221,10 +242,14 @@ impl Sketch {
                 if let Some(offset) = freeform.and_then(|i| candidate.freeform_offsets.get_mut(i)) {
                     offset.distance = distance;
                 }
+                if let Some(offset) = chain.and_then(|i| candidate.freeform_chain_offsets.get_mut(i)) {
+                    offset.distance = distance;
+                }
             }
         }
         candidate.refresh_analytic_offsets()?;
         candidate.refresh_freeform_offsets()?;
+        candidate.refresh_freeform_chain_offsets()?;
         *self = candidate;
         Ok(())
     }
@@ -240,6 +265,7 @@ impl Sketch {
             }
             let bad = || SketchError::Invalid("an offset source vanished or changed shape".into());
             let mut pieces = Vec::new();
+            let mut outline = Vec::new();
             for (id, forward) in &offset.sources {
                 let i = self.curve_index(id).ok_or_else(bad)?;
                 let kind = &self.curves.get(i).ok_or_else(bad)?.kind;
@@ -247,11 +273,15 @@ impl Sketch {
                     CurveKind::Line { a, b } => {
                         let (a, b) = (self.point(a).ok_or_else(bad)?, self.point(b).ok_or_else(bad)?);
                         let (a, b) = if *forward { (a, b) } else { (b, a) };
+                        outline.push((Shape::Line { a, b }, a, b, None));
                         let n = (b - a).normalized().ok_or_else(bad)?.perp() * offset.distance;
-                        (Shape::Line { a: a + n, b: b + n }, a + n, b + n, None)
+                        (Shape::Line { a: a + n, b: b + n }, a + n, b + n)
                     }
                     CurveKind::Arc { c, a, b } => {
                         let (c, a, b) = (self.point(c).ok_or_else(bad)?, self.point(a).ok_or_else(bad)?, self.point(b).ok_or_else(bad)?);
+                        let start = (a - c).angle();
+                        let sweep = ((b - c).angle() - start).rem_euclid(std::f64::consts::TAU);
+                        outline.push((Shape::Round { c, r: c.dist(a), start, sweep }, a, b, Some(*forward)));
                         let r = c.dist(a) - if *forward { offset.distance } else { -offset.distance };
                         if r <= 1e-9 {
                             return Err(SketchError::Invalid("the offset collapses an arc".into()));
@@ -259,7 +289,7 @@ impl Sketch {
                         let a = c + (a - c).normalized().ok_or_else(bad)? * r;
                         let b = c + (b - c).normalized().ok_or_else(bad)? * r;
                         let (a, b) = if *forward { (a, b) } else { (b, a) };
-                        (Shape::Round { c, r, start: 0.0, sweep: std::f64::consts::TAU }, a, b, Some(*forward))
+                        (Shape::Round { c, r, start: 0.0, sweep: std::f64::consts::TAU }, a, b)
                     }
                     CurveKind::Circle { c, r } => {
                         let c = self.point(c).ok_or_else(bad)?;
@@ -285,7 +315,7 @@ impl Sketch {
             }
             // Which way a piece runs at `p`: a line along itself, an arc anticlockwise round its
             // centre when it follows its source forward.
-            let along = |piece: &(Shape, Vec2, Vec2, Option<bool>), p: Vec2| match (&piece.0, piece.3) {
+            let along = |i: usize, piece: &(Shape, Vec2, Vec2), p: Vec2| match (&piece.0, outline.get(i).and_then(|o| o.3)) {
                 (Shape::Line { a, b }, _) => *b - *a,
                 (Shape::Round { c, .. }, Some(true)) => (p - *c).perp(),
                 (Shape::Round { c, .. }, Some(false)) => (*c - p).perp(),
@@ -303,7 +333,7 @@ impl Sketch {
                 // both crossings are as far from the corner and rounding chose one. The pieces
                 // overlap there: they meet where both are cut short, not where both run on and
                 // cross into a loop.
-                let cut_short = |p: Vec2| (p - x.2).dot(along(x, x.2)) < 0.0 && (p - y.1).dot(along(y, y.1)) > 0.0;
+                let cut_short = |p: Vec2| (p - x.2).dot(along(i, x, x.2)) < 0.0 && (p - y.1).dot(along(j, y, y.1)) > 0.0;
                 match found.as_slice() {
                     [p, q, ..] if (q.dist(guess) - p.dist(guess)).abs() <= 1e-9 * (1.0 + p.dist(*q)) && !cut_short(*p) && cut_short(*q) => Ok(*q),
                     [p, ..] => Ok(*p),
@@ -317,6 +347,9 @@ impl Sketch {
             }
             if !offset.closed {
                 joints.push(pieces.last().ok_or_else(bad)?.2);
+            }
+            if offset.closed && !crosses_itself(&outline, true) && crosses_itself(&cut_to_joints(&pieces, &outline, &joints), false) {
+                return Err(SketchError::Invalid("the offset curves would cross".into()));
             }
             for (i, id) in offset.outputs.iter().enumerate() {
                 let a = *joints.get(i).ok_or_else(bad)?;
@@ -350,4 +383,93 @@ impl Sketch {
         }
         Ok(())
     }
+}
+
+/// A piece of a closed outline: its shape, its two ends, and for an arc whether the chain follows
+/// it forward.
+type Outline = (Shape, Vec2, Vec2, Option<bool>);
+
+/// The closed offset outline's pieces, each cut to its joints: a line between them, an arc
+/// anticlockwise from one to the other the way its source runs (`outline`: anticlockwise when
+/// followed forward).
+fn cut_to_joints(pieces: &[(Shape, Vec2, Vec2)], outline: &[Outline], joints: &[Vec2]) -> Vec<Outline> {
+    let n = pieces.len();
+    (0..n)
+        .filter_map(|i| {
+            let (a, b) = (*joints.get(i)?, *joints.get((i + 1) % n)?);
+            Some(match (pieces.get(i)?, outline.get(i)?.3) {
+                ((Shape::Round { c, r, .. }, _, _), Some(ccw)) => {
+                    let (from, to) = if ccw { (a, b) } else { (b, a) };
+                    let start = (from - *c).angle();
+                    (Shape::Round { c: *c, r: *r, start, sweep: ((to - *c).angle() - start).rem_euclid(std::f64::consts::TAU) }, a, b, Some(ccw))
+                }
+                _ => (Shape::Line { a, b }, a, b, None),
+            })
+        })
+        .collect()
+}
+
+/// Whether a closed outline of lines and arcs crosses itself away from the ends its pieces
+/// share: two of its pieces cross, or two lines lie along each other. With `touching`, pieces
+/// that aren't neighbours meeting at all count too (an outline split where it crosses itself
+/// only touches itself there). A simple outline whose offset crosses itself is refused, not drawn
+/// as a loop: an inward offset wider than a neck of the shape pinches it into two, which one
+/// outline can't be (an outline that already crosses or touches itself, a figure eight, keeps
+/// its crossing offset). Outlines of more than 1000 pieces aren't checked.
+fn crosses_itself(outline: &[Outline], touching: bool) -> bool {
+    let n = outline.len();
+    if !(2..=1000).contains(&n) {
+        return false;
+    }
+    // Tolerances from the outline's own size, plus the coordinates' rounding.
+    let ends = || outline.iter().flat_map(|(_, a, b, _)| [*a, *b]);
+    let (lo, hi) = ends().fold((Vec2::new(f64::MAX, f64::MAX), Vec2::new(f64::MIN, f64::MIN)), |(lo, hi), p| {
+        (Vec2::new(lo.x.min(p.x), lo.y.min(p.y)), Vec2::new(hi.x.max(p.x), hi.y.max(p.y)))
+    });
+    let reach = ends().fold(0.0f64, |m, p| m.max(p.x.abs()).max(p.y.abs()));
+    let extent = (hi.x - lo.x).max(hi.y - lo.y).max(1e-9);
+    let tol = 1e-9 * extent + 1e-12 * reach;
+    let near = 1e-6 * extent + 1e-12 * reach;
+    let bounds = |s: &Shape| match *s {
+        Shape::Line { a, b } => (a.x.min(b.x), a.y.min(b.y), a.x.max(b.x), a.y.max(b.y)),
+        Shape::Round { c, r, .. } => (c.x - r, c.y - r, c.x + r, c.y + r),
+    };
+    for i in 0..n {
+        for j in i + 1..n {
+            let (Some(x), Some(y)) = (outline.get(i), outline.get(j)) else { continue };
+            let (bx, by) = (bounds(&x.0), bounds(&y.0));
+            if bx.2 < by.0 - tol || by.2 < bx.0 - tol || bx.3 < by.1 - tol || by.3 < bx.1 - tol {
+                continue;
+            }
+            let neighbours = j == i + 1 || (i == 0 && j == n - 1);
+            // Neighbours meet at their shared end, where a tangent pair's crossings are rounding
+            // noise.
+            let shared: Vec<Vec2> = [x.1, x.2].into_iter().filter(|p| p.dist(y.1).min(p.dist(y.2)) <= tol).collect();
+            let on = |piece: &Outline, p: Vec2, with_ends: bool| {
+                piece.0.param_on(p, tol).is_some() || (with_ends && (piece.1.dist(p) <= tol || piece.2.dist(p) <= tol))
+            };
+            let with_ends = touching && !neighbours;
+            if with_ends && !shared.is_empty() {
+                return true;
+            }
+            if intersections(&x.0, &y.0)
+                .into_iter()
+                .any(|p| on(x, p, with_ends) && on(y, p, with_ends) && (with_ends || shared.iter().all(|s| s.dist(p) > near)))
+            {
+                return true;
+            }
+            // Two lines along one another: no crossing point, but they overlap.
+            if let (Shape::Line { a, b }, Shape::Line { a: c, b: d }) = (x.0, y.0)
+                && let Some(u) = (b - a).normalized()
+            {
+                let off = |p: Vec2| ((p - a).x * u.y - (p - a).y * u.x).abs();
+                let along = |p: Vec2| (p - a).dot(u);
+                let (s0, s1) = (along(c).min(along(d)), along(c).max(along(d)));
+                if off(c) <= tol && off(d) <= tol && s1.min(a.dist(b)) - s0.max(0.0) > near {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }

@@ -5,7 +5,7 @@
 use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
 
-use crate::surface::{OpaqueSurface, unit_direction};
+use solidcraft_viewport::surface::{OpaqueSurface, unit_direction};
 
 use super::{Result, TraceError};
 

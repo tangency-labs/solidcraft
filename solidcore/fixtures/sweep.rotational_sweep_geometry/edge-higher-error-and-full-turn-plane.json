@@ -1,0 +1,3692 @@
+{
+ "cases": [
+  {
+   "name": "err_vertex_off_start_same_bline",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher curve ends vs vertices (SER(SM_ERR))",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 90.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       5,
+       0,
+       0
+      ],
+      "b": [
+       5,
+       0,
+       5
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0.01,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "err_vertex_off_start_same_line",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher curve ends vs vertices (SER(SM_ERR))",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 90.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       5,
+       0,
+       0
+      ],
+      "b": [
+       5,
+       0,
+       5
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0.01,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "err_vertex_off_end_same_bline",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher curve ends vs vertices (SER(SM_ERR))",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 90.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       5,
+       0,
+       0
+      ],
+      "b": [
+       5,
+       0,
+       5
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0.01,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "err_vertex_off_end_same_line",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher curve ends vs vertices (SER(SM_ERR))",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 90.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       5,
+       0,
+       0
+      ],
+      "b": [
+       5,
+       0,
+       5
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0.01,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "err_vertex_off_start_opp_bline",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher curve ends vs vertices (SER(SM_ERR))",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 90.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       5,
+       0,
+       0
+      ],
+      "b": [
+       5,
+       0,
+       5
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0.01,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "err_vertex_off_start_opp_line",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher curve ends vs vertices (SER(SM_ERR))",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 90.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       5,
+       0,
+       0
+      ],
+      "b": [
+       5,
+       0,
+       5
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0.01,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "err_vertex_off_end_opp_bline",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher curve ends vs vertices (SER(SM_ERR))",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 90.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       5,
+       0,
+       0
+      ],
+      "b": [
+       5,
+       0,
+       5
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0.01,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "err_vertex_off_end_opp_line",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher curve ends vs vertices (SER(SM_ERR))",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 90.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       5,
+       0,
+       0
+      ],
+      "b": [
+       5,
+       0,
+       5
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0.01,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "err_vertex_off_eps_inside",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 90.0,
+     "eps": 0.0001,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       5,
+       0,
+       0
+      ],
+      "b": [
+       5,
+       0,
+       5
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      5e-05,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "err_vertex_off_eps_outside",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 90.0,
+     "eps": 0.0001,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       5,
+       0,
+       0
+      ],
+      "b": [
+       5,
+       0,
+       5
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0.0002,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_on_off_bline_same_360.0",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 360.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       0
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_on_off_bline_opp_360.0",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 360.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       0
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_off_on_bline_same_360.0",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 360.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       0,
+       0,
+       0
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_off_on_bline_opp_360.0",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 360.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       0,
+       0,
+       0
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_on_off_z1_bline_same_360.0",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 360.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "b": [
+       0,
+       3,
+       1
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_on_off_z1_bline_opp_360.0",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 360.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "b": [
+       0,
+       3,
+       1
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_off_on_z1_bline_same_360.0",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 360.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       0,
+       3,
+       1
+      ],
+      "b": [
+       0,
+       0,
+       1
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_off_on_z1_bline_opp_360.0",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 360.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       0,
+       3,
+       1
+      ],
+      "b": [
+       0,
+       0,
+       1
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_on_off_line_same_360.0",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 360.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       0
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_on_off_line_opp_360.0",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 360.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       0
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_off_on_line_same_360.0",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 360.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       0,
+       0,
+       0
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_off_on_line_opp_360.0",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 360.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       0,
+       0,
+       0
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_on_off_z1_line_same_360.0",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 360.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "b": [
+       0,
+       3,
+       1
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_on_off_z1_line_opp_360.0",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 360.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "b": [
+       0,
+       3,
+       1
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_off_on_z1_line_same_360.0",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 360.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       0,
+       3,
+       1
+      ],
+      "b": [
+       0,
+       0,
+       1
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_off_on_z1_line_opp_360.0",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 360.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       0,
+       3,
+       1
+      ],
+      "b": [
+       0,
+       0,
+       1
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_on_off_bline_same_359.9999999",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 359.9999999,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       0
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_on_off_bline_opp_359.9999999",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 359.9999999,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       0
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_off_on_bline_same_359.9999999",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 359.9999999,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       0,
+       0,
+       0
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_off_on_bline_opp_359.9999999",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 359.9999999,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       0,
+       0,
+       0
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_on_off_z1_bline_same_359.9999999",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 359.9999999,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "b": [
+       0,
+       3,
+       1
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_on_off_z1_bline_opp_359.9999999",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 359.9999999,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "b": [
+       0,
+       3,
+       1
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_off_on_z1_bline_same_359.9999999",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 359.9999999,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       0,
+       3,
+       1
+      ],
+      "b": [
+       0,
+       0,
+       1
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_off_on_z1_bline_opp_359.9999999",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 359.9999999,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       0,
+       3,
+       1
+      ],
+      "b": [
+       0,
+       0,
+       1
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_on_off_line_same_359.9999999",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 359.9999999,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       0
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_on_off_line_opp_359.9999999",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 359.9999999,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       0
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_off_on_line_same_359.9999999",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 359.9999999,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       0,
+       0,
+       0
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_off_on_line_opp_359.9999999",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 359.9999999,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       0,
+       0,
+       0
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_on_off_z1_line_same_359.9999999",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 359.9999999,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "b": [
+       0,
+       3,
+       1
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_on_off_z1_line_opp_359.9999999",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 359.9999999,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "b": [
+       0,
+       3,
+       1
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_off_on_z1_line_same_359.9999999",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 359.9999999,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       0,
+       3,
+       1
+      ],
+      "b": [
+       0,
+       0,
+       1
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_off_on_z1_line_opp_359.9999999",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 359.9999999,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       0,
+       3,
+       1
+      ],
+      "b": [
+       0,
+       0,
+       1
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      0
+     ],
+     "off1": [
+      0,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "swap_vertices_exact_same_bline",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher bSwapStartEnd (vertices at the opposite curve ends)",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 90.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       5,
+       0,
+       0
+      ],
+      "b": [
+       5,
+       0,
+       5
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      5
+     ],
+     "off1": [
+      0,
+      0,
+      -5
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "swap_vertices_start_off_same_bline",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher bSwapStartEnd (vertices at the opposite curve ends)",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 90.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       5,
+       0,
+       0
+      ],
+      "b": [
+       5,
+       0,
+       5
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0.01,
+      5
+     ],
+     "off1": [
+      0,
+      0,
+      -5
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "swap_vertices_end_off_same_bline",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher bSwapStartEnd (vertices at the opposite curve ends)",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 90.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       5,
+       0,
+       0
+      ],
+      "b": [
+       5,
+       0,
+       5
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      5
+     ],
+     "off1": [
+      0,
+      0.01,
+      -5
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "swap_vertices_exact_opp_bline",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher bSwapStartEnd (vertices at the opposite curve ends)",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 90.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       5,
+       0,
+       0
+      ],
+      "b": [
+       5,
+       0,
+       5
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      -5
+     ],
+     "off1": [
+      0,
+      0,
+      5
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "swap_vertices_start_off_opp_bline",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher bSwapStartEnd (vertices at the opposite curve ends)",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 90.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       5,
+       0,
+       0
+      ],
+      "b": [
+       5,
+       0,
+       5
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0.01,
+      -5
+     ],
+     "off1": [
+      0,
+      0,
+      5
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "swap_vertices_end_off_opp_bline",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher bSwapStartEnd (vertices at the opposite curve ends)",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 90.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       5,
+       0,
+       0
+      ],
+      "b": [
+       5,
+       0,
+       5
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      -5
+     ],
+     "off1": [
+      0,
+      0.01,
+      5
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "swap_vertices_exact_same_line",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher bSwapStartEnd (vertices at the opposite curve ends)",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 90.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       5,
+       0,
+       0
+      ],
+      "b": [
+       5,
+       0,
+       5
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      5
+     ],
+     "off1": [
+      0,
+      0,
+      -5
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "swap_vertices_start_off_same_line",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher bSwapStartEnd (vertices at the opposite curve ends)",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 90.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       5,
+       0,
+       0
+      ],
+      "b": [
+       5,
+       0,
+       5
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0.01,
+      5
+     ],
+     "off1": [
+      0,
+      0,
+      -5
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "swap_vertices_end_off_same_line",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher bSwapStartEnd (vertices at the opposite curve ends)",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 90.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       5,
+       0,
+       0
+      ],
+      "b": [
+       5,
+       0,
+       5
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      5
+     ],
+     "off1": [
+      0,
+      0.01,
+      -5
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "swap_vertices_exact_opp_line",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher bSwapStartEnd (vertices at the opposite curve ends)",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 90.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       5,
+       0,
+       0
+      ],
+      "b": [
+       5,
+       0,
+       5
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      -5
+     ],
+     "off1": [
+      0,
+      0,
+      5
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "swap_vertices_start_off_opp_line",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher bSwapStartEnd (vertices at the opposite curve ends)",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 90.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       5,
+       0,
+       0
+      ],
+      "b": [
+       5,
+       0,
+       5
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0.01,
+      -5
+     ],
+     "off1": [
+      0,
+      0,
+      5
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "swap_vertices_end_off_opp_line",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher bSwapStartEnd (vertices at the opposite curve ends)",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 90.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       5,
+       0,
+       0
+      ],
+      "b": [
+       5,
+       0,
+       5
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      0,
+      0,
+      -5
+     ],
+     "off1": [
+      0,
+      0.01,
+      5
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_swapped_on_off_bline_same",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn, bSwapStartEnd",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 360.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       0
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      2,
+      0,
+      0
+     ],
+     "off1": [
+      -2,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_swapped_on_off_bline_opp",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn, bSwapStartEnd",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 360.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       0
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      -2,
+      0,
+      0
+     ],
+     "off1": [
+      2,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_swapped_off_on_bline_same",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn, bSwapStartEnd",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 360.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       0,
+       0,
+       0
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      -2,
+      0,
+      0
+     ],
+     "off1": [
+      2,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_swapped_off_on_bline_opp",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn, bSwapStartEnd",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 360.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "bline",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       0,
+       0,
+       0
+      ]
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      2,
+      0,
+      0
+     ],
+     "off1": [
+      -2,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_swapped_on_off_line_same",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn, bSwapStartEnd",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 360.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       0
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      2,
+      0,
+      0
+     ],
+     "off1": [
+      -2,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_swapped_on_off_line_opp",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn, bSwapStartEnd",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 360.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       0,
+       0
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      -2,
+      0,
+      0
+     ],
+     "off1": [
+      2,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_swapped_off_on_line_same",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn, bSwapStartEnd",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 360.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       0,
+       0,
+       0
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": false,
+     "closed": false,
+     "off0": [
+      -2,
+      0,
+      0
+     ],
+     "off1": [
+      2,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  },
+  {
+   "name": "plane_full_swapped_off_on_line_opp",
+   "upstream_ref": "source/SMLib/src/SmRotationalSweepGeometry.cpp EdgeSweepHigher degenerate point and plane, full turn, bSwapStartEnd",
+   "inputs": {
+    "sweep": {
+     "base": [
+      0,
+      0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1.0
+     ],
+     "angle": 360.0,
+     "eps": 1e-06,
+     "analytics": false,
+     "brep_tol": 0.0
+    },
+    "op": "edge_higher",
+    "edge": {
+     "curve": {
+      "kind": "line",
+      "a": [
+       2,
+       0,
+       0
+      ],
+      "b": [
+       0,
+       0,
+       0
+      ],
+      "ivl": null
+     },
+     "t": [
+      0.0,
+      1.0
+     ],
+     "opposite": true,
+     "closed": false,
+     "off0": [
+      2,
+      0,
+      0
+     ],
+     "off1": [
+      -2,
+      0,
+      0
+     ],
+     "etol": 1e-06,
+     "vtol": [
+      1e-06,
+      1e-06
+     ]
+    }
+   }
+  }
+ ]
+}

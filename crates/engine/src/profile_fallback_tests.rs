@@ -5,6 +5,7 @@
 //! fails and takes its body (and everything after it) with it.
 
 use serde_json::{Value, json};
+use solidcraft_geom::MeshGeom;
 
 use crate::Session;
 
@@ -112,6 +113,52 @@ fn exact_matches_stay_quiet_and_nothing_plausible_is_an_error() {
     assert!(s.model.state().bodies.is_empty());
 }
 
+/// The public example of #9368: a 40 x 20 rectangle with a circle tangent to its top and bottom
+/// (radius 10 at (20, 10)), or a ring offset 1 mm around a circle of radius 9 with `offset`.
+/// `Gauche` is the region left of the circle, `Disque` (joined) the disc or the ring.
+fn rectangle_and_circle(offset: bool) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S1"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+    run(&mut s, "sketch.circle.center", json!({"center": [20, 10], "radius": if offset { 9 } else { 10 }}));
+    if offset {
+        run(&mut s, "sketch.offset", json!({"curves": ["c1"], "distance": 1, "side": [20, 25]}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "10 mm", "profiles": [{"point": [3, 10]}], "name": "Gauche"}));
+    let disque = if offset { [20.0, 19.5] } else { [20.0, 15.0] };
+    run(&mut s, "solid.extrude", json!({"distance": "10 mm", "profiles": [{"point": disque}], "operation": "join", "name": "Disque"}));
+    s
+}
+
+/// A line from the top side to the circle cuts a sliver off the left region and gives the circle
+/// more arcs: the disc is still the same region, so it is found without a word, and the left region
+/// is still found, as its two pieces.
+#[test]
+fn an_extrude_survives_a_line_ending_on_a_circle_split_by_tangents() {
+    let mut s = rectangle_and_circle(false);
+    edit(&mut s, &[("sketch.line", json!({"points": [[14, 20], [14, 18]]}))]);
+    assert_eq!(result(&s, "Disque"), (None, None));
+    let (error, warning) = result(&s, "Gauche");
+    assert_eq!(error, None);
+    assert!(warning.unwrap_or_default().contains("2 pieces"));
+    assert!((volume(&s) - 5570.6).abs() < 0.5, "volume {}", volume(&s));
+}
+
+/// Same sketch with a ring offset from a circle: the loops name the offset's output. The line
+/// cuts the left region (its closed loop is taken as two pieces, with a warning), and the ring,
+/// only given more arcs, is found as it was.
+#[test]
+fn an_extrude_with_an_offset_curve_survives_a_line_splitting_its_profile() {
+    let mut s = rectangle_and_circle(true);
+    edit(&mut s, &[("sketch.line", json!({"points": [[14, 20], [14, 18]]}))]);
+    let (error, warning) = result(&s, "Gauche");
+    assert_eq!(error, None);
+    assert!(warning.unwrap_or_default().contains("2 pieces"));
+    assert_eq!(result(&s, "Disque"), (None, None));
+    assert!((volume(&s) - 3026.2).abs() < 0.5, "volume {}", volume(&s));
+}
+
 /// A block `E1` with a sketch `S2` on its top cap and a hole cut from it, `E2`.
 fn block_with_hole() -> Session {
     let mut s = Session::default();
@@ -201,4 +248,53 @@ fn a_picked_profile_and_the_sketch_on_its_cap_survive_together() {
     // Saved and opened again, it evaluates the same way.
     let reopened = Session::new(solidcraft_doc::format::read(&s.doc.to_json()).unwrap());
     assert_hole_follows(&reopened, 8000.0, true);
+}
+
+/// The halves of the lens (upper picks) and of the lower crescent (lower picks).
+const TWIN_PICKS: [[f64; 2]; 4] = [[-1.26, 19.7], [1.26, 19.7], [-0.5, 16.5], [0.5, 16.5]];
+
+/// Two circles of radius `r` 0.6 mm apart and a fixed line through both centres, drawn on from
+/// below and ending just above the lower circle: on r = 3.04 mm the line cuts the lens and the
+/// lower crescent into mirror twins, which the curves around them can't tell apart.
+fn twin_sketch(r: &str) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "r", "expression": r}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "s"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 19.4], "radius": 3.04}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["c1"], "type": "diameter", "value": "2*r"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 20], "radius": 3.04}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["c2"], "type": "diameter", "value": "2*r"}));
+    run(&mut s, "sketch.constraint.fix", json!({"entity": "c1.center", "fixed": true}));
+    run(&mut s, "sketch.constraint.fix", json!({"entity": "c2.center", "fixed": true}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 1.75], [0, 22.5]]}));
+    run(&mut s, "sketch.constraint.fix", json!({"entity": "l1", "fixed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    s
+}
+
+/// [`twin_sketch`] with the regions at `picks` picked by points and extruded 2 mm as `E`.
+fn twin_regions(r: &str, picks: &[[f64; 2]]) -> Session {
+    let mut s = twin_sketch(r);
+    let profiles: Vec<Value> = picks.iter().map(|p| json!({"point": p})).collect();
+    run(&mut s, "solid.extrude", json!({"sketch": "s", "profiles": profiles, "distance": 2, "name": "E"}));
+    assert_eq!(result(&s, "E").0, None, "E builds on r = {r}");
+    s
+}
+
+/// The radius grows until the line's end lies inside the lens, so the line no longer cuts it and
+/// the sketch has other regions. The extrude still builds the regions under its points: the lens
+/// once (both its halves were picked) and the two halves of the crescent, as an extrude made on
+/// the new radius does (#22390).
+#[test]
+fn twin_regions_picked_by_points_follow_a_change_of_the_regions() {
+    let mut s = twin_regions("3.04 mm", &TWIN_PICKS);
+    let saved = serde_json::to_value(&s.doc.find_feature("E").unwrap().kind).unwrap().to_string();
+    assert!(saved.contains("\"points\""), "the picks are saved by their points: {saved}");
+    let before = volume(&s);
+    run(&mut s, "parameters.change", json!({"name": "r", "expression": "3.45 mm"}));
+    assert_eq!(result(&s, "E").0, None);
+    let changed = volume(&s);
+    let built = volume(&twin_regions("3.45 mm", &TWIN_PICKS[1..]));
+    assert!((changed - built).abs() < 1e-3, "{changed} after the change, {built} built so (before {before})");
+    assert!(changed > before, "the regions grew with r: {before} to {changed}");
 }

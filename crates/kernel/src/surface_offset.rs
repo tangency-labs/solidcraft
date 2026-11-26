@@ -87,6 +87,25 @@ mod tests {
         assert!(offset_surface(&c, &side, -10.5, 0.01).is_err());
     }
 
+    /// A tube's bore moved by +1 goes into the bore (radius 17), by -1 into the wall (19); a box's bottom by +5 goes down.
+    #[test]
+    fn a_face_used_from_its_surfaces_back_moves_out_of_the_body() {
+        let outer = cylinder(Vec3::ZERO, Vec3::Z, 20.0, 20.0).unwrap();
+        let hole = cylinder(Vec3::new(0.0, 0.0, -1.0), Vec3::Z, 18.0, 22.0).unwrap();
+        let tube = crate::boolean(&outer, &hole, crate::BoolOp::Cut).unwrap().unwrap();
+        let d = 18.0 / 2f64.sqrt();
+        let bore = [face_at(&tube, Vec3::new(d, d, 10.0))];
+        for (dist, r) in [(1.0, 17.0), (-1.0, 19.0)] {
+            let m = measure(&offset_surface(&tube, &bore, dist, 0.01).unwrap()).unwrap();
+            let want = 2.0 * std::f64::consts::PI * r * 20.0;
+            assert!(rel(m.area, want) < 1e-3 && (m.bbox.max.x - r).abs() < 1e-3, "{dist}: {m:?} vs radius {r}");
+        }
+        let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let bottom = face_at(&b, Vec3::new(5.0, 5.0, 0.0));
+        let m = measure(&offset_surface(&b, &[bottom], 5.0, 0.01).unwrap()).unwrap();
+        assert!((m.bbox.min.z + 5.0).abs() < 1e-9 && (m.bbox.max.z + 5.0).abs() < 1e-9, "{m:?}");
+    }
+
     /// A sphere (fitted faces) moved out by 2: area 4π·12², within the tolerance; moved in to
     /// its centre, refused.
     #[test]
@@ -122,5 +141,28 @@ mod tests {
             let dist = s.point(uv).unwrap().dist(*p);
             assert!((dist - 1.5).abs() < 0.03, "{dist} at {p:?}");
         }
+    }
+
+    /// A line swept round a closed 3D spline (eight fit points round a circle of radius 25, up and
+    /// down by 4 in turn) is one face, closed round the path on its seam. Offset by 1 it stays one
+    /// face closed on its seam, not a loop with a gap where the path's ends meet (#18117).
+    #[test]
+    fn a_wall_swept_round_a_closed_spline_keeps_its_seam() {
+        use crate::{PathPiece, PointPath, SweepControl};
+        use solidcore_record::{Plane, Seg2, Vec2};
+        let fit: Vec<Vec3> = (0..=8)
+            .map(|i| {
+                let t = std::f64::consts::TAU * (i % 8) as f64 / 8.0;
+                Vec3::new(25.0 * t.cos(), 25.0 * t.sin(), if i % 2 == 0 { 10.0 } else { 6.0 })
+            })
+            .collect();
+        let path = PointPath { pieces: vec![PathPiece::Spline { fit, reversed: false }] };
+        let plane = Plane { origin: Vec3::new(0.0, 0.0, 10.0), x: Vec3::X, y: Vec3::Y };
+        let line = vec![Seg2::Line { a: Vec2::new(25.0, 0.0), b: Vec2::new(31.0, 0.0) }];
+        let wall = crate::surfaces::sweep_sheet_point_path_with(&plane, &[line], &path, &SweepControl::default()).unwrap();
+        assert!(wall.face_count() == 1 && edges(&wall) == 3, "{} faces, {} edges", wall.face_count(), edges(&wall));
+        let out = offset_surface(&wall, &[0], 1.0, 0.01).unwrap();
+        assert!(out.is_surface() && out.face_count() == 1, "{} faces", out.face_count());
+        assert_eq!(edges(&out), 3, "the offset closes on its seam");
     }
 }

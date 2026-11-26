@@ -7,8 +7,9 @@ only the light it had already gathered; it is never converted into transparent
 background. Each job counts these paths. A handful at the limits of f32
 geometry (a few per billion on the captured 69-body tumbler scene) are logged
 and tolerated; more than one in a million paths fails the job with the first
-failure's pixel, bounce, sample and code. A camera inside glass, open meshes or
-overlapping solids fail every affected path and therefore the job.
+failure's pixel, bounce, sample and code. Without explicit nested-media mode, a
+camera inside glass remains unsupported. Open meshes or overlapping solids
+are unsupported in either mode; the opt-in origin certificate is described below.
 
 Surfaces may touch closed glass, as a tumbler resting on a table does. The
 offset launch from such a surface can start inside the glass, so its first
@@ -41,13 +42,29 @@ grazing angle. Patch identities add four bytes per triangle and their preparatio
 storage is included in admission. Nonmanifold or collapsed adjacency is not used
 to infer a patch.
 
-Projected edge determinants use a compensated difference of products. This
-avoids losing exact shared-edge cancellation on tested GPU compilers. The
-algorithm follows the arithmetic described by
+Projected edge determinants retain the existing compensated expression for
+well-separated products, following
 [Matt Pharr's discussion of Kahan's difference of products](https://pharr.org/matt/blog/2019/11/03/difference-of-floats).
+When four or more leading bits cancel, normalized 12-bit high/low factors supply
+exactly representable partial products. Materialized scalar subtractions recover
+each product residual without requiring a fused `fma`. Compensated summation uses
+the existing integer-defined binary32 addition to establish round-to-nearest,
+ties-to-even boundaries, then rescales the result by a power of two. Choosing
+this arithmetic path leaves the geometric comparisons and distance bounds intact.
+
+The scalar materialization barrier depends on the positive-zero bits of
+`studio_weights.w`. The host always writes that lane as positive zero; only xyz
+contain the three source weights. A retained shader-layout/host-serialization test
+checks the lane's actual offset and bits for implicit and explicit studio inputs.
+The numerical branch adds no owned host or storage buffer.
+
 WGSL [floating-point evaluation rules](https://www.w3.org/TR/WGSL/#floating-point-evaluation)
-permit implementation variation, including expansion of `fma`; backend tests
-are required, and this is not a proof of exact intersection for all WGSL devices.
+permit implementation variation, including expansion of `fma`. The split-product
+oracle checks exact product reconstruction and normal determinant bit patterns
+against an independent f64 reference. Hardware and software Vulkan runs also keep
+the original corner, medium-transition and transport-energy oracles. Floating
+subnormal consumers retain WGSL's permitted handling; backend qualification is
+still required, rather than claiming exact intersection on every WGSL device.
 
 Hit depth also uses an affine base plus local vertex-edge increments. Summing
 three weighted distances can round a distant sharp-rim entry and exit to the
@@ -71,6 +88,63 @@ The regression fixtures distinguish short real exits, a normal offset crossing a
 sloped adjacent face, exact diagonal hits, and a captured impossible hit at a
 polygon edge. Original editable CAD renders exercise hollow walls and repeated
 reflection/refraction through the production command and job interfaces.
+
+## Actual-primary-origin certificate
+
+This implementation and its regressions are part of published `00edaf6a`/tree
+`38a7f0af`; the GPU library passed 210 tests in CI7. Full CI7 remains red, and the
+opaque native fixture does not qualify a native Glass image. See
+[the qualification record](render-parity.md#qualification). In explicit nested-media
+mode, each actual primary/pupil origin performs one closed-boundary-only query
+before any opaque hit, visible analytic emitter, subsurface flight or escape can
+consume the segment. Opaque and thin geometry cannot hide that query. For a
+transverse nearest face-interior crossing in a valid certified containment
+hierarchy, an exit identifies the current medium, while an entry identifies its
+parent; immutable parent references then supply the complete outer-to-inner stack.
+Beer starts at the actual shader primary origin. Perspective pupils use the
+existing sampled eye disk. GPU orthographic primaries retain their existing
+`target + back*(4*distance) + image-plane offset` origin; generic `Camera::eye()`
+is not that orthographic origin, and no camera/projection policy changes here.
+
+The query uses the existing uploaded-f32 intersection arithmetic, dominant-axis
+depth order and padded BVH. Its positive-depth search does not discard the
+ordinary primary's epsilon interval: an interface inside that existing launch
+interval refuses instead of being silently skipped. Detected boundary origins,
+nearest edge/vertex or transverse-sign ambiguity, tied nearest depths and stack
+overflow also use the existing medium diagnostics and unchanged failure fraction.
+No world position, minimum ray distance, tolerance, BRDF, PDF or random draw is
+changed. This is not a new exact world-space predicate or universal watertightness
+proof. Existing GPU certification checks welded closed/oriented homogeneous
+connected topology and strict convex-parent nesting; it does not independently
+prove a nonconvex leaf free from every self-intersection.
+
+The current source also uses the captured root bounds to prove vacuum before
+classifying a future silhouette: an origin outside that box is in air when the
+existing padded box entry misses or lies beyond the existing launch minimum.
+This reuses the query's first box-entry calculation. Near-boundary and in-bounds
+origins retain the complete query and its refusal policy. No origin, tolerance or
+sample stream is changed. The material-model publication record separately
+qualifies this newer proof; the historical suite below predates it.
+
+The additional query runs only with explicit nested-media mode. It has a fixed
+32-entry node stack and 32-entry depth array (256 bytes of shader private array
+state), under the existing depth 30 host-built BVH. There is no new owned host
+allocation, uniform/storage buffer, retained plane or snapshot. One extra BVH
+query per sampled primary is bounded by the existing scene and sample caps.
+GPU work is scheduled by the existing measured dispatch controller, not a
+per-node debit ledger: the added cost participates in actual submission latency,
+with cancellation checked between the same bounded dispatches. No cap, diagnostic
+threshold or timeout is raised, and no hard wall-time guarantee is added.
+
+The pre-fix analytic regression preserves exact source RGB, coverage and the
+existing Beer tolerance. A separate fixture correction establishes the actual
+packed orthographic world origin before qualification: the earlier generic-eye
+premise was wrong. The executed regression set retains first-opaque/emitter cases,
+parent order, no-hit air, exact/near-launch boundary refusal, silhouettes and
+f32 depth ties, physical per-pupil Beer with independent variates, copied
+subsurface parameters and strict outside-path identity. These tests executed in
+the published GPU suite. That execution does not establish every-backend
+watertightness, native Glass visual acceptance or convergence quality.
 
 ## Candidate anchor and local-offset continuation
 
@@ -147,3 +221,35 @@ ray-origin-to-entry difference plus the remaining ray segment; it does not form
 a rounded world endpoint. Geometry crossings are tested up to the true endpoint,
 without applying the separate analytic-emitter self-intersection allowance.
 The scatter history used by area-light MIS carries its associated local offset.
+
+## Certificate for the uploaded optical geometry
+
+Closed GPU Glass now also validates the positions actually consumed by the
+shader: source positions minus the camera target, rounded to f32. The original
+source certificate remains, and the uploaded-position certificate must pass as
+well. The legacy treatment of source-degenerate triangles remains: redundant
+pole faces in a latitude/longitude sphere mesh are skipped for both thin sheets
+and closed bodies. A selected optical body with no retained boundary refuses.
+Every retained face must remain valid after conversion; a face that collapses or
+reverses orientation in uploaded f32 positions refuses before rendering. The
+remaining closed boundary must also pass its topology and orientation proofs.
+
+Closed topology additionally requires one circular connected face fan at every
+welded coordinate vertex. A pair of shells joined only at a pinched vertex cannot
+pass solely because each edge has an opposite partner. The vertex-link proof
+reuses the existing prepaid face/edge scratch without adding an allocation.
+
+Optical bounds, nesting hierarchy and BVH geometry use the actual uploaded
+positions. A valid original mesh therefore cannot supply a certificate for a
+different rounded boundary. The existing coordinate, tolerance, bounded-work and
+cancellation policies remain. This strengthens admission; it does not prove
+general absence of self-intersection or universal exact watertightness.
+
+See the [detailed Glass matrix](render-glass-complete.md) for supported geometry,
+material limits and the headless evidence example. These source changes have
+their own validation scope; earlier captured renders do not qualify them.
+The same geometric boundary certificate surrounds the optional
+[rough, dispersive and coated interface models](render-glass-material-models.md).
+Their authored response changes transport at a valid boundary; it does not relax
+topology, nesting or origin admission. Photon-medium ambiguities fail separately
+and do not use the camera-path failure-fraction allowance.

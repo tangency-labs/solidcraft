@@ -1,0 +1,154 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  -50.0,
+                  -10.0,
+                  30.0
+                ],
+                [
+                  50.0,
+                  -10.0,
+                  30.0
+                ]
+              ],
+              "index": 3
+            }
+          ],
+          "points": [
+            [
+              0.0,
+              -10.0,
+              30.0
+            ]
+          ],
+          "tolerance": 5.574374202401989
+        },
+        "kind": "chamfer",
+        "sizes": [
+          3.0
+        ]
+      }
+    }
+  ],
+  "case": "4055-chamfer-bar-edge-over-joined-pin",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g0"
+    },
+    "method": "pin R8 x 30 (z 0..30) under a bar 100x20x15 (x -50..50, y -10..10, z 30..45). The chamfer of the bar bottom long edge (y=-10, z=30) removes the triangle 3 x 3 along the whole 100 mm: 450. All of it is inside the bar (z>=30); the pin lies below z=30, so it is untouched and only uncovers a strip of its top: V = pi*64*30 + 30000 - 450 = 35581.858. The result must be a closed solid (the strip of the pin top becomes a face).",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#4055"
+    ],
+    "volume_mm3": 35581.857894892404,
+    "what": "a 3 mm chamfer on the bottom long edge of a bar joined on top of a pin, where the chamfer is wider than the 2 mm gap between that edge and the pin"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 22,
+      "faces": 10,
+      "vertices": 14
+    }
+  },
+  "records": "4055-chamfer-bar-edge-over-joined-pin.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 8933.692856987378,
+      "body_count": 1,
+      "edges": 22,
+      "faces": 10,
+      "vertices": 14,
+      "volume_mm3": 35581.85741607513
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4055"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a 3 mm chamfer on the bottom long edge of a bar joined on top of a pin, where the chamfer is wider than the 2 mm gap between that edge and the pin",
+  "why_not": []
+}

@@ -11,9 +11,11 @@
 
 use std::path::{Path, PathBuf};
 
-use super::SolveApp;
+use super::AgentChat;
+use super::panel::PanelAction;
 
 /// A picture on the clipboard: RGBA rows, as the system gives them.
+#[derive(Clone, Debug, PartialEq)]
 pub struct Picture {
     pub width: usize,
     pub height: usize,
@@ -100,15 +102,22 @@ fn uri_path(rest: &str) -> Option<PathBuf> {
     // A Windows drive: `/C:/Users` is `C:/Users`.
     let drive = s.as_bytes();
     let s = if drive.get(2) == Some(&b':') && drive.get(1).is_some_and(u8::is_ascii_alphabetic) { s.get(1..)?.to_string() } else { s };
+    // A link to another machine or a device is text, judged from the link alone, with the rule
+    // design paths follow. A server the user allowed in Preferences is reached as a design link
+    // to it would be.
+    if solidcraft_engine::io::vfs::design_path_refusal(&s, None).is_some() {
+        return None;
+    }
     Some(Path::new(&s).to_path_buf())
 }
 
 /// How long after a text paste the V key coming up still belongs to it.
 const SAME_PASTE_SECS: f64 = 1.5;
 
-/// The paste shortcut for the focused text box this frame. Call before the box is drawn: a paste
-/// that is files is taken out of the input, so the box doesn't type their names.
-pub fn handle(app: &mut SolveApp, ui: &egui::Ui) {
+/// The paste shortcut for the focused text box this frame: what to attach, if the paste is files
+/// or a picture. Call before the box is drawn: a paste that is files is taken out of the input, so
+/// the box doesn't type their names.
+pub fn handle(chat: &mut AgentChat, ui: &egui::Ui) -> Option<PanelAction> {
     let now = ui.input(|i| i.time);
     let (text, released) = ui.input(|i| {
         let text = i.events.iter().find_map(|e| if let egui::Event::Paste(t) = e { Some(t.clone()) } else { None });
@@ -118,37 +127,28 @@ pub fn handle(app: &mut SolveApp, ui: &egui::Ui) {
         });
         (text, released)
     });
-    let after_text = app.agent_chat.text_pasted_at.is_some_and(|at| (0.0..SAME_PASTE_SECS).contains(&(now - at)));
+    let after_text = chat.text_pasted_at.is_some_and(|at| (0.0..SAME_PASTE_SECS).contains(&(now - at)));
     if text.is_none() && !(released && !after_text) {
         if released {
-            app.agent_chat.text_pasted_at = None;
+            chat.text_pasted_at = None;
         }
-        return;
+        return None;
     }
     let paste = decide(text.as_deref(), &mut System);
     if text.is_some() {
-        app.agent_chat.text_pasted_at = if matches!(paste, Paste::Text) { Some(now) } else { None };
+        chat.text_pasted_at = if matches!(paste, Paste::Text) { Some(now) } else { None };
     } else {
-        app.agent_chat.text_pasted_at = None;
+        chat.text_pasted_at = None;
     }
-    apply(app, ui, paste, text.is_some());
-}
-
-/// Do what [`decide`] said.
-fn apply(app: &mut SolveApp, ui: &egui::Ui, paste: Paste, had_text: bool) {
     match paste {
-        Paste::Text | Paste::Nothing => {}
+        Paste::Text | Paste::Nothing => None,
         Paste::Files(paths) => {
-            if had_text {
+            if text.is_some() {
                 ui.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Paste(_))));
             }
-            super::attach_dropped(app, paths.into_iter());
+            Some(PanelAction::AttachDropped(paths))
         }
-        Paste::Picture(p) => {
-            if let Err(e) = super::attach_rgba(app, p.width, p.height, &p.rgba) {
-                app.agent_chat.notice(e, true);
-            }
-        }
+        Paste::Picture(p) => Some(PanelAction::AttachPicture(p)),
     }
 }
 
@@ -216,6 +216,29 @@ mod tests {
         assert!(files_in_text("file://host/share/a.png").is_empty(), "another machine's file");
         assert!(files_in_text("file:///a/%zz").is_empty(), "a bad escape");
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Links that lead to another machine or to a device are not files: the link's text decides,
+    /// so nothing on the disk or the network is asked whether they exist.
+    #[test]
+    fn links_to_other_machines_and_devices_are_text() {
+        for link in [
+            "file:////server/share/a.png",
+            "file:///%5C%5Cserver%5Cshare%5Ca.png",
+            "file:///\\\\server\\share\\a.png",
+            "file:////./pipe/a",
+            "file:////?/UNC/server/share/a.png",
+            "file://localhost//server/share/a.png",
+            "file:///%2F%2Fserver/share/a.png",
+            "file:////%3F/UNC/server/share/a.png",
+        ] {
+            let rest = link.strip_prefix("file://").unwrap_or(link);
+            assert_eq!(uri_path(rest), None, "{link}");
+            assert!(files_in_text(link).is_empty(), "{link}");
+        }
+        // A local drive still reads as a file's path.
+        assert_eq!(uri_path("/C:/Users/a/part.step"), Some(PathBuf::from("C:/Users/a/part.step")));
+        assert_eq!(uri_path("/home/a/part.step"), Some(PathBuf::from("/home/a/part.step")));
     }
 
     #[test]

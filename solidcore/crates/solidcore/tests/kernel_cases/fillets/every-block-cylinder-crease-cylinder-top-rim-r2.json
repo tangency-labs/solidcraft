@@ -1,0 +1,150 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  8.178681931579773,
+                  5.754056122601737,
+                  30.0
+                ],
+                [
+                  8.178681931579773,
+                  5.754056122601737,
+                  30.0
+                ]
+              ],
+              "index": 14
+            }
+          ],
+          "points": [
+            [
+              -8.17868193157977,
+              -5.754056122601739,
+              30.0
+            ]
+          ],
+          "tolerance": 3.0686049981184227
+        },
+        "kind": "round",
+        "sizes": [
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "every-block-cylinder-crease-cylinder-top-rim-r2",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "block 40x10x15 (x 0..40, y -5..5) joined to the cylinder R10 x 30 on the z axis, the block's end on the cylinder's diameter x = 0 so its sides y = +-5 meet the wall at vertical creases: V0 = 6000 + 3000 pi - 15 * (the disc's part with x > 0, |y| <= 5: 2 (y/2 sqrt(100-y^2) + 50 asin(y/10)) at y=5 = 95.661148) = 13989.8607. The rim (rho = 10, z = 30), well above the block, rounded r2 removes the spandrel (1-pi/4) r^2 = 0.858407 revolved once, its centroid at rho = 10 - r (5/6-pi/4)/(1-pi/4) (first moment about the wall r^3 (5/6-pi/4) = 0.383481): Pappus 2 pi (10 A - M) = 51.5258. V = 13938.3349.",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 13938.334904711712,
+    "what": "the top rim of a cylinder that a block is joined to, rounded r2"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 17,
+      "faces": 8,
+      "vertices": 11
+    }
+  },
+  "records": "every-block-cylinder-crease-cylinder-top-rim-r2.bodies.json.gz",
+  "result": [
+    {
+      "body": "Block",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3999.349943580612,
+      "body_count": 1,
+      "edges": 17,
+      "faces": 8,
+      "vertices": 11,
+      "volume_mm3": 13938.334905434578
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "the top rim of a cylinder that a block is joined to, rounded r2",
+  "why_not": []
+}

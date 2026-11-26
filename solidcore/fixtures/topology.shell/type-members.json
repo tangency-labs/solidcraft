@@ -1,0 +1,1044 @@
+{
+  "cases": [
+    {
+      "name": "type_empty_-9223372036854775808",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "type_probe": {
+          "shell": null,
+          "code": -9223372036854775808
+        }
+      }
+    },
+    {
+      "name": "type_empty_-9007199254740993",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "type_probe": {
+          "shell": null,
+          "code": -9007199254740993
+        }
+      }
+    },
+    {
+      "name": "type_empty_-1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "type_probe": {
+          "shell": null,
+          "code": -1
+        }
+      }
+    },
+    {
+      "name": "type_empty_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "type_probe": {
+          "shell": null,
+          "code": 0
+        }
+      }
+    },
+    {
+      "name": "type_empty_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "type_probe": {
+          "shell": null,
+          "code": 1
+        }
+      }
+    },
+    {
+      "name": "type_empty_16004",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "type_probe": {
+          "shell": null,
+          "code": 16004
+        }
+      }
+    },
+    {
+      "name": "type_empty_16005",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "type_probe": {
+          "shell": null,
+          "code": 16005
+        }
+      }
+    },
+    {
+      "name": "type_empty_16006",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "type_probe": {
+          "shell": null,
+          "code": 16006
+        }
+      }
+    },
+    {
+      "name": "type_empty_16013",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "type_probe": {
+          "shell": null,
+          "code": 16013
+        }
+      }
+    },
+    {
+      "name": "type_empty_16022",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "type_probe": {
+          "shell": null,
+          "code": 16022
+        }
+      }
+    },
+    {
+      "name": "type_empty_16999",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "type_probe": {
+          "shell": null,
+          "code": 16999
+        }
+      }
+    },
+    {
+      "name": "type_empty_9007199254740993",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "type_probe": {
+          "shell": null,
+          "code": 9007199254740993
+        }
+      }
+    },
+    {
+      "name": "type_empty_9223372036854775807",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "type_probe": {
+          "shell": null,
+          "code": 9223372036854775807
+        }
+      }
+    },
+    {
+      "name": "type_vertex_-9223372036854775808",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": -9223372036854775808
+        }
+      }
+    },
+    {
+      "name": "type_vertex_-9007199254740993",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": -9007199254740993
+        }
+      }
+    },
+    {
+      "name": "type_vertex_-1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": -1
+        }
+      }
+    },
+    {
+      "name": "type_vertex_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 0
+        }
+      }
+    },
+    {
+      "name": "type_vertex_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 1
+        }
+      }
+    },
+    {
+      "name": "type_vertex_16004",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 16004
+        }
+      }
+    },
+    {
+      "name": "type_vertex_16005",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 16005
+        }
+      }
+    },
+    {
+      "name": "type_vertex_16006",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 16006
+        }
+      }
+    },
+    {
+      "name": "type_vertex_16013",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 16013
+        }
+      }
+    },
+    {
+      "name": "type_vertex_16022",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 16022
+        }
+      }
+    },
+    {
+      "name": "type_vertex_16999",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 16999
+        }
+      }
+    },
+    {
+      "name": "type_vertex_9007199254740993",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 9007199254740993
+        }
+      }
+    },
+    {
+      "name": "type_vertex_9223372036854775807",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 9223372036854775807
+        }
+      }
+    },
+    {
+      "name": "type_wire_-9223372036854775808",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": -9223372036854775808
+        }
+      }
+    },
+    {
+      "name": "type_wire_-9007199254740993",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": -9007199254740993
+        }
+      }
+    },
+    {
+      "name": "type_wire_-1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": -1
+        }
+      }
+    },
+    {
+      "name": "type_wire_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 0
+        }
+      }
+    },
+    {
+      "name": "type_wire_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 1
+        }
+      }
+    },
+    {
+      "name": "type_wire_16004",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 16004
+        }
+      }
+    },
+    {
+      "name": "type_wire_16005",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 16005
+        }
+      }
+    },
+    {
+      "name": "type_wire_16006",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 16006
+        }
+      }
+    },
+    {
+      "name": "type_wire_16013",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 16013
+        }
+      }
+    },
+    {
+      "name": "type_wire_16022",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 16022
+        }
+      }
+    },
+    {
+      "name": "type_wire_16999",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 16999
+        }
+      }
+    },
+    {
+      "name": "type_wire_9007199254740993",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 9007199254740993
+        }
+      }
+    },
+    {
+      "name": "type_wire_9223372036854775807",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 9223372036854775807
+        }
+      }
+    },
+    {
+      "name": "type_face_-9223372036854775808",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": -9223372036854775808
+        }
+      }
+    },
+    {
+      "name": "type_face_-9007199254740993",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": -9007199254740993
+        }
+      }
+    },
+    {
+      "name": "type_face_-1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": -1
+        }
+      }
+    },
+    {
+      "name": "type_face_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 0
+        }
+      }
+    },
+    {
+      "name": "type_face_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 1
+        }
+      }
+    },
+    {
+      "name": "type_face_16004",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 16004
+        }
+      }
+    },
+    {
+      "name": "type_face_16005",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 16005
+        }
+      }
+    },
+    {
+      "name": "type_face_16006",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 16006
+        }
+      }
+    },
+    {
+      "name": "type_face_16013",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 16013
+        }
+      }
+    },
+    {
+      "name": "type_face_16022",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 16022
+        }
+      }
+    },
+    {
+      "name": "type_face_16999",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 16999
+        }
+      }
+    },
+    {
+      "name": "type_face_9007199254740993",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 9007199254740993
+        }
+      }
+    },
+    {
+      "name": "type_face_9223372036854775807",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:GetVertex/GetWireEdge/GetFirstFaceuse/SetShellType; inc/SmObject.h:SM_CAST_PTR",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "type_probe": {
+          "shell": 0,
+          "code": 9223372036854775807
+        }
+      }
+    }
+  ]
+}

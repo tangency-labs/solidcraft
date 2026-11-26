@@ -1,0 +1,21 @@
+[package]
+name = "meshbake"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Standalone (own workspace): an app-side tool outside SolidCraft's workspace members, since it
+# needs SolidCraft's kernel beside solidcore's crates (solidcore itself builds on its own). Built by
+# tools/bench/tess/build.sh against whichever tree it is in.
+[workspace]
+
+[dependencies]
+solidcraft-kernel = { path = "../../../crates/kernel" }
+solidcraft-geom = { path = "../../../crates/geom" }
+solidcore-record = { path = "../../../solidcore/crates/solidcore-record" }
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+debug = false
+codegen-units = 16

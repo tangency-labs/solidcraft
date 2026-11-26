@@ -1,0 +1,35 @@
+{
+  "area": "surfaces",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-blend-from-edges-that-do-not-chain-refused",
+  "expected": {
+    "method": "an end of a blend is one chain of edges, each running on from the last",
+    "outcome": "refused",
+    "refusal": "the picked edges do not run on from one another",
+    "source": "invariants",
+    "sources": [],
+    "what": "a blend from two opposite sides of a sheet: they share no vertex, so they are no chain; refused"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 9 (surface.blend): invalid input: the picked edges do not run on from one another",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 9 (surface.blend): invalid input: the picked edges do not run on from one another",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "a blend from two opposite sides of a sheet: they share no vertex, so they are no chain; refused",
+  "why_not": [
+    "no kernel operation ran before the failure: step 9 (surface.blend): invalid input: the picked edges do not run on from one another"
+  ]
+}

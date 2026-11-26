@@ -1,0 +1,68 @@
+{
+  "area": "inspect",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-curvature-comb-circle-and-line",
+  "expected": {
+    "method": "circle r 7: curvature 1/7 everywhere, radius 7; a line: straight, no radius",
+    "results": [
+      {
+        "json": 7.0,
+        "pointer": "/combs/0/min_radius",
+        "step": 5
+      },
+      {
+        "json": 0.14285714285714285,
+        "pointer": "/combs/0/max_curvature",
+        "step": 5
+      },
+      {
+        "json": null,
+        "pointer": "/combs/1/min_radius",
+        "step": 5
+      },
+      {
+        "json": 0.0,
+        "pointer": "/combs/1/max_curvature",
+        "step": 5
+      }
+    ],
+    "source": "analytic",
+    "sources": [],
+    "what": "the combs of a sketch circle and a line"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 0,
+      "faces": 0,
+      "vertices": 0
+    }
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 0.0,
+      "body_count": 0,
+      "edges": 0,
+      "faces": 0,
+      "vertices": 0,
+      "volume_mm3": 0.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [],
+  "ungraded": [
+    "results: SolidCraft computes it"
+  ],
+  "what": "the combs of a sketch circle and a line",
+  "why_not": [
+    "the case ends with no body"
+  ]
+}

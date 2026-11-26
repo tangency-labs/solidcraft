@@ -16,6 +16,8 @@ pub enum ThreadForm {
     /// ISO metric, 60° (ISO 68-1 basic profile, ISO 261/262 sizes): `M10`, `M10x1`.
     #[default]
     Metric,
+    /// Unified inch, 60° (ASME B1.1): `1/4-20 UNC-2A`, `#10-32 UNF`.
+    Unified,
     /// ISO metric trapezoidal, 30° (ISO 2904 design profile, ISO 2902 sizes): `Tr20x4`.
     Trapezoidal,
     /// General purpose Acme, 29° (ASME B1.5): `1/2-10 ACME`.
@@ -120,6 +122,27 @@ pub(crate) const ISO_COARSE: &[(f64, f64)] = &[
     (42.0, 4.5),
     (48.0, 5.0),
     (56.0, 5.5),
+];
+
+/// The other ISO 261 coarse sizes (second and third choice), with their ISO 262 coarse pitches:
+/// known by name (M33 is M33x3.5) and offered in the Thread window, but not chosen for a face
+/// automatically, which still picks from [`ISO_COARSE`] (#4153, #11901).
+const ISO_COARSE_MORE: &[(f64, f64)] = &[
+    (1.0, 0.25),
+    (1.1, 0.25),
+    (1.2, 0.25),
+    (1.4, 0.3),
+    (1.8, 0.35),
+    (2.2, 0.45),
+    (3.5, 0.6),
+    (4.5, 0.75),
+    (7.0, 1.0),
+    (33.0, 3.5),
+    (39.0, 4.0),
+    (45.0, 4.5),
+    (52.0, 5.0),
+    (60.0, 5.5),
+    (64.0, 6.0),
 ];
 
 /// The ISO 2902 diameter-pitch series' middle pitch per diameter, which ISO 2904 (trapezoidal)
@@ -242,8 +265,9 @@ impl GrooveProfile {
 }
 
 impl ThreadForm {
-    pub const ALL: [ThreadForm; 10] = [
+    pub const ALL: &[ThreadForm] = &[
         ThreadForm::Metric,
+        ThreadForm::Unified,
         ThreadForm::Trapezoidal,
         ThreadForm::Acme,
         ThreadForm::Buttress,
@@ -258,6 +282,7 @@ impl ThreadForm {
     pub fn name(self) -> &'static str {
         match self {
             ThreadForm::Metric => "metric",
+            ThreadForm::Unified => "unified",
             ThreadForm::Trapezoidal => "trapezoidal",
             ThreadForm::Acme => "acme",
             ThreadForm::Buttress => "buttress",
@@ -271,13 +296,14 @@ impl ThreadForm {
     }
 
     pub fn from_name(s: &str) -> Option<ThreadForm> {
-        ThreadForm::ALL.into_iter().find(|f| f.name().eq_ignore_ascii_case(s.trim()))
+        ThreadForm::ALL.iter().copied().find(|f| f.name().eq_ignore_ascii_case(s.trim()))
     }
 
     /// The standard a form's profile and sizes come from.
     pub fn standard(self) -> &'static str {
         match self {
             ThreadForm::Metric => "ISO 68-1, ISO 261",
+            ThreadForm::Unified => "ASME B1.1",
             ThreadForm::Trapezoidal => "ISO 2904, ISO 2902",
             ThreadForm::Acme => "ASME B1.5",
             ThreadForm::Buttress => "DIN 513-1, DIN 513-2",
@@ -316,11 +342,16 @@ impl ThreadForm {
     }
 
     /// The form a designation's prefix names: `M` metric, `Tr` trapezoidal, `S` buttress, an inch
-    /// size with `ACME` or `BUTT`.
+    /// size with `ACME` or `BUTT`, or a Unified `UNC`/`UNF`/`UNEF`/`UN` suffix.
     pub fn of_designation(s: &str) -> Option<ThreadForm> {
+        if s.len() > 128 {
+            return None;
+        }
         let t = s.trim().to_ascii_uppercase();
         let then_size = |rest: &str| rest.trim_start().starts_with(|c: char| c.is_ascii_digit());
-        if t.contains("NPT") {
+        if t.split_whitespace().last().is_some_and(|s| matches!(s.split('-').next(), Some("UNC" | "UNF" | "UNEF" | "UN"))) {
+            Some(ThreadForm::Unified)
+        } else if t.contains("NPT") {
             Some(ThreadForm::Npt)
         } else if t.contains("ACME") {
             Some(ThreadForm::Acme)
@@ -343,11 +374,16 @@ impl ThreadForm {
         }
     }
 
-    /// The standard sizes, (nominal diameter, pitch) in mm; none for ASME buttress (its pitch is
-    /// always given) and the square thread.
+    /// The standard sizes, (nominal diameter, pitch) in mm, by diameter; none for ASME buttress
+    /// (its pitch is always given) and the square thread.
     pub fn sizes(self) -> Vec<(f64, f64)> {
         match self {
-            ThreadForm::Metric => ISO_COARSE.to_vec(),
+            ThreadForm::Metric => {
+                let mut all: Vec<(f64, f64)> = ISO_COARSE.iter().chain(ISO_COARSE_MORE).copied().collect();
+                all.sort_by(|a, b| a.0.total_cmp(&b.0));
+                all
+            }
+            ThreadForm::Unified => unified_catalogue().into_iter().map(|s| (s.major_diameter, s.pitch)).collect(),
             ThreadForm::Trapezoidal => ISO_2902_MEDIUM.to_vec(),
             ThreadForm::Buttress => ISO_2902_MEDIUM.iter().copied().filter(|(d, _)| *d >= 10.0).collect(),
             ThreadForm::Acme => ACME_SIZES.iter().map(|(_, d, n)| (d * INCH, INCH / n)).collect(),
@@ -369,6 +405,9 @@ impl ThreadForm {
             return Err(why.into());
         }
         let bad = || format!("unknown {} thread `{s}` ({})", self.name(), self.example());
+        if s.len() > 128 {
+            return Err(bad());
+        }
         if let Some(f) = ThreadForm::of_designation(s)
             && f != self
         {
@@ -404,6 +443,11 @@ impl ThreadForm {
                         (d, p, p * n)
                     }
                 }
+            }
+            ThreadForm::Unified => {
+                let text = s.trim().to_ascii_uppercase();
+                let (major, pitch, _) = unified_designation(&text).ok_or_else(bad)?;
+                (major, pitch, pitch * n)
             }
             ThreadForm::Trapezoidal | ThreadForm::Buttress => {
                 let body = t.strip_prefix(if self == ThreadForm::Trapezoidal { "TR" } else { "S" }).ok_or_else(bad)?;
@@ -456,6 +500,7 @@ impl ThreadForm {
     fn example(self) -> &'static str {
         match self {
             ThreadForm::Metric => "like M8 or M8x1",
+            ThreadForm::Unified => "like 1/4-20 UNC-2A or #10-32 UNF (UNC, UNF, UNEF or UN; classes 1A/2A/3A external, 1B/2B/3B internal)",
             ThreadForm::Trapezoidal => "like Tr20x4 or Tr40x14(P7)",
             ThreadForm::Acme => "like 1/2-10 ACME",
             ThreadForm::Buttress => "like S20x4 or S40x14(P7)",
@@ -466,6 +511,27 @@ impl ThreadForm {
             ThreadForm::Bspt => "like R 1/2 external or Rc 1/2 internal (ISO 7-1, 1/16 to 6)",
             ThreadForm::Npt => "like 1/2-14 NPT (1/16 to 12)",
         }
+    }
+
+    /// A Unified class names its side: A for a shaft, B for a hole. Classes are retained in
+    /// the callout; pitch-diameter allowances are not modelled by the basic profile.
+    pub fn check_class(self, designation: &str, internal: bool) -> Result<(), String> {
+        if self != ThreadForm::Unified {
+            return Ok(());
+        }
+        self.parse(designation, 1)?;
+        let text = designation.trim().to_ascii_uppercase();
+        if let Some((_, _, Some(class))) = unified_designation(&text)
+            && class.ends_with('B') != internal
+        {
+            return Err(format!(
+                "Unified class {class} is for an {} thread; this {} needs {} (ASME B1.1)",
+                if class.ends_with('B') { "internal" } else { "external" },
+                if internal { "hole" } else { "shaft" },
+                if internal { "1B, 2B or 3B" } else { "1A, 2A or 3A" }
+            ));
+        }
+        Ok(())
     }
 
     /// The pipe size a pipe-thread designation names: `G 1/2` (a class A or B after it is a
@@ -516,6 +582,19 @@ impl ThreadForm {
                     format!("M{}x{}", show(d), show(p))
                 }
             }
+            ThreadForm::Unified => {
+                let catalogue = unified_catalogue();
+                if let Some(size) = catalogue.iter().find(|s| (s.major_diameter - d).abs() < 1e-9 && (s.pitch - p).abs() < 1e-9) {
+                    return size.designation.clone();
+                }
+                let name = catalogue
+                    .iter()
+                    .find(|s| (s.major_diameter - d).abs() < 1e-9)
+                    .and_then(|s| s.designation.split_once('-').map(|(n, _)| n.to_string()))
+                    .or_else(|| (0..=12).find(|n| ((0.060 + 0.013 * f64::from(*n)) * INCH - d).abs() < 1e-9).map(|n| format!("#{n}")))
+                    .unwrap_or_else(|| show(d / INCH));
+                format!("{name}-{} UN", show(INCH / p))
+            }
             ThreadForm::Trapezoidal | ThreadForm::Buttress => {
                 let pre = if self == ThreadForm::Trapezoidal { "Tr" } else { "S" };
                 if multi { format!("{pre}{}x{}(P{})", show(d), show(lead), show(p)) } else { format!("{pre}{}x{}", show(d), show(p)) }
@@ -545,11 +624,27 @@ impl ThreadForm {
     }
 
     /// The minor diameter a hole for this size is drilled to: the tap maker's drill for metric
-    /// ([`crate::metric_tap_drill`]), the internal thread's minor diameter for the others.
+    /// ([`crate::metric_tap_drill`]) and catalogued Unified sizes, the internal thread's minor
+    /// diameter for the others.
     pub fn drill(self, d: f64, p: f64) -> f64 {
         match self {
             ThreadForm::Metric => crate::metric_tap_drill(d, p),
+            ThreadForm::Unified => unified_catalogue()
+                .iter()
+                .find(|s| (s.major_diameter - d).abs() < 1e-9 && (s.pitch - p).abs() < 1e-9)
+                .map_or_else(|| 2.0 * self.groove(d, p, true).crest_r, |s| s.tap_drill),
             _ => 2.0 * self.groove(d, p, true).crest_r,
+        }
+    }
+
+    /// The sizes [`fit`](Self::fit) chooses from: [`sizes`](Self::sizes), less the metric sizes
+    /// that are only known by name ([`ISO_COARSE_MORE`]), so a face is sized as it was before
+    /// they were added. Unified chooses UNC alone.
+    fn fit_sizes(self) -> Vec<(f64, f64)> {
+        match self {
+            ThreadForm::Metric => ISO_COARSE.to_vec(),
+            ThreadForm::Unified => crate::tapped_thread_sizes(crate::TappedThreadFamily::Unc).iter().map(|s| (s.major_diameter, s.pitch)).collect(),
+            _ => self.sizes(),
         }
     }
 
@@ -564,13 +659,14 @@ impl ThreadForm {
     /// as a size's nominal diameter (within 1% and 0.03 mm) is that size, a 12 mm hole is M12,
     /// and only a hole near no nominal diameter is matched by tap drill.
     pub fn fit_with(self, diameter: f64, internal: bool, old_rule: bool) -> Option<(f64, f64)> {
+        let sizes = self.fit_sizes();
         if internal && !old_rule {
             let near = |n: f64| (n - diameter).abs() <= 0.01 * diameter + 0.03;
-            if let Some((n, p)) = self.sizes().into_iter().find(|(n, _)| near(*n)) {
+            if let Some((n, p)) = sizes.iter().copied().find(|(n, _)| near(*n)) {
                 return Some((n, p));
             }
         }
-        self.sizes()
+        sizes
             .into_iter()
             .map(|(n, p)| (n, p, if internal { self.drill(n, p) } else { n }))
             .min_by(|a, b| (a.2 - diameter).abs().total_cmp(&(b.2 - diameter).abs()))
@@ -587,8 +683,8 @@ impl ThreadForm {
         // (flanks, tooth crest flat, basic depth, external minor radius, internal minor radius,
         // internal major radius)
         let (fl, flat, depth, r3, r1, r4) = match self {
-            ThreadForm::Metric | ThreadForm::Square => {
-                // ISO 68-1: H = P sqrt3/2, basic depth 5H/8, flats P/8 at the major and P/4 at
+            ThreadForm::Metric | ThreadForm::Unified | ThreadForm::Square => {
+                // ISO 68-1 / ASME B1.1: H = P sqrt3/2, basic depth 5H/8, flats P/8 at the major and P/4 at
                 // the minor diameter.
                 let h = p * 3f64.sqrt() / 2.0;
                 let r_minor = d / 2.0 - 5.0 * h / 8.0;
@@ -658,6 +754,44 @@ impl ThreadForm {
     }
 }
 
+/// Reuse the tapped-hole catalogue's exact inch majors, TPI and drills. The order keeps UNC
+/// before UNF at each diameter; automatic sizing uses UNC alone.
+fn unified_catalogue() -> Vec<crate::TappedThread> {
+    let mut sizes = crate::tapped_thread_sizes(crate::TappedThreadFamily::Unc);
+    sizes.extend(crate::tapped_thread_sizes(crate::TappedThreadFamily::Unf));
+    sizes.sort_by(|a, b| a.major_diameter.total_cmp(&b.major_diameter).then(b.pitch.total_cmp(&a.pitch)));
+    sizes
+}
+
+/// Read an uppercase Unified callout without discarding its class. A numbered screw's major
+/// is (0.060 + 0.013 n) inches (ASME B1.1), n = 0..12; other sizes are inches as written.
+fn unified_designation(s: &str) -> Option<(f64, f64, Option<&str>)> {
+    let (size_pitch, suffix) = s.rsplit_once(char::is_whitespace)?;
+    let (series, class) = suffix.split_once('-').map_or((suffix, None), |(s, c)| (s, Some(c)));
+    if !matches!(series, "UNC" | "UNF" | "UNEF" | "UN") || class.is_some_and(|c| !matches!(c, "1A" | "2A" | "3A" | "1B" | "2B" | "3B")) {
+        return None;
+    }
+    let (size, tpi) = size_pitch.trim().rsplit_once('-')?;
+    let size = size.trim();
+    let major = if let Some(number) = size.strip_prefix('#') {
+        let n = number.parse::<u8>().ok().filter(|n| *n <= 12)?;
+        (0.060 + 0.013 * f64::from(n)) * INCH
+    } else if let Some((whole, fraction)) = size.split_once(char::is_whitespace) {
+        let (whole, fraction) = (num(whole)?, num(fraction.trim())?);
+        if whole < 1.0 || whole.fract() != 0.0 || !(fraction > 0.0 && fraction < 1.0) {
+            return None;
+        }
+        (whole + fraction) * INCH
+    } else {
+        num(size)? * INCH
+    };
+    let tpi = num(tpi)?;
+    if !(major > 0.0 && tpi > 0.0) {
+        return None;
+    }
+    Some((major, INCH / tpi, class))
+}
+
 /// A number; fractions allowed (`1/2`).
 fn num(s: &str) -> Option<f64> {
     let s = s.trim();
@@ -697,6 +831,80 @@ fn show(v: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unified_designations_use_inch_majors_and_exact_tpi_conversion() {
+        let form = ThreadForm::Unified;
+        for (text, major, tpi) in [
+            ("1/4-20 UNC-2A", 6.35, 20.0),
+            ("#10-32 UNF", 4.826, 32.0),
+            ("0.25-32 UNEF-3B", 6.35, 32.0),
+            ("3/8-20 UN-1A", 9.525, 20.0),
+            ("1 1/4-12 UNF-2B", 31.75, 12.0),
+            ("  1/4-20  unc-2a  ", 6.35, 20.0),
+        ] {
+            assert_eq!(ThreadForm::of_designation(text), Some(form));
+            let size = form.parse(text, 1).unwrap();
+            assert!((size.major - major).abs() < 1e-12, "{text}: {size:?}");
+            assert_eq!(size.pitch, INCH / tpi);
+            assert_eq!(size.lead, size.pitch);
+            for internal in [false, true] {
+                assert_eq!(form.groove(size.major, size.pitch, internal), ThreadForm::Metric.groove(size.major, size.pitch, internal));
+            }
+        }
+        for n in 0..=12 {
+            let size = form.parse(&format!("#{n}-80 UN"), 1).unwrap();
+            assert!((size.major - (0.060 + 0.013 * f64::from(n)) * INCH).abs() < 1e-12);
+        }
+        for size in unified_catalogue() {
+            let parsed = form.parse(&size.designation, 1).unwrap();
+            assert!((parsed.major - size.major_diameter).abs() < 1e-12);
+            assert_eq!(parsed.pitch, size.pitch);
+            assert_eq!(form.format(parsed.major, parsed.pitch, parsed.lead), size.designation);
+            assert_eq!(form.drill(parsed.major, parsed.pitch), size.tap_drill);
+        }
+        assert_eq!(form.parse("1/4-20 UNC", 2).unwrap().lead, 2.54);
+        assert_eq!(form.format(6.35, INCH / 32.0, INCH / 32.0), "1/4-32 UN");
+        assert_eq!(form.fit(6.35, false), Some((6.35, 1.27)));
+        assert_eq!(form.fit(5.1054, true), Some((6.35, 1.27)));
+        assert_eq!(ThreadForm::Metric.fit(6.35, false), Some((6.0, 1.0)));
+    }
+
+    #[test]
+    fn unified_classes_name_the_side_and_malformed_designations_are_refused() {
+        let form = ThreadForm::Unified;
+        for grade in 1..=3 {
+            for (side, internal) in [("A", false), ("B", true)] {
+                let text = format!("1/4-20 UNC-{grade}{side}");
+                assert!(form.check_class(&text, internal).is_ok());
+                let error = form.check_class(&text, !internal).unwrap_err();
+                assert!(error.contains(if internal { "shaft needs 1A, 2A or 3A" } else { "hole needs 1B, 2B or 3B" }), "{error}");
+            }
+        }
+        assert!(form.check_class("1/4-20 UNC", false).is_ok());
+        assert!(form.check_class("1/4-20 UNC", true).is_ok());
+        for text in [
+            "#13-32 UNC",
+            "#-1-32 UN",
+            "1/4-0 UNC",
+            "1/4-NaN UNC",
+            "1/0-20 UNC",
+            "0-20 UNC",
+            "1/4-20",
+            "1/4-20 UNS",
+            "1/4-20 UNC-4A",
+            "1/4-20 UNC-2A-extra",
+            "1/4-20 UNC-",
+            "1/4-20 UNC-2AA",
+            "1/4-1e309 UN",
+            "1e309-20 UN",
+            "1/4-20 UNF extra",
+        ] {
+            assert!(form.parse(text, 1).is_err(), "{text}");
+        }
+        assert!(form.parse(&"1".repeat(5000), 1).is_err());
+        assert!(ThreadForm::Metric.parse("1/4-20 UNC", 1).unwrap_err().contains("a unified designation, not metric"));
+    }
 
     /// Pipe-thread designations read to their table's size and write back as the standards write
     /// them; a size or a threads-per-inch the table lacks is refused.

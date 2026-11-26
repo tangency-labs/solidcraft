@@ -1,0 +1,71 @@
+{
+  "area": "sheet-metal",
+  "bodies": {},
+  "calls": [],
+  "case": "436-edge-flanges-at-105-and-120-degrees-on-opposite-edges",
+  "expected": {
+    "body_count": 1,
+    "method": "T = 2, R = 1. A flange of angle th stands back s = (R+T)tan(th/2) from its edge: s1 = 3*tan(52.5 deg), s2 = 3*tan(60 deg). Base 120 x (90 - s1 - s2), legs 120 x (30 - s1) and 120 x (25 - s2) (height measured along the outer face from the virtual sharp), bends th*((R+T)^2 - R^2)*120/2 each. V = 240*((90 - s1 - s2) + (30 - s1) + (25 - s2)) + sum of the bends",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#436",
+      "tangency-labs/solidcraft#447"
+    ],
+    "volume_mm3": 32314.157892363357,
+    "what": "one edge flange feature with its own angle and height on each of two opposite edges: 105 degrees and 30 mm, 120 degrees and 25 mm"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 44,
+      "faces": 22,
+      "vertices": 24
+    }
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 33332.7271904145,
+      "body_count": 1,
+      "edges": 36,
+      "faces": 14,
+      "vertices": 24,
+      "volume_mm3": 32314.157891469713
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#436",
+    "tangency-labs/solidcraft#447"
+  ],
+  "traced_ops": [
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "boolean2d"
+  ],
+  "ungraded": [],
+  "what": "one edge flange feature with its own angle and height on each of two opposite edges: 105 degrees and 30 mm, 120 degrees and 25 mm",
+  "why_not": [
+    "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}

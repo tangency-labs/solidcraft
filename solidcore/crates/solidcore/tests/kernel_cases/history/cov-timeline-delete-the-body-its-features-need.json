@@ -1,0 +1,77 @@
+{
+  "area": "history",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-timeline-delete-the-body-its-features-need",
+  "expected": {
+    "body_count": 0,
+    "method": "the delete is made (only a sketch takes features with it); the round and the cut have no body now and are reported failing, in timeline order; no body is left",
+    "results": [
+      {
+        "json": {
+          "failing": [
+            {
+              "feature": "Round"
+            },
+            {
+              "feature": "Notch"
+            }
+          ]
+        },
+        "step": 7
+      }
+    ],
+    "source": "invariants",
+    "sources": [],
+    "what": "timeline.delete of the block the round and the notch are made on"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 0,
+      "faces": 0,
+      "vertices": 0
+    }
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 0.0,
+      "body_count": 0,
+      "edges": 0,
+      "faces": 0,
+      "vertices": 0,
+      "volume_mm3": 0.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude"
+  ],
+  "ungraded": [
+    "results: SolidCraft computes it"
+  ],
+  "what": "timeline.delete of the block the round and the notch are made on",
+  "why_not": [
+    "the case ends with no body"
+  ]
+}

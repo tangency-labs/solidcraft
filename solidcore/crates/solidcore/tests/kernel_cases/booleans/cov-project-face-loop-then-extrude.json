@@ -1,0 +1,109 @@
+{
+  "area": "booleans",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "end": 6.896285307179586,
+              "radius": 10.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 0.6131
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "cov-project-face-loop-then-extrude",
+  "expected": {
+    "bbox": {
+      "max": [
+        10,
+        10,
+        25
+      ],
+      "min": [
+        -10,
+        -10,
+        0
+      ]
+    },
+    "body_count": 2,
+    "method": "the top's loop is the circle r10: extruded 5 from z=20, a second cylinder 500 pi beside the first 1000 pi",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 4712.38898038469,
+    "what": "a cylinder's top face projected onto a sketch 10 mm above it and extruded: the projected circle is the profile"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 6,
+      "faces": 6,
+      "vertices": 4
+    }
+  },
+  "result": [
+    {
+      "body": "Post",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 2199.114857517079,
+      "body_count": 2,
+      "edges": 6,
+      "faces": 6,
+      "vertices": 4,
+      "volume_mm3": 4712.388980406344
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "a cylinder's top face projected onto a sketch 10 mm above it and extruded: the projected circle is the profile",
+  "why_not": [
+    "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}

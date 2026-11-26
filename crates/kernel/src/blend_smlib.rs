@@ -90,6 +90,12 @@ pub(crate) fn chamfer_sides(body: &Body, edges: &[Vec3], d1: f64, side: crate::C
     imp::sides(body, edges, d1, side, flip)
 }
 
+/// [`chamfer_sides`] with `d1` back along the face whose outward normal at the middle of its edge
+/// leans most along `first` (the first of the edge's two faces where they lean alike).
+pub(crate) fn chamfer_sides_along(body: &Body, edges: &[Vec3], d1: f64, side: crate::ChamferSide, first: Vec3) -> Result<Body> {
+    imp::sides_along(body, edges, d1, side, first)
+}
+
 /// One edge rounded with the radius `spline` (checked by the caller) along it from the end
 /// nearest `start` ([`crate::fillet_variable_spline`]).
 pub(crate) fn fillet_variable(body: &Body, edge_at: Vec3, start: Vec3, spline: &RadiusSpline) -> Result<Body> {
@@ -240,6 +246,7 @@ mod imp {
         match turn {
             crate::FilletTurn::Mitre => Turn::Mitre,
             crate::FilletTurn::Swept => Turn::Swept,
+            crate::FilletTurn::Auto => Turn::Auto,
         }
     }
 
@@ -394,6 +401,10 @@ mod imp {
     }
 
     pub(super) fn sides(body: &Body, edges: &[Vec3], d1: f64, side: crate::ChamferSide, flip: bool) -> Result<Body> {
+        sides_along(body, edges, d1, side, Vec3::new(0.0, 0.0, if flip { -1.0 } else { 1.0 }))
+    }
+
+    pub(super) fn sides_along(body: &Body, edges: &[Vec3], d1: f64, side: crate::ChamferSide, first: Vec3) -> Result<Body> {
         body.require_brep("chamfer")?;
         sizes_ok("chamfer", &vec![d1; edges.len()])?;
         let picked = resolve(body, edges)?;
@@ -402,9 +413,8 @@ mod imp {
             crate::ChamferSide::Distance(d) => ChamferSecond::Distance(d),
             crate::ChamferSide::Angle(a) => ChamferSecond::Angle(a),
         };
-        let up = if flip { [0.0, 0.0, -1.0] } else { [0.0, 0.0, 1.0] };
         let tol = pick_tolerance(body);
-        run(body, "chamfer", &picked.edges, |b| b.chamfer_sides(&picked.points, tol, d1, second, up))
+        run(body, "chamfer", &picked.edges, |b| b.chamfer_sides(&picked.points, tol, d1, second, [first.x, first.y, first.z]))
             .map_err(|e| crate::blend::with_continuation(e, next))
     }
 
@@ -454,51 +464,61 @@ mod imp {
                     None => failed(what, "operation", SmError::CornerRefused { corner }),
                 },
                 SmError::NoEffect => KernelError::Failed(format!("SMLib made no change: the {what} reported success but built no face")),
-                SmError::CornerUnsupported => KernelError::Invalid(format!(
-                    "not supported yet: the {what} meets a corner of this kind, which SMLib's blends do not handle yet (where its edges \
-                     run on tangentially into each other, or meet in a way no blend corner builds)"
-                )),
+                SmError::CornerUnsupported { why, at } => {
+                    let at = at.map(|[x, y, z]| format!(" at ({x:.3}, {y:.3}, {z:.3})")).unwrap_or_default();
+                    let why = why.map(|why| format!(": {why}")).unwrap_or_default();
+                    KernelError::Invalid(format!(
+                        "not supported yet: the {what} meets a corner of this kind{at}, which SMLib's blends do not handle yet (where its edges \
+                         run on tangentially into each other, or meet in a way no blend corner builds){why}"
+                    ))
+                }
                 SmError::NoRoom => KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow")),
                 // Not a size a smaller radius fixes: solidcore builds no swept turn there.
                 SmError::TurnRefused { why, at, .. } => {
                     let at = at.map(|[x, y, z]| format!(" at ({x:.3}, {y:.3}, {z:.3})")).unwrap_or_default();
                     KernelError::Invalid(format!("the {what}'s swept corner{at} is not built: {why}"))
                 }
-                SmError::TooLarge { size, kind, at, why } => {
+                SmError::TooLarge { size, kind, at, face, why } => {
                     let mut beside = match at {
                         Some([x, y, z]) => format!(", at the edge at ({x:.3}, {y:.3}, {z:.3})"),
                         None => String::new(),
                     };
+                    if let Some([x, y, z]) = face {
+                        beside = format!("{beside}, limited by the face containing ({x:.3}, {y:.3}, {z:.3})");
+                    }
                     if let Some(why) = why {
-                        beside = format!("{beside}: {}", why.words());
+                        beside = format!("{beside}: {}", why.words_for(kind));
                     }
                     let fits = match kind {
-                        solidcraft_smlib::FitKind::Scale => {
-                            format!("the largest that fits is {} times the distances given", crate::blend::trimmed_mm(size))
-                        }
+                        solidcraft_smlib::FitKind::Scale => crate::blend::scale_fit_note(size),
                         kind => crate::blend::largest_fit_note(kind.word(), size),
                     };
                     KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow{beside}; {fits}"))
                 }
                 SmError::Unported(why) => KernelError::Invalid(format!("not supported yet: {why}")),
+                // Not too large: a longer setback. Named as building only where solidcore's fill
+                // is the corner; where another patch replaces it (a G2 corner) it is what
+                // solidcore's corner needs, which that patch may not fit.
+                SmError::SetbackTooShort { least, at, builds } => {
+                    let at = at.map(|[x, y, z]| format!(" at ({x:.3}, {y:.3}, {z:.3})")).unwrap_or_default();
+                    let least = crate::blend::trimmed_mm(least);
+                    KernelError::Invalid(if builds {
+                        format!("the setback{at} of the {what} is too short for its corner's fill; {}{least} mm", crate::blend::SETBACK_AT_LEAST)
+                    } else {
+                        format!("the setback{at} of the {what} is too short for its corner's fill: solidcore's corner needs a setback of at least {least} mm")
+                    })
+                }
                 e => failed(what, "operation", e),
             })?;
-            // Checked here unless the evaluation's validation mode leaves it to the feature's end
-            // (`crate::validation`).
             let step = crate::validation::step();
-            if step == crate::validation::Step::Check {
-                let check = r.check(CheckLevel::All).map_err(|e| failed(what, "check", e))?;
-                if !check.is_valid() {
-                    let input_fails = sb.check(CheckLevel::All).is_ok_and(|c| !c.is_valid());
-                    let step = if input_fails {
-                        "SMLib's check refuses the result (the input already fails it)"
-                    } else {
-                        "SMLib's check refuses the result"
-                    };
-                    return Err(failed(what, step, check));
-                }
-            }
             let (out, result_order) = body_from_smlib_ordered(&r)?;
+            // Checked here when the evaluation's validation mode checks each step
+            // (`crate::validation`), on the decoded record every later operation imports (#22138).
+            if step == crate::validation::Step::Check
+                && let crate::validation::DecodedCheck::Refused(detail) = crate::validation::check_decoded(&format!("SMLib {what}"), out.record())?
+            {
+                return Err(failed(what, &crate::validation::refuses([sb.check(CheckLevel::All)].into_iter()), detail));
+            }
             let history = match (order, &result_order) {
                 (Some(o), Some(ro)) => match r.history().map_err(|e| failed(what, "history", e))?.history(&[o], ro) {
                     Ok(mut h) => {
@@ -515,11 +535,7 @@ mod imp {
                 _ => None,
             };
             let out = out.with_checked_history(history, &record::counts(&[body])).inherit_regularization_protection(body);
-            let out = if step == crate::validation::Step::Defer {
-                out.left_unchecked(&format!("SMLib {what}"), crate::validation::Checked::AsIs, r)
-            } else {
-                out
-            };
+            let out = if step == crate::validation::Step::Defer { out.left_unchecked(&format!("SMLib {what}"), &[body]) } else { out };
             Ok((out, extra, result_order))
         })
     }
@@ -691,6 +707,56 @@ mod tests {
         }
     }
 
+    /// The reporter's case of #12128: a chamfer wider than the rounds at the corners of a block's
+    /// top edge is refused, naming the largest distance that fits (the rounds' radius), in a
+    /// chamfer's words: no rolling ball, which a chamfer has not.
+    #[test]
+    fn a_chamfer_too_wide_for_the_rounded_corners_is_refused_in_its_own_words() {
+        let block = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(60.0, 30.0, 10.0)).unwrap();
+        let uprights = [Vec3::new(0.0, 0.0, 5.0), Vec3::new(60.0, 0.0, 5.0), Vec3::new(60.0, 30.0, 5.0), Vec3::new(0.0, 30.0, 5.0)];
+        let rounded = crate::fillet(&block, &uprights, 2.5).unwrap();
+        // The top edge all round: the four straight edges and the four quarter circles.
+        let c = 2.5 - 2.5 * std::f64::consts::FRAC_1_SQRT_2;
+        let top = [
+            Vec3::new(30.0, 0.0, 10.0),
+            Vec3::new(60.0, 15.0, 10.0),
+            Vec3::new(30.0, 30.0, 10.0),
+            Vec3::new(0.0, 15.0, 10.0),
+            Vec3::new(c, c, 10.0),
+            Vec3::new(60.0 - c, c, 10.0),
+            Vec3::new(60.0 - c, 30.0 - c, 10.0),
+            Vec3::new(c, 30.0 - c, 10.0),
+        ];
+        assert!(imp::blend(&rounded, "chamfer", Kind::Chamfer, &top, &[2.0; 8]).is_ok(), "a 2 mm chamfer fits the 2.5 mm rounds");
+        let e = imp::blend(&rounded, "chamfer", Kind::Chamfer, &top, &[3.0; 8]).unwrap_err();
+        let KernelError::TooLarge(text) = &e else { panic!("{e:?}") };
+        assert!(text.contains("the largest distance that fits is 2.5"), "{text}");
+        assert!(!text.contains("ball") && !text.contains("roll"), "{text}");
+    }
+
+    /// A fixed-angle chamfer's refusal identifies the edge, limiting top face and first
+    /// distance. Two explicit setbacks retain the common scale of both inputs.
+    #[test]
+    fn a_distance_angle_refusal_names_the_limiting_face_and_first_distance() {
+        let body = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(30.0, 0.6, 10.0)).unwrap();
+        let picks = [Vec3::new(15.0, 0.0, 10.0), Vec3::new(15.0, 0.6, 10.0)];
+        let angle = 80.0_f64.to_radians();
+        for second in [crate::ChamferSide::Angle(angle), crate::ChamferSide::Distance(angle.tan())] {
+            let e = imp::sides(&body, &picks, 1.0, second, false).unwrap_err();
+            let KernelError::TooLarge(text) = e else { panic!("{e:?}") };
+            assert!(text.contains("at the edge at ("), "{text}");
+            assert!(text.contains("limited by the face containing ("), "{text}");
+            match second {
+                crate::ChamferSide::Angle(_) => {
+                    assert!(text.contains("the largest distance that fits is "), "{text}");
+                    let named = crate::named_fit(&text).unwrap();
+                    assert!(named > 0.29 && named <= 0.3, "{text}");
+                }
+                crate::ChamferSide::Distance(_) => assert!(text.contains("times the distances given"), "{text}"),
+            }
+        }
+    }
+
     #[test]
     fn each_edge_takes_its_own_size() {
         let b = cube();
@@ -807,5 +873,72 @@ mod tests {
         assert!(chain.len() > 1, "{chain:?}");
         let run_on = fillet(&b, &[vertical], 2.0, FilletTurn::Mitre).unwrap();
         assert!(volume(&run_on) < volume(&b));
+    }
+
+    /// Issue #22190: a 3x45° profile chamfer meeting an obliquely sloped outer wall (~168°
+    /// corner) joined with a rectangular boss flush under the bottom flat, then R1 filleted
+    /// on the chamfer's end edges. At the sloped corner the top-face rail end projects
+    /// `cot(theta) = 61/13 ≈ 4.69 mm` past the chamfer vertex — farther than the chamfer's
+    /// 4.24 mm span — so both base-surface trace extension and cylinder axial extension must
+    /// account for oblique end reach along the filleted edge.
+    #[test]
+    fn oblique_chamfer_end_fillet_after_joined_boss_succeeds() {
+        use crate::BoolOp;
+        use solidcore_record::{Loop2, Plane, Region2, Vec2};
+
+        let make_bar = |len: f64| -> Body {
+            let pts = [Vec2::new(-24.0, 40.0), Vec2::new(0.0, 3.0), Vec2::new(3.0, 0.0), Vec2::new(45.0, 0.0), Vec2::new(45.0, 40.0)];
+            crate::extrude(&Plane::XY, &[Region2 { outer: Loop2::polygon(&pts), holes: vec![] }], 0.0, len).unwrap().remove(0)
+        };
+        let make_boss = |y_top: f64, bevel45: bool, len: f64| -> Body {
+            let h = 1.5;
+            let pts = if bevel45 {
+                [Vec2::new(3.0, y_top), Vec2::new(3.0 + h, y_top - h), Vec2::new(11.6, y_top - h), Vec2::new(11.6, y_top)]
+            } else {
+                [Vec2::new(3.0, y_top), Vec2::new(3.0, y_top - h), Vec2::new(11.6, y_top - h), Vec2::new(11.6, y_top)]
+            };
+            crate::extrude(&Plane::XY, &[Region2 { outer: Loop2::polygon(&pts), holes: vec![] }], 0.0, len).unwrap().remove(0)
+        };
+
+        // Exact cross-section area of bar + rectangular boss:
+        // bar = 45*40 + 0.5*24*37 - 0.5*3*3 = 2239.5; boss = 8.6*1.5 = 12.9; total = 2252.4.
+        // One R1 end fillet along the 3*sqrt(2) chamfer removes:
+        //   3*sqrt(2)*(1 - pi/4) + (cot(theta_top) - cot(45°))*(5/6 - pi/4)
+        // where cot(theta_top) = 61/13 and cot(45°) = 1 (vertical boss wall at x = 3).
+        let one_end_removal = 3.0 * 2.0_f64.sqrt() * QUARTER + (48.0 / 13.0) * (5.0 / 6.0 - std::f64::consts::FRAC_PI_4);
+
+        // Short bar (len = 50), flush rectangular boss, single end edge.
+        let joined_50 = crate::boolean(&make_bar(50.0), &make_boss(0.0, false, 50.0), BoolOp::Union).unwrap().unwrap();
+        let r50 = fillet(&joined_50, &[Vec3::new(1.5, 1.5, 50.0)], 1.0, FilletTurn::Mitre).unwrap();
+        let v50 = crate::validity(&r50);
+        assert!(v50.record.is_ok(), "{:?}", v50.record);
+        assert!(matches!(v50.smlib, Some(crate::SmlibCheck::Valid)), "{:?}", v50.smlib);
+        let want_50 = 2252.4 * 50.0 - one_end_removal;
+        assert!((volume(&r50) - want_50).abs() < 1e-3, "got {}, want {want_50}", volume(&r50));
+
+        // Full-length bar (len = 300), flush rectangular boss, both chamfer end edges.
+        let joined_300 = crate::boolean(&make_bar(300.0), &make_boss(0.0, false, 300.0), BoolOp::Union).unwrap().unwrap();
+        let r300 = fillet(&joined_300, &[Vec3::new(1.5, 1.5, 300.0), Vec3::new(1.5, 1.5, 0.0)], 1.0, FilletTurn::Mitre).unwrap();
+        let v300 = crate::validity(&r300);
+        assert!(v300.record.is_ok(), "{:?}", v300.record);
+        assert!(matches!(v300.smlib, Some(crate::SmlibCheck::Valid)), "{:?}", v300.smlib);
+        let want_300 = 2252.4 * 300.0 - 2.0 * one_end_removal;
+        assert!((volume(&r300) - want_300).abs() < 1e-2, "got {}, want {want_300}", volume(&r300));
+
+        // 45° beveled boss shifted by -5e-7 under the flat (single edge and tangent chain).
+        let joined_bevel = crate::boolean(&make_bar(50.0), &make_boss(-5e-7, true, 50.0), BoolOp::Union).unwrap().unwrap();
+        let seed = Vec3::new(1.5, 1.5, 50.0);
+        let single = fillet(&joined_bevel, &[seed], 1.0, FilletTurn::Mitre).unwrap();
+        let vs = crate::validity(&single);
+        assert!(vs.record.is_ok(), "{:?}", vs.record);
+        assert!(matches!(vs.smlib, Some(crate::SmlibCheck::Valid)), "{:?}", vs.smlib);
+        assert!(volume(&single) < volume(&joined_bevel));
+        let chain = crate::tangent_chain(&joined_bevel, &[seed]).unwrap();
+        assert!(chain.len() > 1, "{chain:?}");
+        let chained = fillet(&joined_bevel, &chain, 1.0, FilletTurn::Mitre).unwrap();
+        let vc = crate::validity(&chained);
+        assert!(vc.record.is_ok(), "{:?}", vc.record);
+        assert!(matches!(vc.smlib, Some(crate::SmlibCheck::Valid)), "{:?}", vc.smlib);
+        assert!(volume(&chained) < volume(&joined_bevel));
     }
 }

@@ -1,0 +1,38 @@
+{
+  "area": "inspect",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-compare-refuses-a-tolerance-out-of-range",
+  "expected": {
+    "method": "the tolerance must be 0.001 to 10 mm: 0 is refused",
+    "outcome": "refused",
+    "refusal": "tolerance",
+    "source": "analytic",
+    "sources": [],
+    "what": "compare with a 0 mm tolerance"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 3 (inspect.compare): invalid parameters for `inspect.compare`: `tolerance` must be a number from 0.001 to 10",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 3 (inspect.compare): invalid parameters for `inspect.compare`: `tolerance` must be a number from 0.001 to 10",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "compare with a 0 mm tolerance",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 3 (inspect.compare): invalid parameters for `inspect.compare`: `tolerance` must be a number from 0.001 to 10"
+  ]
+}

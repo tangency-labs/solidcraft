@@ -5,15 +5,18 @@
 //! and go out as downloads (exports, and "Download design"). Where the File System Access API
 //! exists a design also lives on the computer's disk, saved and opened through the browser's file
 //! dialogs (`disk.rs`). An autosave of unsaved work is kept in OPFS and offered again after a
-//! reload or a crash.
+//! reload or a crash. With "keep unsaved work in this browser" on, each open design's unsaved
+//! changes are kept there instead, one copy per design (`keep.rs`, #10220).
 
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::rc::Rc;
+use std::sync::mpsc::{Receiver, Sender};
 
 use js_sys::{Array, Function, Object, Reflect, Uint8Array};
 use solidcraft_engine::io::vfs;
 
-use crate::disk;
+use crate::{disk, keep};
 use wasm_bindgen::{JsCast as _, JsValue, closure::Closure};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::{
@@ -32,7 +35,7 @@ const RECOVERY: &str = "recovery.sc";
 /// The autosaves earlier releases kept, newest first, one per entry of
 /// `solidcraft_engine::io::LEGACY_DESIGN_EXTS` (compatibility shim, docs/compatibility.md): the
 /// newest is recovered when there is no current one.
-const LEGACY_RECOVERY: [&str; 2] = ["recovery.solidcraft", "recovery.solvecraft"];
+const LEGACY_RECOVERY: [&str; 1] = ["recovery.solidcraft"];
 const RECOVERY_META: &str = "recovery.json";
 
 /// What to do with a file brought in from the computer.
@@ -77,8 +80,33 @@ pub struct Files {
     pub panel: Cell<bool>,
     /// An autosave left by an earlier session: its design's name and file.
     pub recovery: RefCell<Option<(String, Option<String>)>>,
+    /// This page began an autosave, which may still be writing when the page leaves.
+    pub autosave_owned: Cell<bool>,
+    /// The current explicit opt-out of offering recovery after a non-cached departure.
+    pub suppress_recovery_after_leave: Cell<bool>,
     /// The app's context, to wake it when a browser call finishes.
     pub ctx: RefCell<Option<egui::Context>>,
+    /// This page's id: the copies it keeps are named after it (`keep::entry_id`).
+    pub keep_page: RefCell<String>,
+    /// Kept copies stored by this page, and the design revision each holds once its write ended.
+    pub kept: RefCell<std::collections::HashMap<String, Option<u64>>>,
+    /// Kept copies being written or removed now (one browser call at a time per copy).
+    pub keeping: RefCell<std::collections::HashSet<String>>,
+    /// When (ms) the last write of a copy failed, to wait before trying again (`keep::may_write`).
+    pub kept_failed: RefCell<std::collections::HashMap<String, f64>>,
+    /// Copies earlier pages left, newer than their design's last save: offered at start.
+    pub keep_offered: RefCell<Vec<keep::Entry>>,
+    /// Only one browser write at a time. Each prepared save retains its own acknowledgment.
+    writes: RefCell<VecDeque<Write>>,
+    writing: Cell<bool>,
+}
+
+type SaveOutcome = Result<(), String>;
+
+struct Write {
+    path: String,
+    bytes: Vec<u8>,
+    done: Option<(vfs::Snapshot, Sender<SaveOutcome>)>,
 }
 
 impl Files {
@@ -115,9 +143,6 @@ thread_local! {
 
 /// Local storage keys of stored files (under the channel's name, see `channel.rs`).
 const LOCAL_PREFIX: &str = "solidcraft.file.";
-/// Local-storage files kept by earlier releases (compatibility shim, docs/compatibility.md):
-/// still listed and opened; removing one removes either key.
-const LEGACY_LOCAL_PREFIX: &str = "solvecraft.file.";
 
 fn local() -> Result<web_sys::Storage, String> {
     web_sys::window().and_then(|w| w.local_storage().ok().flatten()).ok_or_else(|| "this browser keeps no local storage".to_string())
@@ -218,7 +243,6 @@ async fn write_file(name: &str, bytes: &[u8]) -> Result<(), String> {
 async fn remove_file(name: &str) -> Result<(), String> {
     if local_only() {
         let st = local()?;
-        st.remove_item(&format!("{LEGACY_LOCAL_PREFIX}{name}")).map_err(err)?;
         return st.remove_item(&crate::channel::key(&format!("{LOCAL_PREFIX}{name}"))).map_err(err);
     }
     let dir = root().await?;
@@ -233,9 +257,7 @@ fn read_local() -> Result<Vec<(String, Vec<u8>, f64)>, String> {
     for i in 0..st.length().unwrap_or(0).min(10_000) {
         let Some(k) = st.key(i).ok().flatten() else { continue };
         let own = crate::channel::key(LOCAL_PREFIX);
-        // The old names belong to stable; a pre-release channel has none.
-        let legacy = crate::channel::current().is_empty().then_some(LEGACY_LOCAL_PREFIX);
-        let Some(name) = k.strip_prefix(own.as_str()).or_else(|| legacy.and_then(|l| k.strip_prefix(l))) else { continue };
+        let Some(name) = k.strip_prefix(own.as_str()) else { continue };
         if let Some(v) = st.get_item(&k).ok().flatten() {
             out.push((name.to_string(), decode(&v), 0.0));
         }
@@ -280,7 +302,8 @@ async fn read_all() -> Result<Vec<(String, Vec<u8>, f64)>, String> {
 
 /// Ask the browser to keep the storage (not evict it under pressure), then load every stored
 /// file into the engine's files.
-pub fn start(files: &Rc<Files>) {
+pub fn start(files: &Rc<Files>, suppress_recovery_after_leave: bool) {
+    files.suppress_recovery_after_leave.set(suppress_recovery_after_leave);
     if let Some(sm) = storage_manager().filter(|sm| has(sm, "persist"))
         && let Ok(p) = sm.persist()
     {
@@ -288,6 +311,14 @@ pub fn start(files: &Rc<Files>) {
             let _ = JsFuture::from(p).await;
         });
     }
+    let page = keep::page_id(js_sys::Date::now(), js_sys::Math::random());
+    let previous = remember_page(&page);
+    let reload_owner = reloaded().then_some(previous).flatten();
+    if let Some(owner) = reload_owner.as_deref() {
+        clear_left_owner(owner);
+    }
+    hold_page_lock(&page);
+    *files.keep_page.borrow_mut() = page;
     let files = files.clone();
     spawn_local(async move {
         match disk::known_ids().await {
@@ -300,6 +331,19 @@ pub fn start(files: &Rc<Files>) {
                     files.say("This page can't use the browser's file storage (it needs https or localhost): designs are kept in local storage, a few MB at most.", false);
                 }
                 let mut entries = Vec::new();
+                let kept = kept_copies(&all);
+                let meta = all
+                    .iter()
+                    .find(|(name, _, _)| name == RECOVERY_META)
+                    .and_then(|(_, bytes, _)| serde_json::from_slice::<serde_json::Value>(bytes).ok());
+                let payload = all.iter().find(|(name, _, _)| name == RECOVERY).map(|(_, bytes, _)| bytes.as_slice());
+                let given_up = match (meta.as_ref(), payload) {
+                    (Some(meta), Some(bytes)) => {
+                        let left = crate::recovery_owner(meta).filter(|owner| was_left(owner));
+                        crate::autosave_given_up(meta, bytes, left, reload_owner.as_deref(), files.suppress_recovery_after_leave.get())
+                    }
+                    _ => false,
+                };
                 let has_recovery = all.iter().any(|(n, _, _)| n == RECOVERY);
                 let legacy = (!has_recovery).then(|| LEGACY_RECOVERY.into_iter().find(|l| all.iter().any(|(n, _, _)| n == l))).flatten();
                 for (name, bytes, modified) in all {
@@ -315,7 +359,7 @@ pub fn start(files: &Rc<Files>) {
                         *files.recovery.borrow_mut() = Some((n, meta["path"].as_str().map(str::to_string)));
                         continue;
                     }
-                    if name != RECOVERY {
+                    if name != RECOVERY && keep::parse_name(&name).is_none() {
                         entries.push(Entry { name: name.clone(), size: bytes.len() as u64, modified });
                     }
                     vfs::insert(&format!("{OPFS}{name}"), bytes);
@@ -326,6 +370,12 @@ pub fn start(files: &Rc<Files>) {
                 if !vfs::exists(&format!("{OPFS}{RECOVERY}")) {
                     *files.recovery.borrow_mut() = None;
                 }
+                // Do not offer work its own page intentionally left. Keep the files: another
+                // tab can write shared recovery after our snapshot, so deleting here is unsafe.
+                if given_up {
+                    *files.recovery.borrow_mut() = None;
+                }
+                sort_kept(&files, kept, &live_pages().await);
             }
             Err(e) => files.say(format!("browser storage: {e}"), true),
         }
@@ -338,24 +388,7 @@ pub fn start(files: &Rc<Files>) {
 pub fn flush(files: &Rc<Files>) {
     for (path, bytes) in vfs::take_writes() {
         match disk::route(&path) {
-            disk::WriteTo::Opfs => {
-                let name = path.strip_prefix(OPFS).unwrap_or(&path).to_string();
-                {
-                    let mut e = files.entries.borrow_mut();
-                    e.retain(|x| x.name != name);
-                    if name != RECOVERY && name != RECOVERY_META {
-                        e.push(Entry { name: name.clone(), size: bytes.len() as u64, modified: js_sys::Date::now() });
-                        e.sort_by_key(|a| a.name.to_lowercase());
-                    }
-                }
-                let files = files.clone();
-                spawn_local(async move {
-                    if let Err(e) = write_file(&name, &bytes).await {
-                        files.say(format!("{name}: {e}"), true);
-                    }
-                });
-            }
-            disk::WriteTo::Disk => disk::enqueue(files, &path, bytes),
+            disk::WriteTo::Opfs | disk::WriteTo::Disk => enqueue(files, Write { path, bytes, done: None }),
             disk::WriteTo::Download => {
                 let name = path.strip_prefix(DOWNLOADS).unwrap_or(&path);
                 if let Err(e) = download(name, &bytes) {
@@ -365,6 +398,66 @@ pub fn flush(files: &Rc<Files>) {
             disk::WriteTo::Memory => {}
         }
     }
+}
+
+/// A prepared Save has no effect on the engine's files or the file list until the browser
+/// closes its writable stream (or local storage accepts the value).
+pub fn persist_design(files: &Rc<Files>, path: String, bytes: Vec<u8>) -> Receiver<SaveOutcome> {
+    flush(files);
+    let snapshot = vfs::snapshot(&path);
+    let (done, reply) = std::sync::mpsc::channel();
+    enqueue(files, Write { path, bytes, done: Some((snapshot, done)) });
+    reply
+}
+
+fn enqueue(files: &Rc<Files>, write: Write) {
+    files.writes.borrow_mut().push_back(write);
+    if files.writing.replace(true) {
+        return;
+    }
+    let files = files.clone();
+    spawn_local(async move {
+        loop {
+            let write = files.writes.borrow_mut().pop_front();
+            let Some(Write { path, bytes, done }) = write else { break };
+            let result = match disk::route(&path) {
+                disk::WriteTo::Opfs => store_opfs(&files, path.strip_prefix(OPFS).unwrap_or(&path), &bytes).await,
+                disk::WriteTo::Disk => disk::write(&path, &bytes).await,
+                disk::WriteTo::Download => download(path.strip_prefix(DOWNLOADS).unwrap_or(&path), &bytes),
+                // Explicit virtual paths (for example an API fixture under /upload) use the
+                // in-memory filesystem only. The regular Save picker never returns one.
+                disk::WriteTo::Memory => Ok(()),
+            };
+            if let Some((snapshot, done)) = done {
+                if result.is_ok() {
+                    vfs::insert_if_unchanged(&path, snapshot, bytes);
+                    // This acknowledged write supersedes any earlier write the old command
+                    // queue asked the shell to mark unsaved.
+                    files.unsaved.borrow_mut().retain(|failed| failed != &path);
+                }
+                let _ = done.send(result.map_err(|e| format!("{path}: {e}")));
+            } else if let Err(e) = result {
+                if disk::route(&path) == disk::WriteTo::Disk {
+                    files.failed_disk(&path, &e);
+                } else {
+                    files.say(format!("{path}: {e}"), true);
+                }
+            }
+            files.wake();
+        }
+        files.writing.set(false);
+    });
+}
+
+async fn store_opfs(files: &Files, name: &str, bytes: &[u8]) -> SaveOutcome {
+    write_file(name, bytes).await?;
+    if name != RECOVERY && name != RECOVERY_META && keep::parse_name(name).is_none() {
+        let mut entries = files.entries.borrow_mut();
+        entries.retain(|entry| entry.name != name);
+        entries.push(Entry { name: name.to_string(), size: bytes.len() as u64, modified: js_sys::Date::now() });
+        entries.sort_by_key(|entry| entry.name.to_lowercase());
+    }
+    Ok(())
 }
 
 /// Hand `bytes` to the user as a download named `name`.
@@ -390,6 +483,29 @@ pub fn download(name: &str, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+/// Open a document made in memory (`name`, of media type `kind`) in a new tab, where the browser
+/// shows it with its own viewer (a PDF, to print). Refused when the browser blocks the new tab.
+pub fn open_in_tab(name: &str, kind: &str, bytes: &[u8]) -> Result<(), String> {
+    let window = web_sys::window().ok_or("no window")?;
+    let parts = Array::new();
+    parts.push(&Uint8Array::from(bytes));
+    let opts = web_sys::BlobPropertyBag::new();
+    opts.set_type(kind);
+    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &opts).map_err(err)?;
+    let url = web_sys::Url::create_object_url_with_blob(&blob).map_err(err)?;
+    let opened = window.open_with_url_and_target(&url, "_blank").map_err(err)?;
+    if opened.is_none() {
+        let _ = web_sys::Url::revoke_object_url(&url);
+        return Err(format!("the browser blocked a new tab for {name}: allow pop-ups for this site"));
+    }
+    // The tab keeps what it loaded; the URL goes once it has had time to.
+    let revoke = Closure::once_into_js(move || {
+        let _ = web_sys::Url::revoke_object_url(&url);
+    });
+    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(revoke.unchecked_ref(), 60_000);
+    Ok(())
+}
+
 /// Delete a stored design.
 pub fn delete(files: &Rc<Files>, name: &str) {
     let _ = vfs::remove(&format!("{OPFS}{name}"));
@@ -409,7 +525,7 @@ pub fn rename(files: &Rc<Files>, from: &str, to: &str) -> Result<(), String> {
     if to.is_empty() || to.contains('/') || to.contains('\\') || to.len() > 200 {
         return Err("give a file name without slashes".into());
     }
-    if files.entries.borrow().iter().any(|e| e.name == to) {
+    if vfs::exists(&format!("{OPFS}{to}")) || files.entries.borrow().iter().any(|e| e.name == to) {
         return Err(format!("there is already a file named {to}"));
     }
     let bytes = vfs::read(&format!("{OPFS}{from}"), solidcraft_engine::io::MAX_DESIGN_BYTES).map_err(|e| e.to_string())?;
@@ -431,7 +547,14 @@ pub fn autosave(files: &Rc<Files>, doc: Option<(&solidcraft_engine::doc::Documen
                     return;
                 }
             };
-            let meta = serde_json::json!({"name": d.name, "path": path, "saved_at": js_sys::Date::now()}).to_string();
+            let stamp = js_sys::Date::now();
+            files.autosave_owned.set(true);
+            let meta = serde_json::json!({
+                "name": d.name, "path": path, "saved_at": stamp,
+                "recovery_owner": files.keep_page.borrow().as_str(),
+                "recovery_sha256": crate::recovery_digest(&bytes),
+            })
+            .to_string();
             spawn_local(async move {
                 let r = async {
                     write_file(RECOVERY, &bytes).await?;
@@ -442,14 +565,82 @@ pub fn autosave(files: &Rc<Files>, doc: Option<(&solidcraft_engine::doc::Documen
                 }
             });
         }
-        None => spawn_local(async move {
-            let _ = remove_file(RECOVERY).await;
-            for legacy in LEGACY_RECOVERY {
-                let _ = remove_file(legacy).await;
-            }
-            let _ = remove_file(RECOVERY_META).await;
-        }),
+        None => {
+            files.autosave_owned.set(false);
+            spawn_local(async move {
+                let _ = remove_file(RECOVERY).await;
+                for legacy in LEGACY_RECOVERY {
+                    let _ = remove_file(legacy).await;
+                }
+                let _ = remove_file(RECOVERY_META).await;
+            });
+        }
     }
+}
+
+/// Fixed journal slots keep Leave intents bounded and separate between release channels.
+/// Each value is an exact page owner; a collision can only cause an extra recovery prompt.
+fn left_key(slot: usize) -> String {
+    crate::channel::key(&format!("solidcraft.recovery.left.{slot}"))
+}
+
+/// The page is going away without the browser's back/forward cache. Only an explicit recovery
+/// opt-out permits a marker, because the browser may skip its native Leave prompt.
+/// Mark this page, not its last attempted timestamp: an older write may remain after a failed
+/// attempt, and an in-flight write may finish after this synchronous notification.
+pub fn leaving(files: &Files) {
+    // This page may have returned from BFCache after another same-tab page changed the
+    // session value. A real departure/reload must identify this page again, not that one.
+    let _ = remember_page(&files.keep_page.borrow());
+    if !files.suppress_recovery_after_leave.get() || !files.autosave_owned.get() {
+        return;
+    }
+    let Ok(storage) = local() else { return };
+    let markers = (0..crate::RECOVERY_LEAVE_SLOTS)
+        .map(|slot| storage.get_item(&left_key(slot)).ok().flatten().and_then(|text| crate::LeaveMarker::parse(&text)))
+        .collect::<Vec<_>>();
+    let owner = files.keep_page.borrow();
+    let Some((slot, marker)) = crate::next_leave_marker(&markers, &owner) else { return };
+    let text = serde_json::json!({"owner": marker.owner, "order": marker.order}).to_string();
+    let key = left_key(slot);
+    if storage.set_item(&key, &text).is_ok() && storage.get_item(&key).ok().flatten().as_deref() != Some(text.as_str()) {
+        log::info!("recovery Leave intent changed concurrently");
+    }
+}
+
+fn was_left(owner: &str) -> bool {
+    let Ok(storage) = local() else { return false };
+    (0..crate::RECOVERY_LEAVE_SLOTS).any(|slot| {
+        storage.get_item(&left_key(slot)).ok().flatten().and_then(|text| crate::LeaveMarker::parse(&text)).is_some_and(|m| m.owner == owner)
+    })
+}
+
+/// A reload changes only the marker belonging to the prior page in this same tab/channel.
+fn clear_left_owner(owner: &str) {
+    let Ok(storage) = local() else { return };
+    for slot in 0..crate::RECOVERY_LEAVE_SLOTS {
+        let key = left_key(slot);
+        if storage.get_item(&key).ok().flatten().and_then(|text| crate::LeaveMarker::parse(&text)).is_some_and(|m| m.owner == owner) {
+            let _ = storage.remove_item(&key);
+        }
+    }
+}
+
+/// Session storage survives a reload, but is separate between tabs. Update the identity before
+/// async startup so a tab reloading an unrelated abandoned recovery cannot exempt its owner.
+fn remember_page(page: &str) -> Option<String> {
+    let storage = web_sys::window()?.session_storage().ok().flatten()?;
+    let key = crate::channel::key("solidcraft.recovery.page");
+    let previous = storage.get_item(&key).ok().flatten().filter(|owner| crate::valid_recovery_owner(owner));
+    storage.set_item(&key, page).ok()?;
+    previous
+}
+
+/// This page was loaded by reloading the last one (the browser's navigation timing says so).
+fn reloaded() -> bool {
+    let Some(performance) = web_sys::window().and_then(|w| w.performance()) else { return false };
+    let entry = performance.get_entries_by_type("navigation").get(0);
+    Reflect::get(&entry, &"type".into()).ok().and_then(|t| t.as_string()).is_some_and(|t| t == "reload")
 }
 
 /// A stored path for `name` that no stored file has: `name`, else `name (2)`, `name (3)`…
@@ -473,7 +664,15 @@ pub fn recovery_path() -> String {
 /// A recovery file lives in OPFS, but its relative links belong to the original design's
 /// folder (which can be on disk). Resolve them before Open sees the temporary file location.
 pub fn prepare_recovery(original_path: Option<&str>) -> Result<String, String> {
-    let path = recovery_path();
+    prepare_copy(recovery_path(), original_path)
+}
+
+/// The same for a kept copy (#10220).
+pub fn prepare_kept(id: &str, original_path: Option<&str>) -> Result<String, String> {
+    prepare_copy(format!("{OPFS}{}", keep::design_file(id)), original_path)
+}
+
+fn prepare_copy(path: String, original_path: Option<&str>) -> Result<String, String> {
     let bytes = vfs::read(&path, solidcraft_engine::io::MAX_DESIGN_BYTES).map_err(|e| e.to_string())?;
     let mut doc = solidcraft_engine::io::read_design(&bytes).map_err(|e| e.to_string())?;
     solidcraft_engine::resolve_design_links(&mut doc, original_path);
@@ -533,10 +732,9 @@ fn input_picker(files: &Rc<Files>, intent: Intent) {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
     let Ok(input) = doc.create_element("input").map(|e| e.unchecked_into::<web_sys::HtmlInputElement>()) else { return };
     input.set_type("file");
-    // Everything the browser build imports, from the format registry: cadmpeg is pure Rust, so
-    // FreeCAD and Rhino files are part of it; plus the DXF and SVG drawings Open and Insert take.
-    let mut extensions = solidcraft_engine::io::formats::open_extensions(true);
-    extensions.extend(["dxf", "svg"]);
+    // Everything the browser build opens, from the format registry: cadmpeg is pure Rust, so
+    // FreeCAD and Rhino files are part of it, and so are the DXF and SVG drawings Open and Insert take.
+    let extensions = solidcraft_engine::io::formats::open_extensions(true);
     input.set_accept(&disk::input_accept(&extensions, apple_touch()));
     // Attached (hidden) while it is open: some browsers ignore a click on a detached input.
     let _ = input.set_attribute("style", "display:none");
@@ -645,4 +843,150 @@ pub fn take_drops(files: &Rc<Files>, raw: &mut egui::RawInput, theme: bool) {
             }
         });
     }
+}
+
+/// Hold this page's browser lock while it runs, so other tabs know its kept copies are in use
+/// (`keep.rs`). Browsers without the Web Locks API hold none; their copies are then offered by
+/// any later page.
+fn hold_page_lock(page: &str) {
+    let Some(locks) = web_locks() else { return };
+    let Ok(request) = Reflect::get(&locks, &"request".into()).and_then(|f| f.dyn_into::<Function>()) else { return };
+    // A promise that never settles: the lock is let go only when the page goes.
+    let hold = Closure::<dyn FnMut(JsValue) -> js_sys::Promise>::new(|_lock: JsValue| js_sys::Promise::new(&mut |_, _| {}));
+    let name = format!("{}{page}", keep::LOCK_PREFIX);
+    if let Err(e) = request.call2(&locks, &name.into(), hold.as_ref().unchecked_ref()) {
+        log::info!("keep: no page lock: {}", err(e));
+    }
+    // The callback lives as long as the page.
+    hold.forget();
+}
+
+fn web_locks() -> Option<JsValue> {
+    let nav = web_sys::window()?.navigator();
+    Reflect::get(&nav, &"locks".into()).ok().filter(|l| l.is_object())
+}
+
+/// The pages still open (in this browser profile) that hold their lock.
+async fn live_pages() -> Vec<String> {
+    let query = async {
+        let locks = web_locks().ok_or("no Web Locks")?;
+        let f: Function = Reflect::get(&locks, &"query".into()).map_err(err)?.dyn_into().map_err(|_| "no query".to_string())?;
+        let p: js_sys::Promise = f.call0(&locks).map_err(err)?.dyn_into().map_err(|_| "no promise".to_string())?;
+        let state = JsFuture::from(p).await.map_err(err)?;
+        let held: Array = Reflect::get(&state, &"held".into()).map_err(err)?.dyn_into().map_err(|_| "no list".to_string())?;
+        Ok::<_, String>(
+            held.iter()
+                .take(10_000)
+                .filter_map(|l| Reflect::get(&l, &"name".into()).ok()?.as_string())
+                .filter_map(|n| n.strip_prefix(keep::LOCK_PREFIX).map(str::to_string))
+                .collect(),
+        )
+    };
+    query.await.unwrap_or_else(|e| {
+        log::info!("keep: open pages unknown ({e})");
+        Vec::new()
+    })
+}
+
+/// The kept copies among the stored files: (copy, when its design's file was last written), and
+/// the ids of designs stored without their metadata.
+struct Found {
+    copies: Vec<(keep::Entry, Option<f64>)>,
+    orphans: Vec<String>,
+}
+
+fn kept_copies(all: &[(String, Vec<u8>, f64)]) -> Found {
+    let modified = |path: &str| path.strip_prefix(OPFS).and_then(|n| all.iter().find(|(name, _, _)| name == n)).map(|(_, _, m)| *m);
+    let mut copies = Vec::new();
+    let mut designs = Vec::new();
+    for (name, bytes, _) in all {
+        match keep::parse_name(name) {
+            Some((id, keep::Part::Meta)) => {
+                if let Some(e) = keep::Entry::parse(id, bytes) {
+                    let saved = e.path.as_deref().and_then(modified);
+                    copies.push((e, saved));
+                }
+            }
+            Some((id, keep::Part::Design)) => designs.push(id.to_string()),
+            None => {}
+        }
+    }
+    // A copy is whole only with its design.
+    copies.retain(|(e, _)| designs.contains(&e.id));
+    let orphans = designs.into_iter().filter(|id| !copies.iter().any(|(e, _)| &e.id == id)).collect();
+    Found { copies, orphans }
+}
+
+/// Offer the copies earlier pages left that hold unsaved work, and remove those their design's
+/// later save made stale (and parts without the rest), leaving open pages' copies alone.
+fn sort_kept(files: &Rc<Files>, found: Found, live: &[String]) {
+    let mut offered = Vec::new();
+    let mut gone = Vec::new();
+    for (e, saved) in found.copies {
+        match keep::fate(&e, live, saved) {
+            keep::Fate::Offer => offered.push(e),
+            keep::Fate::Drop => gone.push(e.id),
+            keep::Fate::Leave => {}
+        }
+    }
+    gone.extend(found.orphans.into_iter().filter(|id| !keep::page_of(id).is_some_and(|p| live.iter().any(|l| l == p))));
+    keep::order_offered(&mut offered);
+    *files.keep_offered.borrow_mut() = offered;
+    for id in gone {
+        remove_kept(files, &id);
+    }
+}
+
+/// The path (in the engine's files) a kept copy opens from.
+pub fn kept_path(id: &str) -> String {
+    format!("{OPFS}{}", keep::design_file(id))
+}
+
+/// Write the copy of a design with unsaved changes (`bytes`, described by `entry`) that holds
+/// its revision `revision`. Its metadata goes last, so a copy is never offered half written.
+pub fn write_kept(files: &Rc<Files>, entry: &keep::Entry, bytes: Vec<u8>, revision: u64) {
+    let id = entry.id.clone();
+    if !files.keeping.borrow_mut().insert(id.clone()) {
+        return;
+    }
+    files.kept.borrow_mut().entry(id.clone()).or_insert(None);
+    let meta = entry.to_json();
+    let files = files.clone();
+    spawn_local(async move {
+        let r = async {
+            write_file(&keep::design_file(&id), &bytes).await?;
+            write_file(&keep::meta_file(&id), meta.as_bytes()).await
+        };
+        match r.await {
+            Ok(()) => {
+                files.kept.borrow_mut().insert(id.clone(), Some(revision));
+                files.kept_failed.borrow_mut().remove(&id);
+            }
+            Err(e) => {
+                files.kept_failed.borrow_mut().insert(id.clone(), js_sys::Date::now());
+                files.say(format!("keeping unsaved work in this browser: {e}"), true)
+            }
+        }
+        files.keeping.borrow_mut().remove(&id);
+        files.wake();
+    });
+}
+
+/// Remove kept copy `id` (its design was saved, closed, discarded or restored).
+pub fn remove_kept(files: &Rc<Files>, id: &str) {
+    let id = id.to_string();
+    if !files.keeping.borrow_mut().insert(id.clone()) {
+        return;
+    }
+    let _ = vfs::remove(&kept_path(&id));
+    files.kept_failed.borrow_mut().remove(&id);
+    let files = files.clone();
+    spawn_local(async move {
+        // The metadata first: what's left without it is never offered.
+        let _ = remove_file(&keep::meta_file(&id)).await;
+        let _ = remove_file(&keep::design_file(&id)).await;
+        files.kept.borrow_mut().remove(&id);
+        files.keeping.borrow_mut().remove(&id);
+        files.wake();
+    });
 }

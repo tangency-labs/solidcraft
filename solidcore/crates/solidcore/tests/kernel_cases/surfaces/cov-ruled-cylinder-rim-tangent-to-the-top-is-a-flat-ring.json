@@ -1,0 +1,102 @@
+{
+  "area": "surfaces",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b3"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "stitch",
+      "outputs": [
+        "b4"
+      ],
+      "params": {
+        "tolerance": 0.000312017202806395
+      }
+    }
+  ],
+  "case": "cov-ruled-cylinder-rim-tangent-to-the-top-is-a-flat-ring",
+  "expected": {
+    "area_mm2": 392.6990816987241,
+    "bbox": {
+      "max": [
+        15,
+        15,
+        10
+      ],
+      "min": [
+        -15,
+        -15,
+        10
+      ]
+    },
+    "body_count": 1,
+    "boundary_edges": 2,
+    "faces": 1,
+    "method": "tangent rulings continue the top (z = 10) square to the rim, outward: the plane annulus r 10..15, area pi (225 - 100) = 392.70; one plane face, two free circles",
+    "source": "analytic",
+    "sources": [],
+    "surface_types": [
+      "plane"
+    ],
+    "valid": false,
+    "what": "a ruled strip off a cylinder's top rim continuing the top face: the flat ring r 10..15"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 3,
+      "faces": 1,
+      "vertices": 2
+    }
+  },
+  "records": "cov-ruled-cylinder-rim-tangent-to-the-top-is-a-flat-ring.bodies.json.gz",
+  "result": [
+    {
+      "body": "Brim",
+      "made": "b4"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 392.6990817246204,
+      "body_count": 1,
+      "edges": 1,
+      "faces": 1,
+      "vertices": 1,
+      "volume_mm3": 0.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "tagged",
+    "stitch"
+  ],
+  "ungraded": [],
+  "what": "a ruled strip off a cylinder's top rim continuing the top face: the flat ring r 10..15",
+  "why_not": []
+}

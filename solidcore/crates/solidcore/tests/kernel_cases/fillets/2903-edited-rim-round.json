@@ -1,0 +1,180 @@
+{
+  "area": "fillets",
+  "case": "2903-edited-rim-round",
+  "sources": [
+    "https://github.com/tangency-labs/solidcore/issues/2903"
+  ],
+  "what": "centered70x50 extrusion at edited height33, four outer vertical R6 rounds before top-open inward shell2 (inner cornerR4), from typical/filleted-shelled-box; original height30 changes to33 while matrix blend size stays0.627; blend the complete eight-edge inner top rim from the first reported mirror, explicitly in the reproduced chain order. Direct original Body.record() JSON captured from public SolidCraft kernel APIs at application PR #12413 head 2e8847512baf43c91ab4e2c407750d6f896b6053 with solidcore9856ffee5. This is the geometry after rebuilding height33, not an engine timeline/reference-resolution replay and not an SMB re-export. V0=(70*50-4*A*6^2)*33-(66*46-4*A*4^2)*31, L=192+8*pi. There is no floor round. A=1-pi/4 and M=5/6-pi/4 are the unit round section area and first moment. Outward parallel contours have Jacobian1+kappa*u and total turning2*pi. For the top inner round, subtract L*A*r^2+2*pi*M*r^3, at size0.627. Eight new strip faces, sixteen extra edges and eight extra vertices give counts(27, 64, 40); the existing annular top face remains annular.",
+  "bodies": {
+    "b0": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "records": "2903-edited-rim-round.bodies.json.gz",
+  "calls": [
+    {
+      "op": "blend_dropping",
+      "inputs": [
+        "b0"
+      ],
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "kind": "round",
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "index": 26,
+              "at": [
+                [
+                  29.00000000000001,
+                  22.999999999999996,
+                  33.0
+                ],
+                [
+                  33.0,
+                  19.000000000000007,
+                  33.0
+                ]
+              ]
+            },
+            {
+              "index": 25,
+              "at": [
+                [
+                  29.00000000000001,
+                  22.999999999999996,
+                  33.0
+                ],
+                [
+                  -29.0,
+                  23.0,
+                  33.0
+                ]
+              ]
+            },
+            {
+              "index": 27,
+              "at": [
+                [
+                  33.0,
+                  -19.000000000000004,
+                  33.0
+                ],
+                [
+                  33.0,
+                  19.000000000000007,
+                  33.0
+                ]
+              ]
+            },
+            {
+              "index": 24,
+              "at": [
+                [
+                  -33.0,
+                  19.000000000000004,
+                  33.0
+                ],
+                [
+                  -29.0,
+                  23.0,
+                  33.0
+                ]
+              ]
+            },
+            {
+              "index": 28,
+              "at": [
+                [
+                  33.0,
+                  -19.000000000000004,
+                  33.0
+                ],
+                [
+                  29.0,
+                  -23.0,
+                  33.0
+                ]
+              ]
+            },
+            {
+              "index": 31,
+              "at": [
+                [
+                  -33.0,
+                  19.000000000000004,
+                  33.0
+                ],
+                [
+                  -33.0,
+                  -19.000000000000007,
+                  33.0
+                ]
+              ]
+            },
+            {
+              "index": 29,
+              "at": [
+                [
+                  -29.00000000000001,
+                  -22.999999999999996,
+                  33.0
+                ],
+                [
+                  29.0,
+                  -23.0,
+                  33.0
+                ]
+              ]
+            },
+            {
+              "index": 30,
+              "at": [
+                [
+                  -29.00000000000001,
+                  -22.999999999999996,
+                  33.0
+                ],
+                [
+                  -33.0,
+                  -19.000000000000007,
+                  33.0
+                ]
+              ]
+            }
+          ]
+        },
+        "sizes": [
+          0.627
+        ]
+      }
+    }
+  ],
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b1"
+    }
+  ],
+  "expected": {
+    "source": "analytic",
+    "body_count": 1,
+    "faces": 27,
+    "edges": 64,
+    "vertices": 40,
+    "volume_mm3": 20771.58921103918,
+    "tolerance": {
+      "rel": 1e-09
+    },
+    "method": "V0=(70*50-4*A*6^2)*33-(66*46-4*A*4^2)*31, L=192+8*pi. There is no floor round. A=1-pi/4 and M=5/6-pi/4 are the unit round section area and first moment. Outward parallel contours have Jacobian1+kappa*u and total turning2*pi. For the top inner round, subtract L*A*r^2+2*pi*M*r^3, at size0.627. Eight new strip faces, sixteen extra edges and eight extra vertices give counts(27, 64, 40); the existing annular top face remains annular."
+  },
+  "operation_expressible": true,
+  "expressible": true,
+  "why_not": [],
+  "ungraded": [],
+  "gallery_note": "The whole inner top rim builds from the formerly refused corner. Projecting to another corner endpoint no longer reports a distant rail as overlapping its blend band."
+}

@@ -9,11 +9,13 @@ use solidcraft_sketch::{ConstraintKind, CurveKind, Sketch};
 use super::sketch::{CONNECT_TOL, add_c, curve_ref, edit, ids_of, line_or_axis_ref, line_pts, req_parg, result};
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, expr, num, str_, vec2};
-use crate::schema::sketch_create::{ConstructionLineParams, ConstructionLineResult};
+use crate::schema::sketch_create::{ConstructionLineParams, ConstructionLineResult, CrosshairsParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
 const CONTRACT: TypedContract<ConstructionLineParams> = TypedContract::new();
+const CROSSHAIRS_CONTRACT: TypedContract<CrosshairsParams> = TypedContract::new();
+const CROSSHAIRS: &str = "sketch.crosshairs";
 const CMD: &str = "sketch.construction_line";
 
 macro_rules! variant {
@@ -25,7 +27,7 @@ macro_rules! variant {
         .enabled(in_sketch)
         .contract(&CONTRACT)
         .output(output_schema_for::<ConstructionLineResult>)
-        .params(concat!("Construction line, ", $mode, ". at: point; through?: second point; curve?, curve2?: sketch references; angle?: degrees from sketch X; near?: solution selector, and the side a line with a length runs towards; solution?: zero-based solution index; length?: a segment of this length from `at`, held by a length dimension, instead of an infinite line (horizontal, vertical, angle, parallel, perpendicular); construction?: false makes that segment a normal line. Tangents take circles/arcs, or an open spline/conic endpoint for tangent_at.", created_doc!()))
+        .params(concat!("Construction line, ", $mode, ". at: point; through?: second point; curve?, curve2?: sketch references; angle?: degrees from sketch X; offset?: positive length (parallel: distance from the reference line; horizontal: distance from sketch X; vertical: distance from sketch Y; the side follows at) and a driving dimension at that value; near?: solution selector, and the side a line with a length runs towards; solution?: zero-based solution index; length?: a segment of this length from `at`, held by a length dimension, instead of an infinite line (horizontal, vertical, angle, parallel, perpendicular); construction?: false makes that segment a normal line. Tangents take circles/arcs, or an open spline/conic endpoint for tangent_at.", created_doc!()))
     };
 }
 
@@ -41,7 +43,41 @@ pub static COMMANDS: &[CommandSpec] = &[
     variant!("sketch.construction_line.tangent_at", "Tangent at Curve Point", "tangent_at").icon("construction_line_tangent_at"),
     variant!("sketch.construction_line.tangent_two", "Common Tangent", "tangent_two").icon("construction_line_tangent_two"),
     variant!("sketch.construction_line.bisector", "Angle Bisector", "bisector").icon("construction_line_bisector"),
+    CommandSpec::new(CROSSHAIRS, "Coordinate Crosshairs", crate::checked!("sketch.crosshairs", crosshairs))
+        .at("SKETCH", "CREATE")
+        .enabled(in_sketch)
+        .icon("construction_line")
+        .contract(&CROSSHAIRS_CONTRACT)
+        .output(output_schema_for::<ConstructionLineResult>)
+        .params(concat!(
+            "sketch?: the sketch (default: the one being edited). Adds an infinite horizontal and an infinite vertical construction line              through the sketch's origin, both fixed, so they add no degrees of freedom: references to dimension and constrain to",
+            created_doc!()
+        )),
 ];
+
+/// Coordinate Crosshairs (#22234): an infinite horizontal and vertical construction line through
+/// the sketch's origin, in one edit. Each starts on the origin point and is fixed, as Fix/Unfix
+/// fixes a curve, so the two add no degrees of freedom.
+fn crosshairs(s: &mut Session, p: &Value) -> Result<Value> {
+    let (out, info) = edit(s, p, CROSSHAIRS, true, |sk, _doc| {
+        let first_new = sk.points.len();
+        let origin = sk.point_index("origin").ok_or_else(|| bad(CROSSHAIRS, "the sketch has no origin"))?;
+        let at = sk.point(origin).ok_or_else(|| bad(CROSSHAIRS, "the sketch has no origin"))?;
+        let mut lines = Vec::new();
+        for direction in [Vec2::X, Vec2::Y] {
+            let l = sk.add_line(at, at + direction * 10.0, Some(origin), None, None)?;
+            if let Some(c) = sk.curves.get_mut(l) {
+                c.infinite = true;
+                c.construction = true;
+                c.fixed = true;
+            }
+            lines.push(l);
+        }
+        super::sketch_create::solve_new_only(sk, first_new);
+        Ok((ids_of(sk, &lines), Vec::new()))
+    })?;
+    Ok(result(out, info))
+}
 
 /// One mathematical solution, before adding any sketch entities.
 #[derive(Clone, Copy, Debug)]
@@ -123,6 +159,53 @@ fn endpoint_tangent(sk: &Sketch, i: usize, at: Vec2) -> Option<(usize, Vec2)> {
     })
 }
 
+/// A numeric offset already evaluated in millimetres. An expression is resolved by the command
+/// before it asks for solutions; a missing or non-positive value means "through `at`".
+fn positive_offset(p: &Value) -> Option<f64> {
+    num(p, "offset").filter(|d| d.is_finite() && *d > 1e-9)
+}
+
+fn offset_side(signed: f64) -> f64 {
+    if signed < 0.0 { -1.0 } else { 1.0 }
+}
+
+/// The typed offset as its driving parameter and the length in millimetres. `name = expression`
+/// defines the user parameter `name`, the same way a dimension does.
+fn typed_offset(doc: &mut solidcraft_doc::Document, p: &Value, mode: &str) -> Result<Option<(String, f64)>> {
+    // `offset` is optional. A missing key and JSON null both mean "through `at`", as `length` does.
+    if p.get("offset").is_none_or(Value::is_null) {
+        return Ok(None);
+    }
+    if !matches!(mode, "parallel" | "horizontal" | "vertical") {
+        return Err(bad(CMD, "`offset` applies to a parallel, horizontal or vertical construction line"));
+    }
+    let raw = expr(p, "offset").ok_or_else(|| bad(CMD, "`offset` must be a positive length or expression"))?;
+    let (defines, rhs) = match solidcraft_doc::expr::definition(raw.as_str()) {
+        Some((name, "")) => return Err(bad(CMD, format!("offset: `{name} =` needs a value after the `=`"))),
+        Some((name, rhs)) => (Some(name), rhs),
+        None => (None, raw.as_str()),
+    };
+    let rhs = doc.with_design_unit(rhs, solidcraft_doc::expr::Kind::Length);
+    let mm = doc.eval(&rhs, solidcraft_doc::expr::Kind::Length).map_err(|e| bad(CMD, format!("offset: {e}")))?;
+    if !mm.is_finite() || mm <= 1e-9 || mm >= 1e9 {
+        return Err(bad(CMD, "offset must be positive and within the model's size limits"));
+    }
+    let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
+    let stored = if let Some(name) = defines {
+        if let Some(problem) = solidcraft_doc::Document::param_name_problem(name) {
+            return Err(bad(CMD, format!("offset: {problem}")));
+        }
+        if doc.param(name).is_some() {
+            return Err(bad(CMD, format!("offset: there is already a parameter `{name}`: type `{name}` to use it, or change it in Parameters")));
+        }
+        doc.add_user_param(name, &rhs, Some(&unit), None).map_err(|e| bad(CMD, format!("offset: {e}")))?;
+        name.to_string()
+    } else {
+        rhs
+    };
+    Ok(Some((doc.new_model_param(&stored, &unit), mm)))
+}
+
 /// All valid solutions in deterministic order. This reads the sketch and never changes it.
 pub fn construction_line_solutions(sk: &Sketch, p: &Value, mode: &str) -> Result<Vec<ConstructionLine>> {
     let at = point(sk, p.get("at"), "at")?;
@@ -137,15 +220,32 @@ pub fn construction_line_solutions(sk: &Sketch, p: &Value, mode: &str) -> Result
     };
     match mode {
         "free" => push(at, point(sk, p.get("through"), "through")? - at),
-        "horizontal" => push(at, Vec2::X),
-        "vertical" => push(at, Vec2::Y),
+        "horizontal" => {
+            let y = positive_offset(p).map_or(at.y, |d| offset_side(at.y) * d);
+            push(Vec2::new(at.x, y), Vec2::X);
+        }
+        "vertical" => {
+            let x = positive_offset(p).map_or(at.x, |d| offset_side(at.x) * d);
+            push(Vec2::new(x, at.y), Vec2::Y);
+        }
         "angle" => {
             let a = num(p, "angle").ok_or_else(|| bad(CMD, "`angle` must be finite degrees"))?;
             push(at, Vec2::from_angle(a.rem_euclid(360.0).to_radians()));
         }
         "parallel" | "perpendicular" => {
             let (a, b) = line(sk, p, "curve")?;
-            push(at, if mode == "parallel" { b - a } else { (b - a).perp() });
+            let along = b - a;
+            if mode == "perpendicular" {
+                push(at, along.perp());
+            } else if let Some(distance) = positive_offset(p) {
+                let dir = along.normalized().ok_or_else(|| bad(CMD, "the reference has no direction"))?;
+                let normal = dir.perp();
+                let side = offset_side(normal.dot(at - a));
+                let origin = a + normal * (side * distance);
+                push(origin + dir * (at - origin).dot(dir), dir);
+            } else {
+                push(at, along);
+            }
         }
         "bisector" => {
             let (a, b) = line(sk, p, "curve")?;
@@ -279,6 +379,10 @@ fn run(s: &mut Session, p: &Value, default_mode: &str) -> Result<Value> {
         } else {
             None
         };
+        let offset = typed_offset(doc, &p, mode)?;
+        if let Some((_, mm)) = &offset {
+            params["offset"] = json!(*mm);
+        }
         if let Some(q) = &through {
             params["through"] = json!([q.pos().x, q.pos().y]);
         }
@@ -322,7 +426,10 @@ fn run(s: &mut Session, p: &Value, default_mode: &str) -> Result<Value> {
         let solutions = construction_line_solutions(sk, &params, mode)?;
         let choice = construction_line_choice(&solutions, &params)?;
         let chosen = solutions.get(choice).ok_or_else(|| bad(CMD, "no solution"))?;
-        let start_ref = if mode == "tangent_at" {
+        // A typed offset does not pass through the picked point, so that point is not the line's start.
+        let start_ref = if offset.is_some() {
+            None
+        } else if mode == "tangent_at" {
             if let Some(i) = at.idx() {
                 if at.pos().dist(chosen.start) > 1e-6 {
                     return Err(bad(CMD, "the referenced point must lie on the curve"));
@@ -369,6 +476,24 @@ fn run(s: &mut Session, p: &Value, default_mode: &str) -> Result<Value> {
             cons.push(add_c(sk, ConstraintKind::Tangent { a: l, b })?);
         }
         let start = sk.curves.get(l).and_then(|c| c.kind.ends()).map(|(a, _)| a).ok_or_else(|| bad(CMD, "no line start"))?;
+        if let Some((pname, mm)) = offset {
+            let distance = match mode {
+                "parallel" => {
+                    let reference = reference.ok_or_else(|| bad(CMD, "parallel offset needs a reference line"))?;
+                    ConstraintKind::PointLineDistance { p: start, l: reference, value: mm }
+                }
+                "horizontal" => {
+                    let origin = sk.point_index("origin").ok_or_else(|| bad(CMD, "the sketch has no origin"))?;
+                    ConstraintKind::DistanceY { p: origin, q: start, value: mm }
+                }
+                "vertical" => {
+                    let origin = sk.point_index("origin").ok_or_else(|| bad(CMD, "the sketch has no origin"))?;
+                    ConstraintKind::DistanceX { p: origin, q: start, value: mm }
+                }
+                _ => return Err(bad(CMD, "`offset` does not apply to this construction")),
+            };
+            cons.push(sk.add_constraint(distance, Some(pname))?);
+        }
         if let ("tangent_at", Some(c)) = (mode, reference) {
             let already_on =
                 sk.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::PointOnCurve { p, c: curve } if p == start && curve == c));

@@ -1,0 +1,36 @@
+{
+ "cases": [
+  {
+   "name": "copy_shell_off_extrusion_offset_surface_faces_capi0",
+   "upstream_ref": "source/SMLib/src/SmOffsetSurface.cpp:SmOffsetSurface::AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/off_extrusion.smb"
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true,
+    "copy_op": 4,
+    "index": 0,
+    "value": -0.5
+   }
+  },
+  {
+   "name": "copy_shell_off_extrusion_offset_surface_faces_capi2",
+   "upstream_ref": "source/SMLib/src/SmOffsetSurface.cpp:SmOffsetSurface::AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/off_extrusion.smb"
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true,
+    "copy_op": 4,
+    "index": 0,
+    "value": -0.5
+   }
+  }
+ ]
+}

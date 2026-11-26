@@ -33,7 +33,7 @@ pub struct DirectionalModulusParams {
 }
 
 /// The card, checked by the handler (`admit_card`), with its messages.
-fn card_schema(_: &mut SchemaGenerator) -> Schema {
+pub(super) fn card_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({
         "description": "A schema_version 1 engineering material card in SI units (see docs/physical-material-cards.md).",
         "type": "object"

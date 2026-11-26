@@ -1,0 +1,208 @@
+{
+  "area": "ladder/05-holes-and-taps",
+  "bodies": {
+    "b62": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b64": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b62"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b65"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b65"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b66"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b64"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b67"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b67"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b68"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b66"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b69"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b68"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b70"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b69",
+        "b70"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b71"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "013-part-holes",
+  "expected": {
+    "body_count": 1,
+    "faces": 20,
+    "method": "removed pi 2.5^2 20 (M6, tap drill 5) + pi 2.1^2 8 (M5, tap drill 4.2, flat) + pi 1.65^2 35; faces +1 +2 +1",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 53470.420668652,
+    "what": "the running part: an M6 tapped through hole, an M5 tapped blind hole in the boss, a d3.3 hole down through wall and base"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 13115.213361145003,
+      "body_count": 1,
+      "edges": 48,
+      "faces": 20,
+      "vertices": 32,
+      "volume_mm3": 53470.42066882067
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 48,
+      "faces": 20,
+      "vertices": 32
+    }
+  },
+  "records": "013-part-holes.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b71"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 13115.213361145003,
+      "body_count": 1,
+      "edges": 48,
+      "faces": 20,
+      "vertices": 32,
+      "volume_mm3": 53470.42066882067
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "revolve",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "the running part: an M6 tapped through hole, an M5 tapped blind hole in the boss, a d3.3 hole down through wall and base",
+  "why_not": []
+}

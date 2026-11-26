@@ -1,0 +1,88 @@
+# SolidCore's progress site (solidcore/site/build.py) and unit checklist
+# (solidcore/harness/plan/progress.py, published as PROGRESS.md), at the same address as before:
+# https://tangency-labs.github.io/solidcore/. SolidCore's own Pages workflow
+# (solidcore/.github/workflows/pages.yml), ported: GitHub does not run a subfolder's workflows.
+#
+# This repository's Pages site is SolidCraft's book and web app (pages.yml), and a repository has
+# one Pages site, so this one is pushed to tangency-labs/solidcore's gh-pages branch with the
+# mirror's deploy key (SOLIDCORE_DEPLOY_KEY, solidcore-mirror.yml). That repository's Settings ->
+# Pages -> Source must be "Deploy from a branch", gh-pages, / (root).
+#
+# The site reads SolidCore's history (its progress timeline) and paths from its repository root,
+# so it is built from a checkout of the mirror, tangency-labs/solidcore, whose main is exactly
+# this repository's solidcore/ once the mirror has run.
+#
+# Triggers:
+# - workflow_run of "Mirror to SolidCore" on main: every mirrored change.
+# - schedule (hourly): claims from open "port: <unit id>" pull requests (now in this repository),
+#   and main's newest solids report (SolidCore checks upload it). Not after every CI run on main,
+#   as SolidCore's did: SolidCraft's main runs CI far more often.
+# - workflow_dispatch: manual rebuild.
+name: SolidCore pages
+
+on:
+  workflow_run:
+    workflows: ["Mirror to SolidCore"]
+    types: [completed]
+    branches: [main]
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read  # download main's solids report
+  pull-requests: read  # open "port:" PRs for the checklist's claims
+
+concurrency:
+  group: solidcore-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and publish SolidCore's site
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: tangency-labs/solidcore
+          ref: main
+          fetch-depth: 0 # full history for the progress timeline
+          persist-credentials: false
+      # Main's solids report comes from this repository's CI now (SolidCore checks, tests).
+      - name: Fetch main's solids report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: scripts/fetch-solids.sh || echo "no solids report; the Solids page will say so"
+      - name: Test checklist generator
+        run: python3 -m unittest discover -s harness/plan -p 'test_*.py'
+      - name: Generate checklist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 harness/plan/progress.py --prs
+      # The site links and its own address are SolidCore's.
+      - name: Build site
+        run: GITHUB_REPOSITORY=tangency-labs/solidcore python3 site/build.py --out _site
+      - name: Publish to tangency-labs/solidcore's gh-pages
+        env:
+          SOLIDCORE_DEPLOY_KEY: ${{ secrets.SOLIDCORE_DEPLOY_KEY }}
+          SHA: ${{ github.sha }}
+        run: |
+          if [ -z "$SOLIDCORE_DEPLOY_KEY" ]; then
+            echo "::error::The SOLIDCORE_DEPLOY_KEY secret is not set (see solidcore-mirror.yml)."
+            exit 1
+          fi
+          install -d -m 700 "$RUNNER_TEMP/ssh"
+          (umask 077 && printf '%s\n' "$SOLIDCORE_DEPLOY_KEY" > "$RUNNER_TEMP/ssh/solidcore")
+          export GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/ssh/solidcore -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+          touch _site/.nojekyll
+          cd _site
+          git init -q -b gh-pages
+          git add -A
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "Site for solidcore $(git -C .. rev-parse --short HEAD) (SolidCraft $SHA)"
+          # The branch holds only the latest site: replacing it is the deploy.
+          git push -q --force git@github.com:tangency-labs/solidcore.git gh-pages

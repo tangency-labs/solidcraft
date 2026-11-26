@@ -16,6 +16,7 @@
    "plane": "XY"
   }
  },
+ {"call": "ui.camera", "params": {"target": [30, 20, 0], "distance": 180}},
  {
   "start": "sketch.rectangle.two_point"
  },
@@ -155,7 +156,10 @@
   "start": "sheet.flat_pattern"
  },
  {
-  "widget": "Export DXF\u2026"
+  "click": {"handle": "dialog:sheet_dxf:options"}
+ },
+ {
+  "click": {"handle": "dialog:sheet_dxf:save"}
  },
  {
   "expect": {

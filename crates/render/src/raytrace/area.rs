@@ -7,7 +7,7 @@ use solidcraft_geom::prelude::*;
 
 use super::lighting::MAX_LINEAR_RADIANCE;
 use super::{MAX_COORDINATE_MM, MAX_DISTANCE_MM, Ray, Result, TraceError};
-use crate::surface::{OpaqueSurface, unit_direction};
+use solidcraft_viewport::surface::{OpaqueSurface, unit_direction};
 
 pub const MAX_AREA_LIGHTS: usize = 4;
 pub const MAX_AREA_SAMPLES: u32 = 64;

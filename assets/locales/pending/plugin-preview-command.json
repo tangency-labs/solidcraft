@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.plugin.preview": "Plugin Preview"
+  },
+  "ar": {
+    "cmd.plugin.preview": "معاينة الإضافة"
+  },
+  "de": {
+    "cmd.plugin.preview": "Plugin-Vorschau"
+  },
+  "he": {
+    "cmd.plugin.preview": "תצוגה מקדימה של תוסף"
+  },
+  "ja": {
+    "cmd.plugin.preview": "プラグインのプレビュー"
+  },
+  "ko": {
+    "cmd.plugin.preview": "플러그인 미리 보기"
+  },
+  "vi": {
+    "cmd.plugin.preview": "Xem trước plugin"
+  },
+  "zh": {
+    "cmd.plugin.preview": "插件预览"
+  }
+}

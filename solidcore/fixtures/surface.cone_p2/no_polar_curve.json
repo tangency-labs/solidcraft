@@ -1,0 +1,965 @@
+{
+  "cases": [
+    {
+      "name": "nopolar_bounded_off_pos",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268 (issue #277: GetHeight without a polar curve; ignored evaluation errors leave initialised points)",
+      "inputs": {
+        "cone": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            -1e-300,
+            0
+          ],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": 1.5628,
+            "top": 1.5628,
+            "start": 0.0,
+            "end": 360.0,
+            "height": 1.1078,
+            "swap": false,
+            "inside": true
+          }
+        },
+        "op": {
+          "kind": "offset",
+          "distance": 0.5,
+          "tol": 1e-06
+        }
+      }
+    },
+    {
+      "name": "nopolar_bounded_off_trunc",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268 (issue #277: GetHeight without a polar curve; ignored evaluation errors leave initialised points)",
+      "inputs": {
+        "cone": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            -1e-300,
+            0
+          ],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": 1.5628,
+            "top": 1.5628,
+            "start": 0.0,
+            "end": 360.0,
+            "height": 1.1078,
+            "swap": false,
+            "inside": true
+          }
+        },
+        "op": {
+          "kind": "offset",
+          "distance": -1.5,
+          "tol": 1e-06
+        }
+      }
+    },
+    {
+      "name": "nopolar_bounded_rebuild",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268 (issue #277: GetHeight without a polar curve; ignored evaluation errors leave initialised points)",
+      "inputs": {
+        "cone": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            -1e-300,
+            0
+          ],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": 1.5628,
+            "top": 1.5628,
+            "start": 0.0,
+            "end": 360.0,
+            "height": 1.1078,
+            "swap": false,
+            "inside": true
+          }
+        },
+        "op": {
+          "kind": "rebuild",
+          "edit": {
+            "kind": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "nopolar_bounded_recognize",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268 (issue #277: GetHeight without a polar curve; ignored evaluation errors leave initialised points)",
+      "inputs": {
+        "cone": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            -1e-300,
+            0
+          ],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": 1.5628,
+            "top": 1.5628,
+            "start": 0.0,
+            "end": 360.0,
+            "height": 1.1078,
+            "swap": false,
+            "inside": true
+          }
+        },
+        "op": {
+          "kind": "recognize",
+          "edit": {
+            "kind": "none"
+          },
+          "scale": 1.0
+        }
+      }
+    },
+    {
+      "name": "nopolar_bounded_trim",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268 (issue #277: GetHeight without a polar curve; ignored evaluation errors leave initialised points)",
+      "inputs": {
+        "cone": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            -1e-300,
+            0
+          ],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": 1.5628,
+            "top": 1.5628,
+            "start": 0.0,
+            "end": 360.0,
+            "height": 1.1078,
+            "swap": false,
+            "inside": true
+          }
+        },
+        "op": {
+          "kind": "trim",
+          "origin": [
+            0,
+            0,
+            0.5
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            1,
+            0
+          ],
+          "rx": 1.0,
+          "ry": 1.0,
+          "start": 0.0,
+          "end": 360.0,
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ],
+          "tol": 1e-06
+        }
+      }
+    },
+    {
+      "name": "nopolar_bounded_cone_off_pos",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268 (issue #277: GetHeight without a polar curve; ignored evaluation errors leave initialised points)",
+      "inputs": {
+        "cone": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            -1e-300,
+            0
+          ],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": 1.0,
+            "top": 2.0,
+            "start": 0.0,
+            "end": 360.0,
+            "height": 3.0,
+            "swap": false,
+            "inside": false
+          }
+        },
+        "op": {
+          "kind": "offset",
+          "distance": 0.5,
+          "tol": 1e-06
+        }
+      }
+    },
+    {
+      "name": "nopolar_bounded_cone_off_trunc",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268 (issue #277: GetHeight without a polar curve; ignored evaluation errors leave initialised points)",
+      "inputs": {
+        "cone": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            -1e-300,
+            0
+          ],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": 1.0,
+            "top": 2.0,
+            "start": 0.0,
+            "end": 360.0,
+            "height": 3.0,
+            "swap": false,
+            "inside": false
+          }
+        },
+        "op": {
+          "kind": "offset",
+          "distance": -1.5,
+          "tol": 1e-06
+        }
+      }
+    },
+    {
+      "name": "nopolar_bounded_cone_rebuild",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268 (issue #277: GetHeight without a polar curve; ignored evaluation errors leave initialised points)",
+      "inputs": {
+        "cone": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            -1e-300,
+            0
+          ],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": 1.0,
+            "top": 2.0,
+            "start": 0.0,
+            "end": 360.0,
+            "height": 3.0,
+            "swap": false,
+            "inside": false
+          }
+        },
+        "op": {
+          "kind": "rebuild",
+          "edit": {
+            "kind": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "nopolar_bounded_cone_recognize",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268 (issue #277: GetHeight without a polar curve; ignored evaluation errors leave initialised points)",
+      "inputs": {
+        "cone": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            -1e-300,
+            0
+          ],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": 1.0,
+            "top": 2.0,
+            "start": 0.0,
+            "end": 360.0,
+            "height": 3.0,
+            "swap": false,
+            "inside": false
+          }
+        },
+        "op": {
+          "kind": "recognize",
+          "edit": {
+            "kind": "none"
+          },
+          "scale": 1.0
+        }
+      }
+    },
+    {
+      "name": "nopolar_bounded_cone_trim",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268 (issue #277: GetHeight without a polar curve; ignored evaluation errors leave initialised points)",
+      "inputs": {
+        "cone": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            -1e-300,
+            0
+          ],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": 1.0,
+            "top": 2.0,
+            "start": 0.0,
+            "end": 360.0,
+            "height": 3.0,
+            "swap": false,
+            "inside": false
+          }
+        },
+        "op": {
+          "kind": "trim",
+          "origin": [
+            0,
+            0,
+            0.5
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            1,
+            0
+          ],
+          "rx": 1.0,
+          "ry": 1.0,
+          "start": 0.0,
+          "end": 360.0,
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ],
+          "tol": 1e-06
+        }
+      }
+    },
+    {
+      "name": "nopolar_bounded_apex_off_pos",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268 (issue #277: GetHeight without a polar curve; ignored evaluation errors leave initialised points)",
+      "inputs": {
+        "cone": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            -1e-300,
+            0
+          ],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": 0.0,
+            "top": 2.0,
+            "start": 0.0,
+            "end": 360.0,
+            "height": 3.0,
+            "swap": true,
+            "inside": false
+          }
+        },
+        "op": {
+          "kind": "offset",
+          "distance": 0.5,
+          "tol": 1e-06
+        }
+      }
+    },
+    {
+      "name": "nopolar_bounded_apex_off_trunc",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268 (issue #277: GetHeight without a polar curve; ignored evaluation errors leave initialised points)",
+      "inputs": {
+        "cone": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            -1e-300,
+            0
+          ],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": 0.0,
+            "top": 2.0,
+            "start": 0.0,
+            "end": 360.0,
+            "height": 3.0,
+            "swap": true,
+            "inside": false
+          }
+        },
+        "op": {
+          "kind": "offset",
+          "distance": -1.5,
+          "tol": 1e-06
+        }
+      }
+    },
+    {
+      "name": "nopolar_bounded_apex_rebuild",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268 (issue #277: GetHeight without a polar curve; ignored evaluation errors leave initialised points)",
+      "inputs": {
+        "cone": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            -1e-300,
+            0
+          ],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": 0.0,
+            "top": 2.0,
+            "start": 0.0,
+            "end": 360.0,
+            "height": 3.0,
+            "swap": true,
+            "inside": false
+          }
+        },
+        "op": {
+          "kind": "rebuild",
+          "edit": {
+            "kind": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "nopolar_bounded_apex_recognize",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268 (issue #277: GetHeight without a polar curve; ignored evaluation errors leave initialised points)",
+      "inputs": {
+        "cone": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            -1e-300,
+            0
+          ],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": 0.0,
+            "top": 2.0,
+            "start": 0.0,
+            "end": 360.0,
+            "height": 3.0,
+            "swap": true,
+            "inside": false
+          }
+        },
+        "op": {
+          "kind": "recognize",
+          "edit": {
+            "kind": "none"
+          },
+          "scale": 1.0
+        }
+      }
+    },
+    {
+      "name": "nopolar_bounded_apex_trim",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268 (issue #277: GetHeight without a polar curve; ignored evaluation errors leave initialised points)",
+      "inputs": {
+        "cone": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            -1e-300,
+            0
+          ],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": 0.0,
+            "top": 2.0,
+            "start": 0.0,
+            "end": 360.0,
+            "height": 3.0,
+            "swap": true,
+            "inside": false
+          }
+        },
+        "op": {
+          "kind": "trim",
+          "origin": [
+            0,
+            0,
+            0.5
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            1,
+            0
+          ],
+          "rx": 1.0,
+          "ry": 1.0,
+          "start": 0.0,
+          "end": 360.0,
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ],
+          "tol": 1e-06
+        }
+      }
+    },
+    {
+      "name": "nopolar_bounded_y_trim_o0_full",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5325 (issue #277: sm_GetEllipseTrimIntervals ignores a failed ConvertDomainFromNURBSToSTEP without a polar curve; the default-constructed domain is used)",
+      "inputs": {
+        "cone": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            -1e-300,
+            0
+          ],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": 1.5628,
+            "top": 1.5628,
+            "start": 0.0,
+            "end": 360.0,
+            "height": 1.1078,
+            "swap": false,
+            "inside": true
+          }
+        },
+        "op": {
+          "kind": "trim",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            0,
+            0,
+            1
+          ],
+          "y": [
+            1,
+            0,
+            0
+          ],
+          "rx": 1.0,
+          "ry": 1.0,
+          "start": 0.0,
+          "end": 360.0,
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ],
+          "tol": 1e-06
+        }
+      }
+    },
+    {
+      "name": "nopolar_bounded_cone_y_trim_o0_half",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5325 (issue #277: sm_GetEllipseTrimIntervals ignores a failed ConvertDomainFromNURBSToSTEP without a polar curve; the default-constructed domain is used)",
+      "inputs": {
+        "cone": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            -1e-300,
+            0
+          ],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": 1.0,
+            "top": 2.0,
+            "start": 0.0,
+            "end": 360.0,
+            "height": 3.0,
+            "swap": false,
+            "inside": false
+          }
+        },
+        "op": {
+          "kind": "trim",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            0,
+            0,
+            1
+          ],
+          "y": [
+            1,
+            0,
+            0
+          ],
+          "rx": 1.0,
+          "ry": 1.0,
+          "start": 0.0,
+          "end": 360.0,
+          "dom": [
+            0.25,
+            0.1,
+            0.75,
+            0.9
+          ],
+          "tol": 1e-06
+        }
+      }
+    },
+    {
+      "name": "nopolar_bounded_cone_x_trim_oneg_full",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5325 (issue #277: sm_GetEllipseTrimIntervals ignores a failed ConvertDomainFromNURBSToSTEP without a polar curve; the default-constructed domain is used)",
+      "inputs": {
+        "cone": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            -1e-300,
+            0
+          ],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": 1.0,
+            "top": 2.0,
+            "start": 0.0,
+            "end": 360.0,
+            "height": 3.0,
+            "swap": false,
+            "inside": false
+          }
+        },
+        "op": {
+          "kind": "trim",
+          "origin": [
+            0,
+            0,
+            -2
+          ],
+          "x": [
+            0,
+            1,
+            0
+          ],
+          "y": [
+            0,
+            0,
+            1
+          ],
+          "rx": 1.0,
+          "ry": 1.0,
+          "start": 0.0,
+          "end": 360.0,
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ],
+          "tol": 1e-06
+        }
+      }
+    },
+    {
+      "name": "nopolar_bounded_apex_x_trim_o0_full",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5325 (issue #277: sm_GetEllipseTrimIntervals ignores a failed ConvertDomainFromNURBSToSTEP without a polar curve; the default-constructed domain is used)",
+      "inputs": {
+        "cone": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            -1e-300,
+            0
+          ],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": 0.0,
+            "top": 2.0,
+            "start": 0.0,
+            "end": 360.0,
+            "height": 3.0,
+            "swap": true,
+            "inside": false
+          }
+        },
+        "op": {
+          "kind": "trim",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            0,
+            1,
+            0
+          ],
+          "y": [
+            0,
+            0,
+            1
+          ],
+          "rx": 1.0,
+          "ry": 1.0,
+          "start": 0.0,
+          "end": 360.0,
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ],
+          "tol": 1e-06
+        }
+      }
+    },
+    {
+      "name": "nopolar_bounded_apex_y_trim_o0_full",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5325 (issue #277: sm_GetEllipseTrimIntervals ignores a failed ConvertDomainFromNURBSToSTEP without a polar curve; the default-constructed domain is used)",
+      "inputs": {
+        "cone": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            -1e-300,
+            0
+          ],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": 0.0,
+            "top": 2.0,
+            "start": 0.0,
+            "end": 360.0,
+            "height": 3.0,
+            "swap": true,
+            "inside": false
+          }
+        },
+        "op": {
+          "kind": "trim",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            0,
+            0,
+            1
+          ],
+          "y": [
+            1,
+            0,
+            0
+          ],
+          "rx": 1.0,
+          "ry": 1.0,
+          "start": 0.0,
+          "end": 360.0,
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ],
+          "tol": 1e-06
+        }
+      }
+    }
+  ]
+}

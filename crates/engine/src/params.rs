@@ -10,6 +10,20 @@ pub fn bad(cmd: &str, msg: impl Into<String>) -> EngineError {
     EngineError::BadParams { cmd: cmd.to_string(), msg: msg.into() }
 }
 
+/// Resolve a reference only when one item matches. Callers retain their own name/id precedence;
+/// a repeated name reports every matching id instead of choosing an arbitrary item.
+pub(crate) fn unique_reference<T>(cmd: &str, kind: &str, key: &str, mut matches: impl Iterator<Item = (u64, T)>) -> Result<Option<T>> {
+    let Some((first_id, first)) = matches.next() else { return Ok(None) };
+    if let Some((second_id, _)) = matches.next() {
+        let mut ids = vec![first_id, second_id];
+        ids.extend(matches.map(|(id, _)| id));
+        ids.sort_unstable();
+        let ids = ids.iter().map(u64::to_string).collect::<Vec<_>>().join(", ");
+        return Err(bad(cmd, format!("ambiguous {kind} `{key}`; matching IDs: {ids}; use a numeric {kind} ID")));
+    }
+    Ok(Some(first))
+}
+
 pub fn finite(x: f64) -> Option<f64> {
     (x.is_finite() && x.abs() < 1e9).then_some(x)
 }
@@ -142,16 +156,11 @@ pub fn string_list(cmd: &str, p: &Value, k: &str) -> Result<Vec<String>> {
 }
 
 /// A list of keys, where an entry is a name or an id: a feature can be named or numbered, and
-/// both kinds can sit in one list.
+/// both kinds can sit in one list (#6651). The entries keep their JSON types, so a name that
+/// looks like a number stays a name and resolves before an id (#9748).
 ///
 /// A value of the wrong kind is refused, and so is an entry that is neither a name nor an id,
-/// named by its position as in [`string_list`]. The commands that take feature keys read them
-/// here, because their list is not a list of names (#6651).
-pub fn name_or_id_list(cmd: &str, p: &Value, k: &str) -> Result<Vec<String>> {
-    Ok(name_or_id_values(cmd, p, k)?.iter().map(|v| v.as_str().map(str::to_owned).unwrap_or_else(|| v.to_string())).collect())
-}
-
-/// Keep the JSON types when a command distinguishes a numeric name from a numeric id.
+/// named by its position as in [`string_list`].
 pub(crate) fn name_or_id_values<'a>(cmd: &str, p: &'a Value, k: &str) -> Result<&'a [Value]> {
     match p.get(k) {
         None | Some(Value::Null) => Ok(&[]),
@@ -233,8 +242,8 @@ mod tests {
         list(p).expect_err("the parameter is refused")
     }
 
-    fn keys(p: &Value) -> Result<Vec<String>> {
-        name_or_id_list(CMD, p, "features")
+    fn keys(p: &Value) -> Result<Vec<Value>> {
+        name_or_id_values(CMD, p, "features").map(<[Value]>::to_vec)
     }
 
     #[test]
@@ -303,10 +312,12 @@ mod tests {
 
     #[test]
     fn a_list_of_names_or_ids_is_read_in_the_order_given() {
-        assert_eq!(keys(&json!({"features": ["Base", 3]})).unwrap(), ["Base", "3"]);
-        assert_eq!(keys(&json!({"features": [3, "Base"]})).unwrap(), ["3", "Base"]);
-        assert_eq!(keys(&json!({"features": "Base"})).unwrap(), ["Base"]);
-        assert_eq!(keys(&json!({})).unwrap(), Vec::<String>::new());
+        assert_eq!(keys(&json!({"features": ["Base", 3]})).unwrap(), [json!("Base"), json!(3)]);
+        assert_eq!(keys(&json!({"features": [3, "Base"]})).unwrap(), [json!(3), json!("Base")]);
+        // A name that looks like a number stays a name.
+        assert_eq!(keys(&json!({"features": ["3"]})).unwrap(), [json!("3")]);
+        assert_eq!(keys(&json!({"features": "Base"})).unwrap(), [json!("Base")]);
+        assert_eq!(keys(&json!({})).unwrap(), Vec::<Value>::new());
     }
 
     #[test]

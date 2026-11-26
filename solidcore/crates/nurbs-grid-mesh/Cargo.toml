@@ -1,0 +1,11 @@
+[package]
+name = "nurbs-grid-mesh"
+description = "Trimmed NURBS faces meshed as a grid in their own (u, v): fast on dense surfaces, with every cell measured against the tolerance"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true

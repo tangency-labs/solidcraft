@@ -1,0 +1,140 @@
+{
+  "area": "ladder/09-shells-and-offsets",
+  "bodies": {
+    "b7": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b9"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b10"
+      ],
+      "op": "offset_faces",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "distance": 5.0,
+        "faces": {
+          "kind": "face",
+          "picked": [
+            {
+              "at": [],
+              "index": 0
+            }
+          ],
+          "points": [
+            [
+              15.999999999999996,
+              8.88888888888889,
+              20.0
+            ]
+          ],
+          "tolerance": 0.07483414773547883
+        }
+      }
+    }
+  ],
+  "case": "007-offset-top-face-5",
+  "expected": {
+    "body_count": 1,
+    "faces": 6,
+    "method": "a 60x40x25 box",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 60000,
+    "what": "the stock's top face offset 5 mm"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 9800.000000000007,
+      "body_count": 1,
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8,
+      "volume_mm3": 60000.000000000044
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8
+    }
+  },
+  "records": "007-offset-top-face-5.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 9800.000000000007,
+      "body_count": 1,
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8,
+      "volume_mm3": 60000.000000000044
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "merge_faces",
+    "copy",
+    "copy",
+    "tagged",
+    "offset_faces"
+  ],
+  "ungraded": [],
+  "what": "the stock's top face offset 5 mm",
+  "why_not": []
+}

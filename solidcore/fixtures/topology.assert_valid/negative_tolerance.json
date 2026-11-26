@@ -1,0 +1,68 @@
+{
+  "cases": [
+    {
+      "name": "negative_tolerance_fuzz00115",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "index": 0,
+        "level": 2,
+        "mutation": 1,
+        "value": -1e-300
+      }
+    },
+    {
+      "name": "negative_tolerance_fuzz00116",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "index": 3,
+        "level": 2,
+        "mutation": 2,
+        "value": -1.0
+      }
+    },
+    {
+      "name": "negative_tolerance_fuzz00133",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "index": 0,
+        "level": 2,
+        "mutation": 1,
+        "value": -1.0
+      }
+    },
+    {
+      "name": "negative_tolerance_fuzz00286",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "index": 0,
+        "level": 2,
+        "mutation": 2,
+        "value": -0.0
+      }
+    }
+  ]
+}

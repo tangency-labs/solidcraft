@@ -41,15 +41,19 @@ use windows_sys::Win32::UI::Input::Touch::{
     CloseTouchInputHandle, GetTouchInputInfo, TOUCHEVENTF_DOWN, TOUCHEVENTF_MOVE, TOUCHEVENTF_UP,
     TOUCHINPUT,
 };
-use windows_sys::Win32::UI::Input::{RAWINPUT, RIM_TYPEKEYBOARD, RIM_TYPEMOUSE};
+use windows_sys::Win32::UI::Input::{
+    GetCurrentInputMessageSource, IMDT_TOUCHPAD, INPUT_MESSAGE_SOURCE, RAWINPUT, RIM_TYPEKEYBOARD,
+    RIM_TYPEMOUSE,
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect, GetCursorPos,
     GetMenu, LoadCursorW, MsgWaitForMultipleObjectsEx, PeekMessageW, PostMessageW,
     RegisterClassExW, RegisterWindowMessageA, SetCursor, SetWindowPos, TranslateMessage,
     CREATESTRUCTW, GIDC_ARRIVAL, GIDC_REMOVAL, GWL_STYLE, GWL_USERDATA, HTCAPTION, HTCLIENT,
-    MINMAXINFO, MNC_CLOSE, MSG, MWMO_INPUTAVAILABLE, NCCALCSIZE_PARAMS, PM_REMOVE, PT_PEN,
-    PT_TOUCH, QS_ALLINPUT, RI_MOUSE_HWHEEL, RI_MOUSE_WHEEL, SC_MINIMIZE, SC_RESTORE,
-    SIZE_MAXIMIZED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WHEEL_DELTA, WINDOWPOS,
+    MINMAXINFO, MNC_CLOSE, MSG, MWMO_INPUTAVAILABLE, NCCALCSIZE_PARAMS, PM_REMOVE,
+    POINTER_INPUT_TYPE, PT_PEN, PT_TOUCH, PT_TOUCHPAD, QS_ALLINPUT, RI_MOUSE_HWHEEL,
+    RI_MOUSE_WHEEL, SC_MINIMIZE, SC_RESTORE, SIZE_MAXIMIZED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    SWP_NOZORDER, WHEEL_DELTA, WINDOWPOS,
     WMSZ_BOTTOM, WMSZ_BOTTOMLEFT, WMSZ_BOTTOMRIGHT, WMSZ_LEFT, WMSZ_RIGHT, WMSZ_TOP, WMSZ_TOPLEFT,
     WMSZ_TOPRIGHT, WM_CAPTURECHANGED, WM_CLOSE, WM_CREATE, WM_DESTROY, WM_DPICHANGED,
     WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION,
@@ -66,7 +70,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use crate::dpi::{PhysicalPosition, PhysicalSize};
 use crate::error::EventLoopError;
 use crate::event::{
-    DeviceEvent, Event, Force, Ime, InnerSizeWriter, RawKeyEvent, Touch, TouchPhase, WindowEvent,
+    DeviceEvent, Event, Force, Ime, InnerSizeWriter, MouseScrollDelta, RawKeyEvent, Touch,
+    TouchPhase, WindowEvent,
 };
 use crate::event_loop::{ActiveEventLoop as RootAEL, ControlFlow, DeviceEvents, EventLoopClosed};
 use crate::keyboard::ModifiersState;
@@ -91,6 +96,7 @@ use crate::window::{
 };
 use runner::{EventLoopRunner, EventLoopRunnerShared};
 
+use super::dark_mode::WIN10_BUILD_VERSION;
 use super::window::set_skip_taskbar;
 use super::SelectedCursor;
 
@@ -160,6 +166,7 @@ pub struct EventLoop<T: 'static> {
     // It is created lazily in case if we have `ControlFlow::WaitUntil`.
     // Keep it as a field to avoid recreating it on every `ControlFlow::WaitUntil`.
     high_resolution_timer: Option<OwnedHandle>,
+    touchpad_wheels: bool,
 }
 
 pub(crate) struct PlatformSpecificEventLoopAttributes {
@@ -199,6 +206,11 @@ impl<T: 'static> EventLoop<T> {
             become_dpi_aware();
         }
 
+        // SolidCraft (#15353): without the registration, winit's own wheel behaviour stays.
+        let touchpad_wheels =
+            TOUCHPAD_WHEELS.load(std::sync::atomic::Ordering::Relaxed) && set_touchpad_thread(true);
+        TOUCHPAD_REGISTERED.with(|registered| registered.set(touchpad_wheels));
+
         let thread_msg_target = create_event_target_window();
 
         let runner_shared = Rc::new(EventLoopRunner::new(thread_msg_target));
@@ -219,6 +231,7 @@ impl<T: 'static> EventLoop<T> {
             },
             msg_hook: attributes.msg_hook.take(),
             high_resolution_timer: None,
+            touchpad_wheels,
         })
     }
 
@@ -622,6 +635,10 @@ impl<T> Drop for EventLoop<T> {
         unsafe {
             DestroyWindow(self.window_target.p.thread_msg_target);
         }
+        if self.touchpad_wheels {
+            set_touchpad_thread(false);
+            TOUCHPAD_REGISTERED.with(|registered| registered.set(false));
+        }
     }
 }
 
@@ -998,17 +1015,59 @@ fn normalize_pointer_pressure(pressure: u32) -> Option<Force> {
     }
 }
 
+/// SolidCraft: resolve effective modifiers from synchronous (`GetKeyState`) and live
+/// (`GetAsyncKeyState`) state (#20352).
+///
+/// While unfocused, the thread's synchronous keyboard table has not seen keys pressed in another
+/// application, so live state is authoritative. When focus returns, any modifier already held is
+/// kept in `inherited` until it is either observed synchronously or physically released.
+fn effective_modifiers(
+    focused: bool,
+    sync: ModifiersState,
+    async_mods: Option<ModifiersState>,
+    inherited: &mut ModifiersState,
+) -> ModifiersState {
+    if !focused {
+        *inherited = ModifiersState::empty();
+        return async_mods.unwrap_or(sync);
+    }
+    if let Some(live) = async_mods {
+        *inherited = inherited.intersection(live).difference(sync);
+    }
+    sync.union(*inherited)
+}
+
 /// Emit a `ModifiersChanged` event whenever modifiers have changed.
 /// Returns the current modifier state
 fn update_modifiers(window: HWND, userdata: &WindowData) {
+    update_modifiers_inner(window, userdata, false);
+}
+
+fn update_modifiers_inner(window: HWND, userdata: &WindowData, gaining_focus: bool) {
     use crate::event::WindowEvent::ModifiersChanged;
 
-    let modifiers = {
+    let (focused, has_inherited) = {
+        let window_state = userdata.window_state.lock().unwrap();
+        (window_state.has_active_focus(), !window_state.inherited_modifiers.is_empty())
+    };
+
+    let (sync, async_mods) = {
         let mut layouts = LAYOUT_CACHE.lock().unwrap();
-        layouts.get_agnostic_mods()
+        if !focused {
+            (ModifiersState::empty(), Some(layouts.get_agnostic_mods_async()))
+        } else if gaining_focus || has_inherited {
+            (layouts.get_agnostic_mods(), Some(layouts.get_agnostic_mods_async()))
+        } else {
+            (layouts.get_agnostic_mods(), None)
+        }
     };
 
     let mut window_state = userdata.window_state.lock().unwrap();
+    if gaining_focus {
+        window_state.inherited_modifiers = async_mods.unwrap_or(sync);
+    }
+    let modifiers =
+        effective_modifiers(focused, sync, async_mods, &mut window_state.inherited_modifiers);
     if window_state.modifiers_state != modifiers {
         window_state.modifiers_state = modifiers;
 
@@ -1025,7 +1084,7 @@ fn update_modifiers(window: HWND, userdata: &WindowData) {
 unsafe fn gain_active_focus(window: HWND, userdata: &WindowData) {
     use crate::event::WindowEvent::Focused;
 
-    update_modifiers(window, userdata);
+    update_modifiers_inner(window, userdata, true);
 
     userdata.send_event(Event::WindowEvent {
         window_id: RootWindowId(WindowId(window)),
@@ -1036,7 +1095,11 @@ unsafe fn gain_active_focus(window: HWND, userdata: &WindowData) {
 unsafe fn lose_active_focus(window: HWND, userdata: &WindowData) {
     use crate::event::WindowEvent::{Focused, ModifiersChanged};
 
-    userdata.window_state_lock().modifiers_state = ModifiersState::empty();
+    {
+        let mut window_state = userdata.window_state_lock();
+        window_state.modifiers_state = ModifiersState::empty();
+        window_state.inherited_modifiers = ModifiersState::empty();
+    }
     userdata.send_event(Event::WindowEvent {
         window_id: RootWindowId(WindowId(window)),
         event: ModifiersChanged(ModifiersState::empty().into()),
@@ -1179,6 +1242,17 @@ unsafe fn public_window_callback_inner(
                 if let Ok(monitor_info) = monitor::get_monitor_info(monitor) {
                     params.rgrc[0] = monitor_info.monitorInfo.rcWork;
                 }
+            } else if window_flags.contains(WindowFlags::MARKER_UNDECORATED_SHADOW)
+                && window_flags.contains(WindowFlags::RESIZABLE)
+            {
+                // SolidCraft: the system frame on the left, right and bottom (resize borders and
+                // shadow), none at the top: a non-client row at the top stops Windows 11 offering
+                // snap layouts on the restored window. `WindowFlags::adjust_rect` mirrors this.
+                // Only for a window that can be resized (one that cannot has no resize borders
+                // to keep); otherwise winit's own calculation below.
+                let top = params.rgrc[0].top;
+                unsafe { DefWindowProcW(window, msg, wparam, lparam) };
+                params.rgrc[0].top = top;
             } else if window_flags.contains(WindowFlags::MARKER_UNDECORATED_SHADOW) {
                 // Extend the client area to cover the whole non-client area.
                 // https://docs.microsoft.com/en-us/windows/win32/winmsg/wm-nccalcsize#remarks
@@ -1199,20 +1273,50 @@ unsafe fn public_window_callback_inner(
         },
 
         WM_ENTERSIZEMOVE => {
-            userdata
-                .window_state_lock()
-                .set_window_flags_in_place(|f| f.insert(WindowFlags::MARKER_IN_SIZE_MOVE));
+            // Raw motion still pending from before the loop is delivered now, ahead of the loop's
+            // own events (with `quiet_window_move`, raw motion is held back during the loop).
+            raw_motion::flush(&userdata.event_loop_runner);
+            {
+                let mut state = userdata.window_state_lock();
+                // Each window counts once, even if a second `WM_ENTERSIZEMOVE` comes first.
+                if !state.window_flags().contains(WindowFlags::MARKER_IN_SIZE_MOVE) {
+                    WINDOWS_IN_SIZE_MOVE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                state.size_changed_in_loop = false;
+                state.paint_deferred_in_loop = false;
+                state.set_window_flags_in_place(|f| f.insert(WindowFlags::MARKER_IN_SIZE_MOVE));
+            }
             result = ProcResult::Value(0);
         },
 
         WM_EXITSIZEMOVE => {
-            let mut state = userdata.window_state_lock();
-            if state.dragging {
-                state.dragging = false;
-                unsafe { PostMessageW(window, WM_LBUTTONUP, 0, lparam) };
-            }
+            let pending_moved = {
+                let mut state = userdata.window_state_lock();
+                if state.dragging {
+                    state.dragging = false;
+                    unsafe { PostMessageW(window, WM_LBUTTONUP, 0, lparam) };
+                }
 
-            state.set_window_flags_in_place(|f| f.remove(WindowFlags::MARKER_IN_SIZE_MOVE));
+                if state.window_flags().contains(WindowFlags::MARKER_IN_SIZE_MOVE) {
+                    leave_size_move();
+                }
+                state.set_window_flags_in_place(|f| f.remove(WindowFlags::MARKER_IN_SIZE_MOVE));
+                state.size_changed_in_loop = false;
+                // Whatever `quiet_window_move` says now: a paint deferred or a move held back
+                // before it was turned off is still delivered, once.
+                if std::mem::take(&mut state.paint_deferred_in_loop) {
+                    unsafe { RedrawWindow(window, ptr::null(), 0, RDW_INTERNALPAINT) };
+                }
+                state.pending_moved.take()
+            };
+            // SolidCraft: the position the window ended at, coalesced during the loop
+            // (see `WM_WINDOWPOSCHANGED`). Sent with the state lock released.
+            if let Some(position) = pending_moved {
+                userdata.send_event(Event::WindowEvent {
+                    window_id: RootWindowId(WindowId(window)),
+                    event: WindowEvent::Moved(position),
+                });
+            }
             result = ProcResult::Value(0);
         },
 
@@ -1268,12 +1372,40 @@ unsafe fn public_window_callback_inner(
         },
 
         WM_NCDESTROY => {
+            // SolidCraft: a window destroyed inside the move/size loop gets no
+            // `WM_EXITSIZEMOVE`. Its count is released here, or relative raw mouse motion would
+            // stay held back for the rest of the process.
+            {
+                let mut state = userdata.window_state_lock();
+                if state.window_flags().contains(WindowFlags::MARKER_IN_SIZE_MOVE) {
+                    leave_size_move();
+                    state.set_window_flags_in_place(|f| f.remove(WindowFlags::MARKER_IN_SIZE_MOVE));
+                }
+            }
             unsafe { super::set_window_long(window, GWL_USERDATA, 0) };
             userdata.userdata_removed.set(true);
             result = ProcResult::Value(0);
         },
 
+        // SolidCraft: during a pure move (modal move loop, size unchanged) the compositor moves
+        // the window's pixels, so paints are validated without a frame: a frame here would block
+        // the loop on the swapchain. One paint is requested when the loop ends. Only while the
+        // app asks for it (`quiet_window_move`); otherwise every paint is sent, as in winit.
+        WM_PAINT if quiet_window_move() && {
+            let state = userdata.window_state_lock();
+            state.window_flags().contains(WindowFlags::MARKER_IN_SIZE_MOVE)
+                && !state.size_changed_in_loop
+        } =>
+        {
+            userdata.window_state_lock().paint_deferred_in_loop = true;
+            result = ProcResult::Value(unsafe { DefWindowProcW(window, msg, wparam, lparam) });
+        },
         WM_PAINT => {
+            // SolidCraft: with `quiet_window_move` turned off in the middle of a loop, this paint
+            // also delivers one deferred before, so none is requested again when the loop ends.
+            if !quiet_window_move() {
+                userdata.window_state_lock().paint_deferred_in_loop = false;
+            }
             userdata.window_state_lock().redraw_requested =
                 userdata.event_loop_runner.should_buffer();
 
@@ -1381,13 +1513,32 @@ unsafe fn public_window_callback_inner(
             use crate::event::WindowEvent::Moved;
 
             let windowpos = lparam as *const WINDOWPOS;
-            if unsafe { (*windowpos).flags & SWP_NOMOVE != SWP_NOMOVE } {
+            let flags = unsafe { (*windowpos).flags };
+            if flags & SWP_NOMOVE != SWP_NOMOVE {
                 let physical_position =
                     unsafe { PhysicalPosition::new((*windowpos).x, (*windowpos).y) };
-                userdata.send_event(Event::WindowEvent {
-                    window_id: RootWindowId(WindowId(window)),
-                    event: Moved(physical_position),
-                });
+                // SolidCraft: a pure move inside the modal move/size loop is sent once, at
+                // `WM_EXITSIZEMOVE`. A move that also resizes (a snap, a DPI change) is sent at once,
+                // as is every move while the app hasn't asked for it (`quiet_window_move`); such a
+                // move replaces one held back before.
+                let coalesce = {
+                    let mut state = userdata.window_state_lock();
+                    let in_loop =
+                        state.window_flags().contains(WindowFlags::MARKER_IN_SIZE_MOVE);
+                    if quiet_window_move() && in_loop && flags & SWP_NOSIZE == SWP_NOSIZE {
+                        state.pending_moved = Some(physical_position);
+                        true
+                    } else {
+                        state.pending_moved = None;
+                        false
+                    }
+                };
+                if !coalesce {
+                    userdata.send_event(Event::WindowEvent {
+                        window_id: RootWindowId(WindowId(window)),
+                        event: Moved(physical_position),
+                    });
+                }
             }
 
             // This is necessary for us to still get sent WM_SIZE.
@@ -1396,6 +1547,12 @@ unsafe fn public_window_callback_inner(
 
         WM_SIZE => {
             use crate::event::WindowEvent::Resized;
+            {
+                let mut state = userdata.window_state_lock();
+                if state.window_flags().contains(WindowFlags::MARKER_IN_SIZE_MOVE) {
+                    state.size_changed_in_loop = true;
+                }
+            }
             let w = super::loword(lparam as u32) as u32;
             let h = super::hiword(lparam as u32) as u32;
 
@@ -1725,10 +1882,7 @@ unsafe fn public_window_callback_inner(
         },
 
         WM_MOUSEWHEEL => {
-            use crate::event::MouseScrollDelta::LineDelta;
-
             let value = (wparam >> 16) as i16;
-            let value = value as f32 / WHEEL_DELTA as f32;
 
             update_modifiers(window, userdata);
 
@@ -1736,7 +1890,7 @@ unsafe fn public_window_callback_inner(
                 window_id: RootWindowId(WindowId(window)),
                 event: WindowEvent::MouseWheel {
                     device_id: DEVICE_ID,
-                    delta: LineDelta(0.0, value),
+                    delta: wheel_delta(userdata, value, false),
                     phase: TouchPhase::Moved,
                 },
             });
@@ -1745,10 +1899,8 @@ unsafe fn public_window_callback_inner(
         },
 
         WM_MOUSEHWHEEL => {
-            use crate::event::MouseScrollDelta::LineDelta;
-
+            // NOTE: inverted! See https://github.com/rust-windowing/winit/pull/2105/
             let value = (wparam >> 16) as i16;
-            let value = -value as f32 / WHEEL_DELTA as f32; // NOTE: inverted! See https://github.com/rust-windowing/winit/pull/2105/
 
             update_modifiers(window, userdata);
 
@@ -1756,7 +1908,7 @@ unsafe fn public_window_callback_inner(
                 window_id: RootWindowId(WindowId(window)),
                 event: WindowEvent::MouseWheel {
                     device_id: DEVICE_ID,
-                    delta: LineDelta(value, 0.0),
+                    delta: wheel_delta(userdata, value, true),
                     phase: TouchPhase::Moved,
                 },
             });
@@ -1983,6 +2135,12 @@ unsafe fn public_window_callback_inner(
         },
 
         WM_POINTERDOWN | WM_POINTERUPDATE | WM_POINTERUP => {
+            // SolidCraft: a touchpad contact goes to DefWindowProc, which sends the wheel messages
+            // winit reads (#15353). Touch and pen stay as winit has them.
+            if TOUCHPAD_REGISTERED.with(Cell::get) && pointer_is_touchpad(wparam) {
+                result = ProcResult::DefWindowProc(wparam);
+                return;
+            }
             if let (
                 Some(GetPointerFrameInfoHistory),
                 Some(SkipPointerFrameMessages),
@@ -2306,7 +2464,9 @@ unsafe fn public_window_callback_inner(
             }
 
             let new_outer_rect: RECT;
-            {
+            if takes_suggested_rect(*WIN10_BUILD_VERSION, allow_resize) {
+                new_outer_rect = suggested_rect;
+            } else {
                 let suggested_ul =
                     (suggested_rect.left + margin_left, suggested_rect.top + margin_top);
 
@@ -2556,8 +2716,144 @@ unsafe extern "system" fn thread_event_target_callback(
     result
 }
 
+/// SolidCraft: windows of this process inside the modal move/size loop. Meanwhile, with
+/// [`QUIET_WINDOW_MOVE`] on, relative raw mouse motion is not sent: an app repainting on it would
+/// render once per mouse report.
+static WINDOWS_IN_SIZE_MOVE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// SolidCraft: relative raw mouse motion is summed while more raw input waits in the queue and
+/// sent once per burst, so an 8 kHz mouse no longer makes three device events per report.
+mod raw_motion {
+    use super::{Event, EventLoopRunnerShared, UserEventPlaceholder};
+    use crate::event::DeviceEvent::{Motion, MouseMotion};
+    use crate::event::DeviceId;
+    use std::cell::Cell;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetQueueStatus, QS_RAWINPUT};
+
+    /// The thread's event loop, reached from the raw-input target and from the window procedure.
+    type Runner = EventLoopRunnerShared<UserEventPlaceholder>;
+
+    thread_local! {
+        static PENDING: Cell<Option<(DeviceId, f64, f64)>> = const { Cell::new(None) };
+    }
+
+    pub(super) fn add(runner: &Runner, device_id: DeviceId, x: f64, y: f64) {
+        let merged = PENDING.with(|p| match p.get() {
+            Some((d, px, py)) if d == device_id => Some((d, px + x, py + y)),
+            Some(_) => {
+                flush(runner);
+                Some((device_id, x, y))
+            },
+            None => Some((device_id, x, y)),
+        });
+        PENDING.with(|p| p.set(merged));
+        // The high word lists what is in the queue now: more raw input means the burst goes on.
+        let queued = unsafe { GetQueueStatus(QS_RAWINPUT) } >> 16;
+        if queued & QS_RAWINPUT == 0 {
+            flush(runner);
+        }
+    }
+
+    pub(super) fn flush(runner: &Runner) {
+        let Some((device_id, x, y)) = PENDING.with(|p| p.take()) else { return };
+        if x != 0.0 {
+            runner.send_event(Event::DeviceEvent { device_id, event: Motion { axis: 0, value: x } });
+        }
+        if y != 0.0 {
+            runner.send_event(Event::DeviceEvent { device_id, event: Motion { axis: 1, value: y } });
+        }
+        if x != 0.0 || y != 0.0 {
+            runner.send_event(Event::DeviceEvent { device_id, event: MouseMotion { delta: (x, y) } });
+        }
+    }
+}
+
+/// SolidCraft: a window left the modal move/size loop, or was destroyed inside it.
+fn leave_size_move() {
+    // Only the window thread enters and leaves the loop: no race to guard.
+    let n = WINDOWS_IN_SIZE_MOVE.load(std::sync::atomic::Ordering::Relaxed);
+    WINDOWS_IN_SIZE_MOVE.store(n.saturating_sub(1), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// SolidCraft: a pure move in the modal move/size loop is quiet: its paints are validated without
+/// `RedrawRequested` (one paint when the loop ends), its `Moved` is sent once at the end, and
+/// relative raw mouse motion is not sent while it lasts. Off, the default, is winit's own
+/// behaviour. Read at each message, so a change applies at once, in the middle of a loop too
+/// (`platform::windows::set_quiet_window_move`).
+static QUIET_WINDOW_MOVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// SolidCraft: see [`QUIET_WINDOW_MOVE`].
+pub(crate) fn set_quiet_window_move(on: bool) {
+    QUIET_WINDOW_MOVE.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// SolidCraft: see [`QUIET_WINDOW_MOVE`].
+fn quiet_window_move() -> bool {
+    QUIET_WINDOW_MOVE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// SolidCraft (#15353): 40 px per `WHEEL_DELTA` is egui's default line scroll speed, so a pinch
+/// (Ctrl + wheel) keeps today's speed. `horizontal` keeps the sign inversion of `WM_MOUSEHWHEEL`.
+fn touchpad_wheel_delta(value: i16, horizontal: bool, scale_factor: f64) -> MouseScrollDelta {
+    let pixels = value as f64 / WHEEL_DELTA as f64 * 40.0 * scale_factor;
+    if horizontal {
+        MouseScrollDelta::PixelDelta(PhysicalPosition::new(-pixels, 0.0))
+    } else {
+        MouseScrollDelta::PixelDelta(PhysicalPosition::new(0.0, pixels))
+    }
+}
+
+/// SolidCraft (#15353): read when the event loop is built.
+static TOUCHPAD_WHEELS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn set_touchpad_wheels(on: bool) {
+    TOUCHPAD_WHEELS.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+thread_local! {
+    static TOUCHPAD_REGISTERED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// SolidCraft (#15353): `false` when the function is missing or the call fails.
+fn set_touchpad_thread(enable: bool) -> bool {
+    match *util::REGISTER_TOUCHPAD_CAPABLE_THREAD {
+        Some(register) => unsafe { register(enable.into()) != FALSE },
+        None => false,
+    }
+}
+
+fn current_input_is_touchpad() -> bool {
+    let mut source = INPUT_MESSAGE_SOURCE { deviceType: 0, originId: 0 };
+    let found = unsafe { GetCurrentInputMessageSource(&mut source) } != FALSE;
+    found && source.deviceType == IMDT_TOUCHPAD
+}
+
+fn pointer_is_touchpad(wparam: WPARAM) -> bool {
+    let Some(get_pointer_type) = *util::GET_POINTER_TYPE else {
+        return false;
+    };
+    let mut pointer_type: POINTER_INPUT_TYPE = 0;
+    let found = unsafe {
+        get_pointer_type(super::loword(wparam as u32) as u32, &mut pointer_type)
+    } != FALSE;
+    found && pointer_type == PT_TOUCHPAD
+}
+
+fn wheel_delta(userdata: &WindowData, value: i16, horizontal: bool) -> MouseScrollDelta {
+    if TOUCHPAD_REGISTERED.with(Cell::get) && current_input_is_touchpad() {
+        let scale_factor = userdata.window_state_lock().scale_factor;
+        return touchpad_wheel_delta(value, horizontal, scale_factor);
+    }
+    let lines = value as f32 / WHEEL_DELTA as f32;
+    if horizontal {
+        MouseScrollDelta::LineDelta(-lines, 0.0)
+    } else {
+        MouseScrollDelta::LineDelta(0.0, lines)
+    }
+}
+
 unsafe fn handle_raw_input(userdata: &ThreadMsgTargetData, data: RAWINPUT) {
-    use crate::event::DeviceEvent::{Button, Key, Motion, MouseMotion, MouseWheel};
+    use crate::event::DeviceEvent::{Button, Key, MouseWheel};
     use crate::event::ElementState::{Pressed, Released};
     use crate::event::MouseScrollDelta::LineDelta;
 
@@ -2566,33 +2862,20 @@ unsafe fn handle_raw_input(userdata: &ThreadMsgTargetData, data: RAWINPUT) {
     if data.header.dwType == RIM_TYPEMOUSE {
         let mouse = unsafe { data.data.mouse };
 
-        if util::has_flag(mouse.usFlags as u32, MOUSE_MOVE_RELATIVE) {
-            let x = mouse.lLastX as f64;
-            let y = mouse.lLastY as f64;
-
-            if x != 0.0 {
-                userdata.send_event(Event::DeviceEvent {
-                    device_id,
-                    event: Motion { axis: 0, value: x },
-                });
-            }
-
-            if y != 0.0 {
-                userdata.send_event(Event::DeviceEvent {
-                    device_id,
-                    event: Motion { axis: 1, value: y },
-                });
-            }
-
+        let moving_window = quiet_window_move()
+            && WINDOWS_IN_SIZE_MOVE.load(std::sync::atomic::Ordering::Relaxed) > 0;
+        if util::has_flag(mouse.usFlags as u32, MOUSE_MOVE_RELATIVE) && !moving_window {
+            let (x, y) = (mouse.lLastX as f64, mouse.lLastY as f64);
             if x != 0.0 || y != 0.0 {
-                userdata.send_event(Event::DeviceEvent {
-                    device_id,
-                    event: MouseMotion { delta: (x, y) },
-                });
+                raw_motion::add(&userdata.event_loop_runner, device_id, x, y);
             }
         }
 
         let button_flags = unsafe { mouse.Anonymous.Anonymous.usButtonFlags };
+        // Motion that came before a button or wheel change is delivered before it.
+        if button_flags != 0 {
+            raw_motion::flush(&userdata.event_loop_runner);
+        }
         if util::has_flag(button_flags as u32, RI_MOUSE_WHEEL) {
             let button_data = unsafe { mouse.Anonymous.Anonymous.usButtonData } as i16;
             let delta = button_data as f32 / WHEEL_DELTA as f32;
@@ -2672,5 +2955,100 @@ fn get_pointer_move_kind(
         PointerMoveKind::Leave
     } else {
         PointerMoveKind::None
+    }
+}
+
+/// `WM_DPICHANGED` applies the rect Windows suggests, as is, from Windows 11 on (the first build
+/// is 22000; `None` is a Windows whose version isn't 10.0, or a failed version query).
+///
+/// On this path a size written through the `InnerSizeWriter` of `ScaleFactorChanged` is not
+/// applied: the window takes the suggested rect, whatever size the application wrote.
+///
+/// The adjustments below it are for earlier Windows 10 builds. On Windows 11 they break the move:
+/// when the shell moves a window (Win+Shift+Arrow, snap) the window is still on the old monitor
+/// while this message runs, so `MonitorFromWindow` names the old monitor as the new DPI's, and
+/// the nudge loop pushes the correct rect back until most of it is on the old monitor. That
+/// sends `WM_DPICHANGED` straight back, leaving the window on the boundary, and a size that was
+/// already scaled gets scaled again.
+///
+/// A maximized or fullscreen window (`allow_resize` false) keeps its existing path.
+fn takes_suggested_rect(win10_build: Option<u32>, allow_resize: bool) -> bool {
+    allow_resize && win10_build.map_or(true, |build| build >= 22000)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_11_takes_the_suggested_rect() {
+        assert!(takes_suggested_rect(Some(22000), true));
+        assert!(takes_suggested_rect(Some(26300), true));
+        assert!(takes_suggested_rect(None, true));
+    }
+
+    #[test]
+    fn windows_10_keeps_its_adjustments() {
+        assert!(!takes_suggested_rect(Some(19045), true));
+        assert!(!takes_suggested_rect(Some(21999), true));
+    }
+
+    #[test]
+    fn a_maximized_or_fullscreen_window_keeps_its_path() {
+        assert!(!takes_suggested_rect(Some(26300), false));
+        assert!(!takes_suggested_rect(None, false));
+    }
+
+    #[test]
+    fn touchpad_wheel_delta_is_pixels() {
+        assert_eq!(
+            touchpad_wheel_delta(120, false, 1.0),
+            MouseScrollDelta::PixelDelta(PhysicalPosition::new(0.0, 40.0))
+        );
+        assert_eq!(
+            touchpad_wheel_delta(-60, false, 1.5),
+            MouseScrollDelta::PixelDelta(PhysicalPosition::new(0.0, -30.0))
+        );
+        assert_eq!(
+            touchpad_wheel_delta(120, true, 1.0),
+            MouseScrollDelta::PixelDelta(PhysicalPosition::new(-40.0, 0.0))
+        );
+        match touchpad_wheel_delta(i16::MIN, false, 1.0) {
+            MouseScrollDelta::PixelDelta(p) => assert!(p.x.is_finite() && p.y.is_finite()),
+            other => panic!("expected pixels, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn effective_modifiers_tracks_unfocused_and_inherited_keys() {
+        let ctrl = ModifiersState::CONTROL;
+        let shift = ModifiersState::SHIFT;
+        let empty = ModifiersState::empty();
+        let mut inherited = empty;
+
+        // Unfocused: live async state wins even when synchronous state is empty.
+        assert_eq!(effective_modifiers(false, empty, Some(ctrl), &mut inherited), ctrl);
+        assert_eq!(inherited, empty);
+
+        // Focus gained with Ctrl held before focus: stays active while GetKeyState is still empty.
+        inherited = ctrl;
+        assert_eq!(effective_modifiers(true, empty, Some(ctrl), &mut inherited), ctrl);
+        assert_eq!(inherited, ctrl);
+
+        // Subsequent mouse message before GetKeyState catches up still sees Ctrl, plus Shift if pressed.
+        assert_eq!(effective_modifiers(true, shift, Some(ctrl | shift), &mut inherited), ctrl | shift);
+        assert_eq!(inherited, ctrl);
+
+        // Releasing Ctrl physically clears it from inherited and effective modifiers.
+        assert_eq!(effective_modifiers(true, shift, Some(shift), &mut inherited), shift);
+        assert_eq!(inherited, empty);
+
+        // Once GetKeyState catches up on focus, inherited clears immediately.
+        inherited = ctrl;
+        assert_eq!(effective_modifiers(true, ctrl, Some(ctrl), &mut inherited), ctrl);
+        assert_eq!(inherited, empty);
+
+        // Normal focused path uses synchronous state alone.
+        assert_eq!(effective_modifiers(true, shift, None, &mut inherited), shift);
     }
 }

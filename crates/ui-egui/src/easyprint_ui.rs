@@ -24,6 +24,8 @@ pub struct State {
     rx: Mutex<Receiver<Answer>>,
     /// An upload has been started and not answered. One at a time.
     busy: Arc<AtomicBool>,
+    /// The organization's policy turns EasyPrint off (`AllowEasyPrint` = 0): nothing is uploaded.
+    blocked: Arc<AtomicBool>,
     /// The parameters of a send waiting for the user to agree to the upload.
     ask: Option<Value>,
     /// The last address opened (a step of a scenario runs several frames, so tests can't catch it).
@@ -38,6 +40,7 @@ impl Default for State {
             tx,
             rx: Mutex::new(rx),
             busy: Arc::default(),
+            blocked: Arc::default(),
             ask: None,
             #[cfg(test)]
             opened: None,
@@ -48,8 +51,11 @@ impl Default for State {
 /// Give the session the host's way to upload (call after the services are set).
 pub fn install(app: &mut SolveApp) {
     let Some(upload) = app.services.easyprint_upload.clone() else { return };
-    let (tx, busy) = (app.easyprint.tx.clone(), app.easyprint.busy.clone());
+    let (tx, busy, blocked) = (app.easyprint.tx.clone(), app.easyprint.busy.clone(), app.easyprint.blocked.clone());
     app.session.easyprint_upload = Some(Arc::new(move |name, bytes| {
+        if blocked.load(Ordering::SeqCst) {
+            return Err("your organization's policy turns off Open with EasyPrint: no model is sent to Printables".into());
+        }
         if busy.swap(true, Ordering::SeqCst) {
             return Err("the last model is still being uploaded to Printables".into());
         }
@@ -58,14 +64,23 @@ pub fn install(app: &mut SolveApp) {
     }));
 }
 
-/// Whether this host can upload to EasyPrint.
+/// Whether this host can upload to EasyPrint, and the organization's policy allows it.
 pub fn available(app: &SolveApp) -> bool {
-    app.services.easyprint_upload.is_some()
+    app.services.easyprint_upload.is_some() && app.policy.allows("easyprint")
+}
+
+/// Turn uploads off (or on again) for the organization's policy, whatever starts them.
+pub fn block(app: &SolveApp, blocked: bool) {
+    app.easyprint.blocked.store(blocked, Ordering::SeqCst);
 }
 
 /// Send the bodies of `params` to EasyPrint: at once when the user has agreed before, else after
 /// asking.
 pub fn request(app: &mut SolveApp, params: Value) {
+    if !app.policy.allows("easyprint") {
+        app.set_status(solidcraft_ui_text::tr("policy.easyprint_off").to_string(), true);
+        return;
+    }
     if app.preferences.easyprint_consent {
         return go(app, params);
     }
@@ -73,10 +88,10 @@ pub fn request(app: &mut SolveApp, params: Value) {
 }
 
 fn go(app: &mut SolveApp, mut params: Value) {
-    let _language = crate::i18n::scope(&app.preferences.language);
+    let _language = solidcraft_ui_text::scope(&app.preferences.language);
     params["consent"] = json!(true);
     if app.run("file.open_in_easyprint", params).is_ok() {
-        app.set_status(crate::i18n::tr("ui.easyprint_uploading"), false);
+        app.set_status(solidcraft_ui_text::tr("ui.easyprint_uploading"), false);
     }
 }
 
@@ -90,7 +105,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     };
     app.easyprint.busy.store(false, Ordering::SeqCst);
-    let _language = crate::i18n::scope(&app.preferences.language);
+    let _language = solidcraft_ui_text::scope(&app.preferences.language);
     match answer {
         Ok(url) => {
             #[cfg(test)]
@@ -98,21 +113,22 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                 app.easyprint.opened = Some(url.clone());
             }
             ctx.open_url(egui::OpenUrl::new_tab(url));
-            app.set_status(crate::i18n::tr("ui.easyprint_opened"), false);
+            app.set_status(solidcraft_ui_text::tr("ui.easyprint_opened"), false);
         }
-        Err(e) => app.set_status(crate::i18n::format("ui.easyprint_failed", &[("error", &e)]), true),
+        Err(e) => app.set_status(solidcraft_ui_text::format("ui.easyprint_failed", &[("error", &e)]), true),
     }
 }
 
 /// The question: what is uploaded where, for how long.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(params) = app.easyprint.ask.clone() else { return };
-    let _language = crate::i18n::scope(&app.preferences.language);
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::new("sc_easyprint_confirm"), "mesh_export", crate::i18n::tr_label("Open with EasyPrint"))
-        .actions("Upload", "Cancel", None)
-        .show(ctx, true, |ui| {
-            ui_kit::text(ui, crate::i18n::tr("ui.easyprint_consent"), ui_kit::Text::Report("easyprint_consent", false));
-        });
+    let _language = solidcraft_ui_text::scope(&app.preferences.language);
+    let (closed, action) =
+        ui_kit::Confirm::new(egui::Id::unique("sc_easyprint_confirm"), "mesh_export", solidcraft_ui_text::tr_label("Open with EasyPrint"))
+            .actions("Upload", "Cancel", None)
+            .show(ctx, true, |ui| {
+                ui_kit::text(ui, solidcraft_ui_text::tr("ui.easyprint_consent"), ui_kit::Text::Report("easyprint_consent", false));
+            });
     match action {
         ui_kit::Action::Ok => {
             app.easyprint.ask = None;
@@ -158,6 +174,29 @@ mod tests {
 
     fn status(h: &Harness) -> (String, bool) {
         h.app.status.clone().map(|(text, _, error)| (text, error)).unwrap_or_default()
+    }
+
+    /// An organization's policy that turns EasyPrint off (#10260): nothing is offered, asked or
+    /// sent, whether the menu or a script starts it.
+    #[test]
+    fn a_policy_that_turns_easyprint_off_sends_nothing() {
+        let (mut h, names) = harness(Ok("https://www.printables.com/slice?f=1".into()));
+        h.app.preferences.easyprint_consent = true;
+        h.app.policy = crate::policy::Policy::from_json(r#"{"AllowEasyPrint": 0}"#);
+        crate::policy::enforce(&mut h.app);
+        assert!(!available(&h.app), "the send dialog offers no EasyPrint");
+        request(&mut h.app, json!({}));
+        assert!(status(&h).1, "the status bar says why");
+        assert!(h.app.easyprint.ask.is_none());
+        let scripted = h.app.run("file.open_in_easyprint", json!({"consent": true}));
+        assert!(scripted.is_err(), "a script's call is refused: {scripted:?}");
+        h.frames(3);
+        assert!(names.lock().unwrap().is_empty(), "no model left the computer");
+        assert_eq!(opened(&mut h), None);
+        // AllowEasyPrint = 1 leaves it as it was.
+        h.app.policy = crate::policy::Policy::from_json(r#"{"AllowEasyPrint": 1}"#);
+        crate::policy::enforce(&mut h.app);
+        assert!(available(&h.app));
     }
 
     #[test]

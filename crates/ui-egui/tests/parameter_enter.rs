@@ -39,7 +39,7 @@ fn parameter_enter_adds_once_and_focuses_next_name() {
     enter(&mut h, false);
     assert_eq!(h.app.session.undo.len(), undo + 1);
     assert!(h.app.params.as_ref().unwrap().new_name.is_empty());
-    assert!(h.app.params.as_ref().unwrap().error.is_none());
+    assert!(h.app.params.as_ref().unwrap().banner().is_none());
     let saved = h.app.session.doc.to_json();
     enter(&mut h, true);
     assert_eq!(h.app.session.doc.to_json(), saved);
@@ -73,12 +73,12 @@ fn parameter_enter_invalid_preserves_draft_and_other_rows() {
     let d = h.app.params.as_ref().unwrap();
     assert_eq!(d.new_name, "bad");
     assert_eq!(d.new_expr, "missing + 1 mm");
-    assert!(d.error.is_some());
+    assert!(d.banner().is_some());
     fill(&mut h, "name", "existing");
     fill(&mut h, "expression", "15 mm");
     enter(&mut h, false);
     assert_eq!(h.app.session.doc.to_json(), saved);
-    assert!(h.app.params.as_ref().unwrap().error.is_some());
+    assert!(h.app.params.as_ref().unwrap().banner().is_some());
 }
 #[test]
 fn parameter_enter_edits_expression_without_adding_draft() {
@@ -93,7 +93,7 @@ fn parameter_enter_edits_expression_without_adding_draft() {
     enter(&mut h, false);
     assert_eq!(h.app.session.undo.len(), undo + 1);
     assert_eq!(h.app.params.as_ref().unwrap().new_name, "unsubmitted");
-    assert!(h.app.params.as_ref().unwrap().error.is_none(), "Enter in the existing row never attempts the invalid draft");
+    assert!(h.app.params.as_ref().unwrap().banner().is_none(), "Enter in the existing row never attempts the invalid draft");
     let result = h.app.session.execute("parameters.list", &json!({})).unwrap();
     let ps = result["parameters"].as_array().unwrap();
     assert!(ps.iter().any(|p| p["name"] == "width" && p["expression"] == "20 mm"));
@@ -121,7 +121,7 @@ fn parameter_enter_comment_uses_selected_unit_and_unrelated_focus_does_not_submi
     h.app.params.as_mut().unwrap().new_expr = "2 cm".into();
     enter(&mut h, false);
     assert_eq!(h.app.session.undo.len(), undo);
-    assert!(h.app.params.as_ref().unwrap().error.is_none(), "unrelated Enter never attempts the pending draft");
+    assert!(h.app.params.as_ref().unwrap().banner().is_none(), "unrelated Enter never attempts the pending draft");
     h.run(&json!([{"click":{"handle":"param:new:comment"}}])).unwrap();
     enter(&mut h, false);
     let result = h.app.session.execute("parameters.list", &json!({})).unwrap();
@@ -171,7 +171,7 @@ fn invalid_parameter_name_stays_editable_after_leaving_it() {
 
 #[test]
 fn parameter_add_resets_expression_for_next_row() {
-    for (units, selected) in [("mm", 0), ("cm", 1), ("m", 2), ("in", 3), ("ft", 4)] {
+    for (units, selected) in [("mm", 0), ("cm", 1), ("m", 2), ("in", 5), ("ft", 7)] {
         let mut h = open_in_units(units);
         let d = h.app.params.as_ref().unwrap();
         assert!(d.new_expr.is_empty(), "{units}: the initial draft is blank");

@@ -4,13 +4,14 @@ use super::{
     effects::{failure, layer_actions, note, number},
     materials, studio,
 };
-use crate::{SolveApp, theme::Tokens, ui_kit};
+use crate::{SolveApp, ui_kit};
 use solidcraft_engine::render::job::aging::{AgingKind, AgingLayer, SurfaceClass};
+use solidcraft_theme::Tokens;
 
 pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
-    note(app, ui, "render.effects_gpu_only");
+    note(app, ui, "render.aging_raytrace_help");
     ui.add_space(Tokens::get().space_4);
-    let enabled = app.render_workspace.view.method == ImageMethod::GpuRaytrace;
+    let enabled = matches!(app.render_workspace.view.method, ImageMethod::CpuRaytrace | ImageMethod::GpuRaytrace);
     let response = ui.add_enabled_ui(enabled, |ui| layer_controls(app, ui));
     crate::scenario::publish_rect("render:wear:controls", response.response.rect);
 }
@@ -52,7 +53,7 @@ fn layer_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
             }];
             let row = ui_kit::tree_row(
                 ui,
-                ui.id().with(("aging-layer", index)),
+                ui.scope_id().with(("aging-layer", index)),
                 &ui_kit::Row { label: &label, name: true, selected: index == editor.selected_aging, actions: &actions, ..Default::default() },
             );
             if let Some(rect) = row.rect {
@@ -120,7 +121,7 @@ fn layer_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
             let search_label = app.tr("render.aging_target_search").to_string();
-            ui_kit::bounded_cell_editor(ui, ui.id().with("aging_target_search"), &mut editor.search, &search_label, false, 128);
+            ui_kit::bounded_cell_editor(ui, ui.scope_id().with("aging_target_search"), &mut editor.search, &search_label, false, 128);
             let selected = layer.target.as_ref().map_or_else(
                 || app.tr("render.aging_all_bodies").to_string(),
                 |identity| {
@@ -163,7 +164,7 @@ fn layer_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
             note(app, ui, "render.aging_target_help");
         });
     }
-    if app.render_workspace.view.method == ImageMethod::GpuRaytrace && before != stack {
+    if matches!(app.render_workspace.view.method, ImageMethod::CpuRaytrace | ImageMethod::GpuRaytrace) && before != stack {
         app.render_workspace.view.studio.aging = stack;
         app.render_workspace.view.dirty = true;
     }

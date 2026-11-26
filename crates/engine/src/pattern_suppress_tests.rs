@@ -113,7 +113,7 @@ fn enclosure_arc_extinction_keeps_a_real_sharp_inner_lip_after_resize_and_reopen
         // accepted.
         assert!(
             warnings.iter().all(|(name, message)| name.as_str() == "SnapFit1"
-                && message.as_str() == "face `F4:inner:F2:side:l1` was found by geometry, not exact history; check it"),
+                && message.as_str() == "face `F4:inner(F2:side:l1)` was found by geometry, not exact history; check it"),
             "warnings {warnings:?}"
         );
         assert!(session.model.results.iter().filter(|r| r.name == "Lid lip").all(|r| r.warning.is_none()));

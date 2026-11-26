@@ -1,4 +1,4 @@
-# Files generated from the code are rewritten here, on main, after each merge, so pull requests
+# Files generated from the code are rewritten here, on main, once a night, so pull requests
 # never edit them (two pull requests that each regenerated one would always conflict):
 # THIRD-PARTY-LICENSES.txt (`cargo xtask licences`) and docs/features.md (`cargo xtask features`).
 # Pending files (assets/locales/pending, attribution/pending) are folded into the catalogs and
@@ -6,22 +6,10 @@
 name: Generated files
 
 on:
-  push:
-    branches: [main]
-    # THIRD-PARTY-LICENSES.txt follows the manifests, the lockfile, the vendored crates' licence
-    # files and the fonts' licences; docs/features.md follows the command registry (crates/engine),
-    # read through solidcraft-cli. Other pushes regenerate nothing.
-    paths:
-      - "Cargo.lock"
-      - "**/Cargo.toml"
-      - "vendor/**"
-      - "assets/fonts/**"
-      - "crates/engine/**"
-      - "apps/solidcraft-cli/**"
-      - "xtask/**"
-      - "assets/locales/pending/*.json"
-      - "attribution/pending/*.md"
-      - ".github/workflows/generated.yml"
+  # Nightly, outside merge hours. A push straight to main resets every merge-queue batch, so the
+  # regeneration no longer runs on each push.
+  schedule:
+    - cron: "17 8 * * *"
   workflow_dispatch:
 
 permissions:
@@ -35,7 +23,7 @@ concurrency:
 jobs:
   regenerate:
     name: Regenerate and commit
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 60
     steps:
       # Always main itself, never pull request code, since this job can push.
@@ -44,25 +32,12 @@ jobs:
           ref: main
           # main goes through the merge queue; this deploy key may push past it.
           ssh-key: ${{ secrets.GENERATED_FILES_DEPLOY_KEY }}
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: generated-files
-      - name: THIRD-PARTY-LICENSES.txt
-        run: cargo xtask licences
-      - name: docs/features.md
-        run: cargo xtask features
-      - name: Pending locale strings and attribution rows
-        run: cargo xtask fold-pending
-      - name: Commit if changed
-        run: |
-          if [ -z "$(git status --porcelain)" ]; then echo "unchanged"; exit 0; fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A THIRD-PARTY-LICENSES.txt docs/features.md assets/locales ATTRIBUTION.md attribution
-          git commit -m "Regenerate generated files and fold pending files [skip ci]"
-          for _ in 1 2 3; do
-            git pull --rebase origin main && git push origin HEAD:main && exit 0
-            sleep 10
-          done
-          exit 1
+      # Regenerate (licences, features, fold-pending), commit if changed and push, in a loop that
+      # starts each try clean from main's current tip, so main moving during the run (it takes
+      # about half an hour) can never leave a conflicted rebase behind.
+      - name: Regenerate, commit if changed and push
+        run: bash scripts/ci/generated-files.sh

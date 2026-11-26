@@ -70,11 +70,27 @@ pub(crate) fn stored(doc: &Document, text: &str) -> String {
 }
 
 /// A computed model-space value written back to an editable field. Use all significant digits:
-/// display precision must never round a value that will be sent back to the model.
+/// display precision must never round a value that will be sent back to the model. Snapped
+/// drag writes go through [`model_drag`] instead (#9035).
 pub(crate) fn model(doc: &Document, mm: f64) -> String {
     let unit = unit(doc);
     let scale = unit_info(unit).map(|(_, scale)| scale).unwrap_or(1.0);
     format!("{} {unit}", mm / scale)
+}
+
+/// A snapped-drag length for an editable field: rounded to Preferences › Length decimals, but
+/// never coarser than the snap step so the written value still matches what the arrow snapped to
+/// (#9035). Alt/free drag keeps [`model`]'s full precision.
+pub(crate) fn model_drag(doc: &Document, mm: f64, step_mm: f64, decimals: u8) -> String {
+    let u = unit(doc);
+    let scale = unit_info(u).map(|(_, scale)| scale).unwrap_or(1.0);
+    if !mm.is_finite() || !scale.is_finite() || scale <= 0.0 {
+        return format!("{mm} {u}");
+    }
+    let step_u = if step_mm.is_finite() && step_mm > 0.0 { step_mm / scale } else { 0.0 };
+    let step_places = if step_u > 0.0 { (-step_u.log10()).ceil().max(0.0) as u8 } else { 0 };
+    let places = decimals.max(step_places).min(8);
+    solidcraft_engine::doc::display_units::format_length(mm, u, places)
 }
 
 /// A computed length shown in an editable field or a message, in the design's unit, to a
@@ -88,6 +104,51 @@ pub(crate) fn shown(doc: &Document, mm: f64) -> String {
     format!("{} {unit}", if text == "-0" || text.is_empty() { "0" } else { text })
 }
 
+/// The diameter in a radius worked out from one, `(D) / 2`: what a diameter typed into Cylinder
+/// or Sphere is kept as (#6609). `None` for any other radius, such as `(a) / (b) / 2`.
+pub(crate) fn diameter_of(radius: &str) -> Option<&str> {
+    inside(radius, "(", ") / 2")
+}
+
+/// A diameter switched to the radius (`twice` false) or a radius to the diameter, so the size
+/// stays: a number keeps its unit (`20 mm` and `10 mm`), a size switched before goes back to its
+/// text, and any other expression is wrapped (`(d) / 2`, `2 * (r)`).
+pub(crate) fn scaled(text: &str, twice: bool) -> String {
+    let text = text.trim();
+    let back = if twice { diameter_of(text) } else { inside(text, "2 * (", ")") };
+    if let Some(back) = back {
+        return back.to_string();
+    }
+    if text.is_empty() {
+        return String::new();
+    }
+    if solidcraft_engine::doc::expr::is_literal(text) {
+        // The unit is the word at the end (`1e3 mm` is a thousand millimetres).
+        let number = text.trim_end_matches(char::is_alphabetic);
+        let unit = text.get(number.len()..).unwrap_or_default();
+        if let Ok(x) = number.replace(char::is_whitespace, "").replace(',', ".").parse::<f64>() {
+            let x = if twice { x * 2.0 } else { x / 2.0 };
+            return if unit.is_empty() { format!("{x}") } else { format!("{x} {unit}") };
+        }
+    }
+    if twice { format!("2 * ({text})") } else { format!("({text}) / 2") }
+}
+
+/// The text between `open` and `close` when they wrap all of `text`: the parenthesis `open` ends
+/// with is the one `close` starts with.
+fn inside<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
+    let inner = text.trim().strip_prefix(open)?.strip_suffix(close)?;
+    let mut depth = 0usize;
+    for c in inner.chars() {
+        match c {
+            '(' => depth = depth.saturating_add(1),
+            ')' => depth = depth.checked_sub(1)?,
+            _ => {}
+        }
+    }
+    (depth == 0 && !inner.trim().is_empty()).then_some(inner.trim())
+}
+
 /// The editable length expressions in a dialog. Counts, angles, ratios, selectors and standard
 /// part designations never go through length conversion. Keep this list shared by submission
 /// and feature refill, so a bare stored millimetre cannot become inches just by pressing OK.
@@ -98,7 +159,9 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
     use crate::dialogs_sheet::Sm;
     use crate::dialogs_surface::Surf;
     match kind {
-        D::Extrude { distance, distance2, to_offset, start, wall, wall2, .. } => vec![distance, distance2, to_offset, start, wall, wall2],
+        D::Extrude { distance, distance2, to_offset, to_offset2, start, wall, wall2, .. } => {
+            vec![distance, distance2, to_offset, to_offset2, start, wall, wall2]
+        }
         D::Fillet { radius, distance2, setback, .. } => {
             // A setback not typed (or emptied) stands for the command's default and stays so.
             let mut lengths = vec![radius, distance2];
@@ -107,37 +170,69 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
             }
             lengths
         }
+        D::Combine { offset, radius, .. } => {
+            // An offset or radius not typed (or emptied) stays so: the command leaves it out.
+            let mut lengths = Vec::new();
+            if !offset.trim().is_empty() {
+                lengths.push(offset);
+            }
+            if !radius.trim().is_empty() {
+                lengths.push(radius);
+            }
+            lengths
+        }
         D::Shell { thickness } => vec![thickness],
-        D::PatternRect { spacing, spacing2, .. } => vec![spacing, spacing2],
+        D::PatternRect { spacing, spacing2, extent, extent2, .. } => vec![spacing, spacing2, extent, extent2],
         D::OffsetPlane { offset } | D::Section { offset, .. } => vec![offset],
         D::OffsetFaces { distance } => vec![distance],
         D::MeshConvert { tolerance } => vec![tolerance],
-        D::Thread { length, .. } | D::Emboss { depth: length, .. } => vec![length],
+        D::Thread { length, .. } => vec![length],
+        D::Emboss { depth, offset_x, offset_y, .. } => vec![depth, offset_x, offset_y],
         D::Rib { thickness, depth, .. } => vec![thickness, depth],
+        D::CellGrid(c) => vec![&mut c.size, &mut c.web, &mut c.depth, &mut c.margin],
+        D::PathPattern { spacing, start, fraction: false, .. } => vec![spacing, start],
         D::PathPattern { spacing, .. } => vec![spacing],
         D::Pipe { diameter, wall, .. } => vec![diameter, wall],
         D::Stock { margin } => vec![margin],
         D::Move { x, y, z, .. } => vec![x, y, z],
+        D::CapturePosition(c) => {
+            let mut values = Vec::new();
+            for m in &mut c.moves {
+                values.extend([&mut m.x, &mut m.y, &mut m.z]);
+                if m.has_origin {
+                    values.extend([&mut m.ox, &mut m.oy, &mut m.oz]);
+                }
+            }
+            for j in &mut c.joints {
+                for (i, v) in j.dofs.iter_mut().enumerate() {
+                    if !j.is_angle.get(i).copied().unwrap_or(false) && j.initial_dofs.get(i).is_some_and(|init| init != v) {
+                        values.push(v);
+                    }
+                }
+            }
+            values
+        }
         D::Hole { diameter, depth, cb_diameter, cb_depth, cs_diameter, opts, .. } => {
             vec![diameter, depth, cb_diameter, cb_depth, cs_diameter, &mut opts.bridge]
         }
         D::Primitive { fields, .. } => fields.iter_mut().filter(|(key, _)| *key != "revolutions").map(|(_, value)| value).collect(),
         D::Surface(k) => match k {
-            Surf::Extrude { distance, .. } | Surf::Offset { distance, .. } | Surf::Ruled { distance, .. } | Surf::Extend { distance } => {
-                vec![distance]
-            }
+            Surf::Extrude { distance, to_offset, .. } => vec![distance, to_offset],
+            Surf::Offset { distance, .. } | Surf::Ruled { distance, .. } | Surf::Extend { distance, .. } => vec![distance],
             Surf::Thicken { thickness, .. } => vec![thickness],
-            Surf::Stitch { tolerance } => vec![tolerance],
+            Surf::Stitch { tolerance } | Surf::Fair { tolerance, .. } => vec![tolerance],
             _ => vec![],
         },
         D::Sheet(k) => match k {
-            Sm::Flange { height, radius, distance, relief_size, own, .. } => {
+            Sm::Flange { height, radius, distance, relief_size, own, segments, .. } => {
                 let mut values = vec![height, radius, distance, relief_size];
                 values.extend(own.iter_mut().map(|(_, _, height)| height));
+                values.extend(segments.iter_mut().flat_map(|(_, list)| list.iter_mut().map(|row| &mut row.height)));
                 values
             }
             Sm::Hem { length, gap, .. } => vec![length, gap],
             Sm::Fold { radius, .. } => vec![radius],
+            Sm::Hardware { length, .. } => vec![length],
             // K factor is the only dimensionless sheet rule value.
             Sm::Rules { values, .. } => values.iter_mut().enumerate().filter(|(i, _)| *i != 1).map(|(_, value)| value).collect(),
             _ => vec![],
@@ -217,7 +312,7 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
 /// direction vectors are already in model coordinates and must not be converted.
 pub(crate) fn extra(extra: &mut serde_json::Map<String, serde_json::Value>, mut convert: impl FnMut(&str) -> String) {
     use serde_json::{Value, json};
-    for key in ["radius2", "start_offset", "to_offset", "distance2", "thickness", "thickness2"] {
+    for key in ["radius2", "start_offset", "to_offset", "to_offset2", "distance2", "thickness", "thickness2", "coil_height"] {
         if let Some(value) = extra.get_mut(key) {
             let text = value.as_str().map(str::to_string).or_else(|| value.as_number().map(ToString::to_string));
             if let Some(text) = text {

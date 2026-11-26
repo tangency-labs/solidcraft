@@ -1,0 +1,3716 @@
+{
+ "cases": [
+  {
+   "name": "attributed_split_sheet_slice_default",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions SLICE with default flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_sheet_slice_default_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions SLICE with default flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_sheet_slice_imprinting",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions SLICE with imprinting flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {
+     "imprinting": true
+    },
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_sheet_slice_imprinting_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions SLICE with imprinting flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {
+     "imprinting": true
+    },
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_sheet_slice_keep_other",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions SLICE with keep_other flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {
+     "keep_other_brep": true
+    },
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_sheet_slice_keep_other_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions SLICE with keep_other flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {
+     "keep_other_brep": true
+    },
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_sheet_imprint_default",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions IMPRINT with default flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_sheet_imprint_default_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions IMPRINT with default flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_sheet_imprint_imprinting",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions IMPRINT with imprinting flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {
+     "imprinting": true
+    },
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_sheet_imprint_imprinting_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions IMPRINT with imprinting flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {
+     "imprinting": true
+    },
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_sheet_imprint_keep_other",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions IMPRINT with keep_other flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {
+     "keep_other_brep": true
+    },
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_sheet_imprint_keep_other_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions IMPRINT with keep_other flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {
+     "keep_other_brep": true
+    },
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_sheet_imprint_classify_default",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions IMPRINT_CLASSIFY with default flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 8,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_sheet_imprint_classify_default_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions IMPRINT_CLASSIFY with default flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 8,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_half_sheet_slice_default",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [5,15]x[-5,15] at z = 5, ending inside the box's top; SmApiBooleanWithOptions SLICE with default flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      20.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_half_sheet_slice_default_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [5,15]x[-5,15] at z = 5, ending inside the box's top; SmApiBooleanWithOptions SLICE with default flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      20.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_half_sheet_slice_imprinting",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [5,15]x[-5,15] at z = 5, ending inside the box's top; SmApiBooleanWithOptions SLICE with imprinting flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      20.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {
+     "imprinting": true
+    },
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_half_sheet_slice_imprinting_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [5,15]x[-5,15] at z = 5, ending inside the box's top; SmApiBooleanWithOptions SLICE with imprinting flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      20.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {
+     "imprinting": true
+    },
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_half_sheet_slice_keep_other",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [5,15]x[-5,15] at z = 5, ending inside the box's top; SmApiBooleanWithOptions SLICE with keep_other flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      20.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {
+     "keep_other_brep": true
+    },
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_half_sheet_slice_keep_other_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [5,15]x[-5,15] at z = 5, ending inside the box's top; SmApiBooleanWithOptions SLICE with keep_other flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      20.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {
+     "keep_other_brep": true
+    },
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_half_sheet_imprint_default",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [5,15]x[-5,15] at z = 5, ending inside the box's top; SmApiBooleanWithOptions IMPRINT with default flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      20.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_half_sheet_imprint_default_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [5,15]x[-5,15] at z = 5, ending inside the box's top; SmApiBooleanWithOptions IMPRINT with default flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      20.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_half_sheet_imprint_imprinting",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [5,15]x[-5,15] at z = 5, ending inside the box's top; SmApiBooleanWithOptions IMPRINT with imprinting flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      20.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {
+     "imprinting": true
+    },
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_half_sheet_imprint_imprinting_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [5,15]x[-5,15] at z = 5, ending inside the box's top; SmApiBooleanWithOptions IMPRINT with imprinting flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      20.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {
+     "imprinting": true
+    },
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_half_sheet_imprint_keep_other",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [5,15]x[-5,15] at z = 5, ending inside the box's top; SmApiBooleanWithOptions IMPRINT with keep_other flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      20.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {
+     "keep_other_brep": true
+    },
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_half_sheet_imprint_keep_other_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [5,15]x[-5,15] at z = 5, ending inside the box's top; SmApiBooleanWithOptions IMPRINT with keep_other flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      20.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {
+     "keep_other_brep": true
+    },
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_half_sheet_imprint_classify_default",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [5,15]x[-5,15] at z = 5, ending inside the box's top; SmApiBooleanWithOptions IMPRINT_CLASSIFY with default flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      20.0
+     ]
+    },
+    "operation": 8,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_half_sheet_imprint_classify_default_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [5,15]x[-5,15] at z = 5, ending inside the box's top; SmApiBooleanWithOptions IMPRINT_CLASSIFY with default flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      20.0
+     ]
+    },
+    "operation": 8,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_plate_slice_default",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions SLICE with default flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_plate_slice_default_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions SLICE with default flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_plate_slice_imprinting",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions SLICE with imprinting flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {
+     "imprinting": true
+    },
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_plate_slice_imprinting_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions SLICE with imprinting flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {
+     "imprinting": true
+    },
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_plate_slice_keep_other",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions SLICE with keep_other flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {
+     "keep_other_brep": true
+    },
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_plate_slice_keep_other_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions SLICE with keep_other flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {
+     "keep_other_brep": true
+    },
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_plate_imprint_default",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions IMPRINT with default flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_plate_imprint_default_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions IMPRINT with default flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_plate_imprint_imprinting",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions IMPRINT with imprinting flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {
+     "imprinting": true
+    },
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_plate_imprint_imprinting_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions IMPRINT with imprinting flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {
+     "imprinting": true
+    },
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_plate_imprint_keep_other",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions IMPRINT with keep_other flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {
+     "keep_other_brep": true
+    },
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_plate_imprint_keep_other_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions IMPRINT with keep_other flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {
+     "keep_other_brep": true
+    },
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_plate_imprint_classify_default",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions IMPRINT_CLASSIFY with default flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 8,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_plate_imprint_classify_default_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions IMPRINT_CLASSIFY with default flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 8,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_cylinder_slice_default",
+   "note": "#1462 P5: the box [0,10]^3 and a cylinder through the box; SmApiBooleanWithOptions SLICE with default flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_cylinder_slice_default_copy",
+   "note": "#1462 P5: the box [0,10]^3 and a cylinder through the box; SmApiBooleanWithOptions SLICE with default flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_cylinder_slice_imprinting",
+   "note": "#1462 P5: the box [0,10]^3 and a cylinder through the box; SmApiBooleanWithOptions SLICE with imprinting flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {
+     "imprinting": true
+    },
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_cylinder_slice_imprinting_copy",
+   "note": "#1462 P5: the box [0,10]^3 and a cylinder through the box; SmApiBooleanWithOptions SLICE with imprinting flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {
+     "imprinting": true
+    },
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_cylinder_slice_keep_other",
+   "note": "#1462 P5: the box [0,10]^3 and a cylinder through the box; SmApiBooleanWithOptions SLICE with keep_other flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {
+     "keep_other_brep": true
+    },
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_cylinder_slice_keep_other_copy",
+   "note": "#1462 P5: the box [0,10]^3 and a cylinder through the box; SmApiBooleanWithOptions SLICE with keep_other flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {
+     "keep_other_brep": true
+    },
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_cylinder_imprint_default",
+   "note": "#1462 P5: the box [0,10]^3 and a cylinder through the box; SmApiBooleanWithOptions IMPRINT with default flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_cylinder_imprint_default_copy",
+   "note": "#1462 P5: the box [0,10]^3 and a cylinder through the box; SmApiBooleanWithOptions IMPRINT with default flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_cylinder_imprint_imprinting",
+   "note": "#1462 P5: the box [0,10]^3 and a cylinder through the box; SmApiBooleanWithOptions IMPRINT with imprinting flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {
+     "imprinting": true
+    },
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_cylinder_imprint_imprinting_copy",
+   "note": "#1462 P5: the box [0,10]^3 and a cylinder through the box; SmApiBooleanWithOptions IMPRINT with imprinting flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {
+     "imprinting": true
+    },
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_cylinder_imprint_keep_other",
+   "note": "#1462 P5: the box [0,10]^3 and a cylinder through the box; SmApiBooleanWithOptions IMPRINT with keep_other flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {
+     "keep_other_brep": true
+    },
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_cylinder_imprint_keep_other_copy",
+   "note": "#1462 P5: the box [0,10]^3 and a cylinder through the box; SmApiBooleanWithOptions IMPRINT with keep_other flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {
+     "keep_other_brep": true
+    },
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_cylinder_imprint_classify_default",
+   "note": "#1462 P5: the box [0,10]^3 and a cylinder through the box; SmApiBooleanWithOptions IMPRINT_CLASSIFY with default flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 8,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_cylinder_imprint_classify_default_copy",
+   "note": "#1462 P5: the box [0,10]^3 and a cylinder through the box; SmApiBooleanWithOptions IMPRINT_CLASSIFY with default flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 8,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_sphere_slice_default",
+   "note": "#1462 P5: the box [0,10]^3 and a sphere on the box's corner; SmApiBooleanWithOptions SLICE with default flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      10.0,
+      10.0,
+      10.0
+     ],
+     "radius": 4.0
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_sphere_slice_default_copy",
+   "note": "#1462 P5: the box [0,10]^3 and a sphere on the box's corner; SmApiBooleanWithOptions SLICE with default flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      10.0,
+      10.0,
+      10.0
+     ],
+     "radius": 4.0
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_sphere_slice_imprinting",
+   "note": "#1462 P5: the box [0,10]^3 and a sphere on the box's corner; SmApiBooleanWithOptions SLICE with imprinting flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      10.0,
+      10.0,
+      10.0
+     ],
+     "radius": 4.0
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {
+     "imprinting": true
+    },
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_sphere_slice_imprinting_copy",
+   "note": "#1462 P5: the box [0,10]^3 and a sphere on the box's corner; SmApiBooleanWithOptions SLICE with imprinting flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      10.0,
+      10.0,
+      10.0
+     ],
+     "radius": 4.0
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {
+     "imprinting": true
+    },
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_sphere_slice_keep_other",
+   "note": "#1462 P5: the box [0,10]^3 and a sphere on the box's corner; SmApiBooleanWithOptions SLICE with keep_other flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      10.0,
+      10.0,
+      10.0
+     ],
+     "radius": 4.0
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {
+     "keep_other_brep": true
+    },
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_sphere_slice_keep_other_copy",
+   "note": "#1462 P5: the box [0,10]^3 and a sphere on the box's corner; SmApiBooleanWithOptions SLICE with keep_other flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      10.0,
+      10.0,
+      10.0
+     ],
+     "radius": 4.0
+    },
+    "operation": 10,
+    "behavior": 0,
+    "flags": {
+     "keep_other_brep": true
+    },
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_sphere_imprint_default",
+   "note": "#1462 P5: the box [0,10]^3 and a sphere on the box's corner; SmApiBooleanWithOptions IMPRINT with default flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      10.0,
+      10.0,
+      10.0
+     ],
+     "radius": 4.0
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_sphere_imprint_default_copy",
+   "note": "#1462 P5: the box [0,10]^3 and a sphere on the box's corner; SmApiBooleanWithOptions IMPRINT with default flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      10.0,
+      10.0,
+      10.0
+     ],
+     "radius": 4.0
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_sphere_imprint_imprinting",
+   "note": "#1462 P5: the box [0,10]^3 and a sphere on the box's corner; SmApiBooleanWithOptions IMPRINT with imprinting flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      10.0,
+      10.0,
+      10.0
+     ],
+     "radius": 4.0
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {
+     "imprinting": true
+    },
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_sphere_imprint_imprinting_copy",
+   "note": "#1462 P5: the box [0,10]^3 and a sphere on the box's corner; SmApiBooleanWithOptions IMPRINT with imprinting flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      10.0,
+      10.0,
+      10.0
+     ],
+     "radius": 4.0
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {
+     "imprinting": true
+    },
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_sphere_imprint_keep_other",
+   "note": "#1462 P5: the box [0,10]^3 and a sphere on the box's corner; SmApiBooleanWithOptions IMPRINT with keep_other flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      10.0,
+      10.0,
+      10.0
+     ],
+     "radius": 4.0
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {
+     "keep_other_brep": true
+    },
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_sphere_imprint_keep_other_copy",
+   "note": "#1462 P5: the box [0,10]^3 and a sphere on the box's corner; SmApiBooleanWithOptions IMPRINT with keep_other flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      10.0,
+      10.0,
+      10.0
+     ],
+     "radius": 4.0
+    },
+    "operation": 7,
+    "behavior": 0,
+    "flags": {
+     "keep_other_brep": true
+    },
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_sphere_imprint_classify_default",
+   "note": "#1462 P5: the box [0,10]^3 and a sphere on the box's corner; SmApiBooleanWithOptions IMPRINT_CLASSIFY with default flags; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      10.0,
+      10.0,
+      10.0
+     ],
+     "radius": 4.0
+    },
+    "operation": 8,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_sphere_imprint_classify_default_copy",
+   "note": "#1462 P5: the box [0,10]^3 and a sphere on the box's corner; SmApiBooleanWithOptions IMPRINT_CLASSIFY with default flags, the box first replaced by its SmApiBrepCopy; copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      10.0,
+      10.0,
+      10.0
+     ],
+     "radius": 4.0
+    },
+    "operation": 8,
+    "behavior": 0,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_sheet_slice_behavior1",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions SLICE with default flags; tags of behaviour 1.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 1,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_sheet_slice_behavior1_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions SLICE with default flags, the box first replaced by its SmApiBrepCopy; tags of behaviour 1.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 1,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_sheet_slice_behavior2",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions SLICE with default flags; tags of behaviour 2.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 2,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_sheet_slice_behavior2_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions SLICE with default flags, the box first replaced by its SmApiBrepCopy; tags of behaviour 2.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 2,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_sheet_slice_behavior3",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions SLICE with default flags; tags of behaviour 3.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 3,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_sheet_slice_behavior3_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions SLICE with default flags, the box first replaced by its SmApiBrepCopy; tags of behaviour 3.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 3,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_sheet_slice_behavior4",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions SLICE with default flags; tags of behaviour 4.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 4,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_sheet_slice_behavior4_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions SLICE with default flags, the box first replaced by its SmApiBrepCopy; tags of behaviour 4.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 4,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_sheet_imprint_behavior1",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions IMPRINT with default flags; tags of behaviour 1.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 1,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_sheet_imprint_behavior1_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions IMPRINT with default flags, the box first replaced by its SmApiBrepCopy; tags of behaviour 1.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 1,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_sheet_imprint_behavior2",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions IMPRINT with default flags; tags of behaviour 2.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 2,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_sheet_imprint_behavior2_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions IMPRINT with default flags, the box first replaced by its SmApiBrepCopy; tags of behaviour 2.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 2,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_sheet_imprint_behavior3",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions IMPRINT with default flags; tags of behaviour 3.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 3,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_sheet_imprint_behavior3_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions IMPRINT with default flags, the box first replaced by its SmApiBrepCopy; tags of behaviour 3.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 3,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_sheet_imprint_behavior4",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions IMPRINT with default flags; tags of behaviour 4.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 4,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_sheet_imprint_behavior4_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the sheet [-5,15]^2 at z = 5; SmApiBooleanWithOptions IMPRINT with default flags, the box first replaced by its SmApiBrepCopy; tags of behaviour 4.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 4,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_plate_slice_behavior1",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions SLICE with default flags; tags of behaviour 1.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 1,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_plate_slice_behavior1_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions SLICE with default flags, the box first replaced by its SmApiBrepCopy; tags of behaviour 1.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 1,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_plate_slice_behavior2",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions SLICE with default flags; tags of behaviour 2.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 2,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_plate_slice_behavior2_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions SLICE with default flags, the box first replaced by its SmApiBrepCopy; tags of behaviour 2.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 2,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_plate_slice_behavior3",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions SLICE with default flags; tags of behaviour 3.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 3,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_plate_slice_behavior3_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions SLICE with default flags, the box first replaced by its SmApiBrepCopy; tags of behaviour 3.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 3,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_plate_slice_behavior4",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions SLICE with default flags; tags of behaviour 4.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 4,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_plate_slice_behavior4_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions SLICE with default flags, the box first replaced by its SmApiBrepCopy; tags of behaviour 4.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 10,
+    "behavior": 4,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_plate_imprint_behavior1",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions IMPRINT with default flags; tags of behaviour 1.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 1,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_plate_imprint_behavior1_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions IMPRINT with default flags, the box first replaced by its SmApiBrepCopy; tags of behaviour 1.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 1,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_plate_imprint_behavior2",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions IMPRINT with default flags; tags of behaviour 2.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 2,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_plate_imprint_behavior2_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions IMPRINT with default flags, the box first replaced by its SmApiBrepCopy; tags of behaviour 2.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 2,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_plate_imprint_behavior3",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions IMPRINT with default flags; tags of behaviour 3.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 3,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_plate_imprint_behavior3_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions IMPRINT with default flags, the box first replaced by its SmApiBrepCopy; tags of behaviour 3.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 3,
+    "flags": {},
+    "copy_first": true
+   }
+  },
+  {
+   "name": "attributed_split_plate_imprint_behavior4",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions IMPRINT with default flags; tags of behaviour 4.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 4,
+    "flags": {},
+    "copy_first": false
+   }
+  },
+  {
+   "name": "attributed_split_plate_imprint_behavior4_copy",
+   "note": "#1462 P5: the box [0,10]^3 and the plate [-5,15]^2x[4,6]; SmApiBooleanWithOptions IMPRINT with default flags, the box first replaced by its SmApiBrepCopy; tags of behaviour 4.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -5.0,
+      -5.0,
+      4.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      2.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 4,
+    "flags": {},
+    "copy_first": true
+   }
+  }
+ ]
+}

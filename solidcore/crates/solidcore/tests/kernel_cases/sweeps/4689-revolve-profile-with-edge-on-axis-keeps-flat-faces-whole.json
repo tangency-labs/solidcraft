@@ -1,0 +1,168 @@
+{
+  "area": "sweeps",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "revolve",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "angle": 6.283185307179586,
+        "cap": true,
+        "direction": [
+          0.0,
+          0.0,
+          -1.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          30.0
+        ],
+        "profile": [
+          {
+            "line": {
+              "end": [
+                20.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                20.0,
+                0.0,
+                5.0
+              ],
+              "start": [
+                20.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                5.0,
+                0.0,
+                5.0
+              ],
+              "start": [
+                20.0,
+                0.0,
+                5.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                5.0,
+                0.0,
+                30.0
+              ],
+              "start": [
+                5.0,
+                0.0,
+                5.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                30.0
+              ],
+              "start": [
+                5.0,
+                0.0,
+                30.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                30.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "4689-revolve-profile-with-edge-on-axis-keeps-flat-faces-whole",
+  "expected": {
+    "body_count": 1,
+    "faces": 5,
+    "method": "a disc r20 x 5 under a post r5 x 25: V = pi 400 5 + pi 25 25 = 8246.681. Faces: bottom, disc side, the ring on its top, post side, post top = 5 (each flat face one face)",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#4689",
+      "tangency-labs/solidcraft#5317",
+      "tangency-labs/solidcraft#4521"
+    ],
+    "volume_mm3": 8246.6807,
+    "what": "an L profile whose long leg lies on the revolve axis (the axis is the profile's own line), revolved 360 deg: the flat faces came out split into three 120 deg sectors"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 6,
+      "faces": 5,
+      "vertices": 4
+    }
+  },
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3926.9908169807295,
+      "body_count": 1,
+      "edges": 6,
+      "faces": 5,
+      "vertices": 4,
+      "volume_mm3": 8246.6807155865
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4689",
+    "tangency-labs/solidcraft#5317",
+    "tangency-labs/solidcraft#4521"
+  ],
+  "traced_ops": [
+    "revolve"
+  ],
+  "ungraded": [],
+  "what": "an L profile whose long leg lies on the revolve axis (the axis is the profile's own line), revolved 360 deg: the flat faces came out split into three 120 deg sectors",
+  "why_not": []
+}

@@ -1,7 +1,8 @@
 # Every kernel rig case there is, one case directory a line (relative to tests/kernel-cases/),
 # sorted. The list only shrinks: a case that is deleted takes its line out, and no new case
-# comes here. A new kernel case goes to solidcore's corpus, crates/solidcore/tests/kernel_cases/
-# (CONTRIBUTING.md, "Tests"). Checked by `cargo xtask lists`.
+# comes here. A new kernel case goes to solidcore's corpus,
+# solidcore/crates/solidcore/tests/kernel_cases/ (CONTRIBUTING.md, "Tests").
+# Checked by `cargo xtask lists`.
 
 assemblies/cov-browser-reparent-placement-and-body-into-a-turned-part
 assemblies/cov-component-copy-bodies-from-a-turned-part
@@ -361,7 +362,7 @@ fillets/2811-fillet-rib-roots
 fillets/2852-fillet-outer-round-concentric-with-inner
 fillets/2852-fillet-outer-round-r30-past-inner-round-refused
 fillets/2893-chamfer-distance-and-angle-past-the-wall-refused
-fillets/2893-chamfer-two-distances-across-the-whole-top-refused
+fillets/2893-chamfer-two-distances-across-the-whole-top-is-a-cone
 fillets/2893-chamfer-two-distances-elliptical-rim
 fillets/2893-chamfer-two-distances-past-the-bottom
 fillets/2893-chamfer-two-distances-past-the-top-refused

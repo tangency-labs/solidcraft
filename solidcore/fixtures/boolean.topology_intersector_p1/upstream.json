@@ -1,0 +1,766 @@
+{
+ "cases": [
+  {
+   "name": "topo_test_network_relate_mates",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology (wire network); SmTopologyIntersector::Relate/GetOtherMate/GetBrepMate/IsMatedPair",
+   "inputs": {
+    "brep_a": {
+     "kind": "network"
+    },
+    "brep_b": {
+     "kind": "network"
+    },
+    "ctor": 0,
+    "approx": 1e-05,
+    "ang": 0.349065850398866,
+    "ops": [
+     {
+      "op": "relate",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "op": "relate",
+      "a": [
+       0,
+       1,
+       1
+      ],
+      "b": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "op": "other_mate",
+      "h": [
+       0,
+       0,
+       0
+      ]
+     },
+     {
+      "op": "other_mate",
+      "h": [
+       0,
+       1,
+       1
+      ]
+     },
+     {
+      "op": "other_mate",
+      "h": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "op": "this_mate",
+      "h": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "op": "brep_mate",
+      "h": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "op": "is_mated",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "op": "is_mated",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       1
+      ]
+     },
+     {
+      "op": "mapped_brep",
+      "ty": 16021
+     },
+     {
+      "op": "mapped_brep",
+      "ty": 16016
+     },
+     {
+      "op": "getters"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_tsurf_pair_table",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_analytic_tsurf_creation (two one-face B-reps intersected); RegisterExistingSSI/CheckIfHaveExistingSSI/ClearExistingSSI",
+   "inputs": {
+    "brep_a": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "brep_b": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "ctor": 0,
+    "approx": 1e-05,
+    "ang": 0.349065850398866,
+    "ops": [
+     {
+      "op": "check_ssi",
+      "s1": [
+       0,
+       4,
+       0
+      ],
+      "s2": [
+       1,
+       4,
+       0
+      ]
+     },
+     {
+      "op": "register_ssi",
+      "s1": [
+       0,
+       4,
+       0
+      ],
+      "s2": [
+       1,
+       4,
+       0
+      ],
+      "curves": [
+       {
+        "c3": {
+         "dim": 3,
+         "cpts": [
+          [
+           -1,
+           0,
+           0,
+           -1.7976931348623157e+308
+          ],
+          [
+           0,
+           1,
+           0,
+           -1.7976931348623157e+308
+          ],
+          [
+           1,
+           0,
+           0,
+           -1.7976931348623157e+308
+          ]
+         ],
+         "p": 2,
+         "u": [
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+         ]
+        },
+        "uv1": {
+         "dim": 2,
+         "cpts": [
+          [
+           0,
+           0,
+           1.7976931348623157e+308,
+           -1.7976931348623157e+308
+          ],
+          [
+           1,
+           1,
+           1.7976931348623157e+308,
+           -1.7976931348623157e+308
+          ]
+         ],
+         "p": 1,
+         "u": [
+          0,
+          0,
+          1,
+          1
+         ]
+        },
+        "uv2": {
+         "dim": 2,
+         "cpts": [
+          [
+           0.5,
+           0,
+           1.7976931348623157e+308,
+           -1.7976931348623157e+308
+          ],
+          [
+           0.5,
+           1,
+           1.7976931348623157e+308,
+           -1.7976931348623157e+308
+          ]
+         ],
+         "p": 1,
+         "u": [
+          0,
+          0,
+          2,
+          2
+         ]
+        },
+        "ty": 2,
+        "dev": 1e-07
+       },
+       {
+        "c3": {
+         "dim": 3,
+         "cpts": [
+          [
+           0,
+           0,
+           0,
+           -1.7976931348623157e+308
+          ],
+          [
+           0,
+           0,
+           1,
+           -1.7976931348623157e+308
+          ]
+         ],
+         "p": 1,
+         "u": [
+          0,
+          0,
+          1,
+          1
+         ]
+        },
+        "ty": 1,
+        "dev": 0
+       }
+      ]
+     },
+     {
+      "op": "register_ssi",
+      "s1": [
+       0,
+       4,
+       0
+      ],
+      "s2": [
+       1,
+       4,
+       0
+      ],
+      "curves": [
+       {
+        "c3": {
+         "dim": 3,
+         "cpts": [
+          [
+           2,
+           0,
+           0,
+           -1.7976931348623157e+308
+          ],
+          [
+           2,
+           1,
+           0,
+           -1.7976931348623157e+308
+          ]
+         ],
+         "p": 1,
+         "u": [
+          0,
+          0,
+          1,
+          1
+         ]
+        },
+        "ty": 3,
+        "dev": 2e-06
+       }
+      ]
+     },
+     {
+      "op": "check_ssi",
+      "s1": [
+       0,
+       4,
+       0
+      ],
+      "s2": [
+       1,
+       4,
+       0
+      ]
+     },
+     {
+      "op": "check_ssi",
+      "s1": [
+       1,
+       4,
+       0
+      ],
+      "s2": [
+       0,
+       4,
+       0
+      ]
+     },
+     {
+      "op": "register_ssi",
+      "s1": [
+       1,
+       4,
+       0
+      ],
+      "s2": [
+       -1,
+       8,
+       -1
+      ],
+      "curves": []
+     },
+     {
+      "op": "check_ssi",
+      "s1": [
+       1,
+       4,
+       0
+      ],
+      "s2": [
+       0,
+       4,
+       0
+      ]
+     },
+     {
+      "op": "clear_ssi"
+     },
+     {
+      "op": "check_ssi",
+      "s1": [
+       0,
+       4,
+       0
+      ],
+      "s2": [
+       1,
+       4,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "reversed_line_join_edge_class",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_reversed_line_join (edge classifications of wire edges); sm_SetEdgeClass/sm_CheckInteriorEdge",
+   "inputs": {
+    "brep_a": {
+     "kind": "network"
+    },
+    "brep_b": null,
+    "ctor": 0,
+    "approx": 1e-05,
+    "ang": 0.349065850398866,
+    "ops": [
+     {
+      "op": "set_edge_class",
+      "e": [
+       0,
+       1,
+       0
+      ],
+      "t0": 0.0,
+      "t1": 1.0,
+      "tol": 1e-05,
+      "relative": true
+     },
+     {
+      "op": "set_edge_class",
+      "e": [
+       0,
+       1,
+       2
+      ],
+      "t0": 0.25,
+      "t1": 0.75,
+      "tol": 1e-05,
+      "relative": true
+     },
+     {
+      "op": "set_edge_class",
+      "e": [
+       0,
+       1,
+       3
+      ],
+      "t0": 0.0,
+      "t1": 0.5,
+      "tol": 1e-05,
+      "relative": true
+     },
+     {
+      "op": "check_interior",
+      "e": [
+       0,
+       1,
+       0
+      ],
+      "t": 0.5,
+      "tol": 1e-05,
+      "relative": true
+     },
+     {
+      "op": "check_interior",
+      "e": [
+       0,
+       1,
+       0
+      ],
+      "t": 0.0,
+      "tol": 1e-05,
+      "relative": true
+     },
+     {
+      "op": "check_interior",
+      "e": [
+       0,
+       1,
+       4
+      ],
+      "t": 0.9999,
+      "tol": 0.001,
+      "relative": true
+     },
+     {
+      "op": "split_two",
+      "e1": [
+       0,
+       1,
+       0
+      ],
+      "e2": [
+       0,
+       1,
+       1
+      ],
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "reversed_line_join_split_other",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_reversed_line_join (edge classifications of wire edges); sm_SetEdgeClass/sm_CheckInteriorEdge; the second split of the join in its own case (handles after a mutating op)",
+   "inputs": {
+    "brep_a": {
+     "kind": "network"
+    },
+    "brep_b": null,
+    "ctor": 0,
+    "approx": 1e-05,
+    "ang": 0.349065850398866,
+    "ops": [
+     {
+      "op": "check_interior",
+      "e": [
+       0,
+       1,
+       2
+      ],
+      "t": 0.5,
+      "tol": 1e-05,
+      "relative": true
+     },
+     {
+      "op": "check_interior",
+      "e": [
+       0,
+       1,
+       4
+      ],
+      "t": 0.5,
+      "tol": 1e-05,
+      "relative": true
+     },
+     {
+      "op": "split_two",
+      "e1": [
+       0,
+       1,
+       2
+      ],
+      "e2": [
+       0,
+       1,
+       4
+      ],
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "rectangle_face_point_imprint_far",
+   "upstream_ref": "tests/SM_API_test/TestSmCreateRectangle (a planar rectangle face); sm_TestAndImprintFace/VertexFaceIntersect",
+   "inputs": {
+    "brep_a": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -2,
+      -1,
+      2,
+      1
+     ]
+    },
+    "brep_b": {
+     "kind": "network"
+    },
+    "ctor": 0,
+    "approx": 1e-05,
+    "ang": 0.349065850398866,
+    "ops": [
+     {
+      "op": "imprint_face",
+      "f": [
+       0,
+       2,
+       0
+      ],
+      "p": [
+       0.3,
+       0.6,
+       1.0
+      ],
+      "tol": 1e-05,
+      "on_surface": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "rectangle_face_point_imprint_outside",
+   "upstream_ref": "tests/SM_API_test/TestSmCreateRectangle (a planar rectangle face); sm_TestAndImprintFace/VertexFaceIntersect",
+   "inputs": {
+    "brep_a": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -2,
+      -1,
+      2,
+      1
+     ]
+    },
+    "brep_b": {
+     "kind": "network"
+    },
+    "ctor": 0,
+    "approx": 1e-05,
+    "ang": 0.349065850398866,
+    "ops": [
+     {
+      "op": "imprint_face",
+      "f": [
+       0,
+       2,
+       0
+      ],
+      "p": [
+       1.5,
+       1.5,
+       0.2
+      ],
+      "tol": 1e-05,
+      "on_surface": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "rectangle_face_point_imprint_on_surface",
+   "upstream_ref": "tests/SM_API_test/TestSmCreateRectangle (a planar rectangle face); sm_TestAndImprintFace/VertexFaceIntersect",
+   "inputs": {
+    "brep_a": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -2,
+      -1,
+      2,
+      1
+     ]
+    },
+    "brep_b": {
+     "kind": "network"
+    },
+    "ctor": 0,
+    "approx": 1e-05,
+    "ang": 0.349065850398866,
+    "ops": [
+     {
+      "op": "imprint_face",
+      "f": [
+       0,
+       2,
+       0
+      ],
+      "p": [
+       0.5,
+       0.5,
+       2e-06
+      ],
+      "tol": 1e-05,
+      "on_surface": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "rectangle_face_vertex_face_intersect",
+   "upstream_ref": "tests/SM_API_test/TestSmCreateRectangle (a planar rectangle face); sm_TestAndImprintFace/VertexFaceIntersect",
+   "inputs": {
+    "brep_a": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -2,
+      -1,
+      2,
+      1
+     ]
+    },
+    "brep_b": {
+     "kind": "network"
+    },
+    "ctor": 0,
+    "approx": 1e-05,
+    "ang": 0.349065850398866,
+    "ops": [
+     {
+      "op": "vertex_face",
+      "verts": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        1
+       ],
+       [
+        1,
+        0,
+        2
+       ]
+      ],
+      "faces": [
+       [
+        0,
+        2,
+        0
+       ]
+      ],
+      "manifold": false,
+      "ignore": true
+     }
+    ]
+   }
+  }
+ ]
+}

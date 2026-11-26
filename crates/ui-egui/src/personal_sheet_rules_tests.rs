@@ -46,7 +46,30 @@ fn type_values(h: &mut Harness, typed: [&str; 8]) {
     h.frames(2);
 }
 
+/// Frames until the manager holds still: its preview computed (on a worker thread, so its
+/// result lands after however many frames the machine takes) and the dialog done scrolling a
+/// refusal that preview reports into view. A click aimed where a button was before that moves
+/// lands on whatever scrolled under it (#19472).
+fn settle_manager(h: &mut Harness) {
+    let began = std::time::Instant::now();
+    while h.app.preview.busy && began.elapsed() < std::time::Duration::from_secs(60) {
+        h.frame();
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let at = || crate::scenario::handle_at("dialog:sheet.personal_rules:save");
+    let mut last = None;
+    for _ in 0..240 {
+        h.frame();
+        let now = at();
+        if now.is_some() && now == last {
+            return;
+        }
+        last = now;
+    }
+}
+
 fn save_personal(h: &mut Harness, name: &str) {
+    settle_manager(h);
     h.step(&json!({"widget":"Save new"})).unwrap();
     h.step(&json!({"click":{"handle":"dialog:sheet.personal_rules.name"}})).unwrap();
     h.step(&json!({"key":"A","cmd":true})).unwrap();
@@ -100,7 +123,7 @@ fn a_personal_rule_saved_in_one_design_is_added_to_another_by_ok() {
             "sheet.manage_rules".to_string(),
             json!({"name":"CRS 1.6","active":true,"thickness":"1.6 mm","k_factor":"0.42","bend_radius":"1.6 mm","relief_width":"Thickness",
                 "relief_depth":"Thickness * 0.5","corner_relief":"Thickness * 4.0","hem_gap":"0.01 mm","gap":"Thickness",
-                "corner_relief_shape":"notch","angle_display":"bend"})
+                "corner_relief_shape":"notch","bend_relief_shape":"rectangular","angle_display":"bend"})
         )]
     );
     other.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();

@@ -1,0 +1,5764 @@
+{
+ "cases": [
+  {
+   "name": "interp_params_rib5_zero_start_d2_dim3_par0",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 0,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_d2_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_d2_dim3_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 2,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_d2_dim2_par0",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 0,
+    "dim": 2,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_d2_dim2_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 2,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_d2_dim2_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 2,
+    "dim": 2,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_dim3_par0",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 0,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_dim3_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 2,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_dim2_par0",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 0,
+    "dim": 2,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_dim2_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 2,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_dim2_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 2,
+    "dim": 2,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_d2_p4_dim3_par0",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 0,
+    "dim": 3,
+    "deg": 4,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_d2_p4_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 4,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_d2_p4_dim3_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 2,
+    "dim": 3,
+    "deg": 4,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_d2_p4_dim2_par0",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 0,
+    "dim": 2,
+    "deg": 4,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_d2_p4_dim2_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 2,
+    "deg": 4,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_d2_p4_dim2_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 2,
+    "dim": 2,
+    "deg": 4,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_end_d2_dim3_par0",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 0,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_end_d2_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_end_d2_dim3_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 2,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_end_d2_dim2_par0",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 0,
+    "dim": 2,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_end_d2_dim2_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 2,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_end_d2_dim2_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 2,
+    "dim": 2,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_end_d2_raised_dim3_par0",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 0,
+    "dim": 3,
+    "deg": 2,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_end_d2_raised_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 2,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_end_d2_raised_dim3_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 2,
+    "dim": 3,
+    "deg": 2,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_end_d2_raised_dim2_par0",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 0,
+    "dim": 2,
+    "deg": 2,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_end_d2_raised_dim2_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 2,
+    "deg": 2,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_end_d2_raised_dim2_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 2,
+    "dim": 2,
+    "deg": 2,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_end_d2_d3_dim3_par0",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 0,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ],
+     [
+      0.0,
+      6.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_end_d2_d3_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ],
+     [
+      0.0,
+      6.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_end_d2_d3_dim3_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 2,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ],
+     [
+      0.0,
+      6.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_end_d2_d3_dim2_par0",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 0,
+    "dim": 2,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ],
+     [
+      0.0,
+      6.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_end_d2_d3_dim2_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 2,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ],
+     [
+      0.0,
+      6.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_zero_start_end_d2_d3_dim2_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 2,
+    "dim": 2,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ],
+     [
+      0.0,
+      6.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_start_end_p2_dim3_par0",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 0,
+    "dim": 3,
+    "deg": 2,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_start_end_p2_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 2,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_start_end_p2_dim3_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 2,
+    "dim": 3,
+    "deg": 2,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_start_end_p2_dim2_par0",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 0,
+    "dim": 2,
+    "deg": 2,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_start_end_p2_dim2_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 2,
+    "deg": 2,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_start_end_p2_dim2_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 2,
+    "dim": 2,
+    "deg": 2,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_start_end_p5_dim3_par0",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 0,
+    "dim": 3,
+    "deg": 5,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_start_end_p5_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 5,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_start_end_p5_dim3_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 2,
+    "dim": 3,
+    "deg": 5,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_start_end_p5_dim2_par0",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 0,
+    "dim": 2,
+    "deg": 5,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_start_end_p5_dim2_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 2,
+    "deg": 5,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_start_end_p5_dim2_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 2,
+    "dim": 2,
+    "deg": 5,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_no_vectors_p3_dim3_par0",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 0,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_no_vectors_p3_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_no_vectors_p3_dim3_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 2,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_no_vectors_p3_dim2_par0",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 0,
+    "dim": 2,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_no_vectors_p3_dim2_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 2,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_no_vectors_p3_dim2_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 2,
+    "dim": 2,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_no_vectors_p1_dim3_par0",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 0,
+    "dim": 3,
+    "deg": 1,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_no_vectors_p1_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 1,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_no_vectors_p1_dim3_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 2,
+    "dim": 3,
+    "deg": 1,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_no_vectors_p1_dim2_par0",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 0,
+    "dim": 2,
+    "deg": 1,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_no_vectors_p1_dim2_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 2,
+    "deg": 1,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_no_vectors_p1_dim2_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 2,
+    "dim": 2,
+    "deg": 1,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_plane12_zero_start_d2_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_plane12_zero_start_d2_dim2_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 2,
+    "deg": 3,
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_plane12_zero_start_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_plane12_zero_start_dim2_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 2,
+    "deg": 3,
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_plane12_zero_start_d2_p4_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 4,
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_plane12_zero_start_d2_p4_dim2_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 2,
+    "deg": 4,
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_plane12_zero_start_end_d2_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_plane12_zero_start_end_d2_dim2_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 2,
+    "deg": 3,
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_plane12_zero_start_end_d2_raised_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 2,
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_plane12_zero_start_end_d2_raised_dim2_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 2,
+    "deg": 2,
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_plane12_zero_start_end_d2_d3_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ],
+     [
+      0.0,
+      6.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_plane12_zero_start_end_d2_d3_dim2_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 2,
+    "deg": 3,
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ],
+     [
+      0.0,
+      6.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_plane12_start_end_p2_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 2,
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_plane12_start_end_p2_dim2_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 2,
+    "deg": 2,
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_plane12_start_end_p5_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 5,
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_plane12_start_end_p5_dim2_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 2,
+    "deg": 5,
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_plane12_no_vectors_p3_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "vecs": [],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_plane12_no_vectors_p3_dim2_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 2,
+    "deg": 3,
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "vecs": [],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_plane12_no_vectors_p1_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 1,
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "vecs": [],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_plane12_no_vectors_p1_dim2_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 2,
+    "deg": 1,
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "vecs": [],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_space6_zero_start_d2_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.2,
+      0.1
+     ],
+     [
+      2.0,
+      0.8,
+      0.4
+     ],
+     [
+      2.5,
+      1.9,
+      1.0
+     ],
+     [
+      2.4,
+      3.0,
+      1.8
+     ],
+     [
+      1.8,
+      4.1,
+      2.9
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_space6_zero_start_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.2,
+      0.1
+     ],
+     [
+      2.0,
+      0.8,
+      0.4
+     ],
+     [
+      2.5,
+      1.9,
+      1.0
+     ],
+     [
+      2.4,
+      3.0,
+      1.8
+     ],
+     [
+      1.8,
+      4.1,
+      2.9
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_space6_zero_start_d2_p4_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 4,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.2,
+      0.1
+     ],
+     [
+      2.0,
+      0.8,
+      0.4
+     ],
+     [
+      2.5,
+      1.9,
+      1.0
+     ],
+     [
+      2.4,
+      3.0,
+      1.8
+     ],
+     [
+      1.8,
+      4.1,
+      2.9
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_space6_zero_start_end_d2_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.2,
+      0.1
+     ],
+     [
+      2.0,
+      0.8,
+      0.4
+     ],
+     [
+      2.5,
+      1.9,
+      1.0
+     ],
+     [
+      2.4,
+      3.0,
+      1.8
+     ],
+     [
+      1.8,
+      4.1,
+      2.9
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_space6_zero_start_end_d2_raised_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 2,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.2,
+      0.1
+     ],
+     [
+      2.0,
+      0.8,
+      0.4
+     ],
+     [
+      2.5,
+      1.9,
+      1.0
+     ],
+     [
+      2.4,
+      3.0,
+      1.8
+     ],
+     [
+      1.8,
+      4.1,
+      2.9
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_space6_zero_start_end_d2_d3_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.2,
+      0.1
+     ],
+     [
+      2.0,
+      0.8,
+      0.4
+     ],
+     [
+      2.5,
+      1.9,
+      1.0
+     ],
+     [
+      2.4,
+      3.0,
+      1.8
+     ],
+     [
+      1.8,
+      4.1,
+      2.9
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.5,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ],
+     [
+      0.0,
+      6.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_space6_start_end_p2_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 2,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.2,
+      0.1
+     ],
+     [
+      2.0,
+      0.8,
+      0.4
+     ],
+     [
+      2.5,
+      1.9,
+      1.0
+     ],
+     [
+      2.4,
+      3.0,
+      1.8
+     ],
+     [
+      1.8,
+      4.1,
+      2.9
+     ]
+    ],
+    "vecs": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_space6_start_end_p5_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 5,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.2,
+      0.1
+     ],
+     [
+      2.0,
+      0.8,
+      0.4
+     ],
+     [
+      2.5,
+      1.9,
+      1.0
+     ],
+     [
+      2.4,
+      3.0,
+      1.8
+     ],
+     [
+      1.8,
+      4.1,
+      2.9
+     ]
+    ],
+    "vecs": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ],
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_space6_no_vectors_p3_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.2,
+      0.1
+     ],
+     [
+      2.0,
+      0.8,
+      0.4
+     ],
+     [
+      2.5,
+      1.9,
+      1.0
+     ],
+     [
+      2.4,
+      3.0,
+      1.8
+     ],
+     [
+      1.8,
+      4.1,
+      2.9
+     ]
+    ],
+    "vecs": [],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_space6_no_vectors_p1_dim3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 1,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.2,
+      0.1
+     ],
+     [
+      2.0,
+      0.8,
+      0.4
+     ],
+     [
+      2.5,
+      1.9,
+      1.0
+     ],
+     [
+      2.4,
+      3.0,
+      1.8
+     ],
+     [
+      1.8,
+      4.1,
+      2.9
+     ]
+    ],
+    "vecs": [],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_err_two_vectors_p1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 1,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_err_three_vectors",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_err_kk_ge_p",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 3,
+    "deg": 2,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  },
+  {
+   "name": "interp_params_rib5_err_dim4",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (CreateInterpolatingCurve cpOptParams) against the pinned CreateInterpolatingCurve",
+   "inputs": {
+    "op": "interp_crv",
+    "par": 1,
+    "dim": 4,
+    "deg": 3,
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "vecs": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "more": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "ignore": false,
+    "given_params": true
+   }
+  }
+ ]
+}

@@ -13,6 +13,7 @@ use solidcraft_io::Format;
 use super::easyprint::{Exported, export_bodies};
 use super::export_laid_to;
 use crate::params::bad;
+use crate::schema::save_mesh::SlicerDelivery;
 use crate::slicers::{self, Slicer, TargetKind};
 use crate::{EngineError, Result, Session};
 
@@ -46,6 +47,13 @@ pub(super) enum Dest<'a> {
     Path(&'a str),
 }
 
+/// A folder the user chose to keep the sent file in (#18311), in place of the slicer folder.
+pub(super) struct Copy {
+    pub dir: std::path::PathBuf,
+    /// Replace one file named after the design each time, rather than a new `-v<N>` each time.
+    pub overwrite: bool,
+}
+
 pub(super) struct Send<'a> {
     /// The command, for its error messages.
     pub cmd: &'static str,
@@ -59,6 +67,8 @@ pub(super) struct Send<'a> {
     /// Only for [`Dest::Path`]; the slicer folder's file is always standard.
     pub quality: solidcraft_io::MeshQuality,
     pub dest: Dest<'a>,
+    /// Only for [`Dest::Folder`].
+    pub copy: Option<Copy>,
     pub single_instance: bool,
     pub wait: Wait,
 }
@@ -67,6 +77,7 @@ fn format_name(f: Format) -> &'static str {
     match f {
         Format::StlBinary | Format::StlAscii => "stl",
         Format::ThreeMfTagged => "3mf-tagged",
+        Format::Step => "step",
         _ => "3mf",
     }
 }
@@ -93,6 +104,25 @@ pub(super) fn send(s: &mut Session, r: Send<'_>) -> Result<Value> {
 fn write_in_folder(s: &mut Session, r: &Send<'_>) -> Result<Value> {
     use crate::slicer_files;
     let Exported { bytes, ext, fell_back, bodies, laid } = export_bodies(s, r.cmd, &r.bodies, r.format)?;
+    if let Some(copy) = &r.copy {
+        // The file the user keeps: named after the design, in their folder, and the slicer opens it.
+        let stem = slicer_files::copy_stem(&s.doc.name);
+        let (file, numbered, version) = if copy.overwrite {
+            let (file, numbered) =
+                slicer_files::write_copy(&copy.dir, &stem, ext, &bytes).map_err(|e| EngineError::Other(format!("{}: {e}", copy.dir.display())))?;
+            (file, numbered, None)
+        } else {
+            let (file, n) =
+                slicer_files::write_version(&copy.dir, &stem, ext, &bytes).map_err(|e| EngineError::Other(format!("{}: {e}", copy.dir.display())))?;
+            (file, false, Some(n))
+        };
+        let mut out = json!({"path": file.to_string_lossy(), "bytes": bytes.len(), "format": ext, "numbered": numbered, "stl_fallback": fell_back, "copy": true});
+        if let Some(n) = version {
+            out["version"] = json!(n);
+        }
+        laid.report(&mut out);
+        return Ok(out);
+    }
     let dir = slicer_files::dir().ok_or_else(|| bad(r.cmd, "no per-user folder on this system"))?;
     let stem = slicer_files::stem(&s.doc.name, s.path.as_deref(), s.uid, &bodies);
     let (file, numbered) = slicer_files::write(&dir, &stem, ext, &bytes).map_err(|e| EngineError::Other(format!("{}: {e}", dir.display())))?;
@@ -105,7 +135,7 @@ fn write_in_folder(s: &mut Session, r: &Send<'_>) -> Result<Value> {
 /// `out`: `slicer` when it went, `slicer_error` when the program would not start, `starting` (with
 /// [`Wait::Return`]) or `slicer_timeout` when the target had to be started.
 pub(super) fn deliver(target: &Slicer, path: &str, single_instance: bool, wait: Wait, out: &mut Value) {
-    deliver_via(target, path, single_instance, wait, &slicers::busctl_program(), slicers::READY_LIMIT, slicers::READY_POLL, out);
+    deliver_via(target, path, single_instance, wait, &slicers::busctl_program(), slicers::ready_limit(), slicers::READY_POLL, out);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -120,18 +150,24 @@ fn deliver_via(
     out: &mut Value,
 ) {
     let Some(obj) = out.as_object_mut() else { return };
+    // What happened, as the typed value the reply's schema describes; only its one key is set.
+    let mut say = |delivery: SlicerDelivery| {
+        if let Ok(Value::Object(keys)) = serde_json::to_value(delivery) {
+            obj.extend(keys);
+        }
+    };
     // A target that drops a file given at a cold start is started alone, and sent the file once it is ready.
     if wait != Wait::No && target.waits_for_ready().is_some() && target.ready_via(busctl, slicers::PROBE_LIMIT) == Some(false) {
         if let Err(e) = target.start(single_instance) {
-            obj.insert("slicer_error".into(), json!(e));
+            say(SlicerDelivery { slicer_error: Some(e), ..Default::default() });
             return;
         }
         if wait == Wait::Return {
-            obj.insert("starting".into(), json!(target.name));
+            say(SlicerDelivery { starting: Some(target.name.clone()), ..Default::default() });
             return;
         }
         if !slicers::wait_for_ready_via(target, busctl, limit, poll) {
-            obj.insert("slicer_timeout".into(), json!(target.name));
+            say(SlicerDelivery { slicer_timeout: Some(target.name.clone()), ..Default::default() });
             return;
         }
         // After a start the file has to reach the instance that is now running, so the flag goes
@@ -140,8 +176,8 @@ fn deliver_via(
     }
     // The file is saved either way; a program that won't start is reported, not fatal.
     match target.open(path, single_instance) {
-        Ok(()) => obj.insert("slicer".into(), json!(target.name)),
-        Err(e) => obj.insert("slicer_error".into(), json!(e)),
+        Ok(()) => say(SlicerDelivery { slicer: Some(target.name.clone()), ..Default::default() }),
+        Err(e) => say(SlicerDelivery { slicer_error: Some(e), ..Default::default() }),
     };
 }
 

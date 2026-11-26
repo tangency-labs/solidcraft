@@ -16,7 +16,7 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 
-TOOLS = Path(__file__).resolve().parents[2] / 'assets/icons/ui/design/tools'
+TOOLS = Path(__file__).resolve().parents[2] / 'crates/look/icons/design/tools'
 SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="20" fill="currentColor"/></svg>'
 
 
@@ -24,7 +24,7 @@ SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="3
 def review_fixture():
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
-        design = root / 'assets/icons/ui/design'
+        design = root / 'crates/look/icons/design'
         shutil.copytree(TOOLS, design / 'tools')
         (design / 'svg/model').mkdir(parents=True)
         (design / 'svg/model/box.svg').write_text(SVG, encoding='utf-8')

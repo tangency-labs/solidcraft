@@ -279,3 +279,228 @@ fn an_unchanged_loft_edit_keeps_a_section_of_all_profiles() {
     ok(&mut h);
     assert_eq!(sections(&h), stored);
 }
+
+/// Surface Loft accepts body edge chains as sections (#11838): picking a body edge and a sketch
+/// curve produces valid sections parameters, and editing the feature round-trips correctly.
+#[test]
+fn surface_loft_with_body_edges_and_sketch_sections() {
+    let mut h = Harness::new();
+    // Create two surface bodies with edges to pick
+    h.app.run("sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "LowSketch"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [30, 30]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("surface.extrude", json!({"sketch": "LowSketch", "distance": "10 mm", "body_name": "Low"})).unwrap();
+
+    h.app.run("sketch.create", json!({"plane": {"origin": [0, 0, 40], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "MidSketch"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[15, 15], [25, 25]], "ids": ["m"]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let mid = h.app.session.doc.find_feature("MidSketch").unwrap().id;
+
+    h.app.run("sketch.create", json!({"plane": {"origin": [0, 0, 60], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "HighSketch"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [30, 30]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("surface.extrude", json!({"sketch": "HighSketch", "distance": "10 mm", "body_name": "High"})).unwrap();
+
+    // Pick edges from Low and High bodies, and a curve from Mid sketch
+    let st = h.app.session.world_state().unwrap();
+    let low_body = st.body("Low").unwrap();
+    let low_mesh = low_body.mesh();
+    let low_edge = low_mesh.edges.iter().find(|e| e.iter().any(|p| (p.z - 10.0).abs() < 1e-6)).unwrap();
+    let low_edge_idx = low_mesh.edges.iter().position(|e| std::ptr::eq(e, low_edge)).unwrap();
+    let low_edge_point = (low_edge[0] + low_edge[1]) * 0.5;
+
+    let high_body = st.body("High").unwrap();
+    let high_mesh = high_body.mesh();
+    let high_edge = high_mesh.edges.iter().find(|e| e.iter().any(|p| (p.z - 60.0).abs() < 1e-6)).unwrap();
+    let high_edge_idx = high_mesh.edges.iter().position(|e| std::ptr::eq(e, high_edge)).unwrap();
+    let high_edge_point = high_edge[high_edge.len() / 2];
+
+    h.step(&json!({"call":"ui.start","params":{"command":"surface.loft"}})).unwrap();
+    h.frames(3);
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = vec![
+        Sel::Edge { body: "Low".into(), index: low_edge_idx, point: low_edge_point },
+        Sel::SketchCurve { id: "m".into(), sketch: Some(mid) },
+        Sel::Edge { body: "High".into(), index: high_edge_idx, point: high_edge_point },
+    ];
+
+    let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let sections = &commands[0].1["sections"];
+    assert_eq!(sections.as_array().unwrap().len(), 3, "should have 3 sections");
+    assert!(!sections[0]["body"].is_null(), "first section should be body edge");
+    assert!(!sections[1]["sketch"].is_null(), "second section should be sketch curve");
+    assert!(!sections[2]["body"].is_null(), "third section should be body edge");
+
+    ok(&mut h);
+    let name = h.app.session.doc.features.last().unwrap().name.clone();
+
+    // Edit and verify round-trip
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":name}})).unwrap();
+    h.frames(8);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.inputs[0].items.len(), 3, "should have 3 picks after edit");
+    assert!(d.inputs[0].items.iter().any(|x| matches!(x, Sel::Edge { body, .. } if body == "Low")), "should have Low edge");
+    assert!(d.inputs[0].items.iter().any(|x| matches!(x, Sel::SketchCurve { id, .. } if id == "m")), "should have mid curve");
+    assert!(d.inputs[0].items.iter().any(|x| matches!(x, Sel::Edge { body, .. } if body == "High")), "should have High edge");
+
+    ok(&mut h);
+}
+
+#[test]
+fn a_loft_to_a_point_keeps_the_point_section_when_reopened_for_editing() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"name": "Base", "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center": [0, 0], "radius": 10})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+
+    h.app.run("sketch.create", json!({"name": "Apex", "plane": {"origin": [0, 0, 30], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}})).unwrap();
+    h.app.run("sketch.point", json!({"point": [0, 0], "id": "p1"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+
+    let id = |h: &Harness, n: &str| h.app.session.doc.find_feature(n).unwrap().id;
+    let base = id(&h, "Base");
+    let apex = id(&h, "Apex");
+
+    h.step(&json!({"call": "ui.start", "params": {"command": "solid.loft"}})).unwrap();
+    h.frames(3);
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = vec![Sel::Profile { sketch: base, index: 0 }, Sel::SketchPoint { id: format!("{apex}:p1") }];
+    ok(&mut h);
+
+    let name = h.app.session.doc.features.last().unwrap().name.clone();
+    let sections = |h: &Harness| match &h.app.session.doc.find_feature(&name).unwrap().kind {
+        FeatureKind::Loft { sections, .. } => sections.clone(),
+        k => panic!("{k:?}"),
+    };
+    let stored = sections(&h);
+    assert_eq!(stored.len(), 2);
+    assert_eq!(stored[1].point.as_deref(), Some("p1"));
+
+    h.step(&json!({"call": "ui.editFeature", "params": {"feature": name}})).unwrap();
+    h.frames(8);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(
+        d.inputs[0].items,
+        vec![Sel::Profile { sketch: base, index: 0 }, Sel::SketchPoint { id: format!("{apex}:p1") },],
+        "editing a loft with an apex point preserves the sketch point section"
+    );
+    ok(&mut h);
+    assert_eq!(sections(&h), stored);
+}
+
+/// The rail rows of a Loft or Surface Loft dialog, by label, in order.
+fn rail_labels(h: &Harness) -> Vec<&'static str> {
+    h.app.dialog.as_ref().unwrap().inputs.iter().skip(1).map(|i| i.label).collect()
+}
+
+/// Picks the curve `out` into rail row `i` of the open dialog.
+fn pick_rail(h: &mut Harness, i: usize) {
+    h.app.dialog.as_mut().unwrap().inputs[i].items = vec![Sel::SketchCurve { id: "out".into(), sketch: None }];
+    h.frames(3);
+}
+
+#[test]
+fn a_new_loft_dialog_shows_two_rail_rows() {
+    let mut h = Harness::new();
+    setup(&mut h);
+    h.step(&json!({"call":"ui.start","params":{"command":"solid.loft"}})).unwrap();
+    h.frames(3);
+    assert_eq!(rail_labels(&h), vec!["Rail", "Second Rail"]);
+}
+
+#[test]
+fn picking_the_last_rail_row_adds_the_next_and_the_list_stops_at_sixteen() {
+    let mut h = Harness::new();
+    setup(&mut h);
+    h.step(&json!({"call":"ui.start","params":{"command":"solid.loft"}})).unwrap();
+    h.frames(3);
+    for n in 0..14 {
+        let last = h.app.dialog.as_ref().unwrap().inputs.len() - 1;
+        pick_rail(&mut h, last);
+        assert_eq!(rail_labels(&h).len(), (n + 3).min(16), "after pick {n}: {:?}", rail_labels(&h));
+    }
+    assert_eq!(rail_labels(&h).len(), 16, "sixteen rail rows is the most");
+    assert_eq!(rail_labels(&h).last().copied(), Some("Rail 16"));
+}
+
+#[test]
+fn clearing_the_last_picked_rail_leaves_one_empty_row_at_the_end() {
+    let mut h = Harness::new();
+    setup(&mut h);
+    h.step(&json!({"call":"ui.start","params":{"command":"solid.loft"}})).unwrap();
+    h.frames(3);
+    pick_rail(&mut h, 1);
+    pick_rail(&mut h, 2);
+    assert_eq!(rail_labels(&h), vec!["Rail", "Second Rail", "Rail 3"]);
+    pick_rail(&mut h, 3);
+    assert_eq!(rail_labels(&h), vec!["Rail", "Second Rail", "Rail 3", "Rail 4"]);
+    // Clear Rail 3, the last picked row: the empty Rail 4 goes, and Rail 3 stays as the one empty row.
+    h.app.dialog.as_mut().unwrap().inputs[3].items.clear();
+    h.frames(3);
+    assert_eq!(rail_labels(&h), vec!["Rail", "Second Rail", "Rail 3"], "one empty row at the end, not two");
+    assert!(h.app.dialog.as_ref().unwrap().inputs.last().unwrap().items.is_empty());
+}
+
+#[test]
+fn the_surface_loft_grows_its_rail_rows_the_same_way() {
+    let mut h = Harness::new();
+    setup(&mut h);
+    h.step(&json!({"call":"ui.start","params":{"command":"surface.loft"}})).unwrap();
+    h.frames(3);
+    assert_eq!(rail_labels(&h), vec!["Rail", "Second Rail"]);
+    pick_rail(&mut h, 2);
+    assert_eq!(rail_labels(&h), vec!["Rail", "Second Rail", "Rail 3"]);
+}
+
+/// A loft of five rails (the fifth on a plane turned 45 degrees about Z, so it meets the circles
+/// at their diagonal) edits with five filled rail rows and one empty row, and OK keeps all five.
+/// Only the solid loft: the kernel refuses a sheet loft of closed sections along three or more rails.
+#[test]
+fn a_loft_of_five_rails_edits_with_five_filled_rows_and_one_empty() {
+    let mut h = Harness::new();
+    for (name, z) in [("Base", 0), ("Top", 40)] {
+        let plane = json!({"origin": [0, 0, z], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]});
+        h.app.run("sketch.create", json!({"name": name, "plane": plane})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center": [0, 0], "radius": 10, "id": "c"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+    }
+    // Each rail's sketch has its y running down world Z.
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    for (name, x_dir) in [("RX", [1.0, 0.0, 0.0]), ("RY", [0.0, 1.0, 0.0]), ("RD", [s, s, 0.0])] {
+        h.app.run("sketch.create", json!({"name": name, "plane": {"origin": [0, 0, 0], "x_dir": x_dir, "y_dir": [0, 0, -1]}})).unwrap();
+        h.app.run("sketch.arc.three_point", json!({"start": [10, 0], "end": [10, -40], "through": [13, -20], "id": "plus"})).unwrap();
+        h.app.run("sketch.arc.three_point", json!({"start": [-10, 0], "end": [-10, -40], "through": [-13, -20], "id": "minus"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+    }
+    let id = |h: &Harness, n: &str| h.app.session.doc.find_feature(n).unwrap().id;
+    let (rx, ry, rd) = (id(&h, "RX"), id(&h, "RY"), id(&h, "RD"));
+    let rails: Vec<SweepRail> = [(rx, "plus"), (ry, "plus"), (rx, "minus"), (ry, "minus"), (rd, "plus")]
+        .iter()
+        .map(|(sketch, c)| SweepRail { sketch: SketchId(*sketch), curves: vec![(*c).into()] })
+        .collect();
+    let given: Vec<_> = rails.iter().map(|r| json!({"sketch": r.sketch.0, "curves": r.curves})).collect();
+    let sections = json!([{"sketch": id(&h, "Base")}, {"sketch": id(&h, "Top")}]);
+    h.app.run("solid.loft", json!({"sections": sections, "rails": given})).unwrap();
+    let name = h.app.session.doc.features.last().unwrap().name.clone();
+    let stored = |h: &Harness| match &h.app.session.doc.find_feature(&name).unwrap().kind {
+        FeatureKind::Loft { rails, .. } => rails.clone(),
+        k => panic!("{k:?}"),
+    };
+    assert_eq!(stored(&h), rails);
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":name}})).unwrap();
+    h.frames(8);
+    assert_eq!(rail_labels(&h), vec!["Rail", "Second Rail", "Rail 3", "Rail 4", "Rail 5", "Rail 6"]);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(d.inputs[5].items.len() == 1 && d.inputs[6].items.is_empty());
+    ok(&mut h);
+    assert_eq!(stored(&h), rails);
+}
+
+/// A rail row's label is looked up by its English text, so a translated locale must show the
+/// translated "Rail 3" (German "Leitkurve 3"), not the English one.
+#[test]
+fn loft_rail_row_labels_are_translated() {
+    crate::i18n::install();
+    let _de = solidcraft_ui_text::scope("de");
+    assert_eq!(solidcraft_ui_text::tr_label("Rail 3"), "Leitkurve 3");
+}

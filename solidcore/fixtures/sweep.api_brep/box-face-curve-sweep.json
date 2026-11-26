@@ -1,0 +1,866 @@
+{
+ "cases": [
+  {
+   "name": "box_face0_line_null_opts",
+   "upstream_ref": "SM_API/src/SmApiBrep.cpp SmApiCreateCurveSweepFromFaces; SMLib/inc/SmPrimitiveCreation.h SmSweepOptions::bCapEndsArg (default false)",
+   "inputs": {
+    "op": "from_box_face",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "size": [
+     2,
+     3,
+     4
+    ],
+    "face": 0,
+    "sweep": {
+     "path": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       4
+      ],
+      "end": [
+       0,
+       0,
+       9
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "box_face0_line_no_cap",
+   "upstream_ref": "SM_API/src/SmApiBrep.cpp SmApiCreateCurveSweepFromFaces; SMLib/inc/SmPrimitiveCreation.h SmSweepOptions::bCapEndsArg (default false)",
+   "inputs": {
+    "op": "from_box_face",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "size": [
+     2,
+     3,
+     4
+    ],
+    "face": 0,
+    "sweep": {
+     "path": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       4
+      ],
+      "end": [
+       0,
+       0,
+       9
+      ]
+     },
+     "options": [
+      false,
+      false,
+      false,
+      false,
+      false
+     ]
+    }
+   }
+  },
+  {
+   "name": "box_face0_line_cap",
+   "upstream_ref": "SM_API/src/SmApiBrep.cpp SmApiCreateCurveSweepFromFaces; SMLib/inc/SmPrimitiveCreation.h SmSweepOptions::bCapEndsArg (default false)",
+   "inputs": {
+    "op": "from_box_face",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "size": [
+     2,
+     3,
+     4
+    ],
+    "face": 0,
+    "sweep": {
+     "path": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       4
+      ],
+      "end": [
+       0,
+       0,
+       9
+      ]
+     },
+     "options": [
+      true,
+      false,
+      false,
+      false,
+      false
+     ]
+    }
+   }
+  },
+  {
+   "name": "box_face1_line_null_opts",
+   "upstream_ref": "SM_API/src/SmApiBrep.cpp SmApiCreateCurveSweepFromFaces; SMLib/inc/SmPrimitiveCreation.h SmSweepOptions::bCapEndsArg (default false)",
+   "inputs": {
+    "op": "from_box_face",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "size": [
+     2,
+     3,
+     4
+    ],
+    "face": 1,
+    "sweep": {
+     "path": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       4
+      ],
+      "end": [
+       0,
+       0,
+       9
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "box_face1_line_no_cap",
+   "upstream_ref": "SM_API/src/SmApiBrep.cpp SmApiCreateCurveSweepFromFaces; SMLib/inc/SmPrimitiveCreation.h SmSweepOptions::bCapEndsArg (default false)",
+   "inputs": {
+    "op": "from_box_face",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "size": [
+     2,
+     3,
+     4
+    ],
+    "face": 1,
+    "sweep": {
+     "path": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       4
+      ],
+      "end": [
+       0,
+       0,
+       9
+      ]
+     },
+     "options": [
+      false,
+      false,
+      false,
+      false,
+      false
+     ]
+    }
+   }
+  },
+  {
+   "name": "box_face1_line_cap",
+   "upstream_ref": "SM_API/src/SmApiBrep.cpp SmApiCreateCurveSweepFromFaces; SMLib/inc/SmPrimitiveCreation.h SmSweepOptions::bCapEndsArg (default false)",
+   "inputs": {
+    "op": "from_box_face",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "size": [
+     2,
+     3,
+     4
+    ],
+    "face": 1,
+    "sweep": {
+     "path": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       4
+      ],
+      "end": [
+       0,
+       0,
+       9
+      ]
+     },
+     "options": [
+      true,
+      false,
+      false,
+      false,
+      false
+     ]
+    }
+   }
+  },
+  {
+   "name": "box_face2_line_null_opts",
+   "upstream_ref": "SM_API/src/SmApiBrep.cpp SmApiCreateCurveSweepFromFaces; SMLib/inc/SmPrimitiveCreation.h SmSweepOptions::bCapEndsArg (default false)",
+   "inputs": {
+    "op": "from_box_face",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "size": [
+     2,
+     3,
+     4
+    ],
+    "face": 2,
+    "sweep": {
+     "path": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       4
+      ],
+      "end": [
+       0,
+       0,
+       9
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "box_face2_line_no_cap",
+   "upstream_ref": "SM_API/src/SmApiBrep.cpp SmApiCreateCurveSweepFromFaces; SMLib/inc/SmPrimitiveCreation.h SmSweepOptions::bCapEndsArg (default false)",
+   "inputs": {
+    "op": "from_box_face",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "size": [
+     2,
+     3,
+     4
+    ],
+    "face": 2,
+    "sweep": {
+     "path": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       4
+      ],
+      "end": [
+       0,
+       0,
+       9
+      ]
+     },
+     "options": [
+      false,
+      false,
+      false,
+      false,
+      false
+     ]
+    }
+   }
+  },
+  {
+   "name": "box_face2_line_cap",
+   "upstream_ref": "SM_API/src/SmApiBrep.cpp SmApiCreateCurveSweepFromFaces; SMLib/inc/SmPrimitiveCreation.h SmSweepOptions::bCapEndsArg (default false)",
+   "inputs": {
+    "op": "from_box_face",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "size": [
+     2,
+     3,
+     4
+    ],
+    "face": 2,
+    "sweep": {
+     "path": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       4
+      ],
+      "end": [
+       0,
+       0,
+       9
+      ]
+     },
+     "options": [
+      true,
+      false,
+      false,
+      false,
+      false
+     ]
+    }
+   }
+  },
+  {
+   "name": "box_face3_line_null_opts",
+   "upstream_ref": "SM_API/src/SmApiBrep.cpp SmApiCreateCurveSweepFromFaces; SMLib/inc/SmPrimitiveCreation.h SmSweepOptions::bCapEndsArg (default false)",
+   "inputs": {
+    "op": "from_box_face",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "size": [
+     2,
+     3,
+     4
+    ],
+    "face": 3,
+    "sweep": {
+     "path": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       4
+      ],
+      "end": [
+       0,
+       0,
+       9
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "box_face3_line_no_cap",
+   "upstream_ref": "SM_API/src/SmApiBrep.cpp SmApiCreateCurveSweepFromFaces; SMLib/inc/SmPrimitiveCreation.h SmSweepOptions::bCapEndsArg (default false)",
+   "inputs": {
+    "op": "from_box_face",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "size": [
+     2,
+     3,
+     4
+    ],
+    "face": 3,
+    "sweep": {
+     "path": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       4
+      ],
+      "end": [
+       0,
+       0,
+       9
+      ]
+     },
+     "options": [
+      false,
+      false,
+      false,
+      false,
+      false
+     ]
+    }
+   }
+  },
+  {
+   "name": "box_face3_line_cap",
+   "upstream_ref": "SM_API/src/SmApiBrep.cpp SmApiCreateCurveSweepFromFaces; SMLib/inc/SmPrimitiveCreation.h SmSweepOptions::bCapEndsArg (default false)",
+   "inputs": {
+    "op": "from_box_face",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "size": [
+     2,
+     3,
+     4
+    ],
+    "face": 3,
+    "sweep": {
+     "path": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       4
+      ],
+      "end": [
+       0,
+       0,
+       9
+      ]
+     },
+     "options": [
+      true,
+      false,
+      false,
+      false,
+      false
+     ]
+    }
+   }
+  },
+  {
+   "name": "box_face4_line_null_opts",
+   "upstream_ref": "SM_API/src/SmApiBrep.cpp SmApiCreateCurveSweepFromFaces; SMLib/inc/SmPrimitiveCreation.h SmSweepOptions::bCapEndsArg (default false)",
+   "inputs": {
+    "op": "from_box_face",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "size": [
+     2,
+     3,
+     4
+    ],
+    "face": 4,
+    "sweep": {
+     "path": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       4
+      ],
+      "end": [
+       0,
+       0,
+       9
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "box_face4_line_no_cap",
+   "upstream_ref": "SM_API/src/SmApiBrep.cpp SmApiCreateCurveSweepFromFaces; SMLib/inc/SmPrimitiveCreation.h SmSweepOptions::bCapEndsArg (default false)",
+   "inputs": {
+    "op": "from_box_face",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "size": [
+     2,
+     3,
+     4
+    ],
+    "face": 4,
+    "sweep": {
+     "path": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       4
+      ],
+      "end": [
+       0,
+       0,
+       9
+      ]
+     },
+     "options": [
+      false,
+      false,
+      false,
+      false,
+      false
+     ]
+    }
+   }
+  },
+  {
+   "name": "box_face4_line_cap",
+   "upstream_ref": "SM_API/src/SmApiBrep.cpp SmApiCreateCurveSweepFromFaces; SMLib/inc/SmPrimitiveCreation.h SmSweepOptions::bCapEndsArg (default false)",
+   "inputs": {
+    "op": "from_box_face",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "size": [
+     2,
+     3,
+     4
+    ],
+    "face": 4,
+    "sweep": {
+     "path": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       4
+      ],
+      "end": [
+       0,
+       0,
+       9
+      ]
+     },
+     "options": [
+      true,
+      false,
+      false,
+      false,
+      false
+     ]
+    }
+   }
+  },
+  {
+   "name": "box_face5_line_null_opts",
+   "upstream_ref": "SM_API/src/SmApiBrep.cpp SmApiCreateCurveSweepFromFaces; SMLib/inc/SmPrimitiveCreation.h SmSweepOptions::bCapEndsArg (default false)",
+   "inputs": {
+    "op": "from_box_face",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "size": [
+     2,
+     3,
+     4
+    ],
+    "face": 5,
+    "sweep": {
+     "path": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       4
+      ],
+      "end": [
+       0,
+       0,
+       9
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "box_face5_line_no_cap",
+   "upstream_ref": "SM_API/src/SmApiBrep.cpp SmApiCreateCurveSweepFromFaces; SMLib/inc/SmPrimitiveCreation.h SmSweepOptions::bCapEndsArg (default false)",
+   "inputs": {
+    "op": "from_box_face",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "size": [
+     2,
+     3,
+     4
+    ],
+    "face": 5,
+    "sweep": {
+     "path": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       4
+      ],
+      "end": [
+       0,
+       0,
+       9
+      ]
+     },
+     "options": [
+      false,
+      false,
+      false,
+      false,
+      false
+     ]
+    }
+   }
+  },
+  {
+   "name": "box_face5_line_cap",
+   "upstream_ref": "SM_API/src/SmApiBrep.cpp SmApiCreateCurveSweepFromFaces; SMLib/inc/SmPrimitiveCreation.h SmSweepOptions::bCapEndsArg (default false)",
+   "inputs": {
+    "op": "from_box_face",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "size": [
+     2,
+     3,
+     4
+    ],
+    "face": 5,
+    "sweep": {
+     "path": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       4
+      ],
+      "end": [
+       0,
+       0,
+       9
+      ]
+     },
+     "options": [
+      true,
+      false,
+      false,
+      false,
+      false
+     ]
+    }
+   }
+  },
+  {
+   "name": "box_face1_oblique_line_cap",
+   "upstream_ref": "SM_API/src/SmApiBrep.cpp SmApiCreateCurveSweepFromFaces; SMLib/inc/SmPrimitiveCreation.h SmSweepOptions::bCapEndsArg (default false)",
+   "inputs": {
+    "op": "from_box_face",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "size": [
+     2,
+     3,
+     4
+    ],
+    "face": 1,
+    "sweep": {
+     "path": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       4
+      ],
+      "end": [
+       1,
+       2,
+       10
+      ]
+     },
+     "options": [
+      true,
+      false,
+      false,
+      false,
+      false
+     ]
+    }
+   }
+  },
+  {
+   "name": "box_face1_curve_path_cap",
+   "upstream_ref": "SM_API/src/SmApiBrep.cpp SmApiCreateCurveSweepFromFaces; SMLib/inc/SmPrimitiveCreation.h SmSweepOptions::bCapEndsArg (default false)",
+   "inputs": {
+    "op": "from_box_face",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "size": [
+     2,
+     3,
+     4
+    ],
+    "face": 1,
+    "sweep": {
+     "path": {
+      "kind": "curve",
+      "points": [
+       [
+        0,
+        0,
+        4
+       ],
+       [
+        0,
+        0,
+        6
+       ],
+       [
+        1,
+        0,
+        8
+       ],
+       [
+        3,
+        0,
+        9
+       ]
+      ]
+     },
+     "options": [
+      true,
+      false,
+      false,
+      false,
+      false
+     ]
+    }
+   }
+  },
+  {
+   "name": "box_face1_curve_path_cap_translational",
+   "upstream_ref": "SM_API/src/SmApiBrep.cpp SmApiCreateCurveSweepFromFaces; SMLib/inc/SmPrimitiveCreation.h SmSweepOptions::bCapEndsArg (default false)",
+   "inputs": {
+    "op": "from_box_face",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "size": [
+     2,
+     3,
+     4
+    ],
+    "face": 1,
+    "sweep": {
+     "path": {
+      "kind": "curve",
+      "points": [
+       [
+        0,
+        0,
+        4
+       ],
+       [
+        0,
+        0,
+        6
+       ],
+       [
+        1,
+        0,
+        8
+       ],
+       [
+        3,
+        0,
+        9
+       ]
+      ]
+     },
+     "options": [
+      true,
+      true,
+      false,
+      false,
+      false
+     ]
+    }
+   }
+  },
+  {
+   "name": "box_face0_offset_scaled_cap",
+   "upstream_ref": "SM_API/src/SmApiBrep.cpp SmApiCreateCurveSweepFromFaces; SMLib/inc/SmPrimitiveCreation.h SmSweepOptions::bCapEndsArg (default false)",
+   "inputs": {
+    "op": "from_box_face",
+    "origin": [
+     100,
+     -50,
+     7
+    ],
+    "size": [
+     0.02,
+     0.03,
+     0.04
+    ],
+    "face": 0,
+    "sweep": {
+     "path": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       -0.05
+      ]
+     },
+     "options": [
+      true,
+      false,
+      false,
+      false,
+      false
+     ]
+    }
+   }
+  }
+ ]
+}

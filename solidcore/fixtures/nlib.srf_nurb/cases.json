@@ -1,0 +1,3497 @@
+{
+ "cases": [
+  {
+   "name": "Surface_eval_mid",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "eval_pt",
+    "u": 0.5,
+    "v": 0.3505848413052427,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_derivs_mid",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "derivs",
+    "u": 0.5,
+    "v": 0.3505848413052427,
+    "ufl": 1,
+    "vfl": 2,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_derivs_upper_mid",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "derivs",
+    "u": 0.5,
+    "v": 0.3505848413052427,
+    "ufl": 2,
+    "vfl": 1,
+    "mfl": true,
+    "udr": 3,
+    "vdr": 3,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_basis_mid",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "basis_derivs",
+    "u": 0.5,
+    "v": 0.3505848413052427,
+    "ufl": 1,
+    "vfl": 1,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_normal_fast_mid",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "normal_fast",
+    "u": 0.5,
+    "v": 0.3505848413052427,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_normal_pole_mid",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "normal_pole",
+    "u": 0.5,
+    "v": 0.3505848413052427,
+    "ufl": 2,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_normal_at_pole_mid",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "normal_at_pole",
+    "u": 0.5,
+    "v": 0.3505848413052427,
+    "ufl": 1,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_eval_knot",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "eval_pt",
+    "u": 0.7841343359098634,
+    "v": 0.3505848413052427,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_derivs_knot",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "derivs",
+    "u": 0.7841343359098634,
+    "v": 0.3505848413052427,
+    "ufl": 1,
+    "vfl": 2,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_derivs_upper_knot",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "derivs",
+    "u": 0.7841343359098634,
+    "v": 0.3505848413052427,
+    "ufl": 2,
+    "vfl": 1,
+    "mfl": true,
+    "udr": 3,
+    "vdr": 3,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_basis_knot",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "basis_derivs",
+    "u": 0.7841343359098634,
+    "v": 0.3505848413052427,
+    "ufl": 1,
+    "vfl": 1,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_normal_fast_knot",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "normal_fast",
+    "u": 0.7841343359098634,
+    "v": 0.3505848413052427,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_normal_pole_knot",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "normal_pole",
+    "u": 0.7841343359098634,
+    "v": 0.3505848413052427,
+    "ufl": 2,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_normal_at_pole_knot",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "normal_at_pole",
+    "u": 0.7841343359098634,
+    "v": 0.3505848413052427,
+    "ufl": 1,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_eval_corner00",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "eval_pt",
+    "u": 0.0,
+    "v": 0.0634210842965636,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_derivs_corner00",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "derivs",
+    "u": 0.0,
+    "v": 0.0634210842965636,
+    "ufl": 1,
+    "vfl": 2,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_derivs_upper_corner00",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "derivs",
+    "u": 0.0,
+    "v": 0.0634210842965636,
+    "ufl": 2,
+    "vfl": 1,
+    "mfl": true,
+    "udr": 3,
+    "vdr": 3,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_basis_corner00",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "basis_derivs",
+    "u": 0.0,
+    "v": 0.0634210842965636,
+    "ufl": 1,
+    "vfl": 1,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_normal_fast_corner00",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "normal_fast",
+    "u": 0.0,
+    "v": 0.0634210842965636,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_normal_pole_corner00",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "normal_pole",
+    "u": 0.0,
+    "v": 0.0634210842965636,
+    "ufl": 2,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_normal_at_pole_corner00",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "normal_at_pole",
+    "u": 0.0,
+    "v": 0.0634210842965636,
+    "ufl": 1,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_eval_corner11",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "eval_pt",
+    "u": 1.0,
+    "v": 0.6377485983139218,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_derivs_corner11",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "derivs",
+    "u": 1.0,
+    "v": 0.6377485983139218,
+    "ufl": 1,
+    "vfl": 2,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_derivs_upper_corner11",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "derivs",
+    "u": 1.0,
+    "v": 0.6377485983139218,
+    "ufl": 2,
+    "vfl": 1,
+    "mfl": true,
+    "udr": 3,
+    "vdr": 3,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_basis_corner11",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "basis_derivs",
+    "u": 1.0,
+    "v": 0.6377485983139218,
+    "ufl": 1,
+    "vfl": 1,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_normal_fast_corner11",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "normal_fast",
+    "u": 1.0,
+    "v": 0.6377485983139218,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_normal_pole_corner11",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "normal_pole",
+    "u": 1.0,
+    "v": 0.6377485983139218,
+    "ufl": 2,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_normal_at_pole_corner11",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "normal_at_pole",
+    "u": 1.0,
+    "v": 0.6377485983139218,
+    "ufl": 1,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_eval_outside",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "eval_pt",
+    "u": 1.1,
+    "v": 0.005988332894827766,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_derivs_outside",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "derivs",
+    "u": 1.1,
+    "v": 0.005988332894827766,
+    "ufl": 1,
+    "vfl": 2,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_derivs_upper_outside",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "derivs",
+    "u": 1.1,
+    "v": 0.005988332894827766,
+    "ufl": 2,
+    "vfl": 1,
+    "mfl": true,
+    "udr": 3,
+    "vdr": 3,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_basis_outside",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "basis_derivs",
+    "u": 1.1,
+    "v": 0.005988332894827766,
+    "ufl": 1,
+    "vfl": 1,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_normal_fast_outside",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "normal_fast",
+    "u": 1.1,
+    "v": 0.005988332894827766,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_normal_pole_outside",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "normal_pole",
+    "u": 1.1,
+    "v": 0.005988332894827766,
+    "ufl": 2,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_normal_at_pole_outside",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "normal_at_pole",
+    "u": 1.1,
+    "v": 0.005988332894827766,
+    "ufl": 1,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_basis_maxder",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "basis_derivs",
+    "u": 0.5,
+    "v": 0.3505848413052427,
+    "ufl": 1,
+    "vfl": 1,
+    "mfl": false,
+    "udr": 5,
+    "vdr": 0,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_derivs_maxder",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "derivs",
+    "u": 0.5,
+    "v": 0.3505848413052427,
+    "ufl": 1,
+    "vfl": 1,
+    "mfl": true,
+    "udr": 0,
+    "vdr": 5,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_bbox",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "bbox",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_min_max",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "min_max",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_transform",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "transform",
+    "m": [
+     0.0,
+     -1.0,
+     0.0,
+     1.0,
+     1.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     1.0,
+     -3.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_transform_projective",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "transform",
+    "m": [
+     1.0,
+     0.1,
+     0.0,
+     1.0,
+     0.0,
+     1.0,
+     0.2,
+     0.0,
+     0.3,
+     0.0,
+     1.0,
+     0.0,
+     0.01,
+     0.02,
+     0.0,
+     1.0
+    ],
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_translate",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "translate",
+    "t": [
+     1.5,
+     -2.0,
+     0.25
+    ],
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_rotate",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "rotate",
+    "p": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "v": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "al": 33.0,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_rotate_zero_axis",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "rotate",
+    "p": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "v": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "al": 33.0,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_reverse_1_copy",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "reverse",
+    "dir": 1,
+    "inplace": false,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_reverse_1_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "reverse",
+    "dir": 1,
+    "inplace": true,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_reverse_2_copy",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "reverse",
+    "dir": 2,
+    "inplace": false,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_reverse_2_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "reverse",
+    "dir": 2,
+    "inplace": true,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_reverse_3_copy",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "reverse",
+    "dir": 3,
+    "inplace": false,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_reverse_3_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "reverse",
+    "dir": 3,
+    "inplace": true,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_type_tol1e-06",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "type",
+    "tol": 1e-06,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_type_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "type",
+    "tol": 0.001,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_type_tol1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "type",
+    "tol": 1.0,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_reparam_unit",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "reparam",
+    "r": [
+     0.0,
+     1.0,
+     0.0,
+     1.0
+    ],
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_reparam_shift",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "reparam",
+    "r": [
+     2.0,
+     6.0,
+     -0.9365789157034364,
+     3
+    ],
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_closed_smooth_n0_d1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 0,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_closed_smooth_n0_d2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 0,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_closed_smooth_n0_d3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 0,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 3,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_closed_smooth_n1_d1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 1,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_closed_smooth_n1_d2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 1,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_closed_smooth_n1_d3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 1,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 3,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_closed_smooth_n2_d1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 2,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_closed_smooth_n2_d2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 2,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_closed_smooth_n2_d3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 2,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 3,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_eval_mid",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "eval_pt",
+    "u": 0.5,
+    "v": 0.5,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_derivs_mid",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "derivs",
+    "u": 0.5,
+    "v": 0.5,
+    "ufl": 1,
+    "vfl": 2,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_derivs_upper_mid",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "derivs",
+    "u": 0.5,
+    "v": 0.5,
+    "ufl": 2,
+    "vfl": 1,
+    "mfl": true,
+    "udr": 3,
+    "vdr": 3,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_basis_mid",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "basis_derivs",
+    "u": 0.5,
+    "v": 0.5,
+    "ufl": 1,
+    "vfl": 1,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_normal_fast_mid",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "normal_fast",
+    "u": 0.5,
+    "v": 0.5,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_normal_pole_mid",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "normal_pole",
+    "u": 0.5,
+    "v": 0.5,
+    "ufl": 2,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_normal_at_pole_mid",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "normal_at_pole",
+    "u": 0.5,
+    "v": 0.5,
+    "ufl": 1,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_eval_knot",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "eval_pt",
+    "u": 0.5,
+    "v": 0.5,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_derivs_knot",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "derivs",
+    "u": 0.5,
+    "v": 0.5,
+    "ufl": 1,
+    "vfl": 2,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_derivs_upper_knot",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "derivs",
+    "u": 0.5,
+    "v": 0.5,
+    "ufl": 2,
+    "vfl": 1,
+    "mfl": true,
+    "udr": 3,
+    "vdr": 3,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_basis_knot",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "basis_derivs",
+    "u": 0.5,
+    "v": 0.5,
+    "ufl": 1,
+    "vfl": 1,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_normal_fast_knot",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "normal_fast",
+    "u": 0.5,
+    "v": 0.5,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_normal_pole_knot",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "normal_pole",
+    "u": 0.5,
+    "v": 0.5,
+    "ufl": 2,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_normal_at_pole_knot",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "normal_at_pole",
+    "u": 0.5,
+    "v": 0.5,
+    "ufl": 1,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_eval_corner00",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "eval_pt",
+    "u": 0.0,
+    "v": 0.0,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_derivs_corner00",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "derivs",
+    "u": 0.0,
+    "v": 0.0,
+    "ufl": 1,
+    "vfl": 2,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_derivs_upper_corner00",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "derivs",
+    "u": 0.0,
+    "v": 0.0,
+    "ufl": 2,
+    "vfl": 1,
+    "mfl": true,
+    "udr": 3,
+    "vdr": 3,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_basis_corner00",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "basis_derivs",
+    "u": 0.0,
+    "v": 0.0,
+    "ufl": 1,
+    "vfl": 1,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_normal_fast_corner00",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "normal_fast",
+    "u": 0.0,
+    "v": 0.0,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_normal_pole_corner00",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "normal_pole",
+    "u": 0.0,
+    "v": 0.0,
+    "ufl": 2,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_normal_at_pole_corner00",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "normal_at_pole",
+    "u": 0.0,
+    "v": 0.0,
+    "ufl": 1,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_eval_corner11",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "eval_pt",
+    "u": 1.0,
+    "v": 1.0,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_derivs_corner11",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "derivs",
+    "u": 1.0,
+    "v": 1.0,
+    "ufl": 1,
+    "vfl": 2,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_derivs_upper_corner11",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "derivs",
+    "u": 1.0,
+    "v": 1.0,
+    "ufl": 2,
+    "vfl": 1,
+    "mfl": true,
+    "udr": 3,
+    "vdr": 3,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_basis_corner11",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "basis_derivs",
+    "u": 1.0,
+    "v": 1.0,
+    "ufl": 1,
+    "vfl": 1,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_normal_fast_corner11",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "normal_fast",
+    "u": 1.0,
+    "v": 1.0,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_normal_pole_corner11",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "normal_pole",
+    "u": 1.0,
+    "v": 1.0,
+    "ufl": 2,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_normal_at_pole_corner11",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "normal_at_pole",
+    "u": 1.0,
+    "v": 1.0,
+    "ufl": 1,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_eval_outside",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "eval_pt",
+    "u": 1.1,
+    "v": -0.1,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_derivs_outside",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "derivs",
+    "u": 1.1,
+    "v": -0.1,
+    "ufl": 1,
+    "vfl": 2,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_derivs_upper_outside",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "derivs",
+    "u": 1.1,
+    "v": -0.1,
+    "ufl": 2,
+    "vfl": 1,
+    "mfl": true,
+    "udr": 3,
+    "vdr": 3,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_basis_outside",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "basis_derivs",
+    "u": 1.1,
+    "v": -0.1,
+    "ufl": 1,
+    "vfl": 1,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_normal_fast_outside",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "normal_fast",
+    "u": 1.1,
+    "v": -0.1,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_normal_pole_outside",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "normal_pole",
+    "u": 1.1,
+    "v": -0.1,
+    "ufl": 2,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_normal_at_pole_outside",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "normal_at_pole",
+    "u": 1.1,
+    "v": -0.1,
+    "ufl": 1,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_basis_maxder",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "basis_derivs",
+    "u": 0.5,
+    "v": 0.5,
+    "ufl": 1,
+    "vfl": 1,
+    "mfl": false,
+    "udr": 5,
+    "vdr": 0,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_derivs_maxder",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "derivs",
+    "u": 0.5,
+    "v": 0.5,
+    "ufl": 1,
+    "vfl": 1,
+    "mfl": true,
+    "udr": 0,
+    "vdr": 5,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_bbox",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "bbox",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_min_max",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "min_max",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_transform",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "transform",
+    "m": [
+     0.0,
+     -1.0,
+     0.0,
+     1.0,
+     1.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     1.0,
+     -3.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_transform_projective",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "transform",
+    "m": [
+     1.0,
+     0.1,
+     0.0,
+     1.0,
+     0.0,
+     1.0,
+     0.2,
+     0.0,
+     0.3,
+     0.0,
+     1.0,
+     0.0,
+     0.01,
+     0.02,
+     0.0,
+     1.0
+    ],
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_translate",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "translate",
+    "t": [
+     1.5,
+     -2.0,
+     0.25
+    ],
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_rotate",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "rotate",
+    "p": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "v": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "al": 33.0,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_rotate_zero_axis",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "rotate",
+    "p": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "v": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "al": 33.0,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_reverse_1_copy",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "reverse",
+    "dir": 1,
+    "inplace": false,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_reverse_1_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "reverse",
+    "dir": 1,
+    "inplace": true,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_reverse_2_copy",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "reverse",
+    "dir": 2,
+    "inplace": false,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_reverse_2_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "reverse",
+    "dir": 2,
+    "inplace": true,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_reverse_3_copy",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "reverse",
+    "dir": 3,
+    "inplace": false,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_reverse_3_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "reverse",
+    "dir": 3,
+    "inplace": true,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_type_tol1e-06",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "type",
+    "tol": 1e-06,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_type_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "type",
+    "tol": 0.001,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_type_tol1",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "type",
+    "tol": 1.0,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_reparam_unit",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "reparam",
+    "r": [
+     0.0,
+     1.0,
+     0.0,
+     1.0
+    ],
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_reparam_shift",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "reparam",
+    "r": [
+     2.0,
+     6.0,
+     -1.0,
+     3
+    ],
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_closed_smooth_n0_d1",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 0,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_closed_smooth_n0_d2",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 0,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_closed_smooth_n0_d3",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 0,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 3,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_closed_smooth_n1_d1",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 1,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_closed_smooth_n1_d2",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 1,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_closed_smooth_n1_d3",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 1,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 3,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_closed_smooth_n2_d1",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 2,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_closed_smooth_n2_d2",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 2,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_closed_smooth_n2_d3",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 2,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 3,
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_eval_mid",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "eval_pt",
+    "u": -2.737649966055478,
+    "v": 5.0,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_derivs_mid",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "derivs",
+    "u": -2.737649966055478,
+    "v": 5.0,
+    "ufl": 1,
+    "vfl": 2,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_derivs_upper_mid",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "derivs",
+    "u": -2.737649966055478,
+    "v": 5.0,
+    "ufl": 2,
+    "vfl": 1,
+    "mfl": true,
+    "udr": 3,
+    "vdr": 3,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_basis_mid",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "basis_derivs",
+    "u": -2.737649966055478,
+    "v": 5.0,
+    "ufl": 1,
+    "vfl": 1,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_normal_fast_mid",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "normal_fast",
+    "u": -2.737649966055478,
+    "v": 5.0,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_normal_pole_mid",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "normal_pole",
+    "u": -2.737649966055478,
+    "v": 5.0,
+    "ufl": 2,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_normal_at_pole_mid",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "normal_at_pole",
+    "u": -2.737649966055478,
+    "v": 5.0,
+    "ufl": 1,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_eval_knot",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "eval_pt",
+    "u": -2.030543184868931,
+    "v": 5.0,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_derivs_knot",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "derivs",
+    "u": -2.030543184868931,
+    "v": 5.0,
+    "ufl": 1,
+    "vfl": 2,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_derivs_upper_knot",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "derivs",
+    "u": -2.030543184868931,
+    "v": 5.0,
+    "ufl": 2,
+    "vfl": 1,
+    "mfl": true,
+    "udr": 3,
+    "vdr": 3,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_basis_knot",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "basis_derivs",
+    "u": -2.030543184868931,
+    "v": 5.0,
+    "ufl": 1,
+    "vfl": 1,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_normal_fast_knot",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "normal_fast",
+    "u": -2.030543184868931,
+    "v": 5.0,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_normal_pole_knot",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "normal_pole",
+    "u": -2.030543184868931,
+    "v": 5.0,
+    "ufl": 2,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_normal_at_pole_knot",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "normal_at_pole",
+    "u": -2.030543184868931,
+    "v": 5.0,
+    "ufl": 1,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_eval_corner00",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "eval_pt",
+    "u": -5.475299932110956,
+    "v": 0.0,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_derivs_corner00",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "derivs",
+    "u": -5.475299932110956,
+    "v": 0.0,
+    "ufl": 1,
+    "vfl": 2,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_derivs_upper_corner00",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "derivs",
+    "u": -5.475299932110956,
+    "v": 0.0,
+    "ufl": 2,
+    "vfl": 1,
+    "mfl": true,
+    "udr": 3,
+    "vdr": 3,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_basis_corner00",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "basis_derivs",
+    "u": -5.475299932110956,
+    "v": 0.0,
+    "ufl": 1,
+    "vfl": 1,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_normal_fast_corner00",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "normal_fast",
+    "u": -5.475299932110956,
+    "v": 0.0,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_normal_pole_corner00",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "normal_pole",
+    "u": -5.475299932110956,
+    "v": 0.0,
+    "ufl": 2,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_normal_at_pole_corner00",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "normal_at_pole",
+    "u": -5.475299932110956,
+    "v": 0.0,
+    "ufl": 1,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_eval_corner11",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "eval_pt",
+    "u": 0.0,
+    "v": 10.0,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_derivs_corner11",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "derivs",
+    "u": 0.0,
+    "v": 10.0,
+    "ufl": 1,
+    "vfl": 2,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_derivs_upper_corner11",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "derivs",
+    "u": 0.0,
+    "v": 10.0,
+    "ufl": 2,
+    "vfl": 1,
+    "mfl": true,
+    "udr": 3,
+    "vdr": 3,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_basis_corner11",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "basis_derivs",
+    "u": 0.0,
+    "v": 10.0,
+    "ufl": 1,
+    "vfl": 1,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_normal_fast_corner11",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "normal_fast",
+    "u": 0.0,
+    "v": 10.0,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_normal_pole_corner11",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "normal_pole",
+    "u": 0.0,
+    "v": 10.0,
+    "ufl": 2,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_normal_at_pole_corner11",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "normal_at_pole",
+    "u": 0.0,
+    "v": 10.0,
+    "ufl": 1,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_eval_outside",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "eval_pt",
+    "u": 0.5475299932110956,
+    "v": -1.0,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_derivs_outside",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "derivs",
+    "u": 0.5475299932110956,
+    "v": -1.0,
+    "ufl": 1,
+    "vfl": 2,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_derivs_upper_outside",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "derivs",
+    "u": 0.5475299932110956,
+    "v": -1.0,
+    "ufl": 2,
+    "vfl": 1,
+    "mfl": true,
+    "udr": 3,
+    "vdr": 3,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_basis_outside",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "basis_derivs",
+    "u": 0.5475299932110956,
+    "v": -1.0,
+    "ufl": 1,
+    "vfl": 1,
+    "mfl": false,
+    "udr": 2,
+    "vdr": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_normal_fast_outside",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "normal_fast",
+    "u": 0.5475299932110956,
+    "v": -1.0,
+    "ufl": 1,
+    "vfl": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_normal_pole_outside",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "normal_pole",
+    "u": 0.5475299932110956,
+    "v": -1.0,
+    "ufl": 2,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_normal_at_pole_outside",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "normal_at_pole",
+    "u": 0.5475299932110956,
+    "v": -1.0,
+    "ufl": 1,
+    "vfl": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_basis_maxder",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "basis_derivs",
+    "u": -2.737649966055478,
+    "v": 5.0,
+    "ufl": 1,
+    "vfl": 1,
+    "mfl": false,
+    "udr": 5,
+    "vdr": 0,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_derivs_maxder",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "derivs",
+    "u": -2.737649966055478,
+    "v": 5.0,
+    "ufl": 1,
+    "vfl": 1,
+    "mfl": true,
+    "udr": 0,
+    "vdr": 5,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_bbox",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "bbox",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_min_max",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "min_max",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_transform",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "transform",
+    "m": [
+     0.0,
+     -1.0,
+     0.0,
+     1.0,
+     1.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     1.0,
+     -3.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_transform_projective",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "transform",
+    "m": [
+     1.0,
+     0.1,
+     0.0,
+     1.0,
+     0.0,
+     1.0,
+     0.2,
+     0.0,
+     0.3,
+     0.0,
+     1.0,
+     0.0,
+     0.01,
+     0.02,
+     0.0,
+     1.0
+    ],
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_translate",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "translate",
+    "t": [
+     1.5,
+     -2.0,
+     0.25
+    ],
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_rotate",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "rotate",
+    "p": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "v": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "al": 33.0,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_rotate_zero_axis",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "rotate",
+    "p": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "v": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "al": 33.0,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_reverse_1_copy",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "reverse",
+    "dir": 1,
+    "inplace": false,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_reverse_1_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "reverse",
+    "dir": 1,
+    "inplace": true,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_reverse_2_copy",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "reverse",
+    "dir": 2,
+    "inplace": false,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_reverse_2_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "reverse",
+    "dir": 2,
+    "inplace": true,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_reverse_3_copy",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "reverse",
+    "dir": 3,
+    "inplace": false,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_reverse_3_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "reverse",
+    "dir": 3,
+    "inplace": true,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_type_tol1e-06",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "type",
+    "tol": 1e-06,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_type_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "type",
+    "tol": 0.001,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_type_tol1",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "type",
+    "tol": 1.0,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_reparam_unit",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "reparam",
+    "r": [
+     0.0,
+     1.0,
+     0.0,
+     1.0
+    ],
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_reparam_shift",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "reparam",
+    "r": [
+     -3.475299932110956,
+     5.0,
+     -1.0,
+     3
+    ],
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_closed_smooth_n0_d1",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 0,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_closed_smooth_n0_d2",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 0,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_closed_smooth_n0_d3",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 0,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 3,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_closed_smooth_n1_d1",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 1,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_closed_smooth_n1_d2",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 1,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_closed_smooth_n1_d3",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 1,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 3,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_closed_smooth_n2_d1",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 2,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 1,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_closed_smooth_n2_d2",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 2,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 2,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_closed_smooth_n2_d3",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "closed_smooth",
+    "n": 2,
+    "tols": [
+     1e-06,
+     1.0
+    ],
+    "dflg": 3,
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "cone_elliptic_no_tilt",
+   "upstream_ref": "source/SMLib/src/NL_SrfNurb.cpp (N_ConeEllipticEnds documented example)",
+   "inputs": {
+    "op": "cone_elliptic",
+    "c": [
+     1.0,
+     2.0,
+     3.0,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cone_elliptic_cylinder_tilts",
+   "upstream_ref": "source/SMLib/src/NL_SrfNurb.cpp (N_ConeEllipticEnds documented example)",
+   "inputs": {
+    "op": "cone_elliptic",
+    "c": [
+     1.5,
+     1.5,
+     4.0,
+     10.0,
+     -15.0,
+     5.0,
+     20.0
+    ]
+   }
+  },
+  {
+   "name": "cone_elliptic_cone_front_tilt",
+   "upstream_ref": "source/SMLib/src/NL_SrfNurb.cpp (N_ConeEllipticEnds documented example)",
+   "inputs": {
+    "op": "cone_elliptic",
+    "c": [
+     1.0,
+     3.0,
+     2.0,
+     0.0,
+     0.0,
+     30.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "cone_elliptic_cone_rear_tilt",
+   "upstream_ref": "source/SMLib/src/NL_SrfNurb.cpp (N_ConeEllipticEnds documented example)",
+   "inputs": {
+    "op": "cone_elliptic",
+    "c": [
+     2.0,
+     0.5,
+     5.0,
+     0.0,
+     25.0,
+     0.0,
+     -12.0
+    ]
+   }
+  },
+  {
+   "name": "cone_elliptic_apex_front",
+   "upstream_ref": "source/SMLib/src/NL_SrfNurb.cpp (N_ConeEllipticEnds documented example)",
+   "inputs": {
+    "op": "cone_elliptic",
+    "c": [
+     0.0,
+     2.0,
+     3.0,
+     5.0,
+     5.0,
+     5.0,
+     5.0
+    ]
+   }
+  },
+  {
+   "name": "cone_elliptic_both_zero_radii",
+   "upstream_ref": "source/SMLib/src/NL_SrfNurb.cpp (N_ConeEllipticEnds documented example)",
+   "inputs": {
+    "op": "cone_elliptic",
+    "c": [
+     0.0,
+     0.0,
+     3.0,
+     5.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "cone_elliptic_zero_height",
+   "upstream_ref": "source/SMLib/src/NL_SrfNurb.cpp (N_ConeEllipticEnds documented example)",
+   "inputs": {
+    "op": "cone_elliptic",
+    "c": [
+     1.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "cone_elliptic_zero_height_tilt",
+   "upstream_ref": "source/SMLib/src/NL_SrfNurb.cpp (N_ConeEllipticEnds documented example)",
+   "inputs": {
+    "op": "cone_elliptic",
+    "c": [
+     1.0,
+     1.0,
+     0.0,
+     10.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "cone_elliptic_tiny_tilt",
+   "upstream_ref": "source/SMLib/src/NL_SrfNurb.cpp (N_ConeEllipticEnds documented example)",
+   "inputs": {
+    "op": "cone_elliptic",
+    "c": [
+     1.0,
+     2.0,
+     1.0,
+     5e-09,
+     0.0,
+     -5e-09,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "cone_elliptic_ruling_parallel_to_front",
+   "upstream_ref": "source/SMLib/src/NL_SrfNurb.cpp (N_ConeEllipticEnds documented example)",
+   "inputs": {
+    "op": "cone_elliptic",
+    "c": [
+     1.0,
+     3.0,
+     1.0,
+     0.0,
+     0.0,
+     26.56505117707799,
+     0.0
+    ]
+   }
+  }
+ ]
+}

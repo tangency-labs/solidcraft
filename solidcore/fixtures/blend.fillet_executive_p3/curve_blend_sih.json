@@ -1,0 +1,157 @@
+{
+  "cases": [
+    {
+      "name": "curve-sih-box-all-edges",
+      "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:4739",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11
+          ],
+          "curve_blend_sih": 1.0
+        }
+      }
+    },
+    {
+      "name": "curve-sih-box-edge0",
+      "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:4739",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            10,
+            10
+          ],
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "curve_blend_sih": 1.0
+        }
+      }
+    },
+    {
+      "name": "curve-sih-box_diff_cyl-all-edges-r0.1",
+      "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:4739",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/box_diff_cyl.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true,
+          "curve_blend_sih": 1.0
+        }
+      }
+    },
+    {
+      "name": "curve-sih-box_diff_cyl-all-edges-r0.25",
+      "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:4739",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/box_diff_cyl.smb"
+            }
+          },
+          "radius": 0.25,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true,
+          "curve_blend_sih": 1.0
+        }
+      }
+    },
+    {
+      "name": "curve-sih-box_diff_cyl-all-edges-r0.5",
+      "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:4739",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/box_diff_cyl.smb"
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true,
+          "curve_blend_sih": 1.0
+        }
+      }
+    },
+    {
+      "name": "curve-sih-box_diff_cyl-all-edges-r1.0",
+      "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:4739",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/box_diff_cyl.smb"
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true,
+          "curve_blend_sih": 1.0
+        }
+      }
+    },
+    {
+      "name": "curve-sih-box_diff_cyl-all-edges-step2",
+      "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:4739",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/box_diff_cyl.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true,
+          "curve_blend_sih": 2.0
+        }
+      }
+    }
+  ]
+}

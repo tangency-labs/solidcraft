@@ -60,15 +60,25 @@ fn mcp_connect_serves_before_the_app_runs_and_reaches_it_once_it_does() {
     let listener = TcpListener::bind(&addr).unwrap();
     let app = std::thread::spawn(move || {
         let (stream, _) = listener.accept().unwrap();
-        let mut line = String::new();
-        BufReader::new(stream.try_clone().unwrap()).read_line(&mut line).unwrap();
-        let req: Value = serde_json::from_str(&line).unwrap();
-        let reply = if req["token"] == json!(token) {
-            json!({"id": req["id"], "ok": true, "result": {"bodies": [], "method": req["method"]}})
-        } else {
-            json!({"id": req["id"], "ok": false, "error": format!("unauthorized: token {}", req["token"])})
-        };
-        writeln!(&stream, "{reply}").unwrap();
+        let mut lines = BufReader::new(stream.try_clone().unwrap());
+        loop {
+            let mut line = String::new();
+            lines.read_line(&mut line).unwrap();
+            let req: Value = serde_json::from_str(&line).unwrap();
+            // The server first asks for the agents' output options (the compact preference: off).
+            let options = req["method"] == "mcp.options";
+            let reply = if req["token"] != json!(token) {
+                json!({"id": req["id"], "ok": false, "error": format!("unauthorized: token {}", req["token"])})
+            } else if options {
+                json!({"id": req["id"], "ok": true, "result": {"compact": false}})
+            } else {
+                json!({"id": req["id"], "ok": true, "result": {"bodies": [], "method": req["method"]}})
+            };
+            writeln!(&stream, "{reply}").unwrap();
+            if !options {
+                break;
+            }
+        }
     });
     let r = ask(4, "tools/call", measure);
     assert_ne!(r["result"]["isError"], true, "{r}");
@@ -111,10 +121,21 @@ fn mcp_without_arguments_finds_the_running_app() {
                 break (stream, line);
             }
         };
-        let req: Value = serde_json::from_str(&line).unwrap();
-        let ok = req["token"] == json!(token);
-        let reply = json!({"id": req["id"], "ok": ok, "result": {"bodies": [], "method": req["method"]}, "error": "unauthorized"});
-        writeln!(&stream, "{reply}").unwrap();
+        let mut lines = BufReader::new(stream.try_clone().unwrap());
+        let mut line = line;
+        // The server first asks for the agents' output options (the compact preference: off).
+        loop {
+            let req: Value = serde_json::from_str(&line).unwrap();
+            let ok = req["token"] == json!(token);
+            let options = req["method"] == "mcp.options";
+            let result = if options { json!({"compact": false}) } else { json!({"bodies": [], "method": req["method"]}) };
+            writeln!(&stream, "{}", json!({"id": req["id"], "ok": ok, "result": result, "error": "unauthorized"})).unwrap();
+            if !options {
+                break;
+            }
+            line.clear();
+            lines.read_line(&mut line).unwrap();
+        }
     });
     let mut child = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli"))
         .args(["mcp", "--allow-any-path"])
@@ -261,6 +282,32 @@ mod setup {
         // The MSIX folder is only read through LOCALAPPDATA, set for every platform here.
         assert!(run(&h, &["--client", "claude-desktop"]).status.success());
         assert!(json_of(&pkg.join("claude_desktop_config.json"))["mcpServers"]["solidcraft"].is_object());
+    }
+
+    /// #20877: a current Microsoft Store Claude Desktop reads its config from
+    /// `%LOCALAPPDATA%\Claude-Data\claude_<package-id>`, not the package's redirected folder. Both
+    /// get the entries, the other servers in the one it reads stay, and a folder that isn't one of
+    /// Claude's is left alone.
+    #[test]
+    fn claude_desktop_msix_data_folder_is_found_beside_the_package_folder() {
+        let h = home("msix-data");
+        let pkg = h.join("AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude");
+        let data = h.join("AppData/Local/Claude-Data/claude_pzs8sxrjxfjjc");
+        let other = h.join("AppData/Local/Claude-Data/extensions");
+        for dir in [&pkg, &data, &other] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        std::fs::write(data.join("claude_desktop_config.json"), r#"{"mcpServers": {"mine": {"command": "mine"}}}"#).unwrap();
+        let out = run(&h, &["--client", "claude-desktop", "--live"]);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let read = json_of(&data.join("claude_desktop_config.json"));
+        assert!(read["mcpServers"]["solidcraft"].is_object() && read["mcpServers"]["solidcraft-live"].is_object(), "{read}");
+        assert_eq!(read["mcpServers"]["mine"], serde_json::json!({"command": "mine"}));
+        assert!(json_of(&pkg.join("claude_desktop_config.json"))["mcpServers"]["solidcraft"].is_object());
+        assert!(!other.join("claude_desktop_config.json").exists());
+        // The output names each file written, the one Claude reads among them.
+        let said = String::from_utf8_lossy(&out.stdout);
+        assert!(said.contains("Claude-Data"), "{said}");
     }
 }
 

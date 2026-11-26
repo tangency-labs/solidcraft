@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="900" height="400" viewBox="0 0 900 400">
+  <title>WR-775--projected-extremum-at-an-interval-end</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="900" height="400" fill="#ffffff"/>
+    <text transform="matrix(1 0 0 1 20 34)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="17" font-weight="bold" fill="#000000"><tspan x="0" y="0">Projected nearest point of a curve interval, seen along the projection normal</tspan></text>
+    <text transform="matrix(1 0 0 1 40 72)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">Foot inside the interval</tspan></text>
+    <path d="M40 300 C56.2 273 73.372 250.86 91.224 233.493" fill="none" stroke="#999999" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="5 4"/>
+    <path d="M243.029 194.708 C279.688 208.806 316 239.1 350 285" fill="none" stroke="#999999" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="5 4"/>
+    <path d="M91.224 233.493 C138.831 187.179 191.276 174.804 243.029 194.708" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="142.489" y1="97.116" x2="165.572" y2="189.269" fill="none" stroke="#999999" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="5 4"/>
+    <polyline points="174.302,187.082 172.115,178.352 163.385,180.538" fill="none" stroke="#555555" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="165.572" cy="189.269" r="4.5" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 169.572 215.269)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="13" fill="#000000" text-anchor="middle"><tspan x="0" y="0">answer: the foot</tspan></text>
+    <text transform="matrix(1 0 0 1 255.029 198.708)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">interval end</tspan></text>
+    <text transform="matrix(1 0 0 1 40 352)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">The line from the foot to P is square to the curve.</tspan></text>
+    <text transform="matrix(1 0 0 1 40 370)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">The search for feet finds it.</tspan></text>
+    <circle cx="91.224" cy="233.493" r="3.5" fill="#555555"/>
+    <circle cx="243.029" cy="194.708" r="3.5" fill="#555555"/>
+    <text transform="matrix(1 0 0 1 105.224 245.493)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">interval start</tspan></text>
+    <circle cx="142.489" cy="97.116" r="4.5" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 152.489 91.116)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#000000"><tspan x="0" y="0">P</tspan></text>
+    <text transform="matrix(1 0 0 1 490 72)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">Foot outside the interval</tspan></text>
+    <path d="M490 300 C506.2 273 523.372 250.86 541.224 233.493" fill="none" stroke="#999999" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="5 4"/>
+    <path d="M693.029 194.708 C729.688 208.806 766 239.1 800 285" fill="none" stroke="#999999" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="5 4"/>
+    <path d="M541.224 233.493 C588.831 187.179 641.276 174.804 693.029 194.708" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="837.993" y1="182.786" x2="769.45" y2="248.565" fill="none" stroke="#999999" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="5 4"/>
+    <polyline points="775.682,255.059 782.175,248.827 775.944,242.333" fill="none" stroke="#555555" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="837.993" y1="182.786" x2="693.029" y2="194.708" fill="none" stroke="#000000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <g>
+      <g>
+        <path d="M693.298 194.008 L749.206 215.509 C749.593 215.658 749.786 216.092 749.637 216.478 C749.488 216.865 749.055 217.058 748.668 216.909 L692.76 195.408 C692.373 195.259 692.18 194.825 692.329 194.438 C692.478 194.052 692.912 193.859 693.298 194.008" fill="#555555"/>
+        <path d="M750.897 216.963 L744.22 217.609 L746.977 215.455 L746.374 212.009 Z" fill="#555555"/>
+      </g>
+    </g>
+    <circle cx="769.45" cy="248.565" r="4.5" fill="#ffffff" stroke="#555555" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text transform="matrix(1 0 0 1 755.45 268.565)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555" text-anchor="end"><tspan x="0" y="0">foot, outside the interval</tspan></text>
+    <text transform="matrix(1 0 0 1 727.029 230.708)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555" text-anchor="end"><tspan x="0" y="0">outward tangent</tspan></text>
+    <text transform="matrix(1 0 0 1 687.029 168.708)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="13" fill="#000000" text-anchor="end"><tspan x="0" y="0">answer: the interval end</tspan></text>
+    <text transform="matrix(1 0 0 1 490 352)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">The line from the end to P leans outward: no point of the interval is nearer.</tspan></text>
+    <text transform="matrix(1 0 0 1 490 370)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">The end is the answer. The search for feet alone returns nothing.</tspan></text>
+    <circle cx="541.224" cy="233.493" r="3.5" fill="#555555"/>
+    <circle cx="693.029" cy="194.708" r="4.5" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 555.224 245.493)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">interval start</tspan></text>
+    <circle cx="837.993" cy="182.786" r="4.5" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 847.993 176.786)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#000000"><tspan x="0" y="0">P</tspan></text>
+    <line x1="440" y1="60" x2="440" y2="380" fill="none" stroke="#999999" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

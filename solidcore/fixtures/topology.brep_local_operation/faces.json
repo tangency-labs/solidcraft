@@ -1,0 +1,148 @@
+{
+  "cases": [
+    {
+      "name": "box_face0_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+      "inputs": {
+        "file": "Solids/box.smb",
+        "replaced": [
+          {
+            "face": 0,
+            "offset": 0,
+            "tilt": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "box_face0_out",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+      "inputs": {
+        "file": "Solids/box.smb",
+        "replaced": [
+          {
+            "face": 0,
+            "offset": 0.5,
+            "tilt": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "box_face0_in",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+      "inputs": {
+        "file": "Solids/box.smb",
+        "replaced": [
+          {
+            "face": 0,
+            "offset": -0.5,
+            "tilt": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "box_face1_out",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+      "inputs": {
+        "file": "Solids/box.smb",
+        "replaced": [
+          {
+            "face": 1,
+            "offset": 0.5,
+            "tilt": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "box_face2_out",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+      "inputs": {
+        "file": "Solids/box.smb",
+        "replaced": [
+          {
+            "face": 2,
+            "offset": 0.5,
+            "tilt": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "box_face3_in",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+      "inputs": {
+        "file": "Solids/box.smb",
+        "replaced": [
+          {
+            "face": 3,
+            "offset": -0.5,
+            "tilt": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "box_face4_out",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+      "inputs": {
+        "file": "Solids/box.smb",
+        "replaced": [
+          {
+            "face": 4,
+            "offset": 0.5,
+            "tilt": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "box_face5_tilt",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+      "inputs": {
+        "file": "Solids/box.smb",
+        "replaced": [
+          {
+            "face": 5,
+            "offset": 0.2,
+            "tilt": [
+              0.1,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

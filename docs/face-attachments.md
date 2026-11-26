@@ -22,12 +22,14 @@ is the source. Two drawn curves, or two projections, over one edge remain ambigu
 Every other flat face is attached by its exact history name (a `lineage` certificate) when it
 has one: the persistent name the kernel's face history gives it, which says what made the face
 and follows it through every later feature. That covers a Cut's walls and floor
-(`F5:side:l1`, `F5:top`), a chamfer face (`F7:blend:…`), each copy a pattern or mirror makes
+(`F5:side:l1`, `F5:top`), a chamfer face (`F7:blend(…)`), each copy a pattern or mirror makes
 (`F4:top@F6.2`: the seed's face and the copy's instance), a side wall a Join merged from two
 features (named after the first, answering to the other), the pieces a later feature split
-a face into (all pieces of one name on one oriented plane are that face), and the face Split Body
+a face into (all pieces of one name on one oriented plane are that face), the face Split Body
 cuts with a plane (`F4:section` on each part: a construction plane, a sketch line or a plane given
-outright, so a sketch on it follows the plane when a parameter moves it). A lineage face's
+outright, so a sketch on it follows the plane when a parameter moves it), and the faces of a
+thickened surface: the face that was kept, the offset (`F3:inner(F2:side:l1)`) and the walls on
+the surface's edges (`F3:blend(…)`). A sketch on any of those follows the thickness. A lineage face's
 plane is its current exact plane, measured in a frame that depends on the plane alone: its
 origin where the definition origin projects onto it, its x axis the first of the definition's
 X, Y and Z axes not steep to it (`|cos| < 0.6`), projected. The construction certificates
@@ -53,18 +55,17 @@ sketch on every wall, not only on its tops and bottoms.
 Faces whose history is not exact (faces a feature rebuilt without reporting its history),
 ambiguous sources, and the pieces of a face split on purpose with Split Face (each piece is its
 own face) require an explicit fixed plane instead. The error says why, and the Create Sketch dialog then offers **Use fixed plane**,
-which places the sketch on that face's current plane without following later changes. A
+which places the sketch on that face's current plane without following later changes (the dialog
+says so beside the button, and nothing is made until it is clicked). A
 nearby or parallel face is never used to repair a new attachment automatically.
 
-The flat faces of a sheet metal body are the exception: they have no construction
-certificate, so a sketch on one attaches to its panel by name (`sheet:<body>:<panel>:<side>`)
-and finds it again after every rebuild, unfold and refold. The rims (the sheet's thickness
-along a panel's straight edge) attach the same way, by the edge they run along
-(`<panel>:rim.l3` for a base sketch line, `<flange>:rim.far`, `rim.side0`, `rim.side1`), and so
-do the flat ends of a bend (`<flange>:rim.bend0`, `rim.bend1`); a rim's plane faces out of the
-panel, its x along the edge and its y across the thickness. Extrude and Press Pull from a sheet
-face use the same attachment. If that panel no longer exists the
-sketch reports a lost attachment, as above. See the sheet metal guide.
+The faces of a sheet metal body attach the same way, by the names the engine gives them from
+what the sheet reports each face was made for (`F2:top`, `F3:far:F2:side:l1`, see
+`docs/design/sheet-metal-naming.md`), and find them again after every rebuild, unfold and
+refold: a sheet body's planar face supplies its own sketch frame, so a sketch drawn on the flat
+lands where it belongs after a refold. A `sheet:<body>:<panel>:<side>` name that designs saved
+before used finds no face: such a sketch reports a lost attachment, as above, and Redefine
+Sketch Plane attaches it again. See the sheet metal guide.
 
 ## Create and repair
 

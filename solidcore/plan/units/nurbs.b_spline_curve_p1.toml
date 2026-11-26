@@ -1,0 +1,12 @@
+id = "nurbs.b_spline_curve_p1"
+upstream = ["source/SMLib/inc/SmBSplineCurve.h", "source/SMLib/src/SmBSplineCurve.cpp"]
+rust_module = "nurbs::b_spline_curve::p1"
+depends_on = ["geom.axis2_placement", "geom.extent1d", "geom.object", "geom.tol", "geom.vector3d", "nlib.crv_basic", "nlib.crv_nurb", "nurbs.nurbs_crv"]
+soft_depends_on = ["geom.geom_utility_p1", "geom.polynomial", "nlib.basis_basic", "nlib.crv_common", "nlib.iges", "nlib.math"]
+est_lines = 1894
+layer = 9
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "green"
+claimed_by = "swarm-nurbs.b_spline_curve_p1-a1"
+claimed_at = "2026-10-12T21:56:25Z"
+notes = "GREEN: difftest 2216 cases, 2216 pass bit-identical, 0 deferred, after curve.curve_p1 wired TessellateByBisection. Earlier: PARTIAL: difftest 2216 cases, now 2212 pass / 4 deferred (curve.curve_p1: TessellateByBisection) after curve.curve_p2 wired its stubs; originally (216 fixture on the six pt_TestFiles .smc curves, smSweepTest lines/circles and edge cases + 2000 generated), 2156 pass bit-identical, 60 deferred (curve.curve_p2 59: SmCurve::EvaluateContinuity / IsKindOf / ApproximateLength; curve.curve_p1 1: TessellateByBisection); 30,216-case run clean; no UNPORTED(nurbs.b_spline_curve_p1) stubs to wire; SmBSplineCurve.h default bNonZeroTangents=FALSE binds in Evaluate recursion (findings.md). 56 fns; largest: SmBSplineCurve::Evaluate, SmBSplineCurve::EditEndPoint, SmBSplineCurve::FairBlendCurveDerivatives, SmBSplineCurve::CreateCanonical; cycle back-edges (call into later units; stub or co-port): curve.curve_p2(11), curve.curve_p5(5), curve.ellipse_p1(5), curve.ellipse_p2(5), curve.hyperbola(5), curve.line(5), curve.parabola(5), curve.curve_p1(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"

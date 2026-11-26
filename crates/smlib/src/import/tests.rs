@@ -92,7 +92,7 @@ fn cube(s: f64) -> Record {
 #[test]
 fn a_cube_record_is_valid_and_maps_to_two_shells() {
     let r = cube(10.0);
-    solidcraft_geom::brep::check::validate(&r).unwrap();
+    solidcore_ops::record_check::validate(&r).unwrap();
     let a = arrays(&r, true).unwrap();
     // The infinite region (a void in SMLib) and the solid, one shell each, every face once per side.
     assert_eq!(a.ints[&flat::REGION_SHELL_COUNT], vec![1, 1]);
@@ -144,7 +144,7 @@ fn a_plane_on_other_axes_goes_as_smlibs_plane() {
             }
         }
     }
-    solidcraft_geom::brep::check::validate(&r).unwrap();
+    solidcore_ops::record_check::validate(&r).unwrap();
     let a = arrays(&r, true).unwrap();
     assert_eq!(a.ints[&flat::FACE_SURFACE_TYPE][0], i64::from(flat::SURFACE_PLANE));
     let b = crate::Brep::from_record(&r, true).unwrap();
@@ -316,4 +316,38 @@ fn a_patch_across_an_extruded_circles_seam_is_its_exact_cylinder() {
     assert!(v0.abs() <= 1e-12 && (v1 - h).abs() <= 1e-12, "{:?}", f.domain);
     let start = (-half).sin_cos();
     assert!((frame.x_axis[0] - start.1).abs() <= 1e-12 && (frame.x_axis[1] - start.0).abs() <= 1e-12, "x {:?}", frame.x_axis);
+}
+
+/// Equal plane coefficients mean equal parameters. Projecting the domain corners back onto
+/// the same rounded axes instead grows the box on each record import.
+#[test]
+fn a_plane_import_with_identical_axes_keeps_its_domain() {
+    let (s, c) = 0.37_f64.sin_cos();
+    for sign_u in [-1.0, 1.0] {
+        for sign_v in [-1.0, 1.0] {
+            let u = scale([c, s, 0.0], sign_u);
+            let v = scale([-s, c, 0.0], sign_v);
+            for [[u0, u1], [v0, v1]] in
+                [[[0.0, 1.0], [0.0, 1.0]], [[-2.0, 18.0], [3.0, 33.0]], [[-1000.0, -3.0], [-0.25, 0.5]], [[-0.0, 1.0], [-0.0, 2.0]]]
+            {
+                let mut a = Arrays::default();
+                plane(&mut a, [7.0, -11.0, 23.0], u, v, [[u0, u1], [v0, v1]], true).unwrap();
+                assert_eq!(a.reals[&flat::FACE_PLANE_REF_DIRECTION], u);
+                let z = a.reals[&flat::FACE_PLANE_AXIS].as_slice();
+                assert_eq!(cross([z[0], z[1], z[2]], u), v);
+                let bits = |xs: &[f64]| xs.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+                assert_eq!(bits(&a.reals[&flat::FACE_RANGE]), bits(&[u0, v0, u1, v1]));
+            }
+        }
+    }
+}
+
+#[test]
+fn a_plane_import_still_maps_scaled_and_skew_axes() {
+    for (v, range) in [([0.0, 3.0, 0.0], [-4.0, 9.0, 36.0, 99.0]), ([1.0, 3.0, 0.0], [-1.0, 9.0, 69.0, 99.0])] {
+        let mut a = Arrays::default();
+        plane(&mut a, [7.0, -11.0, 23.0], [2.0, 0.0, 0.0], v, [[-2.0, 18.0], [3.0, 33.0]], true).unwrap();
+        // X = 2u (+ v for the skew frame), Y = 3v, so these are the exact corner bounds.
+        assert_eq!(a.reals[&flat::FACE_RANGE], range);
+    }
 }

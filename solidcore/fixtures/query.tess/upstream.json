@@ -1,0 +1,1938 @@
+{
+ "cases": [
+  {
+   "name": "Surface_new",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "new",
+    "kinds": [
+     15150,
+     15120,
+     15100,
+     15152
+    ],
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 1,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_build_sub",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "build_sub",
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 1,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_build_sub_view",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "build_sub",
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 2,
+      "view": [
+       0,
+       0,
+       1
+      ],
+      "sil_ch": 0.05,
+      "sil_ang": 5.0,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_build_rect",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "build",
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 1,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     },
+     "poly": {
+      "brep_tol": 1e-06,
+      "face_tol": 1e-06,
+      "label": 5,
+      "loops": [
+       {
+        "etol": 1e-06,
+        "pts": [
+         [
+          0.1,
+          0.12085383569829942,
+          0,
+          1e-06
+         ],
+         [
+          0.9,
+          0.12085383569829942,
+          0,
+          1e-06
+         ],
+         [
+          0.9,
+          0.580315846912186,
+          0,
+          1e-06
+         ],
+         [
+          0.1,
+          0.580315846912186,
+          0,
+          1e-06
+         ]
+        ]
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_build_hole",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "build",
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 1,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     },
+     "poly": {
+      "brep_tol": 1e-06,
+      "face_tol": 1e-06,
+      "label": 5,
+      "loops": [
+       {
+        "etol": 1e-06,
+        "pts": [
+         [
+          0.05,
+          0.0921374599974315,
+          0,
+          1e-06
+         ],
+         [
+          0.95,
+          0.0921374599974315,
+          0,
+          1e-06
+         ],
+         [
+          0.95,
+          0.6090322226130539,
+          0,
+          1e-06
+         ],
+         [
+          0.05,
+          0.6090322226130539,
+          0,
+          1e-06
+         ]
+        ]
+       },
+       {
+        "etol": 1e-06,
+        "pts": [
+         [
+          0.4,
+          0.2931520899035069,
+          0,
+          1e-06
+         ],
+         [
+          0.4,
+          0.4080175927069785,
+          0,
+          1e-06
+         ],
+         [
+          0.6,
+          0.4080175927069785,
+          0,
+          1e-06
+         ],
+         [
+          0.6,
+          0.2931520899035069,
+          0,
+          1e-06
+         ]
+        ]
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_build_no_poly",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "build",
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 1,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_test_top",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "test",
+    "nodes": [
+     0
+    ],
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 2,
+      "view": [
+       1,
+       0,
+       0
+      ],
+      "sil_ch": 0.01,
+      "sil_ang": 2.0,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     },
+     "tree": [
+      {
+       "parent": -1,
+       "c1": -1,
+       "c2": -1,
+       "aux": 6,
+       "split": 0,
+       "dom": [
+        0.0,
+        0.0634210842965636,
+        1.0,
+        0.6377485983139218
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "Surface_implant_mark",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "implant",
+    "edges": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 1,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     },
+     "poly": {
+      "brep_tol": 1e-06,
+      "face_tol": 1e-06,
+      "label": 5,
+      "loops": [
+       {
+        "etol": 1e-06,
+        "pts": [
+         [
+          0.1,
+          0.12085383569829942,
+          0,
+          1e-06
+         ],
+         [
+          0.9,
+          0.12085383569829942,
+          0,
+          1e-06
+         ],
+         [
+          0.9,
+          0.580315846912186,
+          0,
+          1e-06
+         ],
+         [
+          0.1,
+          0.580315846912186,
+          0,
+          1e-06
+         ]
+        ]
+       }
+      ]
+     },
+     "tree": [
+      {
+       "parent": -1,
+       "c1": 1,
+       "c2": 2,
+       "aux": 4,
+       "split": 0,
+       "dom": [
+        0.0,
+        0.0634210842965636,
+        1.0,
+        0.6377485983139218
+       ]
+      },
+      {
+       "parent": 0,
+       "c1": -1,
+       "c2": -1,
+       "aux": 6,
+       "split": 0,
+       "dom": [
+        0.0,
+        0.0634210842965636,
+        0.5,
+        0.6377485983139218
+       ]
+      },
+      {
+       "parent": 0,
+       "c1": -1,
+       "c2": -1,
+       "aux": 6,
+       "split": 0,
+       "dom": [
+        0.5,
+        0.0634210842965636,
+        1.0,
+        0.6377485983139218
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "Surface_mark",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "mark",
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 1,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     },
+     "poly": {
+      "brep_tol": 1e-06,
+      "face_tol": 1e-06,
+      "label": 5,
+      "loops": [
+       {
+        "etol": 1e-06,
+        "pts": [
+         [
+          0.3,
+          0.23571933850177107,
+          0,
+          1e-06
+         ],
+         [
+          0.7,
+          0.23571933850177107,
+          0,
+          1e-06
+         ],
+         [
+          0.7,
+          0.46545034410871433,
+          0,
+          1e-06
+         ],
+         [
+          0.3,
+          0.46545034410871433,
+          0,
+          1e-06
+         ]
+        ]
+       }
+      ]
+     },
+     "tree": [
+      {
+       "parent": -1,
+       "c1": 1,
+       "c2": 2,
+       "aux": 4,
+       "split": 0,
+       "dom": [
+        0.0,
+        0.0634210842965636,
+        1.0,
+        0.6377485983139218
+       ]
+      },
+      {
+       "parent": 0,
+       "c1": -1,
+       "c2": -1,
+       "aux": 6,
+       "split": 0,
+       "dom": [
+        0.0,
+        0.0634210842965636,
+        0.5,
+        0.6377485983139218
+       ]
+      },
+      {
+       "parent": 0,
+       "c1": -1,
+       "c2": -1,
+       "aux": 6,
+       "split": 0,
+       "dom": [
+        0.5,
+        0.0634210842965636,
+        1.0,
+        0.6377485983139218
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_new",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "new",
+    "kinds": [
+     15150,
+     15120,
+     15100,
+     15152
+    ],
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 1,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_build_sub",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "build_sub",
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 1,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_build_sub_view",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "build_sub",
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 2,
+      "view": [
+       0,
+       0,
+       1
+      ],
+      "sil_ch": 0.05,
+      "sil_ang": 5.0,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_build_rect",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "build",
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 1,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     },
+     "poly": {
+      "brep_tol": 1e-06,
+      "face_tol": 1e-06,
+      "label": 5,
+      "loops": [
+       {
+        "etol": 1e-06,
+        "pts": [
+         [
+          0.1,
+          0.1,
+          0,
+          1e-06
+         ],
+         [
+          0.9,
+          0.1,
+          0,
+          1e-06
+         ],
+         [
+          0.9,
+          0.9,
+          0,
+          1e-06
+         ],
+         [
+          0.1,
+          0.9,
+          0,
+          1e-06
+         ]
+        ]
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_build_hole",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "build",
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 1,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     },
+     "poly": {
+      "brep_tol": 1e-06,
+      "face_tol": 1e-06,
+      "label": 5,
+      "loops": [
+       {
+        "etol": 1e-06,
+        "pts": [
+         [
+          0.05,
+          0.05,
+          0,
+          1e-06
+         ],
+         [
+          0.95,
+          0.05,
+          0,
+          1e-06
+         ],
+         [
+          0.95,
+          0.95,
+          0,
+          1e-06
+         ],
+         [
+          0.05,
+          0.95,
+          0,
+          1e-06
+         ]
+        ]
+       },
+       {
+        "etol": 1e-06,
+        "pts": [
+         [
+          0.4,
+          0.4,
+          0,
+          1e-06
+         ],
+         [
+          0.4,
+          0.6,
+          0,
+          1e-06
+         ],
+         [
+          0.6,
+          0.6,
+          0,
+          1e-06
+         ],
+         [
+          0.6,
+          0.4,
+          0,
+          1e-06
+         ]
+        ]
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_build_no_poly",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "build",
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 1,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_test_top",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "test",
+    "nodes": [
+     0
+    ],
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 2,
+      "view": [
+       1,
+       0,
+       0
+      ],
+      "sil_ch": 0.01,
+      "sil_ang": 2.0,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     },
+     "tree": [
+      {
+       "parent": -1,
+       "c1": -1,
+       "c2": -1,
+       "aux": 6,
+       "split": 0,
+       "dom": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_implant_mark",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "implant",
+    "edges": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 1,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     },
+     "poly": {
+      "brep_tol": 1e-06,
+      "face_tol": 1e-06,
+      "label": 5,
+      "loops": [
+       {
+        "etol": 1e-06,
+        "pts": [
+         [
+          0.1,
+          0.1,
+          0,
+          1e-06
+         ],
+         [
+          0.9,
+          0.1,
+          0,
+          1e-06
+         ],
+         [
+          0.9,
+          0.9,
+          0,
+          1e-06
+         ],
+         [
+          0.1,
+          0.9,
+          0,
+          1e-06
+         ]
+        ]
+       }
+      ]
+     },
+     "tree": [
+      {
+       "parent": -1,
+       "c1": 1,
+       "c2": 2,
+       "aux": 4,
+       "split": 0,
+       "dom": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      },
+      {
+       "parent": 0,
+       "c1": -1,
+       "c2": -1,
+       "aux": 6,
+       "split": 0,
+       "dom": [
+        0.0,
+        0.0,
+        0.5,
+        1.0
+       ]
+      },
+      {
+       "parent": 0,
+       "c1": -1,
+       "c2": -1,
+       "aux": 6,
+       "split": 0,
+       "dom": [
+        0.5,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_mark",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "mark",
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 1,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     },
+     "poly": {
+      "brep_tol": 1e-06,
+      "face_tol": 1e-06,
+      "label": 5,
+      "loops": [
+       {
+        "etol": 1e-06,
+        "pts": [
+         [
+          0.3,
+          0.3,
+          0,
+          1e-06
+         ],
+         [
+          0.7,
+          0.3,
+          0,
+          1e-06
+         ],
+         [
+          0.7,
+          0.7,
+          0,
+          1e-06
+         ],
+         [
+          0.3,
+          0.7,
+          0,
+          1e-06
+         ]
+        ]
+       }
+      ]
+     },
+     "tree": [
+      {
+       "parent": -1,
+       "c1": 1,
+       "c2": 2,
+       "aux": 4,
+       "split": 0,
+       "dom": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      },
+      {
+       "parent": 0,
+       "c1": -1,
+       "c2": -1,
+       "aux": 6,
+       "split": 0,
+       "dom": [
+        0.0,
+        0.0,
+        0.5,
+        1.0
+       ]
+      },
+      {
+       "parent": 0,
+       "c1": -1,
+       "c2": -1,
+       "aux": 6,
+       "split": 0,
+       "dom": [
+        0.5,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_new",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "new",
+    "kinds": [
+     15150,
+     15120,
+     15100,
+     15152
+    ],
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 1,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_build_sub",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "build_sub",
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 1,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_build_sub_view",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "build_sub",
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 2,
+      "view": [
+       0,
+       0,
+       1
+      ],
+      "sil_ch": 0.05,
+      "sil_ang": 5.0,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_build_rect",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "build",
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 1,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     },
+     "poly": {
+      "brep_tol": 1e-06,
+      "face_tol": 1e-06,
+      "label": 5,
+      "loops": [
+       {
+        "etol": 1e-06,
+        "pts": [
+         [
+          -4.927769938899861,
+          1.0,
+          0,
+          1e-06
+         ],
+         [
+          -0.5475299932110956,
+          1.0,
+          0,
+          1e-06
+         ],
+         [
+          -0.5475299932110956,
+          9.0,
+          0,
+          1e-06
+         ],
+         [
+          -4.927769938899861,
+          9.0,
+          0,
+          1e-06
+         ]
+        ]
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_build_hole",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "build",
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 1,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     },
+     "poly": {
+      "brep_tol": 1e-06,
+      "face_tol": 1e-06,
+      "label": 5,
+      "loops": [
+       {
+        "etol": 1e-06,
+        "pts": [
+         [
+          -5.201534935505408,
+          0.5,
+          0,
+          1e-06
+         ],
+         [
+          -0.2737649966055478,
+          0.5,
+          0,
+          1e-06
+         ],
+         [
+          -0.2737649966055478,
+          9.5,
+          0,
+          1e-06
+         ],
+         [
+          -5.201534935505408,
+          9.5,
+          0,
+          1e-06
+         ]
+        ]
+       },
+       {
+        "etol": 1e-06,
+        "pts": [
+         [
+          -3.2851799592665736,
+          4.0,
+          0,
+          1e-06
+         ],
+         [
+          -3.2851799592665736,
+          6.0,
+          0,
+          1e-06
+         ],
+         [
+          -2.1901199728443825,
+          6.0,
+          0,
+          1e-06
+         ],
+         [
+          -2.1901199728443825,
+          4.0,
+          0,
+          1e-06
+         ]
+        ]
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_build_no_poly",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "build",
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 1,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_test_top",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "test",
+    "nodes": [
+     0
+    ],
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 2,
+      "view": [
+       1,
+       0,
+       0
+      ],
+      "sil_ch": 0.01,
+      "sil_ang": 2.0,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     },
+     "tree": [
+      {
+       "parent": -1,
+       "c1": -1,
+       "c2": -1,
+       "aux": 6,
+       "split": 0,
+       "dom": [
+        -5.475299932110956,
+        0.0,
+        0.0,
+        10.0
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_implant_mark",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "implant",
+    "edges": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 1,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     },
+     "poly": {
+      "brep_tol": 1e-06,
+      "face_tol": 1e-06,
+      "label": 5,
+      "loops": [
+       {
+        "etol": 1e-06,
+        "pts": [
+         [
+          -4.927769938899861,
+          1.0,
+          0,
+          1e-06
+         ],
+         [
+          -0.5475299932110956,
+          1.0,
+          0,
+          1e-06
+         ],
+         [
+          -0.5475299932110956,
+          9.0,
+          0,
+          1e-06
+         ],
+         [
+          -4.927769938899861,
+          9.0,
+          0,
+          1e-06
+         ]
+        ]
+       }
+      ]
+     },
+     "tree": [
+      {
+       "parent": -1,
+       "c1": 1,
+       "c2": 2,
+       "aux": 4,
+       "split": 0,
+       "dom": [
+        -5.475299932110956,
+        0.0,
+        0.0,
+        10.0
+       ]
+      },
+      {
+       "parent": 0,
+       "c1": -1,
+       "c2": -1,
+       "aux": 6,
+       "split": 0,
+       "dom": [
+        -5.475299932110956,
+        0.0,
+        -2.737649966055478,
+        10.0
+       ]
+      },
+      {
+       "parent": 0,
+       "c1": -1,
+       "c2": -1,
+       "aux": 6,
+       "split": 0,
+       "dom": [
+        -2.737649966055478,
+        0.0,
+        0.0,
+        10.0
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_mark",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2522 (tolerances); source/SMLib/src/SmTess.cpp:3151 (cache construction)",
+   "inputs": {
+    "op": "mark",
+    "setup": {
+     "srf": {
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     },
+     "opts": [
+      0.6,
+      0.6981317007977318,
+      4.0,
+      0.0,
+      0.001,
+      4.0
+     ],
+     "driver": {
+      "kind": 1,
+      "opts": [
+       0.6,
+       40.0,
+       4.0,
+       0.0,
+       0.001,
+       4.0
+      ]
+     },
+     "state": {
+      "point_test": true
+     },
+     "poly": {
+      "brep_tol": 1e-06,
+      "face_tol": 1e-06,
+      "label": 5,
+      "loops": [
+       {
+        "etol": 1e-06,
+        "pts": [
+         [
+          -3.8327099524776695,
+          3.0,
+          0,
+          1e-06
+         ],
+         [
+          -1.6425899796332868,
+          3.0,
+          0,
+          1e-06
+         ],
+         [
+          -1.6425899796332868,
+          7.0,
+          0,
+          1e-06
+         ],
+         [
+          -3.8327099524776695,
+          7.0,
+          0,
+          1e-06
+         ]
+        ]
+       }
+      ]
+     },
+     "tree": [
+      {
+       "parent": -1,
+       "c1": 1,
+       "c2": 2,
+       "aux": 4,
+       "split": 0,
+       "dom": [
+        -5.475299932110956,
+        0.0,
+        0.0,
+        10.0
+       ]
+      },
+      {
+       "parent": 0,
+       "c1": -1,
+       "c2": -1,
+       "aux": 6,
+       "split": 0,
+       "dom": [
+        -5.475299932110956,
+        0.0,
+        -2.737649966055478,
+        10.0
+       ]
+      },
+      {
+       "parent": 0,
+       "c1": -1,
+       "c2": -1,
+       "aux": 6,
+       "split": 0,
+       "dom": [
+        -2.737649966055478,
+        0.0,
+        0.0,
+        10.0
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "attr_copy",
+   "upstream_ref": "source/SMLib/src/SmTess.cpp:797",
+   "inputs": {
+    "op": "attr",
+    "id": 12,
+    "behavior": 1,
+    "eu": 3,
+    "vu": 4
+   }
+  }
+ ]
+}

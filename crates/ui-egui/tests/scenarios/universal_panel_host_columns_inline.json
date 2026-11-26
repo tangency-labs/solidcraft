@@ -1,0 +1,19 @@
+[
+  {"note":"Explicit specimens exercise independent columns, stack/tab grouping, sole Content versus Fill, and the editable one-row inline slot. Production adapters remain unchanged."},
+  {"call":"ui.resize","params":{"width":1600,"height":1000}},
+  {"panel_fixture":{"preset":"columns"}},
+  {"widget":"Collapse panel"},
+  {"widget":"Expand panel"},
+  {"panel_fixture":{}},
+  {"panel_fixture":{"enabled":false}},
+  {"panel_fixture":{"preset":"stack_tabs"}},
+  {"panel_fixture":{}},
+  {"panel_fixture":{"enabled":false}},
+  {"panel_fixture":{"preset":"content_fill"}},
+  {"panel_fixture":{}},
+  {"panel_fixture":{"enabled":false}},
+  {"panel_fixture":{"preset":"inline"}},
+  {"panel_fixture":{}},
+  {"expect":{"errors":0,"features":0,"dialog":null,"tool":null}},
+  {"panel_fixture":{"enabled":false}}
+]

@@ -1,0 +1,817 @@
+{
+ "cases": [
+  {
+   "name": "sphere_r10",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:38",
+   "inputs": {
+    "op": "sphere",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     10
+    ]
+   }
+  },
+  {
+   "name": "sphere_r0_fails",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:46",
+   "inputs": {
+    "op": "sphere",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "cone_h0_fails",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:48",
+   "inputs": {
+    "op": "cone",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "cylinder_r0_fails",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:50",
+   "inputs": {
+    "op": "cylinder",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     5.0
+    ]
+   }
+  },
+  {
+   "name": "torus_minor0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:52",
+   "inputs": {
+    "op": "torus",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "partial_sphere_r0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:54",
+   "inputs": {
+    "op": "partial_sphere",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "partial_cone_h0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:56",
+   "inputs": {
+    "op": "partial_cone",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     0.0,
+     0.0,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "partial_torus_minor0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:58",
+   "inputs": {
+    "op": "partial_torus",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5.0,
+     0.0,
+     0.0,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_inside_above_outside",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:60",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5.0,
+     3.0,
+     1.0,
+     0.0,
+     90.0
+    ]
+   }
+  },
+  {
+   "name": "cone_elliptic_ends_zero_radii",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:62",
+   "inputs": {
+    "op": "cone_elliptic_ends",
+    "args": [
+     0.0,
+     0.0,
+     5.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "sphere_no_pole_r0_fails",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:72",
+   "inputs": {
+    "op": "sphere_no_pole",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "sphere_no_pole_inside_out",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:75",
+   "inputs": {
+    "op": "sphere_no_pole",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     -5.0
+    ]
+   }
+  },
+  {
+   "name": "box_5_10_20",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:96",
+   "inputs": {
+    "op": "box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5,
+     10,
+     20
+    ]
+   }
+  },
+  {
+   "name": "box_zero_length_fails",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:102",
+   "inputs": {
+    "op": "box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     0,
+     10,
+     20
+    ]
+   }
+  },
+  {
+   "name": "box_negative_width_fails",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:105",
+   "inputs": {
+    "op": "box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5,
+     -10,
+     20
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_10_5_2_fails",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:110",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     10,
+     5,
+     2,
+     0,
+     90
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_bad_angles_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:119",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     10,
+     2,
+     5,
+     400.0,
+     450.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_bad_angles_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:119",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     10,
+     2,
+     5,
+     90.0,
+     10.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_bad_angles_2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:119",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     10,
+     2,
+     5,
+     45.0,
+     45.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_bad_angles_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:119",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     10,
+     2,
+     5,
+     0.0,
+     400.0
+    ]
+   }
+  },
+  {
+   "name": "cyl_box_valid",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:119",
+   "inputs": {
+    "op": "cylindrical_box",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     10,
+     2,
+     5,
+     0,
+     90
+    ]
+   }
+  },
+  {
+   "name": "cone_5_10_20",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:140",
+   "inputs": {
+    "op": "cone",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5,
+     10,
+     20
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_5_10_20",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:146",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5,
+     10,
+     20
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_zero_radii_fails",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:150",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     0,
+     0,
+     20
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_r0_fails",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:151",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     0,
+     20,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cone_negative_base_fails",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:161",
+   "inputs": {
+    "op": "cone",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     -1,
+     10,
+     20
+    ]
+   }
+  },
+  {
+   "name": "cylinder_negative_radius_fails",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:164",
+   "inputs": {
+    "op": "cylinder",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     -1,
+     20
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_5_20",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:168",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5,
+     20,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_negative_height_fails",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:170",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5,
+     -20,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_negative_height_fails",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:173",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5,
+     10,
+     -20
+    ]
+   }
+  },
+  {
+   "name": "torus_10_5",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:193",
+   "inputs": {
+    "op": "torus",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     10,
+     5
+    ]
+   }
+  },
+  {
+   "name": "plane_brep_10_15",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:212",
+   "inputs": {
+    "op": "plane_brep",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     10,
+     15
+    ]
+   }
+  },
+  {
+   "name": "plane_brep_zero",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:218",
+   "inputs": {
+    "op": "plane_brep",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "plane_surface_10_15",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:222",
+   "inputs": {
+    "op": "plane_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     10,
+     15
+    ]
+   }
+  },
+  {
+   "name": "plane_surface_zero_fails",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:225",
+   "inputs": {
+    "op": "plane_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "planar_circle_10",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:246",
+   "inputs": {
+    "op": "planar_circle",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     10
+    ]
+   }
+  },
+  {
+   "name": "planar_circle_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:251",
+   "inputs": {
+    "op": "planar_circle",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "swung_arcs",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:468",
+   "inputs": {
+    "op": "swung",
+    "args": [
+     1.0
+    ],
+    "xy": [
+     {
+      "center": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 5.0,
+      "start_deg": 0.0,
+      "end_deg": 180.0
+     }
+    ],
+    "xz": [
+     {
+      "center": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 8.0,
+      "start_deg": 0.0,
+      "end_deg": 180.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "swung_empty",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:468",
+   "inputs": {
+    "op": "swung",
+    "args": [
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "planar_circles_5_8_a",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:674",
+   "inputs": {
+    "op": "planar_circle",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5.0
+    ]
+   }
+  },
+  {
+   "name": "sphere_surfaces_test",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:602",
+   "inputs": {
+    "op": "sphere",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     10.0
+    ]
+   }
+  },
+  {
+   "name": "torus_surfaces_test",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:622",
+   "inputs": {
+    "op": "torus",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     10.0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "box_far_origin",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:385",
+   "inputs": {
+    "op": "box",
+    "args": [
+     100000.0,
+     -200000.0,
+     300000.0,
+     2.0,
+     3.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "cylinder_intersectors",
+   "upstream_ref": "tests/SM_API_test/src/TestSmIntersectors.cpp:413",
+   "inputs": {
+    "op": "cylinder",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     12.0
+    ]
+   }
+  },
+  {
+   "name": "pyramid_zero_length_fails",
+   "upstream_ref": "tests/SM_API_test/src/TestSmErrorCodes.cpp:250",
+   "inputs": {
+    "op": "pyramid",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "cone_brep_copy",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrepCopy.cpp:88",
+   "inputs": {
+    "op": "cone",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     3.0,
+     1.0,
+     8.0
+    ]
+   }
+  },
+  {
+   "name": "cylinder_brep_copy",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrepCopy.cpp:87",
+   "inputs": {
+    "op": "cylinder",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     3.0,
+     8.0
+    ]
+   }
+  },
+  {
+   "name": "torus_brep_copy",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrepCopy.cpp:90",
+   "inputs": {
+    "op": "torus",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "plane_surface_brep_test",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:108",
+   "inputs": {
+    "op": "plane_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     10.0,
+     10.0
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_10_5",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:193",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     10,
+     5,
+     0
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_10_2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:622",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     10,
+     2,
+     0
+    ]
+   }
+  },
+  {
+   "name": "torus_surface_minor0_fails",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:52",
+   "inputs": {
+    "op": "torus_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     5,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cylinder_surface_2_12",
+   "upstream_ref": "tests/SM_API_test/src/TestSmIntersectors.cpp:413",
+   "inputs": {
+    "op": "cylinder_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     2,
+     12,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cone_surface_3_1_8",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrepCopy.cpp:88",
+   "inputs": {
+    "op": "cone_surface",
+    "args": [
+     0.0,
+     0.0,
+     0.0,
+     3,
+     1,
+     8
+    ]
+   }
+  }
+ ]
+}

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="640" height="350" viewBox="0 0 640 350">
+  <title>classify</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M0 0 L640 0 L640 350 L0 350 Z" fill="#ffffff"/>
+    <text transform="matrix(1 0 0 1 32 40)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">Classifying the faces of A against B</tspan></text>
+    <path d="M60 110 L300 110 L300 290 L60 290 Z" fill="#f0f0f0" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <path d="M240 200 C240 155.817 275.817 120 320 120 C364.183 120 400 155.817 400 200 C400 244.183 364.183 280 320 280 C275.817 280 240 244.183 240 200 Z" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <g>
+      <g>
+        <path d="M299.812 121.774 L303.684 120.772 L304.06 122.224 L300.188 123.226 Z M306.589 120.02 L310.461 119.017 L310.837 120.47 L306.965 121.472 Z M313.365 118.266 L317.238 117.263 L317.614 118.715 L313.741 119.718 Z M320.142 116.511 L324.014 115.509 L324.39 116.961 L320.518 117.964 Z M326.919 114.757 L330.791 113.755 L331.167 115.207 L327.295 116.209 Z" fill="#999999"/>
+        <path d="M336.7 113 L331.643 117.408 L330.14 111.599 Z" fill="#999999"/>
+      </g>
+    </g>
+    <g>
+      <g>
+        <path d="M300.188 123.226 L296.315 124.227 L295.94 122.775 L299.812 121.774 Z M293.41 124.977 L289.537 125.978 L289.162 124.526 L293.035 123.525 Z M286.633 126.729 L282.76 127.729 L282.385 126.277 L286.258 125.276 Z M279.855 128.48 L275.983 129.481 L275.607 128.028 L279.48 127.028 Z M273.078 130.231 L269.205 131.232 L268.83 129.78 L272.703 128.779 Z M266.301 131.982 L264.392 132.476 L264.017 131.023 L265.925 130.53 Z" fill="#999999"/>
+        <path d="M261.3 132.5 L266.359 128.094 L267.86 133.904 Z" fill="#999999"/>
+      </g>
+    </g>
+    <g>
+      <g>
+        <path d="M300.75 122.5 L300.75 162 L299.25 162 L299.25 122.5 Z" fill="#000000"/>
+        <path d="M300 165 L297 159 L303 159 Z" fill="#000000"/>
+      </g>
+    </g>
+    <g>
+      <g>
+        <path d="M60 189.25 L64 189.25 L64 190.75 L60 190.75 Z M67 189.25 L71 189.25 L71 190.75 L67 190.75 Z M74 189.25 L78 189.25 L78 190.75 L74 190.75 Z M81 189.25 L85 189.25 L85 190.75 L81 190.75 Z M88 189.25 L92 189.25 L92 190.75 L88 190.75 Z M95 189.25 L99 189.25 L99 190.75 L95 190.75 Z M102 189.25 L106 189.25 L106 190.75 L102 190.75 Z M109 189.25 L113 189.25 L113 190.75 L109 190.75 Z M116 189.25 L120 189.25 L120 190.75 L116 190.75 Z M123 189.25 L127 189.25 L127 190.75 L123 190.75 Z M130 189.25 L134 189.25 L134 190.75 L130 190.75 Z M137 189.25 L141 189.25 L141 190.75 L137 190.75 Z M144 189.25 L148 189.25 L148 190.75 L144 190.75 Z M151 189.25 L155 189.25 L155 190.75 L151 190.75 Z M158 189.25 L162 189.25 L162 190.75 L158 190.75 Z M165 189.25 L169 189.25 L169 190.75 L165 190.75 Z M172 189.25 L176 189.25 L176 190.75 L172 190.75 Z M179 189.25 L183 189.25 L183 190.75 L179 190.75 Z M186 189.25 L190 189.25 L190 190.75 L186 190.75 Z M193 189.25 L197 189.25 L197 190.75 L193 190.75 Z M200 189.25 L204 189.25 L204 190.75 L200 190.75 Z M207 189.25 L211 189.25 L211 190.75 L207 190.75 Z M214 189.25 L218 189.25 L218 190.75 L214 190.75 Z M221 189.25 L225 189.25 L225 190.75 L221 190.75 Z M228 189.25 L232 189.25 L232 190.75 L228 190.75 Z M235 189.25 L237.6 189.25 L237.6 190.75 L235 190.75 Z" fill="#999999"/>
+        <path d="M240.6 190 L234.6 193 L234.6 187 Z" fill="#999999"/>
+      </g>
+    </g>
+    <path d="M297 122.5 C297 120.843 298.343 119.5 300 119.5 C301.657 119.5 303 120.843 303 122.5 C303 124.157 301.657 125.5 300 125.5 C298.343 125.5 297 124.157 297 122.5 Z" fill="#000000"/>
+    <path d="M297 277.5 C297 275.843 298.343 274.5 300 274.5 C301.657 274.5 303 275.843 303 277.5 C303 279.157 301.657 280.5 300 280.5 C298.343 280.5 297 279.157 297 277.5 Z" fill="#000000"/>
+    <path d="M57 190 C57 188.343 58.343 187 60 187 C61.657 187 63 188.343 63 190 C63 191.657 61.657 193 60 193 C58.343 193 57 191.657 57 190 Z" fill="#555555"/>
+    <path d="M237.6 190 C237.6 188.343 238.943 187 240.6 187 C242.257 187 243.6 188.343 243.6 190 C243.6 191.657 242.257 193 240.6 193 C238.943 193 237.6 191.657 237.6 190 Z" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 72 278)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">A</tspan></text>
+    <text transform="matrix(1 0 0 1 410 205)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">B, on its exact surface S</tspan></text>
+    <text transform="matrix(1 0 0 1 310 94)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">P: a common edge, seen end-on</tspan></text>
+    <text transform="matrix(1 0 0 1 346 116)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#555555"><tspan x="0" y="0">B&apos;s faces at P</tspan></text>
+    <text transform="matrix(1 0 0 1 308 148)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">A&apos;s face</tspan></text>
+    <text transform="matrix(1 0 0 1 308 164)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">below P:</tspan></text>
+    <text transform="matrix(1 0 0 1 308 180)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">inside B</tspan></text>
+    <text transform="matrix(1 0 0 1 40 195)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" font-weight="bold" fill="#000000"><tspan x="0" y="0">Q</tspan></text>
+    <text transform="matrix(1 0 0 1 222 182)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" font-weight="bold" fill="#000000"><tspan x="0" y="0">H</tspan></text>
+    <text transform="matrix(1 0 0 1 72 214)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">ray +x from Q to the</tspan></text>
+    <text transform="matrix(1 0 0 1 72 230)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">nearest hit H on S;</tspan></text>
+    <text transform="matrix(1 0 0 1 72 246)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">the sector at H: outside</tspan></text>
+    <text transform="matrix(1 0 0 1 32 322)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#555555"><tspan x="0" y="0">A face reached from a classified face without crossing a common edge takes its class.</tspan></text>
+  </g>
+</svg>

@@ -22,7 +22,7 @@ A drag in the viewport, or `occurrence.drag`, moves one exact placement and its 
 
 It captures that placement's position (other pending positions stay pending) and is one undo step. With the design active, the viewport drags the placement on the picked body's path just inside the design; with a component placement active, the one just inside it. Grounded placements and placements that joints hold to something fixed are refused; a free chain of joints moves together, and a chain through a placement used several times is refused. The design's first top-level part is grounded when it is made (not when a design is opened); copies start free.
 
-World movement includes pending parent and child positions. The default space remains parent-local for existing scripts. Capture Position commits pending transforms; Revert Position drops them. Copying an occurrence copies that selected occurrence's effective transform, including its pending position.
+World movement includes pending parent and child positions. The default space remains parent-local for existing scripts. Capture Position commits pending transforms and saves every joint's current values; Revert Position drops the pending transforms and puts the joints back to the saved values, clamped to their limits. Copying an occurrence copies that selected occurrence's effective transform, including its pending position.
 
 An occurrence definition inside a component is shared by every instance of that parent component. Moving, grounding, copying, or deleting that nested definition changes all its parent instances. Selecting its exact path determines the world frame used for movement and Properties; it does not create an independent child definition.
 
@@ -58,6 +58,10 @@ Create Components from Bodies and Move Bodies to Component now add ownership-tra
 
 Transfers preserve the body's world pose through rotated or translated parents. Pending positions on the involved source and destination paths are captured atomically with the transfer so save/reopen retains that pose; unrelated pending positions remain pending. Undo and checkpoint restoration recover the original pending positions as well as the feature history; redo restores the captured transfer. The operation requires one source and one destination placement. Shared instance definitions with several placements are rejected because a single ownership change cannot preserve several different world poses. A component that supplies transfer history outside its subtree cannot be deleted until that dependent history is removed.
 
+When the bodies of a new-body Extrude or Revolve are transferred into their source sketch's component through the same frame, the profile uses that recorded frame. Moving the component and capturing its position then moves the bodies once, matching the preview, even when the source sketch was moved into the component separately. Other cross-component sketch references continue to follow their live placements.
+
+A constructor made in a component from a sketch of another one (an Extrude, a Revolve, a Sweep) captures its own component's frame when it is made. The body it builds then moves with that component when the component is moved and the position captured, while the sketch's own component still carries it and an edit of the sketch still changes it. A design made before this frame was captured keeps its previous behaviour.
+
 Older files without transfer features keep their saved assignment and offset behavior. No transfer timestamp is inferred from their final ownership map. Paste New freezes externally authored geometry after its successful entry transfer and remaps internal transfers, then replays later modifiers once. All transfer commands validate and evaluate on a scratch document before adoption.
 
 New face-attached sketches capture the selected body's producer, certified face and exact occurrence path, together with the sketch's authoring placement. A supported face follows source edits; a missing or incompatible source reports a lost attachment rather than choosing another nearby face. Opening Edit restores the saved authoring occurrence as view context without creating an undo entry. Older saved point-only face references retain their legacy behavior.
@@ -88,6 +92,15 @@ The dialog starts with the
 component's current family, size and actual length, including a non-catalogue
 length. Choose a size and, for parts with a length, a length, then confirm with OK.
 Cancel leaves the design unchanged.
+
+A part with a metric thread also has a **Modeled thread** checkbox, in Insert Part and here.
+Unticked (the default), the thread is cosmetic: it is recorded on the face and the shank stays a
+plain cylinder. That is quick, and enough for drawings and the parts list. Ticked, the thread is
+cut into the body over the standard's thread length from the tip, with the start chamfered. It is
+slower to build, and right for a section view, a render or a print. A thread of more than 80
+turns is refused; leave that part's thread cosmetic. The live preview always shows a cosmetic
+thread; OK cuts a modeled one. In scripts, `parts.insert` and `parts.resize` take
+`thread: cosmetic | modeled`.
 
 Resizing regenerates the standard part, replacing any extra features added inside
 that component. The dialog warns about this before applying the change.

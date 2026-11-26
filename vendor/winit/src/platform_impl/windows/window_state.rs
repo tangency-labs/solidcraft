@@ -37,6 +37,9 @@ pub(crate) struct WindowState {
     pub scale_factor: f64,
 
     pub modifiers_state: ModifiersState,
+    // SolidCraft: modifiers already held (`GetAsyncKeyState`) when focus was gained, until the
+    // thread's synchronous `GetKeyState` catches up or the key is released (#20352).
+    pub inherited_modifiers: ModifiersState,
     pub fullscreen: Option<Fullscreen>,
     pub current_theme: Theme,
     pub preferred_theme: Option<Theme>,
@@ -54,6 +57,18 @@ pub(crate) struct WindowState {
     pub redraw_requested: bool,
 
     pub dragging: bool,
+
+    /// SolidCraft: the latest position of a pure move in the modal move/size loop, sent as
+    /// `Moved` at `WM_EXITSIZEMOVE`.
+    pub pending_moved: Option<PhysicalPosition<i32>>,
+
+    /// SolidCraft: the window changed size during the current modal move/size loop (a resize,
+    /// a snap, a DPI change). Until it does, the loop is a pure move and paints are deferred.
+    pub size_changed_in_loop: bool,
+
+    /// SolidCraft: a paint was deferred during a pure move; one is requested at
+    /// `WM_EXITSIZEMOVE` so the app catches up with whatever it asked to draw meanwhile.
+    pub paint_deferred_in_loop: bool,
 
     pub skip_taskbar: bool,
 }
@@ -162,6 +177,7 @@ impl WindowState {
             scale_factor,
 
             modifiers_state: ModifiersState::default(),
+            inherited_modifiers: ModifiersState::default(),
             fullscreen: None,
             current_theme,
             preferred_theme,
@@ -175,6 +191,12 @@ impl WindowState {
             redraw_requested: false,
 
             dragging: false,
+
+            pending_moved: None,
+
+            size_changed_in_loop: false,
+
+            paint_deferred_in_loop: false,
 
             skip_taskbar: false,
         }
@@ -432,7 +454,13 @@ impl WindowFlags {
 
             // Frameless style implemented by manually overriding the non-client area in
             // `WM_NCCALCSIZE`.
-            if !self.contains(WindowFlags::MARKER_DECORATIONS) {
+            // SolidCraft: with the undecorated shadow a resizable window keeps the frame but
+            // not its top, as `WM_NCCALCSIZE` gives it.
+            let side_frame = !self.contains(WindowFlags::MARKER_DECORATIONS)
+                && self.contains(WindowFlags::MARKER_UNDECORATED_SHADOW)
+                && self.contains(WindowFlags::RESIZABLE);
+            let top = rect.top;
+            if !self.contains(WindowFlags::MARKER_DECORATIONS) && !side_frame {
                 style &= !(WS_CAPTION | WS_SIZEBOX);
             }
 
@@ -447,6 +475,9 @@ impl WindowFlags {
                     AdjustWindowRectEx(&mut rect, style, b_menu.into(), style_ex)
                 }
             })?;
+            if side_frame {
+                rect.top = top;
+            }
             Ok(rect)
         }
     }

@@ -4,7 +4,7 @@ use crate::ui_kit;
 use egui::Key;
 
 use crate::params_dialog::{every_parameter, exact_token, suggestions_for, unit_token, word_before};
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 #[derive(Clone)]
 struct Popup {
@@ -43,7 +43,7 @@ struct Popup {
 }
 
 fn popup_id() -> egui::Id {
-    egui::Id::new("expression_completion_keyboard")
+    egui::Id::unique("expression_completion_keyboard")
 }
 
 /// Run before any TextEdit or viewport shortcuts. Only the focused, recently drawn popup
@@ -238,10 +238,10 @@ pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut Stri
         .map(|suggestion| ui_kit::PopupOption {
             text: &suggestion.text,
             kind: match suggestion.kind.as_str() {
-                "parameter" => crate::i18n::tr_label("Parameter"),
-                "function" => crate::i18n::tr("ui.function"),
-                "unit" => crate::i18n::tr_label("Unit"),
-                "constant" => crate::i18n::tr("ui.constant"),
+                "parameter" => solidcraft_ui_text::tr_label("Parameter"),
+                "function" => solidcraft_ui_text::tr("ui.function"),
+                "unit" => solidcraft_ui_text::tr_label("Unit"),
+                "constant" => solidcraft_ui_text::tr("ui.constant"),
                 _ => &suggestion.kind,
             },
             detail: &suggestion.detail,
@@ -261,7 +261,7 @@ pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut Stri
         &options,
         // Unarmed, the typed word is complete and Enter submits it; an arrow key arms the list.
         // Escape is the window's until the box is typed in.
-        crate::i18n::tr_label(if popup.armed {
+        solidcraft_ui_text::tr_label(if popup.armed {
             "↑ ↓ choose · Enter / Tab complete · Esc dismiss"
         } else if popup.typed {
             "↑ ↓ choose · Enter applies what you typed · Esc dismiss"
@@ -322,7 +322,7 @@ mod tests {
                 app.run("parameters.add", json!({"name":name,"expression":format!("{value} mm")})).unwrap();
             }
             params_dialog::publish(&mut app, &ctx);
-            let id = egui::Id::new("completion_test_editor");
+            let id = egui::Id::unique("completion_test_editor");
             ctx.memory_mut(|m| m.request_focus(id));
             let mut editor = Self { ctx, app, text: text.into(), id, accepted: false, leaked: Vec::new() };
             editor.frame(Vec::new());
@@ -399,7 +399,7 @@ mod tests {
         let long = "Driver_MountHole_to_Cover_Shared_Base_Layout_Angle";
         app.run("parameters.add", json!({"name": long, "expression": "8 deg"})).unwrap();
         params_dialog::publish(&mut app, &ctx);
-        let id = egui::Id::new("long_name_completion");
+        let id = egui::Id::unique("long_name_completion");
         ctx.memory_mut(|m| m.request_focus(id));
         let mut text = "Driver".to_string();
         let mut output = ctx.run_ui(

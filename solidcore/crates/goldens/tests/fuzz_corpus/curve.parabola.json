@@ -1,0 +1,6 @@
+{
+  "unit": "curve.parabola",
+  "cases": [
+    {"name": "fuzz01135_globalpointsolvestep_on_a_parabola_whose_nurb", "origin": "fuzz-out/n2000/curve.parabola/fuzz01135.json (crash: cpp: killed by signal 11)", "issue": "UB-46", "cpp": "harness: invalid argument: GlobalPointSolveSTEP on a parabola whose NURB cannot be made", "rust": "harness: missing argument", "inputs": {"a": {"center": [0.0, 0.0, 0.0], "domain": [-1.0, 2.0], "f": 0.5, "kind": "new", "x": [-1.0, 0.0, 0.0], "y": [0.0, 0.0, 1e+300]}, "args": [-1.0, 2.0], "op": "gps_step"}}
+  ]
+}

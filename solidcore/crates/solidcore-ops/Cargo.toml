@@ -1,0 +1,68 @@
+[package]
+name = "solidcore-ops"
+description = "The modelling operations applications built on solidcore call: each a sequence of kernel calls, converting through solidcore-convert, computing no geometry of its own"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+publish = false
+# solidcore-record needs Rust 1.88 (edition 2024 let chains).
+rust-version = "1.88"
+repository = "https://github.com/tangency-labs/solidcore"
+keywords = ["cad", "brep", "nurbs", "modelling"]
+categories = ["science"]
+# A few test binaries, not one per file (#14926): each links the whole kernel.
+autotests = false
+
+# Every file in tests/ not listed below is a module of tests/ops/main.rs.
+[[test]]
+name = "ops"
+path = "tests/ops/main.rs"
+
+# The rig's runner keeps its own target: CI and the docs call it by name (`--test kernel_cases`).
+[[test]]
+name = "kernel_cases"
+path = "tests/kernel_cases.rs"
+
+# These set the process-wide fix set (`session::set_fixes`). In `ops` they would change the
+# fixes of the tests that name none, so each keeps a process of its own.
+[[test]]
+name = "boolean"
+path = "tests/boolean.rs"
+
+[[test]]
+name = "fixes"
+path = "tests/fixes.rs"
+
+[[test]]
+name = "issue_3012_filleted_boxes_apart"
+path = "tests/issue_3012_filleted_boxes_apart.rs"
+
+[[test]]
+name = "issue_3045_round_at_plate_arc_end"
+path = "tests/issue_3045_round_at_plate_arc_end.rs"
+
+[[test]]
+name = "round_between_crossing_cylinders"
+path = "tests/round_between_crossing_cylinders.rs"
+
+# Layers §3: ops sits on the kernel, the record and the conversion only.
+[dependencies]
+solidcore = { path = "../solidcore" }
+solidcore-record = { path = "../solidcore-record" }
+solidcore-convert = { path = "../solidcore-convert" }
+# The hidden-line drawing's types are written out as JSON by the apps (`hlr`).
+serde = { version = "1", features = ["derive"] }
+
+[features]
+# Each ops call's kernel profile (`session::profiled`): the kernel's profiler (solidcore's
+# `profile` feature), scoped per call. Off by default: without it ops has no profiling code.
+profile = ["solidcore/profile"]
+
+# The kernel rig corpus's entries are JSON, their records gzip: read by its runner
+# (tests/kernel_cases.rs) and by the unit tests' corpus cases (src/test_corpus.rs).
+[dev-dependencies]
+flate2 = "1.1"
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[lints]
+workspace = true

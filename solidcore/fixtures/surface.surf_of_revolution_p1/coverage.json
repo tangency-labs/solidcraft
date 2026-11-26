@@ -1,0 +1,2096 @@
+{
+ "cases": [
+  {
+   "name": "hyperboloid_canon_build",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:639 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       -1,
+       1
+      ],
+      "a": 1.0,
+      "b": 0.5
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "hyperboloid_canon_eval_step_k2",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:639 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       -1,
+       1
+      ],
+      "a": 1.0,
+      "b": 0.5
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "eval_step",
+    "u": 30.0,
+    "v": 0.25,
+    "k": 2
+   }
+  },
+  {
+   "name": "hyperboloid_canon_eval_step_pt",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:639 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       -1,
+       1
+      ],
+      "a": 1.0,
+      "b": 0.5
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "eval_step",
+    "u": 200.0,
+    "v": -0.5,
+    "k": 0,
+    "point": true
+   }
+  },
+  {
+   "name": "hyperboloid_canon_to_step",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:639 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       -1,
+       1
+      ],
+      "a": 1.0,
+      "b": 0.5
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "to_step",
+    "u": 0.3,
+    "v": 0.4
+   }
+  },
+  {
+   "name": "hyperboloid_canon_iso_u",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:639 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       -1,
+       1
+      ],
+      "a": 1.0,
+      "b": 0.5
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "iso",
+    "param": 0,
+    "iso": 0.3
+   }
+  },
+  {
+   "name": "hyperboloid_canon_iso_v",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:639 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       -1,
+       1
+      ],
+      "a": 1.0,
+      "b": 0.5
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "iso",
+    "param": 1,
+    "iso": 0.5
+   }
+  },
+  {
+   "name": "hyperboloid_canon_directrix",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:639 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       -1,
+       1
+      ],
+      "a": 1.0,
+      "b": 0.5
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "directrix",
+    "t": 0.5
+   }
+  },
+  {
+   "name": "hyperboloid_canon_generator",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:639 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       -1,
+       1
+      ],
+      "a": 1.0,
+      "b": 0.5
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "generator",
+    "angle": 45.0
+   }
+  },
+  {
+   "name": "hyperboloid_canon_eq_self",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:639 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       -1,
+       1
+      ],
+      "a": 1.0,
+      "b": 0.5
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "eq",
+    "other": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       -1,
+       1
+      ],
+      "a": 1.0,
+      "b": 0.5
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "hyperboloid_ctor_build",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:164 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       -1,
+       1
+      ],
+      "a": 1.0,
+      "b": 0.5
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       -0.5,
+       270,
+       0.75
+      ]
+     }
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "hyperboloid_ctor_eval_step_k2",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:164 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       -1,
+       1
+      ],
+      "a": 1.0,
+      "b": 0.5
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       -0.5,
+       270,
+       0.75
+      ]
+     }
+    },
+    "op": "eval_step",
+    "u": 30.0,
+    "v": 0.25,
+    "k": 2
+   }
+  },
+  {
+   "name": "hyperboloid_ctor_eval_step_pt",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:164 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       -1,
+       1
+      ],
+      "a": 1.0,
+      "b": 0.5
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       -0.5,
+       270,
+       0.75
+      ]
+     }
+    },
+    "op": "eval_step",
+    "u": 200.0,
+    "v": -0.5,
+    "k": 0,
+    "point": true
+   }
+  },
+  {
+   "name": "hyperboloid_ctor_to_step",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:164 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       -1,
+       1
+      ],
+      "a": 1.0,
+      "b": 0.5
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       -0.5,
+       270,
+       0.75
+      ]
+     }
+    },
+    "op": "to_step",
+    "u": 0.3,
+    "v": 0.4
+   }
+  },
+  {
+   "name": "hyperboloid_ctor_iso_u",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:164 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       -1,
+       1
+      ],
+      "a": 1.0,
+      "b": 0.5
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       -0.5,
+       270,
+       0.75
+      ]
+     }
+    },
+    "op": "iso",
+    "param": 0,
+    "iso": 0.3
+   }
+  },
+  {
+   "name": "hyperboloid_ctor_iso_v",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:164 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       -1,
+       1
+      ],
+      "a": 1.0,
+      "b": 0.5
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       -0.5,
+       270,
+       0.75
+      ]
+     }
+    },
+    "op": "iso",
+    "param": 1,
+    "iso": 0.5
+   }
+  },
+  {
+   "name": "hyperboloid_ctor_directrix",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:164 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       -1,
+       1
+      ],
+      "a": 1.0,
+      "b": 0.5
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       -0.5,
+       270,
+       0.75
+      ]
+     }
+    },
+    "op": "directrix",
+    "t": 0.5
+   }
+  },
+  {
+   "name": "hyperboloid_ctor_generator",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:164 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       -1,
+       1
+      ],
+      "a": 1.0,
+      "b": 0.5
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       -0.5,
+       270,
+       0.75
+      ]
+     }
+    },
+    "op": "generator",
+    "angle": 45.0
+   }
+  },
+  {
+   "name": "hyperboloid_ctor_eq_self",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:164 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       -1,
+       1
+      ],
+      "a": 1.0,
+      "b": 0.5
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       -0.5,
+       270,
+       0.75
+      ]
+     }
+    },
+    "op": "eq",
+    "other": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "d": [
+       -1,
+       1
+      ],
+      "a": 1.0,
+      "b": 0.5
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       -0.5,
+       270,
+       0.75
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "hyperbola_off_axis_canon_build",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:639 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       2,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       0,
+       1
+      ],
+      "y": [
+       1,
+       0,
+       0
+      ],
+      "d": [
+       -0.5,
+       1.5
+      ],
+      "a": 0.5,
+      "b": 0.8
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "hyperbola_off_axis_canon_eval_step_k2",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:639 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       2,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       0,
+       1
+      ],
+      "y": [
+       1,
+       0,
+       0
+      ],
+      "d": [
+       -0.5,
+       1.5
+      ],
+      "a": 0.5,
+      "b": 0.8
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "eval_step",
+    "u": 30.0,
+    "v": 0.25,
+    "k": 2
+   }
+  },
+  {
+   "name": "hyperbola_off_axis_canon_eval_step_pt",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:639 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       2,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       0,
+       1
+      ],
+      "y": [
+       1,
+       0,
+       0
+      ],
+      "d": [
+       -0.5,
+       1.5
+      ],
+      "a": 0.5,
+      "b": 0.8
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "eval_step",
+    "u": 200.0,
+    "v": -0.5,
+    "k": 0,
+    "point": true
+   }
+  },
+  {
+   "name": "hyperbola_off_axis_canon_to_step",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:639 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       2,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       0,
+       1
+      ],
+      "y": [
+       1,
+       0,
+       0
+      ],
+      "d": [
+       -0.5,
+       1.5
+      ],
+      "a": 0.5,
+      "b": 0.8
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "to_step",
+    "u": 0.3,
+    "v": 0.4
+   }
+  },
+  {
+   "name": "hyperbola_off_axis_canon_iso_u",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:639 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       2,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       0,
+       1
+      ],
+      "y": [
+       1,
+       0,
+       0
+      ],
+      "d": [
+       -0.5,
+       1.5
+      ],
+      "a": 0.5,
+      "b": 0.8
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "iso",
+    "param": 0,
+    "iso": 0.3
+   }
+  },
+  {
+   "name": "hyperbola_off_axis_canon_iso_v",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:639 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       2,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       0,
+       1
+      ],
+      "y": [
+       1,
+       0,
+       0
+      ],
+      "d": [
+       -0.5,
+       1.5
+      ],
+      "a": 0.5,
+      "b": 0.8
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "iso",
+    "param": 1,
+    "iso": 0.5
+   }
+  },
+  {
+   "name": "hyperbola_off_axis_canon_directrix",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:639 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       2,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       0,
+       1
+      ],
+      "y": [
+       1,
+       0,
+       0
+      ],
+      "d": [
+       -0.5,
+       1.5
+      ],
+      "a": 0.5,
+      "b": 0.8
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "directrix",
+    "t": 0.5
+   }
+  },
+  {
+   "name": "hyperbola_off_axis_canon_generator",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:639 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       2,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       0,
+       1
+      ],
+      "y": [
+       1,
+       0,
+       0
+      ],
+      "d": [
+       -0.5,
+       1.5
+      ],
+      "a": 0.5,
+      "b": 0.8
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "generator",
+    "angle": 45.0
+   }
+  },
+  {
+   "name": "hyperbola_off_axis_canon_eq_self",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:639 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       2,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       0,
+       1
+      ],
+      "y": [
+       1,
+       0,
+       0
+      ],
+      "d": [
+       -0.5,
+       1.5
+      ],
+      "a": 0.5,
+      "b": 0.8
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "eq",
+    "other": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       2,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       0,
+       1
+      ],
+      "y": [
+       1,
+       0,
+       0
+      ],
+      "d": [
+       -0.5,
+       1.5
+      ],
+      "a": 0.5,
+      "b": 0.8
+     },
+     "build": {
+      "mode": "canonical",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "hyperbola_off_axis_ctor_build",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:164 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       2,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       0,
+       1
+      ],
+      "y": [
+       1,
+       0,
+       0
+      ],
+      "d": [
+       -0.5,
+       1.5
+      ],
+      "a": 0.5,
+      "b": 0.8
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       -0.5,
+       270,
+       0.75
+      ]
+     }
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "hyperbola_off_axis_ctor_eval_step_k2",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:164 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       2,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       0,
+       1
+      ],
+      "y": [
+       1,
+       0,
+       0
+      ],
+      "d": [
+       -0.5,
+       1.5
+      ],
+      "a": 0.5,
+      "b": 0.8
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       -0.5,
+       270,
+       0.75
+      ]
+     }
+    },
+    "op": "eval_step",
+    "u": 30.0,
+    "v": 0.25,
+    "k": 2
+   }
+  },
+  {
+   "name": "hyperbola_off_axis_ctor_eval_step_pt",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:164 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       2,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       0,
+       1
+      ],
+      "y": [
+       1,
+       0,
+       0
+      ],
+      "d": [
+       -0.5,
+       1.5
+      ],
+      "a": 0.5,
+      "b": 0.8
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       -0.5,
+       270,
+       0.75
+      ]
+     }
+    },
+    "op": "eval_step",
+    "u": 200.0,
+    "v": -0.5,
+    "k": 0,
+    "point": true
+   }
+  },
+  {
+   "name": "hyperbola_off_axis_ctor_to_step",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:164 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       2,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       0,
+       1
+      ],
+      "y": [
+       1,
+       0,
+       0
+      ],
+      "d": [
+       -0.5,
+       1.5
+      ],
+      "a": 0.5,
+      "b": 0.8
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       -0.5,
+       270,
+       0.75
+      ]
+     }
+    },
+    "op": "to_step",
+    "u": 0.3,
+    "v": 0.4
+   }
+  },
+  {
+   "name": "hyperbola_off_axis_ctor_iso_u",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:164 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       2,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       0,
+       1
+      ],
+      "y": [
+       1,
+       0,
+       0
+      ],
+      "d": [
+       -0.5,
+       1.5
+      ],
+      "a": 0.5,
+      "b": 0.8
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       -0.5,
+       270,
+       0.75
+      ]
+     }
+    },
+    "op": "iso",
+    "param": 0,
+    "iso": 0.3
+   }
+  },
+  {
+   "name": "hyperbola_off_axis_ctor_iso_v",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:164 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       2,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       0,
+       1
+      ],
+      "y": [
+       1,
+       0,
+       0
+      ],
+      "d": [
+       -0.5,
+       1.5
+      ],
+      "a": 0.5,
+      "b": 0.8
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       -0.5,
+       270,
+       0.75
+      ]
+     }
+    },
+    "op": "iso",
+    "param": 1,
+    "iso": 0.5
+   }
+  },
+  {
+   "name": "hyperbola_off_axis_ctor_directrix",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:164 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       2,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       0,
+       1
+      ],
+      "y": [
+       1,
+       0,
+       0
+      ],
+      "d": [
+       -0.5,
+       1.5
+      ],
+      "a": 0.5,
+      "b": 0.8
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       -0.5,
+       270,
+       0.75
+      ]
+     }
+    },
+    "op": "directrix",
+    "t": 0.5
+   }
+  },
+  {
+   "name": "hyperbola_off_axis_ctor_generator",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:164 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       2,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       0,
+       1
+      ],
+      "y": [
+       1,
+       0,
+       0
+      ],
+      "d": [
+       -0.5,
+       1.5
+      ],
+      "a": 0.5,
+      "b": 0.8
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       -0.5,
+       270,
+       0.75
+      ]
+     }
+    },
+    "op": "generator",
+    "angle": 45.0
+   }
+  },
+  {
+   "name": "hyperbola_off_axis_ctor_eq_self",
+   "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:164 with an SmHyperbola generator (SmBSplineCurve virtuals) (coverage: crates/solidcore/src/surface/surf_of_revolution/p1.rs:152)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       2,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       0,
+       1
+      ],
+      "y": [
+       1,
+       0,
+       0
+      ],
+      "d": [
+       -0.5,
+       1.5
+      ],
+      "a": 0.5,
+      "b": 0.8
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       -0.5,
+       270,
+       0.75
+      ]
+     }
+    },
+    "op": "eq",
+    "other": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       2,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       0,
+       1
+      ],
+      "y": [
+       1,
+       0,
+       0
+      ],
+      "d": [
+       -0.5,
+       1.5
+      ],
+      "a": 0.5,
+      "b": 0.8
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       -0.5,
+       270,
+       0.75
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

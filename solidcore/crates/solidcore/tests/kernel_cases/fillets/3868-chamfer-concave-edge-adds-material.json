@@ -1,0 +1,154 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  20.0,
+                  0.0,
+                  0.0
+                ]
+              ],
+              "index": 24
+            }
+          ],
+          "points": [
+            [
+              10.0,
+              0.0,
+              0.0
+            ]
+          ],
+          "tolerance": 1.7330508075688775
+        },
+        "kind": "chamfer",
+        "sizes": [
+          1.0
+        ]
+      }
+    }
+  ],
+  "case": "3868-chamfer-concave-edge-adds-material",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g0"
+    },
+    "method": "box 20^3 shelled to a 2 mm wall, open top: cavity 16x16x18, V0 = 8000 - 4608 = 3392. 1 mm chamfer on the inside bottom edge (concave, 16 mm long): adds the triangle 1^2/2 x 16 = +8. 1 mm chamfer on the outside bottom edge (convex, 20 mm long): removes 1^2/2 x 20 = 10. V = 3392 + 8 - 10 = 3390. Each chamfer ends on planes (the side walls), so no corner overlaps.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3868"
+    ],
+    "volume_mm3": 3390.0,
+    "what": "a chamfer of an inside (concave) edge fills the corner and adds material, one on the outside edge removes it"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 30,
+      "faces": 13,
+      "vertices": 20
+    }
+  },
+  "records": "3868-chamfer-concave-edge-adds-material.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3528.911688245432,
+      "body_count": 1,
+      "edges": 30,
+      "faces": 13,
+      "vertices": 20,
+      "volume_mm3": 3390.0000000000014
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3868"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "shell",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a chamfer of an inside (concave) edge fills the corner and adds material, one on the outside edge removes it",
+  "why_not": []
+}

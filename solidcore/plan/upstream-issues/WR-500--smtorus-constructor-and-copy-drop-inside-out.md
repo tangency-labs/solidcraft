@@ -1,0 +1,17 @@
+#### WR-500. The `SmTorus` constructor and copy constructor drop `m_bInsideOut`
+- **Severity:** Wrong result (the surface and its generating circle disagree on inside-out: `SmSurfOfRevolution` Test #11 "InsideOut GenCurve: Bad GenCurve and Surface bInsideOut bit values don't match").
+- **Area:** Surfaces (tori)
+- **Location:**
+  - `source/SMLib/src/SmTorus.cpp`, `SmTorus::SmTorus(..., bInsideOut, pOptCircleNurb)` (`:31-104`): passes `bInsideOut` only to the generating circle (`SmCircle::CreateCanonical`) and leaves `m_bInsideOut` at its default `FALSE` (`SmTorus.h:111`).
+  - The copy constructor (`:109-117`) does not copy the member either.
+  - Only `RebuildSTEPFromNURBParameters` and `ReadFromDB` set it.
+- **What happens:** a torus made inside out fails Test #11 as soon as it is made. A torus whose rebuild found it inside out fails again after its first copy. `SmSphere`'s constructor and copy keep the flag.
+- **Trigger:** tangency-labs/solidcore#1490: `SmTorus(origin 0, X, Y, [0,270] x [-90,90], R 20, r 4, inside out)` gives surface FALSE and generator TRUE. Five SolidCraft rig cases (sweeps/3897, 4007, 5195, 5325, crashes/4542) fail Test #11 on a copied inside-out torus.
+- **How found:** SolidCraft rig, issue #1490.
+- **Confirmed:** by reading the pinned source. The Rust port matches it; difftest `surface.torus` covers it with cases `issue1490_*` (construct, copy and `IsNurbSurfaceTorus` of inside-out tori, fix off). The fork (tangency-labs/smlib 5afca53) has the same code.
+- **Fix:** the constructor sets `m_bInsideOut = bInsideOut`, and the copy constructor copies it.
+- **Rust port:** opt-in `Kernel::fixes.torus_keeps_inside_out` (default `false`, upstream's behaviour) in `crates/solidcore/src/surface/torus.rs`:
+  - `Torus::new` sets the flag.
+  - A torus made, rebuilt or read with the fix keeps it in `Clone`.
+  - Test `crates/solidcore/tests/issue_1490_revolve_torus_inside_out.rs`.
+  - Fixes tangency-labs/solidcore#1490.

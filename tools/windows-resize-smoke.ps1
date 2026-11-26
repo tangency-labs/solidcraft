@@ -1,6 +1,6 @@
 # Start the Windows app and check its resize border (#1381): as soon as the window exists (before
 # the first frame), Windows' hit test reports a resize edge or corner within the resize-border
-# width of every side and the client area inside it; a maximized window has none; and a real
+# width of every side and the client area (or the title bar) inside it; a maximized window has none; and a real
 # press-and-drag on the bottom edge (SetCursorPos + mouse input) resizes the window.
 #
 # What this can't check on a CI runner (one monitor at 100 %): moving the window between monitors
@@ -54,7 +54,7 @@ public static class Win {
 }
 '@
 
-$HT = @{ 1 = 'client'; 10 = 'left'; 11 = 'right'; 12 = 'top'; 13 = 'top-left'; 14 = 'top-right'; 15 = 'bottom'; 16 = 'bottom-left'; 17 = 'bottom-right' }
+$HT = @{ 1 = 'client'; 2 = 'caption'; 10 = 'left'; 11 = 'right'; 12 = 'top'; 13 = 'top-left'; 14 = 'top-right'; 15 = 'bottom'; 16 = 'bottom-left'; 17 = 'bottom-right' }
 $failures = New-Object System.Collections.Generic.List[string]
 function Check([bool]$ok, [string]$what) {
     if ($ok) { Write-Host "ok: $what" } else { Write-Host "FAIL: $what"; $failures.Add($what) }
@@ -62,6 +62,8 @@ function Check([bool]$ok, [string]$what) {
 function Rect($h) { $r = New-Object Win+RECT; [void][Win]::GetWindowRect($h, [ref]$r); $r }
 
 # Every side and corner, `in` px inside the window's outer pixel, and points just past the border.
+# Just past the top border, in the middle, is the title bar: client area until the app has drawn
+# it, and from then on its bare part is the system's caption (#13996), so both are right there.
 function CheckBorder($h, [string]$when) {
     $r = Rect $h
     if ($when -eq 'first sight') {
@@ -85,7 +87,7 @@ function CheckBorder($h, [string]$when) {
         $cases = @(
             @($l, $cy, 10), @(($l + $b - 1), $cy, 10), @(($l + $b), $cy, 1),
             @($rt, $cy, 11), @(($rt - $b + 1), $cy, 11), @(($rt - $b), $cy, 1),
-            @($cx, $t, 12), @($cx, ($t + $b - 1), 12), @($cx, ($t + $b), 1),
+            @($cx, $t, 12), @($cx, ($t + $b - 1), 12), @($cx, ($t + $b), @(1, 2)),
             @($cx, $bt, 15), @($cx, ($bt - $b + 1), 15), @($cx, ($bt - $b), 1),
             @($l, $t, 13), @($rt, $t, 14), @($l, $bt, 16), @($rt, $bt, 17),
             @(($l + 2 * $b - 1), $t, 13), @($rt, ($bt - 2 * $b + 1), 17),
@@ -94,7 +96,8 @@ function CheckBorder($h, [string]$when) {
         # Record failures only after confirming these points used a stable window rect.
         $results = foreach ($c in $cases) {
             $got = [Win]::HitTest($h, $c[0], $c[1])
-            @{ ok = ($got -eq $c[2]); what = "$when hit test at ($($c[0]), $($c[1])): $($HT[$got]) ($got), want $($HT[$c[2]])" }
+            $want = @($c[2])
+            @{ ok = ($want -contains $got); what = "$when hit test at ($($c[0]), $($c[1])): $($HT[$got]) ($got), want $(($want | ForEach-Object { $HT[$_] }) -join ' or ')" }
         }
         $after = Rect $h
         if (-not $r.Equals($after)) {
@@ -166,15 +169,25 @@ try {
     Start-Sleep -Milliseconds 500
     CheckBorder $h 'restored'
 
-    # A real drag on the bottom edge, if this session takes mouse input.
-    $before = Rect $h
-    [void][Win]::SetForegroundWindow($h)
-    $x = [int](($before.Left + $before.Right) / 2); $y = $before.Bottom - 2
-    [void][Win]::SetCursorPos($x, $y)
-    $pt = New-Object Win+POINT; [void][Win]::GetCursorPos([ref]$pt)
-    if ($pt.X -ne $x -or $pt.Y -ne $y) {
-        Write-Host "skipped: the drag (this session doesn't move the pointer: at $($pt.X),$($pt.Y))"
-    } else {
+    # A real drag on the bottom edge, if this session takes mouse input. On a loaded runner the
+    # window can be slow to take the move and to follow the drag (the first attempt has measured
+    # height +0, and the window then missed the maximize below), so each step waits for the real
+    # condition and the drag is tried once more if it did not take.
+    $pending = $true
+    for ($attempt = 1; $attempt -le 2 -and $pending; $attempt++) {
+        # The window is where it was put (a message the window had not handled yet would move it later).
+        $settled = (Get-Date).AddSeconds(10)
+        while ((Rect $h).Left -ne 20 -and (Get-Date) -lt $settled) { Start-Sleep -Milliseconds 100 }
+        $before = Rect $h
+        [void][Win]::SetForegroundWindow($h)
+        $x = [int](($before.Left + $before.Right) / 2); $y = $before.Bottom - 2
+        [void][Win]::SetCursorPos($x, $y)
+        $pt = New-Object Win+POINT; [void][Win]::GetCursorPos([ref]$pt)
+        if ($pt.X -ne $x -or $pt.Y -ne $y) {
+            Write-Host "skipped: the drag (this session doesn't move the pointer: at $($pt.X),$($pt.Y))"
+            $pending = $false
+            break
+        }
         Start-Sleep -Milliseconds 300
         [Win]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero) # LEFTDOWN
         $grow = [Math]::Min(80, $sh - $y - 10)
@@ -185,14 +198,28 @@ try {
         }
         Start-Sleep -Milliseconds 100
         [Win]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero) # LEFTUP
-        Start-Sleep -Milliseconds 500
-        $after = Rect $h
-        $dh = ($after.Bottom - $after.Top) - ($before.Bottom - $before.Top)
-        Check ($dh -ge $grow - 4 -and $after.Top -eq $before.Top) "dragging the bottom edge down $grow px resizes the window (height +$dh, top $($before.Top) -> $($after.Top))"
+        # Wait for the window to follow the drag (up to 10 s), not a fixed half second.
+        $followed = (Get-Date).AddSeconds(10)
+        do {
+            Start-Sleep -Milliseconds 250
+            $after = Rect $h
+            $dh = ($after.Bottom - $after.Top) - ($before.Bottom - $before.Top)
+        } while ($dh -lt $grow - 4 -and (Get-Date) -lt $followed)
+        $worked = ($dh -ge $grow - 4 -and $after.Top -eq $before.Top)
+        if ($worked -or $attempt -eq 2) {
+            Check $worked "dragging the bottom edge down $grow px resizes the window (height +$dh, top $($before.Top) -> $($after.Top), attempt $attempt)"
+            $pending = $false
+        } else {
+            Write-Host "the drag did not take on attempt $attempt (height +$dh); trying once more"
+            # Put the window back where the drag starts from.
+            [void][Win]::SetWindowPos($h, [IntPtr]::Zero, 20, 20, [Math]::Min(1000, $sw - 40), [Math]::Min(620, $sh - 140), 0x0014)
+        }
     }
 
     # Maximized: no resize border, the whole window is client area.
     [void][Win]::ShowWindow($h, 3) # SW_MAXIMIZE
+    $zoomed = (Get-Date).AddSeconds(10)
+    while (-not [Win]::IsZoomed($h) -and (Get-Date) -lt $zoomed) { Start-Sleep -Milliseconds 100 }
     Start-Sleep -Milliseconds 500
     if ([Win]::IsZoomed($h)) {
         # The maximized window's rect overhangs the screen by the hidden frame (Windows' own

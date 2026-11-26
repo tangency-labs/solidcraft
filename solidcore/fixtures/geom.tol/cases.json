@@ -1,0 +1,4746 @@
+{
+ "cases": [
+  {
+   "name": "size_estimate_trial_50",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "size_estimate",
+    "a": [
+     50
+    ]
+   }
+  },
+  {
+   "name": "size_estimate_trial_50000",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "size_estimate",
+    "a": [
+     50000
+    ]
+   }
+  },
+  {
+   "name": "size_estimate_trial_0.005",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "size_estimate",
+    "a": [
+     0.005
+    ]
+   }
+  },
+  {
+   "name": "size_estimate_edge_5e-05",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:567",
+   "inputs": {
+    "op": "size_estimate",
+    "a": [
+     5e-05
+    ]
+   }
+  },
+  {
+   "name": "size_estimate_edge_0.005",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:567",
+   "inputs": {
+    "op": "size_estimate",
+    "a": [
+     0.005
+    ]
+   }
+  },
+  {
+   "name": "size_estimate_edge_0.5",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:567",
+   "inputs": {
+    "op": "size_estimate",
+    "a": [
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "size_estimate_edge_500",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:567",
+   "inputs": {
+    "op": "size_estimate",
+    "a": [
+     500
+    ]
+   }
+  },
+  {
+   "name": "size_estimate_edge_50000",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:567",
+   "inputs": {
+    "op": "size_estimate",
+    "a": [
+     50000
+    ]
+   }
+  },
+  {
+   "name": "size_estimate_edge_5000000.0",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:567",
+   "inputs": {
+    "op": "size_estimate",
+    "a": [
+     5000000.0
+    ]
+   }
+  },
+  {
+   "name": "size_estimate_edge_4.999e-05",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:567",
+   "inputs": {
+    "op": "size_estimate",
+    "a": [
+     4.999e-05
+    ]
+   }
+  },
+  {
+   "name": "size_estimate_edge_5000001",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:567",
+   "inputs": {
+    "op": "size_estimate",
+    "a": [
+     5000001
+    ]
+   }
+  },
+  {
+   "name": "size_estimate_edge_0.0",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:567",
+   "inputs": {
+    "op": "size_estimate",
+    "a": [
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "size_estimate_edge_-50",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:567",
+   "inputs": {
+    "op": "size_estimate",
+    "a": [
+     -50
+    ]
+   }
+  },
+  {
+   "name": "size_estimate_edge_-0.001",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:567",
+   "inputs": {
+    "op": "size_estimate",
+    "a": [
+     -0.001
+    ]
+   }
+  },
+  {
+   "name": "size_estimate_edge_100000000.0",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:567",
+   "inputs": {
+    "op": "size_estimate",
+    "a": [
+     100000000.0
+    ]
+   }
+  },
+  {
+   "name": "size_estimate_edge_1e-09",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:567",
+   "inputs": {
+    "op": "size_estimate",
+    "a": [
+     1e-09
+    ]
+   }
+  },
+  {
+   "name": "size_estimate_edge_9876543.21",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:567",
+   "inputs": {
+    "op": "size_estimate",
+    "a": [
+     9876543.21
+    ]
+   }
+  },
+  {
+   "name": "size_estimate_edge_1e+300",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:567",
+   "inputs": {
+    "op": "size_estimate",
+    "a": [
+     1e+300
+    ]
+   }
+  },
+  {
+   "name": "size_estimate_edge_5e-324",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:567",
+   "inputs": {
+    "op": "size_estimate",
+    "a": [
+     5e-324
+    ]
+   }
+  },
+  {
+   "name": "zone_sys_m9876543.21_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 9876543.21,
+    "small": 0
+   }
+  },
+  {
+   "name": "zone_ctx_m9876543.21_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 9876543.21,
+    "small": 0
+   }
+  },
+  {
+   "name": "approx_sys_m9876543.21_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 9876543.21,
+    "small": 0
+   }
+  },
+  {
+   "name": "approx_ctx_m9876543.21_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 9876543.21,
+    "small": 0
+   }
+  },
+  {
+   "name": "xsect_sys_m9876543.21_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 9876543.21,
+    "small": 0
+   }
+  },
+  {
+   "name": "xsect_ctx_m9876543.21_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 9876543.21,
+    "small": 0
+   }
+  },
+  {
+   "name": "zone_sys_m9876543.21_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 9876543.21,
+    "small": 1
+   }
+  },
+  {
+   "name": "zone_ctx_m9876543.21_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 9876543.21,
+    "small": 1
+   }
+  },
+  {
+   "name": "approx_sys_m9876543.21_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 9876543.21,
+    "small": 1
+   }
+  },
+  {
+   "name": "approx_ctx_m9876543.21_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 9876543.21,
+    "small": 1
+   }
+  },
+  {
+   "name": "xsect_sys_m9876543.21_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 9876543.21,
+    "small": 1
+   }
+  },
+  {
+   "name": "xsect_ctx_m9876543.21_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 9876543.21,
+    "small": 1
+   }
+  },
+  {
+   "name": "zone_sys_m9876543.21_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 9876543.21,
+    "small": 2
+   }
+  },
+  {
+   "name": "zone_ctx_m9876543.21_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 9876543.21,
+    "small": 2
+   }
+  },
+  {
+   "name": "approx_sys_m9876543.21_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 9876543.21,
+    "small": 2
+   }
+  },
+  {
+   "name": "approx_ctx_m9876543.21_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 9876543.21,
+    "small": 2
+   }
+  },
+  {
+   "name": "xsect_sys_m9876543.21_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 9876543.21,
+    "small": 2
+   }
+  },
+  {
+   "name": "xsect_ctx_m9876543.21_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 9876543.21,
+    "small": 2
+   }
+  },
+  {
+   "name": "zone_sys_m9876543.21_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 9876543.21,
+    "small": 3
+   }
+  },
+  {
+   "name": "zone_ctx_m9876543.21_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 9876543.21,
+    "small": 3
+   }
+  },
+  {
+   "name": "approx_sys_m9876543.21_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 9876543.21,
+    "small": 3
+   }
+  },
+  {
+   "name": "approx_ctx_m9876543.21_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 9876543.21,
+    "small": 3
+   }
+  },
+  {
+   "name": "xsect_sys_m9876543.21_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 9876543.21,
+    "small": 3
+   }
+  },
+  {
+   "name": "xsect_ctx_m9876543.21_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 9876543.21,
+    "small": 3
+   }
+  },
+  {
+   "name": "zone_sys_m9876543.21_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 9876543.21,
+    "small": 4
+   }
+  },
+  {
+   "name": "zone_ctx_m9876543.21_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 9876543.21,
+    "small": 4
+   }
+  },
+  {
+   "name": "approx_sys_m9876543.21_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 9876543.21,
+    "small": 4
+   }
+  },
+  {
+   "name": "approx_ctx_m9876543.21_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 9876543.21,
+    "small": 4
+   }
+  },
+  {
+   "name": "xsect_sys_m9876543.21_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 9876543.21,
+    "small": 4
+   }
+  },
+  {
+   "name": "xsect_ctx_m9876543.21_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 9876543.21,
+    "small": 4
+   }
+  },
+  {
+   "name": "zone_sys_m0.001_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 0.001,
+    "small": 0
+   }
+  },
+  {
+   "name": "zone_ctx_m0.001_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 0.001,
+    "small": 0
+   }
+  },
+  {
+   "name": "approx_sys_m0.001_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 0.001,
+    "small": 0
+   }
+  },
+  {
+   "name": "approx_ctx_m0.001_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 0.001,
+    "small": 0
+   }
+  },
+  {
+   "name": "xsect_sys_m0.001_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 0.001,
+    "small": 0
+   }
+  },
+  {
+   "name": "xsect_ctx_m0.001_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 0.001,
+    "small": 0
+   }
+  },
+  {
+   "name": "zone_sys_m0.001_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 0.001,
+    "small": 1
+   }
+  },
+  {
+   "name": "zone_ctx_m0.001_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 0.001,
+    "small": 1
+   }
+  },
+  {
+   "name": "approx_sys_m0.001_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 0.001,
+    "small": 1
+   }
+  },
+  {
+   "name": "approx_ctx_m0.001_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 0.001,
+    "small": 1
+   }
+  },
+  {
+   "name": "xsect_sys_m0.001_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 0.001,
+    "small": 1
+   }
+  },
+  {
+   "name": "xsect_ctx_m0.001_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 0.001,
+    "small": 1
+   }
+  },
+  {
+   "name": "zone_sys_m0.001_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 0.001,
+    "small": 2
+   }
+  },
+  {
+   "name": "zone_ctx_m0.001_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 0.001,
+    "small": 2
+   }
+  },
+  {
+   "name": "approx_sys_m0.001_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 0.001,
+    "small": 2
+   }
+  },
+  {
+   "name": "approx_ctx_m0.001_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 0.001,
+    "small": 2
+   }
+  },
+  {
+   "name": "xsect_sys_m0.001_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 0.001,
+    "small": 2
+   }
+  },
+  {
+   "name": "xsect_ctx_m0.001_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 0.001,
+    "small": 2
+   }
+  },
+  {
+   "name": "zone_sys_m0.001_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 0.001,
+    "small": 3
+   }
+  },
+  {
+   "name": "zone_ctx_m0.001_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 0.001,
+    "small": 3
+   }
+  },
+  {
+   "name": "approx_sys_m0.001_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 0.001,
+    "small": 3
+   }
+  },
+  {
+   "name": "approx_ctx_m0.001_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 0.001,
+    "small": 3
+   }
+  },
+  {
+   "name": "xsect_sys_m0.001_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 0.001,
+    "small": 3
+   }
+  },
+  {
+   "name": "xsect_ctx_m0.001_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 0.001,
+    "small": 3
+   }
+  },
+  {
+   "name": "zone_sys_m0.001_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 0.001,
+    "small": 4
+   }
+  },
+  {
+   "name": "zone_ctx_m0.001_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 0.001,
+    "small": 4
+   }
+  },
+  {
+   "name": "approx_sys_m0.001_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 0.001,
+    "small": 4
+   }
+  },
+  {
+   "name": "approx_ctx_m0.001_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 0.001,
+    "small": 4
+   }
+  },
+  {
+   "name": "xsect_sys_m0.001_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 0.001,
+    "small": 4
+   }
+  },
+  {
+   "name": "xsect_ctx_m0.001_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 0.001,
+    "small": 4
+   }
+  },
+  {
+   "name": "zone_sys_m0.1_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 0.1,
+    "small": 0
+   }
+  },
+  {
+   "name": "zone_ctx_m0.1_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 0.1,
+    "small": 0
+   }
+  },
+  {
+   "name": "approx_sys_m0.1_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 0.1,
+    "small": 0
+   }
+  },
+  {
+   "name": "approx_ctx_m0.1_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 0.1,
+    "small": 0
+   }
+  },
+  {
+   "name": "xsect_sys_m0.1_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 0.1,
+    "small": 0
+   }
+  },
+  {
+   "name": "xsect_ctx_m0.1_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 0.1,
+    "small": 0
+   }
+  },
+  {
+   "name": "zone_sys_m0.1_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 0.1,
+    "small": 1
+   }
+  },
+  {
+   "name": "zone_ctx_m0.1_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 0.1,
+    "small": 1
+   }
+  },
+  {
+   "name": "approx_sys_m0.1_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 0.1,
+    "small": 1
+   }
+  },
+  {
+   "name": "approx_ctx_m0.1_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 0.1,
+    "small": 1
+   }
+  },
+  {
+   "name": "xsect_sys_m0.1_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 0.1,
+    "small": 1
+   }
+  },
+  {
+   "name": "xsect_ctx_m0.1_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 0.1,
+    "small": 1
+   }
+  },
+  {
+   "name": "zone_sys_m0.1_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 0.1,
+    "small": 2
+   }
+  },
+  {
+   "name": "zone_ctx_m0.1_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 0.1,
+    "small": 2
+   }
+  },
+  {
+   "name": "approx_sys_m0.1_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 0.1,
+    "small": 2
+   }
+  },
+  {
+   "name": "approx_ctx_m0.1_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 0.1,
+    "small": 2
+   }
+  },
+  {
+   "name": "xsect_sys_m0.1_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 0.1,
+    "small": 2
+   }
+  },
+  {
+   "name": "xsect_ctx_m0.1_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 0.1,
+    "small": 2
+   }
+  },
+  {
+   "name": "zone_sys_m0.1_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 0.1,
+    "small": 3
+   }
+  },
+  {
+   "name": "zone_ctx_m0.1_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 0.1,
+    "small": 3
+   }
+  },
+  {
+   "name": "approx_sys_m0.1_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 0.1,
+    "small": 3
+   }
+  },
+  {
+   "name": "approx_ctx_m0.1_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 0.1,
+    "small": 3
+   }
+  },
+  {
+   "name": "xsect_sys_m0.1_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 0.1,
+    "small": 3
+   }
+  },
+  {
+   "name": "xsect_ctx_m0.1_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 0.1,
+    "small": 3
+   }
+  },
+  {
+   "name": "zone_sys_m0.1_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 0.1,
+    "small": 4
+   }
+  },
+  {
+   "name": "zone_ctx_m0.1_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 0.1,
+    "small": 4
+   }
+  },
+  {
+   "name": "approx_sys_m0.1_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 0.1,
+    "small": 4
+   }
+  },
+  {
+   "name": "approx_ctx_m0.1_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 0.1,
+    "small": 4
+   }
+  },
+  {
+   "name": "xsect_sys_m0.1_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 0.1,
+    "small": 4
+   }
+  },
+  {
+   "name": "xsect_ctx_m0.1_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 0.1,
+    "small": 4
+   }
+  },
+  {
+   "name": "zone_sys_m50_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 50,
+    "small": 0
+   }
+  },
+  {
+   "name": "zone_ctx_m50_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 50,
+    "small": 0
+   }
+  },
+  {
+   "name": "approx_sys_m50_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 50,
+    "small": 0
+   }
+  },
+  {
+   "name": "approx_ctx_m50_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 50,
+    "small": 0
+   }
+  },
+  {
+   "name": "xsect_sys_m50_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 50,
+    "small": 0
+   }
+  },
+  {
+   "name": "xsect_ctx_m50_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 50,
+    "small": 0
+   }
+  },
+  {
+   "name": "zone_sys_m50_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 50,
+    "small": 1
+   }
+  },
+  {
+   "name": "zone_ctx_m50_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 50,
+    "small": 1
+   }
+  },
+  {
+   "name": "approx_sys_m50_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 50,
+    "small": 1
+   }
+  },
+  {
+   "name": "approx_ctx_m50_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 50,
+    "small": 1
+   }
+  },
+  {
+   "name": "xsect_sys_m50_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 50,
+    "small": 1
+   }
+  },
+  {
+   "name": "xsect_ctx_m50_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 50,
+    "small": 1
+   }
+  },
+  {
+   "name": "zone_sys_m50_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 50,
+    "small": 2
+   }
+  },
+  {
+   "name": "zone_ctx_m50_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 50,
+    "small": 2
+   }
+  },
+  {
+   "name": "approx_sys_m50_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 50,
+    "small": 2
+   }
+  },
+  {
+   "name": "approx_ctx_m50_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 50,
+    "small": 2
+   }
+  },
+  {
+   "name": "xsect_sys_m50_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 50,
+    "small": 2
+   }
+  },
+  {
+   "name": "xsect_ctx_m50_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 50,
+    "small": 2
+   }
+  },
+  {
+   "name": "zone_sys_m50_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 50,
+    "small": 3
+   }
+  },
+  {
+   "name": "zone_ctx_m50_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 50,
+    "small": 3
+   }
+  },
+  {
+   "name": "approx_sys_m50_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 50,
+    "small": 3
+   }
+  },
+  {
+   "name": "approx_ctx_m50_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 50,
+    "small": 3
+   }
+  },
+  {
+   "name": "xsect_sys_m50_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 50,
+    "small": 3
+   }
+  },
+  {
+   "name": "xsect_ctx_m50_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 50,
+    "small": 3
+   }
+  },
+  {
+   "name": "zone_sys_m50_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 50,
+    "small": 4
+   }
+  },
+  {
+   "name": "zone_ctx_m50_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 50,
+    "small": 4
+   }
+  },
+  {
+   "name": "approx_sys_m50_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 50,
+    "small": 4
+   }
+  },
+  {
+   "name": "approx_ctx_m50_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 50,
+    "small": 4
+   }
+  },
+  {
+   "name": "xsect_sys_m50_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 50,
+    "small": 4
+   }
+  },
+  {
+   "name": "xsect_ctx_m50_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 50,
+    "small": 4
+   }
+  },
+  {
+   "name": "zone_sys_m5000_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 5000,
+    "small": 0
+   }
+  },
+  {
+   "name": "zone_ctx_m5000_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 5000,
+    "small": 0
+   }
+  },
+  {
+   "name": "approx_sys_m5000_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 5000,
+    "small": 0
+   }
+  },
+  {
+   "name": "approx_ctx_m5000_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 5000,
+    "small": 0
+   }
+  },
+  {
+   "name": "xsect_sys_m5000_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 5000,
+    "small": 0
+   }
+  },
+  {
+   "name": "xsect_ctx_m5000_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 5000,
+    "small": 0
+   }
+  },
+  {
+   "name": "zone_sys_m5000_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 5000,
+    "small": 1
+   }
+  },
+  {
+   "name": "zone_ctx_m5000_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 5000,
+    "small": 1
+   }
+  },
+  {
+   "name": "approx_sys_m5000_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 5000,
+    "small": 1
+   }
+  },
+  {
+   "name": "approx_ctx_m5000_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 5000,
+    "small": 1
+   }
+  },
+  {
+   "name": "xsect_sys_m5000_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 5000,
+    "small": 1
+   }
+  },
+  {
+   "name": "xsect_ctx_m5000_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 5000,
+    "small": 1
+   }
+  },
+  {
+   "name": "zone_sys_m5000_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 5000,
+    "small": 2
+   }
+  },
+  {
+   "name": "zone_ctx_m5000_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 5000,
+    "small": 2
+   }
+  },
+  {
+   "name": "approx_sys_m5000_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 5000,
+    "small": 2
+   }
+  },
+  {
+   "name": "approx_ctx_m5000_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 5000,
+    "small": 2
+   }
+  },
+  {
+   "name": "xsect_sys_m5000_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 5000,
+    "small": 2
+   }
+  },
+  {
+   "name": "xsect_ctx_m5000_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 5000,
+    "small": 2
+   }
+  },
+  {
+   "name": "zone_sys_m5000_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 5000,
+    "small": 3
+   }
+  },
+  {
+   "name": "zone_ctx_m5000_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 5000,
+    "small": 3
+   }
+  },
+  {
+   "name": "approx_sys_m5000_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 5000,
+    "small": 3
+   }
+  },
+  {
+   "name": "approx_ctx_m5000_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 5000,
+    "small": 3
+   }
+  },
+  {
+   "name": "xsect_sys_m5000_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 5000,
+    "small": 3
+   }
+  },
+  {
+   "name": "xsect_ctx_m5000_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 5000,
+    "small": 3
+   }
+  },
+  {
+   "name": "zone_sys_m5000_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 5000,
+    "small": 4
+   }
+  },
+  {
+   "name": "zone_ctx_m5000_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 5000,
+    "small": 4
+   }
+  },
+  {
+   "name": "approx_sys_m5000_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 5000,
+    "small": 4
+   }
+  },
+  {
+   "name": "approx_ctx_m5000_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 5000,
+    "small": 4
+   }
+  },
+  {
+   "name": "xsect_sys_m5000_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 5000,
+    "small": 4
+   }
+  },
+  {
+   "name": "xsect_ctx_m5000_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 5000,
+    "small": 4
+   }
+  },
+  {
+   "name": "zone_sys_m1000000.0_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 1000000.0,
+    "small": 0
+   }
+  },
+  {
+   "name": "zone_ctx_m1000000.0_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 1000000.0,
+    "small": 0
+   }
+  },
+  {
+   "name": "approx_sys_m1000000.0_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 1000000.0,
+    "small": 0
+   }
+  },
+  {
+   "name": "approx_ctx_m1000000.0_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 1000000.0,
+    "small": 0
+   }
+  },
+  {
+   "name": "xsect_sys_m1000000.0_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 1000000.0,
+    "small": 0
+   }
+  },
+  {
+   "name": "xsect_ctx_m1000000.0_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 1000000.0,
+    "small": 0
+   }
+  },
+  {
+   "name": "zone_sys_m1000000.0_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 1000000.0,
+    "small": 1
+   }
+  },
+  {
+   "name": "zone_ctx_m1000000.0_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 1000000.0,
+    "small": 1
+   }
+  },
+  {
+   "name": "approx_sys_m1000000.0_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 1000000.0,
+    "small": 1
+   }
+  },
+  {
+   "name": "approx_ctx_m1000000.0_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 1000000.0,
+    "small": 1
+   }
+  },
+  {
+   "name": "xsect_sys_m1000000.0_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 1000000.0,
+    "small": 1
+   }
+  },
+  {
+   "name": "xsect_ctx_m1000000.0_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 1000000.0,
+    "small": 1
+   }
+  },
+  {
+   "name": "zone_sys_m1000000.0_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 1000000.0,
+    "small": 2
+   }
+  },
+  {
+   "name": "zone_ctx_m1000000.0_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 1000000.0,
+    "small": 2
+   }
+  },
+  {
+   "name": "approx_sys_m1000000.0_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 1000000.0,
+    "small": 2
+   }
+  },
+  {
+   "name": "approx_ctx_m1000000.0_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 1000000.0,
+    "small": 2
+   }
+  },
+  {
+   "name": "xsect_sys_m1000000.0_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 1000000.0,
+    "small": 2
+   }
+  },
+  {
+   "name": "xsect_ctx_m1000000.0_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 1000000.0,
+    "small": 2
+   }
+  },
+  {
+   "name": "zone_sys_m1000000.0_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 1000000.0,
+    "small": 3
+   }
+  },
+  {
+   "name": "zone_ctx_m1000000.0_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 1000000.0,
+    "small": 3
+   }
+  },
+  {
+   "name": "approx_sys_m1000000.0_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 1000000.0,
+    "small": 3
+   }
+  },
+  {
+   "name": "approx_ctx_m1000000.0_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 1000000.0,
+    "small": 3
+   }
+  },
+  {
+   "name": "xsect_sys_m1000000.0_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 1000000.0,
+    "small": 3
+   }
+  },
+  {
+   "name": "xsect_ctx_m1000000.0_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 1000000.0,
+    "small": 3
+   }
+  },
+  {
+   "name": "zone_sys_m1000000.0_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 1000000.0,
+    "small": 4
+   }
+  },
+  {
+   "name": "zone_ctx_m1000000.0_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 1000000.0,
+    "small": 4
+   }
+  },
+  {
+   "name": "approx_sys_m1000000.0_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 1000000.0,
+    "small": 4
+   }
+  },
+  {
+   "name": "approx_ctx_m1000000.0_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 1000000.0,
+    "small": 4
+   }
+  },
+  {
+   "name": "xsect_sys_m1000000.0_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 1000000.0,
+    "small": 4
+   }
+  },
+  {
+   "name": "xsect_ctx_m1000000.0_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 1000000.0,
+    "small": 4
+   }
+  },
+  {
+   "name": "zone_sys_m10000000000.0_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 10000000000.0,
+    "small": 0
+   }
+  },
+  {
+   "name": "zone_ctx_m10000000000.0_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 10000000000.0,
+    "small": 0
+   }
+  },
+  {
+   "name": "approx_sys_m10000000000.0_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 10000000000.0,
+    "small": 0
+   }
+  },
+  {
+   "name": "approx_ctx_m10000000000.0_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 10000000000.0,
+    "small": 0
+   }
+  },
+  {
+   "name": "xsect_sys_m10000000000.0_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 10000000000.0,
+    "small": 0
+   }
+  },
+  {
+   "name": "xsect_ctx_m10000000000.0_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 10000000000.0,
+    "small": 0
+   }
+  },
+  {
+   "name": "zone_sys_m10000000000.0_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 10000000000.0,
+    "small": 1
+   }
+  },
+  {
+   "name": "zone_ctx_m10000000000.0_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 10000000000.0,
+    "small": 1
+   }
+  },
+  {
+   "name": "approx_sys_m10000000000.0_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 10000000000.0,
+    "small": 1
+   }
+  },
+  {
+   "name": "approx_ctx_m10000000000.0_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 10000000000.0,
+    "small": 1
+   }
+  },
+  {
+   "name": "xsect_sys_m10000000000.0_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 10000000000.0,
+    "small": 1
+   }
+  },
+  {
+   "name": "xsect_ctx_m10000000000.0_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 10000000000.0,
+    "small": 1
+   }
+  },
+  {
+   "name": "zone_sys_m10000000000.0_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 10000000000.0,
+    "small": 2
+   }
+  },
+  {
+   "name": "zone_ctx_m10000000000.0_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 10000000000.0,
+    "small": 2
+   }
+  },
+  {
+   "name": "approx_sys_m10000000000.0_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 10000000000.0,
+    "small": 2
+   }
+  },
+  {
+   "name": "approx_ctx_m10000000000.0_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 10000000000.0,
+    "small": 2
+   }
+  },
+  {
+   "name": "xsect_sys_m10000000000.0_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 10000000000.0,
+    "small": 2
+   }
+  },
+  {
+   "name": "xsect_ctx_m10000000000.0_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 10000000000.0,
+    "small": 2
+   }
+  },
+  {
+   "name": "zone_sys_m10000000000.0_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 10000000000.0,
+    "small": 3
+   }
+  },
+  {
+   "name": "zone_ctx_m10000000000.0_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 10000000000.0,
+    "small": 3
+   }
+  },
+  {
+   "name": "approx_sys_m10000000000.0_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 10000000000.0,
+    "small": 3
+   }
+  },
+  {
+   "name": "approx_ctx_m10000000000.0_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 10000000000.0,
+    "small": 3
+   }
+  },
+  {
+   "name": "xsect_sys_m10000000000.0_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 10000000000.0,
+    "small": 3
+   }
+  },
+  {
+   "name": "xsect_ctx_m10000000000.0_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 10000000000.0,
+    "small": 3
+   }
+  },
+  {
+   "name": "zone_sys_m10000000000.0_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 10000000000.0,
+    "small": 4
+   }
+  },
+  {
+   "name": "zone_ctx_m10000000000.0_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 10000000000.0,
+    "small": 4
+   }
+  },
+  {
+   "name": "approx_sys_m10000000000.0_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 10000000000.0,
+    "small": 4
+   }
+  },
+  {
+   "name": "approx_ctx_m10000000000.0_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 10000000000.0,
+    "small": 4
+   }
+  },
+  {
+   "name": "xsect_sys_m10000000000.0_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 10000000000.0,
+    "small": 4
+   }
+  },
+  {
+   "name": "xsect_ctx_m10000000000.0_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 10000000000.0,
+    "small": 4
+   }
+  },
+  {
+   "name": "zone_sys_m1e-07_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 1e-07,
+    "small": 0
+   }
+  },
+  {
+   "name": "zone_ctx_m1e-07_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 1e-07,
+    "small": 0
+   }
+  },
+  {
+   "name": "approx_sys_m1e-07_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 1e-07,
+    "small": 0
+   }
+  },
+  {
+   "name": "approx_ctx_m1e-07_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 1e-07,
+    "small": 0
+   }
+  },
+  {
+   "name": "xsect_sys_m1e-07_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 1e-07,
+    "small": 0
+   }
+  },
+  {
+   "name": "xsect_ctx_m1e-07_s0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 1e-07,
+    "small": 0
+   }
+  },
+  {
+   "name": "zone_sys_m1e-07_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 1e-07,
+    "small": 1
+   }
+  },
+  {
+   "name": "zone_ctx_m1e-07_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 1e-07,
+    "small": 1
+   }
+  },
+  {
+   "name": "approx_sys_m1e-07_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 1e-07,
+    "small": 1
+   }
+  },
+  {
+   "name": "approx_ctx_m1e-07_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 1e-07,
+    "small": 1
+   }
+  },
+  {
+   "name": "xsect_sys_m1e-07_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 1e-07,
+    "small": 1
+   }
+  },
+  {
+   "name": "xsect_ctx_m1e-07_s1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 1e-07,
+    "small": 1
+   }
+  },
+  {
+   "name": "zone_sys_m1e-07_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 1e-07,
+    "small": 2
+   }
+  },
+  {
+   "name": "zone_ctx_m1e-07_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 1e-07,
+    "small": 2
+   }
+  },
+  {
+   "name": "approx_sys_m1e-07_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 1e-07,
+    "small": 2
+   }
+  },
+  {
+   "name": "approx_ctx_m1e-07_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 1e-07,
+    "small": 2
+   }
+  },
+  {
+   "name": "xsect_sys_m1e-07_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 1e-07,
+    "small": 2
+   }
+  },
+  {
+   "name": "xsect_ctx_m1e-07_s2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 1e-07,
+    "small": 2
+   }
+  },
+  {
+   "name": "zone_sys_m1e-07_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 1e-07,
+    "small": 3
+   }
+  },
+  {
+   "name": "zone_ctx_m1e-07_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 1e-07,
+    "small": 3
+   }
+  },
+  {
+   "name": "approx_sys_m1e-07_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 1e-07,
+    "small": 3
+   }
+  },
+  {
+   "name": "approx_ctx_m1e-07_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 1e-07,
+    "small": 3
+   }
+  },
+  {
+   "name": "xsect_sys_m1e-07_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 1e-07,
+    "small": 3
+   }
+  },
+  {
+   "name": "xsect_ctx_m1e-07_s3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 1e-07,
+    "small": 3
+   }
+  },
+  {
+   "name": "zone_sys_m1e-07_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_sys",
+    "model": 1e-07,
+    "small": 4
+   }
+  },
+  {
+   "name": "zone_ctx_m1e-07_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "zone_ctx",
+    "model": 1e-07,
+    "small": 4
+   }
+  },
+  {
+   "name": "approx_sys_m1e-07_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_sys",
+    "model": 1e-07,
+    "small": 4
+   }
+  },
+  {
+   "name": "approx_ctx_m1e-07_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "approx_ctx",
+    "model": 1e-07,
+    "small": 4
+   }
+  },
+  {
+   "name": "xsect_sys_m1e-07_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_sys",
+    "model": 1e-07,
+    "small": 4
+   }
+  },
+  {
+   "name": "xsect_ctx_m1e-07_s4",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:651",
+   "inputs": {
+    "op": "xsect_ctx",
+    "model": 1e-07,
+    "small": 4
+   }
+  },
+  {
+   "name": "zone_sys_ratio9876543.21",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:659",
+   "inputs": {
+    "op": "zone_sys",
+    "ratio": 9876543.21,
+    "small": 1
+   }
+  },
+  {
+   "name": "approx_sys_ratio9876543.21",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:659",
+   "inputs": {
+    "op": "approx_sys",
+    "ratio": 9876543.21,
+    "small": 1
+   }
+  },
+  {
+   "name": "xsect_sys_ratio9876543.21",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:659",
+   "inputs": {
+    "op": "xsect_sys",
+    "ratio": 9876543.21,
+    "small": 1
+   }
+  },
+  {
+   "name": "zone_sys_ratio1000",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:659",
+   "inputs": {
+    "op": "zone_sys",
+    "ratio": 1000,
+    "small": 1
+   }
+  },
+  {
+   "name": "approx_sys_ratio1000",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:659",
+   "inputs": {
+    "op": "approx_sys",
+    "ratio": 1000,
+    "small": 1
+   }
+  },
+  {
+   "name": "xsect_sys_ratio1000",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:659",
+   "inputs": {
+    "op": "xsect_sys",
+    "ratio": 1000,
+    "small": 1
+   }
+  },
+  {
+   "name": "zone_sys_ratio1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:659",
+   "inputs": {
+    "op": "zone_sys",
+    "ratio": 1,
+    "small": 1
+   }
+  },
+  {
+   "name": "approx_sys_ratio1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:659",
+   "inputs": {
+    "op": "approx_sys",
+    "ratio": 1,
+    "small": 1
+   }
+  },
+  {
+   "name": "xsect_sys_ratio1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:659",
+   "inputs": {
+    "op": "xsect_sys",
+    "ratio": 1,
+    "small": 1
+   }
+  },
+  {
+   "name": "zone_sys_ratio0.001",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:659",
+   "inputs": {
+    "op": "zone_sys",
+    "ratio": 0.001,
+    "small": 1
+   }
+  },
+  {
+   "name": "approx_sys_ratio0.001",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:659",
+   "inputs": {
+    "op": "approx_sys",
+    "ratio": 0.001,
+    "small": 1
+   }
+  },
+  {
+   "name": "xsect_sys_ratio0.001",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:659",
+   "inputs": {
+    "op": "xsect_sys",
+    "ratio": 0.001,
+    "small": 1
+   }
+  },
+  {
+   "name": "zone_sys_ratio-10",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:659",
+   "inputs": {
+    "op": "zone_sys",
+    "ratio": -10,
+    "small": 1
+   }
+  },
+  {
+   "name": "approx_sys_ratio-10",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:659",
+   "inputs": {
+    "op": "approx_sys",
+    "ratio": -10,
+    "small": 1
+   }
+  },
+  {
+   "name": "xsect_sys_ratio-10",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:659",
+   "inputs": {
+    "op": "xsect_sys",
+    "ratio": -10,
+    "small": 1
+   }
+  },
+  {
+   "name": "zone_sys_ratio0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:659",
+   "inputs": {
+    "op": "zone_sys",
+    "ratio": 0,
+    "small": 1
+   }
+  },
+  {
+   "name": "approx_sys_ratio0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:659",
+   "inputs": {
+    "op": "approx_sys",
+    "ratio": 0,
+    "small": 1
+   }
+  },
+  {
+   "name": "xsect_sys_ratio0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:659",
+   "inputs": {
+    "op": "xsect_sys",
+    "ratio": 0,
+    "small": 1
+   }
+  },
+  {
+   "name": "in_tol_trial_0.001",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "in_tol",
+    "a": [
+     0.001,
+     0.004
+    ]
+   }
+  },
+  {
+   "name": "in_tol_trial_-0.001",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "in_tol",
+    "a": [
+     -0.001,
+     0.004
+    ]
+   }
+  },
+  {
+   "name": "in_tol_trial_0.008",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "in_tol",
+    "a": [
+     0.008,
+     0.004
+    ]
+   }
+  },
+  {
+   "name": "in_tol_trial_-0.008",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "in_tol",
+    "a": [
+     -0.008,
+     0.004
+    ]
+   }
+  },
+  {
+   "name": "in_tol_trial_0.004",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "in_tol",
+    "a": [
+     0.004,
+     0.004
+    ]
+   }
+  },
+  {
+   "name": "in_tol_trial_-0.004",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "in_tol",
+    "a": [
+     -0.004,
+     0.004
+    ]
+   }
+  },
+  {
+   "name": "in_tol_negative_tol",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:596",
+   "inputs": {
+    "op": "in_tol",
+    "a": [
+     0.001,
+     -0.003
+    ]
+   }
+  },
+  {
+   "name": "tol_ctors_0.001",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "tol_ctors",
+    "a": [
+     0.001
+    ]
+   }
+  },
+  {
+   "name": "tol_ctors_m5000_0.001",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "tol_ctors",
+    "a": [
+     0.001
+    ],
+    "model": 5000
+   }
+  },
+  {
+   "name": "tol_ctors_0.002",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "tol_ctors",
+    "a": [
+     0.002
+    ]
+   }
+  },
+  {
+   "name": "tol_ctors_m5000_0.002",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "tol_ctors",
+    "a": [
+     0.002
+    ],
+    "model": 5000
+   }
+  },
+  {
+   "name": "tol_ctors_-0.003",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "tol_ctors",
+    "a": [
+     -0.003
+    ]
+   }
+  },
+  {
+   "name": "tol_ctors_m5000_-0.003",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "tol_ctors",
+    "a": [
+     -0.003
+    ],
+    "model": 5000
+   }
+  },
+  {
+   "name": "tol_ctors_0.0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "tol_ctors",
+    "a": [
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "tol_ctors_m5000_0.0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "tol_ctors",
+    "a": [
+     0.0
+    ],
+    "model": 5000
+   }
+  },
+  {
+   "name": "tol_ctors_9876543.21",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "tol_ctors",
+    "a": [
+     9876543.21
+    ]
+   }
+  },
+  {
+   "name": "tol_ctors_m5000_9876543.21",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "tol_ctors",
+    "a": [
+     9876543.21
+    ],
+    "model": 5000
+   }
+  },
+  {
+   "name": "tol_ctors_-9876543.21",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "tol_ctors",
+    "a": [
+     -9876543.21
+    ]
+   }
+  },
+  {
+   "name": "tol_ctors_m5000_-9876543.21",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "tol_ctors",
+    "a": [
+     -9876543.21
+    ],
+    "model": 5000
+   }
+  },
+  {
+   "name": "tol_ctors_1.23456e-61",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "tol_ctors",
+    "a": [
+     1.23456e-61
+    ]
+   }
+  },
+  {
+   "name": "tol_ctors_m5000_1.23456e-61",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "tol_ctors",
+    "a": [
+     1.23456e-61
+    ],
+    "model": 5000
+   }
+  },
+  {
+   "name": "tol_ctors_0.5",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "tol_ctors",
+    "a": [
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "tol_ctors_m5000_0.5",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "tol_ctors",
+    "a": [
+     0.5
+    ],
+    "model": 5000
+   }
+  },
+  {
+   "name": "tol_ctors_7.0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "tol_ctors",
+    "a": [
+     7.0
+    ]
+   }
+  },
+  {
+   "name": "tol_ctors_m5000_7.0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "tol_ctors",
+    "a": [
+     7.0
+    ],
+    "model": 5000
+   }
+  },
+  {
+   "name": "tol_ctors_-7.0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "tol_ctors",
+    "a": [
+     -7.0
+    ]
+   }
+  },
+  {
+   "name": "tol_ctors_m5000_-7.0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "tol_ctors",
+    "a": [
+     -7.0
+    ],
+    "model": 5000
+   }
+  },
+  {
+   "name": "tol_mul_0.25_7.0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "tol_mul",
+    "a": [
+     0.25,
+     7.0
+    ]
+   }
+  },
+  {
+   "name": "tol_mul_-0.25_7.0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "tol_mul",
+    "a": [
+     -0.25,
+     7.0
+    ]
+   }
+  },
+  {
+   "name": "tol_mul_0.5_-2.0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "tol_mul",
+    "a": [
+     0.5,
+     -2.0
+    ]
+   }
+  },
+  {
+   "name": "tol_mul_9876543.21_0.5",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "tol_mul",
+    "a": [
+     9876543.21,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "eff_zeros",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:745",
+   "inputs": {
+    "op": "eff_zeros"
+   }
+  },
+  {
+   "name": "ang_tol_rad",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:745",
+   "inputs": {
+    "op": "ang_tol_rad"
+   }
+  },
+  {
+   "name": "gap_gain",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:745",
+   "inputs": {
+    "op": "gap_gain"
+   }
+  },
+  {
+   "name": "scaled_zero_sys",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:745",
+   "inputs": {
+    "op": "scaled_zero_sys"
+   }
+  },
+  {
+   "name": "calc_face_zone",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:745",
+   "inputs": {
+    "op": "calc_face_zone"
+   }
+  },
+  {
+   "name": "model_size_9876543.21",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:78",
+   "inputs": {
+    "op": "model_size",
+    "model": 9876543.21
+   }
+  },
+  {
+   "name": "calc_face_zone_9876543.21",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:616",
+   "inputs": {
+    "op": "calc_face_zone",
+    "model": 9876543.21
+   }
+  },
+  {
+   "name": "model_size_0.01",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:78",
+   "inputs": {
+    "op": "model_size",
+    "model": 0.01
+   }
+  },
+  {
+   "name": "calc_face_zone_0.01",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:616",
+   "inputs": {
+    "op": "calc_face_zone",
+    "model": 0.01
+   }
+  },
+  {
+   "name": "model_size_100000.0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:78",
+   "inputs": {
+    "op": "model_size",
+    "model": 100000.0
+   }
+  },
+  {
+   "name": "calc_face_zone_100000.0",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:616",
+   "inputs": {
+    "op": "calc_face_zone",
+    "model": 100000.0
+   }
+  },
+  {
+   "name": "calc_edge_zone_0_0_0_0",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:621",
+   "inputs": {
+    "op": "calc_edge_zone",
+    "a": [
+     0,
+     0,
+     0
+    ],
+    "flag": false
+   }
+  },
+  {
+   "name": "calc_edge_zone_2e-05_0_0_0",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:621",
+   "inputs": {
+    "op": "calc_edge_zone",
+    "a": [
+     2e-05,
+     0,
+     0
+    ],
+    "flag": false
+   }
+  },
+  {
+   "name": "calc_edge_zone_0_3e-05_0_0",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:621",
+   "inputs": {
+    "op": "calc_edge_zone",
+    "a": [
+     0,
+     3e-05,
+     0
+    ],
+    "flag": false
+   }
+  },
+  {
+   "name": "calc_edge_zone_0.001_0.002_0.0005_1",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:621",
+   "inputs": {
+    "op": "calc_edge_zone",
+    "a": [
+     0.001,
+     0.002,
+     0.0005
+    ],
+    "flag": true
+   }
+  },
+  {
+   "name": "calc_edge_zone_1e-06_1e-06_0.01_1",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:621",
+   "inputs": {
+    "op": "calc_edge_zone",
+    "a": [
+     1e-06,
+     1e-06,
+     0.01
+    ],
+    "flag": true
+   }
+  },
+  {
+   "name": "calc_edge_zone_0_0_9876543.21_1",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:621",
+   "inputs": {
+    "op": "calc_edge_zone",
+    "a": [
+     0,
+     0,
+     9876543.21
+    ],
+    "flag": true
+   }
+  },
+  {
+   "name": "calc_edge_zone_0_0_-0.0001_1",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:621",
+   "inputs": {
+    "op": "calc_edge_zone",
+    "a": [
+     0,
+     0,
+     -0.0001
+    ],
+    "flag": true
+   }
+  },
+  {
+   "name": "calc_edge_zone_-1_-1_0_1",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:621",
+   "inputs": {
+    "op": "calc_edge_zone",
+    "a": [
+     -1,
+     -1,
+     0
+    ],
+    "flag": true
+   }
+  },
+  {
+   "name": "calc_vertex_zone_0_0_0_0",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:621",
+   "inputs": {
+    "op": "calc_vertex_zone",
+    "a": [
+     0,
+     0,
+     0
+    ],
+    "flag": false
+   }
+  },
+  {
+   "name": "calc_vertex_zone_2e-05_0_0_0",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:621",
+   "inputs": {
+    "op": "calc_vertex_zone",
+    "a": [
+     2e-05,
+     0,
+     0
+    ],
+    "flag": false
+   }
+  },
+  {
+   "name": "calc_vertex_zone_0_3e-05_0_0",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:621",
+   "inputs": {
+    "op": "calc_vertex_zone",
+    "a": [
+     0,
+     3e-05,
+     0
+    ],
+    "flag": false
+   }
+  },
+  {
+   "name": "calc_vertex_zone_0.001_0.002_0.0005_1",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:621",
+   "inputs": {
+    "op": "calc_vertex_zone",
+    "a": [
+     0.001,
+     0.002,
+     0.0005
+    ],
+    "flag": true
+   }
+  },
+  {
+   "name": "calc_vertex_zone_1e-06_1e-06_0.01_1",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:621",
+   "inputs": {
+    "op": "calc_vertex_zone",
+    "a": [
+     1e-06,
+     1e-06,
+     0.01
+    ],
+    "flag": true
+   }
+  },
+  {
+   "name": "calc_vertex_zone_0_0_9876543.21_1",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:621",
+   "inputs": {
+    "op": "calc_vertex_zone",
+    "a": [
+     0,
+     0,
+     9876543.21
+    ],
+    "flag": true
+   }
+  },
+  {
+   "name": "calc_vertex_zone_0_0_-0.0001_1",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:621",
+   "inputs": {
+    "op": "calc_vertex_zone",
+    "a": [
+     0,
+     0,
+     -0.0001
+    ],
+    "flag": true
+   }
+  },
+  {
+   "name": "calc_vertex_zone_-1_-1_0_1",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:621",
+   "inputs": {
+    "op": "calc_vertex_zone",
+    "a": [
+     -1,
+     -1,
+     0
+    ],
+    "flag": true
+   }
+  },
+  {
+   "name": "xsect_from_zones_1e-05_1e-05",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:836",
+   "inputs": {
+    "op": "xsect_from_zones",
+    "a": [
+     1e-05,
+     1e-05
+    ]
+   }
+  },
+  {
+   "name": "xsect_from_zones_1e-05_0.0002",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:836",
+   "inputs": {
+    "op": "xsect_from_zones",
+    "a": [
+     1e-05,
+     0.0002
+    ]
+   }
+  },
+  {
+   "name": "xsect_from_zones_9876543.21_1e-05",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:836",
+   "inputs": {
+    "op": "xsect_from_zones",
+    "a": [
+     9876543.21,
+     1e-05
+    ]
+   }
+  },
+  {
+   "name": "xsect_from_zones_9876543.21_9876543.21",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:836",
+   "inputs": {
+    "op": "xsect_from_zones",
+    "a": [
+     9876543.21,
+     9876543.21
+    ]
+   }
+  },
+  {
+   "name": "xsect_from_zones_-1e-05_1e-05",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:836",
+   "inputs": {
+    "op": "xsect_from_zones",
+    "a": [
+     -1e-05,
+     1e-05
+    ]
+   }
+  },
+  {
+   "name": "xsect_from_zones_0_0",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:836",
+   "inputs": {
+    "op": "xsect_from_zones",
+    "a": [
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "is_zero_speed_1e-13_0_0_0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:143",
+   "inputs": {
+    "op": "is_zero_speed",
+    "a": [
+     1e-13,
+     0,
+     0
+    ],
+    "flag": false
+   }
+  },
+  {
+   "name": "is_zero_speed_1e-12_0_0_0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:143",
+   "inputs": {
+    "op": "is_zero_speed",
+    "a": [
+     1e-12,
+     0,
+     0
+    ],
+    "flag": false
+   }
+  },
+  {
+   "name": "is_zero_speed_2e-12_1_0_0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:143",
+   "inputs": {
+    "op": "is_zero_speed",
+    "a": [
+     2e-12,
+     1,
+     0
+    ],
+    "flag": false
+   }
+  },
+  {
+   "name": "is_zero_speed_1.9e-12_1_0_0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:143",
+   "inputs": {
+    "op": "is_zero_speed",
+    "a": [
+     1.9e-12,
+     1,
+     0
+    ],
+    "flag": false
+   }
+  },
+  {
+   "name": "is_zero_speed_-5e-10_1000_0_0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:143",
+   "inputs": {
+    "op": "is_zero_speed",
+    "a": [
+     -5e-10,
+     1000,
+     0
+    ],
+    "flag": false
+   }
+  },
+  {
+   "name": "is_zero_speed_0.5_0_1_1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:143",
+   "inputs": {
+    "op": "is_zero_speed",
+    "a": [
+     0.5,
+     0,
+     1
+    ],
+    "flag": true
+   }
+  },
+  {
+   "name": "is_zero_speed_0.5_0_-0.4_1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:143",
+   "inputs": {
+    "op": "is_zero_speed",
+    "a": [
+     0.5,
+     0,
+     -0.4
+    ],
+    "flag": true
+   }
+  },
+  {
+   "name": "is_zero_speed_0_0_0_1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:143",
+   "inputs": {
+    "op": "is_zero_speed",
+    "a": [
+     0,
+     0,
+     0
+    ],
+    "flag": true
+   }
+  },
+  {
+   "name": "is_degenerate_vec3_1e-06_0_0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:519",
+   "inputs": {
+    "op": "is_degenerate_vec3",
+    "a": [
+     1e-06,
+     0,
+     0,
+     0
+    ],
+    "flag": false
+   }
+  },
+  {
+   "name": "is_degenerate_vec3_2e-05_0_0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:519",
+   "inputs": {
+    "op": "is_degenerate_vec3",
+    "a": [
+     2e-05,
+     0,
+     0,
+     0
+    ],
+    "flag": false
+   }
+  },
+  {
+   "name": "is_degenerate_vec3_1.9e-05_0_0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:519",
+   "inputs": {
+    "op": "is_degenerate_vec3",
+    "a": [
+     1.9e-05,
+     0,
+     0,
+     0
+    ],
+    "flag": false
+   }
+  },
+  {
+   "name": "is_degenerate_vec3_0.0001_0_0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:519",
+   "inputs": {
+    "op": "is_degenerate_vec3",
+    "a": [
+     0.0001,
+     0.0001,
+     0.0001,
+     0
+    ],
+    "flag": false
+   }
+  },
+  {
+   "name": "is_degenerate_vec3_0.1_0.2_1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:519",
+   "inputs": {
+    "op": "is_degenerate_vec3",
+    "a": [
+     0.1,
+     0,
+     0,
+     0.2
+    ],
+    "flag": true
+   }
+  },
+  {
+   "name": "is_degenerate_vec3_0.1_-0.05_1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:519",
+   "inputs": {
+    "op": "is_degenerate_vec3",
+    "a": [
+     0.1,
+     0,
+     0,
+     -0.05
+    ],
+    "flag": true
+   }
+  },
+  {
+   "name": "is_degenerate_vec3_0_0_1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:519",
+   "inputs": {
+    "op": "is_degenerate_vec3",
+    "a": [
+     0,
+     0,
+     0,
+     0
+    ],
+    "flag": true
+   }
+  },
+  {
+   "name": "is_degenerate_vec3_1e-05_9876543.21_1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:519",
+   "inputs": {
+    "op": "is_degenerate_vec3",
+    "a": [
+     1e-05,
+     0,
+     0,
+     9876543.21
+    ],
+    "flag": true
+   }
+  },
+  {
+   "name": "are_parallel_2_0_0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:126",
+   "inputs": {
+    "op": "are_parallel",
+    "a": [
+     1,
+     0,
+     0,
+     2,
+     0,
+     0,
+     0
+    ],
+    "flag": false
+   }
+  },
+  {
+   "name": "are_parallel_0_1_0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:126",
+   "inputs": {
+    "op": "are_parallel",
+    "a": [
+     1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0
+    ],
+    "flag": false
+   }
+  },
+  {
+   "name": "are_parallel_1_0.001_1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:126",
+   "inputs": {
+    "op": "are_parallel",
+    "a": [
+     1,
+     0,
+     0,
+     1,
+     0.001,
+     0,
+     0.01
+    ],
+    "flag": true
+   }
+  },
+  {
+   "name": "are_parallel_-1_0_0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:126",
+   "inputs": {
+    "op": "are_parallel",
+    "a": [
+     1,
+     0,
+     0,
+     -1,
+     0,
+     0,
+     0
+    ],
+    "flag": false
+   }
+  },
+  {
+   "name": "are_perpendicular_2_0_0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:126",
+   "inputs": {
+    "op": "are_perpendicular",
+    "a": [
+     1,
+     0,
+     0,
+     2,
+     0,
+     0,
+     0
+    ],
+    "flag": false
+   }
+  },
+  {
+   "name": "are_perpendicular_0_1_0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:126",
+   "inputs": {
+    "op": "are_perpendicular",
+    "a": [
+     1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0
+    ],
+    "flag": false
+   }
+  },
+  {
+   "name": "are_perpendicular_1_0.001_1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:126",
+   "inputs": {
+    "op": "are_perpendicular",
+    "a": [
+     1,
+     0,
+     0,
+     1,
+     0.001,
+     0,
+     0.01
+    ],
+    "flag": true
+   }
+  },
+  {
+   "name": "are_perpendicular_-1_0_0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:126",
+   "inputs": {
+    "op": "are_perpendicular",
+    "a": [
+     1,
+     0,
+     0,
+     -1,
+     0,
+     0,
+     0
+    ],
+    "flag": false
+   }
+  },
+  {
+   "name": "scaled_zero_1_v1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 2,
+      "d": [
+       1,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_1_v2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 1,
+      "d": [
+       1,
+       -80
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_1_v3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 2,
+      "d": [
+       16,
+       100,
+       1000
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_1_e3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 3,
+      "d": [
+       0,
+       -30,
+       -600,
+       2000,
+       100,
+       10000
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_1_d",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 0,
+      "d": [
+       88
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_v1_v1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 2,
+      "d": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": 2,
+      "d": [
+       1,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_v1_v2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 2,
+      "d": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": 1,
+      "d": [
+       1,
+       -80
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_v1_v3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 2,
+      "d": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": 2,
+      "d": [
+       16,
+       100,
+       1000
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_v1_e3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 2,
+      "d": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": 3,
+      "d": [
+       0,
+       -30,
+       -600,
+       2000,
+       100,
+       10000
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_v1_d",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 2,
+      "d": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": 0,
+      "d": [
+       88
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_v2_v1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 1,
+      "d": [
+       1,
+       -80
+      ]
+     },
+     {
+      "kind": 2,
+      "d": [
+       1,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_v2_v2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 1,
+      "d": [
+       1,
+       -80
+      ]
+     },
+     {
+      "kind": 1,
+      "d": [
+       1,
+       -80
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_v2_v3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 1,
+      "d": [
+       1,
+       -80
+      ]
+     },
+     {
+      "kind": 2,
+      "d": [
+       16,
+       100,
+       1000
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_v2_e3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 1,
+      "d": [
+       1,
+       -80
+      ]
+     },
+     {
+      "kind": 3,
+      "d": [
+       0,
+       -30,
+       -600,
+       2000,
+       100,
+       10000
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_v2_d",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 1,
+      "d": [
+       1,
+       -80
+      ]
+     },
+     {
+      "kind": 0,
+      "d": [
+       88
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_v3_v1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 2,
+      "d": [
+       16,
+       100,
+       1000
+      ]
+     },
+     {
+      "kind": 2,
+      "d": [
+       1,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_v3_v2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 2,
+      "d": [
+       16,
+       100,
+       1000
+      ]
+     },
+     {
+      "kind": 1,
+      "d": [
+       1,
+       -80
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_v3_v3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 2,
+      "d": [
+       16,
+       100,
+       1000
+      ]
+     },
+     {
+      "kind": 2,
+      "d": [
+       16,
+       100,
+       1000
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_v3_e3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 2,
+      "d": [
+       16,
+       100,
+       1000
+      ]
+     },
+     {
+      "kind": 3,
+      "d": [
+       0,
+       -30,
+       -600,
+       2000,
+       100,
+       10000
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_v3_d",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 2,
+      "d": [
+       16,
+       100,
+       1000
+      ]
+     },
+     {
+      "kind": 0,
+      "d": [
+       88
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_e3_v1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 3,
+      "d": [
+       0,
+       -30,
+       -600,
+       2000,
+       100,
+       10000
+      ]
+     },
+     {
+      "kind": 2,
+      "d": [
+       1,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_e3_v2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 3,
+      "d": [
+       0,
+       -30,
+       -600,
+       2000,
+       100,
+       10000
+      ]
+     },
+     {
+      "kind": 1,
+      "d": [
+       1,
+       -80
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_e3_v3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 3,
+      "d": [
+       0,
+       -30,
+       -600,
+       2000,
+       100,
+       10000
+      ]
+     },
+     {
+      "kind": 2,
+      "d": [
+       16,
+       100,
+       1000
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_e3_e3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 3,
+      "d": [
+       0,
+       -30,
+       -600,
+       2000,
+       100,
+       10000
+      ]
+     },
+     {
+      "kind": 3,
+      "d": [
+       0,
+       -30,
+       -600,
+       2000,
+       100,
+       10000
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_e3_d",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 3,
+      "d": [
+       0,
+       -30,
+       -600,
+       2000,
+       100,
+       10000
+      ]
+     },
+     {
+      "kind": 0,
+      "d": [
+       88
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_d_v1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 0,
+      "d": [
+       88
+      ]
+     },
+     {
+      "kind": 2,
+      "d": [
+       1,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_d_v2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 0,
+      "d": [
+       88
+      ]
+     },
+     {
+      "kind": 1,
+      "d": [
+       1,
+       -80
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_d_v3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 0,
+      "d": [
+       88
+      ]
+     },
+     {
+      "kind": 2,
+      "d": [
+       16,
+       100,
+       1000
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_d_e3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 0,
+      "d": [
+       88
+      ]
+     },
+     {
+      "kind": 3,
+      "d": [
+       0,
+       -30,
+       -600,
+       2000,
+       100,
+       10000
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_2_d_d",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 0,
+      "d": [
+       88
+      ]
+     },
+     {
+      "kind": 0,
+      "d": [
+       88
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_3_v1_e3_v3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 2,
+      "d": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": 3,
+      "d": [
+       0,
+       -30,
+       -600,
+       2000,
+       100,
+       10000
+      ]
+     },
+     {
+      "kind": 2,
+      "d": [
+       16,
+       100,
+       1000
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_3_v2_v1_e3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 1,
+      "d": [
+       1,
+       -80
+      ]
+     },
+     {
+      "kind": 2,
+      "d": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": 3,
+      "d": [
+       0,
+       -30,
+       -600,
+       2000,
+       100,
+       10000
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_3_v3_v2_v1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 2,
+      "d": [
+       16,
+       100,
+       1000
+      ]
+     },
+     {
+      "kind": 1,
+      "d": [
+       1,
+       -80
+      ]
+     },
+     {
+      "kind": 2,
+      "d": [
+       1,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_3_e3_v3_v2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 3,
+      "d": [
+       0,
+       -30,
+       -600,
+       2000,
+       100,
+       10000
+      ]
+     },
+     {
+      "kind": 2,
+      "d": [
+       16,
+       100,
+       1000
+      ]
+     },
+     {
+      "kind": 1,
+      "d": [
+       1,
+       -80
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_3_d_d_d",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 0,
+      "d": [
+       88
+      ]
+     },
+     {
+      "kind": 0,
+      "d": [
+       88
+      ]
+     },
+     {
+      "kind": 0,
+      "d": [
+       88
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_3_e3_e3_e3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 3,
+      "d": [
+       0,
+       -30,
+       -600,
+       2000,
+       100,
+       10000
+      ]
+     },
+     {
+      "kind": 3,
+      "d": [
+       0,
+       -30,
+       -600,
+       2000,
+       100,
+       10000
+      ]
+     },
+     {
+      "kind": 3,
+      "d": [
+       0,
+       -30,
+       -600,
+       2000,
+       100,
+       10000
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_4_v1_e3_v3_v2",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 2,
+      "d": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": 3,
+      "d": [
+       0,
+       -30,
+       -600,
+       2000,
+       100,
+       10000
+      ]
+     },
+     {
+      "kind": 2,
+      "d": [
+       16,
+       100,
+       1000
+      ]
+     },
+     {
+      "kind": 1,
+      "d": [
+       1,
+       -80
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_4_v2_v1_e3_v3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 1,
+      "d": [
+       1,
+       -80
+      ]
+     },
+     {
+      "kind": 2,
+      "d": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": 3,
+      "d": [
+       0,
+       -30,
+       -600,
+       2000,
+       100,
+       10000
+      ]
+     },
+     {
+      "kind": 2,
+      "d": [
+       16,
+       100,
+       1000
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_4_v3_v2_v1_e3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 2,
+      "d": [
+       16,
+       100,
+       1000
+      ]
+     },
+     {
+      "kind": 1,
+      "d": [
+       1,
+       -80
+      ]
+     },
+     {
+      "kind": 2,
+      "d": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": 3,
+      "d": [
+       0,
+       -30,
+       -600,
+       2000,
+       100,
+       10000
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_4_e3_v3_v2_v1",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 3,
+      "d": [
+       0,
+       -30,
+       -600,
+       2000,
+       100,
+       10000
+      ]
+     },
+     {
+      "kind": 2,
+      "d": [
+       16,
+       100,
+       1000
+      ]
+     },
+     {
+      "kind": 1,
+      "d": [
+       1,
+       -80
+      ]
+     },
+     {
+      "kind": 2,
+      "d": [
+       1,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_4_d_v2_v3_e3",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1471 (SmTol::sm_TemplateTrial)",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 0,
+      "d": [
+       88
+      ]
+     },
+     {
+      "kind": 1,
+      "d": [
+       1,
+       -80
+      ]
+     },
+     {
+      "kind": 2,
+      "d": [
+       16,
+       100,
+       1000
+      ]
+     },
+     {
+      "kind": 3,
+      "d": [
+       0,
+       -30,
+       -600,
+       2000,
+       100,
+       10000
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_1_double_0.0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1375",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 0,
+      "d": [
+       0.0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_1_double_-1.0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1375",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 0,
+      "d": [
+       -1.0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_1_double_1000000000000000.0",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1375",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 0,
+      "d": [
+       1000000000000000.0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "scaled_zero_1_double_-3.5",
+   "upstream_ref": "source/SMLib/src/SmTol.cpp:1375",
+   "inputs": {
+    "op": "scaled_zero_n",
+    "objs": [
+     {
+      "kind": 0,
+      "d": [
+       -3.5
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

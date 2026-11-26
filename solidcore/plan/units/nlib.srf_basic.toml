@@ -1,0 +1,12 @@
+id = "nlib.srf_basic"
+upstream = ["source/SMLib/src/NL_SrfBasic.cpp", "source/SMLib/src/NL_SrfGeom.cpp"]
+rust_module = "nurbs::srf_basic"
+depends_on = ["nlib.geom", "nlib.math"]
+soft_depends_on = ["nlib.knots"]
+est_lines = 1088
+layer = 2
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = "swarm-nlib.srf_basic-a1"
+claimed_at = "2026-10-12T20:02:23Z"
+notes = "35 fns; largest: N_SrfIsFlatCheap, N_SrfGetAverageLen, N_SrfsAreEqual, N_SrfGetENet; unit-SCC #2 (3 units); 317 upstream test entry points reach this unit; green: 3220 difftest cases (220 fixture + 3000 generated), 0 deferred, bit-identical"

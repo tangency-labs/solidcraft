@@ -1,0 +1,155 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  36.54294554526382,
+                  24.60324489808139,
+                  10.0
+                ],
+                [
+                  36.54294554526382,
+                  24.60324489808139,
+                  10.0
+                ]
+              ],
+              "index": 4
+            }
+          ],
+          "points": [
+            [
+              23.457054454736177,
+              15.396755101918616,
+              10.0
+            ]
+          ],
+          "tolerance": 3.7426573867739417
+        },
+        "kind": "curvature",
+        "sizes": [
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "cov-fillet-section-curvature-boss-root-r2",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g2"
+    },
+    "faces": 9,
+    "method": "plate 60x40x10 with a boss R8 x 10 at (30, 20): V0 = 24000 + 640 pi = 26010.6193. In each meridian plane (rho, z) the plate's top and the boss's wall are the lines z = 10 and rho = 8, the feet of the point at distance d from both (8 + d, 10) and (8, 10 + d): the order-2 section at the equal-area thumbweight is that of a square corner (cov-fillet-section-curvature-box-edge-r3), area 0.214601836603 s^2 = 0.616770622 (s = 2), first moment about the wall 0.233402637 (Green's theorem on the section), revolved (Pappus): 2 pi (8 A + M) = 32.469. V = 26043.0881. Faces 9; the seams at least G2 (the surface is a certified fit of the section turned about the axis: G3 to the plate along its rail, G2 to the wall at Continuity Analysis's tolerances). [the curvature section at the equal-area thumbweight (the default): on the same rails it takes off what the ball's circle does, so between square planes w = -0.5252123889 and it cuts A = (1 - pi/4) s^2 = 0.214601836603 s^2, first moment about either face M = 0.0474559669443 s^3 (Green's theorem on S); V = 26056.152955]",
+    "source": "analytic",
+    "sources": [],
+    "timeout_s": 600,
+    "tolerance": {
+      "rel": 1e-7
+    },
+    "volume_mm3": 26056.152954783724,
+    "what": "a boss's root on a plate rounded curvature-continuous size 2: the order-2 section of the square corner turned about the boss's axis, a certified fit"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 17,
+      "faces": 9,
+      "vertices": 11
+    }
+  },
+  "records": "cov-fillet-section-curvature-boss-root-r2.bodies.json.gz",
+  "result": [
+    {
+      "body": "Plate",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 7261.494290342203,
+      "body_count": 1,
+      "edges": 17,
+      "faces": 9,
+      "vertices": 11,
+      "volume_mm3": 26056.152951183652
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a boss's root on a plate rounded curvature-continuous size 2: the order-2 section of the square corner turned about the boss's axis, a certified fit",
+  "why_not": []
+}

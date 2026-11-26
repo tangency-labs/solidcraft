@@ -93,7 +93,7 @@ impl Field {
         let ctx = egui::Context::default();
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         crate::params_dialog::publish(&mut app, &ctx);
-        let id = egui::Id::new("value_step_test_field");
+        let id = egui::Id::unique("value_step_test_field");
         let mut f = Self { on, ctx, app, text: text.into(), id, changed: false, rect: egui::Rect::NOTHING, scroll: egui::Id::NULL };
         f.ctx.memory_mut(|m| m.request_focus(id));
         f.frame(Vec::new());
@@ -127,7 +127,13 @@ impl Field {
     }
 
     fn wheel(&mut self, at: egui::Pos2, unit: MouseWheelUnit, dy: f32) {
-        let wheel = Event::MouseWheel { unit, delta: vec2(0.0, dy), modifiers: Modifiers::NONE, phase: TouchPhase::Move };
+        let wheel = Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit,
+            delta: vec2(0.0, dy),
+            modifiers: Modifiers::NONE,
+            phase: TouchPhase::Move,
+        };
         self.frame(vec![Event::PointerMoved(at), wheel]);
     }
 
@@ -138,7 +144,7 @@ impl Field {
     }
 
     fn scrolled(&self) -> f32 {
-        egui::scroll_area::State::load(&self.ctx, self.scroll).map_or(0.0, |s| s.offset.y)
+        egui::scroll_area::State::load(&self.ctx, self.scroll).map_or(0.0, |s| s.clamped_offset().y)
     }
 }
 
@@ -254,7 +260,7 @@ fn flange(h: &Harness) -> (usize, String, String) {
 fn flange_height_and_bend_radius_step_with_arrows_and_wheel() {
     let mut h = edge_flange(true);
     // The box sits at the arrow's tip, so it moves as the height does.
-    let at = |h: &Harness| h.ctx.read_response(egui::Id::new("sc_canvas_value")).expect("the Height box beside the edge").rect.center();
+    let at = |h: &Harness| h.ctx.read_response(egui::Id::unique("sc_canvas_value")).expect("the Height box beside the edge").rect.center();
     let height = at(&h);
     h.step(&json!({"click": [height.x, height.y]})).unwrap();
     h.step(&json!({"key": "ArrowUp"})).unwrap();
@@ -267,7 +273,7 @@ fn flange_height_and_bend_radius_step_with_arrows_and_wheel() {
     // shrinks, so every notch steps it and none reaches the camera.
     h.call("ui.camera", json!({"target": [50, 0, 15], "distance": 40}));
     h.frames(4);
-    let rect = h.ctx.read_response(egui::Id::new("sc_canvas_value")).unwrap().rect;
+    let rect = h.ctx.read_response(egui::Id::unique("sc_canvas_value")).unwrap().rect;
     let tip = h.at(&json!({"handle": "arrow"})).unwrap()[1];
     let cam = h.app.cam;
     for _ in 0..4 {
@@ -334,7 +340,7 @@ fn off_by_default_the_keys_and_the_wheel_do_what_they_did() {
     assert!(f.scrolled() > 0.0, "the wheel scrolled the panel");
 
     let mut h = edge_flange(false);
-    let at = h.ctx.read_response(egui::Id::new("sc_canvas_value")).unwrap().rect.center();
+    let at = h.ctx.read_response(egui::Id::unique("sc_canvas_value")).unwrap().rect.center();
     h.step(&json!({"click": [at.x, at.y]})).unwrap();
     h.step(&json!({"key": "ArrowUp"})).unwrap();
     h.call("ui.scroll", json!({"x": at.x, "y": at.y, "delta": 40.0}));
@@ -345,7 +351,7 @@ fn off_by_default_the_keys_and_the_wheel_do_what_they_did() {
     h.step(&json!({"text": "40 mm"})).unwrap();
     h.frames(3);
     assert_eq!(flange(&h).1, "40 mm");
-    let moved = h.ctx.read_response(egui::Id::new("sc_canvas_value")).unwrap().rect.center();
+    let moved = h.ctx.read_response(egui::Id::unique("sc_canvas_value")).unwrap().rect.center();
     assert!((moved.y - at.y).abs() > 5.0, "the box moved with the arrow ({at:?} -> {moved:?})");
 }
 
@@ -361,7 +367,7 @@ fn the_preference_is_on_the_design_page() {
     // The row can be below the page's fold: scroll the page to it, as a user would, a little at a
     // time so the page's length doesn't matter.
     for _ in 0..40 {
-        let window = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_prefs"))).unwrap();
+        let window = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_prefs"))).unwrap();
         let row = crate::scenario::handle_at("prefs:step_values").expect("the Design page shows the row");
         if window.shrink(60.0).contains(row) {
             break;

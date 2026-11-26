@@ -38,7 +38,8 @@ const MAX_STEPS: usize = 64;
 /// shorter than a step over this; at most `MAX_STEPS` such solves per drag.
 const HALVINGS: usize = 16;
 /// Steps of a drag that isn't live solved at once past a failed step, at most (see
-/// [`drag_entity`] and [`ahead_batch`]).
+/// [`drag_entity`] and [`ahead_batch`]). The browser build solves one at a time.
+#[cfg(not(target_arch = "wasm32"))]
 const AHEAD: usize = 8;
 /// An arc whose sweep gets this close (radians) to 0 or a full turn has run into its start.
 const SWEEP_EPS: f64 = 1e-6;
@@ -170,6 +171,15 @@ pub(super) fn drag_entity(
     let Some((path, hold, n, short)) = prepare(sk, e, with, from, to) else {
         return (Dragged::default(), Left::Unsolved);
     };
+    // Splines whose tangent handles nobody turned stay the natural curve through their moved fit
+    // points: their handles follow each step. Dragging a handle itself turns it.
+    let natural: Vec<usize> = {
+        let moved: Vec<usize> = path.points().collect();
+        sk.natural_handle_splines()
+            .into_iter()
+            .filter(|&c| !matches!(sk.curves.get(c).map(|x| &x.kind), Some(CurveKind::Spline { handles, .. }) if handles.iter().any(|h| moved.contains(h))))
+            .collect()
+    };
     // A point dragged alone that ends tangent lines: each step first tries with their other ends
     // held too, and only when that can't be solved lets them move. Unheld, the solver spread its
     // correction over every free point, so the line's far end moved (towards the dragged one)
@@ -195,6 +205,7 @@ pub(super) fn drag_entity(
     // Whether the sketch follows step `t` (with the tangent lines' far ends held, else free).
     let held = |sk: &mut Sketch, last: &Geometry, t: f64, budget: &mut Budget| {
         path.apply(sk, t);
+        sk.renew_natural_handles(&natural);
         let kept = keep.as_ref().is_some_and(|keep| {
             let ok = counted_solve(sk, keep, Some(&last.pos), Analysis::StatusOnly, Some(&mut *budget)).ok()
                 && !last.sweep_wrapped(sk)
@@ -202,6 +213,7 @@ pub(super) fn drag_entity(
             if !ok {
                 last.restore(sk);
                 path.apply(sk, t);
+                sk.renew_natural_handles(&natural);
             }
             ok
         });
@@ -592,12 +604,17 @@ pub(super) struct Dragged {
 }
 
 impl Dragged {
-    pub(super) fn at(&self, sk: &Sketch, from: Vec2) -> Vec2 {
+    /// Where the grab went on its way from `from` to `to`: moved as the moving point that got
+    /// furthest toward `to` moved. A selection part of which is held back (a rectangle with a
+    /// corner on the origin) has its free part follow the pointer; the average of all its points
+    /// lagged the grab, and the next frame's catch-up took the free part past the pointer.
+    pub(super) fn at(&self, sk: &Sketch, from: Vec2, to: Vec2) -> Vec2 {
         if let Some(at) = self.line_grab.and_then(|g| g.point(sk)) {
             return at;
         }
-        let moves: Vec<_> = self.moving.iter().filter_map(|&(q, was)| Some(sk.point(q)? - was)).collect();
-        from + moves.iter().fold(Vec2::ZERO, |a, m| a + *m) * (1.0 / moves.len().max(1) as f64)
+        let d = to - from;
+        let furthest = self.moving.iter().filter_map(|&(q, was)| Some(sk.point(q)? - was)).max_by(|a, b| a.dot(d).total_cmp(&b.dot(d)));
+        from + furthest.unwrap_or(Vec2::ZERO)
     }
 }
 

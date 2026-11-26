@@ -6,7 +6,8 @@
 
 use super::*;
 use solidcraft_doc::joints::Coupling;
-use solidcraft_doc::joints::cam::CamProfile;
+use solidcraft_doc::joints::Size;
+use solidcraft_doc::joints::cam::{CamProfile, Follower};
 
 /// The cam's eccentricity and radius (mm).
 const E: f64 = 10.0;
@@ -434,4 +435,242 @@ fn cams_save_and_open_with_their_table() {
     }
     let old = solidcraft_doc::format::read(&v.to_string()).unwrap_or_else(|e| panic!("{e}"));
     assert!(old.assembly.links.iter().all(|l| l.coupling.is_none() && l.lift.is_empty()));
+}
+
+/// A cam redefined in place keeps what the call leaves out, like the other couplings: an edit
+/// dialog can't re-offer the profile sketch, so the profile, the follower and its radius, the
+/// tip and the side the follower rides from all carry over from the cam being replaced.
+#[test]
+fn an_edited_cam_keeps_the_definition_it_is_not_given() {
+    let mut s = cam_on_base();
+    let tip = knife(0.0, 0.0, R + 5.0);
+    tappet(&mut s, 0.0, tip);
+    run(&mut s, "joint.cam", json!({"a": "Cam", "b": "Tappet", "profile": {"sketch": "CamSketch"}, "follower": "roller", "radius": "5 mm"}));
+    // The cam as defined drives the roller where a knife on the circle of radius R + 5 rides.
+    run(&mut s, "joint.drive", json!({"joint": "Cam", "value": 60}));
+    let want = knife(60.0, 0.0, R + 5.0) - tip;
+    assert!(close(shown(&mut s, "Tappet"), want, 1e-3), "{} vs {want}", shown(&mut s, "Tappet"));
+    let first = s.doc.assembly.links[0].coupling.clone();
+    let rides = |c: &Option<Coupling>| matches!(c, Some(Coupling::Cam(c)) if c.reverse);
+    // Flip the ride side in place: the profile and the roller (with its radius) carry over.
+    let r = run(&mut s, "joint.cam", json!({"a": "Cam", "b": "Tappet", "link": 0, "flip": true}));
+    assert_eq!(r["link"], 0, "{r}");
+    let flipped = s.doc.assembly.links[0].coupling.clone();
+    let kept = match (&first, &flipped) {
+        (Some(Coupling::Cam(a)), Some(Coupling::Cam(b))) => {
+            a.profile == b.profile && matches!(&b.follower, Follower::Roller { radius } if *radius == Size::Expr("5 mm".into()))
+        }
+        _ => false,
+    };
+    assert!(kept, "{first:?} -> {flipped:?}");
+    assert_ne!(rides(&first), rides(&flipped), "{flipped:?}");
+    // And redefining with nothing else now keeps that flipped definition, its side included; the
+    // follower stays on the side it was flipped to at 60 degrees.
+    run(&mut s, "joint.drive", json!({"joint": "Cam", "value": 60}));
+    let rides_this_side = shown(&mut s, "Tappet");
+    run(&mut s, "joint.cam", json!({"a": "Cam", "b": "Tappet", "link": 0}));
+    assert_eq!(s.doc.assembly.links[0].coupling, flipped);
+    run(&mut s, "joint.drive", json!({"joint": "Cam", "value": 60}));
+    assert!(close(shown(&mut s, "Tappet"), rides_this_side, 1e-3), "{} vs {rides_this_side}", shown(&mut s, "Tappet"));
+}
+
+#[test]
+fn a_cam_writes_no_mimic_in_urdf_and_warns_naming_it() {
+    let mut s = cam_on_base();
+    let tip = knife(0.0, 0.0, R);
+    tappet(&mut s, 0.0, tip);
+    run(&mut s, "joint.cam", json!({"a": "Cam", "b": "Tappet", "profile": {"sketch": "CamSketch"}}));
+    let options = solidcraft_io::UrdfOptions { mimic: true, ..Default::default() };
+    let p = solidcraft_io::urdf(&s.doc, &s.doc.painted(&s.model.state()), "t", &options).unwrap_or_else(|e| panic!("{e}"));
+    assert!(!p.xml.contains("<mimic"), "{}", p.xml);
+    assert!(p.warnings.iter().any(|w| w.contains("cam") && w.contains("Tappet")), "{:?}", p.warnings);
+}
+
+#[test]
+fn cam_capture_position_and_suppress_preserve_cam_and_follower_baselines() {
+    let mut s = cam_on_base();
+    let tip = knife(0.0, 0.0, R);
+    run(&mut s, "parameters.add", json!({"name": "tappet_gap", "expression": "0 mm"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Tappet"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 4, "height": 5, "corner": [tip, -2.0, 0.0]}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "slider",
+            "name": "Tappet",
+            "a": {"occurrence": "Base", "point": [0, 0, 2.5], "z": [1, 0, 0]},
+            "b": {"occurrence": "Tappet", "point": [0, 0, 2.5], "z": [1, 0, 0]},
+            "flip": true,
+            "values": ["tappet_gap"]
+        }),
+    );
+    let tappet_occ = occ(&s, "Tappet");
+    let tappet_jid = joint_id(&s, "Tappet");
+    // Prior CapturePosition on Tappet + pre-existing expression on follower DOF before cam link.
+    run(&mut s, "occurrence.move", json!({"occurrence": tappet_occ, "translate": [0, 0, 1], "capture": false}));
+    let cp1 = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+
+    run(&mut s, "joint.cam", json!({"a": "Cam", "b": "Tappet", "profile": {"sketch": "CamSketch"}}));
+    let base_before = s.doc.occurrences.iter().find(|o| o.id == tappet_occ).unwrap().base_transform;
+    assert!(base_before.is_some());
+
+    // Drive cam to 90 deg and trigger recouple via rc parameter change; Tappet.base_transform must stay unchanged.
+    run(&mut s, "joint.drive", json!({"joint": "Cam", "value": 90}));
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == tappet_occ).unwrap().base_transform, base_before);
+    run(&mut s, "parameters.change", json!({"name": "rc", "expression": "32 mm"}));
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == tappet_occ).unwrap().base_transform, base_before);
+
+    let want_90 = knife(90.0, 0.0, 32.0) - tip;
+    assert!(close(shown(&mut s, "Tappet"), want_90, 1e-3), "{} vs {want_90}", shown(&mut s, "Tappet"));
+
+    // CapturePosition omits contradictory follower exprs on linked DOF so Tappet.captured stays at cam lift.
+    let cp2 = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    let tappet_joint = s.doc.assembly.joints.iter().find(|j| j.id == tappet_jid).unwrap();
+    assert!(close(tappet_joint.captured.as_ref().unwrap()[0], want_90, 1e-3), "{:?}", tappet_joint.captured);
+
+    // Driving away and calling revert_position restores CP2 cam & follower pose cleanly.
+    run(&mut s, "joint.drive", json!({"joint": "Cam", "value": 30}));
+    run(&mut s, "component.revert_position", json!({}));
+    assert!(close(shown(&mut s, "Cam"), 90.0, 1e-3));
+    assert!(close(shown(&mut s, "Tappet"), want_90, 1e-3));
+
+    // Suppressing CP2 restores Cam to 0 deg and Tappet to pre-capture baseline.
+    run(&mut s, "timeline.suppress", json!({"feature": cp2, "suppressed": true}));
+    assert!(close(shown(&mut s, "Cam"), 0.0, 1e-3));
+    let tappet_joint = s.doc.assembly.joints.iter().find(|j| j.id == tappet_jid).unwrap();
+    assert_eq!(tappet_joint.exprs.value(0), Some("tappet_gap"));
+    run(&mut s, "timeline.delete", json!({"feature": cp2}));
+    run(&mut s, "timeline.delete", json!({"feature": cp1}));
+}
+
+#[test]
+fn cam_oscillating_roller_and_flat_follower_capture_position_and_suppress() {
+    // 1. Oscillating roller follower.
+    let (pivot, arm, roller) = (Vec3::new(-50.0, 40.0, 2.5), 50.0, 5.0);
+    let away = pivot.y.atan2(pivot.x);
+    let wrap = |a: f64| (a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+    let angle = |p: Vec3| (p.y - pivot.y).atan2(p.x - pivot.x);
+    let [p, q] = meet(pivot, arm, Vec3::new(E, 0.0, 2.5), R + roller);
+    let start = if wrap(angle(p) - away).abs() < wrap(angle(q) - away).abs() { p } else { q };
+
+    let mut s = cam_on_base();
+    run(&mut s, "parameters.add", json!({"name": "arm_ang", "expression": "0 deg"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Arm"}));
+    run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 5, "corner": [start.x - 2.0, start.y - 2.0, 0]}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "revolute",
+            "name": "Arm",
+            "a": {"occurrence": "Base", "point": [pivot.x, pivot.y, pivot.z], "z": [0, 0, 1]},
+            "b": {"occurrence": "Arm", "point": [pivot.x, pivot.y, pivot.z], "z": [0, 0, 1]},
+            "flip": true,
+            "values": ["arm_ang"]
+        }),
+    );
+    let arm_occ = occ(&s, "Arm");
+    let arm_jid = joint_id(&s, "Arm");
+    run(&mut s, "occurrence.move", json!({"occurrence": arm_occ, "translate": [0, 0, 1], "capture": false}));
+    let cp1 = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    let arm_base = s.doc.occurrences.iter().find(|o| o.id == arm_occ).unwrap().base_transform;
+    assert!(arm_base.is_some());
+
+    run(
+        &mut s,
+        "joint.cam",
+        json!({
+            "a": "Cam",
+            "b": "Arm",
+            "profile": {"sketch": "CamSketch"},
+            "follower": "roller",
+            "radius": roller,
+            "tip": {"occurrence": "Arm", "point": [start.x, start.y, 2.5]}
+        }),
+    );
+    run(&mut s, "joint.drive", json!({"joint": "Cam", "value": 90}));
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == arm_occ).unwrap().base_transform, arm_base);
+    let arm_at_90 = shown(&mut s, "Arm");
+
+    let cp2 = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    let arm_joint = s.doc.assembly.joints.iter().find(|j| j.id == arm_jid).unwrap();
+    assert!(close(arm_joint.captured.as_ref().unwrap()[0], arm_at_90.to_radians(), 1e-5), "{:?}", arm_joint.captured);
+    assert_eq!(arm_joint.exprs.value(0), None);
+
+    run(&mut s, "joint.drive", json!({"joint": "Cam", "value": 30}));
+    run(&mut s, "component.revert_position", json!({}));
+    assert!(close(shown(&mut s, "Cam"), 90.0, 1e-3));
+    assert!(close(shown(&mut s, "Arm"), arm_at_90, 1e-3));
+
+    run(&mut s, "timeline.suppress", json!({"feature": cp2, "suppressed": true}));
+    assert!(close(shown(&mut s, "Cam"), 0.0, 1e-3));
+    assert_eq!(s.doc.assembly.joints.iter().find(|j| j.id == arm_jid).unwrap().exprs.value(0), Some("arm_ang"));
+
+    run(&mut s, "timeline.suppress", json!({"feature": cp2, "suppressed": false}));
+    assert!(close(shown(&mut s, "Cam"), 90.0, 1e-3));
+    assert!(close(shown(&mut s, "Arm"), arm_at_90, 1e-3));
+    assert_eq!(s.doc.assembly.joints.iter().find(|j| j.id == arm_jid).unwrap().exprs.value(0), None);
+
+    run(&mut s, "timeline.delete", json!({"feature": cp2}));
+    assert_eq!(s.doc.assembly.joints.iter().find(|j| j.id == arm_jid).unwrap().exprs.value(0), Some("arm_ang"));
+    run(&mut s, "timeline.delete", json!({"feature": cp1}));
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == arm_occ).unwrap().base_transform, None);
+
+    // 2. Flat slider follower.
+    let mut s_flat = cam_on_base();
+    run(&mut s_flat, "parameters.add", json!({"name": "tappet_gap", "expression": "0 mm"}));
+    run(&mut s_flat, "component.activate", json!({"component": "root"}));
+    run(&mut s_flat, "component.create", json!({"name": "Tappet"}));
+    run(&mut s_flat, "solid.box", json!({"length": 20, "width": 4, "height": 5, "corner": [E + R, -2.0, 0.0]}));
+    run(
+        &mut s_flat,
+        "joint.create",
+        json!({
+            "type": "slider",
+            "name": "Tappet",
+            "a": {"occurrence": "Base", "point": [0, 0, 2.5], "z": [1, 0, 0]},
+            "b": {"occurrence": "Tappet", "point": [0, 0, 2.5], "z": [1, 0, 0]},
+            "flip": true,
+            "values": ["tappet_gap"]
+        }),
+    );
+    let tappet_occ = occ(&s_flat, "Tappet");
+    let tappet_jid = joint_id(&s_flat, "Tappet");
+    run(&mut s_flat, "occurrence.move", json!({"occurrence": tappet_occ, "translate": [0, 0, 1], "capture": false}));
+    let flat_cp1 = run(&mut s_flat, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    let flat_base = s_flat.doc.occurrences.iter().find(|o| o.id == tappet_occ).unwrap().base_transform;
+    assert!(flat_base.is_some());
+
+    run(&mut s_flat, "joint.cam", json!({"a": "Cam", "b": "Tappet", "profile": {"sketch": "CamSketch"}, "follower": "flat"}));
+    run(&mut s_flat, "joint.drive", json!({"joint": "Cam", "value": 90}));
+    assert_eq!(s_flat.doc.occurrences.iter().find(|o| o.id == tappet_occ).unwrap().base_transform, flat_base);
+    let want_90 = E * 90.0_f64.to_radians().cos() - E;
+    assert!(close(shown(&mut s_flat, "Tappet"), want_90, 1e-3), "{} vs {want_90}", shown(&mut s_flat, "Tappet"));
+
+    let flat_cp2 = run(&mut s_flat, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    let tappet_joint = s_flat.doc.assembly.joints.iter().find(|j| j.id == tappet_jid).unwrap();
+    assert!(close(tappet_joint.captured.as_ref().unwrap()[0], want_90, 1e-3), "{:?}", tappet_joint.captured);
+    assert_eq!(tappet_joint.exprs.value(0), None);
+
+    run(&mut s_flat, "joint.drive", json!({"joint": "Cam", "value": 30}));
+    run(&mut s_flat, "component.revert_position", json!({}));
+    assert!(close(shown(&mut s_flat, "Cam"), 90.0, 1e-3));
+    assert!(close(shown(&mut s_flat, "Tappet"), want_90, 1e-3));
+
+    run(&mut s_flat, "timeline.suppress", json!({"feature": flat_cp2, "suppressed": true}));
+    assert!(close(shown(&mut s_flat, "Cam"), 0.0, 1e-3));
+    assert_eq!(s_flat.doc.assembly.joints.iter().find(|j| j.id == tappet_jid).unwrap().exprs.value(0), Some("tappet_gap"));
+
+    run(&mut s_flat, "timeline.suppress", json!({"feature": flat_cp2, "suppressed": false}));
+    assert!(close(shown(&mut s_flat, "Cam"), 90.0, 1e-3));
+    assert!(close(shown(&mut s_flat, "Tappet"), want_90, 1e-3));
+    assert_eq!(s_flat.doc.assembly.joints.iter().find(|j| j.id == tappet_jid).unwrap().exprs.value(0), None);
+
+    run(&mut s_flat, "timeline.delete", json!({"feature": flat_cp2}));
+    assert_eq!(s_flat.doc.assembly.joints.iter().find(|j| j.id == tappet_jid).unwrap().exprs.value(0), Some("tappet_gap"));
+    run(&mut s_flat, "timeline.delete", json!({"feature": flat_cp1}));
+    assert_eq!(s_flat.doc.occurrences.iter().find(|o| o.id == tappet_occ).unwrap().base_transform, None);
 }

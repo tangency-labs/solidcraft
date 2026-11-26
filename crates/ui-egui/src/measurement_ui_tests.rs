@@ -464,9 +464,10 @@ fn measure_imported_stl_edges_and_vertices_from_viewport_clicks() {
     h.call("ui.view", json!({"view":"fit"}));
     h.frames(4);
 
+    // Off the edges' middles (z = 5): a click there picks the woken middle point (#5912).
     for offset in [0., 40.] {
         h.app.start("inspect.measure");
-        h.step(&json!({"click":{"world":[offset + 20.,0,5]}})).unwrap();
+        h.step(&json!({"click":{"world":[offset + 20.,0,3]}})).unwrap();
         assert!(
             matches!(h.app.dialog.as_ref().unwrap().inputs[0].items.as_slice(), [Sel::Edge { .. }]),
             "must select the outline, not the whole STL face"
@@ -475,7 +476,7 @@ fn measure_imported_stl_edges_and_vertices_from_viewport_clicks() {
         assert!((result(&h)["items"][0]["length_mm"].as_f64().unwrap() - 10.).abs() < 1e-6);
         let texts = painted_text(&mut h);
         assert!(texts.iter().any(|text| text.contains("10.00 mm")), "{texts:?}");
-        h.step(&json!({"click":{"world":[offset,0,5]}})).unwrap();
+        h.step(&json!({"click":{"world":[offset,0,3]}})).unwrap();
         assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.iter().all(|s| matches!(s, Sel::Edge { .. })));
         assert!((result(&h)["distance_mm"].as_f64().unwrap() - 20.).abs() < 1e-6);
         assert!(result(&h)["angle_deg"].as_f64().unwrap().abs() < 1e-6);
@@ -491,4 +492,209 @@ fn measure_imported_stl_edges_and_vertices_from_viewport_clicks() {
         h.call("ui.key", json!({"key":"Escape"}));
         h.app.session.selection.clear();
     }
+}
+
+/// The Measure tool lists a face's perimeter after its area, and the outer and inner lengths when
+/// the face has a hole (#12048).
+#[test]
+fn measure_lists_a_faces_perimeter_after_its_area() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length": 60, "width": 40, "height": 10, "body_name": "Plate"})).unwrap();
+    h.app.run("solid.cylinder", json!({"radius": 5, "height": 12, "base": [30, 20, -1], "operation": "cut"})).unwrap();
+    let rows = |h: &mut Harness, point: [f64; 3]| {
+        let r = h.app.session.execute("inspect.measure", &json!({"items":[{"type":"face","body":"Plate","point":point}]})).unwrap();
+        crate::quick_measure::item_lines(&h.app, &r["items"][0])
+    };
+    let holed = rows(&mut h, [5., 5., 10.]);
+    let circle = crate::prefs::show_mm(&h.app, std::f64::consts::TAU * 5.0, 1);
+    let total = crate::prefs::show_mm(&h.app, 200.0 + std::f64::consts::TAU * 5.0, 1);
+    let outer = crate::prefs::show_mm(&h.app, 200.0, 1);
+    assert!(holed[0].starts_with("Area  "), "{holed:?}");
+    assert_eq!(holed[1..], [format!("Perimeter  {total}"), format!("Outer perimeter  {outer}"), format!("Inner perimeter  {circle}")], "{holed:?}");
+    let plain = rows(&mut h, [5., 0., 5.]);
+    assert_eq!(plain.len(), 2, "a face with no hole has one perimeter row: {plain:?}");
+    assert!(plain[1].starts_with("Perimeter  "), "{plain:?}");
+}
+
+/// Snap points (#5912): hovering each hole's rim wakes its centre, and clicking the
+/// centres measures centre to centre: 30 mm between Ø6 and Ø8 holes at x = 15 and x = 45.
+#[test]
+fn measure_takes_woken_hole_centres() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.set_origin_shown(false);
+    h.app.ui.show_browser = false;
+    h.app.run("solid.box", json!({"length": 60, "width": 40, "height": 10})).unwrap();
+    h.app.run("solid.cylinder", json!({"radius": 3, "height": 12, "base": [15, 20, -1], "operation": "cut"})).unwrap();
+    h.app.run("solid.cylinder", json!({"radius": 4, "height": 12, "base": [45, 20, -1], "operation": "cut"})).unwrap();
+    h.app.run("select.clear", json!({})).unwrap();
+    h.app.cam.distance = 160.0;
+    h.settle();
+    h.app.start("inspect.measure");
+    for (rim, centre) in [([18, 20, 10], [15, 20, 10]), ([49, 20, 10], [45, 20, 10])] {
+        h.step(&json!({ "move": { "world": rim } })).unwrap();
+        h.step(&json!({ "click": { "world": centre } })).unwrap();
+    }
+    let picked: Vec<Sel> = h.app.dialog.as_ref().unwrap().inputs.iter().flat_map(|i| i.items.clone()).collect();
+    assert!(matches!(picked.as_slice(), [Sel::Vertex { .. }, Sel::Vertex { .. }]), "{picked:?}");
+    assert!((result(&h)["distance_mm"].as_f64().unwrap() - 30.0).abs() < 1e-6, "{}", result(&h));
+}
+
+/// A sphere's woken centre lies inside its own face: it is picked through that face.
+#[test]
+fn measure_takes_a_spheres_woken_centre_through_its_face() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.set_origin_shown(false);
+    h.app.ui.show_browser = false;
+    h.app.run("solid.sphere", json!({"center": [30, 30, 30], "radius": 10})).unwrap();
+    h.app.run("select.clear", json!({})).unwrap();
+    h.app.cam.distance = 160.0;
+    h.settle();
+    h.app.start("inspect.measure");
+    h.step(&json!({ "move": { "world": [35.774, 35.774, 35.774] } })).unwrap();
+    let centre = solidcore_record::Vec3::new(30.0, 30.0, 30.0);
+    assert!(
+        h.app.viewport.woken.points.iter().any(|p| p.at.dist(centre) < 1e-6),
+        "hover {:?} woken {:?}",
+        h.app.viewport.hover,
+        h.app.viewport.woken
+    );
+    h.step(&json!({ "click": { "world": [30, 30, 30] } })).unwrap();
+    let picked = &h.app.dialog.as_ref().unwrap().inputs[0].items;
+    assert!(matches!(picked.as_slice(), [Sel::Vertex { point, .. }] if point.dist(centre) < 1e-6), "{picked:?}");
+}
+
+/// A woken centre doesn't take a click on its own rim: zoomed out, a Ø6 hole's centre is
+/// within a woken point's reach of the rim, and a click on the rim still measures the rim.
+#[test]
+fn a_click_on_a_small_rim_measures_the_rim_not_its_woken_centre() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.set_origin_shown(false);
+    h.app.ui.show_browser = false;
+    h.app.run("solid.box", json!({"length": 60, "width": 40, "height": 10})).unwrap();
+    h.app.run("solid.cylinder", json!({"radius": 3, "height": 12, "base": [15, 20, -1], "operation": "cut"})).unwrap();
+    h.app.run("select.clear", json!({})).unwrap();
+    h.app.cam.distance = 400.0;
+    h.settle();
+    h.app.start("inspect.measure");
+    // On the rim at -55 degrees: away from the two vertices the kernel splits the circle at.
+    h.step(&json!({ "move": { "world": [16.72073, 17.54254, 10] } })).unwrap();
+    assert!(!h.app.viewport.woken.points.is_empty(), "the rim wakes its centre: hover {:?}, woken {:?}", h.app.viewport.hover, h.app.viewport.woken);
+    h.step(&json!({ "click": { "world": [16.72073, 17.54254, 10] } })).unwrap();
+    let picked = &h.app.dialog.as_ref().unwrap().inputs[0].items;
+    assert!(matches!(picked.as_slice(), [Sel::Edge { .. }]), "{picked:?}");
+}
+
+/// In a sketch, hovering a line wakes its middle, and a click there takes the middle, not the
+/// line it lies on (#5912).
+#[test]
+fn measure_takes_a_sketch_lines_woken_middle() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.set_origin_shown(false);
+    h.app.ui.show_browser = false;
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[0, 0], [40, 10]]})).unwrap();
+    h.app.cam.distance = 120.0;
+    h.settle();
+    h.app.start("inspect.measure");
+    h.step(&json!({ "move": { "sketch": [10, 2.5] } })).unwrap();
+    let middle = solidcore_record::Vec3::new(20.0, 5.0, 0.0);
+    assert!(h.app.viewport.woken.points.iter().any(|p| p.at.dist(middle) < 1e-9), "{:?}", h.app.viewport.woken);
+    h.step(&json!({ "click": { "sketch": [20, 5] } })).unwrap();
+    let picked = &h.app.dialog.as_ref().unwrap().inputs[0].items;
+    assert!(matches!(picked.as_slice(), [Sel::Vertex { point, .. }] if point.dist(middle) < 1e-9), "{picked:?}");
+}
+
+#[test]
+fn dual_measure_converts_original_lengths_and_area_without_changing_document_units() {
+    let mut h = Harness::new();
+    h.app.preferences.length_decimals = 2;
+    for (unit, primary, dual) in [
+        ("mm", "6.50 mm", "6.50 mm [0.2559 in]"),
+        ("in", "0.2559 in", "0.2559 in [6.50 mm]"),
+        ("cm", "0.65 cm", "0.65 cm [0.2559 in]"),
+        ("m", "0.01 m", "0.01 m [0.2559 in]"),
+        ("ft", "0.02 ft", "0.02 ft [6.50 mm]"),
+    ] {
+        h.app.run("document.units", json!({"units":unit})).unwrap();
+        assert_eq!(crate::prefs::show_measure(&h.app, 6.5, 1, false), primary);
+        assert_eq!(crate::prefs::show_measure(&h.app, 6.5, 1, true), dual);
+        assert_eq!(h.app.session.doc.units, unit);
+    }
+    h.app.run("document.units", json!({"units":"mm"})).unwrap();
+    assert_eq!(crate::prefs::show_measure(&h.app, 645.16, 2, true), "645.16 mm² [1.000 in²]");
+    assert_eq!(crate::prefs::show_measure(&h.app, 16387.064, 3, true), "16387.06 mm³ [1.000 in³]");
+    let lines = crate::quick_measure::item_lines_with_units(&h.app, &json!({"type":"face", "area_mm2":645.16, "perimeter_mm":101.6}), true);
+    assert!(lines.iter().any(|s| s.contains("645.16 mm² [1.000 in²]")), "{lines:?}");
+    assert!(lines.iter().any(|s| s.contains("101.60 mm [4.000 in]")), "{lines:?}");
+    let lines =
+        crate::quick_measure::item_lines_with_units(&h.app, &json!({"type":"edge", "diameter":6.5, "radius":3.25, "circumference":20.42}), true);
+    assert!(lines[0].contains("6.50 mm [0.2559 in]"), "{lines:?}");
+}
+
+#[test]
+fn dual_measure_toggle_updates_panel_and_viewport_and_can_be_turned_off() {
+    let mut h = vertex_measurement([0., 0., 0.], [3., 4., 12.]);
+    h.app.preferences.length_decimals = 2;
+    let units = h.app.session.doc.units.clone();
+    let before = result(&h).clone();
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Measure { dual_units: false, .. }));
+    h.step(&json!({"click":{"handle":"measure:dual_units"}})).unwrap();
+    h.frames(3);
+    let text = painted_text(&mut h);
+    assert!(text.iter().filter(|s| s.contains("13.00 mm [0.5118 in]")).count() >= 2, "panel and viewport: {text:?}");
+    assert_eq!(h.app.session.doc.units, units);
+    assert_eq!(*result(&h), before);
+    h.step(&json!({"click":{"handle":"measure:dual_units"}})).unwrap();
+    h.frames(3);
+    assert!(!painted_text(&mut h).iter().any(|s| s.contains("[0.5118 in]")));
+    h.step(&json!({"click":{"handle":"measure:dual_units"}})).unwrap();
+    h.frames(3);
+    dual_measure_evidence(&mut h, "dual-measure-distance.png");
+}
+
+/// Optional full-size UI evidence from the same rendered controls exercised by the test.
+fn dual_measure_evidence(h: &mut Harness, name: &str) {
+    let Ok(dir) = std::env::var("SOLIDCRAFT_DUAL_MEASURE_EVIDENCE") else { return };
+    h.ctx = egui::Context::default();
+    crate::fonts::setup_bundled_fonts(&h.ctx);
+    let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280., 720.));
+    let mut textures = std::collections::HashMap::new();
+    for frame in 0..6 {
+        let mut output =
+            h.ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), time: Some(frame as f64 / 60.), ..Default::default() }, |ui| h.app.ui(ui));
+        crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+        output.textures_delta.clear();
+        if frame == 5 {
+            let image = crate::ui_kit::test_raster(&h.ctx, output.shapes, output.pixels_per_point, bounds, &textures);
+            std::fs::create_dir_all(&dir).unwrap();
+            image.save(std::path::Path::new(&dir).join(name)).unwrap();
+        }
+    }
+}
+
+#[test]
+fn dual_measure_shows_a_selected_edges_length_in_both_units() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.length_decimals = 2;
+    h.app.run("solid.box", json!({"length":6.5,"width":10,"height":5,"body_name":"Box"})).unwrap();
+    let point = solidcore_record::Vec3::new(3.25, 0., 0.);
+    let index = {
+        let st = crate::open_meshing::session_world(&h.app.session);
+        let mesh = st.body("Box").unwrap().mesh();
+        mesh.edges.iter().position(|e| e.windows(2).any(|w| point.dist_to_segment(w[0], w[1]) < 1e-6)).unwrap()
+    };
+    h.app.session.selection = vec![Sel::Edge { body: "Box".into(), index, point }];
+    h.app.start("inspect.measure");
+    h.call("ui.view", json!({"view":"fit"}));
+    h.step(&json!({"click":{"handle":"measure:dual_units"}})).unwrap();
+    h.frames(3);
+    let text = painted_text(&mut h);
+    assert!(text.iter().any(|s| s.contains("Length  6.50 mm [0.2559 in]")), "{text:?}");
+    dual_measure_evidence(&mut h, "dual-measure-edge.png");
 }

@@ -1,0 +1,166 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b18": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b19": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b19"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b20"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b20"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b21"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b22"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b22"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b23"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b21"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b24"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b25"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b24",
+        "b25"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b26"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "4877-pocket-on-tab-joined-to-chamfered-disc",
+  "expected": {
+    "body_count": 1,
+    "method": "disc r25 h10 less its 1 mm bottom chamfer ring (Pappus: pi*(25-1/3)) plus the tab 20x12x4 less their overlap: Int_0^4 of the tab rectangle's area inside the disc's radius at z (24+z below z = 1, 25 above) (python quadrature); minus the pocket 10x4x0.6 = 24, wholly in the tab outside the disc. One shell: the pocket opens through the tab's top",
+    "shells": 1,
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#4877",
+      "tangency-labs/solidcraft#5413"
+    ],
+    "volume_mm3": 20403.0482,
+    "what": "a 0.6 mm pocket cut from the top of a tab joined to a disc with a chamfered bottom edge (the join fell back to truck's tool nudge, which lifted the tab's top by 5e-5 mm): the pocket never opened, it left a sealed void under a 0.00005 mm skin"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 35,
+      "faces": 15,
+      "vertices": 23
+    }
+  },
+  "records": "4877-pocket-on-tab-joined-to-chamfered-disc.bodies.json.gz",
+  "result": [
+    {
+      "body": "Disc",
+      "made": "b26"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 6009.545263361953,
+      "body_count": 1,
+      "edges": 33,
+      "faces": 14,
+      "vertices": 22,
+      "volume_mm3": 20403.048235408456
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4877",
+    "tangency-labs/solidcraft#5413"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a 0.6 mm pocket cut from the top of a tab joined to a disc with a chamfered bottom edge (the join fell back to truck's tool nudge, which lifted the tab's top by 5e-5 mm): the pocket never opened, it left a sealed void under a 0.00005 mm skin",
+  "why_not": []
+}

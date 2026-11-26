@@ -1,0 +1,8 @@
+# Frozen archives (new entries are one file each under plan/findings/ and
+# plan/upstream-issues/). Kept so branches that still append here merge locally;
+# GitHub's own mergeability check ignores merge=union.
+plan/findings.md merge=union
+plan/upstream-issues.md merge=union
+# build.rs turns each UpstreamFixes flag file into that field's doc, so a CRLF checkout must
+# not change it.
+crates/solidcore/src/kernel/fixes/*.md text eol=lf

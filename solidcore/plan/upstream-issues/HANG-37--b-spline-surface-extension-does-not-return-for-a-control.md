@@ -1,0 +1,10 @@
+#### HANG-37. B-spline surface extension does not return for a control point of magnitude 1e157 or more
+- **Severity:** Wrong result
+- **Area:** Healing
+- **Location:** `source/SMLib/src/SmBSplineSurfaceNLib.cpp:4583` (`SmBSplineSurface::CreateExtendedSurface`), reached from `SmOffsetExecutive::GetCreateExtendedSurface` (`source/SMLib/src/SmOffsetExecutive.cpp:2148`) with `SM_SP_BOTH`, five times the (nonnegative) offset magnitude and `SM_CT_G1R`.
+- **What happens:** With one control point coordinate at `1e157` or beyond, the extension call gives no result within 25 s; the stuck loop was not isolated (HANG-16 and HANG-17 describe the same routine's doubling loop and its exponential split; a coordinate of that size overflows the squared distances the extension-by-distance code compares).
+- **Trigger:** `--fuzz 2000` of `offset.offset_executive_p1` (case `fuzz00331`): a 3x3 degree-2 rational surface with one control point at `x = -1e300`, extension distance `-0.0`, approximation tolerance `4.5e-4`. The sign of the zero distance does not matter.
+- **How found:** PR #282's fuzz gate on the tree merged with main; the case timed out alone as well. Timing with that coordinate replaced, each axis in turn (pod sc-builder-0, release build): `1e154`, `1e155`, `1e156` return in 25-45 ms on x, y and z; `1e157` and `1e158` give no result within 25 s on every axis; `1e160`, `1e180`, `1e200`, `1e250`, `1e300` likewise on x.
+- **Confirmed:** yes (no result within 25 s, reproduced on 15 inputs across three axes; infinite execution not proven).
+- **Severity:** hang on out-of-range geometry; not a parity blocker (no fixture or generated case reaches it).
+- **Rust port:** the `offset.offset_executive_p1` FFI refuses control point coordinates (and coordinate/weight) above `MAX_COORDINATE = 1e154` in its `points()` guard, 1000x below the first slow value; the difftest runner's Rust side runs the same check, and the input is kept as a regression in `crates/difftest/tests/fuzz_regressions/`.

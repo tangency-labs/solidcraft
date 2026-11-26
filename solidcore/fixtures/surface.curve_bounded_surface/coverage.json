@@ -1,0 +1,146 @@
+{
+ "cases": [
+  {
+   "name": "eq_other_3d_boundaries_swapped",
+   "upstream_ref": "source/SMLib/src/SmCurveBoundedSurface.cpp:111 (coverage: crates/solidcore/src/surface/curve_bounded_surface.rs:234)",
+   "inputs": {
+    "op": "eq_other",
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    },
+    "other": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "eq_other_uv_boundaries_differ",
+   "upstream_ref": "source/SMLib/src/SmCurveBoundedSurface.cpp:119 (coverage: crates/solidcore/src/surface/curve_bounded_surface.rs:242)",
+   "inputs": {
+    "op": "eq_other",
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    },
+    "other": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  }
+ ]
+}

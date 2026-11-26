@@ -1,0 +1,14 @@
+#### UB-28. Curve fitting routines index outside their inputs
+- **Severity:** Crash / undefined behaviour
+- **Area:** NLib: curves, fitting, surfaces
+- **Location:** `NL_CrvFit.cpp:2458` `N_FitCalcKnotVectorEndDerivs` (and `N_FitCalcKnotVectorDeriv`); `:5461` `N_FitCrvApproxKnots`; `:2273` `N_FitCrvInterpGivenParams`; `:2716` `N_FitCrvDerivs` / `N_FitCubicSplineInterp`.
+- **What happens:**
+  - `p == 1` with one parameter reads `u[1]` / `u[-1]`.
+  - `N_FitCrvApproxKnots` copies `n+p+2` knots before checking the count, writes `Pw[1]` for `n == 0`, and indexes `B` correctly only for non-decreasing parameters.
+  - `2 <= n < p` gives `N_BasisEval` too few knots.
+  - A zero end derivative is estimated from `P[0..=3]` whatever the point count, which reads out of bounds below four points.
+- **Trigger:** `N_FitCrvDerivs` with 3 points and zero `Ds`.
+- **How found:** read during porting.
+- **Confirmed:** no.
+- **Severity:** crash/UB.
+- **Rust port:** Returns `InvalidInput`.

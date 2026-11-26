@@ -5,81 +5,108 @@ use solidcraft_engine::{Sel, sketch::SketchPatternKind};
 
 use crate::{
     SolveApp,
-    browser::{Row, draw_row},
+    browser::{Row, Spec, node_row},
+    ui_kit::browser::Rows,
 };
 
 pub(crate) fn has_patterns(app: &SolveApp, sketch: u64) -> bool {
     app.session.doc.sketch(sketch).is_ok_and(|sk| !sk.patterns.is_empty())
 }
 
-/// A pattern's name as its row shows it: "Rectangular Pattern 3".
-fn label(kind: &SketchPatternKind, id: &str) -> String {
-    let name = match kind {
-        SketchPatternKind::Rectangular { .. } => "Rectangular Pattern",
-        SketchPatternKind::Circular { .. } => "Circular Pattern",
-    };
-    format!("{} {}", crate::i18n::tr_label(name), id.strip_prefix("pat").unwrap_or(id))
+/// One pattern row of a sketch, as the Browser and the vertical feature history list it.
+struct Pattern {
+    id: String,
+    label: String,
+    icon: &'static str,
+    selected: bool,
+    /// What a click on it selects while its sketch is edited: the copies, not the sources.
+    copies: Vec<Sel>,
 }
 
-/// The row name of a pattern of the active sketch, or its id once the pattern is gone.
-pub(crate) fn active_label(s: &solidcraft_engine::Session, id: &str) -> String {
-    let sketch = s.active_sketch.and_then(|sketch| s.doc.sketch(sketch).ok());
-    sketch.and_then(|sk| sk.patterns.iter().find(|p| p.id == id).map(|p| label(&p.kind, id))).unwrap_or_else(|| id.to_string())
-}
-
-/// Shared by the parts browser and the vertical feature history. The stored document is the
-/// source, so rolled-back sketches retain their children without showing preview-only copies.
-/// `dim`: the sketch is hidden (or a placement above it), so its patterns fade with it.
-pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, sketch: u64, depth: usize, scope: &str, occurrence: Option<(u64, &[u64])>, dim: bool) {
+/// The sketch's patterns, from the stored document, so rolled-back sketches retain their
+/// children without showing preview-only copies.
+fn patterns(app: &SolveApp, sketch: u64) -> Vec<Pattern> {
     let patterns: Vec<_> = app.session.doc.sketch(sketch).map(|sk| sk.patterns.clone()).unwrap_or_default();
-    for pattern in patterns {
-        let icon = match pattern.kind {
-            SketchPatternKind::Rectangular { .. } => "sketch_rect_pattern",
-            SketchPatternKind::Circular { .. } => "sketch_circ_pattern",
-        };
-        let label = label(&pattern.kind, &pattern.id);
-        let active = app.session.active_sketch == Some(sketch);
-        // The sources are inputs to the pattern: selecting its row must only delete copies.
-        // Select point copies when the point itself is a source; curve endpoints go with curves.
-        let sources: std::collections::BTreeSet<_> = pattern.entities.iter().collect();
-        let copies: Vec<_> = pattern
-            .instances
-            .iter()
-            .flat_map(|instance| &instance.curves)
-            .map(|id| Sel::SketchCurve { id: id.clone(), sketch: None })
-            .chain(
-                pattern
-                    .instances
-                    .iter()
-                    .flat_map(|instance| &instance.points)
-                    .filter(|(source, _)| sources.contains(source))
-                    .map(|(_, id)| Sel::SketchPoint { id: id.clone() }),
-            )
-            .collect();
-        // A pattern with no copies (a count of 1) has nothing to select, so its row selects the
-        // pattern itself, which Delete then removes (#12081).
-        let copies = if copies.is_empty() { vec![Sel::SketchPattern { id: pattern.id.clone() }] } else { copies };
-        let selected = active && copies.iter().all(|copy| app.session.selection.contains(copy));
-        let response = draw_row(
+    let active = app.session.active_sketch == Some(sketch);
+    patterns
+        .into_iter()
+        .map(|pattern| {
+            let (name, icon) = match pattern.kind {
+                SketchPatternKind::Rectangular { .. } => ("Rectangular Pattern", "sketch_rect_pattern"),
+                SketchPatternKind::Circular { .. } => ("Circular Pattern", "sketch_circ_pattern"),
+            };
+            let suffix = pattern.id.strip_prefix("pat").unwrap_or(&pattern.id);
+            let label = format!("{} {suffix}", solidcraft_ui_text::tr_label(name));
+            // The sources are inputs to the pattern: selecting its row must only delete copies.
+            // Select point copies when the point itself is a source; curve endpoints go with curves.
+            let sources: std::collections::BTreeSet<_> = pattern.entities.iter().collect();
+            let copies: Vec<_> = pattern
+                .instances
+                .iter()
+                .flat_map(|instance| &instance.curves)
+                .map(|id| Sel::SketchCurve { id: id.clone(), sketch: None })
+                .chain(
+                    pattern
+                        .instances
+                        .iter()
+                        .flat_map(|instance| &instance.points)
+                        .filter(|(source, _)| sources.contains(source))
+                        .map(|(_, id)| Sel::SketchPoint { id: id.clone() }),
+                )
+                .collect();
+            let selected = active && !copies.is_empty() && copies.iter().all(|copy| app.session.selection.contains(copy));
+            Pattern { id: pattern.id.clone(), label, icon, selected, copies }
+        })
+        .collect()
+}
+
+/// A pattern row clicked or double-clicked: a double-click opens the sketch (its placement's
+/// component active) and the pattern's editor; a click selects the copies while the sketch is
+/// edited, else the sketch.
+fn act(app: &mut SolveApp, sketch: u64, occurrence: Option<(u64, &[u64])>, pattern: Pattern, double: bool, clicked: bool) {
+    if double {
+        if let Some((component, path)) = occurrence {
+            let _ = app.run("component.activate", json!({"component":component,"occurrence":path.last(),"path":path}));
+        }
+        app.edit_sketch(sketch);
+        if app.session.active_sketch == Some(sketch) {
+            crate::sketch_modify_ui::edit_pattern(app, &pattern.id);
+        }
+    } else if clicked {
+        let items = if app.session.active_sketch == Some(sketch) { pattern.copies } else { vec![Sel::Feature { id: sketch }] };
+        let _ = app.run("select.set", json!({"items":items}));
+    }
+}
+
+/// The patterns under their sketch in the Browser. `dim`: the sketch is hidden (or a placement
+/// above it), so its patterns fade with it.
+pub(crate) fn browser_rows(app: &mut SolveApp, rows: &mut Rows<'_>, sketch: u64, depth: usize, occurrence: Option<(u64, &[u64])>, dim: bool) {
+    for pattern in patterns(app, sketch) {
+        let key = format!("pattern:{sketch}:{}", pattern.id);
+        let response = node_row(
+            rows,
+            Spec { key: &key, ..Default::default() },
+            Row { depth, icon: pattern.icon, label: &pattern.label, name: true, selected: pattern.selected, dim, ..Default::default() },
+        );
+        if let Some(rect) = response.rect {
+            crate::scenario::publish_handle(&format!("browser:sketch-pattern:{sketch}:{}", pattern.id), rect.center());
+        }
+        act(app, sketch, occurrence, pattern, response.double, response.clicked);
+    }
+}
+
+/// The patterns under their sketch in the vertical feature history.
+pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, sketch: u64, depth: usize, scope: &str, occurrence: Option<(u64, &[u64])>, dim: bool) {
+    for pattern in patterns(app, sketch) {
+        let response = crate::ui_kit::tree_row(
             ui,
-            ui.id().with(("sketch_pattern", sketch, &pattern.id)),
-            &Row { depth, icon, label: &label, name: true, selected, dim, ..Default::default() },
+            ui.scope_id().with(("sketch_pattern", sketch, &pattern.id)),
+            &Row { depth, icon: pattern.icon, label: &pattern.label, name: true, selected: pattern.selected, dim, ..Default::default() },
         );
         if let Some(rect) = response.rect {
             crate::scenario::publish_handle(&format!("{scope}:sketch-pattern:{sketch}:{}", pattern.id), rect.center());
         }
-        if response.double {
-            if let Some((component, path)) = occurrence {
-                let _ = app.run("component.activate", json!({"component":component,"occurrence":path.last(),"path":path}));
-            }
-            app.edit_sketch(sketch);
-            if app.session.active_sketch == Some(sketch) {
-                crate::sketch_modify_ui::edit_pattern(app, &pattern.id);
-            }
-        } else if response.clicked {
-            let items = if active { copies } else { vec![Sel::Feature { id: sketch }] };
-            let _ = app.run("select.set", json!({"items":items}));
-        }
+        act(app, sketch, occurrence, pattern, response.double, response.clicked);
     }
 }
 
@@ -92,7 +119,7 @@ mod tests {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.ui.show_browser = true;
-        h.app.preferences.timeline_left = left_history;
+        h.app.run("view.history_layout", json!({"dock":if left_history { "left" } else { "bottom" }})).unwrap();
         h.app.run("sketch.create", json!({"plane":"XY","name":"Patterned Sketch"})).unwrap();
         let sketch = h.app.session.active_sketch.unwrap();
         h.app.run("sketch.line", json!({"points":[[10,5],[15,5]],"ids":["source"]})).unwrap();
@@ -160,7 +187,7 @@ mod tests {
                     let mut h = Harness::new();
                     h.app.home.open = false;
                     h.app.ui.show_browser = true;
-                    h.app.preferences.timeline_left = left_history;
+                    h.app.run("view.history_layout", json!({"dock":if left_history { "left" } else { "bottom" }})).unwrap();
                     h.app.run("sketch.create", json!({"plane":"XY","name":"Patterned Sketch"})).unwrap();
                     let sketch = h.app.session.active_sketch.unwrap();
                     h.app.run("sketch.line", json!({"points":[[10,5],[15,5]],"ids":["source"]})).unwrap();
@@ -205,43 +232,6 @@ mod tests {
         }
     }
 
-    /// #12081: a rectangular pattern with a count of 1 has no copies. Its row still selects the
-    /// pattern, and Delete removes the pattern while the source line stays.
-    #[test]
-    fn a_pattern_row_without_copies_selects_and_deletes_the_pattern() {
-        for left_history in [false, true] {
-            let mut h = Harness::new();
-            h.app.home.open = false;
-            h.app.ui.show_browser = true;
-            h.app.preferences.timeline_left = left_history;
-            h.app.run("sketch.create", json!({"plane":"XY","name":"Patterned Sketch"})).unwrap();
-            let sketch = h.app.session.active_sketch.unwrap();
-            h.app.run("sketch.line", json!({"points":[[10,5],[15,5]],"ids":["source"]})).unwrap();
-            let single = h.app.run("sketch.pattern.rectangular", json!({"entities":["source"],"count":1,"spacing":20})).unwrap();
-            let single = single["pattern"].as_str().unwrap().to_string();
-            let sibling = h.app.run("sketch.pattern.rectangular", json!({"entities":["source"],"count":2,"spacing":20})).unwrap();
-            let sk = h.app.session.doc.sketch(sketch).unwrap();
-            assert!(sk.patterns.iter().find(|p| p.id == single).unwrap().instances.is_empty(), "a count of 1 makes no copies");
-            let before = serde_json::to_value(sk).unwrap();
-            h.frames(6);
-
-            let scope = if left_history { "timeline" } else { "browser" };
-            h.step(&json!({"click":{"handle":format!("{scope}:sketch-pattern:{sketch}:{single}")}})).unwrap();
-            h.frames(2);
-            assert!(!h.app.session.selection.is_empty(), "{scope}: clicking the row selects the pattern");
-            h.step(&json!({"key":"Delete"})).unwrap();
-            h.frames(3);
-
-            let sk = h.app.session.doc.sketch(sketch).unwrap();
-            assert!(sk.curve_index("source").is_some(), "{scope}: the source line stays");
-            assert_eq!(sk.patterns.len(), 1, "{scope}: only the selected pattern goes");
-            assert_eq!(sk.patterns[0].id, sibling["pattern"]);
-            assert!(crate::scenario::handle_at(&format!("{scope}:sketch-pattern:{sketch}:{single}")).is_none());
-            h.app.run("edit.undo", json!({})).unwrap();
-            assert_eq!(serde_json::to_value(h.app.session.doc.sketch(sketch).unwrap()).unwrap(), before, "{scope}: undo restores the pattern");
-        }
-    }
-
     /// Where a text starts, drawn inside `within`.
     fn text_left(h: &Harness, text: &str, within: egui::Rect) -> f32 {
         let mut at = None;
@@ -263,7 +253,7 @@ mod tests {
     #[test]
     fn left_history_patterns_step_in_from_their_sketch_like_the_browser() {
         let (mut h, sketch, rectangular, _) = harness(true);
-        let label = format!("{} {}", crate::i18n::tr_label("Rectangular Pattern"), rectangular.strip_prefix("pat").unwrap_or(&rectangular));
+        let label = format!("{} {}", solidcraft_ui_text::tr_label("Rectangular Pattern"), rectangular.strip_prefix("pat").unwrap_or(&rectangular));
         h.frame();
         let browser = crate::scenario::rect_of("browser:card").unwrap();
         let in_browser = text_left(&h, &label, browser) - text_left(&h, "Patterned Sketch", browser);

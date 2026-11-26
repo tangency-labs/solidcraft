@@ -1,0 +1,192 @@
+{
+  "area": "ladder/07-fillets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  60.0,
+                  40.0,
+                  20.0
+                ],
+                [
+                  0.0,
+                  40.0,
+                  20.0
+                ]
+              ],
+              "index": 3
+            },
+            {
+              "at": [
+                [
+                  60.0,
+                  0.0,
+                  20.0
+                ],
+                [
+                  60.0,
+                  40.0,
+                  20.0
+                ]
+              ],
+              "index": 2
+            },
+            {
+              "at": [
+                [
+                  60.0,
+                  40.0,
+                  0.0
+                ],
+                [
+                  60.0,
+                  40.0,
+                  20.0
+                ]
+              ],
+              "index": 4
+            }
+          ],
+          "points": [
+            [
+              30.0,
+              40.0,
+              20.0
+            ],
+            [
+              60.0,
+              20.0,
+              20.0
+            ],
+            [
+              60.0,
+              40.0,
+              10.0
+            ]
+          ],
+          "tolerance": 3.7426573867739417
+        },
+        "kind": "round",
+        "sizes": [
+          5.0,
+          5.0,
+          5.0
+        ]
+      }
+    }
+  ],
+  "case": "009-corner-three-equal-r5",
+  "expected": {
+    "body_count": 1,
+    "faces": 10,
+    "method": "each edge zone outside the corner cube removes (1-pi/4) r^2 (L - r); the corner cube r^3 keeps a sphere octant pi r^3/6",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 47377.120025868,
+    "what": "r5 rounds on the three edges meeting at the corner (60,40,20): a sphere corner"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 8522.842842013037,
+      "body_count": 1,
+      "edges": 21,
+      "faces": 10,
+      "vertices": 13,
+      "volume_mm3": 47377.12002606183
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 21,
+      "faces": 10,
+      "vertices": 13
+    }
+  },
+  "records": "009-corner-three-equal-r5.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 8522.842842014825,
+      "body_count": 1,
+      "edges": 21,
+      "faces": 10,
+      "vertices": 13,
+      "volume_mm3": 47377.12002595122
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "r5 rounds on the three edges meeting at the corner (60,40,20): a sphere corner",
+  "why_not": []
+}

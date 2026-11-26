@@ -1,0 +1,45 @@
+{
+  "area": "booleans",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-pattern-path-past-the-end-refused",
+  "expected": {
+    "method": "(6 - 1) * 20 = 100 > 80: the last instances would leave the path; a clean refusal naming its length",
+    "outcome": "refused",
+    "refusal": "run past the end of the path (80.000 mm long)",
+    "source": "analytic",
+    "sources": [],
+    "what": "6 instances 20 mm apart need 100 mm of an 80 mm path: refused"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 6 (solid.pattern.path): the instances run past the end of the path (80.000 mm long)",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 6 (solid.pattern.path): the instances run past the end of the path (80.000 mm long)",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "6 instances 20 mm apart need 100 mm of an 80 mm path: refused",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 6 (solid.pattern.path): the instances run past the end of the path (80.000 mm long)"
+  ]
+}
