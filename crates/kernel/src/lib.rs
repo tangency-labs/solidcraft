@@ -470,6 +470,7 @@ pub use route::member_extent;
 pub use route::offset_faces;
 pub use route::orient_stock;
 pub use route::plan_cell_grid;
+pub use route::planar;
 pub use route::points;
 pub use route::projection;
 pub use route::query;

@@ -18,6 +18,7 @@ mod exchange;
 mod frames;
 mod hole_stacks;
 mod modelling;
+mod planar;
 mod points;
 mod projection;
 mod query;
