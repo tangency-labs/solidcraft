@@ -3117,6 +3117,17 @@ fn complete_face_seams_edit(
             }
         }
         for &face in &faces {
+            // Closing the loop's UV gaps places vertices within this, not the old face's (#22638).
+            let mut trims_box: Option<Extent2d> = None;
+            for eu in super::p4::upward_edgeuses(b, face, false, None)? {
+                let trim = get_or_create_uv_trim_curve(k, b, eu)?;
+                let bx = Extent2d::from_extent3d(&uv_curve_box(k, &trim)?);
+                trims_box = Some(trims_box.map_or(bx, |d| d.union(&bx)));
+            }
+            if let Some(bx) = trims_box {
+                let surface_domain = surface_deref(b, face)?.natural_uv_domain_with_nurb(k)?;
+                fp2::set_uv_domain(b, face, &bx.intersect(&surface_domain)?)?;
+            }
             let domain =
                 calculate_uv_domain_from_uv_trim_curves(k, b, face, true, false, false)?.domain;
             fp2::set_uv_domain(b, face, &domain)?;
