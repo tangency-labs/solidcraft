@@ -38,6 +38,7 @@ pub fn step(v: &mut Value) -> Result<()> {
             parent,
             name: String::new(),
             transform: crate::IDENTITY,
+            base_transform: None,
             grounded: false,
             expressed_moves: Vec::new(),
             bom_type: None,

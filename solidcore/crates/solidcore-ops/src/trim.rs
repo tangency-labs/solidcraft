@@ -658,6 +658,29 @@ pub fn remove_feature_with_crossing_patches(
     order: &Order,
     faces: &[usize],
 ) -> Result<Option<(Body, History)>> {
+    remove_extended_feature(body, order, faces, true)
+}
+
+/// Remove a connected group of rolling-ball faces by extending their neighbours
+/// into its single boundary loop. The caller identifies the round and its end caps.
+/// Return `None` when the selection is disconnected or the loop cannot be closed.
+///
+/// # Errors
+/// As [`remove_feature_with_crossing_patches`].
+pub fn remove_round_junction(
+    body: &Body,
+    order: &Order,
+    faces: &[usize],
+) -> Result<Option<(Body, History)>> {
+    remove_extended_feature(body, order, faces, false)
+}
+
+fn remove_extended_feature(
+    body: &Body,
+    order: &Order,
+    faces: &[usize],
+    crossing_pair: bool,
+) -> Result<Option<(Body, History)>> {
     if faces.is_empty() || faces.len() > MAX_FACES {
         return Err(Error::Argument);
     }
@@ -670,9 +693,15 @@ pub fn remove_feature_with_crossing_patches(
     if selection.len() != picked.len() {
         return Err(Error::Argument);
     }
+    let operation = if crossing_pair {
+        "remove_feature_with_crossing_patches"
+    } else {
+        "remove_round_junction"
+    };
+    let boundary_count = if crossing_pair { 2 } else { 1 };
     let mut trimmed = false;
     let history = history::recorded(&result, &mapped, Made::Plain, || {
-        trimmed = with_body("remove_feature_with_crossing_patches", &result, |k, b| {
+        trimmed = with_body(operation, &result, |k, b| {
             let mut executive = FeatureExecutive::new(k, b)?;
             let Some(i) = executive.add_feature(
                 k,
@@ -686,17 +715,33 @@ pub fn remove_feature_with_crossing_patches(
             // add_feature starts at the first face. A second disconnected selection
             // must not be silently left behind.
             if !executive.features().get(i).is_some_and(|feature| {
-                feature.loops.len() == 2
+                feature.loops.len() == boundary_count
                     && feature.faces.len() == selection.len()
                     && feature.faces.iter().all(|face| selection.contains(face))
             }) {
                 return Ok(false);
             }
-            Ok(executive.do_defeature(k)?.is_empty()
-                && executive
+            if !executive.do_defeature(k)?.is_empty() {
+                return Ok(false);
+            }
+            if crossing_pair {
+                return Ok(executive
                     .features()
                     .get(i)
-                    .is_some_and(|feature| feature.trimmed_crossing_base_patches))
+                    .is_some_and(|feature| feature.trimmed_crossing_base_patches));
+            }
+            drop(executive);
+            // The extensions can leave their attachment edges as seams on the
+            // original supports. Remove only joins between a patch and an old face.
+            let original: HashSet<_> = mapped.faces.iter().copied().collect();
+            let patches: Vec<_> = b
+                .face_list()
+                .iter()
+                .copied()
+                .filter(|face| !original.contains(face))
+                .collect();
+            solidcore::blend::feature_executive::remove_patch_rims(k, b, &mapped.faces, &patches)?;
+            Ok(true)
         })?;
         Ok(())
     })?;

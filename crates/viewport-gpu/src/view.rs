@@ -77,6 +77,11 @@ pub const PALETTE_WIDTH: u32 = 2048;
 /// Most palette entries a scene may carry (2048 × 512): the palette is an `Rg32Uint` texture
 /// (`downlevel_defaults`/WebGL2 have no storage buffers in the vertex stage).
 pub const MAX_PALETTE: usize = 1 << 20;
+/// Set in a placement's palette index word (never a real index: [`MAX_PALETTE`] is far below
+/// it) for the one placement a whole-body hover lights in the model's own draw: the instanced
+/// shaders take the entry without it and add the hover tint ([`Frame::hover_tint`]) to its
+/// colour, so the body is lit and occluded like the rest and no copy of it is drawn.
+pub const HOVER_FLAG: u32 = 1 << 31;
 
 /// sRGB RGBA bytes, looked up in the shader by [`PaletteIndex`].
 ///
@@ -856,6 +861,13 @@ fn push_edge_seg(out: &mut Vec<u8>, a: [f32; 3], b: [f32; 3], flags: u32, edge: 
 pub struct GpuScene {
     /// The colours every vertex, line and instance index into.
     pub palette: Arc<Palette>,
+    /// The highlight scene's whole hovered body that the model draws lit in place (see
+    /// [`Frame::hover_body`]) rather than this scene drawing it again.
+    pub hover_body: Option<String>,
+    /// The model scene's bodies drawn as one whole opaque placement each: the index in
+    /// `instanced` of its mesh and its row among that mesh's placements, by body name. A
+    /// whole-body hover ([`Frame::hover_body`]) finds its placement here.
+    pub instance_rows: Arc<std::collections::HashMap<String, (u32, u32)>>,
     /// Non-selectable virtual ground receiving viewport AO, separate from model triangles.
     pub ground_ao: Option<GroundAo>,
     /// Opaque triangles. A zero normal draws the colour flat (unlit).
@@ -948,6 +960,20 @@ impl GpuScene {
     /// A scene whose palette starts with `palette`'s stable entries (the model scene).
     pub fn with_palette(palette: Palette) -> GpuScene {
         GpuScene { palette: Arc::new(palette), ..Default::default() }
+    }
+
+    /// The sizes of the lists a sketch scene fills (`lines`, `overlay`, `under`, `trans`), for
+    /// [`GpuScene::reserve_lists`] on the next one.
+    pub fn capacity_hint(&self) -> [usize; 4] {
+        [self.lines.len(), self.overlay.len(), self.under.len(), self.trans.len()]
+    }
+
+    /// Room for the sizes [`GpuScene::capacity_hint`] gave. Only capacity: no byte changes.
+    pub fn reserve_lists(&mut self, sizes: [usize; 4]) {
+        self.lines.reserve(sizes[0]);
+        self.overlay.reserve(sizes[1]);
+        self.under.reserve(sizes[2]);
+        self.trans.reserve(sizes[3]);
     }
 
     /// Intern an ephemeral colour (grid, highlight, sketch, preview) into this scene's palette.
@@ -1384,11 +1410,8 @@ impl GpuScene {
         self.shadow.extend_from_slice(&NO_VALUE.to_le_bytes());
     }
     pub fn trans_tri(&mut self, p: [f32; 3], n: [f32; 3], c: PaletteIndex) {
-        for v in p.iter().chain(&n) {
-            self.trans.extend_from_slice(&v.to_le_bytes());
-        }
-        self.trans.extend_from_slice(&c.0.to_le_bytes());
-        self.trans.extend_from_slice(&NO_VALUE.to_le_bytes());
+        // The same bytes as a line record: position, normal, palette index, no value.
+        self.trans.extend_from_slice(&line_record(p, n, c, NO_VALUE));
     }
     /// A line shown only where the model hides it.
     pub fn hidden_line(&mut self, a: [f32; 3], b: [f32; 3], c: PaletteIndex, width: f32) {
@@ -1424,11 +1447,7 @@ impl GpuScene {
     }
     /// A line under everything (see [`GpuScene::under`]).
     pub fn under_line(&mut self, a: [f32; 3], b: [f32; 3], c: PaletteIndex, width: f32) {
-        for v in a.iter().chain(&b) {
-            self.under.extend_from_slice(&v.to_le_bytes());
-        }
-        self.under.extend_from_slice(&c.0.to_le_bytes());
-        self.under.extend_from_slice(&width.to_le_bytes());
+        self.under.extend_from_slice(&line_record(a, b, c, width.to_bits()));
     }
     /// A translucent triangle of a plane a section does not cut (see [`GpuScene::guide_trans`]).
     pub fn guide_tri(&mut self, p: [f32; 3], c: PaletteIndex) {
@@ -1522,6 +1541,11 @@ pub struct Frame {
     /// The highlight scene and its key.
     pub hl_key: u64,
     pub hl_slot: SceneSlot,
+    /// The whole hovered body the model's own draw lights: its placement (found in the model
+    /// scene the renderer holds, [`GpuScene::instance_rows`]) is drawn with [`HOVER_FLAG`], so
+    /// the shaders add [`Frame::hover_tint`] to its colour and it keeps the model's lighting and
+    /// occlusion. A name the model scene does not place lights nothing.
+    pub hover_body: Option<String>,
     /// The live preview scene and its key.
     pub pv_key: u64,
     pub pv_slot: SceneSlot,
@@ -1969,6 +1993,9 @@ struct LevelDraw {
 /// while they come back), and the placements in view, each drawn from its level.
 #[derive(Clone)]
 struct InstancedDraw {
+    /// Its mesh's index in the scene's `instanced` ([`GpuScene::instance_rows`] names it): empty
+    /// meshes are left out here, so it is not the draw's own index.
+    mesh: u32,
     look: InstanceLook,
     /// Its triangles enclose a volume ([`InstancedMesh::closed`]).
     closed: bool,
@@ -1993,6 +2020,27 @@ impl InstancedDraw {
             pass.set_pipeline(if level.flat { flat } else { smooth });
             level.draw(pass, tally);
         }
+    }
+}
+
+/// Where a whole-body hover's placement `at` (its mesh's index in the scene's `instanced`, its
+/// row there: [`GpuScene::instance_rows`]) is among `draws` (each draw's mesh index, look and
+/// placement count): the draw and the row. `None` when no draw holds that mesh, the row is past
+/// its placements, or the draw is not opaque: the hover then lights nothing rather than another
+/// body.
+fn hover_row(draws: impl IntoIterator<Item = (u32, InstanceLook, usize)>, at: (u32, u32)) -> Option<(usize, usize)> {
+    let (n, (_, look, count)) = draws.into_iter().enumerate().find(|(_, (mesh, _, _))| *mesh == at.0)?;
+    let row = usize::try_from(at.1).ok()?;
+    (look == InstanceLook::Opaque && row < count).then_some((n, row))
+}
+
+/// Set or clear [`HOVER_FLAG`] in the palette word of placement `row` of draw `d`.
+fn set_hover_flag(draws: &mut [InstancedDraw], d: usize, row: usize, on: bool) {
+    let at = row * INSTANCE_SIZE + 48;
+    if let Some(word) = draws.get_mut(d).and_then(|x| x.placements.get_mut(at..at + 4)) {
+        let Ok(bytes) = <[u8; 4]>::try_from(&*word) else { return };
+        let w = u32::from_le_bytes(bytes);
+        word.copy_from_slice(&(if on { w | HOVER_FLAG } else { w & !HOVER_FLAG }).to_le_bytes());
     }
 }
 
@@ -2380,8 +2428,11 @@ impl PaletteGpu {
         let (old, new) = (self.palette.materials(), palette.materials());
         let width = PALETTE_WIDTH as usize;
         for row in 0..self.material_rows {
-            let at = |m: &[Material]| m.get(row as usize * width..((row as usize + 1) * width).min(m.len())).unwrap_or_default().to_vec();
-            if at(old) != at(new) {
+            let start = row as usize * width;
+            let end = (row as usize + 1) * width;
+            let old_row = &old[start.min(old.len())..end.min(old.len())];
+            let new_row = &new[start.min(new.len())..end.min(new.len())];
+            if old_row != new_row {
                 write_materials(queue, &self.materials, new, row, row + 1, written);
             }
         }
@@ -2489,6 +2540,11 @@ struct Batches {
     /// cull after the scene changes (`gpu_cull_stale`), from the pipelines kept across scenes.
     gpu_cull: Option<gpu_cull::GpuCull>,
     gpu_cull_stale: bool,
+    /// The scene's whole-body placements by body name ([`GpuScene::instance_rows`]).
+    instance_rows: Arc<std::collections::HashMap<String, (u32, u32)>>,
+    /// The placement (draw, row) whose palette word holds [`HOVER_FLAG`] in `placements`, for a
+    /// draw the CPU writes: set for the frame's cull and cleared at the next.
+    hover_cpu: Option<(usize, usize)>,
     cull_kernel: Option<Arc<gpu_cull::Kernel>>,
     /// The device cannot build the pipelines: the CPU culls.
     cull_kernel_failed: bool,
@@ -2631,6 +2687,8 @@ impl Batches {
             };
             let arena = self.arena.clone();
             self.instanced = self.instanced(device, &sc.instanced, donor.as_deref(), arena.as_deref());
+            self.instance_rows = sc.instance_rows.clone();
+            self.hover_cpu = None;
             self.indirect = arena.clone().and_then(|a| indirect::Indirect::new(device, &self.instanced, a));
             // The instanced edges, and the lit ones drawn again over them, from one segment
             // buffer: a lit part's edges are the model's (this scene's, or the model scene's for
@@ -2790,7 +2848,7 @@ impl Batches {
     ) -> Vec<InstancedDraw> {
         let mut kept = std::mem::take(&mut self.instanced_tris);
         let mut out = Vec::with_capacity(meshes.len());
-        for m in meshes {
+        for (mesh, m) in meshes.iter().enumerate() {
             let count = u32::try_from(m.count()).unwrap_or(u32::MAX);
             if count == 0 {
                 continue;
@@ -2839,6 +2897,7 @@ impl Batches {
             }
             if !levels.is_empty() {
                 out.push(InstancedDraw {
+                    mesh: u32::try_from(mesh).unwrap_or(u32::MAX),
                     look: m.look,
                     closed: m.closed,
                     levels,
@@ -2894,7 +2953,14 @@ impl Batches {
         motions: &Motions,
         edge_px: f32,
         hidden: Option<(&hiz::Hiz, bool)>,
+        hover: Option<&str>,
     ) {
+        // The last frame's hover flag out of the placements first, so a GPU cull made below reads
+        // them as the scene has them.
+        let flagged = self.hover_cpu.take();
+        if let Some((d, row)) = flagged {
+            set_hover_flag(&mut self.instanced, d, row, false);
+        }
         self.cull_blocks(vp, motions);
         if std::mem::take(&mut self.gpu_cull_stale) {
             self.gpu_cull = None;
@@ -2925,9 +2991,38 @@ impl Batches {
                 }
             }
         }
+        // The whole-body hover's placement in this scene: flagged in the GPU cull's output when
+        // the GPU culls its draw, else in the placements the CPU writes (a draw whose placements
+        // change is written again, as is the one that held the flag before).
+        let target = hover.and_then(|name| {
+            let at = self.instance_rows.get(name)?;
+            hover_row(self.instanced.iter().map(|d| (d.mesh, d.look, d.placements.len() / INSTANCE_SIZE)), *at)
+        });
+        let gpu_culls = |d: usize| self.gpu_cull.as_ref().is_some_and(|g| self.instanced.get(d).is_some_and(|x| g.culls(x)));
+        let (on_gpu, on_cpu) = match target {
+            Some((d, _)) if gpu_culls(d) => (target, None),
+            _ => (None, target),
+        };
+        if let Some((d, row)) = on_cpu {
+            set_hover_flag(&mut self.instanced, d, row, true);
+        }
+        if on_cpu != flagged {
+            for (d, _) in flagged.into_iter().chain(on_cpu) {
+                if let Some(x) = self.instanced.get_mut(d) {
+                    x.shown = None;
+                }
+            }
+        }
+        self.hover_cpu = on_cpu;
         let (changed, edges_changed) = self.cull_placements(queue, vp, size, motions, edge_px);
+        // The GPU cull's scene holds every draw's placements in order: the hovered one is the
+        // count before its draw plus its row.
+        let hover = on_gpu.and_then(|(d, row)| {
+            let before: usize = self.instanced.get(..d)?.iter().map(|x| x.placements.len() / INSTANCE_SIZE).sum();
+            u32::try_from(before + row).ok()
+        });
         if let (Some(g), Some(indirect)) = (self.gpu_cull.as_mut(), self.indirect.as_mut()) {
-            g.run(device, queue, encoder, vp, size, hidden, changed, &self.instanced, indirect, self.edges.as_mut());
+            g.run(device, queue, encoder, vp, size, hidden, changed, &self.instanced, indirect, self.edges.as_mut(), hover);
             return;
         }
         if changed && let Some(indirect) = self.indirect.as_mut() {
@@ -2966,7 +3061,7 @@ impl Batches {
             }
             let word = |at: usize| p.get(at..at + 4).and_then(|x| x.try_into().ok()).map_or(0, u32::from_le_bytes);
             let slot = match word(INSTANCE_MOTION_AT) {
-                UNMOVED_SLOT => palette.as_ref().map_or(UNMOVED_SLOT, |pal| pal.motion(PaletteIndex(word(48)))),
+                UNMOVED_SLOT => palette.as_ref().map_or(UNMOVED_SLOT, |pal| pal.motion(PaletteIndex(word(48) & !HOVER_FLAG))),
                 own => own,
             };
             if slot == UNMOVED_SLOT { rows } else { motions::after(&motions.of(slot), &rows) }
@@ -4932,6 +5027,7 @@ pub fn frame_key(cb: &Frame) -> u64 {
     // The theme's hover and selection tints: a theme change draws the frame again, so the
     // picture cached under the previous theme's colours is not shown (#5802).
     cb.hover_tint.map(f32::to_bits).hash(&mut h);
+    cb.hover_body.hash(&mut h);
     cb.selection_tint.map(f32::to_bits).hash(&mut h);
     // Selecting every body tints them through the uniform alone: the picture must be drawn again
     // when that toggles, or a cached untinted frame would be shown.
@@ -5207,7 +5303,7 @@ impl Renderer {
             .as_ref()
             .filter(|h| cb.occlusion && own.is_some() && h.vp.is_some() && h.built_in == res.frames && res.hiz_slot == res.pic_slot)
             .map(|h| (h, reversed));
-        res.pic.model.cull(device, queue, encoder, &cb.view_proj, cb.size_px, &cb.motions, cb.edge_px, hidden);
+        res.pic.model.cull(device, queue, encoder, &cb.view_proj, cb.size_px, &cb.motions, cb.edge_px, hidden, cb.hover_body.as_deref());
         // The frame's own ground (under bodies drawn moved) before the model scene's.
         let ground = cb.ground.or(res.pic.model.ground_input);
         let ground_visible = ground.is_some_and(|ground| ground.visible_from(cb.back));
@@ -6410,6 +6506,22 @@ mod tests {
         }
     }
 
+    /// A whole-body hover names its placement by the scene's mesh index, not the draw's: a scene
+    /// whose empty meshes have no draw still finds the right one, and a placement that does not
+    /// resolve (no such mesh, a row past its placements, a see-through draw) lights nothing
+    /// rather than another body.
+    #[test]
+    fn a_hovered_placement_is_found_by_its_scene_mesh() {
+        use super::{InstanceLook, hover_row};
+        // Mesh 1 was empty: the draws hold meshes 0, 2 and 3.
+        let draws = [(0, InstanceLook::Opaque, 3), (2, InstanceLook::Opaque, 2), (3, InstanceLook::Faded, 4)];
+        assert_eq!(hover_row(draws, (2, 1)), Some((1, 1)), "mesh 2 is the second draw");
+        assert_eq!(hover_row(draws, (0, 2)), Some((0, 2)));
+        assert_eq!(hover_row(draws, (1, 0)), None, "no draw holds an empty mesh");
+        assert_eq!(hover_row(draws, (2, 2)), None, "a row past the placements");
+        assert_eq!(hover_row(draws, (3, 0)), None, "a see-through draw is not lit in place");
+    }
+
     #[test]
     fn retaining_live_picture_slots_releases_closed_active_and_parked_uploads() {
         use super::*;
@@ -6931,6 +7043,7 @@ mod tests {
         use std::sync::{Arc, Mutex};
         let slot = || Arc::new(Mutex::new(None));
         super::Frame {
+            hover_body: None,
             product_lights: None,
             product: false,
             upload_error: None,
@@ -7662,6 +7775,7 @@ mod glass_tests {
         }
         let none = || Arc::new(Mutex::new(None));
         let frame = Frame {
+            hover_body: None,
             product_lights: None,
             product: false,
             upload_error: None,
@@ -7872,6 +7986,7 @@ mod glass_tests {
         const SIZE: u32 = 64;
         let none = || Arc::new(Mutex::new(None));
         Frame {
+            hover_body: None,
             product_lights: None,
             product: false,
             upload_error: None,
