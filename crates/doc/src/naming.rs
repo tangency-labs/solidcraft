@@ -707,7 +707,7 @@ pub(crate) fn names(b: &ModelBody) -> Arc<Names> {
             // Exact history needs no mesh; geometry does (its face count is the mesh's).
             let names = match b.names.origin.as_ref() {
                 Some(o) if o.depth < MAX_DEPTH => b.names.lineage.as_ref().and_then(|l| crate::history_names::derive(b, o, l)).unwrap_or_else(|| {
-                    let centres = || face_centres(b);
+                    let centres = || face_centres(b).unwrap_or_default();
                     Names::unverified(geometric_names(b, o, face_count(b)), &mesh_adjacency(b), crate::history_names::by_place(&o.feature, &centres))
                 }),
                 _ => Names::unverified((0..face_count(b)).map(|k| format!("{}:face:{k}", b.name)).collect(), &[], None),
@@ -997,9 +997,10 @@ pub(crate) fn along_spread(cs: Vec<(usize, Vec3)>) -> Vec<usize> {
     order.into_iter().map(|(j, _)| j).collect()
 }
 
-/// Each face's centre: the mean of the sampled centres of its triangles.
-pub(crate) fn face_centres(b: &ModelBody) -> Vec<Vec3> {
-    samples(&b.mesh(), face_count(b)).into_iter().map(|ps| ps.iter().fold(Vec3::ZERO, |a, p| a + *p) * (1.0 / ps.len().max(1) as f64)).collect()
+/// Each face's centre: the area-weighted centroid from the kernel.
+pub(crate) fn face_centres(b: &ModelBody) -> solidcraft_kernel::Result<Vec<Vec3>> {
+    let fs = b.body.faces(0.01)?;
+    Ok(fs.into_iter().map(|f| f.centroid).collect())
 }
 
 /// The name of a face new to `f` (a feature that went through `eval::naming_feature`).
@@ -1215,19 +1216,9 @@ pub fn find_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<Vec3, String> 
 
 /// Names of the edges nearest each point on a body (for storing references).
 pub fn edge_names_at(b: &ModelBody, pts: &[Vec3]) -> Vec<String> {
-    let m = b.mesh();
     let names = edge_names(b);
-    pts.iter()
-        .map(|p| {
-            m.edges
-                .iter()
-                .enumerate()
-                .map(|(i, e)| (e.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::MAX, f64::min), i))
-                .min_by(|a, b| a.0.total_cmp(&b.0))
-                .and_then(|(_, i)| names.get(i).cloned())
-                .unwrap_or_default()
-        })
-        .collect()
+    let lines = b.edge_lines();
+    pts.iter().map(|p| lines.nearest(*p).and_then(|i| names.get(i).cloned()).unwrap_or_default()).collect()
 }
 
 /// Incident face indices (sorted, deduplicated) for each B-rep vertex in `record`.
@@ -1313,6 +1304,9 @@ pub(crate) fn vertex_index_at(b: &ModelBody, at: Vec3) -> Option<usize> {
 pub fn face_names_at(st: &ModelState, pts: &[Vec3]) -> Vec<String> {
     pts.iter()
         .map(|p| {
+            // Exact distances of a point on two faces at once (walls touching along a line) differ
+            // only by rounding: within `ON` the first body's face is the one, as it is at 0.
+            const ON: f64 = 1e-9;
             let mut best: Option<(f64, String)> = None;
             for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
                 // A point on a body's face, found by exact geometry, names that face (#20260).
@@ -1321,13 +1315,12 @@ pub fn face_names_at(st: &ModelState, pts: &[Vec3]) -> Vec<String> {
                     break;
                 }
                 let tol = (b.body.size() * 1e-3).max(1e-3);
-                let idx = FaceIndex::new(&b.mesh(), face_count(b));
-                if let Some((d, f)) = idx.face_and_dist_at(*p, tol)
-                    && best.as_ref().is_none_or(|(bd, _)| d < *bd)
+                if let Some((d, f)) = b.body.face_and_dist_at(*p, tol)
+                    && best.as_ref().is_none_or(|(bd, _)| d < *bd - ON)
                 {
                     let name = face_names(b).get(f).cloned().unwrap_or_default();
                     best = Some((d, name));
-                    if d == 0.0 {
+                    if d <= ON {
                         break;
                     }
                 }
@@ -1342,13 +1335,11 @@ pub fn face_name_at_body(body: &ModelBody, point: Vec3) -> Option<String> {
     if body.body.is_mesh() || !point.is_finite() {
         return None;
     }
-    let mesh = body.mesh();
-    let count = face_count(body);
-    if mesh.triangles.len() > 2_000_000 || count > 50_000 {
+    if body.body.face_count() > 50_000 {
         return None;
     }
     let tolerance = (body.body.size() * 1e-3).max(1e-3);
-    let index = FaceIndex::new(&mesh, count).face_at(point, tolerance)?;
+    let index = body.body.face_at(point, tolerance)?;
     face_names(body).get(index).filter(|name| !name.is_empty()).cloned()
 }
 

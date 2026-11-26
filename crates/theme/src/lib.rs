@@ -40,6 +40,8 @@ thread_local! {
     /// The application bar's logo in the theme's accent instead of its own logo colours
     /// (Preferences › Interface › Logo), per thread like the rest.
     static LOGO_ACCENT: Cell<bool> = const { Cell::new(false) };
+    /// The Preferences accent over the theme's own ([`set_accent`]), per thread; `None`: the theme's.
+    static ACCENT: Cell<Option<Color32>> = const { Cell::new(None) };
     /// The 3D view's own dark or light when Preferences give it one ([`ViewportTheme`], #4146),
     /// per thread like the rest. `None`: the view is as dark as the window.
     static VIEWPORT_DARK: Cell<Option<bool>> = const { Cell::new(None) };
@@ -58,6 +60,7 @@ pub struct Environment {
     pub vision: ColorVision,
     pub custom_generation: u64,
     pub logo: bool,
+    pub accent: Option<Color32>,
     pub viewport: Option<bool>,
     pub background: Option<[u8; 3]>,
 }
@@ -70,6 +73,7 @@ impl Environment {
             vision: vision(),
             custom_generation: CUSTOM_GENERATION.get(),
             logo: LOGO_ACCENT.get(),
+            accent: ACCENT.get(),
             viewport: VIEWPORT_DARK.get(),
             background: viewport_background(),
         }
@@ -77,6 +81,7 @@ impl Environment {
 
     /// A window palette with this state's logo accent and colour vision mode on top.
     pub fn window(self, tokens: Tokens) -> Tokens {
+        let tokens = self.accent.map_or(tokens, |a| tokens.with_accent(a, self.dark));
         let tokens = if self.logo { tokens.with_accent_logo() } else { tokens };
         tokens.with_vision(self.dark, self.vision)
     }
@@ -399,6 +404,81 @@ pub fn set_logo_accent(on: bool) -> bool {
     LOGO_ACCENT.with(|c| c.replace(on) != on)
 }
 
+/// Use `accent` (opaque) over the active theme's accent, or the theme's (`None`); returns whether that changed anything.
+pub fn set_accent(accent: Option<Color32>) -> bool {
+    ACCENT.with(|c| c.replace(accent) != accent)
+}
+
+/// The accent [`set_accent`] last set on this thread.
+pub fn accent() -> Option<Color32> {
+    ACCENT.get()
+}
+
+/// `#rrggbb` as an opaque accent; anything else (an empty preference: the theme's) is `None`.
+pub fn parse_accent(s: &str) -> Option<Color32> {
+    let hex = s.trim().strip_prefix('#').filter(|h| h.len() == 6)?;
+    Color32::from_hex(&format!("#{hex}")).ok()
+}
+
+/// The File view's unset colours follow the theme's panel, border, accent and text, not its base's (#4868).
+pub fn file_view_from_theme(t: &mut Tokens, dark: bool, set: impl Fn(&str) -> bool) {
+    let fallback = t.text;
+    let best = |inks: &[Color32], fills: &[Color32]| {
+        let worst = |ink: Color32| fills.iter().map(|f| contrast_ratio(ink, *f)).fold(f64::INFINITY, f64::min);
+        inks.iter().copied().max_by(|a, b| worst(*a).total_cmp(&worst(*b))).unwrap_or(fallback)
+    };
+    if !set("file_background") {
+        t.file_background = t.panel;
+    }
+    if !set("file_surface") {
+        t.file_surface = t.dialog_bg;
+    }
+    if !set("file_border") {
+        t.file_border = t.border;
+    }
+    let inks = [t.on_accent, t.text, t.panel, t.app_bar, t.form_ink];
+    let (rail_set, hover_set) = (set("file_rail"), set("file_rail_hover"));
+    if !rail_set {
+        // Deepened toward the theme's darkest colour as the built-in palettes do (Dark's rail ~0.55, Light's ~0.85).
+        let (toward, k) = if dark { (t.app_bar, 0.45) } else { (t.text, 0.15) };
+        t.file_rail = t.accent.lerp_to_gamma(toward, k);
+    }
+    if !hover_set {
+        t.file_rail_hover = t.file_rail.lerp_to_gamma(t.accent, 0.25);
+    }
+    if !set("file_rail_ink") {
+        t.file_rail_ink = best(&inks, &[t.file_rail, t.file_rail_hover]);
+    }
+    // A rail still too mid-toned for any ink goes further from the ink until the ink reads.
+    let away = best(&inks, &[t.file_rail_ink]);
+    for _ in 0..10 {
+        let reads = |fill: Color32| contrast_ratio(t.file_rail_ink, fill) >= 4.5;
+        if (rail_set || reads(t.file_rail)) && (hover_set || reads(t.file_rail_hover)) {
+            break;
+        }
+        if !rail_set {
+            t.file_rail = t.file_rail.lerp_to_gamma(away, 0.1);
+        }
+        if !hover_set {
+            t.file_rail_hover = t.file_rail_hover.lerp_to_gamma(away, 0.1);
+        }
+    }
+    if !set("file_primary") {
+        t.file_primary = t.accent_soft;
+    }
+    if !set("file_primary_border") {
+        t.file_primary_border = t.accent;
+    }
+    if !set("file_primary_ink") {
+        t.file_primary_ink = best(&[t.accent, t.text, t.on_accent], &[t.file_primary, t.file_background]);
+    }
+    if !set("file_dim") {
+        // Dim where dim text still reads on the page and the cards, else the plain text colour.
+        let on = [t.file_surface, t.file_background];
+        t.file_dim = if on.iter().all(|f| contrast_ratio(t.text_dim, *f) >= 4.5) { t.text_dim } else { best(&[t.text, t.form_ink], &on) };
+    }
+}
+
 /// The theme file palette [`set_custom`] last set on this thread.
 pub fn custom() -> Option<Custom> {
     CUSTOM.get()
@@ -583,6 +663,46 @@ pub fn panel_fallback_tokens(mut authored: Tokens) -> Tokens {
     authored.text_dim = known.file_dim;
     authored.form_dim = known.file_dim;
     authored
+}
+
+/// Keep a theme's panel colours and lift only the canonical panel inks that miss
+/// 4.5:1 on any of the given opaque `fills`. A failing ink moves toward the
+/// theme's own primary text first, so it keeps the theme's hue, and toward
+/// white or black (trying both) only when the primary text is not readable either. Inks
+/// that already pass, and translucent inks, stay as authored; a pair that
+/// still fails is left for [`panel_fallback_tokens`].
+pub fn panel_readable_inks(mut tokens: Tokens, fills: &[Color32]) -> Tokens {
+    let fills: Vec<Color32> = fills.iter().map(|fill| fill.to_opaque()).collect();
+    let Some(first) = fills.first().copied() else {
+        return tokens;
+    };
+    let passes = |ink: Color32| fills.iter().all(|fill| contrast_ratio(ink, *fill) >= 4.5);
+    // The nearer pole first; fills of different lightness may need the other one.
+    let (pole, other) = if panel_luminance(first) < 0.18 { (Color32::WHITE, Color32::BLACK) } else { (Color32::BLACK, Color32::WHITE) };
+    let primary = if tokens.text.a() == 255 && passes(tokens.text) { tokens.text } else { pole };
+    let lift = |ink: Color32| -> Color32 {
+        if ink.a() != 255 || passes(ink) {
+            return ink;
+        }
+        // Walk toward the primary ink, then toward each pole, in small steps,
+        // and keep the first colour that reads on every fill.
+        for target in [primary, pole, other] {
+            for step in 1..=64_u16 {
+                let mix = |a: u8, b: u8| ((u16::from(a) * (64 - step) + u16::from(b) * step + 32) / 64) as u8;
+                let candidate = Color32::from_rgb(mix(ink.r(), target.r()), mix(ink.g(), target.g()), mix(ink.b(), target.b()));
+                if passes(candidate) {
+                    return candidate;
+                }
+            }
+        }
+        ink
+    };
+    tokens.text = lift(tokens.text);
+    tokens.text_dim = lift(tokens.text_dim);
+    tokens.form_ink = lift(tokens.form_ink);
+    tokens.form_dim = lift(tokens.form_dim);
+    tokens.dialog_label = lift(tokens.dialog_label);
+    tokens
 }
 
 /// Raise a captured panel fill to the first quantized alpha that protects all
@@ -789,6 +909,38 @@ pub fn set_published(published: Option<PublishedTab>) {
 /// this cached policy; it must retain its existing scene backplate when the option is absent/off.
 pub fn tab_surfaces_enabled() -> bool {
     PUBLISHED.get().is_some_and(|p| p.environment == Environment::current() && p.tab_surfaces)
+}
+
+/// A kind of line on a drawing sheet that has its own screen colour (#18989): its place in
+/// [`Tokens::paper_lines`] and [`Tokens::paper_dark_lines`]. The visible edges are the sheet's ink.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PaperLine {
+    /// Hidden lines.
+    Hidden,
+    /// Centre lines and centre marks.
+    Centre,
+    /// Dimension lines, extension lines and arrows.
+    Dimension,
+    /// Dimension text.
+    DimensionText,
+    /// Note text and leaders.
+    Note,
+}
+
+impl PaperLine {
+    /// Every kind, in the order of the sets.
+    pub const ALL: [PaperLine; 5] = [PaperLine::Hidden, PaperLine::Centre, PaperLine::Dimension, PaperLine::DimensionText, PaperLine::Note];
+
+    /// Its place in a set ([`Tokens::paper_lines`]).
+    pub const fn index(self) -> usize {
+        self as usize
+    }
+
+    /// Whether it is text, which needs more contrast with its paper than a line (WCAG 1.4.3 and
+    /// 1.4.11).
+    pub const fn is_text(self) -> bool {
+        matches!(self, PaperLine::DimensionText | PaperLine::Note)
+    }
 }
 
 /// Colour vision modes (#778): a second set of values for the colours that carry a meaning, for
@@ -1268,6 +1420,15 @@ pub struct Tokens {
     pub paper_prussian_blue_ink: Color32,
     pub paper_dark: Color32,
     pub paper_dark_ink: Color32,
+    /// Colours for each kind of line on a drawing sheet, beside its ink (which draws the visible
+    /// edges), in [`PaperLine`] order (#18989): on a white sheet (also the print colours) and on a
+    /// dark one. A blueprint or Prussian blue sheet keeps its one white ink, as a real blueprint
+    /// does. Each colour stays apart from the others and from the ink for normal vision and for
+    /// every colour vision mode, so no mode changes them, and reads on its paper (WCAG: 3:1 for a
+    /// line, 4.5:1 for text). The line types still carry the meaning: a colour is extra help (D26
+    /// of #13159).
+    pub paper_lines: [Color32; 5],
+    pub paper_dark_lines: [Color32; 5],
     /// Interference: the clash fill, before its shading.
     pub interference: Color32,
     /// Curvature Comb: the envelope through the teeth tips (purple) and the teeth, the scaled
@@ -1552,8 +1713,38 @@ impl Tokens {
     pub fn themed(dark: bool, mode: ColorVision) -> Tokens {
         let custom = CUSTOM.get().filter(|c| c.dark == dark).map(|c| c.tokens);
         let t = custom.unwrap_or(if dark { Tokens::dark() } else { Tokens::light() });
+        let t = ACCENT.get().map_or(t, |a| t.with_accent(a, dark));
         let t = if LOGO_ACCENT.get() { t.with_accent_logo() } else { t };
         t.with_vision(dark, mode)
+    }
+
+    /// These tokens with `accent` in place of the theme's; the tabs' own accents (Sketch, Surface, …) stay the theme's.
+    pub fn with_accent(self, accent: Color32, dark: bool) -> Tokens {
+        let mut t = self;
+        let accent = accent.to_opaque();
+        // The panel behind a translucent theme's tint is the theme's own colour, unmultiplied.
+        let panel = t.panel.to_opaque();
+        t.accent = accent;
+        t.accent_soft = panel.lerp_to_gamma(accent, if dark { 0.3 } else { 0.18 });
+        t.selected_bg = t.accent_soft;
+        // Ink on the soft tint: the accent lifted (dark) or deepened (light) until it reads.
+        let (toward, mut k) = if dark { (Color32::WHITE, 0.35) } else { (Color32::BLACK, 0.35) };
+        t.selected_ink = accent.lerp_to_gamma(toward, k);
+        while contrast_ratio(t.selected_ink, t.accent_soft) < 4.5 && k < 1.0 {
+            k += 0.1;
+            t.selected_ink = accent.lerp_to_gamma(toward, k.min(1.0));
+        }
+        t.on_accent = if contrast_ratio(Color32::BLACK, accent) >= contrast_ratio(Color32::WHITE, accent) { Color32::BLACK } else { Color32::WHITE };
+        t.chip = accent;
+        t.form_primary = accent;
+        t.form_primary_fill = accent;
+        t.sel_face = accent;
+        t.sel_edge = accent;
+        // The File view's rail and primary action follow the new accent, as they follow a theme's.
+        file_view_from_theme(&mut t, dark, |k| {
+            !matches!(k, "file_rail" | "file_rail_hover" | "file_rail_ink" | "file_primary" | "file_primary_ink" | "file_primary_border")
+        });
+        t
     }
 
     /// These tokens with the logo's three faces in shades of the accent: lighter, the accent
@@ -1691,6 +1882,50 @@ mod tests {
                 assert!(ratio >= 1.5, "isoparm {ratio:.2} on the viewport background {background:?}");
             }
         }
+    }
+
+    /// Each kind of line on a drawing sheet (#18989) reads on its paper in both bases and every
+    /// colour vision mode (WCAG: 3:1 for a line, 4.5:1 for text), as the sheet's ink does, and no
+    /// mode changes them: they are measured apart for every eye in `colour_vision_tests`.
+    #[test]
+    fn each_kind_of_sheet_line_reads_on_its_paper() {
+        for dark in [false, true] {
+            for mode in ColorVision::ALL {
+                let t = Tokens::themed(dark, mode);
+                let sheets = [("white", t.paper_white, t.paper_ink, t.paper_lines), ("dark", t.paper_dark, t.paper_dark_ink, t.paper_dark_lines)];
+                for (sheet, paper, ink, lines) in sheets {
+                    assert!(contrast_ratio(ink, paper) >= 4.5, "{sheet}: the ink");
+                    for kind in PaperLine::ALL {
+                        let colour = lines[kind.index()];
+                        let (ratio, least) = (contrast_ratio(colour, paper), if kind.is_text() { 4.5 } else { 3.0 });
+                        assert!(colour.a() == 255 && ratio >= least, "{sheet}, dark {dark}, {mode:?}: {kind:?} {ratio:.2} < {least}");
+                    }
+                }
+                let base = if dark { Tokens::dark() } else { Tokens::light() };
+                assert_eq!([t.paper_lines, t.paper_dark_lines], [base.paper_lines, base.paper_dark_lines], "{mode:?} leaves them as they are");
+            }
+        }
+        assert_eq!(PaperLine::ALL.map(PaperLine::index), [0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn panel_readable_inks_try_the_other_pole_when_the_nearer_one_cannot_pass_every_fill() {
+        let mut tokens = Tokens::dark();
+        let grey = Color32::from_gray(128);
+        tokens.text = grey;
+        tokens.text_dim = grey;
+        tokens.form_ink = grey;
+        tokens.form_dim = grey;
+        tokens.dialog_label = grey;
+        let fills = [Color32::from_gray(117), Color32::from_gray(120)];
+        let lifted = panel_readable_inks(tokens, &fills);
+        for ink in [lifted.text, lifted.text_dim, lifted.form_ink, lifted.form_dim, lifted.dialog_label] {
+            for fill in fills {
+                assert!(contrast_ratio(ink, fill) >= 4.5, "{ink:?} on {fill:?}");
+            }
+        }
+        let passing = panel_readable_inks(Tokens::dark(), &[Tokens::dark().panel]);
+        assert_eq!(passing.text, Tokens::dark().text, "a readable ink stays as authored");
     }
 
     #[test]

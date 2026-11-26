@@ -128,6 +128,12 @@ impl SurfaceEval {
     pub(crate) fn pole_within(&self, uv: [f64; 2], reach: f64) -> Result<[bool; 2], String> {
         self.0.pole_within(uv, reach).map_err(|e| e.to_string())
     }
+    /// Whether the piece of the iso-line along `d` through `uv` over the `d` parameters `range`
+    /// lies within `reach` mm of `centre`, certified ([`k::SurfaceEval::iso_within`]); refused
+    /// where that cannot be decided.
+    pub(crate) fn iso_within(&self, uv: [f64; 2], d: usize, range: (f64, f64), centre: Vec3, reach: f64) -> Result<bool, String> {
+        self.0.iso_within(uv, d, range, c::vec3(centre), reach).map_err(|e| e.to_string())
+    }
     /// `pc` with its control points put on the knot range and a certified bound on how far that
     /// moves the surface under it; `None` when it is on the range, refused where the move is past
     /// `tolerance` or not bounded ([`k::SurfaceEval::pcurve_onto_knots`]).

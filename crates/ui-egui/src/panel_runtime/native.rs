@@ -5,11 +5,11 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use solidcraft_engine::panels::{
+use solidcraft_panel_layout::{
     HostCapabilities, HostEffect, HostId, InstanceId, MAX_INSTANCES, MAX_LOGICAL, MAX_SECTIONS, PanelResult, Rule, SectionId, Size, error, valid_id,
 };
 
-use super::NativeHostAdapter;
+use super::host::NativeHostAdapter;
 
 const MAX_MONITORS: usize = 64;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -127,7 +127,7 @@ impl DesktopNativeAdapter {
         let min = egui::vec2(min.width, min.height);
         let max = egui::vec2(max.width, max.height);
         // The window a drag showed becomes an ordinary window again here.
-        let builder = egui::ViewportBuilder::default()
+        let builder = crate::window_chrome::popout_viewport(egui::ViewportBuilder::default(), ctx.viewport_id())
             .with_title(title)
             .with_min_inner_size(min)
             .with_max_inner_size(max)

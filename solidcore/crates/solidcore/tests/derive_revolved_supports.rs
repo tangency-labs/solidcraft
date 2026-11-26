@@ -396,6 +396,158 @@ fn horn_tori_round_trip_from_a_collapsed_boundary_sweep() {
     }
 }
 
+/// A quarter of a torus (R `major`, r `minor`) about the tilted frame's axis through `origin`, of
+/// which the tube shows `arc` degrees about `mid` degrees: the tensor product of the two rational
+/// quadratic arcs, its first meridian in the plane of the frame's x. With `inward` the tube runs
+/// the other way round (from `mid + arc / 2` down); with `swap` the sweep is along v.
+fn tube_arc_torus(
+    origin: Vec3,
+    (major, minor): (f64, f64),
+    (mid, arc): (f64, f64),
+    inward: bool,
+    swap: bool,
+) -> BSplineSurface {
+    let (x, y, z) = tilted();
+    let quarter = std::f64::consts::FRAC_PI_4;
+    let half = (0.5 * arc).to_radians();
+    let step = if inward { -half } else { half };
+    let rows: Vec<Vec<CPoint>> = (0..3)
+        .map(|i| {
+            let u = f64::from(i) * quarter;
+            let wu = if i == 1 { quarter.cos() } else { 1.0 };
+            let radial = (x * u.cos() + y * u.sin()) * (1.0 / wu);
+            (0..3)
+                .map(|j| {
+                    let v = mid.to_radians() + (f64::from(j) - 1.0) * step;
+                    let wv = if j == 1 { half.cos() } else { 1.0 };
+                    let p = origin
+                        + radial * (major + minor * v.cos() / wv)
+                        + z * (minor * v.sin() / wv);
+                    let w = wu * wv;
+                    CPoint::new(p.x * w, p.y * w, p.z * w, w)
+                })
+                .collect()
+        })
+        .collect();
+    let net = if swap {
+        (0..3)
+            .map(|j| (0..3).map(|i| rows[i][j]).collect())
+            .collect()
+    } else {
+        rows
+    };
+    let knots = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+    let nurb = solidcore::nurbs::srf_basic::Surface::new(net, 2, 2, knots.clone(), knots).unwrap();
+    BSplineSurface::from_nurb(nurb, true)
+}
+
+/// A torus's own numbers stand on its form however short an arc of the tube the form shows. A
+/// tool's section with a short arc in it, turned about a line, sweeps a torus of which the tube
+/// shows only that arc (the floor of a tooth space cut with a round cutter: a tube of radius
+/// 13.725 about a circle of radius 38.725, showing a degree or less). Such a form does not fix
+/// the tube's circle (a 0.1 degree arc of that tube is 0.024 long and 5e-6 high), so no torus
+/// can be fitted to it; the label says which torus it is, and the form's own control points say
+/// how it is parametrised about the label's axis.
+///
+/// Over tubes that show from 30 down to 0.02 degrees, on the inside, the outside, the top and
+/// askew, running either way round, the sweep along u and along v: the label builds, the
+/// surface carries the label's numbers exactly, and it evaluates as the form within 64 ulps of
+/// the form's size. Nothing but the form's own label passes: one a thousandth off in a radius,
+/// one turned a thousandth of a radian about its axis and one with its axis the other way
+/// round are refused.
+#[test]
+fn a_torus_label_stands_on_a_form_that_shows_a_short_arc_of_its_tube() {
+    use solidcore::geom::axis2_placement::Axis2Placement;
+
+    let k = Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    let (x, y, _) = tilted();
+    for origin in [
+        Vec3::ZERO,
+        Vec3::new(12.5, -7.25, 40.0),
+        Vec3::new(212.5, 133.0, -87.0),
+    ] {
+        let placement = Axis2Placement::from_stored(origin, x, y);
+        for radii in [(38.725, 13.725), (10.0, 3.0), (26.0, 1.0)] {
+            let (major, minor) = radii;
+            let label = AnalyticSupport::Torus {
+                placement,
+                major_radius: major,
+                minor_radius: minor,
+            };
+            let size = origin.length() + major + minor;
+            for mid in [180.0, 0.0, 90.0, 137.0] {
+                for arc in [30.0, 5.0, 1.2, 0.3, 0.1, 0.02] {
+                    for (inward, swap) in
+                        [(false, false), (true, false), (false, true), (true, true)]
+                    {
+                        let at = format!(
+                            "R {major} r {minor} at {origin:?}, {arc} degrees about {mid}, \
+                             inward {inward}, swap {swap}"
+                        );
+                        let form = tube_arc_torus(origin, radii, (mid, arc), inward, swap);
+                        let built = label
+                            .build(&k, form.copy())
+                            .unwrap_or_else(|e| panic!("{at}: {e}"));
+                        assert_eq!(AnalyticSupport::of(&built), Some(label), "{at}");
+                        let d = form.natural_uv_domain();
+                        for (a, b) in [(0.0, 0.4567), (0.4567, 0.7654), (0.9, 0.1), (1.0, 1.0)] {
+                            let uv = Point2::new(
+                                d.min().x + (d.max().x - d.min().x) * a,
+                                d.min().y + (d.max().y - d.min().y) * b,
+                            );
+                            let step = built.convert_uv_from_nurbs_to_step(&k, uv).unwrap();
+                            let off = (built.evaluate_step_point(&k, step).unwrap()
+                                - form.evaluate_point(uv).unwrap())
+                            .length();
+                            assert!(
+                                off <= 64.0 * f64::EPSILON * size,
+                                "{at}: {off:e} off at {uv:?}"
+                            );
+                        }
+                        // labels that are not this form's
+                        let turn = 1e-3_f64;
+                        let others = [
+                            AnalyticSupport::Torus {
+                                placement,
+                                major_radius: major + 1e-3,
+                                minor_radius: minor,
+                            },
+                            AnalyticSupport::Torus {
+                                placement,
+                                major_radius: major,
+                                minor_radius: minor + 1e-3,
+                            },
+                            AnalyticSupport::Torus {
+                                placement: Axis2Placement::from_stored(
+                                    origin,
+                                    x * turn.cos() + y * turn.sin(),
+                                    y * turn.cos() - x * turn.sin(),
+                                ),
+                                major_radius: major,
+                                minor_radius: minor,
+                            },
+                            AnalyticSupport::Torus {
+                                placement: Axis2Placement::from_stored(origin, x, y * -1.0),
+                                major_radius: major,
+                                minor_radius: minor,
+                            },
+                        ];
+                        for other in others {
+                            assert!(
+                                other.build(&k, form.copy()).is_err(),
+                                "{at}: {other:?} stands on a form that is not its own"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// The two short pieces of a chained 2 mm round where a plane meets a 45 degree cone about the
 /// world z axis (tangency-labs/solidcraft#17004), their nets as the body's record holds them
 /// (`data/short_swept_revolution_nets.jsonl`): surfaces of revolution swept 0.4466 degrees at a

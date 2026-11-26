@@ -30,5 +30,9 @@
   "zh": {
     "dialog.dimension_parameter": "{name} =",
     "dialog.dimension_parameters_note": "在此更改的参数会在所有使用它的地方更改"
+  },
+  "fr": {
+    "dialog.dimension_parameter": "{name} =",
+    "dialog.dimension_parameters_note": "Un paramètre modifié ici change partout où il est utilisé"
   }
 }

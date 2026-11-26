@@ -545,10 +545,18 @@ fn run_script_warning(s: &mut Session, path: &str, script: &Value) -> Result<Vec
     s.run_script_each(script, &mut |step, r| print_param_warnings(path, step, r)).map_err(|e| e.to_string())
 }
 
-/// Step `step`'s `param_warnings` on stderr, one per line, named after the script at `path`.
+/// Step `step`'s `param_warnings` and plugin warnings on stderr, one per line, named after the script at `path`.
 fn print_param_warnings(path: &str, step: usize, r: &Value) {
     for w in r.get("param_warnings").and_then(Value::as_array).into_iter().flatten() {
         solidcraft_engine::note!("{path}: step {}: {}", step + 1, w.as_str().unwrap_or_default());
+    }
+    for m in r.get("messages").and_then(Value::as_array).into_iter().flatten() {
+        let level = m.get("level").and_then(Value::as_str).unwrap_or("info");
+        let msg = m.get("message").and_then(Value::as_str).unwrap_or_default();
+        if level == "warn" || level == "error" {
+            let step_num = step + 1;
+            solidcraft_engine::note!("{path}: step {step_num}: {level}: {msg}");
+        }
     }
 }
 
