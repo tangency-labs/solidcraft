@@ -15,6 +15,7 @@ mod curves;
 mod exchange;
 mod frames;
 mod modelling;
+mod projection;
 
 use crate::body::Body;
 use crate::{KernelError, Result};
