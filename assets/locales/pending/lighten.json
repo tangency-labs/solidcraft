@@ -1,0 +1,92 @@
+{
+  "en": {
+    "cmd.solid_lighten": "Lighten",
+    "help.solid.lighten": "Lightens solid bodies by cutting parametric internal pockets and ribs. Use this to reduce part weight while preserving structural rigidity.",
+    "ui.wall_offset": "Wall Offset",
+    "ui.pocket_depth": "Pocket Depth",
+    "ui.draft_angle": "Draft Angle",
+    "ui.corner_radius": "Corner Radius",
+    "ui.fillet_radius": "Fillet Radius",
+    "ui.chamfer_size": "Chamfer Size"
+  },
+  "ar": {
+    "cmd.solid_lighten": "تخفيف الوزن",
+    "help.solid.lighten": "يخفف الأجسام الصلبة عن طريق قطع جيوب وأضلاع داخلية بارامترية. استخدم هذه الأداة لتقليل وزن القطعة مع الحفاظ على الصلابة الهيكلية.",
+    "ui.wall_offset": "إزاحة الجدار",
+    "ui.pocket_depth": "عمق الجيب",
+    "ui.draft_angle": "زاوية السحب",
+    "ui.corner_radius": "نصف قطر الزاوية",
+    "ui.fillet_radius": "نصف قطر الاستدارة",
+    "ui.chamfer_size": "حجم الشطف"
+  },
+  "he": {
+    "cmd.solid_lighten": "הקלת משקל",
+    "help.solid.lighten": "מפחית משקל מגופים מוצקים על ידי חיתוך כיסים וצלעות פנימיות פרמטריות. השתמש בכלי זה להפחתת משקל החלק תוך שמירה על קשיחות מבנית.",
+    "ui.wall_offset": "היסט דופן",
+    "ui.pocket_depth": "עומק כיס",
+    "ui.draft_angle": "זווית חליצה",
+    "ui.corner_radius": "רדיוס פינה",
+    "ui.fillet_radius": "רדיוס עיגול",
+    "ui.chamfer_size": "גודל פאזה"
+  },
+  "ja": {
+    "cmd.solid_lighten": "軽量化",
+    "help.solid.lighten": "パラメトリックな内部ポケットとリブを切り欠いてソリッドボディを軽量化します。構造剛性を保ちながら部品重量を削減するときに使用します。",
+    "ui.wall_offset": "壁オフセット",
+    "ui.pocket_depth": "ポケット深さ",
+    "ui.draft_angle": "抜き勾配",
+    "ui.corner_radius": "コーナー半径",
+    "ui.fillet_radius": "フィレット半径",
+    "ui.chamfer_size": "面取りサイズ"
+  },
+  "vi": {
+    "cmd.solid_lighten": "Giảm khối lượng",
+    "help.solid.lighten": "Làm nhẹ khối đặc bằng cách cắt các hốc và gân bên trong theo tham số. Dùng công cụ này để giảm trọng lượng chi tiết mà vẫn giữ độ cứng vững kết cấu.",
+    "ui.wall_offset": "Khoảng cách thành",
+    "ui.pocket_depth": "Độ sâu hốc",
+    "ui.draft_angle": "Góc thoát khuôn",
+    "ui.corner_radius": "Bán kính góc",
+    "ui.fillet_radius": "Bán kính bo góc",
+    "ui.chamfer_size": "Kích thước vát mép"
+  },
+  "zh": {
+    "cmd.solid_lighten": "轻量化",
+    "help.solid.lighten": "通过切除参数化内部型腔和筋条来减轻实体重量。用于在保持结构刚度的同时降低零件重量。",
+    "ui.wall_offset": "壁偏置",
+    "ui.pocket_depth": "型腔深度",
+    "ui.draft_angle": "拔模角度",
+    "ui.corner_radius": "拐角半径",
+    "ui.fillet_radius": "圆角半径",
+    "ui.chamfer_size": "倒角尺寸"
+  },
+  "de": {
+    "cmd.solid_lighten": "Erleichtern",
+    "help.solid.lighten": "Reduziert das Gewicht von Volumenkörpern durch parametrische innere Taschen und Rippen. Verwenden Sie dieses Werkzeug, um Bauteilgewicht bei erhaltener Steifigkeit zu sparen.",
+    "ui.wall_offset": "Wandversatz",
+    "ui.pocket_depth": "Taschentiefe",
+    "ui.draft_angle": "Entformungsschräge",
+    "ui.corner_radius": "Eckenradius",
+    "ui.fillet_radius": "Verrundungsradius",
+    "ui.chamfer_size": "Fasengröße"
+  },
+  "fr": {
+    "cmd.solid_lighten": "Alléger",
+    "help.solid.lighten": "Allège les corps solides en découpant des poches et des nervures internes paramétriques. Utilisez cet outil pour réduire la masse tout en préservant la rigidité structurelle.",
+    "ui.wall_offset": "Décalage de paroi",
+    "ui.pocket_depth": "Profondeur de poche",
+    "ui.draft_angle": "Angle de dépouille",
+    "ui.corner_radius": "Rayon de coin",
+    "ui.fillet_radius": "Rayon de congé",
+    "ui.chamfer_size": "Taille du chanfrein"
+  },
+  "ko": {
+    "cmd.solid_lighten": "경량화",
+    "help.solid.lighten": "파라메트릭 내부 포켓과 리브를 절삭하여 솔리드 바디를 경량화합니다. 구조적 강성을 유지하면서 부품 무게를 줄일 때 사용합니다.",
+    "ui.wall_offset": "벽 오프셋",
+    "ui.pocket_depth": "포켓 깊이",
+    "ui.draft_angle": "구배 각도",
+    "ui.corner_radius": "모서리 반경",
+    "ui.fillet_radius": "필렛 반경",
+    "ui.chamfer_size": "모따기 크기"
+  }
+}

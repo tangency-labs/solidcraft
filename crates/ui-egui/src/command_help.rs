@@ -297,6 +297,7 @@ pub const DOCUMENTED: &[&str] = &[
     "solid.extrude",
     "solid.fillet",
     "solid.hole",
+    "solid.lighten",
     "solid.loft",
     "solid.mirror",
     "solid.move",
