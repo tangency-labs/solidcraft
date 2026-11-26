@@ -1,0 +1,30 @@
+{
+  "en": {
+    "prefs.fade_other_component_sketches": "Fade sketches of other components",
+    "prefs.fade_other_component_sketches_help": "With a component active, draw the sketches of other components faded, as their bodies are"
+  },
+  "de": {
+    "prefs.fade_other_component_sketches": "Skizzen anderer Komponenten abblenden"
+  },
+  "nl": {
+    "prefs.fade_other_component_sketches": "Schetsen van andere componenten vervagen"
+  },
+  "ja": {
+    "prefs.fade_other_component_sketches": "他のコンポーネントのスケッチを淡色表示"
+  },
+  "zh": {
+    "prefs.fade_other_component_sketches": "淡化其他组件的草图"
+  },
+  "ko": {
+    "prefs.fade_other_component_sketches": "다른 구성요소의 스케치 흐리게 표시"
+  },
+  "vi": {
+    "prefs.fade_other_component_sketches": "Làm mờ phác thảo của các thành phần khác"
+  },
+  "ar": {
+    "prefs.fade_other_component_sketches": "تعتيم رسومات المكونات الأخرى"
+  },
+  "he": {
+    "prefs.fade_other_component_sketches": "עמעום סקיצות של רכיבים אחרים"
+  }
+}

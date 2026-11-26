@@ -78,6 +78,60 @@ fn a_finished_sketch_on_a_face_draws_a_halo_under_its_own_curves_only() {
     solidcraft_theme::set_vision(original_vision);
 }
 
+/// With a component active, a finished sketch of another component is drawn faded, in the colour
+/// its bodies fade to; the active component's own sketch keeps its colour. With the design itself
+/// active, or with the preference off (the old look), nothing fades (#12896).
+#[test]
+fn sketches_of_other_components_fade_while_a_component_is_active() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.ui.ground_shadow = false;
+    app.set_origin_shown(false);
+    let a = app.run("component.create", json!({"name": "A"})).unwrap()["component"].as_u64().unwrap();
+    let sketch_a = app.run("sketch.create", json!({"plane": "XY", "name": "In A"})).unwrap()["sketch"].as_u64().unwrap();
+    app.run("sketch.line", json!({"points": [[0, 0], [10, 0]]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("component.activate", json!({"component": 0})).unwrap();
+    let b = app.run("component.create", json!({"name": "B"})).unwrap()["component"].as_u64().unwrap();
+    let sketch_b = app.run("sketch.create", json!({"plane": "XY", "name": "In B"})).unwrap()["sketch"].as_u64().unwrap();
+    app.run("sketch.line", json!({"points": [[0, 20], [10, 20]]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    assert_eq!(app.session.active_component, b);
+    assert!(app.preferences.fade_other_component_sketches, "on by default");
+
+    let faded = |app: &SolveApp, sketch: u64| super::outside_work(app, super::WorkItem::Sketch(sketch));
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let finished = super::c4(crate::theme::Tokens::get().sketch_fixed);
+    let greyed = super::faded_colour(finished);
+    assert_eq!(greyed[..3], finished[..3], "faded keeps the theme's hue");
+    assert!(greyed[3] < finished[3], "and is faint");
+    // Lines in the finished colour and in the faded one.
+    let counts = |app: &SolveApp| {
+        let scene = super::build_sketch_scene(app, &super::projection(app, rect));
+        let (lines, _) = scene.lines.as_chunks::<{ crate::gpu::LINE_SIZE }>();
+        let count = |c: [u8; 4]| lines.iter().filter(|line| line_color(&scene, *line) == c).count();
+        (count(finished), count(greyed))
+    };
+
+    assert!(faded(&app, sketch_a) && !faded(&app, sketch_b));
+    let (full, faint) = counts(&app);
+    assert!(full > 0 && faint > 0, "B's sketch in its colour, A's faded: {full} and {faint}");
+
+    let projection = super::projection(&app, rect);
+    let key = super::sketch_scene_key(&app, &projection);
+    crate::prefs::set(&mut app, &json!({"fade_other_component_sketches": false})).unwrap();
+    assert_ne!(super::sketch_scene_key(&app, &projection), key, "changing the preference rebuilds the sketch scene");
+    assert!(!faded(&app, sketch_a));
+    assert_eq!(counts(&app), (full + faint, 0), "off: every sketch in its own colour, as before");
+    crate::prefs::set(&mut app, &json!({"fade_other_component_sketches": true})).unwrap();
+
+    app.run("component.activate", json!({"component": a})).unwrap();
+    assert!(!faded(&app, sketch_a) && faded(&app, sketch_b), "the fade follows the active component");
+
+    app.run("component.activate", json!({"component": 0})).unwrap();
+    assert!(!faded(&app, sketch_a) && !faded(&app, sketch_b));
+    assert_eq!(counts(&app), (full + faint, 0), "with the design itself active nothing fades");
+}
+
 #[test]
 fn placed_step_body_uses_imported_opacity_until_a_design_look_overrides_it() {
     let body = kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0))

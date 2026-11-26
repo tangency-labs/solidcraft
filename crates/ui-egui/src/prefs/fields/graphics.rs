@@ -25,6 +25,9 @@ macro_rules! graphics_preferences {
             /// An idle Escape (nothing else owns it) turns off the newest analysis or the section view,
             /// as before. Off by default: they close only from their status item, toggle or command.
             escape_closes_analyses: bool = false, PAGE_GRAPHICS;
+            /// With a component active, sketches of other components are drawn faded, as their bodies
+            /// are. Off: every sketch is drawn in full colour whatever is active, as before.
+            fade_other_component_sketches: bool = true, PAGE_GRAPHICS => check_id("prefs.fade_other_component_sketches");
             /// With the frame rate: a frame-time graph, a histogram and what the GPU drew (#2548).
             frame_rate_details: bool = false, PAGE_GRAPHICS;
             /// Exact graphics adapter name; empty selects automatically on the next start.

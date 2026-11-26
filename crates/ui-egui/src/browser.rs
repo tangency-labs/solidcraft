@@ -1997,7 +1997,7 @@ fn component_rows_inner(
     let active = app.session.active_component == id;
     let bodies = &cache.root_bodies;
     let visible = id == 0 || bodies.is_empty() || bodies.iter().any(|b| !app.session.visibility.hidden_bodies.contains(b));
-    let faded = app.session.active_component != 0 && !app.session.doc.component_within(id, app.session.active_component) && !active;
+    let faded = crate::viewport::outside_work(app, crate::viewport::WorkItem::Component(id));
     let name = &root.name;
     let link = app.tree.links.get(id).cloned();
     let badges: &[&str] = if root.grounded { &["pin"] } else { &[] };
@@ -2180,7 +2180,7 @@ fn occurrence_rows_inner(
     let selected = on_screen
         && (app.session.selection.iter().any(|s| matches!(s, Sel::Occurrence { path: selected } if selected == path))
             || crate::dialogs_move::picked(app, &Sel::Occurrence { path: path.to_vec() }));
-    let faded = app.session.active_occurrence_path.as_ref().is_some_and(|p| !path.starts_with(p) && !p.starts_with(path));
+    let faded = crate::viewport::outside_work(app, crate::viewport::WorkItem::Placement(path));
     // A cut component has a dashed outline until Paste moves it.
     let cut = app.cut.placements.iter().any(|p| p.as_slice() == path);
     let link = app.tree.links.get(placement.component).cloned();
