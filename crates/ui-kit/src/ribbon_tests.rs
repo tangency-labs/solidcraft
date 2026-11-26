@@ -497,6 +497,8 @@ fn menu_style() -> MenuStyle<'static> {
         focus: egui::Id::unique("test_menu"),
         entry: &["t:entry:"],
         pin: "t:pin:",
+        more: "t:more:",
+        more_tip: "More",
         hot: "t:hot:",
         reveal: "t:reveal",
     }
@@ -656,6 +658,7 @@ fn a_deferred_button_is_painted_as_the_app_resolves_it() {
         let look = DeferredLook {
             id: "a.on".into(),
             selected: true,
+            kept: false,
             running: false,
             focus_ring: true,
             label: Some("On".into()),

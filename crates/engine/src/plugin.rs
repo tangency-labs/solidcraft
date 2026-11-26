@@ -1,9 +1,11 @@
 //! SolidCraft policy and transactions for the shared Craft plugin host.
 
 use crate::{EngineError, Result, Session};
+pub use craft_plugin::ui;
 pub use craft_plugin::{
-    API, DesignToken, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES,
-    MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, conditions, dialog, swatches, valid_id,
+    API, DesignToken, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_APPROVED_FUEL,
+    MAX_COMPONENT_BYTES, MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RibbonGroup, RuntimeManifest, UiSlot, check_input, conditions,
+    dialog, directory_read_fields, images, shader, swatches, theme, valid_icon_path, valid_id,
 };
 use craft_plugin::{CommandSchema, PluginHost};
 use serde_json::{Value, json};
@@ -28,6 +30,13 @@ pub fn configure_process_plugins(plugins: Option<PathBuf>, keep_grants: bool) ->
     }
     PROCESS_PLUGINS.set((plugins, keep_grants)).map_err(|_| error("the process plugins folder is already configured"))
 }
+/// Keeps compiled plugin components between sessions in the `plugin-compile` folder of the per-user
+/// cache folder ([`crate::recovery::cache_dir`]), so a large importer compiles once per version
+/// rather than at the first file of every session. Call it once at startup, before any plugin runs.
+pub fn configure_compile_cache() {
+    #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
+    craft_plugin_wasm::set_compile_cache_dir(crate::recovery::cache_dir().map(|dir| dir.join("plugin-compile")));
+}
 pub fn configure_process_host_limits(limits: HostLimits) -> Result<()> {
     limits.validate()?;
     PROCESS_HOST_LIMITS.set(limits).map_err(|_| error("process plugin host limits are already configured"))
@@ -50,6 +59,10 @@ pub struct Grants {
     pub command_groups: BTreeSet<String>,
     #[serde(default)]
     pub folders: Vec<FileGrant>,
+    /// Fuel the user let this package use above Max plugin fuel: exactly its manifest request,
+    /// bound to `package_hash` like memory and never above `MAX_APPROVED_FUEL`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fuel: Option<u64>,
     /// Memory, in MiB, the user let this package use above the app's ceiling for plugins: what
     /// its manifest asks for, approved at install. Bound to `package_hash` like the rest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -58,6 +71,20 @@ pub struct Grants {
     /// `input_folder`), approved at install.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub input_folder: bool,
+}
+
+/// The consent and per-user settings half of [`AppState`], behind a box.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct UserState {
+    /// One UI request's consent, never serialised or persisted. Consumed before entering a guest.
+    pub dialog_folders: Option<folders::DialogFolders>,
+    /// Settings location supplied by the app or tests; otherwise the user's native settings folder.
+    pub user_settings_dir: Option<PathBuf>,
+    /// The authenticated command plugin for this run, only when it requests user-storage.
+    pub user_storage_caller: Option<String>,
+    /// Worker-local settings travel with the candidate session until the app accepts it.
+    pub(crate) defer_user_settings: bool,
+    pub(crate) pending_user_settings: BTreeMap<String, (PathBuf, user_storage::Pending)>,
 }
 
 /// Trusted host state, never loaded from a design or supplied by guest code.
@@ -78,6 +105,10 @@ pub struct AppState {
     /// Host-only authority marker and event payload for a listener invocation.
     pub(crate) listener_design: Option<Option<DesignToken>>,
     pub packages: BTreeMap<String, String>,
+    /// Transient, host-drawn panel state. Never serialised into a design.
+    pub panels: BTreeMap<String, PanelPackage>,
+    /// Namespace of the component currently updating panel data.
+    pub ui_caller: Option<String>,
     pub grants: BTreeMap<String, Grants>,
     /// Adapter folder grants for the active call; runtime calls use the package's approved grants.
     pub file_grants: Vec<FileGrant>,
@@ -86,9 +117,22 @@ pub struct AppState {
     /// Where `plugin.install` writes and `plugin.list` looks; `None`: the per-user
     /// `plugins` folder ([`crate::recovery::data_dir`]).
     pub plugins_dir: Option<PathBuf>,
+    /// Folders the user allowed linked files to be read from (Preferences, General), set by the host
+    /// and never by a design. A file an importer plugin reads for a link outside the design's own
+    /// folder is read only from one of these.
+    pub link_folders: Vec<PathBuf>,
+    /// Files a caller named to Insert Design in this session: its own choice, so Update Links may
+    /// read them again whatever their folder. Never saved with a design.
+    pub linked_files: BTreeSet<PathBuf>,
     /// The plugin whose run is under way, when it keeps data in designs (`storage@0.1`): the only
     /// one that may change plugin data, and only its own. Set by the host for that run alone.
     pub storage_caller: Option<storage::StorageCaller>,
+    /// Per-request consent and per-user settings state, boxed so a session stays small (sessions
+    /// are copied by value on deep call paths).
+    pub user: Box<UserState>,
+    /// The design a plugin run started on, as it was before the run: what `doc.info` reports in it.
+    /// Set by the host for that run alone, like `storage_caller`.
+    pub caller_design: Option<crate::schema::inspect::DocInfoResult>,
     /// Set when `grants` is kept in the plugins folder's grant store between sessions (the command
     /// line and headless MCP with `--keep-plugin-approvals`): what this session last read from or wrote to it. `None`: the
     /// grants live only in this session, or the app keeps them itself (the desktop app).
@@ -96,6 +140,20 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Compute without publishing settings. Dropping the candidate discards its changes.
+    pub fn defer_user_settings(&mut self) {
+        self.user.defer_user_settings = true;
+    }
+
+    /// Call after final cancellation/context checks, immediately before adopting the candidate.
+    /// A conflict leaves both the live design and all settings records unchanged.
+    pub fn publish_user_settings(&mut self) -> craft_plugin::Result<()> {
+        user_storage::publish_all(&self.user.pending_user_settings)?;
+        self.user.pending_user_settings.clear();
+        self.user.defer_user_settings = false;
+        Ok(())
+    }
+
     /// History restores authored links, not observations of a different source or version.
     pub(crate) fn prune_link_changes(&mut self, doc: &solidcraft_doc::Document) {
         let current = |component: &u64, change: &LinkChange| {
@@ -112,14 +170,23 @@ impl AppState {
         }
     }
 
-    /// Background cache/panel updates do not revoke an in-flight command's authority.
+    pub fn user_settings_dir(&self) -> Option<PathBuf> {
+        self.user.user_settings_dir.clone().or_else(user_storage::settings_dir)
+    }
+
+    /// Listener caches and panel frame adoption do not revoke an in-flight command's authority.
     pub(crate) fn same_execution_context(&self, other: &Self) -> bool {
         self.packages == other.packages
+            && self.panels == other.panels
+            && self.ui_caller == other.ui_caller
             && self.grants == other.grants
             && self.file_grants == other.file_grants
+            && self.user.dialog_folders == other.user.dialog_folders
             && self.command_groups == other.command_groups
             && self.plugins_dir == other.plugins_dir
             && self.storage_caller == other.storage_caller
+            && self.user.user_settings_dir == other.user.user_settings_dir
+            && self.user.user_storage_caller == other.user.user_storage_caller
             && self.stored == other.stored
     }
     /// The installed plugins' folder, if this platform has one.
@@ -180,7 +247,7 @@ impl AppState {
 }
 
 pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
-    let manifest = craft_plugin::parse_manifest_for(text, folder, "SolidCraft")?;
+    let manifest = craft_plugin::parse_manifest_for_version(text, folder, "SolidCraft", env!("CARGO_PKG_VERSION"))?;
     let refuse = |field: &str, reason: String| -> EngineError { HostError::InvalidManifest { field: field.into(), reason }.into() };
     if let Some(runtime) = &manifest.runtime {
         for entry in &runtime.entries {
@@ -198,7 +265,7 @@ pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
         if runtime.is_exporter() {
             export::refuse_unreadable(runtime)?;
         }
-        let storage = manifest.capabilities.iter().any(|capability| capability.starts_with("storage@"));
+        let storage = manifest.granted_capabilities().iter().any(|capability| capability.starts_with("storage@"));
         for command in &runtime.commands {
             if command.starts_with("storage.") && !storage {
                 return Err(refuse("runtime.commands", format!("`{command}` needs the storage capability: add \"storage@0.1\" to capabilities")));
@@ -222,7 +289,7 @@ pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
 /// The sensitive command groups. Each reaches past the open design and is refused unless the
 /// manifest asks for it and the user grants it, as file folders are:
 /// - `file`: reads or writes files (save, export, import, insert from a file, libraries);
-/// - `doc`: opens, creates, recovers or switches designs;
+/// - `doc`: opens, creates, recovers or switches designs, or reads the open one's file (`doc.info`);
 /// - `app`: app settings, the window and diagnostics, outside any design;
 /// - `plugin`: reviews, installs, removes, inspects or runs plugins.
 pub const COMMAND_GROUPS: &[&str] = &["app", "doc", "file", "plugin"];
@@ -242,6 +309,7 @@ const FILE_COMMANDS: &[&str] = &[
     "sheet.export_bend_table",
     "sheet.export_dxf",
     "sketch.export_dxf",
+    "sketch.export_svg",
     "timeline.export_script",
 ];
 
@@ -268,6 +336,24 @@ fn approved_file_folders(granted: &[FileGrant], requested: &[craft_plugin::FileP
         .filter(|g| g.read && (!write || g.write) && requested.iter().any(|r| r.name == g.name && r.read && (!write || r.write)))
         .map(|g| g.folder.clone())
         .collect()
+}
+
+/// `params` with each string written `grant:<name>/…` replaced by that file's path in the folder
+/// granted as `<name>` ([`solidcraft_io::vfs::grant_path`]), at any depth, so a plugin's `file`
+/// and `doc` commands name a file without knowing where its folder is. Other strings stay as they
+/// are. Parsed JSON is at most 128 levels deep (serde_json's limit), which bounds the recursion.
+fn resolve_grant_paths(params: &Value, grants: &[(&str, &Path)]) -> std::io::Result<Value> {
+    Ok(match params {
+        Value::String(text) => match solidcraft_io::vfs::grant_path(text, grants) {
+            Some(path) => Value::String(path?),
+            None => params.clone(),
+        },
+        Value::Array(items) => Value::Array(items.iter().map(|item| resolve_grant_paths(item, grants)).collect::<std::io::Result<_>>()?),
+        Value::Object(fields) => Value::Object(
+            fields.iter().map(|(key, value)| resolve_grant_paths(value, grants).map(|value| (key.clone(), value))).collect::<std::io::Result<_>>()?,
+        ),
+        _ => params.clone(),
+    })
 }
 
 /// The sensitive group of a command, or `None` when it acts on the open design alone.
@@ -324,10 +410,15 @@ pub fn with_installed<T>(session: &Session, folder: &str, read: impl FnOnce() ->
     if is_installed_folder(session, folder) { solidcraft_io::vfs::scoped(None, read) } else { read() }
 }
 
-/// The ceilings a package runs under: the app's, raised to the memory the user approved for this
-/// exact manifest and component at install. A grant for another package hash raises nothing.
+/// The ceilings a package runs under: the app's, raised to the fuel and memory the user approved
+/// for this exact manifest and component at install. A grant for another package hash raises nothing.
 pub fn host_limits_for(session: &Session, id: &str, approval: &str) -> HostLimits {
     let mut limits = session.plugin_limits;
+    if let Some(fuel) =
+        session.plugin_state.grants.get(id).filter(|grants| grants.package_hash.as_deref() == Some(approval)).and_then(|grants| grants.fuel)
+    {
+        limits.max_fuel = limits.max_fuel.max(fuel.min(MAX_APPROVED_FUEL));
+    }
     if let Some(memory) =
         session.plugin_state.grants.get(id).filter(|grants| grants.package_hash.as_deref() == Some(approval)).and_then(|grants| grants.memory_mib)
     {
@@ -361,6 +452,18 @@ pub(super) fn package_hash(manifest: &[u8], component: &[u8]) -> String {
     format!("{:x}", digest.finalize())
 }
 
+/// Who a plugin's storage reads and writes are for during its run: the plugin itself, when it has
+/// the storage capability and says which data format it writes.
+#[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn storage_caller(manifest: &Manifest, rt: &RuntimeManifest) -> Option<storage::StorageCaller> {
+    rt.data_format.filter(|_| manifest.granted_capabilities().iter().any(|c| c.starts_with("storage@"))).map(|data_format| storage::StorageCaller {
+        id: manifest.id.clone(),
+        name: manifest.name.clone(),
+        version: manifest.version.clone(),
+        data_format,
+    })
+}
+
 /// The shared hook path for a dialog worker and plugin.run. Hook code receives a scratch host
 /// with no file or edit grants. Complete calls propagate execution failures; a form retains its
 /// declarative state and shows a quiet note instead.
@@ -372,6 +475,22 @@ pub fn update_dialog(
     protected: &BTreeSet<String>,
     complete: bool,
 ) -> Result<dialog::Update> {
+    let runtime = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
+    let declared = runtime.entries.iter().find(|declared| declared.name == entry).ok_or_else(|| error("unknown entry"))?;
+    let schema = conditions::bind_file_conditions(&declared.input_schema, None)?;
+    update_dialog_with_schema(session, package, entry, values, protected, complete, &schema)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn update_dialog_with_schema(
+    session: &Session,
+    package: &Package,
+    entry: &str,
+    values: &Value,
+    protected: &BTreeSet<String>,
+    complete: bool,
+    schema: &Value,
+) -> Result<dialog::Update> {
     if session.disabled_plugins.contains(&package.manifest.id) {
         return Err(error("plugin is disabled"));
     }
@@ -380,15 +499,21 @@ pub fn update_dialog(
     }
     let rt = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
     let declared = rt.entries.iter().find(|e| e.name == entry).ok_or_else(|| error("unknown entry"))?;
-    let schema = &declared.input_schema;
     let baseline = dialog::apply(schema, values, protected, None, false)?.values;
     if !declared.dialog_hook {
         return dialog::apply(schema, &baseline, protected, None, complete).map_err(Into::into);
     }
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
     let result = {
+        // The hook reads the plugin's own data the way its entry does: `storage.get {}` is its own
+        // (#22038). It runs as a read entry, so a write is still refused.
+        let mut scratch = session.scratch();
+        scratch.plugin_state.user.user_storage_caller =
+            package.manifest.granted_capabilities().iter().any(|c| c.starts_with("user-storage@")).then(|| package.manifest.id.clone());
+        scratch.plugin_state.storage_caller = storage_caller(&package.manifest, rt);
         let host = SolidCraftHost {
-            session: session.scratch(),
+            session: scratch,
+            input_folders: Vec::new(),
             transaction: None,
             sketch_exits: Vec::new(),
             view: None,
@@ -398,6 +523,8 @@ pub fn update_dialog(
             evaluation: None,
             forms: Vec::new(),
             form_source: None,
+            messages: Vec::new(),
+            user_data: None,
         };
         let (_, result) = craft_plugin_wasm::dialog_fields(
             host,
@@ -424,11 +551,29 @@ pub fn update_dialog(
 
 /// Runs `entry` of `package`. A failure starts with the plugin's name.
 pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_json::Value) -> Result<crate::schema::plugin::RunResult> {
-    let name = package.manifest.name.clone();
-    run_package(session, package, entry, params).map_err(messages::named(&name, None))
+    run_with_ui_event(session, package, entry, params, None)
 }
 
-fn run_package(session: &mut Session, package: Package, entry: &str, params: &serde_json::Value) -> Result<crate::schema::plugin::RunResult> {
+/// Deliver an explicitly requested panel action while preserving the entry's ordinary input.
+pub fn run_with_ui_event(
+    session: &mut Session,
+    package: Package,
+    entry: &str,
+    params: &serde_json::Value,
+    ui_event: Option<&ui::UiEvent>,
+) -> Result<crate::schema::plugin::RunResult> {
+    let name = package.manifest.name.clone();
+    run_package(session, package, entry, params, ui_event).map_err(messages::named(&name, None))
+}
+
+fn run_package(
+    session: &mut Session,
+    package: Package,
+    entry: &str,
+    params: &serde_json::Value,
+    ui_event: Option<&ui::UiEvent>,
+) -> Result<crate::schema::plugin::RunResult> {
+    let consent = session.plugin_state.user.dialog_folders.take();
     session.plugin_state.refresh_stored();
     if session.disabled_plugins.contains(&package.manifest.id) {
         return Err(error("plugin is disabled"));
@@ -444,6 +589,7 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
     let rt = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
     host_limits_for(session, &package.manifest.id, &package.approval).check(&rt.limits)?;
     let declared = rt.entries.iter().find(|e| e.name == entry).ok_or_else(|| error("unknown entry"))?;
+    let fields = craft_plugin::directory_read_fields(&declared.input_schema)?;
     let prepared = if declared.dialog_hook {
         let protected = params.as_object().map(|v| v.keys().cloned().collect()).unwrap_or_default();
         let update = update_dialog(session, &package, entry, params, &protected, true)?;
@@ -451,12 +597,13 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
             session.echo(warning);
         }
         Some(craft_plugin::prepare_input(&declared.input_schema, &update.values)?)
-    } else if conditions::has_conditions(&declared.input_schema) {
+    } else if conditions::has_conditions(&declared.input_schema) || !fields.is_empty() {
         Some(craft_plugin::prepare_input(&declared.input_schema, params)?)
     } else {
         None
     };
     let params = prepared.as_ref().unwrap_or(params);
+    let input_folders = folders::for_entry(session, &package, entry, params, consent.as_ref())?;
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         // What this call may reach: the groups both the manifest asks for and the user granted,
@@ -464,18 +611,17 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
         let grants = session.plugin_state.grants.get(&package.manifest.id).cloned().unwrap_or_default();
         let groups: BTreeSet<String> = rt.permissions.command_groups.intersection(&grants.command_groups).cloned().collect();
         let mut scratch = session.scratch();
+        panels::register_package(&mut scratch, &package)?;
+        scratch.plugin_state.ui_caller = Some(package.manifest.id.clone());
         scratch.plugin_state.file_grants = grants.folders;
-        scratch.plugin_state.storage_caller =
-            rt.data_format.filter(|_| package.manifest.capabilities.iter().any(|c| c.starts_with("storage@"))).map(|data_format| {
-                storage::StorageCaller {
-                    id: package.manifest.id.clone(),
-                    name: package.manifest.name.clone(),
-                    version: package.manifest.version.clone(),
-                    data_format,
-                }
-            });
+        scratch.plugin_state.user.user_storage_caller =
+            package.manifest.granted_capabilities().iter().any(|c| c.starts_with("user-storage@")).then(|| package.manifest.id.clone());
+        // Only `doc.info` reads it, and only with `doc`: skip the dirty check for every other run.
+        scratch.plugin_state.caller_design = groups.contains("doc").then(|| session.doc_info());
+        scratch.plugin_state.storage_caller = storage_caller(&package.manifest, rt);
         let host = SolidCraftHost {
             session: scratch,
+            input_folders,
             transaction: None,
             sketch_exits: Vec::new(),
             view: None,
@@ -485,13 +631,21 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
             evaluation: None,
             forms: Vec::new(),
             form_source: Some((package.manifest.id.clone(), rt.entries.clone())),
+            messages: Vec::new(),
+            user_data: None,
         };
         let approved = host.granted_folders();
         let file_read_folders = approved_file_folders(&approved, &rt.permissions.files, false);
         let file_folders = approved_file_folders(&approved, &rt.permissions.files, true);
-        let (host, result) =
-            craft_plugin_wasm::run(SolidCraftHost { file_folders, file_read_folders, ..host }, &package.manifest, &package.component, entry, params);
+        let host = SolidCraftHost { file_folders, file_read_folders, ..host };
+        let event = panels::event_for(&package.manifest, entry, ui_event)?;
+        let (host, result) = match event {
+            Some(event) => craft_plugin_wasm::run_ui_event(host, &package.manifest, &package.component, entry, params, &event),
+            None => craft_plugin_wasm::run(host, &package.manifest, &package.component, entry, params),
+        };
         let value = result?;
+        session.plugin_state.user.pending_user_settings = host.session.plugin_state.user.pending_user_settings.clone();
+        session.plugin_state.panels.clone_from(&host.session.plugin_state.panels);
         if !std::sync::Arc::ptr_eq(&session.doc, &host.session.doc)
             || session.active_sketch != host.session.active_sketch
             || session.sketching_view != host.session.sketching_view
@@ -514,11 +668,12 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
             sketch_exits: host.sketch_exits,
             view: host.view,
             param_warnings: vec![],
+            messages: host.messages,
         })
     }
     #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
     {
-        let _ = params;
+        let _ = (params, input_folders, ui_event);
         Err(error("plugin execution requires an x86-64 or AArch64 native build with the plugins feature"))
     }
 }
@@ -528,6 +683,7 @@ mod events;
 mod export;
 pub use events::{LinkChange, design_changed, design_notifications};
 pub(crate) use events::{record_changed_link_reads, record_link_change, record_link_reads};
+pub mod folders;
 mod form;
 pub mod grant_store;
 pub use form::form_errors;
@@ -536,12 +692,18 @@ pub mod install;
 pub mod messages;
 #[cfg(not(target_arch = "wasm32"))]
 mod package;
+mod panels;
+pub use panels::{PanelPackage, PanelSnapshot, sync_panels};
 pub mod storage;
+pub mod user_storage;
 #[cfg(not(target_arch = "wasm32"))]
 pub use package::{remove, store_grants, validate_grants};
 
 pub use export::{describe as describe_exporters, export_file, exporter_for, exporters};
-pub use import::{FormatSlot, Importer, describe as describe_importers, format_slots, import_file, importer_for, importers, open_filters};
+pub use import::{
+    FormatSlot, ImportDialog, ImportedBytes, Importer, ImporterStatus, describe as describe_importers, file_facts, format_slots, import_design_bytes,
+    import_dialog, import_file, importer_for, importer_status, importers, open_filters,
+};
 pub use messages::PluginFailure;
 #[cfg(test)]
 mod tests;
@@ -551,6 +713,7 @@ pub use tools::{explain_importer, explain_named, missing_grant, structured_error
 /// The application adapter owns a scratch transaction. Wasmtime sees only PluginHost.
 pub struct SolidCraftHost {
     pub session: Session,
+    input_folders: Vec<FileGrant>,
     transaction: Option<Session>,
     sketch_exits: Vec<Option<u64>>,
     /// The last view command in this run. Cleared on rollback, like `sketch_exits`.
@@ -566,9 +729,38 @@ pub struct SolidCraftHost {
     evaluation: Option<Box<Session>>,
     forms: Vec<crate::schema::plugin::FormRequest>,
     form_source: Option<(String, Vec<Entry>)>,
+    messages: Vec<crate::schema::plugin::PluginMessage>,
+    /// User settings staged for this call; never copied into a document or undo snapshot.
+    user_data: Option<user_storage::Pending>,
 }
 
 impl SolidCraftHost {
+    fn user_storage_identity(&self) -> craft_plugin::Result<(PathBuf, String)> {
+        let id =
+            self.session.plugin_state.user.user_storage_caller.clone().filter(|id| valid_id(id)).ok_or_else(|| HostError::PermissionDenied {
+                permission: "user-storage: only the plugin's own entries may access its data".into(),
+            })?;
+        let settings = self
+            .session
+            .plugin_state
+            .user_settings_dir()
+            .ok_or_else(|| HostError::PermissionDenied { permission: "user-storage: no user settings folder is available".into() })?;
+        Ok((settings, id))
+    }
+    fn user_data(&mut self) -> craft_plugin::Result<&mut user_storage::Pending> {
+        if self.transaction.is_none() {
+            return Err(HostError::PermissionDenied { permission: "user-storage: no active plugin run".into() });
+        }
+        let (settings, id) = self.user_storage_identity()?;
+        if self.user_data.is_none() {
+            self.user_data = Some(match self.session.plugin_state.user.pending_user_settings.get(&id) {
+                Some((folder, pending)) if folder == &settings => pending.clone(),
+                _ => user_storage::Pending::load(&settings, &id)?,
+            });
+        }
+        self.user_data.as_mut().ok_or_else(|| HostError::InvalidInput { field: "user-storage".into(), reason: "no active data".into() })
+    }
+
     /// Keep the last view command. `view.fit` and `view.home` frame in the window.
     /// `view.navigate` does not store a camera; its reply is what the navigator applies.
     /// Any other command that changes `session.camera` keeps that camera.
@@ -604,6 +796,22 @@ impl PluginHost for SolidCraftHost {
     fn open_form(&mut self, entry: &str, params: &Value) -> craft_plugin::Result<()> {
         self.request_form(entry, params)
     }
+    fn user_storage_get(&mut self, key: &str) -> craft_plugin::Result<Option<Value>> {
+        craft_plugin::check_user_storage_key(key)?;
+        Ok(self.user_data()?.get(key))
+    }
+    fn user_storage_set(&mut self, key: &str, value: &Value) -> craft_plugin::Result<()> {
+        craft_plugin::check_user_storage_key(key)?;
+        self.user_data()?.set(key, value)
+    }
+    fn user_storage_remove(&mut self, key: &str) -> craft_plugin::Result<bool> {
+        craft_plugin::check_user_storage_key(key)?;
+        Ok(self.user_data()?.remove(key))
+    }
+    fn user_storage_list(&mut self) -> craft_plugin::Result<Vec<String>> {
+        Ok(self.user_data()?.list())
+    }
+
     fn design_token(&self) -> craft_plugin::Result<Option<DesignToken>> {
         match &self.session.plugin_state.listener_design {
             Some(design) => Ok(design.clone()),
@@ -682,21 +890,36 @@ impl PluginHost for SolidCraftHost {
         }
         // Read-only grants apply only to known input readers. File writers retain their
         // previous read-and-write scope; unknown commands default to that stricter scope.
-        let scope = match group {
+        let (scope, granted_params) = match group {
             Some("file" | "doc") => {
                 let folders = if input_only_command(name) { &self.file_read_folders } else { &self.file_folders };
-                solidcraft_io::vfs::PathScope::new(folders.iter().cloned())
+                // `grant:<name>/…` names a file in one of these folders by its grant's name.
+                let named: Vec<(&str, &Path)> = self
+                    .session
+                    .plugin_state
+                    .file_grants
+                    .iter()
+                    .filter(|g| folders.contains(&g.folder))
+                    .map(|g| (g.name.as_str(), g.folder.as_path()))
+                    .collect();
+                let resolved = resolve_grant_paths(params, &named).map_err(|e| HostError::PermissionDenied { permission: e.to_string() })?;
+                (solidcraft_io::vfs::PathScope::new(folders.iter().cloned()), Some(resolved))
             }
-            _ => Default::default(),
+            _ => (Default::default(), None),
         };
+        let params = granted_params.as_ref().unwrap_or(params);
         let s = self.transaction.as_mut().ok_or_else(|| HostError::CommandFailed { command: name.into(), reason: "no active transaction".into() })?;
         let finish_sequence = s.sketch_finish_sequence;
         let camera_before = s.camera;
         let before = s.doc.clone();
         let previous: BTreeMap<_, _> = s.model.results.iter().map(|r| (r.id, r.error.clone())).collect();
         // Even implicit font and linked-design reads have no authority from a command grant.
-        let reply = solidcraft_io::vfs::scoped(Some(scope), || s.execute(name, params))
-            .map_err(|e| HostError::CommandFailed { command: name.into(), reason: e.to_string() })?;
+        let ui_caller = s.plugin_state.ui_caller.clone();
+        let reply = solidcraft_io::vfs::scoped(Some(scope), || s.execute(name, params));
+        // Replacing the design clears ambient callers. This component still owns its
+        // active transaction and may populate its panels for the newly opened design.
+        s.plugin_state.ui_caller = ui_caller;
+        let reply = reply.map_err(|e| HostError::CommandFailed { command: name.into(), reason: e.to_string() })?;
         if let Some(failed) = s
             .model
             .results
@@ -719,14 +942,51 @@ impl PluginHost for SolidCraftHost {
         if self.transaction.is_some() {
             return Err(HostError::InvalidInput { field: "transaction".into(), reason: "already active".into() });
         }
+        self.user_data = None;
         self.transaction = Some(self.session.scratch());
         Ok(())
     }
     fn commit_transaction(&mut self) -> craft_plugin::Result<()> {
+        if self.transaction.is_none() {
+            return Err(HostError::InvalidInput { field: "transaction".into(), reason: "not active".into() });
+        }
+        // What the outer session had staged before this run; anything the transaction holds beyond
+        // it was staged by a nested import (`doc.open`) and must survive the commit.
+        let base = self.session.plugin_state.user.pending_user_settings.clone();
+        let mut keep_for_publication = false;
+        if let Some(data) = &self.user_data {
+            let (settings, id) = self.user_storage_identity()?;
+            if self.session.plugin_state.user.defer_user_settings {
+                self.session.plugin_state.user.pending_user_settings.insert(id, (settings, data.clone()));
+            } else {
+                // A stale record refuses the run now; the write waits for `publish_committed`, which
+                // runs only after the approved files are in place.
+                data.check(&settings, &id)?;
+                keep_for_publication = true;
+            }
+        }
+        if !keep_for_publication {
+            self.user_data = None;
+        }
         let mut computed =
             self.transaction.take().ok_or_else(|| HostError::InvalidInput { field: "transaction".into(), reason: "not active".into() })?;
+        // Merge, never replace: the transaction's own staged entries (a nested import's) join the
+        // outer session's. An id staged by both is resolved in favour of the later, inner (nested)
+        // stage; an inner entry identical to what it started from is not a stage and never wins.
+        let inner = std::mem::take(&mut computed.plugin_state.user.pending_user_settings);
+        let mut merged = self.session.plugin_state.user.pending_user_settings.clone();
+        for (id, entry) in inner {
+            // A clean inner record (a nested read) never replaces the outer's unpublished write.
+            let outer_write = merged.get(&id).is_some_and(|(_, outer)| outer.is_dirty());
+            if base.get(&id) != Some(&entry) && (entry.1.is_dirty() || !outer_write) {
+                merged.insert(id, entry);
+            }
+        }
+        self.session.plugin_state.user.pending_user_settings = merged.clone();
+        computed.plugin_state.user.pending_user_settings = merged;
         computed.undo.clear();
         computed.redo.clear();
+        self.session.plugin_state.panels.clone_from(&computed.plugin_state.panels);
         // Session::execute(plugin.run) owns the one outer undo step.
         if !std::sync::Arc::ptr_eq(&self.session.doc, &computed.doc)
             || self.session.active_sketch != computed.active_sketch
@@ -747,15 +1007,38 @@ impl PluginHost for SolidCraftHost {
         }
         Ok(())
     }
+    fn publish_committed(&mut self) -> craft_plugin::Result<()> {
+        if let Some(data) = self.user_data.take() {
+            let (settings, id) = self.user_storage_identity()?;
+            data.publish(&settings, &id)?;
+        }
+        Ok(())
+    }
+    fn discard_committed(&mut self) {
+        self.user_data = None;
+    }
     fn rollback_transaction(&mut self) -> craft_plugin::Result<()> {
         self.transaction = None;
+        self.user_data = None;
         self.sketch_exits.clear();
         self.forms.clear();
         self.view = None;
         Ok(())
     }
+    fn ui_set_data(&mut self, panel: &str, updates: &[ui::Datum]) -> craft_plugin::Result<()> {
+        panels::set_data(self.transaction.as_mut(), panel, updates)
+    }
+    fn ui_clear_data(&mut self, panel: &str) -> craft_plugin::Result<()> {
+        panels::clear_data(self.transaction.as_mut(), panel)
+    }
+    fn ui_show_panel(&mut self, panel: &str, visible: bool) -> craft_plugin::Result<()> {
+        panels::show_panel(self.transaction.as_mut(), panel, visible)
+    }
     fn granted_command_groups(&self) -> BTreeSet<String> {
         self.groups.clone()
+    }
+    fn granted_input_folders(&self) -> Vec<FileGrant> {
+        self.input_folders.clone()
     }
     fn granted_folders(&self) -> Vec<FileGrant> {
         let scope = solidcraft_io::vfs::current_scope();
@@ -769,14 +1052,38 @@ impl PluginHost for SolidCraftHost {
     }
     fn authorize_file_path(&self, path: &Path, write: bool) -> craft_plugin::Result<()> {
         if let Some(scope) = solidcraft_io::vfs::current_scope() {
-            return scope.check(&path.to_string_lossy()).map_err(|e| HostError::PermissionDenied { permission: e.to_string() });
+            // A write may make folders that do not exist yet (`write-file`): its nearest existing
+            // ancestor must be in scope, as with `check_new`. A read needs the whole path to exist.
+            let allowed = if write { scope.check_new(&path.to_string_lossy()) } else { scope.check(&path.to_string_lossy()) };
+            return allowed.map_err(|e| HostError::PermissionDenied { permission: e.to_string() });
         }
         grant_covers(&self.session.plugin_state.file_grants, path, write)
     }
-    fn log(&mut self, message: &str) {
-        if let Some(s) = self.transaction.as_mut() {
-            s.echo(format!("plugin: {}", message.chars().filter(|c| !c.is_control()).collect::<String>()));
+    fn authorize_input_file_path(&self, path: &Path) -> craft_plugin::Result<()> {
+        if cfg!(windows)
+            && let Some(reason) = solidcraft_io::vfs::windows_refusal(&path.to_string_lossy())
+        {
+            return Err(HostError::PermissionDenied { permission: reason.into() });
         }
+        if let Some(scope) = solidcraft_io::vfs::current_scope() {
+            // The session's refusal names absolute folders and `--allow-path` roots; a plugin
+            // only ever sees grant names and relative paths.
+            return scope.check(&path.to_string_lossy()).map_err(|_| {
+                let grant = self.input_folders.iter().find(|g| path.starts_with(&g.folder)).map_or("input", |g| g.name.as_str());
+                HostError::PermissionDenied { permission: format!("folders:{grant}: not allowed in this session") }
+            });
+        }
+        grant_covers(&self.input_folders, path, false)
+    }
+    fn log(&mut self, message: &str) {
+        self.log_level(craft_plugin::LogLevel::Info, message);
+    }
+    fn log_level(&mut self, level: craft_plugin::LogLevel, message: &str) {
+        let clean: String = message.chars().filter(|c| !c.is_control()).collect();
+        if let Some(s) = self.transaction.as_mut() {
+            s.echo(format!("plugin: {clean}"));
+        }
+        self.messages.push(crate::schema::plugin::PluginMessage { level, message: clean });
     }
     fn progress(&mut self, fraction: f32, message: &str) {
         solidcraft_doc::progress::item(Some((message, (fraction.clamp(0., 1.) * 100.) as usize, 100)));
@@ -788,7 +1095,7 @@ impl PluginHost for SolidCraftHost {
 
 /// Whether `path` is covered by a folder grant, for reading or for writing.
 /// A refusal is the same error [`PluginHost::authorize_file_path`] returns when no caller
-/// scope is set. Choosing a folder in a dialog does not add a grant.
+/// scope is set. Unannotated directory fields do not add a grant.
 pub fn require_folder_grant(grants: &[FileGrant], path: &Path) -> craft_plugin::Result<()> {
     if grant_covers(grants, path, false).is_ok() || grant_covers(grants, path, true).is_ok() { Ok(()) } else { grant_covers(grants, path, false) }
 }
@@ -829,6 +1136,9 @@ pub fn resolve_call(s: &Session, id: &str, params: &Value) -> Result<Option<Valu
     // Preserve direct calls' input pass-through; tool callers validate their listed schema.
     // `named`: a refusal comes back in words an agent can act on (`tools::explain`).
     let mut call = json!({"path":path,"approval":approval,"entry":entry,"params":inputs,"named":true});
+    if let (Some(event), Some(call)) = (params.get("ui_event"), call.as_object_mut()) {
+        call.insert("ui_event".into(), event.clone());
+    }
     if let Some(expected) = params.get("expected_design") {
         call["expected_design"] = expected.clone();
     }

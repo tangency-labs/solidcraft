@@ -67,6 +67,38 @@ fn the_drawings_fields() {
     assert_eq!(shown(&d, 0, None, number()), "");
 }
 
+/// The drawing's language is a field for the ISO 7200 language cell (#20121): its code in capitals,
+/// whatever case or region it was saved with.
+#[test]
+fn the_drawings_language_reads_as_its_code_in_capitals() {
+    let mut d = drawing();
+    let language = || vec![field(Source::Drawing, "language")];
+    assert!(has_key(Source::Drawing, "language") && !has_key(Source::Sheet, "language"));
+    assert_eq!(shown(&d, 0, None, language()), "EN");
+    d.language = "pt-br".into();
+    assert_eq!(shown(&d, 0, None, language()), "PT-BR");
+    assert!(Values { drawing: &d, sheet: 0, component: Documented::Nothing }.empty_fields(&Content(language())).is_empty());
+}
+
+/// The built-in block's new cells read what the drawing knows: the sheet's scale, the drawing's
+/// language, the newest revision row's revision; the shop's own three read nothing.
+#[test]
+fn the_built_in_blocks_iso_7200_cells_follow_the_drawing() {
+    let d = drawing();
+    let block = d.sheets[0].title_block.clone().unwrap();
+    let read = |name: &str| {
+        let cell = block.cells.iter().find(|c| c.name == name).unwrap();
+        let CellKind::Text(text) = &cell.kind else { panic!("{name} is text") };
+        shown(&d, 0, None, text.content.0.clone())
+    };
+    assert_eq!(read("language"), "EN");
+    for own in ["document_type", "document_status", "department"] {
+        assert_eq!(read(own), "", "{own}");
+    }
+    // No base view and no revision row yet: nothing to show, and no row to blame.
+    assert_eq!((read("scale").as_str(), read("revision").as_str()), ("", ""));
+}
+
 /// Sheets are numbered among the counted ones: the second of three is "2/3". A sheet left out of
 /// the count shows neither, and the sheets after it close up.
 #[test]
@@ -225,6 +257,33 @@ fn sheet_metal_fields_show_only_what_every_sheet_body_agrees_on() {
     assert_eq!(no_field(Source::Drawing, "thickness").as_deref(), Some("the drawing has no field `thickness`"), "a component's field only");
 }
 
+/// The `finish` field reads the part's finish property (a design's own too: its block's component 0);
+/// a part without one shows its free property of that name, as the built-in block's Finish cell did, and
+/// the `properties.finish` field still reads the free property alone.
+#[test]
+fn the_finish_field_reads_the_finish_property_then_the_free_one() {
+    fn part<'a>(metadata: &'a Metadata, properties: Option<&'a BTreeMap<String, String>>) -> Option<Component<'a>> {
+        Some(Component { name: "Bracket", metadata, properties, material: None, mass: None, sheet_metal: None })
+    }
+    let d = drawing();
+    let free = BTreeMap::from([("finish".to_string(), "Zinc plated".to_string())]);
+    // A fn, not a closure: each call borrows the component for itself.
+    fn read(d: &Drawing, component: Option<Component>, key: &str) -> String {
+        shown(d, 0, component, vec![field(Source::Component, key)])
+    }
+    assert!(has_key(Source::Component, "finish") && has_key(Source::Component, "properties.finish"));
+    let mut metadata = Metadata::default();
+    assert_eq!(read(&d, part(&metadata, None), "finish"), "", "nothing set");
+    assert_eq!(read(&d, part(&metadata, Some(&free)), "finish"), "Zinc plated", "the free property shows as before");
+    metadata.set(Owner::Component, "finish", json!("Powder coat, RAL 9005, matt")).unwrap();
+    assert_eq!(read(&d, part(&metadata, Some(&free)), "finish"), "Powder coat, RAL 9005, matt", "the part property wins");
+    assert_eq!(read(&d, part(&metadata, None), "finish"), "Powder coat, RAL 9005, matt", "the design has no free properties");
+    assert_eq!(read(&d, part(&metadata, Some(&free)), "properties.finish"), "Zinc plated", "that field is unchanged");
+    assert_eq!(read(&d, None, "finish"), "");
+    let blank = Metadata(serde_json::from_value(json!({"finish": ""})).unwrap());
+    assert_eq!(read(&d, part(&blank, Some(&free)), "finish"), "Zinc plated", "an empty property is none");
+}
+
 /// A field its source doesn't have is refused when a block is given and when a drawing is read,
 /// naming the cell; so is an override of a cell the block doesn't have or that shows no text, or
 /// one with a control character. A sheet without overrides saves none.
@@ -300,7 +359,16 @@ fn a_sheets_scale_is_the_one_its_base_views_share() {
     let (first, second) = (d.sheets[0].id, d.sheets[1].id);
     let view = |id, sheet, kind, scale: &str| {
         let settings = ViewOverrides { scale: Some(scale.parse().unwrap()), ..ViewOverrides::default() };
-        Arc::new(View { id, sheet, kind, place: ViewPlace::At([150.0, 150.0]), settings, reference_shown_percent: 0.0, label: None })
+        Arc::new(View {
+            id,
+            sheet,
+            kind,
+            place: ViewPlace::At([150.0, 150.0]),
+            settings,
+            reference_shown_percent: 0.0,
+            centre_marks: None,
+            label: None,
+        })
     };
     let base = |named| ViewKind::Base { source, view: ViewDirection::Named(named) };
     d.add_views([
@@ -329,6 +397,7 @@ fn a_sheets_scale_is_the_one_its_base_views_share() {
             place: ViewPlace::At([150.0, 150.0]),
             settings: ViewOverrides::default(),
             reference_shown_percent: 0.0,
+            centre_marks: None,
             label: None,
         })
     };

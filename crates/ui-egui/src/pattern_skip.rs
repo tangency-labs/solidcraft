@@ -275,7 +275,7 @@ fn marker_labels(doc: &solidcraft_engine::doc::Document, params: &Value, markers
     for marker in markers {
         *counts.entry(marker.slot).or_default() += 1;
     }
-    let (values, _) = doc.param_values();
+    let values = doc.evaluation_values();
     markers
         .iter()
         .map(|marker| {

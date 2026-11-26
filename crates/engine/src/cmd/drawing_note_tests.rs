@@ -37,7 +37,16 @@ fn placed() -> (Session, u64, u64, [u64; 2]) {
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
     let settings = ViewOverrides { scale: Some("1:1".parse().unwrap()), ..ViewOverrides::default() };
-    d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At([200.0, 150.0]), settings, reference_shown_percent: 0.0, label: None })]);
+    d.add_views([Arc::new(View {
+        id,
+        sheet,
+        kind,
+        place: ViewPlace::At([200.0, 150.0]),
+        settings,
+        reference_shown_percent: 0.0,
+        centre_marks: None,
+        label: None,
+    })]);
     d.validate().unwrap();
     s.doc_mut().put_drawing(Arc::new(d));
     (s, sheet, id, [first, second])
@@ -311,6 +320,8 @@ fn a_note_with_three_leaders_follows_the_model_and_loses_only_its_own() {
 /// The branches edit takes out by number as the list is now, then adds after those that stay, in one
 /// undo step, keeping the note's id; one that changes nothing makes no step. A wrong number, a
 /// repeat or a 17th leader is refused before anything is looked up, and the note is left as it was.
+/// A number past the end is named before a repeat, as a dimension set's targets edit names it, and
+/// a list longer than the note's is refused without being sorted.
 #[test]
 fn a_notes_branches_edit_keeps_its_id_in_one_step() {
     let (mut s, _, view, [bracket, _]) = placed();
@@ -333,6 +344,8 @@ fn a_notes_branches_edit_keeps_its_id_in_one_step() {
     let refusals = [
         (json!({"remove": [2]}), "`branches.remove` numbers this note's branches, 0 to 1"),
         (json!({"remove": [1, 1]}), "names each branch once"),
+        (json!({"remove": [1, 1, 5]}), "`branches.remove` numbers this note's branches, 0 to 1"),
+        (json!({"remove": vec![0; 100_000]}), "names each branch once"),
         (json!({"add": vec![json!({"corner": {"point": [1e8, 0, 0], "path": [bracket]}}); 14]}), "at most 16 leaders, its anchor's included"),
         (json!({"add": [{"corner": {"point": [1e8, 0, 0], "path": [bracket]}}]}), "corner"),
         (json!({"add": [{"face": [0, 0, 0]}]}), "face"),

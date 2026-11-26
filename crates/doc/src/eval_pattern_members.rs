@@ -48,7 +48,7 @@ pub(super) fn source_keys(doc: &Document, vals: &BTreeMap<String, Value>, st: &M
         FeatureKind::Rib { .. } => Ok(vec![None; more::rib_tools(vals, st, src, None)?.len()]),
         _ => {
             let moved = pattern_source_at_faces(doc, vals, st, st, src)?;
-            let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut None, &mut None, false)?;
+            let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut Vec::new(), &mut None, false)?;
             Ok(tool_keys(st, src, &tools))
         }
     }
@@ -126,7 +126,7 @@ pub fn pattern_member_catalogue(
     bodies: &[crate::BodyName],
     placements: &[Vec<u64>],
 ) -> Result<crate::PatternCatalogue> {
-    let (vals, _) = doc.param_values();
+    let vals = doc.evaluation_values();
     let transforms = pattern_transforms(doc, &vals, st, component, pattern)?;
     let slots = pattern_slots(&vals, &transforms, Some(pattern), FeatureId::DANGLING, true)?;
     let groups = slots.iter().map(|slot| crate::PatternGroupChoice { number: slot.number, address: slot.address(0) }).collect();
@@ -151,9 +151,7 @@ pub fn pattern_member_catalogue(
         if slots.len().checked_mul(features.len()).is_none_or(|count| count > MAX_CHOICES) {
             return Err(DocError::Invalid("too many selectable pattern members (at most 100000)".into()));
         }
-        for (src, copies, _) in
-            copy_plan(doc, &vals, st, &ordered_pattern_sources(doc, features), &transforms, Some(pattern), true, Some(MAX_CHOICES))?
-        {
+        for (src, copies, _) in copy_plan(doc, &vals, st, component, features, &transforms, Some(pattern), true, Some(MAX_CHOICES))? {
             if copies.is_empty() {
                 continue;
             }
@@ -207,7 +205,7 @@ mod tests {
         let state = model.state();
         let source = doc.feature(source).unwrap();
         let (values, _) = doc.param_values();
-        let mut tools = feature_tools_with_constructor(&doc, &values, source, &state, &mut None, &mut None, &mut None, false).unwrap();
+        let mut tools = feature_tools_with_constructor(&doc, &values, source, &state, &mut None, &mut Vec::new(), &mut None, false).unwrap();
         assert_eq!(tools.len(), 1);
         assert!(tool_keys(&state, source, &tools)[0].is_some(), "an ordinary complete circle remains selectable");
         // Two separated constructor outputs carry the same profile provenance. Without a
