@@ -142,8 +142,6 @@ crates/doc/src/eval.rs:seg_at cross,normalized
 crates/doc/src/eval.rs:sketch_line_plane normalized
 crates/doc/src/eval.rs:slanted_plane dot
 crates/doc/src/eval.rs:tangent_face_chain dot,normalized,triangles
-crates/doc/src/eval.rs:trim_between_planes dot
-crates/doc/src/eval.rs:trim_between_slopes dot
 crates/doc/src/eval.rs:trim_to_curved_face dot
 crates/doc/src/eval.rs:trim_to_face dot
 crates/doc/src/eval.rs:trim_to_plane dot
@@ -488,7 +486,7 @@ crates/engine/src/cmd/features.rs:axis_line_object normalized
 crates/engine/src/cmd/features.rs:beyond_coarse_sizes dot
 crates/engine/src/cmd/features.rs:edge_points dot
 crates/engine/src/cmd/features.rs:extrude_reach dot
-crates/engine/src/cmd/features.rs:hole normalized
+crates/engine/src/cmd/features.rs:hole_with normalized
 crates/engine/src/cmd/features.rs:leaving normalized
 crates/engine/src/cmd/features.rs:move_bodies normalized
 crates/engine/src/cmd/features_more.rs:align dot,normalized

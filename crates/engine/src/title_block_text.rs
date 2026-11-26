@@ -170,10 +170,18 @@ fn documented<'a>(
     sheet_metal: Option<&'a SheetMetal>,
 ) -> Option<Component<'a>> {
     if id == 0 {
-        return Some(Component { name: &doc.name, metadata: &doc.metadata, properties: None, material, mass, sheet_metal });
+        return Some(Component { name: &doc.name, metadata: &doc.metadata, properties: None, name_split: None, material, mass, sheet_metal });
     }
     let c = doc.components.iter().find(|c| c.id == id)?;
-    Some(Component { name: &c.name, metadata: &c.metadata, properties: Some(&c.properties), material, mass, sheet_metal })
+    Some(Component {
+        name: &c.name,
+        metadata: &c.metadata,
+        properties: Some(&c.properties),
+        name_split: c.name_split.as_ref(),
+        material,
+        mass,
+        sheet_metal,
+    })
 }
 
 /// What the sheet metal bodies component `id` (0: the design) of `design` owns agree on, as

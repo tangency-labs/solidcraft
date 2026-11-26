@@ -1874,6 +1874,11 @@ fn glue_with_notification_identity(
     for vu in vertex::vertexuses(b, deleted)? {
         remove_vertexuse(b, deleted, vu)?;
         post_insert_vertexuse(b, survivor, vu)?;
+        // The vertex use now sits on `survivor`'s point rather than `deleted`'s, so its
+        // cached vertex/edge and vertex/face gaps are stale (#21432).
+        let use_ = b.vertexuse_mut(vu)?;
+        use_.vertex_edge_gap.reset();
+        use_.vertex_face_gap.reset();
     }
     remove_owned_vertex(b, deleted);
     destroy_topology_record(b, crate::error::EntityRef::Vertex(deleted))?;

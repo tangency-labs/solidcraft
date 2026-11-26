@@ -94,7 +94,7 @@ Create `plate-maker/plugin.json`:
 | `runtime.module` | The component's file name, beside `plugin.json`. |
 | `runtime.commands` | Every SolidCraft command the plugin calls, by exact id. Anything else is refused. |
 | `runtime.entries` | What the plugin offers. Each entry has a `name`, an `effect` (`edit`, or `read` for one that only reads), an `input_schema` (a JSON schema of an object) and optional `slots`. |
-| `runtime.limits` | The fuel, memory and time one run may use (see [Limits](#limits)). |
+| `runtime.limits` | The fuel, memory, command host calls and guest compute time one run may use (see [Limits](#limits)). |
 | `runtime.permissions` | What else it needs (see [Permissions](#permissions)). Leave it out to ask for nothing. |
 
 The input schema is the entry's dialog: SolidCraft draws a field per property, with the `title`,
@@ -341,16 +341,31 @@ folder fails with `permission_denied`.
 |---|---|---|
 | `fuel` (WebAssembly instructions, roughly) | up to the user's ceiling, 100,000,000,000 by default | the same |
 | `memory_mib` | 1 to 4096; above the user's ceiling (128 by default) the user approves it at install | the same |
-| `deadline_ms` | at most 30,000 | at most 600,000 |
+| `deadline_ms` | default 5,000; up to `max_deadline_ms` (30,000 by default) | up to the greater of `max_deadline_ms` and 600,000 |
+| `host_calls` | default 256; up to `max_host_calls` (256 by default) | not used; importer host calls keep their separate fixed limit |
 | `stack_kib` | 64 to 1024 | 64 to 65,536 |
 | Component size | 16 MiB | 64 MiB |
 | `plugin.json` | 16 KiB | 16 KiB |
 | Parameters and replies | 1 MiB of JSON each | 1 MiB per read or write, 1 GiB read, a 256 MiB design |
 
-A run that goes past its fuel, memory, stack or deadline stops with `exhausted`, which names the
+A run that goes past its fuel, memory, host calls, stack or deadline stops with `exhausted`, which names the
 budget and its size ("it used all 100000 fuel it asks for and was stopped"), and nothing it did is
 kept. `plugin check` says when a request is over the app's ceilings, and `plugin test` runs
 under them.
+
+The deadline counts guest compute, including instantiation, and pauses during native host work.
+A command taking a minute therefore does not use a minute of guest deadline. Native commands
+keep their own limits and cancellation behavior. The whole command plugin run remains one undo
+step; any refusal discards it, even when guest code catches the error.
+
+A plugin that runs 300 commands must request at least `"host_calls": 300` in `runtime.limits`.
+The user must raise **Max plugin host calls** in **Preferences › Plugins**, or set
+`"max_host_calls": 300` in the file passed to `solidcraft-cli --plugin-limits`.
+The deadline uses **Max plugin guest time (ms)** and `max_deadline_ms` in the same way.
+Changing either manifest budget requires a fresh inspected content hash and approval.
+Raising a host ceiling does not increase the package's request or run it automatically.
+See [host ceiling configuration](../../../plugin-runtime.md#change-the-host-ceilings-without-rebuilding)
+for the startup file format.
 
 ## An importer
 
@@ -457,7 +472,8 @@ valid file the importer does not convert answers `unsupported`, which SolidCraft
 "Box Importer does not support part.box: ...".
 
 Once installed, **File › Open** offers `.box` files, and `doc.open` and `file.import` open them.
-An importer that converts a large file can ask for more time (`deadline_ms` up to 600,000), stack
+An importer that converts a large file can ask for more guest compute time (`deadline_ms` up to
+600,000 under the default host policy, or more with a raised `max_deadline_ms`), stack
 (`stack_kib`) and memory; see [Importers](../../../plugins.md#importers), which also covers reading
 an assembly's other files and checking the result with `evaluate`.
 

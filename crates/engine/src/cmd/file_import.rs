@@ -519,7 +519,7 @@ pub(crate) fn component_name(path: &str, name: Option<&str>) -> String {
 /// Evaluates the design. Returns the feature and the component.
 pub(crate) fn add_in_component(
     s: &mut Session,
-    mut kind: FeatureKind,
+    kind: FeatureKind,
     feature_name: &str,
     body_names: Vec<String>,
     hidden: &[bool],
@@ -527,6 +527,22 @@ pub(crate) fn add_in_component(
     tree: Tree<'_>,
 ) -> Result<(u64, Placed)> {
     let (top, top_occ) = new_component(s, name)?;
+    add_into_component(s, top, top_occ, kind, feature_name, body_names, hidden, tree)
+}
+
+/// [`add_in_component`] into the component `top` that already exists (placed by `top_occ`), empty
+/// of the file's contents: a linked board read again fills the component it had.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn add_into_component(
+    s: &mut Session,
+    top: u64,
+    top_occ: Option<u64>,
+    mut kind: FeatureKind,
+    feature_name: &str,
+    body_names: Vec<String>,
+    hidden: &[bool],
+    tree: Tree<'_>,
+) -> Result<(u64, Placed)> {
     let (plan, imp, prepared) = match tree {
         Tree::Flat(prepared) => (Plan::default(), None, prepared),
         Tree::Step(imp) => (Plan::of(imp), Some(imp), None),
