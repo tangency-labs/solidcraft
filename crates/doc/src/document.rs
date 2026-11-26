@@ -317,7 +317,7 @@ fn default_cell_clip() -> solidcore_record::cell_grid::Clip {
 }
 
 /// The smallest slot length, bridge, row spacing and slot width of a living hinge, in mm.
-pub const LIVING_HINGE_MIN_SIZE: f64 = solidcore_ops::living_hinge::MIN_SIZE;
+pub const LIVING_HINGE_MIN_SIZE: f64 = solidcraft_kernel::services::living_hinge::MIN_SIZE;
 
 fn default_hinge_clip() -> solidcore_record::living_hinge::HingeClip {
     solidcore_record::living_hinge::HingeClip::RunOut
@@ -1904,7 +1904,7 @@ pub enum FeatureKind {
     },
     /// A living hinge (#17484): rows of staggered slots cut through a plate inside a sketch's
     /// closed profiles (an outer loop is the area, a loop inside it a keep-out), so the plate can
-    /// bend there. The slots are planned by solidcore (`solidcore_ops::living_hinge`) and cut in one
+    /// bend there. The slots are planned by solidcore (`solidcraft_kernel::services::living_hinge`) and cut in one
     /// boolean.
     LivingHinge {
         /// Feature id of the sketch.
