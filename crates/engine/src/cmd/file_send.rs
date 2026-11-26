@@ -15,6 +15,7 @@ use super::export_laid_to;
 use crate::apps;
 use crate::params::bad;
 use crate::schema::save_mesh::SlicerDelivery;
+use crate::slicer_files;
 use crate::slicers::{self, Slicer, TargetKind};
 use crate::{EngineError, Result, Session};
 
@@ -110,7 +111,6 @@ pub(super) fn send(s: &mut Session, r: Send<'_>) -> Result<Value> {
 
 /// Write the bodies into the slicer folder.
 fn write_in_folder(s: &mut Session, r: &Send<'_>) -> Result<Value> {
-    use crate::slicer_files;
     let Exported { bytes, ext, fell_back, bodies, laid } = export_for(s, r)?;
     if let Some(copy) = &r.copy {
         // The file the user keeps: named after the design, in their folder, and the slicer opens it.
