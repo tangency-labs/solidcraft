@@ -30,6 +30,40 @@ pub struct ThreadInfo {
     pub starts: u32,
 }
 
+impl ThreadInfo {
+    /// Whether two cosmetic thread markings agree on every field, bit for bit (distinguishing
+    /// `0.0` from `-0.0`). Every field is destructured so a new one cannot be left out.
+    pub(crate) fn same_bits(&self, other: &Self) -> bool {
+        let numbers = |t: &Self| {
+            let ThreadInfo {
+                feature: _,
+                body: _,
+                designation: _,
+                major_diameter,
+                radius,
+                pitch,
+                internal: _,
+                axis_point,
+                axis,
+                start,
+                end,
+                form: _,
+                hand: _,
+                starts: _,
+            } = t;
+            [*major_diameter, *radius, *pitch, axis_point.x, axis_point.y, axis_point.z, axis.x, axis.y, axis.z, *start, *end]
+        };
+        self.feature == other.feature
+            && self.body == other.body
+            && self.designation == other.designation
+            && self.internal == other.internal
+            && self.form == other.form
+            && self.hand == other.hand
+            && self.starts == other.starts
+            && numbers(self).iter().zip(numbers(other).iter()).all(|(x, y)| x.to_bits() == y.to_bits())
+    }
+}
+
 /// Nominal diameters and coarse pitches (mm) used for automatic ISO metric thread sizing.
 /// Other diameter/pitch pairs can be supplied as explicit designations.
 pub fn metric_thread_sizes() -> &'static [(f64, f64)] {
