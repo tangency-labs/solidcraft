@@ -1853,11 +1853,7 @@ fn nearest_on_edge(
     // (max then min: no panic on an inverted or NaN range)
     let mut t = guess.max(t0).min(t1);
     for _ in 0..64 {
-        // the span ahead of `t`, as the march along the strip runs up the edge's interval
-        // (the last span at its end): seeded on a corner of the curve (a C0 knot), the span
-        // behind steps along that side's tangent and can settle on a foot point of it, on
-        // #1435's multispan patch 0.03 off a trim that lies on its edge (#16854)
-        let e = curve.evaluate(k, t, 1, t >= t1, false)?;
+        let e = curve.evaluate(k, t, 1, true, false)?;
         let (Some(&ep), Some(&d1)) = (e.first(), e.get(1)) else {
             return Err(defect(SHORT_EVALUATION));
         };
@@ -2297,15 +2293,30 @@ fn gap_closure(
             for i in 1..grid {
                 let tau = c0 + (c1 - c0) * f64::from(i) / f64::from(grid);
                 let p = at(side.trim.evaluate_point(k, tau)?)?.0;
-                // marched from the last point; where that seed is singular (the edge's
-                // end, for the first), from the grid point's share of the edge's interval;
-                // singular from both, the strip is refused
+                // The nearest point is the nearer of the local minima of the distance solved
+                // from the last point and from the grid point's share of the edge's interval
+                // (#16854): from the last point alone, seeded on a corner of the edge curve (a
+                // C0 knot), the solve can settle on a local minimum on the side behind it, on
+                // #1435's multispan patch 0.03 off a trim that lies on its edge, and the strip
+                // folds across the corner. A singular seed (the edge's end, for the first) or
+                // a distance that is not a number gives no point; none from both, the strip is
+                // refused.
                 let share = e0 + (e1 - e0) * f64::from(i) / f64::from(grid);
-                last = match nearest_on_edge(k, curve, e0, e1, p, last)? {
-                    Some(t) => t,
-                    None => nearest_on_edge(k, curve, e0, e1, p, share)?
-                        .ok_or_else(|| SolidError::mass(OP, MassFailure::EdgeCurveSingular))?,
-                };
+                let mut nearest: Option<(f64, f64)> = None;
+                for seed in [Some(last), (share != last).then_some(share)]
+                    .into_iter()
+                    .flatten()
+                {
+                    if let Some(t) = nearest_on_edge(k, curve, e0, e1, p, seed)? {
+                        let d = (curve.evaluate_point(k, t)? - p).length_squared();
+                        if d.is_finite() && nearest.is_none_or(|(_, best)| d < best) {
+                            nearest = Some((t, d));
+                        }
+                    }
+                }
+                last = nearest
+                    .map(|(t, _)| t)
+                    .ok_or_else(|| SolidError::mass(OP, MassFailure::EdgeCurveSingular))?;
                 table.push((tau, last));
             }
             table.push((c1, e1));
