@@ -913,6 +913,58 @@ fn linked_bodies_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({"type": "string", "enum": ["all", "folder"]})
 }
 
+/// The names of the KiCad board options `doc.open` takes (for a `.kicad_pcb` or `.kicad_pro`
+/// file), in the order [`kicad_open_properties`] lists them.
+pub const KICAD_OPEN_OPTIONS: &[&str] = &["thickness", "components", "copper", "silkscreen", "color", "representation"];
+
+/// The KiCad board options of `doc.open` as JSON Schema properties. `OpenParams` publishes these
+/// and the MCP `open` tool lists the same ones, so the two cannot name or describe them apart.
+pub fn kicad_open_properties() -> Map<String, Value> {
+    let Value::Object(properties) = serde_json::json!({
+        "thickness": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000, "description": "KiCad board only: the board's thickness in mm, instead of the one the board states"},
+        "components": {"type": "boolean", "description": "KiCad board only: bring in the components' 3D models (default true). A model is read from the board's folder or from KiCad's own 3D model library (KICAD<n>_3DMODEL_DIR); the warnings name each model that could not be read and why"},
+        "copper": {
+            "anyOf": [{"type": "string", "enum": ["none", "overlay", "mesh"]}, {"type": "boolean"}],
+            "description": "KiCad board only: overlay (default: flat copper just above the board), none (leave the traces out) or mesh (modelled with thickness; true also means mesh, false none). Pads are included whenever copper is enabled",
+        },
+        "silkscreen": {"type": "boolean", "description": "KiCad board only: the silkscreen shapes and text (default true)"},
+        "color": {
+            "anyOf": [
+                {"type": "string", "description": "#rrggbb"},
+                {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 255}, "minItems": 3, "maxItems": 3},
+            ],
+            "description": "KiCad board only: the board substrate's colour, \"#rrggbb\" or [r, g, b] with values 0-255",
+        },
+        "representation": {"type": "string", "description": "KiCad board only: mesh (the board as a mesh body). A B-rep board is not supported yet and is refused"},
+    }) else {
+        return Map::new();
+    };
+    properties
+}
+
+/// One KiCad board option's schema, for the field of `OpenParams` that carries it.
+fn kicad_option_schema(name: &str) -> Schema {
+    kicad_open_properties().remove(name).and_then(|v| Schema::try_from(v).ok()).unwrap_or_else(|| Schema::from(true))
+}
+fn kicad_thickness_schema(_: &mut SchemaGenerator) -> Schema {
+    kicad_option_schema("thickness")
+}
+fn kicad_components_schema(_: &mut SchemaGenerator) -> Schema {
+    kicad_option_schema("components")
+}
+fn kicad_copper_schema(_: &mut SchemaGenerator) -> Schema {
+    kicad_option_schema("copper")
+}
+fn kicad_silkscreen_schema(_: &mut SchemaGenerator) -> Schema {
+    kicad_option_schema("silkscreen")
+}
+fn kicad_color_schema(_: &mut SchemaGenerator) -> Schema {
+    kicad_option_schema("color")
+}
+fn kicad_representation_schema(_: &mut SchemaGenerator) -> Schema {
+    kicad_option_schema("representation")
+}
+
 /// Open a file as the design: a SolidCraft design (`.sc`, or a `.solidcraft` design from an
 /// earlier release), a `.dxf` or `.svg` drawing (a new, unsaved design with an XY sketch, with
 /// the units and defaults of `sketch.insert_dxf` and `sketch.insert_svg`), a STEP, IGES,
@@ -1002,6 +1054,31 @@ pub struct OpenParams {
     /// 5000000.
     #[serde(default)]
     pub max_points: Option<MaxPoints>,
+    /// For a KiCad board only (ignored for other files): its thickness in mm. Default: the board's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "kicad_thickness_schema")]
+    pub thickness: Option<f64>,
+    /// For a KiCad board only (ignored for other files): the components' 3D models. Default: true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "kicad_components_schema")]
+    pub components: Option<bool>,
+    /// For a KiCad board only (ignored for other files): the copper, `overlay`, `none` or `mesh`.
+    /// Default: overlay.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "kicad_copper_schema")]
+    pub copper: Option<Value>,
+    /// For a KiCad board only (ignored for other files): the silkscreen. Default: true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "kicad_silkscreen_schema")]
+    pub silkscreen: Option<bool>,
+    /// For a KiCad board only (ignored for other files): the substrate colour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "kicad_color_schema")]
+    pub color: Option<Value>,
+    /// For a KiCad board only (ignored for other files): `mesh`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "kicad_representation_schema")]
+    pub representation: Option<String>,
     /// The desktop app only (ignored elsewhere): open the file as a design in a new tab at this
     /// place among the tabs (0 the first, past the last at the end), never in place of the design
     /// shown; a design already open shows its tab instead. Given with `new_tab`, the place wins.
