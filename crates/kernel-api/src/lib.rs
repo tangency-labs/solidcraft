@@ -26,6 +26,7 @@ pub mod affine;
 pub mod cell_grid;
 pub mod curves;
 pub mod develop;
+pub mod dxf;
 pub mod exchange;
 pub mod frames;
 pub mod hatch;
@@ -42,6 +43,7 @@ pub mod tube_cope;
 pub use affine::{Affine, AffineRefused, AxisRefusal, Matrix, OffsetQuad, SquareFaceLevel};
 pub use cell_grid::{CellGrid, CellGridLimits};
 pub use curves::{CurveRefused, Curves};
+pub use dxf::Dxf;
 pub use exchange::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWritten, Exchange};
 pub use frames::{Frames, GussetFailure, MemberRefusal, PathFailure, PathRefusal, TrimRefusal, TrimTarget};
 pub use hole_stacks::{HoleStacks, HoleStacksRefused};
@@ -127,6 +129,8 @@ pub enum OpKind {
     TubeCope,
     /// Shaft splines planned, and round faces' seats and ends ([`ShaftSplines`]).
     ShaftSpline,
+    /// DXF geometry: paths converted for a file, bounds, scales, entity checks ([`Dxf`]).
+    Dxf,
 }
 
 impl OpKind {
@@ -159,6 +163,7 @@ impl OpKind {
         OpKind::Mesh,
         OpKind::TubeCope,
         OpKind::ShaftSpline,
+        OpKind::Dxf,
     ];
 
     /// The operation's stable name, as the support matrix and route files spell it.
@@ -191,6 +196,7 @@ impl OpKind {
             OpKind::Mesh => "mesh",
             OpKind::TubeCope => "tube_cope",
             OpKind::ShaftSpline => "shaft_spline",
+            OpKind::Dxf => "dxf",
         }
     }
 
