@@ -588,6 +588,15 @@ placement axes, expressions and hole-pattern limits.
   no line is in two groups. With `groups`, give `lines`, `anchor`, `locate`, `angle`, `mirror` and
   `body_name` in each group, not beside them. A feature with one group saves as before, so designs without
   groups don't change.
+- **End finishes.** Each build records how it finished both ends of every body it made, at its line's start and
+  end (`ModelState::member_ends`, by the feature): `plane` (a mitre, butt or angled butt cut, set back by the
+  weld gap: its origin and its normal, pointing into the member), `coped` (a Coped Butt's short tube), `fitted`
+  (cut to the tubes it meets: a butt's short tube under Auto, a T-junction, a third end at a point, a crossing,
+  an end fitted to an earlier frame, or the end of a piece where an overlapping tube split it) or `square`. A cut
+  list reads its end angles from it. An overlap notch is not recorded, nor an end an overlap cuts away: that
+  end keeps its own finish. Later features (End Cap, cuts, Trim/Extend) do not change the record: a member
+  `frame.trim` trims or extends keeps its new end planes on its member record (`ModelState::frame_member`, normals
+  out of the member). Stock along a path or an arc records no ends.
 
 ### A bent chassis tube
 

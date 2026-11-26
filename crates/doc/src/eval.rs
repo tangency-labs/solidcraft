@@ -1104,6 +1104,12 @@ impl ModelState {
         self.kept_separate.get(&feature).copied()
     }
 
+    /// How Frame Member `feature` finished its members' ends: each body it made with its two ends ([start, end] along
+    /// its line); none for any other feature.
+    pub fn member_ends(&self, feature: u64) -> &[crate::frame_corners::MemberEnds] {
+        self.member_ends.get(&feature).map_or(&[], Vec::as_slice)
+    }
+
     /// The sources (indices into its `bodies`) body Pattern `feature` could not copy and left out.
     pub fn pattern_left_out(&self, feature: u64) -> &[usize] {
         self.pattern_left_out.get(&feature).map_or(&[], Vec::as_slice)
@@ -1225,6 +1231,9 @@ pub struct ModelState {
     /// feature id), so the session keeps the names stored for their copies in their places
     /// ([`crate::Feature::pattern_pins`]).
     pattern_left_out: BTreeMap<u64, Vec<usize>>,
+    /// How each Frame Member feature finished its members' ends (by feature id, #4003): each body it made with its
+    /// two ends, a plane cut or coped, fitted or square. A cut list reads its end angles from these.
+    member_ends: BTreeMap<u64, Vec<crate::frame_corners::MemberEnds>>,
     /// For a feature saved before format 14 that split a body, a digest of the later features'
     /// picks its pieces were named by (by feature id, see [`crate::lineage::order_legacy_lumps`]):
     /// the state stands for the feature only while those picks are the same.
@@ -1293,6 +1302,7 @@ impl ModelState {
             tapered,
             kept_separate,
             pattern_left_out,
+            member_ends,
             legacy_picks,
             cut_extents,
         } = self;
@@ -1315,6 +1325,7 @@ impl ModelState {
             tapered: tapered.clone(),
             kept_separate: kept_separate.clone(),
             pattern_left_out: pattern_left_out.clone(),
+            member_ends: member_ends.clone(),
             legacy_picks: legacy_picks.clone(),
             cut_extents: cut_extents.clone(),
         }
@@ -3720,6 +3731,8 @@ struct ModelChange {
     kept_separate: Option<KeptSeparate>,
     /// A body Pattern's sources it left out.
     pattern_left_out: Option<Vec<usize>>,
+    /// A Frame Member's members' ends.
+    member_ends: Option<Vec<crate::frame_corners::MemberEnds>>,
     /// Where the feature found its named faces.
     named_faces: Option<Vec<Vec3>>,
     /// Cosmetic threads appended by this feature (`t.feature == feature`), in order.
@@ -4081,6 +4094,7 @@ impl ModelState {
             && self.tapered.keys().filter(|k| **k != feature).eq(before.tapered.keys().filter(|k| **k != feature))
             && others_same(&self.kept_separate, &before.kept_separate, feature)
             && others_same(&self.pattern_left_out, &before.pattern_left_out, feature)
+            && others_same(&self.member_ends, &before.member_ends, feature)
             && others_same(&self.named_faces, &before.named_faces, feature);
         if !same_rest {
             return None;
@@ -4145,6 +4159,7 @@ impl ModelState {
             tapered: self.tapered.get(&feature).cloned(),
             kept_separate: self.kept_separate.get(&feature).copied(),
             pattern_left_out: self.pattern_left_out.get(&feature).cloned(),
+            member_ends: self.member_ends.get(&feature).cloned(),
             named_faces: self.named_faces.get(&feature).cloned(),
             added_threads: Arc::from(added_threads.to_vec()),
             clear_of: Arc::from(clear_boxes),
@@ -4267,6 +4282,10 @@ impl ModelState {
         next.pattern_left_out.remove(&feature);
         if let Some(l) = &change.pattern_left_out {
             next.pattern_left_out.insert(feature, l.clone());
+        }
+        next.member_ends.remove(&feature);
+        if let Some(e) = &change.member_ends {
+            next.member_ends.insert(feature, e.clone());
         }
         next.named_faces.remove(&feature);
         if let Some(p) = &change.named_faces {
