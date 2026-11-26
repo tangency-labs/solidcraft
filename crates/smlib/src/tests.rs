@@ -163,6 +163,7 @@ const ANSWERING: &[&str] = &[
     "counts",
     "boolean",
     "boolean_tagged",
+    "boolean_tagged_owned",
     "union_all",
     "union_all_tagged",
     "boolean2d",
@@ -303,6 +304,7 @@ fn every_entry_point_answers() {
     says("counts", a.counts());
     says("boolean", a.boolean(&t, BooleanOp::Union));
     says("boolean_tagged", a.boolean_tagged(&t, BooleanOp::Union));
+    says("boolean_tagged_owned", a.try_clone().and_then(|x| Brep::boolean_tagged_owned(Err(x), Ok(&t), BooleanOp::Union)));
     says("union_all", Brep::union_all(&[&a, &t]));
     says("union_all_tagged", Brep::union_all_tagged(&[&a, &t]));
     says("boolean2d", a.boolean2d(&t, BooleanOp::Union));
@@ -979,6 +981,41 @@ fn a_tagged_boolean_is_the_boolean_of_tagged_copies() {
     // The operands are left as they were: untagged, their records unchanged.
     let plain = Brep::make_box([0.0, 0.0, 0.0], [40.0, 30.0, 6.0]).unwrap();
     assert_eq!(plate.to_native_ordered().unwrap(), plain.to_native_ordered().unwrap());
+}
+
+/// A boolean of operands handed over and tagged themselves, with no copy: the same record,
+/// numbering and history as the boolean that tags copies of them. Each operand is imported from
+/// its record, as a body's form is made for a boolean, once handed over and once read. A cut by a
+/// box and by a cylinder, a union and an intersection, with one operand handed over and both.
+#[test]
+fn a_boolean_of_handed_over_operands_is_the_boolean_of_tagged_copies() {
+    let plate = Brep::make_box([0.0, 0.0, 0.0], [40.0, 30.0, 6.0]).unwrap().to_native().unwrap();
+    let pocket = Brep::make_box([5.0, 5.0, 2.0], [8.0, 6.0, 10.0]).unwrap().to_native().unwrap();
+    let bore = Brep::made_core(core::make_cylinder([25.0, 15.0, -1.0], 4.0, 8.0).unwrap()).to_native().unwrap();
+    let boss = Brep::made_core(core::make_cylinder([30.0, 10.0, 3.0], 3.0, 9.0).unwrap()).to_native().unwrap();
+    let import = |r| Brep::from_record(r, true).unwrap();
+    let cases = [
+        (&plate, &pocket, BooleanOp::Subtract),
+        (&plate, &bore, BooleanOp::Subtract),
+        (&plate, &boss, BooleanOp::Union),
+        (&plate, &boss, BooleanOp::Intersect),
+    ];
+    for (a, b, op) in cases {
+        let (ra, rb) = (import(a), import(b));
+        let want = ra.boolean_tagged(&rb, op).unwrap().unwrap();
+        for (hand_a, hand_b) in [(true, false), (false, true), (true, true)] {
+            let (sa, sb) = (import(a), import(b));
+            let (sa_before, sb_before) = (sa.to_native().unwrap(), sb.to_native().unwrap());
+            let ia = if hand_a { Err(import(a)) } else { Ok(&sa) };
+            let ib = if hand_b { Err(import(b)) } else { Ok(&sb) };
+            let got = Brep::boolean_tagged_owned(ia, ib, op).unwrap().unwrap();
+            assert_eq!(got.to_native_ordered().unwrap(), want.to_native_ordered().unwrap(), "{op:?} {hand_a} {hand_b}");
+            assert_eq!(got.history().unwrap(), want.history().unwrap(), "{op:?} {hand_a} {hand_b}");
+            // a read operand is left as it was
+            assert_eq!(sa.to_native().unwrap(), sa_before, "{op:?}");
+            assert_eq!(sb.to_native().unwrap(), sb_before, "{op:?}");
+        }
+    }
 }
 
 /// A union of operands each tagged as it is (solidcore#3359): the same record, numbering and
