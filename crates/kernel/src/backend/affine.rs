@@ -129,6 +129,22 @@ impl Affine for Solidcore {
         prism::loop_circle(lp)
     }
 
+    fn loop_holds(&self, lp: &Loop2, p: Vec2) -> Option<bool> {
+        prism::loop_holds(lp, p)
+    }
+
+    fn segment_distance(&self, seg: &Seg2, p: Vec2) -> Option<f64> {
+        prism::segment_distance(seg, p)
+    }
+
+    fn same_circle(&self, a: (Vec2, f64), b: (Vec2, f64), tol: f64) -> bool {
+        prism::same_circle(a, b, tol)
+    }
+
+    fn note_beside(&self, at: (Vec2, f64), height: f64) -> Vec2 {
+        prism::note_beside(at, height)
+    }
+
     fn extent_along(&self, min: [f64; 3], max: [f64; 3], placement: &Matrix, axis: [f64; 3]) -> Result<f64, AxisRefusal> {
         ops::extent_along(min, max, placement, axis).map_err(axis_refused)
     }

@@ -25,6 +25,8 @@
  {"expect":{"shown_handles":["button:sketch.line"],"hidden_handles":["button:sketch.point"],"errors":0}},
  {"call":"ui.resize","params":{"width":640,"height":720}},
  {"click":{"handle":"panel:SKETCH:CREATE"}},
+ {"note":"The list is taller than this window and slides back from the offset an earlier opening left; the click waits for it to settle."},
+ {"frames":6},
  {"click":{"handle":"dropdown:sketch.point"}},
  {"expect":{"tool":"sketch.point","errors":0}}
 ]

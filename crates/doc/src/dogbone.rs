@@ -184,7 +184,8 @@ pub(crate) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
     } else {
         let mut w = None;
         let all: Vec<usize> = (0..edges.len()).collect();
-        let at = crate::eval::blend_edges_on(&mb, f, edges, &all, &mut w)?;
+        let placed = crate::eval::bodies_placed_before(doc, f);
+        let at = crate::eval::blend_edges_on(&mb, f, edges, &all, placed, &mut w)?;
         notes.extend(w);
         kernel::blend_edges(&mb.body, &at)?
     };

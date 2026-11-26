@@ -15,6 +15,7 @@ use std::sync::{Arc, OnceLock};
 use solidcore_record::{Region2, Vec3};
 use solidcraft_kernel::Body;
 use solidcraft_kernel::history::{BodyHistory, Change, EdgeProv, FaceOrigin, FaceProv, History};
+use solidcraft_kernel::services::mesh::{FACE_ORDER_VERSION, ReconstructionKind};
 
 use crate::SolvedSketch;
 
@@ -608,6 +609,40 @@ pub(crate) fn part_role(origins: &[FaceOrigin], part: &str) -> Option<String> {
         [FaceOrigin::Profile { segment }] => Some(format!("{part}:side:{segment}")),
         _ => None,
     }
+}
+
+/// The faces of a deterministic mesh reconstruction, bound to its exact inputs. An ordinal
+/// alone is unsafe: another tolerance or an upstream mesh edit may reorder recovered faces.
+/// Identity uses the original shared-vertex positions and triangle indices, independent of display
+/// normals, split vertices and serde fields. The v6 encoding is little-endian: reconstruction
+/// kind (0 analytic, 1 faceted), the producer's u32 face-order version, tolerance bits, u64 vertex
+/// count, xyz f64 bit patterns, u64 triangle count, then each triangle's u32 indices.
+/// The producer versions face ordering; bump this domain when the input encoding changes.
+pub(crate) fn reconstructed_tool(body: Body, positions: &[Vec3], triangles: &[[u32; 3]], tolerance: f64, kind: ReconstructionKind) -> Traced {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    hash.update(b"solidcraft-mesh-reconstruction-v6");
+    hash.update([match kind {
+        ReconstructionKind::Analytic => 0,
+        ReconstructionKind::Faceted => 1,
+    }]);
+    hash.update(FACE_ORDER_VERSION.to_le_bytes());
+    hash.update(tolerance.to_le_bytes());
+    hash.update((positions.len() as u64).to_le_bytes());
+    for p in positions {
+        for coordinate in [p.x, p.y, p.z] {
+            hash.update(coordinate.to_bits().to_le_bytes());
+        }
+    }
+    hash.update((triangles.len() as u64).to_le_bytes());
+    for triangle in triangles {
+        for index in triangle {
+            hash.update(index.to_le_bytes());
+        }
+    }
+    let digest = format!("{:x}", hash.finalize());
+    let roles = (0..body.face_count()).map(|face| vec![format!("mesh:{digest}:face:{face}")]).collect();
+    Traced::made(body, Some(roles))
 }
 
 /// Faces named by their place in a body built as a whole (an imported part's faces in the
