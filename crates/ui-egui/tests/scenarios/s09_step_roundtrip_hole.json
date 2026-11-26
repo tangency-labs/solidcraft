@@ -78,6 +78,9 @@
   "click": {"handle": "appbar:file"}
  },
  {
+  "click": {"handle": "menu:Insert"}
+ },
+ {
   "widget": "Insert STEP\u2026"
  },
  {

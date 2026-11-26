@@ -98,6 +98,9 @@
   "click": {"handle": "appbar:file"}
  },
  {
+  "click": {"handle": "menu:Export"}
+ },
+ {
   "widget": "Export STL\u2026"
  },
  {
