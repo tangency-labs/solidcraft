@@ -198,3 +198,116 @@ impl FaceSurface {
         })
     }
 }
+
+/// An analytic surface by its parameters, for [`same_surface`] (the kernel's
+/// `query::same_surface::Analytic`). Directions need not be unit.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum Analytic {
+    /// The plane through `point` with normal `normal` (either way round).
+    Plane {
+        /// A point of the plane.
+        point: [f64; 3],
+        /// Its normal.
+        normal: [f64; 3],
+    },
+    /// The cylinder of radius `radius` about the line through `origin` along `axis`.
+    Cylinder {
+        /// A point of the axis.
+        origin: [f64; 3],
+        /// The axis's direction (either way round).
+        axis: [f64; 3],
+        /// The radius.
+        radius: f64,
+    },
+    /// The cone with apex `apex`, axis `axis` pointing into the cone, and half-angle
+    /// `half_angle` (radians).
+    Cone {
+        /// The apex.
+        apex: [f64; 3],
+        /// The axis, pointing into the cone.
+        axis: [f64; 3],
+        /// The half-angle, in radians.
+        half_angle: f64,
+    },
+    /// The sphere of radius `radius` about `centre`.
+    Sphere {
+        /// The centre.
+        centre: [f64; 3],
+        /// The radius.
+        radius: f64,
+    },
+    /// The torus about the line through `centre` along `axis`: its ring (major) and tube
+    /// (minor) radii.
+    Torus {
+        /// The centre of the ring.
+        centre: [f64; 3],
+        /// The axis (either way round).
+        axis: [f64; 3],
+        /// The ring's radius.
+        major: f64,
+        /// The tube's radius.
+        minor: f64,
+    },
+}
+
+impl Analytic {
+    fn kernel(self) -> solidcore::query::same_surface::Analytic {
+        use solidcore::query::same_surface::Analytic as K;
+        let v = |p: [f64; 3]| solidcore::Vec3::new(p[0], p[1], p[2]);
+        match self {
+            Self::Plane { point, normal } => K::Plane {
+                point: v(point),
+                normal: v(normal),
+            },
+            Self::Cylinder {
+                origin,
+                axis,
+                radius,
+            } => K::Cylinder {
+                origin: v(origin),
+                axis: v(axis),
+                radius,
+            },
+            Self::Cone {
+                apex,
+                axis,
+                half_angle,
+            } => K::Cone {
+                apex: v(apex),
+                axis: v(axis),
+                half_angle,
+            },
+            Self::Sphere { centre, radius } => K::Sphere {
+                centre: v(centre),
+                radius,
+            },
+            Self::Torus {
+                centre,
+                axis,
+                major,
+                minor,
+            } => K::Torus {
+                centre: v(centre),
+                axis: v(axis),
+                major,
+                minor,
+            },
+        }
+    }
+}
+
+/// Whether `a` and `b` are one surface within `tol` over `reach`
+/// (`solidcore::query::same_surface::same_surface`): positions and radii within `tol`, the
+/// points of each plane or axis within `reach` of its origin within `tol` of the other's, cones
+/// with radii within `tol` at the height `reach`; surfaces of two kinds never. The test whether
+/// two faces anywhere on two bodies lie on one surface.
+///
+/// # Errors
+///
+/// [`Error::Refused`] for a `tol` or `reach` that is negative or not finite, a number that is
+/// not finite or a direction of zero length.
+pub fn same_surface(a: Analytic, b: Analytic, tol: f64, reach: f64) -> Result<bool> {
+    solidcore::query::same_surface::same_surface(&a.kernel(), &b.kernel(), tol, reach)
+        .map_err(crate::error::status)
+}
