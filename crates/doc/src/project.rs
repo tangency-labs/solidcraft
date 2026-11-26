@@ -422,8 +422,7 @@ fn resolve_uncached(
                 LinkKind::Intersect => {
                     let curves = sketch_curves(ss, ci);
                     let pieces: Vec<_> = curves.iter().map(|piece| (&piece.curve, piece.interval)).collect();
-                    let hits =
-                        solidcraft_kernel::services::curve::piece_plane_crossings(&pieces, plane).map_err(|e| DocError::Invalid(e.to_string()))?;
+                    let hits = solidcraft_kernel::curves::piece_plane_crossings(&pieces, plane).map_err(|e| DocError::Invalid(e.to_string()))?;
                     hits.into_iter().map(LinkGeom::Point).collect()
                 }
                 LinkKind::Include => {
@@ -662,17 +661,16 @@ enum EdgeSection {
 /// one crossing it and counts a contact at either end of the edge. A part of the edge lying in
 /// the plane is projected exactly, as a whole edge lying in it is.
 fn edge_section(body: &crate::ModelBody, e: usize, plane: &Plane) -> Result<EdgeSection> {
-    use solidcraft_kernel::services::curve::PlaneSection;
+    use solidcraft_kernel::curves::PlaneSection;
     if body.body.is_mesh() {
         return Ok(EdgeSection::Mesh);
     }
     let edge = body.body.record().edges.get(e).ok_or_else(|| lost("the edge"))?;
     let curve = edge.parameters();
-    let (points, parts) =
-        match solidcraft_kernel::services::curve::plane_section(curve, edge.interval, plane).map_err(|e| DocError::Invalid(e.to_string()))? {
-            PlaneSection::InPlane => return Ok(EdgeSection::InPlane),
-            PlaneSection::Meets { points, in_plane } => (points, in_plane),
-        };
+    let (points, parts) = match solidcraft_kernel::curves::plane_section(curve, edge.interval, plane).map_err(|e| DocError::Invalid(e.to_string()))? {
+        PlaneSection::InPlane => return Ok(EdgeSection::InPlane),
+        PlaneSection::Meets { points, in_plane } => (points, in_plane),
+    };
     let mut geom: Vec<LinkGeom> = points.into_iter().map(LinkGeom::Point).collect();
     for part in parts {
         let projected = solidcraft_kernel::projection::projected_part(
@@ -1548,7 +1546,7 @@ fn placement_frame(doc: &Document, component: u64, path: &[u64], what: &str) -> 
 
 /// Is `m` a rotation (or a reflection) and a translation, as a placement is?
 fn is_rigid(m: &Mat) -> bool {
-    solidcraft_kernel::services::affine::is_rigid(m, 1e-6, 1e-12)
+    solidcraft_kernel::affine::is_rigid(m, 1e-6, 1e-12)
 }
 
 /// The transform from the source's own frame (its body's frame, or its sketch's component
@@ -1695,8 +1693,7 @@ impl Motion2 {
 /// moved, or when it tilts against the plane (its projection then changes shape).
 fn in_plane_motion(seen: &Mat, now: &Mat, plane: &Plane) -> Option<Motion2> {
     let coordinates = |v: Vec3| [v.x, v.y, v.z];
-    let (a, [x, y]) =
-        solidcraft_kernel::services::affine::projection_motion(seen, now, coordinates(plane.origin), coordinates(plane.x), coordinates(plane.y))?;
+    let (a, [x, y]) = solidcraft_kernel::affine::projection_motion(seen, now, coordinates(plane.origin), coordinates(plane.x), coordinates(plane.y))?;
     Some(Motion2 { a, b: Vec2::new(x, y) })
 }
 
@@ -2531,8 +2528,7 @@ fn loop_contains(edges: &[solidcore_record::brep::OrientedEdge], u: f64, v: f64)
         let samples = pcurve_levels(&used.pcurve, t0, t1);
         for pair in samples.windows(2) {
             let (Some(a), Some(b)) = (pair.first().copied(), pair.last().copied()) else { return false };
-            let Some((qa, qb)) =
-                solidcraft_kernel::services::pcurve::eval(&used.pcurve, a).zip(solidcraft_kernel::services::pcurve::eval(&used.pcurve, b))
+            let Some((qa, qb)) = solidcraft_kernel::curves::pcurve_eval(&used.pcurve, a).zip(solidcraft_kernel::curves::pcurve_eval(&used.pcurve, b))
             else {
                 return false;
             };
@@ -2543,14 +2539,14 @@ fn loop_contains(edges: &[solidcore_record::brep::OrientedEdge], u: f64, v: f64)
             let (mut lo, mut hi) = (a, b);
             for _ in 0..80 {
                 let mid = lo.midpoint(hi);
-                let Some(q) = solidcraft_kernel::services::pcurve::eval(&used.pcurve, mid) else { return false };
+                let Some(q) = solidcraft_kernel::curves::pcurve_eval(&used.pcurve, mid) else { return false };
                 if (q[1] > v) == above_a {
                     lo = mid;
                 } else {
                     hi = mid;
                 }
             }
-            let Some(q) = solidcraft_kernel::services::pcurve::eval(&used.pcurve, lo.midpoint(hi)).filter(|q| q[0].is_finite()) else { return false };
+            let Some(q) = solidcraft_kernel::curves::pcurve_eval(&used.pcurve, lo.midpoint(hi)).filter(|q| q[0].is_finite()) else { return false };
             cuts.push(q[0]);
         }
     }
