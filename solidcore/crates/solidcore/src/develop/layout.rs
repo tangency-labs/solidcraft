@@ -1900,8 +1900,10 @@ fn add_zone(
         };
         let across = panel_across(sheet, other, if depth > 0.0 { &joint.b } else { &joint.a })?;
         for (relief, u, out_dir) in [(bend.relief.0, u0, -1.0), (bend.relief.1, u1, 1.0)] {
-            let Relief::Slot { width: w, depth: d } = relief else {
-                continue;
+            let (w, d, round) = match relief {
+                Relief::Slot { width, depth } => (width, depth, false),
+                Relief::Obround { width, depth } => (width, depth, true),
+                _ => continue,
             };
             let runs_on = if out_dir < 0.0 {
                 lo < u - w - EDGE_TOL
@@ -1934,8 +1936,13 @@ fn add_zone(
                 frame.at(s1, l1),
                 frame.at(s0, l1),
             ];
+            let outer = if round {
+                obround(frame, (s0, s1), (l0, l1), depth.signum())
+            } else {
+                polygon(&corners)
+            };
             let region = Region2 {
-                outer: ccw(polygon(&corners)),
+                outer: ccw(outer),
                 holes: Vec::new(),
             };
             out.trims.push(Trim {
@@ -1947,6 +1954,53 @@ fn add_zone(
         }
     }
     Ok(())
+}
+
+/// An obround bend relief's outline: the slot `s0`…`s1` along the joint and `l0`…`l1` across
+/// it (`sign` the way from `l0` toward `l1`), its `l0` end a half round as wide as the slot that
+/// reaches `l0` at its deepest. A slot no longer than its half width is left square: there is
+/// no straight part for the round to end.
+fn obround(frame: &JointFrame, (s0, s1): (f64, f64), (l0, l1): (f64, f64), sign: f64) -> Loop2 {
+    let r = (s1 - s0).abs() / 2.0;
+    let mid = l0 + sign * r;
+    if !(r > 0.0 && (l1 - mid) * sign > EDGE_TOL) {
+        return polygon(&[
+            frame.at(s0, l0),
+            frame.at(s1, l0),
+            frame.at(s1, l1),
+            frame.at(s0, l1),
+        ]);
+    }
+    let along = (s0 + s1) / 2.0;
+    let (c, a, b, deep) = (
+        frame.at(along, mid),
+        frame.at(s0, mid),
+        frame.at(s1, mid),
+        frame.at(along, l0),
+    );
+    let start = (b.y - c.y).atan2(b.x - c.x);
+    // The half turn from `b` to `a` through the slot's deepest point.
+    let halfway =
+        |sweep: f64| c + Vec2::new((start + sweep / 2.0).cos(), (start + sweep / 2.0).sin()) * r;
+    let sweep = if halfway(PI).dist(deep) <= halfway(-PI).dist(deep) {
+        PI
+    } else {
+        -PI
+    };
+    let (a1, b1) = (frame.at(s0, l1), frame.at(s1, l1));
+    Loop2 {
+        segs: vec![
+            Seg2::Arc {
+                center: c,
+                radius: r,
+                start,
+                sweep,
+            },
+            Seg2::Line { a, b: a1 },
+            Seg2::Line { a: a1, b: b1 },
+            Seg2::Line { a: b1, b },
+        ],
+    }
 }
 
 /// A torn end of a bend's zone in the flat, from `from` along the joint on the `a` panel's tangent

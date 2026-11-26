@@ -64,6 +64,16 @@ fn type_into(h: &mut Harness, key: &str, text: &str) {
 }
 
 fn ok(h: &mut Harness) {
+    // The preview computes off the window thread and the window's height changes while it says
+    // so: wait for it, as a person does, so the click lands where OK now is.
+    for _ in 0..3000 {
+        if !h.app.preview.busy && h.app.applying.is_none() {
+            break;
+        }
+        h.frames(1);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    h.frames(2);
     h.step(&json!({"click": {"handle": "dialog:OK"}})).unwrap();
     h.frames(2);
     assert!(h.app.dialog.is_none(), "OK closes the dialog: {:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
@@ -1317,6 +1327,74 @@ fn the_point_input_of_the_box_sphere_and_torus_takes_snap_points() {
         h.app.preferences.snap_points = false;
         assert!(!crate::snap_wake::wanted(&h.app), "{cmd}");
     }
+}
+
+/// Whether the open dialog's Body Name row can be typed in (#20776): it is always there for a
+/// feature that can make a body, greyed out unless the operation is New Body.
+fn shows_body_name(h: &Harness) -> bool {
+    let label = solidcraft_ui_text::tr("ui.body_name");
+    h.output
+        .accesskit_update
+        .as_ref()
+        .unwrap()
+        .nodes
+        .iter()
+        .any(|(_, n)| n.role() == egui::accesskit::Role::TextInput && n.label() == Some(label) && !n.is_disabled())
+}
+
+/// The `body_name` the open dialog's OK sends, if any.
+fn sent_body_name(h: &Harness) -> Option<String> {
+    // A refusal (a Cut with nothing to cut) sends nothing, so no name either.
+    let (cmd, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).ok()?.into_iter().next()?;
+    // An edit is a `timeline.redefine` with the feature's parameters under `params`.
+    let params = if cmd == "timeline.redefine" { params.get("params")?.clone() } else { params };
+    params.get("body_name").and_then(Value::as_str).map(str::to_string)
+}
+
+#[test]
+fn the_body_name_row_shows_for_new_body_only_and_a_typed_name_names_the_body() {
+    for (cmd, _) in PRIMITIVES {
+        let mut h = design("mm");
+        h.app.start(cmd);
+        h.frames(3);
+        assert!(shows_body_name(&h), "{cmd}: New Body shows Body Name");
+        assert_eq!(sent_body_name(&h), None, "{cmd}: empty sends no body_name");
+        for operation in [1, 2] {
+            if let Some(Kind::Primitive { operation: op, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+                *op = operation;
+            }
+            h.app.dialog.as_mut().unwrap().extra.insert("body_name".into(), json!("Ignored"));
+            h.frames(2);
+            assert!(!shows_body_name(&h), "{cmd}: operation {operation} greys Body Name out");
+            assert_eq!(sent_body_name(&h), None, "{cmd}: operation {operation} sends no body_name");
+        }
+        if let Some(Kind::Primitive { operation, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *operation = 0;
+        }
+        h.app.dialog.as_mut().unwrap().extra.insert("body_name".into(), json!("  Lid "));
+        h.frames(2);
+        assert!(shows_body_name(&h), "{cmd}: back to New Body shows it again");
+        assert_eq!(sent_body_name(&h).as_deref(), Some("Lid"), "{cmd}: a typed name is sent");
+    }
+    let mut h = design("mm");
+    h.app.start("solid.box");
+    h.frames(3);
+    h.app.dialog.as_mut().unwrap().extra.insert("body_name".into(), json!("Lid"));
+    h.frames(2);
+    ok(&mut h);
+    assert!(h.app.session.world_state().unwrap().body("Lid").is_some(), "the box's body is named Lid");
+}
+
+#[test]
+fn editing_a_primitive_shows_the_name_its_body_was_given() {
+    let mut h = design("mm");
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Frame"})).unwrap();
+    h.frames(2);
+    let id = h.app.session.doc.features[0].id;
+    h.app.edit_feature(id);
+    h.frames(3);
+    assert!(shows_body_name(&h));
+    assert_eq!(sent_body_name(&h).as_deref(), Some("Frame"));
 }
 
 /// #20674: the Coil dialog sizes the coil by revolutions and pitch (as before), height and pitch,
