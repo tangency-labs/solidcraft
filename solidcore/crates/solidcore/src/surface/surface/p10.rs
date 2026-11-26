@@ -2431,8 +2431,11 @@ mod tests {
     /// A line dipping 2e-6 below the torus's crown where the crown meets the seam crosses it
     /// twice, at 0.5 ± 0.0259 (the gap along the crown's tangent is s⁴/(8R²r), so the dip is
     /// met at s = ±(8R²r·2e-6)^¼ ≈ ±0.518 on a line of length 20). The guesses miss both,
-    /// and the pass stops at its box limit on the leaves there: it must not add one crossing
-    /// of the two, which would make a ray's count odd.
+    /// and the pass stops at its box limit on the leaves there: it adds no root from them,
+    /// neither one crossing of the two, which would make a ray's count odd, nor both. The
+    /// solve's answer about the contact is the guesses' alone: no root added (the work
+    /// counter of roots added at the leaf-to-solution boundary) and no point at either
+    /// crossing.
     #[test]
     fn a_leaf_the_pass_does_not_finish_adds_no_crossing() {
         let k = Kernel::default();
@@ -2443,9 +2446,12 @@ mod tests {
         assert_eq!(expected.len(), 2, "{expected:?}");
         assert!((expected[0] - 0.474_10).abs() < 1.0e-4, "{expected:?}");
         let domain = s.natural_uv_domain_with_nurb(&k).unwrap();
+        k.work_counters.reset();
         let sols = s
             .base_global_line_intersect::<H>(&k, H(0), &domain, p, d, None, false, 1.0e-6)
             .unwrap();
+        assert!(k.work_counters.line_leaves_at_limit() > 0);
+        assert_eq!(k.work_counters.line_roots_added(), 0);
         let crossings = sols
             .as_slice()
             .iter()
@@ -2456,7 +2462,7 @@ mod tests {
                         .any(|e| (sol.start.parameters[0] - e).abs() < 1.0e-6)
             })
             .count();
-        assert_ne!(crossings, 1, "one crossing of two: {:?}", sols.as_slice());
+        assert_eq!(crossings, 0, "a crossing published: {:?}", sols.as_slice());
         // the leaves there stop at their limit: whatever the guesses return about the
         // contact is undecided
         assert!(sols
