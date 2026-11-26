@@ -97,7 +97,7 @@ fn fake_app(tag: &str, args: &[&str], formats: &[&str]) -> (std::path::PathBuf, 
 #[test]
 fn replies_match_the_output_schema_for_each_format_and_the_app_gets_one_argument_per_template_entry() {
     let _turn = apps::TEST_TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let (dir, seen, target) = fake_app("replies", &["--title", "{name} as {format}", "{file}"], &["3mf", "step", "sc"]);
+    let (dir, seen, target) = fake_app("replies", &["--title={name} as {format}", "{file}"], &["3mf", "step", "sc"]);
     apps::set_targets(&[target]);
     let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
     s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 5, "body_name": "Block"})).unwrap();
@@ -114,7 +114,7 @@ fn replies_match_the_output_schema_for_each_format_and_the_app_gets_one_argument
         reply_matches(&r);
         assert_eq!(r["app"], "Fake App", "{r}");
         let command = r["command"].as_array().unwrap_or_else(|| panic!("the real command is in the reply: {r}"));
-        assert_eq!((command.len(), command.last()), (4, Some(&r["path"])), "{r}");
+        assert_eq!((command.len(), command.last()), (3, Some(&r["path"])), "{r}");
         assert_eq!(r["exit_code"], 0, "{r}");
         assert!(r.get("app_error").is_none(), "{r}");
         replies.push(r);
@@ -130,12 +130,12 @@ fn replies_match_the_output_schema_for_each_format_and_the_app_gets_one_argument
     assert_eq!(std::fs::metadata(sc).map(|m| m.len()).ok(), replies[2]["bytes"].as_u64(), "the design file: {sc}");
     let text = std::fs::read_to_string(&seen).unwrap();
     let lines: Vec<&str> = text.lines().collect();
-    // Each run: its folder, then `--title`, the title as one argument, and the file.
+    // Each run: its folder, then the title joined to its option as one argument, and the file.
     let step_run = lines.iter().position(|l| l.ends_with("-v1.step")).unwrap();
-    assert_eq!(lines[step_run - 2], "--title");
-    assert!(lines[step_run - 1].ends_with(" as step") && lines[step_run - 1].contains(' '), "{lines:?}");
+    assert!(lines[step_run - 1].starts_with("--title=") && lines[step_run - 1].ends_with(" as step"), "{lines:?}");
+    assert!(lines[step_run - 1].contains(' '), "the title with its spaces is one argument: {lines:?}");
     // The folder it ran in holds the file.
-    assert!(lines[step_run - 3].ends_with("kept folder"), "{lines:?}");
+    assert!(lines[step_run - 2].ends_with("kept folder"), "{lines:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
