@@ -1833,3 +1833,42 @@ fn a_free_end_laid_out_too_far_to_carry_within_its_tolerance_is_refused() {
     ));
     assert!(develop(&sheet, &[(0, Rigid2::IDENTITY)]).is_ok());
 }
+
+/// Two circles are one hole when their centres and radii are each less than the tolerance apart; a
+/// tolerance of nothing, or a number that is none, makes no circle the same as any.
+#[test]
+fn circles_are_one_hole_within_a_tolerance_of_centre_and_radius() {
+    use super::{same_circle, Circle};
+    let hole: Circle = (Vec2::new(30.0, 40.0), 2.125);
+    assert!(same_circle(hole, hole, 1e-6));
+    assert!(same_circle(
+        hole,
+        (Vec2::new(30.0 + 5e-7, 40.0 - 5e-7), 2.125 + 5e-7),
+        1e-6
+    ));
+    assert!(
+        !same_circle(hole, (Vec2::new(30.0 + 2e-6, 40.0), 2.125), 1e-6),
+        "centres apart"
+    );
+    assert!(
+        !same_circle(hole, (Vec2::new(30.0, 40.0), 2.125 + 2e-6), 1e-6),
+        "radii apart"
+    );
+    assert!(
+        !same_circle(hole, hole, 0.0),
+        "less than nothing apart is no hole"
+    );
+    assert!(!same_circle(hole, hole, f64::NAN));
+    assert!(!same_circle(hole, (Vec2::new(f64::NAN, 40.0), 2.125), 1e-6));
+}
+
+/// A note beside a hole stands level with its centre, a half height clear of its rim on the right:
+/// its lower left corner is half a height below the centre's level, so its middle is on it.
+#[test]
+fn a_note_beside_a_hole_stands_level_with_its_centre_clear_of_its_rim() {
+    use super::note_beside;
+    let at = note_beside((Vec2::new(30.0, 40.0), 2.125), 3.0);
+    assert_eq!((at.x, at.y), (30.0 + 2.125 + 1.5, 40.0 - 1.5));
+    let at = note_beside((Vec2::new(-5.0, 0.0), 1.0), 5.0);
+    assert_eq!((at.x, at.y), (-5.0 + 1.0 + 2.5, -2.5));
+}

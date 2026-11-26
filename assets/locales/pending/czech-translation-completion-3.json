@@ -9,7 +9,7 @@
     "ai.prefs.allowed_folders_note": "Další složky, ve kterých smí Asistent otevírat, ukládat a číst propojené návrhy (kromě složky otevřeného návrhu). Aby změny převzaly nástroje na straně CLI, připojte se znovu nebo začněte nový chat.",
     "ai.prefs.allowed_folders_remove": "Odebrat složku",
     "browser.trace_click": "Klikněte na tvar v obrázku, který chcete obkreslit, a pak nastavte toleranci.",
-    "browser.trace_picked": "Tvar je vybraný. Podle potřeby změňte toleranci a stiskněte Obkreslit (nebo klikněte na jiné místo).",
+    "browser.trace_picked": "Vybrané tvary: {count}. Ctrl+klik přidá další, obyčejný klik začne znovu. Podle potřeby změňte toleranci a stiskněte Obkreslit.",
     "browser.trace_title": "Obkreslit oblast: {name}",
     "browser.trace_tolerance": "Tolerance",
     "cmd.browser_isolate": "Izolovat",

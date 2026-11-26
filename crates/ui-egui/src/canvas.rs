@@ -483,13 +483,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         app.dialog = Some(d);
         return;
     }
-    if let Kind::Measure { result, show, labels, .. } = &mut d.kind {
+    if let Kind::Measure { result, show, labels, dual_units, .. } = &mut d.kind {
         labels.drawn = Default::default();
         if !ui.input(|i| i.pointer.primary_down()) {
             labels.grab = None;
         }
         if let Some(r) = result {
-            measure_line(app, ui, painter, proj, r, *show, labels);
+            measure_line(app, ui, painter, proj, r, *show, labels, *dual_units);
             app.dialog = Some(d);
             return;
         }
@@ -782,7 +782,7 @@ pub(crate) fn format_len(doc: &solidcraft_engine::doc::Document, v: f64) -> Stri
 }
 
 /// Where a sketch point picked as "<sketch id>:<point id>" (or a bare id of the active sketch) is.
-fn sketch_point_at(app: &SolveApp, st: &solidcraft_engine::doc::ModelState, id: &str) -> Option<Vec3> {
+pub(crate) fn sketch_point_at(app: &SolveApp, st: &solidcraft_engine::doc::ModelState, id: &str) -> Option<Vec3> {
     let (sketch, point) = match id.split_once(':') {
         Some((sketch, point)) => (sketch.parse().ok()?, point),
         None => (app.session.active_sketch?, id),
@@ -906,7 +906,10 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         return;
     }
     // Two sides: the second distance gets its own arrow, the other way from the first side.
+    // A second side through all or to an object has no distance to drag.
+    let second_is_distance = !crate::dialogs::object_on(&d.inputs, crate::dialogs::TO_OBJECT2) && !matches!(d.kind, Kind::Extrude { all2: true, .. });
     if let (Kind::Extrude { direction: crate::dialogs::TWO_SIDES | crate::dialogs::TWO_SIDES_REVERSED, distance2, .. }, Some(n)) = (&mut d.kind, dir)
+        && second_is_distance
     {
         // Distance 2 stays on the side Direction gives it, whatever the sign of Distance 1. With
         // All the first side is the through-all reach, and the model sends the second side the
@@ -2243,6 +2246,7 @@ fn measure_line(
     r: &serde_json::Value,
     show: Option<crate::dialogs::Shown>,
     labels: &mut MeasureLabels,
+    dual: bool,
 ) {
     let t = Tokens::get();
     let Some((_, d, a, b)) = crate::dialogs::shown_distance(r, show) else { return };
@@ -2258,14 +2262,17 @@ fn measure_line(
         painter.circle(s, 3.5, t.manipulator, Stroke::new(1.0, Color32::WHITE));
     }
     let mid = sa + (sb - sa) * 0.5;
-    let galley =
-        painter.layout_no_wrap(crate::prefs::show_mm(app, d, 1), egui::FontId::proportional(solidcraft_theme::Tokens::get().font_label), t.text);
+    let galley = painter.layout_no_wrap(
+        crate::prefs::show_measure(app, d, 1, dual),
+        egui::FontId::proportional(solidcraft_theme::Tokens::get().font_label),
+        t.text,
+    );
     let own = egui::Rect::from_min_size(mid + vec2(10.0, -14.0), galley.size() + vec2(10.0, 6.0));
     let rect = moved_label(proj, own, labels.offset(0));
     pick_numbers(painter, sa, sb, rect);
     crate::scenario::publish_target("measure:label", rect);
     if app.preferences.measure_axis_distances {
-        measure_components(app, ui, painter, proj, a, b, rect, labels);
+        measure_components(app, ui, painter, proj, a, b, rect, labels, dual);
     }
     if rect != own {
         painter.line_segment([mid, rect.clamp(mid)], Stroke::new(1.0, t.manipulator));
@@ -2329,6 +2336,7 @@ fn measure_components(
     b: Vec3,
     total: egui::Rect,
     labels: &mut MeasureLabels,
+    dual: bool,
 ) {
     let t = Tokens::get();
     let x = Vec3::new(b.x, a.y, a.z);
@@ -2357,7 +2365,7 @@ fn measure_components(
         } else {
             (total.center(), vec2(20.0, 20.0))
         };
-        let text = format!("{}: {}", axis.to_uppercase(), crate::prefs::show_mm(app, distance, 1));
+        let text = format!("{}: {}", axis.to_uppercase(), crate::prefs::show_measure(app, distance, 1, dual));
         let galley = painter.layout_no_wrap(text, egui::FontId::proportional(solidcraft_theme::Tokens::get().font_label), t.text);
         let size = galley.size() + vec2(10.0, 6.0);
         let bounds = proj.rect.shrink(4.0);
