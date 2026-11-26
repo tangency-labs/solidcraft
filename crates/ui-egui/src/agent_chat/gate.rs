@@ -448,10 +448,14 @@ mod tests {
             args: vec!["--title={name}".into(), "{file}".into()],
             ..Default::default()
         };
-        solidcraft_engine::apps::set_targets(&[known]);
-        let asked = exec("file.send_to_app", json!({"target": "gatetest"}));
+        // The app list is process-wide and every command run sets it, so another test may reset it
+        // between the two lines: try again until the question is seen with it set.
+        let asked = (0..500).any(|_| {
+            solidcraft_engine::apps::set_targets(std::slice::from_ref(&known));
+            matches!(exec("file.send_to_app", json!({"target": "gatetest"})), Verdict::Ask(a) if a.contains("starts: /opt/gatetest --title={name} {file}"))
+        });
         solidcraft_engine::apps::set_targets(&[]);
-        assert!(matches!(asked, Verdict::Ask(a) if a.contains("starts: /opt/gatetest --title={name} {file}")));
+        assert!(asked, "the question shows the command the app would start");
         assert!(runs(&exec("file.apps", json!({}))));
     }
 

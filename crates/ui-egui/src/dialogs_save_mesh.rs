@@ -901,9 +901,8 @@ fn app_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
     let targets = app.preferences.app_targets.clone();
     let label = solidcraft_ui_text::tr("ui.send_app_label");
     if targets.is_empty() {
-        form_row(ui, label, |ui| {
-            ui.add(egui::Label::new(solidcraft_ui_text::tr("ui.send_app_none")).wrap());
-        });
+        form_row(ui, label, |_| {});
+        crate::ui_kit::text(ui, solidcraft_ui_text::tr("ui.send_app_none"), crate::ui_kit::Text::Note("send_app_note"));
     } else {
         let names: Vec<&str> = targets.iter().map(|t| t.name.as_str()).collect();
         let mut at = targets.iter().position(|t| t.id == k.slicer).unwrap_or(0);
@@ -933,9 +932,11 @@ fn app_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
     });
     let Some(t) = chosen.filter(|t| app.preferences.app_targets.iter().any(|a| a.id == t.id)) else { return };
     if apps::resolved(t).is_none() {
-        form_row(ui, "", |ui| {
-            ui.add(egui::Label::new(solidcraft_ui_text::format("ui.send_app_missing", &[("program", &t.program)])).wrap());
-        });
+        crate::ui_kit::text(
+            ui,
+            &(solidcraft_ui_text::format("ui.send_app_missing", &[("program", &t.program)])),
+            crate::ui_kit::Text::Note("send_app_note"),
+        );
     }
     let offered: Vec<&(&str, &str)> = APP_FORMATS.iter().filter(|f| t.accepts(f.1)).collect();
     let labels: Vec<&str> = offered.iter().map(|f| f.0).collect();
@@ -945,9 +946,7 @@ fn app_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
         k.app.format = f.1.to_string();
     }
     if k.app.format == "sc" {
-        form_row(ui, "", |ui| {
-            ui.add(egui::Label::new(solidcraft_ui_text::tr("ui.send_app_sc_note")).wrap());
-        });
+        crate::ui_kit::text(ui, &(solidcraft_ui_text::tr("ui.send_app_sc_note")), crate::ui_kit::Text::Note("send_app_note"));
     }
     // A browser has no folder dialog.
     if app.services.pick_folder.is_some() {
@@ -982,17 +981,17 @@ fn add_app_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
     crate::ui_kit::sized_row(ui, solidcraft_ui_text::tr("ui.send_app_args"), 64.0, |ui| {
         ui.add(egui::TextEdit::multiline(&mut form.args).desired_rows(3).desired_width(f32::INFINITY));
     });
-    form_row(ui, "", |ui| {
-        ui.add(egui::Label::new(solidcraft_ui_text::tr("ui.send_app_args_hint")).wrap());
-    });
+    crate::ui_kit::text(ui, &(solidcraft_ui_text::tr("ui.send_app_args_hint")), crate::ui_kit::Text::Note("send_app_note"));
     let labels: Vec<&str> = APP_FORMATS.iter().map(|f| f.0).collect();
     // The command this makes, with sample values, before it is added.
     let args: Vec<String> = form.args.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect();
     let sample = apps::preview(&form.program, &args, APP_FORMATS.get(form.default).map_or("3mf", |f| f.1))
         .unwrap_or_else(|why| solidcraft_ui_text::format("ui.send_app_refused", &[("why", &why)]));
-    form_row(ui, solidcraft_ui_text::tr("ui.send_app_command"), |ui| {
-        ui.add(egui::Label::new(egui::RichText::new(sample).monospace()).wrap());
-    });
+    crate::ui_kit::text(
+        ui,
+        &format!("{}: {sample}", solidcraft_ui_text::tr("ui.send_app_command")),
+        crate::ui_kit::Text::MonoNote("send_app_sample"),
+    );
     choice_row(ui, solidcraft_ui_text::tr("ui.send_app_default_format"), "sm_app_default", &mut form.default, &labels);
     let default = form.default;
     for (i, (label, _)) in APP_FORMATS.iter().enumerate() {
@@ -1776,5 +1775,96 @@ mod tests {
         h.app.status_sticky_at = Some(old);
         h.frames(3);
         assert!(h.app.status.as_ref().is_some_and(|s| s.0 == text), "a minute later the warning is still shown");
+    }
+
+    fn app_dialog(slicer: &str, format: &str) -> SaveMesh {
+        SaveMesh {
+            format: 0,
+            quality: 0,
+            open: true,
+            slicer: slicer.into(),
+            stale: false,
+            shown: None,
+            copy: false,
+            copy_folder: String::new(),
+            copy_overwrite: false,
+            app: AppMode { on: true, format: format.into(), adding: None },
+        }
+    }
+
+    #[test]
+    fn send_to_app_asks_for_an_app_and_a_format_and_a_design_copy_needs_no_bodies() {
+        let mut k = app_dialog("viewer", "step");
+        let mut input = SelInput::new("Bodies", BODIES, true);
+        assert!(commands(&k, std::slice::from_ref(&input)).is_err(), "a mesh or STEP needs bodies");
+        input.items = vec![Sel::Body { name: "Part".into() }];
+        let sent = commands(&k, std::slice::from_ref(&input)).unwrap();
+        assert_eq!(sent, [("file.send_to_app".to_string(), json!({"target": "viewer", "format": "step", "bodies": ["Part"]}))]);
+        assert_eq!(command_id(&k), "file.send_to_app");
+        k.app.format = "sc".into();
+        let none = SelInput::new("Bodies", BODIES, true);
+        assert!(ready_for(&k, std::slice::from_ref(&none)) && !ready(std::slice::from_ref(&none)));
+        assert_eq!(commands(&k, std::slice::from_ref(&none)).unwrap()[0].1, json!({"target": "viewer", "format": "sc"}));
+        k.slicer = String::new();
+        assert!(commands(&k, std::slice::from_ref(&input)).is_err(), "an app has to be chosen");
+    }
+
+    #[cfg(unix)]
+    fn script(tag: &str) -> (std::path::PathBuf, String) {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("solidcraft-add-app-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let program = dir.join("viewer");
+        std::fs::write(&program, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (dir, program.to_string_lossy().into_owned())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn add_app_keeps_a_program_and_refuses_a_shell_and_a_leading_name() {
+        let (dir, program) = script("add");
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let mut k = app_dialog("", "");
+        let refused = |app: &mut SolveApp, k: &mut SaveMesh, form: AddApp| add_app(app, k, &form).is_err();
+        assert!(refused(&mut app, &mut k, AddApp { program: "/bin/sh".into(), name: "Shell".into(), ..AddApp::default() }));
+        assert!(refused(&mut app, &mut k, AddApp { name: "No program".into(), ..AddApp::default() }));
+        let leading = AddApp { program: program.clone(), name: "Leading".into(), args: "{name}\n{file}".into(), ..AddApp::default() };
+        assert!(refused(&mut app, &mut k, leading), "a name at the start of an argument could become an option");
+        assert!(app.preferences.app_targets.is_empty());
+        let form = AddApp {
+            program: program.clone(),
+            name: "My Viewer".into(),
+            args: "--title={name}\n\n{file}".into(),
+            default: 2,
+            takes: [true, false, false, false, true],
+        };
+        add_app(&mut app, &mut k, &form).unwrap();
+        let t = &app.preferences.app_targets[0];
+        assert_eq!((t.id.as_str(), t.name.as_str(), t.default_format.as_str()), ("myviewer", "My Viewer", "step"));
+        assert_eq!(t.args, ["--title={name}", "{file}"].map(String::from));
+        assert_eq!(t.formats, ["3mf", "step", "sc"].map(String::from));
+        assert_eq!((k.slicer.as_str(), k.app.format.as_str()), ("myviewer", "step"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Running the command from the app starts what the user added in the preferences, and nothing
+    /// else; the reply names the command that was started.
+    #[cfg(unix)]
+    #[test]
+    fn the_app_runs_send_to_app_only_for_what_the_user_added() {
+        let (dir, program) = script("run");
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Part"})).unwrap();
+        let params = json!({"target": "viewer", "bodies": ["Part"], "wait": 3000});
+        assert!(app.run("file.send_to_app", params.clone()).is_err(), "nothing was added");
+        app.preferences.app_targets =
+            vec![solidcraft_engine::apps::AppTarget { id: "viewer".into(), name: "Viewer".into(), program, ..Default::default() }];
+        // The list of apps is process-wide and every command sets it: another test may reset it first.
+        let sent = (0..200).find_map(|_| app.run("file.send_to_app", params.clone()).ok()).expect("the added app is started");
+        assert_eq!((sent["app"].as_str(), sent["exit_code"].as_i64()), (Some("Viewer"), Some(0)), "{sent}");
+        assert_eq!(sent["command"].as_array().and_then(|c| c.last()), Some(&sent["path"]));
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
