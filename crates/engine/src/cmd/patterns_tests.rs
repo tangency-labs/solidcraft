@@ -189,6 +189,35 @@ fn a_hole_pattern_keeps_each_copied_wall_with_its_sketch_point() {
 }
 
 #[test]
+fn a_root_pattern_recuts_the_source_component_after_its_plate_grows() {
+    for consume_root_body in [false, true] {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "L", "expression": "40 mm"}));
+        run(&mut s, "component.create", json!({"name": "Part"}));
+        run(&mut s, "solid.box", json!({"length": "L", "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Plate"}));
+        run(&mut s, "solid.box", json!({"length": 6, "width": 6, "height": 20, "corner": [4, 2, -5], "operation": "cut", "name": "First"}));
+        run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 20, "corner": [12, 12, -5], "operation": "cut", "name": "Pocket"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let features = if consume_root_body {
+            // The first copy removes the root's only body. The next copy then acts on the plate.
+            run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [56, 4, 1], "body_name": "Small"}));
+            vec!["First", "Pocket"]
+        } else {
+            vec!["Pocket"]
+        };
+        let pattern = run(&mut s, "solid.pattern.rectangular", json!({"features": features, "dir1": [1, 0, 0], "count1": 2, "spacing1": 50}));
+        assert_eq!(pattern["warning"], format!("1 of {} cut copies remove no material", features.len()));
+
+        run(&mut s, "parameters.change", json!({"name": "L", "expression": "70 mm"}));
+        let expected = 70.0 * 20.0 * 10.0 - 6.0 * 6.0 * 10.0 - 2.0 * 4.0 * 4.0 * 10.0;
+        let measured = volume(&mut s);
+        assert!((measured - expected).abs() < 1e-6, "{features:?}: resized plate measures {measured}, expected {expected}");
+        let result = s.model.result(pattern["feature"].as_u64().unwrap()).unwrap();
+        assert!(result.error.is_none() && result.warning.is_none(), "{result:?}");
+    }
+}
+
+#[test]
 fn rectangular_hole_pattern_warns_for_copies_that_miss_and_clears_after_edit() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10,"corner":[0,0,0],"body_name":"Plate"}));

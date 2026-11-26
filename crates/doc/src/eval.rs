@@ -3377,15 +3377,13 @@ impl Feature {
             names.iter().map(|n| named_target(doc, st, self, n).ok()).collect()
         };
         // The bodies a tool operates on, as `apply_traced` picks them.
-        let operated = |(op, targets): (Operation, Vec<String>)| -> Option<Vec<usize>> {
-            let targets = if targets.is_empty() { &self.participants } else { &targets };
+        let operated = |scope: &Feature, (op, targets): (Operation, Vec<String>)| -> Option<Vec<usize>> {
+            let targets = if targets.is_empty() { &scope.participants } else { &targets };
             match op {
                 // A new body reads none of the bodies it names, but fails without them.
                 Operation::NewBody if targets.is_empty() || targets.iter().all(|n| n == "*") => Some(Vec::new()),
                 Operation::NewBody => named(targets).map(|_| Vec::new()),
-                _ if targets.is_empty() => Some(
-                    st.bodies.iter().enumerate().filter(|(_, b)| b.component == self.component || b.feature == self.id).map(|(i, _)| i).collect(),
-                ),
+                _ if targets.is_empty() => Some(st.bodies.iter().enumerate().filter(|(_, b)| b.in_default_scope(scope)).map(|(i, _)| i).collect()),
                 _ => named(targets),
             }
         };
@@ -3396,7 +3394,7 @@ impl Feature {
         };
         match &self.kind {
             // A cylinder placed by reference edges reads the faces they lie on.
-            k if numeric_tool(k) && hole_references(self).is_empty() => bodies(operated(feature_op(self))?),
+            k if numeric_tool(k) && hole_references(self).is_empty() => bodies(operated(self, feature_op(self))?),
             FeatureKind::Pattern { bodies: copied, pattern, .. } if !copied.is_empty() && fixed_pattern(pattern) => {
                 bodies(named(&crate::plain::<String, _>(copied))?)
             }
@@ -3405,10 +3403,13 @@ impl Feature {
                 for id in features {
                     let src =
                         source_feature(doc, *id).ok().filter(|src| numeric_tool(&src.kind) && hole_references(src).is_empty() && by_name(src))?;
-                    // As `replay` picks them: the source's targets, else its participants.
-                    let (op, targets) = feature_op(src);
-                    let targets = if targets.is_empty() { src.participants.clone() } else { targets };
-                    read.extend(operated((op, targets))?);
+                    let (op, targets, scope) = copy_targets(st, self, src);
+                    // An earlier copy can remove the pattern component's last body. Replay then
+                    // chooses another component for this source, using the state after that copy.
+                    if features.len() > 1 && copies_may_use_source_component(self, src, op, &targets) {
+                        return None;
+                    }
+                    read.extend(operated(&scope, (op, targets))?);
                 }
                 read.sort_unstable();
                 read.dedup();
@@ -3440,11 +3441,11 @@ impl Feature {
             FeatureKind::Extrude { sketch: s, extent, .. }
                 if extent.to.is_none() && extent.from.is_none() && !extent.through_all && extent.taper.is_none() =>
             {
-                Some(Reads { bodies: operated(feature_op(self))?, ..sketch(s)? })
+                Some(Reads { bodies: operated(self, feature_op(self))?, ..sketch(s)? })
             }
             // About an edge or round face of the model: that geometry is read too.
             FeatureKind::Revolve { axis: crate::AxisRef::Model { .. }, .. } => None,
-            FeatureKind::Revolve { sketch: s, to: None, .. } => Some(Reads { bodies: operated(feature_op(self))?, ..sketch(s)? }),
+            FeatureKind::Revolve { sketch: s, to: None, .. } => Some(Reads { bodies: operated(self, feature_op(self))?, ..sketch(s)? }),
             FeatureKind::Fillet { edges, body, .. } | FeatureKind::Chamfer { edges, body, .. } => match body {
                 Some(n) => bodies(named(std::slice::from_ref(&n.0))?),
                 None => bodies(blend_candidates(st, &crate::plain(edges))?),
@@ -14632,13 +14633,16 @@ fn replay(
 fn copy_targets<'a>(st: &ModelState, f: &'a Feature, src: &Feature) -> (Operation, Vec<String>, std::borrow::Cow<'a, Feature>) {
     let (op, targets) = feature_op(src);
     let targets = if targets.is_empty() { src.participants.clone() } else { targets };
-    let own = matches!(op, Operation::Join | Operation::Cut | Operation::Intersect)
+    let own = copies_may_use_source_component(f, src, op, &targets) && !st.bodies.iter().any(|b| b.in_default_scope(f) && b.feature != f.id);
+    let scope = if own { std::borrow::Cow::Owned(Feature { component: src.component, ..f.clone() }) } else { std::borrow::Cow::Borrowed(f) };
+    (op, targets, scope)
+}
+
+fn copies_may_use_source_component(f: &Feature, src: &Feature, op: Operation, targets: &[String]) -> bool {
+    matches!(op, Operation::Join | Operation::Cut | Operation::Intersect)
         && targets.is_empty()
         && f.participants.is_empty()
         && src.component != f.component
-        && !st.bodies.iter().any(|b| b.in_default_scope(f) && b.feature != f.id);
-    let scope = if own { std::borrow::Cow::Owned(Feature { component: src.component, ..f.clone() }) } else { std::borrow::Cow::Borrowed(f) };
-    (op, targets, scope)
 }
 
 /// The frame `src`'s geometry is kept in, in component `own`'s frame, when it is another
