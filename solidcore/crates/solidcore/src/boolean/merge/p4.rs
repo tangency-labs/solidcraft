@@ -49,7 +49,7 @@
 //! void exactly), takes the class a deleted face has on both sides ([`deleted_face_sides`]);
 //! upstream leaves it the flag it had, so the filled void stayed void.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use super::p1::{self, MergeOptions};
 use crate::error::boolean::{BooleanFailure, BooleanStage};
@@ -60,11 +60,13 @@ use crate::geom::attribute::{
 };
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::context::{MarkLock, MarkType};
+use crate::geom::extent3d::Extent3d;
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
-use crate::math::Vec3;
+use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::BrepQuery;
+use crate::query::face::p1 as qf1;
 use crate::topology::brep::p1 as bp;
 use crate::topology::brep::p9::OrientSheetNote;
 use crate::topology::edgeuse::p1 as eu;
@@ -1718,6 +1720,263 @@ fn remember_split(
     Ok(())
 }
 
+enum OtherRegionSplit {
+    /// A newly closed disjoint shell of `other` carved a single-shell bounded interior
+    /// region inside `old_region`. Any point previously in `old_region` strictly outside
+    /// `interior_bbox` lies in `exterior`.
+    ExcludedInterior {
+        exterior: RegionId,
+        interior_bbox: Extent3d,
+    },
+    /// General split (touching boundary, nested shell, or multi-region split): fall back
+    /// to live classification for any cached seed face in `old_region`.
+    Opaque,
+}
+
+struct PlannedOtherFaces {
+    ordered: Vec<FaceId>,
+    outer_disjoint_seeds: Vec<FaceId>,
+}
+
+/// Orders `other_keep` faces into connected components by shared edges in `other`:
+/// 1. Outermost disjoint components (no edge initially mated to `primary`, seed borders
+///    `other`'s infinite region), each in BFS order from its first face.
+/// 2. Components touching `primary` (at least one initially mated edge), each in BFS order
+///    starting from its initially mated faces so every face finds its region locally via
+///    mated-edge radial sectors instead of building `BrepQuery`.
+/// 3. Remaining disjoint components (e.g. cavity shells in `other`), each in BFS order.
+fn plan_other_keep_order(
+    other: &Brep,
+    other_keep: &[FaceId],
+    initial_mated: &BTreeSet<EdgeId>,
+) -> Result<PlannedOtherFaces> {
+    if other_keep.len() <= 1 {
+        return Ok(PlannedOtherFaces {
+            ordered: other_keep.to_vec(),
+            outer_disjoint_seeds: Vec::new(),
+        });
+    }
+
+    let mut face_edge_lists: Vec<Vec<EdgeId>> = Vec::with_capacity(other_keep.len());
+    let mut edge_to_faces: BTreeMap<EdgeId, Vec<usize>> = BTreeMap::new();
+    let mut face_has_mated: Vec<bool> = Vec::with_capacity(other_keep.len());
+    for (idx, &f) in other_keep.iter().enumerate() {
+        let edges = traverser::face_edges(other, f)?;
+        let mut mated = false;
+        for &e in &edges {
+            if initial_mated.contains(&e) {
+                mated = true;
+            }
+            edge_to_faces.entry(e).or_default().push(idx);
+        }
+        face_has_mated.push(mated);
+        face_edge_lists.push(edges);
+    }
+
+    let other_inf = other.infinite_region();
+    let mut visited = vec![false; other_keep.len()];
+    let mut outer_disjoint: Vec<FaceId> = Vec::new();
+    let mut outer_disjoint_seeds: Vec<FaceId> = Vec::new();
+    let mut touching: Vec<FaceId> = Vec::new();
+    let mut inner_disjoint: Vec<FaceId> = Vec::new();
+
+    for start in 0..other_keep.len() {
+        if visited.get(start).copied().unwrap_or(true) {
+            continue;
+        }
+        // Discover the connected component in first-seen BFS order.
+        let mut comp = Vec::new();
+        let mut queue = VecDeque::from([start]);
+        if let Some(slot) = visited.get_mut(start) {
+            *slot = true;
+        }
+        while let Some(u) = queue.pop_front() {
+            comp.push(u);
+            if let Some(edges) = face_edge_lists.get(u) {
+                for &e in edges {
+                    if let Some(neighbors) = edge_to_faces.get(&e) {
+                        for &v in neighbors {
+                            if !visited.get(v).copied().unwrap_or(true) {
+                                if let Some(slot) = visited.get_mut(v) {
+                                    *slot = true;
+                                }
+                                queue.push_back(v);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let mated_starts: Vec<usize> = comp
+            .iter()
+            .copied()
+            .filter(|&i| face_has_mated.get(i).copied().unwrap_or(false))
+            .collect();
+        if !mated_starts.is_empty() {
+            // Re-walk the touching component starting from all initially mated faces so
+            // every face shares an already-mated edge when reached.
+            let mut in_order = BTreeSet::new();
+            let mut bfs = VecDeque::new();
+            for s in mated_starts {
+                if in_order.insert(s) {
+                    bfs.push_back(s);
+                }
+            }
+            while let Some(u) = bfs.pop_front() {
+                if let Some(&f) = other_keep.get(u) {
+                    touching.push(f);
+                }
+                if let Some(edges) = face_edge_lists.get(u) {
+                    for &e in edges {
+                        if let Some(neighbors) = edge_to_faces.get(&e) {
+                            for &v in neighbors {
+                                if in_order.insert(v) {
+                                    bfs.push_back(v);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else if let Some(&seed_face) = other_keep.get(start) {
+            let borders_other_inf = face::upward_faceuse(other, seed_face)?
+                .map(|fu| region_pair(other, fu))
+                .transpose()?
+                .is_some_and(|(o1, o2)| (Some(o1) == other_inf) != (Some(o2) == other_inf));
+            if borders_other_inf {
+                outer_disjoint_seeds.push(seed_face);
+                for u in comp {
+                    if let Some(&f) = other_keep.get(u) {
+                        outer_disjoint.push(f);
+                    }
+                }
+            } else {
+                for u in comp {
+                    if let Some(&f) = other_keep.get(u) {
+                        inner_disjoint.push(f);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut ordered = Vec::with_capacity(other_keep.len());
+    ordered.extend(outer_disjoint);
+    ordered.extend(touching);
+    ordered.extend(inner_disjoint);
+    Ok(PlannedOtherFaces {
+        ordered,
+        outer_disjoint_seeds,
+    })
+}
+
+fn resolve_preclassified_region(
+    mut region: RegionId,
+    point: Point3,
+    region_splits: &BTreeMap<RegionId, Vec<(usize, OtherRegionSplit)>>,
+) -> Option<RegionId> {
+    let mut epoch = 0usize;
+    loop {
+        let Some(list) = region_splits.get(&region) else {
+            return Some(region);
+        };
+        let pos = list.partition_point(|&(ev, _)| ev < epoch);
+        let Some(&(ev, ref split)) = list.get(pos) else {
+            return Some(region);
+        };
+        match split {
+            OtherRegionSplit::Opaque => return None,
+            OtherRegionSplit::ExcludedInterior {
+                exterior,
+                interior_bbox,
+            } => {
+                if interior_bbox.contains_point(point, 0.0) {
+                    return None;
+                }
+                region = *exterior;
+                epoch = ev + 1;
+            }
+        }
+    }
+}
+
+fn classify_other_region_split(
+    k: &Kernel,
+    primary: &Brep,
+    other: &Brep,
+    old_region: RegionId,
+    new_region: RegionId,
+    new_face: FaceId,
+    other_face: FaceId,
+    copied_faces: &BTreeSet<FaceId>,
+) -> Result<OtherRegionSplit> {
+    let Some(other_inf) = other.infinite_region() else {
+        return Ok(OtherRegionSplit::Opaque);
+    };
+    let (Some(up_new), Some(up_other)) = (
+        face::upward_faceuse(primary, new_face)?,
+        face::upward_faceuse(other, other_face)?,
+    ) else {
+        return Ok(OtherRegionSplit::Opaque);
+    };
+    let (r1, r2) = region_pair(primary, up_new)?;
+    let (o1, o2) = region_pair(other, up_other)?;
+    let (r_in, r_out) = if o1 != other_inf && o2 == other_inf {
+        (r1, r2)
+    } else if o2 != other_inf && o1 == other_inf {
+        (r2, r1)
+    } else {
+        return Ok(OtherRegionSplit::Opaque);
+    };
+    if !((r_in == old_region && r_out == new_region) || (r_in == new_region && r_out == old_region))
+    {
+        return Ok(OtherRegionSplit::Opaque);
+    }
+    let shells = &primary.region(r_in)?.shells;
+    if shells.len() != 1 {
+        return Ok(OtherRegionSplit::Opaque);
+    }
+    let Some(&shell_in) = shells.first() else {
+        return Ok(OtherRegionSplit::Opaque);
+    };
+    let shell_rec = primary.shell(shell_in)?;
+    if !shell_rec.is_faceuse_shell() {
+        return Ok(OtherRegionSplit::Opaque);
+    }
+    let faceuses = shell_rec.get_faceuses()?;
+    if faceuses.is_empty() {
+        return Ok(OtherRegionSplit::Opaque);
+    }
+    let mut interior_bbox = Extent3d::new();
+    let mut max_tol = primary.tolerance().max(other.tolerance());
+    let mut seen_faces = BTreeSet::new();
+    for fu in faceuses {
+        let Some(face_id) = eu::faceuse_face(primary, fu)? else {
+            return Ok(OtherRegionSplit::Opaque);
+        };
+        if !copied_faces.contains(&face_id) {
+            return Ok(OtherRegionSplit::Opaque);
+        }
+        if !seen_faces.insert(face_id) {
+            continue;
+        }
+        let mut fbox = qf1::calculate_bounding_box(k, primary, face_id, false)?;
+        let ftol = face::tolerance(primary, face_id)?;
+        max_tol = max_tol.max(ftol);
+        fbox.expand_absolute(ftol);
+        interior_bbox = interior_bbox.union(&fbox);
+    }
+    if !interior_bbox.is_defined() {
+        return Ok(OtherRegionSplit::Opaque);
+    }
+    interior_bbox.expand_absolute(4.0 * max_tol);
+    Ok(OtherRegionSplit::ExcludedInterior {
+        exterior: r_out,
+        interior_bbox,
+    })
+}
+
 fn make_other_faces(
     kernels: &mut BooleanKernels<'_>,
     primary: &mut Brep,
@@ -1727,7 +1986,36 @@ fn make_other_faces(
     operation: BooleanOperation,
     faces: &Faces,
 ) -> Result<()> {
-    for &f in &faces.other_keep {
+    let (_, mated_other_edges) = intersector.common_edges(primary, other)?;
+    let initial_mated: BTreeSet<EdgeId> = mated_other_edges.into_iter().collect();
+    let planned = plan_other_keep_order(other, &faces.other_keep, &initial_mated)?;
+
+    // Pre-classify every outermost disjoint seed face once against the unmutated `primary`
+    // using a single shared `BrepQuery`, avoiding O(S) full `make_brep_cache` rebuilds.
+    let mut preclassified: BTreeMap<FaceId, (RegionId, Point3)> = BTreeMap::new();
+    if !planned.outer_disjoint_seeds.is_empty() {
+        let query = BrepQuery::of_brep(primary);
+        for &seed in &planned.outer_disjoint_seeds {
+            if let Some(fu1) = face::faceuses(other, seed)?.0 {
+                if let Some(hit) = p1::classify_unmated_other_face_with_query(
+                    kernels.primary,
+                    primary,
+                    other,
+                    fu1,
+                    &query,
+                )? {
+                    preclassified.insert(seed, hit);
+                }
+            }
+        }
+    }
+
+    let mut copied_faces: BTreeSet<FaceId> = BTreeSet::new();
+    let mut region_splits: BTreeMap<RegionId, Vec<(usize, OtherRegionSplit)>> = BTreeMap::new();
+    let mut split_epoch = 0usize;
+    let mut all_opaque = false;
+
+    for &f in &planned.ordered {
         let (fu1, fu2) = face::faceuses(other, f)?;
         let [fu1, fu2] = [fu1, fu2].map(|fu| {
             linked(
@@ -1738,12 +2026,26 @@ fn make_other_faces(
             )
         });
         let (fu1, fu2) = (fu1?, fu2?);
-        let original =
-            intersector.find_region_of_other_face(kernels.primary, primary, other, fu1)?;
+        let original = if all_opaque {
+            intersector.find_region_of_other_face(kernels.primary, primary, other, fu1)?
+        } else if let Some(&(r0, pt)) = preclassified.get(&f) {
+            if let Some(r) = resolve_preclassified_region(r0, pt, &region_splits) {
+                Some(r)
+            } else {
+                intersector.find_region_of_other_face(kernels.primary, primary, other, fu1)?
+            }
+        } else {
+            intersector.find_region_of_other_face(kernels.primary, primary, other, fu1)?
+        };
         let original_void = if let Some(r) = original {
             void(primary, r)?
         } else {
             0
+        };
+        let regions_before = if preclassified.is_empty() || all_opaque {
+            0
+        } else {
+            bp::regions(primary, None)?.len()
         };
         let made = if matches!(
             operation,
@@ -1759,6 +2061,35 @@ fn make_other_faces(
         } else {
             MadeFaceuse::default()
         };
+        if !preclassified.is_empty() && !all_opaque {
+            copied_faces.extend(made.faces.iter().copied());
+            let regions_after = bp::regions(primary, None)?.len();
+            let expected_after = regions_before + usize::from(made.new_region.is_some());
+            if regions_after != expected_after {
+                all_opaque = true;
+            } else if let (Some(old_r), Some(new_r)) = (made.old_region, made.new_region) {
+                let split = if made.faces.len() == 1 {
+                    if let Some(&new_face) = made.faces.first() {
+                        classify_other_region_split(
+                            kernels.primary,
+                            primary,
+                            other,
+                            old_r,
+                            new_r,
+                            new_face,
+                            f,
+                            &copied_faces,
+                        )?
+                    } else {
+                        OtherRegionSplit::Opaque
+                    }
+                } else {
+                    OtherRegionSplit::Opaque
+                };
+                region_splits.entry(old_r).or_default().push((split_epoch, split));
+                split_epoch += 1;
+            }
+        }
         if let (Some(new_region), Some(_)) = (made.new_region, original) {
             let old = linked(
                 made.old_region,
@@ -1944,7 +2275,7 @@ fn find_and_set_infinite(
     primary: &mut Brep,
     shell: Option<crate::topology::ShellId>,
     void_setting: bp::SetRegionVoidType,
-    bounding_box: Option<&crate::geom::extent3d::Extent3d>,
+    bounding_box: Option<&Extent3d>,
 ) -> Result<()> {
     // (the query's geometry owners named by `primary`'s naming scheme and proven owners)
     let query = BrepQuery::of_brep(primary);
@@ -2022,10 +2353,7 @@ fn new_component_brep(
 /// caches are held by their Rust callers, not by the B-rep, and the merge holds none, so
 /// none is stale.
 fn delete_stale_caches(primary: &mut Brep) -> Result<()> {
-    crate::topology::brep::p2::delete_stale_caches::<()>(
-        primary,
-        &mut std::collections::BTreeMap::new(),
-    )
+    crate::topology::brep::p2::delete_stale_caches::<()>(primary, &mut BTreeMap::new())
 }
 
 // true means imprint-only or imprint/classify: preserve normal topology and exit.

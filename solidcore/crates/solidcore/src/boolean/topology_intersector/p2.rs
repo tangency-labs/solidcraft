@@ -683,19 +683,25 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         opt_keep_as_wires: Option<&[O]>,
     ) -> Result<()> {
         let mut faces_vertices: Vec<O> = Vec::new();
+        let mut seen_vertices: std::collections::BTreeSet<O> = std::collections::BTreeSet::new();
         let mut faces_edges: Vec<O> = Vec::new();
+        let mut seen_edges: std::collections::BTreeSet<O> = std::collections::BTreeSet::new();
         let mut face_brep_h: Option<O> = None;
 
         // iter every face saving all face vertices and edges and calling DeleteFace()
         for &f in faces {
             // Accumulate DeletedFace unique EdgeList for later
             for e in brep.face_edges(f)? {
-                add_unique(&mut faces_edges, e);
+                if seen_edges.insert(e) {
+                    faces_edges.push(e);
+                }
             }
 
             // Accumulate DeletedFace unique VertexList for later
             for v in brep.face_vertices(f)? {
-                add_unique(&mut faces_vertices, v);
+                if seen_vertices.insert(v) {
+                    faces_vertices.push(v);
+                }
             }
 
             // remove TargetFace<->OtherFace relationship if it exists (status unchecked
@@ -718,13 +724,16 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             return Ok(());
         }
 
+        let keep_wires: Option<std::collections::BTreeSet<O>> =
+            opt_keep_as_wires.map(|keep| keep.iter().copied().collect());
+
         // iter every edge of every deleted face looking for wire edges to delete
         for &e in &faces_edges {
             if !brep.edge_is_wire(e)? {
                 continue;
             }
             // save wires when asked
-            if opt_keep_as_wires.is_some_and(|keep| contains(keep, &e)) {
+            if keep_wires.as_ref().is_some_and(|keep| keep.contains(&e)) {
                 continue;
             }
 
