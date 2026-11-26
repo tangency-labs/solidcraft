@@ -566,6 +566,24 @@ mod history {
         assert_eq!((kept(1), kept(2), kept(3), kept(4)), (1, 1, 1, 6), "{h:?}");
     }
 
+    /// `boolean_tagged` and `union_all_tagged` preserve operand provenance tags for unions.
+    #[test]
+    fn tagged_boolean_and_union_all_keep_operand_origins() {
+        use std::collections::BTreeSet;
+        let a = super::Shape::Box([0.0; 3], [10.0; 3]).core();
+        let b = super::Shape::Box([5.0; 3], [10.0; 3]).core();
+        let c = super::Shape::Box([10.0; 3], [10.0; 3]).core();
+        let u = super::super::boolean::boolean_tagged(&a, &b, BooleanOp::Union).unwrap().unwrap();
+        let uh = super::super::history::read(&u).unwrap();
+        assert_eq!(uh.faces.len(), 12, "{uh:?}");
+        let u_origins: BTreeSet<usize> = uh.faces.iter().flat_map(|f| f.origins.iter().map(|o| o.0)).collect();
+        assert_eq!(u_origins, BTreeSet::from([0, 1]), "{uh:?}");
+        let all = super::super::boolean::union_all_tagged(&[&a, &b, &c]).unwrap();
+        let ah = super::super::history::read(&all).unwrap();
+        let a_origins: BTreeSet<usize> = ah.faces.iter().flat_map(|f| f.origins.iter().map(|o| o.0)).collect();
+        assert_eq!(a_origins, BTreeSet::from([0, 1, 2]), "{ah:?}");
+    }
+
     /// A row of four boxes sharing their top and bottom planes, united in pairs and the pairs
     /// united: each top merged with its neighbour's stands for two faces, and the merge of those
     /// stands for all four.
