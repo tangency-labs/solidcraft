@@ -649,7 +649,17 @@ impl Camera {
             }
         }
         // Rebuilt on the exact direction, so the view looks along it without rounding drift.
-        cam.with_frame(across, back).unwrap_or(cam)
+        let Some(mut to) = cam.with_frame(across, back) else { return cam };
+        // Straight up or down, heading and roll turn the picture the same way. Keep the turn in
+        // the heading, so a square Top or Bottom is stored upright as before: other code reads
+        // the heading alone there, and an upright view keeps the usual glide (#21480).
+        let pole = to.pitch.signum();
+        if (to.pitch.abs() - std::f64::consts::FRAC_PI_2).abs() < 1e-9 && to.roll != 0.0 {
+            let yaw = to.yaw - pole * to.roll;
+            to.yaw = yaw.sin().atan2(yaw.cos());
+            to.roll = 0.0;
+        }
+        to
     }
     /// The same camera looking from direction `back` (target → eye). Straight up or down
     /// keeps the yaw, rounded to the nearest quarter turn so the view stays square.
@@ -1203,6 +1213,14 @@ mod tests {
         let iso = Camera { yaw: -PI / 4.0, pitch: 0.6155, ..front };
         let (r, u, b) = frame(&iso.turned_to(Vec3::Z, true));
         assert!(near(b, Vec3::Z) && near(r, Vec3::X) && near(u, Vec3::Y), "{r:?} {u:?} {b:?}");
+        // Straight up or down a view is stored upright, its turn kept in the heading, as the
+        // old upright views were: Iso to Top is heading 0, and from the back-left -90.
+        let deg = |c: Camera| (c.yaw.to_degrees(), c.roll.to_degrees());
+        let (yaw, roll) = deg(iso.turned_to(Vec3::Z, true));
+        assert!(yaw.abs() < 1e-6 && roll == 0.0, "{yaw} {roll}");
+        let back_left = Camera { yaw: -3.0 * PI / 4.0, ..iso };
+        let (yaw, roll) = deg(back_left.turned_to(Vec3::Z, true));
+        assert!((yaw + 90.0).abs() < 1e-6 && roll == 0.0, "{yaw} {roll}");
         for up in [UpAxis::Z, UpAxis::Y] {
             for (yaw, pitch) in [(0.0, 0.0), (FRAC_PI_2, 0.0), (0.0, FRAC_PI_2), (PI, -FRAC_PI_2)] {
                 for roll in [0.0, FRAC_PI_2, PI, -FRAC_PI_2] {
