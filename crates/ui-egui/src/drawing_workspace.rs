@@ -136,7 +136,8 @@ fn open_a_drawing(app: &mut SolveApp) {
 }
 
 /// Opens the design's drawing `id` on its first sheet, fitted, in place of the one open: the
-/// drawing picker's choice. The panels and picks of the drawing left go with it.
+/// drawing picker's choice, and the drawing beside a deleted one. The panels and picks of the
+/// drawing left go with it.
 pub(crate) fn open_drawing(app: &mut SolveApp, id: u64) {
     if app.session.open_drawing == Some(id) {
         app.drawing_workspace.return_to = None;
@@ -152,6 +153,14 @@ pub(crate) fn open_drawing(app: &mut SolveApp, id: u64) {
         }
         Err(error) => app.set_status(error, true),
     }
+}
+
+/// The drawing the picker lists after `id`, or before it when `id` is the last: the one that
+/// opens in its place when `id` is deleted. The picker lists the design's drawings in order.
+fn beside_in_picker(app: &SolveApp, id: u64) -> Option<u64> {
+    let drawings = &app.session.doc.drawings;
+    let at = drawings.iter().position(|drawing| drawing.id == id)?;
+    drawings.get(at + 1).or_else(|| drawings.get(at.checked_sub(1)?)).map(|drawing| drawing.id)
 }
 
 /// New drawing…: closes the open drawing, which stays in the design, so the setup page shows to
@@ -1244,14 +1253,19 @@ fn show_delete(app: &mut SolveApp, ctx: &egui::Context) {
             ui.label(message);
         });
     if answer == ui_kit::Action::Ok {
-        // Nothing else opens after a drawing's delete: the page that makes one shows, and Design's
-        // undo brings the drawing back.
+        // The drawing beside it in the picker opens in its place, so deleting one of several does
+        // not look like starting over; with none left, the page that makes one shows. Design's
+        // undo brings the drawing back. `drawing.delete` itself only closes it.
+        let beside = beside_in_picker(app, drawing_id);
         match app.run(command, params) {
             // The drawing's panels and drafts go with it once it is gone. A delete the engine
             // refuses (a sheet sketch started meanwhile) leaves them as they were.
-            Ok(_) if row == MenuRow::Drawing => {
-                close_panel(app);
-            }
+            Ok(_) if row == MenuRow::Drawing => match beside {
+                Some(id) => open_drawing(app, id),
+                None => {
+                    close_panel(app);
+                }
+            },
             Ok(_) => {}
             Err(error) => app.set_status(error, true),
         }
@@ -2796,6 +2810,61 @@ mod tests {
         assert_eq!(open_drawing_settings(&h), open, "a refused delete closes none of the drawing's panels");
         let (text, _, error) = h.app.status.clone().unwrap();
         assert!(error && text.contains("sheet sketch"), "{text}");
+    }
+
+    /// Delete Drawing with other drawings left opens the one after it in the picker, on its first
+    /// sheet, not the page that starts a drawing. The deleted drawing's panels close with it, and
+    /// opening the next adds no step.
+    #[test]
+    fn delete_drawing_opens_the_next_drawing_in_the_picker() {
+        use serde_json::json;
+
+        let mut h = drawing_open(json!({"name":"Bracket"}));
+        h.app.run("drawing.create", json!({"name":"Plate"})).unwrap();
+        h.app.run("drawing.create", json!({"name":"Cover"})).unwrap();
+        let ids: Vec<u64> = h.app.session.doc.drawings.iter().map(|d| d.id).collect();
+        h.app.run("drawing.open", json!({"drawing": solidcraft_engine::doc::ids::encode(ids[1])})).unwrap();
+        h.frames(3);
+        assert!(start(&mut h.app, "drawing.sheet.set"));
+        h.frames(2);
+        let steps = h.app.session.undo.len();
+        ask_to_delete_the_drawing(&mut h, ids[1]);
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.frames(3);
+        let left: Vec<u64> = h.app.session.doc.drawings.iter().map(|d| d.id).collect();
+        assert_eq!(left, [ids[0], ids[2]]);
+        assert_eq!(h.app.session.open_drawing, Some(ids[2]), "the drawing after it in the picker opens");
+        assert_eq!(h.app.session.undo.len(), steps + 1, "one step of the model, and none for opening the next");
+        assert!(!h.app.drawing_workspace.settings_open, "the deleted drawing's panels close with it");
+        assert_eq!(active_sheet(&h.app), Some(the_drawing(&h).sheets[0].id), "on its first sheet");
+        assert!(crate::scenario::handle_at("drawing:first:standard").is_none(), "not the page that starts a drawing");
+    }
+
+    /// Delete Drawing on the last drawing in the picker opens the one before it. Deleting the only
+    /// drawing left shows the page that starts a drawing.
+    #[test]
+    fn delete_drawing_of_the_last_in_the_picker_opens_the_one_before() {
+        use serde_json::json;
+
+        let mut h = drawing_open(json!({"name":"Bracket"}));
+        let first = the_drawing(&h);
+        h.app.run("drawing.create", json!({"name":"Plate"})).unwrap();
+        h.frames(3);
+        let last = the_drawing(&h).id;
+        assert_eq!(h.app.session.doc.drawings.last().map(|d| d.id), Some(last), "Plate is last in the picker");
+        ask_to_delete_the_drawing(&mut h, last);
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.session.open_drawing, Some(first.id), "the drawing before it opens");
+        assert_eq!(active_sheet(&h.app), Some(first.sheets[0].id), "on its first sheet");
+        assert!(crate::scenario::handle_at("drawing:first:standard").is_none(), "not the page that starts a drawing");
+
+        ask_to_delete_the_drawing(&mut h, first.id);
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.frames(3);
+        assert!(h.app.session.doc.drawings.is_empty());
+        assert_eq!(h.app.session.open_drawing, None);
+        assert!(crate::scenario::handle_at("drawing:first:standard").is_some(), "with none left, the page that starts a drawing shows");
     }
 
     #[cfg(not(target_arch = "wasm32"))]
