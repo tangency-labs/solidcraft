@@ -38,5 +38,10 @@
     "ui.plugin_dialog_change_file": "更换文件…",
     "ui.plugin_dialog_open_file": "打开",
     "ui.plugin_dialog_reading_file": "正在读取文件…"
+  },
+  "ko": {
+    "ui.plugin_dialog_change_file": "파일 바꾸기…",
+    "ui.plugin_dialog_open_file": "열기",
+    "ui.plugin_dialog_reading_file": "파일 읽는 중…"
   }
 }
