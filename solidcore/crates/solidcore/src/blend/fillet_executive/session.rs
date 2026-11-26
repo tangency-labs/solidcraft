@@ -7084,35 +7084,38 @@ impl SessionObjects<'_> {
                 .ok_or_else(|| invalid("filleted edge without curve"))?;
             edge_curves.push((curve, edge.interval));
         }
+        // each rail's middle and its foot on its own edge, judged against the other edges
         for (a, &(edge_a, ends_a)) in edges.iter().enumerate() {
-            for (b, &(edge_b, ends_b)) in edges.iter().enumerate() {
-                if a == b
-                    || edge_a == edge_b
-                    || ends_a.iter().flatten().any(|v| ends_b.contains(&Some(*v)))
-                {
-                    continue; // a corner trims them where they meet
+            let (Some(rails_a), Some((curve_ea, ivl_ea))) = (rails.get(a), edge_curves.get(a))
+            else {
+                continue;
+            };
+            for (face, curve_a, kept_a) in rails_a {
+                let p = curve_a.evaluate_point(k, kept_a.evaluate(0.5))?;
+                let on_a = drop_onto_edge(k, curve_ea, ivl_ea, p)?;
+                if !on_a.success {
+                    continue;
                 }
-                let (Some(rails_a), Some(rails_b)) = (rails.get(a), rails.get(b)) else {
-                    continue;
-                };
-                let (Some((curve_ea, ivl_ea)), Some((curve_eb, ivl_eb))) =
-                    (edge_curves.get(a), edge_curves.get(b))
-                else {
-                    continue;
-                };
-                for (face, curve_a, kept_a) in rails_a {
+                let e_a = curve_ea.evaluate_point(k, on_a.parameter)?;
+                for (b, &(edge_b, ends_b)) in edges.iter().enumerate() {
+                    if a == b
+                        || edge_a == edge_b
+                        || ends_a.iter().flatten().any(|v| ends_b.contains(&Some(*v)))
+                    {
+                        continue; // a corner trims them where they meet
+                    }
+                    let (Some(rails_b), Some((curve_eb, ivl_eb))) =
+                        (rails.get(b), edge_curves.get(b))
+                    else {
+                        continue;
+                    };
                     if !rails_b.iter().any(|(f, _, _)| f == face) {
                         continue;
                     }
-                    let p = curve_a.evaluate_point(k, kept_a.evaluate(0.5))?;
-                    let (on_a, on_b) = (
-                        drop_onto_edge(k, curve_ea, ivl_ea, p)?,
-                        drop_onto_edge(k, curve_eb, ivl_eb, p)?,
-                    );
-                    if !on_a.success || !on_b.success {
+                    let on_b = drop_onto_edge(k, curve_eb, ivl_eb, p)?;
+                    if !on_b.success {
                         continue;
                     }
-                    let e_a = curve_ea.evaluate_point(k, on_a.parameter)?;
                     let e_b = curve_eb.evaluate_point(k, on_b.parameter)?;
                     // past edge `b` seen from edge `a`: `e_b` on the way from `e_a` to `p`
                     let beyond =
