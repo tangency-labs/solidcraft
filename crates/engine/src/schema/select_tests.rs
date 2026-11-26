@@ -11,6 +11,7 @@ use crate::{Sel, Session};
 #[test]
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<SelectSetParams>(), &["add", "items"]);
+    assert_keys(input_schema_for::<super::BoundaryParams>(), &["add", "body", "faces", "holes"]);
     assert_keys(input_schema_for::<SelectClearParams>(), &[]);
     assert_keys(input_schema_for::<SelectFilterParams>(), &["mode"]);
     assert_keys(input_schema_for::<EdgeLoopParams>(), &["add", "body", "edge", "face"]);
