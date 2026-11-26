@@ -1,0 +1,30 @@
+{
+  "en": {
+    "report.already_sent": "The same report went to the server a few minutes ago, so nothing new was sent. Open it again below.",
+    "report.already_sent_title": "You already sent this report"
+  },
+  "ar": {
+    "report.already_sent": "أُرسل التقرير نفسه إلى الخادم قبل دقائق، لذا لم يُرسَل شيء جديد. افتحه مرة أخرى أدناه.",
+    "report.already_sent_title": "لقد أرسلت هذا التقرير بالفعل"
+  },
+  "de": {
+    "report.already_sent": "Derselbe Bericht ging vor ein paar Minuten an den Server, daher wurde nichts Neues gesendet. Öffnen Sie ihn unten erneut.",
+    "report.already_sent_title": "Sie haben diesen Bericht bereits gesendet"
+  },
+  "he": {
+    "report.already_sent": "אותו דיווח נשלח לשרת לפני כמה דקות, ולכן לא נשלח דבר חדש. אפשר לפתוח אותו שוב למטה.",
+    "report.already_sent_title": "כבר שלחת את הדיווח הזה"
+  },
+  "ja": {
+    "report.already_sent": "同じレポートが数分前にサーバーへ送信されているため、新しく送信していません。下から再度開けます。",
+    "report.already_sent_title": "このレポートは送信済みです"
+  },
+  "vi": {
+    "report.already_sent": "Báo cáo này đã được gửi đến máy chủ vài phút trước nên không có gì mới được gửi. Mở lại nó bên dưới.",
+    "report.already_sent_title": "Bạn đã gửi báo cáo này rồi"
+  },
+  "zh": {
+    "report.already_sent": "几分钟前已将同一份报告发送到服务器，因此没有再次发送。可在下方重新打开它。",
+    "report.already_sent_title": "你已发送过这份报告"
+  }
+}
