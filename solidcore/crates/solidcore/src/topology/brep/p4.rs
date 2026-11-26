@@ -1883,6 +1883,7 @@ pub(crate) fn stitch_one_solid_with_identity(
         None,
         &mut callback,
         Some(outside),
+        false,
     )
 }
 
@@ -1907,6 +1908,34 @@ pub(crate) fn stitch_faces_with_context<'a>(
         identity,
         edits,
         &mut callback,
+    )
+}
+
+/// [`stitch_faces_with_context`] with per-entity candidate splitting enabled
+/// (`Stitch::per_entity_candidate_split`): when `faces` restricts the stitch to newly
+/// merged faces, T-junction vertices on either the target or the candidate faces still
+/// split the mating lamina edges after earlier non-candidate entities are visited.
+pub(crate) fn stitch_faces_splitting_candidates_with_context<'a>(
+    k: &mut Kernel,
+    b: &mut Brep,
+    xsect_tol_3d: f64,
+    faces: Option<&[Option<FaceId>]>,
+    allow_spine_edges: bool,
+    identity: Option<crate::query::brep::BrepIdentity<'a>>,
+    edits: Option<&'a mut dyn crate::heal::stitch::p1::StitchEditContext>,
+) -> Result<StitchOutcome> {
+    let mut callback = DefaultStitchCallback::new();
+    stitch_faces_configured(
+        k,
+        b,
+        xsect_tol_3d,
+        faces,
+        allow_spine_edges,
+        identity,
+        edits,
+        &mut callback,
+        None,
+        true,
     )
 }
 
@@ -1939,6 +1968,7 @@ pub(crate) fn stitch_faces_with_callback<'a, C: StitchCallback>(
         edits,
         callback,
         None,
+        false,
     )
 }
 
@@ -1955,6 +1985,7 @@ fn stitch_faces_configured<'a, C: StitchCallback>(
     mut edits: Option<&'a mut dyn crate::heal::stitch::p1::StitchEditContext>,
     callback: &mut C,
     outside: Option<FaceuseId>,
+    per_entity_candidate_split: bool,
 ) -> Result<StitchOutcome> {
     // lock brep bounding box, until goes out of scope
     let mut lockit = LockBrepBox::new(k, b)?;
@@ -1972,6 +2003,7 @@ fn stitch_faces_configured<'a, C: StitchCallback>(
     stitch.squeeze_small_edges = true;
     stitch.making_manifold_solid = !allow_spine_edges;
     stitch.remove_laminar_slivers = true;
+    stitch.per_entity_candidate_split = per_entity_candidate_split;
 
     let mut lists = None;
     if let Some(faces) = faces {
