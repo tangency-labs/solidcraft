@@ -501,7 +501,6 @@ fn menu_style() -> MenuStyle<'static> {
         more_tip: "More",
         hot: "t:hot:",
         reveal: "t:reveal",
-        row_pin: false,
     }
 }
 
@@ -514,12 +513,11 @@ struct MenuRig {
     ctx: egui::Context,
     grid: bool,
     time: std::cell::Cell<f64>,
-    row_pin: std::cell::Cell<bool>,
 }
 
 impl MenuRig {
     fn new(grid: bool) -> MenuRig {
-        let rig = MenuRig { ctx: crate::test_support::context(), grid, time: std::cell::Cell::new(0.0), row_pin: std::cell::Cell::new(false) };
+        let rig = MenuRig { ctx: crate::test_support::context(), grid, time: std::cell::Cell::new(0.0) };
         rig.frame(Vec::new(), 0.0);
         rig
     }
@@ -535,7 +533,7 @@ impl MenuRig {
             ..Default::default()
         };
         let entries = [entry("m.on", true), entry("m.off", false)];
-        let style = MenuStyle { row_pin: self.row_pin.get(), ..menu_style() };
+        let style = menu_style();
         let mut chosen = Vec::new();
         crate::test_support::raw_frame(&self.ctx, input, |ui| {
             if self.grid {
@@ -607,22 +605,6 @@ fn a_list_row_shows_its_more_button_at_its_end_and_no_pin() {
         // MenuRig rows are 220 wide; the entry handle is the row's centre.
         assert_eq!(rig.at("t:more:m.on"), pos2(on.x + 110.0 - MORE_INSET, on.y), "the ⋯ is at the row's end");
     }
-}
-
-/// With `row_pin` a list row shows its pin at its end and the ⋯ beside it, as before #11853, and
-/// the pin pins or unpins.
-#[test]
-fn a_list_row_with_row_pin_shows_a_pin_that_toggles() {
-    let rig = MenuRig::new(false);
-    rig.row_pin.set(true);
-    let on = rig.at("t:entry:m.on");
-    rig.frame(vec![egui::Event::PointerMoved(on)], 0.0);
-    rig.frame(vec![egui::Event::PointerMoved(on)], 0.0);
-    let pin = rig.at("t:pin:m.on");
-    assert_eq!(pin, pos2(on.x + 110.0 - MORE_INSET, on.y), "the pin is at the row's end");
-    assert_eq!(rig.at("t:more:m.on"), pin - vec2(ROW_BUTTON + MORE_GAP, 0.0), "the ⋯ sits beside the pin");
-    let chosen = rig.press(pin, egui::PointerButton::Primary, 0.0);
-    assert_eq!(chosen, vec![("m.on".to_string(), MenuAction::TogglePin)]);
 }
 
 impl RowRig {

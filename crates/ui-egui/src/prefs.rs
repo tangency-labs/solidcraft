@@ -5335,7 +5335,6 @@ mod tests {
             ("ribbon_reveal", "prefs.ribbon_reveal"),
             ("ribbon_tabs_only", "prefs.ribbon_tabs_only"),
             ("ribbon_menus_skip_pinned", "prefs.layout_page.pinned_menus"),
-            ("dropdown_row_pin", "prefs.dropdown_row_pin"),
             ("ribbon_menus_follow_hover", "prefs.layout_page.hover_panel_menus"),
             ("pinned_constraints_in_grid", "prefs.pinned_constraints_in_grid"),
         ];
@@ -5398,7 +5397,6 @@ mod tests {
                 "ribbon_reveal",
                 "ribbon_tabs_only",
                 "ribbon_menus_skip_pinned",
-                "dropdown_row_pin",
                 "ribbon_menus_follow_hover",
                 "pinned_constraints_in_grid",
             ],
@@ -7384,7 +7382,6 @@ mod tests {
             ("construct_menu_groups", json!(false), PAGE_LAYOUT),
             ("ribbon_menus_follow_hover", json!(true), PAGE_LAYOUT),
             ("ribbon_menus_skip_pinned", json!(true), PAGE_LAYOUT),
-            ("dropdown_row_pin", json!(true), PAGE_LAYOUT),
             ("history_sketches", json!("under_feature"), PAGE_LAYOUT),
             ("history_play_button", json!(false), PAGE_LAYOUT),
             ("history_folder_kind_icon", json!(true), PAGE_LAYOUT),

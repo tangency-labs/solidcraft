@@ -733,12 +733,6 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         value: |p| &mut p.ribbon_menus_skip_pinned,
                     },
                     Check {
-                        label: "prefs.dropdown_row_pin",
-                        help: "prefs.dropdown_row_pin_note",
-                        key: "dropdown_row_pin",
-                        value: |p| &mut p.dropdown_row_pin,
-                    },
-                    Check {
                         label: "prefs.layout_page.hover_panel_menus",
                         help: "prefs.layout_page.hover_panel_menus_help",
                         key: "ribbon_menus_follow_hover",

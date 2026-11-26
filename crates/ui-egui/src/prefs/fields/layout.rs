@@ -52,9 +52,6 @@ macro_rules! layout_preferences {
             drawing_panel_width: f32 = 320.0, PAGE_LAYOUT, accept(240.0..=560.0);
             /// Drawing sheet strip placement; independent of Design's feature history.
             drawing_sheet_dock: String = "top".into(), PAGE_LAYOUT;
-            /// A drop-down row shows a hover pin beside its ⋯, as before #11853. Off: pin and unpin
-            /// from the row's ⋯ menu.
-            dropdown_row_pin: bool = false, PAGE_LAYOUT;
             /// With several features selected, an entry of a feature's menu (History bar, vertical
             /// History, Browser) acts on all of them or cannot be used. Off: the menus as they were, where
             /// Edit, Rename, Suppress, Roll back, Find and Copy Message act on the right-clicked feature
