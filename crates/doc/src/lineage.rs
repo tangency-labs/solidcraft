@@ -15,7 +15,7 @@ use std::sync::{Arc, OnceLock};
 use solidcore_record::{Region2, Vec3};
 use solidcraft_kernel::Body;
 use solidcraft_kernel::history::{BodyHistory, Change, EdgeProv, FaceOrigin, FaceProv, History};
-use solidcraft_kernel::services::mesh::{FACE_ORDER_VERSION, ReconstructionKind};
+use solidcraft_kernel::mesh::{FACE_ORDER_VERSION, ReconstructionKind};
 
 use crate::SolvedSketch;
 

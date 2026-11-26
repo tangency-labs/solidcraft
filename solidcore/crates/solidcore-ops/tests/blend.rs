@@ -1325,7 +1325,7 @@ fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
     let r = swept(&b, &order, Blend::Round, &edges, &unequal);
     // not built there yet, with the kernel's reason and the corner's point
     assert!(
-        matches!(&r, Some(Error::TurnRefused { room: false, why, at: Some(_) })
+        matches!(&r, Some(Error::TurnRefused { room: false, why, at: Some(_), side_edge: None, least_radius: None })
             if why.starts_with("a swept turn is built between constant rounds of one radius")),
         "{r:?}"
     );
@@ -1335,12 +1335,24 @@ fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
     let (order, edges) = loop_edges(&p, floor, 5.0);
     let before = p.to_record().unwrap().0;
     let r = swept(&p, &order, Blend::Round, &edges, &[1.0]);
-    // no radius of the rounds passes the sharp concave edge: the kernel says what would
+    // no radius of the rounds passes the sharp concave edge: the kernel says what would, and
+    // names it as data, the pocket's upright edge at the corner and the rounds' radius 1
+    let Some(Error::TurnRefused {
+        room: true,
+        why,
+        at: Some([x, y, _]),
+        side_edge,
+        least_radius,
+    }) = &r
+    else {
+        panic!("{r:?}");
+    };
     assert!(
-        matches!(&r, Some(Error::TurnRefused { room: true, why, at: Some(_) })
-            if why.contains("round that edge at a radius of at least 1 first")),
-        "{r:?}"
+        why.contains("round that edge at a radius of at least 1 first"),
+        "{why}"
     );
+    assert_eq!(*least_radius, Some(1.0));
+    assert_eq!(*side_edge, Some(edge_at(&p, [*x, *y, 7.5])));
     assert_eq!(p.to_record().unwrap().0, before);
     blend_ordered(
         &p,
@@ -1442,6 +1454,59 @@ fn auto_turns_are_swept_where_built_and_mitred_where_not() {
     let v = c.volume(1e-10).unwrap();
     assert!(rel(v, 12500.0 + 40.0 * a + 8.0 * m) < 1e-9, "{v}");
     assert_eq!(c.counts().unwrap(), [15, 32, 20]);
+}
+
+/// [`Turn::Auto`] never refuses a round the mitre builds (stress corpus S3267, 0.50.0): a 60 x
+/// 40 x 25 block with a 4.8 x 4.8 notch 12.5 deep centred on its top's +Y edge, the top's outer
+/// loop rounded r 2.8. The notch's inner upright edges are concave under convex rounds, so the
+/// blend corner sweeps the turns there; but the notch's side edges are 2.4 long, shorter than
+/// the radius, and their rounds' rails, ended at the swept turn's section, are trimmed past it
+/// by the mitre at the rim. Auto builds the mitred blend instead. Every wall upright and every
+/// corner mitred, the top over a point at distance t inside the mitred offset outline drops by
+/// g(t) = r - sqrt(r^2 - (r - t)^2), and that outline's perimeter is L0 - 8 t (six convex right
+/// corners, two reflex ones, L0 = 204.8), so the rounds take off
+/// L0 r^2 (1 - pi/4) - 8 r^3 (5/6 - pi/4) from 60 40 25 - 4.8 2.4 12.5 = 59856.
+#[test]
+fn auto_turns_mitre_where_a_swept_turn_leaves_a_short_round_no_room() {
+    all_fixes();
+    let b = built(|k| {
+        let block = create_box(k, Vec3::new(-30.0, -20.0, 0.0), 60.0, 40.0, 25.0)?;
+        let notch = create_box(k, Vec3::new(-2.4, 17.6, 12.5), 4.8, 4.8, 12.5)?;
+        boolean_difference(k, block, notch)
+    });
+    let (record, order) = b.to_record().unwrap();
+    // the top's outer loop: every edge of the record at z = 25 that is not on the notch's floor
+    let top = |i: u32| (record.vertices[i as usize].point[2] - 25.0).abs() < 1e-9;
+    let edges: Vec<usize> = (0..record.edges.len())
+        .filter(|&i| {
+            let [s, t] = record.edges[i].vertices;
+            top(s) && top(t)
+        })
+        .collect();
+    assert_eq!(edges.len(), 8);
+    blend_ordered(
+        &b,
+        &order,
+        Blend::Round,
+        &edges,
+        &[2.8],
+        &[],
+        Corners::Filled,
+        BlendOptions {
+            turn: Turn::Auto,
+            ..BlendOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    let r: f64 = 2.8;
+    let want =
+        59856.0 - 204.8 * r * r * (1.0 - PI / 4.0) + 8.0 * r.powi(3) * (5.0 / 6.0 - PI / 4.0);
+    let v = b.volume(1e-10).unwrap();
+    assert!(rel(v, want) < 1e-9, "{v} against {want}");
+    // bottom, top, five sides (the +Y side split by the notch), the notch's three walls and
+    // floor, and eight rounds
+    assert_eq!(b.counts().unwrap()[0], 18);
 }
 
 /// tangency-labs/solidcraft#16897: an 80 x 60 x 10.5 plate with a 30 x 3 x 65 tab on it
@@ -1933,6 +1998,65 @@ fn a_variable_round_s_net_is_certified_on_wide_pieces() {
     assert_eq!(rounds, 1);
 }
 
+/// tangency-labs/solidcraft#18324: a kernel a boolean copies for its workers shares the
+/// certificates the parent finished. The design there reads its one round again on a kernel
+/// another pool made (a copy, or the session's own), and paid the 4.5 s certificate a second
+/// time for a record an identical key already held. A kernel sharing the parent's
+/// recertify memo certifies nothing the parent certified, and builds the same body; with a
+/// memo of its own it certifies again, as before.
+#[test]
+fn a_kernel_sharing_a_recertify_memo_certifies_nothing_the_parent_did() {
+    all_fixes();
+    let b = make_box([0.0; 3], [10.0, 20.0, 30.0]).unwrap();
+    let e = edge_at(&b, [10.0, 10.0, 30.0]);
+    let start = vertex_at(&b, [10.0, 0.0, 30.0]);
+    fillet_variable(&b, e, start, 1, &[0.0, 0.0, 1.0, 1.0], &[2.0, 5.0]).unwrap();
+    let (record, _) = b.to_record().unwrap();
+    let blends = record
+        .faces
+        .iter()
+        .filter(|f| matches!(f.surface, solidcore_record::brep::Surface::Blend { .. }))
+        .count() as u64;
+    assert!(blends > 0, "the variable round kept no definition");
+    let mut parent = Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        memoize_curve_caches: true,
+        ..Kernel::default()
+    };
+    let certified = |k: &mut Kernel| {
+        let before = k.work_counters.blends_recertified();
+        let (mut made, _) = solidcore_convert::brep::to_kernel(k, &record, true).unwrap();
+        let (again, _) = solidcore_convert::brep::to_record(k, &mut made).unwrap();
+        (k.work_counters.blends_recertified() - before, again)
+    };
+    // the parent certifies every blend the record holds
+    let (first, once) = certified(&mut parent);
+    assert_eq!(first, blends, "the parent's read certifies each blend");
+    // a kernel sharing the parent's memo (a boolean's copy of it) certifies none of them
+    // again, and builds the same body
+    let mut copy = Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        memoize_curve_caches: true,
+        recertify_memo: std::sync::Arc::clone(&parent.recertify_memo),
+        ..Kernel::default()
+    };
+    let (second, twice) = certified(&mut copy);
+    assert_eq!(
+        second, 0,
+        "the copy re-certified what the parent had finished"
+    );
+    assert_eq!(once, twice, "the copy's read built a different body");
+    // a kernel with a memo of its own certifies them again, as a kernel on its own always did
+    let mut own = Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        memoize_curve_caches: true,
+        ..Kernel::default()
+    };
+    let (third, thrice) = certified(&mut own);
+    assert_eq!(third, blends, "an unrelated kernel certifies again");
+    assert_eq!(once, thrice, "an unrelated kernel built a different body");
+}
+
 /// tangency-labs/solidcraft#17640: a kernel certifies a record's procedural blend once. Every
 /// boolean in an application gives back a record that the next operation reads again, and each
 /// read gave every blend its definition back and certified its net again (6 s a boolean on a
@@ -2218,6 +2342,70 @@ fn a_variable_round_with_a_corner_in_its_law_is_its_balls_union() {
         let want: Vec<Option<usize>> = (0..radii.len() - 1).map(Some).collect();
         assert_eq!(pieces, want, "{radii:?} from {from:?}");
         assert_eq!(zones, dips, "{radii:?} from {from:?}");
+    }
+}
+
+/// A law with a corner rounds the edges of a slot and a step as it rounds a block's outside
+/// edge (#21179): the trace lands on the law's corner, and takes the through point there
+/// whatever its tangent's sign, which is the surfaces' and not the trace's. Each round adds
+/// or removes its balls' union along the edge, the faces square to it going on past its ends
+/// (the volumes the kernel's `wr685_law_corners` checks against the union's integral), and is
+/// a valid body: a peak, a dip, and a corner off the middle.
+#[test]
+fn a_variable_round_with_a_corner_in_its_law_rounds_a_slots_and_a_steps_edge() {
+    use solidcore_ops::{boolean::boolean, BooleanOp};
+    all_fixes();
+    let cut = |origin, size| {
+        let block = make_box([-30.0, -9.5, 0.0], [30.0, 19.0, 30.0]).unwrap();
+        let tool = make_box(origin, size).unwrap();
+        boolean(block, tool, BooleanOp::Subtract).unwrap().unwrap()
+    };
+    let slot = cut([-5.0, -10.0, 12.0], [12.0, 20.0, 6.0]);
+    let step = cut([-5.0, -10.0, 20.0], [12.0, 20.0, 20.0]);
+    // the law's corner and its radii
+    let laws = [
+        (0.5, [1.0, 2.0, 1.0]),
+        (0.5, [1.0, 0.5, 1.0]),
+        (0.3, [1.0, 2.0, 1.0]),
+    ];
+    // the body, a point of the edge, its start, and what each law's round adds
+    let (l6, l19, l10) = (
+        [2.900200, 0.744330, 2.883669],
+        [9.479435, 2.376334, 9.472978],
+        [4.942629, 1.247737, 4.931130],
+    );
+    let edges = [
+        (
+            &slot,
+            [-5.0, -9.5, 15.0],
+            [-5.0, -9.5, 12.0],
+            l6.map(|v| -v),
+        ),
+        (&slot, [-5.0, 0.0, 12.0], [-5.0, -9.5, 12.0], l19),
+        (&step, [-5.0, 0.0, 20.0], [-5.0, -9.5, 20.0], l19),
+        (
+            &step,
+            [-5.0, -9.5, 25.0],
+            [-5.0, -9.5, 20.0],
+            l10.map(|v| -v),
+        ),
+    ];
+    for (body, at, start, added) in edges {
+        for ((corner, radii), want) in laws.into_iter().zip(added) {
+            let b = body.copy().unwrap();
+            let before = volume(&b);
+            let knots = [0.0, 0.0, corner, 1.0, 1.0];
+            fillet_variable_from(&b, edge_at(&b, at), start, 1, &knots, &radii).unwrap();
+            let got = volume(&b) - before;
+            assert!(
+                (got - want).abs() <= 1e-4 * want.abs(),
+                "{at:?} {radii:?} at {corner}: {got}, want {want}"
+            );
+            assert!(
+                b.check(CheckLevel::All).unwrap().is_valid(),
+                "{at:?} {radii:?} at {corner}"
+            );
+        }
     }
 }
 
