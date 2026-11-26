@@ -1325,7 +1325,7 @@ fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
     let r = swept(&b, &order, Blend::Round, &edges, &unequal);
     // not built there yet, with the kernel's reason and the corner's point
     assert!(
-        matches!(&r, Some(Error::TurnRefused { room: false, why, at: Some(_) })
+        matches!(&r, Some(Error::TurnRefused { room: false, why, at: Some(_), side_edge: None, least_radius: None })
             if why.starts_with("a swept turn is built between constant rounds of one radius")),
         "{r:?}"
     );
@@ -1335,12 +1335,24 @@ fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
     let (order, edges) = loop_edges(&p, floor, 5.0);
     let before = p.to_record().unwrap().0;
     let r = swept(&p, &order, Blend::Round, &edges, &[1.0]);
-    // no radius of the rounds passes the sharp concave edge: the kernel says what would
+    // no radius of the rounds passes the sharp concave edge: the kernel says what would, and
+    // names it as data, the pocket's upright edge at the corner and the rounds' radius 1
+    let Some(Error::TurnRefused {
+        room: true,
+        why,
+        at: Some([x, y, _]),
+        side_edge,
+        least_radius,
+    }) = &r
+    else {
+        panic!("{r:?}");
+    };
     assert!(
-        matches!(&r, Some(Error::TurnRefused { room: true, why, at: Some(_) })
-            if why.contains("round that edge at a radius of at least 1 first")),
-        "{r:?}"
+        why.contains("round that edge at a radius of at least 1 first"),
+        "{why}"
     );
+    assert_eq!(*least_radius, Some(1.0));
+    assert_eq!(*side_edge, Some(edge_at(&p, [*x, *y, 7.5])));
     assert_eq!(p.to_record().unwrap().0, before);
     blend_ordered(
         &p,

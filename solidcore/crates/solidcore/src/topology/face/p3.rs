@@ -268,8 +268,10 @@ fn coincidence_check(
 /// `pFace->Point3DClassify(sPoint, tol, TRUE, sPC)` of a face of a B-rep lent mutably
 /// (the classification makes the face's trimmed cache and UV trim curves on it): the
 /// point's class. A failed classification is returned (upstream ignores its status and
-/// reads `SM_PC_UNKNOWN`; the fork passes it on, tangency-labs/smlib 6997962).
-fn point_3d_classify(
+/// reads `SM_PC_UNKNOWN`; the fork passes it on, tangency-labs/smlib 6997962). Also the
+/// test of a planar section's touch points
+/// ([`crate::topology::brep::planar_section::create_planar_section_curves`]).
+pub(crate) fn point_3d_classify(
     k: &Kernel,
     b: &mut Brep,
     f: FaceId,

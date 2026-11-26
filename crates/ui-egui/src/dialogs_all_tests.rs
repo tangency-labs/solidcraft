@@ -2566,6 +2566,43 @@ fn coil_and_revolve_keep_the_owner_of_a_collinear_axis() {
     }
 }
 
+/// Two cylinders touch along a line. A round face picked on that line is the face that was
+/// clicked: the point alone names the first body's face there (#20586).
+#[test]
+fn a_round_face_picked_as_an_axis_where_two_faces_touch_is_the_clicked_face() {
+    use solidcraft_engine::doc::naming;
+    let mut h = Harness::new();
+    for (name, x) in [("First", 0), ("Second", 10)] {
+        h.app.run("solid.cylinder", json!({"base":[x,0,0],"radius":5,"height":10,"operation":"new","body_name":name})).unwrap();
+    }
+    // Far from both cylinders, so the revolve makes a body of its own about either axis.
+    let profile = h.app.run("sketch.create", json!({"plane":"XZ"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[40,1],"p1":[42,3]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let touch = Vec3::new(5.0, 0.0, 5.0);
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let second = state.body("Second").unwrap();
+    let index = second.body.face_at_point(touch).unwrap().unwrap();
+    let name = naming::face_names(second)[index].clone();
+    assert!(state.body("First").unwrap().body.face_at_point(touch).unwrap().is_some(), "both side faces hold the pick");
+    let mut d = Dialog::for_command(&h.app, "solid.revolve").unwrap();
+    d.inputs[0].items = vec![Sel::Profile { sketch: profile, index: 0 }];
+    d.inputs[1].items = vec![Sel::Face { body: "Second".into(), index, point: touch }];
+    let commands = apply_commands(&h.app, &d).unwrap();
+    let axis = commands[0].1["axis"].clone();
+    let bodies = h.app.session.model.state().bodies.len();
+    for (command, params) in commands {
+        h.app.run(&command, params).unwrap();
+    }
+    let state = h.app.session.model.state();
+    assert_eq!(state.bodies.len(), bodies + 1, "the revolve is a body of its own");
+    let ring = state.bodies.iter().find(|b| !["First", "Second"].contains(&b.name.as_str())).unwrap();
+    let bounds = ring.body.exact_bounds().unwrap();
+    let centre = (bounds.min + bounds.max) * 0.5;
+    assert!((centre.x - 10.0).abs() < 1e-6 && centre.y.abs() < 1e-6, "turned about the second cylinder's axis: {centre:?}");
+    assert_eq!(axis["name"], json!(name), "the axis names the clicked face: {axis}");
+}
+
 #[test]
 fn coil_from_a_profile_hides_the_primitive_section() {
     let mut h = fixture();
