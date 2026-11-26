@@ -1,0 +1,150 @@
+//! The Markdown snapshot of the conversation currently retained by Assistant.
+
+use super::{Item, ToolStatus};
+
+/// Export messages in display order. Tool calls and notices require a separate choice.
+pub(super) fn markdown_snapshot(items: &[Item], include_tools: bool) -> String {
+    let mut output =
+        String::from("# SolidCraft Assistant conversation\n\n> Snapshot of the retained conversation. Earlier messages may have been discarded.\n\n");
+    if include_tools {
+        output.push_str(
+            "> This export includes retained tool calls, results and notices. Review it for paths and other sensitive data before sharing.\n\n",
+        );
+    }
+
+    for item in items {
+        match item {
+            Item::User { text, pictures, files, .. } => {
+                push_message(&mut output, "User", text);
+                if !files.is_empty() || !pictures.is_empty() {
+                    output.push_str("Attachments:\n\n");
+                    for name in files
+                        .iter()
+                        .map(String::as_str)
+                        .chain(pictures.iter().map(|picture| if picture.view { "Model view" } else { picture.note.as_str() }))
+                    {
+                        output.push_str("- ");
+                        push_literal(&mut output, name);
+                        output.push('\n');
+                    }
+                    output.push('\n');
+                }
+            }
+            Item::Agent { thought: false, text } => push_message(&mut output, "Assistant", text),
+            Item::Tool { id, title, kind, status, input, output: result } if include_tools => {
+                output.push_str("## Tool call: ");
+                push_literal(&mut output, if title.is_empty() { "Untitled" } else { title });
+                output.push_str("\n\n- Call ID: ");
+                push_literal(&mut output, id);
+                output.push_str("\n- Kind: ");
+                push_literal(&mut output, if kind.is_empty() { "Tool" } else { kind });
+                output.push_str("\n- Status: ");
+                output.push_str(match status {
+                    Some(ToolStatus::Pending) => "Pending",
+                    Some(ToolStatus::InProgress) => "In progress",
+                    Some(ToolStatus::Completed) => "Completed",
+                    Some(ToolStatus::Failed) => "Failed",
+                    None => "Not reported",
+                });
+                output.push_str("\n\n");
+                let arguments = input.as_ref().map(|value| serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string()));
+                push_tool_field(&mut output, "Input", arguments.as_deref(), "json");
+                push_tool_field(&mut output, "Output", result.as_deref(), "");
+            }
+            Item::Notice { text, error } if include_tools => {
+                output.push_str(if *error { "## Notice (error)\n\n" } else { "## Notice\n\n" });
+                push_fenced(&mut output, text, "");
+            }
+            Item::Agent { thought: true, .. }
+            | Item::Tool { .. }
+            | Item::Notice { .. }
+            | Item::Plan(_)
+            | Item::Permission { .. }
+            | Item::Approval { .. }
+            | Item::Changes { .. } => {}
+        }
+    }
+    output
+}
+
+/// Keep the original Markdown verbatim, even if the message is only whitespace.
+fn push_message(output: &mut String, role: &str, text: &str) {
+    output.push_str("## ");
+    output.push_str(role);
+    output.push_str("\n\n");
+    output.push_str(text);
+    if let Some((marker, length)) = open_fence(text) {
+        // A partial reply can end in a code block. End the block after the retained text so
+        // subsequent headings do not render as part of the reply.
+        if !text.ends_with('\n') {
+            output.push('\n');
+        }
+        output.extend(std::iter::repeat_n(char::from(marker), length));
+    }
+    output.push_str("\n\n");
+}
+
+/// Find a top-level Markdown code fence that has no closing line yet.
+fn open_fence(text: &str) -> Option<(u8, usize)> {
+    let mut open = None;
+    for raw in text.split(['\n', '\r']) {
+        let line = raw.trim_start_matches(' ');
+        if raw.len() - line.len() > 3 {
+            continue;
+        }
+        let Some(marker @ (b'`' | b'~')) = line.as_bytes().first().copied() else { continue };
+        let length = line.bytes().take_while(|&byte| byte == marker).count();
+        if length < 3 {
+            continue;
+        }
+        let rest = &line[length..];
+        if let Some((opened_with, opened_length)) = open {
+            if marker == opened_with && length >= opened_length && rest.trim_matches([' ', '\t']).is_empty() {
+                open = None;
+            }
+        } else if marker == b'~' || !rest.contains('`') {
+            open = Some((marker, length));
+        }
+    }
+    open
+}
+
+/// Display a retained label as literal text within one Markdown line.
+fn push_literal(output: &mut String, label: &str) {
+    for ch in label.chars() {
+        if ch.is_control() {
+            output.extend(ch.escape_debug());
+        } else {
+            if matches!(ch, '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '&' | '~' | '#') {
+                output.push('\\');
+            }
+            output.push(ch);
+        }
+    }
+}
+
+/// Missing and empty tool data are different. A present value is exported in full.
+fn push_tool_field(output: &mut String, label: &str, text: Option<&str>, lang: &str) {
+    output.push_str(label);
+    if let Some(text) = text {
+        output.push_str(":\n\n");
+        push_fenced(output, text, lang);
+    } else {
+        output.push_str(": not retained.\n\n");
+    }
+}
+
+/// Use a fence longer than any backtick run in its contents.
+fn push_fenced(output: &mut String, text: &str, lang: &str) {
+    let longest = text.split(|ch| ch != '`').map(str::len).max().unwrap_or(0);
+    let fence = "`".repeat(longest.saturating_add(1).max(3));
+    output.push_str(&fence);
+    output.push_str(lang);
+    output.push('\n');
+    output.push_str(text);
+    if !text.is_empty() && !text.ends_with('\n') {
+        output.push('\n');
+    }
+    output.push_str(&fence);
+    output.push_str("\n\n");
+}

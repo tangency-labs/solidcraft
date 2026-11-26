@@ -1406,7 +1406,7 @@ impl WorkspacePanelHost {
                 }
             }
         }
-        self.paint_menu(ui, runtime, native.capabilities(), &metadata, &owners, &mut frame, &mut commands, allow_actions, locale);
+        self.paint_menu(ui, runtime, native.capabilities(), &metadata, &owners, &mut frame, &mut commands, allow_actions, locale, frame_content);
         self.pending =
             Some(PendingHostCommands { scope, window, frame_number, allow_actions, commands, pointer_events, mount: mount.clone(), drag_cards });
         self.overlays = overlays;
@@ -3422,6 +3422,7 @@ impl WorkspacePanelHost {
         commands: &mut Vec<HostCommand>,
         allow_actions: bool,
         locale: solidcraft_ui_text::Locale,
+        frame_content: &mut dyn FramePanelContent,
     ) {
         let (Some(menu), Some(anchor)) = (self.menu.clone(), self.menu_anchor) else {
             return;
@@ -3591,6 +3592,7 @@ impl WorkspacePanelHost {
                             record_control(frame, &response, target, &action.label, action.enabled, bounds.intersect(ui.clip_rect()));
                             if allow_actions && response.clicked() {
                                 if registered.is_some() {
+                                    frame_content.header_action_clicked(instance, &action.id, response.rect);
                                     commands.push(HostCommand::WidgetLayout(
                                         apply_action(
                                             frame.layout.revision,

@@ -39,6 +39,11 @@ pub enum PanelAction {
     RequestNewChat,
     /// New chat, confirmed.
     NewChat,
+    /// Save a snapshot of the retained conversation.
+    #[cfg(not(target_arch = "wasm32"))]
+    ExportConversation {
+        include_tools: bool,
+    },
     /// Look for installed agents again (desktop only, as discovery and agents are).
     #[cfg(not(target_arch = "wasm32"))]
     Refresh,
@@ -104,6 +109,8 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, action: PanelAction) {
     match action {
         PanelAction::RequestNewChat => request_new_chat(app),
         PanelAction::NewChat => new_chat(app),
+        #[cfg(not(target_arch = "wasm32"))]
+        PanelAction::ExportConversation { include_tools } => save_conversation(app, ctx, include_tools),
         #[cfg(not(target_arch = "wasm32"))]
         PanelAction::Refresh => refresh(app, ctx),
         #[cfg(not(target_arch = "wasm32"))]
@@ -465,6 +472,7 @@ pub(crate) fn finish_shared(app: &mut SolveApp, ctx: &egui::Context) {
     #[cfg(not(target_arch = "wasm32"))]
     if !shared_section(app).is_some_and(|section| section.location.zone() == solidcraft_engine::panels::Zone::Window) {
         gallery_window(&mut app.agent_chat, ctx);
+        export_dialog(&mut app.agent_chat, ctx);
     }
     show_drop_hint(&app.agent_chat, ctx);
 }
@@ -486,6 +494,7 @@ pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow) 
         if ui.is_enabled() {
             window_input(&mut app.agent_chat, &ctx, ui.max_rect());
             gallery_window(&mut app.agent_chat, &ctx);
+            export_dialog(&mut app.agent_chat, &ctx);
         }
         app.agent_chat.panel_rect = None;
         app.agent_chat.drop_rect = None;
@@ -803,6 +812,83 @@ pub(crate) fn request_new_chat(app: &mut SolveApp) {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+impl AgentChat {
+    pub(crate) fn can_export_conversation(&self) -> bool {
+        self.items.iter().any(|item| matches!(item, Item::User { .. } | Item::Agent { thought: false, .. }))
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn request_export(chat: &mut AgentChat) {
+    if chat.can_export_conversation() {
+        chat.export_tools = Some(false);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn save_conversation(app: &mut SolveApp, ctx: &egui::Context, include_tools: bool) {
+    use crate::starting::{Poll, Worker};
+
+    if app.file_picker_busy() || !app.agent_chat.can_export_conversation() {
+        return;
+    }
+    // Capture before the picker opens so new reply text cannot change this export.
+    let markdown = super::export::markdown_snapshot(&app.agent_chat.items, include_tools);
+    let wake = ctx.clone();
+    app.pick_save("assistant-conversation.md", &["md"], move |app, path| {
+        let Some(path) = path else { return };
+        let worker = Worker::spawn("assistant-export", wake, move || {
+            solidcraft_engine::io::write_atomic(std::path::Path::new(&path), markdown.as_bytes(), false)
+        });
+        let worker = match worker {
+            Ok(worker) => worker,
+            Err(error) => return report_conversation_save(app, Err(error)),
+        };
+        let result = std::future::poll_fn(move |_| match worker.poll() {
+            Poll::Running => std::task::Poll::Pending,
+            Poll::Done(result) => std::task::Poll::Ready(result),
+            Poll::Failed => std::task::Poll::Ready(Err(std::io::Error::other("the export ended without a result"))),
+        });
+        app.begin_file_task(result, report_conversation_save);
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn report_conversation_save(app: &mut SolveApp, result: std::io::Result<()>) {
+    match result {
+        Ok(()) => app.set_status(tr("ui.agent_chat_export_saved"), false),
+        Err(error) => app.set_status(trf("ui.agent_chat_export_failed", &[("error", &error.to_string())]), true),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn export_dialog(chat: &mut AgentChat, ctx: &egui::Context) {
+    let valid = chat.can_export_conversation();
+    let Some(include_tools) = chat.export_tools.as_mut() else { return };
+    let (closed, action) = ui_kit::Confirm::new(Id::unique("sc_assistant_export"), "export", tr("ui.agent_chat_export").trim_end_matches('…'))
+        .actions(tr("ui.save"), tr("ui.cancel"), None)
+        .show(ctx, valid, |ui| {
+            let checkbox = ui_kit::checkbox(ui, tr("ui.agent_chat_export_tools"), include_tools);
+            solidcraft_ui_registry::publish_target("agent_chat:export_tools", checkbox.rect);
+            if *include_tools {
+                ui.add_space(Tokens::get().space_8);
+                ui_kit::text(ui, tr("ui.agent_chat_export_warning"), ui_kit::Text::Report("assistant_export_warning", false));
+            }
+        });
+    for (handle, button) in [("agent_chat:export_save", "dialog:ok"), ("agent_chat:export_cancel", "dialog:cancel")] {
+        if let Some(rect) = solidcraft_ui_registry::rect_of(button) {
+            solidcraft_ui_registry::publish_target(handle, rect);
+        }
+    }
+    if !closed && action == ui_kit::Action::Ok {
+        chat.actions.push(PanelAction::ExportConversation { include_tools: *include_tools });
+    }
+    if closed || action != ui_kit::Action::None {
+        chat.export_tools = None;
+    }
+}
+
 fn new_chat_shortcut(chat: &mut AgentChat, ctx: &egui::Context) {
     let in_chat = ctx.memory(|m| m.has_focus(Id::unique("sc_agent_chat_input")))
         || ctx.pointer_hover_pos().is_some_and(|p| chat.panel_rect.is_some_and(|r| r.contains(p)));
@@ -996,6 +1082,15 @@ fn header(chat: &mut AgentChat, ui: &mut egui::Ui, prefs: &mut AgentPanelPrefs) 
                 if glyph_button(ui, "dock", tr("ui.agent_chat_dock")).clicked() {
                     prefs.popped = false;
                 }
+                let (rect, _) = ui.allocate_exact_size(vec2(t.form_close_size, t.form_close_size), Sense::hover());
+                let enabled = chat.can_export_conversation();
+                let button = ui.add_enabled_ui(enabled, |ui| ui_kit::icon_button_at(ui, rect, "export", tr("ui.agent_chat_export"))).inner;
+                solidcraft_ui_registry::publish_target("agent_chat:export-chat", button.rect);
+                if button.clicked() {
+                    request_export(chat);
+                } else if !enabled {
+                    button.backing_on_disabled_hover_text(tr("ui.agent_chat_export_empty"));
+                }
             });
         });
     });
@@ -1005,6 +1100,7 @@ fn header(chat: &mut AgentChat, ui: &mut egui::Ui, prefs: &mut AgentPanelPrefs) 
 fn body(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, prefs: &mut AgentPanelPrefs) {
     header(chat, ui, prefs);
     content(chat, view, ui, Flow::Tall, prefs);
+    export_dialog(chat, ui.ctx());
 }
 
 fn content(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, flow: Flow, prefs: &AgentPanelPrefs) {

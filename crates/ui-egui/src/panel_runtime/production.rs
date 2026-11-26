@@ -240,7 +240,11 @@ impl Product {
                 });
                 entries
             }
-            Self::Assistant => vec![("new-chat", "ui.agent_chat_new", "new")],
+            Self::Assistant => vec![
+                ("new-chat", "ui.agent_chat_new", "new"),
+                #[cfg(not(target_arch = "wasm32"))]
+                ("export-chat", "ui.agent_chat_export", "export"),
+            ],
             Self::RenderBrowser => vec![
                 ("by-object", "render.tree_by_object", "list"),
                 ("by-look", "render.tree_by_look", "list"),
@@ -308,13 +312,23 @@ impl Product {
                     },
                 ))
                 .collect(),
-            Self::Assistant => vec![RuntimeAction {
-                id: ControlId("new-chat".into()),
-                label: solidcraft_ui_text::tr("ui.agent_chat_new").into(),
-                enabled: true,
-                disabled_reason: None,
-                pressed: None,
-            }],
+            Self::Assistant => self
+                .header_actions()
+                .into_iter()
+                .map(|action| {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let enabled = action.id.0 != "export-chat" || app.agent_chat.can_export_conversation();
+                    #[cfg(target_arch = "wasm32")]
+                    let enabled = true;
+                    RuntimeAction {
+                        id: action.id,
+                        label: solidcraft_ui_text::tr(&action.label_key).into(),
+                        enabled,
+                        disabled_reason: (!enabled).then(|| solidcraft_ui_text::tr("ui.agent_chat_export_empty").into()),
+                        pressed: None,
+                    }
+                })
+                .collect(),
             Self::RenderBrowser => [
                 ("by-object", "render.tree_by_object", !app.render_workspace.view.by_look),
                 ("by-look", "render.tree_by_look", app.render_workspace.view.by_look),
@@ -676,7 +690,11 @@ pub(crate) fn drain_production_actions(app: &mut crate::SolveApp) -> PanelResult
                     crate::timeline::run_transport(app, control);
                 }
             }
-            Product::Assistant => crate::agent_chat::request_new_chat(app),
+            Product::Assistant => {
+                if action.action.0 == "new-chat" {
+                    crate::agent_chat::request_new_chat(app);
+                }
+            }
             Product::RenderBrowser => {
                 let params = match action.action.0.as_str() {
                     "by-object" => json!({"by_look":false}),
@@ -1616,6 +1634,10 @@ impl FramePanelContent for ProductionFrame<'_> {
     fn header_action_clicked(&mut self, instance: &InstanceId, action: &ControlId, button: egui::Rect) {
         if instance.0 == Product::Timeline2d.id() && action.0 == TIMELINE_SETTINGS {
             crate::context_menu::open_for(self.app, button.left_bottom(), crate::context_menu::Target::Timeline2dOptions);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if instance.0 == Product::Assistant.id() && action.0 == "export-chat" {
+            crate::agent_chat::request_export(&mut self.app.agent_chat);
         }
     }
 
