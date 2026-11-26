@@ -1241,7 +1241,7 @@ impl JsonSchema for SectionKindParam {
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         let names: Vec<Value> = SectionKind::ALL.iter().filter_map(|k| serde_json::to_value(k).ok()).collect();
         json_schema!({
-            "description": "full: one straight cut; half: to the middle, then a square turn away from the arrows; offset: legs the first one's way joined by square steps; aligned: two arms about the middle point.",
+            "description": "full: one straight cut (the only kind supported so far); half, offset and aligned are refused as not supported yet.",
             "type": "string",
             "enum": names
         })

@@ -4946,6 +4946,43 @@ fn a_bad_cutting_line_is_refused() {
     }
 }
 
+/// Section kinds that can't be cut yet (`half`, `offset` and `aligned`) and a section of a shaded
+/// parent are refused by `drawing.view.section` before anything is saved, so they never leave a
+/// failed view on the sheet that stops `drawing.export` (#19879).
+#[test]
+fn unsupported_section_views_are_refused_and_keep_the_sheet_exportable() {
+    let mut s = block_drawing();
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    for (kind, points, expected) in [
+        ("half", json!([[-10.0, 10.0], [50.0, 10.0], [50.0, 30.0]]), "not supported yet: a half section"),
+        ("offset", json!([[-10.0, 5.0], [50.0, 5.0], [50.0, 15.0], [110.0, 15.0]]), "not supported yet: an offset section"),
+        ("aligned", json!([[-10.0, 10.0], [50.0, 10.0], [80.0, 30.0]]), "not supported yet: an aligned section"),
+    ] {
+        let params = json!({
+            "parent": ids::encode(front),
+            "line": {"kind": kind, "points": points, "arrows": "right"},
+            "place": {"at": [300.0, 60.0]},
+        });
+        let why = create_refused(&mut s, SECTION, params);
+        assert!(why.contains(SECTION) && why.contains(expected), "{kind}: {why}");
+    }
+    let exported = run(&mut s, "drawing.export", json!({"sheet": "Sheet 1"}));
+    assert_eq!(exported["views"].as_array().map(Vec::len), Some(1), "{exported}");
+    assert_eq!(exported["views"][0]["status"], json!("drawn"), "{exported}");
+
+    // A full section of a shaded parent would inherit the shaded style, which isn't cut yet either.
+    edit_view(&mut s, front, json!({"visual_style": "shaded"}));
+    let shaded = create_refused(
+        &mut s,
+        SECTION,
+        json!({"parent": ids::encode(front), "line": {"kind": "full", "points": [[-10.0, 10.0], [110.0, 10.0]], "arrows": "right"}}),
+    );
+    assert!(shaded.contains(SECTION) && shaded.contains("not supported yet: a shaded section view"), "{shaded}");
+    let exported = run(&mut s, "drawing.export", json!({"sheet": "Sheet 1"}));
+    assert_eq!(exported["views"].as_array().map(Vec::len), Some(1), "{exported}");
+    assert_eq!(exported["views"][0]["status"], json!("drawn"), "{exported}");
+}
+
 /// A section view takes its letter as it is made, the next one free: A for the first, then B.
 #[test]
 fn a_section_views_letter_is_given() {
