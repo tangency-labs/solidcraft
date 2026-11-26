@@ -10817,11 +10817,13 @@ fn feature_tools_with_constructor(
                 let mut second = Vec::new();
                 for r in &regions {
                     second.extend(
-                        centered_extrude(&ss.plane, r, s_lo + off, s_hi + off, Some(&ss), thin_roles.as_ref(), CapRoles::TwoSided, None).map_err(|e| {
-                            DocError::Invalid(format!(
+                        centered_extrude(&ss.plane, r, s_lo + off, s_hi + off, Some(&ss), thin_roles.as_ref(), CapRoles::TwoSided, None).map_err(|e| match e {
+                            // An internal error keeps its class, so the evaluator retries it.
+                            e @ DocError::Kernel(solidcraft_kernel::KernelError::Internal(_)) => e,
+                            e => DocError::Invalid(format!(
                                 "the second side of the extrude, {} mm thick, cannot be built (a distance this thin is too thin for the kernel): {e}",
                                 s_hi - s_lo
-                            ))
+                            )),
                         })?,
                     );
                 }
