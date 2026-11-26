@@ -1470,6 +1470,19 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut Vec
                         let _ = app.run("component.from_bodies", json!({ "bodies": bodies }));
                     }
                 });
+            } else if let Some(held) = grounded_sides(app, f, inputs) {
+                // Both picked parts are grounded: the joint would move neither (#12867). Say so,
+                // and offer to unground the second, so the preview shows the joint placing it.
+                ui.vertical(|ui| {
+                    crate::ui_kit::status_line(ui, &held.why, crate::ui_kit::StatusTone::Warning);
+                    let label = solidcraft_ui_text::format("joint.unground_part", &[("occurrence", &held.name)]);
+                    let r = crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal);
+                    crate::scenario::publish_handle("joint:unground", r.rect.center());
+                    if r.clicked() {
+                        // A refusal shows on the status line; the picks stay either way.
+                        let _ = app.run("occurrence.ground", json!({ "occurrence": held.occurrence, "grounded": false }));
+                    }
+                });
             }
             form_row(ui, "Motion", |ui| {
                 ui.label("");
@@ -2572,6 +2585,59 @@ fn joint_problem(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<(String
         });
     }
     commands(app, k, inputs).err().map(|e| (e, Vec::new()))
+}
+
+/// Both of a new joint's picked parts are grounded: what the dialog says, and the part its
+/// Unground button frees (the second pick).
+#[derive(Debug, PartialEq)]
+pub(crate) struct GroundedSides {
+    pub why: String,
+    pub occurrence: u64,
+    pub name: String,
+}
+
+/// The Joint dialog's note when both picks are on parts that can't move (#12867): grounded
+/// parts, or the root's own bodies, which never move. A joint between them moves neither. `None`
+/// while editing, before both sides are picked, or when either side is on a part that can move.
+pub(crate) fn grounded_sides(app: &SolveApp, f: &JointForm, inputs: &[SelInput]) -> Option<GroundedSides> {
+    if f.editing.is_some() {
+        return None;
+    }
+    let picks: Vec<&Sel> =
+        if f.as_built { sel_items(inputs, 0).iter().collect() } else { (0..2).filter_map(|i| sel_items(inputs, i).first()).collect() };
+    let doc = &app.session.doc;
+    let mut occs: Vec<u64> = Vec::new();
+    for pick in picks {
+        let occ = side_occurrence(&app.session, pick)?;
+        if !occs.contains(&occ) {
+            occs.push(occ);
+        }
+    }
+    let [a, b] = occs.as_slice() else { return None };
+    let grounded = |o: u64| doc.occurrences.iter().find(|x| x.id == o && x.grounded);
+    let joint = if f.name.trim().is_empty() { default_joint_name(doc, f.joint_kind()) } else { f.name.trim().to_string() };
+    // The Unground button frees the second part, or the one that isn't the root.
+    let (why, free) = match (*a, *b) {
+        (0, o) | (o, 0) => {
+            let free = grounded(o)?;
+            (solidcraft_ui_text::format("joint.moves_neither_root", &[("joint", &joint), ("occurrence", &free.name)]), free)
+        }
+        (a, b) => {
+            let (oa, ob) = (grounded(a)?, grounded(b)?);
+            (solidcraft_ui_text::format("joint.moves_neither", &[("joint", &joint), ("a", &oa.name), ("b", &ob.name)]), ob)
+        }
+    };
+    Some(GroundedSides { why, occurrence: free.id, name: free.name.clone() })
+}
+
+/// The occurrence a joint side picked on `pick` holds (0: the root). A face, edge, vertex or body
+/// is held through the placement it was picked on; a component's plane or axis names its
+/// occurrence as the joint command does ([`snap_of`]). `None` for a pick no part owns here.
+fn side_occurrence(s: &Session, pick: &Sel) -> Option<u64> {
+    match pick {
+        Sel::Plane { .. } | Sel::Axis { .. } => snap_of(s, pick)?.param.get("occurrence")?.as_u64(),
+        _ => placement_of_body(s, body_of(pick)?).map(|path| solidcraft_engine::doc::joints::origin_anchor(&s.doc, &path).0),
+    }
 }
 
 /// As-built: a component was picked whole, as these bodies. Kept while Components holds them all.
