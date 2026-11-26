@@ -17,26 +17,14 @@ pub use solidcore_ops::Error;
 pub use solidcore_ops::ErrorClass;
 pub use solidcore_ops::FailureCode;
 pub use solidcore_ops::PointNormalFace;
+pub use solidcore_ops::board_drill;
 pub use solidcore_ops::cancel;
 pub use solidcore_ops::constraint;
-pub use solidcore_ops::dxf;
 pub use solidcore_ops::face_pair;
-pub use solidcore_ops::face_surface;
-pub use solidcore_ops::hole_stacks;
-pub use solidcore_ops::joint_turn;
-pub use solidcore_ops::mesh;
 pub use solidcore_ops::mid_joint;
 pub use solidcore_ops::mid_sheet;
-pub use solidcore_ops::paper_gaps;
-pub use solidcore_ops::profile;
-pub use solidcore_ops::round_face;
-pub use solidcore_ops::section_corners;
 pub use solidcore_ops::session;
-pub use solidcore_ops::shaft_spline;
-pub use solidcore_ops::sketch_arc;
 pub use solidcore_ops::sweep;
-pub use solidcore_ops::tube_cope;
-pub use solidcore_ops::unit_direction;
 pub use solidcore_ops::{Body as ExactBody, CheckLevel, Order, Result, boolean, make_box, make_sphere, measure};
 
 /// How far record edge `edge` of `body`, on its exact trimmed curve, passes from `point`. `None`
@@ -54,12 +42,8 @@ pub mod tess {
     pub use solidcore_tess::Mesh;
     pub use solidcore_tess::PoleNode;
     pub use solidcore_tess::PoleRule;
-    pub use solidcore_tess::ShapeLimit;
     pub use solidcore_tess::TessPlan;
-    pub use solidcore_tess::Unshaped;
     pub use solidcore_tess::mesh;
     pub use solidcore_tess::plan;
     pub use solidcore_tess::simplify;
-    pub use solidcore_tess::triangulate_planar;
-    pub use solidcore_tess::triangulate_union;
 }
