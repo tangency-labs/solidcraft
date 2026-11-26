@@ -125,8 +125,8 @@ use super::p1::{
     gen_base, gen_with_out_of_bounds, intersect_generators, CurveOrientType, SurfOfExtrusion,
 };
 use super::plane_patch::{
-    coincident_patch, curve_plane_deviation, curve_source_deviation, generator_crosses_plane,
-    generator_in_plane, PatchInputs,
+    coincident_patch, curve_source_deviation, generator_crosses_plane, generator_in_plane,
+    PatchInputs,
 };
 
 const OP_PLANE: &str = "surface::surf_of_extrusion::p2::SurfOfExtrusion::intersect_with_plane";
@@ -1308,7 +1308,7 @@ impl SurfOfExtrusion {
         // constructed curves: plane-domain sides can be offset from the extrusion.
         if sweep_parallel_to_plane {
             for curve in &out.curves_3d {
-                let Some(bound) = curve_plane_deviation(curve, plane) else {
+                let Some(bound) = plane.curve_deviation(curve) else {
                     return Ok(ExtrusionIntersection::needs_more());
                 };
                 deviation = deviation.max(bound);

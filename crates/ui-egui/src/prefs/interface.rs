@@ -1,6 +1,45 @@
 //! Appearance and Layout settings composition, using shared controls and previews.
 use super::*;
 
+/// The accent presets, as `#rrggbb`: blue, green, teal, purple, pink, red, orange and amber.
+const ACCENTS: [&str; 8] = ["#3b82f6", "#22c55e", "#14b8a6", "#8b5cf6", "#ec4899", "#ef4444", "#f97316", "#eab308"];
+
+/// Accent: the theme's own, a preset, or any colour; a theme that keeps its own shows the row disabled.
+fn accent_row(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let accepted = accent_accepted(active_theme_file(app));
+    ui.add_enabled_ui(accepted, |ui| {
+        ui_kit::row(ui, app.tr("prefs.accent"), |ui| {
+            let own = app.preferences.accent.is_empty();
+            let chip = ui_kit::choice_chip(ui, "accent_theme", app.tr("prefs.accent_theme"), own);
+            crate::scenario::publish_target("prefs:accent:theme", chip.rect);
+            if chip.clicked() {
+                app.preferences.accent.clear();
+            }
+            // Any other colour: the shared picker, starting from the accent on now.
+            let on = crate::theme::parse_accent(&app.preferences.accent).unwrap_or(Tokens::get().accent);
+            let mut rgb = [on.r(), on.g(), on.b()];
+            if ui_kit::color_field(ui, &mut rgb).changed() {
+                app.preferences.accent = format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]);
+            }
+        });
+        // The presets wrap on their own lines: a row clips its controls to one line.
+        ui_kit::swatch_grid(ui, &ACCENTS, |ui, hex| {
+            let Some(color) = crate::theme::parse_accent(hex) else { return };
+            let chosen = app.preferences.accent.eq_ignore_ascii_case(hex);
+            // Search draws the page unseen first (#15902): that copy takes an id of its own place.
+            let id = if ui.is_visible() { egui::Id::unique(("sc_accent", hex)) } else { ui.scope_id().with(("sc_accent", hex)) };
+            let swatch = ui_kit::color_swatch(ui, id, color, chosen, hex, ());
+            crate::scenario::publish_target(&format!("prefs:accent:{hex}"), swatch.rect);
+            if swatch.clicked() {
+                app.preferences.accent = (*hex).to_string();
+            }
+        });
+    });
+    if !accepted {
+        ui.label(egui::RichText::new(app.tr("prefs.accent_locked")).weak());
+    }
+}
+
 /// Renders the Appearance preferences page, configuring theme, viewport background, and visual styling.
 pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     ui_kit::settings_page(ui, |ui| {
@@ -18,10 +57,16 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         ui_kit::settings_section(ui, "viewport_logo", app.tr("prefs.appearance.viewport_logo"), |ui| {
             // The 3D view in the theme's colours, or the Light or Dark theme's (#4146).
             ui_kit::settings_form(ui, t.space_24 * 6.0 + t.space_6, |ui| {
-                // The view's background: the theme's gradient, or one colour of the user's (#7688).
+                // The view's background: the theme's gradient, one colour of the user's (#7688), or a
+                // gradient of the user's, top colour then bottom, with an optional colour halfway (#9230).
                 let label = app.tr("prefs.viewport_background");
-                let labels = [solidcraft_ui_text::tr("prefs.viewport_background_theme"), solidcraft_ui_text::tr("prefs.viewport_background_colour")];
-                let segments_width = (labels.iter().map(|label| ui_kit::ContentWidth::name(ui, label)).fold(0.0, f32::max) + t.space_16) * 2.0;
+                let labels = [
+                    solidcraft_ui_text::tr("prefs.viewport_background_theme"),
+                    solidcraft_ui_text::tr("prefs.viewport_background_colour"),
+                    solidcraft_ui_text::tr("prefs.viewport_background_gradient"),
+                ];
+                let segments_width =
+                    (labels.iter().map(|label| ui_kit::ContentWidth::name(ui, label)).fold(0.0, f32::max) + t.space_16) * labels.len() as f32;
                 let label_width = (t.space_24 * 6.0 + t.space_6).min(ui.available_width() * 0.6);
                 let available = (ui.available_width() - label_width - t.space_14).max(0.0);
                 let narrow = available < segments_width + t.control_height + t.space_6 + t.space_24 * 4.0 + ui.spacing().item_spacing.x * 2.0;
@@ -57,18 +102,46 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     ui.data_mut(|data| data.insert_temp(key, (app.preferences.viewport_background, hex)));
                 };
                 let shown = ui_kit::row(ui, label, |ui| {
-                    let mut selected = usize::from(app.preferences.viewport_background.is_some());
+                    let prefs = &mut app.preferences;
+                    let mut selected = match (prefs.viewport_background, prefs.viewport_background_bottom) {
+                        (None, _) => 0,
+                        (Some(_), None) => 1,
+                        (Some(_), Some(_)) => 2,
+                    };
                     if ui_kit::settings_segments(ui, label, &mut selected, &labels) {
-                        app.preferences.viewport_background = (selected == 1).then_some([255, 255, 255]);
+                        let top = prefs.viewport_background.unwrap_or([255, 255, 255]);
+                        prefs.viewport_background = (selected > 0).then_some(top);
+                        prefs.viewport_background_bottom = (selected == 2).then(|| prefs.viewport_background_bottom.unwrap_or(top));
                     }
-                    if !narrow {
+                    if !narrow && app.preferences.viewport_background_bottom.is_none() {
                         colour_controls(ui, app);
                     }
                     ui.is_visible()
                 });
-                if narrow && shown {
+                if narrow && shown && app.preferences.viewport_background_bottom.is_none() {
                     ui_kit::below_row_control(ui, label, ui.available_width(), |ui| {
                         ui.horizontal_wrapped(|ui| colour_controls(ui, app));
+                    });
+                }
+                // The gradient's colours on a line of their own, top to bottom: next to the segments
+                // they would not fit. Under the control column, wrapping onto more lines when the
+                // dialog is narrow, so the bottom colour and the middle option stay in reach.
+                let prefs = &mut app.preferences;
+                if let (Some(top), Some(bottom)) = (&mut prefs.viewport_background, &mut prefs.viewport_background_bottom) {
+                    ui_kit::below_row_control(ui, label, ui.available_width(), |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui_kit::color_field(ui, top);
+                            // The middle colour starts halfway between the two.
+                            let mut middle = prefs.viewport_background_middle.is_some();
+                            if ui_kit::checkbox(ui, solidcraft_ui_text::tr("prefs.viewport_background_middle"), &mut middle).changed() {
+                                let halfway = std::array::from_fn(|k| ((u16::from(top[k]) + u16::from(bottom[k])) / 2) as u8);
+                                prefs.viewport_background_middle = middle.then_some(halfway);
+                            }
+                            if let Some(middle) = &mut prefs.viewport_background_middle {
+                                ui_kit::color_field(ui, middle);
+                            }
+                            ui_kit::color_field(ui, bottom);
+                        })
                     });
                 }
                 let label = app.tr("prefs.appearance.viewport_colours");
@@ -112,8 +185,11 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         app.preferences.logo_accent = selected == 1;
                     }
                 });
-                // A theme file another tool writes, reloaded when it changes (#7573).
-                follow_row(app, ui);
+                accent_row(app, ui);
+                // A theme file another tool writes, reloaded when it changes (#7573); or the
+                // organization's (the `ThemeFile` policy), which the person cannot change.
+                let locked = app.policy.locks("theme_follow");
+                crate::policy::row(ui, locked, |ui| follow_row(app, ui));
             });
         });
         ui_kit::settings_section(ui, "scale", app.tr("prefs.scale_text"), |ui| {
@@ -336,6 +412,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             windows_smooth_window_drag_row(app, ui, WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE);
             layout_check(
                 ui,
+                app.tr("prefs.show_window_controls"),
+                app.tr("prefs.show_window_controls_help"),
+                &mut app.preferences.show_window_controls,
+                "show_window_controls",
+            );
+            layout_check(
+                ui,
                 app.tr("window_ribbon.ribbon"),
                 app.tr("window_ribbon.preference_help"),
                 &mut app.preferences.pop_out_window_defaults.ribbon,
@@ -479,27 +562,7 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 &mut app.preferences.history_in_browser,
                 "history_in_browser",
             );
-            layout_check(
-                ui,
-                app.tr("library.show"),
-                app.tr("library.show_help"),
-                &mut app.preferences.show_document_browser,
-                "show_document_browser",
-            );
-            let sizes = crate::library::ThumbnailSize::ALL;
-            let options = [
-                ui_kit::PictureChoice { key: "small", label: app.tr(sizes[0].label()), figure: |p, rect| document_browser_preview(p, rect, 0.2) },
-                ui_kit::PictureChoice { key: "medium", label: app.tr(sizes[1].label()), figure: |p, rect| document_browser_preview(p, rect, 0.25) },
-                ui_kit::PictureChoice { key: "large", label: app.tr(sizes[2].label()), figure: |p, rect| document_browser_preview(p, rect, 0.3) },
-            ];
-            let selected = sizes.iter().position(|size| *size == app.preferences.library_thumbnail_size).unwrap_or(2);
-            if let Some(selected) =
-                ui_kit::settings_picture_choices(ui, "document_browser", app.tr("library.thumbnail_section"), &options, selected, true)
-                && let Some(size) = sizes.get(selected)
-            {
-                app.preferences.library_thumbnail_size = *size;
-            }
-            ui_kit::text(ui, app.tr("library.thumbnail_help"), ui_kit::Text::Note("document_browser_size"));
+            layout_check(ui, app.tr("parts_library.show"), app.tr("parts_library.show_help"), &mut app.preferences.library_open, "library_open");
             // The Browser tree panel can be closed from its own host menu; this control brings it
             // back (#16058).
             let browser_label = app.tr("prefs.layout_page.browser_tree");
@@ -744,6 +807,18 @@ struct Check {
 /// columns when the widest label fits twice, one in a narrow window, every cell as wide as its
 /// column. A dim caption (a message id) names the group.
 fn check_columns(ui: &mut egui::Ui, app: &mut SolveApp, caption: Option<&'static str>, checks: &[Check]) {
+    use ui_kit::settings_search;
+
+    if settings_search::suppress_chrome(ui) {
+        // Search still visits each checkbox to learn its label. Only matches take up a row.
+        for check in checks {
+            let before = settings_search::hits(ui);
+            let mut row = settings_search::detached_child(ui, check.key, false);
+            layout_check(&mut row, app.tr(check.label), app.tr(check.help), (check.value)(&mut app.preferences), check.key);
+            settings_search::commit_search_child(ui, &row, before);
+        }
+        return;
+    }
     let t = Tokens::get();
     if let Some(caption) = caption {
         ui_kit::settings_inline_note(ui, app.tr(caption));
@@ -834,36 +909,4 @@ fn check_row(ui: &mut egui::Ui, label: &str, help: &str, value: &mut bool, key: 
             ui_kit::help_icon(ui, help);
         })
     });
-}
-
-/// A small window specimen using the same themed card as History and Browser.
-fn document_browser_preview(p: &egui::Painter, rect: egui::Rect, panel_fraction: f32) {
-    let t = Tokens::get();
-    let area = rect.shrink(3.0);
-    let at = |x: f32, y: f32| egui::pos2(area.left() + area.width() * x, area.top() + area.height() * y);
-    let block = |x: f32, y: f32, w: f32, h: f32| egui::Rect::from_min_max(at(x, y), at(x + w, y + h));
-    let stroke = egui::Stroke::new(1.0, t.border);
-    p.rect(area, 2.0, t.field, stroke, egui::StrokeKind::Inside);
-    p.line_segment([at(0.0, 0.14), at(1.0, 0.14)], stroke);
-    for x in [0.04, 0.16, 0.28] {
-        p.line_segment([at(x, 0.07), at(x + 0.08, 0.07)], egui::Stroke::new(1.5, t.text_dim));
-    }
-    let panel = block(0.02, 0.18, panel_fraction, 0.78);
-    p.rect(panel, 2.0, t.panel, egui::Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
-    let tile = (panel_fraction - 0.06) / 2.0;
-    for row in 0..3 {
-        for column in 0..2 {
-            let card = block(0.04 + column as f32 * (tile + 0.02), 0.23 + row as f32 * (tile + 0.1), tile, tile + 0.04);
-            p.rect(card, 1.0, t.field, stroke, egui::StrokeKind::Inside);
-            p.line_segment([card.left_bottom() + egui::vec2(2.0, -3.0), card.right_bottom() + egui::vec2(-2.0, -3.0)], stroke);
-        }
-    }
-    let view = block(panel_fraction + 0.05, 0.18, 0.93 - panel_fraction, 0.78);
-    p.rect(view, 2.0, t.panel, stroke, egui::StrokeKind::Inside);
-    crate::icons::paint_ink(
-        p,
-        egui::Rect::from_center_size(view.center(), egui::vec2(area.height() * 0.22, area.height() * 0.22)),
-        "box",
-        t.text_dim,
-    );
 }

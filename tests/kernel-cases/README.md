@@ -134,10 +134,11 @@ answer. `.github/workflows/kernel-rig.yml` runs them, and the ladder, on pull re
 drafts; once approved for CI) and merge groups: CI (`ci.yml`) calls it, and the required `ci`
 check fails when it does. A plan job (`scripts/ci/kernel_rig_plan.py`) picks the areas from the
 changed files, one job builds `solidcraft-cli` (release) and the rig's runner, and a matrix of
-shards, one per selected area plus the ladder, runs them in parallel; the rig's summary job
+shards runs them in parallel: the ladder in one, the selected areas in up to three (each runs its
+areas one after another, every one even after a failure); the rig's summary job
 (`Kernel rig / kernel-rig`) passes when every selected shard does (and when none was selected).
 Pushes to main and develop, the release gate (`release-gate.yml`) and a run by hand run every
-area. Each area's shard runs:
+area. Each area runs:
 
 ```sh
 cargo xtask kernel-cases --area <area> --cli target/release/solidcraft-cli \
@@ -158,7 +159,7 @@ request, so the list only shrinks and never goes stale:
   `FIXED`;
 - a case here that starts failing for a reason the kernel owns (a SolidCore update): add its
   line, sorted, with the cause from its result (`results.json` in the shard's
-  `kernel-rig-results-<area>` artifact, or a local run);
+  `kernel-rig-results-<n>` artifact, one folder per area, or a local run);
 - a regression: fix it in the same pull request.
 
 To check a list locally before pushing: `cargo xtask kernel-cases --area <area> --cli

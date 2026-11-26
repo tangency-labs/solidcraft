@@ -274,7 +274,7 @@ fn a_copied_body_keeps_the_material_of_the_body_it_came_from() {
     let reply = run(&mut s, "solid.move", json!({"bodies": ["Cube"], "translate": [30, 0, 0], "copy": true}));
     let copy = created(&reply);
     let source = s.doc.materials.get("Cube").expect("the source body keeps its material").clone();
-    assert_eq!(s.doc.materials.get(&copy), Some(&source), "the copy must keep the material of the body it came from");
+    assert_eq!(s.doc.resolved_body_material(&copy), Some(source.as_str()), "the copy must keep the material of the body it came from");
 }
 
 #[test]
@@ -306,8 +306,8 @@ fn each_copied_body_keeps_the_look_and_the_material_of_the_body_it_came_from() {
         "the copy of Alpha must keep the look of Alpha"
     );
     assert_eq!(s.doc.appearances.bodies.get(&beta).map(|l| l.name.clone()), Some(beta_look.clone()), "the copy of Beta must keep the look of Beta");
-    assert_eq!(s.doc.materials.get(&alpha).map(String::as_str), Some("Aluminum"), "the copy of Alpha must keep the material of Alpha");
-    assert_eq!(s.doc.materials.get(&beta).map(String::as_str), Some("Steel"), "the copy of Beta must keep the material of Beta");
+    assert_eq!(s.doc.resolved_body_material(&alpha), Some("Aluminum"), "the copy of Alpha must keep the material of Alpha");
+    assert_eq!(s.doc.resolved_body_material(&beta), Some("Steel"), "the copy of Beta must keep the material of Beta");
 }
 
 #[test]

@@ -272,6 +272,16 @@ impl Body {
         (std::mem::replace(&mut held.brep, Brep::new()), proof)
     }
 
+    /// `other`'s B-rep, proof and template put in this body's place (its own dropped), under
+    /// one lock: for an operation whose result was built as another body.
+    pub(crate) fn take_from(&self, other: &Body) {
+        let (brep, proof) = other.take_held();
+        let mut held = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        held.brep = brep;
+        held.outward = proof.outward;
+        held.primitive = proof.primitive;
+    }
+
     /// Whether a panic interrupted an edit of this body.
     #[must_use]
     pub(crate) fn is_poisoned(&self) -> bool {
@@ -478,6 +488,15 @@ impl Body {
                 b.vertex_list().len(),
             ])
         })
+    }
+
+    /// The body's own tolerance, the kernel's: how near two of its points must be to be one
+    /// point.
+    ///
+    /// # Errors
+    /// Those of [`with_body`].
+    pub fn tolerance(&self) -> Result<f64> {
+        read_body("tolerance", self, |_, b| Ok(b.tolerance()))
     }
 
     /// The enclosed volume (`SmApiBrepComputeVolume`) at `relative_accuracy`, as the kernel's

@@ -46,6 +46,12 @@ pub fn hidden_lines(
     hidden_lines_on(defs, scene, view, opts, cancel, &Threads)
 }
 
+/// A curve's accuracy on a view's paper: its deviation scaled as the view scales the curve
+/// ([`scaled`] by the paper map's scale).
+pub fn accuracy_on_paper(frame: &solidcraft_geom::drawing_view::ViewFrame, accuracy: CurveAccuracy) -> CurveAccuracy {
+    scaled(accuracy, frame.paper_map().scale())
+}
+
 #[cfg(test)]
 mod tests {
     /// A drawing's hidden lines (solidcore's) take as many items as a section: one aggregate limit.
@@ -54,5 +60,17 @@ mod tests {
         use solidcraft_geom::section::MAX_ITEMS;
         assert_eq!(super::MAX_ITEMS, MAX_ITEMS);
         assert_eq!(super::Options::default().max_tracks, MAX_ITEMS);
+    }
+
+    /// On a 2:1 view a bound doubles, and an analytic curve stays analytic.
+    #[test]
+    fn an_accuracy_on_paper_scales_with_the_view() {
+        use solidcore_record::Vec2;
+        use solidcraft_geom::drawing_view::{NamedView, ViewFrame};
+        use solidcraft_geom::section::CurveAccuracy;
+        let frame = ViewFrame::new(NamedView::Front.basis(), "2:1".parse().unwrap(), Vec2::new(50.0, 10.0), Vec2::new(210.0, 148.5)).unwrap();
+        let bounded = CurveAccuracy::Bounded { max_deviation_mm: 0.01 };
+        assert_eq!(super::accuracy_on_paper(&frame, bounded), CurveAccuracy::Bounded { max_deviation_mm: 0.02 });
+        assert_eq!(super::accuracy_on_paper(&frame, CurveAccuracy::Analytic), CurveAccuracy::Analytic);
     }
 }
