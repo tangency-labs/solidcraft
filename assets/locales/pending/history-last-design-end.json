@@ -26,5 +26,9 @@
   "zh": {
     "prefs.history_last_stops_at_component": "转到末尾停在组件末尾",
     "prefs.history_last_stops_at_component_note": "开启“历史按组件逐步移动”时，“转到末尾”和“前进一步”停在活动组件的最后一个特征之后，其他组件后续的特征保持回退状态。关闭后，它们移动到设计末尾。"
+  },
+  "fr": {
+    "prefs.history_last_stops_at_component": "Atteindre la fin s’arrête à la fin du composant",
+    "prefs.history_last_stops_at_component_note": "Lorsque les étapes de l’historique sont organisées par composant, Atteindre la fin et Avancer s’arrêtent après la dernière fonction du composant actif ; les fonctions ultérieures des autres composants restent annulées. Désactivé : ces commandes atteignent la fin de la conception."
   }
 }

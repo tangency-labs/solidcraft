@@ -53,6 +53,9 @@ pub struct State {
     /// What was selected in the other workspace when Drawing was entered (Design's selection while
     /// in Drawing, the drawing's while not): each workspace gets its own back when entered again.
     selection_away: Vec<solidcraft_engine::Sel>,
+    /// The other workspace's whole-body scope (`Session::selection_all_bodies`), kept with
+    /// `selection_away`: Design's Select All waits while in Drawing, where it would mean nothing.
+    selection_all_away: bool,
     /// The session's selection is Drawing's (else Design's).
     selection_is_drawings: bool,
     /// The sheet page's camera, zoom and drawn marks: screen only, never saved.
@@ -151,6 +154,8 @@ pub(crate) fn select_receiver(app: &mut SolveApp, drawings: bool) {
         _ => true,
     });
     app.drawing_workspace.selection_away = std::mem::replace(&mut app.session.selection, back);
+    let all_back = std::mem::take(&mut app.drawing_workspace.selection_all_away);
+    app.drawing_workspace.selection_all_away = std::mem::replace(&mut app.session.selection_all_bodies, all_back);
     focus_sheet_selection(app);
 }
 
@@ -197,6 +202,9 @@ pub(crate) struct ReceiverScope {
     model_focus: bool,
     selection: Vec<solidcraft_engine::Sel>,
     away: Vec<solidcraft_engine::Sel>,
+    /// The whole-body scopes beside `selection` and `away`.
+    all: bool,
+    all_away: bool,
     drawings: bool,
     sheet: Option<(u64, u64)>,
     page: u64,
@@ -210,6 +218,8 @@ impl ReceiverScope {
             model_focus: app.session.model_focus,
             selection: app.session.selection.clone(),
             away: app.drawing_workspace.selection_away.clone(),
+            all: app.session.selection_all_bodies,
+            all_away: app.drawing_workspace.selection_all_away,
             drawings: app.drawing_workspace.selection_is_drawings,
             sheet: app.drawing_workspace.selection_sheet,
             page: app.drawing_workspace.page_view,
@@ -225,6 +235,8 @@ impl ReceiverScope {
         app.session.model_focus = self.model_focus;
         app.session.selection = self.selection;
         app.drawing_workspace.selection_away = self.away;
+        app.session.selection_all_bodies = self.all;
+        app.drawing_workspace.selection_all_away = self.all_away;
         app.drawing_workspace.selection_is_drawings = self.drawings;
         app.drawing_workspace.selection_sheet = self.sheet;
         crate::drawing_sheet_page::activate_view(app, self.page);
@@ -290,6 +302,7 @@ pub fn close_panel(app: &mut SolveApp) -> bool {
     app.drawing_workspace.placement = None;
     app.drawing_workspace.note = None;
     app.drawing_workspace.view_edit = None;
+    app.drawing_workspace.detail = None;
     app.drawing_workspace.export = None;
     app.drawing_workspace.dimension = None;
     app.drawing_workspace.dimension_hover = None;
@@ -1266,7 +1279,7 @@ pub(crate) fn inset<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) 
 fn panel_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let Some(placement) = &mut app.drawing_workspace.placement {
         let finished = inset(ui, |ui| {
-            placement.fields(ui, &app.session.doc.name);
+            placement.fields(ui, &app.session.doc);
             panels::finish_placement(ui)
         });
         if finished {
@@ -1783,7 +1796,7 @@ mod tests {
 
         h.step(&json!({"key":"Escape"})).unwrap();
         h.frames(2);
-        assert!(h.app.session.selection.is_empty(), "Escape clears the selection");
+        assert!(!h.app.session.has_selection(), "Escape clears the selection");
 
         h.step(&json!({"key":"A", "cmd": true})).unwrap();
         h.frames(2);
@@ -1804,7 +1817,7 @@ mod tests {
         let left = h.app.session.drawing("drawing.inspect").unwrap();
         assert!(left.view(a).is_none() && left.view(b).is_some(), "Delete removes only the selected view");
         assert_eq!(h.app.session.undo.len(), undo + 1, "in one undo step");
-        assert!(h.app.session.selection.is_empty());
+        assert!(!h.app.session.has_selection());
 
         h.step(&json!({"key":"Z", "cmd": true})).unwrap();
         h.frames(2);
@@ -1834,7 +1847,9 @@ mod tests {
         h.frames(2);
         assert!(!placing_dimension(&h.app), "and Esc puts it down");
 
-        h.call("ui.shortcut", json!({"command": "sketch.dimension", "key": "M"}));
+        // M is now Sketch Move's default. Explicitly replace that sketch binding.
+        let bound = h.call("ui.shortcut", json!({"command": "sketch.dimension", "key": "M", "replace": true}));
+        assert!(bound["error"].is_null(), "{bound}");
         h.step(&json!({"key":"D"})).unwrap();
         h.frames(2);
         assert!(!placing_dimension(&h.app), "the old key no longer starts it");
@@ -1903,6 +1918,41 @@ mod tests {
         for view in views {
             assert!(!said.contains(&encode(view)), "no message names a view by its id: {said}");
         }
+    }
+
+    #[test]
+    fn the_model_chooser_lists_nested_occurrences_and_places_the_chosen_one() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("component.create", serde_json::json!({"name":"Sub"})).unwrap();
+        h.app.run("component.create", serde_json::json!({"name":"Leaf"})).unwrap();
+        h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        h.app.run("component.activate", serde_json::json!({"component":"root"})).unwrap();
+        let occurrence = |h: &Harness, name: &str| {
+            let doc = &h.app.session.doc;
+            let component = doc.components.iter().find(|c| c.name == name).map(|c| c.id).unwrap();
+            doc.occurrences.iter().find(|o| o.component == component).map(|o| o.id).unwrap()
+        };
+        let (sub, leaf) = (occurrence(&h, "Sub"), occurrence(&h, "Leaf"));
+        enter(&mut h.app, true).unwrap();
+        h.app.run("drawing.create", serde_json::json!({})).unwrap();
+        h.frames(4);
+        let listed = placement::sources(&h.app.session.doc);
+        assert_eq!(
+            listed.iter().map(|(_, path)| path.clone()).collect::<Vec<_>>(),
+            vec![None, Some(vec![sub]), Some(vec![sub, leaf])],
+            "the design, the sub-assembly, then the component nested in it"
+        );
+        let mut tool = placement::Placement::new(&h.app).unwrap();
+        let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+        assert!(tool.request(drawing).unwrap().get("source").is_none(), "the whole design by default");
+        tool.choose_source(Some(vec![sub, leaf]));
+        let mut request = tool.request(drawing).unwrap();
+        assert_eq!(request["source"], serde_json::json!({"occurrences": [[sub, leaf]]}));
+        request["sheet"] = serde_json::json!("Sheet 1");
+        let placed = h.app.run("drawing.view.base", request).unwrap();
+        let inspected = h.app.run("drawing.view.inspect", serde_json::json!({"view": placed["view"]})).unwrap();
+        assert_eq!(inspected["settings"]["occurrences"]["value"], serde_json::json!([[sub, leaf]]));
     }
 
     #[test]

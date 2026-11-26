@@ -332,7 +332,7 @@ macro_rules! input {
 }
 
 fn rust(i: &In) -> Result<Output, HarnessError> {
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     match i {
         In::Trim3d {
             surface,

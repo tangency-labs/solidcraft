@@ -471,7 +471,7 @@ fn center_of_mass(s: &mut Session, p: &Value) -> Result<Value> {
     // Each body's exact mass properties, as `inspect.measure` takes them: a body that encloses no
     // volume (a surface body, an open mesh) or that cannot be measured has no centre of mass.
     for b in st.bodies.iter().filter(|b| names.is_empty() || names.contains(&b.name)) {
-        if !super::inspect::encloses_volume(&b.body) {
+        if !b.is_closed() {
             skipped.push(SkippedBody { body: b.name.clone(), reason: "it encloses no volume".into() });
             continue;
         }
