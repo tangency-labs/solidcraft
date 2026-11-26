@@ -3274,6 +3274,29 @@ fn extend_dialog_goes_up_to_a_picked_face_or_plane() {
     assert!(matches!(up_to(&h), Some(solidcraft_engine::doc::ExtendTo::Plane(_))));
     let (lo, hi) = x_span(&h);
     assert!(lo.abs() < 1e-6 && (hi - 24.0).abs() < 1e-6, "the sheet runs from 0 to 24: {lo} to {hi}");
+
+    // Without the YZ extension, the edge at x = 24 up to the whole box: its near face, at x = 30
+    // (no sheet trimmed by an extension is extended up to anything yet). Editing shows the body.
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.frames(4);
+    open(&mut h, Vec3::new(24.0, 5.0, 0.0));
+    choose(&mut h, "To Object");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        let active = d.active;
+        assert!(d.inputs[active].accept & crate::selection::BODIES != 0, "To Object takes a body");
+        d.inputs[active].items = vec![Sel::Body { name: "Block".into() }];
+    }
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert!(matches!(up_to(&h), Some(solidcraft_engine::doc::ExtendTo::Body(b)) if b.as_ref() == "Block"));
+    let (lo, hi) = x_span(&h);
+    assert!((lo - 5.0).abs() < 1e-6 && (hi - 30.0).abs() < 1e-6, "the sheet runs from 5 to 30: {lo} to {hi}");
+    let name = h.app.session.doc.features.last().unwrap().name.clone();
+    h.step(&json!({"call":"ui.editFeature","params":{"feature": name}})).unwrap();
+    h.frames(4);
+    let picked = h.app.dialog.as_ref().unwrap().inputs.iter().find(|i| i.label == "To Object").and_then(|i| i.items.first().cloned());
+    assert!(matches!(picked, Some(Sel::Body { name }) if name == "Block"), "editing shows the body");
 }
 
 /// A trim whose curves are projected along the surface's normal is made by a script (the
