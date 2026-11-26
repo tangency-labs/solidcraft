@@ -188,7 +188,7 @@ use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p2::BinormalEval;
 use crate::topology::topology_traverser::face_edges;
 use crate::topology::{edge as topo_edge, loopuse, vertexuse};
-use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, LoopId};
+use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, LoopId, VertexuseId};
 
 const OP_TIGHT: &str = "query::face::p3::calculate_tight_bounding_box";
 const OP_UV_LINE: &str = "query::face::p3::face_classify_uv_line";
@@ -2796,6 +2796,26 @@ fn project(p: Vec3, v: Vec3) -> Vec3 {
     p.cross(v).cross(p)
 }
 
+/// Not upstream (tangency-labs/solidcraft#22578): how many sectors the face use of vertex
+/// use `vu` has at its vertex, one per vertex use of the vertex in that face use
+/// ([`sector_classify_curve_on`]'s retry reads the loop, which tells no two apart).
+///
+/// # Errors
+///
+/// Those of the vertex use's links.
+fn sectors_at_vertex(b: &Brep, vu: VertexuseId) -> Result<usize> {
+    let vertex =
+        vertexuse::vertex(b, vu)?.ok_or_else(|| null(OP_SECTOR, "vertex use without vertex"))?;
+    let faceuse = vertexuse::faceuse(b, vu)?;
+    let mut n = 0;
+    for other in crate::topology::vertex::vertexuses(b, vertex)? {
+        if vertexuse::faceuse(b, other)? == faceuse {
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
 /// Not upstream (#15247): whether face `f` holds `uv`, a point that its inner loop `hole`,
 /// measured clockwise, does not wind around ([`sector_classify_curve_on`]'s retry). The
 /// face holds it when its outer loop winds it counter-clockwise and none of its inner
@@ -3427,6 +3447,17 @@ pub fn sector_classify_curve_on(
         eu1::vertexuse(b, mate)?
     }
     .ok_or_else(|| null(OP_SECTOR, "edge use without vertex use"))?;
+
+    // Not upstream (tangency-labs/solidcraft#22578): the loop says whether a point lies in
+    // the face, not in which of its sectors at the vertex. Where the face meets the vertex in
+    // more than one sector (the vertex where its seam ends on its boundary, used once on
+    // each side of the seam), every sector would read the point as inside, so the first one
+    // tried would take the curve: a curve leaving a cone's seam vertex along its rim was put
+    // into the cusp between the rim and the curve leaving the other way, and the face piece
+    // the two curves cut off took the rim with it. The sector's own classification stands.
+    if cp_eu1 != cp_eu2 && sectors_at_vertex(b, vtxuse)? > 1 {
+        return Ok(res);
+    }
 
     let mut guess_uv = match vertexuse::compute_uv_point(k, b, vtxuse, true) {
         Ok(uv) => uv,
