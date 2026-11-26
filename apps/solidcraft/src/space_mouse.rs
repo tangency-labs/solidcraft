@@ -6,6 +6,8 @@
 #[cfg(target_os = "linux")]
 mod hidraw;
 #[cfg(target_os = "linux")]
+mod lcd;
+#[cfg(target_os = "linux")]
 mod smed;
 #[cfg(target_os = "linux")]
 mod spacenavd;
@@ -806,6 +808,20 @@ struct Drivers {
     quit: AtomicBool,
     /// A change of smed's rotation lock asked for in Preferences: `LOCK_ON`, `LOCK_OFF` or 0 for none.
     lock_request: AtomicU8,
+    /// What smed's display should show, set by the egui thread and sent by the reader.
+    display: Mutex<Display>,
+}
+
+/// The display's page and whether SolidCraft's window has the focus, with what changed since the
+/// reader last sent them.
+#[cfg(target_os = "linux")]
+#[derive(Default)]
+struct Display {
+    /// None until a device read through smed has been seen.
+    page: Option<lcd::Page>,
+    focused: bool,
+    page_changed: bool,
+    focus_changed: bool,
 }
 
 #[cfg(target_os = "linux")]
@@ -855,6 +871,38 @@ impl Drivers {
             LOCK_OFF => Some(false),
             _ => None,
         }
+    }
+
+    /// The display's page and the window's focus as of this frame.
+    fn show(&self, page: lcd::Page, focused: bool) {
+        let Ok(mut display) = self.display.lock() else { return };
+        if display.page.as_ref() != Some(&page) {
+            display.page = Some(page);
+            display.page_changed = true;
+        }
+        if display.focused != focused {
+            display.focused = focused;
+            display.focus_changed = true;
+        }
+    }
+
+    /// What to send smed for its display now: what changed since the last call, or with `fresh` (a
+    /// new connection, where smed knows nothing yet) everything. The focus goes after the page, so
+    /// smed draws the new page once.
+    fn take_display(&self, fresh: bool) -> Vec<smed_client::ClientMessage> {
+        let Ok(mut display) = self.display.lock() else { return Vec::new() };
+        let mut messages = Vec::new();
+        if let Some(page) = display.page.as_ref().filter(|_| fresh || display.page_changed) {
+            messages = lcd::messages(page);
+        }
+        if display.page.is_some() && (fresh || display.focus_changed) {
+            messages.push(smed_client::ClientMessage::Focus { on: display.focused });
+        }
+        if display.page.is_some() {
+            display.page_changed = false;
+            display.focus_changed = false;
+        }
+        messages
     }
 
     fn publish(&self, present: DriversPresent) {
@@ -1268,6 +1316,7 @@ fn read_smed(
         },
         || empty.get() || drivers.quit.load(Ordering::Relaxed) || drivers.choice() != wanted,
         || drivers.take_lock_request(),
+        |fresh| drivers.take_display(fresh),
     );
     reset(ctx, shared);
     match (greeted, empty.get()) {
@@ -1473,6 +1522,11 @@ impl SpaceMouse {
             seen
         };
         app.space_mouse.device = reading.device.map(Source::key);
+        // smed's display: the jobs of the device it reads, and whether the window has the focus.
+        #[cfg(target_os = "linux")]
+        if let Some(device) = app.space_mouse.device.as_deref().filter(|device| device.starts_with("smed ")) {
+            self.drivers.show(lcd::page(app, device), ctx.input(|input| input.focused));
+        }
         // One line per connect or reconnect: which device, which read path, and what is saved for it.
         if app.space_mouse.logged_device != app.space_mouse.device {
             // Read through smed for the first time: it starts from what was saved for it read directly.
@@ -2786,6 +2840,51 @@ mod tests {
         assert_eq!((reader.key(), fake.world().opens), (None, 0), "nothing but smed is read");
     }
 
+    /// The reader sends smed what the frame put on the display: a smed that speaks API 2 gets the
+    /// page and the focus on its connection, a changed focus after it.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_reader_sends_the_display_to_a_smed_that_speaks_api_2() {
+        use machine::{Fake, Running};
+        use std::io::{BufRead, BufReader};
+        let fake = Fake::default();
+        *fake.world() = machine::World { smed: true, ..Default::default() };
+        let reader = Running::start(SpaceMouseDriver::Smed, fake.clone());
+        let until = Instant::now() + Duration::from_secs(3);
+        while fake.world().smed_end.is_none() {
+            assert!(Instant::now() < until, "smed was never connected");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let end = fake.world().smed_end.as_ref().unwrap().try_clone().unwrap();
+        end.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        let mut lines = BufReader::new(end).lines();
+        let mut next =
+            || lines.next().unwrap_or_else(|| panic!("smed got nothing more")).unwrap_or_else(|error| panic!("smed got nothing more: {error}"));
+        assert!(next().contains(r#""type":"hello""#));
+        fake.smed_says(r#"{"type":"hello","api":2,"server":"smed test"}"#);
+        fake.smed_says(
+            r#"{"type":"state","device":{"vid":9583,"pid":50739,"name":"SpaceMouse Enterprise","firmware":null},"lock":false,"lcd":true}"#,
+        );
+        reader.reads("smed 256f:c633");
+        let page =
+            lcd::Page { name: "Buttons".into(), tiles: vec![lcd::Tile { key: 1, command: "settings".into(), label: "Settings".into(), icon: None }] };
+        reader.drivers.show(page, true);
+        let sent: Vec<String> = (0..5).map(|_| next()).collect();
+        assert!(sent[0].contains(r#""type":"set_icon""#) && sent[0].contains(r#""id":"solidcraft""#), "{sent:?}");
+        assert_eq!(
+            sent[1..],
+            [
+                r#"{"type":"set_commands","app":{"name":"SolidCraft","icon":"solidcraft"},"commands":[{"id":"settings","label":"Settings"}]}"#,
+                r#"{"type":"set_environments","environments":[{"id":"buttons","name":"Buttons","keys":{"1":"settings"}}]}"#,
+                r#"{"type":"set_environment","id":"buttons"}"#,
+                r#"{"type":"focus","on":true}"#,
+            ]
+        );
+        let page = reader.drivers.display.lock().unwrap().page.clone().unwrap();
+        reader.drivers.show(page, false);
+        assert_eq!(next(), r#"{"type":"focus","on":false}"#, "only the focus changed");
+    }
+
     /// A device read through smed for the first time starts from what was saved for it read directly
     /// (its calibration, button jobs and the calibration offer's mark), and the direct entries stay.
     #[cfg(target_os = "linux")]
@@ -2832,6 +2931,69 @@ mod tests {
         assert!(prefs.space_mouse_offered.contains(smed), "the calibration offer is not shown again");
         assert!(prefs.space_mouse_calibrations.contains_key(direct) && prefs.space_mouse_buttons.contains_key(direct), "the direct entries stay");
         assert!(!prefs.space_mouse_long_buttons.contains_key(smed), "long jobs start from the measured defaults");
+    }
+
+    /// A device read through smed gets its jobs for keys 1–12 on the display: the whole page and the
+    /// focus on a fresh connection, then only what changed, and nothing for a device read otherwise.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_display_follows_the_jobs_and_the_focus() {
+        use smed_client::ClientMessage;
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), solidcraft_ui_egui::Services::default());
+        app.home.open = false;
+        let now = Instant::now();
+        let drivers: Arc<Drivers> = Arc::default();
+        let mut reading = Reading::new(now);
+        reading.device = Some(Source::Hid(Some((0x256f, 0xc633))));
+        let shared = Arc::new(Mutex::new(reading));
+        let mut mouse = SpaceMouse {
+            inactive: false,
+            shared: Arc::clone(&shared),
+            drivers: Arc::clone(&drivers),
+            last_frame: now - Duration::from_millis(20),
+            driver_mapping: DriverMapping::default(),
+            mapping_checked_at: now,
+            wheel: WheelGuard::default(),
+            started: now,
+            calibration: None,
+        };
+        let ctx = Context::default();
+        let frame = |mouse: &mut SpaceMouse, app: &mut SolveApp, focused: bool| {
+            ctx.run_ui(egui::RawInput { focused, ..Default::default() }, |_| {}).textures_delta.clear();
+            mouse.tick_at(app, &ctx, Instant::now());
+        };
+        let kinds = |messages: Vec<ClientMessage>| -> Vec<String> {
+            messages.iter().map(|message| smed_client::to_line(message).split('"').nth(3).unwrap_or_default().to_owned()).collect()
+        };
+        frame(&mut mouse, &mut app, true);
+        assert!(drivers.take_display(true).is_empty(), "a device read directly has no display through smed");
+
+        shared.lock().unwrap().device = Some(Source::Smed(Some((0x256f, 0xc633))));
+        frame(&mut mouse, &mut app, true);
+        let fresh = drivers.take_display(true);
+        assert_eq!(fresh.last(), Some(&ClientMessage::Focus { on: true }));
+        let fresh = kinds(fresh);
+        assert_eq!(fresh.first().map(String::as_str), Some("set_icon"), "{fresh:?}");
+        assert!(fresh.ends_with(&["set_commands", "set_environments", "set_environment", "focus"].map(String::from)), "{fresh:?}");
+        frame(&mut mouse, &mut app, true);
+        assert!(drivers.take_display(false).is_empty(), "nothing changed");
+
+        frame(&mut mouse, &mut app, false);
+        assert_eq!(drivers.take_display(false), vec![ClientMessage::Focus { on: false }]);
+
+        let device = app.space_mouse.device.clone().unwrap();
+        let mut jobs = solidcraft_ui_egui::space_mouse::button_jobs(&app, &device);
+        jobs.insert(smed_client::key_id("1").unwrap(), solidcraft_ui_egui::space_mouse::ButtonJob::View("front".into()));
+        app.preferences.space_mouse_buttons.insert(device, jobs);
+        frame(&mut mouse, &mut app, false);
+        let changed = kinds(drivers.take_display(false));
+        assert!(changed.ends_with(&["set_commands", "set_environments", "set_environment"].map(String::from)), "{changed:?}");
+        assert!(drivers.take_display(false).is_empty(), "nothing changed since");
+        let again = kinds(drivers.take_display(true));
+        assert!(
+            again.ends_with(&["set_commands", "set_environments", "set_environment", "focus"].map(String::from)),
+            "a new connection gets the whole page again, though nothing changed: {again:?}"
+        );
     }
 
     /// The rotation lock switched in Preferences reaches the reader at the next frame, once.

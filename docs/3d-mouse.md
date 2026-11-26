@@ -73,6 +73,11 @@ the defaults, and the direct settings stay for when it is read directly again. s
 rotation lock: its Lock key or **Rotation lock** in the Buttons section switches it, the key's LED
 shows it, and the view then only pans and zooms.
 
+With smed 0.2 or later, the SpaceMouse Enterprise's display shows what keys 1–12 do on a press,
+with the command's icon where it has one, while SolidCraft's window has the focus; a change in the
+Buttons section shows there straight away. When the window loses the focus, smed shows its own page
+again. The display only shows the jobs: the keys run them as before.
+
 Older SpaceNavigators use Logitech's vendor id `046d`, so add a rule with their product id (see
 `lsusb`) instead of matching every Logitech device. A homemade device needs a rule with its own
 vendor and product id. Reload with `sudo udevadm control --reload && sudo udevadm trigger`, then

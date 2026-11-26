@@ -42,7 +42,7 @@ pub enum Event {
 /// The events of one message; none for one the app does not use.
 fn events(message: ServerMessage) -> Vec<Event> {
     match message {
-        ServerMessage::State { device, lock } => vec![Event::Device(device.map(|d| (d.vid, d.pid)), Some(lock))],
+        ServerMessage::State { device, lock, .. } => vec![Event::Device(device.map(|d| (d.vid, d.pid)), Some(lock))],
         ServerMessage::Device { device } => vec![Event::Device(device.map(|d| (d.vid, d.pid)), None)],
         ServerMessage::Motion { t, r } => vec![Event::Motion(Axes { translation: t, rotation: r })],
         ServerMessage::Key { id, press, down, .. } => vec![Event::Key { id, long: press == Press::Long, down }],
@@ -52,8 +52,10 @@ fn events(message: ServerMessage) -> Vec<Event> {
 }
 
 /// Talks to smed until it closes the connection, an error ends it, or `stop` says to: the
-/// handshake, then every message as `on` events. `stop` and `lock` (a change of the rotation lock
-/// to send) are asked at every wake-up, so the stream needs a read timeout. Returns whether smed
+/// handshake, then every message as `on` events. `stop`, `lock` (a change of the rotation lock
+/// to send) and, once smed has agreed on API 2, `display` (what to send for the display; asked with
+/// `true` the first time on a connection, which wants everything) are asked at every wake-up, so
+/// the stream needs a read timeout. Returns whether smed
 /// answered the handshake: false when it refused it, went away before answering, or sent its hello
 /// and first state not within `answer_within` (a socket that accepts and stays silent is no smed to
 /// wait for). Once that state is in, a quiet device is no reason to end the read.
@@ -63,6 +65,7 @@ pub fn read(
     mut on: impl FnMut(Event),
     mut stop: impl FnMut() -> bool,
     mut lock: impl FnMut() -> Option<bool>,
+    mut display: impl FnMut(bool) -> Vec<ClientMessage>,
 ) -> bool {
     let started = Instant::now();
     let hello = ClientMessage::Hello { api: API_VERSION, client: "solidcraft".into() };
@@ -74,6 +77,9 @@ pub fn read(
     let mut chunk = [0_u8; 4096];
     let mut greeted = false;
     let mut answered = false;
+    // smed draws its display for clients that speak API 2; the first send on a connection is everything.
+    let mut draws = false;
+    let mut fresh = true;
     loop {
         if stop() {
             return greeted;
@@ -88,6 +94,15 @@ pub fn read(
                 log::info!("3D mouse: smed: {error}");
                 return greeted;
             }
+        }
+        if draws {
+            for message in display(fresh) {
+                if let Err(error) = stream.write_all(to_line(&message).as_bytes()) {
+                    log::info!("3D mouse: smed: {error}");
+                    return greeted;
+                }
+            }
+            fresh = false;
         }
         match stream.read(&mut chunk) {
             Ok(0) => return greeted,
@@ -112,6 +127,7 @@ pub fn read(
                     ServerMessage::Hello { api, server } => {
                         log::info!("3D mouse: connected to {server} (API {api})");
                         greeted = true;
+                        draws = api >= 2;
                         continue;
                     }
                     ServerMessage::Error { message } => {
@@ -120,6 +136,11 @@ pub fn read(
                     }
                     _ => {}
                 }
+            }
+            // After the handshake an error is about one request (an icon smed cannot draw, say); the
+            // connection stays.
+            if let ServerMessage::Error { message } = &message {
+                log::warn!("3D mouse: smed: {message}");
             }
             answered |= greeted && matches!(message, ServerMessage::State { .. });
             for event in events(message) {
@@ -149,6 +170,7 @@ pub fn has_device(stream: UnixStream, wait: Duration) -> Option<bool> {
         },
         || device.get().is_some() || Instant::now() >= until,
         || None,
+        |_| Vec::new(),
     );
     device.get().filter(|_| greeted)
 }
@@ -164,6 +186,11 @@ mod tests {
     /// A daemon for the test: answers the handshake, sends `lines`, and hands back what the client
     /// sent after its hello.
     fn daemon(lines: &'static [&'static str]) -> (UnixStream, std::thread::JoinHandle<Vec<String>>) {
+        daemon_speaking(1, lines)
+    }
+
+    /// `daemon`, agreeing on API `api`.
+    fn daemon_speaking(api: u32, lines: &'static [&'static str]) -> (UnixStream, std::thread::JoinHandle<Vec<String>>) {
         let (client, server) = UnixStream::pair().unwrap();
         let handle = std::thread::spawn(move || {
             let mut reader = BufReader::new(server.try_clone().unwrap());
@@ -171,7 +198,7 @@ mod tests {
             let mut hello = String::new();
             reader.read_line(&mut hello).unwrap();
             assert!(hello.contains(r#""type":"hello""#) && hello.contains(r#""client":"solidcraft""#), "{hello}");
-            writer.write_all(b"{\"type\":\"hello\",\"api\":1,\"server\":\"smed test\"}\n").unwrap();
+            writer.write_all(format!("{{\"type\":\"hello\",\"api\":{api},\"server\":\"smed test\"}}\n").as_bytes()).unwrap();
             for line in lines {
                 writer.write_all(line.as_bytes()).unwrap();
                 writer.write_all(b"\n").unwrap();
@@ -215,6 +242,7 @@ mod tests {
                 reads > 50
             },
             || None,
+            |_| Vec::new(),
         );
         assert_eq!(
             seen,
@@ -245,8 +273,60 @@ mod tests {
                 reads > 5
             },
             || request.take(),
+            |_| Vec::new(),
         );
         assert_eq!(daemon.join().unwrap(), vec![r#"{"type":"set_lock","on":true}"#.to_owned()]);
+    }
+
+    /// With API 2 the display's messages go out: everything at first, then what changed; each is
+    /// asked for once per wake-up.
+    #[test]
+    fn the_display_is_sent_when_smed_speaks_api_2() {
+        let (client, daemon) = daemon_speaking(2, &[]);
+        let mut asked = Vec::new();
+        let mut reads = 0;
+        read(
+            client,
+            ANSWER,
+            |_| {},
+            || {
+                reads += 1;
+                reads > 20
+            },
+            || None,
+            |fresh| {
+                asked.push(fresh);
+                let on = asked.len() == 1;
+                if fresh || asked.len() == 3 { vec![ClientMessage::Focus { on }] } else { Vec::new() }
+            },
+        );
+        assert_eq!(asked.first(), Some(&true), "everything first");
+        assert!(asked.len() >= 3 && asked.iter().skip(1).all(|fresh| !fresh), "{asked:?}");
+        assert_eq!(daemon.join().unwrap(), vec![r#"{"type":"focus","on":true}"#.to_owned(), r#"{"type":"focus","on":false}"#.to_owned()]);
+    }
+
+    /// An smed that speaks API 1 has no display to send to.
+    #[test]
+    fn the_display_waits_for_api_2() {
+        let (client, daemon) = daemon(&[]);
+        let mut asked = 0;
+        let mut reads = 0;
+        read(
+            client,
+            ANSWER,
+            |_| {},
+            || {
+                reads += 1;
+                reads > 5
+            },
+            || None,
+            |_| {
+                asked += 1;
+                vec![ClientMessage::Focus { on: true }]
+            },
+        );
+        assert_eq!(asked, 0);
+        assert!(daemon.join().unwrap().is_empty());
     }
 
     /// A smed that refuses the handshake ends the read.
@@ -257,7 +337,7 @@ mod tests {
         writer.write_all(b"{\"type\":\"error\",\"message\":\"unsupported API version 9\"}\n").unwrap();
         client.set_read_timeout(Some(Duration::from_millis(20))).unwrap();
         let mut seen = Vec::new();
-        assert!(!read(client, ANSWER, |event| seen.push(event), || false, || None), "a refusal is no handshake");
+        assert!(!read(client, ANSWER, |event| seen.push(event), || false, || None, |_| Vec::new()), "a refusal is no handshake");
         assert!(seen.is_empty());
     }
 
@@ -275,7 +355,7 @@ mod tests {
             let (done, ended) = std::sync::mpsc::channel();
             std::thread::spawn(move || {
                 let mut seen = Vec::new();
-                let greeted = read(client, Duration::from_millis(200), |event| seen.push(event), || false, || None);
+                let greeted = read(client, Duration::from_millis(200), |event| seen.push(event), || false, || None, |_| Vec::new());
                 done.send((greeted, seen)).unwrap();
                 drop(server);
             });
@@ -293,7 +373,7 @@ mod tests {
         writer.write_all(b"{\"type\":\"state\",\"device\":null,\"lock\":false}\n").unwrap();
         client.set_read_timeout(Some(Duration::from_millis(20))).unwrap();
         let started = Instant::now();
-        let greeted = read(client, Duration::from_millis(100), |_| {}, || started.elapsed() >= Duration::from_millis(400), || None);
+        let greeted = read(client, Duration::from_millis(100), |_| {}, || started.elapsed() >= Duration::from_millis(400), || None, |_| Vec::new());
         assert!(greeted && started.elapsed() >= Duration::from_millis(400), "ended by stop, not by the wait");
         drop(server);
     }
