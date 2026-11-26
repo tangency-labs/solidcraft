@@ -607,7 +607,7 @@ fn refine_sag(
     let mut cache: crate::hash::BitsMap<usize, Option<(Vec3, Option<Vec3>)>> = crate::hash::BitsMap::default();
     // Triangles that already passed all sag/turn/length checks in an earlier round need not be
     // re-evaluated while unchanged (spade keeps vertex handles and constraint edges fixed).
-    let mut passed: crate::hash::BitsMap<[usize; 3], ()> = crate::hash::BitsMap::default();
+    let mut passed: crate::hash::BitsSet<[usize; 3]> = crate::hash::BitsSet::default();
     // Non-constraint edge midpoint split decisions cached by sorted vertex handle pair, so each
     // shared interior edge is evaluated once across both adjacent triangles and across rounds.
     let mut edge_split: crate::hash::BitsMap<(usize, usize), bool> = crate::hash::BitsMap::default();
@@ -632,13 +632,13 @@ fn refine_sag(
             let vs = face.vertices();
             let mut key = [vs[0].fix().index(), vs[1].fix().index(), vs[2].fix().index()];
             key.sort_unstable();
-            if passed.contains_key(&key) {
+            if passed.contains(&key) {
                 continue;
             }
             let ps = vs.map(|v| v.position());
             let c = Point2::new((ps[0].x + ps[1].x + ps[2].x) / 3.0, (ps[0].y + ps[1].y + ps[2].y) / 3.0);
             let (Some((a, na)), Some((b, nb)), Some((d, nd))) = (at(vs[0].fix(), ps[0]), at(vs[1].fix(), ps[1]), at(vs[2].fix(), ps[2])) else {
-                passed.insert(key, ());
+                passed.insert(key);
                 continue;
             };
             // How far the surface lies from the triangle at `q`.
@@ -685,7 +685,7 @@ fn refine_sag(
                 }
             }
             if !any_edge_split {
-                passed.insert(key, ());
+                passed.insert(key);
             }
         }
         if todo.is_empty() {

@@ -1468,13 +1468,13 @@ fn a_strip_shift_bound_covers_the_speed_over_the_strip() {
 /// a dense pinched B-spline with one collapsed boundary row still reports its pole there.
 #[test]
 fn dense_periodic_bspline_collapse_certifies_and_handles_poles() {
-    let (nu, nv) = (361, 12);
+    let (nu, nv) = (361u32, 12u32);
     let wavy: Vec<Vec<([f64; 3], f64)>> = (0..nu)
         .map(|i| {
-            let t = std::f64::consts::TAU * (i as f64 / (nu - 1) as f64);
+            let t = std::f64::consts::TAU * (f64::from(i) / f64::from(nu - 1));
             (0..nv)
                 .map(|j| {
-                    let s = j as f64 / (nv - 1) as f64;
+                    let s = f64::from(j) / f64::from(nv - 1);
                     let r =
                         10.0 + 0.4 * (24.0 * t + 0.6 * s).sin() + 0.3 * (3.0 * t + 0.2 * s).sin();
                     ([r * t.cos(), r * t.sin(), 30.0 * s], 1.0)
@@ -1495,13 +1495,13 @@ fn dense_periodic_bspline_collapse_certifies_and_handles_poles() {
     assert!(!collapsed_on(&s, [0.25, 0.5], 0, 0.0, Some((0.1, 0.9))).unwrap());
     assert!(!collapsed_on(&s, [0.25, 0.5], 1, 0.0, Some((0.1, 0.9))).unwrap());
 
-    let (pnu, pnv) = (121, 8);
+    let (pnu, pnv) = (121u32, 8u32);
     let pinched_rows: Vec<Vec<([f64; 3], f64)>> = (0..pnu)
         .map(|i| {
-            let t = std::f64::consts::TAU * (i as f64 / (pnu - 1) as f64);
+            let t = std::f64::consts::TAU * (f64::from(i) / f64::from(pnu - 1));
             (0..pnv)
                 .map(|j| {
-                    let s = j as f64 / (pnv - 1) as f64;
+                    let s = f64::from(j) / f64::from(pnv - 1);
                     let r = 10.0 * s;
                     ([r * t.cos(), r * t.sin(), 20.0 * s], 1.0)
                 })
