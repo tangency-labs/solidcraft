@@ -346,11 +346,7 @@ mod tests {
         let mut attempted = Vec::new();
         let opened = open_first(Policy::Auto, found, |name| {
             attempted.push(*name);
-            if *name == "hardware" {
-                Err(crate::GpuError::Device("out of memory".into()))
-            } else {
-                Ok(42)
-            }
+            if *name == "hardware" { Err(crate::GpuError::Device("out of memory".into())) } else { Ok(42) }
         });
         assert_eq!(attempted, ["hardware", "software"]);
         assert_eq!(opened.unwrap(), ("software", 42));
