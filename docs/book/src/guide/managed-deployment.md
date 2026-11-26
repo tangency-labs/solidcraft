@@ -35,6 +35,7 @@ can run it.
 | Allow Open with EasyPrint | `AllowEasyPrint` | `REG_DWORD` | `0`: SolidCraft offers no EasyPrint and sends no model to Printables, whoever asks. `1` or not set: people can use it after agreeing once. SolidCraft 0.46 or later. |
 | Allow problem reports | `AllowProblemReports` | `REG_DWORD` | `0`: no problem report opens or is sent, to SolidCraft's ticket server or GitHub. Help, About SolidCraft, **Copy diagnostic information** still copies the details. `1` or not set: people can send reports. SolidCraft 0.46 or later. |
 | Add SolidCraft to AI apps | `ConnectAiApps` | `REG_DWORD` | `1`: SolidCraft adds its MCP server to the AI apps on the computer at start. `0`: it adds none and takes out the entries it added. SolidCraft 0.46 or later. |
+| Theme file | `ThemeFile` | `REG_SZ` | The full path of a SolidCraft theme file (`.json`) everyone follows, up to 4096 characters on one line. See [A theme for everyone](#a-theme-for-everyone). SolidCraft 0.51 or later. |
 
 On Windows the values live in the key `Software\Policies\SolidCraft`:
 
@@ -142,6 +143,25 @@ An agent or a script sees the same through the control channel: the reply of `ui
 `policy` object that lists the locked settings, their values in force (`settings`), the
 features turned off (`off`: `easyprint`, `problem_reports`) and the organization's name. The settings themselves report each person's own stored choice, and a
 request that changes a locked setting is refused ([control protocol](https://github.com/tangency-labs/solidcraft/blob/main/docs/control-protocol.md)).
+
+## A theme for everyone
+
+`ThemeFile` gives everyone your organization's colours. Make the theme in SolidCraft
+(Preferences, Interface, Theme: change a theme's colours and export it), then put the file where
+every computer can read it and people cannot change it, for example
+`C:\ProgramData\ACME\solidcraft-theme.json`, `/etc/solidcraft/acme-theme.json` or a read-only
+network share, and set `ThemeFile` to its full path.
+
+SolidCraft then follows that file, as **Follow a theme file** in Preferences does: its colours
+replace the chosen theme, and when you replace the file, every running SolidCraft shows the new
+colours within a second. People cannot stop following it or follow another file, and the
+`--theme-file` option doesn't apply. The theme picker still records a person's choice, which
+comes back when the policy is removed.
+
+If the file is missing, cannot be read or is not a theme file, SolidCraft keeps the last theme
+that loaded (the person's own at start) and Preferences, Interface says why the file was not
+applied. A path that is empty, longer than 4096 characters or has a line break counts as not set.
+The browser version of SolidCraft reads no policy.
 
 ## A policy is not a launcher
 
