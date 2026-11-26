@@ -450,14 +450,25 @@ pub struct ConeParams {
     pub common: FeatureCommon,
 }
 
-/// Add a solid tube along a path of sketch curves.
+/// Add a solid tube along a path of sketch curves, or along a chain of a body's edges.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct PipeParams {
-    /// The sketch holding the path, by id or name.
-    pub path_sketch: SketchRef,
-    /// The path's curve ids, in order along the path.
-    pub path: StringList,
+    /// The sketch holding the path, by id or name. Not needed when the path is a body's edges.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub path_sketch: Option<SketchRef>,
+    /// The path's curve ids, in order along the path. Not needed when the path is a body's edges.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "StringList")]
+    pub path: Option<StringList>,
+    /// The name of the body whose edges are the path, instead of a sketch's curves.
+    #[serde(default, deserialize_with = "path_body_opt", skip_serializing_if = "Option::is_none")]
+    pub path_body: Option<String>,
+    /// The points on that body's edges that are the path, 1 to 1000.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PathEdgePoints")]
+    pub path_edges: Option<PathEdgePoints>,
     /// The tube's outside diameter.
     pub diameter: LengthExpr,
     /// The wall thickness, for a hollow tube: above 0 and less than half `diameter`. Default:
@@ -1358,7 +1369,7 @@ pub struct PatternRectangularParams {
     /// What sets the first direction's copies: `count_spacing` (the default: `count1` and
     /// `spacing1`), `count_extent` (`count1` and `extent1`; the spacing is the extent divided by
     /// one less than the count) or `spacing_extent` (`spacing1` and `extent1`; as many copies as
-    /// fit, none past the extent's end).
+    /// fit, none past the extent's end) or `count_list` (`count1` and `spacing_list1`).
     #[serde(default, deserialize_with = "pattern_distance1")]
     pub distance1: Option<PatternDistanceParam>,
     /// What sets the second direction's copies, as `distance1`.
@@ -1378,6 +1389,14 @@ pub struct PatternRectangularParams {
     /// As `copy_at_end1`, along the second direction.
     #[serde(default, deserialize_with = "copy_at_end2")]
     pub copy_at_end2: Option<bool>,
+    /// `count_list`: the gaps between neighbours along the first direction, each greater than
+    /// zero, used in turn and from the start again: `[10, 20, 30]` with a count of 5 puts the
+    /// copies at 10, 30, 60 and 70. Centred, the list runs out from the original on both sides.
+    #[serde(default, deserialize_with = "spacing_list1")]
+    pub spacing_list1: Option<Vec<LengthExpr>>,
+    /// As `spacing_list1`, along the second direction.
+    #[serde(default, deserialize_with = "spacing_list2")]
+    pub spacing_list2: Option<Vec<LengthExpr>>,
     /// Join the bodies copied from and their copies where they touch or overlap, so a part
     /// patterned from one piece is one body at any count; copies that touch nothing stay bodies of
     /// their own (#21625). Default: false, every copy a body of its own.
@@ -1394,6 +1413,7 @@ pub enum PatternDistanceParam {
     CountSpacing,
     CountExtent,
     SpacingExtent,
+    CountList,
 }
 
 /// A distance type under `key`, with the handler's message; `null` is read as left out.
@@ -1402,7 +1422,7 @@ fn distance_at<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<Patt
         Value::Null => Ok(None),
         v => serde_json::from_value(v)
             .map(Some)
-            .map_err(|_| D::Error::custom(whole(format!("`{key}` must be count_spacing, count_extent or spacing_extent")))),
+            .map_err(|_| D::Error::custom(whole(format!("`{key}` must be count_spacing, count_extent, spacing_extent or count_list")))),
     }
 }
 
@@ -1429,6 +1449,24 @@ fn copy_at_end1<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Erro
 
 fn copy_at_end2<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
     copy_at_end_at(d, "copy_at_end2")
+}
+
+/// A spacing list under `key`, with the handler's message; `null` is read as left out.
+fn spacing_list_at<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<Vec<LengthExpr>>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        v => serde_json::from_value(v)
+            .map(Some)
+            .map_err(|_| D::Error::custom(whole(format!("`{key}` must be a list of spacings, each a number or an expression")))),
+    }
+}
+
+fn spacing_list1<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<LengthExpr>>, D::Error> {
+    spacing_list_at(d, "spacing_list1")
+}
+
+fn spacing_list2<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<LengthExpr>>, D::Error> {
+    spacing_list_at(d, "spacing_list2")
 }
 
 /// The most curves a pattern path lists, as `features::pattern_path` reads it.
@@ -1488,13 +1526,12 @@ impl JsonSchema for PathOrientationParam {
 }
 
 fn path_required(schema: &mut Schema) {
-    for key in ["path", "count"] {
-        require(schema, key);
-    }
+    require(schema, "count");
 }
 
-/// Copy features, bodies or components along a chain of sketch curves. Give one of `features`,
-/// `bodies` or `components`, and `spacing` or `distance`. One undo step.
+/// Copy features, bodies or components along a chain of sketch curves, or along a chain of a body's
+/// edges. Give one of `features`, `bodies` or `components`, the path (`path_sketch` and `path`, or
+/// `path_body` and `path_edges`), and `spacing` or `distance`. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = path_required)]
 pub struct PatternPathParams {
@@ -1507,7 +1544,8 @@ pub struct PatternPathParams {
     /// The components to place more of, by id or name. The reply then lists the new occurrences.
     #[serde(default)]
     pub components: Option<NameList>,
-    /// The sketch holding the path, by id or name. Required, unless given as `sketch`.
+    /// The sketch holding the path, by id or name, also given as `sketch`. Not needed when the
+    /// path is a body's edges.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "SketchRef")]
     pub path_sketch: Option<SketchRef>,
@@ -1515,11 +1553,18 @@ pub struct PatternPathParams {
     #[serde(default, deserialize_with = "path_sketch_alias")]
     #[schemars(with = "SketchRef")]
     pub sketch: Option<SketchRef>,
-    // Optional in the type, required in the schema: left out, `null` or empty, the handler
-    // refuses the call with its own message.
+    // Optional: the path is these curves or `path_edges`; with neither, the handler refuses the
+    // call with its own message.
     #[serde(default, deserialize_with = "path_curves")]
     #[schemars(schema_with = "path_curves_schema")]
     pub path: Option<NameList>,
+    /// The name of the body whose edges are the path, instead of a sketch's curves.
+    #[serde(default, deserialize_with = "path_body_opt", skip_serializing_if = "Option::is_none")]
+    pub path_body: Option<String>,
+    /// The points on that body's edges that are the path, 1 to 1000.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PathEdgePoints")]
+    pub path_edges: Option<PathEdgePoints>,
     // Optional in the type, required in the schema, for the handler's message (as `count1`).
     /// How many, the original included: a whole number or an expression that gives one.
     #[serde(default, deserialize_with = "present")]

@@ -62,7 +62,12 @@ boolean_intersection, boolean_with_options}` and the manifold engine under them
 (`boolean/merge/p4.rs`, `manifold_boolean`); the topology intersector
 (`boolean/topology_intersector`); the point classification the classify step calls
 (`query/brep.rs`, `BrepQuery::point_3d_classify`; `intersect/point_class.rs`); and the ops entry
-points (`solidcore-ops/src/boolean.rs`).
+points (`solidcore-ops/src/boolean.rs`). The ops union of a list (`union_all`) unites it pairwise,
+level by level; two solids of a pair that are proved apart are put side by side instead of
+intersected (`boolean/apart.rs`): every shell's certified box lies farther than their intersection
+tolerance from every shell box of the other, so a boolean would pair none of their faces, and
+the second operand's topology is copied into the first (`MergeBrep`) with the boolean's operand
+preparation and union tail.
 
 **Out**, each with its own page:
 - Surface/surface intersection, its curves and their certification: [ssi.md](ssi.md).
