@@ -735,6 +735,18 @@ pub trait FilletSolverOps {
         Err(no_stations())
     }
 
+    /// (not upstream, #13710) The edge parameter of the trace point `point`, whatever made
+    /// it (a point no solve of this solver made, such as a rail end the corner code placed,
+    /// may carry a stale `user_doubles[0]`).
+    ///
+    /// # Errors
+    ///
+    /// The solver's refusal; [`SolidError::InvalidInput`] for a solver without stations
+    /// (the default).
+    fn station_of(&mut self, _k: &Kernel, _point: &TsectPnt) -> Result<f64> {
+        Err(no_stations())
+    }
+
     /// (not upstream, #13710) The solver's station at the edge parameter `s`
     /// ([`IntersectorVirtuals::station_point`]), its feet solved from `guesses` over
     /// `domains`.
@@ -2791,10 +2803,26 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         find_guess_mid_tsect_pnt(pj, pj1, frac, &mut mid_pnt);
 
         // (not upstream, #13710) a solver's own stations: its station at the share of the
-        // span's s, never a plane's (whose adjusting retry may solve another s), its
-        // tangents along the span
-        if solver.station_leader(k)?.is_some() {
-            let s = (1.0 - frac) * pj.user_doubles[0] + frac * pj1.user_doubles[0];
+        // span's s (each end's as the solver finds it, never a stale user double), strictly
+        // between them, never a plane's (whose adjusting retry may solve another s), its
+        // tangents along the span; a closed leader's seam is not handled yet
+        if let Some(leader) = solver.station_leader(k)? {
+            if leader.closed {
+                return Err(SolidError::blend_solver(
+                    OP_FLUSH,
+                    SolverFailure::StationLeaderClosed,
+                ));
+            }
+            let from = solver.station_of(k, pj)?;
+            let to = solver.station_of(k, pj1)?;
+            let s = (1.0 - frac) * from + frac * to;
+            let between = (s - from) * (to - s) > 0.0;
+            if !between {
+                return Err(SolidError::blend_solver(
+                    OP_FLUSH,
+                    SolverFailure::StationSpanEmpty { s, from, to },
+                ));
+            }
             let guesses = [
                 mid_pnt.uv_pos(SrfIndex::First),
                 mid_pnt.uv_pos(SrfIndex::Second),

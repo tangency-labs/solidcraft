@@ -5640,6 +5640,21 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         self.synced(r)
     }
 
+    /// (#13710) A chamfer of setbacks' edge parameter of a point
+    /// ([`crate::blend::fillet_standard_solver::setback::SetbackFs::station_of_point`]);
+    /// every other solver has none.
+    fn station_of(&mut self, k: &Kernel, point: &TsectPnt) -> Result<f64> {
+        if self.ops.setback_mut().is_none() {
+            return Err(invalid("the solver has no stations of its own"));
+        }
+        self.pre()?;
+        let r = match self.ops.setback_mut() {
+            Some(setback) => setback.station_of_point(k, point),
+            None => Err(invalid("the solver has no stations of its own")),
+        };
+        self.synced(r)
+    }
+
     /// (#13710) A chamfer of setbacks' exact station
     /// ([`crate::blend::fillet_standard_solver::setback::SetbackFs::station_point`]); every
     /// other solver has none.

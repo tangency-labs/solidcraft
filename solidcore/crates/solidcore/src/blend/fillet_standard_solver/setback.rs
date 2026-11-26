@@ -723,6 +723,21 @@ impl SetbackFs {
         })
     }
 
+    /// The edge parameter of the trace point `point` whatever made it (a rail end the corner
+    /// code placed may carry a stale `user_doubles[0]`): its surface values at its own feet
+    /// (`uv_curve_pv[i][0]`), then [`Self::station_parameter`] on them.
+    ///
+    /// # Errors
+    ///
+    /// Those of `ComputeSurfaceValues` and [`Self::station_parameter`]
+    /// (`SetbackStationNotFound`).
+    pub fn station_of_point(&mut self, k: &Kernel, point: &TsectPnt) -> Result<f64> {
+        let uvs = [point.uv_curve_pv[0][0], point.uv_curve_pv[1][0]];
+        let mut at = point.clone();
+        FilletSolver::compute_surface_values(k, self, uvs, &mut at)?;
+        self.station_parameter(k, &at)
+    }
+
     /// A point given to a station trace (a rail end the corner code placed) as its station:
     /// its feet as given (`uv_curve_pv[i][0]`, never moved), its surface values there, its s
     /// ([`Self::station_parameter`]: `user_doubles[0]` where foot 0 is at its station there,
@@ -1970,8 +1985,9 @@ mod tests {
     //
     // An extension step from a station is `StepSolve`'s plane at the step h along foot 0's
     // unit tangent τ from foot 0, foot 0 on the circle r = 9: the next foot 0 is where
-    // 9 sin Δθ = h, Δθ = asin(h / 9). The steps are the stand-off h = max(d) = 1 each, up to
-    // 5 of them (the cap 5 max(d)): an extension ends 5 asin(1/9) past its end station.
+    // 9 sin Δθ = h, Δθ = asin(h / 9), and foot 0 moves the chord 2 · 9 sin(Δθ / 2). Each step
+    // asks h = min(max(d), cap − moved) with max(d) = 1 and the cap 5 max(d) = 5, until foot
+    // 0 has moved the cap ([`extension_reach`]).
 
     use crate::blend::fillet_geom::p1::{
         FilletEdgeType, FilletEdgeuse, FilletGeom, FilletGeomId, FilletGeomType, FilletVertex,
@@ -2418,10 +2434,10 @@ mod tests {
         assert_flushed(&h, d);
     }
 
-    /// Extensions both ways from given points inside the edge (s = 0.3 and 0.6): five steps
-    /// of the larger setback each way, so the trace ends 5 asin(1/9) past each given point's
-    /// foot 0 (above), the given points processed, the first after the extension's
-    /// stations.
+    /// Extensions both ways from given points inside the edge (s = 0.3 and 0.6): steps of
+    /// the larger setback until foot 0 has moved 5 setbacks, so the trace ends
+    /// [`extension_reach`] past each given point's foot 0 (above), the given points
+    /// processed, the first after the extension's stations.
     #[test]
     fn station_trace_extensions_step_five_setbacks_past_the_given_points() {
         let d = [1.0, 0.5];
@@ -2435,7 +2451,7 @@ mod tests {
         let t = trace(&mut h, &given, &opts);
         t.result.unwrap();
         assert_stations(&t.flushed, d, true);
-        let reach = 5.0 * (1.0_f64 / 9.0).asin();
+        let reach = extension_reach();
         let first = angle_of(t.flushed.first().unwrap().surface_pv[0][0][0]);
         let last = angle_of(t.flushed.last().unwrap().surface_pv[0][0][0]);
         let given_first = angle_of(given[0].surface_pv[0][0][0]);
@@ -2450,6 +2466,76 @@ mod tests {
         );
         assert!(t.given[0].curve_parameter > 0.0);
         assert!(t.given[1].curve_parameter > t.given[0].curve_parameter);
+        assert_flushed(&h, d);
+    }
+
+    /// The angle an extension turns foot 0 through on the circle r = 9 (above): steps asking
+    /// h = min(1, 5 − moved) while that exceeds the driver's floor `5 SM_EFF_ZERO`, each
+    /// turning asin(h / 9) and moving foot 0 the chord 18 sin(Δθ / 2).
+    fn extension_reach() -> f64 {
+        let (cap, r0) = (5.0, RIM_R - 1.0);
+        let (mut moved, mut turned) = (0.0_f64, 0.0_f64);
+        for _ in 0..8 {
+            let h = 1.0_f64.min(cap - moved);
+            if h - EFF_ZERO * cap <= 0.0 {
+                break;
+            }
+            let dt = (h / r0).asin();
+            turned += dt;
+            moved += 2.0 * r0 * (0.5 * dt).sin();
+        }
+        turned
+    }
+
+    /// A trace through three given points (s = 0, 0.5, 1): the stations at the closed-form
+    /// feet, s strictly increasing, every given point processed in order, and the flushed
+    /// rails and chord the closed form's.
+    #[test]
+    fn station_trace_through_three_given_points_runs_on_the_closed_form_feet() {
+        let d = [1.0, 0.5];
+        let mut h = half_rim(d);
+        let given = [
+            given_at(&mut h, 0.0, d),
+            given_at(&mut h, 0.5, d),
+            given_at(&mut h, 1.0, d),
+        ];
+        let t = trace(&mut h, &given, &StationTraceOptions::default());
+        t.result.unwrap();
+        assert_stations(&t.flushed, d, true);
+        assert_eq!(t.given[0].curve_parameter, 0.0);
+        assert!(t.given[1].curve_parameter > 0.0);
+        assert!(t.given[2].curve_parameter > t.given[1].curve_parameter);
+        // the middle given point is one of the flushed stations, at its own s
+        assert!(t
+            .flushed
+            .iter()
+            .any(|p| p.user_doubles[0] == 0.5 && p.uv_curve_pv == t.given[1].uv_curve_pv));
+        assert_flushed(&h, d);
+    }
+
+    /// A rail end whose `user_doubles[0]` is stale (0.37 on the point at s = 0, as a point no
+    /// solve of this solver made may carry) is read at its own station: its foot 0 is not at
+    /// the station at 0.37 (that station's foot is at another angle), so s is foot 0's drop
+    /// on the edge, 0 (the edge's start, foot 0 at −45 degrees on r = 9); the trace runs and
+    /// leaves s = 0 in the point. The solver's `station_of_point` gives the same.
+    #[test]
+    fn station_trace_reads_a_stale_edge_parameter_at_its_own_station() {
+        let d = [1.0, 0.5];
+        let mut h = half_rim(d);
+        let mut stale = given_at(&mut h, 0.0, d);
+        stale.user_doubles[0] = 0.37;
+        stale.user_doubles[1] = 0.37;
+        let s = h.fs.station_of_point(&h.k, &stale).unwrap();
+        assert!(s.abs() < 1e-9, "{s}");
+        let given = [stale, given_at(&mut h, 1.0, d)];
+        let t = trace(&mut h, &given, &StationTraceOptions::default());
+        t.result.unwrap();
+        assert!(
+            t.given[0].user_doubles[0].abs() < 1e-9,
+            "{:?}",
+            t.given[0].user_doubles
+        );
+        assert_stations(&t.flushed, d, true);
         assert_flushed(&h, d);
     }
 

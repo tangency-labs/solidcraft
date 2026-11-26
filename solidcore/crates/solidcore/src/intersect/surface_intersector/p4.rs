@@ -292,8 +292,8 @@ pub struct StationLeader {
     /// Whether the leader is closed (its period is not handled yet).
     pub closed: bool,
     /// The solver's stand-off from the leader (a chamfer of setbacks' larger setback): an
-    /// extension's steps add up to at most [`STATION_EXTENSION_FACTOR`] times it, each at
-    /// most this long.
+    /// extension stops once foot 0 has moved [`STATION_EXTENSION_FACTOR`] times it, each
+    /// step asked at most this long.
     pub stand_off: f64,
 }
 
@@ -317,14 +317,15 @@ pub enum StationStep {
     NotFound,
 }
 
-/// An extension of a station trace stops once its steps add up to this many times the
+/// An extension of a station trace stops once foot 0 has moved this many times the
 /// solver's stand-off ([`StationLeader::stand_off`]; the corner code's extension of a
 /// chamfer of setbacks is 7.5 of them).
 pub const STATION_EXTENSION_FACTOR: f64 = 5.0;
 
-/// The steps of one extension of a station trace: each step is the stand-off long but the
-/// last, so [`STATION_EXTENSION_FACTOR`] of them reach the cap; the bound guards against a
-/// step that does not add up (a NaN).
+/// The steps of one extension of a station trace: each step asked is the stand-off long
+/// but the last, and foot 0 moves at least about that far, so about
+/// [`STATION_EXTENSION_FACTOR`] of them reach the cap; the bound guards against steps that
+/// do not add up (a NaN, a solver that barely moves).
 pub const MAX_STATION_EXTENSION_STEPS: usize = 8;
 
 /// A tree node pair of the global surface solve in
@@ -1096,9 +1097,10 @@ impl SurfaceIntersector<'_> {
 ///   (no finite difference), along the trace.
 /// - **Extensions** before the first and after the last given point, when asked, step with
 ///   the solver's `StepSolve` ([`IntersectorVirtuals::station_step`]) and stop at the first
-///   step on a domain boundary, at the leader's interval end, or once the steps add up to
-///   [`STATION_EXTENSION_FACTOR`] times the solver's stand-off; a step that finds neither a
-///   station nor a boundary is refused (`StationStepNotFound`).
+///   step on a domain boundary (a station outside a domain is not kept), at the leader's
+///   interval end, or once foot 0 has moved [`STATION_EXTENSION_FACTOR`] times the solver's
+///   stand-off; a step that finds neither a station nor a boundary is refused
+///   (`StationStepNotFound`), one that goes back too (`StationStepBackwards`).
 /// - **Spans** are split at the mean s ([`IntersectorVirtuals::station_point`]) until they
 ///   pass the span test, as the law's at its mean parameter; no station from the first to
 ///   the last given point may lie outside a surface's domain (the trace would clip before
@@ -1479,14 +1481,13 @@ fn station_anchors<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         station_in_domains(v, &p, &span)?;
     }
 
-    let mut index = points.len();
     let before = if opts.extend_before_start {
-        extend_stations(v, k, first, -1.0, &leader, &span, &mut index)?
+        extend_stations(v, k, first, -1.0, &leader, &span)?
     } else {
         Vec::new()
     };
     let after = if opts.extend_after_end {
-        extend_stations(v, k, last, 1.0, &leader, &span, &mut index)?
+        extend_stations(v, k, last, 1.0, &leader, &span)?
     } else {
         Vec::new()
     };
@@ -1498,11 +1499,12 @@ fn station_anchors<'s, V: IntersectorVirtuals<'s> + ?Sized>(
 
 /// The stations of the extension from the end station `end`, outwards (`outward` `1` after
 /// the last given point, `-1` before the first), in stepping order (module docs of
-/// [`do_law_intersection_with`]); `index` counts the stations for the monotone refusal.
+/// [`do_law_intersection_with`]). A station outside a domain ends the extension, as a
+/// boundary does; the cap counts foot 0's distance moved.
 ///
 /// # Errors
 ///
-/// `StationStepNotFound`, `StationsNotMonotone`, `StationNotSolved`; those of the steps.
+/// `StationStepNotFound`, `StationStepBackwards`, `StationNotSolved`; those of the steps.
 fn extend_stations<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     v: &mut V,
     k: &Kernel,
@@ -1510,7 +1512,6 @@ fn extend_stations<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     outward: f64,
     leader: &StationLeader,
     span: &StationSpan,
-    index: &mut usize,
 ) -> Result<Vec<TsectId>> {
     // the direction in s the steps go
     let step_sign = span.sign * outward;
@@ -1534,7 +1535,7 @@ fn extend_stations<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         if !is_positive(step - EFF_ZERO * cap) || !is_positive((end_s - s_from) * step_sign) {
             break;
         }
-        let (mut q, taken, mut last) = match v.station_step(k, &from, step)? {
+        let (mut q, mut last) = match v.station_step(k, &from, step)? {
             StationStep::Boundary => break,
             StationStep::NotFound => {
                 return Err(SolidError::blend_solver(
@@ -1542,11 +1543,7 @@ fn extend_stations<'s, V: IntersectorVirtuals<'s> + ?Sized>(
                     SolverFailure::StationStepNotFound { s: s_from },
                 ))
             }
-            StationStep::Found {
-                point,
-                step,
-                clipped,
-            } => (*point, step, clipped),
+            StationStep::Found { point, clipped, .. } => (*point, clipped),
         };
         // the leader's end: the station there ends the extension
         if (q.user_doubles[0] - end_s) * step_sign > 0.0 {
@@ -1559,15 +1556,21 @@ fn extend_stations<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         if !is_positive((q.user_doubles[0] - s_from) * step_sign) {
             return Err(SolidError::blend_solver(
                 OP_DLI,
-                SolverFailure::StationsNotMonotone { index: *index },
+                SolverFailure::StationStepBackwards { s: s_from },
             ));
         }
-        *index += 1;
+        // (a step `StepSolve` clipped whose boundary solve found nothing falls through to
+        // the interior solve still flagged clipped, and may land past the boundary: a
+        // station outside a domain ends the extension, never kept)
+        if outside_domains(v, &q).is_some() {
+            break;
+        }
         // (the solver's tangents run along increasing s: the next step goes along the step)
         if step_sign < 0.0 {
             reverse_station_tangents(&mut q);
         }
-        travelled += taken;
+        // (foot 0's distance moved, not the step asked)
+        travelled += from.crv_pos().distance(q.crv_pos());
         from = q.clone();
         // stored along the trace
         if outward < 0.0 {
@@ -1631,6 +1634,18 @@ fn station_in_domains<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     if !span.within_given(p.user_doubles[0]) {
         return Ok(());
     }
+    match outside_domains(v, p) {
+        Some(surface) => Err(SolidError::intersect(
+            OP_DLI,
+            IntersectFailure::PointOutsideDomain { surface },
+        )),
+        None => Ok(()),
+    }
+}
+
+/// The first surface (0 or 1) whose domain the station `p` lies outside, within
+/// `FlushCurve`'s boundary tolerance; `None` inside both.
+fn outside_domains<'s, V: IntersectorVirtuals<'s> + ?Sized>(v: &V, p: &TsectPnt) -> Option<usize> {
     let base = v.intersector();
     for (index, (s, dom)) in [SrfIndex::First, SrfIndex::Second]
         .into_iter()
@@ -1646,13 +1661,10 @@ fn station_in_domains<'s, V: IntersectorVirtuals<'s> + ?Sized>(
             .max(dom.max().y.abs());
         let tol = EFF_ZERO * (1.0 + size) * 100.0;
         if !dom.contains_point(p.uv_pos(s), tol) {
-            return Err(SolidError::intersect(
-                OP_DLI,
-                IntersectFailure::PointOutsideDomain { surface: index },
-            ));
+            return Some(index);
         }
     }
-    Ok(())
+    None
 }
 
 /// One `ComputeNextPoint` call of `TraceCurve`: updates `step` (the deviation and

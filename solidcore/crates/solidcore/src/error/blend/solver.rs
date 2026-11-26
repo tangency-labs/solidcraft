@@ -430,13 +430,30 @@ pub enum SolverFailure {
         /// The edge parameter of the station stepped from.
         s: f64,
     },
-    /// A station trace's stations do not run strictly one way along the edge: the edge
-    /// parameter of station `index` (the given points first, then the extension's steps in
-    /// order) does not continue past the one before it in the trace's direction. The
-    /// caller's points ([`ErrorKind::InvalidInput`]).
+    /// A station trace's extension step from the station at the edge parameter `s` found a
+    /// station that does not continue past it along the edge: the solver's step went back
+    /// ([`ErrorKind::Failed`]).
+    StationStepBackwards {
+        /// The edge parameter of the station stepped from.
+        s: f64,
+    },
+    /// A station trace's given points do not run strictly one way along the edge: the edge
+    /// parameter of given point `index` does not continue past the one before it in the
+    /// trace's direction. The caller's points ([`ErrorKind::InvalidInput`]).
     StationsNotMonotone {
-        /// The station's index.
+        /// The given point's index.
         index: usize,
+    },
+    /// The middle station of a flushed span at the edge parameter `s` is not strictly
+    /// between its ends' `from` and `to` (two stations at one s, or an s that is not
+    /// finite): the span has no station between its ends ([`ErrorKind::Failed`]).
+    StationSpanEmpty {
+        /// The middle's edge parameter.
+        s: f64,
+        /// The span's first end's.
+        from: f64,
+        /// The span's last end's.
+        to: f64,
     },
     /// The support edge's curve does not meet the fillet surface that ends it: an empty
     /// search ([`ErrorKind::NotFound`]).
@@ -610,7 +627,9 @@ impl SolverFailure {
             Self::StationLeaderClosed => ErrorKind::Unsupported,
             Self::StationNotSolved { .. } => ErrorKind::NotFound,
             Self::StationStepNotFound { .. } => ErrorKind::NotFound,
+            Self::StationStepBackwards { .. } => ErrorKind::Failed,
             Self::StationsNotMonotone { .. } => ErrorKind::InvalidInput,
+            Self::StationSpanEmpty { .. } => ErrorKind::Failed,
             Self::SupportCurveMissesSurface => ErrorKind::NotFound,
             Self::SupportEndOffCurve { .. } => ErrorKind::NotFound,
             Self::SupportIntersectionFailed => ErrorKind::Failed,
@@ -706,7 +725,9 @@ impl SolverFailure {
             Self::StationLeaderClosed => SM_ERR,
             Self::StationNotSolved { .. } => SM_ERR,
             Self::StationStepNotFound { .. } => SM_ERR,
+            Self::StationStepBackwards { .. } => SM_ERR,
             Self::StationsNotMonotone { .. } => SM_ERR,
+            Self::StationSpanEmpty { .. } => SM_ERR,
             Self::SupportCurveMissesSurface => SM_ERR,
             Self::SupportEndOffCurve { .. } => SM_ERR,
             Self::SupportIntersectionFailed => SM_ERR,
@@ -997,9 +1018,17 @@ impl core::fmt::Display for SolverFailure {
                 f,
                 "the station trace's extension step from s = {s} finds no station and no boundary"
             ),
+            Self::StationStepBackwards { s } => write!(
+                f,
+                "the station trace's extension step from s = {s} went back along the edge"
+            ),
             Self::StationsNotMonotone { index } => write!(
                 f,
-                "the station trace's station {index} does not continue along the edge past the one before it"
+                "the station trace's given point {index} does not continue along the edge past the one before it"
+            ),
+            Self::StationSpanEmpty { s, from, to } => write!(
+                f,
+                "the flushed span's middle station at s = {s} is not strictly between {from} and {to}"
             ),
             Self::SupportCurveMissesSurface => {
                 f.write_str("the support edge's curve does not meet the fillet surface ending it")
