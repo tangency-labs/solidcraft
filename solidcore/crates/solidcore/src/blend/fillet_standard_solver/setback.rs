@@ -318,19 +318,62 @@ impl SetbackFs {
         }
     }
 
-    /// The edge's point and first two derivatives at `s`, on the extended edge
-    /// ([`CurveBasedFs::evaluate_base_curve`], which extends it further when `s` is past it).
+    /// The edge's point and first two derivatives at `s`, on the extended edge, continued
+    /// first to reach `s` ([`Self::reach`]).
     ///
     /// # Errors
     ///
-    /// Those of the evaluation.
+    /// Those of the continuation and the evaluation.
     pub fn jet(&mut self, k: &Kernel, s: f64) -> Result<EdgeJet> {
+        self.reach(k, s)?;
         let pv = self.curve_based.evaluate_base_curve(k, s, 2)?;
         Ok(EdgeJet {
             point: at3(&pv, 0, OP)?,
             d1: at3(&pv, 1, OP)?,
             d2: at3(&pv, 2, OP)?,
         })
+    }
+
+    /// The extended edge continued to reach `s` past either end, keeping what it reached
+    /// past the other: the stations a trace solved on one side stay on the leader when a
+    /// later one lies past the other end. ([`CurveBasedFs::evaluate_base_curve`] extends the
+    /// original afresh past the one end asked each time, so an extension past the start is
+    /// dropped by one past the end: a given point before a line's start then lay before the
+    /// leader the definition stores, which no proof covers.) The current curve is continued
+    /// as its end span's polynomials (`C-infinity`, as [`Self::set_extension_flags`] extends
+    /// a curved edge: the same polynomials however often it is continued, so continuing an
+    /// extension never shortens or bends it), past `s` as far again as `s` lies past the end
+    /// and at least a tenth of the curve's interval (`evaluate_base_curve`'s rule). Nothing
+    /// is done for `s` inside the curve, within that routine's snapping tolerance, or for an
+    /// edge that is not a B-spline (which that routine refuses).
+    ///
+    /// # Errors
+    ///
+    /// Those of a line's NURB and of the continuation.
+    fn reach(&mut self, _k: &Kernel, s: f64) -> Result<()> {
+        if !s.is_finite() {
+            return Ok(());
+        }
+        let Some(current) = self.curve_based.base_b_spline_curve()? else {
+            return Ok(());
+        };
+        let ivl = current.natural_interval();
+        let snap = EFF_ZERO * (1.0 + ivl.min().abs() + ivl.max().abs());
+        if s >= ivl.min() - snap && s <= ivl.max() + snap {
+            return Ok(());
+        }
+        let tenth = ivl.length() / 10.0;
+        let target = if s < ivl.min() {
+            (s - (ivl.min() - s)).min(ivl.min() - tenth)
+        } else {
+            (s + (s - ivl.max())).max(ivl.max() + tenth)
+        };
+        if let Some(continued) =
+            current.create_extended_curve(target, ContinuityType::CInfinity, true)?
+        {
+            self.curve_based.extended = Some(continued);
+        }
+        Ok(())
     }
 
     /// The edge's parameter nearest `pnt` (the foot's station: `(S − C) · C′ = 0` there),
@@ -1478,6 +1521,42 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A straight edge from (0, 0, 20) to (10, 0, 20) over [0, 1], its jet asked past its start
+    /// (s = -0.3) and then past its end (s = 1.3): the leader reaches both, and is the line
+    /// continued, C(s) = (10 s, 0, 20) with C' = (10, 0, 0) and C'' = 0, at both (the jet past
+    /// the start is the same after the end's continuation as before it). Before, the end's
+    /// extension was made afresh from the edge and dropped the start's.
+    #[test]
+    fn the_leader_continued_past_both_ends_keeps_both() {
+        let k = Kernel::default();
+        let mut fs = solver(&k, [1.0, 0.5]);
+        let line = BSplineCurve::create_line_segment(
+            3,
+            Point3::new(0.0, 0.0, 20.0),
+            Point3::new(10.0, 0.0, 20.0),
+        )
+        .unwrap();
+        fs.curve_based.original = Some(Curve::from(line));
+        fs.curve_based.extended = None;
+        let before = fs.jet(&k, -0.3).unwrap();
+        let after = fs.jet(&k, 1.3).unwrap();
+        let again = fs.jet(&k, -0.3).unwrap();
+        let ivl = fs.edge_curve().unwrap().natural_interval();
+        assert!(ivl.min() <= -0.3 && ivl.max() >= 1.3, "{ivl:?}");
+        for (jet, s) in [(before, -0.3), (after, 1.3), (again, -0.3)] {
+            assert!(
+                jet.point.distance(Point3::new(10.0 * s, 0.0, 20.0)) < 1e-12,
+                "{jet:?}"
+            );
+            assert!(
+                (jet.d1 - Vec3::new(10.0, 0.0, 0.0)).length() < 1e-12,
+                "{jet:?}"
+            );
+            assert!(jet.d2.length() < 1e-12, "{jet:?}");
+        }
+        assert!(before.point.distance(again.point) < 1e-12);
     }
 
     /// The equations vanish at the closed-form feet, and the Jacobian is their derivative
