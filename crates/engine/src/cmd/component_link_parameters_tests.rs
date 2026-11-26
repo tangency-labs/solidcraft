@@ -505,6 +505,64 @@ fn a_plain_value_needs_no_parameter_here_and_each_link_keeps_its_own() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// Update Links reads the sources of several links ahead, each as its file is. Links that pass
+/// values are read with them instead, each with its own, though they share one file.
+#[test]
+fn update_links_reads_each_link_of_several_with_the_values_it_passes() {
+    let dir = folder("update-several");
+    let part = dir.join("block.sc");
+    save_block(&part);
+    let mut s = Session::default();
+    run(&mut s, "component.insert_design", json!({"path": part, "name": "Short", "parameters": {"h": "270 mm"}}));
+    run(&mut s, "component.insert_design", json!({"path": part, "name": "Long", "parameters": {"h": "510 mm"}, "reuse": false}));
+    assert!((volume(&mut s) - 10.0 * 20.0 * (270.0 + 510.0)).abs() < 1e-6);
+    // The block becomes 40 wide on disk.
+    let mut edited = Session::default();
+    run(&mut edited, "parameters.add", json!({"name": "h", "expression": "300 mm"}));
+    run(&mut edited, "solid.box", json!({"length": 10, "width": 40, "height": "h", "body_name": "Block"}));
+    run(&mut edited, "file.save", json!({"path": part}));
+
+    let updated = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(updated["updated"], json!(["Short", "Long"]), "{updated}");
+    assert!((volume(&mut s) - 10.0 * 40.0 * (270.0 + 510.0)).abs() < 1e-6, "each link keeps the height it passes");
+    let passed: Vec<&str> = s.doc.links.values().map(|l| l.parameter_values["h"].as_str()).collect();
+    assert_eq!(passed, ["270 mm", "510 mm"]);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A mass, a volume and an area are passed in the parameter's own unit, as a length is (a new
+/// parameter's is kg, mm³ or mm²), and reported in grams, mm³ and mm².
+#[test]
+fn a_link_passes_a_mass_a_volume_and_an_area_in_the_parameters_unit() {
+    let dir = folder("mass");
+    let path = dir.join("part.sc");
+    let mut part = Session::default();
+    run(&mut part, "parameters.add", json!({"name": "load", "expression": "2 kg"}));
+    run(&mut part, "parameters.add", json!({"name": "fill", "expression": "5 cm³"}));
+    run(&mut part, "parameters.add", json!({"name": "patch", "expression": "3 cm²"}));
+    run(&mut part, "solid.box", json!({"length": 10, "width": 20, "height": 5, "body_name": "Part"}));
+    run(&mut part, "file.save", json!({"path": path}));
+
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "carried", "expression": "1500 g"}));
+    let set = run(
+        &mut s,
+        "component.insert_design",
+        json!({"path": path, "name": "Part", "parameters": {"load": "carried", "fill": "2 ml", "patch": "150 mm²"}}),
+    );
+    assert_eq!(set["parameters"]["load"], json!({"expression": "carried", "value": 1500.0}), "{set}");
+    assert_eq!(set["parameters"]["fill"], json!({"expression": "2 ml", "value": 2000.0}), "{set}");
+    assert_eq!(set["parameters"]["patch"], json!({"expression": "150 mm²", "value": 150.0}), "{set}");
+    let link = s.doc.links.values().next().unwrap();
+    assert_eq!(link.parameter_values["load"], "1.5 kg");
+    assert_eq!(link.parameter_values["fill"], "2000 mm³");
+    assert_eq!(link.parameter_values["patch"], "150 mm²");
+    // A length does not set a mass.
+    let refused = fails(&mut s, "component.link_parameters", json!({"component": "Part", "set": {"load": "12 mm"}}));
+    assert!(refused.contains("mass"), "{refused}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// A linked design's mesh bodies (#20050) come in with a link that passes values too, once, and
 /// stay through each edit of what it passes.
 #[test]

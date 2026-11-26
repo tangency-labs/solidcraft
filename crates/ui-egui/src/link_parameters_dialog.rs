@@ -165,12 +165,15 @@ impl Form {
 }
 
 /// The unit `here` (and every reply's `value`) is in for a parameter of `unit`: mm for a length,
-/// degrees for an angle.
+/// degrees for an angle, grams for a mass, mm³ for a volume, mm² for an area.
 fn reported_unit(unit: &str) -> &'static str {
     match Kind::from_unit(unit) {
         Kind::Length => "mm",
         Kind::Angle => "deg",
         Kind::Unitless => "",
+        Kind::Mass => "g",
+        Kind::Volume => "mm³",
+        Kind::Area => "mm²",
     }
 }
 

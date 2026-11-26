@@ -131,6 +131,9 @@ fn plate_doc() -> (Document, u64) {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                through_all2: false,
+                to2: None,
+                to_offset2: None,
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
@@ -241,6 +244,9 @@ fn an_outline_closed_by_point_on_curve_tangent_joints_extrudes() {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                through_all2: false,
+                to2: None,
+                to_offset2: None,
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
@@ -1751,6 +1757,9 @@ fn box_fillet_cut_timeline() {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                through_all2: false,
+                to2: None,
+                to_offset2: None,
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
@@ -1890,6 +1899,211 @@ fn a_body_reads_the_material_its_mass_is_computed_with() {
     }
 }
 
+/// An older design's parameters and feature inputs named after what are now units (#4811) are
+/// renamed to the first free `<name>_param…`; what uses them follows as the older build read
+/// it, and the comment says why without losing what it said.
+#[test]
+fn parameters_named_after_units_are_renamed_as_an_older_build_read_them() {
+    let mut doc = Document::new("old");
+    let id = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "10".into(),
+                width: "4".into(),
+                height: "2".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    // Names no build lets you choose now, as an older design could have them.
+    doc.feature_mut(id).unwrap().param_names[0] = "deg".into();
+    doc.param_comments.insert("deg".into(), "tilt".into());
+    doc.params.push(Param { name: "mm".into(), expr: "3".into(), unit: String::new(), comment: "x".repeat(4096), model: false });
+    doc.set_param("mm_param", "1", Some(""), None).unwrap();
+    doc.params.push(Param { name: "turn".into(), expr: "deg / 2 + mm".into(), unit: "mm".into(), comment: String::new(), model: false });
+    doc.favorites.insert("mm".into());
+    // An equation curve's formula too: `2 mm * t` was 2 × the parameter `mm` times t.
+    let mut sketch = Sketch::new();
+    let (x, y) = (Some("t".to_string()), "2 mm * t".to_string());
+    let (start, end) = ("0".to_string(), "1".to_string());
+    sketch.equations.push(solidcraft_sketch::EquationCurve {
+        curve: "c1".into(),
+        x,
+        y,
+        start,
+        end,
+        tolerance: 0.01,
+        variable_unit: Default::default(),
+        radians_trig: false,
+    });
+    let curve = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
+    let names = ["mm".to_string(), "deg".into(), "mm".into(), "width".into()];
+    doc.rename_unit_word_params(&names).unwrap();
+    let FeatureKind::Sketch { sketch, .. } = &doc.feature(curve).unwrap().kind else { panic!("a sketch") };
+    assert_eq!(sketch.equations[0].y, "2 mm_param2 * t");
+    assert_eq!(doc.feature(id).unwrap().param_names[0], "deg_param");
+    assert!(doc.param("mm").is_none() && doc.param("mm_param2").is_some(), "the next free name");
+    assert_eq!(doc.param("turn").map(|p| p.expr.as_str()), Some("deg_param / 2 + mm_param2"));
+    assert_eq!(doc.param_values().0["turn"].v, 8.0);
+    assert!(doc.favorites.contains("mm_param2"));
+    assert_eq!(doc.param_comments.get("deg_param").map(String::as_str), Some("tilt (renamed from `deg`, which is now a unit)"));
+    assert_eq!(doc.param("mm_param2").map(|p| p.comment.len()), Some(4096), "a comment at its longest keeps its text");
+    assert!(doc.param_values().1.is_empty(), "{:?}", doc.param_values().1);
+}
+
+/// Text parameters' names are taken too: a new `dN` name and a renamed parameter skip them.
+#[test]
+fn new_and_renamed_names_skip_text_parameters() {
+    let mut doc = Document::new("names");
+    doc.set_text_param("d1", "label", None).unwrap();
+    doc.set_text_param("mm_param", "label", None).unwrap();
+    assert_eq!(doc.next_d_name(), "d2");
+    doc.params.push(Param { name: "mm".into(), expr: "3".into(), unit: String::new(), comment: String::new(), model: false });
+    doc.rename_unit_word_params(&["mm".to_string()]).unwrap();
+    assert!(doc.param("mm").is_none() && doc.param("mm_param2").is_some());
+}
+
+#[test]
+fn copy_lineage_resolves_seed_material_and_respects_overrides() {
+    let mut doc = Document::new("copy lineage");
+    let seed_id = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "10".into(),
+                width: "10".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(seed_id).unwrap().body_names = vec!["Seed".into()];
+    let pat_id = doc
+        .add_feature(
+            FeatureKind::Pattern {
+                features: Vec::new(),
+                pattern: PatternKind::Rectangular {
+                    dir1: crate::points::Dir(Vec3::X),
+                    count1: "3".into(),
+                    spacing1: "20 mm".into(),
+                    dir2: None,
+                    count2: None,
+                    spacing2: None,
+                    alignment: Default::default(),
+                    alignment2: Default::default(),
+                    reversed: false,
+                    reversed2: false,
+                    distance1: Default::default(),
+                    distance2: Default::default(),
+                    extent1: None,
+                    extent2: None,
+                    copy_at_end1: false,
+                    copy_at_end2: false,
+                },
+                bodies: vec!["Seed".into()],
+                placements: Vec::new(),
+                components: Vec::new(),
+                occurrences: Vec::new(),
+                join: false,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(pat_id).unwrap().body_names = vec!["Seed (2)".into(), "Seed (3)".into()];
+    let mir_id = doc
+        .add_feature(
+            FeatureKind::Mirror {
+                features: Vec::new(),
+                plane: PlaneRef::Origin { name: "YZ".into() },
+                bodies: vec!["Seed (2)".into()],
+                combine: false,
+                placements: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(mir_id).unwrap().body_names = vec!["Seed (2) (2)".into()];
+
+    doc.materials.insert("Seed".into(), "Steel".into());
+    assert!(!doc.has_copy_material_lineage("Seed"));
+    assert_eq!(doc.copy_seed_body("Seed (2)"), Some("Seed"));
+    assert_eq!(doc.copy_seed_body("Seed (3)"), Some("Seed"));
+    assert_eq!(doc.copy_seed_body("Seed (2) (2)"), Some("Seed (2)"));
+    assert!(doc.has_copy_material_lineage("Seed (2)"));
+    for body in ["Seed", "Seed (2)", "Seed (3)", "Seed (2) (2)"] {
+        assert_eq!(doc.body_material(body), "Steel", "{body}");
+        assert!((doc.density(body) - 7.85).abs() < 1e-9, "{body}");
+    }
+
+    // Explicit override on an intermediate copy wins for itself and its downstream copies,
+    // and survives even if the seed temporarily acquires the same material and changes again.
+    doc.materials.insert("Seed (2)".into(), "Copper".into());
+    assert_eq!(doc.body_material("Seed (2)"), "Copper");
+    assert_eq!(doc.body_material("Seed (2) (2)"), "Copper");
+    assert_eq!(doc.body_material("Seed (3)"), "Steel");
+    doc.materials.insert("Seed".into(), "Copper".into());
+    doc.materials.insert("Seed".into(), "Aluminum".into());
+    assert_eq!(doc.body_material("Seed (2)"), "Copper");
+    assert_eq!(doc.body_material("Seed (2) (2)"), "Copper");
+    assert_eq!(doc.body_material("Seed (3)"), "Aluminum");
+
+    // Explicit Default on a copy stops lineage inheritance instead of falling back to the seed.
+    doc.materials.insert("Seed (3)".into(), DEFAULT_MATERIAL.into());
+    assert_eq!(doc.resolved_body_material("Seed (3)"), Some(DEFAULT_MATERIAL));
+    assert_eq!(doc.body_material("Seed (3)"), DEFAULT_MATERIAL);
+    assert!((doc.density("Seed (3)") - DEFAULT_DENSITY).abs() < 1e-9);
+
+    // Multi-seed joined pattern: unmerged copies inherit unanimous seed material, do not guess
+    // when seeds disagree, and respect an explicit Default override.
+    let join_id = doc
+        .add_feature(
+            FeatureKind::Pattern {
+                features: Vec::new(),
+                pattern: PatternKind::Rectangular {
+                    dir1: crate::points::Dir(Vec3::X),
+                    count1: "2".into(),
+                    spacing1: "30 mm".into(),
+                    dir2: None,
+                    count2: None,
+                    spacing2: None,
+                    alignment: Default::default(),
+                    alignment2: Default::default(),
+                    reversed: false,
+                    reversed2: false,
+                    distance1: Default::default(),
+                    distance2: Default::default(),
+                    extent1: None,
+                    extent2: None,
+                    copy_at_end1: false,
+                    copy_at_end2: false,
+                },
+                bodies: vec!["A".into(), "B".into()],
+                placements: Vec::new(),
+                components: Vec::new(),
+                occurrences: Vec::new(),
+                join: true,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(join_id).unwrap().body_names = vec!["A (2)".into()];
+    assert_eq!(doc.copy_seed_body("A (2)"), None);
+    assert!(doc.has_copy_material_lineage("A (2)"));
+    doc.materials.insert("A".into(), "Steel".into());
+    doc.materials.insert("B".into(), "Steel".into());
+    assert_eq!(doc.body_material("A (2)"), "Steel");
+    doc.materials.insert("B".into(), "Brass".into());
+    assert_eq!(doc.body_material("A (2)"), DEFAULT_MATERIAL);
+    doc.materials.insert("B".into(), "Steel".into());
+    doc.materials.insert("A (2)".into(), DEFAULT_MATERIAL.into());
+    assert_eq!(doc.body_material("A (2)"), DEFAULT_MATERIAL);
+}
+
 #[test]
 fn primitives_and_combine() {
     let mut doc = Document::new("p");
@@ -1970,6 +2184,10 @@ fn hostile_expressions_never_panic() {
         "in",
         "nan",
         "9999999999999999999999",
+        "g",
+        "kg",
+        "m³",
+        "mm²",
     ];
     let mut state: u64 = 0x9e3779b97f4a7c15;
     let mut next = || {
@@ -2616,6 +2834,9 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                through_all2: false,
+                to2: None,
+                to_offset2: None,
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
@@ -3125,6 +3346,9 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
             to_offset: None,
             from: None,
             to_body_apart: false,
+            through_all2: false,
+            to2: None,
+            to_offset2: None,
             from_level: false,
             picked_placements: Vec::new(),
             one_sided_direction: None,
@@ -3222,6 +3446,168 @@ fn a_sketch_on_the_construction_plane_of_another_component_lies_on_it() {
     close(crate::apply_point(&m, end), want.origin + want.x * 10.0 + want.y * 5.0, "line end");
 }
 
+/// Freeze the persisted v6 face-role encoding independently of display-mesh fields and serde layout.
+#[test]
+fn reconstructed_mesh_roles_keep_the_versioned_binary_identity() {
+    let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(1., 1., 1.)).unwrap();
+    let positions = [Vec3::new(0., -0., 0.), Vec3::X, Vec3::Y];
+    use solidcraft_kernel::services::mesh::ReconstructionKind::{Analytic, Faceted};
+    for (kind, digest) in [
+        (Analytic, "2b85ddcdb826582a9d392dd981499209eb69c06ae3f6ebacaca0c02a4e29a278"),
+        (Faceted, "3cbe2d7ca4e75f8b65845f9d84844cfe94e5236c8235692f6badf053aa649856"),
+    ] {
+        let traced = crate::lineage::reconstructed_tool(body.clone(), &positions, &[[0, 1, 2]], 0.01, kind);
+        let lineage = traced.lineage.unwrap();
+        let crate::lineage::Operand::Made(roles) = lineage.operands[0].as_ref() else { panic!("made faces") };
+        assert_eq!(roles.len(), 6);
+        for (face, names) in roles.iter().enumerate() {
+            assert_eq!(names, &[format!("mesh:{digest}:face:{face}")]);
+        }
+    }
+}
+
+/// Old conversion metadata is readable, but every saved design replays the same converter.
+#[test]
+fn saved_mesh_conversion_modes_replay_the_current_converter() {
+    let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
+    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
+    let mut doc = Document::new("saved conversion");
+    doc.add_feature(
+        FeatureKind::MeshImport {
+            file: "box.stl".into(),
+            meshes: vec![MeshData {
+                name: "Mesh".into(),
+                positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
+                triangles: mesh.triangles.iter().flatten().copied().collect(),
+                color: None,
+                corner_normals: Default::default(),
+            }],
+        },
+        None,
+    )
+    .unwrap();
+    let conversion = doc.add_feature(FeatureKind::MeshConvert { body: "Mesh".into(), tolerance: "0.01 mm".into() }, None).unwrap();
+    let mut expected = None;
+    for obsolete in [
+        serde_json::json!({}),
+        serde_json::json!({"reconstruction":"legacy_prism"}),
+        serde_json::json!({"reconstruction":"analytic_v1"}),
+        serde_json::json!({"reconstruction":"analytic_v1_geometry_names"}),
+        serde_json::json!({"source_bound_names":false}),
+        serde_json::json!({"source_bound_names":true}),
+    ] {
+        let mut saved = serde_json::json!({"type":"mesh_convert","body":"Mesh","tolerance":"0.01 mm"});
+        saved.as_object_mut().unwrap().extend(obsolete.as_object().unwrap().clone());
+        doc.feature_mut(conversion).unwrap().kind = serde_json::from_value(saved).unwrap();
+        let canonical = serde_json::to_value(&doc.feature(conversion).unwrap().kind).unwrap();
+        assert!(canonical.get("reconstruction").is_none() && canonical.get("source_bound_names").is_none());
+        for replay in [&doc, &Document::from_json(&doc.to_json()).unwrap()] {
+            let mut model = Model::new();
+            model.evaluate(replay);
+            assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+            let state = model.state();
+            let body = state.body("Mesh").unwrap();
+            assert!((measure(&body.body).unwrap().volume - 6000.).abs() < 1e-6);
+            assert_eq!(body.feature, conversion);
+            let faces = crate::naming::face_names(body).as_ref().clone();
+            assert!(faces.iter().all(|name| name.contains(":mesh:")));
+            let names = (faces, crate::naming::edge_names(body));
+            if let Some(expected) = &expected {
+                assert_eq!(&names, expected);
+            } else {
+                expected = Some(names);
+            }
+        }
+    }
+}
+
+/// A saved conversion uses the current analytic geometry; an obsolete wall attachment reports a normal broken reference.
+#[test]
+fn saved_partial_arc_conversion_rebuilds_and_reports_obsolete_wall_references() {
+    use solidcraft_geom::prelude::*;
+    let root3 = 3f64.sqrt();
+    let outline = [
+        Vec2::new(-4., -3.),
+        Vec2::new(4., -3.),
+        Vec2::new(4., 3.),
+        Vec2::new(2., 3.),
+        Vec2::new(root3, 2.),
+        Vec2::new(1., 3. - root3),
+        Vec2::new(0., 1.),
+        Vec2::new(-1., 3. - root3),
+        Vec2::new(-root3, 2.),
+        Vec2::new(-2., 3.),
+        Vec2::new(-4., 3.),
+    ];
+    let source = solidcraft_kernel::extrude_planar_regions(
+        &solidcore_record::Plane::XY,
+        &[solidcore_record::Region2 { outer: solidcore_record::Loop2::polygon(&outline), holes: vec![] }],
+        0.,
+        5.,
+    )
+    .unwrap();
+    let mesh = source.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
+    let mut doc = Document::new("legacy polygon notch");
+    doc.add_feature(
+        FeatureKind::MeshImport {
+            file: "polygon-notch.stl".into(),
+            meshes: vec![MeshData {
+                name: "Mesh".into(),
+                positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
+                triangles: mesh.triangles.iter().flatten().copied().collect(),
+                color: None,
+                corner_normals: Default::default(),
+            }],
+        },
+        None,
+    )
+    .unwrap();
+    let conversion = doc
+        .add_feature(serde_json::from_value(serde_json::json!({"type":"mesh_convert","body":"Mesh","tolerance":"0.1 mm"})).unwrap(), None)
+        .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    {
+        let st = model.state();
+        let body = st.body("Mesh").unwrap();
+        assert_eq!(body.body.face_count(), 8);
+        assert_eq!(measure(&body.body).unwrap().merged.face_types.get("cylinder"), Some(&1));
+        assert!((measure(&body.body).unwrap().volume - (240. - 10. * std::f64::consts::PI)).abs() < 1e-6);
+        assert!(crate::naming::face_names(body).iter().all(|name| name.contains(":mesh:")));
+    }
+    // The former polygon converter used these planar walls. This stored planar face no longer
+    // exists on the reconstructed cylinder, so replay must report the ordinary reference error.
+    let old = ModelBody::new("Mesh".into(), source, conversion);
+    let faces = crate::naming::face_names(&old);
+    let (face, spot) = crate::naming::face_spots(&old)
+        .into_iter()
+        .enumerate()
+        .find_map(|(i, spot)| {
+            let spot = spot?;
+            let solidcraft_kernel::FaceSurface::Plane { normal, .. } = spot.surface? else { return None };
+            (normal.z.abs() < 1e-8 && spot.point.x.abs() < 1.99 && spot.point.y > 0.9 && spot.point.y < 2.99).then_some((i, spot))
+        })
+        .unwrap();
+    let solidcraft_kernel::FaceSurface::Plane { normal, .. } = spot.surface.unwrap() else { panic!("planar wall") };
+    let plane = solidcore_record::Plane::from_normal(spot.point, normal.vec()).unwrap();
+    let sketch = doc
+        .add_feature(
+            FeatureKind::Sketch {
+                plane: PlaneRef::Face { plane, at: spot.point, name: Some(faces[face].clone()), anchor: None },
+                sketch: Sketch::new(),
+            },
+            None,
+        )
+        .unwrap();
+    for replay in [&doc, &Document::from_json(&doc.to_json()).unwrap()] {
+        let mut cold = Model::new();
+        cold.evaluate(replay);
+        assert!(cold.result(conversion).unwrap().error.is_none());
+        assert!(cold.result(sketch).unwrap().error.is_some(), "obsolete polygon wall must request reattachment");
+    }
+}
+
 #[test]
 fn thread_additional_faces_preserve_old_single_face_serialization() {
     let old = serde_json::json!({"type":"thread", "face":[3.0,0.0,5.0]});
@@ -3309,6 +3695,32 @@ fn a_closed_control_spline_design_saves_and_reopens_unchanged() {
     let mut model = Model::new();
     model.evaluate(&reopened);
     assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+}
+
+/// #17752: a Hole may name the press-in hardware it is the mounting hole of. It is saved only when
+/// set (a hole without it saves as before), with the kind as its name, and an older design reads
+/// with none. The hardware's length is an expression a parameter rename follows.
+#[test]
+fn a_hole_saves_its_press_in_hardware_only_when_set() {
+    let plain = serde_json::json!({"type": "hole", "position": [0, 0, 0], "direction": [0, 0, 1], "diameter": "4.25 mm", "hole": {"type": "simple"}});
+    let kind: FeatureKind = serde_json::from_value(plain.clone()).unwrap();
+    let FeatureKind::Hole { hardware, .. } = &kind else { panic!("not a hole") };
+    assert_eq!(*hardware, None);
+    assert!(serde_json::to_value(&kind).unwrap().get("hardware").is_none(), "a hole without hardware saves no key");
+
+    let mut with = plain;
+    with["hardware"] = serde_json::json!({"kind": "flush_nut", "thread": "M4", "part": "flush-nut.m4"});
+    let kind: FeatureKind = serde_json::from_value(with.clone()).unwrap();
+    let FeatureKind::Hole { hardware: Some(h), .. } = &kind else { panic!("hardware lost") };
+    assert_eq!((h.kind, h.thread.as_str(), h.part.as_str()), (crate::hardware_catalog::HardwareKind::FlushNut, "M4", "flush-nut.m4"));
+    assert!(h.length.is_none());
+    // Saved as it was read: the hardware object is the same, and has no length key when it has none.
+    assert_eq!(serde_json::to_value(&kind).unwrap()["hardware"], with["hardware"]);
+
+    // A stud's length is an expression: the feature's inputs name it, so a parameter rename reaches it.
+    with["hardware"] = serde_json::json!({"kind": "stud", "thread": "M3", "length": "pin_len", "part": "stud.m3"});
+    let kind: FeatureKind = serde_json::from_value(with).unwrap();
+    assert!(kind.inputs().iter().any(|(label, e, _)| *label == "Hardware length" && e == "pin_len"), "{:?}", kind.inputs());
 }
 
 fn mat_close(a: &Mat, b: &Mat, tol: f64) -> bool {
@@ -4577,6 +4989,9 @@ fn capture_position_20644_isolation_for_to_object_mirror_pattern_plane_and_joint
                     from: None,
                     from_level: false,
                     to_body_apart: true,
+                    through_all2: false,
+                    to2: None,
+                    to_offset2: None,
                     picked_placements: Vec::new(),
                     one_sided_direction: None,
                 },
@@ -4631,6 +5046,7 @@ fn capture_position_20644_isolation_for_to_object_mirror_pattern_plane_and_joint
                 placements: vec![vec![occ_b]],
                 components: Vec::new(),
                 occurrences: Vec::new(),
+                join: false,
             },
             Some("PatternPre"),
         )
@@ -4912,6 +5328,9 @@ fn extrude_start_offset_caps_are_named_consistently_across_rotations() {
                         to_offset: None,
                         from: None,
                         to_body_apart: false,
+                        through_all2: false,
+                        to2: None,
+                        to_offset2: None,
                         from_level: false,
                         picked_placements: Vec::new(),
                         one_sided_direction: None,

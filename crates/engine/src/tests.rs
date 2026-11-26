@@ -1149,6 +1149,7 @@ pub(crate) fn hostile_values() -> Vec<Value> {
         json!("a = = 3"),
         json!("é = 1e308 * 10"),
         json!(format!("{} = 1", "n".repeat(5000))),
+        json!("7.85 g/cm³ * 1 kg^17"),
         json!([]),
         json!([1e308, -1e308]),
         json!([0, 0, 0]),
@@ -1216,6 +1217,7 @@ fn hostile_params_never_panic() {
         "bodies",
         "body",
         "body_name",
+        "bore_face",
         "center",
         "chain",
         "clip",
@@ -1283,13 +1285,16 @@ fn hostile_params_never_panic() {
         "lines",
         "link",
         "major",
+        "make",
         "margin",
+        "master_spline",
         "measure",
         "members",
         "mid",
         "minor",
         "minor_radius",
         "mode",
+        "module",
         "name",
         "names",
         "near",
@@ -1313,6 +1318,7 @@ fn hostile_params_never_panic() {
         "position",
         "position_mm",
         "prefix",
+        "pressure_angle",
         "profile",
         "profiles",
         "project_edges",
@@ -1327,6 +1333,7 @@ fn hostile_params_never_panic() {
         "scale",
         "seam",
         "set",
+        "shaft_face",
         "shape",
         "sheet",
         "side",
@@ -1342,10 +1349,12 @@ fn hostile_params_never_panic() {
         "tangent_edges",
         "target",
         "targets",
+        "teeth",
         "text",
         "thickness",
         "through",
         "through_all",
+        "tip_corner",
         "to",
         "tolerance",
         "tools",
@@ -3689,6 +3698,47 @@ fn deleting_a_path_sketch_deletes_its_pipe() {
     assert_eq!(r["deleted"].as_array().map(Vec::len), Some(2), "{r}");
     assert!(s.doc.features.is_empty(), "{:?}", s.doc.features.iter().map(|f| &f.name).collect::<Vec<_>>());
     assert!(s.model.results.iter().all(|r| r.error.is_none()));
+}
+
+/// #16084: a pipe follows a chain of a body's edges, as a sweep does. Along two edges of a
+/// 40 x 20 x 10 block meeting square at its corner (40 along X, then 10 up Z) a 4 mm pipe is
+/// pi * 2^2 * 50: the mitre at the corner adds as much as it takes. Its open ends are square to
+/// the edges, at x = 0 and z = 10, and its mitred corner reaches 2 past the block's corner.
+#[test]
+fn a_pipe_follows_a_chain_of_a_bodys_edges() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+    run(&mut s, "solid.pipe", json!({"path_body": "Block", "path_edges": [[20, 0, 0], [40, 0, 5]], "diameter": 4, "body_name": "Tube"}));
+    let m = run(&mut s, "inspect.measure", json!({"bodies": ["Tube"]}));
+    let v = m["total"]["volume_mm3"].as_f64().unwrap();
+    assert!(rel(v, PI * 4.0 * 50.0) < 1e-4, "{v} vs {}", PI * 200.0);
+    let bb = &m["bodies"][0]["bbox"];
+    let at = |k: &str, i: usize| bb[k][i].as_f64().unwrap();
+    for (got, want) in
+        [(at("min", 0), 0.0), (at("max", 0), 42.0), (at("min", 1), -2.0), (at("max", 1), 2.0), (at("min", 2), -2.0), (at("max", 2), 10.0)]
+    {
+        assert!((got - want).abs() < 1e-6, "{bb}");
+    }
+    // The path is saved as the body and its points, and comes back the same.
+    let saved = s.doc.to_json();
+    assert!(saved.contains("\"path_body\"") && saved.contains("\"path_edges\""), "{saved}");
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    let v2 = run(&mut reopened, "inspect.measure", json!({"bodies": ["Tube"]}))["total"]["volume_mm3"].as_f64().unwrap();
+    assert!(rel(v2, v) < 1e-9, "{v2} vs {v}");
+}
+
+/// #16084: a pipe round the closed circular edge of a cylinder is a torus: 2 pi^2 R r^2 with
+/// R = 10 and r = 2. The pipe uses the cylinder, so deleting the cylinder would fail the pipe.
+#[test]
+fn a_pipe_round_a_closed_edge_is_a_torus() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [0, 0, 1], "radius": 10, "height": 5, "body_name": "Can", "name": "Can"}));
+    run(&mut s, "solid.pipe", json!({"path_body": "Can", "path_edges": [[10, 0, 5]], "diameter": 4, "body_name": "Ring"}));
+    let v = run(&mut s, "inspect.measure", json!({"bodies": ["Ring"]}))["total"]["volume_mm3"].as_f64().unwrap();
+    let want = 2.0 * PI * PI * 10.0 * 4.0;
+    assert!(rel(v, want) < 1e-4, "{v} vs {want}");
+    let deps = run(&mut s, "timeline.dependents", json!({"feature": "Can"}));
+    assert_eq!(deps["would_fail"].as_array().map(Vec::len), Some(1), "{deps}");
 }
 
 /// Regression: batches were rolled back by undoing as many steps as the undo history grew,
@@ -6065,6 +6115,32 @@ fn revolve_two_sides_symmetric_and_to_object() {
     let corner = if b90["max"][1].as_f64().unwrap_or(0.0) > 1.0 { json!([0, 12, 0]) } else { json!([0, -12, 0]) };
     let (v, _) = ring(json!({"to": corner}));
     assert!(rel(v, v90) < 1e-3, "{v} {v90}");
+}
+
+/// A circle revolved two-sided by 130° and 40° builds, as 40° and 130° does: a 170° sector of
+/// a torus, V = 2 π² R r² (170 / 360) by Pappus, for the report's three circles (the centre
+/// R from the axis and at a height, radius r: 30, 0, 5; 25, 10, 4; 40, 10, 8). The kernel's
+/// check refused it as "Bad Infinite Region": the ray that looks for the infinite region
+/// entered and left the torus face 2.5° and 2° off its surface within one leaf of the face's
+/// cache, and the line/surface solve gave it the exit as its first hit (#20499).
+#[test]
+fn revolve_two_sides_130_and_40_builds_like_40_and_130() {
+    let sector = |centre: [f64; 2], radius: f64, angle: &str, angle2: &str| {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "YZ"}));
+        run(&mut s, "sketch.circle.center", json!({"center": centre, "radius": radius}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.revolve", json!({"sketch": "Sketch1", "axis": "Z", "angle": angle, "exact_regions": true, "angle2": angle2}));
+        let m = run(&mut s, "inspect.measure", json!({}));
+        m["total"]["volume_mm3"].as_f64().unwrap_or(0.0)
+    };
+    for (centre, radius) in [([30.0, 0.0], 5.0), ([25.0, 10.0], 4.0), ([40.0, 10.0], 8.0)] {
+        let pappus = 2.0 * PI * PI * centre[0] * radius * radius * 170.0 / 360.0;
+        for (angle, angle2) in [("130 deg", "40 deg"), ("40 deg", "130 deg")] {
+            let v = sector(centre, radius, angle, angle2);
+            assert!(rel(v, pappus) < 1e-9, "centre {centre:?} r {radius} {angle} / {angle2}: {v} against {pappus}");
+        }
+    }
 }
 
 /// Shell Inside, Outside and Both, and a tangent chain of open faces.

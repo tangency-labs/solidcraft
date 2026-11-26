@@ -106,6 +106,8 @@ enum Cancel {
     Agent,
     /// A save being written: it stops unless the file is already being replaced.
     Save,
+    /// A drawing being read for the Insert SVG/DXF window: its answer is dropped.
+    DrawingRead,
     /// The request held behind the agent's command that has this [`ControlRequest::serial`].
     AgentQueued(u64),
     /// The summary row standing for the waiting requests past [`MAX_WAITING_SHOWN`].
@@ -185,6 +187,14 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
     // The bodies of a design just opened, meshed for the view.
     if let Some((done, total)) = crate::open_meshing::progress(app) {
         rows.push(Row { steps: Some((done, total)), ..Row::new("meshing".into(), solidcraft_ui_text::tr("operations.meshing").to_string()) });
+    }
+    // A drawing being read for the Insert SVG/DXF window before its placement window opens.
+    if let Some(read) = &app.insert_read {
+        rows.push(Row {
+            cancelling: read.cancelled,
+            cancel: Some(Cancel::DrawingRead),
+            ..Row::new(format!("insert_read:{}", read.serial), crate::dialogs_insert_drawing::reading_label(&read.name))
+        });
     }
     if let Some(saving) = &app.saving {
         let command = saving.command();
@@ -355,6 +365,12 @@ pub fn cancel(app: &mut SolveApp, key: &str) -> Result<(), String> {
         }
         Cancel::SketchRefresh => crate::sketch_view::cancel_refresh(app),
         Cancel::Agent => app.stop_agent_command(),
+        Cancel::DrawingRead => {
+            if let Some(read) = app.insert_read.as_mut() {
+                read.cancel();
+            }
+            return Ok(());
+        }
         // It says itself how it ended: a save already replacing the file goes through.
         Cancel::Save => {
             if let Some(saving) = &app.saving {

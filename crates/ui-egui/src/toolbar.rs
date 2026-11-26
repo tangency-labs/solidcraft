@@ -768,6 +768,7 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(row("export_glb", &format!("{}…", app.tr("ui.export_glb")), "", "export", shown));
     rows.push(row("export_usd", &format!("{}…", app.tr("ui.export_usd")), "", "export", shown));
     rows.push(row("file.export_urdf", app.tr_label("Export URDF…"), &key("file.export_urdf"), "export", shown));
+    rows.push(row("file.export_mjcf", app.tr_label("Export MJCF…"), &key("file.export_mjcf"), "export", shown));
     rows.push(row("file.export_sdf", app.tr_label("Export SDF Model…"), &key("file.export_sdf"), "export", shown));
     rows.push(row("export_json", app.tr_label("Export Design as JSON…"), "", "export", true));
     // Each installed export slot is a format of its own, labelled with the plugin's name.
@@ -860,6 +861,7 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         "file.export_view_dxf" => FileAction::Command("file.export_view_dxf").run(app),
         "file.export_obj" => FileAction::Command("file.export_obj").run(app),
         "file.export_urdf" => FileAction::Command("file.export_urdf").run(app),
+        "file.export_mjcf" => FileAction::Command("file.export_mjcf").run(app),
         "file.export_sdf" => FileAction::Command("file.export_sdf").run(app),
         "document.metadata" => FileAction::Command("document.metadata").run(app),
         "drawing.print" => app.start(id),
@@ -1010,7 +1012,11 @@ pub(crate) fn download_design(app: &mut SolveApp) {
 }
 
 pub(crate) fn export(app: &mut SolveApp, ext: &str) {
-    export_as(app, ext, None);
+    match ext {
+        // MJCF is saved as the usual `.xml`, which alone does not name the format.
+        "mjcf" => export_as(app, "xml", Some("mjcf")),
+        _ => export_as(app, ext, None),
+    }
 }
 
 /// Each format's own export command, started from its key, command search or the File menu,
@@ -1027,6 +1033,7 @@ pub(crate) fn start_export(app: &mut SolveApp, id: &str) -> bool {
         "file.export_step" => ("step", false),
         "file.export_obj" => ("obj", false),
         "file.export_urdf" => ("urdf", false),
+        "file.export_mjcf" => ("mjcf", false),
         "file.export_sdf" => ("sdf", false),
         "file.export_stl" => ("stl", true),
         "file.export_3mf" => ("3mf", true),
@@ -3709,6 +3716,27 @@ mod header_report_tests {
         crate::keymap::press(&mut h.app, "Alt+Shift+F8", false);
         assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("file.save_mesh"), "STL opens Save As Mesh");
         crate::dialogs::cancel(&mut h.app);
+    }
+
+    /// File › Export MJCF… offers the usual `.xml` name and writes MuJoCo's format there, which a
+    /// `.xml` path alone would not pick (#20786).
+    #[test]
+    fn file_menu_exports_mjcf_as_an_xml_file() {
+        let mut h = crate::scenario::Harness::new();
+        let offered = std::rc::Rc::new(std::cell::RefCell::new(Vec::<(String, Vec<String>)>::new()));
+        let (seen, dir) = (offered.clone(), h.dir.clone());
+        h.app.services.pick_save = Some(Box::new(move |name, extensions| {
+            seen.borrow_mut().push((name.to_string(), extensions.iter().map(|e| e.to_string()).collect()));
+            Box::pin(std::future::ready(Some(dir.join(name).to_string_lossy().into_owned())))
+        }));
+        h.app.run("solid.box", json!({"length":2,"width":3,"height":4})).unwrap();
+        h.app.session.doc_mut().name = "Bracket".into();
+        run_file_row(&mut h.app, "file.export_mjcf");
+        h.frames(3);
+        h.settle();
+        assert_eq!(offered.borrow().last().cloned(), Some(("Bracket.xml".to_string(), vec!["xml".to_string()])));
+        let xml = std::fs::read_to_string(h.dir.join("Bracket.xml")).unwrap();
+        assert!(xml.contains("<mujoco"), "an MJCF model is written: {xml}");
     }
 
     /// What an exporter leaves out is said on the status line, and each warning stays in Messages

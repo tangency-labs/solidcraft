@@ -228,11 +228,13 @@ fn collect_kept<T>(f: impl FnOnce() -> T) -> (T, Vec<String>) {
     (out, kept)
 }
 
-/// The text a link gives a parameter of unit `unit` for `v` (mm, radians or a number): the
-/// number in that unit, then the unit, so the design reads it back as the same value.
+/// The text a link gives a parameter of unit `unit` for `v` (mm, radians, grams, mm³, mm² or a
+/// number): the number in that unit, then the unit, so the design reads it back as the same value.
 fn value_text(v: f64, unit: &str) -> String {
     match expr::unit_info(unit) {
-        Some((Kind::Length | Kind::Angle, scale)) if scale > 0.0 => format!("{} {}", v / scale, unit.trim()),
+        Some((Kind::Length | Kind::Angle | Kind::Mass | Kind::Volume | Kind::Area, scale)) if scale > 0.0 => {
+            format!("{} {}", v / scale, unit.trim())
+        }
         _ => format!("{v}"),
     }
 }
@@ -243,13 +245,14 @@ fn stored_unit(text: &str) -> (&str, Kind) {
     (unit, expr::unit_info(unit).map_or(Kind::Unitless, |(k, _)| k))
 }
 
-/// The number a reply shows for a value's text: mm, degrees or the number.
+/// The number a reply shows for a value's text: mm, degrees, grams, mm³, mm² or the number
+/// (`expr::reported_value`).
 fn reported(text: &str) -> Option<f64> {
     let v: f64 = text.split_whitespace().next()?.parse().ok()?;
     let (unit, _) = stored_unit(text);
     let v = match expr::unit_info(unit) {
         Some((Kind::Angle, scale)) => (v * scale).to_degrees(),
-        Some((Kind::Length, scale)) => v * scale,
+        Some((Kind::Length | Kind::Mass | Kind::Volume | Kind::Area, scale)) => v * scale,
         _ => v,
     };
     Some(expr::round_reported(v))
@@ -291,6 +294,9 @@ impl Host {
                 Kind::Length => "a length",
                 Kind::Angle => "an angle",
                 Kind::Unitless => "a number",
+                Kind::Mass => "a mass",
+                Kind::Volume => "a volume",
+                Kind::Area => "an area",
             };
             return Err(format!("expected {wanted}, got {}", v.describe()));
         }

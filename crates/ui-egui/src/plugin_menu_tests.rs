@@ -2369,6 +2369,64 @@ fn each_plugin_command_has_its_own_menu_row_and_ribbon_button_and_a_disabled_plu
 }
 
 #[test]
+fn plugin_ribbon_slot_labels_and_model_tab_opt_out() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let mold = listed(
+        "mold",
+        vec![
+            entry("feature", "edit", json!([{"kind":"ribbon","name":"Inspect","label":"형상인식","model_group":false}])),
+            entry("height", "edit", json!([{"kind":"ribbon","name":"Inspect","label":"높이측정","model_group":false}])),
+            entry("overview", "read", json!([{"kind":"ribbon","name":"Inspect","label":"개요"}])),
+        ],
+    );
+    app.plugin_menu.listed = vec![mold];
+    let model_buttons = ribbon_buttons(&app);
+    assert_eq!(model_buttons.len(), 1);
+    assert_eq!(model_buttons[0].id, "plugin_entry:mold:overview");
+    assert_eq!(model_buttons[0].label, "개요");
+}
+
+#[test]
+fn plugin_slots_display_custom_label_on_ribbon_tab() {
+    let mut h = crate::scenario::Harness::new();
+    let root = h.dir.join("plugins-slots-custom");
+    let package = root.join("mold-helper");
+    std::fs::create_dir_all(&package).unwrap();
+    std::fs::write(package.join("entry.wasm"), []).unwrap();
+    std::fs::write(
+        package.join("plugin.json"),
+        json!({
+            "id": "mold-helper", "name": "Mold helper", "version": "1.0", "capabilities": ["commands@0.1"],
+            "runtime": {
+                "module": "entry.wasm",
+                "commands": [],
+                "entries": [
+                    {"name": "feature", "effect": "edit", "slots": [{"kind": "ribbon", "name": "Inspect", "label": "형상인식", "model_group": false}]},
+                    {"name": "height", "effect": "edit", "slots": [{"kind": "ribbon", "name": "Inspect", "label": "높이측정", "model_group": false}]}
+                ]
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    h.app.session.plugin_state.plugins_dir = Some(root);
+    crate::plugin_slots::invalidate(&mut h.app);
+    crate::plugin_slots::refresh(&mut h.app);
+    crate::plugin_slots::wait_for_discovery(&mut h.app);
+    crate::test_support::frame(&h.ctx, egui::RawInput::default(), |ui| {
+        let groups = crate::plugin_slots::ribbon_groups(&h.app, ui, "INSPECT");
+        assert_eq!(groups.len(), 1);
+        let group = groups[0].group(ui);
+        assert_eq!(group.label, "Mold helper");
+        assert_eq!(group.buttons.len(), 2);
+        assert_eq!(group.buttons[0].label, "형상인식");
+        assert_eq!(group.buttons[1].label, "높이측정");
+    });
+    crate::plugin_menu::ensure_listed(&mut h.app);
+    assert!(crate::plugin_menu::ribbon_buttons(&h.app).is_empty());
+}
+
+#[test]
 fn plugin_dialog_titles_are_the_command_alone_and_plugin_text_has_no_long_dashes() {
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
     let mut gears = listed("gears", vec![entry("spur", "edit", json!([]))]);
@@ -3410,6 +3468,32 @@ mod native {
         assert!(h.app.plugin_menu.dialogs.is_empty());
         h.frames(2);
         assert!(!h.app.preview.active, "no dialog, no preview");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A preview that fails says why at the top of its dialog, in the error colour (#22297). The
+    /// dialogs are out of the list while they are drawn, so the line used never to show.
+    #[test]
+    fn a_failed_preview_shows_its_error_at_the_top_of_the_dialog() {
+        let root = view_package("preview-error");
+        let mut h = crate::scenario::Harness::new();
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        h.app.plugin_menu.loaded = true;
+        let fail = h.app.plugin_menu.listed[0].entries.iter().position(|entry| entry.name == "fail").expect("fail");
+        open_entry(&mut h.app, 0, fail);
+        previewed(&mut h);
+        let error = h.app.preview.error.clone().expect("the failed run's error");
+        assert!(!h.app.preview.active, "nothing is drawn for a run that failed");
+        h.frames(2);
+        let line = solidcraft_ui_text::format("ui.plugin_dialog_preview_failed", &[("error", &error)]);
+        let shown = solidcraft_ui_registry::rect_of(&format!("dialog:status:{line}")).expect("the dialog shows the preview's error");
+        // Above the Preview box, which comes after the fields.
+        let preview_box = h.widget("Preview").expect("the Preview box");
+        assert!(f64::from(shown.center().y) < preview_box[1], "the error is above the fields and the Preview box: {shown:?} vs {preview_box:?}");
+        // Preview off: no error is shown.
+        h.app.plugin_menu.dialogs[0].preview = false;
+        previewed(&mut h);
+        assert!(preview_error(&h.app, &h.app.plugin_menu.dialogs[0]).is_none());
         let _ = std::fs::remove_dir_all(root);
     }
 
