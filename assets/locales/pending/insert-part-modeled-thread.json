@@ -1,0 +1,34 @@
+{
+  "en": {
+    "parts.thread.modeled": "Modeled thread",
+    "parts.thread.modeled_hint": "a modeled thread is cut into the body: slower to build, and right for a section view, a render or a print"
+  },
+  "de": {
+    "parts.thread.modeled": "Modelliertes Gewinde",
+    "parts.thread.modeled_hint": "ein modelliertes Gewinde wird in den Körper geschnitten: langsamer im Aufbau, richtig für Schnittansicht, Rendering oder Druck"
+  },
+  "ja": {
+    "parts.thread.modeled": "モデル化したねじ",
+    "parts.thread.modeled_hint": "モデル化したねじはボディに切り込まれます。作成に時間がかかりますが、断面表示、レンダリング、造形に適しています"
+  },
+  "zh": {
+    "parts.thread.modeled": "建模螺纹",
+    "parts.thread.modeled_hint": "建模螺纹会切入实体：生成较慢，适合剖视图、渲染或打印"
+  },
+  "ko": {
+    "parts.thread.modeled": "모델링된 나사산",
+    "parts.thread.modeled_hint": "모델링된 나사산은 바디를 깎아 만듭니다. 생성이 느리지만 단면 보기, 렌더링, 출력에 알맞습니다"
+  },
+  "ar": {
+    "parts.thread.modeled": "سن منمذج",
+    "parts.thread.modeled_hint": "السن المنمذج يُقطع في الجسم: بناؤه أبطأ، وهو مناسب للمقطع والتصيير والطباعة"
+  },
+  "he": {
+    "parts.thread.modeled": "תבריג ממודל",
+    "parts.thread.modeled_hint": "תבריג ממודל נחתך בגוף: איטי יותר לבנייה, ומתאים לחתך, לרינדור או להדפסה"
+  },
+  "vi": {
+    "parts.thread.modeled": "Ren dựng hình",
+    "parts.thread.modeled_hint": "ren dựng hình được cắt vào khối: dựng chậm hơn, và phù hợp cho mặt cắt, kết xuất hoặc in"
+  }
+}

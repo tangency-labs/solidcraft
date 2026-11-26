@@ -8,6 +8,8 @@ and selected when the active body is a sheet), and builds parts from a sheet of 
   sketch of lines and circular arcs, or an edge flange from a part edge. A contour flange along an ellipse, a conic or a
   spline is not supported yet ([#15743](https://github.com/tangency-labs/solidcraft/issues/15743)): the free-form panel it
   would make has no closed-form flat, so the flange is refused, naming the curve.
+- **Tab** (`sheet.tab`) adds a flat piece of material to a sheet from a closed sketch on one of
+  its flat faces.
 - [**Hem**](../reference/commands.md#command-sheet.hem) returns a sheet edge back toward the sheet; no new sketch is required.
 - **Fold** (`sheet.fold`) bends the sheet along a sketch line.
 - **Unfold / Refold** (`sheet.unfold`, `sheet.refold`) for working on the flat part.
@@ -324,6 +326,30 @@ refused, and so is a line too short for its bend. Arcs are not supported yet.
 {"command":"sheet.path_flange","params":{"edge":[1,0,20],"sketch":"Path","curves":["p1","p2"]}}
 ```
 
+**Tab** (`sheet.tab`) adds a flat piece of material to a sheet in its own plane: a mounting ear,
+a tongue that goes through a slot in another part, more room round a hole, or a lug added after
+the walls are folded. Sketch a closed profile on a flat face of the sheet (either side, or in a
+plane level with one) so that it touches or overlaps the face's outline, and pick it in the Tab
+dialog (SHEET METAL → CREATE). The profile's area joins that panel through the sheet's thickness,
+as part of its outline: no second body and no seam, and where the profile overlaps the sheet it
+simply merges. The thickness is always the body's rule's. The tab unfolds with its panel, so the
+flat pattern and its DXF carry it, and later flanges, hems and folds use its edges like any other
+edge of the sheet. A tab on a wall that is already folded works the same way, sketched on that
+wall's face.
+
+A tab is refused, with a message saying why, when its profile does not meet the face's outline
+(touching it at a corner only does not count), adds nothing to it, reaches into a bend zone, or
+would overlap another panel of the sheet once folded or in the flat pattern, would join more
+than one panel (two faces side by side in one plane, both touched by the profile), and while the
+sheet is unfolded. Flange on a sketch on the sheet's face still makes a new sheet body of its own.
+
+```json
+{"command":"sheet.tab","params":{"sketch":"Ear"}}
+```
+
+(A 100 x 60 sheet with `Ear` a 40 x 40 rectangle on its top face, 10 mm on the sheet and 30 mm past its long edge:
+one body with a 40 x 30 tab out of that edge, and a flat pattern in one piece.)
+
 A flange can also stand on the far edge of another flange: a return, such as a lip turned in
 along the top of a tray's walls. It runs along that edge from end to end, so it follows the
 closed end of the flange it stands on, slanted or not. Two returns of one feature whose flanges
@@ -497,6 +523,32 @@ For a program that cuts every line it is given, `"bend_lines": false` leaves the
 (`BEND_UP` and `BEND_DOWN` are then empty), and `"layers": "single"` writes every entity on layer
 `0` instead of a layer for each role.
 
+A cutter's software often expects its own layer names and colours. A **DXF profile** is a small
+file a shop writes once for its machine: for each role (the outline, the cut-outs, cut text,
+etched text, bends up, bends down, bend notes, pockets, perforation, roll lines) it gives the
+layer's name, its colour and its linetype (continuous, dashed or hidden), or turns the role off
+so that it is not in the file at all. Pass it as `"profile"`, either the file's path or the
+profile itself:
+
+```json
+{"command":"sheet.export_dxf","params":{"path":"bracket-flat.dxf","profile":"example-laser.json"}}
+{"command":"sheet.export_dxf","params":{"path":"bracket-flat.dxf","profile":{
+  "format":"solidcraft-dxf-profile",
+  "roles":{
+    "outline":{"layer":"CUT","color":7},
+    "cut":{"layer":"CUT","color":7},
+    "bend_up":{"layer":"FOLD","color":3,"linetype":"hidden"},
+    "bend_down":{"layer":"FOLD","color":3,"linetype":"hidden"},
+    "cut_text":{"on":false}}}}}
+```
+
+A role the profile does not mention keeps the layer in the table above, and without a profile
+the file is exactly as described there. The entities and their order do not change, only their
+layers; a role is written when both the export's options and the profile allow it, and
+`"layers": "single"` cannot be combined with a profile. A profile that names an unknown role or
+gives a colour, linetype or layer name that cannot be used is refused with a message saying
+which, and no file is written. The file format: `docs/formats/dxf-profiles.md`.
+
 A bend's angle is how far the sheet turns from flat. Many press brakes are set by the
 **included angle** instead: the angle left between the bend's two sides, 180° less the bend
 angle. A 90° bend is 90° either way, but a 58° bend is set as 122°. The rule's `angle_display`
@@ -544,10 +596,10 @@ extrude of its footprint: through the sheet it is a cut-out (a cylinder a round 
 part way it is a pocket. A primitive cut at any other angle, or across a folded bend, is refused.
 
 Hole machines the sheet the same way from a flat face of any panel, on either side, folded or
-unfolded: square to that panel, a through hole (plain or tapped) is a round cut-out of the flat
-pattern and a `CIRCLE` in the DXF, and a counterbore or a blind flat-bottomed hole is a round
-pocket. A hole slanted to its panel or drilled into the edge of
-the sheet, a countersink and a drill point are refused.
+unfolded: square to that panel, a through hole (plain, countersunk or tapped) is a round cut-out
+of the flat pattern and a `CIRCLE` in the DXF, a countersink keeps its conical bevel on the sheet
+through Unfold / Refold, and a counterbore or a blind flat-bottomed hole is a round pocket. A hole
+slanted to its panel, a countersink across a bend and a drill point are refused.
 
 Parallel, untapered extrude cuts also preserve shallow pockets through Unfold / Refold.
 The pocket floor and side walls remain solid geometry; overlapping cuts from opposite sides

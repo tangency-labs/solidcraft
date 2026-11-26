@@ -84,13 +84,16 @@ fn scratch_dir() -> PathBuf {
     d
 }
 
+fn widget_centre(n: &egui::accesskit::Node) -> Option<[f64; 2]> {
+    n.bounds().filter(|b| b.x1 > b.x0 && b.y1 > b.y0).map(|b| [(b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0])
+}
+
 fn widget_centres(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)], text: &str) -> Vec<[f64; 2]> {
-    let centre = |n: &egui::accesskit::Node| n.bounds().filter(|b| b.x1 > b.x0 && b.y1 > b.y0).map(|b| [(b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0]);
     let mut exact: Vec<_> = nodes
         .iter()
         .rev()
         .filter(|(_, n)| n.label() == Some(text) || n.value() == Some(text))
-        .filter_map(|(_, n)| centre(n).map(|at| (!n.supports_action(egui::accesskit::Action::Click), at)))
+        .filter_map(|(_, n)| widget_centre(n).map(|at| (!n.supports_action(egui::accesskit::Action::Click), at)))
         .collect();
     if !exact.is_empty() {
         // AccessKit node order is not paint order. A tooltip can repeat its button's text;
@@ -105,13 +108,31 @@ fn widget_centres(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)], te
         .filter(|(_, n)| {
             n.role() == egui::accesskit::Role::Button && n.label().is_some_and(|l| l.strip_prefix(text).is_some_and(|r| r.starts_with(' ')))
         })
-        .filter_map(|(_, n)| centre(n))
+        .filter_map(|(_, n)| widget_centre(n))
         .collect()
 }
 
-/// The app in a headless egui context.
+fn widget_near_centres(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)], text: &str, near: &str) -> Option<[f64; 2]> {
+    // A named combo exposes its label and selected value on one node. It is the
+    // exact field requested, even though its value is not to the label's right.
+    if let Some(point) = nodes.iter().rev().filter(|(_, n)| n.label() == Some(near) && n.value() == Some(text)).find_map(|(_, n)| widget_centre(n)) {
+        return Some(point);
+    }
+    let labels = widget_centres(nodes, near);
+    let &[_, ly] = labels.first()?;
+    // A field can carry its row's label too, and the accessibility tree's order doesn't say
+    // which of the two comes first: the label is the leftmost in its row.
+    let lx = labels.iter().filter(|[_, y]| (y - ly).abs() < 1.0).map(|[x, _]| *x).fold(f64::INFINITY, f64::min);
+    widget_centres(nodes, text).into_iter().filter(|[x, _]| *x > lx).min_by(|a, b| {
+        let d = |p: &[f64; 2]| (p[1] - ly).abs() * 4.0 + (p[0] - lx).abs();
+        d(a).total_cmp(&d(b))
+    })
+}
+
+/// The app in a headless egui context. The app is boxed: it is hundreds of kilobytes, and a
+/// helper that returns or holds a harness would keep a copy of it in its stack frame (#21642).
 pub struct Harness {
-    pub app: SolveApp,
+    pub app: Box<SolveApp>,
     pub ctx: egui::Context,
     /// The last frame's platform output (with its accessibility tree: dialog widgets are found
     /// by their text there).
@@ -156,7 +177,7 @@ impl Harness {
         solidcraft_engine::use_import_cache_dir(std::env::temp_dir().join(format!("solidcraft-scenario-imports-{}", std::process::id())));
         solidcraft_ui_text::pin_system_language();
         let mut h = Harness {
-            app: SolveApp::new(Session::default(), Services::default()),
+            app: Box::new(SolveApp::new(Session::default(), Services::default())),
             ctx: {
                 let ctx = egui::Context::default();
                 crate::fonts::setup_bundled_fonts(&ctx);
@@ -269,6 +290,33 @@ impl Harness {
         }
     }
 
+    /// `n` frames, each drawn once the dialog's preview worker has answered: what they show does
+    /// not depend on how fast the worker ran. On a loaded machine a preview's result (an error
+    /// row, say) can otherwise land a frame later than on an idle one.
+    #[cfg(test)]
+    pub fn frames_after_preview(&mut self, n: usize) {
+        for _ in 0..n {
+            self.app.preview.wait_for_worker();
+            self.frame();
+        }
+    }
+
+    /// `n` frames, each drawn once the model behind a finished sketch has been worked out on its
+    /// worker: a command waiting for that model (started while the marker rolls back) opens on
+    /// the same frame however fast the worker ran.
+    #[cfg(test)]
+    pub fn frames_after_sketch_refresh(&mut self, n: usize) {
+        for _ in 0..n {
+            let uids: Vec<u64> = self.app.sketch_refreshes.keys().copied().collect();
+            for uid in uids {
+                if let Some(job) = self.app.sketch_refreshes.remove(&uid) {
+                    self.app.sketch_refreshes.insert(uid, job.completed());
+                }
+            }
+            self.frame();
+        }
+    }
+
     /// One frame in which the platform drops `files`, the pointer last seen at `at` (a drop
     /// itself carries no position with winit 0.30).
     pub fn drop_files(&mut self, at: egui::Pos2, files: Vec<egui::DroppedFileHandle>) {
@@ -297,12 +345,14 @@ impl Harness {
             }
             self.frame();
         }
-        // A file opening, recovering or saving in the background, a view being drawn on a worker,
-        // or a window checking what its material does: wait for it (as a person would).
+        // A file opening, recovering or saving in the background, the offer to stand it up being
+        // worked out (its estimate can end frames after the meshing), a view being drawn on a
+        // worker, or a window checking what its material does: wait for it (as a person would).
         let began = std::time::Instant::now();
         while (!self.app.file_load.idle()
             || self.app.saving.is_some()
             || crate::open_meshing::active(&self.app)
+            || self.app.stand_up_later.is_some()
             || self.app.op_check.busy()
             || !crate::drawing_jobs::idle(&self.app))
             && began.elapsed() < std::time::Duration::from_secs(120)
@@ -363,11 +413,7 @@ impl Harness {
 
     /// The widget showing `text` nearest the label `near` (the field in a label's row).
     pub fn widget_near(&self, text: &str, near: &str) -> Option<[f64; 2]> {
-        let [lx, ly] = self.widgets(near).into_iter().next()?;
-        self.widgets(text).into_iter().filter(|[x, _]| *x > lx).min_by(|a, b| {
-            let d = |p: &[f64; 2]| (p[1] - ly).abs() * 4.0 + (p[0] - lx).abs();
-            d(a).total_cmp(&d(b))
-        })
+        widget_near_centres(&self.output.accesskit_update.as_ref()?.nodes, text, near)
     }
 
     /// Accessibility bounds include scrolled-out page content. Reveal that content with
@@ -463,6 +509,9 @@ impl Harness {
     }
 
     /// Run one step.
+    // The harness runs only under tests, where libtest captures `eprintln!`; `note!` would write
+    // past the capture and fill the logs of passing tests.
+    #[allow(clippy::print_stderr)]
     pub fn step(&mut self, s: &Value) -> Result<(), String> {
         let flag = |k: &str| s.get(k).and_then(Value::as_bool).unwrap_or(false);
         let res =
@@ -610,7 +659,7 @@ impl Harness {
                         self.frames(1);
                     }
                 }
-                let mut old = std::mem::replace(&mut self.app, SolveApp::new(Session::default(), Services::default()));
+                let mut old = std::mem::replace(&mut *self.app, SolveApp::new(Session::default(), Services::default()));
                 if how == "close" {
                     crate::recovery_ui::close(&mut old);
                     // The desktop saves its settings on close and loads them on the next start.

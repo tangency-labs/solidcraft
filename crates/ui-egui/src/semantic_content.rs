@@ -104,6 +104,44 @@ pub(crate) struct Frame {
     finalized: bool,
 }
 
+/// A pop-out Browser has its own frame and pointer captures while sharing the design tree.
+#[derive(Default)]
+pub(crate) struct Detached {
+    frame: Frame,
+    eye: Option<EyeCapture>,
+    row: Option<RowCapture>,
+}
+
+impl Detached {
+    pub(crate) fn show(&mut self, app: &mut SolveApp, ui: &mut Ui, draw: impl FnOnce(&mut SolveApp, &mut Ui)) {
+        let ctx = ui.ctx().clone();
+        let published = PUBLISHED.with(|outputs| std::mem::take(&mut *outputs.borrow_mut()));
+        self.swap(app, &ctx);
+        begin(app, &ctx);
+        draw(app, ui);
+        finalize(app, &ctx);
+        self.swap(app, &ctx);
+        PUBLISHED.with(|outputs| *outputs.borrow_mut() = published);
+    }
+
+    fn swap(&mut self, app: &mut SolveApp, ctx: &egui::Context) {
+        std::mem::swap(&mut self.frame, &mut app.tree.content);
+        ctx.data_mut(|data| {
+            exchange_capture(data, capture_id(), &mut self.eye);
+            exchange_capture(data, row_capture_id(), &mut self.row);
+        });
+    }
+}
+
+fn exchange_capture<T: Copy + Send + Sync + 'static>(data: &mut egui::util::IdTypeMap, id: egui::Id, retained: &mut Option<T>) {
+    let current = data.get_temp::<T>(id);
+    if let Some(retained) = std::mem::replace(retained, current) {
+        data.insert_temp(id, retained);
+    } else {
+        data.remove::<T>(id);
+    }
+}
+
 impl Frame {
     pub(crate) fn owner(&self, owner: ContentOwner) -> Option<&OwnerState> {
         self.owners.get(&owner)
@@ -415,6 +453,24 @@ pub(crate) fn scroll_acknowledged_at(ui: &Ui, rect: Rect, align: egui::Align) ->
 
 pub(crate) fn presented(ui: &Ui) -> bool {
     ui.is_visible() && ui.opacity() > 0.0
+}
+
+/// The presentations drawn so far this frame.
+pub(crate) fn presented_owners(app: &SolveApp) -> Vec<ContentOwner> {
+    app.tree.content.owners.iter().filter(|(_, state)| state.presented).map(|(owner, _)| *owner).collect()
+}
+
+/// The menu a row asked for in a presentation drawn after `before` was taken: a panel in its own
+/// OS window, which is drawn after the frame's [`finalize`] has opened the other rows' menus
+/// (#19364). The next frame's [`begin`] would drop the request, so its window opens it.
+pub(crate) fn take_late_menu(app: &mut SolveApp, before: &[ContentOwner]) -> Option<(egui::Pos2, crate::context_menu::Target)> {
+    let session = app.session.uid;
+    app.tree
+        .content
+        .owners
+        .iter_mut()
+        .filter(|(owner, state)| state.presented && !before.contains(owner))
+        .find_map(|(_, state)| state.actions.as_mut().filter(|actions| actions.session == Some(session))?.take_menu())
 }
 
 /// Finalize content tree hover state, pointer ownership, and drag interactions across panels

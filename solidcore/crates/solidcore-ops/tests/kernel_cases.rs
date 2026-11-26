@@ -11,8 +11,8 @@
 //! - **unsupported**: the kernel alone does not account for the result (`operation_expressible`
 //!   false), the rig itself rated it unsupported, or the conversion does not carry a record yet;
 //! - **unported**: an operation this crate does not have yet, named, so the case is not run;
-//! - **known-failing**: listed in `known_failing.json` beside the corpus, the one list, each entry
-//!   with its reason and issue. A listed case is steady while it reproduces the rig's result,
+//! - **known-failing**: listed in `kernel_cases_known_failing/` beside the corpus, the one list:
+//!   `<area>/<case>.json` per listed case, with its reason and issue. A listed case is steady while it reproduces the rig's result,
 //!   or, when its entry records `fails` (solidcore fails it differently from the rig), while it
 //!   fails exactly so. A listed case that moves from that (it passes, or fails otherwise) is
 //!   reported, so the list can shrink.
@@ -181,10 +181,13 @@ mod f64_bits {
     }
 }
 
-/// An entry of the known-failing list.
+/// An entry of the known-failing list: `kernel_cases_known_failing/<area>/<case>.json`, the case
+/// named by its path (one file per case, so PRs listing or unlisting different cases never touch
+/// the same file).
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Listed {
+    #[serde(skip)]
     case: String,
     issue: String,
     reason: String,
@@ -196,15 +199,45 @@ struct Listed {
     fails: Option<String>,
 }
 
+fn known_failing_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../solidcore/tests/kernel_cases_known_failing")
+}
+
+/// The known-failing list, by case (`<area>/<case>`): one file per case under
+/// [`known_failing_dir`], each `{"issue", "reason", "fails"?}`.
 fn known_failing() -> BTreeMap<String, Listed> {
-    let text = std::fs::read_to_string(corpus().join("known_failing.json")).unwrap();
-    let list: Vec<Listed> = serde_json::from_str(&text).unwrap();
-    let mut out = BTreeMap::new();
-    for l in list {
-        assert!(!l.reason.is_empty() && !l.issue.is_empty(), "{}", l.case);
-        let case = l.case.clone();
-        assert!(out.insert(case.clone(), l).is_none(), "{case} listed twice");
+    fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<String, Listed>) {
+        for e in std::fs::read_dir(dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                walk(root, &p, out);
+                continue;
+            }
+            assert!(
+                p.extension().is_some_and(|x| x == "json") && p.parent() != Some(root),
+                "{}: the known-failing list holds only <area>/<case>.json files",
+                p.display()
+            );
+            let text = std::fs::read_to_string(&p).unwrap();
+            let mut l: Listed =
+                serde_json::from_str(&text).unwrap_or_else(|err| panic!("{}: {err}", p.display()));
+            l.case = p
+                .strip_prefix(root)
+                .unwrap()
+                .with_extension("")
+                .to_string_lossy()
+                .replace('\\', "/");
+            assert!(
+                !l.reason.is_empty() && !l.issue.is_empty(),
+                "{}: issue and reason must not be empty",
+                p.display()
+            );
+            assert!(out.insert(l.case.clone(), l).is_none());
+        }
     }
+    let root = known_failing_dir();
+    let mut out = BTreeMap::new();
+    walk(&root, &root, &mut out);
     out
 }
 
@@ -1001,6 +1034,7 @@ fn call_with_copy(
             let turn = match p.get("turn").map(Value::as_str) {
                 None | Some(Some("mitre")) => Turn::Mitre,
                 Some(Some("swept")) => Turn::Swept,
+                Some(Some("auto")) => Turn::Auto,
                 Some(_) => return Err(bad("turn")),
             };
             let kind = match p["kind"].as_str() {
@@ -4423,7 +4457,7 @@ fn kernel_cases() {
     for k in listed.keys() {
         assert!(
             all.contains(k),
-            "known_failing.json lists {k}, which the corpus does not have"
+            "kernel_cases_known_failing/{k}.json lists a case the corpus does not have: delete it"
         );
     }
 

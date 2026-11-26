@@ -1,0 +1,1 @@
+takes face normals from mesh triangles

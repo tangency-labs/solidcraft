@@ -59,14 +59,21 @@ and help is welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).
   provisional picture from warm geometry caches while rebuilding before editing; caches never
   replace the parametric design. Export to STEP (AP242 with body names, colours and
   components as assemblies; revolved faces as native planes, cylinders, cones, spheres and tori),
-  IGES 5.3 (manifold solid B-reps with names and colours), 3MF, STL (binary/ASCII), OBJ and GLB (placed bodies with their opaque
-  colours, metallic and roughness, in metres with Y up, each part under a node named after its occurrence), and
+  IGES 5.3 (manifold solid B-reps with names and colours), 3MF, STL (binary/ASCII), OBJ and GLB (placed bodies with their
+  colours, metallic, roughness and opacity, and render-setup Glass as glTF transmission, in metres with Y up, each part under a node named after its occurrence), and
   assemblies with joints as URDF for robot simulators (urdf.md);
   3MF, STL, OBJ and glTF 2.0 (`.glb`/`.gltf`, its node tree as components and its materials as
   appearances) import as mesh bodies (they render, measure, move and export; solid features
-  need B-rep bodies). The `mesh.convert` command reconstructs closed meshes as parametric
-  solids — constant-section parts with planar and circular cylindrical faces, any other closed
-  mesh as the faceted solid its triangles describe;
+  need B-rep bodies). The `mesh.convert` command reconstructs closed meshes as parametric solids.
+  Supported straight-extrusion parts and planar shoulders become planar and circular cylindrical
+  faces, including partial circular walls within the chosen tolerance. Other closed meshes become
+  faceted solids with planar faces that follow the source triangles, including closed meshes
+  outside the analytic reconstruction budgets or certificates. Before recognition, triangle winding
+  is made consistent within closed, orientable components. Open, nonmanifold, wholly degenerate
+  and oversized inputs remain refused. All conversions use source-bound face names and support
+  dynamic face attachments. Saved conversions rebuild with the current converter; a reference
+  that no longer resolves is reported as broken. After changing the mesh or fit tolerance,
+  attached sketches may need reattachment;
   STEP import (AP203/AP214/AP242 solids, assemblies, units, names, colours) and IGES import
   (manifold solid B-reps, or trimmed and bounded surfaces sewn into solids) as a base feature
   that later features build on — open a `.step`/`.stp`/`.igs`/`.iges` file, insert one into a

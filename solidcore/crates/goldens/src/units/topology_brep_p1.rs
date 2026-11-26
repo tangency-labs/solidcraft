@@ -1092,7 +1092,7 @@ fn run_rust_op(
         }
         OpIn::SetSize { kind, value } => {
             if *kind == 0 {
-                let r = b.set_this_model_size_estimate(k, *value);
+                let r = b.set_this_model_size_estimate(*value);
                 o.push(r);
                 o.push(b.tolerance());
                 o.push(b.this_model_size_estimate(k, false));
@@ -1100,7 +1100,7 @@ fn run_rust_op(
                 o.push(k.context.this_model_size_estimate(k));
                 o.push(k.context.this_zone_tol_3d());
             } else {
-                b.set_this_large_small_size_ratio(k, *value);
+                b.set_this_large_small_size_ratio(*value);
                 o.push(b.this_large_small_size_ratio(k, false));
                 o.push(b.this_large_small_size_ratio(k, true));
                 // SmContext::GetThisLargeSmallSizeRatio
@@ -1786,7 +1786,7 @@ fn run_rust_op(
 }
 
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
-    run_rust_on(&mut Kernel::default(), i)
+    run_rust_on(&mut crate::runner_kernel(), i)
 }
 
 /// The unit's Rust run of `case` on the caller's kernel `k` (a fresh default kernel in
@@ -1980,7 +1980,7 @@ fn run_rust_intersection(
 ) -> Result<Output, HarnessError> {
     cross_body_input(i, other)?; // same input-kind check, no native construction/import
     let run = || -> Result<Output, Fail> {
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let first = i
             .brep
             .as_ref()

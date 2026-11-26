@@ -42,8 +42,10 @@ impl JsonSchema for BalloonIdParam {
 #[schemars(deny_unknown_fields)]
 pub struct AddParams {
     pub view: ViewIdParam,
-    /// The edge its arrow points at, with `path`: the occurrences its body is placed through, from
-    /// the top, which is the part the balloon numbers.
+    /// The edge its arrow points at. `path` is a field of this object, not of the call: the ids of
+    /// the occurrences its body is placed through, from the top (at least one), which is the part
+    /// the balloon numbers. Example: `{"point": [40, 0, 0], "path": [3]}`. A design of one part,
+    /// with no component, has no occurrence to name: place the part as a component first.
     pub edge: EdgeParam,
     /// The balloon's centre on paper, in millimetres from the view's centre.
     pub at: [f64; 2],
@@ -93,6 +95,20 @@ pub struct BalloonSet {
 pub struct RepairParams {
     pub balloon: BalloonIdParam,
     pub pick: PickParam,
+}
+
+/// What `drawing.balloon.delete` takes.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct DeleteParams {
+    pub balloon: BalloonIdParam,
+}
+
+/// What `drawing.balloon.delete` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DeleteResult {
+    pub balloon: String,
 }
 
 /// What `drawing.balloon.edit` returns.

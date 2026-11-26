@@ -2,7 +2,8 @@
 //! export; B-rep features refuse them.
 
 use solidcraft_geom::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, hash_map::Entry};
+use std::hash::{Hash, Hasher};
 
 use solidcore_record::Vec3;
 use solidcraft_geom::Mesh;
@@ -72,7 +73,7 @@ impl TriMesh {
         let mut set = std::collections::HashSet::new();
         for t in &self.triangles {
             for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
-                set.insert((a.min(b), a.max(b)));
+                set.insert(MeshEdge::new(a, b));
             }
         }
         set.len()
@@ -88,10 +89,52 @@ impl TriMesh {
     }
 }
 
+#[derive(PartialEq, Eq)]
+struct MeshEdge(u32, u32);
+
+impl MeshEdge {
+    fn new(a: u32, b: u32) -> Self {
+        Self(a.min(b), a.max(b))
+    }
+}
+
+impl Hash for MeshEdge {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // Hash both indices in one write while keeping the table entries aligned to u32.
+        state.write_u64((u64::from(self.0) << 32) | u64::from(self.1));
+    }
+}
+
 /// A mesh body from triangles (`positions` in mm). Coincident vertices are merged, degenerate
 /// triangles dropped, and a closed mesh with inward winding is turned outward.
 pub fn mesh_body(positions: &[Vec3], triangles: &[[u32; 3]]) -> Result<Body> {
     mesh_body_with_normals(positions, triangles, &[])
+}
+
+/// Create a reduced copy using SolidCore's checked connectivity, without import-time welding or
+/// winding repair. Returns the mesh and its achieved triangle count; it may exceed the target.
+pub fn reduce_mesh(body: &Body, target: usize) -> Result<(Body, usize)> {
+    let (positions, triangles) = body.triangle_mesh().ok_or_else(|| KernelError::Invalid("select a mesh body".into()))?;
+    let points: Vec<[f64; 3]> = positions.iter().map(|p| [p.x, p.y, p.z]).collect();
+    let normals: Vec<[f64; 3]> = body.triangle_corner_normals().unwrap_or_default().iter().flatten().map(|n| [n.x, n.y, n.z]).collect();
+    let run = || solidcore_ops::reduce_mesh(&points, triangles.as_flattened(), (!normals.is_empty()).then_some(normals.as_slice()), target);
+    let reduction = match solidcraft_smlib::stop::token() {
+        Some(token) => solidcore_ops::cancel::within(&token, run),
+        None => run(),
+    }
+    .map_err(|e| match e {
+        e @ solidcore_ops::Error::Refused { .. } => KernelError::Invalid(format!("mesh reduction failed: {e}")),
+        solidcore_ops::Error::Internal(m) => KernelError::Internal(format!("mesh reduction: {m}")),
+        e => KernelError::Failed(format!("mesh reduction failed: {e}")),
+    })?;
+    let mesh = TriMesh {
+        positions: reduction.positions.into_iter().map(Vec3::from).collect(),
+        triangles: reduction.indices.as_chunks::<3>().0.to_vec(),
+        corner_normals: reduction.corner_normals.as_deref().unwrap_or_default().as_chunks::<3>().0.iter().map(|n| n.map(Vec3::from)).collect(),
+        // Reduction preserves the boundary and edge incidence.
+        closed: body.is_closed_mesh(),
+    };
+    Ok((Body::of_mesh(mesh).with_color(body.color()), reduction.reduced_triangles))
 }
 
 /// A mesh with optional independent, finite nonzero shading normals per triangle corner.
@@ -180,24 +223,31 @@ fn unify_winding(m: &mut TriMesh) -> bool {
     // A side fits in a u32 because construction caps the mesh at MAX_TRIANGLES.
     const _: () = assert!(MAX_TRIANGLES < (u32::MAX / 3) as usize);
     let mut links = vec![[UNPAIRED; 3]; m.triangles.len()];
+    let side_links = links.as_flattened_mut();
     let mut first_sides = HashMap::new();
     for (triangle, &[a, b, c]) in (0u32..).zip(&m.triangles) {
         for (side, (a, b)) in (0u32..).zip([(a, b), (b, c), (c, a)]) {
             let current = triangle * 3 + side;
-            let first = first_sides.entry((a.min(b), a.max(b))).or_insert(current);
-            if *first == current || *first == UNPAIRED {
+            let first = match first_sides.entry(MeshEdge::new(a, b)) {
+                Entry::Vacant(entry) => {
+                    entry.insert(current);
+                    continue;
+                }
+                Entry::Occupied(entry) => entry.into_mut(),
+            };
+            if *first == UNPAIRED {
                 continue;
             }
-            let Some(previous) = links.get_mut((*first / 3) as usize).and_then(|row| row.get_mut((*first % 3) as usize)) else { continue };
+            let Some(previous) = side_links.get_mut(*first as usize) else { continue };
             if *previous == UNPAIRED {
                 *previous = current;
-                if let Some(link) = links.get_mut(triangle as usize).and_then(|row| row.get_mut(side as usize)) {
+                if let Some(link) = side_links.get_mut(current as usize) {
                     *link = *first;
                 }
             } else {
                 // The third use disconnects the first two; further uses stay disconnected.
                 let second = std::mem::replace(previous, UNPAIRED);
-                if let Some(link) = links.get_mut((second / 3) as usize).and_then(|row| row.get_mut((second % 3) as usize)) {
+                if let Some(link) = side_links.get_mut(second as usize) {
                     *link = UNPAIRED;
                 }
                 *first = UNPAIRED;
@@ -343,5 +393,34 @@ impl Body {
         placed.splits = self.splits.clone();
         placed.regularization_protected = self.regularization_protected;
         Some(placed)
+    }
+}
+
+#[cfg(test)]
+mod reduction_tests {
+    use super::*;
+
+    #[test]
+    fn stopped_reduction_is_refused_and_scope_is_restored() {
+        let points =
+            [Vec3::new(0.0, 0.0, 0.0), Vec3::new(2.0, 0.0, 0.0), Vec3::new(2.0, 2.0, 0.0), Vec3::new(0.0, 2.0, 0.0), Vec3::new(1.0, 1.0, 0.0)];
+        let body = mesh_body(&points, &[[0, 1, 4], [1, 2, 4], [2, 3, 4], [3, 0, 4]]).unwrap();
+        let stop = crate::Stop::new();
+        stop.stop();
+        let typed = stop.within(|| {
+            let token = solidcraft_smlib::stop::token().unwrap();
+            solidcore_ops::cancel::within(&token, || {
+                solidcore_ops::reduce_mesh(
+                    &[[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [2.0, 2.0, 0.0], [0.0, 2.0, 0.0], [1.0, 1.0, 0.0]],
+                    &[0, 1, 4, 1, 2, 4, 2, 3, 4, 3, 0, 4],
+                    None,
+                    2,
+                )
+            })
+        });
+        assert!(matches!(typed, Err(solidcore_ops::Error::Cancelled)));
+        let error = stop.within(|| reduce_mesh(&body, 2)).unwrap_err();
+        assert!(matches!(&error, KernelError::Failed(_)) && error.to_string().to_lowercase().contains("cancel"));
+        assert!(reduce_mesh(&body, 2).is_ok_and(|(reduced, count)| count < 4 && !reduced.is_closed_mesh()));
     }
 }

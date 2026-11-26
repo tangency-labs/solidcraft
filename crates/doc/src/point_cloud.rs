@@ -54,6 +54,9 @@ pub struct PointCloud {
     /// The file's length unit (one of [`UNITS`]): the points were scaled from it to millimetres.
     #[serde(default = "mm")]
     pub units: String,
+    /// The file's up axis: the points were turned from it to stand on the design's Z (#8609).
+    #[serde(default, skip_serializing_if = "Up::is_z")]
+    pub up: Up,
     /// Where the cloud sits in the design: a rigid move of its points.
     #[serde(default = "identity", skip_serializing_if = "is_identity")]
     pub transform: Mat,
@@ -99,6 +102,95 @@ pub enum Source<'a> {
     Corners(&'a [f32]),
     /// A column on the element itself.
     Element(&'a [f32]),
+}
+
+/// The axis a point cloud file has up. Many scanners and phone scanning apps write Y up, so
+/// such a scan, read as it is, lies on its back in a Z-up design (#8609).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Up {
+    /// The file's Z is up, as the design's is: the points are as the file has them.
+    #[default]
+    Z,
+    /// The file's Y is up: the points are turned a quarter turn about X, Y to Z.
+    Y,
+}
+
+impl Up {
+    fn is_z(&self) -> bool {
+        *self == Up::Z
+    }
+    /// From its name (`z` or `y`).
+    pub fn parse(s: &str) -> Option<Up> {
+        match s {
+            "z" => Some(Up::Z),
+            "y" => Some(Up::Y),
+            _ => None,
+        }
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            Up::Z => "z",
+            Up::Y => "y",
+        }
+    }
+    /// A point of a file with this axis up, in a frame with Z up.
+    pub fn stand(self, [x, y, z]: [f64; 3]) -> [f64; 3] {
+        match self {
+            Up::Z => [x, y, z],
+            Up::Y => [x, -z, y],
+        }
+    }
+    /// The inverse of [`Up::stand`]: a point with Z up, back as the file has it.
+    pub fn lay(self, [x, y, z]: [f64; 3]) -> [f64; 3] {
+        match self {
+            Up::Z => [x, y, z],
+            Up::Y => [x, z, -y],
+        }
+    }
+}
+
+/// Pre-resolved filters for point-level visibility checks (`PointCloud::point_filter`).
+#[derive(Clone, Debug)]
+pub struct PointFilter<'a> {
+    entries: Vec<(Source<'a>, &'a Keep)>,
+}
+
+impl PointFilter<'_> {
+    /// Whether this cloud has no point-level filters active.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Whether point `index` at design-space position `world` passes every active point filter.
+    pub fn keeps(&self, index: usize, world: Vec3) -> bool {
+        for (source, keep) in &self.entries {
+            let val = match *source {
+                Source::Coordinate(0) => world.x,
+                Source::Coordinate(1) => world.y,
+                Source::Coordinate(2) => world.z,
+                Source::Coordinate(_) => continue,
+                Source::Corners(v) | Source::Element(v) => match v.get(index) {
+                    Some(x) => f64::from(*x),
+                    None => return false,
+                },
+            };
+            if !val.is_finite() {
+                return false;
+            }
+            let ok = match keep {
+                Keep::Range { range: [lo, hi] } => (*lo..=*hi).contains(&val),
+                Keep::Values { values } => {
+                    let rounded = val.round();
+                    (f64::from(i32::MIN)..=f64::from(i32::MAX)).contains(&rounded) && values.contains(&(rounded as i32))
+                }
+            };
+            if !ok {
+                return false;
+            }
+        }
+        true
+    }
 }
 
 /// How a cloud's points are coloured.
@@ -204,6 +296,20 @@ impl PointCloud {
     pub fn len(&self) -> usize {
         self.points.len()
     }
+    /// Turn the points (and their origin) from the file's axis as it was read with `self.up`
+    /// to `up`, in the cloud's own frame. The turns are quarter turns, so the coordinates are
+    /// only swapped and negated, never rounded. The placement (`transform`) is left alone.
+    pub fn set_up(&mut self, up: Up) {
+        if up == self.up {
+            return;
+        }
+        let turn = |p: [f64; 3]| up.stand(self.up.lay(p));
+        let o = turn([self.origin.x, self.origin.y, self.origin.z]);
+        let points: Vec<f32> = self.points.iter().flat_map(|p| turn(p.map(f64::from)).map(|v| v as f32)).collect();
+        self.origin = Vec3::new(o[0], o[1], o[2]);
+        self.points = Points::new(points.into());
+        self.up = up;
+    }
     pub fn is_empty(&self) -> bool {
         self.points.len() == 0
     }
@@ -212,6 +318,25 @@ impl PointCloud {
         let p = self.points.get(i)?;
         let local = self.origin + Vec3::new(f64::from(p[0]), f64::from(p[1]), f64::from(p[2]));
         Some(crate::apply_point(&self.transform, local))
+    }
+    /// Transform a world-space ray `(o, d)` into the raw `points` frame (before `origin` and
+    /// `transform`). Because `transform` is rigid, distances along and perpendicular to the ray
+    /// are preserved exactly.
+    pub fn local_ray(&self, o: Vec3, d: Vec3) -> Option<(Vec3, Vec3)> {
+        let dir = d.normalized()?;
+        if crate::is_identity(&self.transform) {
+            return Some((o - self.origin, dir));
+        }
+        let inv = crate::mat_inverse(&self.transform)?;
+        let lo = crate::apply_point(&inv, o) - self.origin;
+        let ld = (crate::apply_point(&inv, o + dir) - crate::apply_point(&inv, o)).normalized()?;
+        Some((lo, ld))
+    }
+    /// Pre-resolved filter test for points of this cloud: matches the GPU shader and histogram
+    /// filter semantics on `On::Point` properties and design coordinates (`x`, `y`, `z`).
+    pub fn point_filter(&self) -> PointFilter<'_> {
+        let entries = self.filters.iter().filter_map(|f| self.source(&f.property, On::Point).map(|source| (source, &f.keep))).collect();
+        PointFilter { entries }
     }
     /// The corners of the box around the points, in the cloud's placement (mm), or `None` for
     /// an empty cloud.
@@ -561,6 +686,7 @@ mod tests {
             colors: Colors(colors.into()),
             source_points: 2,
             units: "m".into(),
+            up: Up::Z,
             transform: IDENTITY,
             point_size: 2.0,
             color_by: ColorBy::File,

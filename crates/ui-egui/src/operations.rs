@@ -96,6 +96,8 @@ enum Cancel {
     History,
     /// The `n`th history command waiting its turn (from 0).
     HistoryQueued(usize),
+    /// Cache catch-up after a sketch restores the complete model.
+    SketchRefresh,
     /// A delete's check.
     DeleteCheck,
     /// Opening a feature's editor.
@@ -174,7 +176,7 @@ pub fn serial() -> u64 {
 }
 
 fn command_name(id: &str) -> String {
-    solidcraft_ui_text::tr_label(crate::command_label(id)).to_string()
+    crate::agent_label::name(id)
 }
 
 /// The operations under way, oldest first.
@@ -234,6 +236,16 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
             ..Row::new("feature_edit".into(), solidcraft_ui_text::tr("operations.feature_edit").to_string())
         });
     }
+    if let Some(job) = app.sketch_refreshes.get(&app.session.uid) {
+        rows.push(Row {
+            steps: evaluation_steps(&job.progress),
+            cancelling: job.progress.is_cancelled(),
+            cancel: Some(Cancel::SketchRefresh),
+            ..Row::new("sketch_refresh".into(), command_name("sketch.finish"))
+        });
+    } else if app.session.needs_sketch_finish_evaluation() && !app.stopped_sketch_refreshes.contains(&app.session.uid) {
+        rows.push(Row { queued: true, cancel: Some(Cancel::SketchRefresh), ..Row::new("sketch_refresh".into(), command_name("sketch.finish")) });
+    }
     if let Some(check) = &app.delete_check {
         rows.push(Row {
             steps: evaluation_steps(&check.progress),
@@ -252,9 +264,17 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
     if app.agent_computing().is_some() {
         let steps = app.agent_steps();
         let label = steps.as_ref().map(|s| s.current()).or_else(|| app.agent_computing().map(|(_, label)| label)).unwrap_or_default();
-        // A batch counts its steps; one command, the features it evaluates.
+        // A batch counts its steps; one command, the features it evaluates; a plugin, what it reports.
         let steps = steps.and_then(|s| if s.counts().1 > 1 { Some(s.counts()) } else { evaluation_steps(&s.progress) });
-        rows.push(Row { steps, cancel: Some(Cancel::Agent), agent: true, next: app.agent_next(), ..Row::new("agent".into(), label) });
+        let percent = app.agent_plugin_percent();
+        rows.push(Row {
+            steps: steps.or(percent.map(|p| (p, 100))),
+            percent: steps.is_none() && percent.is_some(),
+            cancel: Some(Cancel::Agent),
+            agent: true,
+            next: app.agent_next(),
+            ..Row::new("agent".into(), label)
+        });
     }
     // Each design change waiting behind it is an operation of its own, named by its place in the
     // queue (1 runs next).
@@ -333,6 +353,7 @@ pub fn cancel(app: &mut SolveApp, key: &str) -> Result<(), String> {
                 edit.cancel();
             }
         }
+        Cancel::SketchRefresh => crate::sketch_view::cancel_refresh(app),
         Cancel::Agent => app.stop_agent_command(),
         // It says itself how it ended: a save already replacing the file goes through.
         Cancel::Save => {

@@ -179,7 +179,7 @@ pub(crate) fn item(app: &SolveApp, id: &str) -> Option<Item> {
             Some((_, label)) => act("ui.repeat", &format!("Repeat {label}"), "redo"),
             None => act("ui.repeat", "Repeat", "redo").on(false),
         }),
-        "delete" => Some(act("ui.delete", "Delete", "delete").key("Del").on(!app.session.selection.is_empty())),
+        "delete" => Some(act("ui.delete", "Delete", "delete").key("Del").on(app.session.has_selection())),
         "undo" => Some(cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty())),
         _ if crate::render_workspace::active(app)
             && matches!(id, "appearance.assign" | "render.settings.set" | "render.camera.fit" | "render.compare") =>
@@ -374,7 +374,7 @@ pub(crate) fn paint(painter: &Painter, c: Pos2, scale: f32, studio: Studio, item
         Some(item) => painter.text(
             c,
             Align2::CENTER_CENTER,
-            solidcraft_ui_text::tr_label(&item.label),
+            solidcraft_ui_text::tr_command(&item.id, &item.label),
             FontId::proportional((t.font_title * scale).max(t.font_badge)),
             t.text,
         ),

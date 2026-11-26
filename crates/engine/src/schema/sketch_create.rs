@@ -81,6 +81,15 @@ pub enum ConstructionMethod {
     Bisector,
 }
 
+/// `sketch.crosshairs`: a fixed horizontal and vertical construction line through the sketch's
+/// origin (#22234).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CrosshairsParams {
+    /// The sketch (default: the one being edited).
+    pub sketch: Option<SketchRef>,
+}
+
 /// The curves and constraints created, together with the sketch solve.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ConstructionLineResult {
@@ -160,6 +169,19 @@ fn spline_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error>
         Value::String(s) => Ok(s),
         _ => Err(serde::de::Error::custom("must be a spline id")),
     }
+}
+
+/// Expose an editable control point spline’s polygon as construction segments.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SplineControlPolygonParams {
+    /// The spline's curve id.
+    #[serde(deserialize_with = "spline_id")]
+    pub curve: String,
+    /// The sketch (default: the one being edited).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub sketch: Option<SketchRef>,
 }
 
 /// Give a fit point spline a tangent handle at each fit point, where the curve already runs.
@@ -1127,6 +1149,92 @@ pub struct FitPointSplineParams {
     pub sketch: Option<SketchTarget>,
 }
 
+/// A contour of points for a tolerance fit (#20048): plain [x, y] coordinates, 2 to 10000 of
+/// them. A contour is data, not picks, so no point references.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContourPoints(pub Vec<[f64; 2]>);
+
+impl<'de> Deserialize<'de> for ContourPoints {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let Value::Array(list) = Value::deserialize(d)? else {
+            return Err(D::Error::custom(whole("`points` must be a list")));
+        };
+        if list.len() < 2 || list.len() > 10_000 {
+            return Err(D::Error::custom(whole("a contour needs 2 to 10000 points")));
+        }
+        let mut out = Vec::with_capacity(list.len());
+        for v in &list {
+            let bad = || D::Error::custom(whole("each point is [x, y]"));
+            let pair = v.as_array().filter(|a| a.len() == 2).ok_or_else(bad)?;
+            let x = pair[0].as_f64().filter(|x| x.is_finite()).ok_or_else(bad)?;
+            let y = pair[1].as_f64().filter(|y| y.is_finite()).ok_or_else(bad)?;
+            out.push([x, y]);
+        }
+        Ok(ContourPoints(out))
+    }
+}
+
+impl JsonSchema for ContourPoints {
+    fn schema_name() -> Cow<'static, str> {
+        "ContourPoints".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<[f64; 2]>();
+        json_schema!({
+            "description": "The contour's points, 2 to 10000, in order along it, each [x, y].",
+            "type": "array", "items": point, "minItems": 2, "maxItems": 10000
+        })
+    }
+}
+
+/// Fit one spline to a contour of many points within a tolerance (#20048), passing through as
+/// few of the points as the tolerance needs.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = points_required)]
+pub struct ToleranceSplineParams {
+    /// The contour's points, in order along it.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ContourPoints")]
+    pub points: Option<ContourPoints>,
+    /// How far (mm) any given point may stray from the spline. Default: 0.01.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    pub tolerance: Option<crate::schema::sketch_equation::Tolerance>,
+    /// Close the contour smoothly. Default: false.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Periodic")]
+    pub periodic: Option<Periodic>,
+    /// Make it construction geometry. Default: false.
+    #[serde(default)]
+    pub construction: Option<bool>,
+    /// The sketch (default: the one being edited).
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+}
+
+/// What `sketch.spline.fit_tolerance` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ToleranceSplineResult {
+    /// The new curve's id, as a list (as other drawing commands return it).
+    pub curves: Vec<String>,
+    /// The new curve's id.
+    pub curve: String,
+    /// How many of the given points the spline goes through (a closed contour's start counted
+    /// once).
+    pub points: usize,
+    /// The contour closes smoothly where it ends.
+    pub closed: bool,
+    /// The largest distance (mm) found between the spline and the given points.
+    pub deviation: f64,
+    /// The sketch's solve: `{solved, dof}`.
+    pub sketch: Value,
+    /// What it added: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Value>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// Draw a control point spline: a cubic one (`sketch.spline.control_point`) or one of degree 5
 /// (`sketch.spline.control_point_5`), shaped by its control points.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1143,6 +1251,9 @@ pub struct ControlPointSplineParams {
     /// Make it construction geometry. Default: false.
     #[serde(default)]
     pub construction: Option<bool>,
+    /// Create the spline's selectable construction sides in the same edit. Default: false.
+    #[serde(default)]
+    pub control_polygon: Option<bool>,
     /// The sketch (default: the one being edited).
     #[serde(default)]
     pub sketch: Option<SketchTarget>,
@@ -1419,20 +1530,30 @@ fn text_align_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({"type": "string", "pattern": word_pattern(&["left", "center", "centre", "right"])})
 }
 
-fn text_letter_spacing<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    nullable(d, |v| v.as_f64().and_then(params::finite).map_or_else(|| refuse("`letter_spacing` must be a length in mm"), Ok))
+/// A text's `letter_spacing`: a number of mm, or an expression.
+fn text_letter_spacing<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+    nullable(d, |v| if text_number_form(&v) { Ok(v) } else { refuse("`letter_spacing` must be a length in mm, or an expression") })
 }
 
 fn text_letter_spacing_schema(_: &mut SchemaGenerator) -> Schema {
-    json_schema!({"type": "number", "exclusiveMinimum": -1e9, "exclusiveMaximum": 1e9})
+    json_schema!({"anyOf": [{"type": "number", "exclusiveMinimum": -1e9, "exclusiveMaximum": 1e9}, expression_string()]})
 }
 
-fn text_line_spacing<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    nullable(d, |v| v.as_f64().and_then(params::finite).filter(|s| *s > 0.0).map_or_else(|| refuse("`line_spacing` must be a positive factor"), Ok))
+/// A text's `line_spacing`: a factor above 0, or an expression.
+fn text_line_spacing<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+    nullable(d, |v| {
+        if !text_number_form(&v) {
+            return refuse("`line_spacing` must be a positive factor, or an expression");
+        }
+        match v.as_f64() {
+            Some(s) if s <= 0.0 => refuse("`line_spacing` must be a positive factor"),
+            _ => Ok(v),
+        }
+    })
 }
 
 fn text_line_spacing_schema(_: &mut SchemaGenerator) -> Schema {
-    json_schema!({"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1e9})
+    json_schema!({"anyOf": [{"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1e9}, expression_string()]})
 }
 
 fn text_path<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
@@ -1501,15 +1622,16 @@ pub struct TextKeys {
     #[serde(default, deserialize_with = "text_align", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "text_align_schema")]
     pub align: Option<String>,
-    /// Extra space between letters, in mm. Default: 0. When editing, kept when left out.
+    /// Extra space between letters: a number of mm or an expression. Default: 0. When editing,
+    /// kept when left out.
     #[serde(default, deserialize_with = "text_letter_spacing", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "text_letter_spacing_schema")]
-    pub letter_spacing: Option<f64>,
-    /// The line distance as a multiple of the font's (above 0). Default: 1. When editing, kept
-    /// when left out.
+    pub letter_spacing: Option<Value>,
+    /// The line distance as a multiple of the font's (above 0), or an expression. Default: 1.
+    /// When editing, kept when left out.
     #[serde(default, deserialize_with = "text_line_spacing", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "text_line_spacing_schema")]
-    pub line_spacing: Option<f64>,
+    pub line_spacing: Option<Value>,
     /// A curve id of the sketch the baseline follows; empty: none. `at` and `angle` then do not
     /// place the text, and the curve becomes construction, a guide the letters stand on. When
     /// editing, kept when left out.
@@ -1700,6 +1822,12 @@ pub struct TextExpressions {
     /// The angle.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub angle: Option<String>,
+    /// The letter spacing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub letter_spacing: Option<String>,
+    /// The line spacing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line_spacing: Option<String>,
     /// The words (`text_expression`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
@@ -1750,7 +1878,7 @@ pub struct TextEditsResult {
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum EditTextResult {
-    One(TextResult),
+    One(Box<TextResult>),
     Many(TextEditsResult),
 }
 

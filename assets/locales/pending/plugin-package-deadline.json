@@ -1,0 +1,38 @@
+{
+  "en": {
+    "prefs.plugin_busy_running": "A plugin package job is still running: {what}, for {seconds} s. It ends by itself after {limit} s, or when it finishes; then try again.",
+    "prefs.plugin_job_abandoned": "{command}: the plugin package job did not finish in {seconds} s and was abandoned. Nothing of it was applied."
+  },
+  "de": {
+    "prefs.plugin_busy_running": "Ein Plugin-Paketauftrag läuft noch: {what}, seit {seconds} s. Er endet von selbst nach {limit} s oder sobald er fertig ist; danach erneut versuchen.",
+    "prefs.plugin_job_abandoned": "{command}: Der Plugin-Paketauftrag wurde nicht in {seconds} s fertig und wurde abgebrochen. Nichts davon wurde übernommen."
+  },
+  "ar": {
+    "prefs.plugin_busy_running": "مهمة حزمة إضافة لا تزال قيد التنفيذ: {what}، منذ {seconds} ث. تنتهي من تلقاء نفسها بعد {limit} ث أو عند اكتمالها؛ ثم حاول مرة أخرى.",
+    "prefs.plugin_job_abandoned": "{command}: لم تكتمل مهمة حزمة الإضافة خلال {seconds} ث وتم التخلي عنها. لم يُطبَّق منها شيء."
+  },
+  "he": {
+    "prefs.plugin_busy_running": "משימת חבילת תוסף עדיין פועלת: {what}, כבר {seconds} שנ׳. היא מסתיימת מעצמה אחרי {limit} שנ׳ או כשתושלם; אז אפשר לנסות שוב.",
+    "prefs.plugin_job_abandoned": "{command}: משימת חבילת התוסף לא הסתיימה תוך {seconds} שנ׳ ונזנחה. דבר ממנה לא הוחל."
+  },
+  "ja": {
+    "prefs.plugin_busy_running": "プラグインパッケージの処理がまだ実行中です: {what}、{seconds} 秒経過。完了するか {limit} 秒後に自動的に終了します。その後にもう一度お試しください。",
+    "prefs.plugin_job_abandoned": "{command}: プラグインパッケージの処理が {seconds} 秒以内に終わらなかったため中止しました。何も適用されていません。"
+  },
+  "ko": {
+    "prefs.plugin_busy_running": "플러그인 패키지 작업이 아직 실행 중입니다: {what}, {seconds}초째. 완료되거나 {limit}초 후에 자동으로 끝납니다. 그 뒤에 다시 시도하세요.",
+    "prefs.plugin_job_abandoned": "{command}: 플러그인 패키지 작업이 {seconds}초 안에 끝나지 않아 중단되었습니다. 적용된 것은 없습니다."
+  },
+  "vi": {
+    "prefs.plugin_busy_running": "Một tác vụ gói plugin vẫn đang chạy: {what}, đã {seconds} giây. Nó tự kết thúc sau {limit} giây hoặc khi xong; sau đó hãy thử lại.",
+    "prefs.plugin_job_abandoned": "{command}: tác vụ gói plugin không xong trong {seconds} giây và đã bị bỏ. Không có gì được áp dụng."
+  },
+  "zh": {
+    "prefs.plugin_busy_running": "插件包任务仍在运行：{what}，已 {seconds} 秒。它会在完成或 {limit} 秒后自动结束，之后请重试。",
+    "prefs.plugin_job_abandoned": "{command}：插件包任务在 {seconds} 秒内未完成，已被放弃。未应用任何内容。"
+  },
+  "fr": {
+    "prefs.plugin_busy_running": "Une opération sur un paquet de plugiciel est toujours en cours : {what}, depuis {seconds} s. Elle se termine automatiquement après {limit} s ou lorsqu’elle est achevée ; réessayez ensuite.",
+    "prefs.plugin_job_abandoned": "{command} : l’opération sur le paquet de plugiciel ne s’est pas terminée en {seconds} s et a été abandonnée. Aucun changement n’a été appliqué."
+  }
+}
