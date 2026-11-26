@@ -57,7 +57,9 @@ pub fn offset_contour(
 /// A closed profile `segs` moved `depth` across its plane, as [`offset_contour`] moves an open
 /// one, where the last piece ends where the first starts and meets it there at a corner like any
 /// other: at a sharp one beside an arc, both moved pieces end where the shifted curves cross
-/// nearest the corner. A lip's band edge is its face's loop moved this way.
+/// nearest the corner. A lip's band edge is its face's loop moved this way. Only neighbouring
+/// pieces are met: moved past a neck, the loop can cross itself, so a caller checks the moved loop
+/// as a region before it builds on it.
 ///
 /// # Errors
 /// A [`ContourRefusal`] naming why the shifted profile does not hold together.
@@ -182,9 +184,11 @@ fn offset_profile(
                 } else {
                     start + sweep
                 };
-                // The sweep from `begin` to `end` nearest the drawn one, the same way round.
-                let off = end - begin - sweep;
-                let cut = sweep + (off - TAU * (off / TAU).round());
+                // The drawn sweep, changed by how far each end moved along the circle (less than
+                // half a turn: the crossing nearest its corner). Wrapping the two moves together
+                // instead would take a long arc cut much shorter for one a whole turn longer.
+                let moved = |x: f64| x - TAU * (x / TAU).round();
+                let cut = sweep + moved(end - (start + sweep)) - moved(begin - start);
                 if !(cut.signum() == sweep.signum() && cut.abs() > 1e-9) {
                     return Err(ContourRefusal::ArcTooShort);
                 }
