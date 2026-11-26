@@ -7,8 +7,9 @@
 
 use std::f64::consts::PI;
 
+use solidcraft_kernel::affine;
 use solidcraft_kernel::services::boolean::union_copies;
-use solidcraft_kernel::services::{CheckLevel, ExactBody as Body, Order, affine, make_box, make_sphere};
+use solidcraft_kernel::services::{CheckLevel, ExactBody as Body, Order, make_box, make_sphere};
 
 use super::*;
 
