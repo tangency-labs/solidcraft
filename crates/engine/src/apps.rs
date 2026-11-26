@@ -206,6 +206,8 @@ pub fn preview(program: &str, args: &[String], format: &str) -> Result<String, S
     let ext = if format == "3mf-tagged" { "3mf" } else { format };
     let file = format!("/home/me/My part-v1.{ext}");
     let vars = Vars { file: &file, name: "My part", dir: "/home/me", format };
+    // Before a program is chosen, the command shows where it will go.
+    let program = if program.trim().is_empty() { "<program>" } else { program };
     let mut argv = vec![program.to_string()];
     for arg in args {
         argv.push(expand_arg(arg, Some(&vars))?);
