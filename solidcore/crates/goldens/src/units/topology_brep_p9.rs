@@ -382,7 +382,7 @@ fn rust(i: &Inputs, mut b: Brep, initial: [f64; 2]) -> Result<Output, HarnessErr
                     id(split.edges.map(|v| v[1])),
                     id(split.vertex),
                 ]);
-                Ok(split.status())
+                Ok(crate::output::split_edge_status(split))
             }
             5 => {
                 let face = if i.variant == 1 {

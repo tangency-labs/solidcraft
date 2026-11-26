@@ -96,7 +96,30 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             h["references"] = json!([{"edge": o, "distance": "hole.reference1"}, {"edge": o, "distance": "hole.reference2"}]);
             h
         }),
+        ("hole_hardware", {
+            let mut h = hole(json!({"type": "simple"}));
+            h["hardware"] = json!({"kind": "stud", "thread": "M3", "length": "hole.hardware_length", "part": "stud.m3"});
+            h
+        }),
         ("thread", json!({"type": "thread", "face": o, "length": "thread.length"})),
+        (
+            "shaft_spline",
+            json!({"type": "shaft_spline", "shaft": o, "shaft_start": o, "bore": o, "bore_start": o, "form": "involute",
+                "teeth": "shaft_spline.teeth", "length": "shaft_spline.length",
+                "module": "shaft_spline.module", "pressure_angle": "shaft_spline.pressure_angle", "addendum": "shaft_spline.addendum",
+                "dedendum": "shaft_spline.dedendum", "root_fillet": "shaft_spline.root_fillet", "profile_shift": "shaft_spline.profile_shift",
+                "thinning": "shaft_spline.thinning", "hub_addendum": "shaft_spline.hub_addendum", "tip_clearance": "shaft_spline.tip_clearance",
+                "form_clearance": "shaft_spline.form_clearance", "major_diameter": "shaft_spline.major_diameter",
+                "minor_diameter": "shaft_spline.minor_diameter", "tooth_width": "shaft_spline.tooth_width", "flank_angle": "shaft_spline.flank_angle",
+                "root_round": "shaft_spline.root_round", "tip_size": "shaft_spline.tip_size", "major_clearance": "shaft_spline.major_clearance",
+                "minor_clearance": "shaft_spline.minor_clearance", "hub_tip_round": "shaft_spline.hub_tip_round",
+                "side_clearance": "shaft_spline.side_clearance", "hub_root_round": "shaft_spline.hub_root_round",
+                "hub_diameter": "shaft_spline.hub_diameter", "master_angle": "shaft_spline.master_angle",
+                "cutter_diameter": "shaft_spline.cutter_diameter", "end_chamfer": "shaft_spline.end_chamfer",
+                "entry_chamfer": "shaft_spline.entry_chamfer", "end_chamfer_distance2": "shaft_spline.end_chamfer_distance2",
+                "end_chamfer_angle": "shaft_spline.end_chamfer_angle", "entry_chamfer_distance2": "shaft_spline.entry_chamfer_distance2",
+                "entry_chamfer_angle": "shaft_spline.entry_chamfer_angle"}),
+        ),
         ("loft", json!({"type": "loft", "sections": []})),
         ("sweep", json!({"type": "sweep", "sketch": 1, "profiles": {"type": "all"}, "path_sketch": 2, "path": ["l1"]})),
         (
@@ -105,6 +128,7 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
                 "orientation": {"direction": [0, 1, 0]}, "twist": "sweep.twist", "scale": "sweep.scale"}),
         ),
         ("shell", json!({"type": "shell", "faces": [o], "thickness": "shell.thickness"})),
+        ("dome", json!({"type": "dome", "face": o, "height": "dome.height"})),
         ("draft", json!({"type": "draft", "faces": [o], "angle": "draft.angle", "neutral": plane("draft_neutral"), "pull": [0, 0, 1]})),
         ("construction_plane", json!({"type": "construction_plane", "plane": plane("cplane")})),
         (
@@ -143,6 +167,7 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             json!({"type": "frame_member", "path_sketch": 1, "profile": {"source": "sketch", "sketch": 2, "profiles": {"type": "all"}},
                 "anchor": "bottom_left", "mirror": true}),
         ),
+        ("frame_cope", json!({"type": "frame_cope", "member": "B", "tools": ["B"], "end": "start"})),
         (
             "frame_trim",
             json!({"type": "frame_trim", "members": [{"feature": "F", "line": "l1"}],
@@ -236,6 +261,11 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             json!({"type": "surface_blend", "from": {"body": "B", "edges": [o]}, "to": {"body": "C", "edges": [o]}, "align": [o, o], "seam": [o, o]}),
         ),
         ("surface_offset", json!({"type": "surface_offset", "faces": [o], "distance": "soff.distance", "tolerance": "soff.tolerance"})),
+        (
+            "surface_midsurface",
+            json!({"type": "surface_midsurface", "faces": [o, o], "max_thickness": "smid.max_thickness", "min_thickness": "smid.min_thickness",
+                "suppress_holes_below": "smid.suppress_holes_below"}),
+        ),
         // The Class-A surface family (surface.blend/boundary/match/fair).
         (
             "surface_blend",
@@ -276,6 +306,21 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             json!({"type": "surface_trim", "body": "B", "plane": plane("trim"), "keep": o, "with": "B", "keep_with": [o, o], "stitch": true, "extend": true}),
         ),
         ("move", json!({"type": "move", "bodies": ["B"], "translate": ["move.x", "move.y", "move.z"], "angle": "move.angle"})),
+        (
+            "capture_position",
+            json!({
+                "type": "capture_position",
+                "moves": [{
+                    "occurrence": 1,
+                    "space": "local",
+                    "translate": ["capture.x", "capture.y", "capture.z"],
+                    "origin": ["capture.ox", "capture.oy", "capture.oz"],
+                    "rotate_axis": [0.0, 1.0, 0.0],
+                    "angle": "capture.angle"
+                }],
+                "joints": [{"joint": 2, "values": [0.5]}]
+            }),
+        ),
         ("import", json!({"type": "import", "file": "a.step", "step": ""})),
         ("mesh_convert", json!({"type": "mesh_convert", "body": "B", "tolerance": "mesh_convert.tolerance"})),
         ("mesh_reduce", json!({"type": "mesh_reduce", "body": "B", "triangle_count": 10})),
@@ -292,9 +337,9 @@ pub(super) fn with_refs(name: &str, mut v: Value) -> Value {
     let tool = json!({"body": "B", "point": o});
     let extra = match name {
         "extrude" | "extrude_thin" | "revolve" | "sweep" | "sweep_options" | "pipe" | "coil" | "cell_grid" | "thicken" => json!({"targets": ["B"]}),
-        "fillet_constant" | "fillet_chord" | "fillet_curvature" | "fillet_variable" | "fillet_spline" | "chamfer" | "shell" | "draft"
+        "fillet_constant" | "fillet_chord" | "fillet_curvature" | "fillet_variable" | "fillet_spline" | "chamfer" | "shell" | "dome" | "draft"
         | "offset_face" | "delete_face" | "replace_face" | "sheet_flange" | "sheet_hem" | "sheet_perforate" | "sheet_path" | "sheet_tab"
-        | "sheet_unfold" | "boss" | "lip" | "snap_fit" | "rest" | "surface_offset" => {
+        | "sheet_unfold" | "boss" | "lip" | "snap_fit" | "rest" | "surface_offset" | "surface_midsurface" => {
             json!({"body": "B"})
         }
         "sheet_bead" => json!({"body": "B"}),

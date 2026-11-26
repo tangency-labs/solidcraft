@@ -1,8 +1,42 @@
 use solidcraft_engine::Session;
 use solidcraft_engine::panels::*;
 
-use super::runtime::standalone_header_action;
 use super::*;
+
+pub(crate) struct CatalogueLayoutStore<'a>(pub(crate) &'a mut dyn commands::LayoutCatalogue);
+
+impl PanelLayoutStore for CatalogueLayoutStore<'_> {
+    fn remembered_key(&self, workspace: &WorkspaceId) -> Option<&[u8]> {
+        self.0.state().remembered(workspace).map(commands::StoredEnvelope::bytes)
+    }
+
+    fn current_envelope(&self, state: &LayoutReply, registry: &PanelRegistry) -> PanelResult<LayoutEnvelope> {
+        commands::current_envelope_snapshot(self.0, state, registry)
+    }
+
+    fn execute_action(&mut self, action: LayoutAction, sink: &mut dyn ActionSink, registry: &PanelRegistry) -> PanelResult<LayoutReply> {
+        commands::execute_layout_action(
+            action,
+            &mut commands::PanelCommandContext { sink, registry, catalogue: self.0, web: cfg!(target_arch = "wasm32") },
+        )
+    }
+}
+
+pub(crate) struct CatalogueLayoutStoreRef<'a>(pub(crate) &'a dyn commands::LayoutCatalogue);
+
+impl PanelLayoutStore for CatalogueLayoutStoreRef<'_> {
+    fn remembered_key(&self, workspace: &WorkspaceId) -> Option<&[u8]> {
+        self.0.state().remembered(workspace).map(commands::StoredEnvelope::bytes)
+    }
+
+    fn current_envelope(&self, state: &LayoutReply, registry: &PanelRegistry) -> PanelResult<LayoutEnvelope> {
+        commands::current_envelope_snapshot(self.0, state, registry)
+    }
+
+    fn execute_action(&mut self, _action: LayoutAction, _sink: &mut dyn ActionSink, _registry: &PanelRegistry) -> PanelResult<LayoutReply> {
+        Err(error(Rule::Capability, "read-only catalogue layout store"))
+    }
+}
 
 /// Later content adapters supply their own services. The app integration exposes
 /// only an immutable Session during refresh; a layout tick cannot run a document
@@ -24,7 +58,7 @@ pub struct AppPanelRuntime {
     services: Box<dyn AppPanelServices>,
     native: Box<dyn NativeHostAdapter>,
     #[cfg(not(target_arch = "wasm32"))]
-    desktop: Option<super::native::DesktopNativeAdapter>,
+    desktop: Option<super::DesktopNativeAdapter>,
     /// The drag's window has its height before its panel measured its content.
     #[cfg(not(target_arch = "wasm32"))]
     drop_fit: bool,
@@ -542,7 +576,7 @@ impl AppPanelRuntime {
     #[cfg(not(target_arch = "wasm32"))]
     fn enable_desktop_windows(&mut self, ctx: &egui::Context) -> PanelResult<()> {
         if self.production.is_some() && self.desktop.is_none() && !ctx.embed_viewports() {
-            let desktop = super::native::DesktopNativeAdapter::default();
+            let desktop = super::DesktopNativeAdapter::default();
             self.set_native_adapter(Box::new(desktop.clone()))?;
             self.desktop = Some(desktop);
         }
@@ -558,7 +592,7 @@ impl AppPanelRuntime {
         enabled: bool,
         drawn: &mut Vec<egui::ViewportId>,
     ) -> PanelResult<()> {
-        use super::native_ui::WindowAction;
+        use super::NativeWindowAction as WindowAction;
 
         let (Some(desktop), Some(state)) = (self.desktop.clone(), self.production.clone()) else { return Ok(()) };
         self.show_drop_window(ctx, &desktop);
@@ -602,7 +636,7 @@ impl AppPanelRuntime {
                     Ok(false) => return Ok(()),
                     Err(reason) => {
                         self.recover_unopened_window(&app.session, host, &section)?;
-                        app.set_status(solidcraft_ui_text::tr(super::workspace::rule_key(reason.rule)).to_owned(), true);
+                        app.set_status(solidcraft_ui_text::tr(super::rule_key(reason.rule)).to_owned(), true);
                         return Err(reason);
                     }
                     Ok(true) => {
@@ -617,7 +651,7 @@ impl AppPanelRuntime {
                             let _blur = content.app.blur.begin(ui.ctx());
                             let before = crate::semantic_content::presented_owners(content.app);
                             let painted = solidcraft_ui_registry::isolated(|| {
-                                super::native_ui::paint(&mut self.runtime, &mut services, &mut content, &host, &section, ui, enabled)
+                                super::paint_native_window(&mut self.runtime, &mut services, &mut content, &host, &section, ui, enabled)
                             });
                             // A window dropped before its panel measured its content fits
                             // it once measured, as the app's side cards do.
@@ -634,12 +668,7 @@ impl AppPanelRuntime {
                                 let needed = inner.and_then(|inner| {
                                     Some((
                                         inner,
-                                        content_height(
-                                            measure.as_deref(),
-                                            active,
-                                            inner.width(),
-                                            super::native_ui::window_chrome(ui.ctx(), actions),
-                                        )?,
+                                        content_height(measure.as_deref(), active, inner.width(), super::native_window_chrome(ui.ctx(), actions))?,
                                     ))
                                 });
                                 if let Some((inner, needed)) = needed {
@@ -696,10 +725,10 @@ impl AppPanelRuntime {
     /// that screen place, with the panel's own paint: release opens it only where
     /// this showed it. The panel's window then keeps that same window.
     #[cfg(not(target_arch = "wasm32"))]
-    fn show_drop_window(&mut self, ctx: &egui::Context, desktop: &super::native::DesktopNativeAdapter) {
+    fn show_drop_window(&mut self, ctx: &egui::Context, desktop: &super::DesktopNativeAdapter) {
         let Some(host) = self.host.as_mut() else { return };
         if let Some((instance, outer)) = host.take_window_landing() {
-            desktop.place(ctx, &instance, super::workspace::egui_rect(outer));
+            desktop.place(ctx, &instance, super::egui_rect(outer));
             self.fit_window = self.drop_fit.then(|| (instance.clone(), std::time::Instant::now()));
             let opened = self.runtime.layout().layout().containing(&instance).ok().and_then(|section| match &section.location {
                 SectionLocation::Window { host, .. } => Some(host.clone()),
@@ -727,7 +756,7 @@ impl AppPanelRuntime {
         let landing = layout.layout().containing(&instance).ok().zip(layout.layout().instance(&instance).ok()).and_then(|(section, panel)| {
             let spec = layout.registry().get(&panel.kind).ok()?;
             let bounds = spec.size_bounds(Zone::Window);
-            chrome = super::native_ui::window_chrome(ctx, !spec.header_actions.is_empty());
+            chrome = super::native_window_chrome(ctx, !spec.header_actions.is_empty());
             let size = match in_app {
                 None => window_size(section.size, bounds),
                 Some((zone, size, header, column, measure)) => {
@@ -756,13 +785,13 @@ impl AppPanelRuntime {
             return;
         }
         let shown = ctx.show_viewport_immediate(viewport, builder, |ui, class| {
-            super::native_ui::paint_drop(ui, host.window_card(), if side.is_some() { 0.0 } else { chrome });
+            super::paint_native_drop(ui, host.window_card(), if side.is_some() { 0.0 } else { chrome });
             class != egui::ViewportClass::EmbeddedWindow && ui.input(|input| input.viewport().native_pixels_per_point.is_some())
         });
         // The OS reports the window where it was before this frame's move, so
         // release keeps the rectangle requested for it: where it is now shown.
         if shown {
-            host.confirm_window_shown(corner, super::workspace::logical_rect(outer));
+            host.confirm_window_shown(corner, super::logical_rect(outer));
         } else {
             ctx.request_repaint();
         }
@@ -860,7 +889,7 @@ impl AppPanelRuntime {
         self.reconcile(session)?;
         self.refresh_metrics()?;
         if let Some(host) = &mut self.host {
-            host.capture_reservations(&self.runtime, self.catalogue.as_ref())?;
+            host.capture_reservations(&self.runtime, &CatalogueLayoutStoreRef(self.catalogue.as_ref()))?;
             host.note_native_capabilities(self.native.capabilities());
         }
         let result = self.host.as_mut().ok_or_else(|| error(Rule::Lifecycle, "universal panel host disabled"))?.prepare_in_domain(
@@ -928,7 +957,7 @@ impl AppPanelRuntime {
         app.panel_content_frame = self.host.as_ref().and_then(WorkspacePanelHost::frame).cloned();
         if let Some(frame) = &app.panel_content_frame {
             for section in &frame.layout.sections {
-                let rect = super::workspace::egui_rect(section.outer);
+                let rect = super::egui_rect(section.outer);
                 match section.instance.0.as_str() {
                     "browser" | "render-browser" => {
                         app.shell.browser = Some(rect);
@@ -978,7 +1007,7 @@ impl AppPanelRuntime {
         if deferred {
             host.show_deferred(ui, &mut self.runtime, self.native.as_mut(), &mut services)
         } else {
-            host.show(ui, &mut self.runtime, self.native.as_mut(), &mut services, self.catalogue.as_mut())
+            host.show(ui, &mut self.runtime, self.native.as_mut(), &mut services, &mut CatalogueLayoutStore(self.catalogue.as_mut()))
         }
     }
     fn prepare_host_paint(&mut self, session: &Session, ui: &egui::Ui) -> PanelResult<()> {
@@ -1010,7 +1039,7 @@ impl AppPanelRuntime {
         self.refresh_metrics()?;
         let mut services = self.services.services();
         if let Some(host) = &mut self.host {
-            host.finish(ui, &mut self.runtime, self.native.as_mut(), &mut services, self.catalogue.as_mut())
+            host.finish(ui, &mut self.runtime, self.native.as_mut(), &mut services, &mut CatalogueLayoutStore(self.catalogue.as_mut()))
         } else {
             Ok(())
         }
@@ -1034,7 +1063,7 @@ impl AppPanelRuntime {
     }
     fn refresh_reservations(&mut self) -> PanelResult<()> {
         if let Some(host) = &mut self.host {
-            host.capture_reservations(&self.runtime, self.catalogue.as_ref())?;
+            host.capture_reservations(&self.runtime, &CatalogueLayoutStoreRef(self.catalogue.as_ref()))?;
         }
         Ok(())
     }
@@ -1137,7 +1166,7 @@ struct CommandActionSink<'a> {
 pub(super) struct AdmittedActionSink<'a, 'runtime, 'services> {
     pub(super) live: &'a mut RuntimeActionSink<'runtime, 'services>,
     pub(super) host: Option<&'a mut WorkspacePanelHost>,
-    pub(super) proposal: std::cell::RefCell<Option<super::runtime::RuntimeHostProposal>>,
+    pub(super) proposal: std::cell::RefCell<Option<super::RuntimeHostProposal>>,
 }
 impl AdmittedActionSink<'_, '_, '_> {
     fn project_owned(&self, action: LayoutAction, context: Option<&LayoutPreparationContext>) -> PanelResult<Layout> {
@@ -1190,7 +1219,7 @@ impl AdmittedActionSink<'_, '_, '_> {
             return Err(error(Rule::Revision, "panel dispatch intent changed"));
         }
         let reply = self.live.runtime.commit_host_proposal(proposal, self.live.native, self.live.services)?;
-        Ok(super::runtime::normalize_native_reply(reply, &self.live.native.capabilities()))
+        Ok(super::normalize_native_reply(reply, &self.live.native.capabilities()))
     }
 }
 impl ActionSink for AdmittedActionSink<'_, '_, '_> {
@@ -1246,9 +1275,9 @@ impl crate::SolveApp {
             .as_ref()
             .ok_or_else(|| error(Rule::Availability, "shared panel host unavailable"))
             .and_then(|integration| integration.contextual_availability(&self.session, action));
-        eligibility.err().map(|reason| {
-            solidcraft_ui_text::Locale::for_language(&self.preferences.language).text(super::workspace::rule_key(reason.rule)).to_owned()
-        })
+        eligibility
+            .err()
+            .map(|reason| solidcraft_ui_text::Locale::for_language(&self.preferences.language).text(super::rule_key(reason.rule)).to_owned())
     }
 
     pub fn run_panel_command(&mut self, id: &str, params: &serde_json::Value) -> PanelResult<serde_json::Value> {
@@ -1363,7 +1392,7 @@ pub(super) fn portrait(size: Size) -> Size {
 /// The height a panel window needs at `width` around `chrome`, when its panel
 /// sizes to its content and has measured it.
 #[cfg(not(target_arch = "wasm32"))]
-pub(super) fn content_height(measure: Option<&dyn super::layout::HostContentMetrics>, instance: &InstanceId, width: f32, chrome: f32) -> Option<f32> {
+pub(super) fn content_height(measure: Option<&dyn super::HostContentMetrics>, instance: &InstanceId, width: f32, chrome: f32) -> Option<f32> {
     let request = ContentMeasureRequest { instance: instance.clone(), width, chrome_height: chrome };
     let measure = measure?.measure(&request).ok()?;
     (measure.policy == SideHeightPolicy::Content && measure.needed_height.is_finite() && measure.needed_height < MAX_LOGICAL)
@@ -1393,7 +1422,7 @@ fn window_size(size: Size, (min, max): (Size, Size)) -> Size {
 
 pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
     if let Err(reason) = ensure_production(app) {
-        app.set_status(solidcraft_ui_text::tr(super::workspace::rule_key(reason.rule)).to_owned(), true);
+        app.set_status(solidcraft_ui_text::tr(super::rule_key(reason.rule)).to_owned(), true);
         if let Some(integration) = &mut app.panel_runtime {
             integration.last_error = Some(reason);
         }
@@ -1467,7 +1496,7 @@ pub(crate) fn show_desktop_windows(app: &mut crate::SolveApp, ctx: &egui::Contex
     let shown = integration.show_desktop_windows(app, ctx, enabled, &mut drawn);
     crate::context_menu::close_unshown_window(app, &drawn);
     if let Err(reason) = shown {
-        app.set_status(solidcraft_ui_text::tr(super::workspace::rule_key(reason.rule)).to_owned(), true);
+        app.set_status(solidcraft_ui_text::tr(super::rule_key(reason.rule)).to_owned(), true);
         integration.last_error = Some(reason);
     }
     app.panel_runtime = Some(integration);
