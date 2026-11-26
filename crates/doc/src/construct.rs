@@ -947,6 +947,44 @@ pub(crate) fn plane(ctx: &Ctx, g: &GeoRef) -> Result<Plane> {
     }
 }
 
+/// Where an extrude's To / From Object reference ([`crate::ObjectRef`]) is now.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ObjectAt {
+    /// A construction point or the origin.
+    Point(Vec3),
+    /// An origin or construction plane.
+    Plane(Plane),
+}
+
+/// [`ObjectAt`] of `r` in the model `ctx.st`. A construction plane later in the timeline is
+/// refused: it would be read as it is defined, and moving it would not rebuild the extrude.
+pub(crate) fn object_at(ctx: &Ctx, r: &crate::ObjectRef) -> Result<ObjectAt> {
+    use crate::walk::Walk;
+    let mut later = None;
+    r.walk_refs(&mut |item| {
+        if let crate::feature_refs::Ref::Feature(id) = item
+            && later.is_none()
+            && !ctx.st.construct.iter().any(|c| c.feature == id.0)
+        {
+            later = Some(id.0);
+        }
+    });
+    if let Some(id) = later {
+        let name = ctx.doc.feature(id).map_or_else(|| id.to_string(), |f| f.name.clone());
+        return Err(bad(format!("the plane `{name}` must come before the extrude in the timeline")));
+    }
+    match &r.0 {
+        g @ GeoRef::Plane { .. } => Ok(ObjectAt::Plane(plane(ctx, g)?)),
+        g @ (GeoRef::ConstructPoint { .. } | GeoRef::Origin) => Ok(ObjectAt::Point(point(ctx, g)?)),
+        _ => Err(bad("not supported yet: To / From Object on this reference; give a plane or a construction point")),
+    }
+}
+
+/// [`object_at`] of `r` in the model `st`, for a feature in `component`.
+pub fn object_at_in(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, component: u64, r: &crate::ObjectRef) -> Result<ObjectAt> {
+    object_at(&Ctx { doc, vals, st, depth: 0, component }, r)
+}
+
 /// The centre of a round edge, sketch circle, sphere or torus.
 fn centre(ctx: &Ctx, g: &GeoRef) -> Result<Vec3> {
     match g {

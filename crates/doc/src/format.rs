@@ -2144,6 +2144,8 @@ mod tests {
                         from_level: false,
                         picked_placements: Vec::new(),
                         one_sided_direction: None,
+                        to_ref: None,
+                        from_ref: None,
                     },
                     operation: Operation::NewBody,
                     targets: vec![],

@@ -1930,6 +1930,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     // A one-sided extrude made symmetric remembers the way it went, so what was picked on its
     // start cap is still found on the cap facing the same way.
     solidcraft_doc::keep_one_sided_direction(&s.model, &f, &mut nf);
+    keep_object_refs(&f, &mut nf);
     let copy_sources_of = |kind: &FeatureKind| match kind {
         FeatureKind::Pattern { bodies, components, occurrences, join, .. }
             if !bodies.is_empty() && components.is_empty() && occurrences.is_empty() && (!*join || bodies.len() == 1) =>
@@ -3096,6 +3097,21 @@ fn input_keys(kind: &FeatureKind, edge_names: &[String]) -> Vec<(String, solidcr
     keys
 }
 
+/// An edit that sends the To or From point stored with a plane or construction point keeps
+/// that reference, so the extrude still follows it (#8527). The Extrude dialog reopens a
+/// reference as that point and sends it back unchanged; another point replaces the reference.
+fn keep_object_refs(old: &Feature, new: &mut Feature) {
+    let (FeatureKind::Extrude { extent: a, .. }, FeatureKind::Extrude { extent: b, .. }) = (&old.kind, &mut new.kind) else { return };
+    let same =
+        |x: Option<solidcraft_doc::FacePick>, y: Option<solidcraft_doc::FacePick>| matches!((x, y), (Some(x), Some(y)) if x.0.dist(y.0) < 1e-6);
+    if b.to_ref.is_none() && same(a.to, b.to) {
+        b.to_ref = a.to_ref.clone();
+    }
+    if b.from_ref.is_none() && same(a.from, b.from) {
+        b.from_ref = a.from_ref.clone();
+    }
+}
+
 /// An old design's From Object keeps starting at the face's level (`from_level`) through an edit
 /// that keeps its From face: the same pick, or a pick of a face on the same plane, found as the
 /// build finds it in the model before the feature. A From picked on another plane is a new
@@ -3487,6 +3503,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     }
     keep_from_level_on_the_same_face(s, &old, &mut new);
     solidcraft_doc::keep_one_sided_direction(&s.model, &old, &mut new);
+    keep_object_refs(&old, &mut new);
     // A boundary surface's loop of sketch curves and its curve network are one command's two
     // forms: an edit may turn one into the other.
     let boundary = |k: &FeatureKind| matches!(k, FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. });

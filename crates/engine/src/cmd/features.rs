@@ -2,12 +2,12 @@
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
-use solidcraft_doc::construct::DatumItem;
+use solidcraft_doc::construct::{DatumItem, GeoRef, ObjectAt};
 use solidcraft_doc::{
     AxisRef, Direction, Expr, Extent, FeatureKind, OffsetEdges, Operation, PointExpr, ProfileSel, RailFit, SweepOrientation, SweepRail, ThinSide,
     ThinWall, Touching, expr::Kind, point_expr,
 };
-use solidcraft_doc::{BodyName, FeatureName, SketchId, SplitSheet};
+use solidcraft_doc::{BodyName, FeatureName, ObjectRef, SketchId, SplitSheet};
 use solidcraft_doc::{Dir, FacePick, Position};
 use solidcraft_geom::prelude::*;
 
@@ -81,9 +81,9 @@ pub static COMMANDS: &[CommandSpec] = &[
             "to2?: [x,y,z] (Two Sides: the second side ends at that face, vertex or point, instead of distance2) with to_offset2?: expr (past it); ",
             "start_offset?: expr (along the sketch normal, also with direction: negative); ",
             "symmetric_offset?: bool (with direction: symmetric and start_offset: offset both sides symmetrically away from the sketch plane, leaving a clearance gap); ",
-            "to?: [x,y,z] (To Object: a face, vertex or point; to_offset?: expr past it); ",
+            "to?: [x,y,z] (To Object: a face, vertex or point; to_offset?: expr past it), or a plane or construction point the extrude follows when it moves: {plane: XY|name} or a plane's name (parallel to the sketch: ends on it; at a slant: the end is cut along it; along the extrusion: refused), {construct_point: name} (ends on the plane through it, parallel to the sketch); ",
             "to_body_apart?: bool (Join To Object: keep the body the To Object pick is on apart, so the join changes only the bodies in `targets`; a call that names its targets keeps that body apart, and `false` takes it too); ",
-            "from?: [x,y,z] (From Object: start at that face or point; on a flat face at a slant the start follows the face, and a distance moves it along the extrusion); ",
+            "from?: [x,y,z] (From Object: start at that face or point; on a flat face at a slant the start follows the face, and a distance moves it along the extrusion), or a plane or construction point, as for `to`; ",
             "operation?: new|join|cut|intersect|auto (cut into a body, otherwise join existing solids; new in an empty component); ",
             "touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); ",
             "targets?: [body] (Join from a face, or from a sketch on a body's face, defaults to that face's body; explicit targets or participants override); ",
@@ -516,8 +516,9 @@ fn extrude_base(s: &Session, p: &Value) -> Option<(Vec3, Vec3)> {
 /// extrude goes there and its `direction` does not count (#1633). Otherwise its distance, turned
 /// round for the negative direction.
 pub fn extrude_reach(s: &Session, p: &Value) -> Option<f64> {
-    if let Some(t) = p.get("to").and_then(vec3) {
+    if let Some(to) = p.get("to") {
         let (base, n) = extrude_base(s, p)?;
+        let t = object_point(s, to, base, n)?;
         return Some((t - base).dot(n)).filter(|h| h.is_finite());
     }
     let d = s.doc.eval(&expr(p, "distance")?, Kind::Length).ok()?;
@@ -587,14 +588,14 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
     };
     // The extrude starts at its From Object or start offset, not at the profile: probe from
     // there (#467). To an object it then reaches only from that start.
-    let start = match p.get("from").and_then(vec3) {
+    let start = match p.get("from").and_then(|from| object_point(s, from, base, n)) {
         Some(from) if grouped.is_none() => (from - base).dot(n),
         _ => expr(p, "start_offset").and_then(|e| s.doc.eval(&e, Kind::Length).ok()).unwrap_or(0.0),
     };
     let start = if start.is_finite() { start } else { 0.0 };
     let base = base + n * start;
     let d = if grouped.is_some() && p.get("to").is_some() {
-        (p.get("to").and_then(vec3)? - base).dot(n)
+        (object_point(s, p.get("to")?, base, n)? - base).dot(n)
     } else if let Some(d) = extrude_reach(s, p) {
         if p.get("to").is_some() { d - start } else { d }
     } else {
@@ -1813,12 +1814,8 @@ fn thin_regions(s: &Session, ss: &solidcraft_doc::SolvedSketch, thin: &ThinWall)
 pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> {
     let through_all = bool_(p, "through_all").unwrap_or(false) || str_(p, "extent").is_some_and(|e| e.eq_ignore_ascii_case("through_all"));
     let to_object = p.get("to").is_some();
-    if to_object && p.get("to").and_then(vec3).is_none() {
-        return Err(bad(cmd, "`to` must be a point [x, y, z] on the face, vertex or point to extrude to"));
-    }
-    if p.get("from").is_some() && p.get("from").and_then(vec3).is_none() {
-        return Err(bad(cmd, "`from` must be a point [x, y, z] on the face or point to start from"));
-    }
+    let (to, to_ref) = object_param(s, p.get("to"), cmd, "to", "on the face, vertex or point to extrude to")?;
+    let (from, from_ref) = object_param(s, p.get("from"), cmd, "from", "on the face or point to start from")?;
     let distance = if through_all || to_object { expr(p, "distance").unwrap_or_else(|| "0".into()) } else { req_expr(cmd, p, "distance")? };
     check_expr(s, &distance, Kind::Length, cmd, "distance")?;
     let taper = expr(p, "taper");
@@ -1885,9 +1882,9 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
         second_follows_first: false,
         taper,
         corner,
-        to: p.get("to").and_then(vec3).map(FacePick),
+        to,
         to_offset: expr(p, "to_offset"),
-        from: p.get("from").and_then(vec3).map(FacePick),
+        from,
         to_body_apart,
         through_all2,
         to2: to2.and_then(vec3).map(FacePick),
@@ -1895,7 +1892,58 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
         from_level: false,
         picked_placements: Vec::new(),
         one_sided_direction: None,
+        to_ref,
+        from_ref,
     })
+}
+
+/// Where a To / From Object parameter lies for an extrude from `base` along `n`: the point, a
+/// construction point, or where the line from `base` along `n` meets a plane (#8527). `None`
+/// when it can't be found, or for a plane the line never meets.
+fn object_point(s: &Session, v: &Value, base: Vec3, n: Vec3) -> Option<Vec3> {
+    if let Some(p) = vec3(v) {
+        return Some(p);
+    }
+    let r = ObjectRef(super::construct::geo(s, Some(v), "solid.extrude", "to").ok()?);
+    let (vals, _) = s.doc.param_values();
+    match solidcraft_doc::construct::object_at_in(&s.doc, &vals, &s.model.state(), s.active_component, &r).ok()? {
+        ObjectAt::Point(q) => Some(q),
+        ObjectAt::Plane(pl) => {
+            let along = pl.normal().dot(n);
+            (along.abs() > 1e-9).then(|| base + n * ((pl.origin - base).dot(pl.normal()) / along))
+        }
+    }
+}
+
+/// A To / From Object parameter: a point `[x, y, z]` (`what` says on what), or a construction
+/// plane or point the extent follows (#8527): `{plane: XY|name}` or a plane's name,
+/// `{construct_point: name}`. A reference also gives the pick a point on it, so the extent
+/// still reads as To / From Object.
+fn object_param(s: &Session, v: Option<&Value>, cmd: &str, key: &str, what: &str) -> Result<(Option<FacePick>, Option<ObjectRef>)> {
+    let Some(v) = v else { return Ok((None, None)) };
+    if let Some(p) = vec3(v) {
+        return Ok((Some(FacePick(p)), None));
+    }
+    let wrong = || {
+        bad(
+            cmd,
+            format!("`{key}` must be a point [x, y, z] {what}, a plane ({{plane: XY|name}}) or a construction point ({{construct_point: name}})"),
+        )
+    };
+    if !v.is_object() && !v.is_string() {
+        return Err(wrong());
+    }
+    let r = ObjectRef(super::construct::geo(s, Some(v), cmd, key)?);
+    if !matches!(r.0, GeoRef::Plane { .. } | GeoRef::ConstructPoint { .. } | GeoRef::Origin) {
+        return Err(wrong());
+    }
+    let (vals, _) = s.doc.param_values();
+    let at = match solidcraft_doc::construct::object_at_in(&s.doc, &vals, &s.model.state(), s.active_component, &r) {
+        Ok(ObjectAt::Point(q)) => q,
+        Ok(ObjectAt::Plane(pl)) => pl.origin,
+        Err(e) => return Err(bad(cmd, format!("`{key}`: {e}"))),
+    };
+    Ok((Some(FacePick(at)), Some(r)))
 }
 
 /// `fixed` of a face extrude or revolve: the face's plane as a fixed plane ([`super::face::sketch_of_face`]).
