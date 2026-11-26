@@ -3972,9 +3972,15 @@ fn a_closed_spline_wall_with_a_curved_seam_keeps_all_faces() {
 /// edge at about half height; the third covers the other three arcs. The wavy edge is a cubic
 /// through points of the wall (Hermite pieces, double knots) whose parameter is not the wall's,
 /// as an intersection edge is written; every other edge is a piece of the wall's section or a
-/// line along it. The file states its lengths to 1e-2 mm. Returns the file and the solid's
-/// volume: the section's area, by Green's theorem over the arcs (three-point Gauss-Legendre,
-/// exact for the quintic `x y' - y x'`), times the height.
+/// line along it. The wavy edge runs round the wall at the speed `1 + 0.2 cos 2πs` along its
+/// parameter s, faster at its ends than in its middle. The file states its
+/// lengths to 1e-2 mm, so its edges' tolerance is 5e-3 mm. The seam split keeps a use's trim,
+/// split at the edge's parameter, only where the trim's point there is within a hundredth of
+/// the edge's tolerance of the edge's: here it is 1.4e-5 mm off, within the 5e-5 mm allowed,
+/// and the split keeps it, as it keeps the issue's file's (2.6e-6 mm against 5e-6 mm). Stated to
+/// 1e-3 mm, this file's would be dropped and made again from the edge. Returns the file and the
+/// solid's volume: the section's area, by Green's theorem over the arcs (three-point
+/// Gauss-Legendre, exact for the quintic `x y' - y x'`), times the height.
 fn tube_with_fitted_edge_step(first: usize) -> (String, f64) {
     use std::f64::consts::{PI, TAU};
     const ARCS: usize = 8;
@@ -4054,7 +4060,7 @@ fn tube_with_fitted_edge_step(first: usize) -> (String, f64) {
     let top_a = rim(a, SPANS, h, (va[2], vb[2]));
     let low_b = rim(b % ARCS, ARCS - SPANS, 0.0, (vb[0], va[0]));
     let top_b = rim(b % ARCS, ARCS - SPANS, h, (vb[2], va[2]));
-    // The wavy edge at s in [0, 1]: round the wall faster in the middle than at its ends, up and
+    // The wavy edge at s in [0, 1]: round the wall faster at its ends than in its middle, up and
     // down about half height; its point on the wall and its derivative by s.
     let wave = |s: f64| {
         let (g, dg) = (s + 0.2 * (TAU * s).sin() / TAU, 1.0 + 0.2 * (TAU * s).cos());
@@ -4127,7 +4133,7 @@ fn tube_with_fitted_edge_step(first: usize) -> (String, f64) {
     ];
     let shell = add(format!("CLOSED_SHELL('',({}))", ids(&faces)));
     let solid = add(format!("MANIFOLD_SOLID_BREP('tube',#{shell})"));
-    // Millimetres, stated to a hundredth.
+    // Millimetres, stated to a hundredth (see above).
     let mm = add("(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))".into());
     let rad = add("(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.))".into());
     let accuracy = add(format!("UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-2),#{mm},'distance_accuracy_value','')"));
@@ -4154,7 +4160,9 @@ fn tube_with_fitted_edge_step(first: usize) -> (String, f64) {
 /// completion splits the wavy edge where it meets the wall's seam, and its trims at the same
 /// parameter; a trim fitted to the edge meets the seam a little away from there, so one piece ran
 /// a sliver across the seam, the completion refused the faces and the tube came in open with two
-/// faces left out (#22462). Both read closed with the section's volume.
+/// faces left out (#22462). Both read closed with the section's volume. (With the wavy edge
+/// faster in its middle instead, the completion meets another defect, one piece's trim made again
+/// from the seam's other side, which this test does not cover.)
 #[test]
 fn a_tube_with_a_fitted_edge_across_its_closed_splines_start_reads_closed() {
     for first in [6, 0] {

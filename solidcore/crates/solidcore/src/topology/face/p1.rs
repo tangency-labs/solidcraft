@@ -3133,6 +3133,18 @@ fn complete_face_seams_edit(
 /// adjacent values in fewer than 2100 steps whatever its width (2^1024 down to 2^-1074).
 const SEAM_CROSSING_BISECTIONS: usize = 2100;
 
+/// The rounding of a base period's sides, far below any piece of a trim: a trim within it of
+/// the base period is in it.
+fn period_rounding(period: f64) -> f64 {
+    1e-9 * period
+}
+
+/// The whole periods from the base period's start `min` to the period holding `low`, a value
+/// within rounding below a period's start counting as in that period.
+fn whole_periods_to(low: f64, min: f64, period: f64) -> f64 {
+    ((low - min) / period + 1e-9).floor() * period
+}
+
 /// Cuts away the sliver by which the trim of `eu` on `face` runs across a seam's line at one
 /// of its ends, so that the trim ends on the line.
 ///
@@ -3150,94 +3162,121 @@ const SEAM_CROSSING_BISECTIONS: usize = 2100;
 /// is. The cut removes only the sliver, by proof, not by samples: the control hull of the
 /// part cut away lies on its own side of the line (to the base period's rounding), so the
 /// trim meets the line nowhere before the cut; and the surface's certified box over that
-/// hull's box is within the edge's tolerance, so the trim's end moves by no more than the
-/// edge allows. A cut not proved so is not made.
+/// hull's box lies within the edge's tolerance of the edge's own point at that end, so the
+/// part cut away, and the trim's new end in it, are on the edge there to its tolerance. A
+/// cut not proved so is not made.
+///
+/// Not bounded here: the reparametrisation moves each point of the rest along the trim by at
+/// most the cut's width in parameter (all of it at the cut end, none at the other), so the
+/// trim's point at an edge parameter inside the edge moves along the trim by that much. The
+/// import checks every completed record's pcurves against their edges, and keeps the trims as
+/// imported where one is off. And `Curve::trim` snaps a cut within `1e-10 (1 + |t|)` of a knot
+/// or of the trim's end to it: a sliver that narrow is not cut, or is cut at the knot, and the
+/// translation that follows refuses the trim as before rather than moving it wrongly.
 ///
 /// # Errors
-/// Those of the trim, its evaluation, hull, cut and reparametrisation, and of the surface's
-/// domain, closure and box.
+/// Those of the trim, its evaluation, hull, cut and reparametrisation, of the edge's curve,
+/// and of the surface's domain, closure and box.
 fn end_trim_on_seam(k: &Kernel, b: &mut Brep, face: FaceId, eu: EdgeuseId) -> Result<()> {
     let Some(e) = eu1::edge(b, eu)? else {
         return Ok(());
     };
     let tolerance = crate::topology::edge::tolerance(b, e)?;
+    if !tolerance.is_finite() {
+        return Ok(());
+    }
     let mut trim = get_or_create_uv_trim_curve(k, b, eu)?;
     let whole = trim.natural_interval();
-    let surface = surface_deref(b, face)?.clone_for_evaluation()?;
-    let domain = surface.natural_uv_domain_with_nurb(k)?;
     let (mut keep_min, mut keep_max) = (whole.min(), whole.max());
-    for (at, other) in [(whole.min(), whole.max()), (whole.max(), whole.min())] {
-        for (dir, range) in [
-            (SurfParamType::U, domain.u_interval()),
-            (SurfParamType::V, domain.v_interval()),
-        ] {
-            let period = range.length();
-            if !(period.is_finite() && period > 0.0) {
-                continue;
-            }
-            let round = 1e-9 * period;
-            let along = |p: Point3| if dir == SurfParamType::U { p.x } else { p.y };
-            let end_at = along(trim.evaluate_point(k, at)?);
-            // the seam's line nearest the trim's end
-            let line = range.min() + ((end_at - range.min()) / period).round() * period;
-            let past = end_at - line;
-            let rest = along(trim.evaluate_point(k, other)?) - line;
-            if !(past.is_finite() && rest.is_finite())
-                || past.abs() <= round
-                || rest.abs() <= round
-                || past.signum() == rest.signum()
-            {
-                // the end on the line, the trim on one side of it, or not finite
-                continue;
-            }
-            if !surface.is_closed(k, &domain, dir, None, false)?.0 {
-                continue;
-            }
-            // Bisect to the crossing; `far` stays on the rest's side of the line.
-            let (mut near, mut far) = (at, other);
-            for _ in 0..SEAM_CROSSING_BISECTIONS {
-                let mid = 0.5 * (near + far);
-                if mid == near || mid == far {
-                    break;
+    {
+        let surface = surface_deref(b, face)?;
+        let edge_curve = crate::topology::edge::curve(b, e)?;
+        let domain = surface.natural_uv_domain_with_nurb(k)?;
+        for (at, other) in [(whole.min(), whole.max()), (whole.max(), whole.min())] {
+            for (dir, range) in [
+                (SurfParamType::U, domain.u_interval()),
+                (SurfParamType::V, domain.v_interval()),
+            ] {
+                let period = range.length();
+                if !(period.is_finite() && period > 0.0) {
+                    continue;
                 }
-                if (along(trim.evaluate_point(k, mid)?) - line).signum() == rest.signum() {
-                    far = mid;
+                let round = period_rounding(period);
+                let along = |p: Point3| if dir == SurfParamType::U { p.x } else { p.y };
+                let end_at = along(trim.evaluate_point(k, at)?);
+                // the seam's line nearest the trim's end
+                let line = range.min() + ((end_at - range.min()) / period).round() * period;
+                let past = end_at - line;
+                let rest = along(trim.evaluate_point(k, other)?) - line;
+                if !(past.is_finite() && rest.is_finite())
+                    || past.abs() <= round
+                    || rest.abs() <= round
+                    || past.signum() == rest.signum()
+                {
+                    // the end on the line, the trim on one side of it, or not finite
+                    continue;
+                }
+                if !surface.is_closed(k, &domain, dir, None, false)?.0 {
+                    continue;
+                }
+                let Some(edge_curve) = edge_curve else {
+                    continue;
+                };
+                // Bisect to the crossing; `far` stays on the rest's side of the line.
+                let (mut near, mut far) = (at, other);
+                for _ in 0..SEAM_CROSSING_BISECTIONS {
+                    let mid = 0.5 * (near + far);
+                    if mid == near || mid == far {
+                        break;
+                    }
+                    if (along(trim.evaluate_point(k, mid)?) - line).signum() == rest.signum() {
+                        far = mid;
+                    } else {
+                        near = mid;
+                    }
+                }
+                let cut = Extent1d::from_min_max(at.min(far), at.max(far));
+                let Some(hull) = crate::topology::brep::p1::uv_hull_over(&trim, &cut)? else {
+                    continue;
+                };
+                let mut uv_box = Extent2d::new();
+                let mut beyond = f64::NEG_INFINITY;
+                for (p, err) in &hull {
+                    uv_box.add_point(Point2::new(p.x - err, p.y - err));
+                    uv_box.add_point(Point2::new(p.x + err, p.y + err));
+                    // how far the hull reaches onto the rest's side of the line
+                    beyond = beyond.max(rest.signum() * (along(*p) - line) + err);
+                }
+                if beyond > round {
+                    continue;
+                }
+                // The hull's box moved by whole periods into the natural domain, the seam's
+                // line onto the domain's side the cut part lies on.
+                let Some(on_surface) = uv_box_in_domain(k, surface, &domain, &uv_box, (dir, line))?
+                else {
+                    continue;
+                };
+                let Some(image) = surface.certified_bounding_box(k, &on_surface)? else {
+                    continue;
+                };
+                // The box's farthest corner from the edge's point at this end.
+                let end_point = edge_curve.evaluate_point(k, at)?;
+                let (lo, hi) = (image.min(), image.max());
+                let reach = |l: f64, h: f64, c: f64| (l - c).abs().max((h - c).abs());
+                let farthest = Vec3::new(
+                    reach(lo.x, hi.x, end_point.x),
+                    reach(lo.y, hi.y, end_point.y),
+                    reach(lo.z, hi.z, end_point.z),
+                )
+                .length();
+                if farthest.is_nan() || farthest > tolerance {
+                    continue;
+                }
+                if at == whole.min() {
+                    keep_min = keep_min.max(far);
                 } else {
-                    near = mid;
+                    keep_max = keep_max.min(far);
                 }
-            }
-            let cut = Extent1d::from_min_max(at.min(far), at.max(far));
-            let Some(hull) = crate::topology::brep::p1::uv_hull_over(&trim, &cut)? else {
-                continue;
-            };
-            let mut uv_box = Extent2d::new();
-            let mut beyond = f64::NEG_INFINITY;
-            for (p, err) in &hull {
-                uv_box.add_point(Point2::new(p.x - err, p.y - err));
-                uv_box.add_point(Point2::new(p.x + err, p.y + err));
-                // how far the hull reaches onto the rest's side of the line
-                beyond = beyond.max(rest.signum() * (along(*p) - line) + err);
-            }
-            if beyond.is_nan() || beyond > round {
-                continue;
-            }
-            // The hull's box moved by whole periods into the natural domain, the seam's line
-            // onto the domain's side the cut part lies on.
-            let Some(on_surface) = uv_box_in_domain(k, &surface, &domain, &uv_box, (dir, line))?
-            else {
-                continue;
-            };
-            let Some(image) = surface.certified_bounding_box(k, &on_surface)? else {
-                continue;
-            };
-            let size = image.size().length();
-            if size.is_nan() || size > tolerance {
-                continue;
-            }
-            if at == whole.min() {
-                keep_min = keep_min.max(far);
-            } else {
-                keep_max = keep_max.min(far);
             }
         }
     }
@@ -3284,9 +3323,10 @@ fn uv_box_in_domain(
     {
         let (mut lo, mut hi) = (extent.min(), extent.max());
         let period = range.length();
+        let round = period_rounding(period);
         if dir == seam_dir {
             // below the line: the line onto the domain's top; above it: onto its bottom
-            let by = if hi <= line + 1e-9 * period {
+            let by = if hi <= line + round {
                 line - range.max()
             } else {
                 line - range.min()
@@ -3294,12 +3334,11 @@ fn uv_box_in_domain(
             lo -= by;
             hi -= by;
         } else if surface.is_closed(k, domain, dir, None, false)?.0 && period > 0.0 {
-            let by = ((lo - range.min()) / period + 1e-9).floor() * period;
+            let by = whole_periods_to(lo, range.min(), period);
             lo -= by;
             hi -= by;
         }
         // Beyond the domain only by its rounding: the box is limited to it by no more.
-        let round = 1e-9 * period;
         if !(lo >= range.min() - round && hi <= range.max() + round) {
             return Ok(None);
         }
@@ -3427,13 +3466,13 @@ fn imported_trim_shift(k: &Kernel, b: &Brep, f: FaceId, trim: &Curve) -> Result<
         if !(period.is_finite() && period > 0.0 && low.is_finite() && high.is_finite()) {
             return Ok(None);
         }
-        let round = 1e-9 * period;
+        let round = period_rounding(period);
         // Both endpoints of the base interval belong to it. In particular a seam's high
         // copy must stay high, rather than being wrapped onto its low copy.
         if low >= range.min() - round && high <= range.max() + round {
             continue;
         }
-        let by = ((low - range.min()) / period + 1e-9).floor() * period;
+        let by = whole_periods_to(low, range.min(), period);
         if low - by < range.min() - round || high - by > range.max() + round {
             return Ok(None);
         }
