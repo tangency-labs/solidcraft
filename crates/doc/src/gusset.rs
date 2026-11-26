@@ -5,7 +5,8 @@ use crate::expr::{Kind, Value};
 use crate::{DocError, Document, Expr, Feature, FeatureKind, ModelState, PlaneRef, Result};
 use serde::{Deserialize, Serialize};
 use solidcore_record::Plane;
-use solidcraft_kernel::services::frame_gusset as geometry;
+use solidcore_record::frame::{self as geometry, SupportData};
+use solidcraft_kernel::{GussetFailure, KernelError};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(deny_unknown_fields)]
@@ -54,7 +55,7 @@ const MAX_LOOPS: usize = 4096;
 const MAX_PIECES: usize = 65536;
 
 /// Resolve the certified support and reconstruct its finite material from trimmed face loops.
-fn face(doc: &Document, st: &ModelState, f: &Feature, support: &Support) -> Result<geometry::Support> {
+fn face(doc: &Document, st: &ModelState, f: &Feature, support: &Support) -> Result<SupportData> {
     let PlaneRef::Face { anchor: Some(anchor), .. } = &support.plane else { return Err(invalid("gusset support must be an attached face")) };
     if member(doc, st, &support.plane)? != support.member {
         return Err(invalid("gusset support's member identity changed"));
@@ -73,7 +74,8 @@ fn face(doc: &Document, st: &ModelState, f: &Feature, support: &Support) -> Resu
     let mut faces = Vec::new();
     for index in indices {
         let face_plane = body.body.planar_face(index).ok_or_else(|| invalid("gusset support face must be planar"))?;
-        let face_plane = geometry::support_plane(source.as_ref(), &face_plane, body.body.size(), tolerance).map_err(geometry_error)?;
+        let face_plane =
+            solidcraft_kernel::gusset_support_plane(source.as_ref(), &face_plane, body.body.size(), tolerance).map_err(geometry_error)?;
         source = Some(face_plane);
         let face = record.faces.get(index).ok_or_else(|| invalid("gusset support face disappeared"))?;
         if face.loops.len() > MAX_LOOPS {
@@ -102,7 +104,7 @@ fn face(doc: &Document, st: &ModelState, f: &Feature, support: &Support) -> Resu
         faces.push(loops);
     }
     let source = source.ok_or_else(|| invalid("gusset support has no material"))?;
-    geometry::support(&geometry::SupportFrames { plane, source, to_source, to_author, tolerance }, &faces).map_err(geometry_error)
+    solidcraft_kernel::gusset_support(&geometry::SupportFrames { plane, source, to_source, to_author, tolerance }, &faces).map_err(geometry_error)
 }
 
 /// Bound geometry inputs; signed offsets share the size limit but need no positive minimum.
@@ -137,7 +139,7 @@ pub(crate) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
         Placement::Positive => geometry::Placement::Positive,
         Placement::Negative => geometry::Placement::Negative,
     };
-    let prepared = geometry::prepare([&a, &b], dimensions, placement).map_err(geometry_error)?;
+    let prepared = solidcraft_kernel::gusset_prepare([&a, &b], dimensions, placement).map_err(geometry_error)?;
     let mut bodies = solidcraft_kernel::extrude(&prepared.plane, &[prepared.profile], prepared.start, prepared.end)?;
     let body = bodies.pop().filter(|_| bodies.is_empty()).ok_or_else(|| invalid("gusset must be one solid"))?;
     let name = gusset_name(st, f);
@@ -145,17 +147,11 @@ pub(crate) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
     Ok(())
 }
 
-fn geometry_error(error: solidcraft_kernel::services::Error) -> DocError {
+/// The kernel's refusal in its words, or its error as the application's.
+fn geometry_error(error: GussetFailure<KernelError>) -> DocError {
     match error {
-        solidcraft_kernel::services::Error::Refused { reason, .. } | solidcraft_kernel::services::Error::Unsupported(reason) => invalid(reason),
-        solidcraft_kernel::services::Error::Argument | solidcraft_kernel::services::Error::Profile(_) => {
-            solidcraft_kernel::KernelError::Invalid(error.to_string()).into()
-        }
-        solidcraft_kernel::services::Error::Internal(message) => solidcraft_kernel::KernelError::Internal(message).into(),
-        error @ solidcraft_kernel::services::Error::Invariant { defect: true, .. } => {
-            solidcraft_kernel::KernelError::Internal(error.to_string()).into()
-        }
-        other => solidcraft_kernel::KernelError::Failed(other.to_string()).into(),
+        GussetFailure::Refused(reason) => invalid(reason),
+        GussetFailure::Kernel(e) => e.into(),
     }
 }
 

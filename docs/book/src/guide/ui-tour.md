@@ -15,10 +15,13 @@ view.
 - **Title bar.** On Windows and Linux the application bar is the window's title bar. On the left:
   the File menu (New, Open, Save, Save As, Export…), undo and redo, the Home tab (the start page)
   and one tab per open design (each with its own undo history, selection and camera; a dot marks
-  unsaved changes). Double-click a design's tab, or right-click it and choose **Rename**, to rename
-  the design: type the name, then press Enter or click elsewhere to keep it, or Esc to leave the old
-  one (Preferences › Interface turns the double-click off, for a double-click that maximizes the
-  window instead; **Rename** stays in the menu). **Duplicate** in a design tab's right-click menu
+  unsaved changes). Files dragged from a file manager onto the tabs open there, each as a design
+  in a new tab: a mark shows the place between the tabs. A CAD, mesh, drawing or point cloud file
+  dropped there becomes a design of its own; dropped on the view instead, it is inserted into a
+  design that has features. Double-click a design's tab, or right-click it and choose **Rename**, to
+  rename the design: type the name, then press Enter or click elsewhere to keep it, or Esc to leave
+  the old one (Preferences › Interface turns the double-click off, for a double-click that maximizes
+  the window instead; **Rename** stays in the menu). **Duplicate** in a design tab's right-click menu
   opens a copy of the design in a new tab next to it, named "… copy" and not saved yet. **Save**
   and **Save As…** in the same menu save that tab's design (it is shown first), as the File menu's
   do. On the right: Report a bug,

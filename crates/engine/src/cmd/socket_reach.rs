@@ -7,7 +7,7 @@
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
-use solidcraft_kernel::services::affine;
+use solidcraft_kernel::affine;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, num, string_list};

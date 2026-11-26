@@ -144,6 +144,7 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             json!({"type": "frame_member", "path_sketch": 1, "profile": {"source": "sketch", "sketch": 2, "profiles": {"type": "all"}},
                 "anchor": "bottom_left", "mirror": true}),
         ),
+        ("frame_cope", json!({"type": "frame_cope", "member": "B", "tools": ["B"], "end": "start"})),
         (
             "frame_trim",
             json!({"type": "frame_trim", "members": [{"feature": "F", "line": "l1"}],
@@ -282,6 +283,21 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             json!({"type": "surface_trim", "body": "B", "plane": plane("trim"), "keep": o, "with": "B", "keep_with": [o, o], "stitch": true, "extend": true}),
         ),
         ("move", json!({"type": "move", "bodies": ["B"], "translate": ["move.x", "move.y", "move.z"], "angle": "move.angle"})),
+        (
+            "capture_position",
+            json!({
+                "type": "capture_position",
+                "moves": [{
+                    "occurrence": 1,
+                    "space": "local",
+                    "translate": ["capture.x", "capture.y", "capture.z"],
+                    "origin": ["capture.ox", "capture.oy", "capture.oz"],
+                    "rotate_axis": [0.0, 1.0, 0.0],
+                    "angle": "capture.angle"
+                }],
+                "joints": [{"joint": 2, "values": [0.5]}]
+            }),
+        ),
         ("import", json!({"type": "import", "file": "a.step", "step": ""})),
         ("mesh_convert", json!({"type": "mesh_convert", "body": "B", "tolerance": "mesh_convert.tolerance"})),
         ("mesh_reduce", json!({"type": "mesh_reduce", "body": "B", "triangle_count": 10})),
