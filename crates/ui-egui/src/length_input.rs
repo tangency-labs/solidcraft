@@ -189,6 +189,7 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
         D::Thread { length, .. } => vec![length],
         D::Emboss { depth, offset_x, offset_y, .. } => vec![depth, offset_x, offset_y],
         D::Rib { thickness, depth, .. } => vec![thickness, depth],
+        D::CellGrid(c) => vec![&mut c.size, &mut c.web, &mut c.depth, &mut c.margin],
         D::PathPattern { spacing, start, fraction: false, .. } => vec![spacing, start],
         D::PathPattern { spacing, .. } => vec![spacing],
         D::Pipe { diameter, wall, .. } => vec![diameter, wall],
@@ -232,6 +233,7 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
             }
             Sm::Hem { length, gap, .. } => vec![length, gap],
             Sm::Fold { radius, .. } => vec![radius],
+            Sm::Hardware { length, .. } => vec![length],
             // K factor is the only dimensionless sheet rule value.
             Sm::Rules { values, .. } => values.iter_mut().enumerate().filter(|(i, _)| *i != 1).map(|(_, value)| value).collect(),
             _ => vec![],

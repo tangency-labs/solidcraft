@@ -340,6 +340,7 @@ impl MovePreview {
             replaced,
             outlines: Vec::new(),
             error: None,
+            warning: None,
             bounds,
             layer,
             joints: Vec::new(),

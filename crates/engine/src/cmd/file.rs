@@ -2289,11 +2289,15 @@ fn write_file(
 }
 
 /// Report a requested model cache missing from the file just written. Inspecting the
-/// container directory avoids decoding the large model a second time (#18815). `checking`: an
-/// import's check of its parts was still running when the save began, so the save left the
-/// cache out without waiting for it ([`saved_geometry`], #20133); taken then, as the check may
-/// have ended since.
-fn missing_save_cache(s: &Session, cache: bool, checking: bool, reader: Option<&DesignContainerReader<Cursor<&[u8]>>>) -> Option<String> {
+/// container directory avoids decoding the large model a second time (#18815). `skip_reason`:
+/// why [`solidcraft_doc::Model::saved_if_checked`] skipped building a cache when the save began
+/// (taken beforehand, since a background check may have ended since, #20133).
+fn missing_save_cache(
+    s: &Session,
+    cache: bool,
+    skip_reason: Option<&'static str>,
+    reader: Option<&DesignContainerReader<Cursor<&[u8]>>>,
+) -> Option<String> {
     if !cache || s.doc.features.is_empty() || reader?.has_model_cache() {
         return None;
     }
@@ -2306,10 +2310,10 @@ fn missing_save_cache(s: &Session, cache: bool, checking: bool, reader: Option<&
         "temporary component placements are active (for example an exploded view)".into()
     } else if s.model.state().bodies.is_empty() {
         "there are no evaluated bodies to cache".into()
-    } else if checking {
-        "an imported file's parts were still being checked (a save once the check ends keeps it)".into()
     } else if let Some(refusal) = solidcraft_io::take_last_cache_refusal() {
         refusal
+    } else if let Some(reason) = skip_reason.or_else(|| s.model.cache_skip_reason(&s.doc)) {
+        reason.into()
     } else {
         "the cache could not fit or be encoded within the design file budget".into()
     };
@@ -2340,7 +2344,7 @@ fn write_bytes(
     signing_key: Option<&str>,
 ) -> Result<Value> {
     // Before the bytes are made: a check that ends meanwhile leaves this save without the cache.
-    let checking = s.model.checking_imports();
+    let skip_reason = cache.then(|| s.model.cache_skip_reason(&s.design_saved(Some(path)))).flatten();
     let chain = s.provenance_chain.clone().unwrap_or_default();
     let mut signature = None;
     let mut notes: Vec<String> = Vec::new();
@@ -2419,7 +2423,7 @@ fn write_bytes(
     // Inspect the directory once. A save over the opening limit keeps its history for the next save.
     let reader = if format == "container" { DesignContainerReader::from_written_bytes(&bytes).ok() } else { None };
     let limit_warning = save_limit_warning(bytes.len(), reader.as_ref().is_some_and(DesignContainerReader::exceeds_expanded_open_limit));
-    let cache_not_saved = missing_save_cache(s, cache, checking, reader.as_ref());
+    let cache_not_saved = missing_save_cache(s, cache, skip_reason, reader.as_ref());
     s.provenance_chain = reader.and_then(|mut r| r.provenance_chain());
     s.provenance = None;
     s.mark_saved();
@@ -2685,7 +2689,7 @@ impl Session {
         // found on, before a change can move it (#17229).
         session.pin_dropped_link_names();
         let dropped = session.has_dropped_link_names();
-        if unpinned || dropped || !std::sync::Arc::ptr_eq(&before, &session.doc) || session.has_duplicate_rolled_back_body_names() {
+        if unpinned || dropped || !std::sync::Arc::ptr_eq(&before, &session.doc) || session.needs_rolled_back_body_name_pinning() {
             session.pin_rolled_back_body_names();
         }
         session.follow_design_token();
@@ -2693,17 +2697,22 @@ impl Session {
         session
     }
 
-    /// Whether a rolled-back design has stored body names past the marker that collide with
-    /// earlier stored names (e.g. linked or imported bodies saved before disambiguated names were
-    /// pinned), so [`Self::pin_rolled_back_body_names`] should pin their evaluated names on open.
-    fn has_duplicate_rolled_back_body_names(&self) -> bool {
+    /// Whether a rolled-back design has unpinned or colliding body names past the marker (e.g.
+    /// linked or imported bodies saved with empty or un-disambiguated `body_names`, or
+    /// body-producing features past the marker whose stored names are still empty), so
+    /// [`Self::pin_rolled_back_body_names`] should pin their evaluated names.
+    fn needs_rolled_back_body_name_pinning(&self) -> bool {
         let Some(marker) = self.doc.marker.filter(|&m| m < self.doc.features.len()) else {
             return false;
         };
-        let mut seen = std::collections::HashSet::new();
+        let state = self.model.state();
+        let mut seen: std::collections::HashSet<&str> = state.bodies.iter().map(|b| b.name.as_str()).collect();
         for (i, f) in self.doc.features.iter().enumerate() {
             if f.suppressed {
                 continue;
+            }
+            if i >= marker && rolled_back_feature_needs_body_names(f) {
+                return true;
             }
             let skip: Option<&[u64]> = match &f.kind {
                 solidcraft_doc::FeatureKind::Import { skip, .. } if !skip.is_empty() => Some(skip.as_slice()),
@@ -2775,6 +2784,21 @@ impl Session {
         store_link_names(doc, link_pins);
         doc.reserved_body_names.extend(reserve);
         self.model.refingerprint_shared(&self.doc, keep);
+    }
+
+    /// Pin evaluated body names across the timeline before a history reorder or move, including
+    /// rolled-back features when any active name needed pinning or any rolled-back feature past
+    /// the marker has unpinned or colliding stored names. Already-pinned sessions hit the O(1)
+    /// `names_pinned` fast path.
+    pub(crate) fn pin_timeline_body_names(&mut self) {
+        let unpinned = self.doc.reserved_body_names.is_empty() && self.doc.features.iter().all(|f| f.body_names.is_empty());
+        let before = self.doc.clone();
+        self.pin_body_names();
+        if self.doc.marker.is_some_and(|m| m < self.doc.features.len())
+            && (unpinned || !std::sync::Arc::ptr_eq(&before, &self.doc) || self.needs_rolled_back_body_name_pinning())
+        {
+            self.pin_rolled_back_body_names();
+        }
     }
 
     /// Prepare only the file's copy with relative paths; saving never rewrites live history.
@@ -2957,6 +2981,66 @@ impl Session {
             return None;
         }
         solidcraft_io::read_container_bytes(path)
+    }
+}
+
+/// Whether `nodes` mentions any body slot in the file's product tree.
+fn step_nodes_have_bodies(nodes: &[solidcraft_kernel::StepNode]) -> bool {
+    nodes.iter().any(|node| !node.bodies.is_empty() || step_nodes_have_bodies(&node.children))
+}
+
+/// Whether any non-skipped body slot in `nodes` is missing or blank in `body_names`.
+fn step_node_has_unpinned_body(nodes: &[solidcraft_kernel::StepNode], skip: &[u64], body_names: &[String]) -> bool {
+    nodes.iter().any(|node| {
+        node.bodies.iter().any(|&slot| !skip.contains(&(slot as u64)) && body_names.get(slot).is_none_or(|n| n.trim().is_empty()))
+            || step_node_has_unpinned_body(&node.children, skip, body_names)
+    })
+}
+
+/// Whether a non-suppressed rolled-back feature past the history marker still lacks pinned
+/// `body_names` for bodies it produces (e.g. an import saved with empty `body_names`).
+fn rolled_back_feature_needs_body_names(f: &solidcraft_doc::Feature) -> bool {
+    use solidcraft_doc::{FeatureKind, Operation};
+    let has_no_names = f.body_names.iter().all(|n| n.trim().is_empty());
+    match &f.kind {
+        FeatureKind::Import { step, components, skip, records, .. } => {
+            if step.is_empty() && records.is_none() {
+                return false;
+            }
+            if let Some(records) = records {
+                return (0..records.bodies.len())
+                    .any(|slot| !skip.contains(&(slot as u64)) && f.body_names.get(slot).is_none_or(|n| n.trim().is_empty()));
+            }
+            if f.body_names.iter().enumerate().any(|(slot, n)| !skip.contains(&(slot as u64)) && n.trim().is_empty()) {
+                return true;
+            }
+            if step_nodes_have_bodies(components) {
+                step_node_has_unpinned_body(components, skip, &f.body_names)
+            } else {
+                !f.body_names.iter().enumerate().any(|(slot, n)| !skip.contains(&(slot as u64)) && !n.trim().is_empty())
+            }
+        }
+        FeatureKind::MeshImport { meshes, .. } => (0..meshes.len()).any(|slot| f.body_names.get(slot).is_none_or(|n| n.trim().is_empty())),
+        FeatureKind::Pattern { bodies, join: false, .. } if !bodies.is_empty() => {
+            has_no_names || (f.pins_every_body_name() && f.pattern_names_in_order)
+        }
+        FeatureKind::Mirror { bodies, combine: false, .. } if !bodies.is_empty() => has_no_names,
+        FeatureKind::Move { bodies, copy: true, .. } if !bodies.is_empty() => has_no_names,
+        FeatureKind::Extrude { operation: Operation::NewBody, .. }
+        | FeatureKind::Revolve { operation: Operation::NewBody, .. }
+        | FeatureKind::Box { operation: Operation::NewBody, .. }
+        | FeatureKind::Cylinder { operation: Operation::NewBody, .. }
+        | FeatureKind::Sphere { operation: Operation::NewBody, .. }
+        | FeatureKind::Torus { operation: Operation::NewBody, .. }
+        | FeatureKind::Cone { operation: Operation::NewBody, .. }
+        | FeatureKind::Loft { operation: Operation::NewBody, .. }
+        | FeatureKind::Sweep { operation: Operation::NewBody, .. }
+        | FeatureKind::Pipe { operation: Operation::NewBody, .. }
+        | FeatureKind::Coil { operation: Operation::NewBody, .. }
+        | FeatureKind::BoundaryFill { operation: Operation::NewBody, .. }
+        | FeatureKind::Thicken { operation: Operation::NewBody, .. }
+        | FeatureKind::SurfaceNetwork { operation: Operation::NewBody, .. } => has_no_names,
+        _ => false,
     }
 }
 
@@ -5582,16 +5666,26 @@ mod tests {
         s.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
         let omitted = s.design_container(solidcraft_io::DesignCompression::Fast, false, false).unwrap();
         let omitted = DesignContainerReader::new(Cursor::new(omitted.as_slice())).unwrap();
-        let notice = missing_save_cache(&s, true, false, Some(&omitted)).unwrap();
+        let notice = missing_save_cache(&s, true, None, Some(&omitted)).unwrap();
         assert!(notice.contains("design file budget"), "{notice}");
         // Left out while an import's parts were being checked (#20133): that is the reason given.
-        let checking = missing_save_cache(&s, true, true, Some(&omitted)).unwrap();
+        let checking = missing_save_cache(
+            &s,
+            true,
+            Some("an imported file's parts were still being checked (a save once the check ends keeps it)"),
+            Some(&omitted),
+        )
+        .unwrap();
         assert!(checking.contains("still being checked") && !checking.contains("budget"), "{checking}");
-        assert!(missing_save_cache(&s, false, false, Some(&omitted)).is_none());
-        assert!(missing_save_cache(&s, true, false, None).is_none());
+        assert!(missing_save_cache(&s, false, None, Some(&omitted)).is_none());
+        assert!(missing_save_cache(&s, true, None, None).is_none());
         let included = s.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
         let included = DesignContainerReader::new(Cursor::new(included.as_slice())).unwrap();
-        assert!(missing_save_cache(&s, true, false, Some(&included)).is_none());
+        assert!(missing_save_cache(&s, true, None, Some(&included)).is_none());
+        // Left out because the model is not up to date with the design: reports that instead of budget.
+        s.doc_mut().features[0].suppressed = true;
+        let not_current = missing_save_cache(&s, true, None, Some(&omitted)).unwrap();
+        assert!(not_current.contains("not up to date") && !not_current.contains("budget"), "{not_current}");
     }
 
     #[test]
@@ -5619,7 +5713,7 @@ mod tests {
         // Without an explicit refusal, it falls back to the default design file budget message.
         assert!(solidcraft_io::take_last_cache_refusal().is_none());
         let default_notice =
-            missing_save_cache(&s, true, false, Some(&omitted_reader)).ok_or_else(|| EngineError::Other("expected default notice".into()))?;
+            missing_save_cache(&s, true, None, Some(&omitted_reader)).ok_or_else(|| EngineError::Other("expected default notice".into()))?;
         assert!(default_notice.contains("the cache could not fit or be encoded within the design file budget"), "{default_notice}");
 
         // Now test that when an unencodable body refusal is recorded, missing_save_cache reports it:
@@ -5646,9 +5740,13 @@ mod tests {
         let reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(bytes.as_slice()))?;
         assert!(!reader.has_model_cache());
 
-        let notice = missing_save_cache(&s, true, false, Some(&reader)).ok_or_else(|| EngineError::Other("expected notice".into()))?;
+        // Even if a background check was still running at the start of write_bytes and finished
+        // before encoding, an actual encoder refusal takes precedence over the stale skip reason.
+        let notice = missing_save_cache(&s, true, Some("a feature's geometry check was still running (a save once it ends keeps it)"), Some(&reader))
+            .ok_or_else(|| EngineError::Other("expected notice".into()))?;
         assert!(notice.contains("body 'GraphicsCore' in feature 'PCIe Board Import' could not be stored exactly"), "{notice}");
         assert!(!notice.contains("design file budget"), "must not mention budget: {notice}");
+        assert!(!notice.contains("still running"), "must not report stale check reason: {notice}");
         Ok(())
     }
 

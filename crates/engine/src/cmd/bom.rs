@@ -14,11 +14,11 @@
 use std::collections::BTreeMap;
 
 use serde_json::{Map, Value, json};
-use solidcraft_doc::BomType;
 use solidcraft_doc::bom::{self, Bom, Group, ItemNumbers, MAX_ITEM, Mass, Numbering, Order, Quantity, Request, Row, Tree, Uncounted, View};
 use solidcraft_doc::metadata::{
     BOM_KEYS, BOM_QUANTITY, DESCRIPTION, FINISH, MATERIAL, MAX_KEYS, Owner, PART_NUMBER, PART_ONLY, REVISION, check_text, key_list,
 };
+use solidcraft_doc::{BomType, ComponentNameSplit};
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
@@ -45,7 +45,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "component: id or name (0 or \"root\": the design's own properties) → component, name, part_number, description, revision, \
          material (its static material or null), finish (or null), bom_type, bom_quantity (or null) and virtual (components only), metadata (as saved, other tools' keys too), \
-         properties: {name: text}",
+         properties: {name: text} (authored values), name_split?: the component's rule for drawing properties",
         ),
     CommandSpec::new("component.metadata.set", "Change Part Properties", crate::checked!("component.metadata.set", set))
         .icon("settings")
@@ -61,8 +61,9 @@ pub static COMMANDS: &[CommandSpec] = &[
          0 (empty or null removes it: one piece); virtual?: true|false (a component with no geometry, such as grease or a \
          label: it can't be the active component or hold bodies, sketches or components); values?: {key: value} (SolidCraft's \
          keys, as document.metadata's properties lists them (material and finish too), bom_type, bom_quantity, virtual, or a reverse-DNS key \
-         holding an object); properties?: {name: text, …} (free properties; empty or null removes). All or nothing, one undo step → component, metadata, \
-         properties, changed: [keys]",
+         holding an object); properties?: {name: text, …} (free properties; empty or null removes); name_split?: {separator, left_property, right_property} \
+         derives missing drawing properties from the current name, split at the first literal separator (null removes the rule). All or nothing, one undo step \
+         → component, metadata, properties, name_split?, changed: [keys]",
         ),
     CommandSpec::new("occurrence.bom_type", "Bill of Materials Type", crate::checked!("occurrence.bom_type", occurrence_type))
         .icon("bom")
@@ -95,7 +96,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          their own beside it (in parts only a part's contents are rows of their own, but not a folded part's or a purchased one's, \
          and of an inseparable one's only its purchased parts are), so the rows add up to the assembly; a reference placement \
          adds nothing; null when nothing in it has a body, a body can't be measured or the row's definitions differ); path?: write \
-         a .csv (columns item, part_number, description, revision, count, definition, material, quantity, finish) or .json file (children as \
+         a .csv (columns item, part_number, description, revision, count, definition, material, quantity, finish, and mass_g with mass) or .json file (children as \
          items 1.1, 1.2…); format?: csv|json (default from the path). Each placement counts as \
          its occurrence's bom_type, else its component's: phantom has no row (what it holds counts here; its own bodies, \
          if it has any, are a row of their own), reference counts nowhere, purchased and inseparable are one row (in flat, an inseparable one's purchased parts are listed too, under it with group_children and a part number); placements \
@@ -150,11 +151,11 @@ fn read(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.metadata";
     let id = component_id(s, p, cmd)?;
     // The root is the design: its own properties, and no free ones.
-    let (name, m, properties) = if id == 0 {
-        (&s.doc.name, &s.doc.metadata, BTreeMap::new())
+    let (name, m, properties, name_split) = if id == 0 {
+        (&s.doc.name, &s.doc.metadata, BTreeMap::new(), None)
     } else {
         let c = s.doc.components.iter().find(|c| c.id == id).ok_or_else(|| bad(cmd, format!("no component `{id}`")))?;
-        (&c.name, &c.metadata, c.properties.clone())
+        (&c.name, &c.metadata, c.properties.clone(), c.name_split.clone())
     };
     let text = |k: &str| m.text(k).map(str::to_string);
     // A bill of materials type, quantity and virtual flag are a component's; the design has none.
@@ -173,17 +174,24 @@ fn read(s: &mut Session, p: &Value) -> Result<Value> {
         r#virtual: part.then(|| m.is_virtual()),
         metadata: m.0.clone(),
         properties,
+        name_split,
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
-/// A free property as it may be saved (`None`: remove it), or why not.
-fn property(name: &str, value: &Value, cmd: &str) -> Result<Option<String>> {
-    let shown: String = name.chars().take(64).collect();
+fn check_property_name(name: &str, cmd: &str) -> Result<()> {
     if name.trim().is_empty() || name.len() > MAX_PROPERTY_NAME_BYTES || name.chars().any(char::is_control) {
+        let shown: String = name.chars().take(64).collect();
         return Err(bad(cmd, format!("property name `{shown}` must be 1…{MAX_PROPERTY_NAME_BYTES} bytes of text without control characters")));
     }
+    Ok(())
+}
+
+/// A free property as it may be saved (`None`: remove it), or why not.
+fn property(name: &str, value: &Value, cmd: &str) -> Result<Option<String>> {
+    check_property_name(name, cmd)?;
+    let shown: String = name.chars().take(64).collect();
     let text = match value {
         Value::Null => return Ok(None),
         Value::String(t) if t.is_empty() => return Ok(None),
@@ -197,6 +205,21 @@ fn property(name: &str, value: &Value, cmd: &str) -> Result<Option<String>> {
     Ok(Some(text))
 }
 
+fn read_name_split(value: &Value, cmd: &str) -> Result<Option<ComponentNameSplit>> {
+    let rule: Option<ComponentNameSplit> = serde_json::from_value(value.clone()).map_err(|e| bad(cmd, format!("`name_split`: {e}")))?;
+    if let Some(rule) = &rule {
+        if rule.separator.is_empty() || rule.separator.len() > MAX_PROPERTY_NAME_BYTES || rule.separator.chars().any(char::is_control) {
+            return Err(bad(cmd, format!("`name_split.separator` must be 1…{MAX_PROPERTY_NAME_BYTES} bytes of text without control characters")));
+        }
+        check_property_name(&rule.left_property, cmd)?;
+        check_property_name(&rule.right_property, cmd)?;
+        if rule.left_property == rule.right_property {
+            return Err(bad(cmd, "`name_split` must use two distinct property names"));
+        }
+    }
+    Ok(rule)
+}
+
 fn set(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.metadata.set";
     let id = component_id(s, p, cmd)?;
@@ -205,6 +228,7 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let c = s.doc.components.iter().find(|c| c.id == id).ok_or_else(|| bad(cmd, format!("no component `{id}`")))?;
     let (mut metadata, mut properties) = (c.metadata.clone(), c.properties.clone());
+    let name_split = p.get("name_split").map(|v| read_name_split(v, cmd)).transpose()?.unwrap_or_else(|| c.name_split.clone());
     let mut entries: Vec<(String, Value)> = Vec::new();
     match p.get("values") {
         None => {}
@@ -223,7 +247,7 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::Object(_)) => return Err(bad(cmd, format!("`properties` can hold at most {MAX_KEYS} names"))),
         Some(_) => return Err(bad(cmd, "`properties` must be an object: {name: text, …}")),
     };
-    if entries.is_empty() && props.is_empty() {
+    if entries.is_empty() && props.is_empty() && p.get("name_split").is_none() {
         return Err(bad(
             cmd,
             format!(
@@ -235,6 +259,9 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         ));
     }
     let mut changed: Vec<String> = Vec::new();
+    if name_split != c.name_split {
+        changed.push("name_split".to_string());
+    }
     for (k, v) in entries {
         if metadata.set(Owner::Component, &k, v).map_err(|e| bad(cmd, e.to_string()))? && !changed.contains(&k) {
             changed.push(k);
@@ -272,12 +299,14 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
     {
         c.metadata = metadata;
         c.properties = properties;
+        c.name_split = name_split;
     }
     let c = s.doc.components.iter().find(|c| c.id == id).ok_or_else(|| bad(cmd, format!("no component `{id}`")))?;
     let reply = ComponentMetadataSetResult {
         component: id,
         metadata: c.metadata.0.clone(),
         properties: c.properties.clone(),
+        name_split: c.name_split.clone(),
         changed,
         param_warnings: Vec::new(),
     };
@@ -440,10 +469,15 @@ fn row_json(row: &Row, item: &[u32], mass: bool, numbered: bool, nested: bool) -
 
 /// The bill of materials as CSV: fixed columns, every field quoted, and a field a spreadsheet
 /// would run as a formula written as text; each row followed by the rows listed under it. A column
-/// added later goes at the end, so the others keep their places.
-fn csv(list: &Bom) -> String {
+/// added later goes at the end, so the others keep their places. With `mass`, `mass_g` ends each
+/// row: the row's mass in grams in the text JSON writes, empty where JSON has null.
+fn csv(list: &Bom, mass: bool) -> String {
     let quote = solidcraft_doc::csv::quoted;
     let mut out = ["item", "part_number", "description", "revision", "count", "definition", "material", "quantity", "finish"].map(quote).join(",");
+    if mass {
+        out.push(',');
+        out.push_str(&quote("mass_g"));
+    }
     out.push('\n');
     for (item, r) in list.rows_deep() {
         let (item, count, definition, material) = (bom::item_text(&item), r.count.to_string(), r.names.join("; "), r.materials.join("; "));
@@ -454,6 +488,15 @@ fn csv(list: &Bom) -> String {
         };
         let fields: [&str; 9] = [&item, &r.part_number, &r.description, &r.revision, &count, &definition, &material, &quantity, &r.finish];
         out.push_str(&fields.map(quote).join(","));
+        if mass {
+            // The text JSON writes for the same mass (`1290.0`, `1.29e-9`), so both files agree.
+            let text = match grams(r.mass) {
+                number @ Value::Number(_) => serde_json::to_string(&number).unwrap_or_default(),
+                _ => String::new(),
+            };
+            out.push(',');
+            out.push_str(&quote(&text));
+        }
         out.push('\n');
     }
     out
@@ -481,7 +524,7 @@ fn bom(s: &mut Session, p: &Value) -> Result<Value> {
             None => return Err(bad(cmd, "`path` must end in .csv or .json, or give `format`")),
         };
         let text = match format.as_str() {
-            "csv" => csv(&list),
+            "csv" => csv(&list, request.mass),
             "json" => {
                 let mut file = json!({"rows": rows, "total_occurrences": list.total.occurrences});
                 if request.mass {

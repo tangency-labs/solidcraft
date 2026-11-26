@@ -382,13 +382,13 @@ pub fn sphere(center: Vec3, radius: f64) -> Result<Body> {
 pub fn torus(center: Vec3, major: f64, minor: f64) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "torus");
     let (major, minor) = (finite(major, "major radius")?, finite(minor, "minor radius")?);
+    if !center.is_finite() {
+        return Err(KernelError::Invalid("torus center must be finite".into()));
+    }
     if !(minor > 1e-6 && major > minor) {
         return Err(KernelError::Invalid("torus needs major > minor > 0".into()));
     }
-    let plane = Plane { origin: center, ..Plane::XZ };
-    let r = Region2 { outer: Loop2::circle(Vec2::new(major, 0.0), minor), holes: vec![] };
-    let mut v = revolve(&plane, &[r], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU)?;
-    v.pop().ok_or_else(|| KernelError::Failed("torus".into()))
+    crate::smlib_sweeps::torus(center, major, minor)
 }
 
 /// Offset every segment of a loop to its right by `d` (outward for a region's outer loop and
@@ -1639,4 +1639,15 @@ pub fn plane_rise(sketch: &Plane, plane: &Plane, regions: &[Region2]) -> Result<
 /// loops ([`solidcore_ops::prism::plane_gap`]).
 pub fn plane_gap(sketch: &Plane, from: &Plane, to: &Plane, regions: &[Region2]) -> Result<(f64, f64)> {
     solidcore_ops::prism::plane_gap(sketch, from, to, regions).map_err(|e| KernelError::Invalid(e.to_string()))
+}
+
+/// `plane` moved by `by` along `sketch`'s normal ([`solidcore_ops::prism::plane_raised`]).
+pub fn plane_raised(sketch: &Plane, plane: &Plane, by: f64) -> Result<Plane> {
+    solidcore_ops::prism::plane_raised(sketch, plane, by).map_err(|e| KernelError::Invalid(e.to_string()))
+}
+
+/// Which side of `from` and of `to` holds what lies between them along `travel`, `true` for the
+/// side each plane's normal points to ([`solidcore_ops::prism::slab_sides`]).
+pub fn slab_sides(travel: Vec3, from: &Plane, to: &Plane) -> Result<(bool, bool)> {
+    solidcore_ops::prism::slab_sides(travel, from, to).map_err(|e| KernelError::Invalid(e.to_string()))
 }
