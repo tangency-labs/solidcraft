@@ -777,6 +777,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 ui.scope(|ui| ui_kit::checkbox_grid(ui, &mut [("Tangent Chain", chain), ("Preview", &mut d.preview_enabled)], 2))
                     .response
                     .backing_on_hover_text(tr("ui.fillet_options_tip"));
+                ui.scope(|ui| form_row(ui, "ui.fillet_color_edges", |ui| check(ui, &mut app.preferences.hover_edge_lit)))
+                    .response
+                    .backing_on_hover_text(tr("ui.fillet_color_edges_tip"));
             });
             // The radii along the edge, for the two types that take them.
             if !*chamfer && matches!(rtype, 2 | 4) {
@@ -928,7 +931,33 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         }
         _ => enter |= additional_rows(app, d, ui),
     }
+    enter |= body_name_row(d, ui);
     error_rows(app, ctx, d, ui);
+    enter
+}
+
+/// The Body Name row of a feature that makes a body of its own (New Body): empty names it as the
+/// command always has, a typed name is sent as `body_name` (#20776).
+fn body_name_row(d: &mut Dialog, ui: &mut egui::Ui) -> bool {
+    // Shown for every feature that can make a body, and greyed out unless the operation is New
+    // Body: a window whose operation is still being chosen keeps its size instead of jumping as
+    // the row comes and goes (only New Body sends the name, see `apply_body_name`).
+    let Some(new_body) = body_name_slot(&d.kind) else { return false };
+    let mut name = d.extra.get("body_name").and_then(Value::as_str).unwrap_or_default().to_string();
+    let mut enter = false;
+    form_row(ui, "ui.body_name", |ui| {
+        ui.add_enabled_ui(new_body, |ui| {
+            enter = ui_kit::text_field(ui, &mut name, tr("ui.body_name_hint")).0;
+        });
+    });
+    if !new_body {
+        return false;
+    }
+    if name.trim().is_empty() {
+        d.extra.remove("body_name");
+    } else {
+        d.extra.insert("body_name".into(), json!(name));
+    }
     enter
 }
 
@@ -1878,6 +1907,11 @@ mod tests {
         assert_eq!(h.app.dialog.as_ref().unwrap().extra.get("type"), Some(&json!("curvature")));
         h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
         assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::Fillet { chain: false, .. }));
+        // Color edges is the remembered preference, not a command parameter.
+        assert!(!h.app.preferences.hover_edge_lit);
+        h.step(&json!({"click":{"handle":"dialog:ui.fillet_color_edges"}})).unwrap();
+        assert!(h.app.preferences.hover_edge_lit);
+        assert_eq!(h.app.dialog.as_ref().unwrap().extra.get("type"), Some(&json!("curvature")));
         h.step(&json!({"click":{"handle":"dialog:section:Options"}})).unwrap();
         h.frames(2);
         assert!(scenario::handle_at("dialog:Tangent Chain").is_none());
