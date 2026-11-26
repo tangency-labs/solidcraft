@@ -24,7 +24,17 @@ pub(crate) fn patch_area(body: &Body, mesh: &Mesh, patch: &[usize]) -> Option<f6
     match solidcraft_kernel::face_surface(body, *patch.first()?)? {
         FaceSurface::Plane { normal, point } => flat_patch(body, patch, normal, point),
         FaceSurface::Cylinder { origin, axis, radius } => cylinder_band(body, mesh, patch, origin, axis, radius),
-        FaceSurface::Sphere { center, radius } => sphere(body, mesh, patch, center, radius),
+        FaceSurface::Sphere { center, radius } => sphere(body, patch, center, radius),
+        _ => None,
+    }
+}
+
+/// The exact area of one face where its surface and edges give it without the display mesh: a
+/// flat face's and a piece of a sphere's (#22556). `None` for any other face.
+pub(crate) fn face_area(body: &Body, face: usize) -> Option<f64> {
+    match solidcraft_kernel::face_surface(body, face)? {
+        FaceSurface::Plane { normal, point } => flat_patch(body, &[face], normal, point),
+        FaceSurface::Sphere { center, radius } => sphere(body, &[face], center, radius),
         _ => None,
     }
 }
@@ -320,8 +330,9 @@ fn cylinder_band(body: &Body, mesh: &Mesh, patch: &[usize], origin: Vec3, axis: 
 }
 
 /// The area of a patch of faces on one sphere: the sum of its faces' areas, each worked out
-/// from its edges by `sphere_face`. A whole sphere has no edges but its seam: 4πr².
-fn sphere(body: &Body, mesh: &Mesh, patch: &[usize], center: Vec3, radius: f64) -> Option<f64> {
+/// from its edges by the kernel ([`solidcraft_kernel::sphere_face_area`]). A whole sphere has no
+/// edges but its seam: 4πr².
+fn sphere(body: &Body, patch: &[usize], center: Vec3, radius: f64) -> Option<f64> {
     if !(radius.is_finite() && radius > 0.0) {
         return None;
     }
@@ -331,118 +342,7 @@ fn sphere(body: &Body, mesh: &Mesh, patch: &[usize], center: Vec3, radius: f64) 
             FaceSurface::Sphere { center: c, radius: r } if (r - radius).abs() <= radius * 1e-6 && c.dist(center) <= radius * 1e-6 => {}
             _ => return None,
         }
-        total += sphere_face(body, mesh, face, center, radius)?;
+        total += solidcraft_kernel::sphere_face_area(body, face)?;
     }
     (total.is_finite() && total > 0.0).then_some(total)
-}
-
-/// One edge of a face on a sphere, run along its loop: where it starts and ends, the
-/// direction it runs in at each end, and how far it bends away from a great circle.
-struct SphereEdge {
-    start: Vec3,
-    end: Vec3,
-    leaving: Vec3,
-    arriving: Vec3,
-    /// `∫κ_g ds` along the edge: positive where it bends to its left, seen from outside.
-    bend: f64,
-}
-
-/// The area of face `face` on the sphere of `center` and `radius`, by Gauss–Bonnet:
-/// `A = R²·(2π·χ − Σ∫κ_g ds − Σ turns)`, where χ = 2 − loops for a piece of a sphere bounded by
-/// that many loops, κ_g is the geodesic curvature of the edges and the turns are the
-/// exterior angles at the corners. Every edge must be a circle or an arc of one, which the
-/// plane of a cut leaves. A circle of radius r whose plane lies at distance d from the centre
-/// bends by d/(R·r): along an arc of turn θ, by θ·d/R. A seam the face runs both ways along
-/// and an edge shrunk to a point (a pole) bound nothing and are left out.
-///
-/// The face lies to the left of its loops or to the right of them; the side whose area the
-/// display mesh's triangles come nearest is the face. `None` for any other edge.
-fn sphere_face(body: &Body, mesh: &Mesh, face: usize, center: Vec3, radius: f64) -> Option<f64> {
-    let tol = radius * 1e-6;
-    let mut used: Vec<(usize, bool)> = Vec::new();
-    for l in &body.record().faces.get(face)?.loops {
-        let Loop::Edges { edges } = l else { return None };
-        used.extend(edges.iter().map(|u| (u.edge as usize, u.forward)));
-    }
-    let mut edges: Vec<SphereEdge> = Vec::new();
-    for &(edge, forward) in &used {
-        if used.iter().filter(|(e, _)| *e == edge).count() > 1 {
-            continue;
-        }
-        let Some(c) = solidcraft_kernel::edge_circle(body, edge) else {
-            // An edge shrunk to a point: a pole of the sphere's parameters.
-            let e = body.record().edges.get(edge)?;
-            let curve = solidcraft_geom::brep::eval::CurveEval::new(e.parameters()).ok()?;
-            let [t0, t1] = e.interval;
-            let (a, m, b) = (curve.point(t0)?, curve.point(0.5 * (t0 + t1))?, curve.point(t1)?);
-            if a.dist(m) <= tol && a.dist(b) <= tol {
-                continue;
-            }
-            return None;
-        };
-        if c.radius <= tol {
-            continue;
-        }
-        // The circle lies on the sphere.
-        let d = (c.center - center).dot(c.axis.vec());
-        let off = c.center - center - c.axis.vec() * d;
-        if off.len() > tol || (d * d + c.radius * c.radius - radius * radius).abs() > 2.0 * radius * tol {
-            return None;
-        }
-        // The arc runs counter-clockwise about its axis from its start to its end.
-        let along = |p: Vec3| c.axis.vec().cross(p - c.center).normalized();
-        let (start, end, sign) = if forward { (c.start, c.end, 1.0) } else { (c.end, c.start, -1.0) };
-        let (leaving, arriving) = (along(start)? * sign, along(end)? * sign);
-        edges.push(SphereEdge { start, end, leaving, arriving, bend: sign * c.angle * d / radius });
-    }
-    // Each edge's next: the one edge that leaves from where it ends. The loops are the
-    // cycles of that order, and the corners are where one edge meets its next.
-    let mut next: Vec<usize> = Vec::with_capacity(edges.len());
-    for e in &edges {
-        let mut after = edges.iter().enumerate().filter(|(_, n)| n.start.dist(e.end) <= tol).map(|(i, _)| i);
-        let (Some(n), None) = (after.next(), after.next()) else { return None };
-        next.push(n);
-    }
-    let mut taken = vec![false; edges.len()];
-    for &n in &next {
-        if std::mem::replace(taken.get_mut(n)?, true) {
-            return None;
-        }
-    }
-    let mut seen = vec![false; edges.len()];
-    let mut loops = 0;
-    for first in 0..edges.len() {
-        if seen.get(first) != Some(&false) {
-            continue;
-        }
-        loops += 1;
-        let mut e = first;
-        while let Some(slot) = seen.get_mut(e).filter(|s| !**s) {
-            *slot = true;
-            e = *next.get(e)?;
-        }
-    }
-    let mut turned = 0.0;
-    for (e, &n) in edges.iter().zip(&next) {
-        let (into, out) = (e.arriving, edges.get(n)?.leaving);
-        let outward = (e.end - center).normalized()?;
-        turned += e.bend + into.cross(out).dot(outward).atan2(into.dot(out));
-    }
-    let r2 = radius * radius;
-    let chi = 2.0 - f64::from(loops);
-    let left = r2 * (2.0 * PI * chi - turned);
-    let right = r2 * (2.0 * PI * chi + turned);
-    let on_mesh: f64 = mesh
-        .triangles
-        .iter()
-        .zip(&mesh.tri_face)
-        .filter(|(_, f)| **f as usize == face)
-        .filter_map(|(t, _)| mesh.tri(t))
-        .map(|[a, b, c]| (b - a).cross(c - a).len() * 0.5)
-        .sum();
-    let whole = 4.0 * PI * r2;
-    [left, right]
-        .into_iter()
-        .filter(|a| a.is_finite() && *a > 0.0 && *a <= whole * (1.0 + 1e-9))
-        .min_by(|a, b| (a - on_mesh).abs().total_cmp(&(b - on_mesh).abs()))
 }
