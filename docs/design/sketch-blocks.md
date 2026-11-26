@@ -332,15 +332,22 @@ How each existing command treats a block member:
   an attribution row).
 - **Right-click on a member:** Explode Block, Edit Block, and Select Block (selects every member).
   They sit in `sketch_entity_items` (`context_menu.rs:1805`) beside Edit Sketch Pattern and
-  Explode Text.
+  Explode Text. Two or more curves in no block offer Make Block instead, just before Merge Lines.
 - **Browser:** each block is a row under its sketch, the way patterns and projections are listed
   (`sketch_pattern_tree.rs`, `sketch_link_tree.rs`, hooked in at `browser.rs:3035`).
   - Click selects the members.
   - Double-click opens Edit Block.
-  - Delete explodes the block, or deletes it if the user picks Delete Block.
+  - Right-click opens the block's menu: Edit Block, Select Block, Explode Block and Delete Block.
+  - Delete after a click deletes the block with its members and its axis, as Delete Block does,
+    in one undoable step. Explode Block is only the menu item.
 - **Canvas:**
   - One block glyph near the origin. `glyph_constraints` already collapses a pattern to one glyph
     (`sketch_tools.rs:2514`).
+  - The glyph is picked like a constraint glyph (`viewport.rs`, `sketch_block_glyph_at`): dimension
+    text, constraint glyphs and midpoints win over it, and it follows the pick filter for
+    constraints. A click selects the members, as the Browser row does, so Delete then deletes the
+    block; a right-click opens the row's menu; a double-click opens Edit Block. A click on the
+    glyph never falls through to the geometry under it.
   - Members and the axis drawn in the block colour (theme token `sketch_block`) while they are not
     fully constrained; once fully constrained they take the fully constrained colour like any
     other geometry. A light outline shows while the pointer is over a member or the glyph.

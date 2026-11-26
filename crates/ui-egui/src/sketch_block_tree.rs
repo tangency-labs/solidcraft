@@ -1,6 +1,7 @@
 //! A sketch's blocks are children of their sketch, beside its patterns and projections: one row
-//! per block. A click selects its members while the sketch is edited, a double-click opens Edit
-//! Block, Delete explodes it, and its menu has Delete Block, which deletes it with its members.
+//! per block. A click selects its members while the sketch is edited (Delete then deletes the
+//! block with them), a double-click opens Edit Block, and its menu has Explode Block and Delete
+//! Block.
 
 use serde_json::json;
 use solidcraft_engine::Sel;
@@ -14,16 +15,6 @@ use crate::{
 
 pub(crate) fn has_blocks(app: &SolveApp, sketch: u64) -> bool {
     app.session.doc.sketch(sketch).is_ok_and(|sk| !sk.blocks.is_empty())
-}
-
-/// A block row clicked, with the selection the click made and the document it was made in:
-/// Delete explodes the block while neither has changed.
-#[derive(Clone, Debug)]
-pub(crate) struct Picked {
-    sketch: u64,
-    block: String,
-    selection: Vec<Sel>,
-    doc: std::sync::Weak<solidcraft_engine::doc::Document>,
 }
 
 /// One block row of a sketch, as the Browser and the vertical feature history list it.
@@ -90,33 +81,21 @@ fn act(
             crate::sketch_modify_ui::edit_block(app, &entry.id);
         }
     } else if clicked {
-        select(app, sketch, &entry.id, entry.members);
+        select(app, sketch, entry.members);
     }
     if let Some(at) = secondary {
         crate::context_menu::open_for(app, at, Target::SketchBlock { sketch, block: entry.id });
     }
 }
 
-/// Select block `block`'s members while its sketch is edited (else the sketch), and remember the
-/// pick for Delete.
-fn select(app: &mut SolveApp, sketch: u64, block: &str, members: Vec<Sel>) {
-    if app.session.active_sketch != Some(sketch) {
-        app.tree.picked_block = None;
-        let _ = app.run("select.set", json!({"items":[Sel::Feature { id: sketch }]}));
-        return;
-    }
-    if app.run("select.set", json!({"items":members})).is_ok() {
-        app.tree.picked_block = Some(Picked {
-            sketch,
-            block: block.to_string(),
-            selection: app.session.selection.clone(),
-            doc: std::sync::Arc::downgrade(&app.session.doc),
-        });
-    }
+/// Select a block's `members` while its sketch is edited, else the sketch.
+fn select(app: &mut SolveApp, sketch: u64, members: Vec<Sel>) {
+    let items = if app.session.active_sketch == Some(sketch) { members } else { vec![Sel::Feature { id: sketch }] };
+    let _ = app.run("select.set", json!({ "items": items }));
 }
 
-/// Select every member of block `block` of the sketch being edited (Select Block). Delete then
-/// deletes them, as for any selection.
+/// Select every member of block `block` of the sketch being edited (Select Block, a click on its
+/// glyph). Delete then deletes them, and with them the block and its axis.
 pub(crate) fn select_members(app: &mut SolveApp, block: &str) {
     let Some(sketch) = app.session.active_sketch else { return };
     let members = app
@@ -127,49 +106,13 @@ pub(crate) fn select_members(app: &mut SolveApp, block: &str) {
         .and_then(|sk| sk.blocks.iter().find(|b| b.id == block))
         .map(|b| b.curves.iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect::<Vec<_>>());
     if let Some(members) = members {
-        app.tree.picked_block = None;
         let _ = app.run("select.set", json!({"items":members}));
     }
-}
-
-/// Forget the picked block row once the document has changed since the pick.
-fn forget_stale(app: &mut SolveApp) {
-    if app.tree.picked_block.as_ref().is_some_and(|p| !std::sync::Weak::ptr_eq(&p.doc, &std::sync::Arc::downgrade(&app.session.doc))) {
-        app.tree.picked_block = None;
-    }
-}
-
-/// Delete with a block row picked, the document and the selection unchanged since, and that
-/// selection still exactly the block's members: the block is exploded, its curves stay. False
-/// otherwise, and Delete goes on as usual.
-pub(crate) fn delete_picked(app: &mut SolveApp) -> bool {
-    let Some(picked) = app.tree.picked_block.take() else { return false };
-    let same_doc = std::sync::Weak::ptr_eq(&picked.doc, &std::sync::Arc::downgrade(&app.session.doc));
-    if !same_doc || app.session.active_sketch != Some(picked.sketch) || app.session.selection != picked.selection {
-        return false;
-    }
-    let members_picked = app.session.doc.sketch(picked.sketch).ok().and_then(|sk| sk.blocks.iter().find(|b| b.id == picked.block)).is_some_and(|b| {
-        let picked_curves = selected_curves(&picked.selection);
-        picked_curves.len() == picked.selection.len()
-            && b.curves.len() == picked_curves.len()
-            && b.curves.iter().all(|c| picked_curves.contains(c.as_str()))
-    });
-    if !members_picked {
-        return false;
-    }
-    match app.run("sketch.explode_block", json!({"block": picked.block})) {
-        Ok(_) => {
-            let _ = app.run("select.clear", json!({}));
-        }
-        Err(e) => app.set_status(e, true),
-    }
-    true
 }
 
 /// The blocks under their sketch in the Browser. `dim`: the sketch is hidden (or a placement
 /// above it), so its blocks fade with it.
 pub(crate) fn browser_rows(app: &mut SolveApp, rows: &mut Rows<'_>, sketch: u64, depth: usize, occurrence: Option<(u64, &[u64])>, dim: bool) {
-    forget_stale(app);
     for entry in entries(app, sketch) {
         let key = format!("block:{sketch}:{}", entry.id);
         let hit = node_row(
@@ -186,7 +129,6 @@ pub(crate) fn browser_rows(app: &mut SolveApp, rows: &mut Rows<'_>, sketch: u64,
 
 /// The blocks under their sketch in the vertical feature history.
 pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, sketch: u64, depth: usize, scope: &str, occurrence: Option<(u64, &[u64])>, dim: bool) {
-    forget_stale(app);
     for entry in entries(app, sketch) {
         let response = crate::ui_kit::tree_row(
             ui,

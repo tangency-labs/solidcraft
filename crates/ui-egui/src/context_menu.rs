@@ -1939,12 +1939,10 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
             v.push(act("ui.editSketchPattern", "Edit Sketch Pattern", "sketch_circ_pattern").with(json!({"pattern":pattern.id})));
         }
     }
-    // The block of the first selected member or axis line; curves in no block can make one, which
-    // starts Make Block as the ribbon does, with the selection's curves and point.
-    if let Some(block) = curves.iter().find_map(|c| ss.sketch.block_of(c)) {
+    // The block of the first selected member or axis line.
+    let in_block = curves.iter().find_map(|c| ss.sketch.block_of(c));
+    if let Some(block) = in_block {
         v.extend(block_items(app, sid, &block.id, true));
-    } else if curves.len() >= 2 {
-        v.push(cmd(app, "sketch.block", "Make Block"));
     }
     if crate::sketch_text::selected_entity(app).is_some() {
         v.push(cmd(app, "sketch.edit_text", "Edit Text"));
@@ -1986,6 +1984,10 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         .collect();
     if !lines.is_empty() {
         v.push(cmd(app, "sketch.infinite", "Infinite Line").with(json!({ "curves": lines })));
+    }
+    // Curves in no block can make one: Make Block as the ribbon starts it, with the selection.
+    if in_block.is_none() && curves.len() >= 2 {
+        v.push(cmd(app, "sketch.block", "Make Block"));
     }
     // #20317: lines joined end to end on one straight line become one. The whole selection goes,
     // so an arc in it is refused rather than left out.
@@ -3276,6 +3278,11 @@ pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
     crate::select_other::close(app);
     if let Some(sel) = crate::viewport::sketch_constraint_at(app, at, app.viewport.hover.as_ref()) {
         select_under(app, at, before, sel);
+    } else if let Some(sketch) = app.session.active_sketch
+        && let Some(block) = crate::viewport::sketch_block_glyph_at(app, at, app.viewport.hover.as_ref())
+    {
+        // A block's glyph opens the block's menu, as its Browser row does.
+        return open_for(app, at, Target::SketchBlock { sketch, block });
     } else if app.session.active_sketch.is_none()
         && let Some(h) = app.viewport.hover.clone()
         && let Some((_, sel)) = crate::viewport::candidate(app, &[h])

@@ -1,7 +1,8 @@
 //! What a sketch block shows on the canvas while its sketch is edited: one glyph beside its
-//! origin, which a double-click opens in Edit Block, and a light outline round its curves while
-//! the pointer is over one of them or over the glyph. The constraints a block holds are drawn
-//! faded, by [`HELD_FADE`].
+//! origin, and a light outline round its curves while the pointer is over one of them or over the
+//! glyph. A click on the glyph selects the block's members, a right-click opens the block's menu
+//! and a double-click opens Edit Block. The constraints a block holds are drawn faded, by
+//! [`HELD_FADE`].
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -113,9 +114,13 @@ pub(crate) fn clear() {
     DRAWN.with(|d| d.borrow_mut().clear());
 }
 
+/// The block whose glyph is under a screen position (its id).
+pub(crate) fn glyph_at(pos: Pos2) -> Option<String> {
+    let reach = crate::sketch_tools::glyph_px_now() * 0.6;
+    DRAWN.with(|d| crate::sketch_tools::nearest_glyph(d.borrow().iter().map(|(id, q)| (id.as_str(), *q)), pos, reach).map(|(id, _)| id.to_owned()))
+}
+
 /// Double-click on a block's glyph: Edit Block.
 pub(crate) fn double_click(app: &mut SolveApp, pos: Pos2) -> bool {
-    let reach = crate::sketch_tools::glyph_px_now() * 0.6;
-    let hit = DRAWN.with(|d| crate::sketch_tools::nearest_glyph(d.borrow().iter().map(|(id, q)| (id.clone(), *q)), pos, reach).map(|(id, _)| id));
-    hit.is_some_and(|id| crate::sketch_modify_ui::edit_block(app, &id))
+    glyph_at(pos).is_some_and(|id| crate::sketch_modify_ui::edit_block(app, &id))
 }

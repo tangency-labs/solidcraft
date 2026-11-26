@@ -1074,7 +1074,10 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
                     let proj = projection(app, rect);
                     !crate::canvas::owns_pointer(app, &proj, p)
                         && pick(app, &proj, p).is_empty()
-                        && (crate::render_workspace::active(app) || (crate::dim_view::hit(p).is_none() && crate::sketch_tools::glyph_at(p).is_none()))
+                        && (crate::render_workspace::active(app)
+                            || (crate::dim_view::hit(p).is_none()
+                                && crate::sketch_tools::glyph_at(p).is_none()
+                                && crate::sketch_block_canvas::glyph_at(p).is_none()))
                 })
         };
         let openscad_orbit =

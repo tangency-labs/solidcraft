@@ -298,9 +298,6 @@ pub struct TreeState {
     pub picked_canvases: Vec<u64>,
     /// Joints picked in the tree (a hidden one shows highlighted while it is picked).
     pub picked_joints: Vec<u64>,
-    /// A sketch block's row clicked in the tree, while the selection is still what that click
-    /// made: Delete explodes the block (`sketch_block_tree::delete_picked`).
-    pub(crate) picked_block: Option<crate::sketch_block_tree::Picked>,
     /// Motion links picked in the tree, as `joint.list` numbers them (#6825).
     pub picked_links: Vec<usize>,
     /// Folders picked in the feature history (features use the engine selection).

@@ -6259,6 +6259,16 @@ pub(crate) fn sketch_constraint_at(app: &SolveApp, pos: Pos2, hit: Option<&Hit>)
     dimension.or(glyph).map(|id| Sel::SketchConstraint { id })
 }
 
+/// The sketch block whose glyph is under a left-click or a context-menu click (its id), when no
+/// sketch annotation is: it yields to midpoints and follows the pick filter as constraint glyphs do.
+pub(crate) fn sketch_block_glyph_at(app: &SolveApp, pos: Pos2, hit: Option<&Hit>) -> Option<String> {
+    crate::sketch_view::active_sketch(app)?;
+    if app.ui.pick_off.iter().any(|x| x == "constraints") || matches!(hit, Some(Hit::SketchMidpoint { .. })) {
+        return None;
+    }
+    sketch_constraint_at(app, pos, hit).is_none().then(|| crate::sketch_block_canvas::glyph_at(pos)).flatten()
+}
+
 /// What a click would pick: the first hit the open dialog's active input accepts, or with no
 /// dialog the first hit (sketch entities only belong to the active sketch).
 pub fn candidate(app: &SolveApp, hits: &[Hit]) -> Option<(Hit, Sel)> {
@@ -9081,11 +9091,14 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             } else {
                 let annotation = sketch_constraint_at(app, p, cand.as_ref().map(|c| &c.0));
+                let block_glyph = sketch_block_glyph_at(app, p, cand.as_ref().map(|c| &c.0));
                 if crate::sketch_text_handles::over(app, &proj, p) || crate::plane_resize::over(app, &proj, p) {
                     // A text's resize or rotation handle, or a plane's: it stays selected.
                 } else if !crate::sketch3d::click(app, &proj, p) {
                     match annotation {
                         Some(sel) => select(app, Some(sel), add || pen_select, allow_toggle || pen_select),
+                        // A block's glyph selects its members, as its Browser row does.
+                        None if let Some(block) = block_glyph => crate::sketch_block_tree::select_members(app, &block),
                         // Clicking again on the same spot selects the next thing under it (not
                         // the second click of a double-click, which has its own actions).
                         None if !pen_select && !add && !resp.double_clicked() && crate::select_other::cycle_click(app, &proj, p) => {}

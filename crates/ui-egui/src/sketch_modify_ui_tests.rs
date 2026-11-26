@@ -1475,8 +1475,9 @@ fn construction_switches_a_selected_point_and_the_menu_offers_it() {
 
 /// Sketch blocks (#4069): Make Block from the ribbon or the right-click menu takes the selected
 /// curves; a member's menu, the block's glyph and its Browser row open Edit Block, which sends
-/// only what changed; the glyph's label names the block; a click on the row then Delete explodes
-/// the block, and the row's Delete Block deletes it whole.
+/// only what changed; the glyph's label names the block; the glyph is picked like a constraint
+/// glyph (a click selects the members, a right-click opens the block's menu); a click on the glyph
+/// or the row then Delete deletes the block whole, as the row's Delete Block does.
 #[test]
 fn blocks_are_made_edited_exploded_and_deleted_from_the_ribbon_menu_glyph_and_browser() {
     let mut h = Harness::new();
@@ -1572,33 +1573,47 @@ fn blocks_are_made_edited_exploded_and_deleted_from_the_ribbon_menu_glyph_and_br
         assert_eq!(crate::sketch_block_canvas::label(&b), "Dove (Free scale, 4 curves), double-click to edit");
     }
 
-    // The Browser row: a click selects the members, and Delete then explodes the block.
+    // The glyph is picked like a constraint glyph: a click selects the members, a right-click
+    // opens the block's menu, and with constraints filtered out of picking it is passed over.
+    let glyph = format!("sketch:block-glyph:{block}");
+    let members_selected = |h: &Harness| {
+        h.app.session.selection.len() == curves.len()
+            && h.app.session.selection.iter().all(|s| matches!(s, Sel::SketchCurve { id, .. } if curves.contains(&id.as_str())))
+    };
+    h.app.session.selection.clear();
+    h.step(&json!({"click":{"handle":glyph}})).unwrap();
+    assert!(members_selected(&h), "a click on the glyph selects the members: {:?}", h.app.session.selection);
+    h.app.session.selection.clear();
+    h.step(&json!({"click":{"handle":glyph},"button":"right"})).unwrap();
+    let target = crate::context_menu::Target::SketchBlock { sketch: sid, block: block.clone() };
+    assert!(h.app.viewport.context_menu.is_some() && h.app.menu.target == target, "the glyph opens the block's menu: {:?}", h.app.menu.target);
+    crate::context_menu::close(&mut h.app);
+    h.app.ui.pick_off = vec!["constraints".into()];
+    h.step(&json!({"click":{"handle":glyph}})).unwrap();
+    assert!(!members_selected(&h), "the pick filter for constraints passes the glyph over");
+    h.app.ui.pick_off.clear();
+
+    // A click on the glyph or on the Browser row selects the members, and Delete then deletes
+    // the block with them and its axis, in one undoable step.
     h.frames(6);
     let row = format!("browser:sketch-block:{sid}:{block}");
     assert!(crate::scenario::handle_at(&row).is_some(), "the block is listed under its sketch");
-    h.step(&json!({"click":{"handle":row}})).unwrap();
-    assert_eq!(h.app.session.selection.len(), 4, "a click on the row selects the members");
-    h.step(&json!({"key":"Delete"})).unwrap();
-    h.frames(3);
-    let sk = h.app.session.doc.sketch(sid).unwrap();
-    assert!(sk.blocks.is_empty(), "Delete on the row explodes the block");
-    assert!(curves.iter().all(|c| sk.curve_index(c).is_some()), "its curves stay");
-    h.app.run("edit.undo", json!({})).unwrap();
-    assert_eq!(h.app.session.doc.sketch(sid).unwrap().blocks.len(), 1);
-
-    // A row pick the document has moved on from: Delete deletes the selection as usual.
-    h.frames(3);
-    h.step(&json!({"click":{"handle":format!("browser:sketch-block:{sid}:{block}")}})).unwrap();
-    let members = h.app.session.selection.clone();
-    h.app.run("sketch.explode_block", json!({"block": block})).unwrap();
-    h.app.session.selection = members;
-    h.step(&json!({"key":"Delete"})).unwrap();
-    h.frames(3);
-    let sk = h.app.session.doc.sketch(sid).unwrap();
-    assert!(curves.iter().all(|c| sk.curve_index(c).is_none()), "Delete deleted the selected curves: {:?}", h.app.status);
-    h.app.run("edit.undo", json!({})).unwrap();
-    h.app.run("edit.undo", json!({})).unwrap();
-    assert_eq!(h.app.session.doc.sketch(sid).unwrap().blocks.len(), 1);
+    for handle in [&glyph, &row] {
+        h.app.session.selection.clear();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":handle}})).unwrap();
+        assert!(members_selected(&h), "a click on {handle} selects the members");
+        h.step(&json!({"key":"Delete"})).unwrap();
+        h.frames(3);
+        let sk = h.app.session.doc.sketch(sid).unwrap();
+        assert!(sk.blocks.is_empty(), "Delete after a click on {handle} deletes the block: {:?}", h.app.status);
+        assert!(curves.iter().all(|c| sk.curve_index(c).is_none()), "and its members");
+        assert!(sk.curve_index(&axis).is_none(), "and its axis");
+        h.app.run("edit.undo", json!({})).unwrap();
+        let sk = h.app.session.doc.sketch(sid).unwrap();
+        assert_eq!(sk.blocks.len(), 1, "undo brings the block back");
+        assert!(curves.iter().chain([&axis.as_str()]).all(|c| sk.curve_index(c).is_some()), "with its members and axis");
+    }
 
     // Members of two blocks selected: the menu offers the first one's items once.
     h.app.run("sketch.line", json!({"points":[[40,0],[50,0]],"ids":["o1"]})).unwrap();
