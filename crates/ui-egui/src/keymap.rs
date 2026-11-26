@@ -2542,6 +2542,40 @@ mod tests {
     }
 
     #[test]
+    fn onshape_keys_split_between_a_sketch_and_the_model() {
+        let mut a = app();
+        a.preferences.keyboard_profile = "onshape".into();
+        // In the model: Shift+letters build features, F fits, Y shows and hides.
+        assert_eq!(command_for(&a, "Shift+E"), Some("solid.extrude"));
+        assert_eq!(command_for(&a, "Shift+F"), Some("solid.fillet"));
+        assert_eq!(command_for(&a, "Shift+W"), Some("solid.revolve"));
+        assert_eq!(command_for(&a, "F"), Some("view.fit"));
+        assert_eq!(command_for(&a, "Y"), Some("ui.toggle_visibility"));
+        assert_eq!(keys(&a, "view.front"), ["Shift+1", "Ctrl+1"]);
+        assert_eq!(keys(&a, "solid.fillet"), ["Shift+F"], "Fit took F");
+        // In a sketch: single letters are tools and constraints.
+        a.run("sketch.create", json!({"plane":"XY","name":"S"})).unwrap();
+        for (key, id) in [
+            ("V", "sketch.constraint.vertical"),
+            ("H", "sketch.constraint.horizontal"),
+            ("E", "sketch.constraint.equal"),
+            ("T", "sketch.constraint.tangent"),
+            ("M", "sketch.trim"),
+            ("Q", "sketch.construction"),
+            ("X", "sketch.extend"),
+            ("R", "sketch.rectangle.center"),
+            ("G", "sketch.rectangle.two_point"),
+            ("U", "sketch.project"),
+            ("Shift+F", "sketch.fillet"),
+            ("Shift+S", "sketch.point"),
+        ] {
+            assert_eq!(command_for(&a, key), Some(id), "{key} in a sketch");
+        }
+        assert_eq!(keys(&a, "ui.toggle_visibility"), ["Y"], "Vertical took V");
+        assert!(crate::keyboard_profiles::chosen(&a).unwrap().left_out(&a).is_empty(), "Onshape's keys are all used");
+    }
+
+    #[test]
     fn older_preferences_and_unknown_profiles_keep_solidcrafts_keys() {
         let older: crate::prefs::Prefs = serde_json::from_value(json!({"nav": "nx", "sketch_keys_only": true})).unwrap();
         assert_eq!(older.keyboard_profile, "solidcraft", "a saved NX mouse preset applies no keys");
@@ -2649,7 +2683,7 @@ mod tests {
         h.frames(2);
         let nx = crate::scenario::handle_at("prefs:keyboard_profile:nx").expect("NX is offered");
         assert!(nx.y > picker.y, "the list opens below the drop-down");
-        for id in ["solidcraft", "fusion", "inventor", "solidworks"] {
+        for id in ["solidcraft", "fusion", "inventor", "onshape", "solidworks"] {
             assert!(crate::scenario::handle_at(&format!("prefs:keyboard_profile:{id}")).is_some(), "{id} is offered");
         }
         h.step(&json!({"click": {"handle": "prefs:keyboard_profile:nx"}})).unwrap();
