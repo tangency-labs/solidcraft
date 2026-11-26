@@ -49,6 +49,33 @@ fn numbering_a_cylinder_operand_needs_no_geometry_export() {
     assert_eq!(known.pieces, measured.pieces);
 }
 
+/// Ordinary booleans tag the shared imported form. Its numbering must match a full
+/// topology walk even when a previous boolean has introduced inner loops and seams.
+#[test]
+fn a_shared_boolean_operand_keeps_its_record_order_without_an_export() {
+    use solidcraft_smlib::trace::{Event, Run};
+
+    let block = box_solid(v(-6., -6., 0.), v(6., 6., 4.)).unwrap();
+    let tool = cylinder(v(0., 0., -1.), Vec3::Z, 2., 6.).unwrap();
+    let drilled = crate::boolean(&block, &tool, crate::BoolOp::Cut).unwrap().unwrap();
+    for body in [&tool, &drilled] {
+        let cached = body.smlib().unwrap();
+        let trace = Run::new();
+        let (operand, known) = trace.within(|| super::smlib_operand_ordered(body)).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&cached, &operand));
+        assert!(!trace.take().iter().any(|e| matches!(e, Event::Export { .. } | Event::Call { op: "copy", .. })));
+
+        // Run the old lookup on a disposable copy. An export can add missing trims.
+        let measured = super::numbering(body.record(), &operand.try_clone().unwrap()).unwrap();
+        let known = known.unwrap();
+        let index = |to: &[usize], i: usize| if to.is_empty() { i } else { to[i] };
+        for (a, b, n) in [(&known.faces, &measured.faces, body.face_count()), (&known.edges, &measured.edges, body.edge_count())] {
+            assert!((0..n).all(|i| index(a, i) == index(b, i)));
+        }
+        assert_eq!(known.pieces, measured.pieces);
+    }
+}
+
 /// Truck holds spheres and tori as revolutions (`PlacedRevolution`): SMLib gets them as its
 /// analytic sphere and torus, faces turned over where the revolution's normal points inward.
 #[test]

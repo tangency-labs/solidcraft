@@ -1034,6 +1034,7 @@ fn call_with_copy(
             let turn = match p.get("turn").map(Value::as_str) {
                 None | Some(Some("mitre")) => Turn::Mitre,
                 Some(Some("swept")) => Turn::Swept,
+                Some(Some("auto")) => Turn::Auto,
                 Some(_) => return Err(bad("turn")),
             };
             let kind = match p["kind"].as_str() {

@@ -234,7 +234,7 @@ fn shown_as(hit: &Hit, sel: &Sel) -> Sel {
 /// Sort key: in a sketch its own points and curves come first; then by kind.
 fn rank(s: &Sel, sketching: bool) -> (u8, u8) {
     let kind = match s {
-        Sel::SketchPoint { .. } | Sel::SketchMidpoint { .. } | Sel::ExternalSketchPoint { .. } => 0,
+        Sel::SketchPoint { .. } | Sel::SketchMidpoint { .. } | Sel::ExternalSketchPoint { .. } | Sel::PlacedSketchPoint { .. } => 0,
         Sel::SketchCurve { .. } | Sel::ExternalSketchCurve { .. } => 1,
         Sel::SketchConstraint { .. } => 2,
         Sel::Vertex { .. } | Sel::ConstructionPoint { .. } | Sel::PointCloudPoint { .. } => 3,
@@ -329,6 +329,11 @@ pub fn label(app: &SolveApp, sel: &Sel) -> String {
         Sel::SketchPoint { id } => app.session.active_sketch.map(|s| in_sketch(s, &|sk| point_label(sk, id))).unwrap_or_else(|| id.clone()),
         Sel::SketchCurve { id, .. } => app.session.active_sketch.map(|s| in_sketch(s, &|sk| curve_label(sk, id))).unwrap_or_else(|| id.clone()),
         Sel::ExternalSketchPoint { sketch, id } => format!("{} · {}", in_sketch(*sketch, &|sk| point_label(sk, id)), sketch_name(app, *sketch)),
+        // On another copy of its part: that copy's name too.
+        Sel::PlacedSketchPoint { sketch, id, path } => {
+            let copy = path.last().and_then(|o| app.session.doc.occurrences.iter().find(|x| x.id == *o)).map(|o| o.name.clone()).unwrap_or_default();
+            format!("{} · {} · {copy}", in_sketch(*sketch, &|sk| point_label(sk, id)), sketch_name(app, *sketch))
+        }
         Sel::ExternalSketchCurve { sketch, id } => format!("{} · {}", in_sketch(*sketch, &|sk| curve_label(sk, id)), sketch_name(app, *sketch)),
         Sel::SketchConstraint { id } => format!("Constraint {id}"),
         Sel::Vertex { body, .. } => format!("Vertex · {body}"),
@@ -368,6 +373,7 @@ fn icon(app: &SolveApp, sel: &Sel) -> &'static str {
         Sel::SketchPoint { .. }
         | Sel::SketchMidpoint { .. }
         | Sel::ExternalSketchPoint { .. }
+        | Sel::PlacedSketchPoint { .. }
         | Sel::Vertex { .. }
         | Sel::ConstructionPoint { .. }
         | Sel::PointCloudPoint { .. } => "point",

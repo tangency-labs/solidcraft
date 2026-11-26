@@ -10,6 +10,7 @@
 //! | [`Tangency`]            | (none)   |
 //! | [`g2_all_along`], [`G2`] | (none)   |
 //! | `bernstein_roots` (private) | (none) |
+//! | [`tube_regularity`], [`TubeRegularity`] | (none) |
 //!
 //! **The polynomials.** Each use of the edge carries its pcurve `(u(t), v(t)) = (X, Y) / W`
 //! on the edge's own parameter `t`, and its face's surface is its NURBS form `A / w` in the
@@ -148,6 +149,36 @@
 //! without a bounded margin.
 
 //!
+//! **A rounded offset's tube ([`tube_regularity`]).** A rounded offset caps a convex edge
+//! `c(t)` with the tube of radius `d` about it: the points `c + d u` for `u` on the arc
+//! between the two face use normals turned to the offset's side (#13685). That sweep is
+//! regular where `1 - d (u . k) > 0`, `k = (c'' - (c'' . c') c' / |c'|^2) / |c'|^2` the
+//! curvature vector (no Frenet frame: `k` is defined, and small, where the edge is straight),
+//! and folds over itself past it. On a piece of `t`, `c'` and `c''` are enclosed from the
+//! edge's NURBS form (`curve_derivs_over`) and the normals from the uses' `F` (as above), and
+//! `max over the arc of u . k` is bounded twice: from below by the arc's two ends (their
+//! enclosures' lower ends), or by `|k_p|` (`k_p` the projection of `k` on the arc's plane)
+//! where `k_p`'s direction is proved inside the arc; from above by `|k|` unless `k_p`'s
+//! direction is proved outside the arc, and then by the two ends. A piece whose lower bound
+//! times `d` is at least 1 is a fold; one whose upper bound times `d` is below 1 is regular;
+//! any other is halved, at most `MAX_TUBE_HALVINGS` times and to at most `MAX_TUBE_PIECES`
+//! pieces an edge, and is undecided past them. A piece whose normals or speed are not proved
+//! non-zero has no bound and is halved likewise. Where the normals are within rounding of one
+//! line (`1 - g^2`, `g = u_a . u_c`, not proved positive), the arc is short only if `g` is proved
+//! positive: then its ends plus `|k| sqrt(1 - g^2)` bound it from above; else (the normals near
+//! opposite, the arc near a half circle) only `|k|` does. The normals are the face uses' on
+//! the side of the edge use the offset builds from (their mates' turned round, when the edge's
+//! first use is on the other side). A blend's net only approximates its definition: where a
+//! use carries a margin `m` (the angle within which its definition's normal lies of its net's,
+//! as above), every point of the definition's arc lies within `2 m / (cos(theta / 2) - m)` of
+//! the net's arc (`cos(theta / 2) = sqrt((1 + g) / 2)`, the arcs matched by their chords'
+//! points), so both bounds widen by `|k|` times that; a piece whose margin is too loose is
+//! halved, and one whose definition is not enclosed is undecided. A fold names the largest radius at which the
+//! tube is proved not to fold (only the tube: other defects can appear at or near it):
+//! with `L` the largest lower bound over the pieces proved to fold, no radius past `U = 1 / L`
+//! is regular (the tube folds there on that piece), and `U <= d`; the same decision is run at
+//! `U (1 - 2^-j)` for `j` = 8 down to 1, and the first proved regular is named, none if none is.
+//!
 //! **G2: the curvature across ([`g2_all_along`]).** Each use's normal curvature across the
 //! edge (in the tangent plane, square to the edge) is the shape operator's trace less the
 //! normal curvature along the pcurve's tangent, `k = 2H - II(T) / I(T)`, so no direction across
@@ -202,6 +233,7 @@
 //! off an end a knot line runs through) and `MAX_SPLITS` (12) times to bound it, on an explicit stack; each piece
 //! between the pcurves' knots evaluates at most `MAX_POINTS` (one million) points of a cross product of degree at most `MAX_DEGREE` (4096).
 
+use crate::blend::fillet_section::certificate::{curve_derivs_over, NurbsCurve};
 use crate::blend::fillet_section::definition_box::{definition_partials_over_box, gn_def_face_of};
 use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::station::{as_b_spline, span, Nurbs};
@@ -247,6 +279,14 @@ pub(crate) const MAX_DEPTH: u32 = 48;
 /// Subdivisions one root isolation may make: a root that touches its knot line (a double
 /// root, the only kind that keeps two sign changes as the pieces shrink) costs one a level.
 pub(crate) const MAX_SUBDIVISIONS: usize = 4096;
+/// Halvings of one piece [`tube_regularity`] makes before leaving it undecided: a piece is
+/// then 2^-16 of one between the pcurves' knots. A work budget (#13685).
+pub(crate) const MAX_TUBE_HALVINGS: u32 = 16;
+/// Pieces [`tube_regularity`] decides on one edge: past it the rest are undecided. Over the
+/// offset goldens and the kernel shell cases (13685-tubeprobe-4) a decided edge took at most
+/// 2119 pieces; the two edges that reached this budget were left undecided near the limit,
+/// on bodies whose check fails. A work budget, not a tolerance.
+pub(crate) const MAX_TUBE_PIECES: usize = 4096;
 /// The least cosine between a face use's normal from the face's evaluator and from its net
 /// at one point: below it the net is not the face's surface and the face is refused.
 const SAME_SURFACE_COS: f64 = 0.5;
@@ -2690,6 +2730,266 @@ fn g2_within(
         (None, None) => G2::Continuous,
     };
     Ok((Some(verdict), points))
+}
+
+/// The answer of [`tube_regularity`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TubeRegularity {
+    /// The tube is proved regular all along the edge.
+    Regular,
+    /// It folds over itself somewhere along the edge: `largest` is the largest radius at which
+    /// the tube is proved regular (module docs), `None` where none of the sizes tried is.
+    Folds {
+        /// The largest tube radius proved regular, when one is.
+        largest: Option<f64>,
+    },
+    /// It is neither proved regular nor proved to fold: a piece is undecided past the budget,
+    /// or the edge has no two face uses, or its curve no NURBS form, to decide it on.
+    NotCertified,
+}
+
+/// `[lower, upper]` of `max over the arc of u . k` on the piece `s` of the edge, times the
+/// sign: `None` where it has no bound (a speed or a normal not proved non-zero, or an
+/// evaluation that failed). Module docs.
+fn tube_bounds(
+    cn: &NurbsCurve,
+    pair: &Pair,
+    sigma: Ivl,
+    s: Ivl,
+    margin: f64,
+) -> Option<(f64, f64)> {
+    let one = Ivl::from(1.0);
+    let ders = curve_derivs_over(cn, s, 2, None).ok()?;
+    let (d1, d2) = (ders.get(1)?, ders.get(2)?);
+    let c1 = [d1.x, d1.y, d1.z];
+    let c2 = [d2.x, d2.y, d2.z];
+    let speed2 = dot(c1, c1);
+    if !speed2.is_positive() {
+        return None;
+    }
+    // k = (c'' - (c'' . c') c' / |c'|^2) / |c'|^2
+    let along = dot(c2, c1) / speed2;
+    let kv = scale(sub3(c2, scale(c1, along)), one / speed2);
+    let fa = pair.a.f(s).ok()?;
+    let fc = pair.c.f(s).ok()?;
+    let (na, nc) = (norm(fa), norm(fc));
+    if !na.is_positive() || !nc.is_positive() {
+        return None;
+    }
+    let ua = scale(fa, sigma / na);
+    let uc = scale(fc, sigma / nc);
+    let (ea, ec) = (dot(ua, kv), dot(uc, kv));
+    let g = dot(ua, uc);
+    let det = one - g * g;
+    let ends_lo = ea.lo.max(ec.lo);
+    let ends_hi = ea.hi.max(ec.hi);
+    let kmag = norm(kv);
+    // a blend's definition arc lies within `widen / |k|` of its net's (module docs)
+    let widen = if margin > 0.0 {
+        let half = (one + g) * Ivl::from(0.5);
+        if !half.is_positive() {
+            return None;
+        }
+        let w = half.sqrt() - Ivl::from(margin);
+        if !w.is_positive() {
+            return None;
+        }
+        (Ivl::from(2.0 * margin) / w * Ivl::from(kmag.hi)).hi
+    } else {
+        0.0
+    };
+    let widened = |(lo, hi): (f64, f64)| {
+        Some((
+            (Ivl::from(lo) - Ivl::from(widen)).lo,
+            (Ivl::from(hi) + Ivl::from(widen)).hi,
+        ))
+    };
+    if !det.is_positive() {
+        if g.lo > 0.0 {
+            // the arc is within rounding of a point: its ends bound it, plus |k| for the rest
+            let rest = Ivl::from(kmag.hi) * Ivl::from(det.hi.max(0.0)).sqrt();
+            return widened((ends_lo, (Ivl::from(ends_hi.max(0.0)) + rest).hi));
+        }
+        // the normals near opposite: the arc is near a half circle, and may hold k's direction
+        return widened((ends_lo, kmag.hi.max(ends_hi)));
+    }
+    // k_p = alpha u_a + beta u_c, its direction inside the arc where both are positive
+    let alpha = (ea - g * ec) / det;
+    let beta = (ec - g * ea) / det;
+    if alpha.lo > 0.0 && beta.lo > 0.0 {
+        let kp = Ivl::from((alpha * ea + beta * ec).lo.max(0.0)).sqrt();
+        widened((kp.lo.max(ends_lo), kmag.hi))
+    } else if alpha.hi < 0.0 || beta.hi < 0.0 {
+        widened((ends_lo, ends_hi))
+    } else {
+        widened((ends_lo, kmag.hi))
+    }
+}
+
+/// What one run of the tube decision found: a fold, and the largest lower bound of
+/// `max over the arc of u . k` over the pieces proved to fold (so `1 / least` bounds the
+/// largest regular radius from above); or regular; or undecided.
+enum TubeRun {
+    Regular,
+    Folds { least: f64 },
+    Undecided,
+}
+
+/// The tube decision at radius `d` (module docs). With `regular_only` it asks only whether the
+/// tube is proved regular, and stops at the first piece that folds or is left undecided (then
+/// [`TubeRun::Undecided`]): the sizing's runs need no more, and a radius past the limit is
+/// then not decided over the whole edge.
+fn tube_run(
+    k: &Kernel,
+    cn: &NurbsCurve,
+    pair: &Pair,
+    sigma: Ivl,
+    d: f64,
+    regular_only: bool,
+) -> Result<TubeRun> {
+    let di = Ivl::from(d);
+    let (mut folds, mut undecided, mut count) = (false, false, 0usize);
+    let mut least = f64::NEG_INFINITY;
+    let mut stack: Vec<(f64, f64, u32)> = pieces(&pair.breaks)
+        .into_iter()
+        .map(|(a, z)| (a, z, 0))
+        .collect();
+    while let Some((a, z, depth)) = stack.pop() {
+        if count % POLL_POINTS == 0 {
+            k.check_cancelled(OP)?;
+        }
+        count += 1;
+        // a blend's margin over the piece (module docs): none for other faces
+        let margin = if pair.a.definition.is_some() || pair.c.definition.is_some() {
+            match pair.margin(k, a, z)? {
+                Margin::Bounded(m) => Some(m),
+                Margin::Loose => None,
+                Margin::NotEnclosed => {
+                    if regular_only {
+                        return Ok(TubeRun::Undecided);
+                    }
+                    undecided = true;
+                    continue;
+                }
+            }
+        } else {
+            Some(0.0)
+        };
+        let bounds = margin.and_then(|m| tube_bounds(cn, pair, sigma, Ivl::new(a, z), m));
+        match bounds {
+            Some((lo, _)) if (di * Ivl::from(lo)).lo >= 1.0 => {
+                if regular_only {
+                    return Ok(TubeRun::Undecided);
+                }
+                folds = true;
+                least = least.max(lo);
+            }
+            Some((_, hi)) if (di * Ivl::from(hi)).hi < 1.0 => {}
+            _ => {
+                let m = 0.5 * (a + z);
+                if depth < MAX_TUBE_HALVINGS
+                    && count + stack.len() + 2 <= MAX_TUBE_PIECES
+                    && a < m
+                    && m < z
+                {
+                    stack.push((m, z, depth + 1));
+                    stack.push((a, m, depth + 1));
+                } else if regular_only {
+                    return Ok(TubeRun::Undecided);
+                } else {
+                    undecided = true;
+                }
+            }
+        }
+    }
+    Ok(if folds {
+        TubeRun::Folds { least }
+    } else if undecided {
+        TubeRun::Undecided
+    } else {
+        TubeRun::Regular
+    })
+}
+
+/// Whether the tube of radius `d` a rounded offset caps the edge of `eu` with is regular: the
+/// sweep of `c + d u`, `u` on the arc between the normals of the edge's two face uses on the
+/// side of `eu`'s face use, turned against them unless `outward` (module docs, "A rounded
+/// offset's tube"). A fold names the largest radius at which the tube is proved regular.
+///
+/// # Errors
+///
+/// A cancellation; those of reading the edge and its uses. An edge not between two face uses,
+/// one whose curve has no NURBS form, or whose uses' normals cannot be read, is
+/// [`TubeRegularity::NotCertified`], not an error.
+pub fn tube_regularity(
+    k: &Kernel,
+    b: &mut Brep,
+    eu: EdgeuseId,
+    d: f64,
+    outward: bool,
+) -> Result<TubeRegularity> {
+    use crate::curve::curve::CurveKind;
+    let Some(e) = eu1::edge(b, eu)? else {
+        return Ok(TubeRegularity::NotCertified);
+    };
+    let pair = match Pair::of(k, b, e) {
+        Ok(Some(p)) => p,
+        Err(err) if err.is_unported_or_cancelled() => return Err(err),
+        Ok(None) | Err(_) => return Ok(TubeRegularity::NotCertified),
+    };
+    // the pair's uses are the edge's first use and its radial, on one side of the faces: the
+    // normals are turned round where `eu` is on the other side (its mate is one of them)
+    let side = if eu == pair.a.eu || eu == pair.c.eu {
+        1.0
+    } else {
+        match eu1::mate(b, eu)? {
+            Some(m) if m == pair.a.eu || m == pair.c.eu => -1.0,
+            _ => return Ok(TubeRegularity::NotCertified),
+        }
+    };
+    let Some(curve) = edge::curve(b, e)? else {
+        return Ok(TubeRegularity::NotCertified);
+    };
+    let line;
+    let base = match curve.kind() {
+        CurveKind::BSpline(c) => c,
+        CurveKind::Ellipse(c) => c.base(),
+        CurveKind::Parabola(c) => c.base(),
+        CurveKind::Hyperbola(c) => c.base(),
+        CurveKind::Line(c) => match c.base_with_nurb() {
+            Ok(l) => {
+                line = l;
+                &*line
+            }
+            Err(err) if err.is_unported_or_cancelled() => return Err(err),
+            Err(_) => return Ok(TubeRegularity::NotCertified),
+        },
+        _ => return Ok(TubeRegularity::NotCertified),
+    };
+    let Ok(cn) = NurbsCurve::of(base) else {
+        return Ok(TubeRegularity::NotCertified);
+    };
+    let sigma = Ivl::from(if outward { side } else { -side });
+    let least = match tube_run(k, &cn, &pair, sigma, d, false)? {
+        TubeRun::Regular => return Ok(TubeRegularity::Regular),
+        TubeRun::Undecided => return Ok(TubeRegularity::NotCertified),
+        TubeRun::Folds { least } => least,
+    };
+    // the largest radius named: `upper = 1 / least` bounds every regular radius from above (a
+    // piece where `max u . k >= least` folds past it), so the first of `upper (1 - 2^-j)`,
+    // j = 8 down to 1, the decision proves regular
+    let upper = 1.0 / least;
+    let mut largest = None;
+    if upper.is_finite() && upper > 0.0 {
+        for j in (1..=8).rev() {
+            let r = upper * (1.0 - (-f64::from(j)).exp2());
+            if r < d && matches!(tube_run(k, &cn, &pair, sigma, r, true)?, TubeRun::Regular) {
+                largest = Some(r);
+                break;
+            }
+        }
+    }
+    Ok(TubeRegularity::Folds { largest })
 }
 
 #[cfg(test)]

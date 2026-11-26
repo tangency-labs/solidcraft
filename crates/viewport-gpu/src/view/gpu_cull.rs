@@ -34,7 +34,7 @@ const LEVEL_WORDS: usize = 4;
 const TRI_ARGS_WORDS: usize = 5;
 const EDGE_ARGS_WORDS: usize = 4;
 /// Bytes of the shader's `View` uniform.
-const VIEW_SIZE: usize = 192;
+const VIEW_SIZE: usize = 208;
 /// Placements a workgroup of `pick` and `place` takes.
 const GROUP: u32 = 64;
 
@@ -155,7 +155,7 @@ pub(super) struct GpuCull {
     /// The shader's `View` after its matrix and size.
     words: [u32; 8],
     /// The view the placements were last culled for.
-    culled_for: Option<([[f32; 4]; 4], [f32; 2], bool)>,
+    culled_for: Option<([[f32; 4]; 4], [f32; 2], bool, Option<u32>)>,
     /// The device's workgroups per dispatch dimension.
     max_groups: u32,
     readback: wgpu::Buffer,
@@ -396,11 +396,12 @@ impl GpuCull {
         draws: &[InstancedDraw],
         indirect: &mut indirect::Indirect,
         edges: Option<&mut edges::Edges>,
+        hover: Option<u32>,
     ) {
         self.collect(indirect, edges);
         // Against a pyramid, each frame (it changes with every frame drawn); without one, again
         // only for another view, or after a cull that left out hidden placements.
-        let key = (*vp, size, hidden.is_some());
+        let key = (*vp, size, hidden.is_some(), hover);
         if !cpu_changed && hidden.is_none() && self.culled_for == Some(key) {
             // A cull whose statistics could not be copied while the readback was busy: copy them
             // now that it is free (a cull below would overwrite its arguments).
@@ -459,6 +460,9 @@ impl GpuCull {
         }
         let words = pyramid.map_or([1, 1, 1, 0], |(h, _, reversed)| [h.frame[0], h.frame[1], h.levels, 1 | if reversed { 2 } else { 0 }]);
         view.extend(words.iter().flat_map(|w| w.to_le_bytes()));
+        // x: the whole-body hovered placement's index in the scene, y: 1 when there is one.
+        let hover_words = hover.map_or([0; 4], |index| [index, 1, 0, 0]);
+        view.extend(hover_words.iter().flat_map(|w| w.to_le_bytes()));
         queue.write_buffer(&self.view, 0, &view);
 
         let n = self.words[0];
@@ -576,7 +580,8 @@ mod tests {
 
     /// The GPU culls a scene's placements as the CPU does: every level of every part draws the
     /// same placements (in any order), triangles and edges alike, for a view with placements out
-    /// of it on every side, behind the eye, and near and far enough for each level.
+    /// of it on every side, behind the eye, and near and far enough for each level. Both mark a
+    /// whole-body hover's one placement alike.
     #[test]
     fn the_gpu_culls_the_placements_the_cpu_would() {
         use super::super::{
@@ -639,8 +644,8 @@ mod tests {
         let size = [800.0, 600.0];
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         let motions = Motions::default();
-        gpu.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX, None);
-        cpu.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX, None);
+        gpu.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX, None, None);
+        cpu.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX, None, None);
         queue.submit([encoder.finish()]);
         assert!(cpu.gpu_cull.is_none());
         let Some(g) = gpu.gpu_cull.as_ref() else { panic!("the GPU culls the scene") };
@@ -693,14 +698,53 @@ mod tests {
             levels_drawn[level] += usize::from(count > 0);
         }
         assert!(levels_drawn.iter().all(|n| *n > 0), "every level drawn: {levels_drawn:?}");
+        // A whole-body hover flags its one placement's palette word in what each cull writes,
+        // on the GPU and on the CPU alike, and the flag goes when the hover does.
+        let row = cpu.instanced[0].shown.as_ref().and_then(|s| s.first()).map(|(i, _)| *i).expect("a placement in view");
+        let rows: Arc<std::collections::HashMap<String, (u32, u32)>> = Arc::new([("Hovered".to_owned(), (0, row))].into_iter().collect());
+        let flagged = |b: &super::super::Batches| -> Vec<u32> {
+            let out = read(&b.indirect.as_ref().unwrap().instances().unwrap());
+            (0..out.len() / INSTANCE_SIZE)
+                .map(|k| word(&out, k * INSTANCE_SIZE / 4 + 12))
+                .filter(|w| w & crate::view::HOVER_FLAG != 0)
+                .map(|w| w & !crate::view::HOVER_FLAG)
+                .collect()
+        };
+        for b in [&mut gpu, &mut cpu] {
+            b.instance_rows = rows.clone();
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            b.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX, None, Some("Hovered"));
+            queue.submit([encoder.finish()]);
+        }
+        // Placement `row` of the first part is in palette entry `row` (see `scene`).
+        assert_eq!(flagged(&gpu), vec![row], "the GPU cull flags the hovered placement alone");
+        // The CPU writes its placements from the draws' own (its buffer is not read back here).
+        let cpu_flagged = |b: &super::super::Batches| -> Vec<(usize, usize)> {
+            b.instanced
+                .iter()
+                .enumerate()
+                .flat_map(|(d, x)| x.placements.as_chunks::<INSTANCE_SIZE>().0.iter().enumerate().map(move |(k, p)| (d, k, p[51])))
+                .filter(|(_, _, high)| high & 0x80 != 0)
+                .map(|(d, k, _)| (d, k))
+                .collect()
+        };
+        assert_eq!(cpu_flagged(&cpu), vec![(0, row as usize)], "the CPU cull flags the hovered placement alone");
+        assert!(cpu.instanced[0].shown.as_ref().is_some_and(|s| s.iter().any(|(i, _)| *i == row)), "and writes it");
+        assert!(cpu_flagged(&gpu).is_empty(), "the GPU's flag is in its output only");
+        for b in [&mut gpu, &mut cpu] {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            b.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX, None, None);
+            queue.submit([encoder.finish()]);
+        }
+        assert!(flagged(&gpu).is_empty() && cpu_flagged(&cpu).is_empty(), "no flag once nothing is hovered");
         // The cull reads the placements where the scene holds them, not where a motion puts one:
         // a frame that moves a body is culled on the CPU, and the next that moves nothing on the
         // GPU again, from the buffers the cull took back.
         let shift = [[1.0, 0.0, 0.0, 30.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        gpu.cull(&device, &queue, &mut encoder, &vp, size, &Motions::new([(1, shift)]), crate::view::EDGE_PX, None);
+        gpu.cull(&device, &queue, &mut encoder, &vp, size, &Motions::new([(1, shift)]), crate::view::EDGE_PX, None, None);
         assert!(gpu.gpu_cull.is_none(), "a frame with motions is culled on the CPU");
-        gpu.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX, None);
+        gpu.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX, None, None);
         assert!(gpu.gpu_cull.is_some(), "a frame without motions is culled on the GPU again");
         queue.submit([encoder.finish()]);
     }
@@ -718,7 +762,7 @@ mod tests {
     ) -> (u32, Vec<u8>) {
         use super::super::INSTANCE_SIZE;
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        batches.cull(device, queue, &mut encoder, vp, size, &super::super::Motions::default(), crate::view::EDGE_PX, hidden);
+        batches.cull(device, queue, &mut encoder, vp, size, &super::super::Motions::default(), crate::view::EDGE_PX, hidden, None);
         queue.submit([encoder.finish()]);
         let Some(g) = batches.gpu_cull.as_ref() else { panic!("the GPU culls the scene") };
         let out = batches.indirect.as_ref().and_then(|i| i.instances()).expect("placements");

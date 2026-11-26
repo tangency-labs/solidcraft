@@ -1125,7 +1125,8 @@ pub fn do_law_intersection_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
             e @ (SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::Unported { .. }
-            | SolidError::Cancelled { .. }),
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
         ) = v.intersector_mut().add_point_to_curve(id)
         {
             return Err(e);

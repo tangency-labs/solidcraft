@@ -1973,6 +1973,7 @@ fn soft<T>(r: Result<T>) -> Result<Option<T>> {
                 e,
                 SolidError::Unported { .. }
                     | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }
                     | SolidError::InvalidInput { .. }
                     | SolidError::PortInvariant { .. }
             ) || e.is_not_certified() =>

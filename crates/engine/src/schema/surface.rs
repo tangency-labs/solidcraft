@@ -240,6 +240,10 @@ pub struct OffsetParams {
     /// How far a fitted face may stray from the true offset. Default: 0.01 mm.
     #[serde(default)]
     pub tolerance: Option<LengthExpr>,
+    /// A result whose shells close stays a surface body, which Stitch makes a solid. Default:
+    /// true. False makes a solid of it, as features saved before it keep.
+    #[serde(default)]
+    pub stays_surface: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
@@ -472,10 +476,16 @@ fn face_on_body(generator: &mut SchemaGenerator) -> Schema {
 
 fn up_to_schema(generator: &mut SchemaGenerator) -> Schema {
     let face = face_on_body(generator);
+    let whole = json_schema!({
+        "type": "object",
+        "properties": {"body": {"type": "string", "description": "The body, by name."}},
+        "required": ["body"],
+        "additionalProperties": false
+    });
     let plane = generator.subschema_for::<PlaneParam>();
     json_schema!({
-        "description": "Extend up to this instead of by `distance`: `bounds`, back to the surface's own bounds (natural mode only); a face, its surface extended; or a plane.",
-        "anyOf": [{"const": "bounds"}, face, plane]
+        "description": "Extend up to this instead of by `distance`: `bounds`, back to the surface's own bounds (natural mode only); a face, its surface extended; a whole body, where the surface first runs into any of its faces (natural mode only); or a plane.",
+        "anyOf": [{"const": "bounds"}, face, whole, plane]
     })
 }
 
@@ -510,6 +520,10 @@ pub struct SurfaceExtendParams {
     /// sides run square to the edge. Default: true.
     #[serde(default)]
     pub neighbours: Option<bool>,
+    /// A result whose shells close stays a surface body, which Stitch makes a solid. Default:
+    /// true. False makes a solid of it, as features saved before it keep.
+    #[serde(default)]
+    pub stays_surface: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
@@ -561,7 +575,8 @@ fn trim_with_schema(_: &mut SchemaGenerator) -> Schema {
 
 fn trim_tool_schema(generator: &mut SchemaGenerator) -> Schema {
     let mut face = face_on_body(generator);
-    face.insert("description".into(), json!("A face to cut with, its surface extended."));
+    face.insert("description".into(), json!("The whole bounded cutting sheet (`body`), or one extended face (`body` and `point`)."));
+    face.insert("required".into(), json!(["body"]));
     face
 }
 
@@ -846,6 +861,10 @@ pub struct SurfaceLoftParams {
     /// surface's normal, as surface lofts saved before it build.
     #[serde(default)]
     pub faced: Option<bool>,
+    /// A result whose shells close stays a surface body, which Stitch makes a solid. Default:
+    /// true. False makes a solid of it, as features saved before it keep.
+    #[serde(default)]
+    pub stays_surface: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
