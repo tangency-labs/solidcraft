@@ -1927,7 +1927,9 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     // start cap is still found on the cap facing the same way.
     solidcraft_doc::keep_one_sided_direction(&s.model, &f, &mut nf);
     let copy_sources_of = |kind: &FeatureKind| match kind {
-        FeatureKind::Pattern { bodies, components, occurrences, .. } if !bodies.is_empty() && components.is_empty() && occurrences.is_empty() => {
+        FeatureKind::Pattern { bodies, components, occurrences, join, .. }
+            if !bodies.is_empty() && components.is_empty() && occurrences.is_empty() && (!*join || bodies.len() == 1) =>
+        {
             Some(solidcraft_doc::plain(bodies))
         }
         FeatureKind::Mirror { bodies, combine: false, .. } if !bodies.is_empty() => Some(solidcraft_doc::plain(bodies)),

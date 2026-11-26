@@ -1963,28 +1963,78 @@ fn copy_lineage_resolves_seed_material_and_respects_overrides() {
     doc.feature_mut(mir_id).unwrap().body_names = vec!["Seed (2) (2)".into()];
 
     doc.materials.insert("Seed".into(), "Steel".into());
+    assert!(!doc.has_copy_material_lineage("Seed"));
     assert_eq!(doc.copy_seed_body("Seed (2)"), Some("Seed"));
     assert_eq!(doc.copy_seed_body("Seed (3)"), Some("Seed"));
     assert_eq!(doc.copy_seed_body("Seed (2) (2)"), Some("Seed (2)"));
+    assert!(doc.has_copy_material_lineage("Seed (2)"));
     for body in ["Seed", "Seed (2)", "Seed (3)", "Seed (2) (2)"] {
         assert_eq!(doc.body_material(body), "Steel", "{body}");
         assert!((doc.density(body) - 7.85).abs() < 1e-9, "{body}");
     }
 
-    // Explicit override on an intermediate copy wins for itself and its downstream copies.
-    doc.materials.insert("Seed (2)".into(), "Brass".into());
-    assert_eq!(doc.body_material("Seed (2)"), "Brass");
-    assert_eq!(doc.body_material("Seed (2) (2)"), "Brass");
+    // Explicit override on an intermediate copy wins for itself and its downstream copies,
+    // and survives even if the seed temporarily acquires the same material and changes again.
+    doc.materials.insert("Seed (2)".into(), "Copper".into());
+    assert_eq!(doc.body_material("Seed (2)"), "Copper");
+    assert_eq!(doc.body_material("Seed (2) (2)"), "Copper");
     assert_eq!(doc.body_material("Seed (3)"), "Steel");
-
-    // Clearing stale inherited copies when Seed changes preserves distinct overrides.
-    doc.materials.insert("Seed (3)".into(), "Steel".into());
-    doc.clear_inherited_copy_materials(&[("Seed", "Steel".into())], "Copper");
     doc.materials.insert("Seed".into(), "Copper".into());
-    assert!(!doc.materials.contains_key("Seed (3)"));
-    assert_eq!(doc.body_material("Seed (3)"), "Copper");
-    assert_eq!(doc.body_material("Seed (2)"), "Brass");
-    assert_eq!(doc.body_material("Seed (2) (2)"), "Brass");
+    doc.materials.insert("Seed".into(), "Aluminum".into());
+    assert_eq!(doc.body_material("Seed (2)"), "Copper");
+    assert_eq!(doc.body_material("Seed (2) (2)"), "Copper");
+    assert_eq!(doc.body_material("Seed (3)"), "Aluminum");
+
+    // Explicit Default on a copy stops lineage inheritance instead of falling back to the seed.
+    doc.materials.insert("Seed (3)".into(), DEFAULT_MATERIAL.into());
+    assert_eq!(doc.resolved_body_material("Seed (3)"), Some(DEFAULT_MATERIAL));
+    assert_eq!(doc.body_material("Seed (3)"), DEFAULT_MATERIAL);
+    assert!((doc.density("Seed (3)") - DEFAULT_DENSITY).abs() < 1e-9);
+
+    // Multi-seed joined pattern: unmerged copies inherit unanimous seed material, do not guess
+    // when seeds disagree, and respect an explicit Default override.
+    let join_id = doc
+        .add_feature(
+            FeatureKind::Pattern {
+                features: Vec::new(),
+                pattern: PatternKind::Rectangular {
+                    dir1: crate::points::Dir(Vec3::X),
+                    count1: "2".into(),
+                    spacing1: "30 mm".into(),
+                    dir2: None,
+                    count2: None,
+                    spacing2: None,
+                    alignment: Default::default(),
+                    alignment2: Default::default(),
+                    reversed: false,
+                    reversed2: false,
+                    distance1: Default::default(),
+                    distance2: Default::default(),
+                    extent1: None,
+                    extent2: None,
+                    copy_at_end1: false,
+                    copy_at_end2: false,
+                },
+                bodies: vec!["A".into(), "B".into()],
+                placements: Vec::new(),
+                components: Vec::new(),
+                occurrences: Vec::new(),
+                join: true,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(join_id).unwrap().body_names = vec!["A (2)".into()];
+    assert_eq!(doc.copy_seed_body("A (2)"), None);
+    assert!(doc.has_copy_material_lineage("A (2)"));
+    doc.materials.insert("A".into(), "Steel".into());
+    doc.materials.insert("B".into(), "Steel".into());
+    assert_eq!(doc.body_material("A (2)"), "Steel");
+    doc.materials.insert("B".into(), "Brass".into());
+    assert_eq!(doc.body_material("A (2)"), DEFAULT_MATERIAL);
+    doc.materials.insert("B".into(), "Steel".into());
+    doc.materials.insert("A (2)".into(), DEFAULT_MATERIAL.into());
+    assert_eq!(doc.body_material("A (2)"), DEFAULT_MATERIAL);
 }
 
 #[test]

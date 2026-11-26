@@ -1021,12 +1021,9 @@ fn physical_material(s: &mut Session, p: &Value) -> Result<Value> {
     if bodies.is_empty() || bodies.iter().any(|b| st.body(b).is_none()) {
         return Err(bad(cmd, "`bodies` must list existing bodies"));
     }
-    let previous: Vec<(String, String)> = bodies.iter().map(|b| (b.clone(), s.doc.body_material(b))).collect();
     let doc = s.doc_mut();
-    let updated: Vec<(&str, String)> = previous.iter().map(|(b, m)| (b.as_str(), m.clone())).collect();
-    doc.clear_inherited_copy_materials(&updated, &canonical);
     for b in &bodies {
-        if canonical == solidcraft_doc::DEFAULT_MATERIAL {
+        if canonical == solidcraft_doc::DEFAULT_MATERIAL && !doc.has_copy_material_lineage(b) {
             doc.materials.remove(b);
         } else {
             doc.materials.insert(b.clone(), canonical.clone());

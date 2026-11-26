@@ -5522,12 +5522,15 @@ impl Document {
         st
     }
 
-    /// The seed body `body` was copied from by the active feature that created it
-    /// (`Pattern`, `Mirror` without combine, or `Move` with `copy: true`), when that
-    /// lineage is unambiguous from pinned `body_names`.
-    pub fn copy_seed_body(&self, body: &str) -> Option<&str> {
+    /// The copy-lineage source(s) of `body` from the active feature that created it
+    /// (`Pattern`, `Mirror` without combine, or `Move` with `copy: true`).
+    ///
+    /// A multi-seed `Pattern` with `join: true` booleans all seeds and copies together before
+    /// splitting disconnected `lumps()`, so `body_names` has no per-seed slot mapping; unmerged
+    /// lumps resolve unanimously when every seed carries the same material.
+    fn copy_material_sources(&self, body: &str) -> CopyMaterialSources<'_> {
         if body.is_empty() {
-            return None;
+            return CopyMaterialSources::None;
         }
         let limit = self.marker.unwrap_or(self.features.len()).min(self.features.len());
         for f in self.features[..limit].iter().rev() {
@@ -5537,94 +5540,100 @@ impl Document {
             let Some(idx) = f.body_names.iter().position(|n| n == body) else {
                 continue;
             };
-            let seed = match &f.kind {
+            let sources = match &f.kind {
                 FeatureKind::Pattern { bodies, components, occurrences, join, .. }
-                    if !bodies.is_empty() && components.is_empty() && occurrences.is_empty() && (!*join || bodies.len() == 1) =>
+                    if !bodies.is_empty() && components.is_empty() && occurrences.is_empty() =>
                 {
                     if bodies.len() == 1 {
-                        Some(bodies[0].0.as_str())
+                        (bodies[0].0.as_str() != body).then_some(CopyMaterialSources::Single(bodies[0].0.as_str()))
+                    } else if *join {
+                        (!bodies.iter().any(|b| b.0.as_str() == body)).then_some(CopyMaterialSources::Unanimous(bodies.as_slice()))
                     } else if f.body_names.len().is_multiple_of(bodies.len()) {
                         let per = f.body_names.len() / bodies.len();
-                        bodies.get(idx / per).map(|b| b.0.as_str())
+                        bodies.get(idx / per).map(|b| b.0.as_str()).filter(|s| *s != body).map(CopyMaterialSources::Single)
                     } else {
                         None
                     }
                 }
-                FeatureKind::Mirror { bodies, combine: false, .. } if !bodies.is_empty() => bodies.get(idx).map(|b| b.0.as_str()),
-                FeatureKind::Move { bodies, copy: true, .. } if !bodies.is_empty() => bodies.get(idx).map(|b| b.0.as_str()),
+                FeatureKind::Mirror { bodies, combine: false, .. } if !bodies.is_empty() => {
+                    bodies.get(idx).map(|b| b.0.as_str()).filter(|s| *s != body).map(CopyMaterialSources::Single)
+                }
+                FeatureKind::Move { bodies, copy: true, .. } if !bodies.is_empty() => {
+                    bodies.get(idx).map(|b| b.0.as_str()).filter(|s| *s != body).map(CopyMaterialSources::Single)
+                }
                 _ => None,
             };
-            return seed.filter(|s| *s != body);
+            return sources.unwrap_or(CopyMaterialSources::None);
         }
-        None
+        CopyMaterialSources::None
+    }
+
+    /// The seed body `body` was copied from by the active feature that created it
+    /// (`Pattern`, `Mirror` without combine, or `Move` with `copy: true`), when that
+    /// lineage is unambiguous from pinned `body_names`. Multi-seed joined patterns merge all
+    /// seeds before splitting disconnected lumps and therefore have no single per-slot seed.
+    pub fn copy_seed_body(&self, body: &str) -> Option<&str> {
+        match self.copy_material_sources(body) {
+            CopyMaterialSources::Single(seed) => Some(seed),
+            CopyMaterialSources::None | CopyMaterialSources::Unanimous(_) => None,
+        }
+    }
+
+    /// Whether `body` was created by an active copy feature that inherits physical material
+    /// from its seed body (or unanimously from its seeds in a multi-seed joined pattern).
+    pub fn has_copy_material_lineage(&self, body: &str) -> bool {
+        !matches!(self.copy_material_sources(body), CopyMaterialSources::None)
     }
 
     /// The material explicitly assigned to `body` in [`Self::materials`], or inherited
     /// from its copy-seed lineage (`Pattern`, `Mirror`, `Move` copy) when `body` has no
     /// explicit assignment of its own.
     ///
-    /// An explicit entry in [`Self::materials`] for `body` always takes precedence over
-    /// any seed body's material.
+    /// An explicit entry in [`Self::materials`] for `body` (including [`DEFAULT_MATERIAL`])
+    /// always takes precedence over any seed body's material.
     pub fn resolved_body_material(&self, body: &str) -> Option<&str> {
         if let Some(m) = self.materials.get(body) {
             return Some(m.as_str());
         }
-        let mut current = body;
         let mut visited: Vec<&str> = Vec::new();
-        for _ in 0..self.features.len() {
-            let seed = self.copy_seed_body(current)?;
-            if seed == body || visited.contains(&seed) {
-                return None;
-            }
-            if let Some(m) = self.materials.get(seed) {
-                return Some(m.as_str());
-            }
-            visited.push(seed);
-            current = seed;
-        }
-        None
+        let mut budget = self.features.len().saturating_mul(8).max(64);
+        self.resolved_inherited_material(body, body, &mut visited, &mut budget)
     }
 
-    /// Clear stored material entries on copy descendants of `updated` (`(seed_name, old_material)`)
-    /// whose stored material matched the seed's previous material (an inherited copy rather than a
-    /// distinct per-copy override), so those copies follow `next_material` via
-    /// [`Self::resolved_body_material`].
-    pub fn clear_inherited_copy_materials(&mut self, updated: &[(&str, String)], next_material: &str) {
-        if updated.is_empty() || self.materials.is_empty() {
-            return;
+    fn resolved_inherited_material<'a>(&'a self, current: &str, root: &str, visited: &mut Vec<&'a str>, budget: &mut usize) -> Option<&'a str> {
+        if *budget == 0 || visited.len() >= self.features.len() {
+            return None;
         }
-        let limit = self.features.len();
-        let mut stale = Vec::new();
-        for body in self.materials.keys() {
-            if updated.iter().any(|(target, _)| *target == body.as_str()) {
-                continue;
-            }
-            let copy_mat = self.body_material(body);
-            let mut current = body.as_str();
-            let mut visited: Vec<&str> = Vec::new();
-            for _ in 0..limit {
-                let Some(seed) = self.copy_seed_body(current) else {
-                    break;
-                };
-                if seed == body.as_str() || visited.contains(&seed) {
-                    break;
-                }
-                if let Some((_, old_seed_mat)) = updated.iter().find(|(target, _)| *target == seed) {
-                    if *old_seed_mat != next_material && copy_mat == *old_seed_mat {
-                        stale.push(body.clone());
+        *budget -= 1;
+        match self.copy_material_sources(current) {
+            CopyMaterialSources::None => None,
+            CopyMaterialSources::Single(seed) => self.resolve_seed_material(seed, root, visited, budget),
+            CopyMaterialSources::Unanimous(seeds) => {
+                let mut unanimous: Option<&'a str> = None;
+                for seed in seeds {
+                    let mat = self.resolve_seed_material(seed.0.as_str(), root, visited, budget)?;
+                    match unanimous {
+                        None => unanimous = Some(mat),
+                        Some(first) if !mat.eq_ignore_ascii_case(first) => return None,
+                        Some(_) => {}
                     }
-                    break;
                 }
-                if self.materials.contains_key(seed) && self.body_material(seed) != copy_mat {
-                    break;
-                }
-                visited.push(seed);
-                current = seed;
+                unanimous
             }
         }
-        for body in stale {
-            self.materials.remove(&body);
+    }
+
+    fn resolve_seed_material<'a>(&'a self, seed: &'a str, root: &str, visited: &mut Vec<&'a str>, budget: &mut usize) -> Option<&'a str> {
+        if seed == root || visited.contains(&seed) {
+            return None;
         }
+        if let Some(m) = self.materials.get(seed) {
+            return Some(m.as_str());
+        }
+        visited.push(seed);
+        let result = self.resolved_inherited_material(seed, root, visited, budget);
+        visited.pop();
+        result
     }
 
     /// The material a body's mass is computed with, as the library or this design spells it:
@@ -6894,6 +6903,12 @@ impl Document {
         }
         Ok(report)
     }
+}
+
+enum CopyMaterialSources<'a> {
+    None,
+    Single(&'a str),
+    Unanimous(&'a [BodyName]),
 }
 
 /// The built-in material library: (name, density), and each material's colour.

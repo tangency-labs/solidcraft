@@ -71,7 +71,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "exact_regions?: bool (each index or point pick is exactly the region it names, as the dialogs send); ",
             "default: every drawn profile, except that a loop inside another is its hole and a loop inside that hole is material again, and a region that closed loops crossing each other shut off but none of them holds is left out; ",
             "face?: [x,y,z] (extrude a planar body face instead of a sketch profile); ",
-            "faces?: [[x,y,z],…] (coplanar faces of one body); ",
+            "faces?: [[x,y,z],â€¦] (coplanar faces of one body); ",
             "face_body?: name (whose face, where faces of several bodies meet at the point); ",
             "fixed?: true (with face or faces: start on the face's plane as a fixed plane, which won't follow later changes to the face; for a face whose history can't keep an attachment, such as a converted mesh's); ",
             "direction?: positive|negative|symmetric (distance is total thickness, split evenly around the start plane); ",
@@ -122,14 +122,14 @@ pub static COMMANDS: &[CommandSpec] = &[
             "path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves); ",
             "orientation?: perpendicular (default: square to the path, turning with it) | parallel (as drawn: the profile moves without turning; the path must keep crossing its plane) | [x,y,z] (square to the path, its turn about the path fixed by this direction); ",
             "twist?: angle expr (the profile turns this much about the path over its length; within 4 turns); ",
-            "scale?: expr (the profile's scale at the end, linear along the path; 0.01…100); ",
+            "scale?: expr (the profile's scale at the end, linear along the path; 0.01â€¦100); ",
             "rails?: [{sketch?: sketch (default path_sketch), curves: [curve ids in order]}] (guide rails, one or two, each meeting every plane square to the path once along it, from the end nearest the path's start: one rail turns the profile so its point where the rail starts stays on the rail and scales it with the rail's distance from the path; two rails carry it between them, its points where they start staying on both; rails take the default orientation, no twist and no scale, and a path without sharp corners); ",
             "rail_fit?: scale (default: the profile grows and shrinks evenly) | stretch (only across to the rail, between the rails); ",
             "operation?, touching?, targets?, name?, body_name?",
         )),
     CommandSpec::new("solid.loft", "Loft", loft).begins_edit().at("SOLID", "CREATE").icon("loft").params(concat!(
-        "sections: [{sketch, profiles?} | {sketch, point: id} (an apex)] (2…50, in order; matching hole counts, no holes at an apex); ",
-        "rails?: [{sketch, curves: [ids in order]}] (1…16 guide rails from the first section to the last, through every section's outline: the loft follows them between the sections, passing through every rail; not with sections that have holes; one or two to an apex); ",
+        "sections: [{sketch, profiles?} | {sketch, point: id} (an apex)] (2â€¦50, in order; matching hole counts, no holes at an apex); ",
+        "rails?: [{sketch, curves: [ids in order]}] (1â€¦16 guide rails from the first section to the last, through every section's outline: the loft follows them between the sections, passing through every rail; not with sections that have holes; one or two to an apex); ",
         "rail_fit?: scale|stretch (one or two rails; with three or more it has no effect: each section is warped between them to pass through them all; default scale: with one rail the sections grow evenly with the rail's distance from their middle, with two with the distance between the rails; stretch: only that way); ",
         "operation?, touching?, targets? (Join excludes hidden bodies from automatic targets; explicit targets or participants may include them), name?, body_name?",
     )),
@@ -194,12 +194,12 @@ pub static COMMANDS: &[CommandSpec] = &[
             "type?: constant|curvature (alias g2: curvature-continuous quintic between planar faces along straight edges, one planar end face at each end (including sloped ends); radius sets the equivalent circular setback, not constant curvature; exact fit only)|chord (radius is the width across)|variable (radius at the end nearest start, radius2 at the other; one end may be 0, where the round closes to the corner)|spline (the radius along the edge is a clamped B-spline from the end nearest start: radius is its first control radius, radii the rest, knots its knot vector from 0 to 1; one end may be 0); ",
             "radius2?; ",
             "start?: [x,y,z]; ",
-            "radii?: [expr, …]; ",
-            "knots?: [number, …]; ",
-            "mid?: [[position 0…1 from start, radius expr], …] (variable radii between the ends); ",
+            "radii?: [expr, â€¦]; ",
+            "knots?: [number, â€¦]; ",
+            "mid?: [[position 0â€¦1 from start, radius expr], â€¦] (variable radii between the ends); ",
             "smooth?: bool (smooth instead of straight between the radii); ",
-            "corner?: rolling|g2 (rolling, the default: the corners where three blended edges meet are pieces of the rolling ball's sphere, tangent to each blend; a curvature round's corners are always g2 patches, between its own sections; g2: each corner where three or more rounded edges meet, and every edge there is rounded, is set back (1.5 × the radius along each edge unless `setbacks` names it) and filled with a patch meeting the rounds and the faces round it to the second order (curvature-continuous seams, clear of the points where a round's section ends on a face), constant-radius exact fillets only, refused where it cannot be built); ",
-            "setbacks?: [{vertex: [x,y,z], distance: expr}, …] (corner setbacks: the corner at the vertex nearest `vertex`, where every edge meeting it is rounded, starts its patch `distance` along each of those edges from the vertex, past where the rounds would meet (past the radius at a square corner), so the rounds blend through a larger patch; one distance for all of a corner's edges; constant-radius exact fillets only; with `corner: g2`, the G2 patch's corners); ",
+            "corner?: rolling|g2 (rolling, the default: the corners where three blended edges meet are pieces of the rolling ball's sphere, tangent to each blend; a curvature round's corners are always g2 patches, between its own sections; g2: each corner where three or more rounded edges meet, and every edge there is rounded, is set back (1.5 Ã— the radius along each edge unless `setbacks` names it) and filled with a patch meeting the rounds and the faces round it to the second order (curvature-continuous seams, clear of the points where a round's section ends on a face), constant-radius exact fillets only, refused where it cannot be built); ",
+            "setbacks?: [{vertex: [x,y,z], distance: expr}, â€¦] (corner setbacks: the corner at the vertex nearest `vertex`, where every edge meeting it is rounded, starts its patch `distance` along each of those edges from the vertex, past where the rounds would meet (past the radius at a square corner), so the rounds blend through a larger patch; one distance for all of a corner's edges; constant-radius exact fillets only; with `corner: g2`, the G2 patch's corners); ",
             "turn?: mitre|swept (where two rounds turn round a sharp, straight, convex side edge square to both on a plane, such as the rounds along a boss's base at its upright edges: mitre, the default, runs them on to meet in a mitre; swept ends them at the side edge and fills the corner with their section revolved about it, a torus; swept takes type: constant, corner: rolling, no setbacks and fit: exact or reduce, and is refused with the reason where the rounds are unequal or the side edge is concave, curved or tangent); ",
             "fit?: exact|reduce|taper (exact, the default: a radius too large for the geometry around the edges is refused, naming the largest that fits; reduce: where it doesn't fit it is reduced to the largest that does, one radius for edges sharing a face; the smallest used is returned as `radius_applied`, each edge's as `radii_applied: [{edge: [x,y,z], radius}]`, and noted in the feature's warning; taper: along each straight edge between planar faces where it doesn't fit, the radius follows the room there as a smooth spline, down to 0 where a face closes to a point, noted in the feature's warning)",
         )),
@@ -279,7 +279,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "path: [curve ids in order]; ",
             "count; ",
             "spacing (between instances) | distance (first to last); ",
-            "start?: expr (start point: how far along the path the original sits, the copies measured on from there; default 0, the path's start) | start_fraction?: expr (the start point as 0…1 of the path's length, kept as the path changes); ",
+            "start?: expr (start point: how far along the path the original sits, the copies measured on from there; default 0, the path's start) | start_fraction?: expr (the start point as 0â€¦1 of the path's length, kept as the path changes); ",
             "orientation?: identical (copies keep the original's orientation, the default)|path (copies turn with the path, keeping the original's relation to it); ",
             "flip?: bool (run from the path's other end)",
         )),
@@ -302,7 +302,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); ",
             "direction?: [x,y,z], each a number or an expression with no unit (\"-sin(t)\") the hole follows as the parameters change (default: into the face, against its outward normal; where faces of several bodies meet there, the face of a body in `targets`; one that leaves the face is mirrored into it; ignored with sketch points unless single); ",
             "diameter | thread (a tapped hole, drilled with the tap maker's tabulated drill: ISO metric (a custom metric size: major minus pitch), UNC/UNF, G, Rp, Rc 1/16 to 4, NPT 1/16 to 3; a `diameter` given with it chooses another drill, from the thread's minor diameter to 5% over the tap maker's) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); ",
-            "head?: \"ISO 4762\" (socket head) | \"ISO 7380-1\" (button head) | \"ISO 10642\" (countersunk head) (with clearance: the recess the screw's head sits in. A cap screw's: a counterbore, so type defaults to counterbore; its diameter is the head's dk plus head_gap each side, its depth the head's k plus head_gap; a cb_diameter or cb_depth given keeps its value. A countersunk head's: a countersink, so type defaults to countersink; 90° unless cs_angle is given, its diameter the head's dk plus head_gap each side, so the head sits head_gap below the face; a cs_diameter given keeps its value); ",
+            "head?: \"ISO 4762\" (socket head) | \"ISO 7380-1\" (button head) | \"ISO 10642\" (countersunk head) (with clearance: the recess the screw's head sits in. A cap screw's: a counterbore, so type defaults to counterbore; its diameter is the head's dk plus head_gap each side, its depth the head's k plus head_gap; a cb_diameter or cb_depth given keeps its value. A countersunk head's: a countersink, so type defaults to countersink; 90Â° unless cs_angle is given, its diameter the head's dk plus head_gap each side, so the head sits head_gap below the face; a cs_diameter given keeps its value); ",
             "head_gap?: length (default 0.5 mm; an expression with parameters is kept, so the recess follows them); ",
             "depth? (default through all; from where the hole starts, not from `position`: the face it enters, or for a sketch point inside a body the sketch plane) | to?: [x,y,z] (To Object: drill to that face or point); ",
             "references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); ",
@@ -370,13 +370,13 @@ pub static COMMANDS: &[CommandSpec] = &[
             "designation?: the size, as its standard writes it: metric \"M8\", \"M8x1\", \"M16xPh3P1.5\" (ISO 68-1, ISO 261, ISO 965-1); ",
             "unified \"1/4-20 UNC-2A\", \"#10-32 UNF\" (ASME B1.1, 60 degrees; <size>-<TPI> UNC|UNF|UNEF|UN, optional -1A/-2A/-3A external or -1B/-2B/-3B internal, class retained; size #0..#12 or fractional/decimal inches, major from size, pitch exactly 25.4/TPI; automatic unified uses nearest catalogued UNC, default automatic remains metric); ",
             "trapezoidal \"Tr20x4\", \"Tr40x14(P7)\" (ISO 2904, ISO 2903); ",
-            "buttress \"S20x4\", \"S40x14(P7)\" (DIN 513, 3°/30°); ",
+            "buttress \"S20x4\", \"S40x14(P7)\" (DIN 513, 3Â°/30Â°); ",
             "acme \"1/2-10 ACME\" (ASME B1.5); ",
-            "buttress_asme \"2.5-8 BUTT\" (ASME B1.9, 7°/45°, basic profile; no size table); ",
-            "bspp \"G 1/2\" (ISO 228-1, 55° parallel); ",
-            "rp \"Rp 1/2\" (ISO 7-1's parallel internal thread, 55°, an R screws into it; internal only); ",
-            "bspt \"R 1/2\" external, \"Rc 1/2\" internal (ISO 7-1, 55°, taper 1 in 16); ",
-            "npt \"1/2-14 NPT\" (ASME B1.20.1, 60°, taper 1 in 16) — a taper thread starts at a free end (the pipe end or the hole mouth) with its standard diameter there, and an external one runs its standard length unless `length` or `up_to` says otherwise (default: the standard size that fits the face, a shaft its major diameter, a hole its nominal diameter (a 12 mm hole is M12) or else the size whose tap drill it is); ",
+            "buttress_asme \"2.5-8 BUTT\" (ASME B1.9, 7Â°/45Â°, basic profile; no size table); ",
+            "bspp \"G 1/2\" (ISO 228-1, 55Â° parallel); ",
+            "rp \"Rp 1/2\" (ISO 7-1's parallel internal thread, 55Â°, an R screws into it; internal only); ",
+            "bspt \"R 1/2\" external, \"Rc 1/2\" internal (ISO 7-1, 55Â°, taper 1 in 16); ",
+            "npt \"1/2-14 NPT\" (ASME B1.20.1, 60Â°, taper 1 in 16) â€” a taper thread starts at a free end (the pipe end or the hole mouth) with its standard diameter there, and an external one runs its standard length unless `length` or `up_to` says otherwise (default: the standard size that fits the face, a shaft its major diameter, a hole its nominal diameter (a 12 mm hole is M12) or else the size whose tap drill it is); ",
             "hand?: right|left|both (default right; both: a right- and a left-handed groove crossing); ",
             "old_auto_size?: bool (an automatic size keeps the rule of designs saved before a hole was sized by its nominal diameter: a 12 mm hole is M14; set on those threads, keeps them as they were when edited); ",
             "steep_flank?: start|end (buttress only, default end: the steep flank of the screw's teeth faces the thread's end, the way its axis points); ",
@@ -442,7 +442,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SPLIT_FACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(
-            "faces: [[x,y,z] points on the faces to split, or face names from model.faces]; body?; and the splitting tool: plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id or name (its curves, along the sketch's normal; each curve on its own, an open one extended past its ends) and loops?: bool (default false: true joins the curves end to end first, so a closed loop cuts along itself only)",
+            "faces: [[x,y,z] points on the faces to split, or face names from model.faces]; body?; and the splitting tool: plane: XY|XZ|YZ|plane name|{origin, normal} â€” or tool: {body, point} (a face of a body, its surface extended) â€” or sketch: id or name (its curves, along the sketch's normal; each curve on its own, an open one extended past its ends) and loops?: bool (default false: true joins the curves end to end first, so a closed loop cuts along itself only)",
         ),
     CommandSpec::new("solid.split_body", "Split Body", crate::checked!("solid.split_body", split_body)).begins_edit()
         .at("SOLID", "MODIFY")
@@ -451,7 +451,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<FeatureResult>)
         .params(concat!(
             "body: name; ",
-            "plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended), tool_plane?: bool (default false; true uses only that face's infinite plane and follows the face) — or sketch: id, line: curve id (a straight sketch line, along the sketch's normal)",
+            "plane: XY|XZ|YZ|plane name|{origin, normal} â€” or tool: {body, point} (a face of a body, its surface extended), tool_plane?: bool (default false; true uses only that face's infinite plane and follows the face) â€” or sketch: id, line: curve id (a straight sketch line, along the sketch's normal)",
         )),
     CommandSpec::new("solid.press_pull", "Press Pull", crate::checked!("solid.press_pull", press_pull)).begins_edit()
         .contract(&PRESS_PULL_CONTRACT)
@@ -461,7 +461,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .key("Q")
         .from_selection(super::model_selection::one_face)
         .params(concat!(
-            "face: [x,y,z] and distance: expr (positive adds material, negative cuts), or edges: [[x,y,z]…] and distance (a fillet); ",
+            "face: [x,y,z] and distance: expr (positive adds material, negative cuts), or edges: [[x,y,z]â€¦] and distance (a fillet); ",
             "body?: the body the face or edges are on (for edges, as for solid.fillet); ",
             "face_body?: the body a flat face is on, used when body is omitted",
         )),
@@ -1070,7 +1070,7 @@ pub(super) fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Resu
     add_feature_in(s, p, kind, true)
 }
 
-/// Bare lengths typed in an inch (or cm…) design mean that unit: `kind`'s inputs with it written
+/// Bare lengths typed in an inch (or cmâ€¦) design mean that unit: `kind`'s inputs with it written
 /// out, as the feature is made and as a preview of it is read.
 pub(super) fn in_design_units(s: &Session, kind: &mut FeatureKind) {
     if s.doc.units.trim() != "mm" {
@@ -1241,7 +1241,7 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
     s.refresh();
     // A feature that makes more bodies than it was given names (a multi-profile extrude with one
     // `body_name`) has the rest numbered after the first by the evaluator: `Ribs`, `Ribs (2)`,
-    // `Ribs (3)`… (#266, #373). They are stored on the feature, so recomputes and saved designs
+    // `Ribs (3)`â€¦ (#266, #373). They are stored on the feature, so recomputes and saved designs
     // keep them even when the profiles are later picked in another order.
     if names.first().is_some_and(|n| !n.trim().is_empty()) {
         let made: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
@@ -1764,7 +1764,7 @@ fn thin_param(s: &Session, p: &Value, sketch: u64, cmd: &str) -> Result<ThinWall
             ss.sketch.curves.iter().filter(|c| !c.construction && !c.centerline && !c.infinite && c.link.is_none()).map(|c| c.id.clone()).collect();
     }
     if curves.is_empty() || curves.len() > 1000 {
-        return Err(bad(cmd, "a thin extrude needs 1…1000 sketch curves (`curves`)"));
+        return Err(bad(cmd, "a thin extrude needs 1â€¦1000 sketch curves (`curves`)"));
     }
     if let Some(c) = curves.iter().find(|c| ss.sketch.curve_index(c).is_none()) {
         return Err(bad(cmd, format!("no curve `{c}` in the sketch")));
@@ -1981,7 +1981,7 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
 /// (followed when it is edited), a component origin axis (saved as its datum, so it follows the
 /// placement), {origin, dir} (each origin coordinate a number or an expression over
 /// the parameters, which the axis follows), {sketch, curve} (a line of another sketch, followed in
-/// that sketch, #6548; also as saved: {type: sketch_line, …}), or an edge
+/// that sketch, #6548; also as saved: {type: sketch_line, â€¦}), or an edge
 /// or round face of the model ({edge|face: [x,y,z]}), which the revolve follows as the model
 /// changes. A line of the sketch wins over a construction axis of the same name.
 pub(crate) fn axis_param(s: &Session, sketch: u64, p: &Value, cmd: &str) -> Result<AxisRef> {
@@ -2309,7 +2309,7 @@ pub(crate) fn edge_reach(size: f64) -> f64 {
     size * 0.05 + 1e-3
 }
 
-/// Edge references → points on the edges, each in the frame of the body it lies on.
+/// Edge references â†’ points on the edges, each in the frame of the body it lies on.
 ///
 /// A point is looked up where it was picked, on every placed body, shown or hidden: a part
 /// whose edge is in the same place only in its own frame is not in the way, and two bodies
@@ -2318,7 +2318,7 @@ pub(crate) fn edge_reach(size: f64) -> f64 {
 fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
     let a = p.get("edges").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`edges` must be a list"))?;
     if a.is_empty() || a.len() > 1000 {
-        return Err(bad(cmd, "select 1…1000 edges"));
+        return Err(bad(cmd, "select 1â€¦1000 edges"));
     }
     let verb = if cmd == "solid.chamfer" { "chamfer" } else { "round" };
     let st = s.model.state();
@@ -2535,7 +2535,7 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
         // them, picked silently (#5173). Edges that carry straight on through the point (the two
         // halves of a circle) are one edge to whoever picked it, and seams and tangent joins don't
         // count. Directions come from the polylines' end chords, which lean off a curve's
-        // tangent: within about 45° of opposite counts as carrying on (edges at a real corner are
+        // tangent: within about 45Â° of opposite counts as carrying on (edges at a real corner are
         // far from opposite).
         let nearest = hit.near.iter().map(|(d, _, _)| *d).fold(f64::INFINITY, f64::min);
         let mut meeting: Vec<Option<Vec3>> = hit.near.iter().filter(|(d, seam, _)| !seam && *d <= nearest + 1e-3).map(|(_, _, dir)| *dir).collect();
@@ -2826,11 +2826,11 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
                 check_expr(s, &r, Kind::Length, cmd, "control radius")?;
                 radii.push(Expr::from(r));
             }
-            // All control radii (`radius` and `radii`) plus the degree (1…3) plus one.
+            // All control radii (`radius` and `radii`) plus the degree (1â€¦3) plus one.
             if radii.is_empty() || !(radii.len() + 3..=radii.len() + 5).contains(&knots.len()) {
                 return Err(bad(
                     cmd,
-                    "a spline fillet needs `radii` (the control radii after `radius`) and `knots` (as many as all control radii, the degree 1…3 and one more)",
+                    "a spline fillet needs `radii` (the control radii after `radius`) and `knots` (as many as all control radii, the degree 1â€¦3 and one more)",
                 ));
             }
             solidcraft_doc::FilletStyle::Spline { start: Position(start), knots, radii }
@@ -2989,7 +2989,7 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
             let a = v
                 .as_array()
                 .filter(|a| !a.is_empty() && a.len() <= 1000)
-                .ok_or_else(|| bad(cmd, "`offset_faces` must list 1…1000 points on tool faces"))?;
+                .ok_or_else(|| bad(cmd, "`offset_faces` must list 1â€¦1000 points on tool faces"))?;
             a.iter().map(|f| super::face::face_ref(s, f, None, cmd).map(FacePick)).collect::<Result<Vec<_>>>()?
         }
     };
@@ -3135,7 +3135,7 @@ fn copied_components(p: &Value) -> Result<Option<Vec<Vec<u64>>>> {
         .collect::<Option<_>>()
         .ok_or_else(|| bad(cmd, "`occurrences` must list occurrence paths, each a list of occurrence ids"))?;
     if paths.is_empty() || paths.len() > 1000 {
-        return Err(bad(cmd, "`occurrences` must list 1…1000 occurrence paths"));
+        return Err(bad(cmd, "`occurrences` must list 1â€¦1000 occurrence paths"));
     }
     if p.get("copy").and_then(Value::as_bool) != Some(true) {
         return Err(bad(cmd, "`occurrences` are copied: set `copy` to true"));
@@ -3360,10 +3360,11 @@ pub(super) fn copy_pairs_for(s: &Session, id: u64, sources: &[String]) -> Option
     Some(pairs)
 }
 
-/// Copy each source body's body-level appearance and physical material onto its copies created by
-/// feature `id`. When `previous_sources` maps a copy to the same source body it already came from,
-/// any explicit assignment on that copy is preserved (#21245), while unstyled copies pick up the
-/// seed's current assignment; new or re-seeded copies always take their new seed's assignment.
+/// Copy each source body's body-level appearance and collision shape onto its copies created by
+/// feature `id`. Physical material is inherited dynamically via
+/// [`solidcraft_doc::Document::resolved_body_material`], so copies only carry an entry in
+/// `doc.materials` when explicitly overridden; re-seeding a copy clears any stale override from
+/// its previous seed so it and its downstream copies inherit from the new seed.
 pub(super) fn copy_keeps_appearance_for(
     s: &mut Session,
     id: u64,
@@ -3383,13 +3384,8 @@ pub(super) fn copy_keeps_appearance_for(
                 s.doc_mut().appearances.bodies.remove(&copy);
             }
         }
-        if !(same_source && s.doc.materials.contains_key(&copy)) {
-            let material = s.doc.resolved_body_material(&source).filter(|m| *m != solidcraft_doc::DEFAULT_MATERIAL).map(str::to_string);
-            if let Some(material) = material {
-                s.doc_mut().materials.insert(copy.clone(), material);
-            } else if !same_source {
-                s.doc_mut().materials.remove(&copy);
-            }
+        if !same_source && s.doc.materials.contains_key(&copy) {
+            s.doc_mut().materials.remove(&copy);
         }
         if !same_source && let Some(shape) = s.doc.collision_shapes.get(&source).copied() {
             s.doc_mut().collision_shapes.insert(copy, shape);
@@ -3497,7 +3493,7 @@ fn finish_pattern(
         // The pattern is added either way: when it made no copies (the feature failed to
         // evaluate) or an uneven number of them, there is nothing to tell the copies apart by
         // and they keep no look, as before. (Appearance copy from main.)
-        if !copied.is_empty() {
+        if !copied.is_empty() && (!join || copied.len() == 1) {
             let _ = copy_keeps_appearance(s, &reply, &copied, "pattern");
         }
         if let Some(note) = warning {
@@ -3756,7 +3752,7 @@ fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
     let path_sketch = sketch_id(s, p.get("path_sketch").or_else(|| p.get("sketch")), cmd, "path_sketch")?;
     let path = string_list(cmd, p, "path")?;
     if path.is_empty() || path.len() > 1000 {
-        return Err(bad(cmd, "`path` must list 1…1000 curve ids"));
+        return Err(bad(cmd, "`path` must list 1â€¦1000 curve ids"));
     }
     let count = req_expr(cmd, p, "count")?;
     check_count(s, &count, cmd, "count")?;
@@ -3780,7 +3776,7 @@ fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     let (start, start_fraction) = match (expr(p, "start"), expr(p, "start_fraction")) {
-        (Some(_), Some(_)) => return Err(bad(cmd, "give `start` (a distance along the path) or `start_fraction` (0…1 of its length), not both")),
+        (Some(_), Some(_)) => return Err(bad(cmd, "give `start` (a distance along the path) or `start_fraction` (0â€¦1 of its length), not both")),
         (Some(x), None) => {
             check_expr(s, &x, Kind::Length, cmd, "start")?;
             (Some(x), None)
@@ -3833,9 +3829,10 @@ fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(reply)
 }
 
-/// Copies are made of what the bodies they were made from are: each takes its source's physical
-/// material and body/face appearances, unless it has its own (kept under its name from before). The copies
-/// are the bodies feature `reply` made, in the order of `sources`, as
+/// Copies are made of what the bodies they were made from are: each takes its source's body and
+/// face appearances, unless it has its own (kept under its name from before). Physical material is
+/// inherited dynamically via [`solidcraft_doc::Document::resolved_body_material`]. The copies are
+/// the bodies feature `reply` made, in the order of `sources`, as
 /// [`super::print_face::copies_keep_print_faces`] takes them.
 fn copies_keep_looks(s: &mut Session, reply: &Value, sources: &[String]) -> Result<()> {
     let Some(id) = reply.get("feature").and_then(Value::as_u64) else { return Ok(()) };
@@ -3890,23 +3887,12 @@ fn copies_keep_looks(s: &mut Session, reply: &Value, sources: &[String]) -> Resu
             });
         }
     }
-    let inherited_material = |doc: &solidcraft_doc::Document, from: &str| {
-        doc.resolved_body_material(from).filter(|m| *m != solidcraft_doc::DEFAULT_MATERIAL).map(str::to_string)
-    };
-    let needs = |copy: &str, from: &str| {
-        (!s.doc.materials.contains_key(copy) && inherited_material(&s.doc, from).is_some())
-            || (!s.doc.appearances.bodies.contains_key(copy) && s.doc.appearances.bodies.contains_key(from))
-    };
+    let needs = |copy: &str, from: &str| !s.doc.appearances.bodies.contains_key(copy) && s.doc.appearances.bodies.contains_key(from);
     if faces.is_empty() && !pairs.iter().any(|(copy, from)| needs(copy, from)) {
         return Ok(());
     }
     let doc = s.doc_mut();
     for (copy, from) in pairs {
-        if !doc.materials.contains_key(&copy)
-            && let Some(material) = inherited_material(doc, &from)
-        {
-            doc.materials.insert(copy.clone(), material);
-        }
         if !doc.appearances.bodies.contains_key(&copy)
             && let Some(look) = doc.appearances.bodies.get(&from).cloned()
         {
@@ -4073,7 +4059,7 @@ fn format_placement_choices(occ_names: &std::collections::HashMap<u64, &str>, fr
         matches.join(", ")
     } else {
         let head = matches.iter().take(LIMIT).cloned().collect::<Vec<_>>().join(", ");
-        format!("{head}, … ({} total)", matches.len())
+        format!("{head}, â€¦ ({} total)", matches.len())
     }
 }
 
@@ -4194,7 +4180,7 @@ fn placed_bodies(s: &Session, names: Vec<String>, cmd: &str) -> Result<ResolvedB
         if *bare && count > 1 && warned_owns.insert(own.as_str()) {
             let at = occurrence_path_label(&occ_names, path).unwrap_or_else(|| format!("{path:?}"));
             let choices = format_placement_choices(&occ_names, &frames, own);
-            warnings.push(format!("body `{own}` appears in {count} placements ({choices}); used the first (`{at}`) — {hint} to choose another"));
+            warnings.push(format!("body `{own}` appears in {count} placements ({choices}); used the first (`{at}`) â€” {hint} to choose another"));
         }
     }
     let warning = (!warnings.is_empty()).then(|| warnings.join("; "));
@@ -4618,7 +4604,7 @@ const CLEARANCE_FITS: [&str; 6] = ["close", "fine", "normal", "medium", "loose",
 pub(super) fn brief(text: &str) -> String {
     const MAX: usize = 32;
     match text.char_indices().nth(MAX) {
-        Some((end, _)) => format!("{}…", &text[..end]),
+        Some((end, _)) => format!("{}â€¦", &text[..end]),
         None => text.to_string(),
     }
 }
@@ -4685,7 +4671,7 @@ pub fn head_counterbore(standard: &str, size: &str) -> Option<(f64, f64)> {
 }
 
 /// The countersink `head` makes for a countersunk screw of `size` (`M6`) with the default
-/// `head_gap`: its diameter in mm (the angle is 90°), as the Hole dialog shows it before the
+/// `head_gap`: its diameter in mm (the angle is 90Â°), as the Hole dialog shows it before the
 /// command runs. `None` for a standard that is not a countersunk head or a size it lacks.
 pub fn head_countersink(standard: &str, size: &str) -> Option<f64> {
     let dk = super::parts::countersunk_head(standard, size)?.ok()?;
@@ -4696,14 +4682,14 @@ pub fn head_countersink(standard: &str, size: &str) -> Option<f64> {
 enum HeadRecess {
     /// A cap screw's (ISO 4762 socket head, ISO 7380-1 button head): diameter and depth.
     Counterbore(Expr, Expr),
-    /// A countersunk screw's (ISO 10642): the 90° countersink's diameter at the face.
+    /// A countersunk screw's (ISO 10642): the 90Â° countersink's diameter at the face.
     Countersink(Expr),
 }
 
 /// The recess a screw's head sits in (`head` with `clearance`). A cap screw's head dk and k come
 /// from the standard's table (ISO 4762 socket heads, ISO 7380-1 button heads, in `parts`), with
 /// `head_gap` (default 0.5 mm) added each side and below. A countersunk head (ISO 10642) gets a
-/// 90° countersink `head_gap` wider than its dk each side, so the head sits that far below the
+/// 90Â° countersink `head_gap` wider than its dk each side, so the head sits that far below the
 /// face. A gap that names parameters is kept as an expression, so the recess follows them.
 /// `None` without `head`.
 fn head_recess(s: &Session, cmd: &str, p: &Value) -> Result<Option<HeadRecess>> {
@@ -4747,13 +4733,13 @@ fn fine_only_hint(t: &str) -> Option<String> {
 /// Largest nominal diameter automatic thread sizing knows (the last ISO coarse size).
 const LARGEST_COARSE: f64 = 56.0;
 
-/// The size the Thread dialog fills in for a cylinder past the coarse table (`M150x4` for a Ø150
+/// The size the Thread dialog fills in for a cylinder past the coarse table (`M150x4` for a Ã˜150
 /// shaft), where automatic sizing has none to give. `None` for any other face.
 pub fn large_thread_size(st: &solidcraft_doc::ModelState, face: Vec3) -> Option<String> {
     beyond_coarse_sizes(st, face)?.2.into_iter().next()
 }
 
-/// The refusal for automatic sizing on a cylinder too big for the coarse table (a Ø75 shaft):
+/// The refusal for automatic sizing on a cylinder too big for the coarse table (a Ã˜75 shaft):
 /// `None` when sizing finds a thread, or the cylinder is not past the table's end (the feature's
 /// own error then explains). It suggests sizes with a pitch to type, scaled to the diameter.
 fn beyond_coarse_range(st: &solidcraft_doc::ModelState, face: Vec3) -> Option<String> {
@@ -4798,7 +4784,7 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             // line or arc ends, not the origin).
             let ids = if p.get("points").is_some() { string_list(cmd, p, "points")? } else { sketch_hole_points(s, sketch) };
             if ids.is_empty() || ids.len() > 10_000 {
-                return Err(bad(cmd, "`points` must list 1…10000 sketch point ids"));
+                return Err(bad(cmd, "`points` must list 1â€¦10000 sketch point ids"));
             }
             let st = s.model.state();
             let ss = st.sketch(sketch).ok_or_else(|| bad(cmd, "the sketch is not evaluated"))?;
@@ -5290,7 +5276,7 @@ fn sketch_hole_points(s: &Session, sketch: u64) -> Vec<String> {
 fn face_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
     let a = p.get("faces").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`faces` must be a list of points or face names"))?;
     if a.is_empty() || a.len() > 1000 {
-        return Err(bad(cmd, "select 1…1000 faces"));
+        return Err(bad(cmd, "select 1â€¦1000 faces"));
     }
     a.iter().map(|v| super::face::face_ref(s, v, str_(p, "body"), cmd)).collect()
 }
@@ -5449,7 +5435,7 @@ pub(super) fn sweep_path(s: &Session, p: &Value, cmd: &str) -> Result<(u64, Vec<
         _ => return Err(bad(cmd, "`path` must list curve ids")),
     };
     if path.is_empty() || path.len() > 1000 {
-        return Err(bad(cmd, "the path needs 1…1000 curves"));
+        return Err(bad(cmd, "the path needs 1â€¦1000 curves"));
     }
     // A curve of the path's sketch is its id; a curve of another sketch is saved with that
     // sketch, so a path may join the curves of several sketches (#16168).
@@ -5473,13 +5459,13 @@ pub(super) fn sweep_path(s: &Session, p: &Value, cmd: &str) -> Result<(u64, Vec<
 fn path_edge_points(p: &Value, cmd: &str) -> Result<Vec<Position>> {
     let a = p.get("path_edges").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`path_edges` must be a list of points"))?;
     if a.is_empty() || a.len() > 1000 {
-        return Err(bad(cmd, "the path needs 1…1000 edges"));
+        return Err(bad(cmd, "the path needs 1â€¦1000 edges"));
     }
     a.iter().map(|e| vec3(e).map(Position::from).ok_or_else(|| bad(cmd, "each `path_edges` entry must be a point [x,y,z]"))).collect()
 }
 
 /// A sweep's `orientation`, `twist` and `scale` (solid.sweep and surface.sweep), checked: an
-/// orientation the sweep knows, a twist within four turns, an end scale within 0.01…100.
+/// orientation the sweep knows, a twist within four turns, an end scale within 0.01â€¦100.
 pub(super) fn sweep_options(s: &Session, p: &Value, cmd: &str) -> Result<(SweepOrientation, Option<Expr>, Option<Expr>)> {
     let orientation = match p.get("orientation") {
         None | Some(Value::Null) => SweepOrientation::Perpendicular,
@@ -5512,7 +5498,7 @@ pub(super) fn sweep_options(s: &Session, p: &Value, cmd: &str) -> Result<(SweepO
 }
 
 /// A sweep's `orientation` as given (not `null`): perpendicular or parallel (any case), or a
-/// non-zero direction `[x, y, z]`, `{x, y, z}` or `{direction: …}`. The error is the message.
+/// non-zero direction `[x, y, z]`, `{x, y, z}` or `{direction: â€¦}`. The error is the message.
 pub(crate) fn sweep_orientation(v: &Value) -> std::result::Result<SweepOrientation, &'static str> {
     match v {
         Value::String(o) if o.eq_ignore_ascii_case("perpendicular") => Ok(SweepOrientation::Perpendicular),
@@ -5530,7 +5516,7 @@ pub(crate) fn sweep_orientation(v: &Value) -> std::result::Result<SweepOrientati
 }
 
 /// A sweep's guide `rails` and `rail_fit` (solid.sweep and surface.sweep), checked: one or two
-/// rails, each a sketch (default: the path's, when the path is a sketch's) and 1…1000 of its
+/// rails, each a sketch (default: the path's, when the path is a sketch's) and 1â€¦1000 of its
 /// curves; a fit of scale or stretch; and no orientation, twist or scale besides, since the
 /// rails set those.
 pub(super) fn sweep_rails(s: &Session, p: &Value, cmd: &str, path_sketch: Option<u64>) -> Result<(Vec<SweepRail>, RailFit)> {
@@ -5545,7 +5531,7 @@ pub(super) fn sweep_rails(s: &Session, p: &Value, cmd: &str, path_sketch: Option
     Ok((rails, rail_fit))
 }
 
-/// A sweep's or a loft's (`what`) `rails` (a sweep's one or two, a loft's 1…16 `{sketch?, curves}`, each rail's sketch
+/// A sweep's or a loft's (`what`) `rails` (a sweep's one or two, a loft's 1â€¦16 `{sketch?, curves}`, each rail's sketch
 /// `default_sketch` when it names none) and `rail_fit` (scale | stretch).
 pub(super) fn guide_rails(s: &Session, p: &Value, cmd: &str, what: &str, default_sketch: Option<u64>) -> Result<(Vec<SweepRail>, RailFit)> {
     let rail_fit = match p.get("rail_fit") {
@@ -5560,7 +5546,7 @@ pub(super) fn guide_rails(s: &Session, p: &Value, cmd: &str, what: &str, default
     if what == "loft" {
         let most = solidcraft_kernel::MAX_LOFT_RAILS;
         if !(1..=most).contains(&given.len()) {
-            return Err(bad(cmd, format!("a loft takes 1…{most} guide rails")));
+            return Err(bad(cmd, format!("a loft takes 1â€¦{most} guide rails")));
         }
     } else if !(1..=2).contains(&given.len()) {
         return Err(bad(cmd, format!("a {what} takes one or two guide rails")));
@@ -5574,7 +5560,7 @@ pub(super) fn guide_rails(s: &Session, p: &Value, cmd: &str, what: &str, default
         };
         let curves = string_list(cmd, rail, "curves")?;
         if curves.is_empty() || curves.len() > 1000 {
-            return Err(bad(cmd, "each rail's `curves` must list 1…1000 curve ids in order"));
+            return Err(bad(cmd, "each rail's `curves` must list 1â€¦1000 curve ids in order"));
         }
         rails.push(SweepRail { sketch: SketchId(sketch), curves });
     }
@@ -5595,7 +5581,7 @@ fn loft(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.loft";
     let list = p.get("sections").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`sections` must be a list"))?;
     if list.len() < 2 || list.len() > 50 {
-        return Err(bad(cmd, "a loft needs 2…50 sections"));
+        return Err(bad(cmd, "a loft needs 2â€¦50 sections"));
     }
     let mut sections = Vec::new();
     for sec in list {
@@ -6125,10 +6111,10 @@ mod corner_tests {
 
     /// `solid.fillet turn?: auto|mitre|swept` on the four base edges of a 10 x 10 x 5 boss on a
     /// 40 x 30 x 10 plate, r 1: at each upright boss edge the two rounds turn round it. Each base
-    /// edge gains the spandrel A = (1 - π/4) r² along its 10, and the corners the rounds' part
+    /// edge gains the spandrel A = (1 - Ï€/4) rÂ² along its 10, and the corners the rounds' part
     /// beyond both walls, whose section's first moment about the upright edge is
-    /// M = (5/6 - π/4) r³: mitred, 8 M; swept, that section revolved a quarter turn at each corner,
-    /// 2π M, the corner's face the horn torus of radii r, r about the upright edge, centred r above
+    /// M = (5/6 - Ï€/4) rÂ³: mitred, 8 M; swept, that section revolved a quarter turn at each corner,
+    /// 2Ï€ M, the corner's face the horn torus of radii r, r about the upright edge, centred r above
     /// the plate. The default, auto, sweeps every turn the swept turn builds: these four concave
     /// rounds turn round convex upright edges, so it is the swept body. The turn is saved (a
     /// mitred one writes none); an unknown turn and a swept chord round are
@@ -6236,7 +6222,7 @@ mod corner_tests {
     }
 
     /// `solid.fillet edge_radii: [r, ...]`: each picked edge at its own radius in one blend. On a
-    /// 40 x 30 x 10 box, the two long top edges at 1 and 3 each take the spandrel (1 - π/4) r²
+    /// 40 x 30 x 10 box, the two long top edges at 1 and 3 each take the spandrel (1 - Ï€/4) rÂ²
     /// along their 40, exactly as two single fillets do; two top edges meeting at a corner at 1
     /// and 3 make one valid solid, removing more than the larger round alone and less than both
     /// rounds' full lengths. The radii are saved (and nothing is written without them), reopen to
