@@ -186,7 +186,7 @@ fn surface_local_point_solve<O: Copy>(
     guess: Point2,
 ) -> Result<(bool, Solution<O>)> {
     // the SmSurface body (surface.surface_p5), on a Surface holding a copy
-    let surface = crate::surface::surface::Surface::from(surface.clone_exact());
+    let surface = Surface::from(surface.clone_exact());
     let r = surface.local_point_solve::<O>(k, domain, operation, point, guess)?;
     Ok((r.found, r.solution))
 }
