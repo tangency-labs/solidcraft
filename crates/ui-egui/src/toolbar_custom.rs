@@ -68,7 +68,7 @@ pub const MAX_QUICK_ACCESS: usize = 24;
 
 impl ToolbarCustom {
     /// Whether a command still uses a compact gallery cell in this panel. `pinned`: constraints
-    /// the user pinned join the default gallery (the `pinned_constraints_in_grid` preference).
+    /// the user pinned join the default six (the `pinned_constraints_in_grid` preference).
     pub fn in_gallery(&self, tab: &str, panel: &str, id: &str, pinned: bool) -> bool {
         tab == "SKETCH"
             && panel == "CONSTRAIN"
@@ -103,7 +103,7 @@ impl ToolbarCustom {
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect();
         let panels = if current { v.get("panels").unwrap_or(&Value::Null) } else { v };
-        self.panels = id_lists(panels).into_iter().map(|(k, ids)| (k, split_horizontal_vertical(ids))).collect();
+        self.panels = id_lists(panels);
         self.gallery_buttons = id_lists(v.get("gallery_buttons").unwrap_or(&Value::Null));
         self.menus = if current { id_lists(v.get("menus").unwrap_or(&Value::Null)) } else { BTreeMap::new() };
         // Saved ids are kept as they are, each once; one this version lacks is not drawn.
@@ -234,15 +234,6 @@ impl ToolbarCustom {
             self.panels.insert(k, ids);
         }
     }
-}
-
-/// A saved panel's commands with the combined Horizontal/Vertical, no longer offered to people,
-/// replaced by Horizontal and Vertical, unless the panel has them already.
-fn split_horizontal_vertical(ids: Vec<String>) -> Vec<String> {
-    const COMBINED: &str = "sketch.constraint.horizontal_vertical";
-    const TOOLS: [&str; 2] = ["sketch.constraint.horizontal", "sketch.constraint.vertical"];
-    let missing: Vec<String> = TOOLS.iter().filter(|tool| !ids.iter().any(|id| id == *tool)).map(|tool| (*tool).to_string()).collect();
-    ids.into_iter().flat_map(|id| if id == COMBINED { missing.clone() } else { vec![id] }).collect()
 }
 
 fn key(tab: &str, panel: &str) -> String {
@@ -922,27 +913,6 @@ mod migration_tests {
         assert!(!custom.panels["DESIGN/MODEL/CREATE"].contains(&"solid.extrude".into()));
         assert!(!custom.panels["DESIGN/MANAGE/RULES"].contains(&"plastic.manage_rules".into()));
         assert_eq!(custom.panels["DESIGN/SKETCH/CONSTRAIN"], vec!["sketch.dimension"]);
-    }
-
-    /// A saved panel with the combined Horizontal/Vertical shows Horizontal and Vertical in its
-    /// place, each once, whichever version saved it.
-    #[test]
-    fn a_saved_horizontal_vertical_button_becomes_the_two_tools() {
-        let mut custom = ToolbarCustom::default();
-        custom.load(&json!({"version":4,"panels":{
-            "DESIGN/SKETCH/CONSTRAIN":["sketch.dimension","sketch.constraint.horizontal_vertical","sketch.constraint.vertical","sketch.constraint.fix"],
-            "DESIGN/SKETCH/CREATE":["sketch.line"]
-        }}));
-        assert_eq!(
-            custom.panels["DESIGN/SKETCH/CONSTRAIN"],
-            ["sketch.dimension", "sketch.constraint.horizontal", "sketch.constraint.vertical", "sketch.constraint.fix"]
-        );
-        assert_eq!(custom.panels["DESIGN/SKETCH/CREATE"], ["sketch.line"]);
-        let mut old = ToolbarCustom::default();
-        old.load(&json!({"DESIGN/SKETCH/CONSTRAINTS":["sketch.constraint.horizontal_vertical"]}));
-        let shown = &old.panels["DESIGN/SKETCH/CONSTRAIN"];
-        assert!(shown.contains(&"sketch.constraint.horizontal".into()) && shown.contains(&"sketch.constraint.vertical".into()), "{shown:?}");
-        assert!(!shown.contains(&"sketch.constraint.horizontal_vertical".into()), "{shown:?}");
     }
 }
 

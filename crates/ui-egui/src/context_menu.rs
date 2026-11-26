@@ -1794,10 +1794,9 @@ fn break_link(app: &SolveApp, sk: &solidcraft_engine::sketch::Sketch, ents: &[St
 fn alignment_items(selection: &[Sel]) -> Vec<Item> {
     let Some(points) = crate::selection::alignment_points(selection) else { return Vec::new() };
     vec![
-        act("ui.horizontalConstraint", "Horizontal Constraint", "c_horizontal")
+        act("ui.horizontalConstraint", "Horizontal Constraint", "c_hv")
             .with(json!({"points": points, "mode": "horizontal", "if_redundant": "refuse"})),
-        act("ui.verticalConstraint", "Vertical Constraint", "c_vertical")
-            .with(json!({"points": points, "mode": "vertical", "if_redundant": "refuse"})),
+        act("ui.verticalConstraint", "Vertical Constraint", "c_hv").with(json!({"points": points, "mode": "vertical", "if_redundant": "refuse"})),
     ]
 }
 
@@ -2081,19 +2080,21 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     {
         // #617: the point can also be aligned with the line (a circle's centre with a square's edge).
         align.push(
-            act("ui.horizontalConstraint", "Horizontal Constraint", "c_horizontal")
+            act("ui.horizontalConstraint", "Horizontal Constraint", "c_hv")
                 .with(json!({"points": points, "mode": "horizontal", "if_redundant": "refuse"})),
         );
         align.push(
-            act("ui.verticalConstraint", "Vertical Constraint", "c_vertical")
-                .with(json!({"points": points, "mode": "vertical", "if_redundant": "refuse"})),
+            act("ui.verticalConstraint", "Vertical Constraint", "c_hv").with(json!({"points": points, "mode": "vertical", "if_redundant": "refuse"})),
         );
     }
     let mut c: Vec<Item> = solidcraft_engine::command_specs()
         .into_iter()
         .filter(|spec| spec.tab == "SKETCH" && spec.panel == "CONSTRAINTS" && spec.id != "sketch.constraint.fix")
         // Two points, or a point and a line, have their own Horizontal and Vertical rows (`align`).
-        .filter(|spec| align.is_empty() || !matches!(spec.id, "sketch.constraint.horizontal" | "sketch.constraint.vertical"))
+        .filter(|spec| {
+            align.is_empty()
+                || !matches!(spec.id, "sketch.constraint.horizontal_vertical" | "sketch.constraint.horizontal" | "sketch.constraint.vertical")
+        })
         .filter(|spec| spec.selection.is_some() && spec.disabled_refusal(&app.session).is_none())
         .filter_map(|spec| {
             solidcraft_engine::sketch_selection::params_for(spec.id, &app.session, &geometry).map(|params| cmd(app, spec.id, spec.label).with(params))
@@ -2119,7 +2120,7 @@ fn legacy_constraint_order(l: usize, r: usize, p: usize, curves: usize, n: usize
     const ALIGN: [&str; 2] = ["ui.horizontalConstraint", "ui.verticalConstraint"];
     let mut order = Vec::new();
     if l == 1 && n == 1 {
-        order.extend(["sketch.constraint.horizontal", "sketch.constraint.vertical"]);
+        order.push("sketch.constraint.horizontal_vertical");
     }
     if p == 2 && n == 2 {
         order.push("sketch.constraint.coincident");

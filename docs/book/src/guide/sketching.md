@@ -524,22 +524,25 @@ fresh link once the source is available; their stored point values are preserved
 
 ## Constraints and dimensions
 
-**Horizontal** and **Vertical** each accept a click on a line or clicks on two distinct sketch points,
-including the origin, endpoints and circle centres. They always go the way they say, whichever way
-the line or the points run now. While either is on, a thin dashed guide runs along its direction
-through the cursor, after the first pick too. With a point already picked, a click on a
+**Horizontal/Vertical** accepts a click on a line or clicks on two distinct sketch points,
+including the origin, endpoints and circle centres. For two points, it chooses horizontal
+or vertical alignment from their current positions. With a point already picked, a click on a
 line's midpoint takes that midpoint, the way the line's ends are taken. Hold **Shift** near a
 line's midpoint to highlight and select it as either point. The midpoint follows both endpoints
 as the line moves, resizes or rotates. Two line midpoints can also be aligned. Hovering and the
 first pick are only previews; Esc cancels them without changing the sketch. Accepting the second
-pick reuses or creates a sketch point with an ordinary Midpoint constraint, then adds the
+pick reuses or creates a sketch point with an ordinary Midpoint constraint, then adds the H/V
 constraint in one undo step. Both constraints can be selected and deleted independently; deleting
 either keeps the point. After a fillet or chamfer, its Midpoint constraint refers to the original
 full side, retained as construction geometry, just like a manually constrained midpoint.
 
-Scripts use `sketch.constraint.horizontal` and `sketch.constraint.vertical`, with `line` or
-`points` and no `mode`. `sketch.constraint.horizontal_vertical` also stays for scripts and agents:
-it takes a `mode`, or picks the nearer way. A midpoint reference goes in the `points` array:
+**Horizontal** and **Vertical**, in the Constrain drop-down, take the same picks but always go the
+way they say, whichever way the line or the points run now; a line running the other way is turned
+keeping its length. While either is on, a thin dashed guide runs along its direction through the
+cursor. Scripts call them as `sketch.constraint.horizontal` and `sketch.constraint.vertical`, with
+`line` or `points` and no `mode`.
+
+Scripts use the same command, with a midpoint reference in the `points` array:
 
 ```json
 {"command":"sketch.constraint.horizontal_vertical","params":{"points":[{"midpoint":"l1"},"c1.center"],"mode":"vertical"}}
@@ -641,7 +644,7 @@ distinct straight lines. Two lines join their closest pair of endpoints; the fir
 picked line stays in place when the existing constraints allow it. Pick endpoints
 explicitly when you want to connect a different pair.
 
-Horizontal and Vertical also apply immediately to one selected line or two distinct selected
+Horizontal/Vertical also applies immediately to one selected line or two distinct selected
 points. Shift-click to add the second point before choosing the constraint.
 
 For Parallel, Perpendicular, Equal, Tangent, Concentric and Collinear, select exactly two

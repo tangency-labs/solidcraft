@@ -270,6 +270,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("sketch.constraint.horizontal_vertical", "Horizontal/Vertical", crate::checked!("sketch.constraint.horizontal_vertical", c_horizontal_vertical))
         .in_sketch_part()
+        .at("SKETCH", "CONSTRAINTS")
         .icon("c_hv")
         .enabled(in_sketch)
         .from_selection(super::sketch_selection::horizontal_vertical)
@@ -3440,8 +3441,52 @@ fn align_axis(s: &mut Session, p: &Value, cmd: &'static str, horizontal: Option<
         };
         let d = sk.point(b).unwrap_or_default() - sk.point(a).unwrap_or_default();
         let horiz = horizontal.unwrap_or(d.x.abs() >= d.y.abs());
+        // A line running nearer the other way is turned to the way asked first, keeping its
+        // length: the constraint alone moves one coordinate of each end, and would leave the
+        // line its short extent (nothing, for an exactly vertical line made horizontal).
+        // Horizontal and Vertical alone; the combined command keeps what it always did.
+        let across = if horiz { d.y.abs() > d.x.abs() } else { d.x.abs() > d.y.abs() };
+        if across && cmd != "sketch.constraint.horizontal_vertical" {
+            turn_line(sk, a, b, horiz);
+        }
         Ok(if horiz { ConstraintKind::Horizontal { l } } else { ConstraintKind::Vertical { l } })
     })
+}
+
+/// Whether nothing holds the sketch point `p` where it is: not fixed, not projected, and with no
+/// Fix constraint on it.
+fn point_free(sk: &Sketch, p: usize) -> bool {
+    sk.points.get(p).is_some_and(|pt| !pt.fixed && pt.link.is_none() && pt.exprs.is_none())
+        && !sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Fix { p: q } if q == p))
+}
+
+/// Turn the line from `a` to `b` to horizontal (`horizontal`) or vertical, keeping its length and
+/// the way it ran along that axis: about its middle when both ends are free, about the end that
+/// is held when one is. Two held ends are left where they are (the solve then says whether the
+/// constraint can hold). Only the starting places change: the solve that follows still decides.
+fn turn_line(sk: &mut Sketch, a: usize, b: usize, horizontal: bool) {
+    let (Some(pa), Some(pb)) = (sk.point(a), sk.point(b)) else { return };
+    let d = pb - pa;
+    let length = d.len();
+    if !(length.is_finite() && length > 0.0) {
+        return;
+    }
+    let sign = |v: f64| if v < 0.0 { -1.0 } else { 1.0 };
+    let along = if horizontal { Vec2::new(length * sign(d.x), 0.0) } else { Vec2::new(0.0, length * sign(d.y)) };
+    let (new_a, new_b) = match (point_free(sk, a), point_free(sk, b)) {
+        (true, true) => {
+            let mid = (pa + pb) * 0.5;
+            (mid - along * 0.5, mid + along * 0.5)
+        }
+        (false, true) => (pa, pa + along),
+        (true, false) => (pb - along, pb),
+        (false, false) => return,
+    };
+    for (p, at) in [(a, new_a), (b, new_b)] {
+        if let Some(pt) = sk.points.get_mut(p) {
+            pt.pos = at;
+        }
+    }
 }
 
 fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {

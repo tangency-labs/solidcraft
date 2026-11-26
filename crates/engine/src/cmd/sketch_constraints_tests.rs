@@ -2224,6 +2224,43 @@ fn horizontal_and_vertical_go_the_way_they_say() {
     }
 }
 
+/// Horizontal on a line running the other way, exactly vertical or nearly, and Vertical on one
+/// lying flat, turn the line keeping its length (it would otherwise shrink to its short extent,
+/// or to nothing): about its middle when both ends are free, about a fixed end when one is.
+#[test]
+fn horizontal_and_vertical_turn_a_line_running_the_other_way_keeping_its_length() {
+    for (id, to) in [
+        ("sketch.constraint.horizontal", [10.0, 40.0]),
+        ("sketch.constraint.horizontal", [13.0, 40.0]),
+        ("sketch.constraint.vertical", [40.0, 10.0]),
+        ("sketch.constraint.vertical", [40.0, 13.0]),
+    ] {
+        for fixed_start in [false, true] {
+            let horizontal = id.ends_with(".horizontal");
+            let mut s = new_sketch();
+            run(&mut s, "sketch.line", json!({"points": [[10.0, 10.0], to], "infer": false, "connect": false}));
+            if fixed_start {
+                run(&mut s, "sketch.constraint.fix", json!({"entity": "l1.start"}));
+            }
+            let length = (Vec2::new(to[0], to[1]) - Vec2::new(10.0, 10.0)).len();
+            run(&mut s, id, json!({"line": "l1"}));
+            let sk = sketch(&s);
+            let a = sk.point(sk.resolve_point("l1.start").unwrap()).unwrap();
+            let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
+            let d = b - a;
+            let case = format!("{id} to {to:?}, fixed start {fixed_start}: {a:?} {b:?}");
+            assert!((d.len() - length).abs() < 1e-6, "{case}: length {} not {length}", d.len());
+            assert!(if horizontal { d.y.abs() < 1e-6 && d.x > 0.0 } else { d.x.abs() < 1e-6 && d.y > 0.0 }, "{case}");
+            if fixed_start {
+                assert!((a - Vec2::new(10.0, 10.0)).len() < 1e-9, "{case}: the fixed end stays");
+            } else {
+                let middle = (Vec2::new(to[0], to[1]) + Vec2::new(10.0, 10.0)) * 0.5;
+                assert!(((a + b) * 0.5 - middle).len() < 1e-6, "{case}: turned about its middle");
+            }
+        }
+    }
+}
+
 /// A selection the combined tool takes, Horizontal and Vertical take too, without a `mode`: one
 /// line, two points, or a point and a line (aligned with the line's middle).
 #[test]
