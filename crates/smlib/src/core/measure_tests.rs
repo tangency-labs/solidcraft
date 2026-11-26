@@ -307,3 +307,45 @@ fn a_sheet_hung_on_a_solid_counts_in_the_area() {
     let m = mass_properties(&both, 1e-8).unwrap();
     assert!((m.area - 700.0).abs() < 1e-6 && (m.volume - 1000.0).abs() < 1e-6, "{m:?}");
 }
+
+/// Proved curve-to-face gap bounds on a 10 × 20 × 30 box: a spline and a quarter-circle arc on
+/// the top face (z = 33) bound near 0 on that face, the spline lifted by 2.5 mm bounds at 2.5 mm,
+/// an out-of-range face or invalid interval/floor returns `None`, an unsupported curve kind is
+/// `Error::Argument`, and a stopped token still gets an answer.
+#[test]
+fn curve_face_gap_bound_bounds_splines_and_conics_and_handles_missing_face() {
+    use solidcore_record::brep::{Curve, Frame};
+
+    let (b, _) = case("box");
+    assert_eq!(counts(&b).unwrap(), [6, 12, 8]);
+    let on_top = Curve::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[2.0, 0.0, 33.0], [10.0, 16.0, 33.0]] };
+    let bounds_all: Vec<f64> = (0..6).map(|f| super::curve_face_gap_bound(&b, &on_top, [0.0, 1.0], f, 1e-9).unwrap().unwrap()).collect();
+    let zero_faces: Vec<usize> = bounds_all.iter().enumerate().filter_map(|(f, &d)| (d < 1e-9).then_some(f)).collect();
+    assert_eq!(zero_faces.len(), 1, "exactly the top face: {bounds_all:?}");
+    let top = zero_faces[0];
+
+    let lifted = Curve::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[2.0, 0.0, 35.5], [10.0, 16.0, 35.5]] };
+    let gap = super::curve_face_gap_bound(&b, &lifted, [0.0, 1.0], top, 1e-9).unwrap().unwrap();
+    assert!(gap >= 2.5 - 1e-9 && gap <= 2.5 + 1e-6, "lifted gap {gap}");
+
+    let arc = Curve::Circle { frame: Frame { origin: [6.0, 8.0, 33.0], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] }, radius: 2.0 };
+    // Bisection stops once a piece's remainder is at most `floor`, so `floor = 1e-10` proves a
+    // zero-gap curve within 1e-9 (remainder <= 1e-10 plus evaluation rounding).
+    let arc_gap = super::curve_face_gap_bound(&b, &arc, [0.0, std::f64::consts::FRAC_PI_2], top, 1e-10).unwrap().unwrap();
+    assert!(arc_gap < 1e-9, "quarter circle on top face: {arc_gap}");
+
+    assert_eq!(super::curve_face_gap_bound(&b, &on_top, [0.0, 1.0], 6, 1e-9).unwrap(), None);
+    assert_eq!(super::curve_face_gap_bound(&b, &on_top, [0.0, 1.0], usize::MAX, 1e-9).unwrap(), None);
+    let line = Curve::Line { start: [2.0, 0.0, 33.0], end: [10.0, 16.0, 33.0] };
+    assert_eq!(super::curve_face_gap_bound(&b, &line, [0.0, 1.0], top, 1e-9).unwrap_err(), crate::Error::Argument);
+    assert_eq!(super::curve_face_gap_bound(&b, &on_top, [1.0, 0.0], top, 1e-9).unwrap(), None);
+    assert_eq!(super::curve_face_gap_bound(&b, &on_top, [f64::NAN, 1.0], top, 1e-9).unwrap(), None);
+    assert_eq!(super::curve_face_gap_bound(&b, &on_top, [0.0, 1.0], top, -1.0).unwrap(), None);
+    assert_eq!(super::curve_face_gap_bound(&b, &on_top, [0.0, 1.0], top, f64::NAN).unwrap(), None);
+
+    let stop = crate::stop::Stop::new();
+    stop.stop();
+    let stopped_gap = stop.within(|| super::curve_face_gap_bound(&b, &lifted, [0.0, 1.0], top, 1e-9)).unwrap().unwrap();
+    assert_eq!(stopped_gap, gap);
+    assert_eq!(counts(&b).unwrap(), [6, 12, 8]);
+}

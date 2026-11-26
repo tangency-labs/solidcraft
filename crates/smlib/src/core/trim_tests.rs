@@ -331,3 +331,47 @@ fn a_holed_plane_sheet_grows_its_trim() {
     assert!(rel(got, want) < 1e-6, "area {got}, {want}");
     assert_eq!(counts(&grown).unwrap()[0], 1);
 }
+
+/// Every face of a box and of a holed plate yields an interior point on its boundary, strictly
+/// inside its face span (for the box, one distinct point on each of the six faces), and a stopped
+/// token still gets the same answer.
+#[test]
+fn face_points_lie_inside_every_face_of_a_box_and_holed_plate() {
+    let b = make_box([1.0, -2.0, 3.0], [10.0, 20.0, 30.0]).unwrap();
+    assert_eq!(counts(&b).unwrap(), [6, 12, 8]);
+    let pts = super::trim::face_points(&b).unwrap();
+    assert_eq!(pts.len(), 6);
+    let lo = [1.0, -2.0, 3.0];
+    let hi = [11.0, 18.0, 33.0];
+    let mut sides = std::collections::BTreeSet::new();
+    for &p in &pts {
+        assert!(p.iter().all(|x| x.is_finite()), "{p:?}");
+        assert_eq!(super::classify_point(&b, p).unwrap(), crate::measure::PointClass::OnBoundary, "{p:?}");
+        let mut on = None;
+        for axis in 0..3 {
+            assert!(p[axis] >= lo[axis] - 1e-9 && p[axis] <= hi[axis] + 1e-9, "{p:?}");
+            if (p[axis] - lo[axis]).abs() < 1e-9 {
+                assert!(on.replace((axis, false)).is_none(), "edge/corner {p:?}");
+            } else if (p[axis] - hi[axis]).abs() < 1e-9 {
+                assert!(on.replace((axis, true)).is_none(), "edge/corner {p:?}");
+            } else {
+                assert!(p[axis] > lo[axis] + 1e-6 && p[axis] < hi[axis] - 1e-6, "too close to edge: {p:?}");
+            }
+        }
+        assert!(sides.insert(on.expect("point must lie on a box face")), "duplicate face {p:?}");
+    }
+    assert_eq!(sides.len(), 6);
+
+    let stop = crate::stop::Stop::new();
+    stop.stop();
+    assert_eq!(stop.within(|| super::trim::face_points(&b)).unwrap(), pts);
+
+    let p = plate();
+    let [faces, _, _] = counts(&p).unwrap();
+    let plate_pts = super::trim::face_points(&p).unwrap();
+    assert_eq!(plate_pts.len(), faces);
+    for &pt in &plate_pts {
+        assert!(pt.iter().all(|x| x.is_finite()), "{pt:?}");
+        assert_eq!(super::classify_point(&p, pt).unwrap(), crate::measure::PointClass::OnBoundary, "{pt:?}");
+    }
+}
