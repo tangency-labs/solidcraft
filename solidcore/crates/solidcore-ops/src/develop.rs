@@ -673,8 +673,13 @@ mod tests {
         let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
         let corners = [at(0.0, 0.0), at(10.0, 0.0), at(10.0, 10.0), at(0.0, 10.0)];
         let moved = [at(1.0, 1.0), at(9.0, 1.0), at(9.0, 9.0), at(1.0, 9.0)];
-        let square: Vec<Seg2> = (0..4).map(|i| line(corners[i], corners[(i + 1) % 4])).collect();
+        let square: Vec<Seg2> = (0..4)
+            .map(|i| line(corners[i], corners[(i + 1) % 4]))
+            .collect();
         let inside: Vec<Seg2> = (0..4).map(|i| line(moved[i], moved[(i + 1) % 4])).collect();
-        assert_eq!(offset_closed_contour(&square, 1.0, 0.0, false, 1e-6), Ok(inside));
+        assert_eq!(
+            offset_closed_contour(&square, 1.0, 0.0, false, 1e-6),
+            Ok(inside)
+        );
     }
 }

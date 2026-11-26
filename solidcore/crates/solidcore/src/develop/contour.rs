@@ -578,7 +578,10 @@ mod tests {
         else {
             panic!("{out:?}")
         };
-        assert_eq!((c0, r0, c1, r1), (Vec2::new(0.0, 3.0), 4.0, Vec2::new(0.0, -3.0), 4.0));
+        assert_eq!(
+            (c0, r0, c1, r1),
+            (Vec2::new(0.0, 3.0), 4.0, Vec2::new(0.0, -3.0), 4.0)
+        );
         let (b0, b1) = ((-3f64).atan2(-r7), 3f64.atan2(r7));
         assert!(
             (s0 - b0).abs() < 1e-12 && (w0 - ((-3f64).atan2(r7) - b0)).abs() < 1e-12,
