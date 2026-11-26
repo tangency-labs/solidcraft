@@ -936,6 +936,88 @@ fn an_inactive_pattern_does_not_drive_an_active_joints_reported_value() {
     assert_eq!(s.occurrence_placement(&[seed]).unwrap().world, before);
 }
 
+/// Component-pattern copies inherit their seed occurrence's constraint and DOF rather than
+/// reporting `dof: 6` across rectangular, circular, and path patterns (#22213).
+#[test]
+fn component_pattern_copies_inherit_seed_dof_and_anchor_downstream_joints() {
+    let dof_map = |s: &mut Session| -> std::collections::BTreeMap<u64, u64> {
+        run(s, "joint.list", json!({}))["dof"]
+            .as_array()
+            .expect("dof array")
+            .iter()
+            .map(|e| (e["occurrence"].as_u64().expect("occ"), e["dof"].as_u64().expect("dof")))
+            .collect()
+    };
+
+    // 1. Grounded seed + rectangular, circular, and path patterns: all copies report dof 0.
+    for kind in ["rectangular", "circular", "path"] {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "Pin", "activate": true}));
+        run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 10}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let seed = s.doc.occurrences[0].id;
+        let pattern = match kind {
+            "rectangular" => run(&mut s, "solid.pattern.rectangular", json!({"components": ["Pin"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 15})),
+            "circular" => run(&mut s, "solid.pattern.circular", json!({"components": ["Pin"], "axis": "Z", "count": 3})),
+            _ => {
+                let sk = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().expect("sketch");
+                run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]]}));
+                run(&mut s, "sketch.finish", json!({}));
+                run(&mut s, "solid.pattern.path", json!({"components": ["Pin"], "path_sketch": sk, "path": ["l1"], "count": 3, "distance": 30}))
+            }
+        };
+        let copies: Vec<u64> = pattern["occurrences"].as_array().expect("copies").iter().map(|v| v.as_u64().expect("copy id")).collect();
+        assert_eq!(copies.len(), 2, "{kind}");
+        let dofs = dof_map(&mut s);
+        assert_eq!(dofs.get(&seed), Some(&0), "{kind} seed");
+        for copy in &copies {
+            assert_eq!(dofs.get(copy), Some(&0), "{kind} copy {copy}");
+        }
+        let free = run(&mut s, "joint.list", json!({"dof_free_only": true}));
+        assert_eq!(free["dof"].as_array().expect("free dof").len(), 0, "{kind} dof_free_only");
+    }
+
+    // 2. Seed on a slider joint (dof 1): copies inherit dof 1, and a part joined to a copy
+    //    is anchored (not a floating chain).
+    let mut s = Session::default();
+    let base = run(&mut s, "component.create", json!({"name": "Base", "activate": true}))["occurrence"].as_u64().expect("base");
+    run(&mut s, "solid.box", json!({"length": 50, "width": 20, "height": 10}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let pin = run(&mut s, "component.create", json!({"name": "Pin", "activate": true}))["occurrence"].as_u64().expect("pin");
+    run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 10}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "joint.as_built", json!({"a": base, "b": pin, "type": "slider", "at": {"occurrence": base, "point": [0, 0, 10], "z": [0, 0, 1]}}));
+    let pattern = run(&mut s, "solid.pattern.rectangular", json!({"components": ["Pin"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 15}));
+    let copy1 = pattern["occurrences"][0].as_u64().expect("copy1");
+    let copy2 = pattern["occurrences"][1].as_u64().expect("copy2");
+    let cap = run(&mut s, "component.create", json!({"name": "Cap", "activate": true}))["occurrence"].as_u64().expect("cap");
+    run(&mut s, "solid.box", json!({"length": 6, "width": 6, "height": 4}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "joint.as_built", json!({"a": copy1, "b": cap, "type": "rigid", "at": {"occurrence": copy1, "point": [15, 0, 10], "z": [0, 0, 1]}}));
+    let listed = run(&mut s, "joint.list", json!({}));
+    assert_eq!(listed["floating"], json!([]), "joint on pattern copy should not float");
+    assert_eq!(listed["conflicts"], json!([]));
+    assert_eq!(listed["errors"], json!([]));
+    let dofs = dof_map(&mut s);
+    assert_eq!(dofs.get(&base), Some(&0));
+    assert_eq!(dofs.get(&pin), Some(&1));
+    assert_eq!(dofs.get(&copy1), Some(&1));
+    assert_eq!(dofs.get(&copy2), Some(&1));
+    assert_eq!(dofs.get(&cap), Some(&1));
+
+    // 3. Unconstrained seed (grounded: false, no joints): seed and copies stay dof 6.
+    let mut s = Session::default();
+    let free_seed =
+        run(&mut s, "component.create", json!({"name": "Loose", "activate": true, "grounded": false}))["occurrence"].as_u64().expect("loose");
+    run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 10}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let pattern = run(&mut s, "solid.pattern.rectangular", json!({"components": ["Loose"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 15}));
+    let free_copy = pattern["occurrences"][0].as_u64().expect("free copy");
+    let dofs = dof_map(&mut s);
+    assert_eq!(dofs.get(&free_seed), Some(&6));
+    assert_eq!(dofs.get(&free_copy), Some(&6));
+}
+
 /// A component pattern's copies placed again on a rebuild read the spacing as the first copies
 /// were placed (#8523): in an inch design `1 + 0` is 1 in, before and after the count changes.
 #[test]

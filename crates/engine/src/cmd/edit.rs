@@ -260,6 +260,13 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("select.filter", "Selection filter", crate::checked!("select.filter", select_filter)).icon("select").noundo().doc_only()
         .contract(&SELECT_FILTER_CONTRACT).output(output_schema_for::<SelectFilterResult>)
         .params("mode: body|face|component → validated UI pick granularity; headless echo only, no document edits or undo"),
+    CommandSpec::new("select.boundary", "Select Boundary", crate::checked!("select.boundary", select_boundary))
+        .icon("select")
+        .noundo()
+        .doc_only()
+        .contract(&BOUNDARY_CONTRACT)
+        .output(output_schema_for::<crate::schema::select::BoundaryResult>)
+        .params("body?: world body name, faces?: face indices of it (default: the selected faces, else the last selected body), holes?: bool, add?: bool → selects the edges that bound exactly one face of the set (exact topology), outer loops only unless holes (a hole: a walk of the faces' inner loops only); a body alone gives its free edges → selected, body, edges, loops, holes_left"),
     CommandSpec::new("select.clear", "Clear Selection", crate::checked!("select.clear", select_clear))
         .any_part()
         .icon("select")
@@ -314,6 +321,7 @@ pub static COMMANDS: &[CommandSpec] = &[
 
 const SELECT_SET_CONTRACT: TypedContract<SelectSetParams> = TypedContract::new();
 const SELECT_FILTER_CONTRACT: TypedContract<SelectFilterParams> = TypedContract::new();
+const BOUNDARY_CONTRACT: TypedContract<crate::schema::select::BoundaryParams> = TypedContract::new();
 const SELECT_CLEAR_CONTRACT: TypedContract<SelectClearParams> = TypedContract::new();
 const SELECT_ALL_CONTRACT: TypedContract<SelectAllParams> = TypedContract::new();
 const SELECT_INVERT_CONTRACT: TypedContract<SelectInvertParams> = TypedContract::new();
@@ -2473,6 +2481,153 @@ fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {
     s.clear_selection();
     s.refresh_display();
     reply("select.clear", SelectClearResult { selected: 0, param_warnings: Vec::new() })
+}
+
+/// `select.boundary`: the edges round a set of faces, or a body's free edges, from the body's
+/// exact topology (#18098). See [`crate::schema::select::BoundaryParams`].
+fn select_boundary(s: &mut Session, p: &Value) -> Result<Value> {
+    use solidcore_record::brep::Loop;
+    use std::collections::BTreeSet;
+    const CMD: &str = "select.boundary";
+    let request: crate::schema::select::BoundaryParams = serde_json::from_value(p.clone()).map_err(|e| bad(CMD, e.to_string()))?;
+    // The body and its face set (None: every face of the body).
+    let (name, faces): (String, Option<BTreeSet<usize>>) = match (request.body, request.faces) {
+        (Some(body), faces) => (body, faces.map(|f| f.into_iter().collect())),
+        (None, Some(_)) => return Err(bad(CMD, "give body with faces")),
+        (None, None) => {
+            let picked: Vec<(&String, usize)> = s
+                .selection
+                .iter()
+                .filter_map(|x| match x {
+                    Sel::Face { body, index, .. } => Some((body, *index)),
+                    _ => None,
+                })
+                .collect();
+            match picked.first() {
+                Some((body, _)) if picked.iter().any(|(b, _)| b != body) => return Err(bad(CMD, "select faces of one body")),
+                Some((body, _)) => ((*body).clone(), Some(picked.iter().map(|(_, f)| *f).collect())),
+                None => {
+                    let body = s
+                        .selection
+                        .iter()
+                        .rev()
+                        .find_map(|x| match x {
+                            Sel::Body { name } => Some(name.clone()),
+                            _ => None,
+                        })
+                        .ok_or_else(|| bad(CMD, "select faces or a body, or give body"))?;
+                    (body, None)
+                }
+            }
+        }
+    };
+    let state = s.world_state()?;
+    let body = state.body(&name).ok_or_else(|| bad(CMD, format!("no body `{name}`")))?;
+    let record = body.body.record();
+    if record.faces.is_empty() {
+        return Err(bad(CMD, format!("`{name}` is a mesh body: it has no edge topology")));
+    }
+    let face_set = faces.is_some();
+    let set: BTreeSet<usize> = match faces {
+        Some(f) if f.is_empty() => return Err(bad(CMD, "faces is empty")),
+        Some(f) => match f.iter().find(|i| **i >= record.faces.len()) {
+            Some(i) => return Err(bad(CMD, format!("no face {i} of `{name}`"))),
+            None => f,
+        },
+        None => (0..record.faces.len()).collect(),
+    };
+    // Every use of an edge in the set's loops: (face, loop, place in the loop). One use is the
+    // boundary; two are an edge between two faces of the set, or a seam of one face.
+    let mut uses: BTreeMap<usize, Vec<(usize, usize, usize)>> = BTreeMap::new();
+    for f in &set {
+        for (l, lp) in record.faces.get(*f).map(|face| face.loops.as_slice()).unwrap_or_default().iter().enumerate() {
+            if let Loop::Edges { edges } = lp {
+                for (i, u) in edges.iter().enumerate() {
+                    uses.entry(u.edge as usize).or_default().push((*f, l, i));
+                }
+            }
+        }
+    }
+    let loops = boundary_walks(record, &uses);
+    if loops.is_empty() {
+        return Err(bad(CMD, if face_set { format!("the faces of `{name}` have no boundary") } else { format!("`{name}` has no free edges") }));
+    }
+    // A face's first loop is its outer loop (SMLib's form, which every B-rep body is imported
+    // into); a walk made only of inner loops' edges goes round a hole or an island of the set.
+    let is_hole = |walk: &Vec<usize>| walk.iter().all(|e| uses.get(e).and_then(|u| u.first()).is_some_and(|(_, l, _)| *l > 0));
+    let keep_holes = !face_set || request.holes.unwrap_or(false);
+    let (kept, left): (Vec<Vec<usize>>, Vec<Vec<usize>>) = loops.into_iter().partition(|walk| keep_holes || !is_hole(walk));
+    if kept.is_empty() {
+        return Err(bad(CMD, format!("the faces of `{name}` are bounded by holes only: give holes: true")));
+    }
+    let edges: Vec<usize> = kept.iter().flatten().copied().collect();
+    let add = request.add.unwrap_or(false);
+    // An edge already selected stays as it was picked (its pick point is part of the selection).
+    let new: Vec<Value> = edges
+        .iter()
+        .filter(|e| !add || !s.selection.iter().any(|x| matches!(x, Sel::Edge { body, index, .. } if *body == name && index == *e)))
+        .map(|e| json!({"type": "edge", "body": name, "index": e}))
+        .collect();
+    drop(state);
+    let selected = if new.is_empty() {
+        s.selection.len()
+    } else {
+        let set = select_set(s, &json!({"items": new, "add": add}))?;
+        set.get("selected").and_then(Value::as_u64).unwrap_or_default() as usize
+    };
+    let result =
+        crate::schema::select::BoundaryResult { selected, body: name, edges, loops: kept.len(), holes_left: left.len(), param_warnings: Vec::new() };
+    reply(CMD, result)
+}
+
+/// The closed walks round the boundary of a face set: each boundary edge (one use in the set) is
+/// followed by the next use round its face's loop; where that edge is inside the set, the walk
+/// crosses to the edge's other use and goes on round that face's loop. So two loops that only
+/// meet at a vertex are two walks. `uses` holds every use of an edge in the set's loops.
+fn boundary_walks(record: &solidcore_record::brep::Brep, uses: &BTreeMap<usize, Vec<(usize, usize, usize)>>) -> Vec<Vec<usize>> {
+    use solidcore_record::brep::Loop;
+    let loop_of = |f: usize, l: usize| match record.faces.get(f).and_then(|face| face.loops.get(l)) {
+        Some(Loop::Edges { edges }) => edges.as_slice(),
+        _ => &[],
+    };
+    let edge_at = |(f, l, i): (usize, usize, usize)| loop_of(f, l).get(i).map(|u| u.edge as usize);
+    let next = |(f, l, i): (usize, usize, usize)| (f, l, (i + 1) % loop_of(f, l).len().max(1));
+    // Every step moves to another use, so a walk takes at most this many.
+    let limit = uses.values().map(Vec::len).sum::<usize>() + 1;
+    let mut seen: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+    let mut walks = Vec::new();
+    for (start, first) in uses.iter().filter_map(|(e, u)| match u.as_slice() {
+        [one] => Some((*e, *one)),
+        _ => None,
+    }) {
+        if seen.contains(&start) {
+            continue;
+        }
+        let mut walk = Vec::new();
+        let mut at = first;
+        for _ in 0..limit {
+            let Some(edge) = edge_at(at) else { break };
+            if !seen.insert(edge) {
+                break;
+            }
+            walk.push(edge);
+            // The use after this one, crossing inner edges to the face on their other side.
+            let mut n = next(at);
+            for _ in 0..limit {
+                match edge_at(n).and_then(|e| uses.get(&e)).map(Vec::as_slice) {
+                    Some([a, b]) => n = next(if *a == n { *b } else { *a }),
+                    _ => break,
+                }
+            }
+            // An edge used by three or more faces of the set ends the walk.
+            if edge_at(n).and_then(|e| uses.get(&e)).map(Vec::len) != Some(1) {
+                break;
+            }
+            at = n;
+        }
+        walks.push(walk);
+    }
+    walks
 }
 
 /// Features that worked in `before` and fail in `after`: (name, error).
