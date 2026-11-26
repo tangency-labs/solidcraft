@@ -3306,6 +3306,47 @@ fn a_plane_raised_along_the_extrusion_rises_by_the_same_level_everywhere() {
         f64::MAX
     )
     .is_err());
+    // Axes that are not finite, or a frame with no normal, are refused, not copied or ignored.
+    let mut bad = half_slope();
+    bad.x_axis = [f64::NAN, 0.0, 0.0];
+    assert!(plane_raised(&xy(), &bad, 1.0).is_err());
+    let mut bad = half_slope();
+    bad.y_axis = [0.0, f64::INFINITY, 0.0];
+    assert!(plane_raised(&xy(), &bad, 1.0).is_err());
+    let flat = Frame {
+        x_axis: [1.0, 0.0, 0.0],
+        y_axis: [1.0, 0.0, 0.0],
+        ..xy()
+    };
+    assert!(plane_raised(&flat, &half_slope(), 1.0).is_err());
+    let mut bad = xy();
+    bad.y_axis = [0.0, f64::NAN, 0.0];
+    assert!(plane_raised(&bad, &half_slope(), 1.0).is_err());
+}
+
+#[test]
+fn a_plane_whose_normal_rounds_away_from_a_travel_in_it_is_refused() {
+    use crate::geom::vector3d::Vec3;
+    // A skewed plane (its axes not square, as a hostile record may hold) and a travel inside it,
+    // `t = a x + b y` up to the rounding of t's own sum: the exact `t·(x × y)` is 6.5e-20, but
+    // the rounded cross product's own error turns the computed `t·m` to -3.0e-18, past
+    // `gamma(3) |t| |m|`. Counting that error, `gamma(2) |t|_1 |x| |y|`, refuses the sign.
+    let skewed = Frame {
+        origin: [0.0; 3],
+        x_axis: [0.7630602430259357, 0.5337981110040966, -0.6271414980178043],
+        y_axis: [
+            -0.2825470651847899,
+            -0.21302882140758705,
+            0.2364626900932829,
+        ],
+    };
+    let travel = Vec3::new(
+        -0.2427861617614619,
+        -0.17197831559588642,
+        0.20013036254154304,
+    );
+    assert!(slab_sides(travel, &skewed, &xy()).is_err());
+    assert!(slab_sides(travel, &xy(), &skewed).is_err());
 }
 
 #[test]
