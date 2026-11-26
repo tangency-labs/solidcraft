@@ -385,7 +385,12 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, p: &mut Place) {
             }
             let boxed = boxed.on_hover_text(solidcraft_ui_text::tr("ui.insert_simplify_auto_tip"));
             crate::scenario::publish_handle("dialog:insert:auto", boxed.rect.center());
-            let r = ui.add_enabled(!p.auto, |ui: &mut egui::Ui| crate::ui_kit::number_field(ui, &mut p.simplify, 0.0..=MAX_SIMPLIFY_MM, 0.01, " mm"));
+            // The field stays editable, as it always was: a distance typed into it is the
+            // person's, so Auto lets go of it (turn Auto back on for the fitted distance again).
+            let r = crate::ui_kit::number_field(ui, &mut p.simplify, 0.0..=MAX_SIMPLIFY_MM, 0.01, " mm");
+            if r.changed() {
+                p.auto = false;
+            }
             crate::scenario::publish_handle("dialog:insert:simplify", r.rect.center());
         });
     });
@@ -729,6 +734,56 @@ mod tests {
         assert!(ended.iter().any(|(key, outcome)| *key == first && outcome == "cancelled"), "the replaced read says it ended: {finished:?}");
         let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("the second pick opens a window") };
         assert_eq!(p.path, svg_file("second-pick.svg"), "the window is the second pick's");
+    }
+
+    /// Typing a distance is the person's: Auto lets go of it, and its value is the one typed.
+    #[test]
+    fn typing_a_distance_turns_auto_off() {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        open(&mut h.app, "sketch.insert_svg", dense_arc_svg_n("typed-distance.svg", 25_000));
+        h.frames(2);
+        let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("no placement") };
+        assert!(p.auto && p.simplify > 0.0, "Auto opens on: {}", p.simplify);
+        h.step(&json!({"click": {"handle": "dialog:insert:simplify"}})).unwrap();
+        h.frame();
+        h.step(&json!({"text": "0.5"})).unwrap();
+        h.frame();
+        let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("the window stays") };
+        assert!(!p.auto, "the typed distance is not Auto's");
+        assert!((p.simplify - 0.5).abs() < 1e-9, "the distance typed: {}", p.simplify);
+    }
+
+    /// OK waits while another Resolution is being measured: the distance shown is fitted at the
+    /// old one until the file is read again at the new one.
+    #[test]
+    fn ok_waits_for_a_new_resolutions_fit() {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        open(&mut h.app, "sketch.insert_svg", dense_arc_svg_n("resolution-fit.svg", 25_000));
+        h.frames(2);
+        let measured = |h: &Harness| match h.app.dialog.as_ref().map(|d| &d.kind) {
+            Some(Kind::InsertDrawing(p)) => Some((p.dpi, p.measured_dpi)),
+            _ => None,
+        };
+        assert_eq!(measured(&h), Some((DEFAULT_DPI, DEFAULT_DPI)), "measured at 96 dpi to start");
+        if let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            p.dpi = 72.0;
+        }
+        h.frame();
+        assert_eq!(crate::scenario::count_of("dialog:ok:enabled"), Some(0.0), "OK waits for the fit at 72 dpi");
+        for _ in 0..600 {
+            h.frame();
+            if measured(&h) == Some((72.0, 72.0)) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        h.frame();
+        assert_eq!(measured(&h), Some((72.0, 72.0)), "the file was measured at 72 dpi");
+        assert_eq!(crate::scenario::count_of("dialog:ok:enabled"), Some(1.0), "OK is back with the new fit");
     }
 
     /// A read whose sketch was finished meanwhile opens nothing: the answer arrives after the

@@ -5294,6 +5294,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Kind::SaveMesh(_) => crate::dialogs_save_mesh::ready(&d.inputs),
         // OK waits for values the engine takes; the drawing says why it does not.
         Kind::ShaftSpline(_) => built.unwrap_or_else(|| apply_commands(app, &d).is_ok()),
+        // A drawing whose Resolution was just changed is being measured again, and the Simplify
+        // distance is still the one fitted at the old resolution: OK waits for the new fit
+        // ([`dialogs_insert_drawing::remeasure`]), so it cannot send a distance that does not fit.
+        Kind::InsertDrawing(p) => {
+            p.dpi == p.measured_dpi && (built.unwrap_or_else(|| apply_commands(app, &d).is_ok()) && app.preview.error.is_none())
+        }
         Kind::SketchModify(crate::sketch_modify_ui::Mod::Corner { .. }) => {
             // Corner dialogs: preview errors are visual only; validation errors from
             // `apply_commands` go to `d.error`. OK stays enabled when the preview fails.
