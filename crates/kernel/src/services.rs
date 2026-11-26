@@ -41,12 +41,8 @@ pub mod tess {
     pub use solidcore_tess::Mesh;
     pub use solidcore_tess::PoleNode;
     pub use solidcore_tess::PoleRule;
-    pub use solidcore_tess::ShapeLimit;
     pub use solidcore_tess::TessPlan;
-    pub use solidcore_tess::Unshaped;
     pub use solidcore_tess::mesh;
     pub use solidcore_tess::plan;
     pub use solidcore_tess::simplify;
-    pub use solidcore_tess::triangulate_planar;
-    pub use solidcore_tess::triangulate_union;
 }

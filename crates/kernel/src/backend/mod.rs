@@ -25,7 +25,9 @@ mod planar;
 mod points;
 mod projection;
 mod query;
+mod sections;
 mod shaft_spline;
+mod tessellate;
 mod tube_cope;
 
 use crate::body::Body;

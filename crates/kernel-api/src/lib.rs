@@ -37,7 +37,9 @@ pub mod planar;
 pub mod points;
 pub mod projection;
 pub mod query;
+pub mod sections;
 pub mod shaft_spline;
+pub mod tessellate;
 pub mod tube_cope;
 
 pub use affine::{Affine, AffineRefused, AxisRefusal, Matrix, OffsetQuad, SquareFaceLevel};
@@ -53,7 +55,9 @@ pub use planar::{Planar, PlanarRefused};
 pub use points::{Distance, PointSetSummary, Points, PointsRefused};
 pub use projection::{ProjectionRefused, Projections};
 pub use query::{OutlineStretch, Queries, QueryRefused, SurfacePoint};
+pub use sections::{BlendFrame, FramesRefused, Sections, TurnRefusal};
 pub use shaft_spline::ShaftSplines;
+pub use tessellate::{PlanarFill, TessRefused, Tessellate};
 pub use tube_cope::{CopeFailed, CopeRefusal, TemplateRefusal, TubeCopes};
 
 /// A kernel's stable name: what build features, the support matrix and reports call it.
@@ -131,6 +135,11 @@ pub enum OpKind {
     ShaftSpline,
     /// DXF geometry: paths converted for a file, bounds, scales, entity checks ([`Dxf`]).
     Dxf,
+    /// Blend sections: a section's frames from its points, which open sections to turn
+    /// ([`Sections`]).
+    Sections,
+    /// Planar fills: loops and unions of regions filled with triangles ([`Tessellate`]).
+    Tessellate,
 }
 
 impl OpKind {
@@ -164,6 +173,8 @@ impl OpKind {
         OpKind::TubeCope,
         OpKind::ShaftSpline,
         OpKind::Dxf,
+        OpKind::Sections,
+        OpKind::Tessellate,
     ];
 
     /// The operation's stable name, as the support matrix and route files spell it.
@@ -197,6 +208,8 @@ impl OpKind {
             OpKind::TubeCope => "tube_cope",
             OpKind::ShaftSpline => "shaft_spline",
             OpKind::Dxf => "dxf",
+            OpKind::Sections => "sections",
+            OpKind::Tessellate => "tessellate",
         }
     }
 
