@@ -686,7 +686,7 @@ fn sectioned(set: &ShownSet, cut: &Cut) -> std::result::Result<ShownSet, Unmeasu
         Err(_) => Vec::new(),
     };
     let cut_one = |body: &ModelBody, plane: &Plane| -> SectionCut {
-        if solidcraft_kernel::watch::cancelled() {
+        if solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled()) {
             return SectionCut::Failed("cancelled".into());
         }
         match body.section(plane) {
