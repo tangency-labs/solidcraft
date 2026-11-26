@@ -259,9 +259,9 @@ fn flat_exports_use_the_save_picker() {
             captured.lock().unwrap().push((name.to_string(), extensions.iter().map(|x| x.to_string()).collect::<Vec<_>>()));
             Box::pin(std::future::ready(None))
         }));
-        assert_eq!(export_flat(&mut app, "Base", "csv"), "Choose an export file…");
+        assert_eq!(export_flat(&mut app, "Base", None), "Choose an export file…");
         crate::file_picker::tick(&mut app, &crate::fonts::test_context());
-        assert_eq!(export_flat(&mut app, "Base", "dxf"), "Choose an export file…");
+        assert_eq!(export_flat(&mut app, "Base", Some(DxfExportOptions::default())), "Choose an export file…");
         crate::file_picker::tick(&mut app, &crate::fonts::test_context());
         let picks = picks.lock().unwrap();
         assert!(picks[0].0.ends_with("-Base.csv"));
@@ -470,7 +470,9 @@ fn pocket_export_button_uses_the_picker_and_preserves_depth_layers() {
         h.app.start("sheet.flat_pattern");
         h.settle();
         let undo = h.app.session.undo.len();
-        h.step(&json!({"widget":"Export DXF…"})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:sheet_dxf:options"}})).unwrap();
+        assert!(!path.exists(), "opening the options does not export");
+        h.step(&json!({"click":{"handle":"dialog:sheet_dxf:save"}})).unwrap();
         let exported = std::fs::read_to_string(&path).expect("actual Export DXF button writes the picker destination");
         assert!(exported.contains("POCKET_BOTTOM_Z0.000000_TO_1.000000_MM"));
         assert!(exported.contains("OUTLINE"));
@@ -495,7 +497,7 @@ fn bend_table_picker_writes_the_current_body() {
             Box::pin(std::future::ready(Some(chosen.clone())))
         }));
         let undo = app.session.undo.len();
-        assert_eq!(export_flat(&mut app, &body, "csv"), "Choose an export file…");
+        assert_eq!(export_flat(&mut app, &body, None), "Choose an export file…");
         crate::file_picker::tick(&mut app, &crate::fonts::test_context());
         assert_eq!(app.status.as_ref().map(|s| &s.0), Some(&format!("Exported {output}")));
         let contents = std::fs::read_to_string(&path).unwrap();

@@ -38,6 +38,12 @@ on:
 permissions:
   contents: read
 
+# A build: label added again replaces that label's running build for the PR. Every other label
+# starts a run that does nothing, in a group of its own, so it never cancels a build.
+concurrency:
+  group: test-build-${{ github.event_name == 'pull_request_target' && format('{0}-{1}', github.event.pull_request.number, github.event.label.name) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
+
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0

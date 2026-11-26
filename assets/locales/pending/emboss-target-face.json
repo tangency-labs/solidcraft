@@ -1,0 +1,104 @@
+{
+  "ar": {
+    "Target Face": "الوجه الهدف"
+  },
+  "bs": {
+    "Target Face": "Ciljno lice"
+  },
+  "ca": {
+    "Target Face": "Cara de destí"
+  },
+  "cs": {
+    "Target Face": "Cílová plocha"
+  },
+  "da": {
+    "Target Face": "Målflade"
+  },
+  "de": {
+    "Target Face": "Zielfläche"
+  },
+  "en": {
+    "Target Face": "Target Face"
+  },
+  "es": {
+    "Target Face": "Cara de destino"
+  },
+  "fi": {
+    "Target Face": "Kohdepinta"
+  },
+  "fr": {
+    "Target Face": "Face cible"
+  },
+  "gl": {
+    "Target Face": "Cara de destino"
+  },
+  "he": {
+    "Target Face": "פאת יעד"
+  },
+  "hr": {
+    "Target Face": "Ciljno lice"
+  },
+  "hu": {
+    "Target Face": "Céllap"
+  },
+  "id": {
+    "Target Face": "Muka Target"
+  },
+  "it": {
+    "Target Face": "Faccia di destinazione"
+  },
+  "ja": {
+    "Target Face": "対象面"
+  },
+  "ka": {
+    "Target Face": "სამიზნე წახნაგი"
+  },
+  "ko": {
+    "Target Face": "대상 면"
+  },
+  "lv": {
+    "Target Face": "Mērķa skaldne"
+  },
+  "ms": {
+    "Target Face": "Muka Sasaran"
+  },
+  "nb": {
+    "Target Face": "Målflate"
+  },
+  "nl": {
+    "Target Face": "Doelvlak"
+  },
+  "pl": {
+    "Target Face": "Ściana docelowa"
+  },
+  "pt-BR": {
+    "Target Face": "Face de destino"
+  },
+  "ro": {
+    "Target Face": "Față țintă"
+  },
+  "ru": {
+    "Target Face": "Целевая грань"
+  },
+  "sr": {
+    "Target Face": "Циљно лице"
+  },
+  "sv": {
+    "Target Face": "Målyta"
+  },
+  "tr": {
+    "Target Face": "Hedef yüz"
+  },
+  "uk": {
+    "Target Face": "Цільова грань"
+  },
+  "vi": {
+    "Target Face": "Mặt đích"
+  },
+  "zh-TW": {
+    "Target Face": "目標面"
+  },
+  "zh": {
+    "Target Face": "目标面"
+  }
+}
