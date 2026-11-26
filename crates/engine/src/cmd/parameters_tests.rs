@@ -1619,7 +1619,8 @@ fn driven_dimension_as_read_only_parameter_drives_extrude_and_later_sketch() {
     let updated = run(&mut s, "parameters.list", json!({"filter": "driven"}));
     assert!((row(&updated, "diag")["value"].as_f64().unwrap_or_default() - expected_diag).abs() < 1e-3, "{updated}");
     assert!(rel(volume(&mut s), 60.0 * 40.0 * (expected_diag / 2.0)) < 1e-6);
-    let ss2 = s.model.state().sketch(sketch2_id).unwrap();
+    let state = s.model.state();
+    let ss2 = state.sketch(sketch2_id).unwrap();
     let (a, b) = (ss2.sketch.points[1].pos, ss2.sketch.points[2].pos);
     assert!(((a.x - b.x).hypot(a.y - b.y) - expected_diag).abs() < 1e-5);
 

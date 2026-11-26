@@ -5417,7 +5417,7 @@ fn driven_dimension_parameter_rejects_self_and_forward_references_and_edits() {
     assert!(doc.change_param("diag", "10 mm", None, None).unwrap_err().to_string().contains("read-only"));
     assert!(doc.change_params_atomic(&[("diag".into(), "10 mm".into())]).unwrap_err().to_string().contains("read-only"));
     assert!(doc.remove_param("diag").unwrap_err().to_string().contains("driven dimension"));
-    assert!(doc.import_params(&[("diag".into(), "10 mm".into(), Some("mm".into()), None)]).unwrap_err().to_string().contains("read-only"));
+    assert!(doc.import_params(r#"[{"name":"diag","expression":"10 mm","unit":"mm"}]"#).unwrap_err().to_string().contains("read-only"));
 
     // Self-reference through `width` (which drives `Sketch1`) is rejected before commit.
     let self_err = doc.set_param("width", "diag", None, None).unwrap_err().to_string();
