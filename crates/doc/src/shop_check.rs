@@ -631,7 +631,11 @@ fn layer_list(layers: &[String]) -> String {
 fn dxf_single_layer(ctx: &Ctx<'_>, r: &mut Report) {
     let Some(d) = &ctx.part.dxf else { return };
     if d.cut_layers.len() > 1 {
-        let keep = if d.bend_lines > 0 { " (with bend_lines: false as well, to keep the bend lines off it)" } else { "" };
+        let keep = if d.bend_lines > 0 {
+            " (with bend_lines: false as well, to keep the bend lines off it), or layers: cut to keep them on their own layer"
+        } else {
+            ""
+        };
         r.findings.push(ctx.finding(format!(
             "the DXF would put the cut contours on {} layers ({}); {} wants all cut geometry on one layer: export with layers: single{keep}{}",
             d.cut_layers.len(),
@@ -641,7 +645,7 @@ fn dxf_single_layer(ctx: &Ctx<'_>, r: &mut Report) {
         )));
     } else if d.bend_lines_with_cuts {
         r.findings.push(ctx.finding(format!(
-            "with layers: single the {} bend line(s) are on the cut layer too, where {} would cut them: export with bend_lines: false{}",
+            "with layers: single the {} bend line(s) are on the cut layer too, where {} would cut them: export with bend_lines: false, or layers: cut to keep them on their own layer{}",
             d.bend_lines,
             ctx.who(),
             ctx.note()
@@ -682,7 +686,7 @@ fn dxf_bend_lines(ctx: &Ctx<'_>, r: &mut Report) {
                 )));
             } else if d.bend_lines_with_cuts {
                 r.findings.push(ctx.finding(format!(
-                    "with layers: single the {} bend line(s) are on the cut layer, not apart from the cuts; {} wants them marked as bends: export with layers: roles{}",
+                    "with layers: single the {} bend line(s) are on the cut layer, not apart from the cuts; {} wants them marked as bends: export with layers: roles, or layers: cut for one cut layer{}",
                     d.bend_lines,
                     ctx.who(),
                     ctx.note()

@@ -1637,9 +1637,10 @@ fn a_clean_plate_passes_the_generic_shop_check() {
     let mut s = plate();
     run(&mut s, "solid.hole", json!({"position": [50, 30, T], "diameter": 6}));
     let before = s.doc.to_json();
-    // The flat DXF is checked as exported on one layer: by default its outline and the hole are on
-    // two (OUTLINE, CUT), which the generic profile's file rules ask against.
-    let reply = run(&mut s, "sheet.check_shop", json!({"shop": "generic", "dxf": {"layers": "single"}}));
+    // The flat DXF is checked as the generic profile recommends it be exported (on one layer):
+    // with the export's own layers by role, its outline and the hole would be on two.
+    let reply = run(&mut s, "sheet.check_shop", json!({"shop": "generic"}));
+    assert_eq!(reply["dxf"], json!({"layers": "single", "bend_lines": false, "bend_notes": false, "hardware_notes": false, "from": "recommended"}));
     assert_eq!(s.doc.to_json(), before, "read-only");
     assert_eq!((reply["shop"]["id"].as_str(), reply["shop"]["name"].as_str()), (Some("generic"), Some("Generic")));
     assert_eq!(reply["thickness"].as_f64(), Some(T));
@@ -1788,6 +1789,64 @@ fn the_flat_dxf_is_checked_for_the_options_it_would_be_exported_with() {
     // A bad option is refused with its name.
     let bad = s.execute("sheet.check_shop", &json!({"shop": "generic", "dxf": {"layers": "many"}})).expect_err("accepted").to_string();
     assert!(bad.contains("layers") || bad.contains("roles"), "{bad}");
+}
+
+/// With no `dxf`, the check starts from the export the shop recommends, and says which: a bent
+/// part with a cut-out has no file finding under any built-in shop (the bug: it was checked for
+/// one layer with the bend lines on it, an error about the export's settings and not the part).
+/// A `dxf` still overrides, and one layer with the bend lines on it is still an error.
+#[test]
+fn the_dxf_is_checked_as_the_shop_recommends_unless_the_call_says_otherwise() {
+    let mut s = plate();
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 20}));
+    run(&mut s, "solid.hole", json!({"position": [50, 40, T], "diameter": 6}));
+    let file_findings = |reply: &Value| -> Vec<String> {
+        reply["findings"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|f| f["rule"].as_str().is_some_and(|r| r.starts_with("file.dxf") || r == "file.text_outlined"))
+            .map(|f| f["message"].as_str().unwrap_or("").to_string())
+            .collect()
+    };
+    let echo = |layers: &str, bend_lines: bool, from: &str| json!({"layers": layers, "bend_lines": bend_lines, "bend_notes": false, "hardware_notes": false, "from": from});
+    for (shop, layers, bend_lines) in
+        [("generic", "single", false), ("pcbway", "single", false), ("jlccnc", "roles", true), ("sendcutsend", "cut", true)]
+    {
+        let reply = run(&mut s, "sheet.check_shop", json!({"shop": shop}));
+        assert_eq!(file_findings(&reply), Vec::<String>::new(), "{shop}: {reply}");
+        assert_eq!(reply["dxf"], echo(layers, bend_lines, "recommended"), "{shop}");
+    }
+    // The recommendation is what the export writes: SendCutSend's one cut layer has the bend line
+    // on a layer of its own, and the cutter's file has no bend line at all.
+    let cut = run(&mut s, "sheet.export_dxf", json!({"layers": "cut"}))["dxf"].as_str().unwrap_or_default().to_string();
+    assert!(cut.contains("BEND_UP") || cut.contains("BEND_DOWN"), "bend lines keep their layer");
+    let cutter = run(&mut s, "sheet.export_dxf", json!({"layers": "single", "bend_lines": false}))["dxf"].as_str().unwrap_or_default().to_string();
+    assert!(!cutter.contains("BEND_UP") && !cutter.contains("BEND_DOWN"), "no bend line in the cutter's file");
+    // The call's own options override: one layer with the bend line on it is an error for the
+    // shop that would cut it and the shop that wants it marked apart, and the reply says so.
+    for shop in ["generic", "pcbway", "sendcutsend"] {
+        let reply = run(&mut s, "sheet.check_shop", json!({"shop": shop, "dxf": {"layers": "single"}}));
+        assert_eq!(reply["dxf"], echo("single", true, "asked"), "{shop}");
+        let found = file_findings(&reply);
+        assert!(found.iter().any(|m| m.contains("the 1 bend line(s) are on the cut layer")), "{shop}: {found:?}");
+    }
+    // The export's defaults, asked for: two cut layers for the shops that want one.
+    let reply = run(&mut s, "sheet.check_shop", json!({"shop": "generic", "dxf": {}}));
+    assert_eq!(reply["dxf"], echo("roles", true, "asked"));
+    assert_eq!(shop_findings(&reply, "file.dxf_single_layer").len(), 1, "{reply}");
+    // A profile without a recommendation is checked for the export's defaults, and says so.
+    let profile = json!({"name": "Mine", "rules": [{"id": "file.dxf_single_layer", "sources": [{"url": "https://example.com/rules", "read": "2026-11-25", "says": "one cut layer"}]}]});
+    let reply = run(&mut s, "sheet.check_shop", json!({"shop": profile}));
+    assert_eq!(reply["dxf"], echo("roles", true, "default"));
+    assert_eq!(shop_findings(&reply, "file.dxf_single_layer").len(), 1, "{reply}");
+    // The same profile with a recommendation starts from it.
+    let mut with_rec = profile;
+    with_rec["dxf_export"] = json!({"layers": "single", "bend_lines": false, "sources": [{"url": "https://example.com/rules", "read": "2026-11-25", "says": "one layer"}]});
+    let reply = run(&mut s, "sheet.check_shop", json!({"shop": with_rec}));
+    assert_eq!(reply["dxf"], echo("single", false, "recommended"));
+    assert!(shop_findings(&reply, "file.dxf_single_layer").is_empty(), "{reply}");
 }
 
 /// A profile as an object, a built-in id in any case, and what is refused.

@@ -7,6 +7,24 @@
       "id": "generic",
       "name": "Generic",
       "note": "What the three shops read here (PCBWay, JLCCNC, SendCutSend) ask in common, taken strictly: a part that passes should be accepted by any of them. It has no stock list or sheet size, which differ. Values were checked against the pages on 2026-11-25. A spot check is still wanted for PCBWay's hole to bend, which one page measures to the bend line and the other to the bend region; the default here (to where the bend starts) is the stricter reading.",
+      "dxf_export": {
+        "layers": "single",
+        "bend_lines": false,
+        "bend_notes": false,
+        "hardware_notes": false,
+        "sources": [
+          {
+            "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
+            "read": "2026-11-25",
+            "says": "every cut path on one designated cut layer, with construction geometry and notes on other layers or deleted: a single-layer file has no other layer, so it leaves bend lines and notes out"
+          },
+          {
+            "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
+            "read": "2026-11-25",
+            "says": "all cut-path geometry on the same layer; guides, construction lines and notes moved off it or deleted"
+          }
+        ]
+      },
       "rules": [
         {
           "id": "file.one_body",
@@ -236,6 +254,19 @@
       "id": "pcbway",
       "name": "PCBWay",
       "note": "From PCBWay's sheet metal pages, checked against them on 2026-11-25. Its pages disagree in places (thickness range, hole to bend, flange): those rules are marked and the strictest value is used. A spot check is still wanted for the general hole-to-edge rule, whose page text gives only 0.5 mm in a table and calls it thread-dependent elsewhere; hole to bend, measured here to where the bend starts. Its hardware rule is left out: no page says how hardware is modelled. Aluminium, titanium and copper sheets are smaller than the 3000 by 1500 mm given.",
+      "dxf_export": {
+        "layers": "single",
+        "bend_lines": false,
+        "bend_notes": false,
+        "hardware_notes": false,
+        "sources": [
+          {
+            "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
+            "read": "2026-11-25",
+            "says": "every cut path on one designated cut layer, with construction geometry and notes on other layers or deleted; text as outlines. Bend lines are not mentioned for the cutting file (bent parts come as 3D), so they are left out"
+          }
+        ]
+      },
       "rules": [
         {
           "id": "file.one_body",
@@ -442,6 +473,19 @@
       "id": "jlccnc",
       "name": "JLCCNC",
       "note": "From JLCCNC's help pages and design blog, checked against them on 2026-11-25. Its blog gives a hole minimum of 1 times the thickness where the help page says half: both are kept and the strictest used. A spot check is still wanted for hole to edge, which only the blog gives; the help pages leave hole to bend to platform limits.",
+      "dxf_export": {
+        "layers": "roles",
+        "bend_lines": true,
+        "bend_notes": false,
+        "hardware_notes": false,
+        "sources": [
+          {
+            "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-file-requirements",
+            "read": "2026-11-25",
+            "says": "gives no layer rules for a 2D file, and takes a flat DXF for laser marking only, with the 3D STEP as the manufacturing source; no notes or text inside the model. The export's own layers by role, with bend lines and no notes, are used"
+          }
+        ]
+      },
       "rules": [
         {
           "id": "file.one_body",
@@ -631,6 +675,24 @@
       "id": "sendcutsend",
       "name": "SendCutSend",
       "note": "From SendCutSend's guidelines, material pages and calculators, checked against them on 2026-11-25; inch sizes are converted to mm. The bend distances use the 5052, mild steel and 304 die tables. A spot check is still wanted for the flange minimum, for 5052 only: the calculator gives formed lengths, converted here to the flat reach from the bend line (formed less half the bend deduction); mild steel and 304 have their own rows, not entered.",
+      "dxf_export": {
+        "layers": "cut",
+        "bend_lines": true,
+        "bend_notes": false,
+        "hardware_notes": false,
+        "sources": [
+          {
+            "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
+            "read": "2026-11-25",
+            "says": "all cut-path geometry on a single layer; guides and construction lines moved off it; dimensions and notes removed"
+          },
+          {
+            "url": "https://sendcutsend.com/services/cnc-bending/",
+            "read": "2026-11-25",
+            "says": "a 2D file for bending has a dashed line at the centre of each bend, apart from the cuts: the cut contours go on one layer and the bend lines keep their own dashed layer"
+          }
+        ]
+      },
       "rules": [
         {
           "id": "file.one_body",

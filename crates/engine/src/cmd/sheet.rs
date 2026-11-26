@@ -247,8 +247,8 @@ pub static COMMANDS: &[CommandSpec] = &[
               when the body's rule has angle_display: included), note_height?: mm (default 3), \
              hardware_notes?: bool (default false: the file is the sheet and its mounting holes, with no mention of the press-in hardware; true: a note beside each press-in hardware hole on layer HARDWARE, `M3 nut`, as high as note_height, with layers: roles), \
              bend_lines?: bool (default true; false leaves BEND_UP and BEND_DOWN out, for a cutter that would cut them), \
-             layers?: roles|single (default roles, the layers below; single: every entity on layer 0), \
-             profile?: a DXF profile file's path, or the profile as an object (which layer, colour and linetype each role is written with, and the roles left out; docs/formats/dxf-profiles.md; default: the layers below; not with layers: single), \
+             layers?: roles|single|cut (default roles, the layers below; single: every entity on layer 0; cut: the cut contours on layer 0, the bend lines and notes on their own layers, so a cutter has one cut layer and a bender still sees the bends), \
+             profile?: a DXF profile file's path, or the profile as an object (which layer, colour and linetype each role is written with, and the roles left out; docs/formats/dxf-profiles.md; default: the layers below; not with layers: single or cut), \
              per_body?: bool (a file for every sheet body, `<path>-<body>.dxf`, or their DXF texts without a path → files: [{body, path | dxf, bends}]; not with `body`) \
              → DXF (AutoCAD 2000, mm): layers OUTLINE (the outer contour), CUT (what is cut out inside it), TEXT or ETCH (letters), BEND_UP and BEND_DOWN (dashed centre lines), BEND_NOTES, \
              POCKET_<BOTTOM|TOP|INTERNAL>_Z<from>_TO_<to>_MM (one per side and depth), PERFORATION, FORM_UP and FORM_DOWN (a bead's dashed \
@@ -1688,6 +1688,9 @@ pub struct DxfOptions {
     pub no_bend_lines: bool,
     /// Everything on layer 0 instead of a layer for each role (#4314).
     pub one_layer: bool,
+    /// Every cut contour on layer 0, the bend lines, notes and markings on their own layers:
+    /// one cut layer for a cutter, and the bends still marked for a bender (`layers: cut`).
+    pub cut_layer: bool,
     /// The height (mm) of the note beside each press-in hardware hole, on layer HARDWARE (#17752);
     /// none: no notes, the default, so a file for a shop has the sheet and its holes only. Only
     /// with layers by role, as the note has a layer of its own.
@@ -1700,10 +1703,10 @@ pub struct DxfOptions {
 fn dxf_layer(
     file: &mut solidcraft_io::DxfFile<solidcraft_io::DxfShape>,
     name: &str,
-    one_layer: bool,
+    o: &DxfOptions,
 ) -> solidcraft_io::Result<solidcraft_io::DxfLayerId> {
     use solidcraft_io::DxfLinetype;
-    if one_layer {
+    if o.one_layer || (o.cut_layer && matches!(name, "OUTLINE" | "CUT" | "TEXT" | "PERFORATION")) {
         return Ok(file.default_layer());
     }
     let (color, linetype) = match name {
@@ -1907,7 +1910,7 @@ impl FlatDrawing {
     /// cut contours are on, the bend lines, the junction cuts and the notes written as text.
     fn facts(&self, o: &DxfOptions) -> solidcraft_doc::shop_check::DxfFacts {
         use solidcraft_io::DxfPathStyle;
-        let name = |layer: &str| if o.one_layer { "0".to_string() } else { layer.to_string() };
+        let name = |layer: &str| if o.one_layer || o.cut_layer { "0".to_string() } else { layer.to_string() };
         let mut cut_layers: Vec<String> = Vec::new();
         let mut unclosed = 0;
         for (pass, lp, layer) in self.layout(o) {
@@ -1971,11 +1974,11 @@ impl FlatDrawing {
             .saturating_add(self.hardware.len())
             .saturating_add(self.beads.len().saturating_mul(4));
         let mut file = DxfFile::for_flat_pattern_export(loops.len(), lines, self.perforation.len())?;
-        if !o.one_layer {
+        if !o.one_layer && !o.cut_layer {
             // These four baseline roles exist even without matching geometry. The
             // compatibility writer keeps their historical sorted table order.
             for name in ["BEND_DOWN", "BEND_UP", "CUT", "OUTLINE"] {
-                dxf_layer(&mut file, name, false)?;
+                dxf_layer(&mut file, name, &DxfOptions::default())?;
             }
         }
         for (i, (_, h, layer)) in loops.into_iter().enumerate() {
@@ -1986,7 +1989,7 @@ impl FlatDrawing {
             let shapes = flat_loop_shapes(h, style)
                 .map_err(|e| EngineError::Other(format!("flat-pattern body {:?}, layer {layer:?}, contour {}: {e}", self.body, i + 1)))?;
             if !shapes.is_empty() {
-                let layer = dxf_layer(&mut file, &layer, o.one_layer)?;
+                let layer = dxf_layer(&mut file, &layer, o)?;
                 for shape in shapes {
                     file.push(layer, shape, None)?;
                 }
@@ -1995,22 +1998,22 @@ impl FlatDrawing {
         // Each junction's cut is cut with the outline, on its layer: out along the junction and
         // back, as the outline would run round a cut with no width.
         for (a, b) in &self.slits {
-            let layer = dxf_layer(&mut file, "OUTLINE", o.one_layer)?;
+            let layer = dxf_layer(&mut file, "OUTLINE", o)?;
             file.push(layer, DxfShape::Line(*a, *b), None)?;
             file.push(layer, DxfShape::Line(*b, *a), None)?;
         }
         for b in &self.bends {
             if !o.no_bend_lines {
-                let layer = dxf_layer(&mut file, if b.up { "BEND_UP" } else { "BEND_DOWN" }, o.one_layer)?;
+                let layer = dxf_layer(&mut file, if b.up { "BEND_UP" } else { "BEND_DOWN" }, o)?;
                 file.push(layer, DxfShape::Line(b.start, b.end), None)?;
             }
             if let Some(height) = o.bend_notes {
-                let layer = dxf_layer(&mut file, "BEND_NOTES", o.one_layer)?;
+                let layer = dxf_layer(&mut file, "BEND_NOTES", o)?;
                 file.push(layer, bend_note(b, height, self.display), None)?;
             }
         }
         if !self.perforation.is_empty() {
-            let layer = dxf_layer(&mut file, "PERFORATION", o.one_layer)?;
+            let layer = dxf_layer(&mut file, "PERFORATION", o)?;
             for (c, r) in &self.perforation {
                 file.push(layer, DxfShape::Circle { c: *c, r: *r }, None)?;
             }
@@ -2018,14 +2021,14 @@ impl FlatDrawing {
         // The hardware's notes, each beside its hole on layer HARDWARE, as a bend's note is.
         if let Some(height) = o.hardware_notes {
             for (c, r, text) in &self.hardware {
-                let layer = dxf_layer(&mut file, "HARDWARE", o.one_layer)?;
+                let layer = dxf_layer(&mut file, "HARDWARE", o)?;
                 let at = solidcraft_kernel::services::prism::note_beside((*c, *r), height);
                 file.push(layer, DxfShape::Text { at, height, angle_deg: 0.0, text: text.clone() }, None)?;
             }
         }
         // Formed beads: the centreline and the footprint, dashed, and a note `BEAD UP D2 W10`.
         for b in &self.beads {
-            let layer = dxf_layer(&mut file, if b.up { "FORM_UP" } else { "FORM_DOWN" }, o.one_layer)?;
+            let layer = dxf_layer(&mut file, if b.up { "FORM_UP" } else { "FORM_DOWN" }, o)?;
             file.push(layer, DxfShape::Line(b.a, b.b), None)?;
             for (i, corner) in b.footprint.iter().enumerate() {
                 let next = b.footprint.get((i + 1) % 4).copied().unwrap_or(*corner);
@@ -2033,14 +2036,14 @@ impl FlatDrawing {
             }
             if let (Some(height), Some((at, angle))) = (o.bend_notes, b.note) {
                 let text = format!("BEAD {} D{} W{}", if b.up { "UP" } else { "DOWN" }, compact(b.depth), compact(b.width));
-                let notes = dxf_layer(&mut file, "BEND_NOTES", o.one_layer)?;
+                let notes = dxf_layer(&mut file, "BEND_NOTES", o)?;
                 file.push(notes, DxfShape::Text { at, height, angle_deg: angle.to_degrees(), text }, None)?;
             }
         }
         // A roll's lines on a layer of their own, so that a reader of the bend layers doesn't
         // take a roll for bends.
         if !o.no_bend_lines && !self.rolls.is_empty() {
-            let layer = dxf_layer(&mut file, "ROLL", o.one_layer)?;
+            let layer = dxf_layer(&mut file, "ROLL", o)?;
             for (a, b) in &self.rolls {
                 file.push(layer, DxfShape::Line(*a, *b), None)?;
             }
@@ -2073,12 +2076,14 @@ pub(crate) fn dxf_text(t: &str) -> Option<DxfText> {
     }
 }
 
-/// A DXF export's `layers`: false for a layer for each role, true for everything on layer 0, in
-/// any case.
-pub(crate) fn dxf_layers(t: &str) -> Option<bool> {
+/// A DXF export's `layers`: a layer for each role, everything on layer 0, or only the cut
+/// contours on layer 0 (the bend lines and notes keep theirs), in any case.
+pub(crate) fn dxf_layers(t: &str) -> Option<solidcraft_doc::shop_rules::DxfLayers> {
+    use solidcraft_doc::shop_rules::DxfLayers;
     match t.to_ascii_lowercase().as_str() {
-        "roles" => Some(false),
-        "single" => Some(true),
+        "roles" => Some(DxfLayers::Roles),
+        "single" => Some(DxfLayers::Single),
+        "cut" => Some(DxfLayers::Cut),
         _ => None,
     }
 }
@@ -2112,10 +2117,12 @@ fn dxf_options(p: &Value, cmd: &str) -> Result<DxfOptions> {
         Some(Value::Bool(false)) => true,
         Some(_) => return Err(bad(cmd, "`bend_lines` must be true or false")),
     };
-    let one_layer = match p.get("layers").filter(|v| !v.is_null()) {
-        None => false,
-        Some(v) => v.as_str().and_then(dxf_layers).ok_or_else(|| bad(cmd, "`layers` must be roles or single"))?,
+    let layers = match p.get("layers").filter(|v| !v.is_null()) {
+        None => solidcraft_doc::shop_rules::DxfLayers::Roles,
+        Some(v) => v.as_str().and_then(dxf_layers).ok_or_else(|| bad(cmd, "`layers` must be roles, single or cut"))?,
     };
+    let one_layer = layers == solidcraft_doc::shop_rules::DxfLayers::Single;
+    let cut_layer = layers == solidcraft_doc::shop_rules::DxfLayers::Cut;
     // Press-in hardware is noted beside its hole only when asked, and on a layer of its own: with
     // the layers by role.
     let hardware_notes = match p.get("hardware_notes").filter(|v| !v.is_null()) {
@@ -2123,7 +2130,7 @@ fn dxf_options(p: &Value, cmd: &str) -> Result<DxfOptions> {
         Some(Value::Bool(true)) => (!one_layer).then_some(height),
         Some(_) => return Err(bad(cmd, "`hardware_notes` must be true or false")),
     };
-    Ok(DxfOptions { curves, text, bend_notes, no_bend_lines, one_layer, hardware_notes })
+    Ok(DxfOptions { curves, text, bend_notes, no_bend_lines, one_layer, cut_layer, hardware_notes })
 }
 
 /// A `sheet.export_dxf` call's `profile`: a profile file's path, or the profile itself as an
@@ -2141,8 +2148,11 @@ fn dxf_profile(p: &Value, cmd: &str, options: &DxfOptions) -> Result<Option<soli
         Some(given @ Value::Object(_)) => DxfExportProfile::from_json(given).map_err(|e| bad(cmd, format!("`profile`: {e}")))?,
         Some(_) => return Err(bad(cmd, "`profile` must be a DXF profile file's path or a profile object")),
     };
-    if options.one_layer {
-        return Err(bad(cmd, "`layers: single` writes everything on layer 0 and a `profile` gives each role its layer: use one of them"));
+    if options.one_layer || options.cut_layer {
+        return Err(bad(
+            cmd,
+            "`layers: single` and `layers: cut` write the cut contours on layer 0 and a `profile` gives each role its layer: use one of them",
+        ));
     }
     Ok(Some(profile))
 }

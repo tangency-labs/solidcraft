@@ -94,7 +94,7 @@ name. When you omit `name`, the command returns the last bend's feature ID and n
   `bend_zones`, `perforations`, `hardware`, `bores` (holes drilled along a panel into its rim) and the unfolded
   body.
 - `sheet.export_dxf`: `body?`, `path?`, `curves?` (`exact`|`arcs`), `text?` (`cut`|`etch`),
-  `bend_notes?`, `hardware_notes?`, `note_height?`, `bend_lines?`, `layers?` (`roles`|`single`), `per_body?`.
+  `bend_notes?`, `hardware_notes?`, `note_height?`, `bend_lines?`, `layers?` (`roles`|`single`|`cut`: cut contours on layer 0, bend lines kept on their own dashed layers), `per_body?`.
   Layers: `OUTLINE`, `CUT`, `TEXT`/`ETCH`, `BEND_UP`/`BEND_DOWN`, `BEND_NOTES`,
   `POCKET_<BOTTOM|TOP|INTERNAL>_Z<from>_TO_<to>_MM`, `PERFORATION`, `HARDWARE` (only with `hardware_notes`).
 - `sheet.export_bend_table`: `body?`, `format?` (`csv`|`json`), `path?`. Each row gives the bend's

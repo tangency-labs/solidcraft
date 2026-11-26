@@ -229,7 +229,7 @@ fn the_value_types_match_the_readers() {
     words(&["cut", "CUT", "etch", "Etch"], &[json!("engrave"), json!("cut "), json!(""), json!(true), json!(null)], &|v| {
         parse::<DxfTextParam>(v).is_some()
     });
-    words(&["roles", "ROLES", "single", "Single"], &[json!("one"), json!("0"), json!(""), json!(5), json!(null)], &|v| {
+    words(&["roles", "ROLES", "single", "Single", "cut", "CUT"], &[json!("one"), json!("0"), json!(""), json!(5), json!(null)], &|v| {
         parse::<DxfLayersParam>(v).is_some()
     });
     for w in ["exact", "EXACT", "arcs", "Arcs"] {
@@ -238,7 +238,7 @@ fn the_value_types_match_the_readers() {
     for w in ["cut", "CUT", "etch", "Etch"] {
         assert_eq!(parse::<DxfTextParam>(json!(w)).map(|t| t.0), crate::cmd::dxf_text(w), "{w}");
     }
-    for w in ["roles", "ROLES", "single", "Single"] {
+    for w in ["roles", "ROLES", "single", "Single", "cut", "CUT"] {
         assert_eq!(parse::<DxfLayersParam>(json!(w)).map(|l| l.0), crate::cmd::dxf_layers(w), "{w}");
     }
     for (v, ok) in [
@@ -260,7 +260,7 @@ fn the_value_types_match_the_readers() {
     for (ty, want) in [
         (input_schema_for::<DxfCurvesParam>(), "^([Ee][Xx][Aa][Cc][Tt]|[Aa][Rr][Cc][Ss])$"),
         (input_schema_for::<DxfTextParam>(), "^([Cc][Uu][Tt]|[Ee][Tt][Cc][Hh])$"),
-        (input_schema_for::<DxfLayersParam>(), "^([Rr][Oo][Ll][Ee][Ss]|[Ss][Ii][Nn][Gg][Ll][Ee])$"),
+        (input_schema_for::<DxfLayersParam>(), "^([Rr][Oo][Ll][Ee][Ss]|[Ss][Ii][Nn][Gg][Ll][Ee]|[Cc][Uu][Tt])$"),
     ] {
         assert_eq!(ty.as_value()["pattern"], want);
     }

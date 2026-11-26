@@ -27,7 +27,7 @@ A sheet metal part is a flat sheet plus bends: base first, then flanges. Work th
 
 ## Verify
 - `sheet.flat_pattern` and `sheet.export_bend_table {"format":"json"}` give the flat size, outline and each bend's line, length and allowance.
-- `sheet.check_shop {"shop":"pcbway"}`: findings against a shop's rules, with sources.
+- `sheet.check_shop {"shop":"pcbway"}`: findings against a shop's rules, with sources. The flat DXF is checked as the shop recommends exporting it (the reply's `dxf`); export with those options (`sheet.export_dxf`).
 - `measure` must match the flat area times thickness; a bend that keeps the volume has not built.
 - `inspect.interference`/`inspect.clearance` against mating bodies.
 

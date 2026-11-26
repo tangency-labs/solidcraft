@@ -13,6 +13,7 @@ use solidcraft_engine::Sel;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::doc::hardware_catalog::{HardwareKind, hardware_size, hardware_sizes_of};
 use solidcraft_engine::doc::sheet::SheetRule;
+use solidcraft_engine::doc::shop_rules::DxfLayers;
 use solidcraft_engine::doc::{FeatureKind, FoldSide, ProfileSel};
 use solidcraft_engine::geom::prelude::*;
 
@@ -227,8 +228,12 @@ crate::dialog_descriptor::dialog_descriptors! {
             /// Read-only: OK only closes it.
             ShopCheck {
                 shop: usize,
-                /// The DXF layers the check assumes: 0 a single layer, 1 one per role.
+                /// The DXF layers the check assumes: 0 a single layer, 1 one per role, 2 one cut
+                /// layer with the bend lines apart. It starts from the shop's recommended export
+                /// and is set again when the shop changes.
                 layers: usize,
+                /// The shop `layers` was last set from.
+                layers_for: Option<usize>,
                 data: Option<Result<Value, String>>,
                 key: Option<(u64, Option<String>, usize, usize)>,
             },
@@ -330,7 +335,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             vec![SelInput::new("Body (last if none)", BODIES, false)],
         ),
         "sheet.check_shop" => {
-            (Sm::ShopCheck { shop: 0, layers: 0, data: None, key: None }, vec![SelInput::new("Body (last if none)", BODIES, false)])
+            (Sm::ShopCheck { shop: 0, layers: 0, layers_for: None, data: None, key: None }, vec![SelInput::new("Body (last if none)", BODIES, false)])
         }
         _ => Sm::simple_start(id)?,
     };
@@ -790,7 +795,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                 }
             }
         }
-        Sm::ShopCheck { shop, layers, data, key } => shop_check_rows(app, ui, (shop, layers), data, key, inputs),
+        Sm::ShopCheck { shop, layers, layers_for, data, key } => shop_check_rows(app, ui, (shop, layers, layers_for), data, key, inputs),
         Sm::FlatPattern { data, key, status, hardware_notes } => {
             let body = inputs.first().and_then(|i| i.items.first()).and_then(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None });
             let want = (app.session.revision, body.clone());
@@ -885,6 +890,14 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
     enter
 }
 
+/// The DXF layer choices of the Shop Check window, in the order of its row: the layout, the row's
+/// label, and the words of "Export with: ...".
+const DXF_LAYERS: [(DxfLayers, &str, &str); 3] = [
+    (DxfLayers::Single, "ui.shop_check_layers_single", "ui.shop_check_export_single"),
+    (DxfLayers::Roles, "ui.shop_check_layers_roles", "ui.shop_check_export_roles"),
+    (DxfLayers::Cut, "ui.shop_check_layers_cut", "ui.shop_check_export_cut"),
+];
+
 /// The sources a shop finding may open: web pages only.
 fn web_source(url: &str) -> bool {
     url.starts_with("https://") || url.starts_with("http://")
@@ -910,7 +923,7 @@ fn shop_counts(errors: usize, warnings: usize) -> String {
 fn shop_check_rows(
     app: &mut SolveApp,
     ui: &mut egui::Ui,
-    (shop, layers): (&mut usize, &mut usize),
+    (shop, layers, layers_for): (&mut usize, &mut usize, &mut Option<usize>),
     data: &mut Option<Result<Value, String>>,
     key: &mut Option<(u64, Option<String>, usize, usize)>,
     inputs: &[SelInput],
@@ -922,14 +935,49 @@ fn shop_check_rows(
     *shop = (*shop).min(last);
     let names: Vec<&str> = shops.iter().map(|(_, name)| *name).collect();
     choice_row(ui, "ui.shop_check_shop", "sm_shop_check_shop", shop, &names);
-    let layer_names = [solidcraft_ui_text::tr("ui.shop_check_layers_single"), solidcraft_ui_text::tr("ui.shop_check_layers_roles")];
-    *layers = (*layers).min(1);
-    choice_row(ui, "ui.shop_check_layers", "sm_shop_check_layers", layers, &layer_names);
     let (id, name) = shops.get(*shop).copied().unwrap_or(("generic", "Generic"));
+    // The export the shop wants (its profile's `dxf_export`, else the export's defaults): the
+    // row starts from it, and again from it when the shop changes.
+    let recommended = shop_rules::profile(id).ok().and_then(|p| p.dxf_export.clone());
+    let wanted = recommended.clone().unwrap_or_default();
+    let wanted_layers = DXF_LAYERS.iter().position(|(l, ..)| *l == wanted.layers).unwrap_or(1);
+    if *layers_for != Some(*shop) {
+        *layers = wanted_layers;
+        *layers_for = Some(*shop);
+    }
+    let layer_names = DXF_LAYERS.map(|(_, key, _)| solidcraft_ui_text::tr(key));
+    *layers = (*layers).min(DXF_LAYERS.len() - 1);
+    choice_row(ui, "ui.shop_check_layers", "sm_shop_check_layers", layers, &layer_names);
+    if recommended.is_some() {
+        let tr = solidcraft_ui_text::tr;
+        let mut settings = vec![tr(DXF_LAYERS[wanted_layers].2)];
+        settings.push(tr(if wanted.bend_lines { "ui.shop_check_export_bend_lines" } else { "ui.shop_check_export_no_bend_lines" }));
+        if wanted.bend_notes {
+            settings.push(tr("ui.shop_check_export_bend_notes"));
+        }
+        if wanted.hardware_notes {
+            settings.push(tr("ui.shop_check_export_hardware_notes"));
+        }
+        let line = solidcraft_ui_text::format("ui.shop_check_export_with", &[("settings", &settings.join(", "))]);
+        crate::ui_kit::status_line(ui, &line, crate::ui_kit::StatusTone::Dim);
+    }
     let body = inputs.first().and_then(|i| i.items.first()).and_then(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None });
     let want = (app.session.revision, body.clone(), *shop, *layers);
     if key.as_ref() != Some(&want) {
-        let mut p = json!({"shop": id, "dxf": {"layers": if *layers == 0 { "single" } else { "roles" }}});
+        let mut p = json!({"shop": id});
+        // `dxf` only when the row was changed from what the shop recommends; the rest of the
+        // recommendation stands.
+        if *layers != wanted_layers
+            && let Some((kind, ..)) = DXF_LAYERS.get(*layers)
+        {
+            let single = *kind == DxfLayers::Single;
+            p["dxf"] = json!({
+                "layers": kind.as_str(),
+                "bend_lines": wanted.bend_lines,
+                "bend_notes": wanted.bend_notes,
+                "hardware_notes": wanted.hardware_notes && !single,
+            });
+        }
         if let Some(b) = &body {
             p["body"] = json!(b);
         }

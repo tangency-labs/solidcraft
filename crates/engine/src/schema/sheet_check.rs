@@ -21,7 +21,9 @@ pub struct CheckShopParams {
     pub shop: ShopParam,
     /// What the flat DXF is exported with, for the file rules (`file.dxf_single_layer`,
     /// `file.dxf_closed_contours`, `file.dxf_bend_lines`, `file.text_outlined`): the options
-    /// `sheet.export_dxf` takes. Default: its defaults (layers by role, bend lines, no notes).
+    /// `sheet.export_dxf` takes; an option left out is the export's default (layers by role, bend
+    /// lines, no notes). Default: the export the shop's profile recommends (its `dxf_export`),
+    /// or the export's defaults when it names none.
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "DxfCheckParams")]
     pub dxf: Option<DxfCheckParams>,
@@ -32,7 +34,8 @@ pub struct CheckShopParams {
 #[serde(deny_unknown_fields)]
 #[schemars(deny_unknown_fields)]
 pub struct DxfCheckParams {
-    /// roles: the layer for each role. single: everything on layer 0. Default: roles.
+    /// roles: the layer for each role. single: everything on layer 0. cut: the cut contours on
+    /// layer 0, the bend lines and notes on their own layers. Default: roles.
     #[serde(default)]
     pub layers: Option<super::sheet::DxfLayersParam>,
     /// The bend lines are drawn. Default: true.
@@ -71,7 +74,7 @@ impl JsonSchema for ShopParam {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "A built-in shop profile's id (generic, pcbway, jlccnc, sendcutsend), a profile file's path (ends in .json), or the profile itself: {id?, name, note?, rules: [{id, unit?, process?, limits?, stock?, wanted?, sources?, disagreement?}]}.",
+            "description": "A built-in shop profile's id (generic, pcbway, jlccnc, sendcutsend), a profile file's path (ends in .json), or the profile itself: {id?, name, note?, dxf_export?: {layers?: roles|single|cut, bend_lines?, bend_notes?, hardware_notes?, sources}, rules: [{id, unit?, process?, limits?, stock?, wanted?, sources?, disagreement?}]}.",
             "anyOf": [
                 {"type": "string", "minLength": 1},
                 {"type": "object", "required": ["name", "rules"]}
@@ -121,6 +124,29 @@ pub struct ShopFinding {
     pub sources: Vec<String>,
 }
 
+/// Where the checked DXF options came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DxfFrom {
+    /// The call's `dxf`.
+    Asked,
+    /// The shop profile's recommended export.
+    Recommended,
+    /// The export's defaults: the call and the profile named none.
+    Default,
+}
+
+/// The `sheet.export_dxf` options the file rules were checked against.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DxfChecked {
+    /// roles, single or cut.
+    pub layers: String,
+    pub bend_lines: bool,
+    pub bend_notes: bool,
+    pub hardware_notes: bool,
+    pub from: DxfFrom,
+}
+
 /// A rule not looked at, or not wholly.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ShopNotChecked {
@@ -134,6 +160,9 @@ pub struct CheckShopResult {
     pub shop: ShopInfo,
     /// The sheet's thickness (mm).
     pub thickness: f64,
+    /// The export options the DXF rules were checked for: what the call asked, else what the shop
+    /// recommends. Export with them (`sheet.export_dxf`) to meet the file rules.
+    pub dxf: DxfChecked,
     /// By rule, in the order of `checked`, then by hole.
     pub findings: Vec<ShopFinding>,
     /// The rules looked at.

@@ -362,3 +362,56 @@ fn the_file_rules_are_not_checked_without_the_dxf() {
         assert!(r.not_checked.iter().any(|n| n.rule == id && n.why.contains("not read")), "{id}");
     }
 }
+
+/// What the export writes for the options a profile recommends, for a part with two bends and a
+/// cut-out: the layout `sheet.export_dxf` has for each `layers` value (everything on layer 0 with
+/// `single`; only the cut contours there with `cut`, the bend lines on their own layers).
+fn exported_as(r: &crate::shop_rules::DxfExport) -> DxfFacts {
+    use crate::shop_rules::DxfLayers;
+    let bend_lines = if r.bend_lines { 2 } else { 0 };
+    DxfFacts {
+        cut_layers: if r.layers == DxfLayers::Roles { vec!["CUT".into(), "OUTLINE".into()] } else { vec!["0".into()] },
+        bends: 2,
+        bend_lines,
+        bend_lines_with_cuts: r.layers == DxfLayers::Single && bend_lines > 0,
+        slits: 0,
+        unclosed: 0,
+        text_notes: if r.bend_notes { 2 } else { 0 },
+        single_layer: r.layers == DxfLayers::Single,
+        notes_asked: if r.bend_notes { vec!["bend_notes"] } else { Vec::new() },
+    }
+}
+
+/// A bent part exported as each built-in shop recommends has no file finding: the recommendation
+/// is one the export produces and the shop's own rules accept. The export's defaults (layers by
+/// role) are still a finding for the shops that want one cut layer.
+#[test]
+fn the_recommended_export_of_a_bent_part_meets_each_shops_file_rules() {
+    let file_rules = ["file.dxf_single_layer", "file.dxf_closed_contours", "file.dxf_bend_lines", "file.text_outlined"];
+    for id in crate::shop_rules::profile_ids() {
+        let rec = profile(id).unwrap().dxf_export.clone().unwrap_or_else(|| panic!("{id} recommends an export"));
+        let r = run(id, &filed(exported_as(&rec)));
+        let found: Vec<&str> = r.findings.iter().filter(|f| file_rules.contains(&f.rule.as_str())).map(|f| f.message.as_str()).collect();
+        assert!(found.is_empty(), "{id}: {found:?}");
+    }
+    for id in ["generic", "pcbway", "sendcutsend"] {
+        assert!(!rule(&run(id, &filed(drawn())), "file.dxf_single_layer").is_empty(), "{id}: layers by role are two cut layers");
+    }
+}
+
+/// Overriding the recommendation to one layer with the bend lines on it still errors: the shop
+/// that would cut them, and the one that wants them marked apart from the cuts.
+#[test]
+fn one_layer_with_bend_lines_on_the_cut_layer_is_still_a_finding() {
+    let mut on_cut_layer = exported_as(&crate::shop_rules::DxfExport { layers: crate::shop_rules::DxfLayers::Single, ..Default::default() });
+    on_cut_layer.notes_asked.clear();
+    for id in ["generic", "pcbway", "sendcutsend"] {
+        let r = run(id, &filed(on_cut_layer.clone()));
+        let errors: Vec<&Finding> = r.findings.iter().filter(|f| f.rule == "file.dxf_single_layer" || f.rule == "file.dxf_bend_lines").collect();
+        assert!(!errors.is_empty(), "{id}");
+        assert!(errors.iter().all(|f| f.severity == Severity::Error), "{id}");
+    }
+    let r = run("sendcutsend", &filed(on_cut_layer));
+    let f = rule(&r, "file.dxf_single_layer");
+    assert!(f[0].message.contains("layers: cut"), "the finding names the export that keeps both: {}", f[0].message);
+}

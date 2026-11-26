@@ -279,6 +279,63 @@ pub enum BendLines {
     Absent,
 }
 
+/// How the flat DXF's layers are laid out (`sheet.export_dxf`'s `layers`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DxfLayers {
+    /// A layer for each role (outline, cut-outs, bend lines, notes). The export's default.
+    #[default]
+    Roles,
+    /// Everything on layer 0, bend lines too: a cutter would cut them.
+    Single,
+    /// Every cut contour on layer 0; the bend lines, notes and markings keep their own layers
+    /// (the bend lines dashed), so a cutter has one cut layer and a bender still sees the bends.
+    Cut,
+}
+
+impl DxfLayers {
+    /// The word `sheet.export_dxf` takes for it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DxfLayers::Roles => "roles",
+            DxfLayers::Single => "single",
+            DxfLayers::Cut => "cut",
+        }
+    }
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// The `sheet.export_dxf` options a shop wants its flat DXF exported with: what `sheet.check_shop`
+/// and the Shop Check window start from. A field left out is the export's default.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DxfExport {
+    /// `layers`: `roles` (default), `single` or `cut`.
+    #[serde(default)]
+    pub layers: DxfLayers,
+    /// `bend_lines`: draw them (default) or leave them out.
+    #[serde(default = "yes")]
+    pub bend_lines: bool,
+    /// `bend_notes`: a text note beside each bend (default: no).
+    #[serde(default)]
+    pub bend_notes: bool,
+    /// `hardware_notes`: a text note beside each hardware hole (default: no); not with `single`.
+    #[serde(default)]
+    pub hardware_notes: bool,
+    /// The pages the recommendation comes from.
+    pub sources: Vec<Source>,
+}
+
+impl Default for DxfExport {
+    /// The export's own defaults, with no sources.
+    fn default() -> Self {
+        DxfExport { layers: DxfLayers::Roles, bend_lines: true, bend_notes: false, hardware_notes: false, sources: Vec::new() }
+    }
+}
+
 /// One rule of a profile.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -336,6 +393,10 @@ pub struct Profile {
     /// What a person reading the profile should know (how it was read, what to confirm).
     #[serde(default)]
     pub note: Option<String>,
+    /// How the shop wants its flat DXF exported; the check and the Shop Check window start from
+    /// it. None: the export's defaults.
+    #[serde(default)]
+    pub dxf_export: Option<DxfExport>,
     pub rules: Vec<Rule>,
 }
 
@@ -375,6 +436,12 @@ impl Profile {
         text("name", &self.name, MAX_NAME)?;
         if let Some(n) = &self.note {
             text("note", n, MAX_TEXT)?;
+        }
+        if let Some(d) = &self.dxf_export {
+            sources("dxf_export", &d.sources)?;
+            if d.layers == DxfLayers::Single && d.hardware_notes {
+                return refuse("dxf_export: `hardware_notes` have no layer of their own with `layers: single`");
+            }
         }
         if self.rules.is_empty() || self.rules.len() > MAX_RULES {
             return refuse(format!("a profile holds 1 to {MAX_RULES} rules"));

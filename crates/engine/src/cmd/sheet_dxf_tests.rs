@@ -671,6 +671,15 @@ fn bend_lines_can_be_left_out_and_everything_put_on_layer_0() {
     let single = entities(&export(&mut s, json!({"layers": "single"})));
     assert_eq!(single.len(), default.len());
     assert!(single.iter().all(|e| layer(e) == "0"), "{:?}", single.iter().map(layer).collect::<Vec<_>>());
+    // `cut`: one cut layer (layer 0) for a cutter, the bend lines still on theirs, dashed, for a
+    // bender (#20113).
+    let cut = entities(&export(&mut s, json!({"layers": "cut"})));
+    assert_eq!(cut.len(), default.len());
+    assert_eq!(bends(&cut), 4, "the bend lines keep their layers");
+    assert!(cut.iter().filter(|e| bends(std::slice::from_ref(e)) == 0).all(|e| layer(e) == "0"), "{:?}", cut.iter().map(layer).collect::<Vec<_>>());
+    let cut_no_lines = entities(&export(&mut s, json!({"layers": "cut", "bend_lines": false})));
+    assert_eq!(cut_no_lines.len(), default.len() - 4, "only the bend lines go");
+    assert!(cut_no_lines.iter().all(|e| layer(e) == "0"), "no bend lines, so the cut layer is the only one");
     for bad in [json!({"bend_lines": "no"}), json!({"layers": "one"})] {
         assert!(s.execute("sheet.export_dxf", &bad).is_err(), "{bad}");
     }
@@ -827,6 +836,8 @@ fn a_dxf_profile_that_cannot_be_used_is_refused_and_writes_nothing() {
     let neutral = solidcraft_io::DxfExportProfile::neutral().to_json();
     let error = s.execute("sheet.export_dxf", &json!({"layers": "single", "profile": neutral})).err().map(|e| e.to_string()).unwrap_or_default();
     assert!(error.contains("`layers: single`"), "{error}");
+    let error = s.execute("sheet.export_dxf", &json!({"layers": "cut", "profile": neutral})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(error.contains("`layers: cut`"), "{error}");
     assert!(s.execute("sheet.export_dxf", &json!({"layers": "roles", "profile": neutral})).is_ok());
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -24,9 +24,32 @@ name; SolidCraft never fetches one.
 ```
 
 A profile given to `sheet.check_shop` as an object, or in a file, is the profile alone
-(`{"id", "name", "note"?, "rules"}`); its `id` is `custom` when it has none. `id` is lower case
+(`{"id", "name", "note"?, "dxf_export"?, "rules"}`); its `id` is `custom` when it has none. `id` is lower case
 letters, digits, `_` and `-`. A rule is given once; one a profile leaves out is listed as not
 checked.
+
+## DXF export
+
+`dxf_export` says how the shop wants its flat DXF exported, as the options of `sheet.export_dxf`:
+
+```json
+"dxf_export": {
+  "layers": "cut", "bend_lines": true, "bend_notes": false, "hardware_notes": false,
+  "sources": [ { "url": "https://...", "read": "2026-11-25", "says": "..." } ]
+}
+```
+
+`layers` is `roles` (a layer for each role, the export's default), `single` (everything on layer 0,
+bend lines too) or `cut` (every cut contour on layer 0, the bend lines and notes on their own
+layers, the bend lines dashed). A field left out is the export's default; `sources` is required,
+and `hardware_notes` is refused with `single`. A shop that wants one cut layer and the bend lines
+recommends `cut`; one whose cutter would cut every line recommends `single` with
+`"bend_lines": false`.
+
+`sheet.check_shop` checks the DXF rules against this export when the call gives no `dxf` (the
+export's defaults when the profile has none), and its reply's `dxf` says which options it used
+and where they came from (`asked`, `recommended` or `default`). A `dxf` in the call overrides
+it. The Shop Check window starts from it and shows it as "Export with: ...".
 
 ## Rules
 
@@ -81,7 +104,8 @@ listed as not checked. A finding is at the bend's middle.
 
 The four `file.dxf_*` and `file.text_outlined` rules are held against the flat DXF `sheet.export_dxf`
 would write, read from the export's own layout, for the options `sheet.check_shop` is given in `dxf`
-(`layers`, `bend_lines`, `bend_notes`, `hardware_notes`; the export's defaults when it has none).
+(`layers`, `bend_lines`, `bend_notes`, `hardware_notes`; when it has none, the profile's
+`dxf_export`, else the export's defaults).
 Each finding names the export option that fixes it. Letters in the flat are always outlines; only
 the notes beside bends, beads and hardware are text entities. A DXF profile that restyles the layers
 is not considered.

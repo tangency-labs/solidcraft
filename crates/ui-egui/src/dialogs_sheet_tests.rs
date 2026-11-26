@@ -2652,6 +2652,11 @@ fn editing_hardware_refuses_a_selection_that_makes_more_than_one_command() {
 
 /// A plate with one hole of `diameter` mm (none for 0), and the Shop Check dialog open on it, drawn.
 fn shop_check_on(diameter: f64) -> crate::scenario::Harness {
+    shop_check_on_part(diameter, false)
+}
+
+/// ... with a 20 mm flange bent up along the plate's front edge when `bent`.
+fn shop_check_on_part(diameter: f64, bent: bool) -> crate::scenario::Harness {
     let mut h = crate::scenario::Harness::new();
     h.app.home.open = false;
     h.call("ui.resize", json!({"width": 1600, "height": 1200}));
@@ -2659,8 +2664,11 @@ fn shop_check_on(diameter: f64) -> crate::scenario::Harness {
     h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
     h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    if bent {
+        h.app.run("sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20})).unwrap();
+    }
     if diameter > 0.0 {
-        h.app.run("solid.hole", json!({"position": [50, 30, 2.5], "diameter": diameter})).unwrap();
+        h.app.run("solid.hole", json!({"position": [50, if bent { 40 } else { 30 }, 2.5], "diameter": diameter})).unwrap();
     }
     h.app.start("sheet.check_shop");
     h.frames(4);
@@ -2724,6 +2732,54 @@ fn shop_check_dialog_checks_one_layer_by_default_and_a_layer_per_role_on_request
     assert!(texts.iter().any(|t| t == "2 errors against Generic"), "{texts:?}");
     let rules = shop_check_rules(&h);
     assert!(rules.contains(&"hole.min_diameter".to_string()) && rules.contains(&"file.dxf_single_layer".to_string()), "{rules:?}");
+}
+
+/// The window's `sheet.check_shop` reply, as it last ran.
+fn shop_check_reply(h: &crate::scenario::Harness) -> Value {
+    let Some(Kind::Sheet(Sm::ShopCheck { data, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("shop dialog") };
+    data.as_ref().and_then(|d| d.as_ref().ok()).cloned().expect("a result")
+}
+
+/// The reported bug: a bent part under Generic, with nothing changed, showed an error about the
+/// export's settings (one layer with the bend line on it). The DXF layers row now starts from what
+/// the shop recommends, the window says how to export, and each shop it is switched to sets the
+/// row again. The call carries `dxf` only when the row was changed.
+#[test]
+fn shop_check_dialog_starts_the_dxf_row_from_the_shops_recommendation() {
+    let mut h = shop_check_on_part(6.0, true);
+    let texts = shop_check_texts(&mut h);
+    assert!(!shop_check_rules(&h).iter().any(|r| r.starts_with("file.dxf")), "no finding about the export on a bent part: {texts:?}");
+    assert!(!texts.iter().any(|t| t.contains("bend line(s)")), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "Export with: single layer, no bend lines"), "{texts:?}");
+    assert_eq!(shop_check_reply(&h)["dxf"]["from"], "recommended", "nothing was sent for the row");
+    // Each shop sets the row from its own recommendation, and the part passes its file rules.
+    for (shop, row, line, layers) in [
+        (1, 0, "Export with: single layer, no bend lines", "single"),
+        (2, 1, "Export with: a layer per role, bend lines", "roles"),
+        (3, 2, "Export with: one cut layer, bend lines", "cut"),
+    ] {
+        let Some(Kind::Sheet(Sm::ShopCheck { shop: s, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("shop dialog") };
+        *s = shop;
+        let texts = shop_check_texts(&mut h);
+        let Some(Kind::Sheet(Sm::ShopCheck { layers: row_now, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("shop dialog") };
+        assert_eq!(*row_now, row, "shop {shop}");
+        assert!(texts.iter().any(|t| t == line), "{texts:?}");
+        let reply = shop_check_reply(&h);
+        assert_eq!((reply["dxf"]["layers"].as_str(), reply["dxf"]["from"].as_str()), (Some(layers), Some("recommended")), "{reply}");
+        assert!(!shop_check_rules(&h).iter().any(|r| r.starts_with("file.dxf")), "shop {shop}: {reply}");
+    }
+    // Changing the row sends it: one layer on SendCutSend, whose bend lines then sit on the cut layer.
+    let Some(Kind::Sheet(Sm::ShopCheck { layers, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("shop dialog") };
+    *layers = 0;
+    shop_check_texts(&mut h);
+    let reply = shop_check_reply(&h);
+    assert_eq!((reply["dxf"]["layers"].as_str(), reply["dxf"]["from"].as_str()), (Some("single"), Some("asked")), "{reply}");
+    assert!(shop_check_rules(&h).contains(&"file.dxf_single_layer".to_string()), "the override is an error again");
+    // Back to the shop's own choice: no override, the recommendation again.
+    let Some(Kind::Sheet(Sm::ShopCheck { layers, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("shop dialog") };
+    *layers = 2;
+    shop_check_texts(&mut h);
+    assert_eq!(shop_check_reply(&h)["dxf"]["from"], "recommended");
 }
 
 #[test]

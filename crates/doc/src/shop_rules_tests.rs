@@ -139,3 +139,48 @@ fn the_built_in_profiles_name_the_dxf_rules_their_shops_state() {
     assert_eq!(scs.bend_lines, Some(BendLines::Present));
     assert!(!has("pcbway", RuleId::DxfBendLines) && !has("generic", RuleId::DxfBendLines), "only SendCutSend states bend lines");
 }
+
+/// Each built-in shop names the export it wants, with the pages it is read from; the
+/// recommendations are the ones the research of 2026-11-25 supports.
+#[test]
+fn the_built_in_profiles_recommend_the_export_their_shops_want() {
+    let rec = |shop: &str| profile(shop).unwrap().dxf_export.clone().unwrap_or_else(|| panic!("{shop} names an export"));
+    for id in profile_ids() {
+        let r = rec(id);
+        assert!(!r.sources.is_empty() && r.sources.iter().all(|s| s.url.starts_with("https://")), "{id}");
+        assert!(!r.bend_notes && !r.hardware_notes, "{id}: notes are text entities, which the shops' file rules refuse");
+    }
+    // A cutter-safe file: one layer and no bend lines for the shops that cut every line.
+    for shop in ["generic", "pcbway"] {
+        let r = rec(shop);
+        assert_eq!((r.layers, r.bend_lines), (DxfLayers::Single, false), "{shop}");
+    }
+    // SendCutSend: one cut layer, and the bend lines apart from it.
+    let scs = rec("sendcutsend");
+    assert_eq!((scs.layers, scs.bend_lines), (DxfLayers::Cut, true));
+    // JLCCNC gives no file rule: the export's own defaults.
+    let jlc = rec("jlccnc");
+    assert_eq!((jlc.layers, jlc.bend_lines), (DxfLayers::Roles, true));
+}
+
+/// `dxf_export` is read with the export's defaults for what it leaves out, and is checked.
+#[test]
+fn a_dxf_export_is_read_and_checked() {
+    let source = json!([{"url": "https://example.com/rules", "read": "2026-11-25", "says": "one cut layer"}]);
+    let with = |dxf: Value| {
+        let mut v = minimal();
+        v["dxf_export"] = dxf;
+        Profile::from_value(&v)
+    };
+    let p = with(json!({"sources": source.clone()})).unwrap().dxf_export.unwrap();
+    assert_eq!((p.layers, p.bend_lines, p.bend_notes, p.hardware_notes), (DxfLayers::Roles, true, false, false));
+    let p = with(json!({"layers": "cut", "bend_lines": false, "bend_notes": true, "hardware_notes": true, "sources": source.clone()})).unwrap();
+    assert_eq!(p.dxf_export.map(|d| (d.layers, d.bend_lines)), Some((DxfLayers::Cut, false)));
+    assert!(Profile::from_value(&minimal()).unwrap().dxf_export.is_none(), "optional");
+    assert!(with(json!({"layers": "single"})).is_err(), "a recommendation names its page");
+    assert!(with(json!({"layers": "single", "sources": []})).is_err());
+    assert!(with(json!({"layers": "many", "sources": source.clone()})).is_err());
+    assert!(with(json!({"colour": 1, "sources": source.clone()})).unwrap_err().to_string().contains("unknown field"));
+    let e = with(json!({"layers": "single", "hardware_notes": true, "sources": source})).unwrap_err().to_string();
+    assert!(e.contains("hardware_notes"), "{e}");
+}
