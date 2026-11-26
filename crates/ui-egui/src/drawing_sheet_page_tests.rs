@@ -2900,4 +2900,32 @@ fn edit_view_lists_the_bodies_and_a_tick_chooses_what_it_draws() {
     settle(&mut h);
     let carcass = solidcraft_engine::doc::drawing_view::HiddenBody { path: Vec::new(), body: "Carcass".into() };
     assert_eq!(hidden_bodies(&h, view), Some(vec![carcass]), "the carcass is left out, the door drawn again");
+
+    // Shows: As shown in the design follows the Browser, its list still on top; All bodies leaves
+    // nothing out.
+    let shows = |h: &Harness| h.app.session.drawing("drawing.inspect").unwrap().resolve_view(view).unwrap().shows.value;
+    let choose = |h: &mut Harness, option: &str| {
+        let row = crate::scenario::rect_of("dialog:widget:Shows").expect("Shows is drawn").center();
+        h.step(&json!({"click": [row.x, row.y]})).unwrap();
+        h.frames(3);
+        let at = solidcraft_ui_registry::handle_at(&format!("dialog:Shows:{option}")).expect(option);
+        h.step(&json!({"click": [at.x, at.y]})).unwrap();
+        h.frames(3);
+    };
+    let apply = |h: &mut Harness| {
+        let at = h.widget("Apply").unwrap();
+        h.step(&json!({"click": at})).unwrap();
+        settle(h);
+    };
+    assert_eq!(shows(&h), solidcraft_engine::doc::drawing_view::Shows::All);
+    choose(&mut h, "As shown in the design");
+    assert!(h.widget("Carcass").is_some(), "the list stays, on top of the Browser");
+    apply(&mut h);
+    assert_eq!(shows(&h), solidcraft_engine::doc::drawing_view::Shows::Design);
+    assert_eq!(hidden_bodies(&h, view).map(|bodies| bodies.len()), Some(1), "its own list is kept");
+    choose(&mut h, "All bodies");
+    assert!(h.widget("Carcass").is_none(), "All bodies has no list");
+    apply(&mut h);
+    assert_eq!(shows(&h), solidcraft_engine::doc::drawing_view::Shows::All);
+    assert_eq!(hidden_bodies(&h, view), Some(Vec::new()), "and leaves nothing out");
 }

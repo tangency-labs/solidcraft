@@ -139,6 +139,12 @@ impl Bodies {
         (hide, hide_bodies)
     }
 
+    /// The lists leave something out: a component, a body, or an entry the list can't show.
+    pub fn leaves_out(&self) -> bool {
+        let (hide, hide_bodies) = self.lists();
+        !hide.is_empty() || !hide_bodies.is_empty()
+    }
+
     /// Nothing is ticked: the view would draw nothing.
     pub fn none_drawn(&self) -> bool {
         !self.bodies.is_empty() && self.bodies.iter().all(|b| !b.drawn)
