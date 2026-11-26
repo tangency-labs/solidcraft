@@ -86,6 +86,44 @@ pub const MODIFIERS: &[ToolModifiers] = &[
 
 pub(crate) const OPS: [&str; 4] = ["new", "join", "cut", "intersect"];
 pub(crate) const OP_LABELS: [&str; 4] = ["New Body", "Join", "Cut", "Intersect"];
+
+/// Whether `kind` is a feature whose command takes `body_name`, and if so whether its operation is
+/// New Body: only then does the feature name a body of its own (#20776).
+pub(crate) fn body_name_slot(kind: &Kind) -> Option<bool> {
+    let operation = match kind {
+        Kind::Extrude { operation, .. }
+        | Kind::Revolve { operation, .. }
+        | Kind::Loft { operation, .. }
+        | Kind::Sweep { operation, .. }
+        | Kind::Primitive { operation, .. } => *operation,
+        _ => return None,
+    };
+    Some(OPS.get(operation).copied().unwrap_or("new") == "new")
+}
+
+/// The body name typed in a dialog's Body Name row: what a New Body feature names its body. Empty
+/// is no name, so the command names the body as it always has.
+pub(crate) fn typed_body_name(d: &Dialog) -> Option<&str> {
+    d.extra.get("body_name").and_then(Value::as_str).map(str::trim).filter(|name| !name.is_empty())
+}
+
+/// Send the typed body name as `body_name` when the operation is New Body, and no stale one
+/// (from a feature opened for editing, then switched to Join or Cut) otherwise. Every command the
+/// dialog made loses any copied name, and only the first, the one that makes the body, gets the
+/// typed one. An edit's `timeline.redefine` holds the feature's parameters under `params`.
+fn apply_body_name(d: &Dialog, cmds: &mut [(String, Value)]) {
+    let Some(new_body) = body_name_slot(&d.kind) else { return };
+    let name = typed_body_name(d).filter(|_| new_body);
+    for (i, (cmd, params)) in cmds.iter_mut().enumerate() {
+        let target = if cmd == "timeline.redefine" { params.get_mut("params") } else { Some(params) };
+        let Some(map) = target.and_then(Value::as_object_mut) else { continue };
+        map.remove("body_name");
+        if let (0, Some(name)) = (i, name) {
+            map.insert("body_name".into(), json!(name));
+        }
+    }
+}
+
 /// A pipe's section: a solid rod or a hollow tube, which has a wall (#18344).
 pub(crate) const PIPE_TYPES: [&str; 2] = ["Solid", "Hollow"];
 const DIRS: [&str; 5] = ["positive", "negative", "symmetric", "positive", "negative"];
@@ -1445,6 +1483,7 @@ impl Dialog {
                 && let Some(inp) = d.inputs.iter_mut().find(|i| takes_only_bodies(i) && (i.multi || i.items.is_empty()))
             {
                 if let Ok(names) = s.occurrence_bodies(path, true) {
+                    let whole = names.clone();
                     for name in names {
                         let body = Sel::Body { name };
                         if !inp.multi {
@@ -1457,6 +1496,7 @@ impl Dialog {
                             inp.items.push(body);
                         }
                     }
+                    crate::dialogs_assembly::picked_whole_component(&mut d, &whole);
                 }
                 continue;
             }
@@ -1548,6 +1588,10 @@ impl Dialog {
         d.sync_thread(s);
         d.sync_material(s);
         d.advance();
+        // As-built opens on Components until they hold two components (#21842).
+        if crate::dialogs_assembly::as_built_wants_components(s, &d) {
+            d.active = 0;
+        }
         // Move/Copy opens on Selection, picked or not: more objects are picked first.
         if matches!(d.kind, Kind::Move { .. }) {
             d.active = 0;
@@ -1754,7 +1798,7 @@ impl Dialog {
             Kind::Sheet(k) => return k.primary(&self.inputs),
             Kind::Surface(k) => return k.primary(),
             Kind::Plastic(k) => return k.primary(),
-            Kind::SketchModify(k) => return k.primary(),
+            Kind::SketchModify(k) => return k.primary(move_field),
             _ => return None,
         })
     }
@@ -6382,6 +6426,11 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
         let prepared = DialogComputation::new(app, d)?.compute()?;
         return adopt_dialog(app, prepared, d);
     }
+    if let Kind::Assembly(k) = &d.kind
+        && let Some(made) = crate::dialogs_assembly::run_new_component(app, k, &d.inputs)
+    {
+        return made;
+    }
     let commands = apply_commands(app, d)?;
     if let Some((_, marker)) = d.editing {
         // Record the actual pre-edit timeline state in the command's undo snapshot.
@@ -6613,6 +6662,7 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
     // The unticked bodies of a Cut's list are the window's own, not a command parameter.
     normalized.extra.remove(crate::cut_bodies::SKIPPED);
     let mut cmds = dialog_commands(app, &normalized)?;
+    apply_body_name(d, &mut cmds);
     for (command, params) in &mut cmds {
         crate::sketch_tools::projection_policy(app, command, params);
     }
@@ -9096,7 +9146,7 @@ fn cylinder_references_now(s: &Session, id: u64) -> Option<Vec<Value>> {
 
 /// The direction an axis saved as `[x, y, z]` of numbers or unitless expressions (#18822) has
 /// with the parameters as they are now.
-fn axis_now(s: &Session, axis: &Value) -> Option<Vec3> {
+pub(crate) fn axis_now(s: &Session, axis: &Value) -> Option<Vec3> {
     let c = axis.as_array().filter(|a| a.len() == 3)?;
     let v = |i: usize| match c.get(i)? {
         Value::Number(n) => n.as_f64(),
@@ -9481,7 +9531,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                         inp.multi = false;
                         inp.items = vec![face_sel(s, at).unwrap_or(Sel::Face { body: String::new(), index: 0, point: at })];
                     }
-                    d.extra.insert("direction".into(), pt3(direction.0));
+                    d.extra.insert("direction".into(), pt_expr(direction));
                     d.extra.insert("single_point".into(), json!({"point": pt3(at), "sketch": sp.sketch.0, "id": id}));
                 }
                 Some(sp) => {
@@ -9501,13 +9551,18 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     // direction when the body moves; seed the Face pick there too (#10689).
                     // Keep `position_exprs.point` as the stored value so expressions stay only
                     // when the pick is still that point (a moved face drops them for numbers).
-                    let on_face = solidcraft_engine::doc::hole_start(&crate::open_meshing::session_world(s), &f, position.0, direction.0);
+                    let on_face = solidcraft_engine::doc::hole_start(
+                        &crate::open_meshing::session_world(s),
+                        &f,
+                        position.0,
+                        axis_now(s, &pt_expr(direction)).unwrap_or(-Vec3::Z),
+                    );
                     if let Some(inp) = d.inputs.first_mut() {
                         // Editing a Single hole places it at exactly one point: a pick replaces.
                         inp.multi = false;
                         inp.items = vec![face_sel(s, on_face).unwrap_or(Sel::Face { body: String::new(), index: 0, point: on_face })];
                     }
-                    d.extra.insert("direction".into(), pt3(direction.0));
+                    d.extra.insert("direction".into(), pt_expr(direction));
                     // A position given as expressions (#1678) is sent again while the pick
                     // stays where the hole is; a new pick places it by the point picked.
                     if let Some(exprs) = at {
@@ -9644,7 +9699,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 }
             }
             d.extra.insert("base".into(), pt_expr(base));
-            d.extra.insert("axis".into(), pt3(axis.0));
+            d.extra.insert("axis".into(), pt_expr(axis));
             if let Some(reference) = axis_ref {
                 let profile_sketch = sketch.map(|id| id.0);
                 let pick = match reference {
@@ -9726,7 +9781,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 refs: Default::default(),
             };
             d.extra.insert("base".into(), pt_expr(base));
-            d.extra.insert("axis".into(), pt3(axis.0));
+            d.extra.insert("axis".into(), pt_expr(axis));
             d
         }
         FeatureKind::BoundaryFill { tools, planes, cells, operation, remove_tools } => {
@@ -10447,6 +10502,12 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 _ => break,
             }
         }
+    }
+    // The name the feature gave its body, if it gave one: shown in Body Name, kept on OK.
+    if body_name_slot(&d.kind).is_some()
+        && let Some(name) = f.body_names.first().filter(|name| !name.trim().is_empty())
+    {
+        d.extra.insert("body_name".into(), json!(name));
     }
     // Extrude shows the name it has, to read and to change (#18668).
     if matches!(f.kind, FeatureKind::Extrude { .. }) {

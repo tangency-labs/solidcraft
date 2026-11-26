@@ -3052,7 +3052,7 @@ fn a_tap_marking_searches_only_the_bodies_near_it() {
     let hole = FeatureKind::Hole {
         position: FacePick(Vec3::new(30.0, 30.0, 12.0)),
         at: None,
-        direction: Dir(-Vec3::Z),
+        direction: crate::dir_expr(-Vec3::Z),
         diameter: "5".into(),
         depth: Some("10".into()),
         hole: HoleKind::default(),
@@ -3196,7 +3196,7 @@ fn a_tapped_hole_reads_the_bodies_along_its_drill_line() {
     let hole = FeatureKind::Hole {
         position: FacePick(Vec3::new(30.0, 30.0, 12.0)),
         at: None,
-        direction: Dir(-Vec3::Z),
+        direction: crate::dir_expr(-Vec3::Z),
         diameter: "5".into(),
         depth: Some("10".into()),
         hole: HoleKind::default(),
@@ -3293,6 +3293,7 @@ fn a_flange_lays_its_sheet_out_once() {
         corner_relief_shape: None,
         corner_relief: None,
         height_from: None,
+        bend_relief_shape: None,
     };
     for p in [Vec3::new(75.0, 0.0, 2.5), Vec3::new(75.0, 100.0, 2.5), Vec3::new(0.0, 50.0, 2.5), Vec3::new(150.0, 50.0, 2.5)] {
         // The pick is named as the engine names it, on the model as it is.
