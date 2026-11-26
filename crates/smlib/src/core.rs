@@ -134,8 +134,7 @@ static POOL: Mutex<Pool<Kernel>> = Mutex::new(Pool { idle: Vec::new(), running: 
 /// ([`start`] names it there): a certificate one kernel finished serves the next, whatever
 /// pool made it (a hit returns what recertifying the same blend again returns, so sharing
 /// changes no answer, only the work).
-static SHARED_RECERTIFY_MEMO: Mutex<Option<std::sync::Arc<std::sync::Mutex<solidcore::surface::procedural_blend::convert::RecertifyMemo>>>> =
-    Mutex::new(None);
+static SHARED_RECERTIFY_MEMO: Mutex<Option<std::sync::Arc<std::sync::Mutex<solidcore_ops::session::RecertifyMemo>>>> = Mutex::new(None);
 
 /// Names this crate's fixes ([`fixes`]) to solidcore-ops' session, once: the kernels of its
 /// calls then run with the fixes this crate's own kernels run with ([`fresh`]). Without it
@@ -152,7 +151,7 @@ pub(crate) fn start() {
         // every kernel this backend's pool and solidcore-ops' session make shares one
         // recertify memo: a certificate finished once serves the next kernel, whichever
         // pool made it
-        let memo = std::sync::Arc::new(std::sync::Mutex::new(solidcore::surface::procedural_blend::convert::RecertifyMemo::default()));
+        let memo = std::sync::Arc::new(std::sync::Mutex::new(solidcore_ops::session::RecertifyMemo::default()));
         *SHARED_RECERTIFY_MEMO.lock().unwrap_or_else(PoisonError::into_inner) = Some(std::sync::Arc::clone(&memo));
         solidcore_ops::session::set_recertify_memo(memo);
     });

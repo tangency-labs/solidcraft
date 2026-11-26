@@ -64,16 +64,16 @@ static FIXES: Mutex<Option<UpstreamFixes>> = Mutex::new(None);
 /// blend again returns, so sharing it changes no answer, only the work). `None` until the
 /// application names it ([`set_recertify_memo`]): the session's own kernels then each keep
 /// their own, as before.
-static SHARED_RECERTIFY_MEMO: Mutex<
-    Option<Arc<Mutex<solidcore::surface::procedural_blend::convert::RecertifyMemo>>>,
-> = Mutex::new(None);
+/// The recertify memo's type, at the seam: the application's wrapper names it through
+/// this crate, not through solidcore's internals (`cargo xtask layers`).
+pub use solidcore::surface::procedural_blend::convert::RecertifyMemo;
+
+static SHARED_RECERTIFY_MEMO: Mutex<Option<Arc<Mutex<RecertifyMemo>>>> = Mutex::new(None);
 
 /// Names the recertify memo this session's kernels share ([`fresh`] injects it into every
 /// kernel the pool makes). The application calls it once, beside [`set_fixes`], with the
 /// memo its own kernel pool shares.
-pub fn set_recertify_memo(
-    m: Arc<Mutex<solidcore::surface::procedural_blend::convert::RecertifyMemo>>,
-) {
+pub fn set_recertify_memo(m: Arc<Mutex<RecertifyMemo>>) {
     *SHARED_RECERTIFY_MEMO
         .lock()
         .unwrap_or_else(PoisonError::into_inner) = Some(m);
