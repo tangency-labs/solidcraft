@@ -1357,6 +1357,139 @@ mod tests {
             ball_rim_chamfered_by_setbacks_1_and_1(10.0, 5.0, 3_510.120_023_7);
         }
 
+        /// A foot crossing a smooth seam mid-edge: a slab, the profile x in [0, 40], y in [-5, 30]
+        /// with its corner (0, -5) rounded to 5 (about (5, 0)) swept along z, so the side x = 0
+        /// meets the cylinder along the seam y = 0 (along z); cut by the top plane y = 0.5 + 0.1 z
+        /// and by ends square to the top edge (z + 0.1 y = 0 and 40.4). The top edge, on x = 0,
+        /// runs from height y = 0.5 / 1.01 = 0.49505 to 4.54 / 1.01 = 4.49505 along (0, 0.1, 1),
+        /// between a narrow strip of the side (from the edge down to the seam, 0.495 to 4.495
+        /// wide) and the top. Chamfered by setbacks 1 and 1: the top foot is C + (1, 0, 0), the
+        /// side foot square to the edge in the side plane C + (0, -1, 0.1) / sqrt(1.01), on the
+        /// strip where the edge's height is at least 1 / sqrt(1.01) = 0.995037, an eighth of
+        /// the way along; before that it lies past the seam, and the chamfer rolls onto the
+        /// cylinder ((x - 5)² + y² = 25, y <= 0) there. Two chamfers of setbacks (the strip's
+        /// and the piece on the cylinder), every rail point 1 from the edge and square to it,
+        /// each foot on its own face (on the side plane at or above the seam, on the cylinder
+        /// below it).
+        #[test]
+        fn a_foot_crossing_a_narrow_face_s_seam_mid_edge_rolls_onto_the_next_face() {
+            use crate::curve::curve::Curve;
+            use crate::primitive::api_curves::{create_arc, create_line_segment};
+            use crate::sweep::api_brep::create_linear_sweep;
+            let line = |a: [f64; 3], b: [f64; 3]| {
+                Curve::from(
+                    create_line_segment(
+                        Point3::new(a[0], a[1], a[2]),
+                        Point3::new(b[0], b[1], b[2]),
+                    )
+                    .unwrap(),
+                )
+            };
+            let mut k = fixed_kernel();
+            let z0 = -5.0;
+            let profile = [
+                line([5.0, -5.0, z0], [40.0, -5.0, z0]),
+                line([40.0, -5.0, z0], [40.0, 30.0, z0]),
+                line([40.0, 30.0, z0], [0.0, 30.0, z0]),
+                line([0.0, 30.0, z0], [0.0, 0.0, z0]),
+                Curve::from(create_arc(Point3::new(5.0, 0.0, z0), 5.0, 180.0, 270.0).unwrap()),
+            ];
+            let refs: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
+            let slab =
+                create_linear_sweep(&mut k, &refs, Vec3::new(0.0, 0.0, 1.0), 55.0, true).unwrap();
+            // the cutter in the plane x = -10, (y, z): the top line y = 0.5 + 0.1 z, the ends
+            // z + 0.1 y = 0 and 40.4, a bottom below the slab
+            let (y0, y1) = (0.5 / 1.01, 4.54 / 1.01);
+            let cut = [
+                [y0, -0.1 * y0],
+                [y1, 40.4 - 0.1 * y1],
+                [-20.0, 42.4],
+                [-20.0, 2.0],
+            ];
+            let cutter: Vec<Curve> = (0..cut.len())
+                .map(|i| {
+                    let (a, b) = (cut[i], cut[(i + 1) % cut.len()]);
+                    line([-10.0, a[0], a[1]], [-10.0, b[0], b[1]])
+                })
+                .collect();
+            let refs: Vec<Option<&Curve>> = cutter.iter().map(Some).collect();
+            let cutter =
+                create_linear_sweep(&mut k, &refs, Vec3::new(1.0, 0.0, 0.0), 70.0, true).unwrap();
+            let mut b =
+                crate::boolean::api_brep::boolean_intersection(&mut k, slab, cutter).unwrap();
+            assert!(closed(&b));
+            let on_top = |p: Point3| (p.y - 0.5 - 0.1 * p.z).abs() < 1e-6;
+            let edges: Vec<EdgeId> = crate::topology::brep::p1::edges(&b, None)
+                .unwrap()
+                .into_iter()
+                .filter(|&e| {
+                    along_edge(&k, &b, e)
+                        .iter()
+                        .all(|p| p.x.abs() < 1e-9 && on_top(*p))
+                })
+                .collect();
+            assert_eq!(edges.len(), 1, "{edges:?}");
+            let top = face_holding(&k, &b, |bx| {
+                bx.min().x.abs() < 1e-6
+                    && (bx.max().x - 40.0).abs() < 1e-6
+                    && (bx.min().y - y0).abs() < 1e-6
+                    && (bx.max().y - y1).abs() < 1e-6
+            });
+            assert_eq!(top.len(), 1);
+            let original = edge::curve(&b, edges[0]).unwrap().unwrap().clone();
+            chamfer_setbacks(&mut k, &mut b, &edges, &[[1.0, 1.0]], &top).unwrap();
+            assert!(closed(&b));
+            let faces = setback_faces(&k, &b);
+            assert_eq!(
+                faces.len(),
+                2,
+                "the strip's chamfer and the piece on the cylinder"
+            );
+            let chamfers: Vec<FaceId> = faces.iter().map(|f| f.0).collect();
+            let on_end =
+                |p: Point3| (p.z + 0.1 * p.y).abs() < 1e-6 || (p.z + 0.1 * p.y - 40.4).abs() < 1e-6;
+            let (mut on_strip, mut on_cylinder) = (0, 0);
+            for &(f, bound) in &faces {
+                for e in crate::topology::face::p4::edges(&b, f, None, false, None).unwrap() {
+                    // a rail: on a face the chamfer was cut from (not a rib between its two
+                    // faces, nor an end)
+                    let others = edge::faces(&b, e, None).unwrap();
+                    if others.iter().any(|o| *o != f && chamfers.contains(o)) {
+                        continue;
+                    }
+                    let points = along_edge(&k, &b, e);
+                    if points.iter().all(|p| on_end(*p)) {
+                        continue;
+                    }
+                    let tol = edge::tolerance(&b, e).unwrap() + bound + 1e-9;
+                    for p in points {
+                        let (c, t) = nearest_on(&k, std::slice::from_ref(&original), p);
+                        let arm = p - c;
+                        assert!((arm.length() - 1.0).abs() <= tol, "{p:?}: {}", arm.length());
+                        assert!(arm.dot(t).abs() <= tol, "{p:?} not square to the edge");
+                        if on_top(p) {
+                            continue;
+                        }
+                        if p.y >= 0.0 {
+                            assert!(p.x.abs() <= tol, "{p:?} above the seam off the side");
+                            on_strip += 1;
+                        } else {
+                            let axis = (p.x - 5.0).hypot(p.y);
+                            assert!(
+                                (axis - 5.0).abs() <= tol,
+                                "{p:?} below the seam off the round"
+                            );
+                            on_cylinder += 1;
+                        }
+                    }
+                }
+            }
+            assert!(
+                on_strip >= 9 && on_cylinder >= 9,
+                "{on_strip} {on_cylinder}"
+            );
+        }
+
         /// zhuangzard's enclosure front (tangency-labs/solidcraft#13710), in x (width), y
         /// (height) and z (depth, the front at z = 0): the side profile (depth, height) [0, 0],
         /// [60, 0], [60, 40], [20, 40], [0, 15] swept 120 across, meeting the 100 x 40 front
@@ -1370,6 +1503,22 @@ mod tests {
         /// [`enclosure_front`] with rounds of radius `r` at the outline's top corners (about
         /// (+-(50 - r), 40 - r)).
         fn enclosure_front_with(k: &mut Kernel, r: f64) -> Brep {
+            enclosure_profiled(
+                k,
+                r,
+                &[
+                    [0.0, 0.0],
+                    [60.0, 0.0],
+                    [60.0, 40.0],
+                    [20.0, 40.0],
+                    [0.0, 15.0],
+                ],
+            )
+        }
+
+        /// The front outline (rounds of `r` at its top corners) swept along the depth, meeting
+        /// the side profile `side` ((depth, height) points) swept across.
+        fn enclosure_profiled(k: &mut Kernel, r: f64, side: &[[f64; 2]]) -> Brep {
             use crate::curve::curve::Curve;
             use crate::primitive::api_curves::{create_arc, create_line_segment};
             use crate::sweep::api_brep::create_linear_sweep;
@@ -1383,13 +1532,6 @@ mod tests {
                 )
             };
             // the side profile in the plane x = -60: (depth, height) -> (x, height, depth)
-            let side = [
-                [0.0, 0.0],
-                [60.0, 0.0],
-                [60.0, 40.0],
-                [20.0, 40.0],
-                [0.0, 15.0],
-            ];
             let curves: Vec<Curve> = (0..side.len())
                 .map(|i| {
                     let (a, b) = (side[i], side[(i + 1) % side.len()]);
@@ -1417,14 +1559,38 @@ mod tests {
             crate::boolean::api_brep::boolean_intersection(k, profile, front).unwrap()
         }
 
-        /// The enclosure front's slanted top front chain (rounds of radius `r`) chamfered by
-        /// setbacks `sizes` (the first along the slanted face, the second along the top, the
-        /// rounds and the sides): the solid closes, with `chamfer_faces` chamfers of setbacks by
-        /// their definition, and every point of their rails, on the straight edges, the rounds
-        /// and the roll-over pieces alike, lies its setback from the chain (from the nearest
-        /// point of the original edges, where the line to it is square to the edge) to the
-        /// face's certified bound and the rail's tolerance; every join between them is within the
-        /// solvers' 3D tolerance (the corner code refuses a join farther apart).
+        /// The enclosure front sloped the other way: its side profile (depth, height) [36, 0],
+        /// [60, 0], [60, 40], [4, 40], the slanted face z = 36 - 0.8 y with the material behind
+        /// it, meeting the top at depth 4 and the bottom at 36, and the sides and rounds as the
+        /// enclosure front's; the side vertices are again V = (+-50, 30, 12).
+        fn enclosure_back_sloped(k: &mut Kernel, r: f64) -> Brep {
+            enclosure_profiled(k, r, &[[36.0, 0.0], [60.0, 0.0], [60.0, 40.0], [4.0, 40.0]])
+        }
+
+        /// The back-sloped enclosure's slanted face and its chain of five edges (the top, the
+        /// rounds, the sides; not the edge on the bottom face).
+        fn back_sloped_chain(k: &Kernel, b: &Brep) -> (FaceId, Vec<EdgeId>) {
+            let slant = face_holding(k, b, |bx| {
+                (bx.min().z - 4.0).abs() < 1e-6
+                    && (bx.max().z - 36.0).abs() < 1e-6
+                    && bx.min().y.abs() < 1e-6
+                    && (bx.max().y - 40.0).abs() < 1e-6
+            });
+            assert_eq!(slant.len(), 1);
+            let slant = slant[0];
+            let bottom = face_holding(k, b, |bx| {
+                bx.min().y.abs() < 1e-6 && bx.max().y.abs() < 1e-6
+            });
+            assert_eq!(bottom.len(), 1);
+            let chain: Vec<EdgeId> = crate::topology::face::p4::edges(b, slant, None, false, None)
+                .unwrap()
+                .into_iter()
+                .filter(|&e| !edge::faces(b, e, None).unwrap().contains(&bottom[0]))
+                .collect();
+            assert_eq!(chain.len(), 5, "{chain:?}");
+            (slant, chain)
+        }
+
         /// The enclosure front's slanted face and its chain of five edges (the top, the two
         /// rounds of radius `r`, the two sides; not the edge on the front face).
         fn front_chain(k: &Kernel, b: &Brep) -> (FaceId, Vec<EdgeId>) {
@@ -1449,22 +1615,68 @@ mod tests {
             (slant, chain)
         }
 
+        /// A part whose slanted face's chain is chamfered: how to make it, its chain (the
+        /// slanted face and its five edges), the face its chain's ends lie on (found again on
+        /// the chamfered body), the slanted plane (a point and its normal) and the rounds'
+        /// radius.
+        struct SlantedChain {
+            make: fn(&mut Kernel, f64) -> Brep,
+            chain: fn(&Kernel, &Brep) -> (FaceId, Vec<EdgeId>),
+            end_face: fn(&Extent3d) -> bool,
+            slant: (Point3, Vec3),
+            r: f64,
+        }
+
+        /// The enclosure front with rounds of `r` ([`enclosure_front_with`]).
+        fn enclosure(r: f64) -> SlantedChain {
+            SlantedChain {
+                make: enclosure_front_with,
+                chain: front_chain,
+                end_face: |bx| bx.min().z.abs() < 1e-6 && bx.max().z.abs() < 1e-6,
+                // through (height 15, depth 0) and (40, 20)
+                slant: (
+                    Point3::new(0.0, 15.0, 0.0),
+                    Vec3::new(0.0, 20.0, -25.0).unitize().unwrap(),
+                ),
+                r,
+            }
+        }
+
         fn chain_holds_its_setbacks(r: f64, sizes: &[[f64; 2]], chamfer_faces: usize) {
+            slanted_chain_holds_its_setbacks(&enclosure(r), sizes, chamfer_faces);
+        }
+
+        /// The enclosure front's slanted top front chain (rounds of radius `r`) chamfered by
+        /// setbacks `sizes` (the first along the slanted face, the second along the top, the
+        /// rounds and the sides): the solid closes, with `chamfer_faces` chamfers of setbacks by
+        /// their definition, and every point of their rails, on the straight edges, the rounds
+        /// and the roll-over pieces alike, lies its setback from the chain (from the nearest
+        /// point of the original edges, where the line to it is square to the edge) to the
+        /// face's certified bound and the rail's tolerance; every join between them is within the
+        /// solvers' 3D tolerance (the corner code refuses a join farther apart).
+        /// Each foot lies on its own face as the part had it: a rail point on a side plane
+        /// (|x| = 50) at or below the seam y = 40 - r, one on a round at or above it (the plane's
+        /// line in a station plane past the seam meets the setback circle twice, once on the
+        /// side face and once past the seam: the piece's foot is the first).
+        fn slanted_chain_holds_its_setbacks(
+            part: &SlantedChain,
+            sizes: &[[f64; 2]],
+            chamfer_faces: usize,
+        ) {
+            let r = part.r;
             for &d in sizes {
                 let mut k = fixed_kernel();
-                let mut b = enclosure_front_with(&mut k, r);
+                let mut b = (part.make)(&mut k, r);
                 assert!(closed(&b));
-                let (slant, chain) = front_chain(&k, &b);
+                let (slant, chain) = (part.chain)(&k, &b);
                 let originals: Vec<crate::curve::curve::Curve> = chain
                     .iter()
                     .map(|&e| edge::curve(&b, e).unwrap().unwrap().clone())
                     .collect();
                 chamfer_setbacks(&mut k, &mut b, &chain, &[d; 5], &[slant; 5]).unwrap();
                 assert!(closed(&b), "{d:?}: not closed");
-                // (the front face as the chamfered body numbers it)
-                let front_face = face_holding(&k, &b, |bx| {
-                    bx.min().z.abs() < 1e-6 && bx.max().z.abs() < 1e-6
-                });
+                // (the chain's end face as the chamfered body numbers it)
+                let front_face = face_holding(&k, &b, part.end_face);
                 assert_eq!(front_face.len(), 1);
                 let faces = setback_faces(&k, &b);
                 assert_eq!(
@@ -1473,9 +1685,8 @@ mod tests {
                     "{d:?}: the chamfers of setbacks"
                 );
                 let chamfers: Vec<FaceId> = faces.iter().map(|f| f.0).collect();
-                // the slanted plane: through (height 15, depth 0) and (40, 20)
-                let n = Vec3::new(0.0, 20.0, -25.0).unitize().unwrap();
-                let on_slant = |p: Point3| (p - Point3::new(0.0, 15.0, 0.0)).dot(n).abs() < 1e-6;
+                let (at, n) = part.slant;
+                let on_slant = |p: Point3| (p - at).dot(n).abs() < 1e-6;
                 let (mut on_rounds, mut on_straight) = (0, 0);
                 for &(f, bound) in &faces {
                     for e in crate::topology::face::p4::edges(&b, f, None, false, None).unwrap() {
@@ -1502,6 +1713,24 @@ mod tests {
                                 arm.dot(t).abs() <= tol,
                                 "{d:?}: {p:?} not square to the edge"
                             );
+                            // on its own face: below the seam a foot is on a side plane, past
+                            // it on a round's cylinder (the other root on the side plane's
+                            // continuation past the seam is on neither)
+                            if !on_slant(p) && p.y < 40.0 - 1e-6 {
+                                let seam = 40.0 - r;
+                                if p.y <= seam {
+                                    assert!(
+                                        (p.x.abs() - 50.0).abs() <= tol,
+                                        "{d:?}: {p:?} below the seam off the side face"
+                                    );
+                                } else {
+                                    let axis = (p.x.abs() - (50.0 - r)).hypot(p.y - seam);
+                                    assert!(
+                                        (axis - r).abs() <= tol,
+                                        "{d:?}: {p:?} past the seam off the round"
+                                    );
+                                }
+                            }
                             if (p.x.abs() - (50.0 - r)) > 1e-3 && p.y > 40.0 - r + 1e-3 {
                                 on_rounds += 1;
                             } else {
@@ -1563,6 +1792,32 @@ mod tests {
         #[test]
         fn the_enclosure_front_chain_with_a_sliver_of_a_piece_is_deferred_and_closes() {
             chain_holds_its_setbacks(10.0, &[[0.05, 0.05]], 7);
+        }
+
+        /// The other direction: the back-sloped enclosure's chain chamfered by 0.8 and 0.8. At
+        /// V = (-50, 30, 12) the station plane's normal is the edges' tangent (0, 1, -0.8), and
+        /// on the side plane the foot square to it, into the material, is V + 0.8 (0, 0.8, 1) /
+        /// sqrt(1.64) = (-50, 30.49976, 12.62470): past the seam, so the side edge's foot stays
+        /// on the round's cylinder past the vertex (from the side edge's height 30 - 0.49976 =
+        /// 29.50024, where it crosses the seam, to V), while the round is native there, its foot
+        /// (-40 - 10 cos ε, 30 + 10 sin ε, 12 + 12.5 sin ε) with 200 (1 - cos ε) + 156.25 sin² ε
+        /// = 0.64, ε = 0.0499 (-49.98751, 30.49958, 12.62448), the sag 0.0125 from the side's.
+        /// Deferred the other way round: the side chamfer rolls onto the cylinder. Seven
+        /// chamfers of setbacks (five edges, a piece on each side edge), each foot on its own
+        /// face.
+        #[test]
+        fn the_back_sloped_chain_s_side_feet_stay_on_the_rounds_past_the_vertex_and_close() {
+            let part = SlantedChain {
+                make: enclosure_back_sloped,
+                chain: back_sloped_chain,
+                end_face: |bx| bx.min().y.abs() < 1e-6 && bx.max().y.abs() < 1e-6,
+                slant: (
+                    Point3::new(0.0, 40.0, 4.0),
+                    Vec3::new(0.0, 0.8, 1.0).unitize().unwrap(),
+                ),
+                r: 10.0,
+            };
+            slanted_chain_holds_its_setbacks(&part, &[[0.8, 0.8]], 7);
         }
 
         /// The chain with the sides chamfered by 0.8 along the slanted face and 0.6 down the side
