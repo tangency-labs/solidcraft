@@ -91,6 +91,7 @@ mod points;
 mod profile_refs;
 pub mod progress;
 mod thread_catalog;
+pub mod worker_scope;
 pub use thread_catalog::DRILL_ALLOWANCE;
 pub use thread_catalog::TaperDrill;
 pub use thread_catalog::TappedThread;

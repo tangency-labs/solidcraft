@@ -532,6 +532,144 @@ fn a_bend_note_sits_beside_each_bend_line_when_asked_for() {
     assert!(note.is_some_and(|e| note_layout(e).0 == 5.0));
 }
 
+/// The value of a header variable.
+fn header_var(dxf: &str, var: &str) -> String {
+    let lines: Vec<&str> = dxf.lines().collect();
+    let pairs: Vec<(i32, &str)> = lines.chunks(2).filter_map(|c| Some((c.first()?.trim().parse().ok()?, c.get(1)?.trim()))).collect();
+    pairs[pairs.iter().position(|(c, v)| *c == 9 && *v == var).unwrap_or_default() + 1].1.to_string()
+}
+
+/// The drawing's units: `mm` (the default) is unchanged, and `inches` writes every coordinate,
+/// the extents, the DASHED pattern, the bend-note radii and the pocket layers in inches.
+/// The lengths a shape holds, in a stable order, so two drawings of the same part compare by
+/// geometry: the reader brings both back to millimetres, and the inch file's 1e-9 inch grid
+/// stays within 3e-8 mm of the millimetre one.
+fn lengths(s: &DxfShape) -> Vec<f64> {
+    let mut out = Vec::new();
+    let pt = |p: Vec2, o: &mut Vec<f64>| {
+        o.push(p.x);
+        o.push(p.y);
+    };
+    match s {
+        DxfShape::Insert { at, scale, column_spacing, row_spacing, .. } => {
+            pt(*at, &mut out);
+            pt(*scale, &mut out);
+            out.extend([*column_spacing, *row_spacing]);
+        }
+        DxfShape::SourceEllipse { c, major, major_radius, .. } => {
+            pt(*c, &mut out);
+            pt(*major, &mut out);
+            out.push(*major_radius);
+        }
+        DxfShape::SourceSpline { ctrl, fit, .. } => {
+            for p in ctrl {
+                pt(*p, &mut out);
+            }
+            for p in fit {
+                pt(*p, &mut out);
+            }
+        }
+        DxfShape::SourcePolyline { vertices, .. } => {
+            for v in vertices {
+                pt(v.at, &mut out);
+            }
+        }
+        DxfShape::SourceOmitted { .. } => {}
+        DxfShape::Point(p) => pt(*p, &mut out),
+        DxfShape::Line(a, b) => {
+            pt(*a, &mut out);
+            pt(*b, &mut out);
+        }
+        DxfShape::Polyline { points } => {
+            for p in points {
+                pt(*p, &mut out);
+            }
+        }
+        DxfShape::LwPolyline { verts, .. } => {
+            for (p, _) in verts {
+                pt(*p, &mut out);
+            }
+        }
+        DxfShape::BulgedPolyline { vertices, .. } => {
+            for v in vertices {
+                pt(v.at, &mut out);
+            }
+        }
+        DxfShape::Circle { c, r } | DxfShape::Arc { c, r, .. } => {
+            pt(*c, &mut out);
+            out.push(*r);
+        }
+        DxfShape::Ellipse { c, major, .. } => {
+            pt(*c, &mut out);
+            pt(*major, &mut out);
+        }
+        DxfShape::Spline { ctrl, .. } => {
+            for p in ctrl {
+                pt(*p, &mut out);
+            }
+        }
+        DxfShape::Text { at, height, .. } | DxfShape::AlignedText { at, height, .. } => {
+            pt(*at, &mut out);
+            out.push(*height);
+        }
+    }
+    out
+}
+
+#[test]
+fn the_drawing_writes_its_coordinates_in_the_units_it_is_asked_for() {
+    let mut s = tray_with(&[]);
+    let mm = export(&mut s, json!({}));
+    assert_eq!(export(&mut s, json!({"units": "mm"})), mm);
+    assert_eq!((header_var(&mm, "$INSUNITS"), header_var(&mm, "$MEASUREMENT")), ("4".to_string(), "1".to_string()));
+    let inches = export(&mut s, json!({"units": "inches"}));
+    assert_eq!((header_var(&inches, "$INSUNITS"), header_var(&inches, "$MEASUREMENT")), ("1".to_string(), "0".to_string()));
+    assert!(s.execute("sheet.export_dxf", &json!({"units": "feet"})).is_err());
+    // The same entities in the same order: the inch file's lengths, read back in millimetres,
+    // are the millimetre file's to the grid.
+    let (mm_es, in_es) = (entities(&mm), entities(&inches));
+    assert_eq!(mm_es.len(), in_es.len());
+    for (m, i) in mm_es.iter().zip(&in_es) {
+        assert_eq!(m.0, i.0, "the files must hold the same entities in the same order");
+        assert_eq!(m.2, i.2, "{}", m.0);
+        let (want, got) = (lengths(&m.1), lengths(&i.1));
+        assert_eq!(want.len(), got.len(), "{}", m.0);
+        assert!(want.iter().zip(&got).all(|(a, b)| (a - b).abs() < 3e-8), "{}: {want:?} vs {got:?}", m.0);
+    }
+    // The file's DASHED pattern is half and quarter inches.
+    let types: Vec<(i32, &str)> =
+        inches.lines().collect::<Vec<_>>().chunks(2).filter_map(|c| Some((c.first()?.trim().parse().ok()?, c.get(1)?.trim()))).collect();
+    let at = types.iter().position(|(c, v)| *c == 2 && *v == "DASHED").unwrap();
+    let pattern: Vec<f64> = types[at..].iter().take_while(|(c, _)| *c != 0).filter(|(c, _)| *c == 49).map(|(_, v)| v.parse().unwrap()).collect();
+    assert_eq!(pattern, vec![0.5, -0.25]);
+    // The bend notes read their radii in inches too: 1 mm is 0.0394 of them.
+    let mut notes = |params: Value| -> Vec<String> {
+        entities(&export(&mut s, params))
+            .iter()
+            .filter(|e| e.0 == "TEXT")
+            .map(|e| {
+                let DxfShape::Text { text, .. } = &e.1 else { panic!("{e:?}") };
+                text.clone()
+            })
+            .collect()
+    };
+    let plain_notes = notes(json!({"bend_notes": true}));
+    let inch_notes = notes(json!({"bend_notes": true, "units": "inches"}));
+    assert_eq!(inch_notes.len(), plain_notes.len());
+    for (plain, inch) in plain_notes.iter().zip(&inch_notes) {
+        let text = plain.replacen("R1", "R0.0394", 1);
+        assert_eq!(inch.as_str(), text.as_str(), "{plain} -> {inch}");
+    }
+    // A pocket layer names its depth in the drawing's units.
+    let mut s = plate_with(&[]);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Marks"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [70, 40], "p1": [90, 45]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Marks", "distance": 1, "operation": "cut"}));
+    let dxf = export(&mut s, json!({"units": "inches"}));
+    assert!(dxf.contains("POCKET_BOTTOM_Z0.000000_TO_0.039370_IN"), "1 mm deep, in inches");
+}
+
 #[test]
 fn a_bend_note_gives_the_included_angle_when_the_rule_reads_it_so() {
     // The included angle is 180° less the bend angle: 122° for a 58° bend, 90° for a 90° one.
@@ -551,6 +689,42 @@ fn a_bend_note_gives_the_included_angle_when_the_rule_reads_it_so() {
         // Without notes the setting changes nothing in the file.
         assert_eq!(plain.first(), plain.get(1), "{deg}°");
     }
+}
+
+/// `markings: false` leaves the letter contours and the bend notes out; the outline, the cut-outs
+/// and the bends stay, and a letter's pocket is no longer etched.
+#[test]
+fn the_markings_option_leaves_the_letters_and_the_notes_out() {
+    let mut s = tray_with(&marks());
+    let plain = entities(&export(&mut s, json!({})));
+    assert!(plain.iter().any(|e| layer_of(e) == "TEXT"), "the default export has the letters");
+    // The letters and their counters are gone, as are the notes when asked for together.
+    let bare = export(&mut s, json!({"markings": false}));
+    let es = entities(&bare);
+    assert!(
+        !es.iter().any(|e| layer_of(e) == "TEXT" || layer_of(e) == "ETCH"),
+        "{:?}",
+        es.iter().filter(|e| layer_of(e) == "TEXT" || layer_of(e) == "ETCH").map(|e| (e.0.clone(), layer_of(e))).collect::<Vec<_>>()
+    );
+    assert!(es.iter().any(|e| layer_of(e) == "OUTLINE") && es.iter().any(|e| layer_of(e) == "BEND_UP"));
+    assert!(entities(&export(&mut s, json!({"markings": false, "bend_notes": true}))).iter().all(|e| e.0 != "TEXT"));
+    // The hole and the slot are no letters: they stay on CUT.
+    let cut = es.iter().filter(|e| layer_of(e) == "CUT").collect::<Vec<_>>();
+    assert_eq!((count_of(&cut, "CIRCLE"), count_of(&cut, "LINE")), (1, 4), "{cut:?}");
+    assert_eq!(export(&mut s, json!({"markings": true})), export(&mut s, json!({})));
+    assert!(s.execute("sheet.export_dxf", &json!({"markings": "no"})).is_err());
+    // A pocket that is letters (a shallow text cut) is a marking and goes with them.
+    let mut p = Session::default();
+    run(&mut p, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut p, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut p, "sketch.finish", json!({}));
+    run(&mut p, "sheet.flange", json!({"sketch": "Base"}));
+    run(&mut p, "sketch.create", json!({"plane": "XY", "name": "Marks"}));
+    run(&mut p, "sketch.text", json!({"text": "AB", "at": [40, 28], "height": 8}));
+    run(&mut p, "sketch.finish", json!({}));
+    run(&mut p, "solid.extrude", json!({"sketch": "Marks", "distance": 1, "operation": "cut"}));
+    assert!(export(&mut p, json!({})).contains("ETCH"));
+    assert!(!export(&mut p, json!({"markings": false})).contains("ETCH"));
 }
 
 /// A body whose base flange names its rule keeps that rule's notes whichever rule is active when

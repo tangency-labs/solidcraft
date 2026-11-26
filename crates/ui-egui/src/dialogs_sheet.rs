@@ -73,6 +73,24 @@ const FLANGE_RELIEF_LABELS: [&str; 5] = ["Rule", "Notch", "Round", "Rectangular"
 /// the shapes of `BEND_RELIEF_SHAPES` in order.
 const FLANGE_BEND_RELIEF_LABELS: [&str; 4] = ["Rule", "Rectangular", "Obround", "Tear"];
 
+/// Choices for one export. They are never saved in Preferences or in the design.
+#[derive(Clone, Copy, Debug)]
+pub struct DxfExportOptions {
+    units: usize,
+    bend_lines: bool,
+    markings: bool,
+    /// The layers row: an index into `DXF_LAYERS` (one per role, by default).
+    layers: usize,
+    /// Set from the flat-pattern panel's Hardware notes option (#17752); off elsewhere.
+    hardware_notes: bool,
+}
+
+impl Default for DxfExportOptions {
+    fn default() -> Self {
+        Self { units: 0, bend_lines: true, markings: true, layers: 1, hardware_notes: false }
+    }
+}
+
 /// One stretch of a picked edge in the Flange dialog: `from`…`to` as fractions of the stretch the
 /// sheet still has of the edge, and the stretch's own angle, height and side (text, as typed).
 #[derive(Clone, Debug, Default)]
@@ -219,6 +237,7 @@ crate::dialog_descriptor::dialog_descriptors! {
                 data: Option<Result<Value, String>>,
                 key: Option<(u64, Option<String>)>,
                 status: Option<String>,
+                export: Option<DxfExportOptions>,
                 /// Export DXF also writes a note beside each press-in hardware hole (#17752). Off:
                 /// the file has the sheet and its mounting holes only.
                 hardware_notes: bool,
@@ -241,6 +260,11 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// What Export DXF… last did: the saved path, or why it did not.
                 status: Option<String>,
             },
+            /// Export Flat Pattern as DXF from the ribbon: the choices for the one export.
+            ExportDxf {
+                body: String,
+                options: DxfExportOptions,
+            },
         }
     }
 }
@@ -255,6 +279,7 @@ impl Sm {
             Sm::Recognize { .. } => "RECOGNIZE SHEET METAL",
             Sm::Rules { .. } => "SHEET METAL RULES",
             Sm::FlatPattern { .. } => "FLAT PATTERN",
+            Sm::ExportDxf { .. } => "cmd.sheet_export_dxf",
             Sm::Hardware { .. } => "ui.hardware_title",
             Sm::ShopCheck { .. } => "ui.shop_check_title",
             _ => self.simple_metadata().map_or("", |(_, title)| title),
@@ -262,7 +287,7 @@ impl Sm {
     }
 
     pub fn previews(&self) -> bool {
-        !matches!(self, Sm::FlatPattern { .. } | Sm::ShopCheck { .. })
+        !matches!(self, Sm::FlatPattern { .. } | Sm::ExportDxf { .. } | Sm::ShopCheck { .. })
     }
 
     /// The value on the canvas (the flange's follows its picks).
@@ -335,7 +360,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             vec![SelInput::new("ui.hardware_place", HOLE_FACES, true)],
         ),
         "sheet.flat_pattern" => (
-            Sm::FlatPattern { data: None, key: None, status: None, hardware_notes: false },
+            Sm::FlatPattern { data: None, key: None, status: None, export: None, hardware_notes: false },
             vec![SelInput::new("Body (last if none)", BODIES, false)],
         ),
         "sheet.check_shop" => (
@@ -803,10 +828,12 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
         Sm::ShopCheck { shop, layers, layers_for, data, key, status } => {
             shop_check_rows(app, ui, (shop, layers, layers_for), (data, key, status), inputs)
         }
-        Sm::FlatPattern { data, key, status, hardware_notes } => {
+        Sm::ExportDxf { options, .. } => dxf_options_rows(ui, options, true),
+        Sm::FlatPattern { data, key, status, export, hardware_notes } => {
             let body = inputs.first().and_then(|i| i.items.first()).and_then(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None });
             let want = (app.session.revision, body.clone());
             if key.as_ref() != Some(&want) {
+                *export = None;
                 let mut p = json!({});
                 if let Some(b) = &body {
                     p["body"] = json!(b);
@@ -869,18 +896,32 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                     if v["hardware"].as_array().is_some_and(|h| !h.is_empty()) {
                         crate::ui_kit::options(ui, "sheet_flat_options", &mut [("ui.hardware_notes", &mut *hardware_notes)]);
                     }
-                    ui.vertical(|ui| {
-                        if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Export DXF…"), crate::ui_kit::Button::Normal).clicked() {
-                            let mut options = serde_json::Map::new();
-                            if *hardware_notes {
-                                options.insert("hardware_notes".into(), json!(true));
-                            }
-                            *status = Some(export_flat_with(app, v["body"].as_str().unwrap_or(""), "dxf", options, ""));
+                    if let Some(options) = export {
+                        dxf_options_rows(ui, options, false);
+                        let (save, cancel) = ui
+                            .horizontal_wrapped(|ui| {
+                                let save = export_button(ui, "dialog:sheet_dxf:save");
+                                let cancel = crate::ui_kit::button(ui, app.tr("ui.cancel"), crate::ui_kit::Button::Normal);
+                                crate::scenario::publish_target("dialog:sheet_dxf:cancel", cancel.rect);
+                                (save, cancel.clicked())
+                            })
+                            .inner;
+                        if save {
+                            *status = Some(export_flat(
+                                app,
+                                v["body"].as_str().unwrap_or(""),
+                                Some(DxfExportOptions { hardware_notes: *hardware_notes, ..*options }),
+                            ));
                         }
-                    });
+                        if save || cancel {
+                            *export = None;
+                        }
+                    } else if export_button(ui, "dialog:sheet_dxf:options") {
+                        *export = Some(DxfExportOptions::default());
+                    }
                     ui.vertical(|ui| {
                         if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Export Bend Table…"), crate::ui_kit::Button::Normal).clicked() {
-                            *status = Some(export_flat(app, v["body"].as_str().unwrap_or(""), "csv"));
+                            *status = Some(export_flat(app, v["body"].as_str().unwrap_or(""), None));
                         }
                     });
                     if let Some(s) = status {
@@ -1096,18 +1137,57 @@ fn shop_check_rows(
 }
 
 /// The ribbon exports use the same save picker as the flat-pattern panel. Keep the
+
+fn export_button(ui: &mut egui::Ui, handle: &str) -> bool {
+    let response = crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Export DXF…"), crate::ui_kit::Button::Normal);
+    crate::scenario::publish_target(handle, response.rect);
+    response.clicked()
+}
+
+fn dxf_options_rows(ui: &mut egui::Ui, options: &mut DxfExportOptions, hardware: bool) {
+    use solidcraft_ui_text::tr;
+    let units = [tr("unit.mm.short"), tr("unit.inch.short")];
+    let response = choice_row(ui, tr("ui.units"), "sheet_dxf_units", &mut options.units, &units);
+    crate::scenario::publish_target("dialog:sheet_dxf:units", response.rect);
+    for (label, handle, value) in [
+        ("sheet.dxf.bend_lines", "dialog:sheet_dxf:bend_lines", &mut options.bend_lines),
+        ("sheet.dxf.markings", "dialog:sheet_dxf:markings", &mut options.markings),
+    ] {
+        let response = crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr(label), value);
+        crate::scenario::publish_target(handle, response.rect);
+    }
+    options.layers = options.layers.min(DXF_LAYERS.len() - 1);
+    let layer_names = DXF_LAYERS.map(|(_, key, _)| tr(key));
+    let response = choice_row(ui, tr("ui.shop_check_layers"), "sheet_dxf_layers", &mut options.layers, &layer_names);
+    crate::scenario::publish_target("dialog:sheet_dxf:layers", response.rect);
+    // The Flat Pattern panel has its own Hardware notes option; the ribbon's dialog has it here.
+    if hardware {
+        let response = crate::ui_kit::checkbox(ui, tr("ui.hardware_notes"), &mut options.hardware_notes);
+        crate::scenario::publish_target("dialog:sheet_dxf:hardware_notes", response.rect);
+    }
+}
+
+/// The ribbon exports use the same options and save picker as the flat-pattern panel. Keep the
 /// commands' default target (the last sheet body) and leave programmatic calls headless.
 pub fn start_export(app: &mut SolveApp, id: &str) -> bool {
-    let extension = match id {
-        "sheet.export_dxf" => "dxf",
-        "sheet.export_bend_table" => "csv",
+    let dxf = match id {
+        "sheet.export_dxf" => true,
+        "sheet.export_bend_table" => false,
         _ => return false,
     };
     let state = app.session.model.state();
     let last = state.surface_sheets.last().map(|sheet| sheet.body.clone());
     drop(state);
     if let Some(body) = last {
-        export_flat(app, &body, extension);
+        if dxf {
+            if app.dialog.is_some() {
+                crate::dialogs::cancel(app);
+            }
+            app.view_windows.start_tool_panel(app.docs.current_tab());
+            app.dialog = Some(Dialog::new(Kind::Sheet(Sm::ExportDxf { body, options: DxfExportOptions::default() }), vec![]));
+        } else {
+            export_flat(app, &body, None);
+        }
     } else {
         // Let the command report its ordinary "no sheet body" error without opening a picker;
         // nothing starts, so the ribbon goes back to the tab it was started from (#10540).
@@ -1118,19 +1198,35 @@ pub fn start_export(app: &mut SolveApp, id: &str) -> bool {
     true
 }
 
-fn export_flat(app: &mut SolveApp, body: &str, extension: &str) -> String {
-    export_flat_with(app, body, extension, serde_json::Map::new(), "")
+/// `dxf`: the DXF's choices (with `hardware_notes`, a note beside each press-in hardware hole);
+/// none: the bend table.
+pub(crate) fn export_flat(app: &mut SolveApp, body: &str, dxf: Option<DxfExportOptions>) -> String {
+    let mut params = serde_json::Map::new();
+    let extension = if let Some(options) = dxf {
+        params.insert("units".into(), json!(if options.units == 1 { "inches" } else { "mm" }));
+        params.insert("bend_lines".into(), json!(options.bend_lines));
+        params.insert("markings".into(), json!(options.markings));
+        params.insert("layers".into(), json!(DXF_LAYERS.get(options.layers).map_or(DxfLayers::Roles, |l| l.0).as_str()));
+        if options.hardware_notes {
+            params.insert("hardware_notes".into(), json!(true));
+        }
+        "dxf"
+    } else {
+        "csv"
+    };
+    export_flat_with(app, body, extension, params, "")
 }
 
 /// Saves the flat pattern through the picker. `options` are the export command's own parameters
-/// beyond `body` and `path` (the DXF's `layers`, `bend_lines`, `hardware_notes` ...; the bend table
-/// has none), and a non-empty `tag` ends the file's name (the shop's, `<design>-<body>-<tag>`).
-/// The result goes to the status of the Flat Pattern panel or the Shop Check window, whichever is open.
+/// beyond `body` and `path` (the DXF's `units`, `layers`, `bend_lines`, `hardware_notes` ...; the
+/// bend table has none), and a non-empty `tag` ends the file's name (the shop's,
+/// `<design>-<body>-<tag>`). The result goes to the status of the Flat Pattern panel or the Shop
+/// Check window, whichever is open.
 fn export_flat_with(app: &mut SolveApp, body: &str, extension: &str, options: serde_json::Map<String, Value>, tag: &str) -> String {
+    let command = if extension == "dxf" { "sheet.export_dxf" } else { "sheet.export_bend_table" };
     let tag = if tag.is_empty() { String::new() } else { format!("-{tag}") };
     let name = format!("{}-{body}{tag}.{extension}", app.session.doc.name);
     let body = body.to_string();
-    let command = if extension == "csv" { "sheet.export_bend_table" } else { "sheet.export_dxf" };
     app.pick_save(&name, &[extension], move |app, path| {
         let message = if let Some(path) = path {
             let mut params = options;
@@ -1723,7 +1819,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             p["angle_display"] = json!(ANGLE_DISPLAYS.get(*angles).copied().unwrap_or("bend"));
             ("sheet.manage_rules", p)
         }
-        Sm::FlatPattern { .. } | Sm::ShopCheck { .. } => return Ok(Vec::new()),
+        Sm::FlatPattern { .. } | Sm::ExportDxf { .. } | Sm::ShopCheck { .. } => return Ok(Vec::new()),
         Sm::Hardware { kind, thread, length } => return hardware_commands(app, *kind, thread, length, inputs, extra),
     };
     k.fill_simple_params(&mut p);

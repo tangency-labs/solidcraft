@@ -28,6 +28,9 @@ mod fields;
 pub(crate) mod figures;
 mod general;
 mod graphics;
+#[cfg(test)]
+#[path = "ground_shadow_settings_tests.rs"]
+mod ground_shadow_tests;
 mod interface;
 mod mouse3d;
 mod navbar;
@@ -45,6 +48,16 @@ use crate::tool_modifiers::ModifierCombo;
 use crate::ui_kit;
 use crate::viewport::NavMode;
 use solidcraft_theme::Tokens;
+
+/// The enabled shadow's style. The existing `UiState::ground_shadow` flag still controls
+/// visibility, preserving saved boolean settings and the control channel's `groundShadow`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GroundShadowStyle {
+    #[default]
+    Ellipse,
+    Projected,
+}
 
 pub const UNITS: &[&str] = &["mm", "cm", "m", "in", "ft"];
 pub const OPENSCAD_NAV: &str = "openscad";
@@ -1590,11 +1603,17 @@ pub fn follow_theme_file_for_run(app: &mut SolveApp, path: &str) -> Result<(), S
     Ok(())
 }
 
+const THEME_FOLLOW_LOCKED: &str = "`theme_follow` is set by your organization's policy and cannot be changed here";
+
 const FOLLOW_UNAVAILABLE: &str = "`theme_follow` is not available in the browser: it follows a file on this computer; import the theme instead";
 
 /// Stop following a theme file: the preference and this run's launch flag. The chosen theme
 /// takes over again, with its own dark or light.
 fn stop_following(app: &mut SolveApp) {
+    // The organization's theme file stays on; the chosen theme waits underneath it.
+    if app.policy.locks("theme_follow") {
+        return;
+    }
     let following = !app.prefs_window.follow.path(&app.preferences.theme_follow).is_empty();
     app.preferences.theme_follow.clear();
     app.prefs_window.follow.launch = None;
@@ -1638,6 +1657,9 @@ fn set_theme_follow(app: &mut SolveApp, value: &serde_json::Value, available: bo
     }
     let path = value.as_str().ok_or("`theme_follow` must be a theme file's path, or \"\" to stop following")?;
     let path = crate::theme_files::follow_path(path)?;
+    if app.policy.locks("theme_follow") {
+        return Err(THEME_FOLLOW_LOCKED.into());
+    }
     if path.is_empty() {
         stop_following(app);
         return Ok(());
@@ -3347,7 +3369,14 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
             staged.theme = if gone.base.is_dark() { "dark" } else { "light" }.into();
         }
     }
+    let follow_locked = app.policy.locks("theme_follow");
     match rest.remove("theme_follow") {
+        // Writing back what was read is not a change (as for every other locked preference).
+        Some(value) if follow_locked => {
+            if !crate::policy::unchanged(app, "theme_follow", &value) {
+                return Err(THEME_FOLLOW_LOCKED.into());
+            }
+        }
         Some(value) => {
             if !FOLLOW_AVAILABLE {
                 return Err(FOLLOW_UNAVAILABLE.into());
@@ -3364,7 +3393,7 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
             follow.launch = None;
             let _ = follow.poll(&staged.theme_follow, f64::NEG_INFINITY, true);
         }
-        None if rest.contains_key("theme") => {
+        None if rest.contains_key("theme") && !follow_locked => {
             staged.theme_follow.clear();
             follow.launch = None;
             let _ = follow.poll("", f64::NEG_INFINITY, true);
@@ -7552,6 +7581,7 @@ mod tests {
             ("extrude_view_isometric", json!(true), PAGE_TOOLS),
             ("extrude_view_return", json!(true), PAGE_TOOLS),
             ("auto_operation", json!(false), PAGE_TOOLS),
+            ("new_body_default", json!(true), PAGE_TOOLS),
             ("placement_handles", json!(true), PAGE_TOOLS),
             ("assembly_move_handles", json!(false), PAGE_TOOLS),
             ("joint_rotation_coarse", json!(12.0), PAGE_TOOLS),
@@ -11657,6 +11687,27 @@ mod tests {
         assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
     }
 
+    /// Preferences saved with the cube navigator, gone since 0.43, say once why the signed axes
+    /// show instead (#19749); the axes are what they save, so a later start says nothing.
+    #[test]
+    fn a_saved_cube_navigator_says_once_that_the_signed_axes_replace_it() {
+        let note = |app: &SolveApp| app.messages.iter().filter(|m| m.text == app.tr("ui.navigator.cube_removed")).count();
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        app.load_prefs(&json!({"preferences": {"navigator_style": "cube", "length_decimals": 4}}).to_string());
+        assert_eq!(app.preferences.navigator_style, NavigatorStyle::Axes);
+        assert_eq!(note(&app), 1);
+        assert_eq!(app.status.as_ref().map(|s| s.0.as_str()), Some(app.tr("ui.navigator.cube_removed")));
+        let saved = app.prefs();
+        let mut again = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        again.load_prefs(&saved);
+        assert_eq!(note(&again), 0, "{saved}");
+        for style in ["axes", "custom", "zigzag"] {
+            let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+            other.load_prefs(&json!({"preferences": {"navigator_style": style}}).to_string());
+            assert_eq!(note(&other), 0, "{style}");
+        }
+    }
+
     #[test]
     fn navigator_picker_preserves_axes_and_follows_preferences_transactions() {
         let old: Prefs = serde_json::from_value(json!({"nav":"solidworks"})).unwrap();
@@ -13892,6 +13943,44 @@ mod ui_scale_regression_tests {
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert_eq!(h.app.preferences.ui_scale, 1.0, "Cancel restores the original scale");
         assert_eq!(h.ctx.zoom_factor(), 1.0);
+    }
+}
+
+pub(crate) fn ground_shadow_mode(app: &SolveApp) -> &'static str {
+    if !app.ui.ground_shadow {
+        "off"
+    } else {
+        match app.preferences.ground_shadow_style {
+            GroundShadowStyle::Ellipse => "ellipse",
+            GroundShadowStyle::Projected => "projected",
+        }
+    }
+}
+
+pub(crate) fn ground_shadow_selector(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let before = ground_shadow_mode(app);
+    let label = |mode| match mode {
+        "off" => "ui.ground_shadow_off",
+        "projected" => "ui.ground_shadow_projected",
+        _ => "ui.ground_shadow_ellipse",
+    };
+    let mut mode = before;
+    let response = ui_kit::dropdown_menu(ui, "ground_shadow_mode", app.tr(label(mode)), |ui| {
+        for value in ["off", "ellipse", "projected"] {
+            let mut row = ui_kit::NavigationMenuRow::new(value, app.tr(label(value)), "");
+            row.selected = mode == value;
+            let choice = row.show(ui);
+            crate::scenario::publish_target(&format!("view:ground_shadow:{value}"), choice.rect);
+            if choice.clicked() {
+                mode = value;
+                ui.close();
+            }
+        }
+    });
+    crate::scenario::publish_target("prefs:ground_shadow_style", response.rect);
+    crate::scenario::publish_target("view:ground_shadow_selector", response.rect);
+    if mode != before {
+        let _ = app.run("view.ground_shadow", json!({"mode":mode}));
     }
 }
 

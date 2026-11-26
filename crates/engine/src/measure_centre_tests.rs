@@ -495,6 +495,34 @@ fn faces_measure_between_their_exact_half_cylinders() {
     assert!(error.to_string().contains("made to fail"), "{error}");
 }
 
+/// A vertex and a curved face measure to the face's exact surface, not its display mesh
+/// (#16262): the report's bar of radius 20 along X and a block's corner at (0, 10, 50), which is
+/// sqrt(10² + 50²) - 20 from the bar's side, the nearest point on the radius through it. The
+/// same corner and a sphere of radius 20 about (60, 0, 0) give |(-60, 10, 50)| - 20.
+#[test]
+fn a_vertex_measures_to_the_exact_curved_face() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 60, "base": [-30, 0, 0], "axis": "X", "body_name": "Bar"}));
+    run(&mut s, "solid.sphere", json!({"radius": 20, "center": [60, 0, 0], "body_name": "Ball", "operation": "new_body"}));
+    run(&mut s, "solid.box", json!({"corner": [0, 10, 50], "length": 1, "width": 1, "height": 1, "body_name": "Block", "operation": "new_body"}));
+    let corner = Vec3::new(0.0, 10.0, 50.0);
+    let vertex = json!({"type": "vertex", "body": "Block", "point": [0, 10, 50]});
+    let bar = json!({"type": "face", "body": "Bar", "point": [0, 0, 20]});
+    let ball = json!({"type": "face", "body": "Ball", "point": [60, 0, 20]});
+    for (face, centre) in [(bar, Vec3::new(0.0, 0.0, 0.0)), (ball, Vec3::new(60.0, 0.0, 0.0))] {
+        let reach = corner.dist(centre);
+        for items in [vec![vertex.clone(), face.clone()], vec![face.clone(), vertex.clone()]] {
+            let swapped = items[0]["type"] == "face";
+            let r = measure(&mut s, items);
+            assert!(close(&r["min"], reach - 20.0, 1e-9) && close(&r["distance_mm"], reach - 20.0, 1e-9), "{r}");
+            let (from, to): (Vec3, Vec3) = (serde_json::from_value(r["from"].clone()).unwrap(), serde_json::from_value(r["to"].clone()).unwrap());
+            let (at_vertex, on_face) = if swapped { (to, from) } else { (from, to) };
+            assert!(at_vertex.dist(corner) < 1e-9, "{r}");
+            assert!(on_face.dist(centre + (corner - centre) * (20.0 / reach)) < 1e-9, "{r}");
+        }
+    }
+}
+
 /// Where the kernel's exact solve can't answer for two edges, they still measure, on the display
 /// mesh, and the reply says the distance is approximate: the issue's concentric arcs (#17823),
 /// whose mesh chords run up to the chord tolerance inside the arcs, so a little under 15.

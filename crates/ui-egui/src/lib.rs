@@ -57,6 +57,7 @@ pub mod dialogs;
 pub mod dialogs_appearance;
 pub mod dialogs_assembly;
 pub mod dialogs_capture;
+pub mod dialogs_cell_grid;
 pub mod dialogs_constrain;
 pub mod dialogs_coupling;
 pub mod dialogs_end_cap;
@@ -779,6 +780,9 @@ pub struct SolveApp {
     verifying: Option<verify_job::Verifying>,
     /// A drawing view being drawn on a worker (see [`drawing_jobs`]).
     drawing_job: Option<drawing_jobs::Drawing>,
+    /// A drawing being read for the Insert SVG/DXF window, on a worker (see
+    /// [`dialogs_insert_drawing`]); the operations panel shows it while it runs.
+    pub(crate) insert_read: Option<dialogs_insert_drawing::InsertRead>,
     pub viewport: viewport::ViewportState,
     pub render_workspace: render_workspace::State,
     pub drawing_workspace: drawing_workspace::State,
@@ -1206,6 +1210,7 @@ impl SolveApp {
             host_save_left_dirty: Default::default(),
             verifying: None,
             drawing_job: None,
+            insert_read: None,
             viewport: viewport::ViewportState::default(),
             render_workspace,
             drawing_workspace: Default::default(),
@@ -1718,6 +1723,12 @@ impl SolveApp {
             self.ui.layout = p.layout;
             self.preferences = p;
         }
+        // 0.43 removed the cube navigator (#17003), and a cube saved before reads as the signed
+        // axes. Said once: the next save keeps the axes, so the note doesn't come back (#19749).
+        if v.pointer("/preferences/navigator_style").and_then(Value::as_str) == Some("cube") {
+            let note = self.tr("ui.navigator.cube_removed").to_string();
+            self.set_status(note, false);
+        }
         // Before a design given at start opens: its paths follow the network preferences.
         prefs::sync_surface_analysis(self);
         crate::plugins::sync_policy(self);
@@ -2073,7 +2084,9 @@ impl SolveApp {
                 // The command and the preference are one setting.
                 "diagnostics.validation" => self.preferences.validation = self.session.validation(),
                 "view.grid" => self.ui.show_grid = v.get("on").and_then(Value::as_bool).unwrap_or(!self.ui.show_grid),
-                "view.ground_shadow" => self.ui.ground_shadow = v.get("on").and_then(Value::as_bool).unwrap_or(!self.ui.ground_shadow),
+                "view.ground_shadow" if v.get("mode").is_none() => {
+                    self.ui.ground_shadow = v.get("on").and_then(Value::as_bool).unwrap_or(!self.ui.ground_shadow);
+                }
                 "view.navigation_bar" => {
                     self.ui.show_navigation_bar = v.get("visible").and_then(Value::as_bool).unwrap_or(!self.ui.show_navigation_bar)
                 }
@@ -2206,6 +2219,17 @@ impl SolveApp {
             if id == "view.angle_readout" {
                 self.preferences.show_view_angles = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
             }
+            if id == "view.ground_shadow" {
+                match v.get("mode").and_then(Value::as_str) {
+                    Some("off") => self.ui.ground_shadow = false,
+                    Some(mode) => {
+                        self.ui.ground_shadow = true;
+                        self.preferences.ground_shadow_style =
+                            if mode == "projected" { prefs::GroundShadowStyle::Projected } else { prefs::GroundShadowStyle::Ellipse };
+                    }
+                    None => {}
+                }
+            }
             if id == "view.origin_axes_across_view" {
                 self.preferences.origin_axes_across_view = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
             }
@@ -2318,6 +2342,9 @@ impl SolveApp {
                 {
                     let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                     self.set_status(language.format("drawing.template_saved_as_scdwg", &[("name", &name)]), false);
+                }
+                if matches!(id, "joint.create" | "joint.as_built" | "joint.edit" | "assembly.constraint.create" | "assembly.constraint.edit") {
+                    joint_conflict_status(self, language, v);
                 }
                 if id == "file.new" {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
@@ -3003,7 +3030,7 @@ impl SolveApp {
             let command = id.to_string();
             self.pick_open_for(&[ext], move |app, path| {
                 if let Some(path) = path {
-                    dialogs_insert_drawing::open(app, &command, path);
+                    dialogs_insert_drawing::start(app, &command, path);
                 }
             });
             return;
@@ -4621,6 +4648,7 @@ impl SolveApp {
         render_workspace::tick(self, ctx);
         parts_library::tick(self, ctx);
         file_load::tick(self, ctx);
+        dialogs_insert_drawing::tick(self);
         save_job::tick(self, false);
         verify_job::tick(self);
         timeline::tick_import_checks(self, ctx);
@@ -4631,7 +4659,7 @@ impl SolveApp {
         if ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra1) || (i.key_pressed(egui::Key::BrowserBack) && !typing)) {
             edit_in_place::back(self);
         }
-        if self.saving.is_some() || self.verifying.is_some() || self.edit_in_place.refreshing() {
+        if self.saving.is_some() || self.verifying.is_some() || self.edit_in_place.refreshing() || self.insert_read.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
         open_meshing::tick(self, ctx);
@@ -5339,6 +5367,35 @@ fn unground_joint_status(app: &mut SolveApp, language: solidcraft_ui_text::Local
         app.session.echo(msg.clone());
         app.set_status(msg, false);
     }
+}
+
+/// A joint just made or changed that doesn't hold says why in Messages, as an error: the joint
+/// is kept, but nothing moved (#12867). Between two grounded parts, or a grounded part and the
+/// root, it says so, and how to let it place one; any other conflict gives the solver's reason.
+fn joint_conflict_status(app: &mut SolveApp, language: solidcraft_ui_text::Locale, v: &Value) {
+    use i18n::LocaleNames;
+
+    let Some(id) = v.get("joint").and_then(Value::as_u64) else { return };
+    let Some(conflict) =
+        v.get("conflicts").and_then(Value::as_array).into_iter().flatten().find(|c| c.get("joint").and_then(Value::as_u64) == Some(id))
+    else {
+        return;
+    };
+    let doc = &app.session.doc;
+    let Some(joint) = doc.assembly.joints.iter().find(|j| j.id == id) else { return };
+    let grounded = |o: u64| doc.occurrences.iter().find(|x| x.id == o && x.grounded).map(|x| language.given_name(&x.name));
+    let name = language.given_name(&joint.name);
+    let (a, b) = (joint.a.occurrence, joint.b.occurrence);
+    let msg = match (grounded(a), grounded(b)) {
+        (Some(ga), Some(gb)) if a != b => language.format("joint.moves_neither", &[("joint", &name), ("a", &ga), ("b", &gb)]),
+        // The root's own bodies never move: a grounded part joined to them is held the same way.
+        (Some(g), None) | (None, Some(g)) if a == 0 || b == 0 => language.format("joint.moves_neither_root", &[("joint", &name), ("occurrence", &g)]),
+        _ => {
+            let reason = conflict.get("why").and_then(Value::as_str).unwrap_or_default();
+            language.format("joint.does_not_hold", &[("joint", &name), ("reason", &language.diagnostic(reason))])
+        }
+    };
+    app.set_status(msg, true);
 }
 
 /// An edit in place command's result, saying when it waits for the end of the agent's turn.

@@ -39,6 +39,10 @@ mod removed_later_tests;
 #[path = "viewport_plane_target_tests.rs"]
 mod plane_target_tests;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "viewport_projected_shadow_tests.rs"]
+mod projected_shadow_tests;
+
 #[cfg(test)]
 #[path = "viewport_ground_tests.rs"]
 mod ground_tests;
@@ -1229,6 +1233,7 @@ fn sketch_scene_key_with(app: &SolveApp, proj: &Proj, model_key: u64) -> u64 {
     model_key.hash(&mut h);
     app.viewport.wireframe.generation().hash(&mut h);
     app.ui.ground_shadow.hash(&mut h);
+    app.preferences.ground_shadow_style.hash(&mut h);
     // Crossing the ground plane toggles ground shadow visibility even when no grid is shown.
     (app.cam.pitch > 0.0).hash(&mut h);
     // The ground shadow lies under the bodies where a joint drag draws them.
@@ -1848,7 +1853,7 @@ fn look_key(
     let name = b.definition_name();
     hash_look(doc.appearances.bodies.get(name), &mut h);
     hash_look(doc.appearances.components.get(&b.component), &mut h);
-    let material = doc.materials.get(name);
+    let material = doc.resolved_body_material(name);
     material.hash(&mut h);
     hash_look(material.and_then(|m| doc.material_look(m)).as_ref(), &mut h);
     faces.get(name).copied().unwrap_or(0).hash(&mut h);
@@ -1990,7 +1995,7 @@ pub(crate) const INSTANCE_ALONE: usize = 50_000;
 
 /// Pack a complete imported mesh from its indexed geometry when the facets supply their own
 /// normals. B-reps, authored normals and subsets for individual looks use the shared vertex weld.
-fn build_shared_tris(
+pub(crate) fn build_shared_tris(
     mesh: &solidcraft_engine::geom::Mesh,
     body: Option<&solidcraft_engine::doc::ModelBody>,
 ) -> std::sync::Arc<crate::gpu::SharedTris> {
@@ -3580,6 +3585,7 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         let geometry = shadow_geometry(app, &st);
         sc.shadow = geometry.bytes.as_ref().clone();
         sc.palette = geometry.palette;
+        sc.projected_shadow = geometry.projection;
     } else if let Ok(mut cache) = app.viewport.shadow.lock()
         && cache.as_ref().is_some_and(|c| !std::sync::Arc::ptr_eq(&c.state, &st))
     {
@@ -3897,6 +3903,7 @@ struct ShadowGeometry {
     state: std::sync::Arc<solidcraft_engine::doc::ModelState>,
     bytes: std::sync::Arc<Vec<u8>>,
     palette: std::sync::Arc<crate::gpu::Palette>,
+    projection: Option<std::sync::Arc<solidcraft_viewport_gpu::view::ground_shadow::Projection>>,
 }
 
 /// Changing sides of the ground only changes whether this small shadow is drawn; it never
@@ -3905,7 +3912,7 @@ fn shadow_geometry(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::M
     // With where a joint drag draws its moving bodies: the shadow lies under them there.
     let key = {
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (scene_key(app), joint_motions::key(app)).hash(&mut h);
+        (scene_key(app), joint_motions::key(app), app.preferences.ground_shadow_style).hash(&mut h);
         h.finish()
     };
     if let Some(geometry) =
@@ -3915,16 +3922,24 @@ fn shadow_geometry(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::M
     }
     let mut scene = GpuScene::default();
     ground_shadow(&mut scene, app, joint_motions::ground_boxes(app).unwrap_or_else(|| ground_boxes(app, st)));
-    let geometry = ShadowGeometry { key, state: st.clone(), bytes: std::sync::Arc::new(scene.shadow), palette: scene.palette };
+    let geometry = ShadowGeometry {
+        key,
+        state: st.clone(),
+        bytes: std::sync::Arc::new(scene.shadow),
+        palette: scene.palette,
+        projection: scene.projected_shadow,
+    };
     if let Ok(mut cache) = app.viewport.shadow.lock() {
         *cache = Some(geometry.clone());
     }
     geometry
 }
 
-/// Whether the view draws the ground shadow: turned on, not in Wireframe, seen from above.
+/// Whether the view includes ground-shadow data. Projected shadows handle their visible side on the GPU.
 fn ground_shadow_shown(app: &SolveApp) -> bool {
-    app.ui.ground_shadow && app.ui.visual_style != 2 && app.cam.pitch > 0.0
+    app.ui.ground_shadow
+        && app.ui.visual_style != 2
+        && (app.cam.pitch > 0.0 || app.preferences.ground_shadow_style == crate::prefs::GroundShadowStyle::Projected)
 }
 
 /// Each shown body's box in the camera's Z-up frame (the ground is its XY plane).
@@ -3980,6 +3995,7 @@ fn ground_height(app: &SolveApp, bounds: solidcraft_engine::geom::Aabb3) -> f64 
 
 /// A soft dark ellipse on the ground under each group of shown bodies (darkest in the middle).
 fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, framed: Vec<solidcraft_engine::geom::Aabb3>) {
+    let first = sc.shadow.len();
     let all = framed.iter().fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, b| a.union(b));
     if all.is_empty() {
         return;
@@ -3994,6 +4010,18 @@ fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, framed: Vec<solidcraft_engin
         }
         let at = |r: f64, a: f64| app.cam.from_frame(Vec3::new(c.x + rx * r * a.cos(), c.y + ry * r * a.sin(), z)).to_f32();
         shadow_ellipse(sc, dark, at);
+    }
+    if app.preferences.ground_shadow_style == crate::prefs::GroundShadowStyle::Projected
+        && let Some(mut projection) = solidcraft_viewport_gpu::view::ground_shadow::Projection::new(
+            solidcraft_engine::render::view_bounds(&all),
+            z,
+            &app.cam,
+            dark as f32 / 255.0 * 0.8,
+            Vec::new(),
+        )
+    {
+        projection.fallback = sc.shadow.split_off(first);
+        sc.projected_shadow = Some(std::sync::Arc::new(projection));
     }
 }
 

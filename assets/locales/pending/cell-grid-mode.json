@@ -1,0 +1,47 @@
+{
+  "en": {
+    "ui.cell_grid.cut": "Cut",
+    "ui.cell_grid.mode": "Mode",
+    "ui.cell_grid.raised": "Raised"
+  },
+  "ar": {
+    "ui.cell_grid.cut": "قص",
+    "ui.cell_grid.mode": "الوضع",
+    "ui.cell_grid.raised": "بارز"
+  },
+  "de": {
+    "ui.cell_grid.cut": "Ausschnitt",
+    "ui.cell_grid.mode": "Modus",
+    "ui.cell_grid.raised": "Erhaben"
+  },
+  "he": {
+    "ui.cell_grid.cut": "חיתוך",
+    "ui.cell_grid.mode": "מצב",
+    "ui.cell_grid.raised": "בולט"
+  },
+  "ja": {
+    "ui.cell_grid.cut": "切り抜き",
+    "ui.cell_grid.mode": "モード",
+    "ui.cell_grid.raised": "盛り上げ"
+  },
+  "ko": {
+    "ui.cell_grid.cut": "잘라내기",
+    "ui.cell_grid.mode": "모드",
+    "ui.cell_grid.raised": "돌출"
+  },
+  "nb": {
+    "ui.cell_grid.cut": "Utskjæring",
+    "ui.cell_grid.mode": "Modus",
+    "ui.cell_grid.raised": "Hevet"
+  },
+  "vi": {
+    "ui.cell_grid.cut": "Cắt",
+    "ui.cell_grid.mode": "Chế độ",
+    "ui.cell_grid.raised": "Nổi"
+  },
+  "zh": {
+    "ui.cell_grid.cut": "切除",
+    "ui.cell_grid.mode": "模式",
+    "ui.cell_grid.raised": "凸起"
+  }
+}

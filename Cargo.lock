@@ -6733,6 +6733,7 @@ dependencies = [
  "naga",
  "pollster 0.4.0",
  "serde",
+ "serde_json",
  "solidcore-record",
  "solidcore-tess",
  "solidcraft-color",

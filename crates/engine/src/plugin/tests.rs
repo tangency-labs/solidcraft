@@ -951,6 +951,44 @@ mod native {
             s.execute("plugin.install", &json!({"path":zip,"replace":true,"approve":approve})).unwrap()["folder"].as_str().unwrap().into()
         }
     }
+    /// An entry asks `plugin.preview` whether it runs as a dialog's live preview (#22297): true in
+    /// a run of a preview session or with `preview: true`, false otherwise, and with no command
+    /// group. The flag stays with that run.
+    #[test]
+    fn an_entry_can_tell_that_it_runs_as_a_preview() {
+        let fixture = Fixture::new("call $box");
+        let mut manifest = manifest();
+        manifest["runtime"]["commands"] = json!(["plugin.preview"]);
+        std::fs::write(fixture.0.join("sample/plugin.json"), manifest.to_string()).unwrap();
+        // The entry runs `plugin.preview` and returns its reply (its result is the command's).
+        let source = component_template()
+            .replace("      call $box\n      call $box\n", "      call $box\n")
+            .replace("i32.const 9\n      i32.const 1024\n      i32.const 33", "i32.const 14\n      i32.const 1024\n      i32.const 2")
+            .replace("\"solid.box\"", "\"plugin.preview\"")
+            .replace(r#""{\22length\22:2,\22width\22:3,\22height\22:4}""#, r#""{}""#);
+        std::fs::write(fixture.0.join("sample/plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
+        let mut s = Session::default();
+        let approval = s.execute("plugin.inspect", &json!({"path":fixture.path()})).unwrap()["approval"].clone();
+        let run = |s: &mut Session, preview: Option<bool>| {
+            let mut params = json!({"path":fixture.path(),"approval":approval,"entry":"make","params":{}});
+            if let Some(preview) = preview {
+                params["preview"] = json!(preview);
+            }
+            s.execute("plugin.run", &params).unwrap()["result"]["preview"].clone()
+        };
+        assert_eq!(run(&mut s, None), json!(false), "an ordinary run");
+        assert_eq!(run(&mut s, Some(true)), json!(true), "a script asks for the preview path");
+        assert!(!s.plugin_state.preview, "the flag stays with that run");
+        assert_eq!(run(&mut s, Some(false)), json!(false));
+        // A dialog's preview session (the host's dry run sets it) answers true without the param.
+        let mut preview = s.scratch();
+        preview.plugin_state.preview = true;
+        assert_eq!(run(&mut preview, None), json!(true));
+        // Outside any plugin run the command answers too.
+        assert_eq!(s.execute("plugin.preview", &json!({})).unwrap()["preview"], json!(false));
+        assert!(s.execute("plugin.preview", &json!({"x": 1})).is_err(), "it takes no parameters");
+    }
+
     /// A 0.41 plugin runs as before, alone and with a background shader added.
     #[test]
     fn a_commands_plugin_from_041_installs_and_runs_unchanged_beside_shaders() {
@@ -6188,4 +6226,36 @@ fn a_plugin_without_a_state_grid_is_unchanged() {
     let compiled = craft_plugin::shader::compile(shader, include_str!("../../../../docs/plugin-examples/dusk/dusk.wgsl")).unwrap();
     assert!(!compiled.wgsl.contains("sc_state"), "{}", compiled.wgsl);
     assert!(!compiled.wgsl.contains("@binding(7)") && !compiled.wgsl.contains("@binding(8)"), "{}", compiled.wgsl);
+}
+
+#[test]
+fn a_body_a_plugin_run_hides_stays_hidden_beside_one_hidden_meanwhile() {
+    // #22153: the run's hide was lost when the window accepted the run.
+    let mut live = Session::default();
+    for name in ["Master", "Cabinet", "Door"] {
+        live.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1, "body_name": name})).unwrap();
+    }
+    live.execute("browser.visibility", &json!({"items": ["Door"], "visible": false})).unwrap();
+    let command = crate::cmd::CommandSpec::new("plugin.run", "Run Plugin", |session, _| {
+        let mut host = SolidCraftHost { session: session.scratch(), ..panel_host() };
+        host.begin_transaction().unwrap();
+        host.run_command("browser.visibility", &json!({"items": ["Master"], "visible": false})).unwrap();
+        host.run_command("browser.visibility", &json!({"items": ["Door"], "visible": true})).unwrap();
+        host.commit_transaction().unwrap();
+        assert!(changed_by(session, &host.session), "a run that only hides is accepted");
+        session.accept_computed(host.session)?;
+        Ok(json!({}))
+    })
+    .icon("play");
+    // The window runs the plugin on a copy; the user hides Cabinet before it is accepted.
+    let mut computed = live.scratch();
+    computed.execute_spec(&command, &json!({})).unwrap();
+    live.execute("browser.visibility", &json!({"items": ["Cabinet"], "visible": false})).unwrap();
+    live.accept_computed(computed).unwrap();
+    let shown = |s: &Session| ["Master", "Cabinet", "Door"].map(|name| s.body_visible(name));
+    assert_eq!(shown(&live), [false, false, true], "the run's hide and show, and the hide made meanwhile");
+    live.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(shown(&live), [true, false, false], "undo takes back the run and keeps the hide made meanwhile");
+    live.execute("edit.redo", &json!({})).unwrap();
+    assert_eq!(shown(&live), [false, false, true]);
 }
