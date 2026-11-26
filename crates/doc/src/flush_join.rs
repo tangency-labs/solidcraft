@@ -50,9 +50,9 @@ fn flush_overlap_join(target: &Body, tool: &Body) -> Option<Body> {
 }
 
 /// Centroids of the tool's planar faces that lie back-to-back on a planar face of the target
-/// ([`solidcraft_kernel::services::flush_contact_points`]).
+/// ([`solidcraft_kernel::points::flush_contact_points`]).
 fn contact_points(target: &Body, tool: &Body) -> Vec<Vec3> {
-    let Some(points) = kernel::services::flush_contact_points(target, tool) else {
+    let Some(points) = kernel::points::flush_contact_points(target, tool) else {
         return Vec::new();
     };
     points.into_iter().map(|[x, y, z]| Vec3::new(x, y, z)).collect()

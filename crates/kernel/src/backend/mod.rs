@@ -14,6 +14,7 @@ mod cell_grid;
 mod exchange;
 mod frames;
 mod modelling;
+mod points;
 
 use crate::body::Body;
 use crate::{KernelError, Result};

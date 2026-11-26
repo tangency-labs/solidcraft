@@ -199,7 +199,7 @@ pub(super) fn touched_links(sk: &Sketch, ids: &[String]) -> Vec<String> {
 
 /// Distance from `p` to the segment `a`–`b`.
 fn seg_dist(p: Vec2, a: Vec2, b: Vec2) -> f64 {
-    solidcraft_kernel::services::measure::polyline_2d_closest_point([p.x, p.y], &[[a.x, a.y], [b.x, b.y]])
+    solidcraft_kernel::points::polyline_2d_closest_point([p.x, p.y], &[[a.x, a.y], [b.x, b.y]])
         .ok()
         .flatten()
         .map_or(f64::INFINITY, |(distance, _)| distance)
