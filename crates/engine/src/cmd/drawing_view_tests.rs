@@ -3914,7 +3914,7 @@ fn a_section_view_inspects_copies_and_draws() {
 /// hidden lines too, on paper round its model's middle.
 fn drawn_lines(s: &Session, id: u64) -> (ShownSet, Extents, crate::drawing_view::Lines) {
     use crate::drawing_view::{CHORD_MM, LineRequest, PreparedBodies};
-    let view = s.drawing("test").unwrap().resolve_view(id).unwrap();
+    let view = crate::drawing_view::drawn_view(s, s.drawing("test").unwrap(), id).unwrap();
     let shown = crate::drawing_view::shown(s);
     let (set, extents) = crate::drawing_view::measured(&shown, &view).unwrap();
     let frame = crate::drawing_view::frame(view.basis, view.scale.value, &extents.model, Vec2::ZERO, "test").unwrap();
@@ -3987,7 +3987,7 @@ fn copies_of_a_part_are_cut_apart() {
     let (mut s, [front, ..]) = three_views_of(s);
     let cut = section_of(&mut s, front, SectionKind::Full, &[[5.0, -10.0], [5.0, 20.0]], ArrowSide::Right);
     let groups = |id: u64| {
-        let view = s.drawing("test").unwrap().resolve_view(id).unwrap();
+        let view = crate::drawing_view::drawn_view(&s, s.drawing("test").unwrap(), id).unwrap();
         let shown = crate::drawing_view::shown(&s);
         let (set, _) = crate::drawing_view::measured(&shown, &view).unwrap();
         let placed = crate::mesh_lines::placed(&s, &set.state, |_| true, "test").unwrap();
@@ -4031,7 +4031,7 @@ fn a_line_that_keeps_none_of_the_parts_shows_the_placeholder() {
     use solidcraft_doc::drawing::cutting_line::{ArrowSide, SectionKind};
     let (mut s, [front, ..]) = three_views();
     let cut = section_of(&mut s, front, SectionKind::Full, &[[-40.0, 0.0], [40.0, 0.0]], ArrowSide::Right);
-    let view = s.drawing("test").unwrap().resolve_view(cut).unwrap();
+    let view = crate::drawing_view::drawn_view(&s, s.drawing("test").unwrap(), cut).unwrap();
     assert_eq!(crate::drawing_view::measured(&crate::drawing_view::shown(&s), &view).err(), Some(Unmeasured::CutAway));
     let reply = inspect_view(&mut s, cut);
     assert_eq!(reply["extents"]["provenance"], json!("cut_away"), "{reply}");
@@ -5091,7 +5091,7 @@ fn front_section(s: Session, points: &[[f64; 2]]) -> (Session, u64) {
 /// Section view `id`'s hatching as its sheet draws it, on paper round its model's middle as
 /// [`drawn_lines`]' lines are, with the bodies it shows.
 fn drawn_hatches(s: &Session, id: u64) -> (ShownSet, Vec<crate::drawing_view::BodyHatch>) {
-    let view = s.drawing("test").unwrap().resolve_view(id).unwrap();
+    let view = crate::drawing_view::drawn_view(s, s.drawing("test").unwrap(), id).unwrap();
     let shown = crate::drawing_view::shown(s);
     let (set, extents) = crate::drawing_view::measured(&shown, &view).unwrap();
     let frame = crate::drawing_view::frame(view.basis, view.scale.value, &extents.model, Vec2::ZERO, "test").unwrap();
@@ -5609,4 +5609,75 @@ fn a_renamed_hidden_body_is_unmatched() {
     run(&mut s, "drawing.open", json!({"drawing": drawing}));
     assert!(inspect_view(&mut s, view).get("unmatched").is_none());
     assert!((width(&mut s, view) - 100.0).abs() < 1e-6);
+}
+
+/// `shows: "design"` (#22107): a view draws only the bodies the browser shows. Hiding the door's eye
+/// takes it out of that view and of the view projected from it, never of a view of every body.
+/// Hiding the Bodies folder leaves its placeholder (the design is never refused by its drawings);
+/// isolating the carcass leaves the carcass. Inspect says where the setting comes from, and `"all"`
+/// draws every body again. A value other than `all` or `design` is refused.
+#[test]
+fn a_view_that_shows_the_design_follows_the_browsers_eyes() {
+    let mut s = carcass_and_door();
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let (_, view) = create(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "position_mm": [200, 150], "shows": "design"}));
+    let (_, every) = create(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "position_mm": [200, 60]}));
+    assert!((width(&mut s, view) - 220.0).abs() < 1e-6, "nothing hidden yet");
+    let inspected = inspect_view(&mut s, view);
+    assert_eq!(inspected["settings"]["shows"], json!({"value": "design", "from": "this", "set": "design"}), "{inspected}");
+    assert_eq!(inspect_view(&mut s, every)["settings"]["shows"], json!({"value": "all", "from": "default", "set": null}));
+
+    run(&mut s, "browser.visibility", json!({"items": ["Door"], "visible": false}));
+    assert!((width(&mut s, view) - 100.0).abs() < 1e-6, "the door is hidden in the browser");
+    assert!((width(&mut s, every) - 220.0).abs() < 1e-6, "a view of every body still draws it");
+    // Inspect still lists every body the design places, and says the hidden door isn't drawn.
+    let listed = |drawn_door: bool| json!([{"path": [], "body": "Carcass", "drawn": true}, {"path": [], "body": "Door", "drawn": drawn_door}]);
+    assert_eq!(inspect_view(&mut s, view)["bodies"], listed(false));
+    assert_eq!(inspect_view(&mut s, every)["bodies"], listed(true), "a view of every body draws the door");
+    let (_, side) = create(&mut s, PROJECTED, json!({"parent": ids::encode(view), "side": "above", "place": {"at": [200, 250]}}));
+    assert!((width(&mut s, side) - 100.0).abs() < 1e-6, "a projected view follows its parent's choice");
+
+    run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/bodies"], "visible": false}));
+    let extents = inspect_view(&mut s, view)["extents"].clone();
+    assert_eq!((&extents["status"], &extents["provenance"]), (&json!("placeholder"), &json!("nothing_chosen")), "{extents}");
+    run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/bodies"], "visible": true}));
+    assert!((width(&mut s, view) - 100.0).abs() < 1e-6, "the door keeps its own eye");
+
+    run(&mut s, "browser.visibility", json!({"items": ["Door"], "visible": true}));
+    run(&mut s, "browser.visibility", json!({"items": ["Carcass"], "visible": true, "isolate": true}));
+    assert!((width(&mut s, view) - 100.0).abs() < 1e-6, "isolation is what the design shows");
+    run(&mut s, "browser.visibility", json!({"visible": true, "unisolate": true}));
+    assert!((width(&mut s, view) - 220.0).abs() < 1e-6);
+
+    run(&mut s, "browser.visibility", json!({"items": ["Door"], "visible": false}));
+    let reply = edit_view(&mut s, view, json!({"shows": "all"}));
+    assert_eq!(reply["changed"], json!(["shows"]));
+    assert!((width(&mut s, view) - 220.0).abs() < 1e-6, "every body again");
+    for bad in [json!("Design"), json!(5), json!("visible")] {
+        let e = edit_refused(&mut s, view, json!({"shows": bad}));
+        assert!(e.contains("shows"), "{bad}: {e}");
+    }
+}
+
+/// `shows: "design"` follows the eyes of the design the drawing is in; a view of a linked design's
+/// file can't read that design's eyes yet (#3890), so it is refused by name.
+#[test]
+fn a_view_of_a_linked_design_cant_follow_its_eyes() {
+    let mut s = carcass_and_door();
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let (_, view) = create(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "position_mm": [200, 150]}));
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let linked = d.sources.iter().map(|source| source.id).max().unwrap() + 1;
+    d.sources.push(solidcraft_doc::drawing::Source { id: linked, path: Some("plate.solidcraft".into()) });
+    let mut record = View::clone(d.view(view).unwrap());
+    if let ViewKind::Base { source, .. } = &mut record.kind {
+        *source = linked;
+    }
+    d.views.retain(|v| v.id != view);
+    d.add_views([Arc::new(record)]);
+    s.doc_mut().put_drawing(Arc::new(d));
+    let e = edit_refused(&mut s, view, json!({"shows": "design"}));
+    assert!(e.contains("not supported yet: following the eyes of a linked design"), "{e}");
 }
