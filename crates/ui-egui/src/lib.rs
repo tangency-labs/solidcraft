@@ -783,6 +783,8 @@ pub struct SolveApp {
     /// A drawing being read for the Insert SVG/DXF window, on a worker (see
     /// [`dialogs_insert_drawing`]); the operations panel shows it while it runs.
     pub(crate) insert_read: Option<dialogs_insert_drawing::InsertRead>,
+    /// That drawing being measured again for a new Resolution, also on a worker.
+    pub(crate) insert_remeasure: Option<dialogs_insert_drawing::Remeasure>,
     pub viewport: viewport::ViewportState,
     pub render_workspace: render_workspace::State,
     pub drawing_workspace: drawing_workspace::State,
@@ -1211,6 +1213,7 @@ impl SolveApp {
             verifying: None,
             drawing_job: None,
             insert_read: None,
+            insert_remeasure: None,
             viewport: viewport::ViewportState::default(),
             render_workspace,
             drawing_workspace: Default::default(),

@@ -692,6 +692,15 @@ impl<'a> Reference<'a> {
             Reference::Face(face) => &face.path,
         }
     }
+
+    /// Its body's name, as its definition names it.
+    pub fn body(self) -> &'a str {
+        match self {
+            Reference::Edge(edge) => &edge.body,
+            Reference::Point(point) => &point.body,
+            Reference::Face(face) => &face.body,
+        }
+    }
 }
 
 /// How a command names an edge (or a face) to measure, before it is saved by name
