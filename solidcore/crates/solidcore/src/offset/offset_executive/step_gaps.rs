@@ -644,20 +644,11 @@ impl OffsetExecutive {
         let Some(this_orig) = original_of(face)? else {
             return Ok(false);
         };
-        // the closed edges of the offset face across, and that face
-        let mut across_closed = Vec::new();
-        for &(other, other_across) in closed_edges {
-            if other != face && original_of(other)? == Some(across) {
-                across_closed.push((other, other_across));
-            }
-        }
-        let once = closed_edges.iter().filter(|&&(f, _)| f == face).count() == 1;
-        let [(other, Some((back_edge, back)))] = across_closed[..] else {
+        let Some(other) =
+            closed_back_across(closed_edges, face, (edge, across), this_orig, original_of)?
+        else {
             return Ok(false);
         };
-        if !once || back_edge != edge || back != this_orig {
-            return Ok(false);
-        }
         for f in [face, other] {
             if face4::edges(b, f, None, false, None)?.len() < 3 {
                 return Ok(false);
@@ -1322,6 +1313,37 @@ impl OffsetExecutive {
         }
         Ok(())
     }
+}
+
+/// (#1126) The offset face across from `face` that closed `face`'s closed edge with it:
+/// the one offset face whose original face is `across`, where it closed exactly one edge,
+/// on the same original `edge`, across onto `this_orig` (`face`'s original face), and
+/// `face` closed only this one. Two faces whose originals share two edges, each closing a
+/// different one, closed no edge between them. `original_of` maps an offset face to its
+/// original face.
+///
+/// # Errors
+///
+/// Those of `original_of`.
+fn closed_back_across(
+    closed_edges: &[(FaceId, Option<(EdgeId, FaceId)>)],
+    face: FaceId,
+    (edge, across): (EdgeId, FaceId),
+    this_orig: FaceId,
+    original_of: impl Fn(FaceId) -> Result<Option<FaceId>>,
+) -> Result<Option<FaceId>> {
+    // the closed edges of the offset face across, and that face
+    let mut across_closed = Vec::new();
+    for &(other, other_across) in closed_edges {
+        if other != face && original_of(other)? == Some(across) {
+            across_closed.push((other, other_across));
+        }
+    }
+    let once = closed_edges.iter().filter(|&&(f, _)| f == face).count() == 1;
+    let [(other, Some((back_edge, back)))] = across_closed[..] else {
+        return Ok(None);
+    };
+    Ok((once && back_edge == edge && back == this_orig).then_some(other))
 }
 
 /// (#1126) Whether an edge on `curve` whose two vertices met at a gap may be squeezed into
@@ -3413,6 +3435,45 @@ mod tests {
         );
         let part = curved_area_vector(origin, &polyline).unwrap().unwrap();
         assert!((part.twice_area - Vec3::new(0.0, 0.0, -2.0)).length() <= 1.0e-14);
+    }
+
+    /// Review r4712105664: an edge closed on both its sides is one original edge closed from
+    /// both faces along it. Two offset faces whose original faces share two edges, each
+    /// closing a different one, closed no edge between them; closing the same one, they did.
+    #[test]
+    fn a_closure_is_matched_across_only_by_its_own_original_edge() {
+        let mut original = Brep::new();
+        let shell = original.add_shell().unwrap();
+        let (fa, fb) = (
+            original.add_face(shell).unwrap(),
+            original.add_face(shell).unwrap(),
+        );
+        let v = original.add_vertex(Vec3::ZERO).unwrap();
+        let (e1, e2) = (
+            original.add_edge(v, v).unwrap(),
+            original.add_edge(v, v).unwrap(),
+        );
+        let mut offset = Brep::new();
+        let shell = offset.add_shell().unwrap();
+        let (oa, ob) = (
+            offset.add_face(shell).unwrap(),
+            offset.add_face(shell).unwrap(),
+        );
+        let original_of = |f: FaceId| -> Result<Option<FaceId>> {
+            Ok([(oa, fa), (ob, fb)]
+                .into_iter()
+                .find_map(|(o, f0)| (o == f).then_some(f0)))
+        };
+        let same = [(oa, Some((e1, fb))), (ob, Some((e1, fa)))];
+        let got = closed_back_across(&same, oa, (e1, fb), fa, original_of).unwrap();
+        assert_eq!(
+            got,
+            Some(ob),
+            "the same original edge closed from both sides"
+        );
+        let different = [(oa, Some((e1, fb))), (ob, Some((e2, fa)))];
+        let got = closed_back_across(&different, oa, (e1, fb), fa, original_of).unwrap();
+        assert_eq!(got, None, "two original edges, each closed from one side");
     }
 
     /// The plane curve `(t, y(t), 0)` on `[0, 1]` as one Bézier curve of `y`'s degree, `y`
