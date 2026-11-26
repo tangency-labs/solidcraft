@@ -466,6 +466,37 @@ fn output_radio_rows_keep_titles_summaries_and_disabled_choices_in_both_themes()
     }
 }
 
+/// A choice card's radio and icon sit on the middle of the title's first line, whatever the
+/// font's line gap. Placed a fixed distance below the card's top, they sat above the title, and
+/// further above Japanese drawn with Hiragino Sans, which has half an em of line gap.
+#[test]
+fn choice_card_radio_and_icon_sit_on_the_title_line() {
+    let ctx = context();
+    let choices = [SettingsChoice { key: "test:choice:all", icon: Some("warning"), title: "Do everything", summary: "Never asks", detail: "" }];
+    let mut selected = 0;
+    let output = raw_frame(&ctx, egui::RawInput::default(), |ui| {
+        ui.set_width(320.0);
+        settings_choices(ui, &choices, &mut selected);
+    });
+    let title = text_shapes(&output).find(|text| text.galley.text() == "Do everything").unwrap();
+    let line = title.pos.y + title.galley.rows[0].rect().center().y;
+    // The radio is the card's first circle; the icon is drawn after it.
+    let mut radio = None;
+    for clipped in &output.shapes {
+        each_shape(&clipped.shape, &mut |shape| {
+            if let egui::Shape::Circle(circle) = shape
+                && radio.is_none()
+            {
+                radio = Some(circle.center.y);
+            }
+        });
+    }
+    let radio = radio.expect("the card draws its radio");
+    let icon = registry::rect_of("test:choice:all:icon").unwrap().center().y;
+    assert!((radio - line).abs() <= 0.5, "radio at {radio}, title line at {line}");
+    assert!((icon - line).abs() <= 0.5, "icon at {icon}, title line at {line}");
+}
+
 /// #11089: a checkbox grid keeps its columns while the labels fit them, and gives up columns, down
 /// to one, when the widest label would be cut ("..." in a translated dialog).
 #[test]

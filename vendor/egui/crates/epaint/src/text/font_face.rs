@@ -600,6 +600,11 @@ impl FontFace {
         let ascent = (font_data.metrics.ascent * pt_scale_factor).round_ui();
         let descent = (font_data.metrics.descent * pt_scale_factor).round_ui();
         let line_gap = (font_data.metrics.leading * pt_scale_factor).round_ui();
+        // SolidCraft: half the line gap above the text and half below it, as CSS does
+        // ("half-leading"). With all of it below, a face with a large line gap (Hiragino Sans:
+        // half an em) sits at the top of its row, so text centred in a button or a frame sits
+        // high, and a fallback face from it sits above the primary face's baseline.
+        let half_line_gap = (0.5 * font_data.metrics.leading * pt_scale_factor).round_ui();
 
         let scale = font_size * self.tweak.scale * pixels_per_point;
         let px_scale_factor = self.font.px_scale_factor(scale);
@@ -620,7 +625,7 @@ impl FontFace {
             px_scale_factor,
             scale,
             y_offset_in_points,
-            ascent,
+            ascent: ascent + half_line_gap,
             row_height: ascent - descent + line_gap,
             location,
             location_hash,

@@ -97,7 +97,11 @@ fn choice_card(ui: &mut Ui, width: f32, choice: &SettingsChoice<'_>, selected: b
         if selected { Stroke::new(if row { 1.0 } else { 2.0 }, primary) } else { t.control_border_stroke(t.control_border) },
         egui::StrokeKind::Inside,
     );
-    let radio = pos2(rect.left() + t.space_16, if row { rect.center().y } else { rect.top() + t.space_16 });
+    let title_top = rect.top() + t.space_10;
+    // The radio and the icon sit on the middle of the title's first line, whatever the font's
+    // line gap (Hiragino Sans has half an em of it, IBM Plex none).
+    let title_middle = title_top + title_galley.rows.first().map_or(title_galley.size().y / 2.0, |line| line.rect().center().y);
+    let radio = pos2(rect.left() + t.space_16, if row { rect.center().y } else { title_middle });
     ui.painter().circle(
         radio,
         t.space_6,
@@ -115,9 +119,9 @@ fn choice_card(ui: &mut Ui, width: f32, choice: &SettingsChoice<'_>, selected: b
         let body = Rect::from_min_max(pos2(rect.right() - t.space_8 - summary_width, rect.top()), rect.max - vec2(t.space_8, 0.0));
         paint_text(ui, body, choice.summary, FontId::proportional(t.font_small), t.form_dim, false);
     } else {
-        let mut at = pos2(radio.x + t.space_12, rect.top() + t.space_10);
+        let mut at = pos2(radio.x + t.space_12, title_top);
         if let Some(icon) = choice.icon {
-            let cue = Rect::from_min_size(at, vec2(t.space_14, t.space_14));
+            let cue = Rect::from_min_size(pos2(at.x, title_middle - t.space_14 / 2.0), vec2(t.space_14, t.space_14));
             crate::icons::paint_icon(ui.painter(), cue, icon, 1.0);
             solidcraft_ui_registry::publish_rect(&format!("{}:icon", choice.key), cue);
             at.x += icon_width;
