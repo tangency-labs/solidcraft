@@ -36,13 +36,14 @@
 //! those eight points: `|(c - p)·n - ((c - q)·m)(m·n)|` for a corner `c`, `p` and `n` the point
 //! and unit normal of `A`, `q` and `m` those of `B`.
 //!
-//! **Rounding.** The plane test counts its rounding, `gamma(24) (|c - p| + |c - q|)`, and adds it
+//! **Rounding.** The plane test counts its rounding, `gamma(27) (|c - p| + |c - q|)`, and adds it
 //! before the comparison, so a pair is one surface only when every corner surely lies within
-//! `tol`. The count: each normal made unit is within `gamma(4)` of the exact unit normal; `c - p`
-//! rounds once in each coordinate, so `(c - p)·n` is within `gamma(8) |c - p|`; likewise
-//! `(c - q)·m` within `gamma(8) |c - q|`, `m·n` (at most 1 in size) within `gamma(11)`, their
-//! product within `gamma(20) |c - q|`, and the difference adds one rounding of each, `gamma(21)`
-//! in all; the lengths and the sum in the comparison add three more. The rounding grows with the
+//! `tol`. The count: each normal is divided by its largest coordinate before it is squared (so
+//! no finite length overflows or underflows) and made unit, within `gamma(5)` of the exact unit
+//! normal; `c - p` rounds once in each coordinate, so `(c - p)·n` is within `gamma(9) |c - p|`;
+//! likewise `(c - q)·m` within `gamma(9) |c - q|`, `m·n` (at most 1 in size) within
+//! `gamma(13)`, their product within `gamma(23) |c - q|`, and the difference adds one rounding
+//! of each, `gamma(24)` in all; the lengths and the sum in the comparison add three more. The rounding grows with the
 //! distance from each plane's given point to the box: a plane given by a point far from the
 //! faces (the foot of the world origin) is known there only to that. The cone, sphere and torus comparisons are the boolean's, which compare
 //! their computed values with `tol` as they come; their rounding is a few units in the last
@@ -208,7 +209,7 @@ fn planes_agree(a: (Vec3, Vec3), b: (Vec3, Vec3), tol: f64, region: &Extent3d) -
         region.corners().iter().all(|&c| {
             let (to_p, to_q) = (c - p, c - q);
             let gap = (to_p.dot(n) - to_q.dot(m) * m.dot(n)).abs();
-            gap + gamma(24) * (to_p.length() + to_q.length()) <= tol
+            gap + gamma(27) * (to_p.length() + to_q.length()) <= tol
         })
     };
     within(a, b) && within(b, a)
@@ -220,7 +221,11 @@ fn kind(s: &Analytic, tol: f64) -> Result<Kind> {
     let bad = || SolidError::invalid_input(OP, "a surface number that is not finite");
     let at = |v: Vec3| if finite(v) { Ok(v) } else { Err(bad()) };
     let num = |x: f64| if x.is_finite() { Ok(x) } else { Err(bad()) };
-    let dir = |v: Vec3| at(v)?.unitize();
+    // scaled before squaring, so a direction of any finite length is made unit
+    let dir = |v: Vec3| match at(v)?.length_and_unit() {
+        Some((_, unit)) => Ok(unit),
+        None => Err(SolidError::invalid_input(OP, "a direction of zero length")),
+    };
     // the placement whose Z axis is the line through `origin` along `axis`
     let line = |origin: Vec3, axis: Vec3| -> Result<Axis2Placement> {
         let [_, y, z] = dir(axis)?.make_unit_ortho_vectors(None)?;
