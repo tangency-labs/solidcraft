@@ -68,6 +68,12 @@ fn refused(op: &str, wall: Option<f64>, e: SmError) -> KernelError {
         // A face the operation cannot handle, named for what it is (a draft's face that is neither
         // a plane nor a cone or cylinder, #18541).
         SmError::Refused(solidcore_ops::Error::Unsupported(why)) => KernelError::Failed(format!("not supported yet: {op}: {why}")),
+        // A drafted cone or cylinder whose angle closes it within the face, or whose neutral plane
+        // lies at or past its apex (#22807): a geometric refusal, not an unsupported feature.
+        SmError::Refused(solidcore_ops::Error::OffsetRefused {
+            why: why @ (solidcore_ops::OffsetRefusal::DraftConeCloses | solidcore_ops::OffsetRefusal::DraftNeutralPlanePastApex),
+            ..
+        }) => KernelError::Invalid(format!("{op}: {why}")),
         // A tangent blend that cannot follow the moved faces, in solidcore's words (#18575).
         SmError::BlendsNotFollowed { exact: false, why } => KernelError::Failed(format!("not supported yet: SMLib {op}: {why}")),
         SmError::BlendsNotFollowed { exact: true, why } => {
