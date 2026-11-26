@@ -413,6 +413,23 @@ fn origin_plane_names(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
                     }
                 }
             });
+            ui_kit::settings_row_help(ui, app.tr("prefs.origin_display"), app.tr("prefs.origin_display_note"), |ui| {
+                let mut selected = OriginDisplay::ALL.iter().position(|display| *display == app.preferences.hide_origin).unwrap_or(0);
+                let options = OriginDisplay::ALL.map(|display| app.tr(display.label_id()));
+                if ui_kit::segmented(
+                    ui,
+                    &mut selected,
+                    &options,
+                    ui_kit::Segments {
+                        intrinsic: true,
+                        targets: &["prefs:hide_origin:shown", "prefs:hide_origin:automatic", "prefs:hide_origin:hidden"],
+                        ..Default::default()
+                    },
+                ) && let Some(display) = OriginDisplay::ALL.get(selected)
+                {
+                    app.preferences.hide_origin = *display;
+                }
+            });
             // (#21191) how large the planes' squares are drawn, as a share of their default size
             ui_kit::row(ui, app.tr("prefs.origin_plane_size"), |ui| {
                 let response = ui_kit::slider(
@@ -424,9 +441,6 @@ fn origin_plane_names(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
                 crate::scenario::publish_target("prefs:origin_plane_scale", response.rect);
             });
         });
-        let response = setting::hide_origin(app, ui);
-        crate::scenario::publish_target("prefs:hide_origin", response.rect);
-        crate::scenario::publish_target("dialog:Hide origin by default", response.rect);
         let response = setting::origin_axes_across_view(app, ui).backing_on_hover_text(app.tr("prefs.origin_axes_across_view_help"));
         crate::scenario::publish_target("prefs:origin_axes_across_view", response.rect);
         let response = setting::browser_hover_shows_origin(app, ui).backing_on_hover_text(app.tr("prefs.browser_hover_shows_origin_help"));

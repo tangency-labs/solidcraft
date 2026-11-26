@@ -385,6 +385,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::FrameEndCap { .. } => "end_cap",
         FeatureKind::FrameGusset { .. } => "gusset",
         FeatureKind::FrameMember { .. } => "frame_member",
+        FeatureKind::FrameCope { .. } => "frame_cope",
         FeatureKind::FrameMemberTurn { .. } => "rotate_member",
         FeatureKind::FrameTrim { .. } => "frame_trim",
         FeatureKind::FramePlate { .. } => "frame_plate",
