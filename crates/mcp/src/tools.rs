@@ -508,22 +508,27 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             "Open a .sc design file (or a .solidcraft one from an earlier release), a STEP file (.step/.stp: a new design whose bodies come from the file, as an \
              Import base feature in a component named after the file; an assembly's parts become nested components) or a \
              mesh (.3mf/.stl/.obj/.glb/.gltf: mesh bodies in such a component; a glTF file's nodes become nested components and its \
-             materials appearances); the result reports the component (id, component_name). Replaces the current design; insert into it \
+             materials appearances) or a KiCad board (.kicad_pcb, or the project's .kicad_pro: a new design with the board as a solid, its copper, \
+             silkscreen and component models in a component named after it); the result reports the component (id, component_name). Replaces the current design; insert into it \
              instead with the file.insert_step (STEP) or file.insert_mesh (mesh) commands. A STEP file from a system \
              that has Y up opens lying on its back: `up: \"y\"` turns its component a quarter turn about X (Y becomes Z). glTF is Y up, \
              so it is turned by default (`up: \"z\"` keeps its axes). `names` picks what the bodies are named after when the solids' own names say nothing useful. \
              An OpenUSD file (.usd/.usda/.usdc/.usdz) opens as meshes, turned to Z up when the stage says Y is up; `geometry: \"exact\"` brings its exact B-rep \
              where it has one (as SolidCraft's own OpenUSD exports carry) as B-rep bodies of an Import feature instead. \
              A file of another kind opens with an installed importer plugin that claims its extension (the `<plugin>.<entry>` tools \
-             titled \"Open .ext files with …\" list them).",
+             titled \"Open .ext files with …\" list them). \
+             A KiCad board takes the options `thickness`, `components`, `copper`, `silkscreen`, `color` and `representation`, the same as \
+             `execute` with `doc.open` takes; a component model that could not be read is named in the reply's warnings, with why. A model is \
+             read from the board's folder or from KiCad's own 3D model library on this machine; a model in another folder outside the agent's \
+             folders is refused with the folder named, and the user allows it with `--allow-path`.",
             object(
-                json!({
-                    "path": string("Path to a .sc (or .solidcraft), .step/.stp, .3mf, .stl, .obj, .glb, .gltf or OpenUSD (.usd, .usda, .usdc, .usdz) file"),
+                open_properties(json!({
+                    "path": string("Path to a .sc (or .solidcraft), .step/.stp, .3mf, .stl, .obj, .glb, .gltf, OpenUSD (.usd, .usda, .usdc, .usdz) or KiCad board (.kicad_pcb, or the project's .kicad_pro) file"),
                     "up": {"type": "string", "enum": ["z", "y"], "description": "STEP, glTF and OpenUSD only. z keeps the file's axes; y: the file has Y up, so its bodies are turned to stand Z up. Default: z for STEP, y for glTF, the stage's own up axis for OpenUSD"},
                     "geometry": {"type": "string", "enum": ["meshes", "exact"], "description": "OpenUSD only. meshes (default): its meshes as mesh bodies; exact: its exact B-rep where it has one as B-rep bodies of an Import feature, and only its meshes with no B-rep as mesh bodies"},
                     "new_tab": {"type": "boolean", "description": "Open the file in a tab of its own, after the active one, and show it, even when the active design is empty, so the design that was open stays open. Desktop app only. Default: false: a design that is not empty is kept in its tab and the file gets one, an empty one is replaced"},
                     "names": {"type": "string", "enum": ["auto", "solid", "product", "instance"], "description": "STEP, IGES, FreeCAD and Rhino. auto (default): keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's"},
-                }),
+                })),
                 &["path"],
             ),
             Effect::Files,
@@ -1010,6 +1015,24 @@ fn command_distance(a: &str, b: &str) -> usize {
     row.last().copied().unwrap_or(a.len())
 }
 
+/// The properties of the `open` tool: `own`, and the KiCad board options, which are `doc.open`'s
+/// own (the engine's `kicad_open_properties`, not a copy).
+fn open_properties(mut own: Value) -> Value {
+    if let Some(map) = own.as_object_mut() {
+        map.extend(solidcraft_engine::schema::file::kicad_open_properties());
+    }
+    own
+}
+
+/// The arguments of `open` that `doc.open` takes.
+fn open_params(a: &Map<String, Value>) -> Value {
+    let keys: Vec<&str> = ["path", "new_tab", "up", "names", "geometry"]
+        .into_iter()
+        .chain(solidcraft_engine::schema::file::KICAD_OPEN_OPTIONS.iter().copied())
+        .collect();
+    pick(a, &keys)
+}
+
 fn pick(a: &Map<String, Value>, keys: &[&str]) -> Value {
     Value::Object(keys.iter().filter_map(|k| a.get(*k).filter(|v| !v.is_null()).map(|v| (k.to_string(), v.clone()))).collect())
 }
@@ -1215,7 +1238,7 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         "undo" => exec(b, "edit.undo", json!({})),
         "redo" => exec(b, "edit.redo", json!({})),
         "new_design" => exec(b, "file.new", pick(a, &["name", "new_tab"])),
-        "open" => exec(b, "doc.open", pick(a, &["path", "new_tab", "up", "names", "geometry"])),
+        "open" => exec(b, "doc.open", open_params(a)),
         "save" => exec(b, "file.save", pick(a, &["path", "format", "overwrite"])),
         other => Err(format!("unknown tool `{other}`")),
     }
@@ -1445,7 +1468,7 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
             ),
         ),
         "save" => mapped("file.save", pick(a, &["path", "format", "overwrite"])),
-        "open" => mapped("doc.open", pick(a, &["path", "new_tab", "up", "names", "geometry"])),
+        "open" => mapped("doc.open", open_params(a)),
         "new_design" => mapped("file.new", pick(a, &["name", "new_tab"])),
         "crash_reports" => match a.get("id") {
             Some(_) => mapped("diagnostics.crash_report", pick(a, &["id"])),

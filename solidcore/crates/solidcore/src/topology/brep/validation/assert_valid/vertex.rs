@@ -9,7 +9,8 @@
 //!
 //! Deviations: the vertex's local tolerance bounds its face gaps, with the body's
 //! intersection tolerance as a floor; a tolerance past twice Test #82's limit excuses
-//! nothing (see `seams`).
+//! nothing (see `seams`). Not upstream: one vertex's check solves each use's UV point for
+//! its sector tests once while the B-rep is unwritten (`vertexuse::UvPoints`).
 
 use super::{base, class, seams, Cx};
 use crate::error::{EntityRef, Result};
@@ -54,9 +55,11 @@ pub(super) fn vertex(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, v: VertexId)
     let ok = !cx.rep.need(0) || seams::vertex_check_pointers(k, b, v)?;
     rtn &= cx.rep.this_bool(b, C, this, 2, ok)?;
 
-    // Check all connected Vertexuses
+    // Check all connected Vertexuses; not upstream: the UV points their sector tests
+    // solve are kept while the B-rep is unwritten (`tvu::UvPoints`)
+    let mut points = tvu::UvPoints::default();
     for vu in b.vertex(v)?.vertexuses.clone() {
-        rtn &= vertexuse(k, b, cx, vu, geo)?;
+        rtn &= vertexuse(k, b, cx, vu, geo, &mut points)?;
     }
 
     // all done
@@ -70,6 +73,7 @@ fn vertexuse(
     cx: &mut Cx<'_>,
     vu: VertexuseId,
     geo: bool,
+    points: &mut tvu::UvPoints,
 ) -> Result<bool> {
     const C: i64 = class::VERTEXUSE;
     let this = EntityRef::Vertexuse(vu);
@@ -95,7 +99,7 @@ fn vertexuse(
     }
 
     // 5: Vertexuse->Sector contains a FaceSrf->Seam not marked by SeamEdge
-    let missing_seam = geo && tvu::is_sector_missing_seam(k, b, vu, true)?.missing;
+    let missing_seam = geo && tvu::is_sector_missing_seam_with(k, b, vu, true, points)?.missing;
     rtn &= cx
         .rep
         .this_bool(b, C, this, 5, !cx.rep.need(0) || !missing_seam)?;

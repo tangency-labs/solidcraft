@@ -4,8 +4,10 @@
 //! ([`Plane`]) and planar profiles ([`Seg2`], [`Loop2`], [`Region2`]), and STEP's Part 21
 //! exchange structure as parsed from a file with the units of its representation contexts and
 //! its Part 42 curves and surfaces ([`step`]), a sheet metal part's surfaces and its flat
-//! pattern ([`develop`]), frame-stock paths, trimmed members and gussets ([`frame`]), and how
+//! pattern ([`develop`]), frame-stock paths, trimmed members and gussets ([`frame`]), curve
+//! queries' answers ([`curve_query`]), planar projections and outlines ([`projection`]), and how
 //! exactly a drawn curve stands for its source ([`CurveAccuracy`]).
+//! ([`CurveAccuracy`]).
 //!
 //! The record computes no geometric quantity: no square roots, trigonometry, dot or cross
 //! products, normalising or solves (clippy `disallowed-methods`, this crate's `clippy.toml`). It
@@ -22,6 +24,7 @@ pub mod accuracy;
 #[allow(missing_docs)]
 pub mod brep;
 pub mod cell_grid;
+pub mod curve_query;
 // A sheet metal part's surfaces are SolidCraft's saved-model wire format, carried over as it is:
 // each type says what it is, and its fields are the names it says.
 #[allow(missing_docs)]
@@ -33,6 +36,9 @@ pub mod plane;
 // is and its fields are the names in its formula.
 #[allow(missing_docs)]
 pub mod profile;
+pub mod projection;
+pub mod round_face;
+pub mod shaft_spline;
 pub mod step;
 pub mod vec;
 
