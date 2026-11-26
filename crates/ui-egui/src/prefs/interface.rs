@@ -563,6 +563,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 "history_in_browser",
             );
             layout_check(ui, app.tr("parts_library.show"), app.tr("parts_library.show_help"), &mut app.preferences.library_open, "library_open");
+            layout_check(
+                ui,
+                app.tr("parts_library.row_layout"),
+                app.tr("parts_library.row_layout_help"),
+                &mut app.preferences.parts_library_row,
+                "parts_library_row",
+            );
             // The Browser tree panel can be closed from its own host menu; this control brings it
             // back (#16058).
             let browser_label = app.tr("prefs.layout_page.browser_tree");

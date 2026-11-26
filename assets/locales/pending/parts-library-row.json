@@ -1,0 +1,26 @@
+{
+  "en": {
+    "parts_library.row_layout": "Parts library: row layout when wide",
+    "parts_library.row_layout_help": "When the library is more than 1.5 times wider than tall, its parts sit in one scrolling row. Docked at the side it fills the column's height; drag its bottom edge up to shorten it, and Reset height restores it. Off: the grid always, at the content height, as before."
+  },
+  "ar": {
+    "parts_library.row_layout": "مكتبة الأجزاء: تخطيط صف عند العرض",
+    "parts_library.row_layout_help": "عندما تكون المكتبة أعرض من ارتفاعها بأكثر من 1.5 مرة، تُعرض أجزاؤها في صف واحد قابل للتمرير. عند الإرساء على الجانب تملأ ارتفاع العمود؛ اسحب حافتها السفلية لأعلى لتقصيرها، وتعيد إعادة الضبط الارتفاع. إيقاف: الشبكة دائماً وبارتفاع المحتوى كما كان."
+  },
+  "he": {
+    "parts_library.row_layout": "ספריית חלקים: תצוגת שורה ברוחב",
+    "parts_library.row_layout_help": "כשהספרייה רחבה מגובהה ביותר מפי 1.5, החלקים שלה מוצגים בשורה אחת הניתנת לגלילה. כשהיא מעוגנת בצד היא ממלאת את גובה העמודה; גררו את קצהה התחתון למעלה כדי לקצר אותה, ואיפוס גובה מחזיר אותה. כבוי: תמיד רשת, בגובה התוכן, כבעבר."
+  },
+  "ja": {
+    "parts_library.row_layout": "パーツライブラリ: 横に広い時は行表示",
+    "parts_library.row_layout_help": "ライブラリの幅が高さの1.5倍を超えると、パーツは横スクロールできる1行に並びます。側面にドックすると列の高さいっぱいになり、下端を上にドラッグして短くできます。高さのリセットで元に戻ります。オフ: 常にグリッドで、以前どおりコンテンツの高さになります。"
+  },
+  "vi": {
+    "parts_library.row_layout": "Thư viện chi tiết: bố cục hàng khi rộng",
+    "parts_library.row_layout_help": "Khi thư viện rộng hơn chiều cao của nó 1,5 lần, các chi tiết nằm trên một hàng cuộn ngang. Khi gắn ở cạnh, thư viện lấp đầy chiều cao cột; kéo cạnh dưới lên để thu ngắn, và Đặt lại chiều cao sẽ khôi phục. Tắt: luôn là lưới, với chiều cao theo nội dung như trước."
+  },
+  "zh": {
+    "parts_library.row_layout": "零件库：较宽时以行布局",
+    "parts_library.row_layout_help": "当零件库宽度超过其高度的 1.5 倍时，零件排成一行并可横向滚动。停靠在侧边时，它会填满整列高度；向上拖动其下边缘可缩短，“重置高度”可恢复。关闭：始终为网格，并按内容高度显示，与以前相同。"
+  }
+}
