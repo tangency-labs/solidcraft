@@ -501,7 +501,7 @@ theme_keys! {
         file_dim, file_recovery_well, file_background, file_surface, file_border, file_image_tint, file_rail, file_rail_ink, file_rail_hover,
         file_primary, file_primary_ink, file_primary_border, file_recovery, file_recovery_ink, file_recovery_border,
         app_bar, toolbar, panel, panel_header, border, text, text_dim, accent, accent_soft, sketch_accent, error, warning,
-        icon, timeline, hover, sel_face, sel_edge, sel_edge_rim, hover_edge, hover_edge_halo, sel_profile,
+        icon, timeline, hover, sel_face, sel_edge, sel_edge_rim, hover_edge, hover_edge_halo, hover_edge_lit, sel_profile,
         sel_profile_edge, hover_profile, hover_profile_edge, sel_vertex, origin_plane, origin_plane_edge, origin_plane_hover,
         origin_point, axis_x, axis_y, axis_z, construction_plane, construction_geom, body, body_edge, isoparm, manipulator, joint_manipulator,
         joint_axis, preview_add, preview_new, preview_sketch, preview_cut, navigator_face, navigator_border, navigator_text, navigator_hover, viewport_top,
@@ -515,7 +515,7 @@ theme_keys! {
         app_bar_hover_button, app_bar_hover_strong, app_bar_tab_active,
         form_ink, form_dim, form_primary, form_primary_fill, form_error, form_error_fill, form_success, form_success_fill, dialog_body, dialog_footer, dialog_rule, control_fill, control_border, dialog_label, selected_ink, selected_bg,
     ],
-    many: [continuity, logo, library_highlights, section_hatch],
+    many: [continuity, logo, library_highlights, section_hatch, paper_lines, paper_dark_lines],
     icons: [highlight, agent, marker_halo],
 }
 

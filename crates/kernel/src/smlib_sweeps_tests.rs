@@ -664,3 +664,146 @@ fn a_ring_swept_round_a_cylinders_rim_edge_keeps_its_hole_empty() {
     let disc = smlib_sweeps::sweep(&plane, &pieces_of(&region(Loop2::circle(Vec2::ZERO, 2.0))), &path, false).unwrap();
     close(volume(&disc), 2.0 * PI * PI * 10.0 * 4.0, 1e-6, "solid ring round the rim");
 }
+
+#[test]
+fn fast_cylinder_matches_extrude_geometry_seam_and_roles() {
+    use solidcore_record::brep::Surface;
+    let cases = [
+        ("positive Z", Vec3::ZERO, Vec3::Z, 5.0, 12.0),
+        ("negative Z", Vec3::new(3.0, -4.0, 7.0), Vec3::Z, 6.0, -15.0),
+        ("tilted positive", Vec3::new(10.0, -20.0, 30.0), Vec3::new(1.0, 2.0, 3.0), 4.5, 18.0),
+        ("tilted negative", Vec3::new(-8.0, 12.0, -5.0), Vec3::new(-2.0, 1.0, 0.5), 3.25, -9.5),
+    ];
+    let face_key = |body: &Body, plane: &Plane, lo: f64, hi: f64, i: usize| -> &'static str {
+        match &body.record().faces[i].surface {
+            Surface::Cylinder { .. } => "wall",
+            Surface::Plane { origin, .. } | Surface::PlaneThrough { origin, .. } => {
+                let h = plane.height(crate::body::v3(*origin));
+                if (h - lo).abs() < (h - hi).abs() { "low" } else { "high" }
+            }
+            other => panic!("unexpected cylinder surface: {other:?}"),
+        }
+    };
+    for (name, base, axis, radius, height) in cases {
+        let plane = Plane::from_normal(base, axis).unwrap();
+        let (lo, hi) = if height >= 0.0 { (0.0, height) } else { (height, 0.0) };
+        let abs_h = hi - lo;
+        let r = region(Loop2::circle_from(Vec2::ZERO, radius, crate::build::SEAM_ANGLE));
+        let cyl = crate::cylinder(base, axis, radius, height).unwrap();
+        let ext = crate::extrude(&plane, &[r], 0.0, height).unwrap().pop().unwrap();
+
+        assert_eq!(cyl.validity(), Vec::<String>::new(), "{name}: validity");
+        assert_eq!(cyl.face_count(), 3, "{name}: 3 faces");
+        assert_eq!(cyl.edge_count(), 3, "{name}: 3 edges");
+        assert_eq!(cyl.record().vertices.len(), 2, "{name}: 2 vertices");
+
+        let cm = crate::measure(&cyl).unwrap();
+        let em = crate::measure(&ext).unwrap();
+        close(cm.volume, PI * radius * radius * abs_h, 1e-8, name);
+        close(cm.area, 2.0 * PI * radius * (radius + abs_h), 1e-8, name);
+        assert!(cm.bbox.min.dist(em.bbox.min) < 1e-6 && cm.bbox.max.dist(em.bbox.max) < 1e-6, "{name}: bbox {:?} vs {:?}", cm.bbox, em.bbox);
+
+        // Seam direction lies at SEAM_ANGLE in `plane` on both the cylindrical surface and its vertices.
+        let seam_dir = plane.x * crate::build::SEAM_ANGLE.cos() + plane.y * crate::build::SEAM_ANGLE.sin();
+        let cyl_faces: Vec<_> = cyl
+            .record()
+            .faces
+            .iter()
+            .filter_map(|f| match &f.surface {
+                Surface::Cylinder { frame, radius: sr } => Some((frame, *sr)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(cyl_faces.len(), 1, "{name}: 1 cylindrical face");
+        let (frame, sr) = cyl_faces[0];
+        assert!((sr - radius).abs() < 1e-9, "{name}: surface radius {sr} vs {radius}");
+        assert!(crate::body::v3(frame.x_axis).dot(seam_dir) > 1.0 - 1e-9, "{name}: seam x_axis");
+        let want_v0 = plane.offset(lo).origin + seam_dir * radius;
+        let want_v1 = plane.offset(hi).origin + seam_dir * radius;
+        for want in [want_v0, want_v1] {
+            assert!(
+                cyl.record().vertices.iter().any(|v| crate::body::v3(v.point).dist(want) < 1e-7),
+                "{name}: seam vertex {want:?} missing from {:?}",
+                cyl.record().vertices
+            );
+        }
+
+        // Exact history and FaceSource parity with `extrude`.
+        let ch = cyl.history().expect("cylinder history");
+        let eh = ext.history().expect("extrude history");
+        crate::history::BodyHistory::check(ch, &cyl, &[]).unwrap();
+        assert_eq!(origins(&cyl), origins(&ext), "{name}: sorted origins");
+        let cs = cyl.face_sources().expect("cylinder sources");
+        let es = ext.face_sources().expect("extrude sources");
+        for (ci, c_source) in cs.iter().enumerate() {
+            let key = face_key(&cyl, &plane, lo, hi, ci);
+            let ei = (0..ext.face_count()).find(|&j| face_key(&ext, &plane, lo, hi, j) == key).expect("matching extrude face");
+            assert_eq!(ch.faces[ci], eh.faces[ei], "{name}: face {key} history");
+            assert_eq!(c_source, &es[ei], "{name}: face {key} source");
+        }
+
+        // Certificate upgrade succeeds and certifies both caps with outward normals.
+        let certified = cyl.with_cylinder_certificate(42).unwrap();
+        let cert_sources = certified.face_sources().expect("certified sources");
+        let caps: Vec<(bool, Plane)> = cert_sources
+            .iter()
+            .filter_map(|s| match s {
+                Some(FaceSource::CylinderCap { producer: 42, high, plane }) => Some((*high, *plane)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(caps.len(), 2, "{name}: 2 certified caps");
+        for (high, cap_plane) in caps {
+            let want_normal = if high { plane.normal() } else { -plane.normal() };
+            assert!(cap_plane.normal().dot(want_normal) > 1.0 - 1e-9, "{name}: cap {high} normal");
+        }
+    }
+}
+
+#[test]
+fn fast_cylinder_rejects_invalid_inputs() {
+    assert!(crate::cylinder(Vec3::ZERO, Vec3::ZERO, 5.0, 10.0).is_err());
+    assert!(crate::cylinder(Vec3::ZERO, Vec3::new(f64::NAN, 0.0, 1.0), 5.0, 10.0).is_err());
+    assert!(crate::cylinder(Vec3::new(f64::INFINITY, 0.0, 0.0), Vec3::Z, 5.0, 10.0).is_err());
+    for bad_r in [0.0, -2.0, 1e-6, 1e-5, f64::NAN, f64::INFINITY, 1e7] {
+        assert!(crate::cylinder(Vec3::ZERO, Vec3::Z, bad_r, 10.0).is_err(), "radius {bad_r}");
+    }
+    for bad_h in [0.0, 5e-7, -5e-7, f64::NAN, f64::INFINITY, 1e7, -1e7] {
+        assert!(crate::cylinder(Vec3::ZERO, Vec3::Z, 5.0, bad_h).is_err(), "height {bad_h}");
+    }
+}
+
+#[test]
+fn fast_cylinder_supports_booleans_fillet_display_plan_and_validation() {
+    let block = crate::box_solid(Vec3::new(-15.0, -15.0, 0.0), Vec3::new(15.0, 15.0, 10.0)).unwrap();
+    let bore = crate::cylinder(Vec3::new(0.0, 0.0, -2.0), Vec3::Z, 4.0, 14.0).unwrap();
+    let drilled = crate::boolean(&block, &bore, crate::BoolOp::Cut).unwrap().unwrap();
+    close(volume(&drilled), 30.0 * 30.0 * 10.0 - PI * 16.0 * 10.0, 1e-6, "cut bore");
+
+    let boss = crate::cylinder(Vec3::new(8.0, 0.0, 10.0), Vec3::Z, 3.0, 8.0).unwrap();
+    let joined = crate::boolean(&block, &boss, crate::BoolOp::Union).unwrap().unwrap();
+    close(volume(&joined), 30.0 * 30.0 * 10.0 + PI * 9.0 * 8.0, 1e-6, "union boss");
+
+    let (big, h, r) = (10.0, 12.0, 2.0);
+    let puck = crate::cylinder(Vec3::ZERO, Vec3::Z, big, h).unwrap();
+    let rounded = crate::fillet(&puck, &[Vec3::new(0.0, big, h)], r).unwrap();
+    let pappus = PI * big * big * h - 2.0 * PI * (big - r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI))) * (1.0 - PI / 4.0) * r * r;
+    close(volume(&rounded), pappus, 1e-6, "fillet rim");
+
+    let plan = puck.mesh_plan(&crate::display_tolerance(puck.size())).unwrap();
+    let mesh = puck.mesh_of(&plan).unwrap();
+    assert!(!mesh.triangles.is_empty(), "display plan produces triangles");
+    close(mesh.measure().volume, PI * big * big * h, 1e-2, "display mesh volume");
+
+    for test_h in [10.0, -10.0] {
+        let (res, deferred) = crate::validating(crate::Validation::EachStep, || crate::cylinder(Vec3::ZERO, Vec3::new(1.0, 1.0, 2.0), 5.0, test_h));
+        assert!(!deferred);
+        assert!(res.is_ok(), "EachStep h={test_h}: {:?}", res.err());
+
+        let (res, deferred) =
+            crate::validating(crate::Validation::EachFeature, || crate::cylinder(Vec3::ZERO, Vec3::new(1.0, 1.0, 2.0), 5.0, test_h));
+        assert!(deferred);
+        let body = res.unwrap();
+        crate::check_kept(&body).unwrap();
+    }
+}

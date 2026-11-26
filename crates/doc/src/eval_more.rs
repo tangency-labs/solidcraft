@@ -11,9 +11,13 @@ use solidcraft_geom::{Aabb3, ArcMap, Ring};
 
 pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
     match &f.kind {
-        FeatureKind::Emboss { sketch, profiles, depth, deboss, targets, face } => {
+        FeatureKind::Emboss { sketch, profiles, depth, deboss, targets, face, offset_x, offset_y, angle } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?;
-            let regions = select_profiles(ss, profiles)?;
+            // The profiles are placed before anything is built from them (#20386), so the wrap, the
+            // projection and the plain emboss all get the offsets and the angle the same way.
+            let given = |e: &Option<crate::Expr>, kind: Kind| e.as_deref().map_or(Ok(0.0), |e| val(vals, e, kind));
+            let shift = Vec2::new(given(offset_x, Kind::Length)?, given(offset_y, Kind::Length)?);
+            let regions = emboss_placement(select_profiles(ss, profiles)?, shift, given(angle, Kind::Angle)?)?;
             let d = val(vals, depth, Kind::Length)?;
             if !(d > 0.0) {
                 return Err(DocError::Invalid("the emboss depth must be positive".into()));
@@ -815,6 +819,7 @@ fn convert_rule(rv: &crate::sheet::RuleValues) -> crate::ConvertRule {
         corner_relief_size: rv.corner_relief,
         relief_width: rv.relief_width,
         relief_depth: rv.relief_depth,
+        bend_relief: rv.bend_relief_shape,
     }
 }
 
@@ -862,7 +867,8 @@ fn convert_to_sheet(
             let (read, _) = crate::sheet_surface_cuts::engraved(&as_modelled, &built, &mb.body)?;
             let mut sheet = sheet;
             sheet.recesses = read.recesses;
-            let solid = if sheet.recesses.is_empty() { solid } else { sheet.build()? };
+            sheet.countersinks = read.countersinks;
+            let solid = if sheet.recesses.is_empty() && sheet.countersinks.is_empty() { solid } else { sheet.build()? };
             (sheet, solid)
         }
     };
@@ -1300,9 +1306,19 @@ pub(super) fn sheet_eval(
             st.surface_sheets.push(sheet);
             Ok(())
         }
-        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, height_from, corner_relief_shape, corner_relief }
-            if surface_flange_sheet(st, body, f, edges).is_some() =>
-        {
+        FeatureKind::SheetFlange {
+            edges,
+            height,
+            angle,
+            radius,
+            position,
+            flip,
+            body,
+            height_from,
+            corner_relief_shape,
+            corner_relief,
+            bend_relief_shape,
+        } if surface_flange_sheet(st, body, f, edges).is_some() => {
             // The sheet with a free edge at the first pick; else, for an edge split into
             // segments, the one with a curved edge there, where the split is refused for what it
             // is (see `surface_flange_sheet`).
@@ -1377,6 +1393,14 @@ pub(super) fn sheet_eval(
                         },
                     )),
                 };
+            // The bend relief these flanges ask for in place of the rule's, at their bends' free ends.
+            let own_bend = match bend_relief_shape {
+                Some(name) => Some(
+                    sheet::BendReliefShape::parse(name)
+                        .ok_or_else(|| DocError::Invalid(format!("unknown bend relief shape `{name}` (rectangular, obround or tear)")))?,
+                ),
+                None => None,
+            };
             let n0 = sk.sheet.panels.len();
             let several = picks.len() > 1;
             // Each edge's error names it, among several.
@@ -1401,6 +1425,9 @@ pub(super) fn sheet_eval(
                     for &joint in &joints {
                         sk.corner_reliefs.push((joint, relief, size, order));
                     }
+                }
+                if let Some(shape) = own_bend {
+                    sk.bend_reliefs.extend(joints.iter().map(|&joint| (joint, shape)));
                 }
                 made.push(joints);
             }
@@ -2034,6 +2061,7 @@ pub(super) fn surface_prism_cut(
                 !(a.max.x < b.min.x || b.max.x < a.min.x || a.max.y < b.min.y || b.max.y < a.min.y)
             };
             if out.recesses.iter().any(|r| r.panel == p && near(&r.region))
+                || out.countersinks.iter().any(|c| c.panel == p && near(&Region2 { outer: c.outer_loop(), holes: Vec::new() }))
                 || out.loose.iter().any(|l| l.panel == p && near(&l.region))
                 || !out.sheet.cuts.is_empty()
             {
@@ -2248,7 +2276,12 @@ pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[super:
                 let (s, e) = (o + d * (u0 - p0), o + d * (u1 + p1));
                 Loop2::polygon(&[s - side, e - side, e + side, s + side])
             };
-            if out.recesses.iter().any(|r| r.panel == p && !crate::sheet_surface::loop_clear_of(&footprint, &r.region)) {
+            if out.recesses.iter().any(|r| r.panel == p && !crate::sheet_surface::loop_clear_of(&footprint, &r.region))
+                || out
+                    .countersinks
+                    .iter()
+                    .any(|c| c.panel == p && !crate::sheet_surface::loop_clear_of(&footprint, &Region2 { outer: c.outer_loop(), holes: Vec::new() }))
+            {
                 return Ok(Vec::new());
             }
             if !out.sheet.cuts.is_empty() {
@@ -3268,5 +3301,47 @@ mod tests {
                 && matches!(arc, Seg2::Arc { center, radius, .. } if (*center - Vec2::new(40.0, -30.0)).len() < 1e-12 && *radius == 10.0)
         );
         assert!((arc.mid() - Vec2::new(40.0, -40.0)).len() < 1e-9, "{:?}", arc.mid());
+    }
+
+    /// An Emboss's placement (#20386) turns the picked regions about the middle of their bounds
+    /// and then shifts them along the sketch's own axes. A hole goes with its outline, an arc
+    /// stays an arc, a shift alone is exact, and with nothing asked the regions come back as
+    /// they are.
+    #[test]
+    fn an_emboss_placement_turns_about_the_middle_of_the_bounds_then_shifts() {
+        let square =
+            |x: f64, y: f64| Loop2::polygon(&[Vec2::new(x, y), Vec2::new(x + 10.0, y), Vec2::new(x + 10.0, y + 10.0), Vec2::new(x, y + 10.0)]);
+        // Two squares over x 0..30 and y 0..10, the first with a round hole: the middle is (15, 5).
+        let regions = vec![
+            Region2 { outer: square(0.0, 0.0), holes: vec![Loop2::circle(Vec2::new(5.0, 5.0), 2.0)] },
+            Region2 { outer: square(20.0, 0.0), holes: vec![] },
+        ];
+        assert_eq!(emboss_placement(regions.clone(), Vec2::ZERO, 0.0).unwrap(), regions);
+        // A quarter turn about (15, 5) takes (x, y) to (20 - y, x - 10); then 100 along x.
+        let placed = emboss_placement(regions.clone(), Vec2::new(100.0, 0.0), std::f64::consts::FRAC_PI_2).unwrap();
+        let want = |p: Vec2| Vec2::new(120.0 - p.y, p.x - 10.0);
+        assert_eq!(placed.len(), 2);
+        for (was, now) in regions.iter().zip(&placed) {
+            assert_eq!(was.holes.len(), now.holes.len());
+            for (a, b) in was.loops().zip(now.loops()) {
+                assert_eq!(a.segs.len(), b.segs.len());
+                for (s, t) in a.segs.iter().zip(&b.segs) {
+                    assert_eq!(std::mem::discriminant(s), std::mem::discriminant(t), "{s:?} became {t:?}");
+                    for (p, q) in [(s.start(), t.start()), (s.mid(), t.mid()), (s.end(), t.end())] {
+                        assert!((want(p) - q).len() < 1e-12, "{p:?} went to {q:?}");
+                    }
+                }
+            }
+        }
+        // A whole turn more is the same placement.
+        let again = emboss_placement(regions.clone(), Vec2::new(100.0, 0.0), 2.5 * std::f64::consts::PI).unwrap();
+        assert!((again[1].outer.segs[0].start() - placed[1].outer.segs[0].start()).len() < 1e-9);
+        let shifted = emboss_placement(regions.clone(), Vec2::new(3.0, -4.0), 0.0).unwrap();
+        assert_eq!(shifted[1].outer.segs[0].start(), Vec2::new(23.0, -4.0));
+        assert!(
+            matches!(shifted[0].holes[0].segs[0], Seg2::Arc { center, radius, start, .. } if center == Vec2::new(8.0, 1.0) && radius == 2.0 && start == 0.0)
+        );
+        assert!(emboss_placement(regions.clone(), Vec2::new(f64::NAN, 0.0), 0.0).is_err());
+        assert!(emboss_placement(regions, Vec2::ZERO, f64::INFINITY).is_err());
     }
 }

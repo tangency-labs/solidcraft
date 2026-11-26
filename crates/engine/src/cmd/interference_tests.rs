@@ -323,3 +323,23 @@ fn a_sliver_shared_by_two_large_envelopes_is_listed_not_cleared() {
         "{env}"
     );
 }
+
+/// A shared part bigger than the smaller body, or reaching outside where the two bodies' boxes
+/// overlap, can't be theirs (#21553): a plate of 200 x 100 x 30 mm and a pin of 8 x 20 mm seated
+/// in it, whose intersection came back as the whole plate. A real overlap inside the pin passes.
+#[test]
+fn a_shared_part_bigger_than_the_smaller_body_is_not_an_overlap() {
+    use solidcore_record::Vec3;
+    use solidcraft_geom::Aabb3;
+    let bounds = |min: [f64; 3], max: [f64; 3]| Aabb3 { min: Vec3::new(min[0], min[1], min[2]), max: Vec3::new(max[0], max[1], max[2]) };
+    let plate_box = bounds([0.0, 0.0, 0.0], [200.0, 100.0, 30.0]);
+    let pin_box = bounds([96.0, 46.0, 10.0], [104.0, 54.0, 30.0]);
+    let (plate, pin) = ((599_000.0, &plate_box), (1005.3, &pin_box));
+    let whole = super::overlap_out_of_bounds(599_000.0, &plate_box, plate, pin).unwrap_or_default();
+    assert!(whole.contains("more than the smaller body"), "{whole}");
+    let outside = super::overlap_out_of_bounds(500.0, &bounds([90.0, 46.0, 10.0], [104.0, 54.0, 30.0]), plate, pin).unwrap_or_default();
+    assert!(outside.contains("reaches outside"), "{outside}");
+    assert_eq!(super::overlap_out_of_bounds(200.0, &bounds([96.0, 46.0, 25.0], [104.0, 54.0, 30.0]), plate, pin), None);
+    // The pin entirely inside the plate shares all of itself: that is the smaller body, not more.
+    assert_eq!(super::overlap_out_of_bounds(1005.3, &pin_box, plate, pin), None);
+}
