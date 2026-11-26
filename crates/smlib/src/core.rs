@@ -12,6 +12,7 @@ use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::{CancelToken, Kernel, KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{PropertyAttributes, brep_volume};
 use solidcore::primitive::api_primitives as primitives;
+use solidcore::topology::Brep;
 
 use crate::{Error, Result};
 
@@ -298,7 +299,7 @@ pub(crate) fn answer<T>(r: std::result::Result<T, solidcore::SolidError>) -> std
 pub(crate) fn with_body<T: dump::Answer>(
     call: &'static str,
     body: &Body,
-    f: impl FnOnce(&mut Kernel, &mut solidcore::topology::Brep) -> std::result::Result<T, solidcore::SolidError>,
+    f: impl FnOnce(&mut Kernel, &mut Brep) -> std::result::Result<T, solidcore::SolidError>,
 ) -> Result<T> {
     // A body a panic interrupted may be half-edited: it is never used again.
     if body.kernel_left_unfinished() {
@@ -313,7 +314,7 @@ pub(crate) fn with_body<T: dump::Answer>(
 pub(crate) fn with_own_body<T: dump::Answer>(
     call: &'static str,
     body: &Body,
-    f: impl FnOnce(&mut Kernel, &mut solidcore::topology::Brep) -> std::result::Result<T, solidcore::SolidError>,
+    f: impl FnOnce(&mut Kernel, &mut Brep) -> std::result::Result<T, solidcore::SolidError>,
 ) -> Result<T> {
     if body.kernel_left_unfinished() {
         return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));
