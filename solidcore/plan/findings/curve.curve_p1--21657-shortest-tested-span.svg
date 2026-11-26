@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="720" height="330" viewBox="0 0 720 330">
+  <title>21657-shortest-tested-span</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="720" height="330" fill="#ffffff"/>
+    <text transform="matrix(1 0 0 1 30 38)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">ApproximateCurve: the shortest tested span</tspan></text>
+    <text transform="matrix(1 0 0 1 30 64)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Lift over [0, 1e-3] of a UV line whose natural interval is [0, 1], tolerance 1e-6</tspan></text>
+    <text transform="matrix(1 0 0 1 30 100)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">Before: limit = natural interval / 1500</tspan></text>
+    <text transform="matrix(1 0 0 1 390 100)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">After: limit = fitted range / 1500</tspan></text>
+    <line id="fitted_interval_before" data-name="fitted interval before" x1="30" y1="130" x2="330" y2="130" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line id="fitted_interval_after" data-name="fitted interval after" x1="390" y1="130" x2="690" y2="130" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 30 150)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">the fitted interval [0, 1e-3]</tspan></text>
+    <text transform="matrix(1 0 0 1 390 150)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">the fitted interval [0, 1e-3]</tspan></text>
+    <line id="limit_before" data-name="limit before" x1="30" y1="172" x2="230" y2="172" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <text transform="matrix(1 0 0 1 240 176)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">limit 6.7e-4</tspan></text>
+    <line id="limit_after" data-name="limit after" x1="390" y1="172" x2="392" y2="172" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 400 176)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">limit 6.7e-7 (too short to draw at this scale)</tspan></text>
+    <line x1="30" y1="206" x2="330" y2="206" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line x1="30" y1="200" x2="30" y2="212" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line x1="330" y1="200" x2="330" y2="212" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 30 228)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">span 1e-3: longer than the limit, tested, fails, halved</tspan></text>
+    <line x1="390" y1="206" x2="690" y2="206" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line x1="390" y1="200" x2="390" y2="212" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line x1="690" y1="200" x2="690" y2="212" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 390 228)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">span 1e-3: longer than the limit, tested, fails, halved</tspan></text>
+    <line x1="30" y1="258" x2="330" y2="258" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line x1="30" y1="252" x2="30" y2="264" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line x1="180" y1="252" x2="180" y2="264" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line x1="330" y1="252" x2="330" y2="264" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 30 280)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">spans 5e-4, shorter than the limit: accepted untested</tspan></text>
+    <text transform="matrix(1 0 0 1 30 298)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">the fit reports 1.9e-3</tspan></text>
+    <line x1="390" y1="258" x2="690" y2="258" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <path d="M390 252 L390 264 M427.5 252 L427.5 264 M465 252 L465 264 M502.5 252 L502.5 264 M540 252 L540 264 M577.5 252 L577.5 264 M615 252 L615 264 M652.5 252 L652.5 264 M690 252 L690 264" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 390 280)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">halved until each span passes its test</tspan></text>
+    <text transform="matrix(1 0 0 1 390 298)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">the fit is within 1e-6</tspan></text>
+  </g>
+</svg>

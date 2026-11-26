@@ -312,6 +312,74 @@ fn an_inset_by_the_rounds_radius_mates_across_rounds_that_meet_at_a_corner() {
     );
 }
 
+/// The area two discs of radii `big` and `r`, centres `d` apart, share.
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn discs_overlap(big: f64, r: f64, d: f64) -> f64 {
+    if d >= big + r {
+        return 0.0;
+    }
+    if d <= (big - r).abs() {
+        return PI * big.min(r).powi(2);
+    }
+    let a = r * r * ((d * d + r * r - big * big) / (2.0 * d * r)).acos();
+    let b = big * big * ((d * d + big * big - r * r) / (2.0 * d * big)).acos();
+    let c = 0.5 * ((-d + r + big) * (d + r - big) * (d - r + big) * (d + r + big)).sqrt();
+    a + b - c
+}
+
+/// A frustum about +Z, r 100 at z = 0 to r 100 - 200 tan 18° at z = 200 (its side 18° off the
+/// axis), with a hole of r 5 from z = 150 up through the top, its axis 32 out at 85° from +X:
+/// it reaches r 37, past the rim's 35.02, so it breaks out through the side near the top. The
+/// hole's wall is one periodic face whose seam, at +X from its axis, is 85° round from the
+/// hole's outermost line. Shelled 2 in, open at the bottom.
+///
+/// The edge where the side meets the hole's wall is a U from the top down to z ~ 194 and back.
+/// Its offset, where the side's offset meets the wall's (r 7), runs from the top's offset
+/// (z = 198) at 83° either way round the hole from its outermost line, down to z ~ 181; on the
+/// extended surfaces it goes on up past the top's offset and crosses the wall's seam at 85°,
+/// z ~ 198.7. The seam cuts the intersection there into the whole U and a short piece beyond the
+/// seam, above the top's offset, whose middle lies nearer the edge's middle than the U's. No
+/// neighbour's offset cuts that piece: its ends are the edge's vertices dropped onto it. Taken
+/// for the edge, it left the loops of the side's and the wall's offsets open (`LoopGapUncertified`).
+///
+/// Every edge but the open bottom's moves with its faces, so the cavity is bounded by the
+/// faces' offsets alone: inside the side's offset, r 100 - z tan 18° - 2 / cos 18°, from the
+/// bottom up to z = 198, less, from z = 148, the r 7 disc 32 off the axis. The shell takes
+/// away the integral over z of that section's area.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle and face picks, not ops geometry
+fn a_cones_side_broken_through_by_a_hole_past_its_seam_shells_to_its_closed_form() {
+    crate::test_corpus::rig_fixes();
+    let t18 = 18.0_f64.to_radians().tan();
+    let top = 100.0 - 200.0 * t18;
+    let (c, s) = (85.0_f64.to_radians().cos(), 85.0_f64.to_radians().sin());
+    let cone = crate::make_cone([0.0; 3], 100.0, top, 200.0).unwrap();
+    let hole = make_cylinder([32.0 * c, 32.0 * s, 150.0], 5.0, 51.0).unwrap();
+    let body = crate::boolean::boolean(cone, hole, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let before = volume(&body);
+    let o = order(&body);
+    let bottom = face(&body, &o, |bx| {
+        bx.min().z.abs() < 1e-9 && bx.max().z.abs() < 1e-9
+    });
+    shell(&body, &o, &[bottom], -2.0).unwrap();
+    let report = body.check(crate::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    let inside = |z: f64| 100.0 - z * t18 - 2.0 / 18.0_f64.to_radians().cos();
+    // the r 7 disc leaves the side's offset where 32 + 7 = inside(z), z ~ 181.3: split there
+    let out = (100.0 - 2.0 / 18.0_f64.to_radians().cos() - 39.0) / t18;
+    let section = |z: f64| PI * inside(z).powi(2);
+    let notch = |z: f64| discs_overlap(inside(z), 7.0, 32.0);
+    let cavity =
+        integral(0.0, 198.0, section) - integral(148.0, out, notch) - integral(out, 198.0, notch);
+    let removed = before - volume(&body);
+    assert!(
+        rel(removed, cavity) < 1e-9,
+        "the shell took {removed:.17} away, the cavity is {cavity:.17}"
+    );
+}
+
 /// A frustum on the z axis, r 10 at z = 0 to r 4 at z = 20 (its side falls 0.3 per mm), with
 /// everything at y > 6.8 cut away from below up to z = 10: a slot whose wall, the plane
 /// y = 6.8, runs along the frustum's side. The slot's ceiling, z = 10, is a lens of two edges
@@ -504,6 +572,60 @@ fn a_feature_narrower_than_twice_the_wall_stays_solid() {
         .unwrap();
     shell(&b, &order(&b), &[], -1.2).unwrap();
     let want = ABC + 12.0 - 27.6 * 17.6 * 7.6;
+    assert!(rel(volume(&b), want) < 1e-9, "{} {want}", volume(&b));
+    assert!(b.is_manifold_solid().unwrap());
+    assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
+}
+
+/// Three pins r 0.5, 2 high, on the top of the 30 x 20 x 10 block, shelled closed with a wall
+/// of their radius (solidcore#3353, acid-8 stage 5's seven bosses): each pin's side collapses
+/// onto its axis, so all three come off together, what is left is shelled once (two shells in
+/// all, counted) and the pins are joined back on, solid.
+///
+/// Closed form: 6000 + 3 pi 0.5^2 2 - (30 - 1)(20 - 1)(10 - 1).
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn pins_as_thin_as_the_wall_come_off_together_and_stay_solid() {
+    all_fixes();
+    let mut b = block();
+    for x in [8.0, 15.0, 22.0] {
+        let pin = make_cylinder([x, 10.0, 10.0], 0.5, 2.0).unwrap();
+        b = crate::boolean::boolean(b, pin, crate::BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+    }
+    let (r, shells) = session::counted(solidcore::kernel::WorkCounters::shells, || {
+        shell(&b, &order(&b), &[], -0.5)
+    });
+    r.unwrap();
+    // the first shell, refused for the pins, and one of the block with all three off (one
+    // at a time it was one more for each pin)
+    assert_eq!(shells, 2);
+    let want = ABC + 3.0 * PI * 0.25 * 2.0 - 29.0 * 19.0 * 9.0;
+    assert!(rel(volume(&b), want) < 1e-9, "{} {want}", volume(&b));
+    assert!(b.is_manifold_solid().unwrap());
+    assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
+}
+
+/// The stress corpus's cut spheres and tori with a thin feature (S6226, S2226): a pin r 2,
+/// 10 high, on the cut ball's cap, shelled closed with a 3 wall. The cap is the cutting box's
+/// bottom, so its surface normal points into the ball, and only its other face use faces out
+/// of the material. Read from the side along the normal, every edge of the cap read the
+/// wrong way round: the pin's foot convex and the rim concave. So the walks from the ball and
+/// from the cap both took the pin in, no feature was found, and the pin's collapse refused the
+/// shell.
+///
+/// The hollow is the cut ball's: the ball r 47 below z = 27, V = pi (R + h)² (2R - h) / 3 for
+/// R 50, h 30 less R 47, h 27, with the pin, pi 2² 10, solid on it.
+#[test]
+fn a_thin_pin_on_a_cut_balls_cap_stays_solid() {
+    all_fixes();
+    let pin = make_cylinder([0.0, 0.0, 30.0], 2.0, 10.0).unwrap();
+    let b = crate::boolean::boolean(cut_ball(), pin, crate::BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    shell(&b, &order(&b), &[], -3.0).unwrap();
+    let want = PI * 6400.0 * 70.0 / 3.0 + PI * 4.0 * 10.0 - PI * 5476.0 * 67.0 / 3.0;
     assert!(rel(volume(&b), want) < 1e-9, "{} {want}", volume(&b));
     assert!(b.is_manifold_solid().unwrap());
     assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
@@ -3034,6 +3156,67 @@ mod drafts {
             ([-430.0, -180.0, 2300.0], crate::PointClass::Outside),
             ([-430.0, 0.0, 2300.0], crate::PointClass::Outside),
             ([-430.0, 180.0, 2300.0], crate::PointClass::Outside),
+        ] {
+            assert_eq!(b.classify_point(point).unwrap(), wanted, "{point:?}");
+        }
+        assert!(b.is_manifold_solid().unwrap());
+        b.check_solid().unwrap();
+        let report = b.check(crate::CheckLevel::All).unwrap();
+        assert_eq!(report.failures, 0, "{}", report.text);
+    }
+
+    /// A frustum r 100 at z = 0 to r 40 at z = 200 (its side leaning atan 0.3, 16.70 degrees,
+    /// inward) with six blind holes r 5, from z = 150 up through the top, their centres on the
+    /// circle r 32 (each reaching out to r 37). Its side drafted to lean 18 degrees, about its
+    /// base, is r(z) = 100 - z tan 18 degrees, which passes r 37 at z0 = 193.89 and is r 35.02
+    /// at the top: every hole breaks out through the drafted side near the top, its wall and
+    /// the cone's passing through each other between the two points where the hole's rim
+    /// crosses the top's new rim. The body is the frustum less the holes: pi int r^2 less
+    /// 6 int lens(r(z), 5, 32) over z 150 to 200, the lens the discs' closed-form overlap,
+    /// 25 pi below z0. The lens integral above z0, after z = z0 + s^2 (which makes it
+    /// analytic), by Gauss-Legendre: 20, 40 and 80 nodes agree to every digit printed,
+    /// 3061182.2920648409. (At this size the drafted cone's stored top height, recovered from
+    /// its net, is 200 plus a rounding, though its top row lies in the top's plane.)
+    #[test]
+    fn a_cones_side_drafted_through_blind_holes_near_its_top_breaks_them_out() {
+        /// 18 degrees less atan 0.3, radians: the turn that leaves the side at 18 degrees.
+        const TURN: f64 = 0.022_702_470_881_112_213;
+        /// The drafted frustum less the six holes (the quadrature above).
+        const DRAFTED: f64 = 3_061_182.292_064_841;
+        /// sqrt 3, the double nearest it (ops computes no geometry, its tests included).
+        const SQRT_3: f64 = 1.732_050_807_568_877_2;
+        all_fixes();
+        let mut b = make_cone([0.0; 3], 100.0, 40.0, 200.0).unwrap();
+        let s = SQRT_3;
+        for (x, y) in [
+            (32.0, 0.0),
+            (16.0, 16.0 * s),
+            (-16.0, 16.0 * s),
+            (-32.0, 0.0),
+            (-16.0, -16.0 * s),
+            (16.0, -16.0 * s),
+        ] {
+            let hole = make_cylinder([x, y, 150.0], 5.0, 51.0).unwrap();
+            b = crate::boolean::boolean(b, hole, crate::BooleanOp::Subtract)
+                .unwrap()
+                .unwrap();
+        }
+        let o = order(&b);
+        let side = face(&b, &o, |bx| {
+            bx.min().x < 0.0 && bx.max().x > 0.0 && bx.max().z > bx.min().z
+        });
+        draft(&b, &o, &[side], [0.0; 3], Z, Z, TURN).unwrap();
+        let got = volume(&b);
+        assert!(rel(got, DRAFTED) < 1e-9, "{got} vs {DRAFTED}");
+        // r(190) = 38.27 and the old side's r(190) = 43: (40 cos 30, 40 sin 30, 190), between
+        // two holes, is cut away; r 30 there stays; the hole's centre line and its outer reach
+        // past the new side near the top are void.
+        for (point, wanted) in [
+            ([20.0 * s, 20.0, 190.0], crate::PointClass::Outside),
+            ([15.0 * s, 15.0, 195.0], crate::PointClass::Inside),
+            ([32.0, 0.0, 170.0], crate::PointClass::Outside),
+            ([36.0, 0.0, 199.5], crate::PointClass::Outside),
+            ([30.0, 0.0, 100.0], crate::PointClass::Inside),
         ] {
             assert_eq!(b.classify_point(point).unwrap(), wanted, "{point:?}");
         }
