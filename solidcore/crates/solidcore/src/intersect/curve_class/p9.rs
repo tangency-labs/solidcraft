@@ -472,13 +472,18 @@ impl<O: ClassObject> CurveClassification<O> {
                 NativeSupport::curve(working, &self.interval()),
                 NativeSupport::curve(target, &edge.interval),
             ) {
-                let foreign = source.zone(source_zone).is_some_and(|source_zone| {
-                    self.native_foreign_support()
-                        .is_some_and(|(support, zone)| {
-                            target.outside_surface(k, edge_zone, support, zone.max(source_zone))
-                        })
-                });
-                if source.disjoint(k, source_zone, &target, edge_zone) || foreign {
+                // Both are pure proofs; the curves' own separation is the cheaper one and
+                // settles most edges (a plate's holes against a new hole's curve), so the
+                // band test runs only for an edge it leaves open.
+                let foreign = || {
+                    source.zone(source_zone).is_some_and(|source_zone| {
+                        self.native_foreign_support()
+                            .is_some_and(|(support, zone)| {
+                                target.outside_surface(k, edge_zone, support, zone.max(source_zone))
+                            })
+                    })
+                };
+                if source.disjoint(k, source_zone, &target, edge_zone) || foreign() {
                     return Ok((Vec::new(), tolerance));
                 }
             }
