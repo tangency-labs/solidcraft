@@ -1271,6 +1271,7 @@ fn hostile_params_never_panic() {
         "head",
         "head_gap",
         "height",
+        "hide_bodies",
         "id",
         "ids",
         "infer",
