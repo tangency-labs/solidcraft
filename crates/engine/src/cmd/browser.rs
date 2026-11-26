@@ -19,7 +19,12 @@ use crate::browser_find::{Kind, MAX_PATTERN_CHARS, Pattern};
 use crate::params::{bad, bool_, expr, str_};
 use crate::schema::browser::{
     BodyRenameParams, BodyRenamed, BrowserFoldParams, BrowserFoldResult, BrowserGroupMade, BrowserGroupParams, BrowserGroupRenamed,
-    BrowserMoveParams, BrowserMoved, BrowserOpacityParams, BrowserOpacityResult, BrowserOrderParams, BrowserOrdered, BrowserRenameGroupParams, BrowserUngroupParams, BrowserUngrouped, BrowserVisibilityParams, BrowserVisibilityResult, DocumentUnitsParams, DocumentUnitsResult, FindParams, FindResult, FlipAxis, Isolated, OpacityState, PlaneFrame, PlaneSizeParams, PlaneSized, RedefineAttachment, RedefineSketchParams, RedefineSketchResult, RenamedBody, RepairDone, RepairFace, RepairHole, RepairParams, RepairResult, RepairSewn, ViewApplyParams, ViewDeleteParams, ViewDeleted, ViewHome, ViewListParams, ViewListResult, ViewRenameParams, ViewRenamed, ViewResetHomeParams, ViewSaveParams, ViewSaved, ViewSetHomeParams, VisibilityState,
+    BrowserMoveParams, BrowserMoved, BrowserOpacityParams, BrowserOpacityResult, BrowserOrderParams, BrowserOrdered, BrowserRenameGroupParams,
+    BrowserUngroupParams, BrowserUngrouped, BrowserVisibilityParams, BrowserVisibilityResult, DocumentUnitsParams, DocumentUnitsResult, FindParams,
+    FindResult, FlipAxis, Isolated, OpacityState, PlaneFrame, PlaneSizeParams, PlaneSized, RedefineAttachment, RedefineSketchParams,
+    RedefineSketchResult, RenamedBody, RepairDone, RepairFace, RepairHole, RepairParams, RepairResult, RepairSewn, ViewApplyParams, ViewDeleteParams,
+    ViewDeleted, ViewHome, ViewListParams, ViewListResult, ViewRenameParams, ViewRenamed, ViewResetHomeParams, ViewSaveParams, ViewSaved,
+    ViewSetHomeParams, VisibilityState,
 };
 use crate::schema::view_navigation::CameraReply;
 use crate::schema::{TypedContract, output_schema_for};
