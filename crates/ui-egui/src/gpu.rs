@@ -814,6 +814,7 @@ fn offscreen_layers(
     let cb = solidcraft_viewport_egui::ViewportCallback(Frame {
         // A preview frame with no session: no whole-body selection.
         selection_all: false,
+        hover_body: None,
         product_lights,
         product,
         upload_error: None,

@@ -11,10 +11,13 @@ package craft:plugin@0.2.0;
 // - `evaluate@0.2`: with `formats`, evaluate, so an importer can check its result;
 // - `storage@0.1`: with `commands`, the app's `storage.*` commands and the `storage` interface, so a
 //   plugin keeps its own data in the open design: its main document as JSON, its files as bytes.
+// - `user-storage@0.1`: with `commands` or `formats`, user-storage, for per-user JSON settings
+//   outside designs (importers use the additive world `importer-plugin-with-storage`).
 // - `design@0.1`: with `commands`, design-state, for document identity/revision and read listeners.
 // - `ui@0.1`: ui and ui-provider (world `panel-plugin`).
 // - `forms@0.1`: with `commands`, forms.open, to request a populated command form;
 //   programs receive an interactive-required refusal instead of a window.
+// - `dialog@0.1`: dialog-provider, for command field patches or file-aware importer updates.
 // Later capabilities (viewport) arrive as their own interfaces. While the version is
 // 0.x, a minor version may break the one before it. 0.2 added `plugin-error.unsupported`. A host
 // still runs plugins built against 0.1 (`../wit-0.1/plugin.wit`): it reads the version from the
@@ -68,6 +71,17 @@ interface commands {
 interface forms {
     use types.{json, plugin-error};
     open: func(entry: string, params: json) -> result<_, plugin-error>;
+}
+// Per-user settings for the calling plugin alone. Keys: 1..128 bytes without control characters.
+// At most 128 keys and 64 KiB for the compact JSON map; set accepts up to 1 MiB of JSON text.
+// Writes require a non-read entry and are published on success (for importers, after the app
+// accepts the design); they do not edit a design or add an undo step. Absent keys return none.
+interface user-storage {
+    use types.{json, plugin-error};
+    get: func(key: string) -> result<option<json>, plugin-error>;
+    set: func(key: string, value: json) -> result<_, plugin-error>;
+    remove: func(key: string) -> result<bool, plugin-error>;
+    %list: func() -> result<list<string>, plugin-error>;
 }
 // Additive read-only import: JSON {document_id: string, revision: string}, or null with no document.
 // Both fields are opaque printable ASCII, bounded to 128 characters; compare them for equality.
@@ -169,6 +183,7 @@ interface formats-provider {
 world command-plugin {
     import forms;
     import commands;
+    import user-storage;
     import design-state;
     import log;
     import control;
@@ -186,6 +201,40 @@ world importer-plugin {
     import evaluate;
     export importer;
 }
+// The original importer world stays unchanged for existing guests. New importers opt in with
+// `user-storage@0.1`; the host stages settings until the imported design is accepted.
+world importer-plugin-with-storage {
+    include importer-plugin;
+    import user-storage;
+}
+
+// Optional read-only access to annotated directory fields (capability folders@0.1).
+// The grant is the top-level property key. Paths are relative to its approved root;
+// empty path names that directory only for resolve. There is no write operation.
+interface folders {
+    use types.{plugin-error};
+    read: func(grant: string, path: string, offset: u64, len: u32) -> result<list<u8>, plugin-error>;
+    size: func(grant: string, path: string) -> result<option<u64>, plugin-error>;
+    resolve: func(grant: string, path: string) -> result<option<string>, plugin-error>;
+}
+world folder-reader {
+    import folders;
+}
+world command-with-folders {
+    // Keep this world's original imports: design-state is optional and belongs to command-plugin.
+    import commands;
+    import log;
+    import control;
+    import files;
+    import clock;
+    import folders;
+    export entry;
+}
+world importer-with-folders {
+    include importer-plugin;
+    import folders;
+}
+
 world exporter-plugin {
     import commands;
     import log;
@@ -366,6 +415,8 @@ world panel-dialog-plugin {
 interface dialog-provider {
     use types.{json, plugin-error};
     // Values and reply are JSON objects. The host validates the entire reply before applying it.
+    // A dialog_hook entry receives values and returns per-field visible/enabled/choices/default/value/hint patches.
+    // A file-aware importer receives {values, file} and returns {fields: {declared-field: {title?, description?, default?, enum?/oneOf?}}}.
     update-fields: func(entry: string, values: json) -> result<json, plugin-error>;
 }
 world dialog-plugin {
@@ -378,5 +429,10 @@ world dialog-plugin {
 }
 world command-dialog-plugin {
     include command-plugin;
+    export dialog-provider;
+}
+
+world importer-dialog-plugin {
+    include importer-plugin;
     export dialog-provider;
 }

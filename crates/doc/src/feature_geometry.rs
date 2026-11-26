@@ -83,6 +83,7 @@ impl FeatureKind {
             | FeatureKind::DeleteFace { .. }
             | FeatureKind::ReplaceFace { .. }
             | FeatureKind::SurfaceOffset { .. }
+            | FeatureKind::SurfaceMidsurface { .. }
             | FeatureKind::SurfaceMatch { .. }
             | FeatureKind::SurfaceFair { .. } => &["faces"],
             FeatureKind::SplitFace { .. } => &["faces", "tool"],
@@ -94,7 +95,7 @@ impl FeatureKind {
             FeatureKind::SheetConvert { .. } | FeatureKind::Lip { .. } | FeatureKind::SurfaceUntrim { .. } | FeatureKind::SurfaceRuled { .. } => {
                 &["face"]
             }
-            FeatureKind::Emboss { .. } => &["face"],
+            FeatureKind::Emboss { .. } | FeatureKind::Dome { .. } => &["face"],
             FeatureKind::Revolve { .. } => &["to"],
             FeatureKind::Extrude { .. } | FeatureKind::SurfaceExtrude { .. } => &["extent.to", "extent.from"],
             FeatureKind::SurfaceExtend { .. } => &["up_to"],
@@ -109,12 +110,14 @@ impl FeatureKind {
     pub fn face_body(&self) -> Option<&str> {
         match self {
             FeatureKind::Shell { body, .. }
+            | FeatureKind::Dome { body, .. }
             | FeatureKind::Draft { body, .. }
             | FeatureKind::SplitFace { body, .. }
             | FeatureKind::OffsetFace { body, .. }
             | FeatureKind::DeleteFace { body, .. }
             | FeatureKind::ReplaceFace { body, .. }
             | FeatureKind::SurfaceOffset { body, .. }
+            | FeatureKind::SurfaceMidsurface { body, .. }
             | FeatureKind::Boss { body, .. }
             | FeatureKind::Lip { body, .. }
             | FeatureKind::SnapFit { body, .. }
