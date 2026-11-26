@@ -191,7 +191,8 @@ pub(crate) fn check_decoded(what: &str, record: &Record) -> Result<DecodedCheck>
 }
 
 /// What a step says of a result SMLib's check refuses, naming the operands (the input of a
-/// blend) whose own check (`checks`, in order) fails too: the fault is then theirs.
+/// blend) whose own check (`checks`, in order) fails or could not run: only when every operand
+/// check succeeds and passes is the refusal reported as result-only.
 pub(crate) fn refuses(checks: impl ExactSizeIterator<Item = solidcraft_smlib::Result<solidcraft_smlib::CheckReport>>) -> String {
     let n = checks.len();
     let name = |i: usize| match n {
@@ -199,13 +200,30 @@ pub(crate) fn refuses(checks: impl ExactSizeIterator<Item = solidcraft_smlib::Re
         2 => ["the first operand", "the second operand"][i.min(1)].to_string(),
         _ => format!("operand {i}"),
     };
-    let failing: Vec<String> = checks
-        .enumerate()
-        .filter(|(_, c)| matches!(c, Ok(r) if !r.is_valid()) || matches!(c, Err(solidcraft_smlib::Error::Record(_))))
-        .map(|(i, _)| name(i))
-        .collect();
-    let whose = if failing.is_empty() { String::new() } else { format!(" ({} already fails it)", failing.join(" and ")) };
+    let mut failing = Vec::new();
+    let mut errored = Vec::new();
+    for (i, check) in checks.enumerate() {
+        match check {
+            Ok(c) if c.is_valid() => {}
+            Ok(_) | Err(solidcraft_smlib::Error::Record(_)) => failing.push(name(i)),
+            Err(_) => errored.push(name(i)),
+        }
+    }
+    let mut notes = Vec::new();
+    if !failing.is_empty() {
+        notes.push(format!("{} already fails it", failing.join(" and ")));
+    }
+    if !errored.is_empty() {
+        notes.push(format!("{} could not be checked", errored.join(" and ")));
+    }
+    let whose = if notes.is_empty() { String::new() } else { format!(" ({})", notes.join("; ")) };
     format!("SMLib's check refuses the result{whose}")
+}
+
+/// Whether `err` is a step refusal caused solely by SMLib's check rejecting the result while
+/// every input operand passed SMLib's check (the operation itself succeeded).
+pub fn is_result_only_check_refusal(err: &KernelError) -> bool {
+    matches!(err, KernelError::Failed(msg) if msg.contains("SMLib's check refuses the result:"))
 }
 
 /// SMLib's full check of a body a feature keeps, once a step of the feature left its check to
@@ -652,5 +670,74 @@ mod tests {
         }
         assert_eq!(Validation::parse("each step"), None);
         assert_eq!(Validation::default(), Validation::EachFeature);
+    }
+
+    #[test]
+    fn result_only_check_refusal_distinguishes_result_from_operand_and_operation_errors() {
+        use solidcore_record::Vec3;
+
+        let result_only = KernelError::Failed("SMLib boolean: SMLib's check refuses the result: 9 failed tests:\nSmFace::Test #33".into());
+        assert!(is_result_only_check_refusal(&result_only));
+
+        for non_result_only in [
+            KernelError::Failed("SMLib boolean: SMLib's check refuses the result (the first operand already fails it): 1 failed test".into()),
+            KernelError::Failed("SMLib boolean: SMLib's check refuses the result (the second operand already fails it): 1 failed test".into()),
+            KernelError::Failed(
+                "SMLib boolean: SMLib's check refuses the result (the first operand and the second operand already fails it): 1 failed test".into(),
+            ),
+            KernelError::Failed("SMLib boolean: operation: relate conflict".into()),
+            KernelError::Failed("boolean cancelled".into()),
+            KernelError::Invalid("SMLib's check refuses the result: bad input".into()),
+            KernelError::Internal("SMLib boolean: SMLib's check refuses the result: panic".into()),
+        ] {
+            assert!(!is_result_only_check_refusal(&non_result_only), "{non_result_only:?}");
+        }
+
+        // A real boolean against an invalid operand names that operand, so it is not result-only.
+        let good = crate::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let mut record = good.record().clone();
+        record.vertices[0].point[2] += 0.5;
+        let bad = Body::from_record(record).unwrap();
+        let tool = crate::box_solid(Vec3::new(5.0, 5.0, 5.0), Vec3::new(20.0, 20.0, 20.0)).unwrap();
+        let err = validating(Validation::EachStep, || crate::boolean(&bad, &tool, crate::BoolOp::Union)).0.unwrap_err();
+        assert!(!is_result_only_check_refusal(&err), "{err}");
+    }
+
+    #[test]
+    fn refuses_marks_operand_check_errors_as_non_result_only() {
+        let valid = || Ok(solidcraft_smlib::CheckReport { failures: 0, text: String::new() });
+        let invalid = || Ok(solidcraft_smlib::CheckReport { failures: 1, text: "SmEdge::Test #1".into() });
+        let check_err = || Err(solidcraft_smlib::Error::Cancelled("check"));
+        let as_kernel_err = |msg: String| KernelError::Failed(format!("SMLib boolean: {msg}: 1 failed test"));
+
+        // Both operands checked and valid -> result-only.
+        let both_valid = refuses([valid(), valid()].into_iter());
+        assert_eq!(both_valid, "SMLib's check refuses the result");
+        assert!(is_result_only_check_refusal(&as_kernel_err(both_valid)));
+
+        // First operand check errored -> NOT result-only.
+        let first_err = refuses([check_err(), valid()].into_iter());
+        assert_eq!(first_err, "SMLib's check refuses the result (the first operand could not be checked)");
+        assert!(!is_result_only_check_refusal(&as_kernel_err(first_err)));
+
+        // Second operand check errored -> NOT result-only.
+        let second_err = refuses([valid(), check_err()].into_iter());
+        assert_eq!(second_err, "SMLib's check refuses the result (the second operand could not be checked)");
+        assert!(!is_result_only_check_refusal(&as_kernel_err(second_err)));
+
+        // Both operand checks errored -> NOT result-only.
+        let both_err = refuses([check_err(), check_err()].into_iter());
+        assert_eq!(both_err, "SMLib's check refuses the result (the first operand and the second operand could not be checked)");
+        assert!(!is_result_only_check_refusal(&as_kernel_err(both_err)));
+
+        // One operand failed and the other errored -> both reported, NOT result-only.
+        let mixed = refuses([invalid(), check_err()].into_iter());
+        assert_eq!(mixed, "SMLib's check refuses the result (the first operand already fails it; the second operand could not be checked)");
+        assert!(!is_result_only_check_refusal(&as_kernel_err(mixed)));
+
+        // Single-input operation whose input check errored -> NOT result-only.
+        let single_err = refuses([check_err()].into_iter());
+        assert_eq!(single_err, "SMLib's check refuses the result (the input could not be checked)");
+        assert!(!is_result_only_check_refusal(&as_kernel_err(single_err)));
     }
 }

@@ -1528,6 +1528,7 @@
   "cmd.file.gpg_keys": "签名密钥",
   "cmd.file.import": "使用插件导入",
   "cmd.file.import_cache_clear": "清除重用的导入结果",
+  "cmd.file.stl_to_step": "将 STL 转换为 STEP",
   "cmd.file.verify": "验证签名",
   "cmd.file_copy": "复制设计文件",
   "cmd.file_export": "导出",
