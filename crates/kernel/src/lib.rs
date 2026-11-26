@@ -147,6 +147,8 @@ mod smlib_sweeps;
 mod smlib_sweeps_tests;
 mod smooth_edges;
 #[cfg(test)]
+mod sphere_area_tests;
+#[cfg(test)]
 mod sphere_lens_tests;
 mod splitface;
 mod step;
