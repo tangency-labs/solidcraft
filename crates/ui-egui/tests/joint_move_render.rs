@@ -47,7 +47,7 @@ fn bearing(kind: &str) -> (Harness, u64) {
 }
 
 fn frame(h: &mut Harness, textures: &mut HashMap<TextureId, ColorImage>, events: Vec<Event>) -> egui::FullOutput {
-    raster::paint_at(h, textures, events, vec2(1460., 1000.))
+    raster::paint_at(h, textures, events, vec2(1280., 720.))
 }
 
 fn save_frame(h: &mut Harness, textures: &mut HashMap<TextureId, ColorImage>, mut out: egui::FullOutput, path: &std::path::Path) {
@@ -114,6 +114,20 @@ fn joint_move_has_readable_rotation_and_translation_in_both_themes() {
                 assert!((u.x * v.y - u.y * v.x).abs() * 0.5 >= 400.0, "legible arrowhead, independent of arc tessellation");
             }
             save_frame(&mut h, &mut textures, idle, &dir.join(format!("{}-{name}-idle.png", if dark { "dark" } else { "light" })));
+            if kind == "revolute" && !dark {
+                for (label, distance) in [("zoom-in", 120.0), ("zoom-out", 480.0)] {
+                    h.app.cam.distance = distance;
+                    for _ in 0..4 {
+                        frame(&mut h, &mut textures, vec![]);
+                    }
+                    let zoomed = frame(&mut h, &mut textures, vec![]);
+                    save_frame(&mut h, &mut textures, zoomed, &dir.join(format!("light-rotation-{label}.png")));
+                }
+                h.app.cam.distance = 240.0;
+                for _ in 0..4 {
+                    frame(&mut h, &mut textures, vec![]);
+                }
+            }
             let from = scenario::handle_at(&format!("joint-move:{joint}:0")).expect("Move handle");
             let rect = h.app.viewport.rect.unwrap();
             let proj = viewport::projection(&h.app, rect);

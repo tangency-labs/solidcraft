@@ -2,10 +2,7 @@
 //! and angles are relative to the current drag, and each drag is one cancellable undo step.
 use solidcore_record::Vec3;
 use solidcraft_engine::geom::prelude::*;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
+use std::{collections::BTreeSet, sync::Arc};
 
 use egui::{Pos2, Shape, Stroke, vec2};
 use serde_json::json;
@@ -26,7 +23,6 @@ pub(crate) struct Mode {
     occurrence: u64,
     axes: Vec<joints::MotionAxis>,
     drag: Option<Drag>,
-    radii: BTreeMap<(u64, usize), f64>,
     local_anchor: Vec3,
     doc: Arc<Document>,
 }
@@ -44,7 +40,6 @@ struct Drag {
     anchor_raw: f64,
     anchor_value: f64,
     fine: bool,
-    radius: f64,
     actual: f64,
     step: Option<Arc<Document>>,
     checkpoint: Option<u64>,
@@ -105,14 +100,7 @@ pub(crate) fn begin(app: &mut SolveApp, occurrence: u64) -> bool {
         })
         .unwrap_or_else(|| apply_point(&world, Vec3::ZERO));
     let Some(inverse) = mat_inverse(&world) else { return false };
-    let mut mode = Mode {
-        occurrence,
-        axes: Vec::new(),
-        drag: None,
-        radii: BTreeMap::new(),
-        local_anchor: apply_point(&inverse, anchor),
-        doc: app.session.doc.clone(),
-    };
+    let mut mode = Mode { occurrence, axes: Vec::new(), drag: None, local_anchor: apply_point(&inverse, anchor), doc: app.session.doc.clone() };
     mode.refresh(app);
     if mode.axes.is_empty() {
         return false;
@@ -134,32 +122,6 @@ impl Mode {
         for a in &mut self.axes {
             a.origin += a.axis * (anchor - a.origin).dot(a.axis);
         }
-        let names: BTreeSet<_> = app
-            .session
-            .doc
-            .body_frames_with_source(&app.session.model.state())
-            .into_iter()
-            .filter(|(_, _, _, path, _)| path.last() == Some(&self.occurrence))
-            .map(|(name, ..)| name)
-            .collect();
-        let world = crate::open_meshing::session_world(&app.session);
-        self.radii = self
-            .axes
-            .iter()
-            .map(|a| {
-                let mut extent = 0.0_f64;
-                for body in world.bodies.iter().filter(|b| names.contains(&b.name)) {
-                    let mesh = body.mesh();
-                    for p in mesh.positions.iter().step_by((mesh.positions.len() / 1024).max(1)) {
-                        let radius = (*p - a.origin).cross(a.axis).len();
-                        if radius.is_finite() {
-                            extent = extent.max(radius);
-                        }
-                    }
-                }
-                ((a.joint, a.index), extent)
-            })
-            .collect();
         self.doc = app.session.doc.clone();
     }
 }
@@ -327,11 +289,11 @@ fn mm_per_px(proj: &Proj, origin: Vec3) -> Option<f64> {
     (pixels.is_finite() && pixels > 1e-8).then_some(1.0 / pixels)
 }
 
-fn radius(app: &SolveApp, proj: &Proj, a: &joints::MotionAxis) -> Option<f64> {
+const HANDLE_RADIUS_POINTS: f64 = 128.0;
+
+fn radius(_app: &SolveApp, proj: &Proj, a: &joints::MotionAxis) -> Option<f64> {
     let scale = mm_per_px(proj, a.origin)?;
-    let extent = app.viewport.joint_handles.as_ref()?.radii.get(&(a.joint, a.index)).copied().unwrap_or(0.0);
-    // Keep the arcs outside the part even when zoomed in.
-    Some((extent + scale * 18.0).max(scale * 72.0))
+    Some(scale * HANDLE_RADIUS_POINTS)
 }
 
 fn arc(proj: &Proj, a: &joints::MotionAxis, radius: f64, start: f64, sweep: f64) -> Vec<Pos2> {
@@ -464,7 +426,7 @@ pub(crate) fn start_drag(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
     let initial = joints::joint_values(&app.session.doc.active_assembly().assembly).get(&axis.joint).and_then(|q| q.get(axis.index)).copied();
     let Some(initial) = initial else { return false };
     let start = if axis.angular { polar(proj, p, &axis).map(|q| q.0) } else { along(proj, p, &axis) };
-    let (Some(start), Some(radius)) = (start, radius(app, proj, &axis)) else { return false };
+    let Some(start) = start else { return false };
     let checkpoint = app.session.execute("edit.checkpoint", &json!({})).ok().and_then(|v| v["checkpoint"].as_u64());
     let Some(mode) = app.viewport.joint_handles.as_mut() else { return false };
     let world = joints::occurrence_world(&app.session.doc, mode.occurrence);
@@ -480,7 +442,6 @@ pub(crate) fn start_drag(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
         anchor_raw: 0.0,
         anchor_value: 0.0,
         fine: false,
-        radius,
         actual: 0.0,
         step: None,
         checkpoint,
@@ -493,12 +454,12 @@ fn wrapped(angle: f64) -> f64 {
 }
 
 impl Drag {
-    fn rotate(&mut self, angle: f64, distance: f64, coarse: f64, fine: f64) -> f64 {
+    fn rotate(&mut self, angle: f64, distance: f64, radius: f64, coarse: f64, fine: f64) -> f64 {
         self.raw += wrapped(angle - self.last);
         self.last = angle;
         // Hysteresis prevents flicker at the 2-radius boundary. Rebase at a switch, so
         // moving radially changes precision without moving the part or losing its pose.
-        let next = if self.fine { distance > self.radius * 1.85 } else { distance > self.radius * 2.15 };
+        let next = if self.fine { distance > radius * 1.85 } else { distance > radius * 2.15 };
         if next != self.fine {
             self.fine = next;
             self.anchor_raw = self.raw;
@@ -524,7 +485,10 @@ pub(crate) fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
         return;
     }
     let amount = if d.axis.angular {
-        polar(proj, p, &d.axis).map(|(a, r)| d.rotate(a, r, app.preferences.joint_rotation_coarse, app.preferences.joint_rotation_fine))
+        polar(proj, p, &d.axis).and_then(|(a, r)| {
+            radius(app, proj, &d.axis)
+                .map(|handle_radius| d.rotate(a, r, handle_radius, app.preferences.joint_rotation_coarse, app.preferences.joint_rotation_fine))
+        })
     } else {
         along(proj, p, &d.axis).map(|v| v - d.start)
     };
@@ -632,8 +596,10 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     if let Some(d) = &mode.drag {
         crate::tool_modifiers::set_manipulator_dragging(true);
         if d.axis.angular {
-            let guide = arc(proj, &d.axis, d.radius * 2.0, 0.0, 360.0);
-            painter.add(Shape::dashed_line(&guide, Stroke::new(1.2, tk.joint_manipulator), 5.0, 4.0));
+            if let Some(handle_radius) = radius(app, proj, &d.axis) {
+                let guide = arc(proj, &d.axis, handle_radius * 2.0, 0.0, 360.0);
+                painter.add(Shape::dashed_line(&guide, Stroke::new(1.2, tk.joint_manipulator), 5.0, 4.0));
+            }
             if let (Some(c), Some(p)) = (proj.to_screen(d.axis.origin), pointer) {
                 painter.add(Shape::dashed_line(&[c, p], Stroke::new(1.0, tk.joint_manipulator), 4.0, 4.0));
             }
@@ -753,11 +719,10 @@ mod tests {
         let r = radius(&h.app, &proj, &a).unwrap();
         let on_handle = proj.to_screen(a.origin + a.axis * r * 0.7).unwrap();
         assert!(owns_pointer(&h.app, &proj, on_handle));
-        let near = crate::test_support::lit_alike_around(&h, on_handle, |p| owns_pointer(&h.app, &proj, p));
-        assert!(near.len() >= 2, "the handle lies over something larger than it: {near:?}");
-        move_to(&mut h, near[0]);
+        let off_handle = on_handle + vec2(0.0, 80.0);
+        assert!(!owns_pointer(&h.app, &proj, off_handle));
+        move_to(&mut h, off_handle);
         assert!(h.app.viewport.quiet_motion.is_some(), "a still view, only hovered");
-        assert!(crate::viewport::follow_pointer_without_frame(&mut h.app, &h.ctx, near[1]), "the same item, off the handles");
         assert!(!crate::viewport::follow_pointer_without_frame(&mut h.app, &h.ctx, on_handle), "onto a handle");
     }
 
@@ -963,7 +928,40 @@ mod tests {
     }
 
     #[test]
-    fn broad_arrowheads_are_pickable_and_rotation_stays_outside_a_zoomed_part() {
+    fn handles_keep_their_screen_size_across_zoom_levels() {
+        for kind in ["revolute", "slider"] {
+            let axis_direction = if kind == "revolute" { Vec3::Z } else { Vec3::X };
+            let (mut h, _) = assembly(kind, axis_direction, false);
+            h.app.start("occurrence.move");
+            h.frames(3);
+            let axis = h.app.viewport.joint_handles.as_ref().unwrap().axes[0].clone();
+            h.app.ui.auto_ortho_faces = false;
+            for perspective in [false, true] {
+                h.app.ui.perspective = perspective;
+                assert_eq!(h.app.view_fov() > 0.0, perspective);
+                let mut sizes = Vec::new();
+                for distance in [90.0, 200.0, 400.0] {
+                    h.app.cam.distance = distance;
+                    let proj = projection(&h);
+                    let r = radius(&h.app, &proj, &axis).unwrap();
+                    let center = proj.to_screen(axis.origin).unwrap();
+                    let arrow = arrows(&proj, &axis, r).pop().unwrap();
+                    let size = if axis.angular { center.distance(arrow.shaft[0]) } else { center.distance(*arrow.shaft.last().unwrap()) / 1.3 };
+                    assert!((100.0..=145.0).contains(&size), "{kind}, perspective={perspective}, distance={distance}: {size} points");
+                    if kind == "slider" {
+                        let shaft_length = center.distance(*arrow.shaft.last().unwrap());
+                        assert!((145.0..=185.0).contains(&shaft_length), "slider shaft: {shaft_length} points");
+                        assert!(hit(&h.app, &proj, arrow.head[0]).is_some());
+                    }
+                    sizes.push(size);
+                }
+                assert!(sizes.iter().copied().fold(f32::NEG_INFINITY, f32::max) - sizes.iter().copied().fold(f32::INFINITY, f32::min) < 6.0);
+            }
+        }
+    }
+
+    #[test]
+    fn broad_arrowheads_remain_pickable_when_zoomed_in() {
         for kind in ["revolute", "slider"] {
             let (mut h, _) = assembly(kind, Vec3::Z, false);
             if kind == "slider" {
@@ -975,8 +973,6 @@ mod tests {
             let axis = h.app.viewport.joint_handles.as_ref().unwrap().axes[0].clone();
             let proj = projection(&h);
             let radius = radius(&h.app, &proj, &axis).unwrap();
-            let extent = h.app.viewport.joint_handles.as_ref().unwrap().radii[&(axis.joint, axis.index)];
-            assert!(radius > extent, "rotation must not shrink inside the selected part on zoom");
             let arrows = arrows(&proj, &axis, radius);
             assert_eq!(arrows.len(), 2);
             for arrow in arrows {
