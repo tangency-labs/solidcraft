@@ -2696,6 +2696,45 @@ fn an_edge_on_a_curve_replica_is_the_moved_curve() {
     assert_eq!(a.edges[0].interval, b.edges[0].interval);
 }
 
+/// The cube with its first face's PLANE replaced by a SURFACE_REPLICA of a plane 7 mm lower, moved
+/// up by the operator `op` (#2340: what one writer puts under a solid's repeated face).
+fn replica_face(t: &str, op: &str) -> String {
+    let (head, tail) = t.split_once("=PLANE('',#").expect("a plane");
+    let (_, plane_id) = head.rsplit_once('#').expect("an id");
+    let (placement, _) = tail.split_once(')').expect("the end");
+    let axes = t.split_once(&format!("#{placement}=AXIS2_PLACEMENT_3D('',#")).expect("the placement").1;
+    let (point, axes) = axes.split_once(",#").expect("the axes");
+    let (axes, _) = axes.split_once(')').expect("the end");
+    let pt = t.split_once(&format!("#{point}=CARTESIAN_POINT('',(")).expect("the point").1;
+    let xyz: Vec<f64> = pt.split_once(')').unwrap().0.split(',').map(|v| v.parse().unwrap()).collect();
+    let replaced = t.replacen(&format!("#{plane_id}=PLANE('',#{placement})"), &format!("#{plane_id}=SURFACE_REPLICA('',#9005,#9004)"), 1);
+    format!(
+        "{replaced}#9001=CARTESIAN_POINT('',({},{},{}));#9002=CARTESIAN_POINT('',(0.,0.,7.));#9003=AXIS2_PLACEMENT_3D('',#9001,#{axes});#9005=PLANE('',#9003);#9006=DIRECTION('',(1.,0.,0.));#9007=DIRECTION('',(0.,1.,0.));#9008=DIRECTION('',(0.,0.,1.));#9004=CARTESIAN_TRANSFORMATION_OPERATOR_3D{op};",
+        real(xyz[0]),
+        real(xyz[1]),
+        real(xyz[2] - 7.0)
+    )
+}
+
+#[test]
+fn a_face_on_a_surface_replica_is_the_moved_surface() {
+    let plain = edited(str::to_string);
+    for op in ["('','',#9006,#9007,#9002,1.,#9008)", "('',#9006,#9007,#9002,1.,#9008)", "('',$,$,#9002,$,$)"] {
+        let moved = edited(|t| {
+            let edited = replica_face(t, op);
+            assert!(edited.contains("SURFACE_REPLICA"), "the edit did not apply");
+            edited
+        });
+        assert!(moved.failures.is_empty(), "{op}: {:?}", moved.failures);
+        assert_eq!(moved.solids.len(), 1, "{op}");
+        let (a, b) = (&plain.solids[0].brep, &moved.solids[0].brep);
+        solidcore_ops::record_check::validate(b).unwrap();
+        assert_eq!(counts(a), counts(b), "{op}");
+        // The replica's face lies on the plain cube's plane.
+        assert_eq!(a.faces[0].surface, b.faces[0].surface, "{op}");
+    }
+}
+
 #[test]
 fn hostile_topology_is_an_error_never_a_panic() {
     // Sanity: unedited, the cube reads.
