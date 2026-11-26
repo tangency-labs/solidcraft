@@ -32,6 +32,8 @@ can run it.
 | AI agent permissions | `AiPermissions` | `REG_SZ` | `ask` (every change asks first), `edits` (modelling runs, files and destructive actions ask) or `all` (nothing asks). An agent's own permissions and the **Always allowed** answers don't apply while it is set. SolidCraft 0.46 or later. |
 | Changes per message | `AgentTurnLimit` | `REG_DWORD` | `1` to `200`: the most changes an agent in the chat makes for one message. `0`: no limit. SolidCraft 0.46 or later. |
 | Let AI agents connect | `AgentControl` | `REG_DWORD` | `1`: the control channel (MCP, this computer only) is on. `0`: SolidCraft opens no port for agents, not even one named with `--control` or `SOLIDCRAFT_CONTROL_PORT`. SolidCraft 0.46 or later. |
+| Allow Open with EasyPrint | `AllowEasyPrint` | `REG_DWORD` | `0`: SolidCraft offers no EasyPrint and sends no model to Printables, whoever asks. `1` or not set: people can use it after agreeing once. SolidCraft 0.46 or later. |
+| Allow problem reports | `AllowProblemReports` | `REG_DWORD` | `0`: no problem report opens or is sent, to SolidCraft's ticket server or GitHub. Help, About SolidCraft, **Copy diagnostic information** still copies the details. `1` or not set: people can send reports. SolidCraft 0.46 or later. |
 | Add SolidCraft to AI apps | `ConnectAiApps` | `REG_DWORD` | `1`: SolidCraft adds its MCP server to the AI apps on the computer at start. `0`: it adds none and takes out the entries it added. SolidCraft 0.46 or later. |
 
 On Windows the values live in the key `Software\Policies\SolidCraft`:
@@ -105,6 +107,22 @@ Make it owned by root and not writable by others (`chmod 644`): a file anyone ma
 ignored. A Flatpak or Snap sees its own `/etc`, not the computer's, so use the distribution's
 package (deb, rpm, AppImage or the FreeBSD package) where you need the policy to apply.
 
+## Keeping data inside the organization
+
+These are the features that send something from SolidCraft to a server outside your
+organization, and the policy that turns each off:
+
+| What leaves the computer | Where it goes | Policy |
+|---|---|---|
+| Update checks | SolidCraft's update feed | `CheckForUpdates` = `0` |
+| Anonymous usage statistics | SolidCraft's metrics server (`metrics.solidcraft.io`, [Privacy](https://github.com/tangency-labs/solidcraft/blob/main/docs/privacy.md)) | `UsageStatistics` = `0` |
+| What a person asks an AI agent, and what the agent sees | The AI provider the agent uses | `AiFeatures` = `0`, `AgentControl` = `0`, `ConnectAiApps` = `0` |
+| Problem reports, with what the person ticks | SolidCraft's ticket server, or GitHub | `AllowProblemReports` = `0` |
+| A model sent to Open with EasyPrint | Printables | `AllowEasyPrint` = `0` |
+
+Linked designs and fonts on network locations are read from your own file servers
+(Preferences, General, Network locations).
+
 ## Check that a policy applies
 
 While any policy is set, the application bar shows a briefcase and **Managed by** with the
@@ -121,8 +139,8 @@ unavailable too. A Donate or Discord button the policy shows has no way to hide 
 **Set by your organization** instead.
 
 An agent or a script sees the same through the control channel: the reply of `ui.prefs` has a
-`policy` object that lists the locked settings, their values in force (`settings`) and the
-organization's name. The settings themselves report each person's own stored choice, and a
+`policy` object that lists the locked settings, their values in force (`settings`), the
+features turned off (`off`: `easyprint`, `problem_reports`) and the organization's name. The settings themselves report each person's own stored choice, and a
 request that changes a locked setting is refused ([control protocol](https://github.com/tangency-labs/solidcraft/blob/main/docs/control-protocol.md)).
 
 ## A policy is not a launcher

@@ -149,6 +149,14 @@ struct Placed {
 /// (#8706). A placement that turns the body off the axes takes its box from the body's exact
 /// bounds placed there. Any other placement (scaled or mirrored) is measured as placed, as before.
 fn measure_placed(body: &solidcraft_doc::ModelBody, transform: Mat) -> Result<Placed> {
+    if !proper_rotation(&transform) {
+        #[cfg(test)]
+        work::count(|w| w.placed_measures += 1);
+    }
+    Ok(measure_placed_body(body, transform)?)
+}
+
+fn measure_placed_body(body: &solidcraft_doc::ModelBody, transform: Mat) -> solidcraft_kernel::Result<Placed> {
     if proper_rotation(&transform) {
         let m = body.measure()?;
         let bbox = if square_to_axes(&transform) {
@@ -165,14 +173,12 @@ fn measure_placed(body: &solidcraft_doc::ModelBody, transform: Mat) -> Result<Pl
             area: m.area,
             centroid: solidcraft_doc::apply_point(&transform, m.centroid),
             bbox,
-            closed: crate::cmd::inspect::encloses_volume(&body.body),
+            closed: body.is_closed(),
             faces: m.merged.faces,
             edges: m.merged.edges,
             vertices: m.merged.vertices,
         });
     }
-    #[cfg(test)]
-    work::count(|w| w.placed_measures += 1);
     let placed = solidcraft_kernel::transform_matrix(&body.body, transform)?;
     let m = solidcraft_kernel::measure(&placed)?;
     Ok(Placed {
@@ -180,7 +186,7 @@ fn measure_placed(body: &solidcraft_doc::ModelBody, transform: Mat) -> Result<Pl
         area: m.area,
         centroid: m.centroid,
         bbox: m.bbox,
-        closed: crate::cmd::inspect::encloses_volume(&placed),
+        closed: crate::cmd::inspect::encloses_volume(&placed) && !body.is_closed_sheet(),
         faces: m.merged.faces,
         edges: m.merged.edges,
         vertices: m.merged.vertices,
@@ -297,19 +303,22 @@ fn measure(s: &Session, doc: &Document, selected: &[u64], descendants: bool, abo
     for (index, (body, component)) in state.bodies.iter().zip(doc.model_body_components(&state)).enumerate() {
         by_component.entry(component).or_default().push((index, body));
     }
+    // A window waiting for the result (the Properties window) sees how far it is and can stop it.
+    let watch = solidcraft_kernel::watch::current();
+    if watch.as_ref().is_some_and(|w| w.cancelled()) {
+        return Err(bad(cmd, "cancelled"));
+    }
     // How each closed body's volume spreads about its centre of mass (#8095): one tessellation
     // however often it is placed, which each placement then turns.
     let components: BTreeSet<u64> = selected_placements.iter().map(|(component, _, _)| *component).collect();
-    let spread_bodies: Vec<usize> = components
-        .iter()
-        .filter_map(|c| by_component.get(c))
-        .flatten()
-        .filter(|(_, b)| crate::cmd::inspect::encloses_volume(&b.body))
-        .map(|(i, _)| *i)
-        .collect();
+    let spread_bodies: Vec<usize> =
+        components.iter().filter_map(|c| by_component.get(c)).flatten().filter(|(_, b)| b.is_closed()).map(|(i, _)| *i).collect();
     #[cfg(test)]
     work::count(|w| w.spreads += spread_bodies.len());
     let spreads = solidcraft_kernel::map_on_threads(&spread_bodies, 16, |&i| {
+        if watch.as_ref().is_some_and(|w| w.cancelled()) {
+            return None;
+        }
         let body = state.bodies.get(i)?;
         let mut measured = solidcraft_io::mass_properties(&body.body).ok().flatten()?;
         if let Some(sheet) = state.surface_sheets.iter().find(|sheet| sheet.body == body.definition_name()) {
@@ -317,82 +326,169 @@ fn measure(s: &Session, doc: &Document, selected: &[u64], descendants: bool, abo
         }
         measured.gyration()
     });
+    if watch.as_ref().is_some_and(|w| w.cancelled()) {
+        return Err(bad(cmd, "cancelled"));
+    }
     let spread: BTreeMap<usize, Tensor3> = spread_bodies.into_iter().zip(spreads).filter_map(|(i, g)| Some((i, g.flatten()?))).collect();
-    // A window waiting for the result (the Properties window) sees how far it is and can stop it.
-    let watch = solidcraft_kernel::watch::current();
-    let total_bodies: usize = selected_placements.iter().map(|(c, _, _)| by_component.get(c).map_or(0, Vec::len)).sum();
-    let mut done = 0;
-    // Closed bodies' (mass, centre of mass, inertia about it), all in world axes.
-    let mut parts: Vec<(f64, Vec3, Option<Tensor3>)> = Vec::new();
+    // Collect active (non-reference) placements and per-body tasks in exact traversal order.
+    struct BodyTask<'a> {
+        component: u64,
+        path_index: usize,
+        body_index: usize,
+        body: &'a solidcraft_doc::ModelBody,
+        transform: Mat,
+    }
+    let mut active_paths: Vec<Vec<u64>> = Vec::new();
+    let mut tasks: Vec<BodyTask<'_>> = Vec::new();
     for (component, path, transform) in selected_placements {
         if path.iter().skip(selected.len()).any(|id| reference.contains(id)) {
             continue;
         }
         placement_count += 1;
+        let path_index = active_paths.len();
+        active_paths.push(path);
         for &(index, body) in by_component.get(&component).into_iter().flatten() {
-            if let Some(w) = &watch {
-                if w.cancelled() {
-                    return Err(bad(cmd, "cancelled"));
-                }
-                w.progress("measuring", done, total_bodies);
-            }
-            done += 1;
             let transform: Mat = doc.model_body_offset(body).map(|offset| solidcraft_doc::mat_mul(&transform, offset)).unwrap_or(transform);
-            let mut measured = measure_placed(body, transform)?;
-            // The volume the bill of materials weighs too, measured once for the model; the area,
-            // the centre, the box and the counts are the placed body's.
-            let mut body_volume = body.volume().map_or(measured.volume, |v| v * solidcraft_doc::mat_volume_scale(&transform));
-            // A sheet's perforation fields (#732): their holes, which the body does not have,
-            // come off what it measures.
-            if let Some(sheet) = state.surface_sheets.iter().find(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty()) {
-                let mut corrected = body.measure()?;
-                corrected.volume = measured.volume;
-                corrected.area = measured.area;
-                corrected.centroid = measured.centroid;
-                sheet.correct_perforation_properties(&mut corrected, &transform)?;
-                measured.volume = corrected.volume;
-                measured.area = corrected.area;
-                measured.centroid = corrected.centroid;
-                // A perforated sheet's holes are not in the model's volume.
-                body_volume = measured.volume;
-            }
-            let density = doc.density(&body.name);
-            let body_mass = body_volume * density / 1000.0;
-            let closed = measured.closed;
-            // The mesh's spread with the exact mass, so the tensor agrees with the mass shown.
-            let body_inertia = spread
-                .get(&index)
-                .filter(|_| closed)
-                .map(|g| inertia::from_gyration(&inertia::transformed(g, &linear(&transform)), body_mass))
-                .filter(|i| i.iter().flatten().all(|x| x.is_finite()));
-            if closed {
-                volume += body_volume;
-                mass += body_mass;
-                moment += measured.centroid * body_mass;
-                parts.push((body_mass, measured.centroid, body_inertia));
-            } else {
-                skipped += 1;
-            }
-            area += measured.area;
-            bounds = bounds.union(&measured.bbox);
-            faces += measured.faces;
-            edges += measured.edges;
-            vertices += measured.vertices;
-            bodies.push(BodyProperties {
-                name: body.name.to_string(),
-                component,
-                path: path.clone(),
-                material: doc.body_material(&body.name),
-                closed,
-                density_g_cm3: closed.then_some(density),
-                mass_g: closed.then_some(body_mass),
-                volume_mm3: closed.then_some(body_volume),
-                area_mm2: measured.area,
-                center_of_mass: closed.then_some(measured.centroid),
-                inertia_g_mm2: body_inertia,
-                bbox: BoundingBox { min: measured.bbox.min, max: measured.bbox.max },
-            });
+            tasks.push(BodyTask { component, path_index, body_index: index, body, transform });
         }
+    }
+    let total_bodies = tasks.len();
+    if let Some(w) = &watch {
+        w.progress("measuring", 0, total_bodies);
+    }
+    // Phase 1: warm exact measurements of distinct uncached bodies used by rigid placements in
+    // parallel, so every placement reuses one parallelized measurement.
+    let mut seen_measure = HashSet::new();
+    let cold_bodies: Vec<&solidcraft_doc::ModelBody> = tasks
+        .iter()
+        .filter(|t| proper_rotation(&t.transform) && !t.body.has_cached_measure() && seen_measure.insert(t.body_index))
+        .map(|t| t.body)
+        .collect();
+    let parallel_done = std::sync::atomic::AtomicUsize::new(0);
+    if cold_bodies.len() > 1 {
+        let cold_total = cold_bodies.len();
+        solidcraft_kernel::for_each_on_threads(&cold_bodies, 16, |body| {
+            if !watch.as_ref().is_some_and(|w| w.cancelled()) {
+                let _ = body.measure();
+                let _ = body.is_closed();
+                if let Some(w) = &watch {
+                    let n = parallel_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    w.progress("measuring", n, cold_total);
+                }
+            }
+        });
+    }
+    if watch.as_ref().is_some_and(|w| w.cancelled()) {
+        return Err(bad(cmd, "cancelled"));
+    }
+    // Phase 2: measure off-axis rigid placements (needing per-placement exact bounds) and
+    // non-rigid placements (needing full transformed measurement) in parallel.
+    let expensive: Vec<usize> =
+        tasks.iter().enumerate().filter(|(_, t)| !proper_rotation(&t.transform) || !square_to_axes(&t.transform)).map(|(i, _)| i).collect();
+    let mut precomputed: Vec<Option<solidcraft_kernel::Result<Placed>>> = std::iter::repeat_with(|| None).take(tasks.len()).collect();
+    if expensive.len() > 1 {
+        let exp_total = expensive.len();
+        parallel_done.store(0, std::sync::atomic::Ordering::Relaxed);
+        let computed = solidcraft_kernel::map_on_threads(&expensive, 16, |&ti| {
+            if watch.as_ref().is_some_and(|w| w.cancelled()) {
+                return Err(solidcraft_kernel::KernelError::Failed("cancelled".into()));
+            }
+            let Some(task) = tasks.get(ti) else {
+                return Err(solidcraft_kernel::KernelError::Internal("missing body task".into()));
+            };
+            let res = measure_placed_body(task.body, task.transform);
+            if let Some(w) = &watch {
+                let n = parallel_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                w.progress("measuring", n, exp_total);
+            }
+            res
+        });
+        for (ti, res) in expensive.into_iter().zip(computed) {
+            if let Some(slot) = precomputed.get_mut(ti) {
+                *slot = Some(res.unwrap_or_else(|| Err(solidcraft_kernel::KernelError::Internal("measuring this body failed".into()))));
+            }
+        }
+    }
+    if watch.as_ref().is_some_and(|w| w.cancelled()) {
+        return Err(bad(cmd, "cancelled"));
+    }
+    // Phase 3: accumulate totals and per-body entries in exact deterministic traversal order.
+    let mut done = 0;
+    // Closed bodies' (mass, centre of mass, inertia about it), all in world axes.
+    let mut parts: Vec<(f64, Vec3, Option<Tensor3>)> = Vec::new();
+    for (task, pre) in tasks.into_iter().zip(precomputed) {
+        if let Some(w) = &watch {
+            if w.cancelled() {
+                return Err(bad(cmd, "cancelled"));
+            }
+            w.progress("measuring", done, total_bodies);
+        }
+        done += 1;
+        let BodyTask { component, path_index, body_index: index, body, transform } = task;
+        let mut measured = match pre {
+            Some(res) => {
+                if !proper_rotation(&transform) {
+                    #[cfg(test)]
+                    work::count(|w| w.placed_measures += 1);
+                }
+                res?
+            }
+            None => measure_placed(body, transform)?,
+        };
+        // The volume the bill of materials weighs too, measured once for the model; the area,
+        // the centre, the box and the counts are the placed body's.
+        let mut body_volume = body.volume().map_or(measured.volume, |v| v * solidcraft_doc::mat_volume_scale(&transform));
+        // A sheet's perforation fields (#732): their holes, which the body does not have,
+        // come off what it measures.
+        if let Some(sheet) = state.surface_sheets.iter().find(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty()) {
+            let mut corrected = body.measure()?;
+            corrected.volume = measured.volume;
+            corrected.area = measured.area;
+            corrected.centroid = measured.centroid;
+            sheet.correct_perforation_properties(&mut corrected, &transform)?;
+            measured.volume = corrected.volume;
+            measured.area = corrected.area;
+            measured.centroid = corrected.centroid;
+            // A perforated sheet's holes are not in the model's volume.
+            body_volume = measured.volume;
+        }
+        let density = doc.density(&body.name);
+        let body_mass = body_volume * density / 1000.0;
+        let closed = measured.closed;
+        // The mesh's spread with the exact mass, so the tensor agrees with the mass shown.
+        let body_inertia = spread
+            .get(&index)
+            .filter(|_| closed)
+            .map(|g| inertia::from_gyration(&inertia::transformed(g, &linear(&transform)), body_mass))
+            .filter(|i| i.iter().flatten().all(|x| x.is_finite()));
+        if closed {
+            volume += body_volume;
+            mass += body_mass;
+            moment += measured.centroid * body_mass;
+            parts.push((body_mass, measured.centroid, body_inertia));
+        } else {
+            skipped += 1;
+        }
+        area += measured.area;
+        bounds = bounds.union(&measured.bbox);
+        faces += measured.faces;
+        edges += measured.edges;
+        vertices += measured.vertices;
+        let path = active_paths.get(path_index).cloned().unwrap_or_default();
+        bodies.push(BodyProperties {
+            name: body.name.to_string(),
+            component,
+            path,
+            material: doc.body_material(&body.name),
+            closed,
+            density_g_cm3: closed.then_some(density),
+            mass_g: closed.then_some(body_mass),
+            volume_mm3: closed.then_some(body_volume),
+            area_mm2: measured.area,
+            center_of_mass: closed.then_some(measured.centroid),
+            inertia_g_mm2: body_inertia,
+            bbox: BoundingBox { min: measured.bbox.min, max: measured.bbox.max },
+        });
     }
     if let Some(w) = &watch {
         w.progress("measuring", done, total_bodies);

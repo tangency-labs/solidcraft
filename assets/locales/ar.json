@@ -5554,7 +5554,6 @@
   "sketch_finish.edit": "تعديل الرسم",
   "sketch_finish.finished": "اكتمل {name}",
   "sketch_mode.announcement": "{view}، وضع الرسم",
-  "sketch_mode.editing": "قيد التعديل",
   "sketch_mode.model_card_unavailable": "افتح عرض نموذج قبل بدء رسم هنا",
   "sketch_mode.view_name": "{view} · {sketch}",
   "sketch_panel.attached": "مرتبط بـ {body} / {path}",

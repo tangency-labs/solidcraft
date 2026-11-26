@@ -14,16 +14,26 @@
 //! | [`BSplineCurve::is_on_plane`], [`OnPlane`]        | `IsOnPlane`                            |
 //! | [`BSplineCurve::join_with`]                       | `JoinWith`                             |
 //! | [`BSplineCurve::subdivide_at_discontinuity`]      | `SubdivideAtDiscontinuity`             |
+//! | [`BSplineCurve::split_sharp_ends`] (not upstream, #22184) | none                     |
 //! | [`BSplineCurve::trim_gap`], [`GapFix`]            | `TrimGap`                              |
 //! | [`BSplineCurve::trim_gap_intersection`], [`GapIntersection`], [`GapCurves`] | the first half of `TrimGap` |
 //! | [`BSplineCurve::assert_valid`]                    | `AssertValid`                          |
 //! | [`BSplineCurve::assert_no_periodic_jump`], [`assert_no_periodic_jump_of`] | `AssertNoPeriodicJump` |
 //! | `is_zero_speed_tangent_end`, `zero_speed_radius_stretch` (private; fork, WR-668) | `sm_IsZeroSpeedTangentEnd`, `sm_ZeroSpeedRadiusStretch` |
+//! | `span_bounds`, `SpanBounds` (crate; not upstream, tangency-labs/solidcraft#11574) | none |
 //!
 //! The other members of the file belong to `nurbs.b_spline_curve_p1`, `_p2` and
 //! `nurbs.b_spline_curve_n_lib`.
 //!
 //! Deviations:
+//! - **Searches a bound settles** (not upstream, tangency-labs/solidcraft#11574).
+//!   `AssertValid`'s first-derivative and radius-of-curvature searches (tests 11 to 14)
+//!   are not run on a curve of degree 1 or 2 made of Bezier spans whose closed-form lower
+//!   bounds (`span_bounds`: the rational Bezier hodograph for the speed, and the conic's
+//!   curvature identity for the radius) clear the test's tolerance. No solution of the search
+//!   could then fail the test, so the verdict is the search's. Every other curve is
+//!   searched as upstream does, and every curve is with `Kernel::memoize_curve_caches`
+//!   off.
 //! - **Out-params, contexts.** Outputs are return values; `SmContext` arguments (and
 //!   the local context of `TrimGap`) only choose where upstream allocates and are
 //!   dropped. `IsSegmentLine` and `IsOnPlane` leave some outputs unset on some paths;
@@ -295,6 +305,31 @@ enum CurveProperty {
     MinimizeRadiusOfCurvature,
 }
 
+/// The tolerance and the solution spacing of `AssertValid`'s derivative and radius tests
+/// (11-14) for a bounded curve whose bounding box has diagonal `size_xyz` over a
+/// parameter interval `size_t` long: a ten-thousandth of its average speed, and its size
+/// over at least 20.
+fn bounded_scale(size_xyz: f64, size_t: f64) -> (f64, f64) {
+    ((size_xyz / size_t) / 10000.0, size_xyz / max2(20., size_t))
+}
+
+/// Where test 14 of `AssertValid` finds a curve's radius of curvature too small, as
+/// [`BSplineCurve::split_sharp_ends`] reads it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum SmallRadius {
+    /// Nowhere: the test passes.
+    Nowhere,
+    /// At the start (`0`) or the end (`1`) of the natural interval.
+    End(usize),
+    /// Inside the curve, or the curve cannot be sized or searched.
+    Elsewhere,
+}
+
+/// The most cuts [`BSplineCurve::split_sharp_ends`] makes at the ends of one curve: a bound
+/// on its work (as many as a double's interval halves towards its end), past which the
+/// curve is used as given.
+const SHARP_END_CUTS: usize = 53;
+
 /// The analysed curve in the solutions of [`global_property_analysis`] (unread).
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct SelfCurve;
@@ -373,6 +408,7 @@ fn global_property_analysis_run(
     property: CurveProperty,
     min_sep: f64,
 ) -> Result<(bool, Vec<SolutionEnd>)> {
+    crate::profile::profile_scope!(k, "nurbs::b_spline_curve::property_analysis");
     let property = match property {
         CurveProperty::MinimizeFirstDerivative => CurvePropertyType::MinimizeFirstDerivative,
         CurveProperty::MinimizeRadiusOfCurvature => CurvePropertyType::MinimizeRadiusOfCurvature,
@@ -899,6 +935,167 @@ const fn curve_is_analytic(_curve: &BSplineCurve) -> bool {
 /// override it; see [`crate::curve::curve::Curve::is_bounded`]).
 const fn curve_is_bounded(_curve: &BSplineCurve) -> bool {
     true
+}
+
+/// Lower bounds, over a whole curve, of its speed (in its own parameter) and of its radius
+/// of curvature ([`span_bounds`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct SpanBounds {
+    /// No point of the curve moves slower than this.
+    pub speed: f64,
+    /// No point of the curve has a smaller radius of curvature (infinite for a polygon).
+    pub radius: f64,
+}
+
+/// Not upstream (tangency-labs/solidcraft#11574): closed-form lower bounds of the speed
+/// and of the radius of curvature of a B-spline of degree 1 or 2 whose interior knots all
+/// have multiplicity equal to the degree, so that each span is a rational Bezier segment
+/// of that degree: a straight segment, or a conic arc (a circle drawn as a NURB is one).
+/// `None` for any other curve, or a weight not above 0.
+///
+/// On a straight segment from `P0` to `P1` with weights `w0, w1`, the derivative is
+/// `w0 w1 (P1 - P0) / W(s)^2`, so the speed is at least `w0 w1 |P1 - P0| / (w_max^2 L)` on
+/// a span of length `L`, and the radius of curvature is infinite (a corner at a knot is the
+/// kink test's).
+///
+/// On a quadratic segment with points `P0, P1, P2`, weights `w0, w1, w2` and weight function
+/// `W(s) = sum w_i B_i(s)`, the derivative is `N(s) / W(s)^2`, `N` the quadratic with
+/// Bernstein coefficients `2 w0 w1 (P1 - P0)`, `w0 w2 (P2 - P0)`, `2 w1 w2 (P2 - P1)`
+/// (the hodograph of a rational Bezier curve), so `|N|` is at least the distance `h` from
+/// the origin to their convex hull, and `W` lies between the smallest and largest weight.
+/// The cross product of the first two derivatives is `4 w0 w1 w2 (P1 - P0) x (P2 - P1) /
+/// W^3`. So the speed is at least `h / (w_max^2 L)` on a span of length `L`, and the radius
+/// of curvature `|C'|^3 / |C' x C''|` at least `(h / w_max^2)^3 w_min^3 / (4 w0 w1 w2
+/// |(P1 - P0) x (P2 - P1)|)`, which is infinite on a straight segment. Both are computed
+/// with each segment's weights divided by its largest, which changes neither.
+pub(crate) fn span_bounds(cur: &crate::nurbs::crv_basic::Curve) -> Option<SpanBounds> {
+    let degree = cur.degree();
+    if !(degree == 1 || degree == 2) {
+        return None;
+    }
+    let knots = cur.knots();
+    let cpts = cur.cpts();
+    // the distinct knot values, each with its count: both ends `degree + 1`, every interior
+    // one `degree`
+    let mut values: Vec<(f64, usize)> = Vec::new();
+    for &u in knots {
+        match values.last_mut() {
+            Some((v, count)) if *v == u => *count += 1,
+            _ => values.push((u, 1)),
+        }
+    }
+    let last = values.len().checked_sub(1)?;
+    let shaped = values.len() >= 2
+        && values.iter().enumerate().all(|(i, &(u, count))| {
+            u.is_finite()
+                && count
+                    == if i == 0 || i == last {
+                        degree + 1
+                    } else {
+                        degree
+                    }
+        });
+    if !shaped || cpts.len() != degree * last + 1 {
+        return None;
+    }
+    let point = |i: usize| -> Option<(Vec3, f64)> {
+        let (p, w) = cpts.get(i)?.to_euclid_and_w();
+        let w = if w == crate::nurbs::math::NOW { 1.0 } else { w };
+        (w.is_finite() && w > 0.0 && p.x.is_finite() && p.y.is_finite() && p.z.is_finite())
+            .then_some((p, w))
+    };
+    let mut bounds = SpanBounds {
+        speed: f64::INFINITY,
+        radius: f64::INFINITY,
+    };
+    for (s, span) in values.windows(2).enumerate() {
+        let &[(a, _), (b, _)] = span else {
+            return None;
+        };
+        let length = b - a;
+        if length.is_nan() || length <= 0.0 {
+            return None;
+        }
+        // A segment's weights are divided by their largest, which leaves the curve as it
+        // is (a rational curve is the same for weights all scaled by one factor) and keeps
+        // their products from underflowing; a term that is still not finite gives `None`,
+        // so the curve is searched as before.
+        let (speed, radius) = if degree == 1 {
+            let (Some((p0, w0)), Some((p1, w1))) = (point(s), point(s + 1)) else {
+                return None;
+            };
+            let w_max = w0.max(w1);
+            let (w0, w1) = (w0 / w_max, w1 / w_max);
+            (w0 * w1 * (p1 - p0).length() / length, f64::INFINITY)
+        } else {
+            let (Some((p0, w0)), Some((p1, w1)), Some((p2, w2))) =
+                (point(2 * s), point(2 * s + 1), point(2 * s + 2))
+            else {
+                return None;
+            };
+            let w_max = w0.max(w1).max(w2);
+            let (w0, w1, w2) = (w0 / w_max, w1 / w_max, w2 / w_max);
+            let h = origin_distance_to_triangle(
+                (p1 - p0) * (2.0 * w0 * w1),
+                (p2 - p0) * (w0 * w2),
+                (p2 - p1) * (2.0 * w1 * w2),
+            );
+            let w_min = w0.min(w1).min(w2);
+            let turn = (p1 - p0).cross(p2 - p1).length();
+            let radius = if turn > 0.0 {
+                h.powi(3) * w_min.powi(3) / (4.0 * w0 * w1 * w2 * turn)
+            } else {
+                f64::INFINITY
+            };
+            (h / length, radius)
+        };
+        if !(speed.is_finite() && speed >= 0.0 && radius >= 0.0) || radius.is_nan() {
+            return None;
+        }
+        bounds.speed = bounds.speed.min(speed);
+        bounds.radius = bounds.radius.min(radius);
+    }
+    Some(bounds)
+}
+
+/// Whether a lower bound of a curve property clears the tolerance a test reads: by a
+/// relative margin of `1e-9`, far above the rounding of the few dozen operations of
+/// [`span_bounds`] and far below any tolerance a test compares with.
+fn bound_clears(bound: f64, tol: f64) -> bool {
+    bound >= tol * (1.0 + 1e-9)
+}
+
+/// The distance from the origin to the triangle `a, b, c` (any of them may coincide): to
+/// its plane where the origin projects inside it, else to the nearest of its sides (the
+/// triangle's Voronoi regions; Ericson, *Real-Time Collision Detection*, 5.1.5).
+fn origin_distance_to_triangle(a: Vec3, b: Vec3, c: Vec3) -> f64 {
+    let segment = |p: Vec3, q: Vec3| {
+        let d = q - p;
+        let len2 = d.dot(d);
+        let t = if len2 > 0.0 {
+            (-p.dot(d) / len2).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        (p + d * t).length()
+    };
+    let sides = || segment(a, b).min(segment(b, c)).min(segment(c, a));
+    let (ab, ac) = (b - a, c - a);
+    let normal = ab.cross(ac);
+    let n2 = normal.dot(normal);
+    if n2.is_nan() || n2 <= 0.0 {
+        return sides();
+    }
+    // the origin's projection onto the plane, in barycentric coordinates
+    let ap = -a;
+    let (v, w) = (ap.cross(ac).dot(normal) / n2, ab.cross(ap).dot(normal) / n2);
+    if v >= 0.0 && w >= 0.0 && v + w <= 1.0 {
+        let d = a.dot(normal).abs() / n2.sqrt();
+        if d.is_finite() {
+            return d;
+        }
+    }
+    sides()
 }
 
 // ---- helpers ----------------------------------------------------------------------
@@ -1460,6 +1657,156 @@ impl BSplineCurve {
         Ok(resulting_curves)
     }
 
+    /// Not upstream (#22184): this 3D curve cut exactly where test 14 of `AssertValid`
+    /// finds its radius of curvature too small at an end, so that every piece passes that
+    /// test with the curve's own geometry; `None` (the curve is used as given) when the
+    /// test passes, when it fails inside the curve, or when no cuts make every piece pass.
+    /// The pieces are copies trimmed to consecutive intervals of the natural one
+    /// ([`BSplineCurve::trim`]: knot insertion, the parameters kept), in order.
+    ///
+    /// The test reads the radius against a ten-thousandth of the curve's average speed
+    /// ([`bounded_scale`]). A piece cut off at an end keeps the radius there, while its
+    /// tolerance tends to a ten-thousandth of the speed at that end as the piece shrinks;
+    /// so a turn sharp only against the whole curve's speed passes once cut off. The
+    /// longest such piece is cut off ([`BSplineCurve::cut_sharp_end`]), and the rest read
+    /// again: cut again where it still fails at an end, at most [`SHARP_END_CUTS`] times.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] and [`SolidError::Cancelled`] of the analyses and trims
+    /// (any other failure of them leaves the curve as given).
+    pub fn split_sharp_ends(&self, k: &Kernel) -> Result<Option<Vec<Self>>> {
+        if self.dim() != 3 {
+            return Ok(None);
+        }
+        let mut rest = self.clone();
+        // the pieces cut off the start, and off the end (the last cut the innermost)
+        let (mut head, mut tail): (Vec<Self>, Vec<Self>) = (Vec::new(), Vec::new());
+        for _ in 0..=SHARP_END_CUTS {
+            match rest.small_radius(k)? {
+                SmallRadius::Nowhere if head.is_empty() && tail.is_empty() => return Ok(None),
+                SmallRadius::Nowhere => {
+                    tail.reverse();
+                    return Ok(Some(head.into_iter().chain([rest]).chain(tail).collect()));
+                }
+                SmallRadius::End(end) => {
+                    let Some((piece, left)) = rest.cut_sharp_end(k, end)? else {
+                        return Ok(None);
+                    };
+                    if end == 0 {
+                        head.push(piece);
+                    } else {
+                        tail.push(piece);
+                    }
+                    rest = left;
+                }
+                SmallRadius::Elsewhere => return Ok(None),
+            }
+        }
+        Ok(None)
+    }
+
+    /// How test 14 of `AssertValid` reads this curve's radius of curvature, as for a
+    /// bounded 3D curve on no face's trim and with no zero-speed tangent end (WR-668): the
+    /// first solution of the same search, over the natural interval with the same spacing,
+    /// against the same tolerance ([`bounded_scale`]); on an end where the derivative test
+    /// takes a solution to be on one (within `EFF_ZERO` scaled by the interval).
+    fn small_radius(&self, k: &Kernel) -> Result<SmallRadius> {
+        let domain = self.natural_interval();
+        let request = BoundingBoxRequest {
+            normal: true,
+            pseudo: false,
+            polar: false,
+        };
+        let Some(bbox) =
+            ignored(self.calculate_bounding_box(&domain, request))?.and_then(|b| b.normal)
+        else {
+            return Ok(SmallRadius::Elsewhere);
+        };
+        let (tol, sep) = bounded_scale(bbox.size().length(), domain.length());
+        let (ok, solutions) = global_property_analysis(
+            k,
+            self,
+            &domain,
+            CurveProperty::MinimizeRadiusOfCurvature,
+            sep,
+        )?;
+        if !ok {
+            return Ok(SmallRadius::Elsewhere);
+        }
+        let Some(first) = solutions.first() else {
+            return Ok(SmallRadius::Nowhere);
+        };
+        // (a radius that is not a number passes, as in the test)
+        if first.solution_value.partial_cmp(&tol) != Some(std::cmp::Ordering::Less) {
+            return Ok(SmallRadius::Nowhere);
+        }
+        let t = first.param(0)?;
+        let (on_end, other) = domain.is_value_on_boundary(t, EFF_ZERO * (1.0 + domain.length()));
+        Ok(match on_end {
+            false => SmallRadius::Elsewhere,
+            true if other == domain.max() => SmallRadius::End(0),
+            true => SmallRadius::End(1),
+        })
+    }
+
+    /// This curve cut in two where the longest piece at end `end` (0: the start, 1: the
+    /// end) that passes test 14 ends: the cut moved towards `end` by halving that piece's
+    /// interval, from half the curve, until the piece passes; `(piece, rest)`, or `None`
+    /// once the piece's bounding box is smaller than the zone tolerance (an edge that short
+    /// is degenerate) or the interval halves no more.
+    fn cut_sharp_end(&self, k: &Kernel, end: usize) -> Result<Option<(Self, Self)>> {
+        let domain = self.natural_interval();
+        let (lo, hi) = (domain.min(), domain.max());
+        let zone = zone_tol_3d(k, SmallTopoType::NormalSize);
+        let request = BoundingBoxRequest {
+            normal: true,
+            pseudo: false,
+            polar: false,
+        };
+        let mut len = domain.length();
+        loop {
+            len *= 0.5;
+            let s = if end == 0 { lo + len } else { hi - len };
+            if !(s > lo && s < hi) {
+                return Ok(None);
+            }
+            let cut = if end == 0 { [lo, s] } else { [s, hi] };
+            let Some(piece) = self.trimmed(k, cut[0], cut[1])? else {
+                return Ok(None);
+            };
+            let size = ignored(piece.calculate_bounding_box(&piece.natural_interval(), request))?
+                .and_then(|b| b.normal)
+                .map(|b| b.size().length());
+            if !size.is_some_and(|size| size >= zone) {
+                return Ok(None);
+            }
+            if piece.small_radius(k)? != SmallRadius::Nowhere {
+                continue;
+            }
+            let rest_ivl = if end == 0 { [s, hi] } else { [lo, s] };
+            let Some(rest) = self.trimmed(k, rest_ivl[0], rest_ivl[1])? else {
+                return Ok(None);
+            };
+            // the trims may snap the cut to a knot or drop a short end span: the pieces
+            // must still meet at one parameter and span the curve
+            let (p, r) = (piece.natural_interval(), rest.natural_interval());
+            let (first, second) = if end == 0 { (p, r) } else { (r, p) };
+            if first.min() != lo || first.max() != second.min() || second.max() != hi {
+                continue;
+            }
+            return Ok(Some((piece, rest)));
+        }
+    }
+
+    /// A copy trimmed to `[lo, hi]` ([`BSplineCurve::trim`]), or `None` where the trim
+    /// fails.
+    fn trimmed(&self, k: &Kernel, lo: f64, hi: f64) -> Result<Option<Self>> {
+        let mut copy = self.clone();
+        let mut interval = Extent1d::from_min_max(lo, hi);
+        Ok(ignored(copy.trim(k, &mut interval, TrimMode::Notify))?.map(|()| copy))
+    }
+
     /// The intersection step of [`BSplineCurve::trim_gap`], which `trim_gap` runs before
     /// it moves any end: the closest ends of this curve and `other`, both curves extended
     /// (G1, by 3% of their domain) past them, and the extensions intersected at a tolerance of
@@ -1923,6 +2270,14 @@ impl BSplineCurve {
 
         // for debug - data at failing tests
         let dim = self.dim;
+        // closed-form lower bounds of this curve's speed and radius (#11574): a shortcut
+        // that never changes a result, taken only with `Kernel::memoize_curve_caches`
+        // (off, every search runs in full, to check that)
+        let bounds = if k.memoize_curve_caches {
+            span_bounds(cur)
+        } else {
+            None
+        };
         if !degenerate && !analytic {
             // for non degenerate curves
             let mut idx = 1usize;
@@ -2062,27 +2417,29 @@ impl BSplineCurve {
 
             // finite curves: proportional to the average curve speed; else absolute
             let bounded = ovr.bounded;
-            let tol = if bounded {
-                (size_xyz / size_t) / 10000.0
+            let (tol, min_sep) = if bounded {
+                bounded_scale(size_xyz, size_t)
             } else {
-                1e-03
-            };
-            let min_sep = if bounded {
-                size_xyz / max2(20., size_t)
-            } else {
-                5.0
+                (1e-03, 5.0)
             };
 
             // the search reports its own status (as the fork, tangency-labs/smlib
             // 8843967), so it always runs on a sized curve
             let solutions = if sized {
-                let (first_derivs_ok, sols) = global_property_analysis(
-                    k,
-                    self,
-                    &domain,
-                    CurveProperty::MinimizeFirstDerivative,
-                    min_sep,
-                )?;
+                // Not upstream (#11574): a curve proved to move faster than `tol` everywhere
+                // has no solution the test below could fail, so the search is not run
+                let (first_derivs_ok, sols) = if bounds.is_some_and(|b| bound_clears(b.speed, tol))
+                {
+                    (true, Vec::new())
+                } else {
+                    global_property_analysis(
+                        k,
+                        self,
+                        &domain,
+                        CurveProperty::MinimizeFirstDerivative,
+                        min_sep,
+                    )?
+                };
                 rtn &= report(
                     &mut list,
                     key,
@@ -2167,8 +2524,7 @@ impl BSplineCurve {
                     rtn &= bool_report(&mut list, key, 13, radius_sized)?;
                     if let Some(mapped_box) = mapped_box {
                         let mapped_size = mapped_box.size().length();
-                        radius_tol = (mapped_size / size_t) / 10000.0;
-                        radius_sep = mapped_size / max2(20., size_t);
+                        (radius_tol, radius_sep) = bounded_scale(mapped_size, size_t);
                     }
                 }
             }
@@ -2178,13 +2534,25 @@ impl BSplineCurve {
             let mut radii = false;
             // (the search reports its own status, as the fork, tangency-labs/smlib 8843967)
             let solutions = if radius_sized {
-                let (radii_ok, sols) = global_property_analysis(
-                    k,
-                    copy_curve,
-                    &domain,
-                    CurveProperty::MinimizeRadiusOfCurvature,
-                    radius_sep,
-                )?;
+                // Not upstream (#11574): a curve proved to have no radius of curvature below
+                // `radius_tol` has no solution the test below could fail
+                let clears = k.memoize_curve_caches
+                    && copy_curve
+                        .nurb
+                        .as_ref()
+                        .and_then(span_bounds)
+                        .is_some_and(|b| bound_clears(b.radius, radius_tol));
+                let (radii_ok, sols) = if clears {
+                    (true, Vec::new())
+                } else {
+                    global_property_analysis(
+                        k,
+                        copy_curve,
+                        &domain,
+                        CurveProperty::MinimizeRadiusOfCurvature,
+                        radius_sep,
+                    )?
+                };
                 radii = radii_ok;
                 rtn &= report(
                     &mut list,
@@ -2883,6 +3251,300 @@ mod tests {
         // a curve that is no face's trim is tested as it is
         let idx = failed_tests(&k, &trim, None);
         assert!(idx.contains(&13), "{idx:?}");
+    }
+
+    /// A rational quadratic B-spline of dimension `dim` with `points`, `weights` and the
+    /// distinct `knots` `0, 1, .., n` (each interior one twice): one Bezier segment per span.
+    fn conic_chain(dim: u64, points: &[Vec3], weights: &[f64]) -> BSplineCurve {
+        use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+        let spans = (points.len() - 1) / 2;
+        let knots: Vec<f64> = (0..=spans).map(|i| i as f64).collect();
+        let mut mults = vec![2; spans + 1];
+        mults[0] = 3;
+        mults[spans] = 3;
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim,
+            degree: 2,
+            control_points: points,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &mults,
+            knots: &knots,
+            knot_type: KnotType::Unspecified,
+            weights: Some(weights),
+            trim: None,
+        })
+        .unwrap()
+    }
+
+    /// The curves the bound tests run on: circles (2d, and tilted in 3d), the exact trims of
+    /// circles on planes of several sizes as they are and mapped onto their planes, and arcs
+    /// of an ellipse, a parabola and a hyperbola.
+    fn conic_cases(k: &Kernel) -> Vec<(String, BSplineCurve)> {
+        let w = 0.5_f64.sqrt();
+        let quarter = [
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(2.0, 2.0, 0.0),
+            Vec3::new(0.0, 2.0, 0.0),
+        ];
+        let mut cases = vec![
+            (
+                "quarter circle".to_string(),
+                conic_chain(2, &quarter, &[1.0, w, 1.0]),
+            ),
+            (
+                "ellipse arc".to_string(),
+                conic_chain(2, &quarter, &[1.0, 0.3, 1.0]),
+            ),
+            (
+                "parabola arc".to_string(),
+                conic_chain(2, &quarter, &[1.0, 1.0, 1.0]),
+            ),
+            (
+                "hyperbola arc".to_string(),
+                conic_chain(2, &quarter, &[1.0, 2.5, 1.0]),
+            ),
+            (
+                "unequal end weights".to_string(),
+                conic_chain(2, &quarter, &[0.5, 0.9, 2.0]),
+            ),
+            (
+                "polyline".to_string(),
+                curve(
+                    1,
+                    &[
+                        [0.0, 0.0, 0.0],
+                        [2.0, 0.0, 0.0],
+                        [2.0, 3.0, 0.0],
+                        [5.0, 7.0, 0.0],
+                    ],
+                    &[0.0, 0.0, 1.0, 1.5, 4.0, 4.0],
+                ),
+            ),
+            (
+                "tilted 3d quarter circle".to_string(),
+                conic_chain(
+                    3,
+                    &[
+                        Vec3::new(1.0, 0.0, 0.0),
+                        Vec3::new(1.0, 0.6, 0.8),
+                        Vec3::new(0.0, 0.6, 0.8),
+                    ],
+                    &[1.0, w, 1.0],
+                ),
+            ),
+        ];
+        for (centre, plane) in [
+            ((0.5, 0.5, 0.2), (1.0, 1.0)),
+            ((50.0, 50.0, 1.5), (100.0, 100.0)),
+            ((300.0, 1.5, 1.0), (600.0, 3.0)),
+            ((2250.0, 2250.0, 0.003), (4500.0, 4500.0)),
+        ] {
+            let (trim, surface) = circle_trim_on_plane(centre, plane);
+            let domain = trim.natural_interval();
+            if let Some(l) = trim_metric(k, &trim, true, Some(&surface), &domain).unwrap() {
+                if let Some(mapped) = mapped_trim(&trim, l) {
+                    cases.push((format!("trim {centre:?} on {plane:?}, mapped"), mapped));
+                }
+            }
+            cases.push((format!("trim {centre:?} on {plane:?}"), trim));
+        }
+        cases
+    }
+
+    /// The speed and the radius of curvature of `c` at `t`.
+    fn speed_and_radius(c: &BSplineCurve, t: f64) -> (f64, f64) {
+        let d = c.evaluate(t, 2, false, false).unwrap();
+        let (d1, d2) = (d[1], d[2]);
+        let turn = d1.cross(d2).length();
+        let speed = d1.length();
+        (
+            speed,
+            if turn > 0.0 {
+                speed.powi(3) / turn
+            } else {
+                f64::INFINITY
+            },
+        )
+    }
+
+    /// tangency-labs/solidcraft#11574: [`span_bounds`] is a lower bound of the speed
+    /// and of the radius of curvature over the whole curve, sampled at 2001 parameters of
+    /// each case; and it is `None` for a curve that is not made of rational quadratic
+    /// Bezier segments.
+    #[test]
+    fn span_bounds_are_lower_bounds() {
+        let k = Kernel::default();
+        for (name, c) in conic_cases(&k) {
+            let b = span_bounds(c.nurb.as_ref().unwrap()).unwrap();
+            assert!(b.speed > 0.0 && b.radius > 0.0, "{name}: {b:?}");
+            assert_eq!(b.radius.is_infinite(), name == "polyline", "{name}: {b:?}");
+            let domain = c.natural_interval();
+            let (mut speed, mut radius) = (f64::INFINITY, f64::INFINITY);
+            for i in 0..=2000 {
+                let t = domain.min() + domain.length() * f64::from(i) / 2000.0;
+                let (s, r) = speed_and_radius(&c, t);
+                speed = speed.min(s);
+                radius = radius.min(r);
+            }
+            assert!(
+                b.speed <= speed * (1.0 + 1e-12),
+                "{name}: speed {} > {speed}",
+                b.speed
+            );
+            assert!(
+                b.radius <= radius * (1.0 + 1e-12),
+                "{name}: radius {} > {radius}",
+                b.radius
+            );
+        }
+        // a cubic, and a quadratic whose interior knot joins its spans smoothly: not
+        // segments of degree 1 or 2
+        assert!(span_bounds(
+            curve(
+                3,
+                &[
+                    [0.0, 0.0, 0.0],
+                    [1.0, 1.0, 0.0],
+                    [2.0, 1.0, 0.0],
+                    [3.0, 0.0, 0.0]
+                ],
+                &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]
+            )
+            .nurb
+            .as_ref()
+            .unwrap()
+        )
+        .is_none());
+        assert!(span_bounds(quad().nurb.as_ref().unwrap()).is_none());
+    }
+
+    /// tangency-labs/solidcraft#11574: no solution of the first-derivative or of the
+    /// radius-of-curvature search has a value below [`span_bounds`]'s bound, so a curve
+    /// whose bound clears the test's tolerance has no solution the test could fail, and
+    /// skipping the search changes no verdict.
+    #[test]
+    fn no_search_solution_lies_below_the_span_bounds() {
+        let k = Kernel::default();
+        for (name, c) in conic_cases(&k) {
+            let b = span_bounds(c.nurb.as_ref().unwrap()).unwrap();
+            let domain = c.natural_interval();
+            let sep = domain.length() / 20.0;
+            let (_, speeds) = global_property_analysis(
+                &k,
+                &c,
+                &domain,
+                CurveProperty::MinimizeFirstDerivative,
+                sep,
+            )
+            .unwrap();
+            for s in &speeds {
+                let (speed, _) = speed_and_radius(&c, s.param(0).unwrap());
+                assert!(
+                    b.speed <= speed * (1.0 + 1e-12),
+                    "{name}: speed {} > {speed}",
+                    b.speed
+                );
+            }
+            let (_, radii) = global_property_analysis(
+                &k,
+                &c,
+                &domain,
+                CurveProperty::MinimizeRadiusOfCurvature,
+                sep,
+            )
+            .unwrap();
+            for s in &radii {
+                let (_, radius) = speed_and_radius(&c, s.param(0).unwrap());
+                assert!(
+                    b.radius <= radius * (1.0 + 1e-12),
+                    "{name}: radius {} > {radius}",
+                    b.radius
+                );
+                assert!(
+                    b.radius <= s.solution_value * (1.0 + 1e-12),
+                    "{name}: radius {} > {}",
+                    b.radius,
+                    s.solution_value
+                );
+            }
+        }
+    }
+
+    /// A quadratic span whose weights are all near `1e-200` (their products underflow
+    /// unscaled) has the bounds of the same span with weights near 1, below its least speed
+    /// and radius: the weights are scaled by their largest first.
+    #[test]
+    fn span_bounds_hold_for_weights_whose_products_underflow() {
+        let points = [
+            Vec3::new(-0.0005, 0.25, 0.0),
+            Vec3::new(0.0, -0.25, 0.0),
+            Vec3::new(0.0005, 0.25, 0.0),
+        ];
+        // a rational span (equal weights are stored as a polynomial one)
+        let plain = conic_chain(2, &points, &[1.0, 0.9, 1.0]);
+        assert!(plain.nurb.as_ref().unwrap().is_rational());
+        // the same span with its homogeneous control points (w x, w y, w z, w) times 1e-200
+        let mut tiny = plain.clone();
+        for c in tiny.nurb.as_mut().unwrap().cpts_mut() {
+            c.x *= 1e-200;
+            c.y *= 1e-200;
+            if c.z != crate::nurbs::math::NOZ {
+                c.z *= 1e-200;
+            }
+            c.w *= 1e-200;
+        }
+        assert!(tiny
+            .nurb
+            .as_ref()
+            .unwrap()
+            .cpts()
+            .iter()
+            .all(|c| c.w > 0.0 && c.w < 1e-199));
+        let b = span_bounds(tiny.nurb.as_ref().unwrap()).unwrap();
+        let p = span_bounds(plain.nurb.as_ref().unwrap()).unwrap();
+        let close = |a: f64, b: f64| (a - b).abs() <= 1e-12 * a.abs().max(b.abs());
+        assert!(
+            close(b.speed, p.speed) && close(b.radius, p.radius),
+            "{b:?} {p:?}"
+        );
+        let (mut speed, mut radius) = (f64::INFINITY, f64::INFINITY);
+        for i in 0..=2000 {
+            let (s, r) = speed_and_radius(&plain, f64::from(i) / 2000.0);
+            speed = speed.min(s);
+            radius = radius.min(r);
+        }
+        assert!(
+            b.speed.is_finite() && b.speed <= speed * (1.0 + 1e-12),
+            "{b:?} {speed}"
+        );
+        assert!(
+            b.radius.is_finite() && b.radius <= radius * (1.0 + 1e-12),
+            "{b:?} {radius}"
+        );
+    }
+
+    /// With `Kernel::memoize_curve_caches` off every search runs in full: the check of a
+    /// circle's trim, whose bounds clear both tolerances, runs no search with it on and
+    /// both with it off (`nurbs::b_spline_curve::property_analysis`).
+    #[cfg(feature = "profile")]
+    #[test]
+    #[allow(clippy::field_reassign_with_default)] // a kernel differing in one switch
+    fn the_memo_off_switch_runs_every_search() {
+        let (trim, plane) = circle_trim_on_plane((50.0, 50.0, 1.5), (100.0, 100.0));
+        let runs = |memo: bool| {
+            let mut k = Kernel::default();
+            k.memoize_curve_caches = memo;
+            let _ = k.take_profile();
+            assert!(failed_tests(&k, &trim, Some(&plane)).is_empty());
+            k.take_profile()
+                .summary
+                .iter()
+                .filter(|s| s.name == "nurbs::b_spline_curve::property_analysis")
+                .map(|s| s.count)
+                .sum::<u64>()
+        };
+        assert_eq!(runs(true), 0);
+        assert_eq!(runs(false), 2);
     }
 
     /// WR-560 (fork tangency-labs/smlib 54ca3e0, #1524): the trim of a r 0.003 hole on a
@@ -3950,5 +4612,118 @@ mod tests {
         let broken =
             Surface::from(BSplineSurface::from_data(6, 1, 3, 1, 10, 3, &broken, &u, &v).unwrap());
         assert!(failed_tests(&k, &on_line, Some(&broken)).contains(&7));
+    }
+
+    /// #22184's cubic: from (-30, -20) to (30, 15) through (-10, 20) and `leg`.
+    fn issue_22184_cubic(leg: [f64; 2]) -> BSplineCurve {
+        let pts = [[-30.0, -20.0], [-10.0, 20.0], leg, [30.0, 15.0]].map(|[x, y]| [x, y, 0.0]);
+        curve(3, &pts, &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0])
+    }
+
+    /// The last control of #22184's cubic: `leg` from its end at 225 degrees. At t = 1 the
+    /// velocity is 3 leg u (u the unit direction from that control to the end) and the
+    /// acceleration 6 (P1 - 2 P2 + P3), so the radius of curvature there is
+    /// |v|^3 / |v x a| = 1.5 leg^2 / |u x (P1 - P3)| = 1.5 leg^2 / (45 / sqrt 2):
+    /// 1.18e-4 for leg 0.05.
+    fn sharp_cubic(leg: f64) -> BSplineCurve {
+        let ang = 225.0_f64.to_radians();
+        issue_22184_cubic([30.0 + leg * ang.cos(), 15.0 + leg * ang.sin()])
+    }
+
+    /// `pieces` are `c` cut exactly: they start and end where it does, meet consecutively
+    /// at one parameter and one point, each passes test 14 and lies on `c`.
+    fn assert_cut_exactly(k: &Kernel, c: &BSplineCurve, pieces: &[BSplineCurve]) {
+        assert!(pieces.len() >= 2);
+        let ends = |p: &BSplineCurve| {
+            let i = p.natural_interval();
+            [
+                p.evaluate_point(i.min()).unwrap(),
+                p.evaluate_point(i.max()).unwrap(),
+            ]
+        };
+        let whole = c.natural_interval();
+        assert_eq!(pieces[0].natural_interval().min(), whole.min());
+        assert_eq!(
+            pieces[pieces.len() - 1].natural_interval().max(),
+            whole.max()
+        );
+        assert_eq!(ends(&pieces[0])[0], ends(c)[0]);
+        assert_eq!(ends(&pieces[pieces.len() - 1])[1], ends(c)[1]);
+        for w in pieces.windows(2) {
+            // consecutive pieces meet at one parameter and one point
+            assert_eq!(w[0].natural_interval().max(), w[1].natural_interval().min());
+            assert_eq!(ends(&w[0])[1], ends(&w[1])[0]);
+        }
+        for p in pieces {
+            assert_eq!(p.small_radius(k).unwrap(), SmallRadius::Nowhere);
+            // the same curve: the piece's middle is the whole curve's point there
+            let t = p.natural_interval().evaluate(0.5);
+            let d = p.evaluate_point(t).unwrap() - c.evaluate_point(t).unwrap();
+            assert!(d.length() <= 1e-12, "{d:?}");
+        }
+    }
+
+    #[test]
+    fn a_cubic_that_turns_sharply_at_its_end_is_cut_there_exactly() {
+        // #22184: the radius of curvature falls to 1.2e-4 at t = 1, below test 14's 7.0e-3
+        // (the curve's size over 1e4)
+        let k = Kernel::default();
+        let c = sharp_cubic(0.05);
+        assert_eq!(c.small_radius(&k).unwrap(), SmallRadius::End(1));
+        let pieces = c.split_sharp_ends(&k).unwrap().expect("cut");
+        assert_cut_exactly(&k, &c, &pieces);
+    }
+
+    #[test]
+    fn a_cubic_that_turns_sharply_at_its_start_is_cut_there_exactly() {
+        // #22184's cubic with its controls reversed: the same curve read from (30, 15), the
+        // sharp turn at t = 0
+        let k = Kernel::default();
+        let ang = 225.0_f64.to_radians();
+        let pts = [
+            [30.0, 15.0],
+            [30.0 + 0.05 * ang.cos(), 15.0 + 0.05 * ang.sin()],
+            [-10.0, 20.0],
+            [-30.0, -20.0],
+        ]
+        .map(|[x, y]| [x, y, 0.0]);
+        let c = curve(3, &pts, &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(c.small_radius(&k).unwrap(), SmallRadius::End(0));
+        let pieces = c.split_sharp_ends(&k).unwrap().expect("cut");
+        assert_cut_exactly(&k, &c, &pieces);
+    }
+
+    #[test]
+    fn a_cubic_that_turns_sharply_inside_is_not_cut() {
+        // (0, 0), (10, 10), (e, 10), (10, 0): at t = 1/2 the velocity is (0.75 e, 0) and the
+        // acceleration (-3 e, -60), so for e = 0.01 the radius of curvature there is
+        // |v|^3 / |v x a| = (0.75 e)^2 / 60 = 9.4e-7, far below test 14's tolerance (the
+        // curve's size, about 14, over 1e4) and inside the curve: it is left as given
+        let k = Kernel::default();
+        let pts = [[0.0, 0.0], [10.0, 10.0], [0.01, 10.0], [10.0, 0.0]].map(|[x, y]| [x, y, 0.0]);
+        let c = curve(3, &pts, &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(c.small_radius(&k).unwrap(), SmallRadius::Elsewhere);
+        assert!(c.split_sharp_ends(&k).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_cubic_too_sharp_at_its_end_to_cut_off_is_not_cut() {
+        // leg 1e-3: the radius at t = 1 is 1.5e-6 / 31.82 = 4.7e-8 (`sharp_cubic`). A piece
+        // cut off there has a tolerance of its average speed over 1e4, which tends to the
+        // end's speed, 3 leg = 3e-3, over 1e4 = 3e-7 as the piece shrinks, and the speed
+        // only grows away from the end: no piece passes, so the curve is left as given
+        let k = Kernel::default();
+        let c = sharp_cubic(1e-3);
+        assert_eq!(c.small_radius(&k).unwrap(), SmallRadius::End(1));
+        assert!(c.split_sharp_ends(&k).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_cubic_with_an_ordinary_end_is_not_cut() {
+        // #22184's ordinary profile: the last control (18, 12)
+        let k = Kernel::default();
+        let c = issue_22184_cubic([18.0, 12.0]);
+        assert_eq!(c.small_radius(&k).unwrap(), SmallRadius::Nowhere);
+        assert!(c.split_sharp_ends(&k).unwrap().is_none());
     }
 }

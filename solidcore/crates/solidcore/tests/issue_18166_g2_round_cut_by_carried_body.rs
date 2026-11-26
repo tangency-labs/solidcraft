@@ -30,8 +30,6 @@ use solidcore::Kernel;
 /// less those retired since (their behaviour is now the default).
 const SOLIDCRAFT_FIXES: &[&str] = &[
     "fillet_chamfer_cone_on_arc",
-    "uv_trim_corner_end_points_only",
-    "bspline_trim_preserves_uv_spans",
     "offset_extension_from_base",
     "fillet_patch_keeps_fillet_edges",
     "fillet_knife_edge_rounds",
@@ -42,7 +40,6 @@ const SOLIDCRAFT_FIXES: &[&str] = &[
     "edgeuse_convexity_propagates_step_off_failure",
     "keep_exact_pcurves",
     "closed_smooth_pole_tangent_limit",
-    "brep_ray_classifies_current_trims",
 ];
 
 /// SolidCraft's fixes.
