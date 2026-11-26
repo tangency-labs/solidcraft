@@ -394,15 +394,12 @@ impl ThreadForm {
         }
     }
 
-    /// The standard sizes, (nominal diameter, pitch) in mm, by diameter; none for ASME buttress
-    /// (its pitch is always given) and the square thread.
+    /// The standard sizes, (nominal diameter, pitch) in mm, by diameter (metric: the common sizes
+    /// a face is sized to automatically, then the other ISO 261 sizes); none for ASME buttress (its
+    /// pitch is always given) and the square thread.
     pub fn sizes(self) -> Vec<(f64, f64)> {
         match self {
-            ThreadForm::Metric => {
-                let mut all: Vec<(f64, f64)> = ISO_COARSE.iter().chain(ISO_COARSE_MORE).copied().collect();
-                all.sort_by(|a, b| a.0.total_cmp(&b.0));
-                all
-            }
+            ThreadForm::Metric => ISO_COARSE.iter().chain(ISO_COARSE_MORE).copied().collect(),
             ThreadForm::Unified => unified_catalogue().into_iter().map(|s| (s.major_diameter, s.pitch)).collect(),
             ThreadForm::Trapezoidal => ISO_2902_MEDIUM.to_vec(),
             ThreadForm::Buttress => ISO_2902_MEDIUM.iter().copied().filter(|(d, _)| *d >= 10.0).collect(),
@@ -1002,6 +999,16 @@ fn show(v: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn metric_sizes_list_the_common_sizes_then_the_other_iso_sizes() {
+        let diameters: Vec<f64> = ThreadForm::Metric.sizes().iter().map(|(d, _)| *d).collect();
+        let (first, second) = diameters.split_at(22);
+        assert_eq!(first[..11], [1.6, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 14.0]);
+        assert_eq!(first[11..], [16.0, 18.0, 20.0, 22.0, 24.0, 27.0, 30.0, 36.0, 42.0, 48.0, 56.0]);
+        assert_eq!(second, [1.0, 1.1, 1.2, 1.4, 1.8, 2.2, 3.5, 4.5, 7.0, 33.0, 39.0, 45.0, 52.0, 60.0, 64.0]);
+        assert_eq!(ThreadForm::Metric.designations()[21..23], ["M56", "M1"]);
+    }
 
     #[test]
     fn unified_designations_use_inch_majors_and_exact_tpi_conversion() {
