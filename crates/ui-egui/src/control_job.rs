@@ -128,6 +128,7 @@ const ANSWERED_ON_A_COPY: &[&str] = &[
     "file.export_urdf",
     "file.export_urdf_options",
     "file.save_mesh",
+    "frame.export_cope_dxf",
 ];
 
 /// Commands that only read the design, which can take long on a large one (a measure of every

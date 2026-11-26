@@ -82,6 +82,8 @@ const VIEW_IMAGE: (u32, u32) = (960, 600);
 const MAX_PICTURE_BYTES: usize = 4 << 20;
 /// A tool call's arguments kept for its card, at most this big (as JSON text).
 const MAX_TOOL_INPUT: usize = 64 << 10;
+/// Most characters from a plan step shown above the conversation.
+const MAX_STAGE_CHARS: usize = 240;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
@@ -402,6 +404,8 @@ struct Turn {
     /// When it was sent, and when the agent last said or did something (ms since the epoch).
     began: f64,
     heard: f64,
+    /// The first running step from this turn's latest plan update.
+    current_stage: Option<String>,
 }
 
 /// A message typed while the agent works: shown in the transcript as "Queued" until it is sent.
@@ -884,6 +888,9 @@ impl AgentChat {
     pub(crate) fn heard_at(&self) -> Option<f64> {
         self.turn.as_ref().filter(|_| self.state() == State::Busy).map(|t| t.heard)
     }
+    fn current_stage(&self) -> Option<&str> {
+        self.turn.as_ref().filter(|_| self.state() == State::Busy && !self.stopped && !self.steering).and_then(|turn| turn.current_stage.as_deref())
+    }
     /// Keep the picture just sent with the message at `at` in the conversation (the user can open
     /// it). A message sent again (after a sign-in) has its picture already: nothing is added, and
     /// never to another message.
@@ -1035,6 +1042,15 @@ impl AgentChat {
                 }
             }
             Event::Plan(entries) => {
+                if let Some(turn) = self.turn.as_mut() {
+                    turn.current_stage = entries
+                        .iter()
+                        .filter(|(_, status)| status == "in_progress")
+                        .flat_map(|(content, _)| content.lines())
+                        .map(str::trim)
+                        .find(|line| !line.is_empty())
+                        .map(|line| line.chars().take(MAX_STAGE_CHARS).collect());
+                }
                 // A plan is replaced whole: update this turn's plan where it is.
                 let turn = self.items.iter().rposition(|i| matches!(i, Item::User { .. })).unwrap_or(0);
                 if let Some(Item::Plan(p)) = self.items.iter_mut().skip(turn).rev().find(|i| matches!(i, Item::Plan(_))) {
@@ -2106,6 +2122,7 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
         edit_requested: requests_edit(&text),
         began: now,
         heard: now,
+        current_stage: None,
     });
     app.agent_chat.last = Some((text, image, at, files));
     app.agent_chat.unfinished = None;

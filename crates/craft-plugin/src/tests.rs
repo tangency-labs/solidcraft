@@ -1954,6 +1954,30 @@ fn schema_composition_does_not_implicitly_close_object_constraints() {
 }
 
 #[test]
+fn slot_declarations_support_custom_labels_and_model_group_flags() {
+    let mut value = manifest();
+    value["runtime"]["entries"] = json!([
+        {
+            "name": "feature",
+            "effect": "edit",
+            "slots": [{"kind": "ribbon", "name": "Inspect", "label": "형상인식"}],
+            "model_group": false
+        },
+        {
+            "name": "height",
+            "effect": "edit",
+            "slots": [{"kind": "ribbon", "name": "Inspect", "label": "높이측정", "model_group": true}]
+        }
+    ]);
+    let parsed = parse(&value).expect("valid manifest");
+    let entries = &parsed.runtime.unwrap().entries;
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].slots[0], UiSlot::Ribbon { name: "Inspect".into(), label: Some("형상인식".into()), model_group: None });
+    assert_eq!(entries[0].model_group, Some(false));
+    assert_eq!(entries[1].slots[0], UiSlot::Ribbon { name: "Inspect".into(), label: Some("높이측정".into()), model_group: Some(true) });
+}
+
+#[test]
 fn file_conditions_are_typed_host_facts_and_cannot_be_spoofed_by_options() {
     let schema = json!({"type":"object","required":["parts"],"properties":{
         "extension":{"type":"string"},

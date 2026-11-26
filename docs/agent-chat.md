@@ -8,6 +8,8 @@ coding agent runs on your computer under **your own account** with that agent: S
 doesn't sell or proxy a model and needs no key for it. An endpoint's key, if it needs one, goes
 into your system keychain, never into SolidCraft's settings.
 
+For implementation details, see [the in-app agent chat design](design/in-app-agent-chat.md).
+
 Desktop app only.
 
 ## Turning it on and off
