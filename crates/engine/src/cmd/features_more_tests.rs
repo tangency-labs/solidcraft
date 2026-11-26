@@ -2025,6 +2025,55 @@ fn coil_and_loft_to_a_point() {
     assert!(s.execute("solid.loft", &json!({"sections": [{"sketch": "Base"}, {"sketch": "Top", "point": "nope"}]})).is_err());
 }
 
+/// #20736: `height_measure: overall` sets the coil's height end to end. The section reaches past
+/// the centre line at both ends by its size along the axis: the section's size with axial ends, its
+/// size times the cosine of the pitch angle with square ends. The issue's own example, a round 2 mm
+/// section, 20 across, pitch 7, overall 42, touches planes 42 apart; square sections give exact corners.
+#[test]
+fn a_coils_overall_height_is_its_height_end_to_end() {
+    let span = |p: Value| {
+        let mut s = Session::default();
+        let mut p = p;
+        p["body_name"] = json!("Coil");
+        run(&mut s, "solid.coil", p);
+        let (lo, hi, _) = z_x(&mut s, "Coil");
+        hi - lo
+    };
+    let round = json!({"diameter": 20, "height": 42, "pitch": 7, "section_size": 2, "height_measure": "overall"});
+    assert!((span(round) - 42.0).abs() < 0.02, "the issue's coil");
+    let square = |end: &str, measure: &str, size: f64| {
+        span(json!({"diameter": 20, "height": 30, "pitch": 9, "section": "square", "section_size": size,
+            "section_position": "outside", "end_cut": end, "height_measure": measure}))
+    };
+    assert!((square("axial", "overall", 3.0) - 30.0).abs() < 1e-6);
+    assert!((square("square", "overall", 3.0) - 30.0).abs() < 1e-6);
+    // Square ends reach less far than the section's size: the centre line alone falls short by less.
+    let over = square("square", "center_line", 3.0) - 30.0;
+    let c = std::f64::consts::PI * 23.0;
+    assert!((over - 3.0 * c / (c * c + 81.0).sqrt()).abs() < 1e-6, "{over}");
+    assert!((square("axial", "centre_line", 3.0) - 33.0).abs() < 1e-6, "the default measures the centre line");
+    // It follows a parameter, as a height does.
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "H", "expression": "50 mm"}));
+    run(
+        &mut s,
+        "solid.coil",
+        json!({"diameter": 20, "height": "H", "pitch": 7, "section": "square", "section_size": 2, "height_measure": "overall", "body_name": "Coil"}),
+    );
+    run(&mut s, "parameters.change", json!({"name": "H", "expression": "60 mm"}));
+    let (lo, hi, _) = z_x(&mut s, "Coil");
+    assert!((hi - lo - 60.0).abs() < 1e-6, "{}", hi - lo);
+    // Refused where it can't apply.
+    let mut s = Session::default();
+    for p in [
+        json!({"diameter": 20, "revolutions": 3, "pitch": 7, "section_size": 2, "height_measure": "overall"}),
+        json!({"diameter": 20, "revolutions": 3, "height": 30, "section_size": 2, "end_cut": "square", "height_measure": "overall"}),
+        json!({"diameter": 20, "height": 30, "pitch": 7, "section_size": 2, "height_measure": "tip"}),
+    ] {
+        assert!(s.execute("solid.coil", &p).is_err(), "{p}");
+    }
+}
+
 /// A 3 mm shelled basin (100 x 60 x 30, open top) with a fall lofted from its whole outline
 /// 10 up down to a drain pad (`pad`: corners, 1 up), in either section order. The loft's top
 /// edges lie on the outer walls; the cut used to fail for one order of the sections (an

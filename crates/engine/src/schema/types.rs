@@ -682,6 +682,14 @@ keyword_param!(
     "Where the wire ends: axial (the default), in a plane through the coil's axis, or square, across the wire. Any case."
 );
 keyword_param!(
+    /// `solid.coil`'s `height_measure`.
+    CoilHeightMeasureParam,
+    "height measure",
+    &["center_line", "centre_line", "overall"],
+    "center_line or overall",
+    "What `height` measures: center_line (the default; centre_line is an alias), the helix's own height from the section's centre at one end to the other, or overall, end to end, from where the wire starts along the axis to where it stops. Any case."
+);
+keyword_param!(
     /// `solid.emboss`'s `mode`.
     EmbossModeParam,
     "mode",
