@@ -4543,3 +4543,15 @@ fn scoped_ui_file_import_keeps_its_caller_scope_when_submitted_from_a_normal_fra
     assert!(scope.check(&outside.to_string_lossy()).is_err());
     h.app.file_load.cancel();
 }
+
+/// Every message the plugin dialog names is in the English catalog, so no button or line shows
+/// its key instead of text (#22652).
+#[test]
+fn every_plugin_dialog_message_has_text() {
+    crate::i18n::install();
+    let mut missing: Vec<&str> =
+        include_str!("plugin_menu.rs").split('"').filter(|s| s.starts_with("ui.plugin_dialog_") && solidcraft_ui_text::tr(s) == *s).collect();
+    missing.sort_unstable();
+    missing.dedup();
+    assert!(missing.is_empty(), "no text for {missing:?}");
+}
