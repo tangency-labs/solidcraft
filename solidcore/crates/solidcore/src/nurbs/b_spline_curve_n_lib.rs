@@ -2251,7 +2251,12 @@ impl BSplineCurve {
         } else {
             Ok(())
         };
-        if let Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) = elevated {
+        if let Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) = elevated
+        {
             return Err(e);
         }
 

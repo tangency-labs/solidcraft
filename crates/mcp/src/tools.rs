@@ -197,6 +197,11 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "names_only": {"type": "boolean", "description": "Only each body's name (assembly occurrences included) and its definition's, without measuring (default false)"},
                     "items": {"type": "array", "items": {"type": "object"}, "description": "One or two selections to measure instead of bodies, e.g. {\"type\": \"face\", \"body\": \"Body1\", \"index\": 3, \"point\": [x,y,z]}"},
                     "summary": {"type": "boolean", "description": "Per body only name, volume_mm3, bbox {min, max}, faces and closed, and total.volume_mm3 (default false: the full reply)"},
+                    "within": {"type": "object", "properties": {
+                        "min": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                        "max": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}
+                    }, "required": ["min", "max"], "additionalProperties": false, "description": "Filter bodies by their world-coordinate bounding box (mm)"},
+                    "mode": {"type": "string", "enum": ["intersects", "inside"], "description": "With within: include boxes that touch or overlap (intersects, default), or only boxes fully inside"},
                 }),
                 &[],
             ),
@@ -341,13 +346,18 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              component placement with mass and inertia, joints from the assembly's joints, and STL meshes in metres written \
              next to it, or where mesh_prefix points with place_meshes (docs/urdf.md); RViz needs mesh_prefix such as package://robot/meshes/. SDF (.sdf) writes a Gazebo \
              model folder at the path (a .sdf ending dropped): model.config, model.sdf, an STL per body and each decal's image \
-             on a textured quad, the image also its visual's albedo map (docs/sdf.md).",
+             on a textured quad, the image also its visual's albedo map (docs/sdf.md). MJCF (format mjcf, any path such as robot.xml) exports the whole \
+             assembly as a MuJoCo model at its current joint values: a body per component placement with mass and inertia, a \
+             joint per joint value (ball joints as one), loops and motion links as equality constraints, and STL meshes written next to it \
+             (docs/mjcf.md).",
             object(
                 json!({
                     "path": string("Output file"),
-                    "format": {"type": "string", "enum": ["step", "stp", "iges", "igs", "3mf", "3mf-tagged", "stl", "stla", "obj", "glb", "usd", "usda", "usdc", "usdz", "3dm", "urdf", "sdf"]},
-                    "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names (default: all; not with urdf)"},
+                    "format": {"type": "string", "enum": ["step", "stp", "iges", "igs", "3mf", "3mf-tagged", "stl", "stla", "obj", "glb", "usd", "usda", "usdc", "usdz", "3dm", "urdf", "mjcf", "sdf"]},
+                    "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names (default: all; not with urdf or mjcf)"},
                     "writer": {"type": "string", "enum": ["solidcraft", "cadmpeg"], "description": "STEP and IGES only: SolidCraft's own writer (default), or cadmpeg's, which writes STEP AP242 with the components and colours but no solid names, and IGES 5.3 with each body where the design shows it; refused for other formats"},
+                    "quality": {"type": "string", "enum": ["standard", "fine", "finest"], "description": "stl, stla, obj, 3mf, glb, usd, 3dm, urdf and sdf: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size (default standard)"},
+                    "chord": {"type": "number", "minimum": 0.001, "maximum": 1000, "description": "Instead of quality, for the same formats: one chord tolerance for every body, in mm; coarser gives fewer triangles (a simulator's limit on triangles per mesh file). Refused with quality"},
                     "mesh_prefix": string("urdf: put before each mesh file name (default: none, so relative to the .urdf)"),
                     "place_meshes": {"type": "boolean", "description": "urdf: write the meshes where mesh_prefix points, making its folder (default false: next to the .urdf)"},
                     "effort": {"type": "number", "description": "urdf: effort limit for joints with none saved, N or N m (default 1000)"},
@@ -1008,9 +1018,17 @@ fn str_arg<'a>(a: &'a Map<String, Value>, k: &str) -> Option<&'a str> {
     a.get(k).and_then(Value::as_str)
 }
 
+/// Preserve present region keys, even null, for validation by the engine.
+fn measure_region_params(a: &Map<String, Value>) -> Value {
+    Value::Object(["within", "mode"].iter().filter_map(|k| a.get(*k).map(|v| (k.to_string(), v.clone()))).collect())
+}
+
 /// `measure`'s arguments (without `items`) as `inspect.measure` takes them.
 fn measure_params(a: &Map<String, Value>) -> Value {
-    let mut p = pick(a, &["names_only"]);
+    let mut p = measure_region_params(a);
+    if let Some(v) = a.get("names_only").filter(|v| !v.is_null()) {
+        p["names_only"] = v.clone();
+    }
     if let Some(body) = str_arg(a, "body") {
         p["bodies"] = json!([body]);
     }
@@ -1078,7 +1096,9 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         "pending" => pending(b),
         "measure" => {
             if let Some(items) = a.get("items") {
-                return exec(b, "inspect.measure", json!({ "items": items }));
+                let mut p = measure_region_params(a);
+                p["items"] = items.clone();
+                return exec(b, "inspect.measure", p);
             }
             let m = exec(b, "inspect.measure", measure_params(a))?;
             Ok(if measure_summary_wanted(a) { measure_summary(m) } else { m })
@@ -1107,6 +1127,8 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
                     "format",
                     "bodies",
                     "writer",
+                    "quality",
+                    "chord",
                     "mesh_prefix",
                     "place_meshes",
                     "effort",
@@ -1377,7 +1399,11 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
             mapped(inner, a.get("params").cloned().filter(Value::is_object).unwrap_or(json!({})))
         }
         "measure" => match a.get("items") {
-            Some(items) => mapped("inspect.measure", json!({"items": items})),
+            Some(items) => {
+                let mut p = measure_region_params(a);
+                p["items"] = items.clone();
+                mapped("inspect.measure", p)
+            }
             None => Ok(("inspect.measure".into(), measure_params(a), measure_summary_wanted(a).then_some(Narrow::MeasureSummary))),
         },
         // A batch step gets the numbers; the overlay picture is the `compare_picture` tool's.
@@ -1399,6 +1425,8 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
                     "format",
                     "bodies",
                     "writer",
+                    "quality",
+                    "chord",
                     "mesh_prefix",
                     "place_meshes",
                     "effort",
@@ -1903,6 +1931,8 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
             Err(e) if e.starts_with(crate::backend::NOT_RUNNING) || e.starts_with(STILL_RUNNING) || e.contains(crate::backend::REFUSED_UNRUN) => {
                 return (Value::String(e), true);
             }
+            // The app said it ran nothing (the user declined the call): not "it may have run".
+            Err(e) if e.starts_with(solidcraft_control::NOT_RUN) => return (Value::String(e), true),
             // The app may have run it: sending the steps again would apply them twice.
             Err(e) => {
                 let msg = format!("the app did not answer engine.batch ({e}); it may have run: inspect the design before sending it again");

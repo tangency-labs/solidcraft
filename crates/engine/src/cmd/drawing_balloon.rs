@@ -1,4 +1,4 @@
-//! `drawing.balloon.add`, `.edit`, `.repair` and `.inspect` (W26, #3874; B5, #4892): a balloon on a
+//! `drawing.balloon.add`, `.edit`, `.delete`, `.repair` and `.inspect` (W26, #3874; B5, #4892): a balloon on a
 //! saved view of the open drawing, pointing at a placed part by an edge of it, a new name for the
 //! edge when it is lost, and where it stands with the model now. The edge is picked as a
 //! dimension's is and saved by name ([`solidcraft_doc::Document::edge_reference`]); its path is the
@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use solidcraft_doc::bom::Unlisted;
+use solidcraft_doc::drawing::OnSheet;
 use solidcraft_doc::drawing::balloon::{Balloon, RowRead, balloon_rows};
 use solidcraft_doc::ids;
 
@@ -20,12 +21,14 @@ use super::CommandSpec;
 use super::drawing_dimension::{Slot, repair_reference, status_words};
 use super::drawing_view::{check_drawn, drawn_warning};
 use crate::params::bad;
-use crate::schema::drawing_balloon::{AddParams, BalloonResult, EditParams, EditResult, InspectParams, RepairParams};
+use crate::schema::drawing_balloon::{AddParams, BalloonResult, DeleteParams, DeleteResult, EditParams, EditResult, InspectParams, RepairParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const ADD: &str = "drawing.balloon.add";
 const ADD_CONTRACT: TypedContract<AddParams> = TypedContract::new();
+const DELETE: &str = "drawing.balloon.delete";
+const DELETE_CONTRACT: TypedContract<DeleteParams> = TypedContract::new();
 const EDIT: &str = "drawing.balloon.edit";
 const EDIT_CONTRACT: TypedContract<EditParams> = TypedContract::new();
 const INSPECT: &str = "drawing.balloon.inspect";
@@ -48,6 +51,13 @@ pub static COMMANDS: &[CommandSpec] = &[
              (default its sheet's only parts list, else the drawing's) → what drawing.balloon.inspect \
              answers for it. Saved by the edge's name, never the point picked; one on a part its view doesn't draw (its hide or \n             source leaves it out) is refused. One undo step; no model is evaluated.",
         ),
+    CommandSpec::new(DELETE, "Delete Balloon", crate::checked!("drawing.balloon.delete", delete)).begins_edit()
+        .icon("delete")
+        .in_drawing()
+        .doc_only()
+        .contract(&DELETE_CONTRACT)
+        .output(output_schema_for::<DeleteResult>)
+        .params("balloon: its id → {balloon}. The part it numbered keeps its row in the parts list. One undo step; no model is evaluated."),
     CommandSpec::new(EDIT, "Edit Balloon", crate::checked!("drawing.balloon.edit", edit)).begins_edit_when(crate::edit_start::changes_editor_fields)
         .icon("edit")
         .in_drawing()
@@ -101,6 +111,17 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(())
     })?;
     answer(s, ADD, id)
+}
+
+fn delete(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: DeleteParams = crate::schema::read(DELETE, p)?;
+    let id = request.balloon.0;
+    s.edit_drawing(DELETE, |d| {
+        d.balloons.by_id(id).ok_or_else(|| bad(DELETE, format!("the drawing has no balloon {}", ids::encode(id))))?;
+        d.remove_objects(&OnSheet { balloons: vec![id], ..Default::default() });
+        Ok(())
+    })?;
+    serde_json::to_value(DeleteResult { balloon: ids::encode(id) }).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 fn edit(s: &mut Session, p: &Value) -> Result<Value> {

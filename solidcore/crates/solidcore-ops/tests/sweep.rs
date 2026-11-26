@@ -30,7 +30,9 @@ use solidcore_ops::sweep::{
     sweep_placed, sweep_stations, Affine, CornerRefusal, Curve, DraftCorner, Ends, Join, PathCheck,
     SweepFrame, SweepRoute, Verdict,
 };
-use solidcore_ops::sweep::{loft_with_ends, LoftEnd};
+use solidcore_ops::sweep::{
+    loft_with_ends, screw_sweep_with, LoftEnd, ScrewSweepOptions, ScrewWalls,
+};
 use solidcore_ops::{make_box, Body, CheckLevel, Error};
 
 const Z: [f64; 3] = [0.0, 0.0, 1.0];
@@ -557,6 +559,35 @@ fn check(name: &str) {
         }
         (want, got) => panic!("{name}: want {want:?}, got {got:?}"),
     }
+}
+
+/// A square thread with joined walls: its two flanks one face each across the half turns its
+/// cylinder walls come in, the same solid as its pieces (the same volume, every cylinder piece),
+/// and `screw_sweep` is the pieces.
+#[test]
+fn screw_sweep_joined_walls_are_the_pieces_solid() {
+    let thread = polygon(&[
+        [5.0, 0.0, 0.0],
+        [6.0, 0.0, 0.0],
+        [6.0, 0.0, 1.0],
+        [5.0, 0.0, 1.0],
+    ]);
+    let made = |walls| {
+        let options = ScrewSweepOptions {
+            law: None,
+            tolerance: 1e-5,
+            walls,
+        };
+        screw_sweep_with(&thread, [0.0; 3], Z, 2.0, 2.0, &options).unwrap()
+    };
+    let (pieces, joined) = (made(ScrewWalls::Pieces), made(ScrewWalls::Joined));
+    let plain = screw_sweep(&thread, [0.0; 3], Z, 2.0, 2.0, None, 1e-5).unwrap();
+    assert_eq!(plain.counts().unwrap(), pieces.counts().unwrap());
+    // 4 half turns of 4 walls and 2 caps; then 4 of the 2 cylinders, 2 flanks and 2 caps
+    assert_eq!(pieces.counts().unwrap()[0], 18);
+    assert_eq!(joined.counts().unwrap()[0], 12);
+    let (vp, vj) = (pieces.volume(1e-8).unwrap(), joined.volume(1e-8).unwrap());
+    assert!(rel(vp, vj) < 1e-9, "pieces {vp}, joined {vj}");
 }
 
 macro_rules! cases {
@@ -1546,4 +1577,321 @@ fn a_swept_circle_s_record_opens_again() {
         }
     }
     assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// A swept circle saved before #21509 squared the record's plane axes: its cap planes' v axes
+/// are off square by about 1.36e-14 times their size (tangency-labs/solidcraft#21752). The
+/// record opens, as the same solid, and the record it writes again opens too.
+#[test]
+fn a_swept_circle_saved_with_its_caps_off_square_opens() {
+    use solidcore_record::brep::Surface;
+    let start = [10010.0, 9997.58, 10.0];
+    let circle = Curve::Arc {
+        center: start,
+        axis: [0.0, 1.0, 0.0],
+        reference: Z,
+        radius: 1.0,
+        start: 0.0,
+        end: TAU,
+    };
+    let end = [start[0], start[1] + 10.0, start[2]];
+    let (body, _, _) =
+        sweep_placed(&[circle], &[line(start, end)], SweepFrame::Follow, true).unwrap();
+    let (mut record, _) = body.to_record().unwrap();
+    let mut skewed = 0;
+    for face in &mut record.faces {
+        if let Surface::Plane { u_axis, v_axis, .. } = &mut face.surface {
+            let size = (0..3).map(|i| v_axis[i] * v_axis[i]).sum::<f64>().sqrt();
+            for i in 0..3 {
+                v_axis[i] += 1.36e-14 * size * u_axis[i];
+            }
+            skewed += 1;
+        }
+    }
+    assert_eq!(skewed, 2, "the two caps");
+    let (back, _) = Body::from_record(&record, true).unwrap();
+    assert!(back.check(CheckLevel::All).unwrap().is_valid());
+    let (again, _) = back.to_record().unwrap();
+    assert_eq!(
+        (again.faces.len(), again.edges.len(), again.vertices.len()),
+        (
+            record.faces.len(),
+            record.edges.len(),
+            record.vertices.len()
+        )
+    );
+    Body::from_record(&again, true).unwrap();
+    let (v, w) = (body.volume(1e-9).unwrap(), back.volume(1e-9).unwrap());
+    assert!(rel(v, w) < 1e-9, "volume {w} vs {v}");
+}
+
+/// A profile's runs of arcs on one circle are found and joined as [`join_arcs`] joins them: a
+/// circle in two halves of one frame is the full circle from its frame's start; two frames
+/// close at the middle of the longer; an open run in a loop with a line is one arc and the line
+/// stays; a profile with no such run is as given.
+#[test]
+fn the_runs_of_a_profile_join_as_join_arcs_joins_them() {
+    rig_fixes();
+    let whole = solidcore_ops::sweep::join_circle_runs(&halves(), JOIN).unwrap();
+    assert_eq!(
+        whole,
+        [join_arcs(&halves(), Join::ClosedAtFrameStart, JOIN).unwrap()]
+    );
+    let framed = solidcore_ops::sweep::join_circle_runs(&two_frames(), JOIN).unwrap();
+    assert_eq!(
+        framed,
+        [join_arcs(&two_frames(), Join::ClosedAtMiddleOfLongest, JOIN).unwrap()]
+    );
+    let d = half_disc();
+    let open = solidcore_ops::sweep::join_circle_runs(&d, JOIN).unwrap();
+    assert_eq!(
+        open,
+        [join_arcs(&d[..2], Join::Open, JOIN).unwrap(), d[2].clone()]
+    );
+    let square = [
+        line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+        line([1.0, 0.0, 0.0], [1.0, 1.0, 0.0]),
+        line([1.0, 1.0, 0.0], [0.0, 1.0, 0.0]),
+        line([0.0, 1.0, 0.0], [0.0, 0.0, 0.0]),
+    ];
+    assert_eq!(
+        solidcore_ops::sweep::join_circle_runs(&square, JOIN).unwrap(),
+        square
+    );
+    assert!(solidcore_ops::sweep::join_circle_runs(&[], JOIN).is_err());
+}
+
+/// A circle in two halves lofted to a point above its centre is a cone: the base and a ruled
+/// wall on each half, volume pi r^2 h / 3; a half disc's arc gets a ruled wall and its line a
+/// triangle.
+#[test]
+fn a_curved_section_lofts_to_a_point_as_a_cone() {
+    rig_fixes();
+    let cone = loft_to_point(&halves(), [0.0, 0.0, 10.0]).unwrap();
+    assert_eq!(faces(&cone), 3, "the base and two walls");
+    assert!(rel(cone.volume(1e-8).unwrap(), 250.0 * PI / 3.0) < 1e-7);
+    let half = loft_to_point(&half_disc(), [0.0, 0.0, 10.0]).unwrap();
+    assert_eq!(faces(&half), 4, "the base, two ruled walls and a triangle");
+    assert!(rel(half.volume(1e-8).unwrap(), 125.0 * PI / 3.0) < 1e-7);
+}
+
+/// A tapered duct of squares lofts with flat sides: six faces, every one a plane (the skin would
+/// make the sides bilinear B-spline surfaces), and the frustum's volume.
+#[test]
+fn a_loft_of_two_squares_has_planar_sides() {
+    rig_fixes();
+    let b = loft(
+        &[square(0.0, 0.0, 20.0, 0.0), square(5.0, 5.0, 10.0, 10.0)],
+        1,
+        true,
+    )
+    .unwrap();
+    assert_eq!(faces(&b), 6);
+    let (record, _) = b.to_record().unwrap();
+    assert!(
+        record.faces.iter().all(|f| matches!(
+            f.surface,
+            solidcore_record::brep::Surface::Plane { .. }
+                | solidcore_record::brep::Surface::PlaneThrough { .. }
+        )),
+        "every face a plane"
+    );
+    assert!(rel(b.volume(1e-8).unwrap(), 7000.0 / 3.0) < 1e-9);
+}
+
+/// The profile of #22184 placed by `p`: a cubic Bézier from (-30, -20) to (30, 15) through
+/// the controls (-10, 20) and its last 0.05 mm from its end at 225 degrees (`leg`; the
+/// issue's ordinary profile has (18, 12)), then two lines back.
+fn bezier_profile(p: impl Fn(f64, f64) -> [f64; 3], leg: [f64; 2]) -> Vec<Curve> {
+    let ctrl = [[-30.0, -20.0], [-10.0, 20.0], leg, [30.0, 15.0]];
+    vec![
+        Curve::Nurbs {
+            degree: 3,
+            points: ctrl
+                .iter()
+                .map(|&[y, z]| {
+                    let q = p(y, z);
+                    [q[0], q[1], q[2], 1.0]
+                })
+                .collect(),
+            knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        },
+        Curve::Line {
+            start: p(30.0, 15.0),
+            end: p(30.0, -20.0),
+        },
+        Curve::Line {
+            start: p(30.0, -20.0),
+            end: p(-30.0, -20.0),
+        },
+    ]
+}
+
+/// The last control of #22184's Bézier: 0.05 mm from its end at 225 degrees, so its radius
+/// of curvature falls to 1.2e-4 mm there.
+fn sharp_leg() -> [f64; 2] {
+    let ang = 225.0_f64.to_radians();
+    [30.0 + 0.05 * ang.cos(), 15.0 + 0.05 * ang.sin()]
+}
+
+/// A profile whose cubic Bézier turns sharply at its end (#22184), extruded 10 mm: a closed
+/// solid of the profile's area times 10. By Green's theorem the area is 1559.6287689399
+/// mm^2 (the Bézier's part of the integral exactly, by five-point Gauss on its degree-5
+/// integrand), so 15596.287689399 mm^3.
+#[test]
+fn a_profile_bezier_that_turns_sharply_at_its_end_extrudes_to_a_solid() {
+    rig_fixes();
+    let profile = bezier_profile(|y, z| [2.0, y, z], sharp_leg());
+    let body = extrude(
+        &profile,
+        [1.0, 0.0, 0.0],
+        10.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .expect("the extrude is a solid");
+    assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    let v = body.volume(1e-10).unwrap();
+    assert!((v - 15596.287689399).abs() <= 1e-6, "{v}");
+    // the Bézier is cut at its sharp end: two caps, the two lines' walls and at least two
+    // of the Bézier's
+    assert!(body.counts().unwrap()[0] >= 6);
+}
+
+/// The same profile in the XZ plane, 40 mm out along X (x from 10 to 70), turned a whole
+/// turn about Z: by Pappus the volume is 2 pi times the region's moment about the axis, its
+/// integral of x, by Green's theorem the integral of x^2 / 2 dz round the loop: -85750 along
+/// the line x = 70, 0 along the line z = -20, and 13963.00720844239 along the Bézier
+/// (five-point Gauss, exact on its degree-8 integrand): 71786.9927915576 mm^3 in all, so
+/// 451050.978354522 mm^3.
+#[test]
+fn a_profile_bezier_that_turns_sharply_at_its_end_revolves_to_a_solid() {
+    rig_fixes();
+    let profile = bezier_profile(|y, z| [y + 40.0, 0.0, z], sharp_leg());
+    let body = revolve(&profile, [0.0; 3], Z, TAU, true).expect("the revolve is a solid");
+    assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    let v = body.volume(1e-10).unwrap();
+    assert!(
+        (v - 451050.978354522).abs() <= 1e-9 * 451050.978354522,
+        "{v}"
+    );
+}
+
+/// The issue's ordinary profile (last control (18, 12)) is not cut: its extrusion has a wall
+/// per curve and two caps.
+#[test]
+fn a_profile_bezier_with_an_ordinary_end_extrudes_one_wall_per_curve() {
+    rig_fixes();
+    let profile = bezier_profile(|y, z| [2.0, y, z], [18.0, 12.0]);
+    let body = extrude(
+        &profile,
+        [1.0, 0.0, 0.0],
+        10.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .expect("the extrude is a solid");
+    assert_eq!(body.counts().unwrap()[0], 5);
+}
+
+/// #22184's profile traversed the other way round: its Bézier starts with the sharp turn.
+fn reversed(profile: Vec<Curve>) -> Vec<Curve> {
+    profile
+        .into_iter()
+        .rev()
+        .map(|c| match c {
+            Curve::Nurbs {
+                degree,
+                mut points,
+                knots,
+            } => {
+                // the knots 0, 0, 0, 0, 1, 1, 1, 1 read the same backwards
+                points.reverse();
+                Curve::Nurbs {
+                    degree,
+                    points,
+                    knots,
+                }
+            }
+            Curve::Line { start, end } => Curve::Line {
+                start: end,
+                end: start,
+            },
+            arc @ Curve::Arc { .. } => arc,
+        })
+        .collect()
+}
+
+/// The issue's plate: 100 x 80, 2 mm thick, its top face the plane x = 2 that the profiles
+/// above lie in (y in [-30, 30] and z in [-20, 20] inside it); 16000 mm^3.
+fn plate() -> Body {
+    make_box([0.0, -50.0, -40.0], [2.0, 100.0, 80.0]).unwrap()
+}
+
+/// The same profile with its Bézier's sharp turn at its start: the same closed solid,
+/// 15596.287689399 mm^3 (the area does not depend on the direction the loop is read).
+#[test]
+fn a_profile_bezier_that_turns_sharply_at_its_start_extrudes_to_a_solid() {
+    rig_fixes();
+    let profile = reversed(bezier_profile(|y, z| [2.0, y, z], sharp_leg()));
+    let body = extrude(
+        &profile,
+        [1.0, 0.0, 0.0],
+        10.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .expect("the extrude is a solid");
+    assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    let v = body.volume(1e-10).unwrap();
+    assert!((v - 15596.287689399).abs() <= 1e-6, "{v}");
+}
+
+/// #22184's Join: the profile extruded 10 mm off the plate's top and united with it, a valid
+/// solid of 16000 + 15596.287689399 mm^3 (the extrusion touches the plate only on its cap).
+#[test]
+fn a_profile_bezier_that_turns_sharply_at_its_end_joins_its_plate() {
+    rig_fixes();
+    let profile = bezier_profile(|y, z| [2.0, y, z], sharp_leg());
+    let tool = extrude(
+        &profile,
+        [1.0, 0.0, 0.0],
+        10.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let joined = solidcore_ops::boolean::boolean(plate(), tool, solidcore_ops::BooleanOp::Union)
+        .expect("the union is a solid")
+        .expect("the union is not empty");
+    assert!(joined.check(CheckLevel::All).unwrap().is_valid());
+    let v = joined.volume(1e-10).unwrap();
+    assert!((v - 31596.287689399).abs() <= 1e-6, "{v}");
+}
+
+/// #22184's Cut: the profile extruded 2 mm into the plate and subtracted, through it; a
+/// valid solid of 16000 - 2 x 1559.6287689399 = 12880.7424621202 mm^3.
+#[test]
+fn a_profile_bezier_that_turns_sharply_at_its_end_cuts_through_its_plate() {
+    rig_fixes();
+    let profile = bezier_profile(|y, z| [2.0, y, z], sharp_leg());
+    let tool = extrude(
+        &profile,
+        [-1.0, 0.0, 0.0],
+        2.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let cut = solidcore_ops::boolean::boolean(plate(), tool, solidcore_ops::BooleanOp::Subtract)
+        .expect("the cut is a solid")
+        .expect("the cut is not empty");
+    assert!(cut.check(CheckLevel::All).unwrap().is_valid());
+    let v = cut.volume(1e-10).unwrap();
+    assert!((v - 12880.7424621202).abs() <= 1e-6, "{v}");
 }

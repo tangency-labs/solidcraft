@@ -17,7 +17,6 @@ test-support = []
 
 [dependencies]
 solidcore-record = { workspace = true }
-solidcore-tess = { workspace = true }
 solidcraft-color = { workspace = true }
 solidcraft-viewport = { workspace = true }
 solidcraft-geom = { workspace = true }

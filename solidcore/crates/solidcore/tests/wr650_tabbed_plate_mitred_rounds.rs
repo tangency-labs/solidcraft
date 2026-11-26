@@ -156,12 +156,10 @@ fn top_edges(k: &Kernel, b: &Brep) -> Vec<EdgeId> {
 fn round() -> (f64, Result<(bool, f64), i32>) {
     let mut k = Kernel::default();
     k.fixes.fillet_chamfer_cone_on_arc = true;
-    k.fixes.fillet_cleanup_keeps_target_faces = true;
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
-    k.fixes.offset_analytic_mate_edges = true;
     k.fixes.offset_extension_as_itself = true;
     k.fixes.offset_extension_from_base = true;
     let mut b = plate(&mut k);

@@ -412,6 +412,52 @@ fn anchor_angle_and_mirror_place_the_profile() {
     assert!(plain.4[1] < 30.0 && m.4[1] > 30.0, "{plain:?} {m:?}");
 }
 
+/// A part drawn with Y up (as parts read from other CAD often are) gives its members `up: "Y"`:
+/// they stand as a Z-up part's do with no `angle`, a line along Y is a vertical member and a line
+/// along Z a horizontal one. The axis is saved only when it is not Z, and survives a save.
+#[test]
+fn members_of_a_y_up_part_stand_on_y() {
+    let angle = json!({"kind": "angle", "width": 60, "height": 40, "thickness": 5});
+    let place = |plane: &str, to: [f64; 2], up: Option<&str>| {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": plane, "name": "Rail"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], to]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut p = json!({"sketch": "Rail", "profile": angle, "anchor": "bottom_left"});
+        if let Some(up) = up {
+            p["up"] = json!(up);
+        }
+        run(&mut s, "frame.member", p);
+        let b = bodies(&mut s).remove(0);
+        (s, b)
+    };
+    // Along +X on the XZ plane (a floor with Y up): the profile's y is world +Y and its x
+    // y × d = −Z, so the 60 mm leg runs −Z and the 40 mm one +Y.
+    let (s, flat) = place("XZ", [1000.0, 0.0], Some("Y"));
+    assert!(near3(flat.2, [0.0, 0.0, -60.0]) && near3(flat.3, [1000.0, 40.0, 0.0]), "{flat:?}");
+    // Saved with the member, and read back the same.
+    let saved = s.doc.to_json();
+    assert!(saved.contains("\"up\": \"Y\""), "{saved}");
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    assert_eq!(bodies(&mut reopened).remove(0), flat);
+    // A line along Y is a post: its x is world X and its y d × x = −Z.
+    let (_, post) = place("XY", [0.0, 500.0], Some("Y"));
+    assert!(near3(post.2, [0.0, 0.0, -40.0]) && near3(post.3, [60.0, 500.0, 0.0]), "{post:?}");
+    // With Z up (the default, and saved as nothing) the same line is a horizontal member.
+    let (s, rail) = place("XY", [0.0, 500.0], None);
+    assert!(near3(rail.2, [-60.0, 0.0, 0.0]) && near3(rail.3, [0.0, 500.0, 40.0]), "{rail:?}");
+    assert!(!s.doc.to_json().contains("\"up\""));
+    let (_, z) = place("XY", [0.0, 500.0], Some("Z"));
+    assert_eq!(z, rail);
+    // Anything but a world axis is refused with the choices.
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    for bad in [json!("y"), json!("W"), json!(1), json!([0, 1, 0])] {
+        let err = s.execute("frame.member", &json!({"sketch": "Frame", "profile": tube(), "up": bad})).unwrap_err().to_string();
+        assert!(err.contains("`up` must be X, -X, Y, -Y, Z or -Z"), "{bad}: {err}");
+    }
+}
+
 #[test]
 fn the_section_view_shows_where_the_member_goes_and_its_anchors() {
     let rail = || {
@@ -450,6 +496,13 @@ fn the_section_view_shows_where_the_member_goes_and_its_anchors() {
     p["locate"] = json!(v.locate_of(top_right));
     let again = super::member_section_view(&s, &p).unwrap();
     assert!((again.at.x - top_right.x).abs() < 1e-9 && (again.at.y - top_right.y).abs() < 1e-9, "{again:?}");
+    // And back: the section point a `locate` puts on the line, mirrored or not.
+    for view in [&v, &again] {
+        let back = view.locate_point(view.locate_of(top_right));
+        assert!((back.x - top_right.x).abs() < 1e-9 && (back.y - top_right.y).abs() < 1e-9, "{back:?}");
+    }
+    let back = again.locate_point(v.locate_of(top_right));
+    assert!((back.x - again.at.x).abs() < 1e-9 && (back.y - again.at.y).abs() < 1e-9, "{back:?}");
     run(&mut s, "frame.member", p);
     let b = bodies(&mut s).remove(0);
     assert!(near3(b.2, [0.0, -60.0, -40.0]) && near3(b.3, [1000.0, 0.0, 0.0]), "{b:?}");
@@ -1123,6 +1176,64 @@ fn coped_fits_a_tee_to_the_through_tubes_shape() {
     let (butt, coped) = (&fitted[0], &fitted[1]);
     assert!((butt.2[1] - 20.0).abs() < 1e-6 && (coped.2[1] - 14.0).abs() < 1e-3, "{butt:?} {coped:?}");
     assert!(coped.1 > butt.1 + 1.0, "{butt:?} {coped:?}");
+}
+
+#[test]
+fn a_tee_on_an_open_section_reaches_across_its_open_side_to_the_far_face() {
+    // v ends on h's middle at (200, 0), in 50 x 50 x 6 angle and in 60 x 45 channel (web 5). Fitted to h, as Butt
+    // and Coped frames fit a T, v's end reaches across h's open side to the face beyond h's line: the angle's far
+    // leg (its inner face at y = -19; Coped follows the leg's rounded toe, to -22) and the channel's web (its inner
+    // face at y = -17.5), not stopping at h's line (y = 0). Neither overlaps h, its root fillet included.
+    let sections = [
+        (json!({"kind": "angle", "width": 50, "height": 50, "thickness": 6}), [-19.0, -22.0]),
+        (json!({"kind": "channel", "height": 60, "width": 45, "web": 5, "flange": 6}), [-17.5, -17.5]),
+    ];
+    // v square to h, and at 45° to it: its line leaves the box round h's section 1 / sin 45° further along v.
+    for ((profile, lowest), top) in sections.iter().flat_map(|s| [(s, 200), (s, 300)]) {
+        for (coped, want) in [false, true].into_iter().zip(*lowest) {
+            let mut s = Session::default();
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Plus"}));
+            run(&mut s, "sketch.line", json!({"points": [[0, 0], [400, 0]], "ids": ["h"]}));
+            run(&mut s, "sketch.line", json!({"points": [[200, 0], [top, 100]], "ids": ["v"]}));
+            run(&mut s, "sketch.finish", json!({}));
+            let p = json!({"sketch": "Plus", "profile": profile, "corner": "butt", "coped": coped, "names": {"h": "H", "v": "V"}});
+            run(&mut s, "frame.member", p);
+            let v = measured(&mut s, "V");
+            let o = overlap_all(&mut s);
+            assert!(
+                (v.2[1] - want).abs() < 1e-3 && o < 1e-3,
+                "{} to x {top} coped {coped}: v from y = {}, not {want}; overlap {o} mm³",
+                profile["kind"],
+                v.2[1]
+            );
+        }
+    }
+}
+
+#[test]
+fn a_member_fitted_after_an_open_sections_tee_is_cut_to_the_tees_whole_reach() {
+    // v ends on h's middle at (200, 0) and d ends there too, at 45° up to the left, in 50 x 50 x 6 angle and in
+    // 60 x 45 channel. v is fitted first and reaches across h's open side to its far face; d, fitted after it, is cut
+    // by v's tool, which must reach as far as v does. Stopping at v's line left d overlapping v there by 2364 mm³ in
+    // angle and 1878 mm³ in channel.
+    let sections = [
+        json!({"kind": "angle", "width": 50, "height": 50, "thickness": 6}),
+        json!({"kind": "channel", "height": 60, "width": 45, "web": 5, "flange": 6}),
+    ];
+    for profile in sections {
+        for coped in [false, true] {
+            let mut s = Session::default();
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Plus"}));
+            run(&mut s, "sketch.line", json!({"points": [[0, 0], [400, 0]], "ids": ["h"]}));
+            run(&mut s, "sketch.line", json!({"points": [[200, 0], [200, 150]], "ids": ["v"]}));
+            run(&mut s, "sketch.line", json!({"points": [[200, 0], [80, 120]], "ids": ["d"]}));
+            run(&mut s, "sketch.finish", json!({}));
+            let p = json!({"sketch": "Plus", "profile": profile, "corner": "butt", "coped": coped});
+            run(&mut s, "frame.member", p);
+            let o = overlap_all(&mut s);
+            assert!(o < 1e-3, "{} coped {coped}: the members overlap by {o} mm³", profile["kind"]);
+        }
+    }
 }
 
 #[test]
@@ -8042,6 +8153,22 @@ fn rotate_member_refuses_a_curved_path_without_changing_it() {
 }
 
 #[test]
+fn a_continuous_member_refuses_an_up_axis_other_than_z_without_changing_the_design() {
+    let mut s = Session::default();
+    let ids = chassis_path(&mut s);
+    let before = s.doc.to_json();
+    let e = s
+        .execute(
+            "frame.member",
+            &json!({"sketch": "Chassis", "lines": ids, "continuous": true, "up": "Y", "profile": {"kind": "bar", "width": 20, "height": 10}}),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("take world Z as up"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
 fn explicit_arcs_make_round_and_rectangular_members_without_changing_all_lines() {
     for profile in [
         json!({"kind": "round_tube", "diameter": 20, "wall": 2}),
@@ -8324,32 +8451,29 @@ fn separate_curves_and_point_pairs_keep_none_member_identity_and_analytic_volume
 
 #[test]
 fn frame_member_refusals_keep_their_geometry_data_and_session_failure_code() {
-    use solidcore_ops::frame_member::{self as stock, Failure, Refusal};
-    use solidcore_ops::{Error, FailureCode, session};
+    use solidcraft_kernel::services::{FailureCode, session};
+    use solidcraft_kernel::{PathFailure, PathRefusal, orient_stock, stock_line};
 
     let expected_code = FailureCode { call: "frame_member", kind: FailureCode::OPS, operation: "FrameMember" };
     let origin = solidcore_record::Vec3::ZERO;
-    let error = stock::line(origin, origin).unwrap_err();
-    assert!(matches!(&error, Failure::Geometry(Refusal::Line)), "{error:?}");
+    let error = stock_line(origin, origin).unwrap_err();
+    assert!(matches!(&error, PathFailure::Refused { why: PathRefusal::Line, .. }), "{error:?}");
     assert_eq!(error.to_string(), "the line has no length or has invalid coordinates");
     assert_eq!(session::take_failure_code(), Some(expected_code));
 
-    let first = stock::line(origin, [10.0, 0.0, 0.0].into()).unwrap();
-    let second = stock::line([20.0, 0.0, 0.0].into(), [30.0, 0.0, 0.0].into()).unwrap();
+    let first = stock_line(origin, [10.0, 0.0, 0.0].into()).unwrap();
+    let second = stock_line([20.0, 0.0, 0.0].into(), [30.0, 0.0, 0.0].into()).unwrap();
     assert_eq!(session::take_failure_code(), None, "a successful query clears the previous refusal");
     let mut path = [first, second];
     let before = path;
-    let error = stock::orient(&mut path).unwrap_err();
-    let Failure::Geometry(reason) = &error else { panic!("geometry refusal was reclassified: {error:?}") };
-    assert_eq!(*reason, Refusal::Connection(1));
+    let error = orient_stock(&mut path).unwrap_err();
+    let PathFailure::Refused { why, .. } = &error else { panic!("geometry refusal was reclassified: {error:?}") };
+    assert_eq!(*why, PathRefusal::Connection(1));
     assert_eq!(path, before, "a refused traversal leaves its input unchanged");
-    let typed = Error::FrameMember(reason.clone());
-    assert_eq!(typed.name(), "FrameMember");
-    assert_eq!(typed.to_string(), "curve 1 is not connected end to end in path order; pick the curves in order along the path");
-    assert_eq!(error.to_string(), typed.to_string(), "the public error and session diagnostic agree");
+    assert_eq!(error.to_string(), "curve 1 is not connected end to end in path order; pick the curves in order along the path");
     assert_eq!(session::take_failure_code(), Some(expected_code), "the code contains no curve index or model data");
 
-    stock::line(origin, [10.0, 0.0, 0.0].into()).unwrap();
+    stock_line(origin, [10.0, 0.0, 0.0].into()).unwrap();
     assert_eq!(session::take_failure_code(), None);
 }
 

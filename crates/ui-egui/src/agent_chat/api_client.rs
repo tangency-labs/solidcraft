@@ -1025,6 +1025,21 @@ impl Worker {
                     self.emit(Event::TurnEnded { reason: "cancelled".into() });
                     return;
                 }
+                // The conversation no longer fits the model's context window (#21294): the oldest
+                // turn goes and the request is asked again, until only this message is left.
+                Err(e) if context_full(&e) => {
+                    let removed = drop_oldest_turn(&mut self.history);
+                    if removed == 0 {
+                        self.emit(Event::Error(format!("{e}\n{}", solidcraft_ui_text::tr("ui.agent_chat_context_full_new_chat"))));
+                        self.emit(Event::TurnEnded { reason: "error".into() });
+                        return;
+                    }
+                    if self.cfg.protocol == Protocol::Anthropic {
+                        drop_finished_thinking(&mut self.history);
+                    }
+                    self.emit(Event::Text { thought: true, text: solidcraft_ui_text::tr("ui.agent_chat_context_trimmed").to_owned() });
+                    continue;
+                }
                 Err(e) => {
                     self.emit(Event::Error(e));
                     self.emit(Event::TurnEnded { reason: "error".into() });
@@ -1487,6 +1502,36 @@ fn starts_a_turn(message: &Value) -> bool {
     message["role"] == "user" && !message["content"].as_array().is_some_and(|blocks| blocks.iter().any(|b| b["type"] == "tool_result"))
 }
 
+/// Whether a request's error (from [`http_error`]) says the conversation is too long for the
+/// model: a request too large (413), or a 400 that names the context window or a prompt too long.
+fn context_full(error: &str) -> bool {
+    if error.starts_with("HTTP 413") {
+        return true;
+    }
+    let e = error.to_lowercase();
+    e.starts_with("http 400")
+        && [
+            "context window",
+            "context length",
+            "context limit",
+            "context_length",
+            "maximum context",
+            "prompt is too long",
+            "too many tokens",
+            "input is too long",
+        ]
+        .iter()
+        .any(|p| e.contains(p))
+}
+
+/// Removes the oldest turn (its message, replies and tool results) when a later turn is left, so
+/// the history still starts at a user message. Returns how many messages went (0: one turn only).
+fn drop_oldest_turn(history: &mut Vec<Value>) -> usize {
+    let Some(next) = history.iter().enumerate().skip(1).find(|(_, m)| starts_a_turn(m)).map(|(i, _)| i) else { return 0 };
+    history.drain(..next);
+    next
+}
+
 /// One tool call the endpoint asked for.
 #[derive(Debug)]
 struct Call {
@@ -1671,6 +1716,15 @@ fn drop_old_views(history: &mut [Value], keep: usize) -> bool {
 /// the conversation before it, so once a dropped view or trimmed message changes that, the API
 /// refuses the whole request (#9417); leaving earlier thinking out is allowed. A reply that was
 /// only thinking keeps a note, as the API takes no assistant message without content.
+/// [`drop_thinking`] for the finished turns only: the turn under way keeps its reasoning, which
+/// Anthropic needs back unchanged with the tool results it led to.
+fn drop_finished_thinking(history: &mut [Value]) {
+    let current = history.iter().rposition(starts_a_turn).unwrap_or(0);
+    if let Some(finished) = history.get_mut(..current) {
+        drop_thinking(finished);
+    }
+}
+
 fn drop_thinking(history: &mut [Value]) {
     for msg in history.iter_mut().filter(|m| m["role"] == "assistant") {
         let Some(content) = msg.get_mut("content").and_then(Value::as_array_mut) else { continue };
@@ -2203,6 +2257,84 @@ mod tests {
         let sent = seen.lock().unwrap();
         let roles: Vec<&str> = sent[1]["messages"].as_array().unwrap().iter().map(|m| m["role"].as_str().unwrap_or("")).collect();
         assert_eq!(roles, ["system", "user", "user"], "no reply or tool call of the cancelled round is left");
+        b.shutdown(true);
+    }
+
+    /// A conversation past the model's context window (#21294): the endpoint's refusal drops the
+    /// oldest turn and asks again, so the conversation goes on; a message too long on its own
+    /// says to start a new chat instead of failing the same way on every later message.
+    #[test]
+    fn a_conversation_past_the_context_window_drops_its_oldest_turn() {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+        let log = seen.clone();
+        let http: HttpFn = Arc::new(move |r: &HttpRequest| {
+            if r.method == "GET" {
+                return Ok((200, b"{\"data\":[]}".to_vec()));
+            }
+            let body: Value = serde_json::from_slice(r.body.as_deref().unwrap_or(b"null")).unwrap();
+            let users = body["messages"].as_array().unwrap().iter().filter(|m| m["role"] == "user").count();
+            let huge = body.to_string().contains("huge");
+            log.lock().unwrap().push(body);
+            if users > 2 || huge {
+                let refusal = json!({"error": {"message": "prompt is too long: 267259 tokens > 262135 maximum"}});
+                return Ok((400, refusal.to_string().into_bytes()));
+            }
+            Ok((200, json!({"choices": [{"message": {"role": "assistant", "content": "ok"}}]}).to_string().into_bytes()))
+        });
+        let cfg = ApiConfig {
+            name: "Test".into(),
+            protocol: Protocol::OpenAi,
+            base_url: "http://localhost:1/v1".into(),
+            model: "m".into(),
+            allow_insecure_http: false,
+            key: None,
+            http,
+            request_timeout_s: 300,
+            reasoning_effort: String::new(),
+            openai_responses: false,
+        };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let mut b = ApiBackend::start(cfg, ctx).unwrap();
+        for text in ["one", "two"] {
+            b.prompt(&[PromptPart::Text(text.into())]);
+            let events = wait_for_turn(&mut b);
+            assert!(matches!(events.last(), Some(Event::TurnEnded { reason }) if reason.is_empty()), "{events:?}");
+        }
+        b.prompt(&[PromptPart::Text("three".into())]);
+        let events = wait_for_turn(&mut b);
+        assert!(!events.iter().any(|e| matches!(e, Event::Error(_))), "{events:?}");
+        let note = solidcraft_ui_text::tr("ui.agent_chat_context_trimmed");
+        assert!(events.iter().any(|e| matches!(e, Event::Text { thought: true, text } if text == note)), "{events:?}");
+        assert!(matches!(events.last(), Some(Event::TurnEnded { reason }) if reason.is_empty()), "{events:?}");
+        let asked: Vec<String> = seen.lock().unwrap().last().unwrap()["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["role"] == "user")
+            .map(|m| m["content"].to_string())
+            .collect();
+        assert_eq!(asked.len(), 2, "{asked:?}");
+        assert!(asked[0].contains("two") && asked[1].contains("three"), "the oldest turn went: {asked:?}");
+        // Too long on its own: nothing older goes on dropping, and the message says what to do.
+        b.prompt(&[PromptPart::Text("huge".into())]);
+        let events = wait_for_turn(&mut b);
+        let hint = solidcraft_ui_text::tr("ui.agent_chat_context_full_new_chat");
+        assert!(events.iter().any(|e| matches!(e, Event::Error(e) if e.starts_with("HTTP 400") && e.ends_with(hint))), "{events:?}");
+        assert!(matches!(events.last(), Some(Event::TurnEnded { reason }) if reason == "error"), "{events:?}");
+        assert!(context_full("HTTP 413: too large") && !context_full("HTTP 400 (unknown model)") && !context_full("HTTP 500 (context window)"));
+        assert!(context_full("HTTP 400: input length and `max_tokens` exceed context limit: 198000 + 8192 > 200000"));
+        // A retry in the middle of a turn keeps that turn's reasoning: only finished turns lose it.
+        let thinking = json!({"type": "thinking", "thinking": "plan", "signature": "s"});
+        let mut history = vec![
+            json!({"role": "user", "content": "one"}),
+            json!({"role": "assistant", "content": [thinking.clone(), {"type": "text", "text": "ok"}]}),
+            json!({"role": "user", "content": "two"}),
+            json!({"role": "assistant", "content": [thinking.clone(), {"type": "tool_use", "id": "t", "name": "x", "input": {}}]}),
+            json!({"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "done"}]}),
+        ];
+        drop_finished_thinking(&mut history);
+        assert_eq!(history[1]["content"], json!([{"type": "text", "text": "ok"}]), "a finished turn loses its reasoning");
+        assert_eq!(history[3]["content"][0], thinking, "the turn under way keeps its reasoning");
         b.shutdown(true);
     }
 

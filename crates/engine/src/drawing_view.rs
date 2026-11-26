@@ -411,7 +411,7 @@ pub fn copy_for(placed: &Session, choice: &Choice) -> std::result::Result<ViewCo
     use crate::cmd::motion::{drive_with_contact, explode_moves, exploded_at, keyed, values_at};
     // From where the design places its parts: an occurrence move not captured yet is left out.
     let mut copy = placed.scratch();
-    copy.pending_moves.clear();
+    copy.clear_pending_moves();
     // The configuration first: the position and the explode start from the geometry it builds.
     let mut failing = Vec::new();
     if let Some(row) = choice.configuration {
@@ -525,6 +525,43 @@ pub struct OnSheet {
     pub extents: Extents,
     /// Why there's nothing to measure, when there isn't.
     pub unmeasured: Option<Unmeasured>,
+}
+
+/// Centre references still read the design's active geometry and placement. Other view states
+/// must omit them rather than put that geometry on a different configuration or position.
+pub fn unsupported_centre_view(d: &Drawing, id: u64) -> Option<&'static str> {
+    let view = d.resolve_view(id).ok()?;
+    if d.own_source() != Some(view.source) {
+        Some("a view of another design")
+    } else if d.view(id).and_then(no_model_edges).is_some() {
+        Some("a flat pattern view")
+    } else if view.exploded.value != Exploded::Assembled {
+        Some("an exploded view")
+    } else if view.pose.value != Pose::Designed {
+        Some("a view in a position of its own")
+    } else if view.configuration.value != ViewConfiguration::Active {
+        Some("a view of a configuration of its own")
+    } else {
+        None
+    }
+}
+
+/// Whether a centre annotation's view names another design than the references can read.
+pub(crate) fn centre_on_another_design(d: &Drawing, id: u64) -> bool {
+    d.resolve_view(id).is_ok_and(|view| d.own_source() != Some(view.source))
+}
+
+/// Refuses reading or editing host references as if they belonged to another design.
+pub(crate) fn check_centre_source(d: &Drawing, view: u64, what: &str, cmd: &str) -> Result<()> {
+    if centre_on_another_design(d, view) { Err(bad(cmd, format!("not supported yet: {what} on a view of another design"))) } else { Ok(()) }
+}
+
+/// Refuses a new centre annotation that would read another state than its view draws.
+pub fn check_centre_view(d: &Drawing, view: u64, what: &str, cmd: &str) -> Result<()> {
+    match unsupported_centre_view(d, view) {
+        Some(view) => Err(bad(cmd, format!("not supported yet: {what} on {view}"))),
+        None => Ok(()),
+    }
 }
 
 /// Why section view `view` can't be drawn yet, if it can't (#13046): only a full section's lines

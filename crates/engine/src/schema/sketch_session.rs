@@ -210,7 +210,20 @@ macro_rules! option_flags {
     )+};
 }
 
-option_flags!(value, show_profile, show_points, show_dimensions, show_constraints, show_projected, show_construction, grid, snap, slice, sketch_3d);
+option_flags!(
+    value,
+    show_profile,
+    show_points,
+    show_dimensions,
+    show_constraints,
+    show_projected,
+    show_construction,
+    show_control_polygons,
+    grid,
+    snap,
+    slice,
+    sketch_3d
+);
 
 // ---------------------------------------------------------------------------------------------
 // sketch.create
@@ -564,6 +577,9 @@ pub struct ConstructionResult {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = entities_required)]
 pub struct DeleteParams {
+    /// Keep identifiable surviving projection edges linked. Default: false, break the remaining link.
+    #[serde(default)]
+    pub preserve_projection_link: bool,
     // Optional in the type and required in the schema (`entities_required`).
     /// What to delete: curve, point, constraint, wire or link ids.
     #[serde(default, deserialize_with = "entities", skip_serializing_if = "Option::is_none")]
@@ -581,9 +597,22 @@ pub struct DeleteResult {
     pub deleted: usize,
     /// The sketch's solve; null when it was not solved again.
     pub sketch: Option<SketchSolve>,
+    /// Projections part of which was deleted and whose deleted members could not be recorded:
+    /// what remained of each is normal geometry now.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub broken_links: Vec<BrokenLink>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// A projection `sketch.delete` broke off.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BrokenLink {
+    /// The projection's id.
+    pub link: String,
+    /// Why its deleted members could not be recorded.
+    pub why: String,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -994,6 +1023,10 @@ pub struct OptionsParams {
     #[serde(default, deserialize_with = "show_construction", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<bool>")]
     pub show_construction: Option<bool>,
+    /// Show the sides of spline control polygons.
+    #[serde(default, deserialize_with = "show_control_polygons", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<bool>")]
+    pub show_control_polygons: Option<bool>,
     /// Show the grid.
     #[serde(default, deserialize_with = "grid", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<bool>")]
@@ -1030,6 +1063,8 @@ pub struct SketchOptions {
     pub show_projected: bool,
     /// Construction geometry is shown.
     pub show_construction: bool,
+    /// Spline control polygons are shown.
+    pub show_control_polygons: bool,
     /// The grid is shown.
     pub grid: bool,
     /// Clicks snap to the grid.

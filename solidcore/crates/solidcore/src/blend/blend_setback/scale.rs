@@ -26,12 +26,13 @@ use super::{el, fill_hole_probe, smax, smin, Edge, Face, FillStats, Probe, Refus
 use crate::error::Result;
 use crate::geom::vector3d::sqrt;
 use crate::kernel::Kernel;
-use crate::math::Point3;
+use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_curve::KnotType;
 use crate::nurbs::b_spline_surface::{
     BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData, SurfParamType,
 };
 use crate::surface::surface::Surface;
+use core::cmp::Ordering;
 
 /// What [`certified_scale`] finds.
 #[derive(Debug, Clone, PartialEq)]
@@ -53,13 +54,50 @@ pub struct CertifiedScale {
     pub reason: Option<&'static str>,
 }
 
+/// The modeled round and its source edge index before ordering by geometry.
+pub(crate) struct ModelRound {
+    pub(crate) index: usize,
+    pub(crate) surface: Surface,
+    pub(crate) end: f64,
+}
+
+impl ModelRound {
+    pub(crate) fn round(&self) -> Round<'_> {
+        Round {
+            surface: &self.surface,
+            along: SurfParamType::U,
+            end: self.end,
+            corner_above: false,
+        }
+    }
+}
+
+fn compare_direction(a: Vec3, b: Vec3) -> Ordering {
+    let compare = |a: f64, b: f64| {
+        let canonical = |value: f64| if value == 0.0 { 0.0 } else { value };
+        canonical(a).total_cmp(&canonical(b))
+    };
+    compare(a.x, b.x)
+        .then_with(|| compare(a.y, b.y))
+        .then_with(|| compare(a.z, b.z))
+}
+
+/// Whether the corner has distinct nominal radii.
+pub(crate) fn unequal_radii(edges: &[Edge]) -> bool {
+    edges.first().is_some_and(|first| {
+        edges
+            .iter()
+            .any(|edge| edge.radius.to_bits() != first.radius.to_bits())
+    })
+}
+
 /// `sm_SbModelRounds`: the corner's constant circular rounds, one per edge, each ending at
 /// its setback (module docs).
-fn model_rounds(
+pub(crate) fn model_rounds(
     faces: &[Face],
     edges: &[Edge],
     setbacks: &[f64],
-) -> core::result::Result<Vec<BSplineSurface>, Refusal> {
+) -> core::result::Result<Vec<ModelRound>, Refusal> {
     let n = edges.len();
     if n < 3 || faces.len() != n || setbacks.len() != n {
         return Err(Refusal::invalid(
@@ -71,13 +109,23 @@ fn model_rounds(
         Refusal::invalid("SmBlendSetback: the corner's faces meet in no one point")
     })?;
     let mut surfaces = Vec::with_capacity(n);
-    for (i, edge) in edges.iter().enumerate() {
-        let [f, g] = edge.faces;
+    // The graph starts on the first round and follows its section direction.
+    // Neither should depend on the order in which edges were picked.
+    let mut ordered: Vec<_> = edges.iter().enumerate().collect();
+    let unequal = unequal_radii(edges);
+    if unequal {
+        ordered.sort_by(|(_, a), (_, b)| compare_direction(b.away, a.away));
+    }
+    for (i, edge) in ordered {
+        let [mut f, mut g] = edge.faces;
         let setback = el(setbacks, i)?;
         if f >= n || g >= n || !(edge.radius > 0.0) || !(setback > 0.0) {
             return Err(Refusal::invalid(
                 "SmBlendSetback: an edge needs a positive radius, a positive setback and two of the faces given",
             ));
+        }
+        if unequal && compare_direction(el(faces, f)?.normal, el(faces, g)?.normal).is_gt() {
+            core::mem::swap(&mut f, &mut g);
         }
         let nf = el(faces, f)?.normal;
         let ng = el(faces, g)?.normal;
@@ -133,7 +181,11 @@ fn model_rounds(
             weights: Some(&wts),
             uv_domain: None,
         })?;
-        surfaces.push(surface);
+        surfaces.push(ModelRound {
+            index: i,
+            surface: Surface::from(surface),
+            end: setback,
+        });
     }
     Ok(surfaces)
 }
@@ -171,19 +223,8 @@ impl Model<'_> {
         work: &mut FillStats,
     ) -> core::result::Result<bool, Refusal> {
         let ks = self.at(k)?;
-        let surfaces: Vec<Surface> = model_rounds(self.faces, self.edges, &ks)?
-            .into_iter()
-            .map(Surface::from)
-            .collect();
-        let mut rounds = Vec::with_capacity(surfaces.len());
-        for (surface, &end) in surfaces.iter().zip(&ks) {
-            rounds.push(Round {
-                surface,
-                along: SurfParamType::U,
-                end,
-                corner_above: false,
-            });
-        }
+        let surfaces = model_rounds(self.faces, self.edges, &ks)?;
+        let rounds: Vec<_> = surfaces.iter().map(ModelRound::round).collect();
         let tol = 1.0e-9 * (1.0 + k * self.size);
         let mut as_fill = Probe {
             fill: true,
@@ -461,21 +502,8 @@ mod tests {
             let mut search = FillStats::default();
             assert_eq!(model.run(k, None, &mut search).unwrap(), certifies);
             let ks = model.at(k).unwrap();
-            let surfaces: Vec<Surface> = model_rounds(&faces, &edges, &ks)
-                .unwrap()
-                .into_iter()
-                .map(Surface::from)
-                .collect();
-            let rounds: Vec<Round<'_>> = surfaces
-                .iter()
-                .zip(&ks)
-                .map(|(surface, &end)| Round {
-                    surface,
-                    along: SurfParamType::U,
-                    end,
-                    corner_above: false,
-                })
-                .collect();
+            let surfaces = model_rounds(&faces, &edges, &ks).unwrap();
+            let rounds: Vec<_> = surfaces.iter().map(ModelRound::round).collect();
             let tol = 1.0e-9 * (1.0 + k * model.size);
             let mut own = FillStats::default();
             let fill = fill_hole_counted(&kernel, &faces, &rounds, 1, tol, true, &mut own);

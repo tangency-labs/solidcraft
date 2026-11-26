@@ -36,8 +36,11 @@ mod corner_g2;
 mod curvature_comb;
 mod delete_face;
 mod distance;
+mod dome;
 mod draft_corners;
+pub mod drawing_centre_mark;
 mod emboss;
+mod face_flux;
 #[cfg(test)]
 mod face_source_tests;
 pub mod failure;
@@ -51,6 +54,7 @@ pub mod fuzz;
 mod heal;
 mod helix;
 pub mod history;
+pub mod hlr;
 mod iges_in;
 mod iges_out;
 mod intersection;
@@ -97,6 +101,7 @@ mod meshbody;
 #[cfg(test)]
 mod modify_history_tests;
 mod native;
+pub mod network;
 mod numbered;
 mod offset;
 mod offset_backend;
@@ -115,6 +120,7 @@ pub use par::map_with_local_pools;
 mod display_plan_tests;
 #[cfg(test)]
 mod pinch_tests;
+mod placement;
 #[cfg(test)]
 mod planar_faces_tests;
 mod plane_fit;
@@ -127,6 +133,8 @@ mod prism_measure;
 pub mod profile;
 pub mod provenance;
 mod record;
+#[cfg(test)]
+mod record_eval_tests;
 mod repair;
 mod route;
 #[cfg(test)]
@@ -219,6 +227,7 @@ pub use body::CapSignature;
 pub use body::DISPLAY_ANGLE;
 pub use body::DisplayShare;
 pub use body::EdgeInfo;
+pub use body::EdgeLines;
 pub use body::FaceInfo;
 pub use body::FacePaint;
 pub use body::FaceSource;
@@ -257,12 +266,15 @@ pub use build::canonical_revolve_axis;
 pub use build::extrude_tapered;
 pub use build::extrude_tapered_between;
 pub use build::extrude_whole_sides;
+pub use build::level_on_plane;
 pub use build::loft;
 pub use build::loft_regions;
 pub use build::loft_with_rails;
 pub use build::offset_loop;
 pub use build::path_polyline;
 pub use build::planar_face_record;
+pub use build::plane_gap;
+pub use build::plane_rise;
 pub use build::sweep;
 pub use build::sweep_with;
 pub use build::symmetric_offset_intervals;
@@ -298,7 +310,9 @@ pub use distance::Members;
 pub use distance::body_distance;
 pub use distance::edges_closest;
 pub use distance::faces_closest;
+pub use distance::interiors_disjoint;
 pub use distance::point_closest;
+pub use dome::dome;
 pub use draft_corners::CornerFill;
 pub use draft_corners::CornerOption;
 pub use draft_corners::CornerRefusal;
@@ -357,6 +371,7 @@ pub use matchsurf::match_surface;
 pub use matchsurf::seam_continuity;
 pub use measure::BodyMeasure;
 pub use measure::MassMeasure;
+pub use measure::levels_along;
 pub use measure::measure;
 pub use measure::measure_mass;
 pub use mesh_convert::convert_prismatic_mesh;
@@ -395,6 +410,8 @@ pub use polybool::faceted_boolean;
 pub use polyhedron::HalfSpace;
 pub use polyhedron::convex_polyhedron;
 pub use polyhedron::draft;
+pub use polyhedron::offset_solid;
+pub use polyhedron::offset_tool;
 pub use prism::PLANAR_FIT_TOL;
 pub use prism::extrude_planar_regions;
 pub use prism::planar_regions_boolean;
@@ -411,22 +428,48 @@ pub use repair::RepairRefusal;
 pub use repair::RepairReport;
 pub use repair::SewnGap;
 pub use repair::repair;
+pub use route::CELL_GRID_LIMITS;
+pub use route::FRAME_MAX_REACH;
+pub use route::FRAME_VERTICAL_TOLERANCE;
 pub use route::Which;
 pub use route::boolean;
 pub use route::box_solid;
+pub use route::cell_regions;
 pub use route::chamfer;
 pub use route::chamfer_sides;
+pub use route::check_bend_clearance;
 pub use route::cylinder;
+pub use route::default_cell_grid;
 pub use route::extrude;
 pub use route::fillet;
+pub use route::gusset_prepare;
+pub use route::gusset_support;
+pub use route::gusset_support_pick;
+pub use route::gusset_support_plane;
+pub use route::member_along;
+pub use route::member_axes;
+pub use route::member_axis;
+pub use route::member_extent;
 pub use route::offset_faces;
+pub use route::orient_stock;
+pub use route::plan_cell_grid;
+pub use route::read_cadir;
 pub use route::revolve;
 pub use route::revolve_whole;
 pub use route::shell;
 pub use route::sphere;
+pub use route::step_string;
+pub use route::stock_line;
+pub use route::stock_line_length;
+pub use route::stock_planar;
+pub use route::stock_retained_line;
+pub use route::stock_section_plane;
+pub use route::stock_spatial_arc;
 pub use route::thicken;
 pub use route::torus;
+pub use route::trim_member;
 pub use route::which;
+pub use route::write_cadir;
 pub use sew::EdgeSpec;
 pub use sew::FaceSpec;
 pub use sew::MAX_CHAIN_POINTS;
@@ -434,11 +477,15 @@ pub use sew::SurfSpec;
 pub use sew::sew;
 pub use sew::sew_touching;
 pub use sew::sew_touching_traced;
-pub use solidcore_ops::member_turn::ParallelTurnError;
-pub use solidcore_ops::member_turn::parallel_turn;
+pub use solidcore_ops::dome::DomeRefusal;
+pub use solidcore_ops::dome::DomeShape;
+pub use solidcore_ops::measure::ParallelTurnError;
+pub use solidcore_ops::measure::turn_to_parallel;
 /// SolidCraft's kernel interface: the trait each kernel's adapter implements, its operations,
 /// inputs and errors.
 pub use solidcraft_kernel_api as api;
+pub use solidcraft_kernel_api::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWritten};
+pub use solidcraft_kernel_api::{GussetFailure, MemberRefusal, PathFailure, PathRefusal, TrimRefusal, TrimTarget};
 pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::start;
 pub use solidcraft_smlib::stop::Stop;
@@ -452,8 +499,10 @@ pub use splitface::has_cap_at;
 pub use splitface::split_at_facing_side;
 pub use splitface::split_body;
 pub use splitface::split_body_by_faces;
+pub use splitface::split_body_by_sheet_where_it_cuts;
 pub use splitface::split_faces;
 pub use splitface::split_faces_with_map;
+pub use splitface::{FieldKind, PieceSides, split_piece_sides};
 pub use step::step_export;
 pub use step::step_export_with_face_ids;
 pub use step_in::HealedBody;
@@ -519,9 +568,11 @@ pub use surface_ruled::ruled_surface;
 pub use surface_ruled::ruled_surface_with;
 pub use surface_trim::TrimKeep;
 pub use surface_trim::mutual_trim;
+pub use surface_trim::stop_at_bodies;
 pub use surface_trim::trim;
 pub use surface_trim::trim_dropped_keep;
 pub use surface_trim::trim_keep;
+pub use surface_trim::trim_sheet_keep;
 pub use surface_untrim::UntrimHoles;
 pub use surface_untrim::untrim;
 pub use surfaces::copy_faces;
@@ -557,6 +608,7 @@ pub use tolerance_heal::heals_tolerance_defects;
 pub use tolerance_heal::set_heals_tolerance_defects;
 pub use topo::CylinderFace;
 pub use topo::TopoCounts;
+pub use topo::cone_face;
 pub use topo::cylinder_between_rims;
 pub use topo::cylinder_end_at;
 pub use topo::cylinder_face;
@@ -603,9 +655,16 @@ pub enum KernelError {
     /// run ([`heal_tolerance_defects`]).
     #[error("the operation failed: {0}")]
     Heal(#[from] HealFailure),
+    /// A dome the face or the height cannot take.
+    #[error("the operation failed: {0}")]
+    Dome(#[from] DomeRefusal),
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;
+
+/// Most guide rails a loft takes. solidcore states the same limit (`solidcore::sweep::loft_rails`);
+/// the kernel does not depend on solidcore, so the number is repeated here.
+pub const MAX_LOFT_RAILS: usize = 16;
 
 /// The mesher's error as the kernel's: the same words.
 impl From<solidcore_tess::TessError> for KernelError {
@@ -643,6 +702,7 @@ impl Cause for solidcraft_smlib::CheckReport {}
 impl Cause for solidcraft_smlib::export::ExportError {}
 impl Cause for solidcore_record::brep::history::Failed {}
 impl Cause for solidcore_ops::pcurve::Error {}
+impl Cause for solidcraft_geom::brep::eval::Error {}
 impl<T: Cause + ?Sized> Cause for &T {
     fn panic(&self) -> Option<&str> {
         (**self).panic()
@@ -670,10 +730,10 @@ thread_local! {
     static GUARDED: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
-/// Is this thread inside [`guard`]? (A panic now will be caught and turned into an error; the
-/// engine's crash reports mark it recovered.)
+/// Is this thread inside [`guard`], an SMLib call or the mesher's own guard? (A panic now will be
+/// caught and turned into an error; the engine's crash reports mark it recovered.)
 pub fn guarded() -> bool {
-    GUARDED.with(std::cell::Cell::get) > 0 || solidcraft_smlib::in_call()
+    GUARDED.with(std::cell::Cell::get) > 0 || solidcraft_smlib::in_call() || solidcore_tess::guarded()
 }
 
 /// A panic inside a solidcore call, caught there and reported as the kernel's internal error
