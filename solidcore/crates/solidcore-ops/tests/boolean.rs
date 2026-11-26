@@ -1247,6 +1247,11 @@ fn cusp_tools(block: &CuspBlock, seed: u32, noise: f64) -> Vec<Body> {
 /// was a crossing as far off, and the imprint failed (no vertex at an edge definition's end)
 /// or the merge did. With each contact read as one touch at the cusp, the cut builds
 /// whatever the rounding. Seeds whose points were 5e-10 and 1e-9 off; each failed before.
+/// Then seeds that failed at the other two contacts, 5e-10 to 3e-9 off: where the cut ends
+/// on the floor, the floor's section of the tool's arc face crossed the floor's side once
+/// 2.5e-4 from the cusp and the result was not a solid (seeds 32, 3, 4); and where it
+/// starts, the touch of the block's arc face and the tool's line face was found 1.5e-4 from
+/// the cusp and split the tool's line edge alone, and the merge failed (seeds 2, 14).
 #[test]
 #[allow(clippy::disallowed_methods)] // the oracle points' closed form, not ops computing geometry
 fn a_cusp_swept_onto_a_coaxial_cylinder_cuts_whatever_the_sketch_rounding() {
@@ -1260,6 +1265,11 @@ fn a_cusp_swept_onto_a_coaxial_cylinder_cuts_whatever_the_sketch_rounding() {
         (8, 1e-9),
         (28, 1e-9),
         (33, 1e-9),
+        (2, 5e-10),
+        (32, 5e-10),
+        (3, 1e-9),
+        (4, 3e-9),
+        (14, 3e-9),
     ] {
         let tools = cusp_tools(&block, seed, noise);
         // the tools lie inside the block, touching its back face and each other: the cut

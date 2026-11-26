@@ -123,7 +123,10 @@
 //!   one plane that touch by the contact rule (`circle_coplanar_circle_intersect_in_contact`
 //!   at `contact_tol_3d`), for their touching point (`touch_of_edges`): the surface
 //!   intersection met their lens at its two crossings, which became vertices beside the
-//!   touch (docs/booleans.md §6).
+//!   touch (docs/booleans.md §6). Not upstream either (#15049): a circle edge and a line edge
+//!   in its plane, the line a hair inside it (`line_touch`), or the two meeting at one point
+//!   that lies beside the classified point within the band where both edges lie within the
+//!   tolerance of each other (`meeting_beside`), give that one point.
 //! - **Vertex identity** (not upstream): `FindOrCreateProtoVertex(PC, PC)` makes no proto
 //!   vertex for two classifications onto vertices farther apart than the intersection
 //!   tolerance of the two (a distance upstream's `sm_FindPositionFromPCs` only reports and
@@ -2993,8 +2996,9 @@ fn crossing_sine<O: ClassObject>(
 /// where those two edges touch when they are circles in one plane that the contact rule
 /// takes for touching (`circle_coplanar_circle_intersect_in_contact` at `contact_tol_3d`,
 /// as the edge/curve intersections of the boolean read them), or (#15049) a circle and a
-/// line in its plane a hair inside it ([`line_touch`]), and the touching point lies on both
-/// edges within their intersection tolerance. Any other pair is left as it is.
+/// line in its plane a hair inside it ([`line_touch`]) or meeting it at one point near which
+/// the surface intersection put its touch ([`meeting_beside`]), and the touching point lies
+/// on both edges within their intersection tolerance. Any other pair is left as it is.
 ///
 /// # Errors
 ///
@@ -3056,13 +3060,33 @@ fn touch_of_edges<O: ClassObject>(
         (CurveKind::Ellipse(c), CurveKind::Line(l)) if c.is_circle() => {
             match line_touch(k, (curve1, c, &ivl1), (l, &ivl2), tol)? {
                 Some(p) => p,
-                None => return Ok(()),
+                None => match meeting_beside(
+                    k,
+                    geometry,
+                    pc1,
+                    (curve1, c, &ivl1),
+                    (curve2, l, &ivl2),
+                    tol,
+                )? {
+                    Some(p) => p,
+                    None => return Ok(()),
+                },
             }
         }
         (CurveKind::Line(l), CurveKind::Ellipse(c)) if c.is_circle() => {
             match line_touch(k, (curve2, c, &ivl2), (l, &ivl1), tol)? {
                 Some(p) => p,
-                None => return Ok(()),
+                None => match meeting_beside(
+                    k,
+                    geometry,
+                    pc1,
+                    (curve2, c, &ivl2),
+                    (curve1, l, &ivl1),
+                    tol,
+                )? {
+                    Some(p) => p,
+                    None => return Ok(()),
+                },
             }
         }
         _ => return Ok(()),
@@ -3128,6 +3152,84 @@ fn line_touch(
         }
     }
     Ok(Some(point))
+}
+
+/// Not upstream (#15049): where a point `pc` classified onto a circle edge and onto a line
+/// edge in its plane stands for their one meeting. The surface intersection of two faces
+/// tangent at a corner finds their touch wherever the rounding of the faces puts it inside
+/// the band in which the two edges at that corner lie within the tolerance of each other
+/// (√(2rτ) long for the circle's radius r: a cusp's arc running tangentially into its line,
+/// swept onto the line's face, touched it 1.5e-4 from the corner, and the line edge was split
+/// there while the arc was not). Where the two edges meet at one point by the contact rule
+/// ([`Ellipse::intersect_with_line`](crate::curve::ellipse::Ellipse::intersect_with_line) at
+/// [`contact_tol_3d`], as [`line_touch`] reads it), that meeting lies farther than `tol` from
+/// the point, but within a thousand times it, and the point and the middle of the stretch
+/// between it and the meeting both lie within `tol` of both edges (the edges within the
+/// tolerance of each other all along it, as the cap rule reads a band, docs/booleans.md §6),
+/// the point is that meeting. `None` otherwise, or when a point cannot be read or dropped.
+///
+/// # Errors
+///
+/// Those of the intersection; an unported or cancelled evaluation or drop.
+fn meeting_beside<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
+    pc: &PointClassification<O>,
+    (circle_curve, circle, circle_ivl): (&Curve, &crate::curve::ellipse::Ellipse, &Extent1d),
+    (line_curve, line, line_ivl): (&Curve, &crate::curve::line::Line, &Extent1d),
+    tol: f64,
+) -> Result<Option<Point3>> {
+    let at = match pc.find_obj_point_3d(k, geometry) {
+        Ok(p) => p,
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => return Ok(None),
+    };
+    let meetings = circle.intersect_with_line::<()>(
+        k,
+        circle_ivl,
+        line,
+        line_ivl,
+        tol,
+        contact_tol_3d(k),
+        None,
+        None,
+    )?;
+    let [meeting] = meetings.solutions[..] else {
+        return Ok(None);
+    };
+    if meeting.solution_type != SolutionType::SingleValue {
+        return Ok(None);
+    }
+    let meeting = circle_curve.evaluate_point(k, meeting.start.param(0)?)?;
+    let apart = meeting.distance(at);
+    // (a NaN distance refuses: every comparison below is false for it)
+    let within = apart > tol && apart <= 1000.0 * tol;
+    if !within {
+        return Ok(None);
+    }
+    let middle = (meeting + at) * 0.5;
+    for point in [at, middle] {
+        for (curve, interval) in [(circle_curve, circle_ivl), (line_curve, line_ivl)] {
+            let near = match curve.drop_point(
+                k,
+                interval,
+                point,
+                None,
+                0.0,
+                None,
+                SolverOperation::Minimize,
+            ) {
+                Ok(near) => near,
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                Err(_) => return Ok(None),
+            };
+            let on = near.success && near.distance <= tol;
+            if !on {
+                return Ok(None);
+            }
+        }
+    }
+    Ok(Some(meeting))
 }
 
 #[cfg(test)]
