@@ -121,7 +121,8 @@ pub(crate) fn offered_for_component(app: &crate::SolveApp, body: Option<&str>, c
     let component = component.map_or(legacy, |c| c.name.as_str());
     // Only a template that asks for it evaluates the model to find the body's import.
     let source = if template.contains("{source}") { imported_file(&app.session, body) } else { None };
-    let names = Names { design: &app.session.doc.name, body, component: Some(component), source: source.as_deref(), metadata: &app.session.doc.metadata };
+    let names =
+        Names { design: &app.session.doc.name, body, component: Some(component), source: source.as_deref(), metadata: &app.session.doc.metadata };
     stem(template, &names, legacy)
 }
 
@@ -273,7 +274,8 @@ mod tests {
 
     #[test]
     fn component_placeholder_uses_the_component_and_keeps_other_names() {
-        let names = Names { design: "Assembly", body: Some("PartBody"), component: Some("Bracket/Rev"), source: None, metadata: &Metadata::default() };
+        let names =
+            Names { design: "Assembly", body: Some("PartBody"), component: Some("Bracket/Rev"), source: None, metadata: &Metadata::default() };
         assert_eq!(stem("", &names, "PartBody"), "PartBody");
         assert_eq!(stem("{component}-{body}-{design}", &names, "PartBody"), "Bracket_Rev-PartBody-Assembly");
         assert_eq!(stem("{body}", &names, "PartBody"), "PartBody");

@@ -1372,7 +1372,10 @@ fn section(p: &[(i32, String)], start: usize) -> Result<Vec<Ent>> {
     for (kind, fields) in RecordSlices::new(p, start, "ENDSEC") {
         ents.push(Ent { kind: kind.to_string(), ..Default::default() });
         if ents.len() > MAX_ENTITIES {
-            return Err(IoError::Invalid("too many entities".into()));
+            return Err(IoError::Invalid(format!(
+                "the drawing has more than {} entities: simplify it in its own program, or split it across files",
+                crate::sketch2d::MAX_ENTITIES
+            )));
         }
         let Some(e) = ents.last_mut() else { continue };
         for (c, v) in fields {
@@ -3259,16 +3262,19 @@ mod tests {
 
     #[test]
     fn parent_text_work_budget_is_shared_across_the_whole_actual_file() {
-        // Each entity charges1750 encoded +750 decoded bytes plus the parent
-        // entity/layer visits. Under existing MAX_WORK800000,319 fit,320 do not.
-        // Input is below1MiB: no giant resource fixture or counter injection.
+        // Each entity charges 1750 encoded + 750 decoded bytes plus the parent entity/layer
+        // visits. The budget is the whole file's, not one entity's: about 1,600 such texts fit
+        // in it ([`MAX_WORK`]), and a file with 200 more does not.
         let encoded = "\\U+4E2D".repeat(250);
         let entity = format!("0\nTEXT\n10\n0\n20\n0\n11\n1\n21\n2\n40\n1\n72\n1\n1\n{encoded}\n");
-        let accepted_input = format!("0\nSECTION\n2\nENTITIES\n{}0\nENDSEC\n0\nEOF\n", entity.repeat(319));
+        // 2,500 work units each, plus the two visits: 1/2600th of the budget fits, 1/2400th does not.
+        let fits = MAX_WORK / 2_600;
+        let many = MAX_WORK / 2_400;
+        let accepted_input = format!("0\nSECTION\n2\nENTITIES\n{}0\nENDSEC\n0\nEOF\n", entity.repeat(fits));
         let file = read_dxf_file(&accepted_input).unwrap();
-        assert_eq!(file.entities().len(), 319);
+        assert_eq!(file.entities().len(), fits);
         assert!(matches!(file.entities().last().unwrap().geometry(), DxfShape::Text { text, .. } if text == &"中".repeat(250)));
-        let refused_input = format!("0\nSECTION\n2\nENTITIES\n{}0\nENDSEC\n0\nEOF\n", entity.repeat(320));
+        let refused_input = format!("0\nSECTION\n2\nENTITIES\n{}0\nENDSEC\n0\nEOF\n", entity.repeat(many));
         let before = refused_input.clone();
         assert!(read_dxf_file(&refused_input).unwrap_err().to_string().contains("budget"));
         assert_eq!(refused_input, before);
@@ -3726,11 +3732,14 @@ mod tests {
 
     #[test]
     fn source_insert_checks_aggregate_variable_payload_before_first_expanded_array_clone() {
+        // 1,000 points a copy, and as many copies as the copy budget takes plus 1,000: the
+        // payload of all of them is past the budget.
+        let copies = MAX_WORK / 1_000 + 1_000;
         let mut text = String::from("0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n2\nBIG\n0\nSPLINE\n71\n3\n");
         for i in 0..1000 {
             text.push_str(&format!("10\n{i}\n20\n0\n"));
         }
-        text.push_str("0\nENDBLK\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nINSERT\n2\nBIG\n70\n1000\n0\nENDSEC\n0\nEOF\n");
+        text.push_str(&format!("0\nENDBLK\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nINSERT\n2\nBIG\n70\n{copies}\n0\nENDSEC\n0\nEOF\n"));
         let file = read_dxf_file_with_profile(&text, DxfReadProfile::SketchImport).unwrap();
         assert!(matches!(file.source_block("BIG").unwrap().entities()[0].geometry(),DxfShape::SourceSpline { ctrl,.. } if ctrl.len()==1000));
         assert!(file.sketch_geometry().unwrap_err().to_string().contains("INSERT copied payload exceeds work budget"));

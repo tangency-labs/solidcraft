@@ -422,8 +422,7 @@ fn resolve_uncached(
                 LinkKind::Intersect => {
                     let curves = sketch_curves(ss, ci);
                     let pieces: Vec<_> = curves.iter().map(|piece| (&piece.curve, piece.interval)).collect();
-                    let hits =
-                        solidcraft_kernel::services::curve::piece_plane_crossings(&pieces, plane).map_err(|e| DocError::Invalid(e.to_string()))?;
+                    let hits = solidcraft_kernel::curves::piece_plane_crossings(&pieces, plane).map_err(|e| DocError::Invalid(e.to_string()))?;
                     hits.into_iter().map(LinkGeom::Point).collect()
                 }
                 LinkKind::Include => {
@@ -662,17 +661,16 @@ enum EdgeSection {
 /// one crossing it and counts a contact at either end of the edge. A part of the edge lying in
 /// the plane is projected exactly, as a whole edge lying in it is.
 fn edge_section(body: &crate::ModelBody, e: usize, plane: &Plane) -> Result<EdgeSection> {
-    use solidcraft_kernel::services::curve::PlaneSection;
+    use solidcraft_kernel::curves::PlaneSection;
     if body.body.is_mesh() {
         return Ok(EdgeSection::Mesh);
     }
     let edge = body.body.record().edges.get(e).ok_or_else(|| lost("the edge"))?;
     let curve = edge.parameters();
-    let (points, parts) =
-        match solidcraft_kernel::services::curve::plane_section(curve, edge.interval, plane).map_err(|e| DocError::Invalid(e.to_string()))? {
-            PlaneSection::InPlane => return Ok(EdgeSection::InPlane),
-            PlaneSection::Meets { points, in_plane } => (points, in_plane),
-        };
+    let (points, parts) = match solidcraft_kernel::curves::plane_section(curve, edge.interval, plane).map_err(|e| DocError::Invalid(e.to_string()))? {
+        PlaneSection::InPlane => return Ok(EdgeSection::InPlane),
+        PlaneSection::Meets { points, in_plane } => (points, in_plane),
+    };
     let mut geom: Vec<LinkGeom> = points.into_iter().map(LinkGeom::Point).collect();
     for part in parts {
         let projected = solidcraft_kernel::projection::projected_part(
@@ -2155,7 +2153,7 @@ pub fn pick_planar_face(st: &ModelState, body: Option<&str>, at: Vec3) -> std::r
     let mut found: Vec<(String, usize, Plane, &crate::ModelBody)> = Vec::new();
     for b in st.bodies.iter().filter(|b| body.is_none_or(|n| b.name == n) && !b.body.is_mesh()) {
         let tol = (b.body.size() * 1e-9).max(1e-6);
-        let query = solidcraft_kernel::services::query::Query::new(b.body.record());
+        let query = solidcraft_kernel::query::Query::new(b.body.record());
         for (_, i) in query.faces_at(at, tol) {
             if let Some(p) = b.body.planar_face(i) {
                 found.push((b.name.clone(), i, p, b));
@@ -2530,8 +2528,7 @@ fn loop_contains(edges: &[solidcore_record::brep::OrientedEdge], u: f64, v: f64)
         let samples = pcurve_levels(&used.pcurve, t0, t1);
         for pair in samples.windows(2) {
             let (Some(a), Some(b)) = (pair.first().copied(), pair.last().copied()) else { return false };
-            let Some((qa, qb)) =
-                solidcraft_kernel::services::pcurve::eval(&used.pcurve, a).zip(solidcraft_kernel::services::pcurve::eval(&used.pcurve, b))
+            let Some((qa, qb)) = solidcraft_kernel::curves::pcurve_eval(&used.pcurve, a).zip(solidcraft_kernel::curves::pcurve_eval(&used.pcurve, b))
             else {
                 return false;
             };
@@ -2542,14 +2539,14 @@ fn loop_contains(edges: &[solidcore_record::brep::OrientedEdge], u: f64, v: f64)
             let (mut lo, mut hi) = (a, b);
             for _ in 0..80 {
                 let mid = lo.midpoint(hi);
-                let Some(q) = solidcraft_kernel::services::pcurve::eval(&used.pcurve, mid) else { return false };
+                let Some(q) = solidcraft_kernel::curves::pcurve_eval(&used.pcurve, mid) else { return false };
                 if (q[1] > v) == above_a {
                     lo = mid;
                 } else {
                     hi = mid;
                 }
             }
-            let Some(q) = solidcraft_kernel::services::pcurve::eval(&used.pcurve, lo.midpoint(hi)).filter(|q| q[0].is_finite()) else { return false };
+            let Some(q) = solidcraft_kernel::curves::pcurve_eval(&used.pcurve, lo.midpoint(hi)).filter(|q| q[0].is_finite()) else { return false };
             cuts.push(q[0]);
         }
     }
@@ -3046,7 +3043,7 @@ fn extruded_along(rec: &solidcore_record::brep::Brep, f: usize, n: Vec3) -> bool
 /// The outline of a solid seen along the sketch normal, from its exact faces and edges: the
 /// stretches of its edges between a face that faces the sketch and one that does not (and of an
 /// open sheet's border where its face faces the sketch; the kernel's
-/// [`Query::outline_stretches`](solidcraft_kernel::services::query::Query::outline_stretches)), each projected exactly as an edge link
+/// [`Query::outline_stretches`](solidcraft_kernel::query::Query::outline_stretches)), each projected exactly as an edge link
 /// projects it ([`exact_edges`], or the kernel's projection of the stretch), and the silhouettes of
 /// its curved faces as the drawing's hidden lines trace them ([`hlr::silhouettes`]). A face faces
 /// the sketch where its normal out of the material leans toward it; edge-on is away, as in
@@ -3068,7 +3065,7 @@ fn exact_silhouette_traced(body: &crate::ModelBody, plane: &Plane) -> Option<Vec
     let rec = body.body.record();
     let n = plane.normal();
     let size = body.body.size().max(1e-9);
-    let q = solidcraft_kernel::services::query::Query::new(rec);
+    let q = solidcraft_kernel::query::Query::new(rec);
     let mut edges = Vec::new();
     // The stretches of the edges on the outline, each projected as an edge link projects it.
     for stretch in q.outline_stretches(n, size).ok()? {
