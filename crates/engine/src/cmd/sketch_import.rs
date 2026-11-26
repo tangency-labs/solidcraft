@@ -357,12 +357,15 @@ fn fit_simplify(geom: &[Geom2], span: f64) -> Option<f64> {
         return None;
     }
     let fits = |d: f64| {
-        let cut = if d > 0.0 { simplify_lines(geom, d, DEFAULT_TOLERANCE_MM).0 } else { geom.to_vec() };
+        // As drawn is a borrow: a drawing too large for the sketch is refused before it is
+        // copied, which is the common case for a window that asks.
+        let cut: std::borrow::Cow<[Geom2]> =
+            if d > 0.0 { std::borrow::Cow::Owned(simplify_lines(geom, d, DEFAULT_TOLERANCE_MM).0) } else { std::borrow::Cow::Borrowed(geom) };
         if cut.len() > solidcraft_sketch::limits::max_points() {
             return false;
         }
         let mut sk = Sketch::new();
-        add_geometry(&mut sk, &cut, &|q: Vec2| q, 1.0, DEFAULT_TOLERANCE_MM).is_ok()
+        add_geometry(&mut sk, cut.as_ref(), &|q: Vec2| q, 1.0, DEFAULT_TOLERANCE_MM).is_ok()
     };
     if fits(0.0) {
         return Some(0.0);

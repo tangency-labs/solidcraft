@@ -375,9 +375,8 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, p: &mut Place) {
             // out with the file's size). It owns the number; turning it off keeps that number and
             // lets it be changed. A drawing no distance fits has no Auto to offer.
             let mut auto = p.auto;
-            let boxed = ui.add_enabled(p.auto_value.is_some(), |ui: &mut egui::Ui| {
-                crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("ui.insert_simplify_auto"), &mut auto)
-            });
+            let boxed =
+                ui.add_enabled(p.auto_value.is_some(), |ui: &mut egui::Ui| crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("Auto"), &mut auto));
             if boxed.changed() {
                 p.auto = auto;
                 if auto {
