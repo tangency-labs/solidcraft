@@ -654,6 +654,8 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     // Pin surviving features' evaluated body names before deleting, so disambiguated names
     // (e.g. `VIS (3)`) do not slide down into freed suffixes.
     s.pin_body_names();
+    let feature_bodies: Vec<(u64, Vec<String>)> =
+        s.doc.features.iter().filter(|f| !f.body_names.is_empty()).map(|f| (f.id, f.body_names.clone())).collect();
     let mut removed_capture_joints = std::collections::BTreeSet::new();
     for &id in &ids {
         if let Some(f) = s.doc.feature(id)
@@ -670,6 +672,16 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
         if s.doc.feature(id).is_some() {
             gone.extend(s.doc_mut().delete_feature(id)?);
         }
+    }
+    let gone_ids: std::collections::BTreeSet<u64> = gone.iter().copied().collect();
+    let deleted_bodies: std::collections::BTreeSet<String> =
+        feature_bodies.into_iter().filter(|(id, _)| gone_ids.contains(id)).flat_map(|(_, names)| names).filter(|name| !name.is_empty()).collect();
+    if !deleted_bodies.is_empty() {
+        let surviving: std::collections::BTreeSet<String> =
+            s.doc.features.iter().flat_map(|f| f.body_names.iter().cloned()).chain(s.doc.body_components.keys().cloned()).collect();
+        let d = s.doc_mut();
+        d.appearances.bodies.retain(|name, _| !deleted_bodies.contains(name) || surviving.contains(name));
+        d.appearances.faces.retain(|face| !deleted_bodies.contains(&face.body) || surviving.contains(&face.body));
     }
     for jid in cleanup_capture_position_bases(s.doc_mut(), &removed_capture_joints) {
         s.pending_joint_bases.remove(&jid);
