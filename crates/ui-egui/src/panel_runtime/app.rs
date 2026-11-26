@@ -782,7 +782,7 @@ impl AppPanelRuntime {
         self.drop_fit = bootstrap;
         let Some(outer) = landing else { return };
         let title = self.runtime.instance_presentation(&instance).map(|presentation| presentation.title).unwrap_or_default();
-        let (viewport, builder) = desktop.drop_window(&instance, title, outer);
+        let (viewport, builder) = desktop.drop_window(ctx, &instance, title, outer);
         // Drawing needs the OS window: until it exists, nothing is shown.
         if !desktop.drop_ready(ctx, &builder).unwrap_or(false) {
             return;

@@ -140,6 +140,11 @@ pub struct Caches {
     /// is not solved again. A [`RefCell`] so the check can fill it through the `&Kernel`
     /// it takes (the kernel stays `Send`; it is not shared between threads).
     pub(crate) curve_analysis: RefCell<crate::nurbs::b_spline_curve::analysis::AnalysisMemo>,
+    /// Not upstream (#22467): exact-input memo of trim-image gap outcomes
+    /// (`query::curve_surface_gap::TrimBoundMemo`), keyed by the pair's data and bound
+    /// parameters bit for bit. Off when [`Kernel::memoize_curve_caches`] is false; clearing it
+    /// changes no result, only speed.
+    pub(crate) trim_move_bounds: RefCell<crate::query::curve_surface_gap::TrimBoundMemo>,
     /// Not upstream (#18166): whether a lazily built UV trim raises its edge's tolerance by
     /// the trim's proved distance from the edge (`topology::edgeuse::p3::trim_raise_distance`),
     /// as it does by default, or by upstream's sampled distance, as a file's translation asks
@@ -167,6 +172,7 @@ impl Default for Caches {
     fn default() -> Self {
         Self {
             curve_analysis: RefCell::default(),
+            trim_move_bounds: RefCell::default(),
             prove_lazy_trim_raise: true,
             hold_trim_raise: false,
             refit_raising_trims: Cell::new(false),
@@ -250,6 +256,7 @@ pub struct WorkCounters {
     shells: Cell<u64>,
     booleans: Cell<u64>,
     apart_unions: Cell<u64>,
+    move_trim_bisection_pieces: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -684,6 +691,15 @@ impl WorkCounters {
         self.apart_unions.get()
     }
 
+    /// Bisection pieces evaluated while certifying trim-image gaps across rigid moves
+    /// (`topology::edgeuse::p3::cover_moved_trims`, through `query::curve_surface_gap`),
+    /// so a far-origin boolean test can catch regressions back to `MAX_PIECES` pole-trim
+    /// bisections or repeated `reparametrisation` work (#22467). Not the fork's.
+    #[must_use]
+    pub fn move_trim_bisection_pieces(&self) -> u64 {
+        self.move_trim_bisection_pieces.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -738,6 +754,13 @@ impl WorkCounters {
         self.shells.set(0);
         self.booleans.set(0);
         self.apart_unions.set(0);
+        self.move_trim_bisection_pieces.set(0);
+    }
+
+    /// Counts `pieces` bisection pieces evaluated while certifying a moved trim's gap.
+    pub(crate) fn add_move_trim_bisection_pieces(&self, pieces: u64) {
+        self.move_trim_bisection_pieces
+            .set(self.move_trim_bisection_pieces.get().saturating_add(pieces));
     }
 
     /// Counts one intersection of a blend's section with a face.

@@ -15532,12 +15532,12 @@ fn a_dropped_window_opens_at_the_shown_place_kept_on_its_monitor() {
     let other = InstanceId::new("other-panel").unwrap();
     let landing = adapter.landing(&ctx, &other, egui::pos2(100.0, 80.0), preferred, bounds).unwrap();
     assert_eq!(landing, egui::Rect::from_min_size(egui::pos2(100.0, 80.0), content + frame));
-    let (dropped, window) = adapter.drop_window(&other, "Other".into(), landing);
+    let (dropped, window) = adapter.drop_window(&ctx, &other, "Other".into(), landing);
     assert_eq!((window.position, window.inner_size), (Some(landing.min), Some(content)));
     assert_eq!((window.mouse_passthrough, window.window_level, window.active), (Some(true), Some(egui::WindowLevel::AlwaysOnTop), Some(false)));
     // It is the window Pop out to window opens: the system's own title bar.
     assert_eq!((window.decorations, window.fullsize_content_view, window.title_shown), (None, None, None));
-    assert_eq!(adapter.drop_window(&other, "Other".into(), landing).0, dropped, "one window for the whole drag");
+    assert_eq!(adapter.drop_window(&ctx, &other, "Other".into(), landing).0, dropped, "one window for the whole drag");
     // It is drawn only once the OS has created it, visible but not activated: shown
     // later, a hidden window would take the app's focus and cancel the drag.
     assert!(adapter.drop_ready(&ctx, &window).is_err(), "no OS windows where viewports are embedded");
@@ -15563,10 +15563,16 @@ fn a_dropped_window_opens_at_the_shown_place_kept_on_its_monitor() {
     assert_eq!(adapter.adopt(&opened, &other), Some(dropped));
     assert_eq!(adapter.viewport_id(&opened), Some(dropped));
     adapter.place(&ctx, &other, landing);
+    let shown_owner = window.native_owner;
     let window = adapter.builder(&ctx, &opened, &other, "Other".into(), preferred, bounds).unwrap();
     assert_eq!((window.mouse_passthrough, window.window_level), (Some(false), Some(egui::WindowLevel::Normal)));
+    // A window keeps the owner it was created with. On macOS the drag's window has the panel
+    // window's owner, so it stays the panel's window on release, in front. Elsewhere it has
+    // none, as before.
+    let drag_owner = cfg!(target_os = "macos").then(|| ctx.viewport_id());
+    assert_eq!((shown_owner, window.native_owner), (drag_owner, Some(ctx.viewport_id())));
     assert_eq!((window.position, window.inner_size), (Some(landing.min), Some(content)));
-    assert_ne!(adapter.drop_window(&other, "Other".into(), landing).0, dropped, "the next drag shows a new window");
+    assert_ne!(adapter.drop_window(&ctx, &other, "Other".into(), landing).0, dropped, "the next drag shows a new window");
     // The window's content has its card's size, with the window's row of actions
     // in the header's place: the body keeps its size. A panel from the bottom
     // strip opens in the shape of a new side column instead.
