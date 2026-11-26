@@ -1034,6 +1034,94 @@ fn a_round_saved_on_a_start_offset_caps_edge_stays_on_the_edge_it_was_picked_on(
     assert!(at_z(&cylinders, 18.59), "{cylinders:?}");
 }
 
+/// A rod (radius 3 about y 15, z 10, from x 10 to 30) through a plate joined over it, from z 8 to
+/// 12: the plate's extrude has a start offset, so both its caps are `top`, and they border faces of
+/// the same features, so they are told apart only by where they lie (`#1` at z 8, `#2` at z 12),
+/// as are the rod's side above the plate and below it. Each cap meets the rod's side along two
+/// lines (`~1`, `~2`, at y 15 -/+ sqrt(5)); the upper cap meets only the side above the plate. A
+/// round on the upper cap's line at y 15 + sqrt(5) (its middle at x 20), as built now ("Round").
+/// Returns the session, the plate's and the round's feature ids.
+fn rod_through_offset_plate() -> (Session, u64, u64) {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "RodSketch"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [15, 10], "radius": 3}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "RodSketch", "distance": 20, "start_offset": 10, "name": "Rod", "body_name": "Part"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "PlateSketch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"sketch": "PlateSketch", "distance": 4, "start_offset": 8, "operation": "join", "targets": ["Part"], "name": "Plate"}),
+    );
+    run(&mut s, "solid.fillet", json!({"edges": [rod_line(1.0)], "radius": 1, "name": "Round"}));
+    let (plate, round) = (id(&s, "Plate"), id(&s, "Round"));
+    (s, plate, round)
+}
+
+/// The middle of the line where the rod of [`rod_through_offset_plate`] leaves the plate's upper
+/// cap, on the side of `side` (+1: y 15 + sqrt(5), -1: y 15 - sqrt(5)).
+fn rod_line(side: f64) -> [f64; 3] {
+    [20.0, 15.0 + side * 5f64.sqrt(), 12.0]
+}
+
+/// The design of [`rod_through_offset_plate`] saved with its round's edge stored as `edge_name`
+/// and picked at `pick`, opened again.
+fn rod_round_reopened(s: &Session, edge_name: &str, pick: [f64; 3]) -> Session {
+    let mut doc: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let round = doc["features"].as_array_mut().unwrap().iter_mut().find(|f| f["name"] == "Round").expect("the round");
+    round["edge_names"] = json!([edge_name]);
+    round["edges"] = json!([pick]);
+    Session::new(solidcraft_doc::Document::from_json(&doc.to_string()).unwrap())
+}
+
+/// #22418: a design saved by a build that numbered an extrude's two like-named caps the other way
+/// round (the flange of #18324, saved by 0.43.0, whose two `bottom` caps trade numbers since
+/// #21762) stores a round on the upper cap's edge with the lower cap's number. The lower cap does
+/// not meet the face on the edge's other side, so that name finds no edge at all, where #22230's
+/// name found the other cap's edge. On the body it was picked on, the pick, on the one edge named
+/// alike but for its faces' numbers, decides; a pick on an edge named otherwise (the other line,
+/// `~1` for `~2`) still asks for the edge again.
+#[test]
+fn a_round_saved_with_the_other_caps_number_finds_its_edge_at_its_pick() {
+    let (mut s, plate, round) = rod_through_offset_plate();
+    assert_eq!(error(&s, "Round"), None);
+    let stored = s.doc.find_feature("Round").unwrap().edge_names.first().cloned().unwrap_or_default();
+    let (upper, lower) = (format!("F{plate}:top#2"), format!("F{plate}:top#1"));
+    assert!((stored.starts_with(&format!("{upper}|")) || stored.contains(&format!("|{upper}~"))) && stored.ends_with("~2"), "{stored}");
+    // Rounded on the upper cap's line, not the lower's: a point 0.05 from the line along the
+    // bisector of the corner, which the round (radius 1) fills out to 1 / sin(half) - 1, about
+    // 0.095. The rod's wall leaves the cap leaning back over the rod at acos(2 / 3) to the cap's
+    // plane (its normal there is (sqrt(5), 2) / 3 in y, z), so the corner outside it opens
+    // 180 deg - acos(2 / 3). The lower cap's line is the mirror image in z 10.
+    let half = (std::f64::consts::PI - (2.0f64 / 3.0).acos()) / 2.0;
+    let [x, y, z] = rod_line(1.0);
+    let (up, down) = ([x, y + 0.05 * half.cos(), z + 0.05 * half.sin()], [x, y + 0.05 * half.cos(), 20.0 - z - 0.05 * half.sin()]);
+    let rounded = |s: &Session| solid_at(s, up) && !solid_at(s, down);
+    assert!(rounded(&s), "{:?}", names(&s, "Part"));
+    assert!(names(&s, "Part").iter().any(|(n, _)| *n == format!("F{round}:blend({stored})")), "{:?}", names(&s, "Part"));
+    // Before the round (the edge it rounds still there), no edge has the name with the lower
+    // cap's number.
+    let saved = stored.replacen(&format!("{upper}|"), &format!("{lower}|"), 1).replacen(&format!("|{upper}~"), &format!("|{lower}~"), 1);
+    assert_ne!(saved, stored);
+    run(&mut s, "timeline.roll_to", json!({"feature": "Plate"}));
+    let edges = run(&mut s, "model.edges", json!({"body": "Part"}));
+    run(&mut s, "timeline.roll_to", json!({}));
+    let edge_names: Vec<&str> = edges["edges"].as_array().unwrap().iter().filter_map(|e| e["name"].as_str()).collect();
+    assert!(edge_names.contains(&stored.as_str()) && !edge_names.contains(&saved.as_str()), "{saved} in {edge_names:?}");
+
+    // Saved with the lower cap's number, picked on the edge: the round is on that edge again.
+    let reopened = rod_round_reopened(&s, &saved, rod_line(1.0));
+    assert_eq!(error(&reopened, "Round"), None);
+    assert!(rounded(&reopened), "{:?}", names(&reopened, "Part"));
+    assert!(has_volume(&reopened, "Part", volume_of(&s, "Part")), "{} {}", volume_of(&reopened, "Part"), volume_of(&s, "Part"));
+
+    // The same name picked on the other line (`~1`): named otherwise, so the pick does not decide.
+    let elsewhere = rod_round_reopened(&s, &saved, rod_line(-1.0));
+    assert_eq!(reselect(&elsewhere, "Round").as_deref(), Some(saved.as_str()));
+}
+
 /// The volumes of the design's bodies, by name.
 fn volumes(s: &Session) -> Vec<(String, f64)> {
     let st = s.model.state();

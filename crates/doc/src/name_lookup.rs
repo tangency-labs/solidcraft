@@ -200,21 +200,24 @@ fn without_face_ties(name: &str) -> Option<crate::persistent_name::EdgeName> {
 }
 
 /// The edge a blend's stored edge name `name` meant when it found edge `found` of body `b` (whose
-/// mesh is `m`) and the blend's own pick `near` does not lie on it: the edge `near` lies on
-/// (exactly, clear of its ends, see [`edge_through`]), when its name differs from `name` only in
-/// the numbers of its faces. Pieces that nothing else tells apart are numbered along where they
-/// lie, and builds have numbered them differently: both caps of an extrude with a start offset are
-/// `top`, and since #21762 the one a design saved by 0.47.0 called `top#1` is `top#2` (#22230).
-/// The point was picked on the edge the name was given to, so it says which one that is, but only
-/// on the body it was picked on: a pick is not updated when an edit moves the body, and then it
-/// can lie on the other cap's edge. The caller checks that the body has not moved: its box is the
-/// saved one, and no earlier feature places bodies whole.
-pub(crate) fn retied_edge(b: &ModelBody, m: &Mesh, name: &str, found: usize, near: Vec3) -> Option<usize> {
-    if b.body.is_mesh() || !near.is_finite() || edge_near(b, m, found, near) {
+/// mesh is `m`) and the blend's own pick `near` does not lie on it, or found no edge at all
+/// (`found` is `None`): the edge `near` lies on (exactly, clear of its ends, see
+/// [`edge_through`]), when its name differs from `name` only in the numbers of its faces. Pieces
+/// that nothing else tells apart are numbered along where they lie, and builds have numbered them
+/// differently: both caps of an extrude with a start offset are `top`, and since #21762 the one a
+/// design saved by 0.47.0 called `top#1` is `top#2` (#22230). Where only one of the caps meets the
+/// edge's other face, the name with the other cap's number finds no edge at all: a round 0.43.0
+/// saved on a flange's `bottom#1|…~1` edge, the cap that is `bottom#2` now (#22418). The point was
+/// picked on the edge the name was given to, so it says which one that is, but only on the body it
+/// was picked on: a pick is not updated when an edit moves the body, and then it can lie on the
+/// other cap's edge. The caller checks that the body has not moved: its box is the saved one, and
+/// no earlier feature places bodies whole.
+pub(crate) fn retied_edge(b: &ModelBody, m: &Mesh, name: &str, found: Option<usize>, near: Vec3) -> Option<usize> {
+    if b.body.is_mesh() || !near.is_finite() || found.is_some_and(|found| edge_near(b, m, found, near)) {
         return None;
     }
     let wanted = without_face_ties(name)?;
-    let j = edge_through(b, m, near).filter(|j| *j != found)?;
+    let j = edge_through(b, m, near).filter(|j| Some(*j) != found)?;
     (without_face_ties(edge_names(b).get(j)?)? == wanted).then_some(j)
 }
 

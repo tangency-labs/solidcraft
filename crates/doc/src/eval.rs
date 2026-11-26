@@ -9221,22 +9221,31 @@ fn blend_edges_on(
         });
         let moved = moved_since.unwrap_or(false);
         let named = trusted_edge_name(f, i, p);
+        // On the body the pick was made on, a pick on an edge named alike but for its faces' tie
+        // numbers is that edge: the numbers moved, not the edge (#22230). An unchanged box does
+        // not show the body unmoved where an earlier feature places it whole.
+        let unmoved = moved_since == Some(false) && !placed;
         let Some(hit) = named.and_then(|n| crate::name_lookup::locate_projected_edge(mb, n, p).ok()) else {
             // #21997: the saved whole closed edge can now exist as the pieces a whole-turn
             // revolve join's turned seam split it into. Every piece is blended, as a pick made
             // today stores one name per piece.
             let Some(pieces) = named.and_then(|n| crate::name_lookup::recover_split_closed_edge(mb, n, p)) else {
-                return Err(DocError::reselect(stored.as_str()));
+                // #22418: with the other number, the name can find no edge at all, where only one
+                // of the faces told apart by it meets the edge's other face; the pick then lies on
+                // the edge it is, clear of its ends.
+                if named.filter(|_| unmoved).and_then(|n| crate::name_lookup::retied_edge(mb, &mb.mesh(), n, None, p)).is_none() {
+                    return Err(DocError::reselect(stored.as_str()));
+                }
+                out.push(p);
+                continue;
             };
             out.extend(pieces.iter().map(|hit| if moved { off_the_ends(mb, hit.edge, hit.point) } else { hit.point }));
             notes.push(format!("the saved edge `{stored}` now exists as {} pieces; every piece is blended", pieces.len()));
             continue;
         };
-        // On the body the pick was made on, a pick off the named edge and on one named alike but for
-        // its faces' tie numbers is that edge: the numbers moved, not the edge (#22230). An
-        // unchanged box does not show the body unmoved where an earlier feature places it whole.
-        let hit = match (hit.on_point, moved_since) {
-            (false, Some(false)) if !placed => crate::name_lookup::retied_edge(mb, &mb.mesh(), stored, hit.edge, p)
+        // A pick off the named edge, on one named alike but for its faces' tie numbers (#22230).
+        let hit = match hit.on_point {
+            false if unmoved => crate::name_lookup::retied_edge(mb, &mb.mesh(), stored, Some(hit.edge), p)
                 .map_or(hit, |edge| crate::name_lookup::EdgeHit { edge, point: p, verified: false, on_point: true }),
             _ => hit,
         };
