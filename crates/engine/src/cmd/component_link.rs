@@ -301,6 +301,215 @@ type StepReadOnce =
 /// linked design (none for a STEP file).
 type LeftOut = (solidcraft_io::StepFeature, Vec<Vec<String>>, bool, Vec<MeshData>);
 
+/// Cache key for a linked design read during one open ([`Reading::read`]): target path,
+/// configuration selection, allowed folder root, and current nesting depth (`opening.len()`) so a
+/// shallow read is never reused at a depth where nested links would exceed [`OPENING_DEPTH`].
+type ReadKey = (PathBuf, Option<(u64, Option<u64>)>, Option<PathBuf>, usize);
+
+/// Cache key for a linked STEP file read during one open: `(absolute_path, flat, step_names)`,
+/// so a STEP file linked into many components is read, parsed and hashed once per open.
+type StepReadKey = (PathBuf, bool, String);
+
+/// Single-flight, deadlock-free memoization map shared across parallel branches of one open.
+///
+/// Acyclic diamond dependencies (e.g. `top -> {left, right} -> shared`) wait on the in-flight
+/// reader and share its result so the shared part is evaluated exactly once. Both cache waits
+/// (`waiting_on`) and nested worker join edges (`join_edges`: parent thread waiting on spawned
+/// `map_on_threads` helpers) are tracked under the same lock so any cyclic wait chain—direct or
+/// across nested worker pools—is detected before blocking and bypassed cleanly.
+struct SharedReads {
+    state: Mutex<SharedReadsState>,
+    done: std::sync::Condvar,
+}
+
+#[derive(Default)]
+struct SharedReadsState {
+    ready: std::collections::HashMap<ReadKey, ReadOnce>,
+    step_ready: std::collections::HashMap<StepReadKey, StepReadOnce>,
+    /// Key -> `(owner_thread, owner_pool_depth_when_claimed)`.
+    in_flight: std::collections::HashMap<ReadKey, (std::thread::ThreadId, usize)>,
+    /// Waiter -> `(owner_thread, owner_claim_depth)`.
+    waiting_on: std::collections::HashMap<std::thread::ThreadId, (std::thread::ThreadId, usize)>,
+    /// Directed wait edges `parent -> (active child worker, parent pool depth)` while `parent` joins
+    /// nested work. A parent claim acquired at depth `d` can only block behind children spawned at
+    /// depth `s > d`; claims made inside the parent's own `map_on_threads` job have `d == s` and
+    /// release before `parent` joins those siblings.
+    join_edges: std::collections::HashMap<std::thread::ThreadId, Vec<(std::thread::ThreadId, usize)>>,
+    /// Nesting depth of active `map_on_threads` pools currently executing on each thread.
+    pool_depth: std::collections::HashMap<std::thread::ThreadId, usize>,
+}
+
+struct PoolDepthGuard {
+    shared: SharedReadCache,
+    tid: std::thread::ThreadId,
+}
+
+impl Drop for PoolDepthGuard {
+    fn drop(&mut self) {
+        let mut st = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(depth) = st.pool_depth.get_mut(&self.tid) {
+            *depth = depth.saturating_sub(1);
+            if *depth == 0 {
+                st.pool_depth.remove(&self.tid);
+            }
+        }
+    }
+}
+
+enum ReadAcquire {
+    Ready(Box<ReadOnce>),
+    Claimed(ReadClaim),
+    Bypass,
+}
+
+struct ReadClaim {
+    shared: SharedReadCache,
+    key: Option<ReadKey>,
+}
+
+impl ReadClaim {
+    fn finish(mut self, value: Option<ReadOnce>) {
+        if let Some(key) = self.key.take() {
+            let mut st = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+            st.in_flight.remove(&key);
+            if let Some(val) = value {
+                st.ready.insert(key, val);
+            }
+            self.shared.done.notify_all();
+        }
+    }
+}
+
+impl Drop for ReadClaim {
+    fn drop(&mut self) {
+        if let Some(key) = self.key.take() {
+            let mut st = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+            st.in_flight.remove(&key);
+            self.shared.done.notify_all();
+        }
+    }
+}
+
+impl SharedReads {
+    fn new() -> SharedReadCache {
+        std::sync::Arc::new(SharedReads { state: Mutex::new(SharedReadsState::default()), done: std::sync::Condvar::new() })
+    }
+
+    fn get_ready(&self, key: &ReadKey) -> Option<ReadOnce> {
+        self.state.lock().ok().and_then(|st| st.ready.get(key).cloned())
+    }
+
+    fn get_step_ready(&self, key: &StepReadKey) -> Option<StepReadOnce> {
+        self.state.lock().ok().and_then(|st| st.step_ready.get(key).cloned())
+    }
+
+    fn insert_step_ready(&self, key: StepReadKey, val: StepReadOnce) {
+        if let Ok(mut st) = self.state.lock() {
+            st.step_ready.insert(key, val);
+        }
+    }
+
+    fn remove_ready(&self, key: &ReadKey) {
+        if let Ok(mut st) = self.state.lock() {
+            st.ready.remove(key);
+        }
+    }
+
+    fn enter_pool(self: &SharedReadCache, parent: std::thread::ThreadId) -> (usize, PoolDepthGuard) {
+        let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = st.pool_depth.entry(parent).or_insert(0);
+        *entry += 1;
+        (*entry, PoolDepthGuard { shared: self.clone(), tid: parent })
+    }
+
+    fn register_join(&self, parent: std::thread::ThreadId, child: std::thread::ThreadId, pool_depth: usize) {
+        if parent != child {
+            let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            st.join_edges.entry(parent).or_default().push((child, pool_depth));
+        }
+    }
+
+    fn unregister_join(&self, parent: std::thread::ThreadId, child: std::thread::ThreadId, pool_depth: usize) {
+        if parent != child {
+            let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(children) = st.join_edges.get_mut(&parent) {
+                if let Some(pos) = children.iter().position(|&e| e == (child, pool_depth)) {
+                    children.swap_remove(pos);
+                }
+                if children.is_empty() {
+                    st.join_edges.remove(&parent);
+                }
+            }
+        }
+    }
+
+    /// Whether `me` is reachable from `(owner, owner_claim_depth)` in the combined wait-for graph
+    /// (`waiting_on` U depth-filtered `join_edges`), meaning waiting on `owner` would form a
+    /// deadlock cycle.
+    fn would_cycle(st: &SharedReadsState, owner: std::thread::ThreadId, owner_claim_depth: usize, me: std::thread::ThreadId) -> bool {
+        let mut stack = vec![(owner, owner_claim_depth)];
+        let mut min_seen: std::collections::HashMap<std::thread::ThreadId, usize> = std::collections::HashMap::new();
+        while let Some((cur, min_depth)) = stack.pop() {
+            if cur == me {
+                return true;
+            }
+            if min_seen.get(&cur).is_some_and(|&prev| prev <= min_depth) {
+                continue;
+            }
+            min_seen.insert(cur, min_depth);
+            if let Some(&(next, next_depth)) = st.waiting_on.get(&cur) {
+                stack.push((next, next_depth));
+            }
+            if let Some(children) = st.join_edges.get(&cur) {
+                for &(child, spawn_depth) in children {
+                    if spawn_depth > min_depth {
+                        stack.push((child, 0));
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    fn acquire(self: &SharedReadCache, key: &ReadKey) -> ReadAcquire {
+        let me = std::thread::current().id();
+        let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            if let Some(val) = st.ready.get(key) {
+                return ReadAcquire::Ready(Box::new(val.clone()));
+            }
+            if let Some(&(owner, owner_depth)) = st.in_flight.get(key) {
+                if Self::would_cycle(&st, owner, owner_depth, me) {
+                    return ReadAcquire::Bypass;
+                }
+                st.waiting_on.insert(me, (owner, owner_depth));
+                st = self.done.wait(st).unwrap_or_else(|e| e.into_inner());
+                st.waiting_on.remove(&me);
+                continue;
+            }
+            let my_depth = st.pool_depth.get(&me).copied().unwrap_or(0);
+            st.in_flight.insert(key.clone(), (me, my_depth));
+            return ReadAcquire::Claimed(ReadClaim { shared: self.clone(), key: Some(key.clone()) });
+        }
+    }
+}
+
+type SharedReadCache = std::sync::Arc<SharedReads>;
+
+/// Maximum worker threads used when evaluating independent linked files concurrently.
+const MAX_LINK_WORKERS: usize = 16;
+
+fn link_cores() -> usize {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::thread::available_parallelism().map(usize::from).unwrap_or(1).min(MAX_LINK_WORKERS)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        1
+    }
+}
+
 /// The reads of linked designs saved without bodies that one open, or one Update Links, makes
 /// on this thread.
 struct Reading {
@@ -322,26 +531,128 @@ struct Reading {
     /// How many reads were not kept in `read` because of a refusal below them. Each may be made
     /// again by another chain of links, so past [`READ_AGAIN`] no further design is read.
     again: usize,
+    /// Worker thread budget for parallelizing links at or below this level, preventing nested
+    /// thread explosion across sub-assembly hierarchies.
+    budget: usize,
     /// What each linked design gave, by its file and configuration, so that a design many links
     /// lead to is read once: without it the reads grow with the number of ways to reach it. With
     /// [`LinkedRead::Folder`] a design below a link of the outermost design is kept for that link
     /// (the key's last part), whose folder decides what it may read.
-    read: std::collections::HashMap<(PathBuf, Option<(u64, Option<u64>)>, Option<PathBuf>), ReadOnce>,
-    /// What each linked STEP file gave, by `(absolute_path, flat, step_names)`, so a STEP file
-    /// linked into many components is read, parsed and hashed once per open.
-    step_read: std::collections::HashMap<(PathBuf, bool, String), StepReadOnce>,
+    read: Option<SharedReadCache>,
+}
+
+impl Reading {
+    fn empty() -> Self {
+        Reading { opening: Vec::new(), which: LinkedRead::All, refused: 0, outside: 0, again: 0, budget: 1, read: None }
+    }
 }
 
 thread_local! {
-    static READING: std::cell::RefCell<Reading> = std::cell::RefCell::new(Reading {
-        opening: Vec::new(),
-        which: LinkedRead::All,
-        refused: 0,
-        outside: 0,
-        again: 0,
-        read: std::collections::HashMap::new(),
-        step_read: std::collections::HashMap::new(),
-    });
+    static READING: std::cell::RefCell<Reading> = std::cell::RefCell::new(Reading::empty());
+}
+
+fn reading_read_get(key: &ReadKey) -> Option<ReadOnce> {
+    READING.with(|reading| reading.borrow().read.clone())?.get_ready(key)
+}
+
+fn reading_read_acquire(key: &ReadKey) -> ReadAcquire {
+    match READING.with(|reading| reading.borrow().read.clone()) {
+        Some(cache) => cache.acquire(key),
+        None => ReadAcquire::Bypass,
+    }
+}
+
+fn reading_step_get(key: &StepReadKey) -> Option<StepReadOnce> {
+    READING.with(|reading| reading.borrow().read.clone())?.get_step_ready(key)
+}
+
+fn reading_step_insert(key: StepReadKey, val: StepReadOnce) {
+    if let Some(cache) = READING.with(|reading| reading.borrow().read.clone()) {
+        cache.insert_step_ready(key, val);
+    }
+}
+
+/// Temporarily installs a branch [`Reading`] snapshot on a worker thread (preserving `opening`,
+/// `which`, shared memoization cache, and bounded `budget`), records the parent-to-child join
+/// wait edge in [`SharedReads`] for deadlock detection, and restores the thread's prior
+/// [`Reading`] state on drop — essential because `map_on_threads` also executes work on the
+/// calling thread.
+struct BranchReading {
+    saved: Option<Reading>,
+    join_edge: Option<(SharedReadCache, std::thread::ThreadId, std::thread::ThreadId, usize)>,
+}
+
+impl BranchReading {
+    fn enter(
+        opening: Vec<Option<PathBuf>>,
+        which: LinkedRead,
+        budget: usize,
+        read: Option<SharedReadCache>,
+        parent_tid: std::thread::ThreadId,
+        pool_depth: usize,
+    ) -> Self {
+        let me = std::thread::current().id();
+        let join_edge = read.as_ref().filter(|_| me != parent_tid && pool_depth > 0).map(|cache| {
+            cache.register_join(parent_tid, me, pool_depth);
+            (cache.clone(), parent_tid, me, pool_depth)
+        });
+        let branch = Reading { opening, which, refused: 0, outside: 0, again: 0, budget, read };
+        let saved = READING.with(|r| r.replace(branch));
+        BranchReading { saved: Some(saved), join_edge }
+    }
+
+    fn finish(mut self) -> (usize, usize, usize) {
+        let stats = READING.with(|r| {
+            let b = r.borrow();
+            (b.refused, b.outside, b.again)
+        });
+        if let Some((cache, parent, child, pool_depth)) = self.join_edge.take() {
+            cache.unregister_join(parent, child, pool_depth);
+        }
+        if let Some(saved) = self.saved.take() {
+            READING.with(|r| *r.borrow_mut() = saved);
+        }
+        stats
+    }
+}
+
+impl Drop for BranchReading {
+    fn drop(&mut self) {
+        if let Some((cache, parent, child, pool_depth)) = self.join_edge.take() {
+            cache.unregister_join(parent, child, pool_depth);
+        }
+        if let Some(saved) = self.saved.take() {
+            READING.with(|r| *r.borrow_mut() = saved);
+        }
+    }
+}
+
+#[cfg(test)]
+fn measure_eval_counts<R>(f: impl FnOnce() -> R) -> (R, usize, usize, usize) {
+    let saved_e = EVALUATED.with(|n| n.replace(0));
+    let saved_r = REUSED.with(|n| n.replace(0));
+    let saved_s = STEP_READS.with(|n| n.replace(0));
+    struct Restore(usize, usize, usize);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            EVALUATED.with(|n| n.set(self.0));
+            REUSED.with(|n| n.set(self.1));
+            STEP_READS.with(|n| n.set(self.2));
+        }
+    }
+    let _restore = Restore(saved_e, saved_r, saved_s);
+    let out = f();
+    let e = EVALUATED.with(std::cell::Cell::get);
+    let r = REUSED.with(std::cell::Cell::get);
+    let s = STEP_READS.with(std::cell::Cell::get);
+    (out, e, r, s)
+}
+
+#[cfg(test)]
+fn add_eval_counts(evaluated: usize, reused: usize, step_reads: usize) {
+    EVALUATED.with(|n| n.set(n.get() + evaluated));
+    REUSED.with(|n| n.set(n.get() + reused));
+    STEP_READS.with(|n| n.set(n.get() + step_reads));
 }
 
 /// How many designs deep [`read_left_out_bodies`] follows links saved without bodies.
@@ -367,8 +678,8 @@ impl Opening {
                 reading.refused = 0;
                 reading.outside = 0;
                 reading.again = 0;
-                reading.read.clear();
-                reading.step_read.clear();
+                reading.budget = link_cores();
+                reading.read = Some(SharedReads::new());
             }
             reading.opening.push(file.map(|file| absolute(Path::new(file))));
         });
@@ -382,8 +693,8 @@ impl Drop for Opening {
             let mut reading = reading.borrow_mut();
             reading.opening.pop();
             if reading.opening.is_empty() {
-                reading.read.clear();
-                reading.step_read.clear();
+                reading.read = None;
+                reading.budget = 1;
             }
         });
     }
@@ -446,9 +757,254 @@ pub(super) fn read_left_out_bodies(
         return Vec::new();
     }
     let _opening = Opening::enter(from, which);
-    preread_left_out_links(doc, &links, from, validation);
+    let mut prefetched_steps: std::collections::HashMap<usize, StepReadOnce> = std::collections::HashMap::new();
+    let mut prefetched_designs: std::collections::HashMap<usize, ReadOnce> = std::collections::HashMap::new();
+    let (budget, parent_opening, parent_which, parent_refused, parent_again, shared_read) = READING.with(|reading| {
+        let r = reading.borrow();
+        (r.budget, r.opening.clone(), r.which, r.refused, r.again, r.read.clone())
+    });
+    if links.len() > 1 && budget > 1 && parent_refused == 0 && parent_again == 0 && !solidcraft_doc::progress::cancelled() {
+        enum LeftOutJob {
+            Step { link_indices: Vec<usize>, key: StepReadKey, file: PathBuf, flat: bool, step_names: String },
+            Design { link_indices: Vec<usize>, key: ReadKey, file: PathBuf, configuration: Option<SelectedConfiguration> },
+        }
+        enum LeftOutJobOut {
+            Cancelled,
+            Step {
+                link_indices: Vec<usize>,
+                key: StepReadKey,
+                read: StepReadOnce,
+                #[cfg(test)]
+                evals: usize,
+                #[cfg(test)]
+                reuses: usize,
+                #[cfg(test)]
+                step_reads: usize,
+            },
+            Design {
+                link_indices: Vec<usize>,
+                key: ReadKey,
+                read: ReadOnce,
+                refused: usize,
+                outside: usize,
+                again: usize,
+                #[cfg(test)]
+                evals: usize,
+                #[cfg(test)]
+                reuses: usize,
+                #[cfg(test)]
+                step_reads: usize,
+            },
+        }
+        let allowed_by = (parent_which == LinkedRead::Folder).then(|| parent_opening.get(1).cloned().flatten()).flatten();
+        let depth = parent_opening.len();
+        let mut jobs: Vec<LeftOutJob> = Vec::new();
+        let mut step_job_by_key: std::collections::HashMap<StepReadKey, usize> = std::collections::HashMap::new();
+        let mut design_job_by_key: std::collections::HashMap<ReadKey, usize> = std::collections::HashMap::new();
+        for (link_idx, (_comp, link)) in links.iter().enumerate() {
+            let file = resolve(from, &link.path);
+            if !may_read(&file) || link_refused(from, &link.path).is_err() {
+                continue;
+            }
+            if let Some(step_names) = &link.step_names {
+                let flat = step_import_flat(doc, link);
+                let key: StepReadKey = (absolute(&file), flat, step_names.clone());
+                if reading_step_get(&key).is_some() {
+                    continue;
+                }
+                if let Some(&job_idx) = step_job_by_key.get(&key) {
+                    if let LeftOutJob::Step { link_indices, .. } = &mut jobs[job_idx] {
+                        link_indices.push(link_idx);
+                    }
+                } else {
+                    let job_idx = jobs.len();
+                    step_job_by_key.insert(key.clone(), job_idx);
+                    jobs.push(LeftOutJob::Step { link_indices: vec![link_idx], key, file, flat, step_names: step_names.clone() });
+                }
+                continue;
+            }
+            let target = absolute(&file);
+            let is_cycle = parent_opening.iter().flatten().any(|open| *open == target || same_file(open, &target));
+            if is_cycle || depth >= OPENING_DEPTH {
+                continue;
+            }
+            let configuration = selected_configuration(link);
+            let key: ReadKey = (target, configuration.map(|c| (c.row, c.identity)), allowed_by.clone(), depth);
+            if reading_read_get(&key).is_some() {
+                continue;
+            }
+            if let Some(&job_idx) = design_job_by_key.get(&key) {
+                if let LeftOutJob::Design { link_indices, .. } = &mut jobs[job_idx] {
+                    link_indices.push(link_idx);
+                }
+            } else {
+                let job_idx = jobs.len();
+                design_job_by_key.insert(key.clone(), job_idx);
+                jobs.push(LeftOutJob::Design { link_indices: vec![link_idx], key, file, configuration });
+            }
+        }
+        if jobs.len() > 1 {
+            let workers = budget.min(jobs.len());
+            let child_budget = (budget / workers).max(1);
+            let progress = solidcraft_doc::progress::current();
+            let parent_tid = std::thread::current().id();
+            let allowed_hosts = solidcraft_io::vfs::current_allowed_hosts();
+            // Workers start unconfined: carry the caller's file scope so linked reads stay inside it.
+            let scope = solidcraft_io::vfs::current_scope();
+            let (pool_depth, _pool_guard) = shared_read.as_ref().map_or((0, None), |c| {
+                let (d, g) = c.enter_pool(parent_tid);
+                (d, Some(g))
+            });
+            let done = solidcraft_kernel::map_on_threads(&jobs, workers, |job| -> LeftOutJobOut {
+                solidcraft_io::vfs::scoped(scope.clone(), || {
+                    solidcraft_io::vfs::allowing_hosts(&allowed_hosts, || {
+                        solidcraft_doc::progress::watch_nested(progress.clone(), || {
+                            if solidcraft_doc::progress::cancelled() || solidcraft_kernel::watch::cancelled() {
+                                return LeftOutJobOut::Cancelled;
+                            }
+                            match job {
+                                LeftOutJob::Step { link_indices, key, file, flat, step_names } => {
+                                    let run = || read_step_once(file, from, step_names, *flat, validation);
+                                    #[cfg(test)]
+                                    let (read, evals, reuses, step_reads) = measure_eval_counts(run);
+                                    #[cfg(not(test))]
+                                    let read = run();
+                                    LeftOutJobOut::Step {
+                                        link_indices: link_indices.clone(),
+                                        key: key.clone(),
+                                        read,
+                                        #[cfg(test)]
+                                        evals,
+                                        #[cfg(test)]
+                                        reuses,
+                                        #[cfg(test)]
+                                        step_reads,
+                                    }
+                                }
+                                LeftOutJob::Design { link_indices, key, file, configuration } => {
+                                    let branch = BranchReading::enter(
+                                        parent_opening.clone(),
+                                        parent_which,
+                                        child_budget,
+                                        shared_read.clone(),
+                                        parent_tid,
+                                        pool_depth,
+                                    );
+                                    let (read, evals, reuses, step_reads) = match reading_read_acquire(key) {
+                                        ReadAcquire::Ready(read) => (*read, 0usize, 0usize, 0usize),
+                                        ReadAcquire::Claimed(claim) => {
+                                            let run = || read_once(file, from, *configuration, validation);
+                                            #[cfg(test)]
+                                            let (read, evals, reuses, step_reads) = measure_eval_counts(run);
+                                            #[cfg(not(test))]
+                                            let (read, evals, reuses, step_reads) = (run(), 0usize, 0usize, 0usize);
+                                            let refused_here = READING.with(|r| r.borrow().refused);
+                                            claim.finish((refused_here == 0).then(|| read.clone()));
+                                            (read, evals, reuses, step_reads)
+                                        }
+                                        ReadAcquire::Bypass => {
+                                            let run = || read_once(file, from, *configuration, validation);
+                                            #[cfg(test)]
+                                            let (read, evals, reuses, step_reads) = measure_eval_counts(run);
+                                            #[cfg(not(test))]
+                                            let (read, evals, reuses, step_reads) = (run(), 0usize, 0usize, 0usize);
+                                            (read, evals, reuses, step_reads)
+                                        }
+                                    };
+                                    #[cfg(not(test))]
+                                    let _ = (evals, reuses, step_reads);
+                                    let (refused, outside, again) = branch.finish();
+                                    LeftOutJobOut::Design {
+                                        link_indices: link_indices.clone(),
+                                        key: key.clone(),
+                                        read,
+                                        refused,
+                                        outside,
+                                        again,
+                                        #[cfg(test)]
+                                        evals,
+                                        #[cfg(test)]
+                                        reuses,
+                                        #[cfg(test)]
+                                        step_reads,
+                                    }
+                                }
+                            }
+                        })
+                    })
+                })
+            });
+            // Merge branch outcomes in deterministic link order.
+            for out in done.into_iter().flatten() {
+                match out {
+                    LeftOutJobOut::Cancelled => {}
+                    LeftOutJobOut::Step {
+                        link_indices,
+                        key,
+                        read,
+                        #[cfg(test)]
+                        evals,
+                        #[cfg(test)]
+                        reuses,
+                        #[cfg(test)]
+                        step_reads,
+                    } => {
+                        #[cfg(test)]
+                        add_eval_counts(evals, reuses, step_reads);
+                        reading_step_insert(key, read.clone());
+                        for idx in link_indices {
+                            prefetched_steps.insert(idx, read.clone());
+                        }
+                    }
+                    LeftOutJobOut::Design {
+                        link_indices,
+                        key,
+                        read,
+                        refused,
+                        outside,
+                        again,
+                        #[cfg(test)]
+                        evals,
+                        #[cfg(test)]
+                        reuses,
+                        #[cfg(test)]
+                        step_reads,
+                    } => {
+                        #[cfg(test)]
+                        add_eval_counts(evals, reuses, step_reads);
+                        let within_limit = READING.with(|reading| {
+                            let mut r = reading.borrow_mut();
+                            if r.again >= READ_AGAIN {
+                                // Evict speculative worker entries past the sequential retry
+                                // cutoff so fallback calls enforce `READ_AGAIN` identically.
+                                if let Some(cache) = &r.read {
+                                    cache.remove_ready(&key);
+                                }
+                                return false;
+                            }
+                            r.refused += refused;
+                            r.outside += outside;
+                            r.again += again;
+                            if refused != 0 {
+                                r.again += 1;
+                            }
+                            true
+                        });
+                        if within_limit {
+                            for idx in link_indices {
+                                prefetched_designs.insert(idx, read.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     let mut warnings = Vec::new();
-    for (comp, link) in links {
+    for (link_idx, (comp, link)) in links.into_iter().enumerate() {
+        if solidcraft_doc::progress::cancelled() {
+            break;
+        }
         let name = doc.components.iter().find(|c| c.id == comp).map_or_else(|| comp.to_string(), |c| c.name.clone());
         if !may_read(&resolve(from, &link.path)) {
             READING.with(|reading| reading.borrow_mut().outside += 1);
@@ -456,7 +1012,20 @@ pub(super) fn read_left_out_bodies(
             warnings.push(format!("{name} has no bodies yet: its linked {what} is in another folder, and Update Links reads it"));
             continue;
         }
-        let (feature, faces, changed, meshes) = match left_out_bodies(&link, from, step_import_flat(doc, &link), validation) {
+        let read_result = if let Some(step_res) = prefetched_steps.remove(&link_idx) {
+            step_res.map_err(EngineError::Other).map(|(n, kind, body_names, invisible, w, import, digest)| {
+                let changed = link.file_sha256.as_deref().is_some_and(|kept| kept != digest);
+                (solidcraft_io::StepFeature { name: n, kind, body_names, invisible, warnings: w, import }, Vec::new(), changed, Vec::new())
+            })
+        } else if let Some(design_res) = prefetched_designs.remove(&link_idx) {
+            design_res.map_err(EngineError::Other).map(|(n, kind, body_names, invisible, w, import, faces, digest, meshes)| {
+                let changed = link.file_sha256.as_deref().is_some_and(|kept| kept != digest);
+                (solidcraft_io::StepFeature { name: n, kind, body_names, invisible, warnings: w, import }, faces, changed, meshes)
+            })
+        } else {
+            left_out_bodies(&link, from, step_import_flat(doc, &link), validation)
+        };
+        let (feature, faces, changed, meshes) = match read_result {
             Ok(read) => read,
             Err(e) => {
                 warnings.push(format!("{name} has no bodies: {e}"));
@@ -570,16 +1139,16 @@ fn left_out_bodies(link: &DesignLink, from: Option<&str>, flat: bool, validation
         let reading = reading.borrow();
         (reading.which == LinkedRead::Folder).then(|| reading.opening.get(1).cloned().flatten()).flatten()
     });
-    let key = (target, configuration.map(|c| (c.row, c.identity)), allowed_by);
-    let known = READING.with(|reading| reading.borrow().read.get(&key).cloned());
-    let read = match known {
-        Some(read) => read,
-        None => {
+    let key = (target, configuration.map(|c| (c.row, c.identity)), allowed_by, depth);
+    let read = match reading_read_acquire(&key) {
+        ReadAcquire::Ready(read) => *read,
+        acquired => {
             let (refused, again) = READING.with(|reading| {
                 let reading = reading.borrow();
                 (reading.refused, reading.again)
             });
             if again >= READ_AGAIN {
+                drop(acquired);
                 return refuse(format!(
                     "{}: the linked designs saved without bodies link each other in too many ways to read them all; Update Links reads it once the loop is gone",
                     file.display()
@@ -588,120 +1157,24 @@ fn left_out_bodies(link: &DesignLink, from: Option<&str>, flat: bool, validation
             let read = read_once(&file, from, configuration, validation);
             // What a design gives after a link below it was refused for its place in this chain
             // is not what another chain gets.
-            READING.with(|reading| {
+            let cacheable = READING.with(|reading| {
                 let mut reading = reading.borrow_mut();
                 if reading.refused == refused {
-                    reading.read.insert(key, read.clone());
+                    true
                 } else {
                     reading.again += 1;
+                    false
                 }
             });
+            if let ReadAcquire::Claimed(claim) = acquired {
+                claim.finish(cacheable.then(|| read.clone()));
+            }
             read
         }
     };
     let (name, kind, body_names, invisible, warnings, import, faces, digest, meshes) = read.map_err(EngineError::Other)?;
     let changed = link.file_sha256.as_deref().is_some_and(|kept| kept != digest);
     Ok((solidcraft_io::StepFeature { name, kind, body_names, invisible, warnings, import }, faces, changed, meshes))
-}
-
-enum LeftOutJob {
-    Step { key: (PathBuf, bool, String), file: PathBuf, flat: bool, step_names: String },
-    Design { key: (PathBuf, Option<(u64, Option<u64>)>, Option<PathBuf>), file: PathBuf, configuration: Option<SelectedConfiguration> },
-}
-
-enum LeftOutPreRead {
-    Step((PathBuf, bool, String), StepReadOnce),
-    Design((PathBuf, Option<(u64, Option<u64>)>, Option<PathBuf>), ReadOnce),
-    NeedsSequential,
-}
-
-/// Pre-read and evaluate independent top-level left-out links in parallel, populating [`READING`]'s
-/// caches before the deterministic apply loop runs. Any linked design that itself holds left-out
-/// links falls back safely to sequential evaluation under the full cycle, depth and folder guards.
-fn preread_left_out_links(doc: &Document, links: &[(u64, DesignLink)], from: Option<&str>, validation: solidcraft_kernel::Validation) {
-    let opening = READING.with(|reading| {
-        let reading = reading.borrow();
-        (reading.opening.len() == 1).then(|| reading.opening.clone())
-    });
-    let Some(opening) = opening else { return };
-    if opening.len() >= OPENING_DEPTH {
-        return;
-    }
-    let mut seen_steps = std::collections::HashSet::new();
-    let mut seen_designs = std::collections::HashSet::new();
-    let mut jobs = Vec::new();
-    for (_, link) in links {
-        let file = resolve(from, &link.path);
-        if !may_read(&file) || link_refused(from, &link.path).is_err() {
-            continue;
-        }
-        if let Some(step_names) = &link.step_names {
-            let flat = step_import_flat(doc, link);
-            let key = (absolute(&file), flat, step_names.clone());
-            let cached = READING.with(|reading| reading.borrow().step_read.contains_key(&key));
-            if !cached && seen_steps.insert(key.clone()) {
-                jobs.push(LeftOutJob::Step { key, file, flat, step_names: step_names.clone() });
-            }
-        } else {
-            let target = absolute(&file);
-            if opening.iter().flatten().any(|open| *open == target || same_file(open, &target)) {
-                continue;
-            }
-            let configuration = selected_configuration(link);
-            let key = (target, configuration.map(|c| (c.row, c.identity)), None);
-            let cached = READING.with(|reading| reading.borrow().read.contains_key(&key));
-            if !cached && seen_designs.insert(key.clone()) {
-                jobs.push(LeftOutJob::Design { key, file, configuration });
-            }
-        }
-    }
-    if jobs.len() <= 1 {
-        return;
-    }
-    let results = map_link_work(&jobs, |job| match job {
-        LeftOutJob::Step { key, file, flat, step_names } => {
-            LeftOutPreRead::Step(key.clone(), read_step_once(file, from, step_names, *flat, validation))
-        }
-        LeftOutJob::Design { key, file, configuration } => {
-            let bytes = match read_link(file, from, false) {
-                Ok(bytes) => bytes,
-                Err(e) => return LeftOutPreRead::Design(key.clone(), Err(e.to_string())),
-            };
-            let source = Source::File(file.clone());
-            let (part_doc, saved) = match parse_design_bytes(&source, &bytes) {
-                Ok(parsed) => parsed,
-                Err(e) => {
-                    #[cfg(test)]
-                    EVALUATED.with(|n| n.set(n.get() + 1));
-                    return LeftOutPreRead::Design(key.clone(), Err(e.to_string()));
-                }
-            };
-            if has_left_out_links(&part_doc) {
-                return LeftOutPreRead::NeedsSequential;
-            }
-            let read = evaluate_parsed_design(&source, &bytes, part_doc, saved, *configuration, validation, true)
-                .map(|((_, feature, faces, _, _, meshes), _)| {
-                    let solidcraft_io::StepFeature { name, kind, body_names, invisible, warnings, import } = feature;
-                    (name, kind, body_names, invisible, warnings, import, faces, DesignLink::file_digest(&bytes), meshes)
-                })
-                .map_err(|e| e.to_string());
-            LeftOutPreRead::Design(key.clone(), read)
-        }
-    });
-    READING.with(|reading| {
-        let mut reading = reading.borrow_mut();
-        for outcome in results.into_iter().flatten() {
-            match outcome {
-                LeftOutPreRead::Step(key, read) => {
-                    reading.step_read.insert(key, read);
-                }
-                LeftOutPreRead::Design(key, read) => {
-                    reading.read.insert(key, read);
-                }
-                LeftOutPreRead::NeedsSequential => {}
-            }
-        }
-    });
 }
 
 /// [`left_out_step`]'s single read of a linked STEP file at `file`, for a design opened from `from`.
@@ -718,14 +1191,11 @@ fn read_step_once(file: &Path, from: Option<&str>, step_names: &str, flat: bool,
 fn left_out_step(link: &DesignLink, file: &Path, from: Option<&str>, flat: bool, validation: solidcraft_kernel::Validation) -> Result<LeftOut> {
     let step_names = link.step_names.as_deref().unwrap_or_default();
     let key = (absolute(file), flat, step_names.to_string());
-    let known = READING.with(|reading| reading.borrow().step_read.get(&key).cloned());
-    let read = match known {
+    let read = match reading_step_get(&key) {
         Some(read) => read,
         None => {
             let read = read_step_once(file, from, step_names, flat, validation);
-            READING.with(|reading| {
-                reading.borrow_mut().step_read.insert(key, read.clone());
-            });
+            reading_step_insert(key, read.clone());
             read
         }
     };
@@ -792,9 +1262,6 @@ struct LinkRead {
     meshes: Vec<MeshData>,
 }
 
-/// Maximum worker threads used for parallel linked-file reads, hashing, and evaluation.
-const LINK_THREADS: usize = 16;
-
 #[cfg(test)]
 thread_local! {
     /// Linked designs read and evaluated on this thread, for tests.
@@ -820,7 +1287,7 @@ fn map_link_work<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> V
     let vfs_ctx = solidcraft_io::vfs::ThreadContext::current();
     #[cfg(test)]
     {
-        let raw = solidcraft_kernel::map_on_threads(items, LINK_THREADS, |item| {
+        let raw = solidcraft_kernel::map_on_threads(items, MAX_LINK_WORKERS, |item| {
             if std::thread::current().id() == caller {
                 (f(item), 0usize, 0usize, 0usize, 0usize)
             } else {
@@ -867,13 +1334,9 @@ fn map_link_work<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> V
     }
     #[cfg(not(test))]
     {
-        solidcraft_kernel::map_on_threads(
-            items,
-            LINK_THREADS,
-            |item| {
-                if std::thread::current().id() == caller { f(item) } else { vfs_ctx.run(|| f(item)) }
-            },
-        )
+        solidcraft_kernel::map_on_threads(items, MAX_LINK_WORKERS, |item| {
+            if std::thread::current().id() == caller { f(item) } else { vfs_ctx.run(|| f(item)) }
+        })
     }
 }
 
@@ -1259,10 +1722,6 @@ fn parse_design_bytes(source: &Source, bytes: &[u8]) -> Result<(Document, Option
     } else {
         Ok((solidcraft_io::read_design(bytes).map_err(fail)?, None))
     }
-}
-
-fn has_left_out_links(doc: &Document) -> bool {
-    doc.links.iter().any(|(comp, link)| left_out(doc, *comp, link))
 }
 
 fn evaluate_parsed_design(
@@ -2313,11 +2772,6 @@ enum TargetLink {
     },
 }
 
-enum EvalOutcome {
-    Done(std::result::Result<Box<EvaluatedLink>, String>),
-    NeedsSequential,
-}
-
 enum PostRefreshEntry {
     Done { cname: String, updated: bool },
     Inherit { comp: u64, cname: String, properties: Vec<SourceProperties>, changed: bool },
@@ -2525,6 +2979,9 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
     // Phase 1: classify target links and snapshot `before` states upfront before any mutation.
     let mut targets: Vec<TargetLink> = Vec::with_capacity(links.len());
     for (comp, link) in links {
+        if solidcraft_doc::progress::cancelled() {
+            break;
+        }
         let cname = s.doc.components.iter().find(|c| c.id == comp).map(|c| c.name.clone());
         let Some(cname) = cname else {
             // The component was deleted: the link goes with it.
@@ -2638,42 +3095,93 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
 
-    // Phase 2C: evaluate unique changed/uncached sources in parallel (nested left-out designs fall back safely).
+    // Phase 2C: evaluate unique changed/uncached sources in parallel (including nested left-out
+    // sub-assemblies via `BranchReading` and `SharedReads`).
     let mut evaluated: std::collections::HashMap<UpdateSourceKey, std::result::Result<(PathBuf, EvaluatedLink), String>> =
         std::collections::HashMap::with_capacity(eval_jobs.len());
-    if eval_jobs.len() == 1 {
-        if let Some(job) = eval_jobs.into_iter().next() {
-            let res = eval_job_sequential(&job, validation).map(|eval| (job.file, eval));
-            evaluated.insert(job.key, res);
+    let cores = link_cores();
+    if eval_jobs.len() > 1 && cores > 1 && !solidcraft_doc::progress::cancelled() {
+        struct EvalJobOut {
+            result: Option<std::result::Result<EvaluatedLink, String>>,
+            #[cfg(test)]
+            evals: usize,
+            #[cfg(test)]
+            reuses: usize,
+            #[cfg(test)]
+            step_reads: usize,
         }
-    } else if eval_jobs.len() > 1 {
-        let par_results = map_link_work(&eval_jobs, |job| {
-            if job.step_names.is_some() {
-                return EvalOutcome::Done(eval_job_sequential(job, validation).map(Box::new));
-            }
-            let source = Source::File(job.file.clone());
-            let (part_doc, saved) = match parse_design_bytes(&source, &job.bytes) {
-                Ok(parsed) => parsed,
-                Err(e) => {
-                    #[cfg(test)]
-                    EVALUATED.with(|n| n.set(n.get() + 1));
-                    return EvalOutcome::Done(Err(e.to_string()));
-                }
-            };
-            if has_left_out_links(&part_doc) {
-                return EvalOutcome::NeedsSequential;
-            }
-            let res = evaluate_parsed_design(&source, &job.bytes, part_doc, saved, job.configuration, validation, false)
-                .map(|(linked, _)| Box::new(EvaluatedLink::from_linked(linked)))
-                .map_err(|e| e.to_string());
-            EvalOutcome::Done(res)
+        let (parent_opening, parent_which, shared_read) = READING.with(|r| {
+            let r = r.borrow();
+            (r.opening.clone(), r.which, r.read.clone())
+        });
+        let workers = cores.min(eval_jobs.len());
+        let child_budget = (cores / workers.max(1)).max(1);
+        let progress = solidcraft_doc::progress::current();
+        let parent_tid = std::thread::current().id();
+        let allowed_hosts = solidcraft_io::vfs::current_allowed_hosts();
+        // Workers start unconfined: carry the caller's file scope so linked reads stay inside it.
+        let scope = solidcraft_io::vfs::current_scope();
+        let (pool_depth, _pool_guard) = shared_read.as_ref().map_or((0, None), |c| {
+            let (d, g) = c.enter_pool(parent_tid);
+            (d, Some(g))
+        });
+        let par_results = solidcraft_kernel::map_on_threads(&eval_jobs, workers, |job| -> EvalJobOut {
+            solidcraft_io::vfs::scoped(scope.clone(), || {
+                solidcraft_io::vfs::allowing_hosts(&allowed_hosts, || {
+                    solidcraft_doc::progress::watch_nested(progress.clone(), || {
+                        if solidcraft_doc::progress::cancelled() || solidcraft_kernel::watch::cancelled() {
+                            return EvalJobOut {
+                                result: None,
+                                #[cfg(test)]
+                                evals: 0,
+                                #[cfg(test)]
+                                reuses: 0,
+                                #[cfg(test)]
+                                step_reads: 0,
+                            };
+                        }
+                        let branch =
+                            BranchReading::enter(parent_opening.clone(), parent_which, child_budget, shared_read.clone(), parent_tid, pool_depth);
+                        let run = || eval_job_sequential(job, validation);
+                        #[cfg(test)]
+                        let (result, evals, reuses, step_reads) = measure_eval_counts(run);
+                        #[cfg(not(test))]
+                        let result = run();
+                        let _ = branch.finish();
+                        EvalJobOut {
+                            result: Some(result),
+                            #[cfg(test)]
+                            evals,
+                            #[cfg(test)]
+                            reuses,
+                            #[cfg(test)]
+                            step_reads,
+                        }
+                    })
+                })
+            })
         });
         for (job, outcome) in eval_jobs.into_iter().zip(par_results) {
-            let res = match outcome {
-                Some(EvalOutcome::Done(res)) => res.map(|eval| *eval),
-                Some(EvalOutcome::NeedsSequential) | None => eval_job_sequential(&job, validation),
+            let Some(out) = outcome else {
+                if !solidcraft_doc::progress::cancelled() {
+                    let res = eval_job_sequential(&job, validation);
+                    evaluated.insert(job.key, res.map(|eval| (job.file, eval)));
+                }
+                continue;
             };
-            evaluated.insert(job.key, res.map(|eval| (job.file, eval)));
+            #[cfg(test)]
+            add_eval_counts(out.evals, out.reuses, out.step_reads);
+            if let Some(res) = out.result {
+                evaluated.insert(job.key, res.map(|eval| (job.file, eval)));
+            }
+        }
+    } else {
+        for job in eval_jobs {
+            if solidcraft_doc::progress::cancelled() {
+                break;
+            }
+            let res = eval_job_sequential(&job, validation).map(|eval| (job.file, eval));
+            evaluated.insert(job.key, res);
         }
     }
 
@@ -2690,6 +3198,9 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
     let mut needs_first_refresh = false;
 
     for (slot, target) in targets.into_iter().enumerate() {
+        if solidcraft_doc::progress::cancelled() {
+            break;
+        }
         match target {
             TargetLink::SessionOnly { cname } => {
                 solidcraft_doc::progress::item(Some((&cname, slot, count)));
@@ -5686,6 +6197,171 @@ mod tests {
         assert_eq!(FILE_HASH_COMPUTED.with(std::cell::Cell::get), 0);
         assert_eq!(cached, listed);
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parallel_left_out_open_and_update_links_are_deterministic_and_deduplicate_shared_parts() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-par-links-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let shared = dir.join("shared.sc");
+        save_box(&shared, 10.0);
+
+        // Create 4 distinct sub-assemblies saved without linked bodies, each linking `shared.sc`
+        // plus its own unique box, forming a 4-way diamond dependency tree.
+        let mut subs = Vec::new();
+        for k in 0..4 {
+            let sub_path = dir.join(format!("sub_{k}.sc"));
+            let mut sub = Session::default();
+            run(&mut sub, "solid.box", json!({"length": 10 + k * 2, "width": 10, "height": 10, "body_name": format!("SubBox{k}")}));
+            run(&mut sub, "component.insert_design", json!({"path": shared, "name": "Shared", "translate": [30, 0, 0]}));
+            run(&mut sub, "file.save", json!({"path": sub_path, "linked_bodies": false}));
+            subs.push(sub_path);
+        }
+
+        // Top-level assembly linking all 4 sub-assemblies (plus a duplicate link to sub_0), saved
+        // with `linked_bodies: false`.
+        let top_path = dir.join("top.sc");
+        let mut top = Session::default();
+        for (k, sub) in subs.iter().enumerate() {
+            run(&mut top, "component.insert_design", json!({"path": sub, "name": format!("Sub{k}"), "translate": [0, k * 60, 0]}));
+        }
+        run(&mut top, "component.insert_design", json!({"path": &subs[0], "name": "Sub0Dup", "translate": [0, 300, 0]}));
+        run(&mut top, "file.save", json!({"path": top_path, "linked_bodies": false}));
+
+        // Opening the top assembly in parallel must evaluate each distinct sub-assembly once and
+        // the shared diamond part once (4 subs + 1 shared = 5), matching an inline reference build.
+        let reset_evals = || EVALUATED.with(|n| n.replace(0));
+        reset_evals();
+        let mut opened = Session::default();
+        let open_reply = run(&mut opened, "doc.open", json!({"path": top_path}));
+        assert_eq!(open_reply["errors"], 0, "{open_reply}");
+        assert_eq!(reset_evals(), 5, "4 distinct sub-assemblies + 1 shared diamond part must be evaluated exactly once");
+
+        let snapshot = |s: &Session| -> Vec<(String, u64, u64, Vec<String>)> {
+            s.model
+                .state()
+                .bodies
+                .iter()
+                .map(|b| {
+                    let m = solidcraft_kernel::measure(&b.body).unwrap();
+                    (b.name.clone(), m.volume.to_bits(), m.area.to_bits(), (*solidcraft_doc::naming::face_names(b)).clone())
+                })
+                .collect()
+        };
+        assert_eq!(snapshot(&opened), snapshot(&top), "parallel left-out open must match reference bit-for-bit");
+
+        // Now modify 3 of the 4 leaf part designs in a direct multi-link assembly and verify
+        // parallel `component.update_links` updates them deterministically, deduplicates shared
+        // links, and reports failures in exact link order.
+        let mut leaves = Vec::new();
+        for k in 0..4 {
+            let p = dir.join(format!("leaf_{k}.sc"));
+            save_box(&p, 10.0 + k as f64 * 5.0);
+            leaves.push(p);
+        }
+        let mut multi = Session::default();
+        for (k, leaf) in leaves.iter().enumerate() {
+            run(&mut multi, "component.insert_design", json!({"path": leaf, "name": format!("Leaf{k}"), "translate": [k * 50, 0, 0]}));
+        }
+        // Second component pointing at leaf_0 (must be deduplicated during update_links).
+        run(&mut multi, "component.insert_design", json!({"path": &leaves[0], "name": "Leaf0Copy", "translate": [250, 0, 0]}));
+
+        // Edit leaf_0, leaf_1, and leaf_2; leave leaf_3 unchanged.
+        save_box(&leaves[0], 20.0);
+        save_box(&leaves[1], 25.0);
+        save_box(&leaves[2], 30.0);
+
+        reset_evals();
+        let upd = run(&mut multi, "component.update_links", json!({}));
+        assert_eq!(upd["updated"], json!(["Leaf0", "Leaf1", "Leaf2", "Leaf0Copy"]), "{upd}");
+        assert_eq!(upd["unchanged"], json!(["Leaf3"]), "{upd}");
+        assert_eq!(reset_evals(), 3, "3 distinct edited leaves must be evaluated once each (Leaf0Copy deduplicated)");
+
+        // Expected total volume: 20*20*10 + 25*20*10 + 30*20*10 + 25*20*10 + 20*20*10 (wait: save_box is L x 20 x 10).
+        let mut seq = Session::default();
+        for (k, leaf) in leaves.iter().enumerate() {
+            run(&mut seq, "component.insert_design", json!({"path": leaf, "name": format!("Leaf{k}"), "translate": [k * 50, 0, 0]}));
+        }
+        run(&mut seq, "component.insert_design", json!({"path": &leaves[0], "name": "Leaf0Copy", "translate": [250, 0, 0]}));
+        assert!((volume(&mut multi) - volume(&mut seq)).abs() < 1e-6, "multi={} seq={}", volume(&mut multi), volume(&mut seq));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Two sub-assemblies in `dir/subs`, saved without linked bodies, each linking its own part
+    /// in `dir/leaves` (`length` sizes the sub-assembly's own box).
+    fn save_scoped_subs(dir: &Path, length: f64) -> Vec<std::path::PathBuf> {
+        std::fs::create_dir_all(dir.join("subs")).unwrap();
+        std::fs::create_dir_all(dir.join("leaves")).unwrap();
+        (0..2)
+            .map(|k| {
+                let leaf = dir.join(format!("leaves/leaf_{k}.sc"));
+                if !leaf.exists() {
+                    save_box(&leaf, 10.0);
+                }
+                let mut sub = Session::default();
+                run(&mut sub, "solid.box", json!({"length": length, "width": 10, "height": 10, "body_name": format!("SubBox{k}")}));
+                run(&mut sub, "component.insert_design", json!({"path": leaf, "name": "Leaf", "translate": [30, 0, 0]}));
+                let path = dir.join(format!("subs/sub_{k}.sc"));
+                run(&mut sub, "file.save", json!({"path": path, "linked_bodies": false}));
+                path
+            })
+            .collect()
+    }
+
+    #[test]
+    fn opening_without_linked_bodies_in_a_scope_reads_no_nested_link_outside_it() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-par-links-scope-open-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let subs = save_scoped_subs(&dir, 10.0);
+        let mut top = Session::default();
+        for (k, sub) in subs.iter().enumerate() {
+            run(&mut top, "component.insert_design", json!({"path": sub, "name": format!("Sub{k}"), "translate": [0, k * 60, 0]}));
+        }
+        let top_path = dir.join("top.sc");
+        run(&mut top, "file.save", json!({"path": top_path, "linked_bodies": false}));
+        let bytes = std::fs::read(&top_path).unwrap();
+        let path = top_path.to_string_lossy().into_owned();
+        let open = || {
+            let doc = solidcraft_io::read_design(&bytes).unwrap();
+            Session::opened_at_validating(doc, None, Some(&path), Session::default().validation())
+        };
+        // The two sub-assemblies are read on worker threads, each reading its part there.
+        assert_eq!(open().model.state().bodies.len(), 4);
+        let scope = solidcraft_io::vfs::PathScope::new([dir.join("subs")]);
+        let names: Vec<String> = solidcraft_io::vfs::scoped(Some(scope), open).model.state().bodies.iter().map(|b| b.name.clone()).collect();
+        assert!(!names.iter().any(|n| n.starts_with("Plate")), "the parts outside the scope must not be read: {names:?}");
+        // An empty scope refuses both sub-assemblies.
+        assert_eq!(solidcraft_io::vfs::scoped(Some(Default::default()), open).model.state().bodies.len(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn update_links_in_a_scope_reads_no_nested_link_outside_it() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-par-links-scope-update-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let subs = save_scoped_subs(&dir, 10.0);
+        let assembly = || {
+            let mut s = Session::default();
+            for (k, sub) in subs.iter().enumerate() {
+                run(&mut s, "component.insert_design", json!({"path": sub, "name": format!("Sub{k}"), "translate": [0, k * 60, 0]}));
+            }
+            s
+        };
+        let (mut free, mut confined) = (assembly(), assembly());
+        assert_eq!(free.model.state().bodies.len(), 4);
+        save_scoped_subs(&dir, 20.0);
+        // Both changed sub-assemblies are read again on worker threads, each reading its part.
+        assert_eq!(run(&mut free, "component.update_links", json!({}))["updated"], json!(["Sub0", "Sub1"]));
+        assert_eq!(free.model.state().bodies.len(), 4);
+        let scope = solidcraft_io::vfs::PathScope::new([dir.join("subs")]);
+        let refused = solidcraft_io::vfs::scoped(Some(scope), || confined.execute("component.update_links", &json!({})));
+        let err = refused.expect_err("the parts outside the scope must not be read").to_string();
+        assert!(err.contains("leaf_0.sc"), "{err}");
+        assert_eq!(confined.model.state().bodies.len(), 4, "a refused update keeps what the design had");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

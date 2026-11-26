@@ -2,6 +2,8 @@
 
 #[path = "eval_overlap.rs"]
 mod overlap;
+#[path = "eval_parallel.rs"]
+mod parallel;
 #[path = "placed_mesh.rs"]
 mod placed_mesh;
 #[path = "placement_reuse.rs"]
@@ -2139,6 +2141,11 @@ fn fingerprint(doc: &Document, prev: u64, f: &Feature, vals: &BTreeMap<String, V
                 v.v.to_bits().hash(&mut h);
                 v.len.hash(&mut h);
                 v.ang.hash(&mut h);
+                // Only a value that has a mass power hashes it, so the fingerprints a design's
+                // saved model cache holds from before masses existed still match.
+                if v.mass != 0 {
+                    v.mass.hash(&mut h);
+                }
             }
             (None, Some(p)) => p.text.hash(&mut h),
             (None, None) => 0u8.hash(&mut h),
@@ -2511,7 +2518,7 @@ fn evaluation_values(doc: &Document) -> (BTreeMap<String, Value>, BTreeMap<Strin
     if let Some((Kind::Length, scale)) = expr::unit_info(doc.units.trim())
         && scale != 1.0
     {
-        vals.insert(DESIGN_LEN.into(), Value { v: scale, len: 0, ang: 0 });
+        vals.insert(DESIGN_LEN.into(), Value::num(scale));
     }
     (vals, perr)
 }
@@ -2823,12 +2830,9 @@ fn replaced(before: &ModelState, after: &ModelState) -> Vec<(String, Body, bool)
 /// ([`kernel::failing_check`]), since the result's check reports their defects too. Checked only
 /// here, once the result is refused.
 ///
-/// That is a check of each input as it is now, not a replay of the check that kept it at the end
-/// of its own feature, which ran on that step's own result ([`kernel::check_kept`]; for a
-/// boolean, as the separate solids a non-manifold result exports to). The body decoded from a
-/// result is a different SMLib form, which can fail where the result passed, so the message says
-/// what was checked: the body as it was before this feature, not that its own feature let a
-/// failure through.
+/// That is a check of each input as it is now: an imported STEP part or a body built under
+/// `Validation::Off` can enter a feature already failing SMLib's check, so the message says what
+/// was checked — the body as it was before this feature.
 fn kept_refused(name: &str, e: &kernel::KernelError, inputs: &[(String, Body, bool)]) -> kernel::KernelError {
     let failing: Vec<&str> = inputs
         .iter()
@@ -5773,7 +5777,8 @@ impl Model {
         let previous_context = self.context;
         let mut rolled_results = std::mem::take(&mut self.rolled_results);
         self.context = ctx;
-        self.import_digests = ImportDigests::of(doc, &self.import_digests, heal);
+        let prev_import_digests = std::mem::take(&mut self.import_digests);
+        self.import_digests = ImportDigests::of(doc, &prev_import_digests, heal);
         let primed: Vec<Primed> = self.primed.iter().filter(|p| !self.no_cache && p.context == ctx).cloned().collect();
         // Each feature's component, for `Document::legacy_body_component` on every body after
         // every feature without searching the timeline for each (the first feature with an id).
@@ -5785,6 +5790,45 @@ impl Model {
         let envelopes: std::collections::HashSet<u64> =
             doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::BoundingSolid { contents: true, .. })).map(|f| f.id).collect();
         let watched = crate::progress::begin(doc.features.len());
+        let prefetch_limit = doc.features.len().min(marker).min(watched.hold_limit());
+        let prepared_imports = parallel::prefetch_imports(
+            doc,
+            &vals,
+            &self.results,
+            &prev_import_digests,
+            &self.import_digests,
+            &self.cache,
+            &primed,
+            &rolled_results,
+            ctx,
+            previous_context,
+            shared_ctx,
+            self.no_cache,
+            prefetch_limit,
+            watched.cancelled(),
+        );
+        let prefetched = parallel::prefetch_components(
+            doc,
+            &vals,
+            &self.param_errors,
+            &self.results,
+            &self.empty,
+            &self.frame_bodies,
+            &self.cache,
+            &self.import_digests,
+            &feature_component,
+            &envelopes,
+            carried.as_ref(),
+            &prepared_imports,
+            validation,
+            heal,
+            ctx,
+            previous_context,
+            shared_ctx,
+            self.no_cache,
+            prefetch_limit,
+            watched.cancelled(),
+        );
         let mut poses = std::collections::HashMap::new();
         // Pose-only features evaluated again for a pose change alone: their new bodies, which
         // replace the old ones in the results reused after them (#12139).
@@ -6055,7 +6099,7 @@ impl Model {
                 }
                 // Or what it changed when what it reads was as it is now, made again on the rest of the
                 // model as it is now. Never in place of a result a check refused.
-                let (hit_relative, reused) = {
+                let (mut hit_relative, reused) = {
                     let reads = key.reads.as_ref().filter(|_| {
                         !self.no_cache && checks.refused_at(i).is_none() && param_names(f).iter().all(|n| !self.param_errors.contains_key(n))
                     });
@@ -6080,18 +6124,33 @@ impl Model {
                     !self.no_cache && checks.refused_at(i).is_none() && param_names(f).iter().all(|n| !self.param_errors.contains_key(n))
                 });
                 let relative = reads.and(key.relative);
-                // Each feature computed is a profiler span named after its kind.
-                let _feature_span = solidcraft_profile::span("feature", f.kind.type_name());
+                let prefetched_use = if reused.is_none() {
+                    relative.and_then(|k| prefetched.get(f.id, k)).and_then(|p| state.with_relative(&p.cached.state, f.id).map(|next| (next, p)))
+                } else {
+                    None
+                };
+                if prefetched_use.is_some() {
+                    hit_relative = true;
+                }
+                // Each feature computed is a profiler span named after its kind, with its id and
+                // name: the spans it runs (a STEP import's) are inside it on this thread (#22473).
+                let _feature_span = solidcraft_profile::span("feature", f.kind.type_name()).arg("feature", f.id).arg("name", &f.name);
                 let before = state.clone();
                 // A kernel call that failed before this feature is not its failure.
                 kernel::failure::clear();
                 let t0 = now();
-                let (mut next, cached) = match reused {
-                    Some((next, c)) => {
+                let (mut next, cached, prefetched_change) = match (reused, prefetched_use) {
+                    (Some((next, c)), _) => {
                         restored += 1;
-                        (next, Some(c))
+                        (next, Some(c), None)
                     }
-                    None => {
+                    (None, Some((next, p))) => {
+                        recomputed += 1;
+                        #[cfg(test)]
+                        cost_tests::add(p.counts);
+                        (next, Some(p.cached.clone()), Some(p.cached.state.clone()))
+                    }
+                    (None, None) => {
                         recomputed += 1;
                         let mut next = (*state).clone();
                         // The names the design must not use again travel with the state (#4957, #4302).
@@ -6100,7 +6159,7 @@ impl Model {
                         for b in &mut next.bodies {
                             b.made = crate::lineage::Made::Before;
                         }
-                        (next, None)
+                        (next, None, None)
                     }
                 };
                 let mut warning = cached.as_ref().and_then(|c| c.warning.clone());
@@ -6152,7 +6211,18 @@ impl Model {
                         let (r, deferred) = kernel::validating(validation, || {
                             IMPORT_HEALS.with(|h| *h.borrow_mut() = self.import_digests.heals(f.id).cloned());
                             let meshes = prepared_meshes.as_ref().filter(|(id, _)| *id == f.id).map(|(_, meshes)| meshes);
-                            let r = eval_feature(eval_doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair, heal, meshes);
+                            let r = eval_feature(
+                                eval_doc,
+                                &vals,
+                                f,
+                                &mut next,
+                                &mut warning,
+                                &mut import_report,
+                                &mut repair,
+                                heal,
+                                meshes,
+                                prepared_imports.get(f.id),
+                            );
                             IMPORT_HEALS.with(|h| *h.borrow_mut() = None);
                             r
                         });
@@ -6243,10 +6313,10 @@ impl Model {
                 let internal = matches!(r, Err(kernel::KernelError::Internal(_)));
                 // What it changed, when that is only what it read: kept for whatever the rest of the
                 // model holds, and its bodies are known by what it read.
-                let change = match (&cached, reads) {
+                let change = prefetched_change.or_else(|| match (&cached, reads) {
                     (None, Some((_, read))) if r.is_ok() => next.change_from(&state, f, read),
                     _ => None,
-                };
+                });
                 // A change that holds whatever the bodies it did not read is known by the key
                 // without them, and so are the bodies it made.
                 let relative = relative.filter(|_| hit_relative || change.as_ref().is_some_and(|c| c.relative().is_some()));
@@ -16486,9 +16556,10 @@ fn eval_feature(
     repair: &mut Option<Arc<kernel::RepairReport>>,
     heal: bool,
     prepared_meshes: Option<&PreparedMeshImport>,
+    prepared_import: Option<&parallel::PreparedImport>,
 ) -> Result<()> {
     JOINED_TARGETS.with(|n| n.borrow_mut().clear());
-    let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair, heal, prepared_meshes);
+    let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair, heal, prepared_meshes, prepared_import);
     for note in JOINED_TARGETS.with(|n| std::mem::take(&mut *n.borrow_mut())) {
         append_warning(warning, note);
     }
@@ -16557,6 +16628,7 @@ fn eval_feature_kind(
     repair: &mut Option<Arc<kernel::RepairReport>>,
     heal: bool,
     prepared_meshes: Option<&PreparedMeshImport>,
+    prepared_import: Option<&parallel::PreparedImport>,
 ) -> Result<()> {
     // Its tools meet bodies in other placements where those are shown (#3383).
     let _frames = ToolFrames::install(doc, f, st);
@@ -17988,9 +18060,12 @@ fn eval_feature_kind(
                     "the bodies of the linked file {file} are not in this design: it was saved without them, and they have not been read from the file since; Update Links reads them"
                 )));
             }
-            let (imp, digest) = match records {
-                Some(r) => (kernel::records_import_shared(r)?, crate::config::payload_digest(&kernel::records_text(r)?)),
-                None => (kernel::step_import_shared(step)?, crate::config::payload_digest(step)),
+            let (imp, digest) = match prepared_import {
+                Some((imp, digest)) => (imp.clone(), digest.clone()),
+                None => match records {
+                    Some(r) => (kernel::records_import_shared(r)?, crate::config::payload_digest(&kernel::records_text(r)?)),
+                    None => (kernel::step_import_shared(step)?, crate::config::payload_digest(step)),
+                },
             };
             let names = import_body_names(st, &f.body_names, &imp, skip);
             // The parts the import's checks healed, when the model has them ([`ImportDigests::heals`]).
@@ -20134,6 +20209,45 @@ mod kept_refused_tests {
         assert!(matches!(&internal, kernel::KernelError::Internal(m) if m == "body `Box1`: SMLib copy: boom"), "{internal:?}");
         let refused = kept_refused("Box1", &kernel::KernelError::Failed("refused".into()), &inputs);
         assert!(matches!(refused, kernel::KernelError::Failed(_)), "{refused:?}");
+    }
+}
+
+#[cfg(test)]
+mod fingerprint_tests {
+    use super::*;
+
+    /// A parameter's mass power is part of the fingerprint of a feature that uses it (#4811), and
+    /// a value without one is fingerprinted exactly as before masses existed, so the fingerprints
+    /// a saved model cache holds still match and the design opens without evaluating again.
+    #[test]
+    fn a_mass_power_is_fingerprinted_only_where_there_is_one() {
+        let mut doc = Document::new("fingerprints");
+        doc.set_param("w", "10", Some("mm"), None).unwrap();
+        let kind = FeatureKind::Box {
+            corner: crate::point_expr(Vec3::ZERO),
+            length: "w".into(),
+            width: "3".into(),
+            height: "4".into(),
+            operation: Operation::NewBody,
+            centred: false,
+        };
+        let id = doc.add_feature(kind, None).unwrap();
+        let f = doc.feature(id).unwrap().clone();
+        let steps = ImportDigests::default();
+        let length = BTreeMap::from([("w".to_string(), Value::length(10.0))]);
+        let massy = BTreeMap::from([("w".to_string(), Value { mass: 1, ..Value::length(10.0) })]);
+        assert_ne!(fingerprint(&doc, 0, &f, &length, false, &steps), fingerprint(&doc, 0, &f, &massy, false, &steps));
+        // The fingerprint as builds before the mass power worked it out.
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        0u64.hash(&mut h);
+        false.hash(&mut h);
+        None::<u64>.hash(&mut h);
+        feature_json(&f, &steps).hash(&mut h);
+        "w".to_string().hash(&mut h);
+        10f64.to_bits().hash(&mut h);
+        1i8.hash(&mut h);
+        0i8.hash(&mut h);
+        assert_eq!(fingerprint(&doc, 0, &f, &length, false, &steps), h.finish());
     }
 }
 
