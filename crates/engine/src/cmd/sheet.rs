@@ -463,7 +463,7 @@ fn rule_param(s: &Session, p: &Value, cmd: &str) -> Result<Option<String>> {
 
 /// Sheet values a flange takes from its rule. Passing one to `sheet.flange` is refused rather
 /// than ignored, so a script never gets a part of another thickness than it asked for.
-const RULE_ONLY: [&str; 11] = [
+const RULE_ONLY: &[&str] = &[
     "thickness",
     "k_factor",
     "bend_radius",
