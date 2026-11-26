@@ -4832,6 +4832,8 @@ fn capture_position_20644_isolation_for_to_object_mirror_pattern_plane_and_joint
                     extent2: None,
                     copy_at_end1: false,
                     copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: vec!["BodyB".into()],
                 placements: vec![vec![occ_b]],
