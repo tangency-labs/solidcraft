@@ -8302,7 +8302,8 @@ mod tests {
                 before,
                 "the trim over {range:?} (a line: {line}) was bisected"
             );
-            assert!(g <= 1e-9, "{g:e}");
+            // (on the side, the seam snap's reach: [`trim_cap`], #20643)
+            assert!(g <= trim_cap(s), "{g:e}");
             let sampled = sampled_same_parameter_gap(&k, s, curve, trim, *range);
             assert!(g >= sampled, "{g:e} under the sampled {sampled:e}");
             lines += usize::from(line);
@@ -8418,7 +8419,8 @@ mod tests {
                 before,
                 "the piece over {range:?} was bisected"
             );
-            assert!(g <= 1e-9, "{range:?}: {g:e}");
+            // (the seam snap's reach: [`trim_cap`], #20643)
+            assert!(g <= trim_cap(&s), "{range:?}: {g:e}");
             let sampled = sampled_same_parameter_gap(&k, &s, piece, &along, range);
             assert!(
                 g >= sampled,
