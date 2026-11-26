@@ -1136,8 +1136,6 @@ fn shop_check_rows(
     }
 }
 
-/// The ribbon exports use the same save picker as the flat-pattern panel. Keep the
-
 fn export_button(ui: &mut egui::Ui, handle: &str) -> bool {
     let response = crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Export DXF…"), crate::ui_kit::Button::Normal);
     crate::scenario::publish_target(handle, response.rect);
