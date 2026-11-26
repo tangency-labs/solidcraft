@@ -589,7 +589,7 @@ mod tests {
         }
         again.frames(2);
         assert_eq!(groups(&mut again).len(), 1, "one group comes back");
-        assert_eq!(again.app.docs.groups.groups()[0].collapsed, true, "folded as it was");
+        assert!(again.app.docs.groups.groups()[0].collapsed, "folded as it was");
         assert_eq!(super::remembered(&mut again.app), vec![pair.clone()], "both designs are in it");
         // A design that was in no group is not put in one.
         again.app.open_path(&paths[2]);
