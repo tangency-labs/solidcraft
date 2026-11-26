@@ -258,7 +258,7 @@ fn a_malformed_profile_is_refused_with_the_reason_and_never_panics() {
     let mut v = minimal();
     v["rules"][0]["limits"][0]["sources"] = json!([{"says": "general practice: half the thickness"}]);
     assert!(Profile::from_value(&v).is_ok());
-    assert!(broken(&|v| v["rules"][0]["limits"][0]["sources"] = json!([{"url": "https://example.com"}])).contains("sources"));
+    assert!(broken(&|v| v["rules"][0]["limits"][0]["sources"] = json!([{"url": "https://example.com"}])).contains("says"));
     assert!(broken(&|v| v["rules"][0]["limits"][0]["sources"] = json!([{"says": " "}])).contains("says"));
     // A bend radius is only there for the bend rules: a formula with it elsewhere would be dropped.
     assert!(broken(&|v| v["rules"][0]["limits"][0]["plus_radius"] = json!(1.0)).contains("plus_radius"));
