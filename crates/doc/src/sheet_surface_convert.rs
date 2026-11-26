@@ -4866,6 +4866,7 @@ mod tests {
     use std::f64::consts::PI;
 
     use solidcore_record::{Loop2, Region2, Seg2, Vec2};
+    use solidcraft_geom::PlaneGeom;
 
     use super::extent_across;
 

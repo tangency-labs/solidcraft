@@ -741,18 +741,18 @@ pub fn perforation_grid(regions: &[Region2], avoid: &[Region2], p: &SheetPerfora
     let zones = avoid;
     let clear = p.diameter / 2.0 + p.margin;
     let mut segs: Vec<(Vec2, Vec2)> = Vec::new();
-    let mut push_ring = |pts: &Ring<Vec2>| {
+    fn push_ring(segs: &mut Vec<(Vec2, Vec2)>, pts: &Ring<Vec2>) {
         for (&a, &b) in pts.edges() {
             segs.push((a, b));
         }
-    };
+    }
     let poly_regions: Vec<PolyRegion> = regions
         .iter()
         .map(|r| {
             let pr = PolyRegion::from_region(r);
-            push_ring(&pr.outer.1);
+            push_ring(&mut segs, &pr.outer.1);
             for (_, h) in &pr.holes {
-                push_ring(h);
+                push_ring(&mut segs, h);
             }
             pr
         })
@@ -761,7 +761,7 @@ pub fn perforation_grid(regions: &[Region2], avoid: &[Region2], p: &SheetPerfora
         .iter()
         .map(|z| {
             let pz = PolyRegion::from_region(z);
-            push_ring(&pz.outer.1);
+            push_ring(&mut segs, &pz.outer.1);
             pz
         })
         .collect();
@@ -777,9 +777,9 @@ pub fn perforation_grid(regions: &[Region2], avoid: &[Region2], p: &SheetPerfora
             .iter()
             .map(|r| {
                 let pr = PolyRegion::from_region(r);
-                push_ring(&pr.outer.1);
+                push_ring(&mut segs, &pr.outer.1);
                 for (_, h) in &pr.holes {
-                    push_ring(h);
+                    push_ring(&mut segs, h);
                 }
                 pr
             })

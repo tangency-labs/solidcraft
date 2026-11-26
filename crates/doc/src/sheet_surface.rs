@@ -129,7 +129,7 @@ pub(crate) fn holds_clear(region: &Region2, cut: &Region2) -> bool {
     }
     // Chords this far inside the curves: two loops whose chords stay farther apart than twice
     // that and `CLEAR` are clear of each other.
-    let sag = 1e-4;
+    let sag: f64 = 1e-4;
     let ring = std::cell::OnceCell::new();
     // Exact upper bound on the chord deviation of `Seg2::polyline(sag)` for lines and arcs;
     // `None` for other curve kinds or degenerate arcs, which fall back to the polyline check.
@@ -475,7 +475,7 @@ mod tests {
         if !cut.holes.is_empty() || !region_holds(region, start) {
             return false;
         }
-        let sag = 1e-4;
+        let sag: f64 = 1e-4;
         let ring = cut.outer.polyline(sag);
         let reach = loop_box(&cut.outer);
         let near = |b: &Aabb2| b.min.x <= reach.max.x && reach.min.x <= b.max.x && b.min.y <= reach.max.y && reach.min.y <= b.max.y;
