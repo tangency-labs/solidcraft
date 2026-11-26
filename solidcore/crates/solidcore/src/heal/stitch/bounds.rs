@@ -1319,12 +1319,22 @@ pub(crate) fn point_at_curve(point: Point3, curve: &Curve, parameter: f64) -> Re
     ))
 }
 
-/// Bounds the whole curve's distance from a point (the geometry a squeeze removes).
+/// Bounds the whole curve's distance from a point (the geometry a squeeze removes): the
+/// farthest of [`curve_cover`]'s boxes over the interval. A B-spline span's box is cut to the
+/// box of its control points, so the bound follows the curve's own size: the interval
+/// evaluation of a span alone widens with the distance of its points from the origin
+/// (`(1 - a) p + a q` with `a` in `[0, 1]` spans `[0, |p| + |q|]` even where `p = q`).
 pub(crate) fn curve_to_point(curve: &Curve, interval: &Extent1d, point: Point3) -> Result<f64> {
-    norm(difference(
-        curve_box(curve, checked_range([interval.min(), interval.max()])?)?,
-        point_box(point)?,
-    ))
+    let p = point_box(point)?;
+    let mut far = 0.0_f64;
+    for piece in curve_cover(curve, interval.min(), interval.max(), 1)? {
+        let d = norm(difference(piece, p))?;
+        if !d.is_finite() {
+            return Err(invalid("non-finite curve-to-point bound"));
+        }
+        far = far.max(d);
+    }
+    Ok(far)
 }
 
 /// Cells the mean-value pair bound starts from, the most it encloses, and its most
