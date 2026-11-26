@@ -881,6 +881,257 @@ fn parallel_holes_a_hair_less_than_tangent_cut_as_touching() {
     }
 }
 
+// ---- #15049: a cut whose profile has a cusp, swept onto a face its line sweeps onto -------
+
+/// The arc of radius `radius` about the x-parallel axis through `center`, from angle `start`
+/// to `end` measured from +y towards +z.
+fn cusp_arc_x(center: [f64; 3], radius: f64, start: f64, end: f64) -> Curve {
+    Curve::Arc {
+        center,
+        axis: [1.0, 0.0, 0.0],
+        reference: [0.0, 1.0, 0.0],
+        radius,
+        start,
+        end,
+    }
+}
+
+/// The block of #15049's shape, cut twice, and the frame of its third cut's sketch.
+///
+/// A block 30 wide along x whose section is a front quarter circle (radius 30), a long top
+/// arc (radius 86 about a centre 56 below the floor) and a small back arc (radius 18),
+/// standing on the floor z = 0. Cut 1 rounds its front to a ball. Cut 2 sweeps two curved
+/// triangles along the top arc; each has an arc of the front ball's radius running
+/// tangentially into its top line at x = 0, where the two triangles touch: a cusp. Cut 2
+/// ends at the top of the back arc in a plane face holding the two triangles, and cut 3
+/// starts there (`sketch_point` maps the sketch's (u, v) onto that plane).
+struct CuspBlock {
+    body: Body,
+    /// The sketch plane's origin, its u and v directions and its normal.
+    origin: [f64; 3],
+    u: [f64; 3],
+    v: [f64; 3],
+    normal: [f64; 3],
+    /// The back arc's centre (y), radius and start angle: cut 3's path.
+    back: (f64, f64, f64),
+}
+
+impl CuspBlock {
+    fn sketch_point(&self, (a, b): (f64, f64)) -> [f64; 3] {
+        let (o, u, v) = (self.origin, self.u, self.v);
+        [
+            o[0] + u[0] * a + v[0] * b,
+            o[1] + u[1] * a + v[1] * b,
+            o[2] + u[2] * a + v[2] * b,
+        ]
+    }
+}
+
+const CUSP_W: f64 = 15.0;
+const CUSP_R0: f64 = 30.0;
+const CUSP_C: f64 = 56.0;
+const CUSP_R2: f64 = 18.0;
+
+#[allow(clippy::disallowed_methods)] // the test's operands, not ops computing geometry
+fn cusp_block() -> CuspBlock {
+    use solidcore_ops::sweep::{sweep_placed, SweepFrame};
+    let (w, r0, c, r2) = (CUSP_W, CUSP_R0, CUSP_C, CUSP_R2);
+    let rb = r0 + c;
+    let q = ((rb - r2).powi(2) - c * c).sqrt();
+    let phi_t = c.atan2(-q);
+    let x = [1.0, 0.0, 0.0];
+    let profile = [
+        cusp_arc_x([-w, 0.0, 0.0], r0, 0.0, PI / 2.0),
+        cusp_arc_x([-w, 0.0, -c], rb, PI / 2.0, phi_t),
+        cusp_arc_x([-w, -q, 0.0], r2, phi_t, PI),
+        Curve::Line {
+            start: [-w, -q - r2, 0.0],
+            end: [-w, r0, 0.0],
+        },
+    ];
+    let mut body = extrude(&profile, x, 2.0 * w, 0.0, DraftCorner::Curvature, true).unwrap();
+    // cut 1: the front rounded to a ball
+    let h = r0 + 15.0;
+    let ya = |x: f64| (r0 * r0 - x * x).sqrt();
+    let tool1 = [
+        Curve::Arc {
+            center: [0.0; 3],
+            axis: [0.0, 0.0, 1.0],
+            reference: x,
+            radius: r0,
+            start: ya(w).atan2(w),
+            end: ya(w).atan2(-w),
+        },
+        Curve::Line {
+            start: [-w, ya(w), 0.0],
+            end: [-w, h, 0.0],
+        },
+        Curve::Line {
+            start: [-w, h, 0.0],
+            end: [w + 0.2, h, 0.0],
+        },
+        Curve::Line {
+            start: [w + 0.2, h, 0.0],
+            end: [w, ya(w), 0.0],
+        },
+    ];
+    let (s1, _, _) = sweep_placed(
+        &tool1,
+        &[cusp_arc_x([0.0; 3], r0, 0.0, PI / 2.0)],
+        SweepFrame::Follow,
+        true,
+    )
+    .unwrap();
+    body = boolean(body, s1, BooleanOp::Subtract).unwrap().unwrap();
+    // cut 2: two curved triangles touching at their cusps, swept along the top arc
+    let path2 = [cusp_arc_x([0.0, 0.0, -c], rb, PI / 2.0, phi_t)];
+    for s in [1.0_f64, -1.0] {
+        let za = ya(s * w);
+        let (a, b, cc) = ([s * w, 0.0, za], [0.0, 0.0, r0], [s * w, 0.0, r0]);
+        let ta = za.atan2(s * w);
+        let arc = |start: f64, end: f64| Curve::Arc {
+            center: [0.0; 3],
+            axis: [0.0, -1.0, 0.0],
+            reference: x,
+            radius: r0,
+            start,
+            end,
+        };
+        let tri = if s > 0.0 {
+            [
+                arc(ta, PI / 2.0),
+                Curve::Line { start: b, end: cc },
+                Curve::Line { start: cc, end: a },
+            ]
+        } else {
+            [
+                arc(PI / 2.0, ta),
+                Curve::Line { start: a, end: cc },
+                Curve::Line { start: cc, end: b },
+            ]
+        };
+        let (s2, _, _) = sweep_placed(&tri, &path2, SweepFrame::Follow, true).unwrap();
+        body = boolean(body, s2, BooleanOp::Subtract).unwrap().unwrap();
+    }
+    assert_eq!(body.counts().unwrap(), [9, 19, 12], "the block after cut 2");
+    // cut 3's sketch plane: cut 2's end face
+    let alpha = phi_t - PI / 2.0;
+    let v = [0.0, -alpha.sin(), alpha.cos()];
+    let u = [-1.0, 0.0, 0.0];
+    let normal = [
+        u[1] * v[2] - u[2] * v[1],
+        u[2] * v[0] - u[0] * v[2],
+        u[0] * v[1] - u[1] * v[0],
+    ];
+    CuspBlock {
+        body,
+        origin: [0.0, 0.0, -c],
+        u,
+        v,
+        normal,
+        back: (-q, r2, phi_t),
+    }
+}
+
+/// Cut 3's two tools: the end face's triangles as a sketch on that face reads them back,
+/// each point moved by a few billionths of a millimetre (`noise`, seeded by `seed`) and each
+/// arc's radius taken from its start point, swept along the back arc to the floor.
+#[allow(clippy::disallowed_methods)] // the test's operands, not ops computing geometry
+fn cusp_tools(block: &CuspBlock, seed: u32, noise: f64) -> Vec<Body> {
+    use solidcore_ops::sweep::{sweep_placed, SweepFrame};
+    let (w, r0, c) = (CUSP_W, CUSP_R0, CUSP_C);
+    let rnd = |j: u32| {
+        let t = (f64::from(seed) * 12.9898 + f64::from(j) * 78.233).sin() * 43758.5453;
+        (t - t.floor()) * 2.0 - 1.0
+    };
+    let pt = |j: u32, a: f64, b: f64| (a + noise * rnd(2 * j), b + noise * rnd(2 * j + 1));
+    let (side, top) = (c + (r0 * r0 - w * w).sqrt(), c + r0);
+    let p1 = pt(1, w, side);
+    let p2 = pt(2, w, top);
+    let p3 = pt(3, 0.0, c);
+    let p4 = pt(4, 0.0, top);
+    let p5 = pt(5, -w, side);
+    let p6 = pt(6, -w, top);
+    // an arc about `cen` from `a` to `b`, counter-clockwise, its radius to `a`
+    let arc = |cen: (f64, f64), a: (f64, f64), b: (f64, f64)| {
+        let start = (a.1 - cen.1).atan2(a.0 - cen.0);
+        let mut sweep = (b.1 - cen.1).atan2(b.0 - cen.0) - start;
+        while sweep <= 1e-12 {
+            sweep += 2.0 * PI;
+        }
+        Curve::Arc {
+            center: block.sketch_point(cen),
+            axis: block.normal,
+            reference: block.u,
+            radius: ((a.0 - cen.0).powi(2) + (a.1 - cen.1).powi(2)).sqrt(),
+            start,
+            end: start + sweep,
+        }
+    };
+    let line = |a, b| Curve::Line {
+        start: block.sketch_point(a),
+        end: block.sketch_point(b),
+    };
+    let (yc, r2, phi_t) = block.back;
+    let path = [cusp_arc_x([0.0, yc, 0.0], r2, phi_t, PI)];
+    [
+        vec![line(p1, p2), arc(p3, p1, p4), line(p2, p4)],
+        vec![arc(p3, p4, p5), line(p4, p6), line(p5, p6)],
+    ]
+    .iter()
+    .map(|region| {
+        sweep_placed(region, &path, SweepFrame::Follow, true)
+            .unwrap()
+            .0
+    })
+    .collect()
+}
+
+/// #15049: a sweep cut whose profile has a cusp, an arc running tangentially into a line,
+/// swept round the axis of a cylinder that line sweeps onto. Within a few hundredths of a
+/// millimetre of the cusp both of the tool's edges there, and its faces swept from them,
+/// lie within the tolerance of each other and of the block, so where the rounding of the
+/// sketch's points puts a crossing there decided the topology: the coaxial surfaces crossed
+/// 3e-5 to 2.5e-4 from the cusp, and the touch of the tool's line with the block's arc
+/// was a crossing as far off, and the imprint failed (no vertex at an edge definition's end)
+/// or the merge did. With each contact read as one touch at the cusp, the cut builds
+/// whatever the rounding. Seeds whose points were 5e-10 and 1e-9 off; each failed before.
+#[test]
+fn a_cusp_swept_onto_a_coaxial_cylinder_cuts_whatever_the_sketch_rounding() {
+    all_fixes();
+    let block = cusp_block();
+    for (seed, noise) in [
+        (0, 0.0),
+        (7, 5e-10),
+        (12, 5e-10),
+        (22, 5e-10),
+        (8, 1e-9),
+        (28, 1e-9),
+        (33, 1e-9),
+    ] {
+        let tools = cusp_tools(&block, seed, noise);
+        for order in [[1usize, 0], [0, 1]] {
+            let mut body = block.body.copy().unwrap();
+            for k in order {
+                body = boolean(body, tools[k].copy().unwrap(), BooleanOp::Subtract)
+                    .unwrap_or_else(|e| panic!("seed {seed}, tools {order:?}: {e:?}"))
+                    .unwrap_or_else(|| panic!("seed {seed}, tools {order:?}: empty"));
+            }
+            assert_eq!(
+                body.counts().unwrap(),
+                [8, 17, 11],
+                "seed {seed}, tools {order:?}"
+            );
+            let report = body.check(CheckLevel::All).unwrap();
+            assert!(
+                report.is_valid(),
+                "seed {seed}, tools {order:?}: {}",
+                report.text
+            );
+        }
+    }
+}
+
 #[test]
 fn an_imprint_cuts_the_faces_the_tool_crosses() {
     all_fixes();
@@ -4588,255 +4839,6 @@ fn a_fitted_loft_insert_with_a_knife_on_the_floor_gets_through_imprint_and_relat
             assert!(
                 detail.contains("the solid it bounded merged into the outside"),
                 "{e:?}: {detail}"
-            );
-        }
-    }
-}
-
-// ---- #15049: a cut whose profile has a cusp, swept onto a face its line sweeps onto -------
-
-/// The arc of radius `radius` about the x-parallel axis through `center`, from angle `start`
-/// to `end` measured from +y towards +z.
-fn cusp_arc_x(center: [f64; 3], radius: f64, start: f64, end: f64) -> Curve {
-    Curve::Arc {
-        center,
-        axis: [1.0, 0.0, 0.0],
-        reference: [0.0, 1.0, 0.0],
-        radius,
-        start,
-        end,
-    }
-}
-
-/// The block of #15049's shape, cut twice, and the frame of its third cut's sketch.
-///
-/// A block 30 wide along x whose section is a front quarter circle (radius 30), a long top
-/// arc (radius 86 about a centre 56 below the floor) and a small back arc (radius 18),
-/// standing on the floor z = 0. Cut 1 rounds its front to a ball. Cut 2 sweeps two curved
-/// triangles along the top arc; each has an arc of the front ball's radius running
-/// tangentially into its top line at x = 0, where the two triangles touch: a cusp. Cut 2
-/// ends at the top of the back arc in a plane face holding the two triangles, and cut 3
-/// starts there (`sketch_point` maps the sketch's (u, v) onto that plane).
-struct CuspBlock {
-    body: Body,
-    /// The sketch plane's origin, its u and v directions and its normal.
-    origin: [f64; 3],
-    u: [f64; 3],
-    v: [f64; 3],
-    normal: [f64; 3],
-    /// The back arc's centre (y), radius and start angle: cut 3's path.
-    back: (f64, f64, f64),
-}
-
-impl CuspBlock {
-    fn sketch_point(&self, (a, b): (f64, f64)) -> [f64; 3] {
-        let (o, u, v) = (self.origin, self.u, self.v);
-        [
-            o[0] + u[0] * a + v[0] * b,
-            o[1] + u[1] * a + v[1] * b,
-            o[2] + u[2] * a + v[2] * b,
-        ]
-    }
-}
-
-const CUSP_W: f64 = 15.0;
-const CUSP_R0: f64 = 30.0;
-const CUSP_C: f64 = 56.0;
-const CUSP_R2: f64 = 18.0;
-
-fn cusp_block() -> CuspBlock {
-    use solidcore_ops::sweep::{sweep_placed, SweepFrame};
-    let (w, r0, c, r2) = (CUSP_W, CUSP_R0, CUSP_C, CUSP_R2);
-    let rb = r0 + c;
-    let q = ((rb - r2).powi(2) - c * c).sqrt();
-    let phi_t = c.atan2(-q);
-    let x = [1.0, 0.0, 0.0];
-    let profile = [
-        cusp_arc_x([-w, 0.0, 0.0], r0, 0.0, PI / 2.0),
-        cusp_arc_x([-w, 0.0, -c], rb, PI / 2.0, phi_t),
-        cusp_arc_x([-w, -q, 0.0], r2, phi_t, PI),
-        Curve::Line {
-            start: [-w, -q - r2, 0.0],
-            end: [-w, r0, 0.0],
-        },
-    ];
-    let mut body = extrude(&profile, x, 2.0 * w, 0.0, DraftCorner::Curvature, true).unwrap();
-    // cut 1: the front rounded to a ball
-    let h = r0 + 15.0;
-    let ya = |x: f64| (r0 * r0 - x * x).sqrt();
-    let tool1 = [
-        Curve::Arc {
-            center: [0.0; 3],
-            axis: [0.0, 0.0, 1.0],
-            reference: x,
-            radius: r0,
-            start: ya(w).atan2(w),
-            end: ya(w).atan2(-w),
-        },
-        Curve::Line {
-            start: [-w, ya(w), 0.0],
-            end: [-w, h, 0.0],
-        },
-        Curve::Line {
-            start: [-w, h, 0.0],
-            end: [w + 0.2, h, 0.0],
-        },
-        Curve::Line {
-            start: [w + 0.2, h, 0.0],
-            end: [w, ya(w), 0.0],
-        },
-    ];
-    let (s1, _, _) = sweep_placed(
-        &tool1,
-        &[cusp_arc_x([0.0; 3], r0, 0.0, PI / 2.0)],
-        SweepFrame::Follow,
-        true,
-    )
-    .unwrap();
-    body = boolean(body, s1, BooleanOp::Subtract).unwrap().unwrap();
-    // cut 2: two curved triangles touching at their cusps, swept along the top arc
-    let path2 = [cusp_arc_x([0.0, 0.0, -c], rb, PI / 2.0, phi_t)];
-    for s in [1.0_f64, -1.0] {
-        let za = ya(s * w);
-        let (a, b, cc) = ([s * w, 0.0, za], [0.0, 0.0, r0], [s * w, 0.0, r0]);
-        let ta = za.atan2(s * w);
-        let arc = |start: f64, end: f64| Curve::Arc {
-            center: [0.0; 3],
-            axis: [0.0, -1.0, 0.0],
-            reference: x,
-            radius: r0,
-            start,
-            end,
-        };
-        let tri = if s > 0.0 {
-            [
-                arc(ta, PI / 2.0),
-                Curve::Line { start: b, end: cc },
-                Curve::Line { start: cc, end: a },
-            ]
-        } else {
-            [
-                arc(PI / 2.0, ta),
-                Curve::Line { start: a, end: cc },
-                Curve::Line { start: cc, end: b },
-            ]
-        };
-        let (s2, _, _) = sweep_placed(&tri, &path2, SweepFrame::Follow, true).unwrap();
-        body = boolean(body, s2, BooleanOp::Subtract).unwrap().unwrap();
-    }
-    assert_eq!(body.counts().unwrap(), [9, 19, 12], "the block after cut 2");
-    // cut 3's sketch plane: cut 2's end face
-    let alpha = phi_t - PI / 2.0;
-    let v = [0.0, -alpha.sin(), alpha.cos()];
-    let u = [-1.0, 0.0, 0.0];
-    let normal = [
-        u[1] * v[2] - u[2] * v[1],
-        u[2] * v[0] - u[0] * v[2],
-        u[0] * v[1] - u[1] * v[0],
-    ];
-    CuspBlock {
-        body,
-        origin: [0.0, 0.0, -c],
-        u,
-        v,
-        normal,
-        back: (-q, r2, phi_t),
-    }
-}
-
-/// Cut 3's two tools: the end face's triangles as a sketch on that face reads them back,
-/// each point moved by a few billionths of a millimetre (`noise`, seeded by `seed`) and each
-/// arc's radius taken from its start point, swept along the back arc to the floor.
-fn cusp_tools(block: &CuspBlock, seed: u32, noise: f64) -> Vec<Body> {
-    use solidcore_ops::sweep::{sweep_placed, SweepFrame};
-    let (w, r0, c) = (CUSP_W, CUSP_R0, CUSP_C);
-    let rnd = |j: u32| {
-        let t = (f64::from(seed) * 12.9898 + f64::from(j) * 78.233).sin() * 43758.5453;
-        (t - t.floor()) * 2.0 - 1.0
-    };
-    let pt = |j: u32, a: f64, b: f64| (a + noise * rnd(2 * j), b + noise * rnd(2 * j + 1));
-    let (side, top) = (c + (r0 * r0 - w * w).sqrt(), c + r0);
-    let p1 = pt(1, w, side);
-    let p2 = pt(2, w, top);
-    let p3 = pt(3, 0.0, c);
-    let p4 = pt(4, 0.0, top);
-    let p5 = pt(5, -w, side);
-    let p6 = pt(6, -w, top);
-    // an arc about `cen` from `a` to `b`, counter-clockwise, its radius to `a`
-    let arc = |cen: (f64, f64), a: (f64, f64), b: (f64, f64)| {
-        let start = (a.1 - cen.1).atan2(a.0 - cen.0);
-        let mut sweep = (b.1 - cen.1).atan2(b.0 - cen.0) - start;
-        while sweep <= 1e-12 {
-            sweep += 2.0 * PI;
-        }
-        Curve::Arc {
-            center: block.sketch_point(cen),
-            axis: block.normal,
-            reference: block.u,
-            radius: ((a.0 - cen.0).powi(2) + (a.1 - cen.1).powi(2)).sqrt(),
-            start,
-            end: start + sweep,
-        }
-    };
-    let line = |a, b| Curve::Line {
-        start: block.sketch_point(a),
-        end: block.sketch_point(b),
-    };
-    let (yc, r2, phi_t) = block.back;
-    let path = [cusp_arc_x([0.0, yc, 0.0], r2, phi_t, PI)];
-    [
-        vec![line(p1, p2), arc(p3, p1, p4), line(p2, p4)],
-        vec![arc(p3, p4, p5), line(p4, p6), line(p5, p6)],
-    ]
-    .iter()
-    .map(|region| {
-        sweep_placed(region, &path, SweepFrame::Follow, true)
-            .unwrap()
-            .0
-    })
-    .collect()
-}
-
-/// #15049: a sweep cut whose profile has a cusp, an arc running tangentially into a line,
-/// swept round the axis of a cylinder that line sweeps onto. Within a few hundredths of a
-/// millimetre of the cusp both of the tool's edges there, and its faces swept from them,
-/// lie within the tolerance of each other and of the block, so where the rounding of the
-/// sketch's points puts a crossing there decided the topology: the coaxial surfaces crossed
-/// 3e-5 to 2.5e-4 from the cusp, and the touch of the tool's line with the block's arc
-/// was a crossing as far off, and the imprint failed (no vertex at an edge definition's end)
-/// or the merge did. With each contact read as one touch at the cusp, the cut builds
-/// whatever the rounding. Seeds whose points were 5e-10 and 1e-9 off; each failed before.
-#[test]
-fn a_cusp_swept_onto_a_coaxial_cylinder_cuts_whatever_the_sketch_rounding() {
-    all_fixes();
-    let block = cusp_block();
-    for (seed, noise) in [
-        (0, 0.0),
-        (7, 5e-10),
-        (12, 5e-10),
-        (22, 5e-10),
-        (8, 1e-9),
-        (28, 1e-9),
-        (33, 1e-9),
-    ] {
-        let tools = cusp_tools(&block, seed, noise);
-        for order in [[1usize, 0], [0, 1]] {
-            let mut body = block.body.copy().unwrap();
-            for k in order {
-                body = boolean(body, tools[k].copy().unwrap(), BooleanOp::Subtract)
-                    .unwrap_or_else(|e| panic!("seed {seed}, tools {order:?}: {e:?}"))
-                    .unwrap_or_else(|| panic!("seed {seed}, tools {order:?}: empty"));
-            }
-            assert_eq!(
-                body.counts().unwrap(),
-                [8, 17, 11],
-                "seed {seed}, tools {order:?}"
-            );
-            let report = body.check(CheckLevel::All).unwrap();
-            assert!(
-                report.is_valid(),
-                "seed {seed}, tools {order:?}: {}",
-                report.text
             );
         }
     }
