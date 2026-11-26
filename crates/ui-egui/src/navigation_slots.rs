@@ -94,17 +94,22 @@ pub(crate) const CATALOGUE: &[Slot] = &[
     slot!("grid", Toggle, "grid", Some("view.grid")),
     slot!("ground_shadow", Toggle, "ground_shadow", Some("view.ground_shadow")),
     slot!("ambient_occlusion", Toggle, "ambient_occlusion", Some("view.ambient_occlusion")),
+    // Isolates the selection; on while an Isolate is in effect, when a click brings the rest back
+    // (#8120). Never on a new bar; the bar view runs it.
+    slot!("isolate", Toggle, "isolate", None, orbit: true, pick: true),
     slot!("separator", Separator, "", None),
 ];
 
 /// SolidCraft's bar: its slots, the bar a new preferences file holds, the menus that show their
 /// value until the user chooses (the selection mode, the render mode once it is a slot, and the
-/// sheet zoom) and the View menu, which only ever shows its icon.
+/// sheet zoom), the View menu, which only ever shows its icon, and Isolate, which stands out while
+/// the rest of the model is hidden.
 static HOST: Catalogue = Catalogue {
     slots: CATALOGUE,
     default_bar: &["orbit", "pan", "zoom", "separator", "fit", "look_at", "home", "separator", "selection_mode", "visual_style", "display"],
     value_menus: &["selection_mode", "render_mode", "sheet_zoom"],
     icon_menus: &["display"],
+    strong: &["isolate"],
 };
 
 /// Installs SolidCraft's catalogue, once per process, before preferences are read or the first

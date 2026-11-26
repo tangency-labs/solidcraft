@@ -1105,6 +1105,26 @@ impl Body {
         }
     }
 
+    /// The first face of `self` met by the ray from `origin` along `dir`, as `(distance, face_index)`.
+    pub fn raycast_face(&self, origin: Vec3, dir: Vec3) -> Option<(f64, usize)> {
+        let form = self.ops_body()?;
+        let (ops, order) = &*form;
+        let hit = ops.face_hit_by_ray(order, [origin.x, origin.y, origin.z], [dir.x, dir.y, dir.z]).ok()??;
+        Some((hit.distance, hit.face))
+    }
+
+    /// Whether `p` lies inside or on the boundary of `self` (for a B-rep body).
+    pub fn contains(&self, p: Vec3) -> bool {
+        let Some(form) = self.ops_body() else {
+            return false;
+        };
+        let (ops, _) = &*form;
+        let Ok(mut res) = ops.classify_points(&[[p.x, p.y, p.z]]) else {
+            return false;
+        };
+        matches!(res.pop().and_then(std::result::Result::ok), Some(solidcore_ops::PointClass::Inside | solidcore_ops::PointClass::OnBoundary))
+    }
+
     /// Every edge of `self` drawn as a polyline within a thousandth of the body's size, for
     /// finding the edge nearest a point ([`EdgeLines::nearest`]). Empty for a mesh body.
     pub fn edge_lines(&self) -> EdgeLines {
@@ -2218,6 +2238,31 @@ impl Body {
             Ok(found) => Ok(found.map(|p| Vec3::new(p[0], p[1], p[2]))),
             Err(solidcore_ops::Error::Argument) => Ok(None),
             Err(e) => Err(KernelError::Failed(format!("point on face: {e}"))),
+        }
+    }
+
+    /// The unit normal of face `face_index` at `point`, a point of that face (within the body's
+    /// modelling tolerance): exact, from the face's own surface and trim
+    /// ([`solidcore_ops::Body::face_normal_at_point`]), no mesh. It points out of the material,
+    /// or for a face of a surface body to the side its surface faces. `None` for a point off
+    /// the face, a mesh body, an index out of range or a point that is not finite.
+    ///
+    /// # Errors
+    ///
+    /// [`KernelError::Invalid`] where the face has no normal (a pole, an apex) or no side that
+    /// faces out (material on both sides); [`KernelError::Failed`] for the kernel's failure.
+    pub fn face_normal_at(&self, face_index: usize, point: Vec3) -> Result<Option<Vec3>> {
+        let Some(form) = self.ops_body() else { return Ok(None) };
+        let (body, order) = &*form;
+        if face_index >= self.record.faces.len() {
+            return Ok(None);
+        }
+        match body.face_normal_at_point(order, face_index, [point.x, point.y, point.z]) {
+            Ok(found) => Ok(found.map(|n| Vec3::from(n.value))),
+            Err(solidcore_ops::Error::Argument) => Ok(None),
+            Err(solidcore_ops::Error::Degenerate) => Err(KernelError::Invalid("the face has no normal at that point".into())),
+            Err(solidcore_ops::Error::Unsupported(why)) => Err(KernelError::Invalid(format!("the face has no side that faces out: {why}"))),
+            Err(e) => Err(KernelError::Failed(format!("face normal: {e}"))),
         }
     }
 

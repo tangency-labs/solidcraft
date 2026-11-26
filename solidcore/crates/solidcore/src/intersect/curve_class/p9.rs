@@ -280,7 +280,9 @@ impl<O: ClassObject> CurveClassification<O> {
             lift = lifted(k, source, &unowned)?;
             &lift
         } else {
-            source
+            // (not upstream: a seam's ruling in the seam's place, the same curve,
+            // `ClassGeometry::intersect_curve`)
+            geometry.intersect_curve(source_handle).unwrap_or(source)
         };
         let source_zone = src_zone_tol_3d_of(k, Some(self));
         // the source curve's cache, kept across the edges (see `edge_solutions`)
@@ -358,7 +360,12 @@ impl<O: ClassObject> CurveClassification<O> {
             let (mut solutions, tolerance) = {
                 let working = match &lift {
                     Some(l) => l,
-                    None => curve(&*geometry, source_handle)?,
+                    // (not upstream: a seam's ruling in the seam's place, the same
+                    // curve, `ClassGeometry::intersect_curve`)
+                    None => match geometry.intersect_curve(source_handle) {
+                        Some(c) => c,
+                        None => curve(&*geometry, source_handle)?,
+                    },
                 };
                 if edge.seam.is_some() && self.source_reach().is_none() {
                     // read once, for the first seam

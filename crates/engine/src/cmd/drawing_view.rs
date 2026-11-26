@@ -1140,6 +1140,11 @@ fn check_apart(d: &Drawing, views: impl Iterator<Item = u64>, cmd: &str) -> Resu
         {
             return Err(bad(cmd, format!("not supported yet: {apart} with centre annotations")));
         }
+        if let Some(apart) = crate::drawing_view::unsupported_centre_view(d, view)
+            && d.view(view).is_some_and(|record| record.centre_marks.is_some())
+        {
+            return Err(bad(cmd, format!("not supported yet: {apart} with automatic centre marks enabled")));
+        }
     }
     Ok(())
 }
@@ -1396,7 +1401,7 @@ fn base(s: &mut Session, p: &Value) -> Result<Value> {
     let place = ViewPlace::At([position.x, position.y]);
     let kind = ViewKind::Base { source, view: direction };
     let percent = request.reference_shown_percent.unwrap_or(0.0);
-    let mut view = View { id, sheet, kind, place, settings, reference_shown_percent: percent, label: None };
+    let mut view = View { id, sheet, kind, place, settings, reference_shown_percent: percent, centre_marks: None, label: None };
     // The record's rules first, at 1:1 unless a scale is given, so a bad direction, percent or place
     // is refused as the record says; then what it shows; then the fitted scale, which is saved. With
     // nothing to measure, 1:1.
@@ -1442,7 +1447,7 @@ fn projected(s: &mut Session, p: &Value) -> Result<Value> {
         Beside::Diagonal(diagonal) => (ViewKind::Pictorial { parent, diagonal }, ViewPlace::At([parent_centre.x, parent_centre.y])),
     };
     let place = request.place.map_or(staged_place, |place| place.0);
-    let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0, label: None };
+    let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0, centre_marks: None, label: None };
     if request.place.is_none() {
         // Staged on its parent's centre to measure it, then moved until its boundary is the gap past
         // its parent's: along the free axis beside it, along both axes on a diagonal.
@@ -1500,7 +1505,7 @@ fn auxiliary(s: &mut Session, p: &Value) -> Result<Value> {
     let parent_centre = record.view_centre(parent).map_err(|e| bad(AUXILIARY, e.to_string()))?;
     let place = request.place.map_or(ViewPlace::At([parent_centre.x, parent_centre.y]), |place| place.0);
     let kind = ViewKind::Auxiliary { parent, toward: [toward.x, toward.y] };
-    let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0, label: None };
+    let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0, centre_marks: None, label: None };
     // Staged (on its parent's centre unless placed): the record's rules, then measured to unfold it.
     let mut staged = Drawing::clone(&record);
     staged.add_views([Arc::new(view.clone())]);
@@ -1650,6 +1655,7 @@ fn plan_standard(s: &mut Session, record: &Drawing, request: StandardParams) -> 
             settings: ViewOverrides::default(),
             reference_shown_percent: 0.0,
             label: None,
+            centre_marks: None,
         })]);
     }
     let [main, top, right, iso] = ids;
@@ -1665,6 +1671,7 @@ fn plan_standard(s: &mut Session, record: &Drawing, request: StandardParams) -> 
             settings: ViewOverrides { scale: Some(scale), ..ViewOverrides::default() },
             reference_shown_percent: 0.0,
             label: None,
+            centre_marks: None,
         };
         let projected = |id, side: ProjectedSide, at: Vec2| View {
             id,
@@ -1674,6 +1681,7 @@ fn plan_standard(s: &mut Session, record: &Drawing, request: StandardParams) -> 
             settings: ViewOverrides::default(),
             reference_shown_percent: 0.0,
             label: None,
+            centre_marks: None,
         };
         let mut views = vec![base(main, direction, at[0]), projected(top, top_side, at[1]), projected(right, right_side, at[2])];
         if with_iso {
@@ -1811,7 +1819,16 @@ fn flat(s: &mut Session, p: &Value) -> Result<Value> {
     let kind = ViewKind::Flat { source, body, turn };
     let one = Scale::new(1.0, 1.0).map_err(|e| bad(FLAT, e.to_string()))?;
     let settings = ViewOverrides { scale: Some(request.scale.map_or(one, |scale| scale.0)), ..ViewOverrides::default() };
-    let mut view = View { id, sheet, kind, place: ViewPlace::At([position.x, position.y]), settings, reference_shown_percent: 0.0, label: None };
+    let mut view = View {
+        id,
+        sheet,
+        kind,
+        place: ViewPlace::At([position.x, position.y]),
+        settings,
+        reference_shown_percent: 0.0,
+        centre_marks: None,
+        label: None,
+    };
     // The record's rules first, at 1:1 unless a scale is given; then the fitted scale, which is saved.
     let mut staged = Drawing::clone(&record);
     staged.add_views([Arc::new(view.clone())]);
@@ -1899,7 +1916,7 @@ fn detail(s: &mut Session, p: &Value) -> Result<Value> {
     let id = record.allocate_id(&mut s.ids).map_err(|e| bad(DETAIL, e.to_string()))?;
     let kind = ViewKind::Detail { parent, boundary };
     let settings = ViewOverrides { scale: Some(scale), ..ViewOverrides::default() };
-    let view = View { id, sheet, kind, place, settings, reference_shown_percent: 0.0, label: None };
+    let view = View { id, sheet, kind, place, settings, reference_shown_percent: 0.0, centre_marks: None, label: None };
     s.edit_drawing(DETAIL, |d| {
         d.add_views([Arc::new(view)]);
         d.give_letter(id).map_err(|e| bad(DETAIL, e.to_string()))?;
@@ -1922,7 +1939,7 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
     // A place lined up with the parent is passed on, for the drawing's own rule to refuse.
     let place = request.place.map_or(ViewPlace::At([parent_centre.x, parent_centre.y]), |place| place.0);
     let kind = ViewKind::Section { parent, line };
-    let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0, label: None };
+    let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0, label: None, centre_marks: None };
     if request.place.is_none() {
         // Staged on its parent's centre to measure it, then moved along the free axis of the side a
         // projected view looking its way takes, as `projected` places one.

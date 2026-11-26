@@ -26,6 +26,20 @@ Welds and the cut list follow.
 {"command": "frame.member", "params": {"sketch": "Frame", "lines": ["l5", "l6"], "profile_sketch": "45x45 section", "anchor": "bottom_left", "angle": "90 deg"}}
 ```
 
+A run drawn as several lines end to end makes one member per line. To make it one member at its
+full length, select the lines in the sketch and use **Merge Lines** (SKETCH › MODIFY or the
+right-click menu, `sketch.merge_lines`, #20317). The first selected line keeps its id and runs the
+whole length. Its direction relations stay and the pieces' lengths go. A line ending between the
+pieces stays on the merged line. A Frame Member already built on the sketch names the merged line
+in place of the ones that went, and drops their names and corner overrides; a Rotate step on a
+line that went turns the merged member. Separate Frame Members on different lines of the run each
+name the merged line, so they overlap: delete the extra ones. Merge Lines takes lines of a 2D
+sketch; 3D sketch lines (`sketch.line3d`) are refused with `unknown curve`.
+
+```json
+{"command": "sketch.merge_lines", "params": {"curves": ["l1", "l2", "l3"]}}
+```
+
 Members are ordinary bodies: mirror, pattern, move, drill and combine them with the usual
 commands. Where members meet they overlap unless you choose a corner type (see Corners) or use Trim/Extend.
 
@@ -44,6 +58,7 @@ frame member, end cap, mounting plate or gusset is the selected body (or the las
 Curved and continuous stock currently requires **Corner Type: None**, no corner overrides,
 Fit Ends, Coped, Flip or gap. Unsupported combinations are refused before changing the design.
 Curved and continuous members cannot yet be combined with multiple placement groups.
+They also take world Z as up: an **Up Axis** other than Z is refused for them.
 Separate curved members may share a plain None feature with point-pair members. Ordinary straight
 members and point pairs retain Auto, corner, fitting and gap behavior described below.
 - **Section (optional)**: pick the section's region in another sketch (the ring between two
@@ -52,8 +67,8 @@ members and point pairs retain Auto, corner, fitting and gap behavior described 
 - **Corner Type**, **Flip** and **Corner Overrides** cut the members where two of them meet, as
   under Corners below, and **Gap** leaves a weld gap at each welded end (see Multi-trim and the weld
   gap). A new Frame Member and the command both start on None.
-- **Anchor**, **Angle** and **Mirror** place the section on each line, as below. **Name** names
-  the members (default: after the profile).
+- **Anchor**, **Angle**, **Mirror** and **Up Axis** place the section on each line, as below.
+  **Name** names the members (default: after the profile).
 - **Offset A** and **Offset B** move the section from its anchor by a length, along the
   section's own axes as drawn (A across its width, B across its height; they turn with **Angle**,
   so they are not the world's X and Y): Anchor **Bottom Middle** with Offset B `50 mm` puts a
@@ -236,7 +251,9 @@ own choice.
 
 **Fits.** A tube that ends against the side of another (a T-junction), or one of three or more tubes
 ending at a point, is cut to fit the tube it meets, only near its end: flat on a box tube, with the
-radii squared, and a fishmouth on a round tube.
+radii squared, and a fishmouth on a round tube. On an open section (an angle, a channel) the end
+reaches across the open side to the face beyond, the far leg or the web, and an inside corner's
+fillet is kept, not squared.
 
 **Tubes in no sketch plane.** Point-to-point tubes (`pairs`) and 3D-sketch lines are laid after every
 group, chained among themselves: where two of them end together they are mitred (or joined as an
@@ -481,6 +498,11 @@ placement axes, expressions and hole-pattern limits.
   about the line, counter-clockwise looking back from the line's end; `mirror` mirrors it across
   its y axis first. A line leaning less than 10⁻⁶ rad from vertical counts as vertical, so
   rounding in a 3D sketch never turns a post a quarter turn.
+- `up`: `X`, `-X`, `Y`, `-Y`, `Z` or `-Z`, the world axis that is up for the profile (default `Z`,
+  saved only when it is not). A part drawn with Y up takes `Y`: its members need no `angle`, and
+  lines along Y are its vertical members, their x along world X (world Y when X is up).
+  Under Auto, a member whose section Auto lines up (one in a sketch plane, or in a chain of
+  members in one plane) takes that plane's normal as up instead (see Auto).
 - Bodies are named after `body_name`, or the standard size (`RSC 203x89`), the profile
   (`Rect Tube 40x40x3`) or the profile sketch, then numbered on past names already taken (`(2)`, `(3)`…). Each member's name is kept
   with its line (the feature's `names`), so deleting or adding a line, or deleting another

@@ -1135,7 +1135,7 @@ impl SurfaceSheet {
         bend: &Bend,
         position: &str,
     ) -> Result<std::result::Result<FoldPlan, &'static str>> {
-        let planned = self.plan_fold_outline(i, (here, places), (region, sheet_cuts), line, n, bend, position);
+        let planned = self.plan_fold_drawn(i, (here, places), (region, sheet_cuts), line, n, bend, position);
         // A round-ended notch can connect the zone while separating the material beyond it
         // (#18560). Close its mouth for the panel/joint recipe, then keep the original notch
         // as a cross-joint cut: the rebuilt surface model cuts it from panels and bends alike.
@@ -1175,6 +1175,38 @@ impl SurfaceSheet {
             }
             Err(_) => planned,
         }
+    }
+
+    /// The fold planned for `line` as drawn; where that can't be made, for the line pulled in
+    /// from each end by a hair. A line drawn exactly to the far edges of the cut-outs at its ends
+    /// (across a tongue, from one side of its slot to the other) also touches the material past
+    /// them, which the fold then takes (its chords touch the line); pulled in, it crosses only
+    /// the tongue.
+    #[allow(clippy::too_many_arguments)]
+    fn plan_fold_drawn(
+        &self,
+        i: usize,
+        (here, places): (&Rigid3, &[Option<Rigid3>]),
+        (region, sheet_cuts): (&Region2, &[Region2]),
+        line: [Vec2; 2],
+        n: Vec2,
+        bend: &Bend,
+        position: &str,
+    ) -> Result<std::result::Result<FoldPlan, &'static str>> {
+        let planned = self.plan_fold_outline(i, (here, places), (region, sheet_cuts), line, n, bend, position);
+        if matches!(planned, Ok(Ok(_))) {
+            return planned;
+        }
+        let hair = (bend.allowance(self.sheet.thickness, self.sheet.k_factor).max(self.sheet.thickness) * 1e-4).max(1e-6);
+        let length = line[0].dist(line[1]);
+        if length > 4.0 * hair {
+            let d = (line[1] - line[0]) * (hair / length);
+            let inner = [line[0] + d, line[1] - d];
+            if let Ok(Ok(plan)) = self.plan_fold_outline(i, (here, places), (region, sheet_cuts), inner, n, bend, position) {
+                return Ok(Ok(plan));
+            }
+        }
+        planned
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1611,6 +1643,7 @@ impl SurfaceSheet {
         let first = self.sheet.panels.len();
         let mut moves: Vec<FoldPiece> = Vec::new();
         let mut bent_chords: Vec<usize> = Vec::new();
+        let mut cornered: Vec<usize> = Vec::new();
         for k in order {
             let (Some(piece), Some(cs)) = (pieces.get(k), hangs.get(k)) else { continue };
             // Where material of the panel lies between two of the chords it hangs from (the root
@@ -1638,6 +1671,13 @@ impl SurfaceSheet {
             let mut bend = bend.clone();
             bend.length = hi - lo;
             bend.ends = ZoneEnds { near: (0.0, hi - lo), far: (0.0, hi - lo) };
+            // A corner of the outline in the zone of a piece the line is drawn across the whole of
+            // is the user's to fold: a stepped end or a notch wraps its corners onto the bend, the
+            // zone's material as the outline has it (what it lacks of its reach is cut from the
+            // flat below). Only a piece the zone reaches past the line as drawn is refused for one.
+            if !(lo >= drawn.0 - tol && hi <= drawn.1 + tol) {
+                cornered.extend(cs);
+            }
             moves.push(FoldPiece { panel: first + moves.len(), region: piece.clone(), bend, start: lo, span: (lo.min(plo), hi.max(phi)) });
             bent_chords.extend(cs);
         }
@@ -1664,7 +1704,7 @@ impl SurfaceSheet {
                 return err("not supported yet: material in the fold's bend zone that only one side of the bend holds");
             }
         }
-        if let Some(why) = corner_error(&bent_chords, false) {
+        if let Some(why) = corner_error(&cornered, false) {
             return err(why);
         }
         // What each zone lacks of its reach (the outline past a slanted or a curved end, a cut-out
@@ -1879,16 +1919,29 @@ impl SurfaceSheet {
         };
         let moved_cuts = beyond(self.sheet.cuts.iter().map(|c| starts(c.panel == i, &c.region.outer)).collect(), None)?;
         let recesses = beyond(self.recesses.iter().map(|r| starts(r.panel == i, &r.region.outer)).collect(), Some("a pocket"))?;
+        let countersinks = beyond(
+            self.countersinks
+                .iter()
+                .map(|c| {
+                    (c.panel == i).then(|| {
+                        let r = c.outer_radius;
+                        let along = c.center.dot(u);
+                        (vec![c.center + n * r, c.center - n * r, c.center + u * r, c.center - u * r], (along - r, along + r))
+                    })
+                })
+                .collect(),
+            Some("a countersink"),
+        )?;
         let loose = beyond(self.loose.iter().map(|l| starts(l.panel == i, &l.region.outer)).collect(), Some("a loose piece of the sheet"))?;
         let t = self.sheet.thickness;
         let beads = beyond(self.beads.iter().map(|b| b.footprint_loop(t).and_then(|l| starts(b.panel == i, &l))).collect(), Some("a bead"))?;
-        Ok(Ok(FoldPlan { n, u, s0, ba, stays, moves, cuts, anchors, rips, moved_cuts, recesses, loose, beads }))
+        Ok(Ok(FoldPlan { n, u, s0, ba, stays, moves, cuts, anchors, rips, moved_cuts, recesses, countersinks, loose, beads }))
     }
 
     /// Makes the fold `plan` of panel `i` (see [`SurfaceSheet::add_fold`]). Returns the fold's
     /// first joint.
     fn apply_fold(&mut self, i: usize, plan: FoldPlan) -> usize {
-        let FoldPlan { n, u, s0, ba, stays, moves, cuts, anchors, rips, moved_cuts, recesses, loose, beads } = plan;
+        let FoldPlan { n, u, s0, ba, stays, moves, cuts, anchors, rips, moved_cuts, recesses, countersinks, loose, beads } = plan;
         for (k, on_a, p) in anchors {
             if let Some(joint) = self.sheet.joints.get_mut(k) {
                 if on_a {
@@ -1916,6 +1969,11 @@ impl SurfaceSheet {
         for (k, p) in recesses {
             if let Some(r) = self.recesses.get_mut(k) {
                 r.panel = p;
+            }
+        }
+        for (k, p) in countersinks {
+            if let Some(c) = self.countersinks.get_mut(k) {
+                c.panel = p;
             }
         }
         for (k, p) in loose {
@@ -2071,6 +2129,9 @@ impl SurfaceSheet {
         }
         for x in &mut self.recesses {
             x.region = r(&x.region);
+        }
+        for c in &mut self.countersinks {
+            c.center = f(c.center);
         }
         for l in &mut self.loose {
             l.region = r(&l.region);
@@ -2972,10 +3033,11 @@ struct FoldPlan {
     /// The rips the zone parts: the joint, its stretch that stays (in its place) and its stretch
     /// that folds (a joint of its own).
     rips: Vec<(usize, Joint, Joint)>,
-    /// The sheet's cuts, recesses, loose pieces and beads that go with a piece that folds: each
-    /// one's index, and the piece's panel.
+    /// The sheet's cuts, recesses, countersinks, loose pieces and beads that go with a piece that
+    /// folds: each one's index, and the piece's panel.
     moved_cuts: Vec<(usize, usize)>,
     recesses: Vec<(usize, usize)>,
+    countersinks: Vec<(usize, usize)>,
     loose: Vec<(usize, usize)>,
     beads: Vec<(usize, usize)>,
 }
@@ -3770,6 +3832,7 @@ mod tests {
             corner_relief_size: 0.0,
             relief_width: 0.0,
             relief_depth: 0.0,
+            bend_relief: crate::sheet::BendReliefShape::Rectangular,
         };
         let (r, x0) = (3.05, 50.0);
         let v = Vec2::new;
@@ -3879,6 +3942,7 @@ mod tests {
             corner_relief_size: 0.0,
             relief_width: 0.0,
             relief_depth: 0.0,
+            bend_relief: crate::sheet::BendReliefShape::Rectangular,
         };
         let pts = [Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0), Vec2::new(100.0, 60.0), Vec2::new(0.0, 60.0)];
         let plate = Region2 { outer: Loop2::polygon(&pts).ccw(), holes: Vec::new() };

@@ -15,8 +15,11 @@
 //! relabelled. [`WIDE`] lists the entries whose enclosure is too wide for EQUAL to bound the
 //! new value's error within the rows' accuracy.
 //!
-//! Every moved entry is a centroid or product of inertia that is zero up to the integration's
-//! noise (at most `4e-7` against a scale of the body's radius or `volume * radius^2`).
+//! Every entry the rule moves is a centroid or product of inertia that is zero up to the
+//! integration's noise (at most `4e-7` against a scale of the body's radius or
+//! `volume * radius^2`). The new rows also carry WR-732's retirement (#18934: the read's
+//! classified trims are the implant's), which moves more entries: the area by up to `1.7e-10`
+//! of its scale, the others by at most `4e-16` of theirs. Each is EQUAL as well.
 //!
 //! Run (each body's enclosure is a full sweep, so `#[ignore]`d; the goldens job checks the
 //! rows themselves):
