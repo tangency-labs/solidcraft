@@ -175,7 +175,7 @@ and in the MCP tool list (today every entry reuses the plugin's description).
    runner; installed generators answer codes in the parts browser and global search.
 3. **Workshop items**: the signed match-table snapshot, Install-to-use rows, conflict checks at index build.
 
-Phase 1 replaces the five matchers (it covers what [#9080](https://github.com/tangency-labs/solidcraft/issues/9080) and [#22207](https://github.com/tangency-labs/solidcraft/issues/22207) ask; #22207 is claimed by its contributor, whose work comes first and which this RFC would build on)); the old ones are removed, not kept alongside.
+Phase 1 replaces the five matchers (it covers what [#9080](https://github.com/tangency-labs/solidcraft/issues/9080) and [#22207](https://github.com/tangency-labs/solidcraft/issues/22207) ask; #22207 is claimed by its contributor, whose work comes first and which this RFC would build on); the old ones are removed, not kept alongside.
 Phase 2 dogfoods the format on SolidCraft's own Standard parts before any third party uses it.
 
 Consequence tests written into the work (each proven red first):
