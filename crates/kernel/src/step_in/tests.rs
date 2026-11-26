@@ -5668,18 +5668,21 @@ fn hair_step_step_file(step: f64, gap: f64, accuracy: f64) -> String {
 
 /// The heal at import is honest about what it cannot do: the hair step itself is read at a
 /// finer tolerance (the reader's own answer to edges shorter than the stated tolerance), so it
-/// imports clean and nothing is healed; with a corner off its edges past the edges'
-/// tolerance (SMLib's pointer stage fails it, which no tolerance-scale heal reaches) it still
-/// needs repair, and no heal is claimed.
+/// imports clean and nothing is healed, and so does a corner off its edges by a gap the stated
+/// tolerance covers as the kernel's check takes it (a quarter of it, #22579); with a corner off
+/// its edges past that (SMLib's pointer stage fails it, which no tolerance-scale heal reaches) it
+/// still needs repair, and no heal is claimed.
 #[test]
 fn a_hair_step_file_imports_clean_and_a_real_gap_still_needs_repair() {
     let healed = |imp: &StepImport| imp.warnings.iter().any(|w| w.contains("healed SMLib's check failures"));
     let needs = |imp: &StepImport| imp.report.issues.iter().any(|i| matches!(i.kind, IssueKind::NeedsRepair));
-    let clean = step_import(&hair_step_step_file(3e-4, 0.0, 1e-3)).unwrap();
-    assert_eq!(clean.bodies.len(), 1);
-    assert!(!needs(&clean) && !healed(&clean), "{:?}", clean.warnings);
-    assert_eq!(crate::validation::failing_check(&clean.bodies[0].body).unwrap(), None);
-    for (gap, accuracy) in [(4e-4, 1e-3), (4e-4, 5e-4), (6e-4, 1e-3)] {
+    for (gap, accuracy) in [(0.0, 1e-3), (1e-4, 1e-3), (2.4e-4, 1e-3), (1e-4, 5e-4)] {
+        let clean = step_import(&hair_step_step_file(3e-4, gap, accuracy)).unwrap();
+        assert_eq!(clean.bodies.len(), 1);
+        assert!(!needs(&clean) && !healed(&clean), "{gap} {accuracy}: {:?}", clean.warnings);
+        assert_eq!(crate::validation::failing_check(&clean.bodies[0].body).unwrap(), None, "{gap} {accuracy}");
+    }
+    for (gap, accuracy) in [(2.6e-4, 1e-3), (4e-4, 1e-3), (4e-4, 5e-4), (6e-4, 1e-3)] {
         let imp = step_import(&hair_step_step_file(3e-4, gap, accuracy)).unwrap();
         assert!(needs(&imp) && !healed(&imp), "{gap} {accuracy}: {:?}", imp.warnings);
         assert!(crate::validation::failing_check(&imp.bodies[0].body).unwrap().is_some());
