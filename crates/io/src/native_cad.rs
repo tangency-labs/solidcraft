@@ -123,6 +123,310 @@ fn next_end_section(text: &str, from: usize) -> Option<usize> {
     None
 }
 
+/// Normalize non-standard `{...}` suffixes inside `FILE_SCHEMA((...))` entries of a STEP file's
+/// `HEADER;` section so cadmpeg's strict ASN.1 OID validator admits them (for example
+/// `'AUTOMOTIVE_DESIGN {UNKNOWN IMPLEMENTATION LEVEL}'` -> `'AUTOMOTIVE_DESIGN'`).
+///
+/// Bare schema names and valid ASN.1 OID suffixes (such as `{ 1 0 10303 214 1 1 1 1 }` or
+/// `{ 1 0 10303 442 1 1 4 }`) are left untouched with no allocation. Only the `HEADER;` section
+/// before `ENDSEC;` is inspected, so the `DATA;` section is never altered.
+fn normalize_step_file_schema(bytes: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    let header_slice = &bytes[..bytes.len().min(STEP_HEADER_BYTES)];
+    let mut scan = StepHeaderScanner::new(header_slice);
+    // Optional UTF-8 BOM at the start of the file.
+    if scan.bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        scan.at = 3;
+    }
+    if scan.read_keyword().as_deref() != Some("ISO-10303-21") || !scan.eat_byte(b';') {
+        return std::borrow::Cow::Borrowed(bytes);
+    }
+    if scan.read_keyword().as_deref() != Some("HEADER") || !scan.eat_byte(b';') {
+        return std::borrow::Cow::Borrowed(bytes);
+    }
+
+    let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
+    while let Some(kw) = scan.read_keyword() {
+        match kw.as_str() {
+            "ENDSEC" | "DATA" => break,
+            "FILE_SCHEMA" => {
+                if !scan.collect_file_schema_edits(&mut edits) {
+                    break;
+                }
+            }
+            _ => {
+                if !scan.skip_statement() {
+                    break;
+                }
+            }
+        }
+    }
+
+    if edits.is_empty() {
+        return std::borrow::Cow::Borrowed(bytes);
+    }
+
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut cursor = 0;
+    for (range, replacement) in edits {
+        out.extend_from_slice(&bytes[cursor..range.start]);
+        out.extend_from_slice(replacement.as_bytes());
+        cursor = range.end;
+    }
+    out.extend_from_slice(&bytes[cursor..]);
+    std::borrow::Cow::Owned(out)
+}
+
+/// Byte-oriented scanner over a STEP Part 21 `HEADER;` section.
+struct StepHeaderScanner<'a> {
+    bytes: &'a [u8],
+    at: usize,
+}
+
+impl<'a> StepHeaderScanner<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, at: 0 }
+    }
+
+    fn skip_comment(&mut self) -> bool {
+        if !self.bytes[self.at..].starts_with(b"/*") {
+            return false;
+        }
+        self.at += 2;
+        if let Some(rel) = self.bytes[self.at..].windows(2).position(|w| w == b"*/") {
+            self.at += rel + 2;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn skip_trivia(&mut self) -> bool {
+        loop {
+            while self.bytes.get(self.at).is_some_and(|b| b.is_ascii_control() || *b == b' ') {
+                self.at += 1;
+            }
+            if self.bytes[self.at..].starts_with(b"\\N\\") || self.bytes[self.at..].starts_with(b"\\F\\") {
+                self.at += 3;
+                continue;
+            }
+            if self.bytes[self.at..].starts_with(b"/*") {
+                if !self.skip_comment() {
+                    return false;
+                }
+                continue;
+            }
+            return true;
+        }
+    }
+
+    fn read_keyword(&mut self) -> Option<String> {
+        if !self.skip_trivia() {
+            return None;
+        }
+        let first = *self.bytes.get(self.at)?;
+        if !(first.is_ascii_alphabetic() || first == b'_' || first == b'!') {
+            return None;
+        }
+        let mut out = String::new();
+        out.push(first.to_ascii_uppercase() as char);
+        self.at += 1;
+        while let Some(&b) = self.bytes.get(self.at) {
+            if b.is_ascii_alphanumeric() || b == b'_' || b == b'-' {
+                if out.len() < 64 {
+                    out.push(b.to_ascii_uppercase() as char);
+                }
+                self.at += 1;
+            } else if b.is_ascii_control() {
+                self.at += 1;
+            } else {
+                break;
+            }
+        }
+        Some(out)
+    }
+
+    fn eat_byte(&mut self, expected: u8) -> bool {
+        if !self.skip_trivia() {
+            return false;
+        }
+        if self.bytes.get(self.at) == Some(&expected) {
+            self.at += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn read_string(&mut self) -> Option<(usize, usize)> {
+        if !self.skip_trivia() || self.bytes.get(self.at) != Some(&b'\'') {
+            return None;
+        }
+        self.at += 1;
+        let start = self.at;
+        while self.at < self.bytes.len() {
+            if self.bytes[self.at] == b'\'' {
+                if self.bytes.get(self.at + 1) == Some(&b'\'') {
+                    self.at += 2;
+                    continue;
+                }
+                let end = self.at;
+                self.at += 1;
+                return Some((start, end));
+            }
+            self.at += 1;
+        }
+        None
+    }
+
+    fn skip_statement(&mut self) -> bool {
+        while self.at < self.bytes.len() {
+            match self.bytes[self.at] {
+                b';' => {
+                    self.at += 1;
+                    return true;
+                }
+                b'\'' => {
+                    if self.read_string().is_none() {
+                        return false;
+                    }
+                }
+                b'/' if self.bytes.get(self.at + 1) == Some(&b'*') => {
+                    if !self.skip_comment() {
+                        return false;
+                    }
+                }
+                _ => self.at += 1,
+            }
+        }
+        false
+    }
+
+    /// Parse `(( 'schema1', 'schema2', ... ));` after `FILE_SCHEMA` and append any string-content
+    /// replacements needed for non-OID `{...}` suffixes.
+    fn collect_file_schema_edits(&mut self, edits: &mut Vec<(std::ops::Range<usize>, String)>) -> bool {
+        let start = self.at;
+        if !self.eat_byte(b'(') || !self.eat_byte(b'(') {
+            self.at = start;
+            return self.skip_statement();
+        }
+        let mut pending = Vec::new();
+        if !self.skip_trivia() {
+            return false;
+        }
+        if self.bytes.get(self.at) == Some(&b')') {
+            self.at += 1;
+        } else {
+            loop {
+                let Some((s, e)) = self.read_string() else {
+                    self.at = start;
+                    return self.skip_statement();
+                };
+                if let Some(stripped) = strip_invalid_schema_oid(&self.bytes[s..e]) {
+                    pending.push((s..e, stripped));
+                }
+                if !self.skip_trivia() {
+                    return false;
+                }
+                match self.bytes.get(self.at) {
+                    Some(&b',') => self.at += 1,
+                    Some(&b')') => {
+                        self.at += 1;
+                        break;
+                    }
+                    _ => {
+                        self.at = start;
+                        return self.skip_statement();
+                    }
+                }
+            }
+        }
+        if !self.eat_byte(b')') || !self.eat_byte(b';') {
+            self.at = start;
+            return self.skip_statement();
+        }
+        edits.extend(pending);
+        true
+    }
+}
+
+/// If `raw` (the bytes inside quotes of a `FILE_SCHEMA` entry) has a valid schema name followed
+/// by a `{...}` suffix that cadmpeg's strict ASN.1 OID validator would reject (such as
+/// `{UNKNOWN IMPLEMENTATION LEVEL}`), return the bare schema name. Otherwise return `None` so the
+/// original bytes remain untouched.
+fn strip_invalid_schema_oid(raw: &[u8]) -> Option<String> {
+    // Bail out on STEP Part 21 escape sequences (`\X\`, `\S\`, `\\`, etc.) so we never rewrite
+    // escaped string contents.
+    if !raw.contains(&b'{') || raw.contains(&b'\\') {
+        return None;
+    }
+    // Part 21 ignores ASCII control bytes (such as line breaks) inside string literals.
+    let cleaned: Vec<u8> = raw.iter().copied().filter(|b| !b.is_ascii_control()).collect();
+    let text = std::str::from_utf8(&cleaned).ok()?.trim();
+    let (name, rest) = text.split_once('{')?;
+    let oid = rest.strip_suffix('}')?;
+    let name = name.trim_end();
+    if !is_valid_schema_name(name) || is_valid_schema_oid(oid) {
+        return None;
+    }
+    Some(name.to_string())
+}
+
+fn is_valid_schema_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    name.len() <= 1024 && bytes.next().is_some_and(|b| b.is_ascii_alphabetic()) && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
+/// Whether `oid` (the text between `{` and `}` in a `FILE_SCHEMA` identifier) parses as an ASN.1
+/// object identifier as cadmpeg's STEP parser checks it: at least two whitespace-separated
+/// components, each a decimal integer (optional leading `-`), a lowercase ASN.1 identifier, or
+/// `name(number)` / `name(name)`.
+fn is_valid_schema_oid(oid: &str) -> bool {
+    let mut components = oid.split_whitespace();
+    let (Some(first), Some(second)) = (components.next(), components.next()) else {
+        return false;
+    };
+    [first, second].into_iter().chain(components).all(is_valid_schema_oid_component)
+}
+
+fn is_valid_schema_oid_component(component: &str) -> bool {
+    if is_valid_schema_oid_name(component) {
+        return true;
+    }
+    if let Some((name, inner)) = component.split_once('(') {
+        let Some(inner) = inner.strip_suffix(')') else {
+            return false;
+        };
+        return is_valid_schema_oid_name(name) && (is_valid_schema_oid_name(inner) || is_valid_schema_oid_signed_number(inner));
+    }
+    is_valid_schema_oid_signed_number(component)
+}
+
+fn is_valid_schema_oid_signed_number(value: &str) -> bool {
+    let unsigned = value.strip_prefix('-').unwrap_or(value);
+    !unsigned.is_empty() && unsigned.bytes().all(|b| b.is_ascii_digit()) && (unsigned == "0" || !unsigned.starts_with('0'))
+}
+
+fn is_valid_schema_oid_name(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    let Some(first) = bytes.next() else {
+        return false;
+    };
+    if !first.is_ascii_lowercase() {
+        return false;
+    }
+    let mut previous_hyphen = false;
+    for b in bytes {
+        if b.is_ascii_alphanumeric() {
+            previous_hyphen = false;
+        } else if b == b'-' && !previous_hyphen {
+            previous_hyphen = true;
+        } else {
+            return false;
+        }
+    }
+    !value.ends_with('-')
+}
+
 /// Read a FreeCAD or Rhino file (`file` is its name) into an import kept as B-rep records,
 /// with what cadmpeg could not bring over, and whether its contents are a FreeCAD design. Panics
 /// inside cadmpeg or the reader become errors.
@@ -921,7 +1225,9 @@ mod convert {
         if !matches!(ext.as_str(), "step" | "stp") {
             return Err(format!("{name}: not a STEP file (.step or .stp)"));
         }
-        records_of(name, &ext, bytes, &["step"])
+        crate::limits::check(crate::limits::Kind::Step, bytes.len() as u64).map_err(|e| format!("{name}: {e}"))?;
+        let prepared = super::normalize_step_file_schema(bytes);
+        records_of(name, &ext, &prepared, &["step"])
     }
 
     /// An IGES file (`name`) read by cadmpeg's IGES decoder into an import kept as records.

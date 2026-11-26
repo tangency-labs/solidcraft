@@ -98,11 +98,22 @@ pub(crate) fn run(
     wall: Option<f64>,
     op: impl FnOnce(&Brep) -> std::result::Result<Brep, SmError>,
 ) -> Result<(Body, Option<History>)> {
+    run_ordered(name, b, wall, |tagged, _| op(tagged))
+}
+
+/// Like [`run`], also passing the operand's SMLib-to-record [`solidcraft_smlib::history::Order`]
+/// so the operation can name edges directly by SMLib index.
+pub(crate) fn run_ordered(
+    name: &str,
+    b: &Body,
+    wall: Option<f64>,
+    op: impl FnOnce(&Brep, Option<&solidcraft_smlib::history::Order>) -> std::result::Result<Brep, SmError>,
+) -> Result<(Body, Option<History>)> {
     use crate::validation::{Checked, Step};
     b.require_brep(name)?;
     let (sb, ob) = smlib_body_ordered(b)?;
     let tagged = sb.tagged(0).map_err(|e| failed(name, "tag", e))?;
-    let r = op(&tagged).map_err(|e| refused(name, wall, e))?;
+    let r = op(&tagged, ob.as_ref()).map_err(|e| refused(name, wall, e))?;
     let step = crate::validation::step();
     if step == Step::Check {
         let check = r.check(CheckLevel::All).map_err(|e| failed(name, "check", e))?;

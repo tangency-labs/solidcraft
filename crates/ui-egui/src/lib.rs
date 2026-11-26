@@ -56,6 +56,7 @@ mod dialog_descriptor;
 pub mod dialogs;
 pub mod dialogs_appearance;
 pub mod dialogs_assembly;
+pub mod dialogs_capture;
 pub mod dialogs_constrain;
 pub mod dialogs_coupling;
 pub mod dialogs_end_cap;
@@ -692,6 +693,16 @@ pub struct WgpuBuilt {
     msaa_fallback: bool,
 }
 
+/// The portable preferences last built for a save ([`SolveApp::try_prefs`]), with what they
+/// were built from.
+pub(crate) struct PortablePrefs {
+    layout: Option<Value>,
+    inputs: panel_runtime::PortableInputs,
+    portable: Option<Value>,
+    /// How many times they have been built (a reused build does not count).
+    pub(crate) builds: u64,
+}
+
 pub struct SolveApp {
     /// Common panel foundation, internal opt-in; stays on the app across document tabs.
     pub(crate) panel_runtime: Option<panel_runtime::AppPanelRuntime>,
@@ -1069,6 +1080,10 @@ pub struct SolveApp {
     pub(crate) open_meshing_next: bool,
     /// How long each frame takes on the window thread, by phase.
     pub(crate) frame_watch: frame_watch::Watch,
+    /// The panel layout the last portable preferences were built from, and that result: the
+    /// host's auto-save (eframe's 30 s `App::save`) otherwise decodes every retained command
+    /// record again on the window thread, which took ~0.9 s on a large design.
+    pub(crate) portable_prefs: std::sync::Mutex<Option<PortablePrefs>>,
     /// The other open designs (tabs).
     pub docs: documents::Documents,
     /// Where the control channel's design events go ([`control::publish_design`]): the shared
@@ -1304,6 +1319,7 @@ impl SolveApp {
             safe_graphics_next: false,
             frame_ms: 0.0,
             frame_rate: frame_rate::FrameRate::default(),
+            portable_prefs: std::sync::Mutex::new(None),
             operations: operations::Panel::default(),
             synthetic: Vec::new(),
             synthetic_mods: egui::Modifiers::default(),
@@ -1533,7 +1549,23 @@ impl SolveApp {
     /// Portable preferences for storage. On refusal the host retains its stored panel record.
     pub fn try_prefs(&self) -> Result<String, String> {
         let layout = prefs::held_panel_layout(self).unwrap_or_else(|| panel_runtime::preferences_value(self));
-        let portable = panel_runtime::portable_preferences_value(self, layout).map_err(solidcraft_engine::panels::commands::error_text)?;
+        // Rebuilding decodes every retained command record in the layout, which is expensive and
+        // only necessary when the layout changed: an auto-save with the same layout reuses it.
+        // Keyed on every input of the conversion (recovery can keep a saved record, and panels
+        // can register), so a reused build is the one a fresh conversion would make.
+        let inputs = panel_runtime::portable_inputs(self);
+        let mut cache = self.portable_prefs.lock().unwrap_or_else(|e| e.into_inner());
+        let portable = match cache.as_ref().filter(|c| c.layout == layout && c.inputs == inputs) {
+            Some(c) => c.portable.clone(),
+            None => {
+                let portable =
+                    panel_runtime::portable_preferences_value(self, layout.clone()).map_err(solidcraft_engine::panels::commands::error_text)?;
+                let builds = cache.as_ref().map_or(0, |c| c.builds) + 1;
+                *cache = Some(PortablePrefs { layout, inputs, portable: portable.clone(), builds });
+                portable
+            }
+        };
+        drop(cache);
         Ok(self.prefs_with_panel_layout(portable))
     }
 
@@ -2933,6 +2965,10 @@ impl SolveApp {
             sketch_palette::toggle_construction(self);
             return;
         }
+        if id == "sketch.merge_lines" {
+            sketch_modify_ui::merge_selected_lines(self);
+            return;
+        }
         if id == "doc.open" {
             self.file_load.home_at_start = self.home.open;
         }
@@ -3333,8 +3369,19 @@ impl SolveApp {
     }
 
     /// Does starting `id` open a tool or a dialog?
-    fn interactive(&self, id: &str) -> bool {
+    pub(crate) fn interactive(&self, id: &str) -> bool {
         tools::Tool::for_command(id).is_some() || dialogs::Dialog::for_command(self, id).is_some()
+    }
+
+    /// Does `start` do something of its own with `id`, rather than run it with no values: open a
+    /// tool or a dialog, go to its settings in the Render workspace, or give it its values (a
+    /// toggle's new state, the selection)? Command search lists such a command (#9734).
+    pub(crate) fn starts_its_own_way(&self, id: &str) -> bool {
+        STARTED_WITH_VALUES.contains(&id)
+            || STARTED_BY_PREFIX.iter().any(|prefix| id.starts_with(prefix))
+            || toolbar::file_menu_row(id).is_some()
+            || render_workspace::ribbon_starts(id)
+            || self.interactive(id)
     }
 
     /// The ribbon has no sketch argument: use one unambiguous sketch pick, otherwise ask.
@@ -3501,6 +3548,7 @@ impl SolveApp {
                         FeatureKind::BodyTransfer { .. } => language.text("ui.feature_kind.body_transfer"),
                         FeatureKind::ConstructionAxis { .. } => language.text("ui.feature_kind.construction_axis"),
                         FeatureKind::ConstructionPoint { .. } => language.text("ui.feature_kind.construction_point"),
+                        FeatureKind::CapturePosition { .. } => language.text("cmd.component_capture_position"),
                         _ => f.kind.base_name(),
                     };
                     self.set_status(language.format("ui.feature_nothing_to_edit", &[("kind", kind)]), false);
@@ -4426,6 +4474,12 @@ impl SolveApp {
             drawing_sheet_page::fit(self);
             return;
         }
+        // The design's own Home view: its camera as it was set, not fitted again (#19972).
+        if home && let Some(to) = solidcraft_engine::view::home_view(&self.session) {
+            self.pending_fit = None;
+            self.animate_to(to);
+            return;
+        }
         if render_workspace::active(self) {
             if home {
                 self.cam.set_view(StandardView::Iso);
@@ -4639,6 +4693,9 @@ impl SolveApp {
             prefs::take_theme_drops(self, ctx);
             // Files dropped on the agent chat attach to its next message instead.
             agent_chat::take_drops(self, ctx);
+            // Files dropped on the tab bar open in tabs of their own there.
+            #[cfg(not(target_arch = "wasm32"))]
+            documents::take_file_drops(self, ctx);
             for f in ctx.input(|i| i.raw.dropped_files.clone()) {
                 let p = f.path().to_string_lossy().to_string();
                 if !p.is_empty() {
@@ -4830,6 +4887,13 @@ impl SolveApp {
         let host = self.view_windows.current_window();
         let opening_host = self.view_windows.opening_host(Some(host));
         plugins::tick(self, ui.ctx(), false);
+        // The folders the user allowed linked files to be read from (Preferences, General): an importer
+        // plugin's link outside its design's folder is read only from one of them. The user's own
+        // setting, never the design's.
+        let allowed: Vec<std::path::PathBuf> = self.preferences.linked_file_folders.iter().map(std::path::PathBuf::from).collect();
+        if self.session.plugin_state.link_folders != allowed {
+            self.session.plugin_state.link_folders = allowed;
+        }
         documents::give_up_renames_of_other_designs(self);
         params_dialog::install_expressions(ui.ctx());
         ui_kit::set_viewport_half_height(ui.ctx(), self.cam.half_height());
@@ -5300,3 +5364,34 @@ pub fn now_ms() -> f64 {
 mod picker_test_support;
 #[cfg(test)]
 mod test_support;
+
+/// Commands that `SolveApp::start` runs with values it works out itself (a toggle's new state,
+/// the selected component or body), or offers a menu of (the selection filter's mode), although
+/// their schema requires them. Command search lists
+/// them (#9734); `start_special_cases_stay_in_command_search` keeps this list in step with
+/// `start`.
+const STARTED_WITH_VALUES: &[&str] = &[
+    "body.print_face",
+    "browser.visibility",
+    "component.move_features",
+    "component.relink",
+    "drawing.sketch.create",
+    "occurrence.properties",
+    "select.filter",
+    "select.mode",
+    "sketch.toggle_diameter",
+    "sketch.toggle_driven",
+    "tab.view.move_to_window",
+    "view.ambient_occlusion",
+    "view.angle_readout",
+    "view.layout",
+    "view.origin_axes_across_view",
+    "view.perspective",
+    "view.render_focus",
+    "view.scale_bar",
+    "view.shots_strip",
+];
+
+/// Command id prefixes `SolveApp::start` handles as a group (Settings profiles open Preferences
+/// on their page), so command search lists their commands too (#9734).
+const STARTED_BY_PREFIX: &[&str] = &["settings.profile."];
