@@ -236,6 +236,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 layers_for: Option<usize>,
                 data: Option<Result<Value, String>>,
                 key: Option<(u64, Option<String>, usize, usize)>,
+                /// What Export DXF… last did: the saved path, or why it did not.
+                status: Option<String>,
             },
         }
     }
@@ -334,9 +336,10 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             Sm::FlatPattern { data: None, key: None, status: None, hardware_notes: false },
             vec![SelInput::new("Body (last if none)", BODIES, false)],
         ),
-        "sheet.check_shop" => {
-            (Sm::ShopCheck { shop: 0, layers: 0, layers_for: None, data: None, key: None }, vec![SelInput::new("Body (last if none)", BODIES, false)])
-        }
+        "sheet.check_shop" => (
+            Sm::ShopCheck { shop: 0, layers: 0, layers_for: None, data: None, key: None, status: None },
+            vec![SelInput::new("Body (last if none)", BODIES, false)],
+        ),
         _ => Sm::simple_start(id)?,
     };
     Some((crate::length_input::defaults(&app.session.doc, Kind::Sheet(sm)), inputs))
@@ -795,7 +798,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                 }
             }
         }
-        Sm::ShopCheck { shop, layers, layers_for, data, key } => shop_check_rows(app, ui, (shop, layers, layers_for), data, key, inputs),
+        Sm::ShopCheck { shop, layers, layers_for, data, key, status } => {
+            shop_check_rows(app, ui, (shop, layers, layers_for), (data, key, status), inputs)
+        }
         Sm::FlatPattern { data, key, status, hardware_notes } => {
             let body = inputs.first().and_then(|i| i.items.first()).and_then(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None });
             let want = (app.session.revision, body.clone());
@@ -864,7 +869,11 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                     }
                     ui.vertical(|ui| {
                         if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Export DXF…"), crate::ui_kit::Button::Normal).clicked() {
-                            *status = Some(export_flat_with(app, v["body"].as_str().unwrap_or(""), "dxf", *hardware_notes));
+                            let mut options = serde_json::Map::new();
+                            if *hardware_notes {
+                                options.insert("hardware_notes".into(), json!(true));
+                            }
+                            *status = Some(export_flat_with(app, v["body"].as_str().unwrap_or(""), "dxf", options, ""));
                         }
                     });
                     ui.vertical(|ui| {
@@ -924,8 +933,7 @@ fn shop_check_rows(
     app: &mut SolveApp,
     ui: &mut egui::Ui,
     (shop, layers, layers_for): (&mut usize, &mut usize, &mut Option<usize>),
-    data: &mut Option<Result<Value, String>>,
-    key: &mut Option<(u64, Option<String>, usize, usize)>,
+    (data, key, status): (&mut Option<Result<Value, String>>, &mut Option<(u64, Option<String>, usize, usize)>, &mut Option<String>),
     inputs: &[SelInput],
 ) {
     use solidcraft_engine::doc::shop_rules;
@@ -1010,6 +1018,21 @@ fn shop_check_rows(
         StatusTone::Dim
     };
     status_line(ui, &summary, tone);
+    // Export the DXF with exactly the options this check used (the reply's `dxf`, less where
+    // they came from), so the file is the one the findings are about.
+    let mut options = v["dxf"].as_object().cloned().unwrap_or_default();
+    options.remove("from");
+    let exported = body.clone().or_else(|| app.session.model.state().surface_sheets.last().map(|s| s.body.clone()));
+    if let Some(exported) = exported {
+        ui.vertical(|ui| {
+            if crate::ui_kit::button(ui, solidcraft_ui_text::tr("ui.shop_check_export_dxf"), crate::ui_kit::Button::Normal).clicked() {
+                *status = Some(export_flat_with(app, &exported, "dxf", options, id));
+            }
+        });
+    }
+    if let Some(s) = status {
+        status_line(ui, s, StatusTone::Dim);
+    }
     for f in findings.iter().take(200) {
         let error = is_error(f);
         let severity = solidcraft_ui_text::tr(if error { "ui.shop_check_error" } else { "ui.shop_check_warning" });
@@ -1084,22 +1107,24 @@ pub fn start_export(app: &mut SolveApp, id: &str) -> bool {
 }
 
 fn export_flat(app: &mut SolveApp, body: &str, extension: &str) -> String {
-    export_flat_with(app, body, extension, false)
+    export_flat_with(app, body, extension, serde_json::Map::new(), "")
 }
 
-/// `hardware_notes` asks the DXF for the note beside each press-in hardware hole; the bend table
-/// has none.
-fn export_flat_with(app: &mut SolveApp, body: &str, extension: &str, hardware_notes: bool) -> String {
-    let name = format!("{}-{body}.{extension}", app.session.doc.name);
+/// Saves the flat pattern through the picker. `options` are the export command's own parameters
+/// beyond `body` and `path` (the DXF's `layers`, `bend_lines`, `hardware_notes` ...; the bend table
+/// has none), and a non-empty `tag` ends the file's name (the shop's, `<design>-<body>-<tag>`).
+/// The result goes to the status of the Flat Pattern panel or the Shop Check window, whichever is open.
+fn export_flat_with(app: &mut SolveApp, body: &str, extension: &str, options: serde_json::Map<String, Value>, tag: &str) -> String {
+    let tag = if tag.is_empty() { String::new() } else { format!("-{tag}") };
+    let name = format!("{}-{body}{tag}.{extension}", app.session.doc.name);
     let body = body.to_string();
     let command = if extension == "csv" { "sheet.export_bend_table" } else { "sheet.export_dxf" };
     app.pick_save(&name, &[extension], move |app, path| {
         let message = if let Some(path) = path {
-            let mut params = json!({"body": body, "path": path});
-            if hardware_notes && command == "sheet.export_dxf" {
-                params["hardware_notes"] = json!(true);
-            }
-            match app.run(command, params) {
+            let mut params = options;
+            params.insert("body".into(), json!(body));
+            params.insert("path".into(), json!(path));
+            match app.run(command, Value::Object(params)) {
                 Ok(_) => {
                     app.set_status(format!("Exported {path}"), false);
                     format!("Saved {path}")
@@ -1110,7 +1135,7 @@ fn export_flat_with(app: &mut SolveApp, body: &str, extension: &str, hardware_no
             "Export cancelled".into()
         };
         if let Some(d) = app.dialog.as_mut()
-            && let Kind::Sheet(Sm::FlatPattern { status, .. }) = &mut d.kind
+            && let Kind::Sheet(Sm::FlatPattern { status, .. } | Sm::ShopCheck { status, .. }) = &mut d.kind
         {
             *status = Some(message);
         }

@@ -2782,6 +2782,41 @@ fn shop_check_dialog_starts_the_dxf_row_from_the_shops_recommendation() {
     assert_eq!(shop_check_reply(&h)["dxf"]["from"], "recommended");
 }
 
+/// Export DXF… in the Shop Check window saves the flat DXF with the options the last check used:
+/// SendCutSend's recommendation (one cut layer, bend lines apart) puts the cuts on layer 0 and the
+/// bend lines on BEND_UP/BEND_DOWN; Generic's (one layer, no bend lines) has no bend line.
+#[test]
+fn shop_check_dialog_exports_the_dxf_as_the_shop_wants_it() {
+    for (shop, name, bend_lines) in [(3, "sendcutsend", true), (0, "generic", false)] {
+        let mut h = shop_check_on_part(6.0, true);
+        let Some(Kind::Sheet(Sm::ShopCheck { shop: s, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("shop dialog") };
+        *s = shop;
+        shop_check_texts(&mut h);
+        let path = h.dir.join(format!("shop-check-{name}.dxf"));
+        let chosen = path.to_string_lossy().into_owned();
+        let suffix = format!("-Body1-{name}.dxf");
+        h.app.services.pick_save = Some(Box::new(move |file, extensions| {
+            assert!(file.ends_with(&suffix), "{file}");
+            assert_eq!(extensions, &["dxf"]);
+            Box::pin(std::future::ready(Some(chosen.clone())))
+        }));
+        let undo = h.app.session.undo.len();
+        h.step(&json!({"widget": "Export DXF…"})).unwrap();
+        h.frames(2);
+        let dxf = std::fs::read_to_string(&path).expect("the button writes the picked file");
+        let has = |layer: &str| dxf.lines().any(|l| l.trim() == layer);
+        assert_eq!(has("BEND_UP") || has("BEND_DOWN"), bend_lines, "{name}");
+        if bend_lines {
+            let on_zero = dxf.lines().map(str::trim).collect::<Vec<_>>().windows(2).any(|w| w == ["8", "0"]);
+            assert!(on_zero, "the cuts are on layer 0");
+            assert!(!has("OUTLINE") && !has("CUT"), "no layer per role");
+        }
+        let Some(Kind::Sheet(Sm::ShopCheck { status, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("shop dialog stays open") };
+        assert_eq!(status.as_deref(), Some(format!("Saved {}", path.display()).as_str()));
+        assert_eq!(h.app.session.undo.len(), undo, "export does not alter the part");
+    }
+}
+
 #[test]
 fn shop_check_dialog_says_a_clean_part_passes_and_changes_nothing() {
     // No cut-out: the flat DXF has the outline layer only.
