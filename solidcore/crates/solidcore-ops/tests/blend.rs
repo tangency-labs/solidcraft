@@ -2280,6 +2280,70 @@ fn a_variable_round_with_a_corner_in_its_law_is_its_balls_union() {
     }
 }
 
+/// A law with a corner rounds the edges of a slot and a step as it rounds a block's outside
+/// edge (#21179): the trace lands on the law's corner, and takes the through point there
+/// whatever its tangent's sign, which is the surfaces' and not the trace's. Each round adds
+/// or removes its balls' union along the edge, the faces square to it going on past its ends
+/// (the volumes the kernel's `wr685_law_corners` checks against the union's integral), and is
+/// a valid body: a peak, a dip, and a corner off the middle.
+#[test]
+fn a_variable_round_with_a_corner_in_its_law_rounds_a_slots_and_a_steps_edge() {
+    use solidcore_ops::{boolean::boolean, BooleanOp};
+    all_fixes();
+    let cut = |origin, size| {
+        let block = make_box([-30.0, -9.5, 0.0], [30.0, 19.0, 30.0]).unwrap();
+        let tool = make_box(origin, size).unwrap();
+        boolean(block, tool, BooleanOp::Subtract).unwrap().unwrap()
+    };
+    let slot = cut([-5.0, -10.0, 12.0], [12.0, 20.0, 6.0]);
+    let step = cut([-5.0, -10.0, 20.0], [12.0, 20.0, 20.0]);
+    // the law's corner and its radii
+    let laws = [
+        (0.5, [1.0, 2.0, 1.0]),
+        (0.5, [1.0, 0.5, 1.0]),
+        (0.3, [1.0, 2.0, 1.0]),
+    ];
+    // the body, a point of the edge, its start, and what each law's round adds
+    let (l6, l19, l10) = (
+        [2.900200, 0.744330, 2.883669],
+        [9.479435, 2.376334, 9.472978],
+        [4.942629, 1.247737, 4.931130],
+    );
+    let edges = [
+        (
+            &slot,
+            [-5.0, -9.5, 15.0],
+            [-5.0, -9.5, 12.0],
+            l6.map(|v| -v),
+        ),
+        (&slot, [-5.0, 0.0, 12.0], [-5.0, -9.5, 12.0], l19),
+        (&step, [-5.0, 0.0, 20.0], [-5.0, -9.5, 20.0], l19),
+        (
+            &step,
+            [-5.0, -9.5, 25.0],
+            [-5.0, -9.5, 20.0],
+            l10.map(|v| -v),
+        ),
+    ];
+    for (body, at, start, added) in edges {
+        for ((corner, radii), want) in laws.into_iter().zip(added) {
+            let b = body.copy().unwrap();
+            let before = volume(&b);
+            let knots = [0.0, 0.0, corner, 1.0, 1.0];
+            fillet_variable_from(&b, edge_at(&b, at), start, 1, &knots, &radii).unwrap();
+            let got = volume(&b) - before;
+            assert!(
+                (got - want).abs() <= 1e-4 * want.abs(),
+                "{at:?} {radii:?} at {corner}: {got}, want {want}"
+            );
+            assert!(
+                b.check(CheckLevel::All).unwrap().is_valid(),
+                "{at:?} {radii:?} at {corner}"
+            );
+        }
+    }
+}
+
 /// A round of a linear radius law along a box's straight edge, between its two faces at a
 /// right angle: the ball of radius r(y) at the edge's fraction y lies r(y) in from each face.
 struct LawPieces {
