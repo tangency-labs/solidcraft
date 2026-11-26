@@ -5,6 +5,7 @@ use solidcore::error::blend::BlendFailure;
 use solidcore::SolidError;
 use std::borrow::Cow;
 
+pub use solidcore::error::ErrorClass;
 pub use solidcore::topology::brep::SolidTest;
 
 /// SMLib's `SM_ERR_INVALID_INPUT`, the status of input the kernel refuses.
@@ -483,6 +484,11 @@ pub struct FailureCode {
     /// as `"blend::fillet_executive::…"`); for a failure ops decided ([`FailureCode::OPS`]),
     /// the name of its [`Error`] variant ([`Error::name`]).
     pub operation: &'static str,
+    /// The kernel's class of the error the call failed with ([`SolidError::class`]: a refusal,
+    /// a defect or a port failure), as solidcore gives it, so a caller never keeps its own
+    /// table of the kinds. [`ErrorClass::Unclassed`] for a kind solidcore does not class and
+    /// for a failure ops decided itself ([`FailureCode::OPS`]).
+    pub class: ErrorClass,
 }
 
 impl FailureCode {
@@ -496,6 +502,7 @@ impl FailureCode {
             call,
             kind: e.kind().code(),
             operation: e.operation(),
+            class: e.class(),
         }
     }
 
@@ -506,6 +513,7 @@ impl FailureCode {
             call,
             kind: Self::OPS,
             operation: e.name(),
+            class: ErrorClass::Unclassed,
         }
     }
 }
@@ -1268,8 +1276,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// keeps the kernel's [`FailureCode`].
 #[must_use]
 pub(crate) fn status(e: SolidError) -> Error {
-    let (kind, operation) = (e.kind(), e.operation());
-    crate::session::noted_as(kind.code(), operation, typed(e))
+    let (kind, operation, class) = (e.kind(), e.operation(), e.class());
+    crate::session::noted_as(kind.code(), operation, class, typed(e))
 }
 
 /// [`status`]'s typing of the kernel error `e`.

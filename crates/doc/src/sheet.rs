@@ -38,6 +38,11 @@ pub const TAB_OVERLAPS: &str = "the tab would overlap another panel of the sheet
 pub const TAB_SEVERAL: &str = "not supported yet: a tab that would join more than one panel; draw it out from an edge of one panel only";
 /// A tab lies inside the face already.
 pub const TAB_ADDS_NOTHING: &str = "the tab adds no material: it lies inside the face already; draw it out past an edge of the face";
+/// A tab fills where a cut took a bend away, out past where the bend's other side began.
+pub const TAB_PAST_BEND: &str = "not supported yet: a tab that fills where a cut took a bend away must end before the far side of that bend; past it, the tab would run into the next panel in the flat pattern";
+/// Part of what a tab fills where a cut took material away would still be cut away.
+pub const TAB_CUT_AWAY: &str =
+    "not supported yet: part of the tab would still be cut away in the flat pattern, by another cut or a relief; keep the tab clear of them";
 
 fn flat_budget_error() -> DocError {
     DocError::Invalid("sheet metal flat geometry exceeds the bounded processing budget".into())
