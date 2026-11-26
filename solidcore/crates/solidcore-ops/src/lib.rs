@@ -27,7 +27,7 @@
 //! [`pick`] (the edge or vertex nearest a point), [`boolean`], [`stitch`], [`prism`] (planar
 //! region booleans and extrusion, prism sections),
 //! [`cell_grid`] (the cells of a grid over a profile), [`profile`] (line families clipped to a
-//! region).
+//! region), [`shaft_spline`] (the outlines of a splined shaft and its hub from plain numbers).
 //!
 //! Operations change the body they are given, as the kernel does. An application that keeps
 //! its input copies it first ([`Body::copy`]).
@@ -41,6 +41,7 @@ pub mod bead;
 pub mod blend;
 pub mod blend_definition;
 pub mod blend_surface;
+pub mod board_drill;
 pub mod body;
 pub mod boolean;
 pub mod bspline;
@@ -80,7 +81,7 @@ pub mod hole_stacks;
 pub mod joint_turn;
 pub mod label;
 pub mod measure;
-pub mod member_turn;
+pub mod mesh;
 pub mod mid_joint;
 pub mod mid_sheet;
 pub mod network;
@@ -88,6 +89,7 @@ pub mod offset;
 pub mod order;
 pub mod outline;
 pub mod paper_gaps;
+pub mod path_plane;
 pub mod pcurve;
 pub mod pick;
 pub mod point_identity;
@@ -96,17 +98,23 @@ pub mod profile;
 pub mod provenance;
 pub mod query;
 pub mod record_check;
+pub mod round_face;
 pub mod section_corners;
 pub mod session;
+pub mod shaft_spline;
+pub mod sketch_arc;
 pub mod spline_projection;
 pub mod split;
 pub mod step_assembly;
 pub mod stitch;
+pub mod stop;
+pub mod stroke_runs;
 pub mod surface;
 pub mod surface_cvs;
 pub mod sweep;
 pub mod tangent;
 pub mod trim;
+pub mod tube_cope;
 pub mod untrim;
 pub mod vertex_meet;
 
@@ -161,6 +169,7 @@ pub use check::CheckReport;
 pub use contact::flush_contact_points;
 pub use contact::Gap;
 pub use error::Error;
+pub use error::ErrorClass;
 pub use error::FailureCode;
 pub use error::FitKind;
 pub use error::OffsetRefusal;
@@ -188,6 +197,7 @@ pub use measure::FaceCentroid;
 pub use measure::FaceRayHit;
 pub use measure::GapSample;
 pub use measure::MassPropertiesEstimate;
+pub use measure::MaterialSides;
 pub use measure::MembersClosest;
 pub use measure::Normal;
 pub use measure::PointClass;

@@ -14,6 +14,9 @@
 //! 4096; the repeated linear sweep checks that bound before its end cap, which moves
 //! the profile once per repetition. No additional recursion. Unavailable calls retain
 //! their full caller tails.
+//! Not upstream (#22184): the profile's split at its C1 discontinuities also cuts a
+//! B-spline piece exactly where it turns too sharply at an end for the result's check
+//! (`BSplineCurve::split_sharp_ends`), so each edge passes it with the same geometry.
 //! Not upstream (WR-409, tangency-labs/solidcore#1113): a profile that bounds no planar
 //! face becomes wires joined where its curves meet (`join_profile_wire_ends`).
 //! Not upstream (WR-442, tangency-labs/solidcore#478): after a full turn's
@@ -49,6 +52,7 @@ use crate::geom::geom_utility::{
 use crate::kernel::Kernel;
 use crate::math::{max4, Point3, Vec3, EFF_ZERO, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
+use crate::nurbs::crv_basic::CONIC_ANGLE_TOL_DEG;
 use crate::primitive::primitive_creation::p1::PrimitiveCreation;
 use crate::surface::surf_of_revolution::p1::SurfOfRevolution;
 use crate::surface::surface::Surface;
@@ -76,6 +80,24 @@ fn no_wire(e: SolidError) -> SolidError {
             .caused_by(e)
             .into_error()
     }
+}
+
+/// Not upstream (#21672): a partial turn of `angle_deg` degrees whose size is below the
+/// circle builder's [`CONIC_ANGLE_TOL_DEG`] is refused with
+/// [`PrimitiveFailure::SweepAngleTooSmall`]. The builder makes such an arc a full turn,
+/// so the sweep's rails and side faces would close up while its caps stay together. A
+/// NaN angle passes on, to be refused where it is used.
+fn refuse_vanishing_turn(angle_deg: f64) -> Result<()> {
+    if angle_deg.abs() < CONIC_ANGLE_TOL_DEG {
+        return Err(SolidError::primitive(
+            OP,
+            PrimitiveFailure::SweepAngleTooSmall {
+                angle: angle_deg,
+                minimum: CONIC_ANGLE_TOL_DEG,
+            },
+        ));
+    }
+    Ok(())
 }
 
 /// Flags shared by the repeated linear and partial rotational sweeps.
@@ -109,10 +131,24 @@ fn split(a: &impl PrimitiveAccess, b: BrepId, curves: &mut Vec<Option<Curve>>) -
         // `((SmBSplineCurve *)cr3DCurves[ii])->SubdivideAtDiscontinuity(..)`: the curve with
         // the NURB its own `GetOrCreateGwNurbPointer` makes (a line's lazy NURB), not a copy
         // of its bare base, which has none and refuses (`make_nurb`, 1001).
+        let spline = matches!(curve.kind(), CurveKind::BSpline(_));
         let curve = bspline_with_nurb(k, curve)?
             .ok_or_else(|| SolidError::invalid_input(OP, "non B-spline continuity input"))?;
         // fork c8f6a31 (WR-662): SER(SubdivideAtDiscontinuity(..)).
-        let pieces = curve.subdivide_at_discontinuity(k, ContinuityType::C1, 0.5)?;
+        let mut pieces = curve.subdivide_at_discontinuity(k, ContinuityType::C1, 0.5)?;
+        // Not upstream (#22184): a B-spline piece that turns too sharply at an end for the
+        // result's check (test 14) is cut there exactly, so each edge passes it with the
+        // profile's own geometry.
+        if spline {
+            let mut cut = Vec::new();
+            for piece in pieces {
+                match piece.split_sharp_ends(k)? {
+                    Some(more) => cut.extend(more),
+                    None => cut.push(piece),
+                }
+            }
+            pieces = cut;
+        }
         if pieces.len() > 1 {
             let count = pieces.len();
             curves.splice(
@@ -574,6 +610,11 @@ impl PrimitiveCreation {
 
     /// Partial rotation and its full-revolution dispatch, axis-interior rejection,
     /// sweep, ordered face deletion and callback stitching.
+    ///
+    /// # Errors
+    ///
+    /// [`PrimitiveFailure::SweepAngleTooSmall`] for a turn below `CONIC_ANGLE_TOL_DEG`
+    /// in size (not upstream, #21672); those of the profile, the sweep and the stitch.
     pub fn create_partial_rotational_sweep(
         &mut self,
         a: &mut impl PrimitiveAccess,
@@ -589,6 +630,11 @@ impl PrimitiveCreation {
         let previous = a.kernel(brep)?.context.doing_boolean();
         a.kernel_mut(brep)?.context.set_doing_boolean(true);
         let result = (|| {
+            // Not upstream (#21672): a turn the circle builder cannot draw is refused. Below
+            // `CONIC_ANGLE_TOL_DEG` every rail and side surface comes out a full turn
+            // (`conic_data`) while the end cap is the start cap moved by the exact, near-zero
+            // rotation: a full-turn ring with both caps on its seam, for a request of no volume
+            refuse_vanishing_turn(angle_deg)?;
             if options.test_continuity {
                 split(a, brep, curves)?;
             }
@@ -621,12 +667,16 @@ impl PrimitiveCreation {
                 join_profile_wire_ends(a, brep, &edges)?;
                 faces.clear();
             }
-            let base = faces.first().copied();
             for &face in &faces {
                 edges.extend(a.face_edges((brep, face))?);
             }
             let mut cap = options.cap_ends;
-            if let Some(face) = base {
+            if faces.is_empty() {
+                cap = false;
+            }
+            // Not upstream (#22035 review): every cap face is checked, not only the first;
+            // a profile of several loops in one plane gives several faces, each capped
+            for &face in &faces {
                 let bound = a.primitive_face_box((brep, face))?.sphere_bound();
                 let direction = axis.unitize()?;
                 let param = line_closest_point(axis_base, direction, bound.center);
@@ -635,11 +685,17 @@ impl PrimitiveCreation {
                 let end = point + 2.0 * bound.radius * direction;
                 let axis_curve = Curve::from(BSplineCurve::create_line_segment(3, start, end)?);
                 if a.axis_inside_face((brep, face), &axis_curve)? {
-                    a.delete_primitive_faces(brep, &[face])?;
+                    a.delete_primitive_faces(brep, &faces)?;
                     return Err(SolidError::primitive(OP, PrimitiveFailure::AxisInsideFace));
                 }
-            } else {
-                cap = false;
+                // Not upstream (#21671): the check above sees only an axis lying in the
+                // face. An axis crossing the face's plane at a point inside the face leaves
+                // that point fixed, so both caps contain it, and two caps through a common
+                // inside point cross (or overlap, when the axis is the plane's normal)
+                if cap && axis_crosses_face_inside(a, (brep, face), axis_base, axis)? {
+                    a.delete_primitive_faces(brep, &faces)?;
+                    return Err(SolidError::primitive(OP, PrimitiveFailure::AxisInsideFace));
+                }
             }
             // Not upstream (WR-448, #545): analytic side faces (with `make_analytics`, the default)
             let rotation = RotationalSweepGeometry::new(axis_base, axis, angle_deg, tolerance);
@@ -669,6 +725,64 @@ impl PrimitiveCreation {
         a.kernel_mut(brep)?.context.set_doing_boolean(previous);
         result
     }
+}
+
+/// Not upstream (#21671): whether the axis through `axis_base` along `axis` crosses the
+/// plane of the planar profile `face` at a point strictly inside the face, off its
+/// boundary by more than the face's tolerance.
+///
+/// The rotation fixes every point of its axis, so that point lies on the start cap and on
+/// the end cap of a capped partial revolution. The two caps' planes both pass through it:
+/// they cross along a line through it (or coincide, when the axis is the plane's normal),
+/// and since the point is inside both caps they cross there along a segment that is no
+/// edge of the body, or overlap. The point is where the axis line meets the face's plane,
+/// classified against the face's own loops (`point_3d_classify_at`); an axis parallel to
+/// the plane meets it nowhere, or lies in it, which `axis_inside_face` decides. A face
+/// that is not planar within its tolerance is not decided here (`false`).
+///
+/// # Errors
+///
+/// Those of the face's surface and of the point classification.
+fn axis_crosses_face_inside(
+    a: &mut impl PrimitiveAccess,
+    face: crate::sweep::topology_sweep::access::FaceRef,
+    axis_base: Point3,
+    axis: Vec3,
+) -> Result<bool> {
+    use crate::intersect::point_class::{PointClassType, PointClassification};
+    use crate::query::face::p1::{point_3d_classify_at, Point3dClassifyOptions};
+
+    a.with_brep_mut(face.0, |k, b, _, _| {
+        let tolerance = b.face(face.1)?.tolerance;
+        let Some(surface) = crate::topology::face::p2::surface(b, face.1)? else {
+            return Ok(false);
+        };
+        let plane = surface.is_planar(k, tolerance)?;
+        if !plane.is_planar {
+            return Ok(false);
+        }
+        let along = plane.normal.dot(axis);
+        if along == 0.0 || !along.is_finite() {
+            return Ok(false);
+        }
+        let t = plane.normal.dot(plane.point - axis_base) / along;
+        let point = axis_base + t * axis;
+        if ![point.x, point.y, point.z].iter().all(|c| c.is_finite()) {
+            return Ok(false);
+        }
+        let mut pc = PointClassification::new(crate::geom::tol::zone_tol3d(k, tolerance));
+        point_3d_classify_at(
+            k,
+            b,
+            face.1,
+            point,
+            tolerance,
+            true,
+            &mut pc,
+            Point3dClassifyOptions::default(),
+        )?;
+        Ok(pc.point_class() == PointClassType::Face)
+    })
 }
 
 /// Not upstream (#17204): `curve`, a B-spline, with each end that lies within `tolerance`
@@ -741,6 +855,100 @@ mod tests {
             api_curves::create_line_segment(Point3::new(ax, ay, az), Point3::new(bx, by, bz))
                 .expect("segment"),
         )
+    }
+
+    /// #21671 (goldens `primitive.primitive_creation_p3`
+    /// `capped_rot_square_axis_tilted_through_face_{90,270}`): a capped partial revolve
+    /// whose axis crosses the profile's plane inside the profile is refused with
+    /// `AxisInsideFace`. The square [2,4] x [0,2] at z 0 about the axis (1, 0, 1)
+    /// through its centre (3, 1, 0): the rotation fixes the centre, so both caps contain
+    /// it; after 90 degrees the end cap's normal is (1/2, -1/sqrt 2, 1/2), at 60 degrees
+    /// to the start cap's, and the caps cross along a segment of length sqrt 6 through
+    /// the centre that is no edge. Before, the 90 degree turn returned that body. The
+    /// axis (0, 0, 1) through the centre turns the square in its own plane: the caps
+    /// overlap, refused the same way.
+    /// Controls that still build, by Pappus (an axis in the profile's plane, a quarter
+    /// turn: volume = area 4 * centroid distance * pi / 2): the y axis outside the square
+    /// (centroid 3 from it, 6 pi), and the y axis along the edge x 0 of [0,2]^2
+    /// (centroid 1 from it, 2 pi).
+    #[test]
+    fn issue_21671_an_axis_through_the_capped_profile_is_refused() {
+        use crate::error::primitive::PrimitiveFailure;
+        use crate::mass::integrator::properties::brep_volume_default;
+
+        let square = |x0: f64| {
+            [
+                segment([x0, 0.0, 0.0], [x0 + 2.0, 0.0, 0.0]),
+                segment([x0 + 2.0, 0.0, 0.0], [x0 + 2.0, 2.0, 0.0]),
+                segment([x0 + 2.0, 2.0, 0.0], [x0, 2.0, 0.0]),
+                segment([x0, 2.0, 0.0], [x0, 0.0, 0.0]),
+            ]
+        };
+        let off = square(2.0);
+        let curves: Vec<Option<&Curve>> = off.iter().map(Some).collect();
+        let centre = Point3::new(3.0, 1.0, 0.0);
+        let mut k = Kernel::default();
+        for (axis, angle) in [
+            (Vec3::new(1.0, 0.0, 1.0), 90.0),
+            (Vec3::new(1.0, 0.0, 1.0), 270.0),
+            (Vec3::new(-1.0, 0.0, 1.0), 45.0),
+            (Vec3::new(0.0, 0.0, 1.0), 90.0),
+        ] {
+            let got = create_rotational_sweep(&mut k, &curves, centre, axis, angle, true);
+            assert_eq!(
+                got.as_ref()
+                    .err()
+                    .and_then(|e| e.primitive_failure())
+                    .copied(),
+                Some(PrimitiveFailure::AxisInsideFace),
+                "axis {axis:?} through the centre, {angle} degrees: {:?}",
+                got.map(|_| ())
+            );
+        }
+
+        // #22035 review: a profile of two loops in one plane gives two cap faces; the axis
+        // through the second square's centre (7, 1, 0) is refused as well
+        let two: Vec<Curve> = square(2.0).into_iter().chain(square(6.0)).collect();
+        let two: Vec<Option<&Curve>> = two.iter().map(Some).collect();
+        let got = create_rotational_sweep(
+            &mut k,
+            &two,
+            Point3::new(7.0, 1.0, 0.0),
+            Vec3::new(1.0, 0.0, 1.0),
+            90.0,
+            true,
+        );
+        assert_eq!(
+            got.as_ref()
+                .err()
+                .and_then(|e| e.primitive_failure())
+                .copied(),
+            Some(PrimitiveFailure::AxisInsideFace),
+            "the axis through the second square: {:?}",
+            got.map(|_| ())
+        );
+
+        let pi = std::f64::consts::PI;
+        let on_edge = square(0.0);
+        let on_edge: Vec<Option<&Curve>> = on_edge.iter().map(Some).collect();
+        let (o, y) = (Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
+        for (curves, want, what) in [
+            (&curves, 6.0 * pi, "outside"),
+            (&on_edge, 2.0 * pi, "on edge"),
+        ] {
+            let mut body = create_rotational_sweep(&mut k, curves, o, y, 90.0, true)
+                .unwrap_or_else(|e| panic!("y axis {what}: {e}"));
+            assert!(
+                crate::topology::brep::p2::is_manifold_solid(&body).unwrap(),
+                "{what}"
+            );
+            // signed: an inward-facing solid fails too
+            let volume = brep_volume_default(&k, &mut body, 1e-8).unwrap();
+            assert!(
+                (volume - want).abs() < 1e-6 * want,
+                "y axis {what}: volume {volume}, want {want}"
+            );
+        }
     }
 
     /// WR-776: a line skew to the axis sweeps a hyperboloid of one sheet. Every point of
@@ -1145,5 +1353,97 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// #21672: a capped revolve by 0 degrees, or by less than the circle builder's
+    /// `CONIC_ANGLE_TOL_DEG`, is refused by name. Before, every rail and side face came
+    /// out a full turn (an arc below 1e-6 degrees is a whole circle) while the end cap was
+    /// the start cap in place: for the unit square [0,1]^2 at z 0 about the x axis through
+    /// (0, -5, 0), a ring of volume 11 pi with both caps on its seam (6 faces, 8 edges,
+    /// 4 vertices), for a request of no volume. A partial sphere of radius 1e6 turned
+    /// 2e-12 degrees was a whole sphere with two half discs through its axis. Turns of
+    /// 90 and 360 degrees still build, with their closed-form volumes: the square is 5 to
+    /// 6 from the axis, so a turn of t radians sweeps t / 2 (6^2 - 5^2) = 5.5 t.
+    #[test]
+    fn issue_21672_a_revolve_by_almost_nothing_is_refused() {
+        use crate::error::primitive::PrimitiveFailure;
+        use crate::geom::attribute::{AttributeStore, ObjectKey};
+        use crate::mass::integrator::properties::{brep_volume, PropertyAttributes};
+        use crate::nurbs::crv_basic::CONIC_ANGLE_TOL_DEG;
+        use crate::primitive::api_primitives::create_partial_sphere;
+
+        let square = [
+            segment([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+            segment([1.0, 0.0, 0.0], [1.0, 1.0, 0.0]),
+            segment([1.0, 1.0, 0.0], [0.0, 1.0, 0.0]),
+            segment([0.0, 1.0, 0.0], [0.0, 0.0, 0.0]),
+        ];
+        let curves: Vec<Option<&Curve>> = square.iter().map(Some).collect();
+        let (base, axis) = (Point3::new(0.0, -5.0, 0.0), Vec3::new(1.0, 0.0, 0.0));
+        let too_small = |angle: f64| PrimitiveFailure::SweepAngleTooSmall {
+            angle,
+            minimum: CONIC_ANGLE_TOL_DEG,
+        };
+
+        let mut k = Kernel::default();
+        for angle in [0.0, 1e-7, -1e-7, 2e-12, 0.99e-6] {
+            for cap in [true, false] {
+                let got = create_rotational_sweep(&mut k, &curves, base, axis, angle, cap);
+                let failure = got
+                    .as_ref()
+                    .err()
+                    .and_then(|e| e.primitive_failure())
+                    .copied();
+                assert_eq!(
+                    failure,
+                    Some(too_small(angle)),
+                    "a turn of {angle} degrees (caps {cap}): {:?}",
+                    got.map(|_| ())
+                );
+            }
+        }
+        let got = create_partial_sphere(
+            &mut k,
+            Point3::new(0.0, 0.0, 0.0),
+            1e6,
+            30.0,
+            30.000000000002,
+        );
+        assert!(
+            matches!(
+                got.as_ref().err().and_then(|e| e.primitive_failure()),
+                Some(PrimitiveFailure::SweepAngleTooSmall { angle, minimum })
+                    if *angle < 1e-11 && *minimum == CONIC_ANGLE_TOL_DEG
+            ),
+            "a partial sphere turned 2e-12 degrees: {:?}",
+            got.map(|_| ())
+        );
+
+        let store = AttributeStore::default();
+        let key_of = |_| ObjectKey(0);
+        let attributes = PropertyAttributes {
+            store: &store,
+            key_of: &key_of,
+        };
+        for (angle, cap) in [(90.0, true), (360.0, true)] {
+            let mut ring = create_rotational_sweep(&mut k, &curves, base, axis, angle, cap)
+                .unwrap_or_else(|e| panic!("a turn of {angle} degrees: {e}"));
+            assert!(crate::topology::brep::p2::is_manifold_solid(&ring).unwrap());
+            let volume = brep_volume(&k, &mut ring, 1e-8, &attributes).unwrap();
+            let want = 5.5 * f64::to_radians(angle);
+            assert!(
+                (volume - want).abs() < 1e-6 * want,
+                "a turn of {angle} degrees: volume {volume}, want {want}"
+            );
+        }
+        // a quarter of the unit ball, pi / 3
+        let mut wedge =
+            create_partial_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 1.0, 0.0, 90.0).unwrap();
+        let volume = brep_volume(&k, &mut wedge, 1e-8, &attributes).unwrap();
+        let want = std::f64::consts::PI / 3.0;
+        assert!(
+            (volume - want).abs() < 1e-6 * want,
+            "volume {volume}, want {want}"
+        );
     }
 }
