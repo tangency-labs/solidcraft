@@ -203,13 +203,14 @@ face still in several pieces, asks to be picked again. Test:
 
 Pieces of a folded panel's cap (#21300): where a Fold parts a sheet metal panel into pieces that
 the faces around them do not tell apart (a round base flange's, whose rims are all one circle's),
-releases up to 0.47.0 numbered the pieces of each cap by where they lie (`F2:top#1`, `F2:top#2`),
-not exactly. They are now numbered in the order of their panels' keys (the panel the fold leaves
-first, then the pieces it folds), exactly, and a sketch attaches to them. A reference a design
-saved under such a number may now name the other piece. No sketch could be attached there before
-(it was refused), but another feature may have kept such a name. A piece the faces around it tell
-apart (`F2:bottom#[F2:side:r3]`) is named as before. Test:
-`every_flat_face_of_a_folded_round_sheet_takes_an_attached_sketch`
+releases up to 0.50.0 numbered the pieces of each cap by where they lie (`F2:top#1`, `F2:top#2`),
+not exactly, and a sketch on them was refused. They are now named by the fold and its part
+(`F2:top#[F30:fold:stay]`, the part the fold left; `F2:top#[F30:fold:1]`, the first part it
+folded), exactly, and a sketch attaches to them. Each piece keeps its number by place as its former
+name: a reference a design saved under such a number finds the same piece. A piece the faces around
+it tell apart (`F2:bottom#[F2:side:r3]`) is named as before. Tests:
+`every_flat_face_of_a_folded_round_sheet_takes_an_attached_sketch`,
+`a_reference_saved_under_a_numbered_piece_of_a_folded_round_cap_finds_that_piece`
 (`crates/engine/src/cmd/sheet_tests.rs`).
 
 Tie numbers (#22230): faces that nothing else tells apart share a name and are numbered by where

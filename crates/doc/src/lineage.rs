@@ -83,11 +83,12 @@ pub(crate) struct Stage {
 pub(crate) struct Lineage {
     pub(crate) history: History,
     pub(crate) operands: Vec<Arc<Operand>>,
-    /// Each face's place, from 1, among the faces of one name the feature made for one part of its
-    /// definition, where it says (empty: nowhere): a sheet's panel cap's pieces a fold parted, by
-    /// the piece each is on (see `sheet_lineage`). It numbers the faces of one name nothing around
-    /// them tells apart, as [`GrownFace::ordinal`] does: a rank, never a measure (#21300).
-    pub(crate) ordinals: Vec<Option<usize>>,
+    /// The pieces of a sheet's panel caps that folds parted, by face of the body this is the
+    /// lineage of: each the folds' roles of the piece it is on (`F30:fold:stay`, the part Fold F30
+    /// left where it was; `F30:fold:1`, the first part it folded, see `sheet_lineage`), `None` for
+    /// any other face (empty: none). They tell apart pieces nothing around them does (a round
+    /// panel's, whose rims are all one circle's, #21300), exactly.
+    pub(crate) cap_pieces: Vec<Option<Vec<String>>>,
     /// The pieces the feature split faces into, by face of the body this is the lineage of: each
     /// piece's role in the feature (`in`, `out`, `+`, …, see [`Traced::with_pieces`]), `None` for
     /// a face it did not split. Only the feature's own step has them: a later step's lineage reads
@@ -98,7 +99,7 @@ pub(crate) struct Lineage {
 impl Lineage {
     /// `body` as it is: every face and edge its own, named as `operand` names them.
     pub(crate) fn of(body: &Body, operand: Operand) -> Lineage {
-        Lineage { history: History::identity(body), operands: vec![Arc::new(operand)], ordinals: Vec::new(), pieces: None }
+        Lineage { history: History::identity(body), operands: vec![Arc::new(operand)], cap_pieces: Vec::new(), pieces: None }
     }
 
     /// The lineage of `result`, made by one kernel operation from operands whose lineages are
@@ -118,7 +119,7 @@ impl Lineage {
             }
         }
         let operands: Vec<Arc<Operand>> = inputs.iter().flat_map(|l| l.operands.iter().cloned()).collect();
-        (history.operands == operands.len()).then_some(Lineage { history, operands, ordinals: Vec::new(), pieces: None })
+        (history.operands == operands.len()).then_some(Lineage { history, operands, cap_pieces: Vec::new(), pieces: None })
     }
 
     /// This lineage for a moved copy of what feature `feature` built (instance `instance` of a
@@ -135,7 +136,7 @@ impl Lineage {
                 _ => op.clone(),
             })
             .collect();
-        Lineage { history: self.history.clone(), operands, ordinals: self.ordinals.clone(), pieces: None }
+        Lineage { history: self.history.clone(), operands, cap_pieces: self.cap_pieces.clone(), pieces: None }
     }
 
     /// Whether each face of the body this is the lineage of came, in whole or in part, from a
@@ -178,7 +179,7 @@ impl Lineage {
             .iter()
             .map(|piece| {
                 let history = piece.history()?.clone();
-                (history.operands == 1).then(|| Lineage { history, operands: vec![stage.clone()], ordinals: Vec::new(), pieces: None })
+                (history.operands == 1).then(|| Lineage { history, operands: vec![stage.clone()], cap_pieces: Vec::new(), pieces: None })
             })
             .collect()
     }
@@ -194,7 +195,7 @@ impl Lineage {
                 let history = piece.history()?.clone();
                 let body = crate::ModelBody::new(String::new(), whole.clone(), 0);
                 let stage = Arc::new(Operand::Stage(Box::new(Stage { body, lineage: lineage.clone(), names: OnceLock::new() })));
-                (history.operands == 1).then(|| Lineage { history, operands: vec![stage], ordinals: Vec::new(), pieces: None })
+                (history.operands == 1).then(|| Lineage { history, operands: vec![stage], cap_pieces: Vec::new(), pieces: None })
             })
             .collect()
     }
@@ -304,7 +305,7 @@ impl Traced {
             }
             let body = crate::ModelBody::new(String::new(), self.body.clone(), 0);
             let stage = Arc::new(Operand::Stage(Box::new(Stage { body, lineage: l.clone(), names: OnceLock::new() })));
-            Some(Lineage { history, operands: vec![stage], ordinals: Vec::new(), pieces: None })
+            Some(Lineage { history, operands: vec![stage], cap_pieces: Vec::new(), pieces: None })
         });
         Traced { body: result, lineage, recipe: None }
     }
@@ -816,7 +817,7 @@ pub(crate) fn sheet_lineage(before: Option<SheetBefore<'_>>, sheet: &crate::Surf
                     Lineage {
                         history: History { operands: 1, faces, edges: Vec::new() },
                         operands: vec![Arc::new(Operand::Body(b.name.to_string()))],
-                        ordinals: Vec::new(),
+                        cap_pieces: Vec::new(),
                         pieces: None,
                     }
                 }
@@ -879,7 +880,10 @@ pub(crate) fn sheet_lineage(before: Option<SheetBefore<'_>>, sheet: &crate::Surf
             faces.push(FaceProv { origins: source.iter().map(|&face| FaceOrigin::Face { operand: 0, face }).collect(), change });
             continue;
         }
-        match sheet_role(&x.part, x.place, sheet, &on, &meet, converting) {
+        // A cap's place is its piece's rank among its panel's pieces, for telling them apart from
+        // the body before (above); its name tells the pieces apart by the folds' roles instead.
+        let place = x.place.filter(|_| !matches!(x.part, SheetPart::Cap { .. }));
+        match sheet_role(&x.part, place, sheet, &on, &meet, converting) {
             Some(g) => {
                 faces.push(FaceProv { origins: vec![FaceOrigin::Face { operand: grown_at, face: i }], change: Change::Generated });
                 if let Some(slot) = grown.get_mut(i) {
@@ -892,12 +896,11 @@ pub(crate) fn sheet_lineage(before: Option<SheetBefore<'_>>, sheet: &crate::Surf
     // The body's edges, where its faces meet: named from its faces.
     let edges = History::identity(body).edges.into_iter().map(|e| EdgeProv { faces: e.faces, origins: Vec::new() }).collect();
     let mut history = History { operands: grown_at + 1, faces, edges };
-    // The pieces of a panel's cap a fold parted are numbered by the piece each is on, which nothing
-    // around them may tell apart (a round panel's, whose rims are all one curve's, #21300).
-    let ordinals: Vec<Option<usize>> =
-        parts.iter().map(|x| x.as_ref().filter(|x| matches!(x.part, SheetPart::Cap { .. })).and_then(|x| x.place)).collect();
+    // The pieces of a panel's cap folds parted, by the folds' roles of the piece each is on: what
+    // tells apart pieces nothing around them may (a round panel's, whose rims are all one curve's).
+    let cap_pieces = crate::sheet::fold_cap_roles(sheet);
     let Some(first) = first else {
-        return Some(Lineage { history, operands: vec![Arc::new(Operand::Grown { body: None, faces: grown })], ordinals, pieces: None });
+        return Some(Lineage { history, operands: vec![Arc::new(Operand::Grown { body: None, faces: grown })], cap_pieces, pieces: None });
     };
     // A face grown from faces of the body as the feature found it is named after their names;
     // where the feature made that body so far, after the faces of the model before them.
@@ -922,7 +925,7 @@ pub(crate) fn sheet_lineage(before: Option<SheetBefore<'_>>, sheet: &crate::Surf
     history.substitute(0, &first.history).ok()?;
     let mut operands = first.operands.clone();
     operands.push(Arc::new(Operand::Grown { body: body_name, faces: grown }));
-    (history.operands == operands.len()).then_some(Lineage { history, operands, ordinals, pieces: None })
+    (history.operands == operands.len()).then_some(Lineage { history, operands, cap_pieces, pieces: None })
 }
 
 /// The role of a face a sheet's build made for `part` (see `SheetPart`), the `place`th of the faces
