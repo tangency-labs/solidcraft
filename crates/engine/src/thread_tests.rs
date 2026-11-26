@@ -82,7 +82,10 @@ fn unified_threads_require_a_saved_form_but_new_and_edited_threads_record_it() {
     // Match the file before this change: no Thread form and no Unified pending-format marker.
     let mut legacy = saved;
     legacy["features"].as_array_mut().unwrap().last_mut().unwrap().as_object_mut().unwrap().remove("form");
-    legacy["format_pending"].as_array_mut().unwrap().retain(|change| change.as_str() != Some("unified-thread-form"));
+    // A released format names no pending changes, so there is no marker to take out then.
+    if let Some(pending) = legacy["format_pending"].as_array_mut() {
+        pending.retain(|change| change.as_str() != Some("unified-thread-form"));
+    }
     let mut reopened = Session::new(solidcraft_doc::Document::from_json(&legacy.to_string()).unwrap());
     let error = reopened.model.results.last().unwrap().error.as_deref().unwrap();
     assert!(error.contains("`1/4-20 UNC` is a unified designation, not metric"), "{error}");
