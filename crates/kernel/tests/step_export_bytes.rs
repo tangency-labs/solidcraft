@@ -5,7 +5,9 @@
 //! and written back through `step_export_bodies`. The written text's digest must be the one in
 //! [`DIGESTS`]. These digests were taken from the export as it was before the AP242 product layer
 //! moved into solidcore-step, except the torus-ring spline whose exact torus support is now
-//! proved and written analytically (#16297). A small assembly
+//! proved and written analytically (#16297), and five files whose torus faces are now read back
+//! on their own numbers instead of a torus fitted to their NURBS forms, so they write the numbers
+//! the file gave them (#22146). A small assembly
 //! with names and a colour goes through `step_export_products` the same way.
 //!
 //! Four fixtures import to slightly different records on Windows x64 MSVC. On that
@@ -155,16 +157,16 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/step-regressions/block_edge_off_its_face.step", "8e25cc9a701de87d"),
     ("tests/step-regressions/cylinder_rim_off_its_wall.step", "e07c2fdbef7cc0c6"),
     ("tests/step-regressions/cylinder_spline_rims.step", "ed34ee7908eddf1d"),
-    ("tests/step-regressions/hole_round_revolved.step", "260e07ac4dec005d"),
+    ("tests/step-regressions/hole_round_revolved.step", "36800798ee4ee56c"),
     ("tests/step-regressions/net_steps_back_within_tolerance.step", "687c36e89ffe679a"),
     ("tests/step-regressions/rod_cross_hole_rim_off_curve_start.step", "908bb8af3062c6c0"),
     ("tests/step-regressions/rod_doubled_edge.step", "7e5ec3041433853c"),
-    ("tests/step-regressions/rounded_disc_cut_vertices_off.step", "5dda1e626a95d58c"),
+    ("tests/step-regressions/rounded_disc_cut_vertices_off.step", "53f2cf10173fc3d8"),
     ("tests/step-regressions/swept_tube_last_wall.step", "b10f2cc091917d5a"),
     ("tests/step-regressions/thread_crest_band.step", "2dfb86551d60a9f3"),
-    ("tests/step-regressions/tiny_rounds_coarse_tolerance.step", "0909a2e6b030bd2c"),
-    ("tests/step-regressions/torus_patch_and_rest.step", "a82c8cbad7038460"),
-    ("tests/step-regressions/torus_patch_and_rest_revolved.step", "6b2f15c1dc602029"),
+    ("tests/step-regressions/tiny_rounds_coarse_tolerance.step", "1ec425a020cf33a5"),
+    ("tests/step-regressions/torus_patch_and_rest.step", "091ac952e57d66d9"),
+    ("tests/step-regressions/torus_patch_and_rest_revolved.step", "42e784dd458626f4"),
     ("(assembly)", "45b6ef6cf64529e2"),
 ];
 
