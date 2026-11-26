@@ -4509,8 +4509,7 @@ mod issue_21421_round_ends_on_the_sphere_seam {
         let mut k = Kernel::default();
         let mut body = result_body_of(&mut k, name);
         let blends = certified_blends(&k, &mut body, name);
-        // (the volume did not move: the row's is the one before)
-        let estimates = volume_band(&k, &mut body, &blends, row[1], name);
+        let estimates = volume_band(&k, &mut body, &blends, name);
         let m = &estimates.golden;
         let at = |p: Vec3| [p.x, p.y, p.z];
         let mut ours = vec![m.properties.area, m.properties.volume, m.properties.mass];
