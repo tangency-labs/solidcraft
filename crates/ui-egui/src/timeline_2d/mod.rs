@@ -511,16 +511,20 @@ mod tests {
     #[test]
     fn opening_or_scrolling_a_long_timeline_checks_the_visible_steps_first() {
         let mut h = Harness::new();
-        h.app.preferences.timeline_2d = true;
+        h.app.home.open = false;
         h.app.run("solid.box", json!({"name": "First", "length": 5, "width": 5, "height": 5})).unwrap();
         let doc = std::sync::Arc::make_mut(&mut h.app.session.doc);
         let first = doc.features[0].clone();
         for i in 1..256 {
             doc.features.push(solidcraft_engine::doc::Feature { id: first.id + i, name: format!("Step {i}"), ..first.clone() });
         }
+        h.frames(3);
+        assert!(panel_rect(&h, "history").is_some());
         let checked = || canvas::FEATURES_CHECKED.with(std::cell::Cell::get);
         let start = checked();
-        h.frame();
+        // Open the grid from the loaded 1D History, as in the desktop. Its panel swap takes several passes.
+        h.call("ui.prefs", json!({"timeline_2d": true}));
+        assert!(panel_rect(&h, "timeline-2d").is_some());
         assert!(crate::scenario::handle_at("timeline_2d:First").is_some());
         assert!(checked() - start < 256, "opening the dock must not analyze the entire model");
 
