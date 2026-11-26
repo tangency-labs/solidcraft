@@ -470,6 +470,7 @@ pub(super) fn read_left_out_bodies(
             .filter(|other| other.id != link.feature)
             .flat_map(|other| other.body_names.iter().filter(|n| !n.is_empty()).cloned())
             .collect();
+        let mut unpinned_inherited = if !step_file { realign_unpinned_inherited(doc, &link.inherited, &feature.body_names) } else { None };
         if let Some(f) = doc.feature_mut(link.feature) {
             match (&mut f.kind, feature.kind) {
                 // An unchanged STEP file gives back the text it was saved without; the tree,
@@ -478,17 +479,24 @@ pub(super) fn read_left_out_bodies(
                 (_, kind) => {
                     // Bodies keep their names where the file still has as many.
                     if f.body_names.len() != feature.body_names.len() {
-                        let (next_names, next_inherited, removed) = realign_changed_body_count(
-                            "",
-                            "",
-                            solidcraft_io::StepNames::default(),
-                            &f.body_names,
-                            &link.inherited,
-                            &feature.body_names,
-                            &other_bodies,
-                        );
-                        f.body_names = next_names;
-                        realigned = Some((next_inherited, removed));
+                        if f.body_names.is_empty() {
+                            f.body_names = feature.body_names;
+                            if let Some(next_inherited) = unpinned_inherited.take() {
+                                realigned = Some((next_inherited, Vec::new()));
+                            }
+                        } else {
+                            let (next_names, next_inherited, removed) = realign_changed_body_count(
+                                "",
+                                "",
+                                solidcraft_io::StepNames::default(),
+                                &f.body_names,
+                                &link.inherited,
+                                &feature.body_names,
+                                &other_bodies,
+                            );
+                            f.body_names = next_names;
+                            realigned = Some((next_inherited, removed));
+                        }
                     }
                     f.kind = kind;
                     f.link_faces = faces;
@@ -2063,22 +2071,34 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         let naming = link.step_names.as_deref().and_then(solidcraft_io::StepNames::parse).unwrap_or_default();
         let before = s.model.result(link.feature).map(|r| r.state.clone());
         let (old_names, other_bodies) = feature_body_context(s, link.feature);
+        let mut unpinned_inherited = if old_names.is_empty() && link.step_names.is_none() {
+            realign_unpinned_inherited(&s.doc, &link.inherited, &sf.body_names)
+        } else {
+            None
+        };
         if let Some(f) = s.doc_mut().feature_mut(link.feature) {
             if !same {
                 // Bodies keep their names where the design still has as many, also when it lists
                 // them in another order (#21371).
                 if old_names.len() != sf.body_names.len() {
-                    let (next_names, next_inherited, removed) = realign_changed_body_count(
-                        &old.0,
-                        &file.display().to_string(),
-                        naming,
-                        &old_names,
-                        &link.inherited,
-                        &sf.body_names,
-                        &other_bodies,
-                    );
-                    f.body_names = next_names;
-                    realigned = Some((next_inherited, removed));
+                    if old_names.is_empty() {
+                        f.body_names = sf.body_names;
+                        if let Some(next_inherited) = unpinned_inherited.take() {
+                            realigned = Some((next_inherited, Vec::new()));
+                        }
+                    } else {
+                        let (next_names, next_inherited, removed) = realign_changed_body_count(
+                            &old.0,
+                            &file.display().to_string(),
+                            naming,
+                            &old_names,
+                            &link.inherited,
+                            &sf.body_names,
+                            &other_bodies,
+                        );
+                        f.body_names = next_names;
+                        realigned = Some((next_inherited, removed));
+                    }
                 } else if let Some(order) = moved_bodies(&old.0, &file.display().to_string(), naming, &sf.body_names) {
                     f.body_names = reordered(&old_names, &order);
                     moved = Some(order);
@@ -2295,6 +2315,27 @@ fn feature_body_context(s: &Session, feature: u64) -> (Vec<String>, std::collect
     (effective, other_bodies)
 }
 
+/// When a link has no stored or evaluated body names yet (e.g. a file saved without linked bodies
+/// and empty `body_names`), keep its existing `inherited` baseline when the body count still
+/// matches; if the count changed, keep baselines only for slots whose names already exist in
+/// `doc.materials` and give brand-new body names a fresh baseline so they inherit from the source.
+fn realign_unpinned_inherited(doc: &Document, old_inherited: &[LinkedBodyProperties], new_names: &[String]) -> Option<Vec<LinkedBodyProperties>> {
+    if old_inherited.is_empty() || old_inherited.len() == new_names.len() {
+        return None;
+    }
+    Some(
+        new_names
+            .iter()
+            .enumerate()
+            .map(
+                |(i, name)| {
+                    if doc.materials.contains_key(name) { old_inherited.get(i).cloned().unwrap_or_default() } else { LinkedBodyProperties::default() }
+                },
+            )
+            .collect(),
+    )
+}
+
 /// Match each body of a linked design whose body count changed to its prior slot, if any.
 /// Surviving bodies keep their assembly name and inherited baseline (preserving local overrides);
 /// new bodies get a fresh baseline (`LinkedBodyProperties::default()`) so [`inherit_properties`]
@@ -2473,25 +2514,33 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     let mut inherited = link.inherited.clone();
     let mut removed = Vec::new();
     let (old_names, other_bodies) = feature_body_context(s, link.feature);
+    let mut unpinned_inherited = if old_names.is_empty() { realign_unpinned_inherited(&s.doc, &inherited, &sf.body_names) } else { None };
     if let Some(f) = s.doc_mut().feature_mut(link.feature) {
         // Both modes start as Relink always did; `sync` renames the bodies below.
         if old_names.len() != sf.body_names.len() {
-            let old_step = match &f.kind {
-                FeatureKind::Import { step, .. } => step.as_ref(),
-                _ => "",
-            };
-            let (next_names, next_inherited, gone) = realign_changed_body_count(
-                old_step,
-                &file.display().to_string(),
-                solidcraft_io::StepNames::default(),
-                &old_names,
-                &inherited,
-                &sf.body_names,
-                &other_bodies,
-            );
-            f.body_names = next_names;
-            inherited = next_inherited;
-            removed = gone;
+            if old_names.is_empty() {
+                f.body_names = sf.body_names;
+                if let Some(next_inherited) = unpinned_inherited.take() {
+                    inherited = next_inherited;
+                }
+            } else {
+                let old_step = match &f.kind {
+                    FeatureKind::Import { step, .. } => step.as_ref(),
+                    _ => "",
+                };
+                let (next_names, next_inherited, gone) = realign_changed_body_count(
+                    old_step,
+                    &file.display().to_string(),
+                    solidcraft_io::StepNames::default(),
+                    &old_names,
+                    &inherited,
+                    &sf.body_names,
+                    &other_bodies,
+                );
+                f.body_names = next_names;
+                inherited = next_inherited;
+                removed = gone;
+            }
         } else if let FeatureKind::Import { step, .. } = &f.kind
             && !same_import_source(&f.kind, &sf.kind)
             && let Some(order) = moved_bodies(step, &file.display().to_string(), solidcraft_io::StepNames::default(), &sf.body_names)
@@ -4453,6 +4502,67 @@ mod tests {
                 ("dup (3)".into(), "Steel".into()),
             ])
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn empty_stored_body_names_keep_inherited_baseline_on_open_update_and_relink() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-empty-names-baseline-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("inside")).unwrap();
+        std::fs::create_dir_all(dir.join("outside")).unwrap();
+
+        let part = dir.join("outside/part.sc");
+        let part_v2 = dir.join("outside/part_v2.sc");
+        let assembly = dir.join("inside/assembly.json");
+
+        save_material_boxes(&part, &[("Plate", 0.0, "Aluminum"), ("Block", 30.0, "Steel")]);
+        save_material_boxes(&part_v2, &[("Plate", 0.0, "Titanium"), ("Block", 30.0, "Brass")]);
+
+        let mut s = Session::default();
+        let comp = run(&mut s, "component.insert_design", json!({"path": part}))["component"].as_u64().unwrap();
+        let feat = s.doc.links[&comp].feature;
+        run(&mut s, "material.assign", json!({"bodies": ["Block"], "material": "Copper"}));
+        run(&mut s, "file.save", json!({"path": assembly, "linked_bodies": false}));
+
+        // Simulate a saved document whose link kept its inherited baseline but has empty stored `body_names`.
+        let mut disk = solidcraft_io::read_design(&std::fs::read(&assembly).unwrap()).unwrap();
+        disk.feature_mut(feat).unwrap().body_names.clear();
+        std::fs::write(&assembly, solidcraft_io::write_design(&disk).unwrap()).unwrap();
+
+        // Update source material Aluminum -> Steel while Block is locally overridden to Copper.
+        save_material_boxes(&part, &[("Plate", 0.0, "Steel"), ("Block", 30.0, "Oak")]);
+
+        // 1. Opening with `linked_bodies: "all"` runs `read_left_out_bodies` with empty stored `body_names`.
+        let mut opened = Session::default();
+        run(&mut opened, "doc.open", json!({"path": assembly}));
+        let updated = run(&mut opened, "component.update_links", json!({}));
+        assert_eq!(updated["updated"], json!(["part"]), "{updated}");
+        assert_eq!(
+            component_materials(&opened, comp),
+            std::collections::BTreeMap::from([("Block".into(), "Copper".into()), ("Plate".into(), "Steel".into())])
+        );
+
+        // 2. Opening with `linked_bodies: "folder"` leaves the outside link unevaluated with empty `body_names`;
+        //    `update_links` still preserves the baseline so Plate follows Aluminum -> Steel and Block keeps Copper.
+        let mut deferred_update = Session::default();
+        run(&mut deferred_update, "doc.open", json!({"path": assembly, "linked_bodies": "folder"}));
+        let updated = run(&mut deferred_update, "component.update_links", json!({}));
+        assert_eq!(updated["updated"], json!(["part"]), "{updated}");
+        assert_eq!(
+            component_materials(&deferred_update, comp),
+            std::collections::BTreeMap::from([("Block".into(), "Copper".into()), ("Plate".into(), "Steel".into())])
+        );
+
+        // 3. Relinking from the same unevaluated empty-`body_names` state also preserves the baseline.
+        let mut deferred_relink = Session::default();
+        run(&mut deferred_relink, "doc.open", json!({"path": assembly, "linked_bodies": "folder"}));
+        run(&mut deferred_relink, "component.relink", json!({"component": comp, "path": part_v2}));
+        assert_eq!(
+            component_materials(&deferred_relink, comp),
+            std::collections::BTreeMap::from([("Block".into(), "Copper".into()), ("Plate".into(), "Titanium".into())])
+        );
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
