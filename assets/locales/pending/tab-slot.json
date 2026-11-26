@@ -18,7 +18,7 @@
     "ui.tab_slot.tab_plates_tip": "Pick the plates whose edges get tabs",
     "ui.tab_slot.slot_plates_tip": "Pick the plates that get the slots",
     "ui.tab_slot.count_tip": "How many tabs on each stretch where the plates meet. Empty: as many as fit",
-    "ui.tab_slot.spacing_tip": "Distance from one tab's centre to the next. Empty: as many as fit",
+    "ui.tab_slot.spacing_tip": "Distance from one tab's center to the next. Empty: as many as fit",
     "ui.tab_slot.tab_width_tip": "Width of each tab along the edge. Empty: three times the plate's thickness",
     "ui.tab_slot.end_distance_tip": "From the end of a stretch to the nearest tab. Empty: the tab width",
     "ui.tab_slot.clearance_tip": "Room on every side of a tab in its slot, so the parts fit together",

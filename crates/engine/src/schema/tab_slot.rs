@@ -35,7 +35,7 @@ pub struct TabSlotParams {
     /// Tabs per stretch, a whole number 1 to 100. Not with `spacing`. Default: as many as fit.
     #[serde(default)]
     pub count: Option<NumberExpr>,
-    /// Centre to centre between tabs, more than 0. Not with `count`.
+    /// Center to center between tabs, more than 0. Not with `count`.
     #[serde(default)]
     pub spacing: Option<LengthExpr>,
     /// A tab's width, more than 0. Default: three times the tab plate's thickness.

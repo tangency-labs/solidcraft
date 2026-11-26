@@ -1949,7 +1949,7 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(unitless = "Tabs Per Stretch")]
         count: Option<Expr>,
-        /// Centre to centre between tabs, instead of a count.
+        /// Center to center between tabs, instead of a count.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Spacing")]
         spacing: Option<Expr>,
