@@ -225,6 +225,16 @@ fn pan_follows_the_pointer_and_keeps_the_panned_point_centred() {
         let z = project(&m, p)[2];
         assert!((0.0..=1.0).contains(&z), "{p:?} clipped at depth {z}");
     }
+    // Re-anchoring an active pan after zoom keeps the next drag 1:1 from the new scale without jumping.
+    let mut zoom_pan = Orbit::default();
+    let p1 = zoom_pan.pan_start(200.0, 150.0, 400.0, 300.0).unwrap();
+    zoom_pan.pan_to(&p1, 280.0, 150.0, 400.0, 300.0);
+    zoom_pan.zoom_by(2.0);
+    let before_next = project(&zoom_pan.matrices(radius, 4.0 / 3.0), [0.0; 3]);
+    let p2 = zoom_pan.pan_start(280.0, 150.0, 400.0, 300.0).unwrap();
+    zoom_pan.pan_to(&p2, 281.0, 150.0, 400.0, 300.0);
+    let after_next = project(&zoom_pan.matrices(radius, 4.0 / 3.0), [0.0; 3]);
+    assert!(((after_next[0] - before_next[0]) - 2.0 / 400.0).abs() < 1e-4, "{before_next:?} -> {after_next:?}");
     // Reset restores the default isometric view, target and zoom.
     orbit.reset();
     assert_eq!(orbit, Orbit::default());

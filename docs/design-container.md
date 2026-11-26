@@ -331,8 +331,8 @@ authoritative document opening.
 On macOS, SolidCraft.app carries two Quick Look extensions (`apps/solidcraft-quicklook`): Finder
 shows this picture as the design's icon, and Space shows the design's saved display meshes
 (see "Provisional saved display") in a 3D view turned by dragging, panned by Shift-dragging,
-right-dragging or middle-dragging, zoomed by scrolling or pinching, and reset by double-clicking,
-or this picture when the design has none. They read the container with
+right-dragging or middle-dragging, zoomed by scrolling or pinching, and reset by
+Option-double-clicking or middle double-clicking, or this picture when the design has none. They read the container with
 `crates/design-preview`, which has no kernel and bounds every read as the writers do; they check
 the container format, the PNG header and size and every mesh blob, but not the caches' keys or
 build: a stale picture or mesh there only shows an older look. Core Graphics scales the PNG, and
