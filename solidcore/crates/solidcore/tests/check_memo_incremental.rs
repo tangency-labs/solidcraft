@@ -280,6 +280,33 @@ fn a_vertex_with_another_cached_gap_is_tested_again() {
     assert_eq!(on(&mut k, &stale), want);
 }
 
+/// A plate with a corner moved 3e-4 is valid at the default body tolerance (the check may
+/// grow the vertex's tolerance up to Test #82's limit, `LARGE_SMALL_SIZE_RATIO` times the
+/// body's tolerance, 0.01) and checked clean. The same plate with a body tolerance of 1e-7
+/// has a limit of 1e-4, which the move passes: the body tolerance is read by the vertex
+/// tests, so the incremental check must not skip them as the clean plate it looks like.
+#[test]
+fn another_body_tolerance_is_tested_again() {
+    let moved = |tolerance: Option<f64>| {
+        move || {
+            let mut b = plate(2);
+            let v = b.vertex_list()[0];
+            move_vertex(&mut b, v, 3e-4);
+            if let Some(t) = tolerance {
+                b.set_tolerance(t);
+            }
+            b
+        }
+    };
+    let mut k = Kernel::default();
+    assert!(full(&moved(None)).is_empty(), "the moved plate is valid");
+    assert!(on(&mut k, &moved(None)).is_empty());
+    let tight = moved(Some(1e-7));
+    let want = full(&tight);
+    assert!(!want.is_empty(), "the tight plate is valid");
+    assert_eq!(on(&mut k, &tight), want);
+}
+
 #[test]
 fn every_vendored_body_checks_the_same_incrementally() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
