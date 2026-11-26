@@ -14,12 +14,12 @@
         "hardware_notes": false,
         "sources": [
           {
-            "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+            "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
             "read": "2026-11-25",
             "says": "every cut path on one designated cut layer, with construction geometry and notes on other layers or deleted: a single-layer file has no other layer, so it leaves bend lines and notes out"
           },
           {
-            "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+            "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
             "read": "2026-11-25",
             "says": "all cut-path geometry on the same layer; guides, construction lines and notes moved off it or deleted"
           }
@@ -30,12 +30,12 @@
           "id": "file.one_body",
           "sources": [
             {
-              "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+              "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
               "read": "2026-11-25",
               "says": "each STEP file holds exactly one solid sheet-metal body; multi-body solids and assemblies are not processed in one part file"
             },
             {
-              "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+              "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
               "read": "2026-11-25",
               "says": "the STEP file holds a single solid sheet-metal body; files with several bodies or assemblies do not upload"
             }
@@ -45,12 +45,12 @@
           "id": "file.uniform_thickness",
           "sources": [
             {
-              "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+              "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-file-requirements",
               "read": "2026-11-25",
               "says": "for a part bent in one piece, every feature is modelled at the same sheet thickness; thicknesses are the listed stock"
             },
             {
-              "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+              "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
               "read": "2026-11-25",
               "says": "thickness is uniform, with a face at every edge, and modelled at the stock thickness that will be ordered"
             }
@@ -66,17 +66,17 @@
               "relative_to": "thickness",
               "sources": [
                 {
-                  "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
                   "read": "2026-11-25",
                   "says": "laser holes at least 0.5 times the thickness (capability table), at least 50% of the thickness in the guide"
                 },
                 {
-                  "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+                  "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
                   "read": "2026-11-25",
                   "says": "laser holes and cut-outs at least 50% of the material thickness; the exact figure per material is on each material page"
                 },
                 {
-                  "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+                  "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-guidelines",
                   "read": "2026-11-25",
                   "says": "cutting holes at least half the sheet thickness"
                 }
@@ -86,7 +86,7 @@
               "value": 1.0,
               "sources": [
                 {
-                  "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+                  "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-guidelines",
                   "read": "2026-11-25",
                   "says": "cutting holes also at least 1 mm across, whatever the thickness"
                 }
@@ -104,7 +104,7 @@
               "relative_to": "thickness",
               "sources": [
                 {
-                  "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+                  "url": "https://jlccnc.com/blog/sheet-metal-design",
                   "read": "2026-11-25",
                   "says": "hole edge to sheet edge at least 1.5 times the thickness; more for heavily formed or loaded parts (blog)"
                 }
@@ -115,7 +115,7 @@
               "relative_to": "thickness",
               "sources": [
                 {
-                  "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+                  "url": "https://sendcutsend.com/materials/5052-aluminum/",
                   "read": "2026-11-25",
                   "says": "a hole at least 2 times the thickness from an edge (this one material page; the guideline page gives no figure)"
                 }
@@ -133,12 +133,12 @@
               "relative_to": "thickness",
               "sources": [
                 {
-                  "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/bending.html",
                   "read": "2026-11-25",
                   "says": "holes at least 2 times the thickness from the bend line as a starting point; the page adds that the hole edge to the bend region is what counts, and that tight radii or large holes call for more"
                 },
                 {
-                  "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+                  "url": "https://jlccnc.com/blog/sheet-metal-design",
                   "read": "2026-11-25",
                   "says": "hole edge to the bend tangent line at least 2 times the thickness (rules table; its mistakes table says 1.5 to 2 times)"
                 }
@@ -150,7 +150,7 @@
               "plus_radius": 1.0,
               "sources": [
                 {
-                  "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
                   "read": "2026-11-25",
                   "says": "hole to bend line at least 2 times the thickness plus the bend radius (formula in the bending section)"
                 }
@@ -168,7 +168,7 @@
               "relative_to": "thickness",
               "sources": [
                 {
-                  "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+                  "url": "https://jlccnc.com/blog/sheet-metal-design",
                   "read": "2026-11-25",
                   "says": "flange at least 3 times the thickness; varies with press brake tooling and die width"
                 }
@@ -179,7 +179,7 @@
               "relative_to": "thickness",
               "sources": [
                 {
-                  "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
                   "read": "2026-11-25",
                   "says": "minimum flange length is 4 times the thickness, so the flange sits stably on the lower die"
                 }
@@ -191,12 +191,12 @@
           "id": "thread.modelling",
           "sources": [
             {
-              "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+              "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/tapping.html",
               "read": "2026-11-25",
               "says": "the tap-size pilot hole is what goes in the 2D or 3D model (a drill chart is given); the page does not say to model the thread itself"
             },
             {
-              "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+              "url": "https://sendcutsend.com/services/tapping/",
               "read": "2026-11-25",
               "says": "model a plain hole at the size listed for the tap; the laser-cut hole is resized to the drill size automatically"
             }
@@ -207,12 +207,12 @@
           "id": "file.dxf_single_layer",
           "sources": [
             {
-              "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+              "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
               "read": "2026-11-25",
               "says": "all final cut paths go on one designated cut layer; construction geometry and notes go on other layers or are deleted"
             },
             {
-              "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+              "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
               "read": "2026-11-25",
               "says": "all cut-path geometry on the same layer; guides and construction lines moved off it or deleted"
             }
@@ -222,12 +222,12 @@
           "id": "file.dxf_closed_contours",
           "sources": [
             {
-              "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+              "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
               "read": "2026-11-25",
               "says": "every cut path forms a fully closed shape; duplicate, overlapping and intersecting entities are deleted"
             },
             {
-              "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+              "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
               "read": "2026-11-25",
               "says": "every cut path is a closed shape; no shared or overlapping lines inside a part"
             }
@@ -237,12 +237,12 @@
           "id": "file.text_outlined",
           "sources": [
             {
-              "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+              "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
               "read": "2026-11-25",
               "says": "all text converted to vector outlines; editable text cannot be recognised as cutting geometry"
             },
             {
-              "url": "https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/shop-rules.md",
+              "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
               "read": "2026-11-25",
               "says": "text converted to outlines; text that can still be edited does not cut"
             }
