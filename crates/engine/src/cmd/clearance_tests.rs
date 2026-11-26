@@ -1,4 +1,4 @@
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::Session;
 
@@ -612,7 +612,7 @@ fn unchecked_pairs_are_excluded_from_nearest() {
     use solidcore_record::Vec3;
     use solidcraft_geom::Aabb3;
 
-    use super::{PairContext, PairResult, collect_pair_results};
+    use super::{collect_pair_results, PairContext, PairResult};
 
     let bx = |x0: f64, x1: f64| Aabb3 { min: Vec3::new(x0, 0.0, 0.0), max: Vec3::new(x1, 10.0, 10.0) };
     // A overlaps B and D (both unchecked) and sits 5 mm clear of C; B touches C (0 mm) and D.
@@ -1061,7 +1061,7 @@ fn unchecked_pair_carries_non_boolean_distance_while_staying_excluded_from_neare
     use solidcraft_geom::Aabb3;
     use solidcraft_kernel::BodyDistance;
 
-    use super::{PairContext, PairResult, collect_pair_results};
+    use super::{collect_pair_results, PairContext, PairResult};
 
     let bx = |x0: f64, x1: f64| Aabb3 { min: Vec3::new(x0, 0.0, 0.0), max: Vec3::new(x1, 10.0, 10.0) };
     let names = ["A", "B", "C", "D"];
@@ -1106,8 +1106,8 @@ fn unchecked_pair_carries_non_boolean_distance_while_staying_excluded_from_neare
 #[test]
 fn memory_policy_scales_concurrency_chunks_and_refuses_below_headroom_floor() {
     use super::{
-        DEFAULT_CHUNK_PAIRS, MAX_CLEARANCE_THREADS, MAX_SHAPE_CACHE_BYTES, MIN_HEADROOM_BYTES, MIN_SHAPE_CACHE_BYTES, check_memory_headroom,
-        chunk_size_for_memory, clearance_worker_limit, shape_cache_budget,
+        check_memory_headroom, chunk_size_for_memory, clearance_worker_limit, shape_cache_budget, DEFAULT_CHUNK_PAIRS, MAX_CLEARANCE_THREADS,
+        MAX_SHAPE_CACHE_BYTES, MIN_HEADROOM_BYTES, MIN_SHAPE_CACHE_BYTES,
     };
 
     const GB: u64 = 1 << 30;
@@ -1228,9 +1228,12 @@ fn chunked_clearance_across_many_close_pairs_matches_exact_results() {
     assert!((f(&overlaps[0]["volume_mm3"]) - 0.2).abs() < 1e-6, "{r}");
     let near = r["near"].as_array().cloned().unwrap_or_default();
     assert_eq!(near.len(), 80, "all 80 non-overlapping pairs are within 20 mm: {r}");
-    // M1's nearest fixed neighbour is F1 at exactly 1.0 mm.
-    assert_eq!(r["nearest"]["M1"][0]["body"], "F1", "{r}");
-    assert!((f(&r["nearest"]["M1"][0]["distance_mm"]) - 1.0).abs() < 1e-6, "{r}");
+    // M1's nearest fixed neighbour is F0 (X overlaps [0.8, 1.0], Y gap = 0.5 mm);
+    // M2's nearest fixed neighbour is F2 at exactly 1.0 mm along X.
+    assert_eq!(r["nearest"]["M1"][0]["body"], "F0", "{r}");
+    assert!((f(&r["nearest"]["M1"][0]["distance_mm"]) - 0.5).abs() < 1e-6, "{r}");
+    assert_eq!(r["nearest"]["M2"][0]["body"], "F2", "{r}");
+    assert!((f(&r["nearest"]["M2"][0]["distance_mm"]) - 1.0).abs() < 1e-6, "{r}");
 }
 
 /// Under severe host memory pressure, `inspect.clearance` returns a structured error instead of
