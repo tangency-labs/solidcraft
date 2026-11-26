@@ -23,7 +23,7 @@
 //! its counterparts in every section (a line between two sections; the kernel's interpolation
 //! of degree `min(3, sections - 1)` at the sections' parameters across more). A rail meets each
 //! section where it crosses the section's plane, at a point of the section's curves within the
-//! body tolerance ([`crate::kernel::Tolerances::zone_tol_3d`]); that point, as a wire parameter
+//! loft's tolerance ([`RailLoftOptions::tolerance`]); that point, as a wire parameter
 //! (the curve's index plus the fraction of its parameter range), is the point the rail guides.
 //! A station at `v`, `f` of the way across its span, takes the plain loft there, the guided
 //! point at the wire parameter `f` of the way between the span's two, and the rail's crossing
@@ -57,7 +57,7 @@
 //! **Refused**, naming why: no section or one, no rail or more than sixteen; sections whose curves
 //! do not pair (counts, degrees, knots or weights differing by more than `1e-9` relative,
 //! SolidCraft's convention); two sections on top of each other; a rail not crossing a section's
-//! plane exactly once, or crossing it farther than the body tolerance from its curves; two
+//! plane exactly once, or crossing it farther than the loft's tolerance from its curves; two
 //! rails at one point of a section; a rail through the stations' middle, or two rails meeting
 //! (the station shrinks to nothing, within `1e-6` of the loft's size, SolidCraft's convention);
 //! a tolerance not finite and positive.
@@ -781,7 +781,7 @@ impl<'a> Loft<'a> {
 
     /// Where each rail meets each section (module docs).
     fn anchor_rails(&self, k: &Kernel) -> Result<Vec<Vec<Anchor>>> {
-        let tol = k.tolerances.zone_tol_3d;
+        let tol = self.tolerance;
         let mut out = Vec::new();
         for rail in self.rails {
             let mut anchors = Vec::new();
