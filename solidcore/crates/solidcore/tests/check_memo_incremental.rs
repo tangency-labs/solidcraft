@@ -24,7 +24,7 @@ use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::brep::validation::{
-    check_brep, check_brep_full, CheckLevel, ValidityScope,
+    check_brep, check_brep_full, update_tolerances_after_boolean, CheckLevel, ValidityScope,
 };
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
@@ -348,4 +348,115 @@ fn every_vendored_body_checks_the_same_incrementally() {
     }
     assert!(read >= 20, "only {read} bodies read");
     assert!(valid >= 5, "only {valid} of {read} bodies valid");
+}
+
+/// A kernel with the memo off.
+fn memo_off() -> Kernel {
+    Kernel {
+        memoize_curve_caches: false,
+        ..Kernel::default()
+    }
+}
+
+/// Every vertex's and edge's tolerance of `b`, in list order, bit for bit.
+fn tolerances(b: &Brep) -> (Vec<u64>, Vec<u64>) {
+    let v = b
+        .vertex_list()
+        .iter()
+        .map(|&v| b.vertex(v).unwrap().tolerance.to_bits())
+        .collect();
+    let e = b
+        .edge_list()
+        .iter()
+        .map(|&e| {
+            solidcore::topology::edge::tolerance(b, e)
+                .unwrap()
+                .to_bits()
+        })
+        .collect();
+    (v, e)
+}
+
+/// A boolean result's tolerance update ([`update_tolerances_after_boolean`]) of a fresh body
+/// from `make`: with the memo off, the tolerances it leaves; on `k`, the same tolerances.
+fn update_same(label: &str, make: &dyn Fn() -> Brep, k: &mut Kernel) {
+    let mut off = memo_off();
+    let mut want = make();
+    update_tolerances_after_boolean(&mut off, &mut want).unwrap();
+    let mut got = make();
+    update_tolerances_after_boolean(k, &mut got).unwrap();
+    assert_eq!(tolerances(&got), tolerances(&want), "{label}");
+}
+
+/// The tolerance update after a boolean, run twice on one kernel on fresh builds of a body:
+/// the second skips the edge use pairs the first found clean, and both leave every tolerance as the
+/// update with the memo off does. The primitives, a boolean result, plates and every
+/// vendored body.
+#[test]
+fn the_tolerance_update_skips_clean_faces_and_grows_the_same() {
+    let mut k = Kernel::default();
+    update_same("box less cylinder", &holed_block, &mut k);
+    update_same("box less cylinder again", &holed_block, &mut k);
+    for n in [1, 2, 4] {
+        update_same(&format!("{n} by {n} holes"), &|| plate(n), &mut k);
+        update_same(&format!("{n} by {n} holes again"), &|| plate(n), &mut k);
+    }
+    assert!(
+        k.check_memo.borrow().update_skips() > 0,
+        "no pair was skipped"
+    );
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for dir in [root.join("tests/data"), root.join("../../fixtures")] {
+        for path in smb_files(&dir) {
+            let bytes = std::fs::read(&path).unwrap();
+            if read_smb(bytes.clone()).is_none() {
+                continue;
+            }
+            let make = || read_smb(bytes.clone()).unwrap();
+            let mut k = Kernel::default();
+            let label = path.display().to_string();
+            // a body the update cannot run on is refused the same way with the memo on
+            let mut off = memo_off();
+            let mut b = make();
+            if update_tolerances_after_boolean(&mut off, &mut b).is_err() {
+                assert!(
+                    update_tolerances_after_boolean(&mut k, &mut make()).is_err(),
+                    "{label}"
+                );
+                continue;
+            }
+            update_same(&label, &make, &mut k);
+            update_same(&label, &make, &mut k);
+        }
+    }
+}
+
+/// A plate whose update found it clean, then the same plate with a vertex use caching a
+/// vertex/face gap of 1, which the update reads as it is and grows the vertex for: the memo
+/// must not skip that vertex's pairs as the clean ones they look like, so the vertex grows as with the
+/// memo off.
+#[test]
+fn the_tolerance_update_grows_a_vertex_whose_cached_gap_is_wide() {
+    let stale = || {
+        let mut b = plate(2);
+        let v = b.vertex_list()[0];
+        for vu in b.vertex(v).unwrap().vertexuses.clone() {
+            let u = b.vertexuse_mut(vu).unwrap();
+            u.vertex_face_gap.vertexuse = Some(vu);
+            u.vertex_face_gap.gap_3d = 1e-3;
+        }
+        b
+    };
+    let mut k = Kernel::default();
+    update_same("plate", &|| plate(2), &mut k);
+    let mut off = memo_off();
+    let mut want = stale();
+    let before = tolerances(&want);
+    update_tolerances_after_boolean(&mut off, &mut want).unwrap();
+    assert_ne!(
+        tolerances(&want),
+        before,
+        "the wide cached gap grew nothing"
+    );
+    update_same("stale plate", &stale, &mut k);
 }
