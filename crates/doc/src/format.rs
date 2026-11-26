@@ -2138,6 +2138,9 @@ mod tests {
                         to_offset: Some("offset + 1 mm".into()),
                         from: Some(crate::FacePick(solidcore_record::Vec3::new(0.0, 0.0, 5.0))),
                         to_body_apart: false,
+                        through_all2: false,
+                        to2: None,
+                        to_offset2: None,
                         from_level: false,
                         picked_placements: Vec::new(),
                         one_sided_direction: None,
@@ -2445,7 +2448,7 @@ mod tests {
         legacy["format"] = Value::from("solidcraft/6");
         let original_table = legacy["configs"].clone();
         let upgraded = read(&legacy.to_string()).unwrap();
-        d.features.iter_mut().for_each(|f| (f.shell_piece_order, f.kernel_piece_order) = (true, true));
+        d.features.iter_mut().for_each(|f| (f.shell_piece_order, f.kernel_piece_order, f.least_face_piece_order) = (true, true, true));
         assert_eq!(upgraded, d, "the identity migration preserves the complete design");
         assert_eq!(serde_json::to_value(&upgraded.configs).unwrap(), original_table);
         assert_eq!(upgraded.format, format_string(FORMAT));
@@ -2504,10 +2507,11 @@ mod tests {
         pieces_in_shell_order(&mut features);
         for f in features.as_array_mut().into_iter().flatten() {
             f["kernel_piece_order"] = Value::Bool(true);
+            f["least_face_piece_order"] = Value::Bool(true);
         }
         let params = legacy["params"].clone();
         let upgraded = read(&legacy.to_string()).unwrap();
-        d.features.iter_mut().for_each(|f| (f.shell_piece_order, f.kernel_piece_order) = (true, true));
+        d.features.iter_mut().for_each(|f| (f.shell_piece_order, f.kernel_piece_order, f.least_face_piece_order) = (true, true, true));
         assert_eq!(upgraded, d);
         let upgraded_json: Value = serde_json::from_str(&upgraded.to_json()).unwrap();
         assert_eq!(upgraded_json["features"], features);
