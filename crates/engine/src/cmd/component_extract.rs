@@ -521,6 +521,7 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
         g.features.retain(|f| sc.inside.contains(f));
     }
     part.named_views.clear();
+    part.home_view = None;
     part.saved_sections.clear();
     part.configs = Default::default();
     part.assembly = Default::default();
