@@ -502,7 +502,10 @@ fn extrude_base(s: &Session, p: &Value) -> Option<(Vec3, Vec3)> {
         ProfileSel::All => ps.first()?.region.interior_point(),
         ProfileSel::Indices { indices } => ps.get(*indices.first()?)?.region.interior_point(),
         ProfileSel::Points { points } => *points.first()?,
-        selection @ (ProfileSel::Curves { .. } | ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. }) => {
+        selection @ (ProfileSel::Curves { .. }
+        | ProfileSel::OffsetBoundaries { .. }
+        | ProfileSel::WholeBoundaries { .. }
+        | ProfileSel::SidedCurves { .. }) => {
             let indices = solidcraft_doc::profile_selection_indices(ss, &selection).ok()?;
             ps.get(*indices.first()?)?.region.interior_point()
         }
@@ -794,7 +797,7 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind, exact: bool) 
                 *sel = selection;
                 continue;
             }
-            ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } => {
+            ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } | ProfileSel::SidedCurves { .. } => {
                 // Explicit identities retain the caller's semantics. Validate through the
                 // same resolver as recomputation, including reserved-role precedence.
                 solidcraft_doc::profile_selection_indices(ss, sel)?;
@@ -805,11 +808,12 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind, exact: bool) 
         let picked = if exact { indices.clone() } else { drawn_profile_regions(ss, &indices) };
         let captured = solidcraft_doc::capture_profile_selection(ss, &picked)?;
         // Twins (regions the curves around them can't tell apart, such as the halves of a lens a
-        // line cuts) are captured by their numbers, which name other regions or none once a
-        // parameter changes the sketch's regions. A pick by points keeps its points instead: each
-        // finds the region it lies in (#22390).
+        // line cuts) are captured by the sides of those curves they lie on (#22548), or else by
+        // their numbers, which name other regions or none once a parameter changes the sketch's
+        // regions. A pick by points keeps its points instead: each finds the region it lies in
+        // (#22390).
         let captured = match (captured, given_points) {
-            (ProfileSel::Indices { .. }, Some(points)) if picked == indices => ProfileSel::Points { points },
+            (ProfileSel::Indices { .. } | ProfileSel::SidedCurves { .. }, Some(points)) if picked == indices => ProfileSel::Points { points },
             (captured, _) => captured,
         };
         *sel = match captured {
@@ -931,6 +935,9 @@ pub(crate) fn profiles(p: &Value, cmd: &str) -> Result<ProfileSel> {
         Value::Object(fields) => {
             if fields.get("type").and_then(Value::as_str) == Some("whole_boundaries") {
                 return solidcraft_doc::whole_profile_selection_from_value(v).map_err(|error| bad(cmd, error.to_string()));
+            }
+            if fields.get("type").and_then(Value::as_str) == Some("sided_curves") {
+                return solidcraft_doc::sided_curves_selection_from_value(v).map_err(|error| bad(cmd, error.to_string()));
             }
             if !fields.contains_key("offset_boundaries") && fields.get("type").and_then(Value::as_str) != Some("offset_boundaries") {
                 return Err(bad(
