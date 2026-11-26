@@ -145,6 +145,9 @@ impl SearchBox {
         let response = ui
             .scope_builder(egui::UiBuilder::new().max_rect(editor), |ui| {
                 ui.set_clip_rect(ui.clip_rect().intersect(editor));
+                // As in command search: egui 0.37 floors a text edit's height at the theme's
+                // interact height, which centered the text below the field's middle (#22642).
+                ui.spacing_mut().interact_size.y = editor.height();
                 let mut response = ui.add_sized(
                     editor.size(),
                     // As tall as the frame, not a field's height: the editor stays inside its box.
