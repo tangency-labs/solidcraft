@@ -6508,7 +6508,9 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                 }
             }
         }
-        Ok(true)
+        // Not the fork's (#2784): a band that reaches another blended edge of its face
+        // takes the face whole, whatever the face's kind
+        Ok(!self.bands_reach_blended_edges(k, solvers)?)
     }
     fn geometry_ease_set_back_sections(
         &mut self,
@@ -7051,6 +7053,79 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
             }
         }
         Ok(true)
+    }
+}
+
+impl SessionObjects<'_> {
+    /// Not the fork's (#2784): whether a blend's band reaches across a face it rolls on to
+    /// another blended edge of that face that shares no vertex with its own (the two rims of
+    /// a disc no higher than the blends). The band check (`BandsClearOtherRails`) drops a
+    /// sample of a rail that lies off the face, so a rail on the far edge or past it, with
+    /// each band taking the whole face, went on to a build that failed. The middle of the
+    /// rail's kept part is judged: it takes the face whole where it lies on the other edge,
+    /// or off the face past the other edge, seen from its own. Edges are paired as the
+    /// bands' contact size pairs them (`creation_bands_meet`): two closed edges without
+    /// vertices (a washer's rims) are judged too.
+    ///
+    /// # Errors
+    /// Those of the rails' gathering, the evaluations and the face's classification.
+    fn bands_reach_blended_edges(
+        &mut self,
+        k: &mut Kernel,
+        solvers: &[FilletObject],
+    ) -> Result<bool> {
+        let (rails, edges, tol) = band_rails(self, k, solvers)?;
+        let mut edge_curves = Vec::new();
+        for &(e, _) in &edges {
+            let edge = self.target.edge(e)?;
+            let curve = edge
+                .curve
+                .clone()
+                .ok_or_else(|| invalid("filleted edge without curve"))?;
+            edge_curves.push((curve, edge.interval));
+        }
+        for (a, &(edge_a, ends_a)) in edges.iter().enumerate() {
+            for (b, &(edge_b, ends_b)) in edges.iter().enumerate() {
+                if a == b
+                    || edge_a == edge_b
+                    || ends_a.iter().flatten().any(|v| ends_b.contains(&Some(*v)))
+                {
+                    continue; // a corner trims them where they meet
+                }
+                let (Some(rails_a), Some(rails_b)) = (rails.get(a), rails.get(b)) else {
+                    continue;
+                };
+                let (Some((curve_ea, ivl_ea)), Some((curve_eb, ivl_eb))) =
+                    (edge_curves.get(a), edge_curves.get(b))
+                else {
+                    continue;
+                };
+                for (face, curve_a, kept_a) in rails_a {
+                    if !rails_b.iter().any(|(f, _, _)| f == face) {
+                        continue;
+                    }
+                    let p = curve_a.evaluate_point(k, kept_a.evaluate(0.5))?;
+                    let (on_a, on_b) = (
+                        drop_onto_edge(k, curve_ea, ivl_ea, p)?,
+                        drop_onto_edge(k, curve_eb, ivl_eb, p)?,
+                    );
+                    if !on_a.success || !on_b.success {
+                        continue;
+                    }
+                    let e_a = curve_ea.evaluate_point(k, on_a.parameter)?;
+                    let e_b = curve_eb.evaluate_point(k, on_b.parameter)?;
+                    // past edge `b` seen from edge `a`: `e_b` on the way from `e_a` to `p`
+                    let beyond =
+                        (p - e_b).length() + (e_b - e_a).length() <= (p - e_a).length() + tol;
+                    if (p - e_b).length() <= tol
+                        || (beyond && sample_off_face(k, self.target, *face, p)?)
+                    {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+        Ok(false)
     }
 }
 

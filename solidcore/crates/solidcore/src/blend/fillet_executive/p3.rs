@@ -3626,20 +3626,45 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             // (NoteFitOfPolygonsTakenWhole) and a plane bounded by one blended circle (the ball
             // touching it at the centre); open, so less the fit margin
             let solvers = self.solvers.clone();
-            for (best, solver, _) in access.creation_polygons_taken_whole(k, &solvers)? {
+            let polygons = access.creation_polygons_taken_whole(k, &solvers)?;
+            let no_polygon = polygons.is_empty();
+            for (best, solver, _) in polygons {
                 self.note_open_fit(access, true, best, FitKind::Radius, solver)?;
             }
-            for solver in solvers {
+            for &solver in &solvers {
                 for (fit, edge) in access.creation_circle_tops(k, solver)? {
                     if self.fit_radius < 0.0 || fit < self.fit_radius {
                         self.note_fit_radius(fit, Some(edge), FitKind::Radius);
                     }
                 }
             }
-            return self.record_no_room(
+            // Not the fork's (#2784): a face of any kind taken whole by bands that reach its
+            // other blended edges (a disc's side, both rims blended by its height or more)
+            // fits only where those bands still meet: their contact size, where less, and
+            // located there as `refuse_overlapping_bands` locates it. A polygon taken whole
+            // keeps its own event's size.
+            let mut site = None;
+            if no_polygon {
+                for fit in access.creation_bands_meet(k, &solvers)? {
+                    if self.fit_radius < 0.0 || fit.size < self.fit_radius {
+                        self.note_fit_radius(fit.size, Some(fit.edge), fit.kind);
+                        site = Some(fit);
+                    }
+                }
+            }
+            let refused = self.record_no_room(
                 NoRoomReason::FaceConsumed,
                 "Fillet Error: the blends take the whole of a face they roll on, some at an angle to it (the blend is larger than the faces allow)",
             );
+            if let Some(fit) = site {
+                self.error.edge = Some(fit.edge);
+                self.error.vertex = None;
+                self.error.end_face = None;
+                self.error.side_face = fit.face;
+                self.error.location = fit.at;
+                self.error.no_room_without_site = false;
+            }
+            return refused;
         }
         Ok(())
     }
