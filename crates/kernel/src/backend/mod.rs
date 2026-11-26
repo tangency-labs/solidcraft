@@ -10,11 +10,18 @@
 use solidcore_record::brep::Brep;
 use solidcraft_kernel_api::{Backend, BackendError, BackendId, Exported, OpKind, Support};
 
+mod affine;
 mod cell_grid;
+mod curves;
+mod develop;
 mod exchange;
 mod frames;
+mod hole_stacks;
 mod modelling;
 mod planar;
+mod points;
+mod projection;
+mod query;
 
 use crate::body::Body;
 use crate::{KernelError, Result};

@@ -4,7 +4,8 @@
 //! ([`Plane`]) and planar profiles ([`Seg2`], [`Loop2`], [`Region2`]), and STEP's Part 21
 //! exchange structure as parsed from a file with the units of its representation contexts and
 //! its Part 42 curves and surfaces ([`step`]), a sheet metal part's surfaces and its flat
-//! pattern ([`develop`]), frame-stock paths, trimmed members and gussets ([`frame`]), planar
+//! pattern ([`develop`]), frame-stock paths, trimmed members and gussets ([`frame`]), hole stacks
+//! through touching bodies ([`hole_stacks`]), curve queries' answers ([`curve_query`]), planar
 //! projections and outlines ([`projection`]), and how exactly a drawn curve stands for its source
 //! ([`CurveAccuracy`]).
 //!
@@ -23,11 +24,13 @@ pub mod accuracy;
 #[allow(missing_docs)]
 pub mod brep;
 pub mod cell_grid;
+pub mod curve_query;
 // A sheet metal part's surfaces are SolidCraft's saved-model wire format, carried over as it is:
 // each type says what it is, and its fields are the names it says.
 #[allow(missing_docs)]
 pub mod develop;
 pub mod frame;
+pub mod hole_stacks;
 pub mod native;
 pub mod plane;
 // Profiles are SolidCraft's sketch wire format, carried over as it is: each variant says what it
