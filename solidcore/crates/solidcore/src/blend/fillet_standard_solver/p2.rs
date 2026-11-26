@@ -3682,9 +3682,15 @@ impl super::p1::LinearCrossSectionFsg {
     /// the edge in `user_doubles[0]`), with `leader` (the solver's extended edge, cut to
     /// where the stations are) as the definition's leader
     /// ([`GnSectionFsg::build_traced_setback_chord`]). The supports are the faces the trace
-    /// rolled on ([`rolled_on`]), extended (their parameters kept) past every side by four
-    /// times the larger setback, since a support that ends along the edge exactly where the
-    /// edge does is not proved (`setback_enclose::prove_setback_feet`); a side that cannot be
+    /// rolled on ([`rolled_on`]), extended (their parameters kept) past every side far enough
+    /// to hold every station's foot on it, and a margin of four times the larger setback
+    /// beyond, since a support that ends along the edge exactly where its feet do is not
+    /// proved (`setback_enclose::prove_setback_feet`): each support by the farthest any of
+    /// its feet lies from its domain (the foot's distance from the support at its uv
+    /// clamped into the domain, a chord, which the margin covers against the arc along a
+    /// curved continuation) plus the margin. The trace's extensions run their feet past the
+    /// faces by up to five setbacks of foot 0, and a foot on the other support may move
+    /// farther, so no fixed multiple of the setback holds them. A side that cannot be
     /// extended is kept as it is. The rails, uv curves and centre line become the stations'
     /// feet and the leader's points, over s. `None` where a face is not an offset surface.
     ///
@@ -3723,10 +3729,27 @@ impl super::p1::LinearCrossSectionFsg {
             return Ok(None);
         };
         let [d1, d2] = chamfer.setbacks();
-        let reach = 4.0 * d1.max(d2);
+        let margin = 4.0 * d1.max(d2);
         let mut supports: Vec<Surface> = Vec::new();
-        for rolled in [rolled_on(o1), rolled_on(o2)] {
+        for (rolled, srf) in [
+            (rolled_on(o1), SrfIndex::First),
+            (rolled_on(o2), SrfIndex::Second),
+        ] {
             let base: &Surface = rolled.as_ref();
+            let domain = base.natural_uv_domain_with_nurb(k)?;
+            let mut past = 0.0_f64;
+            for p in points {
+                let uv = p.uv_pos(srf);
+                let inside = Point2::new(
+                    uv.x.max(domain.min.x).min(domain.max.x),
+                    uv.y.max(domain.min.y).min(domain.max.y),
+                );
+                if inside != uv {
+                    let edge_of_domain = base.evaluate_point(k, inside)?;
+                    past = past.max(edge_of_domain.distance(p.srf_pos(srf)));
+                }
+            }
+            let reach = past + margin;
             let extended = match base.extended_sides_keeping_parameters(
                 k,
                 &BoxSide::ALL,

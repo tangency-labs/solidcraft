@@ -682,6 +682,54 @@ impl FilletSession<'_> {
     }
 }
 
+impl FilletSession<'_> {
+    /// Test-only, not upstream (#13710): chamfers of setbacks held at every station on
+    /// `edges`, `distances[i]` the setbacks of edge i, the first along `along[i]` (one of the
+    /// edge's faces) and the second along its other face. Nothing routes a command's chamfer
+    /// to a chamfer of setbacks yet; this requests one through the executive as
+    /// [`Self::prepare_chamfers_along`] requests today's, without its wedges, chains, run-ons
+    /// or knife edges.
+    #[cfg(test)]
+    pub(crate) fn prepare_setback_chamfers(
+        &mut self,
+        k: &Kernel,
+        edges: &[EdgeId],
+        distances: &[[f64; 2]],
+        along: &[crate::topology::FaceId],
+    ) -> Result<()> {
+        let mut first = Vec::new();
+        let mut second = Vec::new();
+        let mut chamfers = Vec::new();
+        for (index, &id) in edges.iter().enumerate() {
+            let u0 = self.blendable_edgeuse(k, id)?;
+            let target: &crate::Brep = &*self.objects.target;
+            let face0 = match eu1::faceuse(target, u0)? {
+                Some(fu) => target.faceuse(fu)?.face,
+                None => None,
+            };
+            let [a, b] = value(OP_ALONG, distances, index)?;
+            let [d1, d2] = if face0 == Some(value(OP_ALONG, along, index)?) {
+                [a, b]
+            } else {
+                [b, a]
+            };
+            first.push(d1);
+            second.push(d2);
+            chamfers.push(Some(ChamferDefinition::of_setbacks(
+                ChamferSize::Distances([d1, d2]),
+            )?));
+        }
+        self.prepare_two_offsets(
+            k,
+            edges,
+            &first,
+            &second,
+            &[FilletSurfaceGenerator::Linear],
+            &chamfers,
+        )
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -980,6 +1028,209 @@ mod tests {
                     .prepare_chamfers_along(&k, &[e], &[good], &[face])
                     .unwrap();
             }
+        }
+    }
+
+    /// Chamfers of setbacks held at every station (#13710), through their solver's trace.
+    mod setbacks {
+        use super::*;
+        use crate::geom::extent3d::Extent3d;
+        use crate::math::{Point3, PI};
+        use crate::surface::surface::SurfaceKind;
+        use crate::topology::{Brep, FaceId};
+
+        /// Every fix on, as ops runs.
+        fn fixed_kernel() -> Kernel {
+            let mut k = Kernel::default();
+            for &name in crate::kernel::UpstreamFixes::NAMES {
+                *k.fixes.flag_mut(name).unwrap() = true;
+            }
+            k
+        }
+
+        fn face_box(k: &Kernel, b: &Brep, f: FaceId) -> Extent3d {
+            crate::query::api_queries::face_bounding_box(k, b, f, true).unwrap()
+        }
+
+        /// The faces of `b` whose tight boxes `keep` takes.
+        fn face_holding(k: &Kernel, b: &Brep, keep: impl Fn(&Extent3d) -> bool) -> Vec<FaceId> {
+            crate::topology::brep::p1::faces(b, None)
+                .unwrap()
+                .into_iter()
+                .filter(|&f| keep(&face_box(k, b, f)))
+                .collect()
+        }
+
+        /// `edges` of `body` chamfered by setbacks held at every station, `distances[i]` the first
+        /// along `along[i]`: the session's result, every corner bevelled.
+        fn chamfer_setbacks(
+            k: &mut Kernel,
+            body: &mut Brep,
+            edges: &[EdgeId],
+            distances: &[[f64; 2]],
+            along: &[FaceId],
+        ) -> Result<()> {
+            let mut s = FilletSession::new(k, body)?;
+            s.prepare_setback_chamfers(k, edges, distances, along)?;
+            s.create_corners(k, None)?;
+            for corner in s.fillet_corners()? {
+                s.set_corner_bevel(corner, true)?;
+            }
+            s.do_filleting(k, None)
+        }
+
+        /// The faces of `b` that are chamfers of setbacks by their definition, each with its
+        /// certified bound (re-certified).
+        fn setback_faces(k: &Kernel, b: &Brep) -> Vec<(FaceId, f64)> {
+            let mut out = Vec::new();
+            for f in crate::topology::brep::p1::faces(b, None).unwrap() {
+                let Some(surface) = b.face(f).unwrap().surface.as_ref() else {
+                    continue;
+                };
+                if let SurfaceKind::ProceduralBlend(pb) = surface.kind() {
+                    if pb.definition().chamfer.is_some_and(|c| c.is_setbacks()) {
+                        out.push((f, pb.recertify(k).unwrap()));
+                    }
+                }
+            }
+            out
+        }
+
+        /// `b` is a closed manifold solid.
+        fn closed(b: &Brep) -> bool {
+            crate::topology::brep::p2::is_manifold_solid(b).unwrap()
+        }
+
+        fn volume(k: &Kernel, b: &mut Brep) -> f64 {
+            crate::mass::integrator::properties::brep_volume_default(k, b, 1e-9).unwrap()
+        }
+
+        /// Points along the interior of edge `e` (fractions 0.1 to 0.9 of its interval).
+        fn along_edge(k: &Kernel, b: &Brep, e: EdgeId) -> Vec<Point3> {
+            let ivl = edge::interval(b, e).unwrap();
+            let curve = edge::curve(b, e).unwrap().unwrap();
+            (1..10)
+                .map(|i| {
+                    curve
+                        .evaluate_point(k, ivl.evaluate(f64::from(i) / 10.0))
+                        .unwrap()
+                })
+                .collect()
+        }
+
+        /// The top rim of half a cylinder of radius 10 and height 20 (from 0 to 180 degrees about
+        /// its axis, an open arc between the flat face's corners) chamfered by setbacks 1 along
+        /// the top and 0.5 down the wall, through the setback solver's trace: in closed form the
+        /// chamfer is the cone between the arcs of radius 9 at z = 20 and radius 10 at z = 19.5,
+        /// its rails those arcs (each foot a straight 1 or 0.5 from the rim, square to it), its
+        /// ends on the flat face (a plane through the axis, the station planes' own there), and
+        /// the solid loses the triangle of legs 1 and 0.5 turned half a turn about the axis, `pi
+        /// (10 - 1/3) (1/2)(1)(0.5)` (Pappus: the triangle's centroid at radius 10 - 1/3).
+        #[test]
+        fn a_half_cylinder_rim_chamfered_by_setbacks_is_the_closed_form_cone() {
+            let (r, h, d) = (10.0, 20.0, [1.0, 0.5]);
+            let mut k = fixed_kernel();
+            let mut b = crate::primitive::api_primitives::create_partial_cylinder(
+                &mut k,
+                Point3::new(0.0, 0.0, 0.0),
+                r,
+                h,
+                0.0,
+                180.0,
+            )
+            .unwrap();
+            assert!(closed(&b));
+            let v0 = volume(&k, &mut b);
+            let flat = face_holding(&k, &b, |bx| {
+                bx.min().y.abs() < 1e-6 && bx.max().y.abs() < 1e-6
+            });
+            // (the half turn's cut: two coplanar faces in y = 0, from the axis to either end
+            // of the rim)
+            assert_eq!(flat.len(), 2);
+            let rim: Vec<EdgeId> = crate::topology::brep::p1::edges(&b, None)
+                .unwrap()
+                .into_iter()
+                .filter(|&e| {
+                    along_edge(&k, &b, e)
+                        .iter()
+                        .all(|p| (p.z - h).abs() < 1e-9 && p.y > 1e-6)
+                })
+                .collect();
+            assert_eq!(rim.len(), 1, "{rim:?}");
+            let top = face_holding(&k, &b, |bx| {
+                (bx.min().z - h).abs() < 1e-9 && (bx.max().z - h).abs() < 1e-9
+            });
+            assert_eq!(top.len(), 1);
+            chamfer_setbacks(&mut k, &mut b, &rim, &[d], &top).unwrap();
+            assert!(closed(&b));
+            // (the flat faces as the chamfered body numbers them)
+            let flat = face_holding(&k, &b, |bx| {
+                bx.min().y.abs() < 1e-6 && bx.max().y.abs() < 1e-6
+            });
+            assert_eq!(flat.len(), 2);
+            let faces = setback_faces(&k, &b);
+            assert_eq!(faces.len(), 1, "one chamfer of setbacks");
+            let (chamfer, bound) = faces[0];
+            let mut rails = 0;
+            for e in crate::topology::face::p4::edges(&b, chamfer, None, false, None).unwrap() {
+                // (its ends lie on the flat faces)
+                if edge::faces(&b, e, None)
+                    .unwrap()
+                    .iter()
+                    .any(|f| flat.contains(f))
+                {
+                    continue;
+                }
+                let tol = edge::tolerance(&b, e).unwrap() + bound + 1e-9;
+                for p in along_edge(&k, &b, e) {
+                    let radius = (p.x * p.x + p.y * p.y).sqrt();
+                    if (p.z - h).abs() < 1e-3 {
+                        assert!((radius - (r - d[0])).abs() <= tol, "top rail {p:?}");
+                    } else {
+                        assert!(
+                            (radius - r).abs() <= tol && (p.z - (h - d[1])).abs() <= tol,
+                            "wall rail {p:?}"
+                        );
+                    }
+                    rails += 1;
+                }
+            }
+            assert!(rails >= 18, "{rails}");
+            // the chord at the half turn's middle (theta = 90 degrees) runs from (r, z) =
+            // (9, 20) to (10, 19.5), on the line r = 9 + 2 (20 - z): its midpoint (0, 9.5,
+            // 19.75) lies on the chamfer, so the surface's nearest point to it is within the
+            // bound, and on that line, the residual in r within sqrt(5) times the bound (the
+            // line's normal in (r, z) is (1, 2) / sqrt(5))
+            let mid = Point3::new(0.0, 9.5, 19.75);
+            let surface = b.face(chamfer).unwrap().surface.clone().unwrap();
+            let domain = surface.natural_uv_domain_with_nurb(&k).unwrap();
+            let dropped = surface
+                .drop_point::<crate::surface::surface::p4::NoObject>(
+                    &k,
+                    mid,
+                    &domain,
+                    &crate::surface::surface::p5::DropPointOptions::default(),
+                )
+                .unwrap();
+            assert!(dropped.success);
+            let on = surface.evaluate_point(&k, dropped.result_uv).unwrap();
+            assert!(
+                on.distance(mid) <= bound + 1e-9,
+                "{on:?} off the chord's middle"
+            );
+            let radius = (on.x * on.x + on.y * on.y).sqrt();
+            assert!(
+                (radius - (r - d[0] + 2.0 * (h - on.z))).abs() <= 5.0_f64.sqrt() * bound + 1e-9,
+                "{on:?} off the cone's ruling"
+            );
+            let removed = PI * (r - d[0] / 3.0) * 0.5 * d[0] * d[1];
+            let cone_area = PI * (r - 0.5 * d[0]) * (d[0] * d[0] + d[1] * d[1]).sqrt();
+            let v = volume(&k, &mut b);
+            assert!(
+                (v - (v0 - removed)).abs() <= bound * cone_area + 1e-8 * v0,
+                "{v} vs {} (bound {bound})",
+                v0 - removed
+            );
         }
     }
 }
