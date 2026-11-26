@@ -54,7 +54,7 @@ const STALL_ITERS: usize = 20;
 const STALL_DECREASE: f64 = 1e-5;
 const STALL_RESIDUAL: f64 = 1e-4;
 /// Two fit points closer than this (mm) meet: drawn end to end, they are joined.
-const MEET: f64 = 1e-9;
+pub(crate) const MEET: f64 = 1e-9;
 /// Chord-height tolerance (mm) of a re-sampled arc, as when it was drawn.
 const ARC_TOL: f64 = 1e-3;
 
@@ -629,7 +629,7 @@ impl WireConstraintKind {
     }
 
     /// The same relation, whichever order its operands were given in.
-    fn same_as(&self, o: &WireConstraintKind) -> bool {
+    pub(crate) fn same_as(&self, o: &WireConstraintKind) -> bool {
         use WireConstraintKind::*;
         match (self, o) {
             (Coincident { a, b }, Coincident { a: c, b: d }) => (a == c && b == d) || (a == d && b == c),
