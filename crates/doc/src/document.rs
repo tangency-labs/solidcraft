@@ -2803,7 +2803,9 @@ pub enum FeatureKind {
     /// them is rounded with a fillet of `radius`. `trim` says what is left of the two surfaces: both
     /// cut back and sewn (the default), only `a`, or neither (the round alone, a new body).
     SurfaceFillet {
+        #[walk(picks_faces)]
         a: FaceAt,
+        #[walk(picks_faces)]
         b: FaceAt,
         #[walk(length = "Radius")]
         radius: Expr,
@@ -2818,7 +2820,9 @@ pub enum FeatureKind {
     /// or `distance` along the first at `angle` to it. `flip` swaps which surface is the first (by
     /// default the one facing up most). `trim` says what is left of the two surfaces.
     SurfaceChamfer {
+        #[walk(picks_faces)]
         a: FaceAt,
+        #[walk(picks_faces)]
         b: FaceAt,
         #[walk(length = "Distance")]
         distance: Expr,

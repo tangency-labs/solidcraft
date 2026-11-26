@@ -855,11 +855,15 @@ fn fillet_face(s: &Session, p: &Value, cmd: &str, key: &str) -> Result<FaceAt> {
 
 /// The `trim` of `surface.fillet` and `surface.chamfer`.
 fn trim_param(p: &Value, cmd: &str) -> Result<FilletTrim> {
-    match str_(p, "trim").map(str::to_ascii_lowercase).as_deref() {
-        None | Some("both") => Ok(FilletTrim::Both),
-        Some("first") => Ok(FilletTrim::First),
-        Some("none") => Ok(FilletTrim::None),
-        Some(o) => Err(bad(cmd, format!("unknown trim `{o}` (both, first or none)"))),
+    match p.get("trim") {
+        None | Some(Value::Null) => Ok(FilletTrim::Both),
+        Some(Value::String(s)) => match s.to_ascii_lowercase().as_str() {
+            "both" => Ok(FilletTrim::Both),
+            "first" => Ok(FilletTrim::First),
+            "none" => Ok(FilletTrim::None),
+            o => Err(bad(cmd, format!("unknown trim `{o}` (both, first or none)"))),
+        },
+        Some(_) => Err(bad(cmd, "`trim` must be both, first or none")),
     }
 }
 
@@ -894,9 +898,9 @@ fn surface_chamfer(s: &mut Session, p: &Value) -> Result<Value> {
             distance,
             distance2,
             angle,
-            flip: bool_(p, "flip").unwrap_or(false),
+            flip: optional_flag(p, "flip", false, cmd)?,
             trim,
-            extend: bool_(p, "extend").unwrap_or(false),
+            extend: optional_flag(p, "extend", false, cmd)?,
         },
     )
 }
@@ -912,7 +916,7 @@ fn surface_fillet(s: &mut Session, p: &Value) -> Result<Value> {
     let radius = expr(p, "radius").ok_or_else(|| bad(cmd, "`radius` is required"))?;
     check_expr(s, &radius, Kind::Length, cmd, "radius")?;
     let trim = trim_param(p, cmd)?;
-    add_feature(s, p, FeatureKind::SurfaceFillet { a, b, radius, trim, extend: bool_(p, "extend").unwrap_or(false) })
+    add_feature(s, p, FeatureKind::SurfaceFillet { a, b, radius, trim, extend: optional_flag(p, "extend", false, cmd)? })
 }
 
 fn ruled(s: &mut Session, p: &Value) -> Result<Value> {

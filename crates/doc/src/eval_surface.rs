@@ -1075,9 +1075,20 @@ fn round_seam(
     let i = st.bodies.iter().position(|x| x.name == a.body.0).ok_or_else(|| DocError::Unknown(format!("body `{}`", a.body)))?;
     let before = (trim != FilletTrim::Both).then(|| st.clone());
     mutual_trim(st, i, &b.body.0, kernel::TrimKeep::Side(a.point.0), &[b.point.0], true, extend)?;
-    let Some(sewn) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
-    // Each surface is one face and they are sewn along their seam: the edges two faces share.
-    let seams: Vec<usize> = sewn.body.record().edges.iter().enumerate().filter(|(_, e)| e.uses.len() == 2).map(|(k, _)| k).collect();
+    // The second body is gone now, so the sewn one may have moved down: find it again by its name.
+    let sewn_at = st.bodies.iter().position(|x| x.name == a.body.0).ok_or_else(|| DocError::Invalid("the sewn body is missing".into()))?;
+    let Some(sewn) = st.bodies.get(sewn_at).cloned() else { return Err(DocError::Invalid("body".into())) };
+    // Each surface is one face and they are sewn along their seam: the edges two different faces
+    // share (not a periodic face's own seam, which has two uses on one face).
+    let seams: Vec<usize> = sewn
+        .body
+        .record()
+        .edges
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| matches!(e.uses.as_slice(), [u, v] if u.face != v.face))
+        .map(|(k, _)| k)
+        .collect();
     if seams.is_empty() {
         return Err(DocError::Invalid("Surface Fillet and Chamfer: the two surfaces don't meet along an edge".into()));
     }
@@ -1093,7 +1104,7 @@ fn round_seam(
     // feature: its faces and edges are named first, and the round is named after the faces beside it.
     let rounded = sewn.traced().then(rounded.with_preserved_planar_sources(&sewn.body)?);
     let Some(before) = before else {
-        if let Some(slot) = st.bodies.get_mut(i) {
+        if let Some(slot) = st.bodies.get_mut(sewn_at) {
             *slot = ModelBody::traced_new(sewn.name, rounded, sewn.feature);
         }
         return Ok(());
