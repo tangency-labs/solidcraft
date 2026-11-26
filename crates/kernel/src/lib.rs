@@ -147,6 +147,8 @@ mod smlib_sweeps;
 mod smlib_sweeps_tests;
 mod smooth_edges;
 #[cfg(test)]
+mod sphere_area_tests;
+#[cfg(test)]
 mod sphere_lens_tests;
 mod splitface;
 mod step;
@@ -241,8 +243,10 @@ pub use body::PlanStats;
 pub use body::PointClass;
 pub use body::RayPick;
 pub use body::Refusal;
+pub use body::ShapeLimit;
 pub use body::SketchPlane;
 pub use body::SurfaceKind;
+pub use body::Unshaped;
 pub use body::colour_name;
 pub use body::display_tolerance;
 pub use body::placed_mesh;
@@ -318,6 +322,7 @@ pub use distance::faces_closest;
 pub use distance::interiors_disjoint;
 pub use distance::overlap_witness;
 pub use distance::point_closest;
+pub use distance::segment_closest;
 pub use dome::dome;
 pub use draft_corners::CornerFill;
 pub use draft_corners::CornerOption;
@@ -362,6 +367,8 @@ pub use iges_in::MAX_IGES_BYTES;
 pub use iges_in::iges_import;
 pub use iges_in::iges_native_system;
 pub use iges_in::iges_to_step;
+pub use iges_in::max_bytes as iges_max_bytes;
+pub use iges_in::set_max_bytes as set_iges_max_bytes;
 pub use iges_out::iges_export_bodies;
 pub use intersection::MeetingEdge;
 pub use intersection::meeting_edges;
@@ -456,25 +463,32 @@ pub use route::curves;
 pub use route::cylinder;
 pub use route::default_cell_grid;
 pub use route::develop;
+pub use route::dxf;
 pub use route::extrude;
 pub use route::fillet;
 pub use route::gusset_prepare;
 pub use route::gusset_support;
 pub use route::gusset_support_pick;
 pub use route::gusset_support_plane;
+pub use route::hatch;
+pub use route::hole_stacks;
 pub use route::member_along;
 pub use route::member_axes;
 pub use route::member_axis;
 pub use route::member_extent;
+pub use route::mesh;
 pub use route::offset_faces;
 pub use route::orient_stock;
 pub use route::plan_cell_grid;
+pub use route::planar;
 pub use route::points;
 pub use route::projection;
 pub use route::query;
 pub use route::read_cadir;
 pub use route::revolve;
 pub use route::revolve_whole;
+pub use route::sections;
+pub use route::shaft_spline;
 pub use route::shell;
 pub use route::sphere;
 pub use route::step_string;
@@ -485,9 +499,11 @@ pub use route::stock_retained_line;
 pub use route::stock_section_plane;
 pub use route::stock_spatial_arc;
 pub use route::stock_terminal_planes;
+pub use route::tessellate;
 pub use route::thicken;
 pub use route::torus;
 pub use route::trim_member;
+pub use route::tube_cope;
 pub use route::which;
 pub use route::write_cadir;
 pub use sew::EdgeSpec;
@@ -510,10 +526,20 @@ pub use solidcraft_kernel_api::{GussetFailure, MemberRefusal, PathFailure, PathR
 pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::start;
 pub use solidcraft_smlib::stop::Stop;
+
 /// The cancel token over this thread's work ([`Stop::within`]), for work outside the kernel that
 /// stops with it (a sketch solve).
 pub use solidcraft_smlib::stop::token as stop_token;
 pub use solidcraft_smlib::trace as smlib_trace;
+/// Solidcore's own profiler, written as JSON Lines (feature `solidcore-profile`): the kernel's
+/// scopes and counted work of the calls this process made.
+#[cfg(feature = "solidcore-profile")]
+pub use solidcraft_smlib::write_kernel_profiles;
+
+/// [`solidcraft_smlib::profiled`]: each solidcore-ops call's kernel profile, scoped per call
+/// (feature `solidcore-profile`).
+#[cfg(feature = "solidcore-profile")]
+pub use solidcraft_smlib::profiled;
 pub use splitface::SplitTool;
 pub use splitface::face_split_if_on_face;
 pub use splitface::has_cap_at;
@@ -555,11 +581,13 @@ pub use step_in::records::RecordMesh;
 pub use step_in::records::import_trims;
 pub use step_in::records::records_import;
 pub use step_in::records::records_import_shared;
+pub use step_in::records::records_import_shared_with_workers;
 pub use step_in::records::records_noted;
 pub use step_in::records::records_text;
 pub use step_in::step_cache_alive;
 pub use step_in::step_import;
 pub use step_in::step_import_shared;
+pub use step_in::step_import_shared_with_workers;
 pub use step_in::step_orientation_errors;
 pub use step_in::step_validate;
 pub use step_out::ExportBody;
@@ -601,7 +629,9 @@ pub use surfaces::copy_faces;
 pub use surfaces::extend;
 pub use surfaces::extrude_sheet;
 pub use surfaces::extrude_sheet_tapered;
+pub use surfaces::loft_section_closed;
 pub use surfaces::loft_sheet;
+pub use surfaces::loft_sheet_planar_g1;
 pub use surfaces::loft_sheet_with_rails;
 pub use surfaces::loft_sheet_with_rails_legacy_sides;
 pub use surfaces::patch_edges;

@@ -1995,7 +1995,7 @@ pub(crate) const INSTANCE_ALONE: usize = 50_000;
 
 /// Pack a complete imported mesh from its indexed geometry when the facets supply their own
 /// normals. B-reps, authored normals and subsets for individual looks use the shared vertex weld.
-fn build_shared_tris(
+pub(crate) fn build_shared_tris(
     mesh: &solidcraft_engine::geom::Mesh,
     body: Option<&solidcraft_engine::doc::ModelBody>,
 ) -> std::sync::Arc<crate::gpu::SharedTris> {
@@ -9252,7 +9252,11 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             if app.tool.is_some() {
                 crate::tools::finish(app);
             } else if app.dialog.is_none() {
-                crate::context_menu::open(app, p, held_mods);
+                if crate::sketch_tools::detach_simulated_at(app, p) {
+                    // Right-clicking a simulated break-off glyph detaches the curve endpoint immediately.
+                } else {
+                    crate::context_menu::open(app, p, held_mods);
+                }
             } else if crate::dialogs_frame::open_menu(app, p) {
                 // A centreline of the Frame Member being made: its Remove Tube menu (#15705).
             } else if app.preferences.right_click_confirms {
