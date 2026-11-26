@@ -41,15 +41,19 @@ use windows_sys::Win32::UI::Input::Touch::{
     CloseTouchInputHandle, GetTouchInputInfo, TOUCHEVENTF_DOWN, TOUCHEVENTF_MOVE, TOUCHEVENTF_UP,
     TOUCHINPUT,
 };
-use windows_sys::Win32::UI::Input::{RAWINPUT, RIM_TYPEKEYBOARD, RIM_TYPEMOUSE};
+use windows_sys::Win32::UI::Input::{
+    GetCurrentInputMessageSource, IMDT_TOUCHPAD, INPUT_MESSAGE_SOURCE, RAWINPUT, RIM_TYPEKEYBOARD,
+    RIM_TYPEMOUSE,
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect, GetCursorPos,
     GetMenu, LoadCursorW, MsgWaitForMultipleObjectsEx, PeekMessageW, PostMessageW,
     RegisterClassExW, RegisterWindowMessageA, SetCursor, SetWindowPos, TranslateMessage,
     CREATESTRUCTW, GIDC_ARRIVAL, GIDC_REMOVAL, GWL_STYLE, GWL_USERDATA, HTCAPTION, HTCLIENT,
-    MINMAXINFO, MNC_CLOSE, MSG, MWMO_INPUTAVAILABLE, NCCALCSIZE_PARAMS, PM_REMOVE, PT_PEN,
-    PT_TOUCH, QS_ALLINPUT, RI_MOUSE_HWHEEL, RI_MOUSE_WHEEL, SC_MINIMIZE, SC_RESTORE,
-    SIZE_MAXIMIZED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WHEEL_DELTA, WINDOWPOS,
+    MINMAXINFO, MNC_CLOSE, MSG, MWMO_INPUTAVAILABLE, NCCALCSIZE_PARAMS, PM_REMOVE,
+    POINTER_INPUT_TYPE, PT_PEN, PT_TOUCH, PT_TOUCHPAD, QS_ALLINPUT, RI_MOUSE_HWHEEL,
+    RI_MOUSE_WHEEL, SC_MINIMIZE, SC_RESTORE, SIZE_MAXIMIZED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    SWP_NOZORDER, WHEEL_DELTA, WINDOWPOS,
     WMSZ_BOTTOM, WMSZ_BOTTOMLEFT, WMSZ_BOTTOMRIGHT, WMSZ_LEFT, WMSZ_RIGHT, WMSZ_TOP, WMSZ_TOPLEFT,
     WMSZ_TOPRIGHT, WM_CAPTURECHANGED, WM_CLOSE, WM_CREATE, WM_DESTROY, WM_DPICHANGED,
     WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION,
@@ -66,7 +70,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use crate::dpi::{PhysicalPosition, PhysicalSize};
 use crate::error::EventLoopError;
 use crate::event::{
-    DeviceEvent, Event, Force, Ime, InnerSizeWriter, RawKeyEvent, Touch, TouchPhase, WindowEvent,
+    DeviceEvent, Event, Force, Ime, InnerSizeWriter, MouseScrollDelta, RawKeyEvent, Touch,
+    TouchPhase, WindowEvent,
 };
 use crate::event_loop::{ActiveEventLoop as RootAEL, ControlFlow, DeviceEvents, EventLoopClosed};
 use crate::keyboard::ModifiersState;
@@ -161,6 +166,7 @@ pub struct EventLoop<T: 'static> {
     // It is created lazily in case if we have `ControlFlow::WaitUntil`.
     // Keep it as a field to avoid recreating it on every `ControlFlow::WaitUntil`.
     high_resolution_timer: Option<OwnedHandle>,
+    touchpad_wheels: bool,
 }
 
 pub(crate) struct PlatformSpecificEventLoopAttributes {
@@ -200,6 +206,11 @@ impl<T: 'static> EventLoop<T> {
             become_dpi_aware();
         }
 
+        // SolidCraft (#15353): without the registration, winit's own wheel behaviour stays.
+        let touchpad_wheels =
+            TOUCHPAD_WHEELS.load(std::sync::atomic::Ordering::Relaxed) && set_touchpad_thread(true);
+        TOUCHPAD_REGISTERED.with(|registered| registered.set(touchpad_wheels));
+
         let thread_msg_target = create_event_target_window();
 
         let runner_shared = Rc::new(EventLoopRunner::new(thread_msg_target));
@@ -220,6 +231,7 @@ impl<T: 'static> EventLoop<T> {
             },
             msg_hook: attributes.msg_hook.take(),
             high_resolution_timer: None,
+            touchpad_wheels,
         })
     }
 
@@ -623,6 +635,10 @@ impl<T> Drop for EventLoop<T> {
         unsafe {
             DestroyWindow(self.window_target.p.thread_msg_target);
         }
+        if self.touchpad_wheels {
+            set_touchpad_thread(false);
+            TOUCHPAD_REGISTERED.with(|registered| registered.set(false));
+        }
     }
 }
 
@@ -999,17 +1015,59 @@ fn normalize_pointer_pressure(pressure: u32) -> Option<Force> {
     }
 }
 
+/// SolidCraft: resolve effective modifiers from synchronous (`GetKeyState`) and live
+/// (`GetAsyncKeyState`) state (#20352).
+///
+/// While unfocused, the thread's synchronous keyboard table has not seen keys pressed in another
+/// application, so live state is authoritative. When focus returns, any modifier already held is
+/// kept in `inherited` until it is either observed synchronously or physically released.
+fn effective_modifiers(
+    focused: bool,
+    sync: ModifiersState,
+    async_mods: Option<ModifiersState>,
+    inherited: &mut ModifiersState,
+) -> ModifiersState {
+    if !focused {
+        *inherited = ModifiersState::empty();
+        return async_mods.unwrap_or(sync);
+    }
+    if let Some(live) = async_mods {
+        *inherited = inherited.intersection(live).difference(sync);
+    }
+    sync.union(*inherited)
+}
+
 /// Emit a `ModifiersChanged` event whenever modifiers have changed.
 /// Returns the current modifier state
 fn update_modifiers(window: HWND, userdata: &WindowData) {
+    update_modifiers_inner(window, userdata, false);
+}
+
+fn update_modifiers_inner(window: HWND, userdata: &WindowData, gaining_focus: bool) {
     use crate::event::WindowEvent::ModifiersChanged;
 
-    let modifiers = {
+    let (focused, has_inherited) = {
+        let window_state = userdata.window_state.lock().unwrap();
+        (window_state.has_active_focus(), !window_state.inherited_modifiers.is_empty())
+    };
+
+    let (sync, async_mods) = {
         let mut layouts = LAYOUT_CACHE.lock().unwrap();
-        layouts.get_agnostic_mods()
+        if !focused {
+            (ModifiersState::empty(), Some(layouts.get_agnostic_mods_async()))
+        } else if gaining_focus || has_inherited {
+            (layouts.get_agnostic_mods(), Some(layouts.get_agnostic_mods_async()))
+        } else {
+            (layouts.get_agnostic_mods(), None)
+        }
     };
 
     let mut window_state = userdata.window_state.lock().unwrap();
+    if gaining_focus {
+        window_state.inherited_modifiers = async_mods.unwrap_or(sync);
+    }
+    let modifiers =
+        effective_modifiers(focused, sync, async_mods, &mut window_state.inherited_modifiers);
     if window_state.modifiers_state != modifiers {
         window_state.modifiers_state = modifiers;
 
@@ -1026,7 +1084,7 @@ fn update_modifiers(window: HWND, userdata: &WindowData) {
 unsafe fn gain_active_focus(window: HWND, userdata: &WindowData) {
     use crate::event::WindowEvent::Focused;
 
-    update_modifiers(window, userdata);
+    update_modifiers_inner(window, userdata, true);
 
     userdata.send_event(Event::WindowEvent {
         window_id: RootWindowId(WindowId(window)),
@@ -1037,7 +1095,11 @@ unsafe fn gain_active_focus(window: HWND, userdata: &WindowData) {
 unsafe fn lose_active_focus(window: HWND, userdata: &WindowData) {
     use crate::event::WindowEvent::{Focused, ModifiersChanged};
 
-    userdata.window_state_lock().modifiers_state = ModifiersState::empty();
+    {
+        let mut window_state = userdata.window_state_lock();
+        window_state.modifiers_state = ModifiersState::empty();
+        window_state.inherited_modifiers = ModifiersState::empty();
+    }
     userdata.send_event(Event::WindowEvent {
         window_id: RootWindowId(WindowId(window)),
         event: ModifiersChanged(ModifiersState::empty().into()),
@@ -1820,10 +1882,7 @@ unsafe fn public_window_callback_inner(
         },
 
         WM_MOUSEWHEEL => {
-            use crate::event::MouseScrollDelta::LineDelta;
-
             let value = (wparam >> 16) as i16;
-            let value = value as f32 / WHEEL_DELTA as f32;
 
             update_modifiers(window, userdata);
 
@@ -1831,7 +1890,7 @@ unsafe fn public_window_callback_inner(
                 window_id: RootWindowId(WindowId(window)),
                 event: WindowEvent::MouseWheel {
                     device_id: DEVICE_ID,
-                    delta: LineDelta(0.0, value),
+                    delta: wheel_delta(userdata, value, false),
                     phase: TouchPhase::Moved,
                 },
             });
@@ -1840,10 +1899,8 @@ unsafe fn public_window_callback_inner(
         },
 
         WM_MOUSEHWHEEL => {
-            use crate::event::MouseScrollDelta::LineDelta;
-
+            // NOTE: inverted! See https://github.com/rust-windowing/winit/pull/2105/
             let value = (wparam >> 16) as i16;
-            let value = -value as f32 / WHEEL_DELTA as f32; // NOTE: inverted! See https://github.com/rust-windowing/winit/pull/2105/
 
             update_modifiers(window, userdata);
 
@@ -1851,7 +1908,7 @@ unsafe fn public_window_callback_inner(
                 window_id: RootWindowId(WindowId(window)),
                 event: WindowEvent::MouseWheel {
                     device_id: DEVICE_ID,
-                    delta: LineDelta(value, 0.0),
+                    delta: wheel_delta(userdata, value, true),
                     phase: TouchPhase::Moved,
                 },
             });
@@ -2078,6 +2135,12 @@ unsafe fn public_window_callback_inner(
         },
 
         WM_POINTERDOWN | WM_POINTERUPDATE | WM_POINTERUP => {
+            // SolidCraft: a touchpad contact goes to DefWindowProc, which sends the wheel messages
+            // winit reads (#15353). Touch and pen stay as winit has them.
+            if TOUCHPAD_REGISTERED.with(Cell::get) && pointer_is_touchpad(wparam) {
+                result = ProcResult::DefWindowProc(wparam);
+                return;
+            }
             if let (
                 Some(GetPointerFrameInfoHistory),
                 Some(SkipPointerFrameMessages),
@@ -2729,6 +2792,66 @@ fn quiet_window_move() -> bool {
     QUIET_WINDOW_MOVE.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// SolidCraft (#15353): 40 px per `WHEEL_DELTA` is egui's default line scroll speed, so a pinch
+/// (Ctrl + wheel) keeps today's speed. `horizontal` keeps the sign inversion of `WM_MOUSEHWHEEL`.
+fn touchpad_wheel_delta(value: i16, horizontal: bool, scale_factor: f64) -> MouseScrollDelta {
+    let pixels = value as f64 / WHEEL_DELTA as f64 * 40.0 * scale_factor;
+    if horizontal {
+        MouseScrollDelta::PixelDelta(PhysicalPosition::new(-pixels, 0.0))
+    } else {
+        MouseScrollDelta::PixelDelta(PhysicalPosition::new(0.0, pixels))
+    }
+}
+
+/// SolidCraft (#15353): read when the event loop is built.
+static TOUCHPAD_WHEELS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn set_touchpad_wheels(on: bool) {
+    TOUCHPAD_WHEELS.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+thread_local! {
+    static TOUCHPAD_REGISTERED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// SolidCraft (#15353): `false` when the function is missing or the call fails.
+fn set_touchpad_thread(enable: bool) -> bool {
+    match *util::REGISTER_TOUCHPAD_CAPABLE_THREAD {
+        Some(register) => unsafe { register(enable.into()) != FALSE },
+        None => false,
+    }
+}
+
+fn current_input_is_touchpad() -> bool {
+    let mut source = INPUT_MESSAGE_SOURCE { deviceType: 0, originId: 0 };
+    let found = unsafe { GetCurrentInputMessageSource(&mut source) } != FALSE;
+    found && source.deviceType == IMDT_TOUCHPAD
+}
+
+fn pointer_is_touchpad(wparam: WPARAM) -> bool {
+    let Some(get_pointer_type) = *util::GET_POINTER_TYPE else {
+        return false;
+    };
+    let mut pointer_type: POINTER_INPUT_TYPE = 0;
+    let found = unsafe {
+        get_pointer_type(super::loword(wparam as u32) as u32, &mut pointer_type)
+    } != FALSE;
+    found && pointer_type == PT_TOUCHPAD
+}
+
+fn wheel_delta(userdata: &WindowData, value: i16, horizontal: bool) -> MouseScrollDelta {
+    if TOUCHPAD_REGISTERED.with(Cell::get) && current_input_is_touchpad() {
+        let scale_factor = userdata.window_state_lock().scale_factor;
+        return touchpad_wheel_delta(value, horizontal, scale_factor);
+    }
+    let lines = value as f32 / WHEEL_DELTA as f32;
+    if horizontal {
+        MouseScrollDelta::LineDelta(-lines, 0.0)
+    } else {
+        MouseScrollDelta::LineDelta(0.0, lines)
+    }
+}
+
 unsafe fn handle_raw_input(userdata: &ThreadMsgTargetData, data: RAWINPUT) {
     use crate::event::DeviceEvent::{Button, Key, MouseWheel};
     use crate::event::ElementState::{Pressed, Released};
@@ -2855,7 +2978,7 @@ fn takes_suggested_rect(win10_build: Option<u32>, allow_resize: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::takes_suggested_rect;
+    use super::*;
 
     #[test]
     fn windows_11_takes_the_suggested_rect() {
@@ -2874,5 +2997,58 @@ mod tests {
     fn a_maximized_or_fullscreen_window_keeps_its_path() {
         assert!(!takes_suggested_rect(Some(26300), false));
         assert!(!takes_suggested_rect(None, false));
+    }
+
+    #[test]
+    fn touchpad_wheel_delta_is_pixels() {
+        assert_eq!(
+            touchpad_wheel_delta(120, false, 1.0),
+            MouseScrollDelta::PixelDelta(PhysicalPosition::new(0.0, 40.0))
+        );
+        assert_eq!(
+            touchpad_wheel_delta(-60, false, 1.5),
+            MouseScrollDelta::PixelDelta(PhysicalPosition::new(0.0, -30.0))
+        );
+        assert_eq!(
+            touchpad_wheel_delta(120, true, 1.0),
+            MouseScrollDelta::PixelDelta(PhysicalPosition::new(-40.0, 0.0))
+        );
+        match touchpad_wheel_delta(i16::MIN, false, 1.0) {
+            MouseScrollDelta::PixelDelta(p) => assert!(p.x.is_finite() && p.y.is_finite()),
+            other => panic!("expected pixels, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn effective_modifiers_tracks_unfocused_and_inherited_keys() {
+        let ctrl = ModifiersState::CONTROL;
+        let shift = ModifiersState::SHIFT;
+        let empty = ModifiersState::empty();
+        let mut inherited = empty;
+
+        // Unfocused: live async state wins even when synchronous state is empty.
+        assert_eq!(effective_modifiers(false, empty, Some(ctrl), &mut inherited), ctrl);
+        assert_eq!(inherited, empty);
+
+        // Focus gained with Ctrl held before focus: stays active while GetKeyState is still empty.
+        inherited = ctrl;
+        assert_eq!(effective_modifiers(true, empty, Some(ctrl), &mut inherited), ctrl);
+        assert_eq!(inherited, ctrl);
+
+        // Subsequent mouse message before GetKeyState catches up still sees Ctrl, plus Shift if pressed.
+        assert_eq!(effective_modifiers(true, shift, Some(ctrl | shift), &mut inherited), ctrl | shift);
+        assert_eq!(inherited, ctrl);
+
+        // Releasing Ctrl physically clears it from inherited and effective modifiers.
+        assert_eq!(effective_modifiers(true, shift, Some(shift), &mut inherited), shift);
+        assert_eq!(inherited, empty);
+
+        // Once GetKeyState catches up on focus, inherited clears immediately.
+        inherited = ctrl;
+        assert_eq!(effective_modifiers(true, ctrl, Some(ctrl), &mut inherited), ctrl);
+        assert_eq!(inherited, empty);
+
+        // Normal focused path uses synchronous state alone.
+        assert_eq!(effective_modifiers(true, shift, None, &mut inherited), shift);
     }
 }

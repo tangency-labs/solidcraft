@@ -271,6 +271,11 @@ pub(crate) fn show_view(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) -> bool 
         message(ui, ui.max_rect(), app.tr("sheet_views.missing"), Tokens::get().error);
         return true;
     };
+    // New drawing… closed the drawing this focused Sheet shows: the setup page takes its place.
+    if app.session.view_context.focused() == id && crate::drawing_workspace::left_for_new(app).is_some() {
+        crate::drawing_workspace::show_setup(app, ui);
+        return true;
+    }
     let subject = descriptor.subject;
     let (drawing, sheet) = match crate::sheet_views::resolve(app, subject.as_deref()) {
         Ok(owner) => owner,
@@ -726,8 +731,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     {
         // The second click of a double-click is not a click of the tool's: it would place the
         // dimension where the first click picked its edge, on top of the edge.
-        let clicked = response.clicked() && !response.double_clicked();
-        crate::drawing_workspace::dimension::on_sheet(app, &placement_painter, at, sheet, point, HOVER_BAND / at.scale, clicked);
+        let clicks = crate::drawing_workspace::dimension::Clicks::of_frame(response.clicked(), response.double_clicked());
+        crate::drawing_workspace::dimension::on_sheet(app, &placement_painter, at, sheet, point, HOVER_BAND / at.scale, clicks);
     }
     // With the tool in hand a double-click on a placed dimension's text edits it where it is, as
     // the sketch's Dimension tool does, and the tool stays in hand; anywhere else it changes nothing.
@@ -901,6 +906,8 @@ fn kind_name(kind: ObjectKind) -> &'static str {
         ObjectKind::Fill => "fill",
         ObjectKind::Dimension => "dimension",
         ObjectKind::Note => "note",
+        ObjectKind::CentreMark => "centre_mark",
+        ObjectKind::CentreLine => "centre_line",
         ObjectKind::ViewLabel => "view_label",
         ObjectKind::Balloon => "balloon",
         ObjectKind::RevisionTag => "revision_tag",

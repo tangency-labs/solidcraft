@@ -322,12 +322,13 @@ pub enum ThreadHand {
     Both,
 }
 
-/// A thread form: ISO metric 60°, metric trapezoidal 30°, Acme 29°, metric buttress 3°/30°,
+/// A thread form: ISO metric and Unified inch 60°, metric trapezoidal 30°, Acme 29°, metric buttress 3°/30°,
 /// buttress inch 7°/45°, square, and the 55° and 60° pipe threads.
 #[derive(Clone, Copy, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ThreadForm {
     Metric,
+    Unified,
     Trapezoidal,
     Acme,
     Buttress,
@@ -352,6 +353,7 @@ impl From<&solidcraft_doc::ThreadInfo> for ModelThread {
             internal: t.internal,
             form: match t.form {
                 Form::Metric => ThreadForm::Metric,
+                Form::Unified => ThreadForm::Unified,
                 Form::Trapezoidal => ThreadForm::Trapezoidal,
                 Form::Acme => ThreadForm::Acme,
                 Form::Buttress => ThreadForm::Buttress,
@@ -615,11 +617,15 @@ pub struct ErrorCodeReply {
     /// The kernel routine that failed (a module path), or for kind 0 the library's name of the
     /// error.
     pub operation: String,
+    /// The kernel's class of the error: `refusal` (a fact of the geometry: change the input),
+    /// `defect` (the kernel's fault), `port_failure` (a part of the kernel not ported, or a
+    /// preparation it needs), or `unclassed` (none of them, and every failure of kind 0).
+    pub class: String,
 }
 
 impl From<&solidcraft_kernel::ErrorCode> for ErrorCodeReply {
     fn from(c: &solidcraft_kernel::ErrorCode) -> Self {
-        ErrorCodeReply { call: c.call.clone(), kind: c.kind, operation: c.operation.clone() }
+        ErrorCodeReply { call: c.call.clone(), kind: c.kind, operation: c.operation.clone(), class: c.class.clone() }
     }
 }
 
@@ -886,6 +892,22 @@ pub struct DocInfoResult {
     pub param_warnings: Vec<String>,
 }
 
+/// The world-coordinate box used to filter measured bodies.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct MeasureRegion {
+    pub min: super::types::Point3,
+    pub max: super::types::Point3,
+}
+
+/// How a body's bounding box must meet the query region.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MeasureRegionMode {
+    Intersects,
+    Inside,
+}
+
 /// How `inspect.measure` selects: bodies, or one or two picked items. With `items`, `bodies` and
 /// `names_only` are not read, so the check leaves them alone.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -899,6 +921,14 @@ pub struct MeasureKeys {
     /// with `items`.
     #[serde(default)]
     pub names_only: Option<bool>,
+    /// Limit the bodies to a world-coordinate box (mm), inclusive of its boundary.
+    #[serde(default, deserialize_with = "super::types::present")]
+    #[schemars(with = "MeasureRegion")]
+    pub within: Option<MeasureRegion>,
+    /// Intersects (default) includes touching boxes; inside requires full containment.
+    #[serde(default, deserialize_with = "super::types::present")]
+    #[schemars(with = "MeasureRegionMode")]
+    pub mode: Option<MeasureRegionMode>,
     /// One or two selections to measure, instead of bodies: a face or edge `{type, body, point}`,
     /// `{type, body, index}` (as `model.faces` and `model.edges` list it) or both, or a body,
     /// vertex, sketch curve or profile as `Sel` has it.
@@ -924,7 +954,10 @@ impl<'de> Deserialize<'de> for MeasureParams {
             if list.is_empty() || list.len() > 1000 {
                 return Err(D::Error::custom(whole("measure one or two items")));
             }
-            return Ok(MeasureParams(MeasureKeys { bodies: None, names_only: None, items: Some(list.clone()) }));
+            if value.get("within").is_some() || value.get("mode").is_some() {
+                return Err(D::Error::custom(whole("`within` and `mode` cannot be combined with `items`")));
+            }
+            return Ok(MeasureParams(MeasureKeys { bodies: None, names_only: None, within: None, mode: None, items: Some(list.clone()) }));
         }
         serde_path_to_error::deserialize(&value).map(MeasureParams).map_err(|e| D::Error::custom(located(&e)))
     }

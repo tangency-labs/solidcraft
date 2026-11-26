@@ -123,6 +123,10 @@ pub enum RadiusRecord {
     },
     /// A ball whose radius is the x of a curve over the leader's parameter.
     Law(NurbsCurveRecord),
+    /// No ball: a chamfer whose setbacks hold at every station
+    /// ([`ChamferKindRecord::Setbacks`]). The leader is the edge itself, extended past its
+    /// ends and stored as written; the seeds are the feet's (u, v) on each support.
+    Edge,
     /// The rolling radius is set by the chamfer's equal setbacks at each pair of feet.
     EqualSetback,
 }
@@ -143,13 +147,85 @@ pub enum ChamferSizeRecord {
     Chord(f64),
 }
 
-/// A chamfer's sizes and the wedge angle they were converted to offsets at (#2486).
+/// How a chamfer's sizes hold along its edge.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ChamferKindRecord {
+    /// Converted to the constant offsets of a ball's centre at the wedge angle `wedge`: the
+    /// sizes hold where that wedge was measured (every record written before the kind).
+    #[default]
+    Offsets,
+    /// Setbacks held at every station: each foot a straight line of its size from the edge, in
+    /// the plane square to the edge (`blend::fillet_section::setback_station`). Its radius is
+    /// [`RadiusRecord::Edge`] and its `wedge` is 0, which no chamfer of offsets has: a reader
+    /// that does not know the kind refuses the wedge rather than read offsets. Its sizes are
+    /// two distances or a chord; a distance and an angle under it is reserved, not defined
+    /// yet (the angle's reference is undecided), and refused. Nothing builds one yet: the
+    /// kernel refuses it when read.
+    Setbacks,
+}
+
+impl ChamferKindRecord {
+    /// Whether it is [`Self::Offsets`], the kind a record without one has.
+    #[must_use]
+    pub fn is_offsets(&self) -> bool {
+        *self == Self::Offsets
+    }
+}
+
+/// A chamfer's sizes and the wedge angle they were converted to offsets at (#2486), or
+/// setbacks held at every station.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ChamferRecord {
     /// The sizes as asked.
     pub size: ChamferSizeRecord,
-    /// The angle between the supports the sizes were converted at.
+    /// The angle between the supports the sizes were converted at; 0 for
+    /// [`ChamferKindRecord::Setbacks`].
     pub wedge: f64,
+    /// How the sizes hold; absent (and not written) for [`ChamferKindRecord::Offsets`], so a
+    /// record of offsets reads and writes as it did before the kind.
+    #[serde(default, skip_serializing_if = "ChamferKindRecord::is_offsets")]
+    pub kind: ChamferKindRecord,
+}
+
+impl ChamferRecord {
+    /// The structural check of a chamfer's numbers: finite; a chamfer of setbacks of two
+    /// distances or a chord, positive, its wedge 0.
+    ///
+    /// # Errors
+    ///
+    /// The [`RecordError`] for `field`.
+    pub fn validate(&self, field: &'static str) -> Result<(), RecordError> {
+        let sizes = match self.size {
+            ChamferSizeRecord::Distances([a, b]) => [a, b, self.wedge],
+            ChamferSizeRecord::DistanceAngle { distance, angle } => [distance, angle, self.wedge],
+            ChamferSizeRecord::Chord(l) => [l, l, self.wedge],
+        };
+        if !all_finite(&sizes) {
+            return Err(refuse(field, "a definition's numbers are finite"));
+        }
+        if self.kind == ChamferKindRecord::Setbacks {
+            let [a, b, _] = sizes;
+            if !(a > 0.0 && b > 0.0) {
+                return Err(refuse(field, "a chamfer of setbacks has positive sizes"));
+            }
+            if self.wedge != 0.0 {
+                return Err(refuse(field, "a chamfer of setbacks has no wedge: it is 0"));
+            }
+            if matches!(self.size, ChamferSizeRecord::DistanceAngle { .. }) {
+                return Err(refuse(
+                    field,
+                    "a chamfer of setbacks by a distance and an angle is not defined yet",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether its sizes are setbacks held at every station.
+    #[must_use]
+    pub fn is_setbacks(&self) -> bool {
+        self.kind == ChamferKindRecord::Setbacks
+    }
 }
 
 /// The affine map from the net's (u, v) to the definition's (s, t):
@@ -381,17 +457,15 @@ impl ProceduralBlendRecord {
             return Err(refuse("definition", "a definition's numbers are finite"));
         }
         if let Some(c) = &d.chamfer {
-            let sizes = match c.size {
-                ChamferSizeRecord::Distances([a, b]) => [a, b, c.wedge],
-                ChamferSizeRecord::DistanceAngle { distance, angle } => [distance, angle, c.wedge],
-                ChamferSizeRecord::Chord(l) => [l, l, c.wedge],
-            };
-            if !all_finite(&sizes) {
-                return Err(refuse(
-                    "definition.chamfer",
-                    "a definition's numbers are finite",
-                ));
-            }
+            c.validate("definition.chamfer")?;
+        }
+        // a chamfer of setbacks has no ball, and only it has none
+        let setbacks = d.chamfer.is_some_and(|c| c.is_setbacks());
+        if setbacks != matches!(d.radius, RadiusRecord::Edge) || (setbacks && d.order != 0) {
+            return Err(refuse(
+                "definition.radius",
+                "a chamfer of setbacks, of order 0, has the edge for its radius, and only it has",
+            ));
         }
         match &d.radius {
             RadiusRecord::Constant { offsets } => {
@@ -403,10 +477,12 @@ impl ProceduralBlendRecord {
                 }
             }
             RadiusRecord::Law(law) => law.validate("definition.radius")?,
+            RadiusRecord::Edge => {}
             RadiusRecord::EqualSetback => {
                 if d.order != 0
-                    || !matches!(d.chamfer.as_ref().map(|c| c.size),
-                    Some(ChamferSizeRecord::Distances([a, b])) if a == b && a > 0.0)
+                    || !matches!(d.chamfer.as_ref().map(|c| (c.size, c.kind)),
+                    Some((ChamferSizeRecord::Distances([a, b]), ChamferKindRecord::Offsets))
+                        if a == b && a > 0.0)
                 {
                     return Err(refuse(
                         "definition.radius",
@@ -606,6 +682,12 @@ impl ExactRoundRecord {
             };
             if !all_finite(&sizes) {
                 return Err(refuse("chamfer", "an exact round's numbers are finite"));
+            }
+            if c.is_setbacks() {
+                return Err(refuse(
+                    "chamfer",
+                    "an exact round's chamfer is of offsets: one of setbacks has no exact class yet",
+                ));
             }
         } else {
             if self.radius <= 0.0 {

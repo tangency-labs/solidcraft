@@ -577,7 +577,7 @@ fn point_class_pair(pc: &PointClassification<H>) -> [i64; 2] {
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     // the B-rep: the Rust kernel's own build of the source (no C++ state)
     let (mut b, _) = match own_brep(&i.brep, i.validate_only, i.init_gaps)? {
         Ok(x) => x,
@@ -1392,7 +1392,7 @@ mod tight_box_certificate {
                     report.push(format!("{unit_id} {name}: no copy"));
                     continue;
                 };
-                let k = Kernel::default();
+                let k = crate::runner_kernel();
                 let faces = solidcore::topology::brep::p1::faces(body, None).expect("faces");
                 for f in faces {
                     let mut b = body.clone_standing_for_self().expect("copy");
@@ -1444,7 +1444,7 @@ mod tight_box_certificate {
                                         ));
                                     }
                                 }
-                                let mut kk = Kernel::default();
+                                let mut kk = crate::runner_kernel();
                                 let mut bb = body.clone_standing_for_self().expect("copy");
                                 let check = solidcore::topology::brep::validation::check_brep(
                                     &mut kk,

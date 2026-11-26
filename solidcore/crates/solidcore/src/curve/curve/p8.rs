@@ -121,10 +121,9 @@
 //!   told apart. The certificates do bounded work: at most 16 control points of a curve's
 //!   stretch for the cones, 4096 piece pairs a level over 24 levels in the subdivision,
 //!   and 64 pieces of each in the conic slope test; past that, or for curve kinds they do
-//!   not cover, the ranges are kept. With `Kernel::fixes.simple_coincidence_crossing_is_point`
-//!   a span pair whose separation keeps one side without vanishing is already the nearest
-//!   point (`Curve::simple_coincidence_checker`), and `drop_ranges_of_tangencies` then makes
-//!   a section tangent to a floor arc at their shared end one point (#18064).
+//!   not cover, the ranges are kept. A face/face section tangent to a floor arc at
+//!   their shared end vertex is made one point by the tangency witness, from the
+//!   surfaces (`crate::intersect::curve_class::witness`, #18064).
 //! - **Flank points of an ellipse's touch (#18828).** After the spurious points are
 //!   culled, consecutive point solutions of a line and an ellipse that is no circle are
 //!   replaced by the line's one touch with the ellipse when the line lies in the ellipse's
@@ -160,6 +159,7 @@ use crate::nurbs::b_spline_curve::{BSplineCurve, ProjectionType};
 use crate::nurbs::crv_basic::Curve as NurbCurve;
 use crate::nurbs::math::{gamma, NOZ};
 use crate::nurbs::nurbs_crv::{crv_accel_bound, crv_point_error, crv_speed_bound};
+use crate::profile::profile_scope;
 
 const OP_GCI: &str = "curve::curve::p8::Curve::global_curve_intersect";
 
@@ -876,6 +876,60 @@ impl Curve {
         )
     }
 
+    /// Not upstream (#15049): [`Curve::global_curve_intersect`] with a contact tolerance:
+    /// coplanar circles, or a circle and a line in its plane, overlapping past touching by
+    /// less than `contact_tol` touch at one point ([`analytic_curve_intersect`]), as in
+    /// [`Curve::global_curve_intersect_cached_with_zone_tols`]; zero is
+    /// [`Curve::global_curve_intersect`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Curve::global_curve_intersect`].
+    pub(crate) fn global_curve_intersect_in_contact<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+        other: &Self,
+        other_interval: &Extent1d,
+        dist_tol: f64,
+        opts: &CurveIntersectOptions<O>,
+        contact_tol: f64,
+    ) -> Result<SolutionArray<O>> {
+        if opts.handles == [None, None] && opts.analytic_handles == [None, None] {
+            let own = operand_handles(self, other);
+            let inner = CurveIntersectOptions {
+                skip_global_coincidence_check: opts.skip_global_coincidence_check,
+                handles: [Some(own[0]), Some(own[1])],
+                analytic_handles: [Some(own[2]), Some(own[3])],
+            };
+            return Ok(self
+                .global_curve_intersect_in_contact(
+                    k,
+                    interval,
+                    other,
+                    other_interval,
+                    dist_tol,
+                    &inner,
+                    contact_tol,
+                )?
+                .without_objects());
+        }
+        self.global_curve_intersect_body(
+            k,
+            interval,
+            other,
+            other_interval,
+            dist_tol,
+            opts,
+            &mut None,
+            &mut None,
+            [None, None],
+            contact_tol,
+            true,
+            [false; 2],
+        )
+    }
+
     /// [`Curve::global_curve_intersect`] keeping the curves' caches in `cache1` (this
     /// curve's) and `cache2` (the other curve's; unused when `other` is this curve)
     /// across calls, as upstream keeps them on the curves (`GetOrCreateObjectCache`):
@@ -1121,6 +1175,7 @@ impl Curve {
         // get target curves' caches (kept in the caller's slots, see
         // `global_curve_intersect_cached`), each at its owner's zone tolerance when the
         // caller resolved one
+        profile_scope!(k, "curve::global_curve_intersect::cached");
         let cache1 = match cache1_slot {
             Some(c) => c,
             slot @ None => slot.insert(build_cache(k, self, h_this, zone_tols[0])?),
@@ -2479,11 +2534,11 @@ impl Curve {
     ///   of one sign; or [`curves_meet_at_most_once`]); else (two curved curves tangent to
     ///   each other, an exact or near overlap, also with a conic over an arc, two touches)
     ///   the stretch keeps its ranges: a tangency has no sign change, so at the scaled zero
-    ///   it is a short coincidence and no bound tells it from one. With
-    ///   `Kernel::fixes.simple_coincidence_crossing_is_point` the span pairs of a one-sided
-    ///   approach are already nearest points, and `drop_ranges_of_tangencies` makes a
-    ///   section tangent to a floor arc at their shared end one point (#18064). So does a curve
-    ///   against itself whose touch is where it folds back onto itself. Curves that come
+    ///   it is a short coincidence and no bound tells it from one. `drop_ranges_of_tangencies`
+    ///   drops the flank ranges beside a touch (a curve against itself whose touch is where
+    ///   it folds back onto itself), and a face/face section tangent to a floor arc at their
+    ///   shared end vertex is made one point by the tangency witness
+    ///   (`crate::intersect::curve_class::witness`, #18064). Curves that come
     ///   back within the tolerance elsewhere without changing sides
     ///   are one coincidence whose separation passes the tolerance here and there (a fitted
     ///   copy of a closed section, #1036), and keep their ranges; so do two separate touches
@@ -2832,9 +2887,8 @@ impl Curve {
                 // overlap, a fitted copy touching its edge where the fit is exact, two
                 // touches) and keeps its ranges: a tangency of two curved curves has no
                 // sign change, so at the scaled zero it cannot be told from a short
-                // coincidence. With `simple_coincidence_crossing_is_point` the per-span
-                // nearest points and `drop_ranges_of_tangencies` make the shared-end
-                // tangency of a section and a floor arc one point (#18064)
+                // coincidence (the face/face tangency witness makes the shared-end
+                // tangency of a section and a floor arc one point, #18064)
                 if !(touch_is_alone(
                     k,
                     self,
