@@ -158,7 +158,8 @@ impl Outcome {
 
 /// Check `job`'s body under the token and validation mode of this thread.
 pub(super) fn check(job: &Job) -> Outcome {
-    let _span = solidcraft_profile::span("import", "step.check");
+    // On a worker thread: the span says which part it checks (#22473).
+    let _span = solidcraft_profile::span("import", "step.check").arg("part", &job.label);
     check_body(&job.body)
 }
 

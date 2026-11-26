@@ -176,6 +176,48 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
     }
 }
 
+/// Edge name `name` without the numbers that tell its faces apart from tied pieces of the same
+/// name (`F2:side:l1|F2:top#1` is `F2:side:l1|F2:top`): `None` when none of its faces has one, or
+/// it does not read as an edge name.
+fn without_face_ties(name: &str) -> Option<crate::persistent_name::EdgeName> {
+    use crate::persistent_name::{EdgeName, Suffix};
+    let mut e = EdgeName::parse(name).ok()?;
+    let mut tied = false;
+    for f in &mut e.faces {
+        match f.suffixes.last_mut() {
+            Some(Suffix::Numbered(_)) => {
+                f.suffixes.pop();
+                tied = true;
+            }
+            Some(Suffix::Piece(q)) if q.tie.is_some() => {
+                q.tie = None;
+                tied = true;
+            }
+            _ => {}
+        }
+    }
+    tied.then_some(e)
+}
+
+/// The edge a blend's stored edge name `name` meant when it found edge `found` of body `b` (whose
+/// mesh is `m`) and the blend's own pick `near` does not lie on it: the edge `near` lies on
+/// (exactly, clear of its ends, see [`edge_through`]), when its name differs from `name` only in
+/// the numbers of its faces. Pieces that nothing else tells apart are numbered along where they
+/// lie, and builds have numbered them differently: both caps of an extrude with a start offset are
+/// `top`, and since #21762 the one a design saved by 0.47.0 called `top#1` is `top#2` (#22230).
+/// The point was picked on the edge the name was given to, so it says which one that is, but only
+/// on the body it was picked on: a pick is not updated when an edit moves the body, and then it
+/// can lie on the other cap's edge. The caller checks that the body has not moved: its box is the
+/// saved one, and no earlier feature places bodies whole.
+pub(crate) fn retied_edge(b: &ModelBody, m: &Mesh, name: &str, found: usize, near: Vec3) -> Option<usize> {
+    if b.body.is_mesh() || !near.is_finite() || edge_near(b, m, found, near) {
+        return None;
+    }
+    let wanted = without_face_ties(name)?;
+    let j = edge_through(b, m, near).filter(|j| *j != found)?;
+    (without_face_ties(edge_names(b).get(j)?)? == wanted).then_some(j)
+}
+
 /// Find a saved edge in its body when it may be named with numbered pieces: a Sketch Project edge, or
 /// the edge of a fillet or chamfer (#16535). Older designs can name the edge between
 /// numbered pieces of faces that now evaluate whole (`F4:side:l6#2|F4:side:l7#2`, now
@@ -195,6 +237,7 @@ pub(crate) fn locate_projected_edge_from(b: &ModelBody, saved_body: &str, name: 
         recover_numbered_projected_edge(b, name, near)
             .or_else(|| recover_blend_numbered_edge(b, name, near))
             .or_else(|| recover_align_projected_edge(b, saved_body, name, near))
+            .or_else(|| recover_misnumbered_side_edge(b, name, near))
             .or_else(|| recover_positional_edge(b, name, near))
             .ok_or(miss)
     })
@@ -321,6 +364,67 @@ fn recover_align_projected_edge(b: &ModelBody, saved_body: &str, name: &str, nea
         return None;
     }
     Some(EdgeHit { edge, point: near, verified: false, on_point: true })
+}
+
+/// 0.45.0-rc.4 and 0.45.0 could name several faces a feature swept from different curves after
+/// one of them, told apart by a number only: a revolve cut after another named both flanks of its
+/// groove `F6:side:l1#1` and `F6:side:l1#2`, where earlier and later builds name them
+/// `F6:side:l1` and `F6:side:l2` (#21293). A saved edge naming such a numbered side face is found
+/// at its saved point: the one exact edge within a pick's reach of it, where the numbered face
+/// is a side face the same feature swept from the same profile and the other face is the saved
+/// face or a piece of it. No mesh or nearest-edge substitution decides this.
+fn recover_misnumbered_side_edge(b: &ModelBody, name: &str, near: Vec3) -> Option<EdgeHit> {
+    use crate::persistent_name::{Base, EdgeName, FaceName, Role, Suffix};
+    if b.body.is_mesh() || !near.is_finite() {
+        return None;
+    }
+    let read = EdgeName::parse(name).ok()?;
+    let side = |f: &FaceName| match &f.base {
+        Base::Made { feature, role: Role::Side { profile, .. } } => Some((*feature, *profile)),
+        _ => None,
+    };
+    let numbered = |f: &FaceName| side(f).is_some() && matches!(f.suffixes.as_slice(), [Suffix::Numbered(_)]);
+    let [first, second] = read.faces.as_slice() else { return None };
+    // One face numbered: the other, named as saved, ties the edge down. A name whose faces are
+    // both numbered pieces (as 0.30.1 saved a revolve's) says nothing that tells the edge apart.
+    // The other face carries no piece number at all: one numbered side face is the only
+    // misnumbering this reads past.
+    let carries_number = |f: &FaceName| f.suffixes.iter().any(|s| matches!(s, Suffix::Numbered(_)));
+    if numbered(first) == numbered(second) || (carries_number(first) && carries_number(second)) {
+        return None;
+    }
+    // The numbered face is a cut's flank and the other the face it cut, made earlier: a name
+    // whose faces one feature made (a numbered piece of a side beside its own top) is a split
+    // face's piece, which the saved number alone can't pick out.
+    let (flank, other) = if numbered(first) { (first, second) } else { (second, first) };
+    if other.made_by().is_none_or(|other| Some(other) == flank.made_by()) {
+        return None;
+    }
+    let record = b.body.record();
+    let reach = pick_reach(b);
+    let mut on = record
+        .edges
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| solidcraft_kernel::edge_distance(&b.body, *i, near).ok().flatten().is_some_and(|d| d <= reach));
+    let edge = on.next().filter(|_| on.next().is_none())?.0;
+    let [p, q] = record.edges.get(edge)?.uses.as_slice() else { return None };
+    let faces = naming::names(b);
+    let current = |face: u32| faces.faces.get(face as usize).and_then(|n| FaceName::parse(n).ok());
+    let (p, q) = (current(p.face)?, current(q.face)?);
+    let answers = |saved: &FaceName, now: &FaceName| {
+        if numbered(saved) {
+            side(saved) == side(now) && now.suffixes.iter().all(|s| matches!(s, Suffix::Piece(_)))
+        } else {
+            now.stem() == saved.stem()
+        }
+    };
+    ((answers(first, &p) && answers(second, &q)) || (answers(first, &q) && answers(second, &p))).then_some(EdgeHit {
+        edge,
+        point: near,
+        verified: false,
+        on_point: true,
+    })
 }
 
 /// Find a saved edge between a face and a fillet's or chamfer's face whose name, in the older
@@ -1413,6 +1517,18 @@ pub fn locate_face_on_body(st: &ModelState, body: Option<&str>, name: &str, p: V
 /// piece never covered.
 pub fn locate_thread_face_on_body(st: &ModelState, body: Option<&str>, name: &str, p: Vec3) -> Option<FaceHit> {
     locate_face_on_body_with(st, body, name, p, true)
+}
+
+/// Whether [`locate_face_on_body`] resolves `name` directly on `st.bodies[body_index]` without
+/// falling back to scanning other bodies in `st`.
+pub(crate) fn face_resolved_on_body(st: &ModelState, body_index: usize, name: &str, p: Vec3) -> bool {
+    if crate::sheet::split_sheet_face_name(name).is_some() || legacy_name(name).is_some() {
+        return false;
+    }
+    let Some(b) = st.bodies.get(body_index).filter(|b| !b.body.is_mesh()) else {
+        return false;
+    };
+    locate_in(std::iter::once((body_index, b)), name, Some(p)).is_ok()
 }
 
 /// [`locate_face_on_body`] for a face that stands only for where it lies: an extrude's From or To
