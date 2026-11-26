@@ -18167,7 +18167,7 @@ fn eval_feature_kind(
                     if !(t.is_finite() && origin.is_finite() && ang.is_finite()) {
                         return Err(kernel::KernelError::Invalid("non-finite transform".into()).into());
                     }
-                    if ang.abs() > 1e-12 && axis.normalized().is_none() {
+                    if ang.abs() > 1e-12 && !(axis.is_finite() && (axis.x * axis.x + axis.y * axis.y + axis.z * axis.z) > 1e-24) {
                         return Err(kernel::KernelError::Invalid("rotation axis".into()).into());
                     }
                     let motion = crate::mat_mul(frame, &base_motion);
