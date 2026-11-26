@@ -2949,7 +2949,7 @@ fn round_record(
 ) -> Result<Option<crate::frame_cope::RoundMember>> {
     use crate::frame_cope::{Bounds, RoundMember, Terminal};
     use solidcore_record::frame::Segment;
-    use solidcraft_kernel::services::tube_cope;
+    use solidcraft_kernel::tube_cope;
     let MemberProfile::Library { profile } = profile else { return Ok(None) };
     let frame::Profile::RoundTube { diameter, wall } = profile.resolve(|_, e, kind| val(vals, e, kind))? else { return Ok(None) };
     // An off-centre circular profile sweeps about a different centreline at a bend.
