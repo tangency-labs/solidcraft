@@ -831,7 +831,8 @@ fn send_to_slicer_sends_step_to_the_slicers_that_read_it() {
     let refused = refused.unwrap_err().to_string();
     assert!(refused.contains("does not take step"), "{refused}");
     assert!(unknown.is_err());
-    std::fs::remove_dir_all(std::path::Path::new(&file).parent().unwrap()).unwrap();
+    // Only this test's file: the slicer folder is shared with the other sends.
+    std::fs::remove_file(&file).unwrap();
     std::fs::remove_dir_all(dir).unwrap();
 }
 
