@@ -859,7 +859,7 @@ pub struct FilletExecutive<O> {
     /// `FilletSession::set_groups_apart`.
     pub groups_apart: bool,
     /// Not upstream (#2784): with [`Self::groups_apart`], the refusal recorded is that of
-    /// bands that meet across a curved face they share (`FaceConsumed` from the bands, or
+    /// bands that meet only across curved faces (`FaceConsumed` from the bands, or
     /// `BandsOverlap`) while no blend adds material: the event in which each group's blend
     /// takes off what it takes alone, so the body is the intersection of what each group
     /// leaves. The refusal, with its size, stands for when that construction gives no body.
@@ -3657,17 +3657,20 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             // located there as `refuse_overlapping_bands` locates it. A polygon taken whole
             // keeps its own event's size.
             let mut site = None;
-            let mut bands_meet = false;
+            // the event only where every meeting of bands is on a curved face (a plane's
+            // bands keep their refusal)
+            let (mut met, mut all_curved) = (false, true);
             if no_polygon {
                 for fit in access.creation_bands_meet(k, &solvers)? {
-                    bands_meet |= fit.curved;
+                    met = true;
+                    all_curved &= fit.curved;
                     if self.fit_radius < 0.0 || fit.size < self.fit_radius {
                         self.note_fit_radius(fit.size, Some(fit.edge), fit.kind);
                         site = Some(fit);
                     }
                 }
             }
-            self.bands_meet_apart = bands_meet && self.blends_take_material(k, access)?;
+            self.bands_meet_apart = met && all_curved && self.blends_take_material(k, access)?;
             let refused = self.record_no_room(
                 NoRoomReason::FaceConsumed,
                 "Fillet Error: the blends take the whole of a face they roll on, some at an angle to it (the blend is larger than the faces allow)",
@@ -3831,15 +3834,17 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         if !access.geometry_bands_clear_other_rails(k, &self.solvers)? {
             let solvers = self.solvers.clone();
             let mut site = None;
-            let mut curved = false;
+            // the event only where every meeting of bands is on a curved face
+            let (mut met, mut all_curved) = (false, true);
             for fit in access.creation_bands_meet(k, &solvers)? {
-                curved |= fit.curved;
+                met = true;
+                all_curved &= fit.curved;
                 if self.fit_radius < 0.0 || fit.size < self.fit_radius {
                     self.note_fit_radius(fit.size, Some(fit.edge), fit.kind);
                     site = Some(fit);
                 }
             }
-            self.bands_meet_apart = curved && self.blends_take_material(k, access)?;
+            self.bands_meet_apart = met && all_curved && self.blends_take_material(k, access)?;
             let refused = self.record_no_room(
                 NoRoomReason::BandsOverlap,
                 "Fillet Error: a blend's rail runs inside the band another blend takes off a face they share (the blends are larger than the face allows)",

@@ -826,25 +826,32 @@ fn both_rims_of_a_disc_past_half_its_height_build_what_each_takes_alone() {
         }
         std::f64::consts::PI * (5.0 - d) * (5.0 - d) + s * h / 3.0
     };
-    for kind in [Blend::Round, Blend::Chamfer] {
-        for d in [0.75, 1.0, 1.5, 4.0] {
-            let disc = built(|k| create_cylinder(k, Vec3::new(0.0, 0.0, 0.0), 5.0, 1.0));
-            let rims = [
-                edge_at(&disc, [-5.0, 0.0, 0.0]),
-                edge_at(&disc, [-5.0, 0.0, 1.0]),
-            ];
-            let out = blend(&disc, kind, &rims, &[d], &[], Corners::Filled);
-            assert!(out.is_ok(), "{kind:?} {d}: {out:?}");
-            assert!(
-                disc.check(CheckLevel::All).unwrap().is_valid(),
-                "{kind:?} {d}"
-            );
-            let want = disc_rims(d, kind);
-            let v = disc.volume(1e-9).unwrap();
-            assert!(
-                (v - want).abs() <= 1e-6 * want,
-                "{kind:?} {d}: volume {v}, want {want}"
-            );
+    // the turns the fillet and chamfer commands give (`Auto` without one asked) and `Mitre`
+    for turn in [Turn::Auto, Turn::Mitre] {
+        for kind in [Blend::Round, Blend::Chamfer] {
+            for d in [0.75, 1.0, 1.5, 4.0] {
+                let disc = built(|k| create_cylinder(k, Vec3::new(0.0, 0.0, 0.0), 5.0, 1.0));
+                let rims = [
+                    edge_at(&disc, [-5.0, 0.0, 0.0]),
+                    edge_at(&disc, [-5.0, 0.0, 1.0]),
+                ];
+                let options = BlendOptions {
+                    turn,
+                    ..BlendOptions::default()
+                };
+                let out = blend_with(&disc, kind, &rims, &[d], &[], Corners::Filled, options);
+                assert!(out.is_ok(), "{turn:?} {kind:?} {d}: {out:?}");
+                assert!(
+                    disc.check(CheckLevel::All).unwrap().is_valid(),
+                    "{turn:?} {kind:?} {d}"
+                );
+                let want = disc_rims(d, kind);
+                let v = disc.volume(1e-9).unwrap();
+                assert!(
+                    (v - want).abs() <= 1e-6 * want,
+                    "{turn:?} {kind:?} {d}: volume {v}, want {want}"
+                );
+            }
         }
     }
 }

@@ -1427,6 +1427,12 @@ fn overflow_first(
             ask_apart: asks_apart(&fresh, &again, &[], Corners::Filled, turn, options)?,
             ..Stopped::default()
         };
+        // the body as it was, for the event's construction (only when the event is asked)
+        let intact = if stopped.ask_apart {
+            Some(fresh.clone_standing_for_self_keeping_definitions()?)
+        } else {
+            None
+        };
         let one = pass(
             k,
             &mut fresh,
@@ -1434,10 +1440,12 @@ fn overflow_first(
             &mut stopped,
         )?;
         if let Err(refused) = one {
-            if stopped.apart && build_apart(k, &mut fresh, kind, &again, &sizes, options)?.is_some()
-            {
-                untagged(&mut fresh)?;
-                return Ok(Ok(fresh));
+            if let (true, Some(intact)) = (stopped.apart, intact.as_ref()) {
+                if let Some((apart, _)) = build_apart(k, intact, kind, &again, &sizes, options)? {
+                    fresh = apart;
+                    untagged(&mut fresh)?;
+                    return Ok(Ok(fresh));
+                }
             }
             return Ok(Err(match refused {
                 Refused::Corner(corner) => Error::CornerRefused { corner },
@@ -1900,43 +1908,42 @@ fn ends_the_operation(e: &SolidError) -> bool {
 }
 
 /// Not upstream (#2784): each pick's group among `picked`, the groups being the picks joined
-/// by shared vertices (each named by its least index), from the topology alone.
+/// by shared vertices, from the topology alone (a union of the picks met at each vertex, each
+/// group named by its least pick).
 ///
 /// # Errors
 /// The kernel's, reading the edges' vertices.
 fn vertex_groups(b: &Brep, picked: &[EdgeId]) -> solidcore::Result<Vec<usize>> {
-    let ends: Vec<[Option<VertexId>; 2]> = picked
-        .iter()
-        .map(|&e| edge::start_end_vertices(b, e).map(|(s, t)| [s, t]))
-        .collect::<solidcore::Result<_>>()?;
-    let mut group: Vec<usize> = (0..picked.len()).collect();
-    let mut changed = true;
-    while changed {
-        changed = false;
-        for (i, ei) in ends.iter().enumerate() {
-            for (j, ej) in ends.iter().enumerate() {
-                let (Some(&gi), Some(&gj)) = (group.get(i), group.get(j)) else {
-                    continue;
-                };
-                if gi != gj && ei.iter().flatten().any(|v| ej.contains(&Some(*v))) {
-                    let low = gi.min(gj);
-                    for g in &mut group {
-                        if *g == gi || *g == gj {
-                            *g = low;
-                        }
-                    }
-                    changed = true;
-                }
+    fn root(parent: &[usize], mut i: usize) -> usize {
+        while let Some(&p) = parent.get(i) {
+            if p == i {
+                break;
+            }
+            i = p;
+        }
+        i
+    }
+    let mut parent: Vec<usize> = (0..picked.len()).collect();
+    let mut first_at: HashMap<VertexId, usize> = HashMap::new();
+    for (i, &e) in picked.iter().enumerate() {
+        let (s, t) = edge::start_end_vertices(b, e)?;
+        for v in [s, t].into_iter().flatten() {
+            let other = *first_at.entry(v).or_insert(i);
+            let (a, z) = (root(&parent, i), root(&parent, other));
+            let (low, high) = (a.min(z), a.max(z));
+            if let Some(slot) = parent.get_mut(high) {
+                *slot = low;
             }
         }
     }
-    Ok(group)
+    Ok((0..picked.len()).map(|i| root(&parent, i)).collect())
 }
 
 /// Not upstream (#2784): whether a pass of `picked` asks the session for the bands-meet event
-/// ([`Stopped::ask_apart`]): a plain constant blend (no setback, filled corners, mitred turns)
-/// of edges in at least two groups that share no vertex ([`vertex_groups`]). The topology
-/// alone decides it, before anything is built.
+/// ([`Stopped::ask_apart`]): a plain constant blend (no setback, filled corners, mitred
+/// corners, turns mitred or left to the kernel: groups that share no vertex have no turn between
+/// them) of edges in at least two groups that share no vertex ([`vertex_groups`]). The
+/// topology alone decides it, before anything is built.
 ///
 /// # Errors
 /// The kernel's, reading the edges' vertices.
@@ -1951,76 +1958,119 @@ fn asks_apart(
     if picked.len() < 2
         || !back.is_empty()
         || corners != Corners::Filled
-        || turn != Turn::Mitre
+        || !matches!(turn, Turn::Mitre | Turn::Auto)
         || options.chamfer_corner != ChamferCorner::Mitre
     {
         return Ok(false);
     }
-    let mut groups = vertex_groups(b, picked)?;
-    groups.sort_unstable();
-    groups.dedup();
-    Ok(groups.len() > 1)
+    let groups = vertex_groups(b, picked)?;
+    Ok(groups.iter().any(|&g| groups.first() != Some(&g)))
+}
+
+/// A step of [`build_apart`] whose failure leaves the caller's refusal standing: its value, or
+/// `None` for a failure; a cancel and the kernel's defects end the operation.
+fn soft<T>(step: solidcore::Result<T>) -> solidcore::Result<Option<T>> {
+    match step {
+        Ok(v) => Ok(Some(v)),
+        Err(error) if ends_the_operation(&error) => Err(error),
+        Err(_) => Ok(None),
+    }
 }
 
 /// Not upstream (#2784): the construction of the bands-meet event ([`Stopped::apart`]):
-/// blends whose bands meet across a face they share, on edges in groups that share no vertex,
-/// none adding material (both rims of a disc blended by half its height or more, the two end
-/// edges of a narrow post rounded past half its width). Each group's blend takes off what it
-/// takes alone, so the body left is the intersection of the bodies each group leaves on its
-/// own, the face the bands cover gone and the blends meeting in a ridge (half-spaces, for
-/// chamfers): the removal of the edges and faces a large blend sweeps over (US patent
-/// 5,615,317), here by the booleans.
+/// blends whose bands meet only across curved faces, on edges in groups that share no vertex,
+/// none adding material (both rims of a disc blended by half its height or more). Each group's
+/// blend takes off what it takes alone, so the body left is the intersection of the bodies each
+/// group leaves on its own, the face the bands cover gone and the blends meeting in a ridge
+/// (half-spaces, for chamfers): the removal of the edges and faces a large blend sweeps over
+/// (US patent 5,615,317), here by the booleans.
 ///
-/// Each group is blended alone on a copy that keeps the body's ids and its faces' definitions,
-/// its faces tagged ([`MadeBy`]); the copies are intersected, and the result is taken only
-/// where its volume is what that construction gives ([`apart_volumes_fit`]: no group adds
-/// material, the result between what each leaves and what all take off). The blend's faces in the
-/// result go to the session log. `None` (the caller's refusal stands) where a group is refused
-/// alone, or the intersection is empty or not taken.
+/// `intact` is the body as it was before the pass that noted the event, `picked` its edges.
+/// Each group is blended alone on its own copy of it (the picks mapped through the copy), its
+/// faces tagged ([`MadeBy`]); the copies are intersected, and the result is taken only where its
+/// volume is what that construction gives ([`apart_volumes_fit`]). The blend's faces in the
+/// result go to the session log. The new body, with each pick's `dropped` as its group's pass
+/// gave it, or `None` (the caller's refusal stands) where a group is refused alone or any step
+/// fails or does not fit; the log is left as it was then.
 ///
 /// # Errors
-/// A cancel and the kernel's defects; the kernel's errors from the body's queries.
+/// A cancel and the kernel's defects, from any step.
 fn build_apart(
     k: &mut Kernel,
-    b: &mut Brep,
+    intact: &Brep,
     kind: Blend,
     picked: &[EdgeId],
     sizes: &[f64],
     options: BlendOptions,
-) -> solidcore::Result<Option<Blended>> {
-    let group = vertex_groups(b, picked)?;
+) -> solidcore::Result<Option<(Brep, Vec<bool>)>> {
+    let outer = k.blend_face_log.take();
+    let built = apart_bodies(k, intact, kind, picked, sizes, options);
+    let made = k.blend_face_log.take();
+    k.blend_face_log = outer;
+    let Some((result, dropped)) = built? else {
+        return Ok(None);
+    };
+    if let (Some(log), Some(made)) = (k.blend_face_log.as_mut(), made) {
+        log.sessions.extend(made.sessions);
+    }
+    Ok(Some((result, dropped)))
+}
+
+/// [`build_apart`]'s bodies, with the blend's faces in `k.blend_face_log` (one session).
+fn apart_bodies(
+    k: &mut Kernel,
+    intact: &Brep,
+    kind: Blend,
+    picked: &[EdgeId],
+    sizes: &[f64],
+    options: BlendOptions,
+) -> solidcore::Result<Option<(Brep, Vec<bool>)>> {
+    let group = vertex_groups(intact, picked)?;
     let mut ids = group.clone();
     ids.sort_unstable();
     ids.dedup();
-    let order = b.edge_list().to_vec();
-    let v0 = volume_of(k, b)?;
-    let outer = k.blend_face_log.take();
+    let mut v0_body = intact.clone_standing_for_self_keeping_definitions()?;
+    let Some(v0) = soft(volume_of(k, &mut v0_body))? else {
+        return Ok(None);
+    };
+    let mut dropped = vec![false; picked.len()];
     let mut bodies = Vec::new();
     let mut volumes = Vec::new();
     for id in ids {
         k.check_cancelled("blend")?;
-        let mut alone = b.clone_standing_for_self_keeping_definitions()?;
-        let mut indices = Vec::new();
+        let members: Vec<usize> = (0..picked.len())
+            .filter(|&n| group.get(n) == Some(&id))
+            .collect();
+        let mine: Vec<EdgeId> = members
+            .iter()
+            .filter_map(|&n| picked.get(n).copied())
+            .collect();
         let mut each = Vec::new();
-        for (n, (&e, &g)) in picked.iter().zip(&group).enumerate() {
-            if g != id {
-                continue;
-            }
-            let Some(at) = order.iter().position(|&o| o == e) else {
-                k.blend_face_log = outer;
+        for &n in &members {
+            let Some(&size) = sizes.get(n).or_else(|| sizes.first()) else {
+                return Ok(None);
+            };
+            each.push(size);
+        }
+        let Some((mut alone, map)) = soft(brep_copy_mapped(k, intact))? else {
+            return Ok(None);
+        };
+        let Some(copies) = crate::split::copies_of(&map, &mine, EntityRef::Edge, |e| match e {
+            EntityRef::Edge(x) => Some(x),
+            _ => None,
+        }) else {
+            return Ok(None);
+        };
+        let order = alone.edge_list().to_vec();
+        let mut indices = Vec::new();
+        for c in &copies {
+            let Some(at) = order.iter().position(|o| o == c) else {
                 return Ok(None);
             };
             indices.push(at);
-            each.push(
-                sizes
-                    .get(n)
-                    .or_else(|| sizes.first())
-                    .copied()
-                    .unwrap_or(0.0),
-            );
         }
         k.blend_face_log = Some(BlendFaceLog::default());
-        let ran = blend_on_body(
+        let ran = soft(blend_on_body(
             k,
             &mut alone,
             None,
@@ -2030,48 +2080,53 @@ fn build_apart(
             &[],
             Corners::Filled,
             options,
-        );
+        ))?;
         let log = k.blend_face_log.take();
-        match ran {
-            Ok(Ok(_)) => {}
-            Ok(Err(_)) => {
-                k.blend_face_log = outer;
-                return Ok(None);
-            }
-            Err(error) => {
-                k.blend_face_log = outer;
-                return Err(error);
+        let Some(Ok(blended)) = ran else {
+            return Ok(None);
+        };
+        for (&n, &d) in members.iter().zip(&blended.dropped) {
+            if let Some(slot) = dropped.get_mut(n) {
+                *slot = d;
             }
         }
         for made in log.iter().flat_map(|l| l.sessions.iter().flatten()) {
             if alone.face_list().contains(&made.face) {
-                alone.add_attribute(
-                    EntityRef::Face(made.face),
-                    Attribute::application(MADE_BY_ID, Behavior::Copy, MadeBy(made.kind)),
-                )?;
+                let tag = Attribute::application(MADE_BY_ID, Behavior::Copy, MadeBy(made.kind));
+                if soft(alone.add_attribute(EntityRef::Face(made.face), tag))?.is_none() {
+                    return Ok(None);
+                }
             }
         }
-        volumes.push(volume_of(k, &mut alone)?);
+        let Some(v) = soft(volume_of(k, &mut alone))? else {
+            return Ok(None);
+        };
+        volumes.push(v);
         bodies.push(alone);
     }
-    k.blend_face_log = outer;
     let mut bodies = bodies.into_iter();
     let Some(mut result) = bodies.next() else {
         return Ok(None);
     };
     for next in bodies {
         k.check_cancelled("blend")?;
-        match crate::boolean::intersection_in(k, result, next, options.contract) {
-            Ok(Some(r)) => result = r,
-            Err(error) if ends_the_operation(&error) => return Err(error),
-            Ok(None) | Err(_) => return Ok(None),
+        match soft(crate::boolean::intersection_in(
+            k,
+            result,
+            next,
+            options.contract,
+        ))? {
+            Some(Some(r)) => result = r,
+            Some(None) | None => return Ok(None),
         }
     }
-    let v = volume_of(k, &mut result)?;
-    if !apart_volumes_fit(v0, &volumes, v) || !is_manifold_solid(&result)? {
+    let Some(v) = soft(volume_of(k, &mut result))? else {
+        return Ok(None);
+    };
+    if !apart_volumes_fit(v0, &volumes, v) || soft(is_manifold_solid(&result))? != Some(true) {
         return Ok(None);
     }
-    // the blend's faces in the result, as its log gives them to the caller, the tags off
+    // the blend's faces in the result, the tags off
     let mut made = Vec::new();
     for f in result.face_list().to_vec() {
         let tag = result
@@ -2080,19 +2135,16 @@ fn build_apart(
             .find(|(_, a)| a.attribute_id() == MADE_BY_ID)
             .and_then(|(h, a)| a.application_value::<MadeBy>().map(|m| (h, m.0)));
         if let Some((h, kind)) = tag {
-            result.remove_attribute(EntityRef::Face(f), h)?;
+            if soft(result.remove_attribute(EntityRef::Face(f), h))?.is_none() {
+                return Ok(None);
+            }
             made.push(MadeBlendFace { face: f, kind });
         }
     }
-    if let Some(log) = k.blend_face_log.as_mut() {
-        log.sessions.push(made);
-    }
-    *b = result;
-    Ok(Some(Blended {
-        dropped: vec![false; picked.len()],
-        holes: Vec::new(),
-        made: Vec::new(),
-    }))
+    k.blend_face_log = Some(BlendFaceLog {
+        sessions: vec![made],
+    });
+    Ok(Some((result, dropped)))
 }
 
 /// [`blend_impl`] on the kernel's body: every pass, its corners and refusals, the body
@@ -2206,12 +2258,25 @@ fn blend_on_body(
                 ask_apart: asks_apart(b, &picked, &back, corners, turn, options)?,
                 ..Stopped::default()
             };
+            // the body as it was, for the event's construction (only when the event is asked)
+            let intact = if stopped.ask_apart {
+                Some(b.clone_standing_for_self_keeping_definitions()?)
+            } else {
+                None
+            };
             if let Err(refused) = pass(k, b, p, &mut stopped)? {
-                // chamfers whose bands meet across a face, in groups that share no vertex:
-                // the event's construction (#2784); else the refusal stands
-                if stopped.apart {
-                    if let Some(apart) = build_apart(k, b, kind, &picked, each, options)? {
-                        return Ok(Ok(apart));
+                // chamfers whose bands meet only across curved faces, in groups that share no
+                // vertex: the event's construction (#2784); else the refusal stands
+                if let (true, Some(intact)) = (stopped.apart, intact.as_ref()) {
+                    if let Some((apart, gone)) =
+                        build_apart(k, intact, kind, &picked, each, options)?
+                    {
+                        *b = apart;
+                        return Ok(done(k, b, expect, contract)?.map(|()| Blended {
+                            dropped: gone,
+                            holes: Vec::new(),
+                            made: Vec::new(),
+                        }));
                     }
                 }
                 return Ok(Err(match refused {
@@ -2281,6 +2346,12 @@ fn blend_on_body(
         ask_apart: asks_apart(b, &picked, &back, corners, turn, options)?,
         ..Stopped::default()
     };
+    // the body as it was, for the event's construction (only when the event is asked)
+    let intact = if stopped.ask_apart {
+        Some(b.clone_standing_for_self_keeping_definitions()?)
+    } else {
+        None
+    };
     let p = Pass {
         edges: &picked,
         section: section(each),
@@ -2297,12 +2368,22 @@ fn blend_on_body(
         contract,
     };
     let made = pass(k, b, p, &mut stopped)?;
-    // bands of groups of edges that share no vertex meet across a face (#2784): the event's
-    // construction, each group apart and the bodies intersected ([`build_apart`]); where it
-    // gives no body, the first call's refusal stands
-    if stopped.apart && made.is_err() {
-        if let Some(apart) = build_apart(k, b, kind, &picked, each, options)? {
-            return Ok(Ok(Blended { dropped, ..apart }));
+    // bands of groups of edges that share no vertex meet only across curved faces (#2784): the
+    // event's construction, each group apart and the bodies intersected ([`build_apart`]);
+    // where it gives no body, the first call's refusal stands. A Roll-over the corners step
+    // noted goes first, as before.
+    if let (true, true, Some(intact)) = (
+        stopped.apart && made.is_err(),
+        stopped.roll_overs.is_empty(),
+        intact.as_ref(),
+    ) {
+        if let Some((apart, gone)) = build_apart(k, intact, kind, &picked, each, options)? {
+            *b = apart;
+            return Ok(done(k, b, expect, contract)?.map(|()| Blended {
+                dropped: gone,
+                holes: Vec::new(),
+                made: Vec::new(),
+            }));
         }
     }
     // the blend corner's Roll-over (#10876): the corners step refused it; it is built in two
