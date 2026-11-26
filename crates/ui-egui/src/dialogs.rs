@@ -7621,13 +7621,20 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
         }
         Kind::AnglePlane { direction_only, .. } => {
-            need(0, "a plane")?;
-            let base = plane_arg(app, sels(d, 0).first())?;
+            // With no plane picked, a body edge as the axis is enough: the command measures the
+            // angle from a flat face along the edge (#20233).
+            let edge_only = sels(d, 0).is_empty() && matches!(sels(d, 1).first(), Some(Sel::Edge { .. }));
+            if !edge_only {
+                need(0, "a plane")?;
+            }
             let axis = match sels(d, 1).first() {
                 Some(x) => axis_param(app, x)?,
                 None => d.extra.get("axis").cloned().ok_or("pick an axis")?,
             };
-            let mut p = json!({"base": base, "axis": axis, "direction_only": direction_only});
+            let mut p = json!({"axis": axis, "direction_only": direction_only});
+            if !edge_only {
+                p["base"] = plane_arg(app, sels(d, 0).first())?;
+            }
             if *direction_only && let Some(pivot) = angle_pivot(d) {
                 p["pivot"] = construct_ref(app, pivot)?;
             }
@@ -10816,6 +10823,26 @@ mod refused_ok_tests {
         .expect("the angled plane previews");
 
         assert!(!preview.scene.xray.is_empty(), "the preview contains the translucent construction plane");
+    }
+
+    /// #20233: with only a body edge picked as the axis, Plane at Angle makes its plane without a
+    /// reference plane (the command measures from a flat face along the edge); with neither a plane
+    /// nor an edge it still asks for a plane.
+    #[test]
+    fn an_edge_alone_builds_a_plane_at_angle() {
+        let mut session = Session::default();
+        session.execute("solid.box", &serde_json::json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        let app = SolveApp::new(session, Default::default());
+        let mut dialog = Dialog::for_command(&app, "construct.plane.at_angle").expect("the command has a dialog");
+        dialog.inputs[1].items = vec![Sel::Edge { body: "Body1".into(), index: 0, point: Vec3::new(20.0, 0.0, 20.0) }];
+        let commands = preview_commands(&app, &dialog).expect("an edge alone forms a command");
+        let (id, params) = commands.first().unwrap();
+        assert_eq!(id, "construct.plane.at_angle");
+        assert!(params.get("base").is_none(), "{params}");
+        let mut session = app.session.scratch();
+        session.execute(id, params).expect("the command makes the plane from the edge");
+        dialog.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+        assert_eq!(preview_commands(&app, &dialog).err().as_deref(), Some("select a plane first"));
     }
 
     /// A box, and a hole dialog with a position picked on its top.

@@ -817,6 +817,47 @@ fn model_line(st: &ModelState, g: &GeoRef) -> Result<(Vec3, Vec3)> {
     }
 }
 
+/// A flat face that meets the body edge `g` picks and runs along `axis` (its plane holds that
+/// direction), as its body's name, its index and a point on it: what a plane at an angle about the edge is
+/// measured from when no reference plane is given (#20233). The first such face in the body's
+/// face order; `None` when there is none (a circular edge's flat cap is square to its axis) or `g`
+/// is not a body edge.
+pub fn flat_face_at_edge(st: &ModelState, g: &GeoRef, axis: Vec3) -> Result<Option<(String, usize, Vec3)>> {
+    let GeoRef::Edge { at, name } = g else { return Ok(None) };
+    let (b, edge, points) = edge_pick(st, *at, name)?;
+    if b.body.is_mesh() || points.len() < 2 {
+        return Ok(None);
+    }
+    // The middle of the edge and its direction there.
+    let i = points.len() / 2;
+    let (from, to) = (points[i.saturating_sub(1).min(points.len() - 2)], points[i.max(1)]);
+    let (mid, Some(along)) = ((from + to) * 0.5, (to - from).normalized()) else { return Ok(None) };
+    let step = (b.body.size() * 1e-3).max(1e-3);
+    let record = b.body.record();
+    let Some(e) = record.edges.get(edge) else { return Ok(None) };
+    let mut faces: Vec<usize> = e.uses.iter().map(|u| u.face as usize).collect();
+    faces.sort_unstable();
+    faces.dedup();
+    for face in faces {
+        let Some(FaceSurface::Plane { normal, .. }) = kernel::face_surface(&b.body, face) else { continue };
+        if axis.normalized().is_none_or(|axis| normal.vec().dot(axis).abs() > 1e-6) {
+            continue;
+        }
+        let Some(across) = normal.vec().cross(along).normalized() else { continue };
+        // A point a step off the edge inside the face: on the face's side of the edge it is its
+        // own closest point on the face (#20233). Exact geometry, no mesh.
+        for side in [1.0, -1.0] {
+            let p = mid + across * (side * step);
+            if let Ok(Some(nearest)) = kernel::point_closest(p, &b.body, kernel::Members::Faces(&[face]))
+                && nearest.to.dist(p) < step * 1e-3
+            {
+                return Ok(Some((b.name.clone(), face, nearest.to)));
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// What [`model_axis`] says about a reference that is neither an edge nor a face.
 pub const MODEL_AXIS_REFS: &str = "pick a straight or circular edge, or a cylinder, cone or torus face";
 
