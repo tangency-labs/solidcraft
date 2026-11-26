@@ -454,8 +454,9 @@ fn a_radial_dimension_reads_a_hole_and_an_edit_makes_it_a_diameter() {
 }
 
 /// A radial dimension on the circle where a countersink meets its bore reads the bore's diameter
-/// from above (#22308): the kernel holds that edge only as a spline, split in two, and each piece
-/// reads as the bore's circle, as the bore's rim on the bottom face does.
+/// from above (#22308), as the bore's rim on the bottom face does: the kernel holds that edge only
+/// as a spline, split in two, and each of the two pieces, picked by its index, reads as the bore's
+/// circle. The issue's point on it reads its diameter by default.
 #[test]
 fn a_radial_dimension_reads_where_a_countersink_meets_its_bore() {
     let mut s = Session::default();
@@ -464,8 +465,22 @@ fn a_radial_dimension_reads_where_a_countersink_meets_its_bore() {
     run(&mut s, "solid.hole", hole);
     let (mut s, view) = drawn_from(s, NamedView::Top);
     // The countersink's 90° cone meets the 2.25 mm bore 2.25 mm below the 4.5 mm rim.
-    let (cos, sin) = (0.3_f64.cos(), 0.3_f64.sin());
-    for at in [[15.0 + 2.25 * cos, 20.0 + 2.25 * sin, 7.75], [15.0 - 2.25 * cos, 20.0 - 2.25 * sin, 7.75], [17.25, 20.0, 0.0]] {
+    let centre = Vec3::new(15.0, 20.0, 7.75);
+    // Its pieces are marched curves: their mesh points lie a few micrometres off the circle.
+    let pieces: Vec<usize> = {
+        let state = s.model.state();
+        let mesh = state.body("Box").unwrap().mesh();
+        mesh.edges.iter().enumerate().filter(|(_, line)| line.iter().all(|p| (p.dist(centre) - 2.25).abs() < 1e-4)).map(|(i, _)| i).collect()
+    };
+    assert_eq!(pieces.len(), 2, "{pieces:?}");
+    let mut named = BTreeSet::new();
+    for index in pieces {
+        let across = add(&mut s, view, json!({"radial": {"edge": {"body": "Box", "index": index}, "diameter": true}}));
+        reads(&across, 4.5, "Ø4.50");
+        named.insert(across["record"]["kind"]["radial"]["edge"]["name"].as_str().unwrap().to_string());
+    }
+    assert_eq!(named.len(), 2, "{named:?}");
+    for at in [[17.25, 20.0, 7.75], [17.25, 20.0, 0.0]] {
         let across = add(&mut s, view, json!({"radial": {"edge": at}}));
         reads(&across, 4.5, "Ø4.50");
         assert_eq!(across["record"]["kind"]["radial"]["diameter"], json!(true), "{at:?}: {across}");
