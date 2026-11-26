@@ -4256,12 +4256,16 @@ pub(crate) fn explicit_plane(o: &Value, origin: Vec3) -> Option<solidcore_record
 /// explicit plane `{origin, x_dir, y_dir}` / `{origin, normal}`. Every command that takes a
 /// plane reads it here.
 pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<solidcraft_doc::PlaneRef> {
+    plane_param_named(s, v, cmd, "plane")
+}
+
+pub(super) fn plane_param_named(s: &Session, v: Option<&Value>, cmd: &str, key: &str) -> Result<solidcraft_doc::PlaneRef> {
     use solidcraft_doc::PlaneRef;
     const WANT: &str = PLANE_FORMS;
     let construction = |r: &str| match s.doc.find_feature(r) {
         Some(f) if matches!(f.kind, FeatureKind::ConstructionPlane { .. }) => Ok(PlaneRef::Construction { feature: f.id.into(), placement: None }),
-        Some(f) => Err(bad(cmd, format!("`{}` is not a construction plane (a plane is {WANT})", f.name))),
-        None => Err(bad(cmd, format!("no plane `{r}` (a plane is {WANT})"))),
+        Some(f) => Err(bad(cmd, format!("`{key}`: `{}` is not a construction plane (a plane is {WANT})", f.name))),
+        None => Err(bad(cmd, format!("`{key}`: no plane `{r}` (a plane is {WANT})"))),
     };
     match v {
         Some(Value::String(n)) if solidcore_record::Plane::named(n.trim()).is_some() => {
@@ -4271,7 +4275,7 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
                 return Err(bad(
                     cmd,
                     format!(
-                        "plane `{}` is ambiguous: an origin-plane alias and a construction plane; use `{}` for the origin plane, construction plane feature id {}, or an explicit {{origin, normal}} plane",
+                        "`{key}`: plane `{}` is ambiguous: an origin-plane alias and a construction plane; use `{}` for the origin plane, construction plane feature id {}, or an explicit {{origin, normal}} plane",
                         n.trim(),
                         origin_plane_alias(n).unwrap_or("XY"),
                         f.id
@@ -4294,7 +4298,7 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
         }
         Some(Value::Number(id)) => match id.as_u64() {
             Some(id) => construction(&id.to_string()),
-            None => Err(bad(cmd, format!("`plane` must be {WANT}"))),
+            None => Err(bad(cmd, format!("`{key}` must be {WANT}"))),
         },
         Some(o @ Value::Object(_)) => {
             // The origin's coordinates are numbers or length expressions; expressions are kept,
@@ -4305,13 +4309,13 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
             };
             let at = |e: &str| s.doc.eval(e, Kind::Length).unwrap_or(0.0);
             let here = Vec3::new(at(&origin[0]), at(&origin[1]), at(&origin[2]));
-            let plane = explicit_plane(o, here).ok_or_else(|| bad(cmd, "plane needs x_dir and y_dir, or normal"))?;
+            let plane = explicit_plane(o, here).ok_or_else(|| bad(cmd, format!("`{key}` needs x_dir and y_dir, or normal")))?;
             if origin.iter().all(|e| solidcraft_doc::expr::is_literal(e)) {
                 return Ok(PlaneRef::Custom { plane });
             }
             Ok(PlaneRef::Placed { origin, x_dir: plane.x, y_dir: plane.y })
         }
-        _ => Err(bad(cmd, format!("`plane` must be {WANT}"))),
+        _ => Err(bad(cmd, format!("`{key}` must be {WANT}"))),
     }
 }
 
@@ -5331,7 +5335,7 @@ fn draft(s: &mut Session, p: &Value) -> Result<Value> {
     let picked = faces_body(s, p, &faces);
     let angle = req_expr(cmd, p, "angle")?;
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
-    let neutral = plane_param(s, p.get("neutral"), cmd)?;
+    let neutral = plane_param_named(s, p.get("neutral"), cmd, "neutral")?;
     let (vals, _) = s.doc.param_values();
     let pl = s.doc.resolve_plane_in(&vals, &neutral, 0, s.active_component, Some(&s.model.state()))?;
     let pull = p.get("pull").and_then(vec3).unwrap_or_else(|| pl.normal());

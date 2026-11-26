@@ -3542,6 +3542,9 @@ pub struct Component {
     /// Free text properties of the definition (material grade, finish, supplier…), by name.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub properties: std::collections::BTreeMap<String, String>,
+    /// Derives two drawing properties from the current name. Explicit properties take precedence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_split: Option<ComponentNameSplit>,
     /// Keeps this component's features (and its children's) out of the History bar (#10393).
     /// The features still rebuild and the component still shows in the Browser; imported copies
     /// whose features only exist to rebuild the copy can carry this flag.
@@ -3550,6 +3553,39 @@ pub struct Component {
     /// Mass values that replace those worked out from its bodies, for robot exports.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub physical_override: Option<PhysicalOverride>,
+}
+
+/// An opt-in rule for deriving two custom drawing properties from a component name.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComponentNameSplit {
+    /// Literal separator, with the first occurrence dividing the name.
+    pub separator: String,
+    /// Property that reads the text before the separator.
+    pub left_property: String,
+    /// Property that reads the text after the separator, including any further separators.
+    pub right_property: String,
+}
+
+impl ComponentNameSplit {
+    /// The property value for `key`, where both halves of the name contain text.
+    pub fn property<'a>(&self, name: &'a str, key: &str) -> Option<&'a str> {
+        if self.separator.is_empty() || self.left_property == self.right_property {
+            return None;
+        }
+        let (left, right) = name.split_once(self.separator.as_str())?;
+        let (left, right) = (left.trim(), right.trim());
+        if left.is_empty() || right.is_empty() {
+            return None;
+        }
+        if key == self.left_property {
+            Some(left)
+        } else if key == self.right_property {
+            Some(right)
+        } else {
+            None
+        }
+    }
 }
 
 /// What a body looks like to a simulator.
@@ -4497,6 +4533,13 @@ pub struct Feature {
     /// mean that numbering.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub kernel_piece_order: bool,
+    /// The pieces this feature splits a body into take its body names in the order of each
+    /// piece's least face name alone, as builds before #21552 named them, instead of first by
+    /// the faces the feature cut them apart with (`lineage::order_lumps`), which an upstream edit
+    /// does not take away. Set on the features of designs saved before then, whose stored body
+    /// names mean that order.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub least_face_piece_order: bool,
     /// This body Pattern reads its stored `body_names` in the order it makes its copies, as builds
     /// before #12114 read them, instead of by source and copy number. Set on the Patterns of
     /// several bodies in designs saved before then, whose stored names mean that order. The
@@ -5444,12 +5487,16 @@ impl Document {
 
     /// This design with `other`'s part properties, or `None` when they are this design's
     /// already (then nothing is copied). The part properties are the fields that change no
-    /// geometry: the design's metadata, each component's metadata and free properties, each
-    /// placement's bill of materials type and the saved item numbers. A field that joins them is
+    /// geometry: the design's metadata, each component's metadata, free properties and name split,
+    /// each placement's bill of materials type and the saved item numbers. A field that joins them is
     /// compared and copied here, and nowhere else.
     fn with_part_properties_of(&self, other: &Document) -> Option<Document> {
         let same = self.metadata == other.metadata
-            && self.components.iter().zip(&other.components).all(|(c, o)| c.metadata == o.metadata && c.properties == o.properties)
+            && self
+                .components
+                .iter()
+                .zip(&other.components)
+                .all(|(c, o)| c.metadata == o.metadata && c.properties == o.properties && c.name_split == o.name_split)
             && self.occurrences.iter().zip(&other.occurrences).all(|(c, o)| c.bom_type == o.bom_type)
             && self.assembly.item_numbers == other.assembly.item_numbers;
         if same {
@@ -5463,6 +5510,7 @@ impl Document {
         for (c, o) in out.components.iter_mut().zip(&other.components) {
             c.metadata.clone_from(&o.metadata);
             c.properties.clone_from(&o.properties);
+            c.name_split.clone_from(&o.name_split);
         }
         for (c, o) in out.occurrences.iter_mut().zip(&other.occurrences) {
             c.bom_type = o.bom_type;
@@ -5984,6 +6032,7 @@ impl Document {
             participants: Vec::new(),
             shell_piece_order: false,
             kernel_piece_order: false,
+            least_face_piece_order: false,
             pattern_names_in_order: false,
             inserted: false,
             link_faces: Vec::new(),

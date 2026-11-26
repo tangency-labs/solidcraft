@@ -1647,6 +1647,14 @@ fn faces_and_neutral_required(schema: &mut Schema) {
     require(schema, "neutral");
 }
 
+fn neutral_plane<'de, D: Deserializer<'de>>(d: D) -> Result<Option<PlaneParam>, D::Error> {
+    let v = Value::deserialize(d)?;
+    match super::types::plane_problem_named(&v, "neutral") {
+        Some(why) => Err(D::Error::custom(why)),
+        None => Ok(Some(PlaneParam(v))),
+    }
+}
+
 /// Tilt faces by an angle about where they meet a neutral plane, so the part comes out of its
 /// mould along the pull direction. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1658,9 +1666,8 @@ pub struct DraftParams {
     pub faces: Option<FaceRefs>,
     /// The draft angle.
     pub angle: AngleExpr,
-    // As `faces`. The handler names this key `plane` in its messages, and so does `PlaneParam`.
     /// The neutral plane: the faces keep their size where they cross it.
-    #[serde(default, deserialize_with = "present")]
+    #[serde(default, deserialize_with = "neutral_plane")]
     #[schemars(with = "PlaneParam")]
     pub neutral: Option<PlaneParam>,
     /// The pull direction, [x, y, z]. Default: the neutral plane's normal.

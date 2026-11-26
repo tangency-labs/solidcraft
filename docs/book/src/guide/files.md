@@ -85,6 +85,15 @@ body's colour and each face's own colour, but without the bodies' names, and IGE
 named and in its colour, as cadmpeg's IGES writer writes no assemblies. The reply's warnings say what
 the file leaves out.
 
+To export a [sketch](sketching.md) with real circles, arcs, and lines, right-click the sketch
+in the **Browser** and choose **Export DXF…** (`sketch.export_dxf`). These become DXF
+`CIRCLE`, `ARC`, and `LINE` entities; a rectangle is four `LINE` entities. Other curves, such as
+splines, are written as short straight `LINE` segments, and construction curves are left out.
+**File → Export Current View as DXF…** instead writes a projected drawing made of straight
+segments, so circles and arcs become segmented curves. See
+[view DXF export](https://github.com/tangency-labs/solidcraft/blob/main/docs/view-dxf.md)
+for projection and tolerance settings.
+
 Opening a STEP, IGES, FreeCAD or Rhino file creates a design with the file's bodies as a base feature, and
 inserting one adds them to the current design. Later features build on them. A FreeCAD file's
 sketches and features are rebuilt as SolidCraft features instead, so its dimensions can be edited;
