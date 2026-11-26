@@ -252,7 +252,7 @@ fn px_apart(a: Pos2, b: Pos2) -> f64 {
 /// None where `p` is on `at` or not finite.
 fn angle_about(at: Vec2, p: Vec2) -> Option<f64> {
     let (dx, dy) = (p.x - at.x, p.y - at.y);
-    let turn = solidcraft_kernel::services::joint_turn::joint_turn([1.0, 0.0], [dx, dy]).ok()?;
+    let turn = solidcraft_kernel::planar::joint_turn([1.0, 0.0], [dx, dy]).ok()?;
     Some(if dy < 0.0 { -turn } else { turn })
 }
 
