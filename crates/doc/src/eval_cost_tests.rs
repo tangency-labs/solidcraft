@@ -776,7 +776,7 @@ fn import_snapshot(model: &Model) -> (Vec<(String, u64, u64, i64, Vec<String>)>,
 }
 
 /// Deleting an early independent Import component must not re-evaluate later independent Import
-/// components — both in-session and on the first edit after opening a saved design — while
+/// components â€” both in-session and on the first edit after opening a saved design â€” while
 /// preserving carried face names and linked cosmetic threads. A saved import whose bodies carry a
 /// legacy key safely falls back to evaluating once.
 #[test]
@@ -2351,7 +2351,7 @@ fn a_cut_leaves_bodies_it_cannot_reach_as_they_were() {
 /// `a_cut_leaves_bodies_it_cannot_reach_as_they_were`.)
 #[test]
 fn a_cut_still_runs_where_its_tool_touches_grazes_or_meets_a_curved_face() {
-    // A cylinder whose side is tangent to the face x = 50, one 0.5 µm clear of it (far past the
+    // A cylinder whose side is tangent to the face x = 50, one 0.5 Âµm clear of it (far past the
     // bodies' tolerances, so left out), one 0.1 mm in.
     for (x, cuts, boolean) in [(53.0, false, 1), (53.0005, false, 0), (52.9, true, 1)] {
         let mut doc = Document::new("graze");
@@ -2530,6 +2530,7 @@ fn a_pattern_replays_every_grouped_thread_pick_on_its_named_body() {
                 placements: Vec::new(),
                 components: Vec::new(),
                 occurrences: Vec::new(),
+                join: false,
             },
             None,
         )
@@ -2586,6 +2587,7 @@ fn a_patterned_modelled_thread_reuses_its_final_check() {
                 placements: Vec::new(),
                 components: Vec::new(),
                 occurrences: Vec::new(),
+                join: false,
             },
             None,
         )
@@ -3265,7 +3267,7 @@ fn a_hole_into_a_rim_still_bores_its_sheet_beside_far_ones() {
     let state = work.model.state();
     let sheet = state.surface_sheets.iter().find(|s| s.body == near).expect("the drilled sheet");
     assert!(sheet.bores.len() == 1 && (sheet.bores[0].radius - d / 2.0).abs() < 1e-12, "kept as a bore of the sheet: {:?}", sheet.bores);
-    // It takes the bore's cylinder through the plate's 60: π (d/2)² 60 = 106.03 mm³ (to 2 %, as on
+    // It takes the bore's cylinder through the plate's 60: Ï€ (d/2)Â² 60 = 106.03 mmÂ³ (to 2 %, as on
     // main).
     let removed = whole - volume(&work.model, &near);
     let bore = std::f64::consts::PI * (d / 2.0).powi(2) * 60.0;
@@ -5148,8 +5150,8 @@ fn multi_target_join_batches_same_target_apart_tools_and_keeps_sheet_identity() 
 }
 
 /// Snapshot of a model's evaluated state for verifying cached incremental replay matches a cold
-/// `no_cache` evaluation identically (bodies, geometry, face names, cosmetic threads, body
-/// counter, and resolved named face points).
+/// `no_cache` evaluation identically (bodies, volume, exact bounds via `m.bbox`, face counts, face
+/// names, cosmetic threads, body counter, and resolved named face points).
 fn full_eval_snapshot(model: &Model) -> (Vec<(String, u64, i64, [i64; 6], usize, Vec<String>)>, Vec<ThreadInfo>, usize, Vec<(u64, Vec<[u64; 3]>)>) {
     let st = model.state();
     let bodies = st
@@ -5182,7 +5184,7 @@ fn cold_model(doc: &Document) -> Model {
 }
 
 /// Editing, adding, or deleting an unrelated earlier component or body must skip recomputing
-/// downstream modeled threads — both grouped body-qualified threads with `face_names` and legacy
+/// downstream modeled threads â€” both grouped body-qualified threads with `face_names` and legacy
 /// threads without `target_bodies`, in-session and on the first edit after opening a saved design.
 /// Editing a threaded body or moving an unread body to overlap it must recompute cleanly and stay
 /// identical to a cold evaluation.
@@ -5398,8 +5400,8 @@ fn unrelated_earlier_edits_and_deletes_skip_downstream_modeled_threads() {
 }
 
 /// Cosmetic threads (both body-qualified with `face_names` and legacy) and patterns of cosmetic
-/// threads must stay cached across unrelated earlier edits and deletes — both in-session and after
-/// opening a saved design — while recomputing when an unrelated body moves into a legacy thread's
+/// threads must stay cached across unrelated earlier edits and deletes â€” both in-session and after
+/// opening a saved design â€” while recomputing when an unrelated body moves into a legacy thread's
 /// cylinder reach.
 #[test]
 fn unrelated_earlier_edits_keep_downstream_cosmetic_threads_and_pattern_cached() {
@@ -5504,6 +5506,7 @@ fn unrelated_earlier_edits_keep_downstream_cosmetic_threads_and_pattern_cached()
                 placements: Vec::new(),
                 components: Vec::new(),
                 occurrences: Vec::new(),
+                join: false,
             },
             Some("PatternB"),
         )
@@ -5736,6 +5739,7 @@ fn unrelated_earlier_edits_keep_downstream_shell_scale_mirror_and_extrude_patter
                 placements: Vec::new(),
                 components: Vec::new(),
                 occurrences: Vec::new(),
+                join: false,
             },
             Some("PatternC"),
         )
@@ -5808,6 +5812,213 @@ fn unrelated_earlier_edits_keep_downstream_shell_scale_mirror_and_extrude_patter
     assert_eq!(work.blends, 0, "editing PartB must keep PartC's Fillet cached: {work:?}");
     assert_eq!(model.last_recomputed, 4, "BlockB, ShellB, ScaleB, MirrorB should recompute");
     assert_eq!(full_eval_snapshot(&model), full_eval_snapshot(&cold_model(&doc)));
+}
+
+/// Editing a sketch line referenced via `AxisRef::SketchLine` from another sketch (either in the
+/// same component or in another component) â€” or moving that other component â€” must invalidate both
+/// the dependent `Revolve` and a `Pattern` of that `Revolve`, while unrelated earlier edits still
+/// keep same-component `Revolve` and `Pattern` features cached.
+#[test]
+fn editing_external_sketch_line_axis_invalidates_revolve_and_pattern_cache() {
+    let rect_sketch = |x0: f64, y0: f64, w: f64, h: f64| {
+        let mut sk = Sketch::new();
+        let p = [Vec2::new(x0, y0), Vec2::new(x0 + w, y0), Vec2::new(x0 + w, y0 + h), Vec2::new(x0, y0 + h)].map(|q| sk.add_point(q, None).unwrap());
+        for k in 0..4 {
+            sk.add_line_pts(p[k], p[(k + 1) % 4], None).unwrap();
+        }
+        sk
+    };
+    let axis_sketch = |x: f64| {
+        let mut sk = Sketch::new();
+        let a = sk.add_point(Vec2::new(x, 0.0), None).unwrap();
+        let b = sk.add_point(Vec2::new(x, 10.0), None).unwrap();
+        let line = sk.add_line_pts(a, b, None).unwrap();
+        let id = sk.curves[line].id.clone();
+        (sk, id)
+    };
+    let rect_pattern = |src: u64| FeatureKind::Pattern {
+        features: vec![FeatureId(src)],
+        pattern: PatternKind::Rectangular {
+            dir1: Dir(Vec3::Y),
+            count1: "2".into(),
+            spacing1: "12".into(),
+            dir2: None,
+            count2: None,
+            spacing2: None,
+            alignment: solidcraft_sketch::PatternAlignment::Right,
+            alignment2: Default::default(),
+            reversed: false,
+            reversed2: false,
+            distance1: Default::default(),
+            distance2: Default::default(),
+            extent1: None,
+            extent2: None,
+            copy_at_end1: false,
+            copy_at_end2: false,
+        },
+        bodies: Vec::new(),
+        placements: Vec::new(),
+        components: Vec::new(),
+        occurrences: Vec::new(),
+        join: false,
+    };
+
+    // 1. Same-component external axis sketch: unrelated edit stays cached; editing axis sketch
+    //    invalidates both Revolve and Pattern of Revolve.
+    let mut doc = Document::new("revolve same-component external axis");
+    doc.set_param("A_h", "10 mm", None, None).unwrap();
+    let comp_a = doc.add_component(Some("PartA"), 0).unwrap();
+    let box_a = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "10".into(),
+                width: "10".into(),
+                height: "A_h".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("BlockA"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(box_a).unwrap();
+        f.component = comp_a;
+        f.body_names = vec!["BlockA".into()];
+    }
+
+    let comp_b = doc.add_component(Some("PartB"), 0).unwrap();
+    let (sk_axis_b, axis_b_curve) = axis_sketch(50.0);
+    let axis_b = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk_axis_b }, Some("AxisB")).unwrap();
+    doc.feature_mut(axis_b).unwrap().component = comp_b;
+    let prof_b = doc
+        .add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: rect_sketch(60.0, 0.0, 4.0, 6.0) }, Some("ProfB"))
+        .unwrap();
+    doc.feature_mut(prof_b).unwrap().component = comp_b;
+    let rev_b = doc
+        .add_feature(
+            FeatureKind::Revolve {
+                sketch: SketchId(prof_b),
+                profiles: ProfileSel::All,
+                axis: AxisRef::SketchLine { curve: axis_b_curve, sketch: Some(axis_b) },
+                angle: "180 deg".into(),
+                operation: Operation::NewBody,
+                targets: Vec::new(),
+                angle2: None,
+                symmetric: false,
+                convention: Default::default(),
+                to: None,
+            },
+            Some("RevB"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(rev_b).unwrap();
+        f.component = comp_b;
+        f.body_names = vec!["RevB".into()];
+    }
+    let pat_b = doc.add_feature(rect_pattern(rev_b), Some("PatB")).unwrap();
+    {
+        let f = doc.feature_mut(pat_b).unwrap();
+        f.component = comp_b;
+        f.body_names = vec!["RevB_Copy".into()];
+    }
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(full_eval_snapshot(&model), full_eval_snapshot(&cold_model(&doc)));
+
+    // Unrelated edit to PartA keeps RevolveB and PatB cached.
+    doc.set_param("A_h", "14 mm", None, None).unwrap();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(model.last_recomputed, 1, "only BlockA should recompute on unrelated edit");
+    let before_axis_edit = full_eval_snapshot(&model);
+    assert_eq!(before_axis_edit, full_eval_snapshot(&cold_model(&doc)));
+
+    // Moving the axis line in AxisB must invalidate both RevB and PatB.
+    if let FeatureKind::Sketch { sketch, .. } = &mut doc.feature_mut(axis_b).unwrap().kind {
+        for pt in &mut sketch.points {
+            pt.pos.x -= 3.0;
+        }
+    }
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert!(model.last_recomputed >= 3, "AxisB, RevB, and PatB must recompute: {}", model.last_recomputed);
+    let after_axis_edit = full_eval_snapshot(&model);
+    assert_ne!(after_axis_edit, before_axis_edit, "moving external axis line must change revolved geometry");
+    assert_eq!(after_axis_edit, full_eval_snapshot(&cold_model(&doc)));
+
+    // 2. Cross-component external axis sketch: both editing the axis sketch and moving its owning
+    //    component must invalidate Revolve and Pattern of Revolve.
+    let mut doc = Document::new("revolve cross-component external axis");
+    let comp_axis = doc.add_component(Some("PartAxis"), 0).unwrap();
+    let (sk_axis_c, axis_c_curve) = axis_sketch(110.0);
+    let axis_c = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk_axis_c }, Some("AxisC")).unwrap();
+    doc.feature_mut(axis_c).unwrap().component = comp_axis;
+
+    let comp_c = doc.add_component(Some("PartC"), 0).unwrap();
+    let prof_c = doc
+        .add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: rect_sketch(120.0, 0.0, 4.0, 6.0) }, Some("ProfC"))
+        .unwrap();
+    doc.feature_mut(prof_c).unwrap().component = comp_c;
+    let rev_c = doc
+        .add_feature(
+            FeatureKind::Revolve {
+                sketch: SketchId(prof_c),
+                profiles: ProfileSel::All,
+                axis: AxisRef::SketchLine { curve: axis_c_curve, sketch: Some(axis_c) },
+                angle: "180 deg".into(),
+                operation: Operation::NewBody,
+                targets: Vec::new(),
+                angle2: None,
+                symmetric: false,
+                convention: Default::default(),
+                to: None,
+            },
+            Some("RevC"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(rev_c).unwrap();
+        f.component = comp_c;
+        f.body_names = vec!["RevC".into()];
+    }
+    let pat_c = doc.add_feature(rect_pattern(rev_c), Some("PatC")).unwrap();
+    {
+        let f = doc.feature_mut(pat_c).unwrap();
+        f.component = comp_c;
+        f.body_names = vec!["RevC_Copy".into()];
+    }
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    let initial_c = full_eval_snapshot(&model);
+    assert_eq!(initial_c, full_eval_snapshot(&cold_model(&doc)));
+
+    // Editing the axis line in another component invalidates both RevC and PatC.
+    if let FeatureKind::Sketch { sketch, .. } = &mut doc.feature_mut(axis_c).unwrap().kind {
+        for pt in &mut sketch.points {
+            pt.pos.x -= 2.0;
+        }
+    }
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert!(model.last_recomputed >= 3, "AxisC, RevC, and PatC must recompute: {}", model.last_recomputed);
+    let edited_c = full_eval_snapshot(&model);
+    assert_ne!(edited_c, initial_c);
+    assert_eq!(edited_c, full_eval_snapshot(&cold_model(&doc)));
+
+    // Moving the component that owns AxisC also invalidates both RevC and PatC.
+    place(&mut doc, comp_axis, rigid(Vec3::new(-3.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert!(model.last_recomputed >= 2, "RevC and PatC must recompute when PartAxis moves: {}", model.last_recomputed);
+    let moved_c = full_eval_snapshot(&model);
+    assert_ne!(moved_c, edited_c);
+    assert_eq!(moved_c, full_eval_snapshot(&cold_model(&doc)));
 }
 
 /// A hollow rectangular tube (outer `w` x `h`, wall thickness `wall`, length `len`, centred on X
