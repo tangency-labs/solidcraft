@@ -285,13 +285,7 @@ fn auto_constrain_refuses_parameter_exhaustion_without_changing_the_design() {
     let mut s = new_sketch();
     run(&mut s, "sketch.circle.center", json!({"center": [20, 15], "radius": 5}));
     s.doc_mut().params = (0..solidcraft_doc::MAX_PARAMS - 1)
-        .map(|i| solidcraft_doc::Param {
-            name: format!("p{i}"),
-            expr: "1 mm".into(),
-            unit: "mm".into(),
-            comment: String::new(),
-            model: false,
-        })
+        .map(|i| solidcraft_doc::Param { name: format!("p{i}"), expr: "1 mm".into(), unit: "mm".into(), comment: String::new(), model: false })
         .collect();
     let before = s.doc.clone();
     let undo = s.undo.len();

@@ -823,6 +823,7 @@ fn infinite_line(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.ellipse";
+    let on_sheet = s.sheet_sketching();
     // The centre and the major end follow the parameters a coordinate typed as an expression
     // names, and a minor radius typed as one is a dimension driven by them, as for a circle.
     // A coordinate may read another point's coordinate: it is worked out against the sketch.
@@ -864,8 +865,12 @@ fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
         mark_construction(sk, &[e], p);
         let mut cons = Vec::new();
         if let Some(expr) = &size {
-            let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
-            let pname = doc.new_model_param(expr, &unit)?;
+            let pname = if on_sheet {
+                expr.clone()
+            } else {
+                let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
+                doc.new_model_param(expr, &unit)?
+            };
             cons.push(sk.add_constraint(ConstraintKind::Radius { c: e, value: r }, Some(pname))?);
         }
         if !axes {
