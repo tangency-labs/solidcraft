@@ -444,9 +444,10 @@ impl<'a> ExactSketchCurves<'a> {
         let reversed = generated.reversed();
         let mut found: Option<Option<&str>> = None;
         for (id, originals) in &self.free_form {
-            if originals.iter().any(|original| {
-                *original == *generated || *original == reversed || solidcraft_kernel::services::prism::cubic_contains(original, generated)
-            }) {
+            if originals
+                .iter()
+                .any(|original| *original == *generated || *original == reversed || solidcraft_kernel::affine::cubic_contains(original, generated))
+            {
                 found = Some(if found.is_some() { None } else { Some(*id) });
             }
         }
