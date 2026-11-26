@@ -1083,8 +1083,10 @@ fn corner_candidates_agree_with_engine_spatial_curve_filter() {
             let sk = &state.sketch(sketch).unwrap().sketch;
             let hit = Hit::SketchCurve { sketch, id: id.clone(), straight: true, point: solidcore_record::Vec3::ZERO };
             let offered = candidate(h.app.dialog.as_ref().unwrap(), &h.app.session, &hit).is_some();
-            assert_eq!(offered, !sk.is_spatial_corner_curve(id), "{cmd}: {id}");
-            assert_eq!(offered, id == "side", "{cmd}: {id}");
+            // Fillet takes a drawn 3D line, to round the corner it makes with another (#21319).
+            let fillet_line = cmd == "sketch.fillet" && *id == line;
+            assert_eq!(offered, !sk.is_spatial_corner_curve(id) || fillet_line, "{cmd}: {id}");
+            assert_eq!(offered, id == "side" || fillet_line, "{cmd}: {id}");
         }
         h.app.dialog = None;
     }
@@ -1126,6 +1128,41 @@ fn line_arc_fillet_preview_and_apply_work_in_both_pick_orders() {
             ss.sketch.radius(i).is_some_and(|r| (r - 3.0).abs() < 1e-7) && ss.sketch.center(i).is_some_and(|c| c.dist(want) < 1e-6)
         }));
     }
+}
+
+/// #21319: the Fillet tool takes two drawn 3D lines, previews the round, and rounds the corner
+/// they share with a 3D arc tangent to both, in one undo step.
+#[test]
+fn fillet_tool_rounds_the_corner_of_two_picked_3d_lines() {
+    use solidcraft_engine::sketch::WireConstraintKind;
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.options", json!({"sketch_3d":true})).unwrap();
+    h.app.run("sketch.line3d", json!({"points":[[0,0,0],[100,0,0],[100,60,40]]})).unwrap();
+    h.app.run("view.fit", json!({})).unwrap();
+    h.settle();
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"start":"sketch.fillet"})).unwrap();
+    h.frames(2);
+    for point in [[40, 0, 0], [100, 30, 20]] {
+        h.step(&json!({"click":{"world":point}})).unwrap();
+        h.frames(2);
+    }
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 2, "{:?}", h.app.status);
+    set_size(&mut h.app, "20 mm");
+    // The preview draws the arc and the two shortened lines.
+    h.step(&json!({"until":{"count":{"name":"sketch_preview_curves","value":3}}})).unwrap();
+    apply(&mut h);
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.status);
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    let st = h.app.session.world_state().unwrap();
+    let ss = st.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+    assert!(ss.report.wires_ok());
+    let arc = ss.sketch.wires.iter().find(|w| w.arc.is_some()).expect("a 3D arc rounds the corner");
+    assert!(arc.arc.is_some_and(|a| (a.radius - 20.0).abs() < 1e-6), "{arc:?}");
+    let tangents =
+        ss.sketch.wire_constraints.iter().filter(|c| matches!(&c.kind, WireConstraintKind::Tangent { arc: on, .. } if *on == arc.id)).count();
+    assert_eq!(tangents, 2, "{:?}", ss.sketch.wire_constraints);
 }
 
 /// An ellipse's axis is never a side of a Fillet or Chamfer corner (the engine refuses it), so a
