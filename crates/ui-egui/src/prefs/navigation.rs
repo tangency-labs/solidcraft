@@ -50,6 +50,14 @@ pub(super) fn mapping_rows(app: &SolveApp) -> Vec<(Vec<String>, String)> {
         .filter(|binding| app.preferences.right_drag_orbits || !(binding.button == NavButton::Right && binding.mode == NavMode::Orbit))
         .map(|binding| row(binding.button, binding.keys, binding.mode))
         .collect();
+    // The preset's two-button drags (NX: middle + right pans, middle + left zooms, #22063).
+    if chosen(NavButton::Middle).is_none() {
+        gestures.extend(nav_preset(&app.preferences.nav).chords.iter().map(|(other, mode)| {
+            let (mut names, action) = row(NavButton::Middle, NavKeys::default(), *mode);
+            names.push(button_label(*other));
+            (names, action)
+        }));
+    }
     gestures.extend(NavButton::ALL.into_iter().chain(NavButton::mapped_numbered(&app.preferences)).filter_map(|button| {
         let choice = chosen(button)?;
         Some(row(button, choice.keys, choice.mode?))
@@ -490,7 +498,7 @@ fn button_rows(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     }
 }
 
-fn button_label(button: NavButton) -> String {
+pub(super) fn button_label(button: NavButton) -> String {
     let id = match button {
         NavButton::Left => "prefs.button_left",
         NavButton::Middle => "prefs.button_middle",

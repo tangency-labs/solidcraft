@@ -845,6 +845,39 @@ fn rounds_the_edge(bound: &str, here: &str, face: &str) -> bool {
     crate::naming::blend_sides(bound).is_some_and(|(a, b)| (sides(a) == here && sides(b) == face) || (sides(a) == face && sides(b) == here))
 }
 
+/// How many of the bounding faces in a stored piece qualifier (`stem#[a, b, …]`, without a tie
+/// number) still bound face `index`, and how many the qualifier lists: `(matched, total)`.
+/// `None` when `name` is not a neighbour-qualified piece name, or `index` is not a face of the
+/// same stem and copy instance.
+pub(crate) fn piece_overlap(names: &Names, index: usize, name: &str) -> Option<(usize, usize)> {
+    let face = names.faces.get(index)?;
+    let info = names.info.get(index)?;
+    let canonical = crate::persistent_name::written_now(name);
+    let today = crate::persistent_name::written_now(face);
+    let ((name_core, at), (current, here)) = (instance_suffix(&canonical), instance_suffix(&today));
+    if at != here || !name_core.ends_with(']') || !current.ends_with(']') {
+        return None;
+    }
+    let (stem, around) = crate::piece_names::piece_parts(name_core)?;
+    if around.is_empty() || crate::naming::strip_piece(current) != crate::naming::strip_piece(stem) {
+        return None;
+    }
+    let matched = around
+        .iter()
+        .filter(|f| {
+            let suffixed = (!at.is_empty()).then(|| format!("{f}{at}"));
+            let target = suffixed.as_deref().unwrap_or(f);
+            info.bounds.contains(target)
+                || (!at.is_empty() && info.bounds.contains(**f))
+                || info.bounds.iter().any(|bound| {
+                    let (bound_core, bound_at) = instance_suffix(bound);
+                    (bound_at == at || bound_at.is_empty()) && rounds_the_edge(bound_core, current, f)
+                })
+        })
+        .count();
+    Some((matched, around.len()))
+}
+
 /// A name and the pattern instances after it (`F3:top#[F4:side]@F9.1` is `F3:top#[F4:side]` and
 /// `@F9.1`; a copy of a copy carries one instance after another).
 fn instance_suffix(n: &str) -> (&str, &str) {

@@ -4,6 +4,41 @@ use solidcraft_engine::panels::*;
 use super::runtime::standalone_header_action;
 use super::*;
 
+pub(crate) struct CatalogueLayoutStore<'a>(pub(crate) &'a mut dyn commands::LayoutCatalogue);
+
+impl super::workspace::PanelLayoutStore for CatalogueLayoutStore<'_> {
+    fn remembered_key(&self, workspace: &WorkspaceId) -> Option<&[u8]> {
+        self.0.state().remembered(workspace).map(commands::StoredEnvelope::bytes)
+    }
+
+    fn current_envelope(&self, state: &LayoutReply, registry: &PanelRegistry) -> PanelResult<LayoutEnvelope> {
+        commands::current_envelope_snapshot(self.0, state, registry)
+    }
+
+    fn execute_action(&mut self, action: LayoutAction, sink: &mut dyn ActionSink, registry: &PanelRegistry) -> PanelResult<LayoutReply> {
+        commands::execute_layout_action(
+            action,
+            &mut commands::PanelCommandContext { sink, registry, catalogue: self.0, web: cfg!(target_arch = "wasm32") },
+        )
+    }
+}
+
+pub(crate) struct CatalogueLayoutStoreRef<'a>(pub(crate) &'a dyn commands::LayoutCatalogue);
+
+impl super::workspace::PanelLayoutStore for CatalogueLayoutStoreRef<'_> {
+    fn remembered_key(&self, workspace: &WorkspaceId) -> Option<&[u8]> {
+        self.0.state().remembered(workspace).map(commands::StoredEnvelope::bytes)
+    }
+
+    fn current_envelope(&self, state: &LayoutReply, registry: &PanelRegistry) -> PanelResult<LayoutEnvelope> {
+        commands::current_envelope_snapshot(self.0, state, registry)
+    }
+
+    fn execute_action(&mut self, _action: LayoutAction, _sink: &mut dyn ActionSink, _registry: &PanelRegistry) -> PanelResult<LayoutReply> {
+        Err(error(Rule::Capability, "read-only catalogue layout store"))
+    }
+}
+
 /// Later content adapters supply their own services. The app integration exposes
 /// only an immutable Session during refresh; a layout tick cannot run a document
 /// command. Explicit content commands stay on the separate supplied sink.
@@ -860,7 +895,7 @@ impl AppPanelRuntime {
         self.reconcile(session)?;
         self.refresh_metrics()?;
         if let Some(host) = &mut self.host {
-            host.capture_reservations(&self.runtime, self.catalogue.as_ref())?;
+            host.capture_reservations(&self.runtime, &CatalogueLayoutStoreRef(self.catalogue.as_ref()))?;
             host.note_native_capabilities(self.native.capabilities());
         }
         let result = self.host.as_mut().ok_or_else(|| error(Rule::Lifecycle, "universal panel host disabled"))?.prepare_in_domain(
@@ -978,7 +1013,7 @@ impl AppPanelRuntime {
         if deferred {
             host.show_deferred(ui, &mut self.runtime, self.native.as_mut(), &mut services)
         } else {
-            host.show(ui, &mut self.runtime, self.native.as_mut(), &mut services, self.catalogue.as_mut())
+            host.show(ui, &mut self.runtime, self.native.as_mut(), &mut services, &mut CatalogueLayoutStore(self.catalogue.as_mut()))
         }
     }
     fn prepare_host_paint(&mut self, session: &Session, ui: &egui::Ui) -> PanelResult<()> {
@@ -1010,7 +1045,7 @@ impl AppPanelRuntime {
         self.refresh_metrics()?;
         let mut services = self.services.services();
         if let Some(host) = &mut self.host {
-            host.finish(ui, &mut self.runtime, self.native.as_mut(), &mut services, self.catalogue.as_mut())
+            host.finish(ui, &mut self.runtime, self.native.as_mut(), &mut services, &mut CatalogueLayoutStore(self.catalogue.as_mut()))
         } else {
             Ok(())
         }
@@ -1034,7 +1069,7 @@ impl AppPanelRuntime {
     }
     fn refresh_reservations(&mut self) -> PanelResult<()> {
         if let Some(host) = &mut self.host {
-            host.capture_reservations(&self.runtime, self.catalogue.as_ref())?;
+            host.capture_reservations(&self.runtime, &CatalogueLayoutStoreRef(self.catalogue.as_ref()))?;
         }
         Ok(())
     }

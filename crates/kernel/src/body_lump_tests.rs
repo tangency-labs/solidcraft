@@ -343,6 +343,21 @@ fn point_lies_on_face_answers_through_solidcore() {
     assert_eq!(body.point_lies_on_face(99, Vec3::ZERO, 1e-6).unwrap(), None);
 }
 
+#[test]
+fn face_normal_at_answers_through_solidcore() {
+    // The query itself is tested in solidcore-ops (`measure.rs`); this is the wrapper. On the
+    // cube's x = +10 face the normal points out of the material, along +X.
+    let body = cube(10.0);
+    let on = Vec3::new(10.0, 3.0, -4.0);
+    let normals: Vec<Vec3> = (0..body.record().faces.len()).filter_map(|f| body.face_normal_at(f, on).unwrap()).collect();
+    assert_eq!(normals.len(), 1, "{normals:?}");
+    assert!(normals[0].dist(Vec3::X) < 1e-12, "{normals:?}");
+    // Off every face, an index past the faces and a point that is not a number: no normal.
+    assert!((0..body.record().faces.len()).all(|f| body.face_normal_at(f, Vec3::new(11.0, 3.0, -4.0)).unwrap().is_none()));
+    assert_eq!(body.face_normal_at(99, on).unwrap(), None);
+    assert_eq!(body.face_normal_at(0, Vec3::new(f64::NAN, 0.0, 0.0)).unwrap(), None);
+}
+
 /// A ball of radius 5 less everything above z = 3: its sphere faces end at the circle of radius 4
 /// there. The contour seen along (0.8, -0.6, 0), the circle of radius 5 in the plane of x = (0.6, 0.8,
 /// 0) and z, meets that rim where 5 sin t = 3: at asin 0.6 and pi less it, away from the rim's

@@ -92,6 +92,61 @@ fn a_click_on_the_bottom_edge_makes_an_edge_flange() {
     assert_eq!(c[0].1["type"], "edge", "{:?}", c[0].1);
 }
 
+/// The Flange window has no thickness, bend radius or K-factor of its own: a line under its Rule
+/// box says they are changed in Sheet Metal Rules (#17421).
+#[test]
+fn flange_window_says_where_the_rule_values_are_changed() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let sk = h.app.session.doc.features[0].id;
+    h.app.session.selection = vec![Sel::Profile { sketch: sk, index: 0 }];
+    h.app.start("sheet.flange");
+    h.frames(3);
+    let note = crate::scenario::rect_of("dialog:note:sheet_flange_rule_values");
+    assert!(note.is_some_and(|r| r.width() > 0.0), "the note under the Rule box is shown");
+    // The whole sentence is shown: it wraps over lines rather than being cut to one.
+    let line = solidcraft_theme::Tokens::get().font_small * 1.5;
+    assert!(note.is_some_and(|r| r.height() > line + solidcraft_theme::Tokens::get().space_4 * 2.0), "{note:?}");
+    let text = solidcraft_ui_text::tr("ui.sheet_flange_rule_values");
+    assert!(text.contains(solidcraft_ui_text::tr("cmd.sheet_manage_rules")), "{text}");
+}
+
+/// egui wraps a right-to-left note as one string, so the lines of a wrapped Arabic or Hebrew
+/// sentence would come out in reverse order: those notes are split with `\n` at a clause, and
+/// each line fits the control column unwrapped, so every line is reordered on its own.
+#[test]
+fn flange_rule_note_in_arabic_and_hebrew_keeps_its_lines_unwrapped() {
+    for language in ["ar", "he"] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = language.into();
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let sk = h.app.session.doc.features[0].id;
+        h.app.session.selection = vec![Sel::Profile { sketch: sk, index: 0 }];
+        h.app.start("sheet.flange");
+        h.frames(4);
+        let lines = {
+            let _language = solidcraft_ui_text::scope(language);
+            solidcraft_ui_text::tr("ui.sheet_flange_rule_values").lines().count()
+        };
+        assert!(lines > 1, "{language}: the note is split at a clause");
+        let rows = h
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if solidcraft_ui_text::bidi::has_rtl(&text.galley.job.text) && text.galley.job.text.contains('K') => {
+                    Some(text.galley.rows.len())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{language}: the note is drawn"));
+        assert_eq!(rows, lines, "{language}: each line of the note fits without wrapping");
+    }
+}
+
 #[test]
 fn contour_flange_options_round_trip_through_feature_editing() {
     let mut app = plate(crate::ui_kit::LayoutMode::Docked);
@@ -718,6 +773,69 @@ fn flange_dialog_picks_a_corner_relief_of_its_own() {
         assert_eq!(relief(&h.app), Some((None, None)));
         assert_eq!(arcs(&h.app), Some(0));
     }
+}
+
+/// The Flange dialog's Bend Relief Shape row: Rule (the default) leaves the shape to the rule, a
+/// shape reaches the feature, Edit Feature shows it again, and Rule takes it back.
+#[test]
+fn flange_dialog_picks_a_bend_relief_shape_of_its_own() {
+    let mut h = crate::scenario::Harness::new();
+    h.app
+        .run(
+            "sheet.manage_rules",
+            json!({"name": "AL2", "thickness": "2 mm", "k_factor": 0.5, "bend_radius": "1 mm", "relief_width": "2 mm", "relief_depth": "1 mm", "active": true}),
+        )
+        .unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[0, 0], [160, 0], [160, 30], [20, 30], [20, 60], [0, 60]], "closed": true})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    h.app.session.selection = edge_sel(&h.app.session, Vec3::new(90.0, 30.0, 2.0)).into_iter().collect();
+    assert_eq!(h.app.session.selection.len(), 1);
+    h.app.start("sheet.flange");
+    h.frames(3);
+    if let Some(Kind::Sheet(Sm::Flange { height, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *height = "15 mm".into();
+    }
+    let shown = |app: &SolveApp| match app.dialog.as_ref().map(|d| &d.kind) {
+        Some(Kind::Sheet(Sm::Flange { bend_relief, .. })) => Some(*bend_relief),
+        _ => None,
+    };
+    let saved = |app: &SolveApp| match &app.session.doc.features.last().map(|f| &f.kind) {
+        Some(FeatureKind::SheetFlange { bend_relief_shape, .. }) => Some(bend_relief_shape.clone()),
+        _ => None,
+    };
+    // Untouched, the dialog asks for nothing: the rule's shape.
+    assert_eq!(shown(&h.app), Some(0));
+    let d = h.app.dialog.clone().unwrap();
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert!(c[0].1.get("bend_relief_shape").is_none(), "{}", c[0].1);
+    h.step(&json!({"click": {"handle": "dialog:section:Advanced"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Bend Relief Shape"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Bend Relief Shape:Obround"}})).unwrap();
+    assert_eq!(shown(&h.app), Some(2));
+    h.step(&json!({"widget": "OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+    assert_eq!(saved(&h.app), Some(Some("obround".into())));
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", h.app.session.model.results);
+    // The flat's outline, as points: the obround's half round beside the bend's end takes many
+    // more than the rectangular slot's square end.
+    let points = |app: &mut SolveApp| {
+        app.session.execute("sheet.flat_pattern", &json!({})).ok().and_then(|f| f["outline"][0].as_array().map(Vec::len)).unwrap_or(0)
+    };
+    let round = points(&mut h.app);
+    // Edit Feature shows it again; Rule takes the feature back to the rule's rectangular slot.
+    let id = h.app.session.doc.features.last().map(|f| f.id).unwrap();
+    let mut e = edit_dialog(&h.app, id, None).unwrap();
+    assert!(matches!(&e.kind, Kind::Sheet(Sm::Flange { bend_relief: 2, .. })));
+    if let Kind::Sheet(Sm::Flange { bend_relief, .. }) = &mut e.kind {
+        *bend_relief = 0;
+    }
+    let commands = apply_commands(&h.app, &e).unwrap();
+    run_all(&mut h.app, commands);
+    assert_eq!(saved(&h.app), Some(None));
+    let square = points(&mut h.app);
+    assert!(square > 0 && round > square + 4, "{round} vs {square}");
 }
 
 #[test]
@@ -1630,7 +1748,7 @@ fn perforate_edit_restores_dimensions_pattern_and_target() {
 #[test]
 fn flat_pattern_navigation_slots_hide_orbit_controls_and_keep_fit_home() {
     let mut h = crate::scenario::Harness::new();
-    h.app = flat_app("fusion", crate::ui_kit::LayoutMode::Floating);
+    *h.app = flat_app("fusion", crate::ui_kit::LayoutMode::Floating);
     h.app.home.open = false;
     h.app.preferences.navigation_bar = serde_json::from_value(json!({
         "slots":["orbit","spin","look_at","projection","visual_style","pan","zoom","fit","home","display"]
