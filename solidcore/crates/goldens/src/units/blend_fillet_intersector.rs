@@ -1419,18 +1419,24 @@ mod wr458_moved_rows {
             let Ok(rec) = rec else { panic!("{name}: no record") };
             assert_eq!(rec.get(..3), Some(&[8.0, 0.0, 0.0][..]), "{name}: a solved law point");
             assert_eq!(offsets.len(), 2, "{name}");
-            let mut growths = 0;
-            for o in &offsets {
-                let mut w = ExtensionWatch::default();
+            let mut watches = vec![ExtensionWatch::default(); offsets.len()];
+            for (w, o) in watches.iter_mut().zip(&offsets) {
                 w.observe(&k, o).unwrap_or_else(|e| panic!("{name}: {e}"));
-                growths += w.growths;
             }
+            let growths: usize = watches.iter().map(|w| w.growths).sum();
             assert!(growths > 0, "{name}: no extension held");
             let at = |j: usize| {
                 let uv = Vec2::new(rec[3 + 2 * j], rec[4 + 2 * j]);
                 offsets[j].evaluate_point(&k, uv).unwrap()
             };
             let (p0, p1) = (at(0), at(1));
+            // the points are on the extensions certified above: evaluating the recorded uvs
+            // grew neither offset's extension (a growth would be a change the watch sees)
+            for (w, o) in watches.iter_mut().zip(&offsets) {
+                let before = w.growths;
+                w.observe(&k, o).unwrap_or_else(|e| panic!("{name}: {e}"));
+                assert_eq!(w.growths, before, "{name}: a recorded uv grew its extension");
+            }
             let n = v3(normal);
             let n = n * (1.0 / n.length());
             let gap = (p0 - p1).length();

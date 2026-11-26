@@ -286,8 +286,15 @@ fn surface_surface_row_is_a_certified_definition() {
 /// split at its knots by Boehm insertion) `F = (x - ax)^2 + (z - az)^2 - r^2` is a
 /// polynomial of degree twice the net's in each parameter, whose Bernstein coefficients
 /// (products of the patch's) bound it, and `rho - r = F / (rho + r)` with `rho >= 0`, so
-/// `|rho - r| <= max |F| / r`. The insertion's rounding (convex combinations, a few ulps
-/// of the coordinates, about `1e-14` here) is far below the tolerance it is compared to.
+/// `|rho - r| <= max |F| / r`. The bound includes its rounding, with `M` the net's largest
+/// coordinate off the axis (every patch's points are convex combinations of the net's, so
+/// within `M` too): each Bezier point is at most 12 insertions deep (at most `p` at each of
+/// the two knots of its segment, in each direction, `p, q <= 3`), each a convex combination
+/// within `4 eps M`, so within `gamma(48) M` of exact, which moves a coefficient of
+/// `x^2 + z^2` by at most `5 gamma(48) M^2`; a coefficient sums at most
+/// `(p + 1)^2 (q + 1)^2 <= 256` products of weights summing to one, rounded within
+/// `gamma(272) M^2` for each coordinate; and `- r^2` adds `gamma(2) (2 M^2 + r^2)`. In all,
+/// within `gamma(512) (2 M^2 + r^2)` of `F`'s exact coefficients.
 fn cylinder_bound(n: &solidcore::nurbs::srf_basic::Surface, axis: [f64; 2], r: f64) -> f64 {
     use solidcore::nurbs::math::NOW;
     let (p, q) = n.degrees();
@@ -324,7 +331,9 @@ fn cylinder_bound(n: &solidcore::nurbs::srf_basic::Surface, axis: [f64; 2], r: f
             }
         }
     }
-    worst / r
+    let m = rows.iter().flatten().flatten().fold(0.0_f64, |m, c| m.max(c.abs()));
+    assert!(p <= 3 && q <= 3, "a bicubic-or-less net");
+    (worst + solidcore::nurbs::math::gamma(512) * (2.0 * m * m + r * r)) / r
 }
 
 /// The Bernstein coefficients (degree `2p` by `2q`) of the square of coordinate `c` of a

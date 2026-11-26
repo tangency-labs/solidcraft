@@ -35,6 +35,13 @@
 //!   generator span; row `r0` is at a knot of multiplicity at least `p` of E (B's first
 //!   rotation knot), so `C` is E's own curve there, on the surface.
 //!
+//! * **(S) The turn round the axis is gone round at most once.** The rotation arcs'
+//!   angles, each read off its end points (`atan2(|a x b|, a . b)`, `a` and `b` the ends'
+//!   radii), sum to at most one full turn (WR-650: an extension that reaches the turn closes
+//!   at it). Along a generator circle the extension carries its spans on past a full turn
+//!   by design, and the parameters past the closure are bounded by the kernel's
+//!   `closed_turn` instead, so the generator's sweep is not bounded here.
+//!
 //! So E is the revolution of the generator's circle about the axis: B's own surface (A,
 //! with B's net among the rows checked), continued as itself, and G1 across every join
 //! (consecutive arcs of one circle turning one way meet tangent).
@@ -48,6 +55,10 @@
 //! operations on values of the net's magnitude; each check's own evaluation adds at most
 //! 40 more (a residual of products of differences). `ROUNDING_OPS = 128` bounds the sum.
 //! What a pass proves is the statement up to those allowances (as `crate::g1r_cert`'s).
+//! An arc's angle is off by at most `2 asin(tau / rho) <= 3 tau / rho` from its ends being
+//! within `tau` of the circle (for `tau <= rho / 2`), plus `atan2`'s and the sum's rounding,
+//! well under `gamma(ROUNDING_OPS)` a span: (S) allows `3 tau / rho + gamma(ROUNDING_OPS)`
+//! for each span over the full turn.
 
 use solidcore::kernel::Kernel;
 use solidcore::math::Vec3;
@@ -183,7 +194,8 @@ fn within(what: &str, resid: f64, allow: f64, worst: &mut f64) -> Result<(), Str
 /// `w1 / sqrt(w0 w2) = rho / |p1 - c|`, the cosine of half the arc (an arc of less than a
 /// half turn, `0 < cos < 1`). Those are the rational quadratic arc's conditions (the
 /// conic through `p0` and `p2` tangent there to `p0 p1` and `p2 p1`, its shape fixed by
-/// the weight). Returns the turn's sense, `((p0 - c) x (p2 - c)) . n`'s sign.
+/// the weight). Returns the turn's sense, `((p0 - c) x (p2 - c)) . n`'s sign, and the arc's
+/// angle, read off its ends.
 #[allow(clippy::too_many_arguments)]
 fn arc_on_circle(
     what: &str,
@@ -193,7 +205,7 @@ fn arc_on_circle(
     rho: f64,
     tau: f64,
     worst: &mut f64,
-) -> Result<f64, String> {
+) -> Result<(f64, f64), String> {
     for (i, p) in [p0, p1, p2].iter().enumerate() {
         within(
             &format!("{what}: point {i} off the circle's plane"),
@@ -246,7 +258,35 @@ fn arc_on_circle(
     if sense == 0.0 {
         return Err(format!("{what}: no sense of turn"));
     }
-    Ok(sense.signum())
+    let angle = (p0 - c).cross(p2 - c).length().atan2((p0 - c).dot(p2 - c));
+    Ok((sense.signum(), angle))
+}
+
+/// (S): arcs of angles summing to `sweep`, `spans` of them on a circle of radius `rho`, go
+/// round it at most once.
+fn at_most_one_turn(
+    what: &str,
+    sweep: f64,
+    spans: usize,
+    rho: f64,
+    tau: f64,
+    worst: &mut f64,
+) -> Result<(), String> {
+    // (the angle's allowance holds for ends within tau <= rho / 2 of the circle)
+    if !(2.0 * tau <= rho) {
+        return Err(format!(
+            "{what}: radius {rho:e} within the rounding {tau:e}"
+        ));
+    }
+    // (spans is a count of arcs, far below 2^53: exact as an f64)
+    #[allow(clippy::cast_precision_loss)]
+    let allow = spans as f64 * (3.0 * tau / rho + gamma(ROUNDING_OPS));
+    within(
+        &format!("{what}: a sweep of {sweep} past one turn"),
+        (sweep - std::f64::consts::TAU).max(0.0),
+        allow,
+        worst,
+    )
 }
 
 /// The certificate of `e`, an offset's base `base` extended as itself (module docs).
@@ -405,10 +445,10 @@ pub(crate) fn certify_as_itself(
     }
     // (R) column j*'s rotation spans: arcs of one circle about the axis, one sense
     let foot = ps - radial(ps);
-    let mut sense = 0.0;
+    let (mut sense, mut sweep) = (0.0, 0.0);
     for s in 0..rot_spans {
         let tri = [at(2 * s, js)?, at(2 * s + 1, js)?, at(2 * s + 2, js)?];
-        let sg = arc_on_circle(
+        let (sg, angle) = arc_on_circle(
             &format!("rotation span {s}"),
             tri,
             foot,
@@ -421,7 +461,10 @@ pub(crate) fn certify_as_itself(
             return Err(format!("rotation span {s} turns back"));
         }
         sense = sg;
+        sweep += angle;
     }
+    // (S) round the axis
+    at_most_one_turn("rotation", sweep, rot_spans, dmax, tau, &mut worst)?;
     // (G) row r0 along the generator: a line's points on B's line, in order; a circle's
     // spans arcs of the circle of B's first generator span
     let g0 = if rot_u { off_v } else { off_u };
@@ -467,7 +510,7 @@ pub(crate) fn certify_as_itself(
         let mut sense = 0.0;
         for s in 0..gen_spans {
             let tri = [at(r0, 2 * s)?, at(r0, 2 * s + 1)?, at(r0, 2 * s + 2)?];
-            let sg = arc_on_circle(
+            let (sg, _) = arc_on_circle(
                 &format!("generator span {s}"),
                 tri,
                 c,
@@ -568,6 +611,69 @@ mod tests {
             let bad = moved(&e, i, j, 1e-9);
             assert!(certify_as_itself(&k, &base, &bad).is_err(), "{i},{j}");
         }
+    }
+
+    /// `e` (rotation round u) with its last rotation span repeated, turned on by its own
+    /// angle, `times` times: arcs of the same circle turning the same way, knots of
+    /// rational quadratic spans, so only the sweep is wrong.
+    fn turned_on(e: &NlSurface, o: Vec3, z: Vec3, times: usize) -> NlSurface {
+        let mut c = e.cpts();
+        let mut ku = e.u_knots().to_vec();
+        let radial = |x: Vec3| x - z * z.dot(x - o) - o;
+        for _ in 0..times {
+            let n = c.len();
+            let (a, b) = (pw(c[n - 3][0]).0, pw(c[n - 1][0]).0);
+            let (ra, rb) = (radial(a), radial(b));
+            let (sin, cos) = (ra.cross(rb).dot(z), ra.dot(rb));
+            let t = sin.atan2(cos);
+            let turn = |p: Vec3| {
+                let r = radial(p);
+                let f = p - r;
+                f + r * t.cos() + z.cross(r) * t.sin() + z * (z.dot(r) * (1.0 - t.cos()))
+            };
+            for i in [n - 2, n - 1] {
+                let row = c[i]
+                    .iter()
+                    .map(|q| {
+                        let (p, w) = pw(*q);
+                        let p = turn(p);
+                        CPoint::new(p.x * w, p.y * w, p.z * w, w)
+                    })
+                    .collect();
+                c.push(row);
+            }
+            let end = *ku.last().unwrap();
+            let step = end - ku[ku.len() - 4];
+            ku.truncate(ku.len() - 1);
+            ku.extend([end + step; 3]);
+        }
+        let (p, q) = e.degrees();
+        NlSurface::new(c, p, q, ku, e.v_knots().to_vec()).unwrap()
+    }
+
+    #[test]
+    fn an_extension_going_round_more_than_once_is_refused() {
+        let (k, base, e) = torus_extension(false);
+        let rev = revolution(&k, &base).unwrap();
+        assert!(!rev.swap_uv(), "rotation round u");
+        let (o, z) = (
+            rev.position().origin(),
+            rev.position().z_axis().unitize().unwrap(),
+        );
+        // enough quarter spans to pass one turn: refused by the sweep and nothing else
+        let mut times = 0;
+        loop {
+            let net = turned_on(&e, o, z, times);
+            match certify_as_itself(&k, &base, &net) {
+                Ok(_) => times += 1,
+                Err(why) => {
+                    assert!(why.starts_with("rotation: a sweep of"), "{times}: {why}");
+                    break;
+                }
+            }
+            assert!(times < 64, "never refused");
+        }
+        assert!(times > 0, "the extension itself was refused");
     }
 
     #[test]

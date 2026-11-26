@@ -736,7 +736,11 @@ mod wr458_moved_rows {
                     let mut k = Kernel::default();
                     let lines = check_brep(&mut k, b, CheckLevel::Level2).unwrap().lines();
                     assert!(lines.is_empty(), "{name}: Level 2: {lines:?}");
-                    let near = |x: f64, y: f64| (x - y).abs() <= 1e-12 * x.abs().max(y.abs()).max(1.0);
+                    // on a face to the rounding floor at the part's scale: about 1e-10 at
+                    // tens of millimetres (docs/definitions-and-certificates.md, "Exact to
+                    // rounding is enough"), never a gate below it
+                    let part = lo.iter().chain(&hi).fold(1.0_f64, |m, x| m.max(x.abs()));
+                    let near = |x: f64, y: f64| (x - y).abs() <= 1e-11 * part;
                     for v in p1::vertices(b, None).unwrap() {
                         let p = b.vertex(v).unwrap().point.to_array();
                         let on = (0..3).any(|a| {
