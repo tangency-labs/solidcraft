@@ -128,13 +128,29 @@ pub fn toggle_construction(app: &mut SolveApp) {
     }
 }
 
+/// Commands that create sketch curves and inherit the drawing line type.
+fn takes_drawing_line_type(id: &str) -> bool {
+    solidcraft_engine::find_command(id).is_some_and(|c| c.tab == "SKETCH" && c.panel == "CREATE")
+        || matches!(
+            id,
+            "sketch.project"
+                | "sketch.intersect"
+                | "sketch.include_3d"
+                | "sketch.project_to_surface"
+                | "sketch.intersection_curve"
+                | "sketch.spun_profile"
+                | "sketch.isoparametric_curve"
+                | "sketch.fit_curves_to_section"
+        )
+}
+
 /// Curves a drawing command just made take the drawing line type.
 pub fn apply_mode(app: &mut SolveApp, id: &str, result: &Value) {
     if solidcraft_engine::cmd::construction_line_mode(id).is_some() {
         return;
     }
     let m = mode(app);
-    if m == 0 || !solidcraft_engine::find_command(id).is_some_and(|c| c.tab == "SKETCH" && c.panel == "CREATE") {
+    if m == 0 || !takes_drawing_line_type(id) {
         return;
     }
     // Drawing reports its curves as `curves`; Project and the other link commands report them per
@@ -829,6 +845,23 @@ mod tests {
             assert!(h.app.session.world_state().unwrap().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty());
             set_mode(&mut h.app, 0);
         }
+    }
+
+    #[test]
+    fn reference_curve_commands_keep_the_drawing_line_type_policy() {
+        for id in [
+            "sketch.project",
+            "sketch.intersect",
+            "sketch.include_3d",
+            "sketch.project_to_surface",
+            "sketch.intersection_curve",
+            "sketch.spun_profile",
+            "sketch.isoparametric_curve",
+            "sketch.fit_curves_to_section",
+        ] {
+            assert!(takes_drawing_line_type(id), "{id}");
+        }
+        assert!(!takes_drawing_line_type("surface.trim"));
     }
 
     /// Project gives the curves it makes the drawing line type, as drawing does (#9945): its
