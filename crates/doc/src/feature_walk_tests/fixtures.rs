@@ -144,6 +144,7 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             json!({"type": "frame_member", "path_sketch": 1, "profile": {"source": "sketch", "sketch": 2, "profiles": {"type": "all"}},
                 "anchor": "bottom_left", "mirror": true}),
         ),
+        ("frame_cope", json!({"type": "frame_cope", "member": "B", "tools": ["B"], "end": "start"})),
         (
             "frame_trim",
             json!({"type": "frame_trim", "members": [{"feature": "F", "line": "l1"}],

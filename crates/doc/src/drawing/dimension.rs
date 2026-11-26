@@ -788,7 +788,7 @@ impl Document {
         let mut square: Vec<(usize, f64)> = Vec::new();
         for f in 0..b.body.face_count() {
             let Some(plane) = b.body.planar_face(f) else { continue };
-            match solidcraft_kernel::services::affine::square_plane_offset(&frame, plane.origin.into(), plane.normal().into(), axis) {
+            match solidcraft_kernel::affine::square_plane_offset(&frame, plane.origin.into(), plane.normal().into(), axis) {
                 Ok(Some(offset)) => square.push((f, offset)),
                 Ok(None) => {}
                 Err(why) => return Err(axis_refusal(why)),
@@ -824,7 +824,7 @@ impl Document {
         let state = model.state();
         let b = state.bodies.iter().find(|b| b.name == body && !b.body.is_mesh())?;
         let frame = self.body_frame_at(b, path).ok()?;
-        let along_one = solidcraft_kernel::services::affine::along_own_axes(&frame, axis.into()).ok()?;
+        let along_one = solidcraft_kernel::affine::along_own_axes(&frame, axis.into()).ok()?;
         if along_one { body_extent(b, &frame, axis.into()).ok() } else { None }
     }
 
@@ -1597,17 +1597,17 @@ impl<'a> Lookup<'a> {
 /// frame (any length), by solidcore's `extent_along`. Tight when `axis` runs along the body's own axes.
 fn body_extent(b: &ModelBody, frame: &Mat, axis: [f64; 3]) -> Result<f64> {
     let bounds = b.body.exact_bounds().map_err(|e| DocError::Invalid(e.to_string()))?;
-    solidcraft_kernel::services::affine::extent_along(bounds.min.into(), bounds.max.into(), frame, axis).map_err(axis_refusal)
+    solidcraft_kernel::affine::extent_along(bounds.min.into(), bounds.max.into(), frame, axis).map_err(axis_refusal)
 }
 
 /// The refusal of one of solidcore's axis ops, in the words of a dimension on a view.
-fn axis_refusal(why: solidcraft_kernel::services::Error) -> DocError {
-    use solidcraft_kernel::services::affine::{REFUSED_FLAT_MAP, REFUSED_ZERO_AXIS};
+fn axis_refusal(why: solidcraft_kernel::affine::AxisRefusal) -> DocError {
+    use solidcraft_kernel::affine::AxisRefusal;
     DocError::Invalid(
         match why {
-            solidcraft_kernel::services::Error::Refused { reason: REFUSED_ZERO_AXIS, .. } => "the view's axis is zero",
-            solidcraft_kernel::services::Error::Refused { reason: REFUSED_FLAT_MAP, .. } => "the occurrence its body is placed through flattens it",
-            _ => "the body's box is not finite",
+            AxisRefusal::ZeroAxis => "the view's axis is zero",
+            AxisRefusal::FlatMap => "the occurrence its body is placed through flattens it",
+            AxisRefusal::NotFinite => "the body's box is not finite",
         }
         .into(),
     )

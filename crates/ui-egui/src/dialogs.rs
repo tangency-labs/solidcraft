@@ -450,6 +450,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             /// Measure one or two picked items (vertices, edges, faces): the result of the last
             /// measurement and the items it was for.
             Measure {
+                /// Show an additional metric or inch readout without changing design units.
+                dual_units: bool,
                 result: Option<Value>,
                 of: Vec<Sel>,
                 /// The measure chosen in the panel (centre, min or max); `None` follows the result's
@@ -1238,7 +1240,7 @@ impl Dialog {
                 vec![SelInput::new("Plane", PLANES | PLANAR_FACES, false)],
             ),
             "inspect.measure" => Dialog::new(
-                Kind::Measure { result: None, of: Vec::new(), show: None, labels: Default::default() },
+                Kind::Measure { dual_units: false, result: None, of: Vec::new(), show: None, labels: Default::default() },
                 vec![SelInput::new(
                     "Items",
                     FACES
@@ -8526,8 +8528,8 @@ fn coil_axis_param(app: &SolveApp, sel: &Sel, profile_sketch: Option<u64>) -> Re
             }
             let name =
                 solidcraft_engine::doc::naming::edge_names(source_body).into_iter().nth(*index).filter(|name| !name.is_empty()).ok_or(AXIS_PICK)?;
-            let inverse = solidcraft_kernel::services::affine::inverse(&frame).map_err(|_| AXIS_PICK)?;
-            let at = solidcraft_kernel::services::affine::apply_point(&inverse, (*point).into());
+            let inverse = solidcraft_kernel::affine::inverse(&frame).map_err(|_| AXIS_PICK)?;
+            let at = solidcraft_kernel::affine::apply_point(&inverse, (*point).into());
             Ok(json!({"type":"placed_edge", "body":source, "path":path, "at":at, "name":name}))
         }
         Sel::SketchCurve { id, .. } => {
