@@ -89,6 +89,8 @@ pub enum LinkSource {
     /// The curve on the face through `at` lying `distance` mm from `from` measured along the face,
     /// on the side of `from` that `at` is on: `from` is an `Edge` of that face or a `SketchCurve`
     /// lying on it. Fitted within `tolerance` mm (none: [`FACE_OFFSET_TOLERANCE`]). 3D curves.
+    /// `flip`: from a `SketchCurve`, to the other side of it than `at` (an edge's offset always
+    /// goes into the face).
     FaceOffset {
         body: String,
         at: Vec3,
@@ -96,6 +98,8 @@ pub enum LinkSource {
         distance: f64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tolerance: Option<f64>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
     },
     /// The outline of a body spun about an axis (world line), laid into the sketch plane.
     Spun { body: String, origin: Vec3, dir: Vec3 },

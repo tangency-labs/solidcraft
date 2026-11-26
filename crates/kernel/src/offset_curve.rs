@@ -68,6 +68,26 @@ struct Source {
 /// the face it goes to the side `toward` (a point on the face) lies on. See the module notes for
 /// what is cut and what is refused.
 pub fn offset_on_face(body: &Body, face: usize, from: OffsetFrom<'_>, distance: f64, toward: Vec3, tolerance: f64) -> Result<FaceOffset> {
+    offset_on_face_to(body, face, from, distance, toward, tolerance, false)
+}
+
+/// [`offset_on_face`], to the other side of curves lying on the face than `toward` when `flip`
+/// (the side point stays where it was picked; the offset goes the other way). From a face's edge
+/// the offset always goes into the face, so `flip` is refused there.
+pub fn offset_on_face_to(
+    body: &Body,
+    face: usize,
+    from: OffsetFrom<'_>,
+    distance: f64,
+    toward: Vec3,
+    tolerance: f64,
+    flip: bool,
+) -> Result<FaceOffset> {
+    if flip && matches!(from, OffsetFrom::Edge(_)) {
+        return Err(KernelError::Invalid(
+            "offset curve: from an edge of the face the curve always goes into the face; Flip is for a curve lying on the face".into(),
+        ));
+    }
     if !(distance.is_finite() && distance > 0.0) {
         return Err(KernelError::Invalid("offset curve: the distance must be a positive number".into()));
     }
@@ -92,6 +112,11 @@ pub fn offset_on_face(body: &Body, face: usize, from: OffsetFrom<'_>, distance: 
             for (curve, range) in curves {
                 on.check_on_face(curve, *range)?;
                 let side = curve_side(curve, *range, sheet.record(), toward, distance, size)?;
+                let side = match (flip, side) {
+                    (false, side) => side,
+                    (true, OffsetSide::Left) => OffsetSide::Right,
+                    (true, OffsetSide::Right) => OffsetSide::Left,
+                };
                 out.push(Source { curve: curve.clone(), range: *range, side });
             }
             out

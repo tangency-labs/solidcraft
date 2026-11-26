@@ -231,6 +231,26 @@ fn offset_of_a_curve_lying_on_the_face_goes_to_the_picked_side() {
     }
 }
 
+/// Flip ([`offset_on_face_to`]): the same side point, the other side of the curve; from an edge
+/// the offset goes into the face only, so Flip is refused there.
+#[test]
+fn a_flipped_offset_of_a_curve_goes_to_the_other_side_of_the_side_point() {
+    let body = plane_strip();
+    let line = (brep::Curve::Line { start: [20.0, 0.0, 0.0], end: [20.0, 0.0, 30.0] }, [0.0, 1.0]);
+    // The line x = 20 by 12.5: toward x = 35 is x = 32.5, flipped x = 7.5; toward x = 5 flipped is 32.5.
+    for (toward, x) in [(Vec3::new(35.0, 0.0, 15.0), 7.5), (Vec3::new(5.0, 0.0, 15.0), 32.5)] {
+        let r = offset_on_face_to(&body, 0, OffsetFrom::Curves(std::slice::from_ref(&line)), 12.5, toward, TOL, true).unwrap();
+        assert!(points(&r.curves[0], 16).iter().all(|p| (p.x - x).abs() < 1e-9), "{r:?}");
+        assert!((length(&r.curves[0]) - 30.0).abs() < 1e-9);
+    }
+    // Not flipped, it is offset_on_face.
+    let toward = Vec3::new(35.0, 0.0, 15.0);
+    let r = offset_on_face_to(&body, 0, OffsetFrom::Curves(std::slice::from_ref(&line)), 12.5, toward, TOL, false).unwrap();
+    assert_eq!(r, offset_on_face(&body, 0, OffsetFrom::Curves(std::slice::from_ref(&line)), 12.5, toward, TOL).unwrap());
+    let e = offset_on_face_to(&body, 0, OffsetFrom::Edge(Vec3::new(0.0, 0.0, 15.0)), 10.0, toward, TOL, true).unwrap_err();
+    assert!(e.to_string().contains("always goes into the face"), "{e}");
+}
+
 #[test]
 fn offset_curve_refusals() {
     let body = plane_strip();

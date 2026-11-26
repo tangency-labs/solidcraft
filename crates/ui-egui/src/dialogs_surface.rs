@@ -76,6 +76,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 axis: Option<Value>,
             },
             Sweep(crate::dialogs_sweep::SweepOpts),
+            /// A curve at a distance along a face, into the sketch being edited (#22414).
+            OffsetCurve(crate::dialogs_offset_curve::OffsetCurveOpts),
             /// `rail_fit`: how the guide rails reshape the sections (an index into the sweep dialog's
             /// rail fits).
             Loft {
@@ -135,6 +137,7 @@ impl Surf {
             Surf::Extrude { .. } => "SURFACE EXTRUDE",
             Surf::Revolve { .. } => "SURFACE REVOLVE",
             Surf::Sweep(_) => "SURFACE SWEEP",
+            Surf::OffsetCurve(_) => "OFFSET CURVE",
             Surf::Loft { .. } => "SURFACE LOFT",
             Surf::Blend { .. } => "BLEND SURFACE",
             Surf::Boundary { .. } => "BOUNDARY SURFACE",
@@ -162,6 +165,7 @@ impl Surf {
                 ("Distance", ValueKind::Length, distance)
             }
             Surf::Revolve { angle, .. } => ("Angle", ValueKind::Angle, angle),
+            Surf::OffsetCurve(o) => ("Distance", ValueKind::Length, &mut o.distance),
             _ => return None,
         })
     }
@@ -270,6 +274,7 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
             let [rail, rail2] = crate::dialogs_sweep::rail_inputs();
             vec![SelInput::new("Sections", PROFILES | CURVES | EDGES, true), rail, rail2]
         }
+        Surf::OffsetCurve(_) => crate::dialogs_offset_curve::inputs(),
         Surf::Blend { .. } => vec![SelInput::new("From edges", EDGES, true), SelInput::new("To edges", EDGES, true)],
         Surf::Boundary { .. } => vec![SelInput::new("Curves", CURVES | EDGES, true), SelInput::new("Cross curves", CURVES | EDGES, true)],
         Surf::Patch { .. } => {
@@ -310,6 +315,9 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "surface.revolve" => Surf::Revolve { angle: "360 deg".into(), symmetric: false, axis: None },
         "surface.sweep" => Surf::Sweep(crate::dialogs_sweep::SweepOpts::default()),
         "surface.loft" => Surf::Loft { rail_fit: 0 },
+        "surface.offset_curve" => {
+            Surf::OffsetCurve(crate::dialogs_offset_curve::OffsetCurveOpts::new(crate::dialogs::length_default(&app.session, "5")))
+        }
         "surface.blend" => Surf::Blend { continuity: [Continuity::G1; 2], bulge: [0.0, 0.0], stitch: false },
         "surface.boundary" => Surf::Boundary { continuity: Continuity::G1, join: false },
         "surface.patch" => Surf::Patch { continuity: Continuity::G0 },
@@ -462,6 +470,7 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf, inputs: &mut Vec<SelInput>, active:
             ui_kit::options(ui, "trim_options", &mut [("Extend to meet", extend), ("Stitch the kept pieces", stitch)]);
         }
         Surf::Sweep(opts) => enter |= crate::dialogs_sweep::rows(ui, opts, "ss"),
+        Surf::OffsetCurve(o) => enter |= crate::dialogs_offset_curve::rows(ui, o),
         Surf::Loft { rail_fit } => crate::dialogs_sweep::rail_fit_row(ui, "sl", rail_fit),
         Surf::SplitFace | Surf::Unstitch | Surf::ReverseNormal => {}
     }
@@ -1045,6 +1054,7 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             }
             ("surface.untrim", p)
         }
+        Surf::OffsetCurve(o) => crate::dialogs_offset_curve::command(app, o, inputs)?,
         Surf::SplitFace => {
             need(0, "the faces to split")?;
             need(1, "the splitting tool")?;

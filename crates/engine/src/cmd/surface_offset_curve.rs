@@ -6,7 +6,7 @@
 use serde_json::Value;
 use solidcraft_sketch::{LinkKind, LinkSource};
 
-use super::sketch_project::{one_link, source};
+use super::sketch_project::{one_link, relink, source};
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, num, str_, vec3};
 use crate::schema::surface_offset_curve::{FROM_MESSAGE, OffsetCurveParams, OffsetCurveResult};
@@ -17,12 +17,12 @@ const OFFSET_CURVE_CONTRACT: TypedContract<OffsetCurveParams> = TypedContract::n
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("surface.offset_curve", "Offset Curve", crate::checked!("surface.offset_curve", offset_curve))
     .at("SURFACE", "CREATE")
-    .icon("surface_offset")
+    .icon("surface_offset_curve")
     .enabled(in_sketch)
     .contract(&OFFSET_CURVE_CONTRACT)
     .output(output_schema_for::<OffsetCurveResult>)
     .params(concat!(
-        "face: [x,y,z] (a point on the face; it picks the side when the face lies on both sides of the source), body?; from: {edge: [x,y,z]} (an edge of the face: the curve goes into the face) | {sketch, curve} (a curve or 3D curve of another sketch lying on the face); distance: mm (> 0), measured along the face: each point that far along the straightest path on the face leaving the source square to it (a plane: the ordinary offset; a cylinder, cone or extrusion: the offset in the face unrolled); tolerance?: mm (default 0.01: how far the fitted cubic spline through the offset's points may be from the true offset, measured between them). Where the offset would leave the face it stops at the face's edge; an offset that leaves the face's surface, one that folds over itself (the distance past the source's radius of curvature on the face), a source not on the face and a pole on the way are refused. Needs an active sketch: a linked 3D curve that follows the face and the source; the reply gives the deviation and whether the face's edge cut it",
+        "face: [x,y,z] (a point on the face; it picks the side when the face lies on both sides of the source), body?; from: {edge: [x,y,z]} (an edge of the face: the curve goes into the face) | {sketch, curve} (a curve or 3D curve of another sketch lying on the face); distance: mm (> 0), measured along the face: each point that far along the straightest path on the face leaving the source square to it (a plane: the ordinary offset; a cylinder, cone or extrusion: the offset in the face unrolled); tolerance?: mm (default 0.01: how far the fitted cubic spline through the offset's points may be from the true offset, measured between them); flip?: bool (default false: from a curve on the face, offset to the other side of it than the face point; refused from an edge, whose offset always goes into the face); link?: id (an offset curve's link in the active sketch: change it to these values, keeping its id and its 3D curves' ids, instead of adding one). Where the offset would leave the face it stops at the face's edge; an offset that leaves the face's surface, one that folds over itself (the distance past the source's radius of curvature on the face), a source not on the face and a pole on the way are refused. Needs an active sketch: a linked 3D curve that follows the face and the source; the reply gives the deviation and whether the face's edge cut it",
         created_doc!()
     ))];
 
@@ -40,10 +40,22 @@ fn offset_curve(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => None,
         Some(v) => Some(v.as_f64().filter(|t| t.is_finite() && *t > 0.0).ok_or_else(|| bad(cmd, "`tolerance` must be a number of mm more than 0"))?),
     };
-    let src = LinkSource::FaceOffset { body, at, from: Box::new(from), distance, tolerance };
+    let flip = match p.get("flip") {
+        None | Some(Value::Null) => false,
+        Some(v) => v.as_bool().ok_or_else(|| bad(cmd, "`flip` must be true or false"))?,
+    };
+    let link = match p.get("link") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(v.as_str().filter(|l| !l.is_empty()).ok_or_else(|| bad(cmd, "`link` must be the id of an offset curve's link"))?.to_string()),
+    };
+    let src = LinkSource::FaceOffset { body, at, from: Box::new(from), distance, tolerance, flip };
     // The kernel's report (deviation, cut by the boundary), and its refusal word for word.
     let (_, _, report) = solidcraft_doc::project::face_offset(&s.model.state(), &src).map_err(|e| bad(cmd, e.to_string()))?;
-    let made = one_link(s, cmd, LinkKind::Include, src)?;
+    let made = match link {
+        None => one_link(s, cmd, LinkKind::Include, src)?,
+        // An offset curve already in the sketch takes the new values (the dialog's Edit).
+        Some(link) => relink(s, cmd, &link, src, |old| matches!(old, LinkSource::FaceOffset { .. }))?,
+    };
     serde_json::to_value(OffsetCurveResult { made, deviation: report.deviation, clipped: report.clipped, created: None, param_warnings: Vec::new() })
         .map_err(|e| bad(cmd, e.to_string()))
 }

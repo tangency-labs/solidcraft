@@ -922,6 +922,7 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
                 | "sketch.chamfer.distance_angle"
                 | "sketch.insert_svg"
                 | "sketch.insert_dxf"
+                | "surface.offset_curve"
         ) || command == "construct.plane.along_path"
             || params.get("command").and_then(Value::as_str) == Some("construct.plane.along_path")
     }) {
@@ -1577,14 +1578,24 @@ pub(crate) fn sketch_changes(
         .enumerate()
         .filter_map(|(i, p)| if old_points.get(p.id.as_str()) == Some(&p.pos) { None } else { Some(i) })
         .collect::<Vec<_>>();
-    // Drawn 3D curves only: a linked one follows the model, which a sketch tool does not change.
+    // Drawn 3D curves, and linked ones whose link is new or reads something else now (an Offset
+    // Curve added or changed, #22414): a link that stays as it was follows the model, which a
+    // sketch tool does not change.
     let old_wires = old.into_iter().flat_map(|s| s.sketch.wires.iter().map(|w| (w.id.as_str(), &w.pts))).collect::<std::collections::HashMap<_, _>>();
+    let relinked = |link: &str| {
+        let source = |s: &solidcraft_engine::doc::SolvedSketch| s.sketch.link(link).map(|l| l.source.clone());
+        old.and_then(source) != source(sketch.as_ref())
+    };
     let wires = sketch
         .sketch
         .wires
         .iter()
         .enumerate()
-        .filter_map(|(i, w)| if w.link.is_some() || old_wires.get(w.id.as_str()) == Some(&&w.pts) { None } else { Some(i) })
+        .filter_map(|(i, w)| {
+            let changed = old_wires.get(w.id.as_str()) != Some(&&w.pts);
+            let shown = changed && w.link.as_deref().is_none_or(relinked);
+            shown.then_some(i)
+        })
         .collect::<Vec<_>>();
     if indices.is_empty() && points.is_empty() && wires.is_empty() {
         None

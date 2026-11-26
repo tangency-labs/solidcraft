@@ -85,6 +85,14 @@ pub struct OffsetCurveParams {
     /// straight; a circular one is a spline within the tolerance.
     #[serde(default)]
     pub tolerance: Option<f64>,
+    /// From a curve lying on the face: offset to the other side of it than the face point.
+    /// Default: false. Refused from an edge, whose offset always goes into the face.
+    #[serde(default)]
+    pub flip: Option<bool>,
+    /// The id of an offset curve's link in the active sketch: change that offset curve to these
+    /// values (one undo step; the link and its 3D curves keep their ids) instead of adding one.
+    #[serde(default)]
+    pub link: Option<String>,
 }
 
 fn required(schema: &mut Schema) {

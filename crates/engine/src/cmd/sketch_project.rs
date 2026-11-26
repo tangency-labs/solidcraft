@@ -1126,6 +1126,39 @@ pub(super) fn one_link(s: &mut Session, cmd: &str, kind: LinkKind, src: LinkSour
     })
 }
 
+/// Change link `link` of the active sketch, a link that makes only 3D curves and whose source
+/// `is_kind` accepts, to read `src` instead, and report it: one undo step, the link and its 3D
+/// curves keep their ids (constraints and features naming them stay), as Edit Text keeps a text's.
+pub(super) fn relink(s: &mut Session, cmd: &str, link: &str, src: LinkSource, is_kind: impl Fn(&LinkSource) -> bool) -> Result<LinkMade> {
+    let id = sketch_store::active(s).ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
+    sketch_store::update(s, id, |s, doc, sk| {
+        refresh(s, doc, id, sk);
+        let kind = match sk.link(link) {
+            Some(l) if is_kind(&l.source) => l.kind,
+            Some(l) => return Err(bad(cmd, format!("`{link}` is {}, not what this command makes", l.source.describe()))),
+            None => return Err(bad(cmd, format!("the sketch being edited has no link `{link}`"))),
+        };
+        let what = src.describe();
+        let doc = placed_candidate(s, doc);
+        let (vals, _) = doc.param_values();
+        let st = s.model.state_before(id);
+        let st = state_for_sketch(s, &doc, id, &st, &src.bodies())?;
+        let plane = sketch_plane(&doc, id, &st)?;
+        let frame = sketch_frame(s, &doc, id);
+        let r = resolve_at(&doc, &vals, &st, &plane, kind, &src, frame.as_ref()).map_err(|e| bad(cmd, format!("{what}: {e}")))?;
+        if !r.geom.is_empty() {
+            return Err(bad(cmd, format!("{what} makes sketch curves, which this change does not keep")));
+        }
+        sk.set_link_source(link, r.source);
+        sk.set_link_lost(link, false);
+        sk.set_link_wires(link, &r.wires)?;
+        sk.set_link_wire_curves(link, &r.exact)?;
+        let (curves, points) = link_parts(sk, link);
+        let wires: Vec<String> = sk.link_wires(link).iter().filter_map(|w| sk.wires.get(*w).map(|w| w.id.clone())).collect();
+        Ok(LinkMade { link: link.to_string(), curves, points, wires })
+    })
+}
+
 fn project_to_surface(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.project_to_surface";
     let at = p.get("face").and_then(vec3).ok_or_else(|| bad(cmd, "`face` must be a point [x,y,z] on the target face"))?;

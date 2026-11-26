@@ -394,6 +394,7 @@ pub use offset::with_same_surface;
 pub use offset_curve::FaceOffset;
 pub use offset_curve::OffsetFrom;
 pub use offset_curve::offset_on_face;
+pub use offset_curve::offset_on_face_to;
 pub use ops::BoolOp;
 pub use ops::apart;
 pub use ops::half_space;

@@ -1,0 +1,90 @@
+{
+  "ar": {
+    "ui.edit_offset_curve": "تعديل منحنى الإزاحة",
+    "ui.offset_curve_done": "منحنى الإزاحة: أكبر انحراف عن الإزاحة الحقيقية {deviation} مم",
+    "ui.offset_curve_done_clipped": "منحنى الإزاحة: أكبر انحراف عن الإزاحة الحقيقية {deviation} مم؛ قُطع عند حافة الوجه حيث كان سيخرج منه",
+    "ui.offset_curve_from": "حافة أو منحنى",
+    "ui.offset_curve_from_tip": "حافة الوجه، أو منحنى من مخطط آخر يقع على الوجه، يبقى المنحنى على المسافة منه",
+    "ui.offset_curve_other_sketch": "اختر منحنى من مخطط آخر: لا يمكن إزاحة منحنى من المخطط الذي يجري تعديله إلى داخله",
+    "ui.offset_curve_pick_face": "اختر الوجه الذي يقع عليه المنحنى",
+    "ui.offset_curve_pick_from": "اختر حافة للوجه، أو منحنى من مخطط آخر يقع عليه",
+    "ui.offset_curve_tolerance_hint": "0.01 مم (الافتراضي)"
+  },
+  "de": {
+    "ui.edit_offset_curve": "Versatzkurve bearbeiten",
+    "ui.offset_curve_done": "Versatzkurve: größte Abweichung vom echten Versatz {deviation} mm",
+    "ui.offset_curve_done_clipped": "Versatzkurve: größte Abweichung vom echten Versatz {deviation} mm; an der Kante der Fläche gekürzt, wo sie die Fläche verlassen würde",
+    "ui.offset_curve_from": "Kante oder Kurve",
+    "ui.offset_curve_from_tip": "Die Kante der Fläche oder eine Kurve einer anderen Skizze auf der Fläche, zu der die Kurve den Abstand hält",
+    "ui.offset_curve_other_sketch": "Eine Kurve einer anderen Skizze wählen: eine Kurve der bearbeiteten Skizze kann nicht in diese versetzt werden",
+    "ui.offset_curve_pick_face": "Die Fläche wählen, auf der die Kurve liegt",
+    "ui.offset_curve_pick_from": "Eine Kante der Fläche oder eine Kurve einer anderen Skizze auf ihr wählen",
+    "ui.offset_curve_tolerance_hint": "0.01 mm (Standard)"
+  },
+  "en": {
+    "ui.edit_offset_curve": "Edit Offset Curve",
+    "ui.offset_curve_done": "Offset Curve: largest deviation from the true offset {deviation} mm",
+    "ui.offset_curve_done_clipped": "Offset Curve: largest deviation from the true offset {deviation} mm; cut short at the face's edge where it would leave the face",
+    "ui.offset_curve_from": "Edge or curve",
+    "ui.offset_curve_from_tip": "The edge of the face, or a curve of another sketch lying on the face, that the curve keeps its distance from",
+    "ui.offset_curve_other_sketch": "Pick a curve of another sketch: a curve of the sketch being edited cannot be offset into it",
+    "ui.offset_curve_pick_face": "Pick the face the curve lies on",
+    "ui.offset_curve_pick_from": "Pick an edge of the face, or a curve of another sketch lying on it",
+    "ui.offset_curve_tolerance_hint": "0.01 mm (default)"
+  },
+  "he": {
+    "ui.edit_offset_curve": "עריכת עקומת היסט",
+    "ui.offset_curve_done": "עקומת היסט: הסטייה הגדולה ביותר מההיסט האמיתי {deviation} מ\"מ",
+    "ui.offset_curve_done_clipped": "עקומת היסט: הסטייה הגדולה ביותר מההיסט האמיתי {deviation} מ\"מ; נקטעה בקצה הפאה במקום שבו הייתה יוצאת ממנה",
+    "ui.offset_curve_from": "קצה או עקומה",
+    "ui.offset_curve_from_tip": "קצה הפאה, או עקומה מסקיצה אחרת המונחת על הפאה, שהעקומה שומרת ממנה על המרחק",
+    "ui.offset_curve_other_sketch": "בחרו עקומה מסקיצה אחרת: אי אפשר להסיט עקומה של הסקיצה הנערכת אל תוכה",
+    "ui.offset_curve_pick_face": "בחרו את הפאה שעליה מונחת העקומה",
+    "ui.offset_curve_pick_from": "בחרו קצה של הפאה, או עקומה מסקיצה אחרת המונחת עליה",
+    "ui.offset_curve_tolerance_hint": "0.01 מ\"מ (ברירת מחדל)"
+  },
+  "ja": {
+    "ui.edit_offset_curve": "オフセット曲線を編集",
+    "ui.offset_curve_done": "オフセット曲線: 真のオフセットからの最大偏差 {deviation} mm",
+    "ui.offset_curve_done_clipped": "オフセット曲線: 真のオフセットからの最大偏差 {deviation} mm。面から出る所で面のエッジで切り詰めました",
+    "ui.offset_curve_from": "エッジまたは曲線",
+    "ui.offset_curve_from_tip": "曲線が距離を保つ、面のエッジ、または面上にある別のスケッチの曲線",
+    "ui.offset_curve_other_sketch": "別のスケッチの曲線を選択してください: 編集中のスケッチの曲線はそのスケッチ自身にオフセットできません",
+    "ui.offset_curve_pick_face": "曲線が載る面を選択してください",
+    "ui.offset_curve_pick_from": "面のエッジ、または面上にある別のスケッチの曲線を選択してください",
+    "ui.offset_curve_tolerance_hint": "0.01 mm (既定値)"
+  },
+  "ko": {
+    "ui.edit_offset_curve": "간격띄우기 곡선 편집",
+    "ui.offset_curve_done": "간격띄우기 곡선: 실제 간격띄우기와의 최대 편차 {deviation} mm",
+    "ui.offset_curve_done_clipped": "간격띄우기 곡선: 실제 간격띄우기와의 최대 편차 {deviation} mm. 면을 벗어나는 곳에서 면의 모서리로 잘랐습니다",
+    "ui.offset_curve_from": "모서리 또는 곡선",
+    "ui.offset_curve_from_tip": "곡선이 거리를 유지하는 면의 모서리, 또는 면 위에 놓인 다른 스케치의 곡선",
+    "ui.offset_curve_other_sketch": "다른 스케치의 곡선을 선택하십시오: 편집 중인 스케치의 곡선은 그 스케치 안으로 간격띄우기할 수 없습니다",
+    "ui.offset_curve_pick_face": "곡선이 놓일 면을 선택하십시오",
+    "ui.offset_curve_pick_from": "면의 모서리, 또는 면 위에 놓인 다른 스케치의 곡선을 선택하십시오",
+    "ui.offset_curve_tolerance_hint": "0.01 mm (기본값)"
+  },
+  "vi": {
+    "ui.edit_offset_curve": "Sửa đường cong offset",
+    "ui.offset_curve_done": "Đường cong offset: độ lệch lớn nhất so với offset thật {deviation} mm",
+    "ui.offset_curve_done_clipped": "Đường cong offset: độ lệch lớn nhất so với offset thật {deviation} mm; bị cắt ở cạnh của mặt, nơi nó sẽ ra khỏi mặt",
+    "ui.offset_curve_from": "Cạnh hoặc đường cong",
+    "ui.offset_curve_from_tip": "Cạnh của mặt, hoặc một đường cong của bản phác thảo khác nằm trên mặt, mà đường cong giữ khoảng cách tới",
+    "ui.offset_curve_other_sketch": "Chọn một đường cong của bản phác thảo khác: không thể offset một đường cong của bản phác thảo đang sửa vào chính nó",
+    "ui.offset_curve_pick_face": "Chọn mặt mà đường cong nằm trên",
+    "ui.offset_curve_pick_from": "Chọn một cạnh của mặt, hoặc một đường cong của bản phác thảo khác nằm trên mặt",
+    "ui.offset_curve_tolerance_hint": "0.01 mm (mặc định)"
+  },
+  "zh": {
+    "ui.edit_offset_curve": "编辑偏移曲线",
+    "ui.offset_curve_done": "偏移曲线：与真实偏移的最大偏差 {deviation} mm",
+    "ui.offset_curve_done_clipped": "偏移曲线：与真实偏移的最大偏差 {deviation} mm；在将离开面的位置于面的边处截断",
+    "ui.offset_curve_from": "边或曲线",
+    "ui.offset_curve_from_tip": "曲线与之保持距离的面的边，或位于面上的另一草图的曲线",
+    "ui.offset_curve_other_sketch": "请选择另一草图的曲线：正在编辑的草图的曲线不能偏移到该草图自身",
+    "ui.offset_curve_pick_face": "选择曲线所在的面",
+    "ui.offset_curve_pick_from": "选择面的一条边，或位于面上的另一草图的曲线",
+    "ui.offset_curve_tolerance_hint": "0.01 mm（默认）"
+  }
+}

@@ -67,6 +67,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_surface::Surf::Extrude { .. } => "surface.extrude",
             crate::dialogs_surface::Surf::Revolve { .. } => "surface.revolve",
             crate::dialogs_surface::Surf::Sweep(_) => "surface.sweep",
+            crate::dialogs_surface::Surf::OffsetCurve(_) => "surface.offset_curve",
             crate::dialogs_surface::Surf::Loft { .. } => "surface.loft",
             crate::dialogs_surface::Surf::Blend { .. } => "surface.blend",
             crate::dialogs_surface::Surf::Boundary { .. } => "surface.boundary",

@@ -820,8 +820,10 @@ fn adopt_dialog(app: &mut SolveApp, mut prepared: solidcraft_engine::ComputedCom
     let made = crate::hole_place::holes_made(&replies);
     for (id, reply) in replies {
         let stop = (id == "joint.drive").then(|| crate::dialogs_assembly::drive_stop(&reply)).flatten();
+        // Offset Curve's deviation from the true offset (#22414): what the command measured.
+        let offset = (id == crate::dialogs_offset_curve::COMMAND).then(|| crate::dialogs_offset_curve::status(&reply)).flatten();
         app.command_completed(&id, Ok(reply))?;
-        if let Some(why) = stop {
+        if let Some(why) = stop.or(offset) {
             app.set_status(why, false);
         }
     }

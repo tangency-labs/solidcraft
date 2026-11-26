@@ -383,6 +383,7 @@ surface_fair	false
 surface_fillet	false
 surface_loft	false
 surface_offset	false
+surface_offset_curve	false
 surface_patch	false
 surface_reverse_normal	false
 surface_revolve	false

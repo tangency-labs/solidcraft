@@ -1922,6 +1922,10 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     if let Some(curve) = crate::sketch_modify_ui::selected_equation(app) {
         v.push(act("ui.editEquationCurve", "Edit Equation Curve", "equation_curve").with(json!({ "curve": curve })));
     }
+    // An offset curve is a link of the sketch (#22414): its dialog reopens with the link's values.
+    if let Some(link) = crate::dialogs_offset_curve::selected(app) {
+        v.push(act("ui.editOffsetCurve", "Edit Offset Curve", "surface_offset_curve").with(json!({ "link": link })));
+    }
     v.push(cmd(app, "sketch.move", "Move/Copy"));
     v.push(cmd(app, "sketch.transform", "Transform").key("G"));
     // Points switch too (#18448): a construction point is reference geometry a Hole leaves out.
@@ -2297,6 +2301,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.editEquationCurve" => {
             if let Some(id) = p.get("curve").and_then(Value::as_str) {
                 crate::sketch_modify_ui::edit_equation(app, id);
+            }
+        }
+        "ui.editOffsetCurve" => {
+            if let Some(link) = p.get("link").and_then(Value::as_str) {
+                crate::dialogs_offset_curve::edit(app, link);
             }
         }
         "ui.editSketchPattern" => {
