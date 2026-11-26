@@ -1,9 +1,9 @@
 //! The Change Parameters dialog and parameter-name autocomplete for expression boxes.
 //!
-//! A window over the engine's `parameters.*` commands: favourites first, then user parameters
-//! (name, unit, expression, value, comment; add, rename, delete) and model parameters grouped by
-//! the sketch or feature they drive (editable). The Name heading sorts each section, and each
-//! model group, by name in natural order (#8563). Expressions validate as you type
+//! A window over the engine's `parameters.*` commands: one table with favourites first, user
+//! parameters (name, unit, expression, value, comment; add, rename, delete), then model
+//! parameters grouped by the sketch or feature they drive. The Name heading sorts each band by name
+//! in natural order (#8563). Expressions validate as you type
 //! (`expr.evaluate`) with a live model preview; Enter or leaving the field applies them.
 //! With "Apply each change as you leave its field" off (a remembered preference, #9279), they
 //! wait instead, without a preview, until Apply or OK sets them in one `parameters.change`.
@@ -32,8 +32,7 @@ const UNITS: [&str; 10] = ["mm", "cm", "m", "in", "ft", "deg", "rad", "", "um", 
 #[derive(Default)]
 pub struct ParamsDialog {
     pub filter: String,
-    /// The order by name inside each section (#8563); remembered across openings like the
-    /// sections' open state.
+    /// The order by name inside each band (#8563), remembered across openings.
     pub(crate) sort: ui_kit::Sort,
     reset_scroll: bool,
     /// Expressions being edited, by parameter name.
@@ -49,7 +48,7 @@ pub struct ParamsDialog {
     pub comments: std::collections::BTreeMap<String, String>,
     /// A parameter being renamed: (old name, new name).
     pub renaming: Option<(String, String)>,
-    /// The table the rename was started in. A favourite is listed twice (Favourites and User),
+    /// The band the rename was started in. A favourite is listed twice (Favourites and its group),
     /// and two editors on one name took each other's focus, so the rename closed at once (#4952).
     pub rename_table: String,
     pub new_name: String,
@@ -83,23 +82,8 @@ pub struct ParamsDialog {
     /// How many times the rows were listed and the add row checked (for the tests).
     pub lists: u32,
     pub checks: u32,
-    /// Measured model groups keep their scroll space without rebuilding offscreen tables.
-    group_layout: Option<GroupLayout>,
-    group_sizes: std::collections::HashMap<String, egui::Vec2>,
-    #[cfg(test)]
-    groups_drawn: usize,
-}
-
-#[derive(PartialEq)]
-struct GroupLayout {
-    revision: u64,
-    filter: String,
-    width: f32,
-    pixels_per_point: f32,
-    style: Arc<egui::Style>,
-    font: String,
-    system_fonts: bool,
-    language: &'static str,
+    /// Each section band starts open and remembers its state while the dialog is open.
+    bands: std::collections::HashMap<String, bool>,
 }
 
 impl ParamsDialog {
@@ -141,6 +125,8 @@ struct Row {
     comment: String,
     source: String,
     group: String,
+    /// The component the row's sketch or feature belongs to; 0 = the top level.
+    component: u64,
     favorite: bool,
     /// A text parameter's text.
     text: Option<String>,
@@ -174,6 +160,12 @@ fn rows(app: &mut SolveApp) -> Vec<Row> {
             }
         }
     }
+    // The component each sketch or feature belongs to, as the design records it.
+    let doc = &app.session.doc;
+    let mut component_of: std::collections::HashMap<&str, u64> = Default::default();
+    for f in &doc.features {
+        component_of.insert(f.name.as_str(), shown_component(&doc.components, f.component));
+    }
     let s = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
     list["parameters"]
         .as_array()
@@ -187,7 +179,9 @@ fn rows(app: &mut SolveApp) -> Vec<Row> {
                 "sketch" => owner.get(&name).cloned().unwrap_or_else(|| "Sketch".into()),
                 _ => String::new(),
             };
+            let component = component_of.get(group.as_str()).copied().unwrap_or(0);
             Row {
+                component,
                 expression: s(r, "expression"),
                 unit: s(r, "unit"),
                 // The dialog shows the parameter's own unit, so it reads `display_value`
@@ -204,6 +198,138 @@ fn rows(app: &mut SolveApp) -> Vec<Row> {
         })
         .collect()
 }
+
+/// The component to list a feature under: its own when it is in the design tree, else the top
+/// level (a component that is missing, or whose parents never reach the top, cannot be shown
+/// as a folder).
+fn shown_component(components: &[solidcraft_engine::doc::Component], id: u64) -> u64 {
+    let mut at = id;
+    for _ in 0..=components.len() {
+        if at == 0 {
+            return id;
+        }
+        match components.iter().find(|c| c.id == at) {
+            Some(c) => at = c.parent,
+            None => return 0,
+        }
+    }
+    0
+}
+
+/// One entry of the Model Parameters list, in the order it is drawn.
+#[derive(Debug, PartialEq)]
+enum Entry {
+    /// The model group at this index of the sections' groups.
+    Group(usize),
+    /// A component's folder, holding its own groups and then its child components' folders.
+    Folder { id: u64, name: String, entries: Vec<Entry> },
+}
+
+/// The order the Model Parameters list is drawn in (#20648). `group_components` is each group's
+/// component (0 = the top level) in listing order; `components` is every component as
+/// (id, parent, name) in the design's order. With `grouped` off the list is flat. Otherwise the
+/// top-level groups come first (so do groups whose component is not in the tree, so a row is
+/// never lost), then a folder per component with groups in it or below it, nested like the
+/// components, a component's own groups before its child folders.
+fn listing_order(group_components: &[u64], components: &[(u64, u64, &str)], grouped: bool) -> Vec<Entry> {
+    if !grouped {
+        return (0..group_components.len()).map(Entry::Group).collect();
+    }
+    let mut children: std::collections::HashMap<u64, Vec<(u64, &str)>> = Default::default();
+    for (id, parent, name) in components.iter().filter(|(id, parent, _)| *id != 0 && id != parent) {
+        children.entry(*parent).or_default().push((*id, *name));
+    }
+    let mut by_component: std::collections::HashMap<u64, Vec<usize>> = Default::default();
+    for (index, component) in group_components.iter().enumerate().filter(|(_, c)| **c != 0) {
+        by_component.entry(*component).or_default().push(index);
+    }
+    fn build(
+        parent: u64,
+        children: &std::collections::HashMap<u64, Vec<(u64, &str)>>,
+        by_component: &std::collections::HashMap<u64, Vec<usize>>,
+        seen: &mut std::collections::HashSet<u64>,
+    ) -> Vec<Entry> {
+        let mut folders = Vec::new();
+        for (id, name) in children.get(&parent).into_iter().flatten() {
+            // A component is visited once, so a damaged parent loop ends.
+            if !seen.insert(*id) {
+                continue;
+            }
+            let mut entries: Vec<Entry> = by_component.get(id).into_iter().flatten().map(|i| Entry::Group(*i)).collect();
+            entries.extend(build(*id, children, by_component, seen));
+            if !entries.is_empty() {
+                folders.push(Entry::Folder { id: *id, name: (*name).to_owned(), entries });
+            }
+        }
+        folders
+    }
+    let folders = build(0, &children, &by_component, &mut Default::default());
+    fn placed(entries: &[Entry], into: &mut std::collections::HashSet<usize>) {
+        for entry in entries {
+            match entry {
+                Entry::Group(i) => {
+                    into.insert(*i);
+                }
+                Entry::Folder { entries, .. } => placed(entries, into),
+            }
+        }
+    }
+    let mut inside: std::collections::HashSet<usize> = Default::default();
+    placed(&folders, &mut inside);
+    let mut order: Vec<Entry> = (0..group_components.len()).filter(|i| !inside.contains(i)).map(Entry::Group).collect();
+    order.extend(folders);
+    order
+}
+
+/// Rows in `entries`, counting every group below a folder.
+fn entry_rows(entries: &[Entry], groups: &[(&str, Vec<&Row>)]) -> usize {
+    entries
+        .iter()
+        .map(|entry| match entry {
+            Entry::Group(i) => groups.get(*i).map_or(0, |(_, members)| members.len()),
+            Entry::Folder { entries, .. } => entry_rows(entries, groups),
+        })
+        .sum()
+}
+
+/// Draw `entries` into the shared table: each group as its band, each component folder as a
+/// header band holding its own entries, indented one step per level. A closed folder hides all
+/// that is in it. The table has no nesting of its own, so depth is shown by the label's indent.
+fn draw_entries(
+    app: &mut SolveApp,
+    ui: &mut egui::Ui,
+    table: &mut ui_kit::Table<'_>,
+    d: &mut ParamsDialog,
+    (entries, groups): (&[Entry], &[(&str, Vec<&Row>)]),
+    widths: (f32, f32),
+    depth: usize,
+) {
+    for entry in entries {
+        match entry {
+            Entry::Group(i) => {
+                if let Some((group, members)) = groups.get(*i) {
+                    band_at(app, ui, table, d, (&format!("model:{group}"), group, members), widths, depth);
+                }
+            }
+            Entry::Folder { id, name, entries } => {
+                // A component's name is the user's own text, so the header shows it as written
+                // and never as a catalog word (a component named "Frame" is not the word "Frame").
+                let salt = format!("component:{id}");
+                let open = *d.bands.entry(salt.clone()).or_insert(true);
+                let mut now = open;
+                let response = table.group(ui, &salt, &format!("{}{name}", INDENT.repeat(depth)), entry_rows(entries, groups), &mut now);
+                d.bands.insert(salt, now);
+                crate::scenario::publish_target(&format!("dialog:section:{name}"), response.rect);
+                if now {
+                    draw_entries(app, ui, table, d, (entries, groups), widths, depth + 1);
+                }
+            }
+        }
+    }
+}
+
+/// One level of a component folder's indent in a band label.
+const INDENT: &str = "\u{2003}\u{2003}";
 
 fn show_value(r: &Row) -> String {
     match r.value {
@@ -325,6 +451,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             |ui| {
                 ui_kit::text(ui, hint(live), ui_kit::Text::Hint("manage"));
                 apply_live_checkbox(app, ui, &mut d, &all);
+                group_checkbox(app, ui);
                 ui_kit::row(ui, "Filter", |ui| {
                     let id = ui.make_persistent_id("parameter_filter");
                     ui_kit::search_field(ui, id, &mut d.filter, "Filter");
@@ -354,43 +481,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     .map(|r| ui_kit::ContentWidth::name(ui, &r.name))
                     .fold(solidcraft_theme::Tokens::get().form_label_width, f32::max)
                     .min(solidcraft_theme::Tokens::get().form_card_width);
-                let Sections { favorites, users, groups } = sections(&visible, d.sort);
-                if !favorites.is_empty() {
-                    ui_kit::section_count(ui, "favorites", "Favorites", true, Some(favorites.len()), |ui| {
-                        table(app, ui, &mut d, &favorites, "fav", name_floor)
-                    });
-                }
-                ui_kit::section_count(ui, "users", "User Parameters", true, Some(users.len()), |ui| {
-                    table(app, ui, &mut d, &users, "user", name_floor);
-                });
-                ui_kit::section(ui, "models", "Model Parameters", true, |ui| {
-                    ui.scope(|ui| {
-                        ui.spacing_mut().indent = solidcraft_theme::Tokens::get().space_14;
-                        ui.indent("model_groups", |ui| {
-                            let layout = GroupLayout {
-                                revision: app.session.revision,
-                                filter: filter.clone(),
-                                width: ui.available_width(),
-                                pixels_per_point: ui.ctx().pixels_per_point(),
-                                style: ui.style().clone(),
-                                font: app.applied_ui_font.clone(),
-                                system_fonts: app.applied_system_fonts,
-                                language: solidcraft_ui_text::language(),
-                            };
-                            if d.group_layout.as_ref() != Some(&layout) {
-                                d.group_sizes.clear();
-                                d.group_layout = Some(layout);
-                            }
-                            #[cfg(test)]
-                            {
-                                d.groups_drawn = 0;
-                            }
-                            for (group, members) in groups {
-                                model_group(app, ui, &mut d, group, &members, name_floor);
-                            }
-                        });
-                    });
-                });
+                let sections = sections(&visible, d.sort);
+                table(app, ui, &mut d, &sections, name_floor);
                 ui_kit::ComputeStatus { text: held_status, busy: false, applying: false }
             },
         );
@@ -429,7 +521,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
-/// Where the chosen order is kept: egui's persisted memory, like a section's open state.
+/// Where the chosen order is kept across dialog openings.
 fn sort_id() -> egui::Id {
     egui::Id::unique("sc_params_sort")
 }
@@ -478,31 +570,6 @@ fn sections<'a>(visible: &[&'a Row], sort: ui_kit::Sort) -> Sections<'a> {
         sort.apply(members, by_name);
     }
     Sections { favorites, users, groups }
-}
-
-fn model_group(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, group: &str, rows: &[&Row], name_floor: f32) {
-    // Focused editors and pending drafts must still receive focus-loss/commit events after
-    // scrolling away. The measured size is used only while the group is idle.
-    let active = ui.ctx().egui_wants_keyboard_input()
-        || rows.iter().any(|r| {
-            d.editing.contains_key(&r.name) || d.comments.contains_key(&r.name) || d.renaming.as_ref().is_some_and(|(old, _)| *old == r.name)
-        });
-    let measured = d.group_sizes.get(group).copied();
-    let response = ui.push_id(("parameter_group", group), |ui| {
-        if !active
-            && let Some(size) = measured
-            && !ui.is_rect_visible(egui::Rect::from_min_size(ui.next_widget_position(), size))
-        {
-            ui.allocate_space(size);
-            return;
-        }
-        #[cfg(test)]
-        {
-            d.groups_drawn += 1;
-        }
-        ui_kit::section_count(ui, ("pgroup", group), group, true, Some(rows.len()), |ui| table(app, ui, d, rows, group, name_floor));
-    });
-    d.group_sizes.insert(group.to_owned(), response.response.rect.size());
 }
 
 /// Live check of an expression typed for a parameter of this unit: Ok(shown value) or the message.
@@ -587,22 +654,26 @@ impl ParamGrid<'_> {
     }
 }
 
+fn parameter_columns(name_floor: f32, unit_width: f32) -> Vec<ui_kit::GridColumn> {
+    use ui_kit::{CellKind, GridColumn};
+    let t = solidcraft_theme::Tokens::get();
+    let units = UNITS.iter().map(|u| unit_label(u).to_owned()).collect();
+    // Name keeps a larger share and a shared content floor so long identifiers stay readable
+    // and every section's columns line up (#8533, #8551 review).
+    vec![
+        GridColumn::new("favorite", "", 0.0, CellKind::Custom).min_content_width(t.space_24 * 3.0),
+        GridColumn::new("name", "Name", 2.0, CellKind::Text).flex().min_content_width(name_floor),
+        GridColumn::new("unit", "Unit", 0.65, CellKind::Choice(units)).min_content_width(unit_width),
+        GridColumn::new("expression", "Expression", 1.5, CellKind::Expression).flex().edit_on_click(),
+        GridColumn::new("value", "Value", 1.1, CellKind::ReadOnly).flex(),
+        GridColumn::new("comment", "Comment", 1.0, CellKind::Text).flex().edit_on_click(),
+        GridColumn::new("actions", "Actions", 0.0, CellKind::Custom).icon_only().min_content_width(ui_kit::table_row_height()),
+    ]
+}
+
 impl ui_kit::GridSource for ParamGrid<'_> {
     fn columns(&self) -> Vec<ui_kit::GridColumn> {
-        use ui_kit::{CellKind, GridColumn};
-        let t = solidcraft_theme::Tokens::get();
-        let units = UNITS.iter().map(|u| unit_label(u).to_owned()).collect();
-        // Name keeps a larger share and a shared content floor so long identifiers stay readable
-        // and every section's columns line up (#8533, #8551 review).
-        vec![
-            GridColumn::new("favorite", "", 0.0, CellKind::Custom).min_content_width(t.space_24 * 3.0),
-            GridColumn::new("name", "Name", 2.0, CellKind::Text).flex().min_content_width(self.name_floor),
-            GridColumn::new("unit", "Unit", 0.65, CellKind::Choice(units)).min_content_width(self.unit_width),
-            GridColumn::new("expression", "Expression", 1.5, CellKind::Expression).flex().edit_on_click(),
-            GridColumn::new("value", "Value", 1.1, CellKind::ReadOnly).flex(),
-            GridColumn::new("comment", "Comment", 1.0, CellKind::Text).flex().edit_on_click(),
-            GridColumn::new("actions", "Actions", 0.0, CellKind::Custom).icon_only().min_content_width(ui_kit::table_row_height()),
-        ]
+        parameter_columns(self.name_floor, self.unit_width)
     }
 
     fn row_count(&self) -> usize {
@@ -678,7 +749,7 @@ impl ui_kit::GridSource for ParamGrid<'_> {
                 ui.horizontal(|ui| {
                     let star = if r.favorite { "★" } else { "☆" };
                     ui.spacing_mut().item_spacing.x = 0.0;
-                    let favorite = ui_kit::compact_button(ui, star, "Favourite", true, r.favorite);
+                    let favorite = ui_kit::compact_toggle(ui, star, "Favourite", true, r.favorite);
                     crate::scenario::publish_handle(&format!("param:star:{}", r.name), favorite.rect.center());
                     if favorite.clicked() {
                         self.d.error = self.app.run("parameters.favorite", json!({"name": r.name, "favorite": !r.favorite})).err();
@@ -715,6 +786,15 @@ impl ui_kit::GridSource for ParamGrid<'_> {
                 let (shown, error) = self.shown(r);
                 Some(ui_kit::text(ui, &shown, ui_kit::Text::Value(&format!("value:{}", r.name), error)).backing_on_hover_text(&shown))
             }
+            COMMENT => {
+                let request = egui::Id::unique(("sc_parameter_comment_expand", self.d.opening, self.salt, &r.name));
+                let text = self.d.comments.get(&r.name).unwrap_or(&r.comment);
+                let response = ui_kit::expandable_cell_preview(ui, request, text, &format!("param:comment:{}", r.name));
+                if response.clicked() && !ui.input(|input| input.modifiers.shift) {
+                    ui.data_mut(|data| data.insert_temp(request, true));
+                }
+                Some(response)
+            }
             ACTIONS if r.source == "user" => {
                 let response = ui_kit::bin_button(ui, "Delete");
                 if response.clicked() {
@@ -748,7 +828,17 @@ impl ui_kit::GridSource for ParamGrid<'_> {
                 ui_kit::CellEditor { response, taken }
             }
             NAME => ui_kit::CellEditor { response: ui_kit::cell_editor(ui, id, text, "Name", false), taken: false },
-            _ => ui_kit::CellEditor { response: ui_kit::cell_editor(ui, id, text, "Comment", false), taken: false },
+            _ => {
+                let request = egui::Id::unique(("sc_parameter_comment_expand", self.d.opening, self.salt, &r.name));
+                if ui.data_mut(|data| data.remove_temp::<bool>(request)).unwrap_or(false) {
+                    ui.memory_mut(|memory| memory.request_focus(id));
+                    ui.data_mut(|data| data.insert_temp(id.with("expanded"), true));
+                }
+                ui_kit::CellEditor {
+                    response: ui_kit::expandable_cell_editor(ui, id, text, "Comment", &format!("param:comment:{}", r.name)),
+                    taken: false,
+                }
+            }
         }
     }
 
@@ -785,13 +875,83 @@ fn grid_state(d: &ParamsDialog, salt: &str) -> egui::Id {
     egui::Id::unique(("sc_params_grid", d.opening, salt))
 }
 
-/// One section's grid of parameter rows with its sortable, resizable headings and add row.
-/// `salt` keeps each section's widgets apart; `name_floor` is the shared Name column minimum.
-fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&Row], salt: &str, name_floor: f32) {
+/// One shared card and header; each band keeps the upstream grid's editing and virtualization.
+fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, sections: &Sections<'_>, name_floor: f32) {
     let t = solidcraft_theme::Tokens::get();
     let units: Vec<_> = UNITS.iter().map(|unit| unit_label(unit)).collect();
     let unit_width = ui_kit::ContentWidth::dropdown(ui, &units).max(t.space_24 * 3.0 + t.space_6);
-    // An expression being edited may open over the cells to its right, up to the table's edge.
+    let columns = parameter_columns(name_floor, unit_width);
+    let manual: Vec<Option<f32>> = ui.ctx().data_mut(|m| m.get_persisted(columns_id())).unwrap_or_default();
+    let layout: Vec<_> = columns.iter().enumerate().map(|(i, c)| c.layout(manual.get(i).copied().flatten())).collect();
+    ui_kit::table_custom(ui, "parameters", &layout, solidcraft_ui_text::tr("manage.empty"), |ui, table| {
+        table.headers_resizable(ui, columns_id(), |ui, index| {
+            if index != NAME {
+                return false;
+            }
+            let response = ui_kit::sort_header(ui, "Name", &mut d.sort);
+            for salt in ["fav", "user"].into_iter().chain(sections.groups.iter().map(|(group, _)| *group)) {
+                crate::scenario::publish_handle(&format!("params:sort:{salt}"), response.rect.center());
+            }
+            true
+        });
+        let widths = (name_floor, unit_width);
+        if !sections.favorites.is_empty() {
+            band(app, ui, table, d, ("fav", solidcraft_ui_text::tr_label("Favorites"), &sections.favorites), widths);
+        }
+        // Keep the editable user rows above model groups, as in the original dialog: a
+        // design with many feature parameters must not push its user parameters off screen.
+        band(app, ui, table, d, ("user", solidcraft_ui_text::tr_label("User Parameters"), &sections.users), widths);
+        // Top-level features first, then a folder per component, nested like the component
+        // tree (#20648). Off, the groups are in listing order, as before.
+        let order = {
+            let components: Vec<_> = app.session.doc.components.iter().map(|c| (c.id, c.parent, c.name.as_str())).collect();
+            let of_group: Vec<u64> = sections.groups.iter().map(|(_, m)| m.first().map_or(0, |r| r.component)).collect();
+            listing_order(&of_group, &components, app.preferences.params_group_by_component)
+        };
+        draw_entries(app, ui, table, d, (&order, &sections.groups), widths, 0);
+    });
+    // The sections now share one horizontal viewport; existing agents may still ask for
+    // their original grid's viewport and content width.
+    let viewport = crate::scenario::rect_of("dialog:table:parameters:viewport");
+    let content_width = crate::scenario::count_of("dialog:table:parameters:content_width");
+    for salt in ["fav", "user"].into_iter().chain(sections.groups.iter().map(|(group, _)| *group)) {
+        if let Some(rect) = viewport {
+            crate::scenario::publish_rect(&format!("dialog:table:{salt}:viewport"), rect);
+        }
+        if let Some(width) = content_width {
+            crate::scenario::publish_count(&format!("dialog:table:{salt}:content_width"), width);
+        }
+    }
+}
+
+fn band(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>, d: &mut ParamsDialog, band: (&str, &str, &[&Row]), widths: (f32, f32)) {
+    band_at(app, ui, table, d, band, widths, 0);
+}
+
+/// A band `depth` component folders deep.
+fn band_at(
+    app: &mut SolveApp,
+    ui: &mut egui::Ui,
+    table: &mut ui_kit::Table<'_>,
+    d: &mut ParamsDialog,
+    (salt, label, rows): (&str, &str, &[&Row]),
+    (name_floor, unit_width): (f32, f32),
+    depth: usize,
+) {
+    let open = d.bands.entry(salt.to_owned()).or_insert(true);
+    let response = table.group(ui, salt, &format!("{}{label}", INDENT.repeat(depth)), rows.len(), open);
+    let section = match salt {
+        "fav" => "Favorites",
+        "user" => "User Parameters",
+        _ => label,
+    };
+    crate::scenario::publish_target(&format!("dialog:section:{section}"), response.rect);
+    crate::scenario::publish_count(&format!("dialog:table:parameters:group:{salt}:count"), rows.len() as f64);
+    if !*open {
+        return;
+    }
+    // The band has a namespaced key, while the grid keeps its original agent-facing id.
+    let salt = salt.strip_prefix("model:").unwrap_or(salt);
     let right = ui.max_rect().right().min(ui.clip_rect().right());
     let state = grid_state(d, salt);
     if !d.grids.iter().any(|g| g == salt) {
@@ -805,16 +965,12 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
         }
     }
     let mut grid = ParamGrid { app, d, rows, salt, name_floor, unit_width, right, live };
-    let out = ui_kit::Grid::new(salt).state(state).empty(solidcraft_ui_text::tr("manage.empty")).resizable(columns_id()).show_with(
-        ui,
-        &mut grid,
-        |ui, table, grid| {
-            if grid.salt == "user" && grid.d.adding {
-                let right = grid.right;
-                ui.push_id("parameter_draft", |ui| add_row(grid.app, ui, table, grid.d, right));
-            }
-        },
-    );
+    let out = ui_kit::Grid::new(salt).state(state).show_in(ui, table, &mut grid, |ui, table, grid| {
+        if grid.salt == "user" && grid.d.adding {
+            let right = grid.right;
+            ui.push_id("parameter_draft", |ui| add_row(grid.app, ui, table, grid.d, right));
+        }
+    });
     if out.add_row {
         d.adding = true;
         d.focus_new = true;
@@ -1134,6 +1290,13 @@ fn apply_live_checkbox(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDial
     }
 }
 
+/// "Group model parameters by component" (#20648), remembered across sessions; off lists the model
+/// parameters flat, in listing order.
+fn group_checkbox(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let response = ui_kit::checkbox(ui, solidcraft_ui_text::tr("parameters.group_by_component"), &mut app.preferences.params_group_by_component);
+    crate::scenario::publish_handle("params:group_by_component", response.rect.center());
+}
+
 /// The add row's draft (name, unit, expression, comment) an add was refused with, the design
 /// document the refusal was about, and the message. The message is about that draft in that
 /// design, as a dialog's refused OK is about its inputs and the design (#641): once either
@@ -1189,6 +1352,7 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
     let mut submit = false;
     let mut left = false;
     let mut discard = false;
+    let mut comment_rect = egui::Rect::NOTHING;
     let reveal = d.focus_new;
     let response = table.row(ui, "new", false, |row| {
         row.cell(|_| {});
@@ -1226,7 +1390,8 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
             ui_kit::text(ui, &value, ui_kit::Text::Value("new_value", invalid)).backing_on_hover_text(&value);
         });
         row.cell(|ui| {
-            let response = ui_kit::cell_editor(ui, comment_id, &mut d.new_comment, "Comment", false);
+            let response = ui_kit::expandable_cell_editor(ui, comment_id, &mut d.new_comment, "Comment", "param:new:comment");
+            comment_rect = response.rect;
             crate::scenario::publish_handle("param:new:comment", response.rect.center());
             left |= response.lost_focus();
             submit |= enter_for(ui, focused_id.is_some());
@@ -1239,6 +1404,12 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
             discard = response.clicked();
         });
     });
+    crate::scenario::publish_rect("dialog:table:user:new", response.rect);
+    for label in ["", "Name", "Unit", "Expression", "Value", "Comment", "Actions"] {
+        if let Some(rect) = crate::scenario::rect_of(&format!("dialog:table:parameters:new:cell:{label}")) {
+            crate::scenario::publish_rect(&format!("dialog:table:user:new:cell:{label}"), rect);
+        }
+    }
     if reveal {
         table.reveal_row(response.rect);
     }
@@ -1248,13 +1419,13 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
     let valid = !d.new_name.trim().is_empty() && live.is_ok();
     crate::scenario::publish_count("param:new:valid", f64::from(valid));
     let clicked = ui.input(|i| i.pointer.any_click().then(|| i.pointer.interact_pos()).flatten());
-    let clicked_outside = !menu_was_open && clicked.is_some_and(|p| !response.rect.contains(p));
+    let inside_row = |p| response.rect.contains(p) || comment_rect.contains(p);
+    let clicked_outside = !menu_was_open && clicked.is_some_and(|p| !inside_row(p));
     // Losing a cell's focus is not leaving the draft: a click or Tab into another cell
-    // must keep its values and geometry (#4461). The unit menu belongs to the draft too.
+    // must keep its values and geometry (#4461). The unit menu and comment overlay belong to the draft too.
     let left_row = !menu_was_open
         && !egui::Popup::is_any_open(ui.ctx())
-        && (clicked_outside
-            || (left && !ui.memory(|m| row_ids.iter().any(|id| m.has_focus(*id))) && !clicked.is_some_and(|p| response.rect.contains(p))));
+        && (clicked_outside || (left && !ui.memory(|m| row_ids.iter().any(|id| m.has_focus(*id))) && !clicked.is_some_and(inside_row)));
     let abandoned = d.new_name.trim().is_empty() && clicked_outside;
     if discard || abandoned {
         d.adding = false;
@@ -1995,6 +2166,26 @@ mod tests {
         assert!(!other.app.preferences.parameters_apply_live, "the choice persists with the preferences");
     }
 
+    /// #20648: the Parameters window's own option turns the grouping on and off, and the choice is kept
+    /// with the stored preferences; there is no Preferences page row for it.
+    #[test]
+    fn the_windows_option_toggles_the_grouping_and_is_remembered() {
+        crate::i18n::install();
+        assert!(!crate::prefs::Prefs::default().params_group_by_component, "grouping stays off by default");
+        let mut h = held_dialog();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"params:group_by_component"}})).unwrap();
+        assert!(h.app.preferences.params_group_by_component, "the option turns the grouping on");
+        let saved = h.app.prefs();
+        let mut other = crate::scenario::Harness::new();
+        other.app.load_prefs(&saved);
+        assert!(other.app.preferences.params_group_by_component, "the choice persists with the preferences");
+        // A new harness clears the published handles: draw the first window again before clicking.
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"params:group_by_component"}})).unwrap();
+        assert!(!h.app.preferences.params_group_by_component, "and off again");
+    }
+
     #[test]
     fn words_and_suggestions() {
         assert_eq!(word_before("2 * wid", 7), (4, "wid".to_string()));
@@ -2447,7 +2638,7 @@ mod tests {
         }
     }
 
-    /// #8563: clicking a Name heading sorts every table in the window, the choice outlives the
+    /// #8563: clicking the Name heading sorts every band in the window, the choice outlives the
     /// window, and moving a user parameter waits for the listed order.
     #[test]
     fn the_name_heading_sorts_the_window_and_is_remembered() {
@@ -2470,6 +2661,10 @@ mod tests {
         let group = h.app.params.as_ref().unwrap().listed.as_ref().unwrap().1.iter().find(|r| r.source != "user").unwrap().group.clone();
         let model: Vec<String> =
             h.app.params.as_ref().unwrap().listed.as_ref().unwrap().1.iter().filter(|r| r.group == group).map(|r| r.name.clone()).collect();
+        // Sort with the model band closed; its rows must take the same sort when reopened.
+        let model_band = format!("dialog:table:parameters:group:model:{group}");
+        h.step(&json!({"click":{"handle":model_band}})).unwrap();
+        h.frames(3);
         assert_eq!(order("user", &users), users, "the listed order by default");
         assert!(model.len() > 1, "the box drives several parameters: {model:?}");
         let mut sorted_model = model.clone();
@@ -2478,12 +2673,16 @@ mod tests {
         h.step(&json!({"click": {"handle": "params:sort:user"}})).unwrap();
         h.frames(3);
         assert_eq!(order("user", &users), ["Alpha", "span", "t1", "t2", "t10"]);
-        // The bounded card may not show the model group below the user table: filter to it.
+        // Filter to a model group so all of its cells are in view.
         h.app.params.as_mut().unwrap().filter = group.clone();
         h.frames(4);
+        h.step(&json!({"click":{"handle":model_band}})).unwrap();
+        h.frames(3);
         assert_eq!(order(&group, &model), sorted_model, "a model group sorts too");
         h.app.params.as_mut().unwrap().filter.clear();
         h.frames(4);
+        h.step(&json!({"click":{"handle":model_band}})).unwrap();
+        h.frames(3);
         assert!(crate::scenario::handle_at("param:after:Alpha").is_some());
         let before = h.app.session.doc.params.iter().map(|p| p.name.clone()).collect::<Vec<_>>();
         h.step(&json!({"click": {"handle": "param:after:Alpha"}})).unwrap();
@@ -2495,6 +2694,8 @@ mod tests {
         h.frames(2);
         h.app.start("parameters.change");
         h.frames(4);
+        h.step(&json!({"click":{"handle":model_band}})).unwrap();
+        h.frames(3);
         assert_eq!(h.app.params.as_ref().unwrap().sort, ui_kit::Sort::Ascending);
         h.step(&json!({"click": {"handle": "params:sort:user"}})).unwrap();
         h.frames(3);
@@ -2568,7 +2769,8 @@ mod tests {
         let open = frame_ms(&mut h, 20);
         let listed = &h.app.params.as_ref().unwrap().listed.as_ref().unwrap().1;
         assert_eq!(listed.iter().filter(|r| r.source == "feature").count(), 740);
-        assert!(h.app.params.as_ref().unwrap().groups_drawn < 10, "offscreen feature groups must not build tables on idle frames");
+        let model_rows = crate::scenario::rects("dialog:table:parameters:Plane");
+        assert!(model_rows.is_empty(), "user parameters precede the offscreen model groups");
         eprintln!("740 feature groups: closed {closed:.2} ms, open {open:.2} ms");
     }
 
@@ -2578,17 +2780,22 @@ mod tests {
         h.app.start("parameters.change");
         h.frames(5);
         let height = crate::scenario::count_of("dialog:body:content_height").unwrap();
-        let sizes = h.app.params.as_ref().unwrap().group_sizes.clone();
         h.frames(20);
-        assert_eq!(h.app.params.as_ref().unwrap().group_sizes, sizes, "skipping groups must preserve their measured size");
+        assert_eq!(crate::scenario::count_of("dialog:body:content_height"), Some(height), "idle rows keep their scroll geometry");
         let last = h.app.params.as_ref().unwrap().listed.as_ref().unwrap().1.iter().find(|r| r.group == "Plane739").unwrap().name.clone();
         let viewport = crate::scenario::rect_of("dialog:body:viewport").unwrap();
         h.call("ui.scroll", json!({"x":viewport.center().x,"y":viewport.center().y,"delta":-100_000}));
         h.frames(40);
         assert!((crate::scenario::count_of("dialog:body:content_height").unwrap() - height).abs() < 1.0);
+        let band = crate::scenario::rect_of("dialog:table:parameters:group:model:Plane739").unwrap();
+        let row_y = band.bottom() + ui_kit::table_row_height() * 0.5;
+        // Centre the last model row in the viewport before editing it.
+        h.call("ui.scroll", json!({"x":viewport.center().x,"y":viewport.center().y,"delta":viewport.center().y - row_y}));
+        h.frames(40);
         let at = crate::scenario::handle_at(&format!("param:{last}")).unwrap();
-        assert!(crate::scenario::rect_of("dialog:body:viewport").unwrap().contains(at), "the last parameter remains reachable");
-        assert!(h.app.params.as_ref().unwrap().groups_drawn < 10);
+        assert!(crate::scenario::rect_of("dialog:body:viewport").unwrap().contains(at), "the last model parameter remains reachable");
+        let model_rows = crate::scenario::rects("dialog:table:parameters:Plane");
+        assert!(!model_rows.is_empty() && model_rows.len() < 80, "only visible model rows build their cells");
         h.step(&json!({"click":{"handle":format!("param:{last}")}})).unwrap();
         h.step(&json!({"key":"A","cmd":true})).unwrap();
         h.step(&json!({"text":"900 mm"})).unwrap();
@@ -2606,8 +2813,150 @@ mod tests {
         assert_eq!(value(&h), 900.0);
         h.app.params.as_mut().unwrap().filter = "Plane739".into();
         h.frames(5);
-        assert_eq!(h.app.params.as_ref().unwrap().group_sizes.len(), 1, "filtering invalidates the group layout");
+        assert_eq!(crate::scenario::rects("dialog:table:parameters:group:model:").len(), 1, "filtering keeps only the matching group");
         assert!(crate::scenario::handle_at(&format!("param:{last}")).is_some());
+    }
+
+    /// #20648: the order the list is drawn in. Top level first, components in the design's order,
+    /// folders nested like the components, empty components skipped, flat when grouping is off.
+    #[test]
+    fn the_model_list_is_ordered_by_component() {
+        use super::Entry::{Folder, Group};
+        // Components: 1 Frame, 2 Lid, 3 Hinge (in Frame), 4 Empty, 5 Pin (in Hinge).
+        let components = [(1, 0, "Frame"), (2, 0, "Lid"), (3, 1, "Hinge"), (4, 0, "Empty"), (5, 3, "Pin")];
+        // Groups in listing order: Lid, Pin, top level, Frame, Frame.
+        let of_group = [2, 5, 0, 1, 1];
+        let folder = |id: u64, name: &str, entries| Folder { id, name: name.into(), entries };
+        assert_eq!(
+            listing_order(&of_group, &components, true),
+            vec![
+                Group(2),
+                folder(1, "Frame", vec![Group(3), Group(4), folder(3, "Hinge", vec![folder(5, "Pin", vec![Group(1)])])]),
+                folder(2, "Lid", vec![Group(0)]),
+            ]
+        );
+        assert_eq!(listing_order(&of_group, &components, false), (0..5).map(Group).collect::<Vec<_>>(), "flat when grouping is off");
+        assert_eq!(listing_order(&[], &components, true), vec![], "nothing listed, nothing drawn");
+        // A group whose component is unknown, or whose parents loop, is still drawn at the top.
+        let broken = [(1, 2, "A"), (2, 1, "B")];
+        assert_eq!(listing_order(&[1, 9, 0], &broken, true), vec![Group(0), Group(1), Group(2)]);
+    }
+
+    /// #20648: model parameters sit under the component their feature belongs to: top-level
+    /// features first, then a folder per component; a design without components stays flat.
+    #[test]
+    fn model_parameters_group_under_their_component() {
+        use solidcraft_engine::doc::{Document, FeatureKind, PlaneRef};
+        let plane = |i: u32| FeatureKind::ConstructionPlane {
+            plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: format!("{} mm", i + 1).into() },
+        };
+        let mut doc = Document::default();
+        let a = doc.add_component(Some("Frame"), 0).unwrap();
+        let b = doc.add_component(Some("Lid"), 0).unwrap();
+        for (name, component) in [("PlaneB", b), ("PlaneA", a), ("PlaneTop", 0)] {
+            doc.add_feature(plane(1), Some(name)).unwrap();
+            if let Some(f) = doc.features.iter_mut().find(|f| f.name == name) {
+                f.component = component;
+            }
+        }
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.session = solidcraft_engine::Session::new(doc);
+        // Grouping is opt-in (the Parameters window's own option).
+        h.app.preferences.params_group_by_component = true;
+        h.app.start("parameters.change");
+        h.frames(5);
+        let listed = h.app.params.as_ref().unwrap().listed.as_ref().unwrap().1.clone();
+        let row_of = |group: &str| listed.iter().find(|r| r.group == group).unwrap().clone();
+        assert_eq!((row_of("PlaneTop").component, row_of("PlaneA").component, row_of("PlaneB").component), (0, a, b));
+        // A group off the dialog's visible part is not drawn, so scroll the body to the end: the
+        // last folder's row must then be drawn, inside the dialog.
+        let viewport = crate::scenario::rect_of("dialog:body:viewport").unwrap();
+        h.call("ui.scroll", json!({"x":viewport.center().x,"y":viewport.center().y,"delta":-100_000}));
+        h.frames(10);
+        let at = crate::scenario::handle_at(&format!("param:{}", row_of("PlaneB").name)).unwrap();
+        assert!(crate::scenario::rect_of("dialog:body:viewport").unwrap().contains(at), "a row inside a component folder is drawn");
+        h.app.preferences.params_group_by_component = true;
+
+        let mut flat = Document::default();
+        flat.add_feature(plane(1), Some("PlaneTop")).unwrap();
+        h.app.session = solidcraft_engine::Session::new(flat);
+        h.app.params = None;
+        h.app.start("parameters.change");
+        h.frames(5);
+        let listed = &h.app.params.as_ref().unwrap().listed.as_ref().unwrap().1;
+        assert!(listed.iter().all(|r| r.component == 0), "a design without components lists every row at the top level");
+        assert!(crate::scenario::handle_at(&format!("param:{}", listed.iter().find(|r| r.group == "PlaneTop").unwrap().name)).is_some());
+    }
+
+    /// #20648: in the one Parameters table, grouping on draws the top-level features' bands first,
+    /// then a header band per component with that component's bands after it, in tree order; off,
+    /// the bands are in listing order and there are no component headers.
+    #[test]
+    fn the_table_draws_component_bands_in_tree_order_when_grouped() {
+        use solidcraft_engine::doc::{Document, FeatureKind, PlaneRef};
+        let plane = FeatureKind::ConstructionPlane {
+            plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "1 mm".into() },
+        };
+        let mut doc = Document::default();
+        let a = doc.add_component(Some("Frame"), 0).unwrap();
+        let b = doc.add_component(Some("Lid"), 0).unwrap();
+        for (name, component) in [("PlaneB", b), ("PlaneA", a), ("PlaneTop", 0)] {
+            doc.add_feature(plane.clone(), Some(name)).unwrap();
+            if let Some(f) = doc.features.iter_mut().find(|f| f.name == name) {
+                f.component = component;
+            }
+        }
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1600}));
+        h.app.session = solidcraft_engine::Session::new(doc);
+        let order = || {
+            let mut bands = crate::scenario::rects("dialog:table:parameters:group:");
+            bands.sort_by(|x, y| x.1.top().total_cmp(&y.1.top()));
+            bands.into_iter().map(|(key, _)| key.trim_start_matches("dialog:table:parameters:group:").to_owned()).collect::<Vec<_>>()
+        };
+        h.app.start("parameters.change");
+        h.frames(6);
+        assert_eq!(order(), ["user", "model:PlaneB", "model:PlaneA", "model:PlaneTop"], "off: the listing order, no folders");
+        h.app.preferences.params_group_by_component = true;
+        h.frames(6);
+        let model = |name: &str| format!("model:{name}");
+        assert_eq!(
+            order(),
+            ["user".to_owned(), model("PlaneTop"), format!("component:{a}"), model("PlaneA"), format!("component:{b}"), model("PlaneB")],
+            "on: top level first, then a header band per component with its own bands after it"
+        );
+    }
+
+    /// A component's name is the user's text, so its folder in the Model Parameters list shows
+    /// the name as written in every language: "Frame" is also a catalog word, and in German the
+    /// folder read "BILDAUSSCHNITT".
+    #[test]
+    fn a_component_folder_shows_the_components_name_in_german() {
+        use solidcraft_engine::doc::{Document, FeatureKind, PlaneRef};
+        crate::i18n::install();
+        assert_ne!(solidcraft_ui_text::Locale::for_language("de").label("Frame"), "Frame", "the German catalog translates the word Frame");
+        let mut doc = Document::default();
+        let a = doc.add_component(Some("Frame"), 0).unwrap();
+        let plane = FeatureKind::ConstructionPlane {
+            plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "1 mm".into() },
+        };
+        doc.add_feature(plane, Some("PlaneA")).unwrap();
+        if let Some(f) = doc.features.iter_mut().find(|f| f.name == "PlaneA") {
+            f.component = a;
+        }
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.session = solidcraft_engine::Session::new(doc);
+        h.app.preferences.params_group_by_component = true;
+        h.app.preferences.language = "de".into();
+        h.app.start("parameters.change");
+        h.frames(5);
+        let texts: Vec<String> =
+            h.shapes.iter().filter_map(|s| if let egui::Shape::Text(t) = &s.shape { Some(t.galley.job.text.to_string()) } else { None }).collect();
+        assert!(texts.iter().any(|t| t.eq_ignore_ascii_case("Frame")), "the folder is named Frame: {texts:?}");
+        assert!(!texts.iter().any(|t| t.eq_ignore_ascii_case("Bildausschnitt")), "the name was not translated: {texts:?}");
     }
 
     /// #2919: the add row starts blank; a blank expression shows no error and adds nothing, and
@@ -2756,10 +3105,9 @@ mod tests {
         assert!(d.listed.as_ref().unwrap().1.iter().any(|r| r.name == "p1" && r.comment == "hello"));
     }
 
-    /// #8551 review: Favorites and User Parameters share one Name-column floor, so a long name
-    /// only in User does not shift that section's Expression column relative to Favorites.
+    /// #8551 review: a long name only in User cannot shift its Expression column relative to Favorites.
     #[test]
-    fn parameter_tables_share_one_name_column_floor() {
+    fn parameter_bands_share_the_same_columns_and_have_distinct_row_keys() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.call("ui.resize", json!({"width": 1600, "height": 1200}));
@@ -2771,10 +3119,101 @@ mod tests {
         let fav = crate::scenario::handle_at("param:favorite:w").expect("Favorites expression");
         let user = crate::scenario::handle_at("param:w").expect("User Parameters expression");
         assert!((fav.x - user.x).abs() < 1.0, "Expression columns lined up: favorites {fav:?} user {user:?}");
+        let favorite = crate::scenario::rect_of("dialog:table:parameters:fav:w").unwrap();
+        let own = crate::scenario::rect_of("dialog:table:user:w").unwrap();
+        assert!(favorite.bottom() <= own.top(), "the favourite also has its own distinct row");
+        assert_eq!(crate::scenario::rects("dialog:column:parameters:").iter().filter(|(key, _)| key.ends_with(":Name")).count(), 1);
+        let header = crate::scenario::rect_of("dialog:column:parameters:Name").unwrap();
+        assert!(crate::scenario::rects("dialog:column:").iter().filter(|(key, _)| key.ends_with(":Name")).all(|(_, rect)| *rect == header));
     }
 
     #[test]
-    fn model_groups_and_user_tables_fit_their_viewports() {
+    fn one_table_has_ordered_counted_bands_that_collapse_independently() {
+        fn texts(shape: &egui::Shape, within: egui::Rect, found: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(text) if within.contains(text.pos) => found.push(text.galley.job.text.clone()),
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        texts(shape, within, found);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1600}));
+        h.app.run("solid.box", json!({"length":10,"width":20,"height":30})).unwrap();
+        h.app.run("solid.box", json!({"length":40,"width":50,"height":60})).unwrap();
+        h.app.run("parameters.add", json!({"name":"w","expression":"1 mm"})).unwrap();
+        h.app.run("parameters.favorite", json!({"name":"w","favorite":true})).unwrap();
+        h.app.start("parameters.change");
+        h.frames(6);
+        let headers = crate::scenario::rects("dialog:column:parameters:");
+        assert_eq!(headers.iter().filter(|(key, _)| key.ends_with(":Name")).count(), 1, "one header for the entire table");
+        let header = crate::scenario::rect_of("dialog:column:parameters:Name").unwrap();
+        assert!(crate::scenario::rects("dialog:column:").iter().filter(|(key, _)| key.ends_with(":Name")).all(|(_, rect)| *rect == header));
+        let bands = crate::scenario::rects("dialog:table:parameters:group:");
+        let expected = [("fav", "FAVORITES", 1), ("user", "USER PARAMETERS", 1), ("model:Box1", "BOX1", 3), ("model:Box2", "BOX2", 3)];
+        assert_eq!(bands.len(), expected.len());
+        for ((key, rect), (band, label, count)) in bands.iter().zip(expected) {
+            assert_eq!(key, &format!("dialog:table:parameters:group:{band}"));
+            assert_eq!(crate::scenario::count_of(&format!("{key}:count")), Some(f64::from(count)));
+            let viewport = crate::scenario::rect_of("dialog:body:viewport").unwrap();
+            let current = crate::scenario::rect_of(key).unwrap();
+            h.call("ui.scroll", json!({"x":viewport.center().x,"y":viewport.center().y,"delta":viewport.center().y - current.center().y}));
+            h.frames(40);
+            let current = crate::scenario::rect_of(key).unwrap();
+            assert_eq!(current.height(), rect.height());
+            let mut painted = Vec::new();
+            for shape in &h.shapes {
+                texts(&shape.shape, current, &mut painted);
+            }
+            assert!(painted.contains(&label.to_owned()), "band label: {painted:?}");
+            assert!(painted.contains(&count.to_string()), "band count: {painted:?}");
+        }
+        assert!(bands.windows(2).all(|pair| pair[0].1.bottom() <= pair[1].1.top()));
+        let viewport = crate::scenario::rect_of("dialog:body:viewport").unwrap();
+        h.call("ui.scroll", json!({"x":viewport.center().x,"y":viewport.center().y,"delta":100_000}));
+        h.frames(40);
+
+        let model = h.app.params.as_ref().unwrap().listed.as_ref().unwrap().1.iter().find(|row| row.group == "Box1").unwrap().name.clone();
+        h.step(&json!({"click":{"handle":"dialog:table:parameters:group:fav"}})).unwrap();
+        h.frames(3);
+        assert!(crate::scenario::rect_of("dialog:table:parameters:fav:w").is_none());
+        assert!(crate::scenario::handle_at("param:favorite:w").is_none());
+        assert_eq!(crate::scenario::count_of("dialog:table:parameters:group:fav:count"), Some(1.0));
+        assert!(h.app.params.as_ref().unwrap().bands["user"]);
+        assert!(h.app.params.as_ref().unwrap().bands["model:Box1"]);
+
+        h.step(&json!({"click":{"handle":"dialog:table:parameters:group:model:Box1"}})).unwrap();
+        h.frames(3);
+        assert!(crate::scenario::rect_of(&format!("dialog:table:Box1:{model}")).is_none());
+        h.app.params.as_mut().unwrap().filter = "w".into();
+        h.frames(3);
+        h.app.params.as_mut().unwrap().filter.clear();
+        h.frames(3);
+        assert!(!h.app.params.as_ref().unwrap().bands["model:Box1"], "filtering keeps the band's state");
+        h.step(&json!({"click":{"handle":"dialog:table:parameters:group:model:Box1"}})).unwrap();
+        h.frames(3);
+        assert!(crate::scenario::rect_of(&format!("dialog:table:Box1:{model}")).is_some());
+
+        // Each band toggles independently, including User and its add prompt.
+        h.step(&json!({"click":{"handle":"dialog:table:parameters:group:model:Box2"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:table:parameters:group:model:Box1"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:table:parameters:group:user"}})).unwrap();
+        h.frames(3);
+        assert!(crate::scenario::handle_at("param:w").is_none());
+        assert!(crate::scenario::handle_at("dialog:table:user:add").is_none());
+        h.step(&json!({"click":{"handle":"dialog:table:parameters:group:user"}})).unwrap();
+        h.frames(3);
+        assert!(crate::scenario::handle_at("param:w").is_some());
+        assert!(crate::scenario::handle_at("dialog:table:user:add").is_some());
+    }
+
+    #[test]
+    fn model_groups_and_user_bands_fit_the_table_viewport() {
         for screen_width in [760, 900, 1100] {
             let mut h = crate::scenario::Harness::new();
             h.app.home.open = false;
@@ -2785,16 +3224,12 @@ mod tests {
             h.app.run("parameters.favorite", json!({"name": "width", "favorite": true})).unwrap();
             h.app.start("parameters.change");
             h.frames(6);
-            for id in ["fav", "user", "Box1", "Box2"] {
-                if id.starts_with("Box") {
-                    // The bounded card no longer shows every group at once. Bring each
-                    // model table into view before checking its horizontal layout.
-                    h.app.params.as_mut().unwrap().filter = id.into();
-                    h.frames(6);
-                }
-                let viewport = crate::scenario::rect_of(&format!("dialog:table:{id}:viewport")).unwrap();
-                let content = crate::scenario::count_of(&format!("dialog:table:{id}:content_width")).unwrap();
-                assert!(content <= f64::from(viewport.width().ceil()), "{id} on {screen_width} screen: {content} outside {viewport:?}");
+            for filter in ["", "width", "Box1", "Box2"] {
+                h.app.params.as_mut().unwrap().filter = filter.into();
+                h.frames(6);
+                let viewport = crate::scenario::rect_of("dialog:table:parameters:viewport").unwrap();
+                let content = crate::scenario::count_of("dialog:table:parameters:content_width").unwrap();
+                assert!(content <= f64::from(viewport.width().ceil()), "{filter} on {screen_width} screen: {content} outside {viewport:?}");
             }
         }
     }
@@ -2838,6 +3273,179 @@ mod tests {
             assert!(crate::scenario::rect_of("dialog:body:viewport").unwrap().height() > 0.0);
         }
     }
+    #[test]
+    fn expanded_comment_opens_explicitly_wraps_and_saves_on_click_away() {
+        let evidence = |h: &mut crate::scenario::Harness, name: &str| {
+            let Some(directory) = std::env::var_os("SOLIDCRAFT_COMMENT_EVIDENCE") else { return };
+            let directory = std::path::PathBuf::from(directory);
+            std::fs::create_dir_all(&directory).unwrap();
+            crate::icons::clear_texture_cache(&h.ctx);
+            let output = h.ctx.run_ui(egui::RawInput { screen_rect: Some(h.ctx.content_rect()), focused: true, ..Default::default() }, |ui| {
+                h.app.logic(ui.ctx());
+                h.app.ui(ui);
+            });
+            let mut textures = std::collections::HashMap::from([(egui::TextureId::default(), h.ctx.fonts(|fonts| fonts.image()))]);
+            crate::ui_kit::update_test_textures(&mut textures, &output.textures_delta);
+            let dialog = crate::scenario::rect_of("dialog:header").unwrap().union(crate::scenario::rect_of("dialog:footer").unwrap());
+            let dialog = crate::scenario::rect_of("param:comment:width:popup").map_or(dialog, |popup| dialog.union(popup));
+            for (suffix, bounds) in [("", h.ctx.content_rect()), ("-dialog", dialog)] {
+                let mut image = crate::ui_kit::test_raster(&h.ctx, output.shapes.clone(), h.ctx.pixels_per_point(), bounds, &textures);
+                let background = solidcraft_theme::Tokens::get().dialog_body.to_array();
+                for pixel in image.pixels_mut() {
+                    let remaining = 1.0 - f32::from(pixel.0[3]) / 255.0;
+                    for (dest, back) in pixel.0.iter_mut().zip(background) {
+                        *dest = (f32::from(*dest) + f32::from(back) * remaining).round() as u8;
+                    }
+                }
+                image.save(directory.join(format!("solidcraft-comment-{name}{suffix}.png"))).unwrap();
+            }
+        };
+        let mut h = escape_dialog();
+        evidence(&mut h, "before");
+        h.step(&json!({"click":{"handle":"param:comment:width:expand"}, "shift":true})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_none(), "Shift keeps the grid's selection gesture");
+        h.step(&json!({"click":{"handle":"param:comment:width"}})).unwrap();
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_none(), "ordinary editing stays compact");
+        h.run(&json!([{"key":"A","cmd":true}, {"text":"Pending inline comment"}])).unwrap();
+        h.step(&json!({"click":{"handle":"param:comment:width:expand"}})).unwrap();
+        h.frames(3);
+        let popup = crate::scenario::rect_of("param:comment:width:popup").unwrap();
+        let tokens = solidcraft_theme::Tokens::get();
+        let font = egui::FontId::monospace(tokens.font_label);
+        let width = h.ctx.fonts_mut(|fonts| fonts.layout_no_wrap("M".repeat(30), font.clone(), tokens.form_ink)).size().x;
+        let line_height = h.ctx.fonts_mut(|fonts| fonts.row_height(&font));
+        assert!(popup.width() >= width, "expanded comment fits thirty characters: {popup:?}");
+        assert!(popup.height() >= line_height * 5.0, "expanded comment shows five lines: {popup:?}");
+        assert!(h.ctx.content_rect().contains_rect(popup), "popup stays within the window: {popup:?}");
+        assert_eq!(h.app.session.doc.param("width").unwrap().comment, "Saved comment", "opening does not prematurely save the inline draft");
+        assert_eq!(h.app.params.as_ref().unwrap().comments.get("width").map(String::as_str), Some("Pending inline comment"));
+
+        let long = "A longer comment with enough words to wrap across several visible rows while editing the parameter";
+        h.run(&json!([{"key":"A","cmd":true}, {"text":long}])).unwrap();
+        h.frames(2);
+        evidence(&mut h, "after");
+        assert!(
+            h.shapes
+                .iter()
+                .any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == long && text.galley.rows.len() > 1)),
+            "the expanded text wraps"
+        );
+        h.step(&json!({"click":{"handle":"dialog:Filter"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_none());
+        assert_eq!(h.app.session.doc.param("width").unwrap().comment, long);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.param("width").unwrap().comment, "Saved comment", "the entire edit is one undoable command");
+    }
+
+    #[test]
+    fn expanded_comment_paste_stays_single_line_and_enter_commits() {
+        let mut h = escape_dialog();
+        h.step(&json!({"click":{"handle":"param:comment:width:expand"}})).unwrap();
+        h.frames(3);
+        h.step(&json!({"key":"A","cmd":true})).unwrap();
+        h.app.synthetic.push(egui::Event::Paste("Mounting\r\n尺寸\n🙂\rClearance".into()));
+        h.frame();
+        let draft = h.app.params.as_ref().unwrap().comments.get("width").cloned().unwrap();
+        assert_eq!(draft, "Mounting 尺寸 🙂 Clearance");
+        h.step(&json!({"key":"Enter"})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_none());
+        assert_eq!(h.app.session.doc.param("width").unwrap().comment, draft);
+        assert!(h.app.params.is_some(), "Enter finishes the field without closing Parameters");
+    }
+
+    #[test]
+    fn expanded_comment_escape_discards_draft_and_closes_parameters() {
+        let mut h = escape_dialog();
+        let before = escape_state(&h);
+        h.step(&json!({"click":{"handle":"param:comment:width:expand"}})).unwrap();
+        h.frames(3);
+        h.run(&json!([{"key":"A","cmd":true}, {"text":"Expanded pending comment"}])).unwrap();
+        assert_eq!(h.app.params.as_ref().unwrap().comments.get("width").map(String::as_str), Some("Expanded pending comment"));
+        escape_closed(&mut h, &before, "10 mm");
+        h.frames(3);
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_none(), "reopening Parameters starts with the compact editor");
+    }
+
+    #[test]
+    fn expanded_comment_scrolls_long_text_and_reopens_after_tab() {
+        let mut h = escape_dialog();
+        let long = "A mounting clearance note with dimensions and installation details. ".repeat(40);
+        h.step(&json!({"click":{"handle":"param:comment:width:expand"}})).unwrap();
+        h.frames(3);
+        h.run(&json!([{"key":"A","cmd":true}, {"text":long}])).unwrap();
+        h.frames(2);
+        let (painted, text) = h
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.job.text == long && text.galley.rows.len() > 1 => Some((shape, text)),
+                _ => None,
+            })
+            .unwrap();
+        assert!(text.galley.size().y > painted.clip_rect.height(), "very long text scrolls within its editor");
+        assert!(painted.clip_rect.height() < h.ctx.content_rect().height() / 2.0, "the editor leaves the dialog reachable");
+        h.step(&json!({"key":"Tab"})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_none(), "Tab leaves the expanded editor");
+        assert_eq!(h.app.session.doc.param("width").unwrap().comment, long);
+        h.step(&json!({"click":{"handle":"param:comment:width:expand"}})).unwrap();
+        h.frames(3);
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_some());
+        h.run(&json!([{"key":"A","cmd":true}, {"text":"Reopened"}, {"key":"Enter"}])).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.doc.param("width").unwrap().comment, "Reopened");
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_none());
+    }
+
+    #[test]
+    fn expanded_comment_context_menu_keeps_draft_until_edit_finishes() {
+        let mut h = escape_dialog();
+        h.step(&json!({"click":{"handle":"param:comment:width:expand"}})).unwrap();
+        h.frames(3);
+        h.run(&json!([{"key":"A","cmd":true}, {"text":"Pending expanded comment"}])).unwrap();
+        h.step(&json!({"click":{"handle":"param:comment:width:popup"},"button":"right"})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::handle_at("menu:text_select_all").is_some());
+        h.step(&json!({"click":{"handle":"menu:text_select_all"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_some(), "the context menu returns to the expanded editor");
+        assert_eq!(h.app.session.doc.param("width").unwrap().comment, "Saved comment", "using the context menu does not commit the draft");
+        h.run(&json!([{"text":"Replacement from menu selection"}, {"key":"Enter"}])).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.doc.param("width").unwrap().comment, "Replacement from menu selection");
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_none());
+    }
+
+    #[test]
+    fn expanded_comment_draft_stays_in_row_until_click_away() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.step(&json!({"start":"parameters.change"})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:table:user:add"}})).unwrap();
+        h.step(&json!({"text":"width"})).unwrap();
+        h.step(&json!({"click":{"handle":"param:new:expression"}})).unwrap();
+        h.step(&json!({"text":"25 mm"})).unwrap();
+        h.step(&json!({"click":{"handle":"param:new:comment:expand"}})).unwrap();
+        h.frames(3);
+        let popup = crate::scenario::rect_of("param:new:comment:popup").unwrap();
+        let row = crate::scenario::rect_of("dialog:table:user:new").unwrap();
+        let inside = egui::pos2(popup.center().x, popup.bottom() - 8.0);
+        assert!(!row.contains(inside), "the click is below the compact draft row");
+        assert!(h.app.session.doc.param("width").is_none(), "opening the expanded draft field stays in its row");
+        h.step(&json!({"click":[inside.x, inside.y]})).unwrap();
+        h.frames(2);
+        assert!(h.app.session.doc.param("width").is_none(), "clicking inside the expanded editor keeps the parameter as a draft");
+        h.step(&json!({"text":"Overall width"})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:Filter"}})).unwrap();
+        h.frames(2);
+        let parameter = h.app.session.doc.param("width").unwrap();
+        assert_eq!(parameter.expr, "25 mm");
+        assert_eq!(parameter.comment, "Overall width");
+    }
+
     /// #9358: a formula longer than its column opens wide while it is edited, over the cells to
     /// its right, so all of it shows; Enter applies it and the field goes back into its column.
     /// A formula that fits stays in its cell.

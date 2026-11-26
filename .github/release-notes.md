@@ -28,8 +28,10 @@ Documentation, the browser app and the Flatpak feed use the SolidCraft project P
 - **macOS 11+** (Apple silicon and Intel): open the `.dmg` and drag `SolidCraft.app` onto Applications.
   The CLI is in `solidcraft-cli-{version}-macos-universal.zip`.
 - **Linux** (x86_64 and aarch64, glibc 2.35+): the `.AppImage` (`chmod +x`, then run it), the
-  `.deb` or `.rpm`, the `.flatpak` (`flatpak install --user <file>`), the `.snap`
-  (`sudo snap install --dangerous <file>`, or `sudo snap install solidcraft` from the Snap Store), or the `.tar.gz`.
+  `.deb` or `.rpm`, the `.flatpak` (`flatpak install --user <file>`), or the `.tar.gz`.
+  For Snap, download `solidcraft-{version}-linux-x86_64.snap` or `solidcraft-{version}-linux-aarch64.snap`
+  and run `sudo snap install --dangerous ./<file>` with that filename. Local Snap installs do not
+  update automatically ([installation instructions](https://docs.solidcraft.io/guide/getting-started.html#linux-snap)).
 - **FreeBSD:** `tar -xzf solidcraft-{version}-freebsd-x86_64.tar.gz --strip-components 1 -C /usr/local`.
 - **Web:** `solidcraft-web-{version}.zip` is a static site to host yourself.
 - `SHA256SUMS.txt`: `sha256sum -c SHA256SUMS.txt --ignore-missing`.

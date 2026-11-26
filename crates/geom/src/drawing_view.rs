@@ -14,7 +14,8 @@
 //!   scales at which a view fits a space.
 //! - A **[`ViewFrame`]** places a view on paper: the point of the view's plane at `centre` lands at
 //!   `position_mm`, everything scaled by the scale. Its [`ViewFrame::paper_map`] moves the view's
-//!   curves ([`Seg2Geom::similar`]) and their accuracy ([`CurveAccuracy::scaled`]) onto paper.
+//!   curves ([`Seg2Geom::similar`]) onto paper; their accuracy follows by the kernel adapter's
+//!   `hlr::accuracy_on_paper`.
 
 use crate::prelude::*;
 use std::fmt;
@@ -24,7 +25,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::cell::Projection;
 use crate::paper::MAX_SIDE_MM;
-use crate::section::{CurveAccuracy, MAX_NUMBER, validate_plane};
+use crate::section::{MAX_NUMBER, validate_plane};
 use crate::{Aabb2, Similarity2};
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 
@@ -47,8 +48,9 @@ pub(crate) fn require(condition: bool, message: &'static str) -> Result<()> {
     if condition { Ok(()) } else { Err(Invalid(message)) }
 }
 
-/// Two directions closer to parallel than this (the sine of their angle) give no view.
-pub(crate) const PARALLEL: f64 = 1e-9;
+/// Two directions closer to parallel than this (the sine of their angle) give no view. Drawing
+/// measurement (`solidcraft_doc::drawing::measure`) tests a line against the view's plane by it too.
+pub const PARALLEL: f64 = 1e-9;
 
 /// A view with a name: the six principal views and the isometric views from the four upper
 /// corners. Each looks at the model from where its name says; `iso` reads as the front-right one.
@@ -364,11 +366,6 @@ impl ViewFrame {
     /// A curve of the view's plane (in plane coordinates, as [`Self::paper_map`]'s), on paper.
     pub fn seg_to_paper(&self, seg: &Seg2) -> Seg2 {
         seg.similar(&self.map)
-    }
-
-    /// A curve's accuracy on paper: its deviation scaled as the curve is.
-    pub fn accuracy_on_paper(&self, accuracy: CurveAccuracy) -> CurveAccuracy {
-        accuracy.scaled(self.map.scale())
     }
 }
 

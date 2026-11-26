@@ -1,12 +1,18 @@
 //! OpenUSD (`.usd`, `.usda`, `.usdc`, `.usdz`) through cadmpeg's USD codec, both ways.
 //!
-//! Export: the bodies are written as STEP by SolidCraft's own writer (an assembly as a STEP
-//! assembly, as `file.export` writes it), cadmpeg reads that STEP into its neutral model, and
-//! cadmpeg's USD writer writes the model: each part as an `Xform` prim holding its exact B-rep (a
-//! `BrepArray` prim) and a `Mesh` of it, a part placed more than once written once under the
-//! abstract `Prototypes` prim and referenced at each placement, and colours as `UsdPreviewSurface`
-//! materials. The layer is in metres with Z up and says so. SolidCraft's colours are sRGB, and
-//! USD's are linear, so the colours are converted on the way.
+//! Export ([`super::export`]): the design is written straight into cadmpeg's neutral model
+//! ([`super::cadir_out::design_for`]: components, placements, bodies with their exact B-rep and the
+//! mesh SolidCraft draws them with, and their looks), and cadmpeg's USD writer writes the model:
+//! each component an `Xform` prim named after its occurrence, holding its bodies, each named after
+//! it, as the exact B-rep (a `BrepArray` prim) and SolidCraft's `Mesh` of it; a part placed more
+//! than once written once under the abstract `Prototypes` prim and referenced at each placement
+//! (a part of one body placed so has its body's prim named after the part, as cadmpeg 0.6.12
+//! names it). A mesh body, a body whose exact shape cadmpeg's model cannot hold yet, and every
+//! body of a meshes-only export (`exact_brep: false`) have their `Mesh` alone, no `BrepArray`;
+//! and looks as `UsdPreviewSurface` materials with their colour, opacity, metallic, roughness and
+//! index of refraction, a face with a look of its own bound through a `GeomSubset`. The layer is
+//! in metres with Z up and says so. SolidCraft's colours are sRGB, and USD's are linear, so the
+//! colours are converted on the way.
 //!
 //! Import: cadmpeg reads the layer (text, binary, or the root layer of a package) and composes it
 //! within itself. Each mesh becomes a mesh body, and the prim tree becomes components, as a glTF
@@ -23,12 +29,10 @@ use std::hash::{Hash, Hasher};
 
 use cadmpeg_core::decode::DecodeDepth;
 use cadmpeg_ir::appearance::AppearanceTarget;
-use cadmpeg_ir::codec::write::{EncodeInput, target::TargetRequest};
 use cadmpeg_ir::document::CadIr;
 use cadmpeg_ir::products::{Occurrence, OccurrenceParent, ProductDefinition, PrototypeReference};
 use cadmpeg_ir::tessellation::Tessellation;
 use cadmpeg_ir::topology::Color;
-use cadmpeg_registry::{Format, build_encoder};
 use solidcore_record::Vec3;
 use solidcraft_doc::MeshData;
 use solidcraft_doc::appearance::Look;
@@ -54,12 +58,6 @@ const MAX_COMPONENT_DEPTH: usize = 32;
 /// Most components one file makes.
 const MAX_COMPONENTS: usize = 5_000;
 
-/// Losses cadmpeg reports that say nothing to the person exporting: how SolidCraft's own STEP
-/// text was read on the way, and that mesh points are single precision, which every USD mesh is
-/// (the exact B-rep beside it keeps double precision).
-const QUIET_LOSSES: [&str; 4] =
-    ["step/decode.opaque-record-preserved", "step/topology.pcurve-global-fidelity-unproved", "step/decode.warning", "usd/export.vertex-precision"];
-
 /// Is this an OpenUSD file name (any case)?
 pub fn is_usd_path(path: &str) -> bool {
     std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| USD_EXTS.iter().any(|x| e.eq_ignore_ascii_case(x)))
@@ -67,7 +65,7 @@ pub fn is_usd_path(path: &str) -> bool {
 
 /// The cadmpeg write target a file name asks for: `.usda` text, `.usdz` a package, and `.usdc` or
 /// `.usd` binary (a `.usd` layer is binary unless it says otherwise, as OpenUSD writes it).
-fn target(file: &str) -> Option<&'static str> {
+pub(super) fn target(file: &str) -> Option<&'static str> {
     let ext = std::path::Path::new(file).extension().and_then(|e| e.to_str())?.to_ascii_lowercase();
     match ext.as_str() {
         "usda" => Some("usda"),
@@ -77,70 +75,7 @@ fn target(file: &str) -> Option<&'static str> {
     }
 }
 
-/// `step` (STEP text SolidCraft wrote) as an OpenUSD file called `file`, whose extension picks the
-/// encoding, with what the file could not carry.
-pub(super) fn from_step(step: &[u8], file: &str) -> Result<(Vec<u8>, Vec<String>), String> {
-    let name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
-    let target = target(&name).ok_or_else(|| format!("{name}: not an OpenUSD file name (.usda, .usdc, .usd or .usdz)"))?;
-    let (_, decoded) = decode_at(&name, "step", step, &["step"], DecodeDepth::Full)?;
-    let (mut ir, report, fidelity) = decoded.into_parts();
-    if !report.geometry_transferred() {
-        return Err(format!("{name}: there is no geometry to write"));
-    }
-    let stem = std::path::Path::new(&name).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-    name_roots(&mut ir, &stem);
-    colours_to_linear(&mut ir);
-    let plan = build_encoder(Format::Usd)
-        .plan(EncodeInput::new(&ir, Some(&fidelity)), TargetRequest::Explicit(target))
-        .map_err(|e| format!("{name}: could not write OpenUSD: {e}"))?;
-    let mut warnings: Vec<String> = Vec::new();
-    for l in report.losses.iter().chain(&plan.report().losses) {
-        let code = l.code.to_string();
-        if !QUIET_LOSSES.contains(&code.as_str()) {
-            warnings.push(format!("{code}: {}", l.message));
-        }
-    }
-    let mut out = Vec::new();
-    plan.write_to(&mut out).map_err(|e| format!("{name}: could not write OpenUSD: {e}"))?;
-    Ok((out, warnings))
-}
-
-/// Name each root occurrence with no name after its part, else after the file, so the layer's
-/// root prim is not called `Occurrence`.
-fn name_roots(ir: &mut CadIr, stem: &str) {
-    let labels: HashMap<String, String> =
-        ir.model.product_definitions.iter().filter_map(|d| Some((d.id.as_str().to_string(), product_name(d)?))).collect();
-    for o in ir.model.occurrences.iter_mut().filter(|o| matches!(o.parent, OccurrenceParent::Root {})) {
-        if o.name.as_deref().is_some_and(|n| !n.trim().is_empty()) {
-            continue;
-        }
-        let part = match &o.prototype {
-            PrototypeReference::Local { definition } => labels.get(definition.as_str()).cloned(),
-            _ => None,
-        };
-        o.name = part.or_else(|| (!stem.trim().is_empty()).then(|| stem.to_string()));
-    }
-}
-
-/// SolidCraft's (and STEP's) colours are sRGB; USD's `displayColor` and `diffuseColor` are linear.
-fn colours_to_linear(ir: &mut CadIr) {
-    let linear = |c: Color| {
-        let f = |v: f32| solidcraft_color::srgb::decode(f64::from(v)).clamp(0.0, 1.0) as f32;
-        Color::new(f(c.r()), f(c.g()), f(c.b()), c.a()).unwrap_or(c)
-    };
-    for b in &mut ir.model.bodies {
-        b.color = b.color.map(linear);
-    }
-    for f in &mut ir.model.faces {
-        f.color = f.color.map(linear);
-    }
-    for a in &mut ir.model.appearances {
-        a.base_color = a.base_color.map(linear);
-    }
-}
-
-/// USD's colours are linear; SolidCraft's are sRGB. The inverse of [`colours_to_linear`], for a
-/// file read into records.
+/// USD's colours are linear; SolidCraft's are sRGB. For a file read into records.
 pub(super) fn colours_to_srgb(ir: &mut CadIr) {
     let srgb = |c: Color| {
         let f = |v: f32| solidcraft_color::srgb::encode(f64::from(v).clamp(0.0, 1.0)).clamp(0.0, 1.0) as f32;
@@ -458,12 +393,12 @@ impl<'a> Reader<'a> {
                 self.cut_off = true;
                 return;
             }
-            self.plan.places.push(PlanPlace { slot, parent, transform: local });
+            self.plan.places.push(PlanPlace { slot, parent, transform: local, name: None });
             return;
         }
         let slot = self.plan.slots.len();
         self.plan.slots.push(label.clone());
-        self.plan.places.push(PlanPlace { slot, parent, transform: local });
+        self.plan.places.push(PlanPlace { slot, parent, transform: local, name: None });
         self.keys.insert(key, slot);
         if let Some(d) = definition {
             for b in &d.bodies {

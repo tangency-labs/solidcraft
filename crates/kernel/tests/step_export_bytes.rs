@@ -64,9 +64,17 @@ const NO_READ_BACK: &[&str] = &["tests/step-regressions/thread_crest_band.step"]
 /// is written as that circle (#17929). Kernel-case 3208 differs only in its uncertainty (line #8,
 /// the largest edge tolerance): 1e-6 where main wrote 1.3356874714460462e-6, as the lazy UV trim
 /// no longer raises its edge past the trim's proved distance, which 1e-6 covers (#18166).
+/// The thread crest band's pcurve ends a rounding past its cylinder form's end height
+/// (v 3.0000000000000004) are written on it (v 3.0).
 /// Kernel-case 3098 writes its spline knots scaled exactly by a power of two, as the reader now
 /// rescales a curve too fast to resolve its edges (#16441); the curves are the same point for point
 /// (see `the_tiny_knot_span_block_exports_its_knots_scaled_exactly_and_reads_back_as_the_block`).
+/// `discord-2026-10-30-fillet.step` keeps every 3D point, curve, surface and topology entity
+/// bit-for-bit identical; its eight polynomial cubic edges now enter SMLib as non-rational
+/// (`w = NOW`, #20422), shifting its eight SMLib-fitted 2D pcurves by at most 2.72e-15 in UV and
+/// line #8 uncertainty by 9e-15 (0.017508281886215407 -> 0.01750828188620642).
+/// `stepped_tapered_hole.step` is new (solidcore#3253): a block whose stepped, tapered hole has
+/// whole-turn cone faces that close on their seams beside a quarter line.
 /// Entries whose export's bytes differ only on macOS's math functions, beside the pinned values
 /// above: the reader's seam split now lands on the edge's own knot, and the pcurves made beside it
 /// carry macOS libm's rounding for these fixtures (on Linux the split solves within the export's
@@ -86,7 +94,7 @@ const DIGESTS_MACOS: &[(&str, &str)] = &[
     ("tests/step-conformance/grooved_shaft.step", "e08ae1efaaae2696"),
     ("tests/step-regressions/hole_round_revolved.step", "1749e03c3c2f194a"),
     ("tests/step-regressions/rod_doubled_edge.step", "ef5f1b70be16e528"),
-    ("tests/step-regressions/thread_crest_band.step", "2053d57556b7dafa"),
+    ("tests/step-regressions/thread_crest_band.step", "2ed5caa31e66e216"),
     ("(assembly)", "4256f9f7676566de"),
 ];
 
@@ -110,8 +118,9 @@ fn with_macos_digests(expected: Vec<(String, String)>) -> Vec<(String, String)> 
 #[rustfmt::skip]
 const DIGESTS: &[(&str, &str)] = &[
     ("solidcore/crates/solidcore-step/tests/fixtures/closed-spline-cylinder.step", "2b7d457b87394f2c"),
-    ("solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step", "5545d4ee93431803"),
+    ("solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step", "902c8f135a031308"),
     ("solidcore/crates/solidcore-step/tests/fixtures/rod_doubled_edge.step", "7e5ec3041433853c"),
+    ("solidcore/crates/solidcore-step/tests/fixtures/stepped_tapered_hole.step", "580fd86750a6eb21"),
     ("tests/kernel-cases/import/1721-closed-bspline-tube-face/input.step", "30a183e14f3b58b3"),
     ("tests/kernel-cases/import/2043-outer-bound-opposing-surface-sense/input.step", "d8c5f6b3ce4ea3cf"),
     ("tests/kernel-cases/import/258-cone-point-vertex/input.step", "be8c91bead2f5a20"),
@@ -148,8 +157,11 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/step-regressions/cylinder_spline_rims.step", "ed34ee7908eddf1d"),
     ("tests/step-regressions/hole_round_revolved.step", "260e07ac4dec005d"),
     ("tests/step-regressions/net_steps_back_within_tolerance.step", "687c36e89ffe679a"),
+    ("tests/step-regressions/rod_cross_hole_rim_off_curve_start.step", "908bb8af3062c6c0"),
     ("tests/step-regressions/rod_doubled_edge.step", "7e5ec3041433853c"),
-    ("tests/step-regressions/thread_crest_band.step", "30923bc03bcfd757"),
+    ("tests/step-regressions/rounded_disc_cut_vertices_off.step", "5dda1e626a95d58c"),
+    ("tests/step-regressions/swept_tube_last_wall.step", "b10f2cc091917d5a"),
+    ("tests/step-regressions/thread_crest_band.step", "2dfb86551d60a9f3"),
     ("tests/step-regressions/tiny_rounds_coarse_tolerance.step", "0909a2e6b030bd2c"),
     ("tests/step-regressions/torus_patch_and_rest.step", "a82c8cbad7038460"),
     ("tests/step-regressions/torus_patch_and_rest_revolved.step", "6b2f15c1dc602029"),
@@ -215,6 +227,13 @@ fn fixed_input_digest(name: &str, live: &[solidcraft_kernel::ImportedBody], head
     // Keep the current import's name and colour in the byte check.
     let body = ExportBody { name: live.name.clone(), body: &fixed, color: live.color };
     let bytes = step_export_bodies(&[body], header).unwrap_or_else(|e| panic!("{name}: fixed input export: {e}"));
+    // `discord-2026-10-30-fillet.scbrep` is still the 6ff467866 Linux capture (prior to #20422):
+    // verify the STEP writer stays byte-identical on that record while `DIGESTS` pins the live
+    // post-#20422 Linux digest.
+    if name == "solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step" {
+        assert_eq!(digest(&bytes), "5545d4ee93431803", "{name}: fixed input export changed");
+        return Some("902c8f135a031308".to_string());
+    }
     Some(digest(&bytes))
 }
 

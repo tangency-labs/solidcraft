@@ -1438,16 +1438,14 @@ pub(super) fn upstream_example(example: usize) -> Result<Option<Output>, Harness
             p1::vertices(&body, None)?.len() as f64,
         ])
     };
-    let result = run();
-    let step = super::rust_point_step(&k);
-    match result {
+    match run() {
         Ok(values) => {
             let mut out = Output::new();
             out.ints.insert(
                 "api_status_counts".into(),
                 values.into_iter().map(|v| v as i64).collect(),
             );
-            Ok(Some(super::with_point_step(out, step)))
+            Ok(Some(out))
         }
         Err(error) => match Output::unported(&error) {
             Some(deferred) => Ok(Some(deferred)),
@@ -1460,10 +1458,7 @@ pub(super) fn rust(input: &RealSolid) -> Result<Output, HarnessError> {
     if let Some(shell) = input.shell {
         let mut k = crate::runner_kernel();
         return match shell_rust(&mut k, input, shell) {
-            Ok(values) => Ok(super::with_point_step(
-                shell_output(&values)?,
-                super::rust_point_step(&k),
-            )),
+            Ok(values) => shell_output(&values),
             Err(error) => match Output::unported(&error) {
                 Some(deferred) => Ok(deferred),
                 None => Err(HarnessError::new(error.to_string())),
@@ -1474,12 +1469,11 @@ pub(super) fn rust(input: &RealSolid) -> Result<Output, HarnessError> {
     let body = build(&mut k, input)?;
     match run_rust(&mut k, body, input) {
         Ok(values) => {
-            let out = if input.checkpoint == Checkpoint::Full {
-                output(&values)?
+            if input.checkpoint == Checkpoint::Full {
+                output(&values)
             } else {
-                prefix::output(&values, input.checkpoint)?
-            };
-            Ok(super::with_point_step(out, super::rust_point_step(&k)))
+                prefix::output(&values, input.checkpoint)
+            }
         }
         Err(RealSolidRunError::Fixture(error)) => Err(error),
         Err(RealSolidRunError::Kernel(error)) => match Output::unported(&error) {
@@ -1574,10 +1568,8 @@ pub(super) fn surface_surface_rust(input: &SurfaceSurface) -> Result<Output, Har
         }
         Ok(values)
     };
-    let result = run();
-    let step = super::rust_point_step(&k);
-    match result {
-        Ok(values) => Ok(super::with_point_step(surface_surface_output(&values)?, step)),
+    match run() {
+        Ok(values) => surface_surface_output(&values),
         Err(error) => Output::unported(&error)
             .ok_or_else(|| HarnessError::new(error.to_string())),
     }
@@ -1894,7 +1886,7 @@ pub(super) mod round_definition_proof {
     /// golden's accuracy and at the integrator's finest, where it converges.
     pub(in super::super) struct Estimates {
         /// At [`MASS_ACCURACY`], as the golden measures.
-        golden: MassProperties,
+        pub(in super::super) golden: MassProperties,
         /// At [`ESTIMATE_ACCURACY_FINEST`].
         converged: MassProperties,
     }
@@ -1946,14 +1938,12 @@ pub(super) mod round_definition_proof {
     /// ([`spread`]: each face's certified area times its proved net distance `d_f` from
     /// [`certified_blends`]). Asserts that the volume the integrator
     /// converges to (its estimate at its finest accuracy, 1e-8 relative) lies in it. The
-    /// golden's own estimate (at 1e-4) and the row before (`old`, the old body's) are
-    /// printed beside the band for the record only: an estimate is not a bound. Returns
-    /// both estimates, for [`mass_bands`].
+    /// golden's own estimate (at 1e-4) is printed beside the band for the record only: an
+    /// estimate is not a bound. Returns both estimates, for [`mass_bands`].
     pub(in super::super) fn volume_band(
         k: &Kernel,
         b: &mut Brep,
         blends: &[(FaceId, f64)],
-        old: f64,
         name: &str,
     ) -> Estimates {
         let spread = spread(k, b, blends);
@@ -1978,7 +1968,7 @@ pub(super) mod round_definition_proof {
             "{name}: the converged volume {converged} is off the certified [{lo}, {hi}]"
         );
         eprintln!(
-            "{name}: converged {converged}, the golden's estimate {new} (before {old}), \
+            "{name}: converged {converged}, the golden's estimate {new}, \
              certified [{lo}, {hi}], band width {:e}",
             hi - lo
         );
@@ -2086,39 +2076,38 @@ pub(super) mod round_definition_rows {
         bare_blend_faces, BlendFaceKind, BlendFaceLog, CornerKind,
     };
 
-    /// The moved rows of the full real-solid form: name, the volume and the counts the
-    /// golden held before, and the counts after (`None`: an open result, no volume).
-    /// A moved row: name, the volume before (`None`: an open result), counts before and after.
-    type Row = (&'static str, Option<f64>, [i64; 4], [i64; 4]);
+    /// The rows of the full real-solid form whose rounds are definitions: name, whether
+    /// the result is closed (an open result has no volume), and its counts.
+    type Row = (&'static str, bool, [i64; 4]);
 
     const ROWS: &[Row] = &[
-        ("law-box10x20x30-e0-deg1-edge-map-degenerate", Some(5993.756280511141), [0, 12, 19, 9], [0, 12, 19, 9]),
-        ("law-cube20-e0-deg1-4-2-4-c0-corner", Some(7960.456479043605), [0, 12, 19, 9], [0, 12, 19, 9]),
-        ("law-cube20-e0-deg1-linear-2-4", Some(7960.071936129126), [0, 10, 15, 7], [0, 10, 15, 7]),
-        ("law-cube20-e0-deg1-two-corners", Some(7967.522641489464), [0, 16, 26, 12], [0, 16, 26, 12]),
-        ("law-cube20-e0-deg2-c0-knot", Some(7960.45647903661), [0, 12, 19, 9], [0, 12, 19, 9]),
-        ("law-cube20-e3-deg1-4-2-4-c0-corner", Some(7960.4591713535165), [0, 12, 19, 9], [0, 12, 19, 9]),
-        ("source-file-corner_box-all-edges", Some(455.9756600237953), [0, 30, 60, 32], [0, 30, 60, 32]),
-        ("source-file-corner_box-edge13", Some(456.170359361229), [0, 12, 18, 8], [0, 12, 18, 8]),
-        ("source-file-nurb_box-all-edges", Some(899.6446069287648), [0, 24, 48, 26], [0, 24, 48, 26]),
-        ("source-file-nurb_box-edge0", Some(899.9779184480373), [0, 10, 15, 7], [0, 10, 15, 7]),
-        ("source-file-nurb_box-edge5", Some(899.8473310857921), [0, 10, 15, 7], [0, 10, 15, 7]),
-        ("stubs4-Heart-all-edges-r0.1", Some(326.05803686396416), [0, 14, 26, 14], [0, 14, 26, 14]),
-        ("stubs4-coons_01_03_29-e0-r0.5", None, [0, 8, 12, 5], [0, 8, 12, 5]),
-        ("stubs4-coons_01_03_29-e3-r0.5", None, [0, 8, 12, 5], [0, 8, 12, 5]),
-        ("stubs4-coons_01_03_29-e6-r0.5", None, [0, 8, 12, 5], [0, 8, 12, 5]),
-        ("stubs4-delete-edge-bottle-e8-r0.1", Some(11.065538784092405), [0, 30, 46, 18], [0, 31, 47, 18]),
-        ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", Some(169498.77345473654), [0, 27, 42, 10], [0, 27, 42, 10]),
-        ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", Some(169488.15759245612), [0, 27, 42, 10], [0, 27, 42, 10]),
-        ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1", Some(169498.7688211253), [0, 27, 42, 10], [0, 27, 42, 10]),
-        ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", Some(169488.16356054693), [0, 27, 42, 10], [0, 27, 42, 10]),
-        ("stubs4-sphere_plane-e3-r0.5", None, [0, 4, 6, 3], [0, 4, 6, 3]),
-        ("stubs4-test8-e3-r0.5", None, [0, 6, 9, 3], [0, 6, 9, 3]),
-        ("stubs4-torii_unioned-e2-r0.5", Some(8906.398139766763), [0, 4, 7, 3], [0, 4, 7, 3]),
-        ("sweep5-ext_w_hole-e15-r1.0", Some(234.29248501042775), [0, 16, 24, 10], [0, 16, 24, 10]),
-        ("sweep5-letter_g-e1-r1.0", Some(573.7971132096428), [0, 22, 33, 13], [0, 22, 33, 13]),
-        ("sweep5-letter_g-e10-r1.0", Some(572.1858458923035), [0, 23, 35, 14], [0, 23, 35, 14]),
-        ("sweep5-nurb_box1-all-r0.5", Some(3793.253064279953), [0, 18, 36, 20], [0, 18, 36, 20]),
+        ("law-box10x20x30-e0-deg1-edge-map-degenerate", true, [0, 12, 19, 9]),
+        ("law-cube20-e0-deg1-4-2-4-c0-corner", true, [0, 12, 19, 9]),
+        ("law-cube20-e0-deg1-linear-2-4", true, [0, 10, 15, 7]),
+        ("law-cube20-e0-deg1-two-corners", true, [0, 16, 26, 12]),
+        ("law-cube20-e0-deg2-c0-knot", true, [0, 12, 19, 9]),
+        ("law-cube20-e3-deg1-4-2-4-c0-corner", true, [0, 12, 19, 9]),
+        ("source-file-corner_box-all-edges", true, [0, 30, 60, 32]),
+        ("source-file-corner_box-edge13", true, [0, 12, 18, 8]),
+        ("source-file-nurb_box-all-edges", true, [0, 24, 48, 26]),
+        ("source-file-nurb_box-edge0", true, [0, 10, 15, 7]),
+        ("source-file-nurb_box-edge5", true, [0, 10, 15, 7]),
+        ("stubs4-Heart-all-edges-r0.1", true, [0, 14, 26, 14]),
+        ("stubs4-coons_01_03_29-e0-r0.5", false, [0, 8, 12, 5]),
+        ("stubs4-coons_01_03_29-e3-r0.5", false, [0, 8, 12, 5]),
+        ("stubs4-coons_01_03_29-e6-r0.5", false, [0, 8, 12, 5]),
+        ("stubs4-delete-edge-bottle-e8-r0.1", true, [0, 31, 47, 18]),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", true, [0, 29, 46, 11]),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", true, [0, 29, 46, 11]),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1", true, [0, 29, 46, 11]),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", true, [0, 29, 46, 11]),
+        ("stubs4-sphere_plane-e3-r0.5", false, [0, 4, 6, 3]),
+        ("stubs4-test8-e3-r0.5", false, [0, 6, 9, 3]),
+        ("stubs4-torii_unioned-e2-r0.5", true, [0, 4, 7, 3]),
+        ("sweep5-ext_w_hole-e15-r1.0", true, [0, 16, 24, 10]),
+        ("sweep5-letter_g-e1-r1.0", true, [0, 22, 33, 13]),
+        ("sweep5-letter_g-e10-r1.0", true, [0, 23, 35, 14]),
+        ("sweep5-nurb_box1-all-r0.5", true, [0, 18, 36, 20]),
     ];
 
     /// No face the operation logged as a blend face (`blend::definition_check`) is a bare
@@ -2212,13 +2201,14 @@ pub(super) mod round_definition_rows {
     }
 
     /// The [`ROWS`] row named `row`: its blend faces are definitions whose nets
-    /// re-certify, its counts are the golden's (unchanged but for the bottle's rail, split
-    /// at the shoulder face's C1 knot), and a closed result's converged volume and mass
-    /// values lie in their certified bands.
+    /// re-certify, its counts are the golden's (the bottle's rail split at the shoulder
+    /// face's C1 knot; the `sphere_diff_3cylinders` rows keep the target's two sphere
+    /// patches, WR-459), and a closed result's converged volume and mass values lie in
+    /// their certified bands.
     fn check(row: &str) {
         let picked: Vec<&Row> = ROWS.iter().filter(|r| r.0 == row).collect();
         assert_eq!(picked.len(), 1, "{row}: one row of that name");
-        for &&(name, old_volume, before, after) in &picked {
+        for &&(name, closed, after) in &picked {
             let input = inputs(name).real_solid.expect("a real solid");
             assert_eq!(input.checkpoint, Checkpoint::Full, "{name}");
             let mut k = Kernel::default();
@@ -2229,15 +2219,12 @@ pub(super) mod round_definition_rows {
             assert!(result.is_ok(), "{name}: {result:?}");
             no_bare_blend_face(&k, &body, name);
             assert_eq!(counts(&body, 0), after, "{name}");
-            if name != "stubs4-delete-edge-bottle-e8-r0.1" {
-                assert_eq!(before, after, "{name}");
-            }
             if name == "stubs4-delete-edge-bottle-e8-r0.1" {
                 rail_splits_at_a_c1_knot(&k, &body);
             }
             let blends = certified_blends(&k, &mut body, name);
-            if let Some(old) = old_volume {
-                let estimates = volume_band(&k, &mut body, &blends, old, name);
+            if closed {
+                let estimates = volume_band(&k, &mut body, &blends, name);
                 mass_bands(&k, &mut body, &estimates, name);
             }
         }
@@ -2367,7 +2354,7 @@ mod wr457_certificates {
     use solidcore::mass::enclosure::enclose_volume;
     use solidcore::surface::surface::p2::SurfaceKind;
     use solidcore::topology::brep::p1;
-    use solidcore::topology::brep::p2::is_manifold_solid;
+    use solidcore::topology::brep::p2::{create_missing_uv_trim_curves, is_manifold_solid};
     use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 
     /// The moved rows: (fixture file, case name).
@@ -2542,6 +2529,11 @@ mod wr457_certificates {
             }
             apply(&mut k, &mut body, &selected, &input)
                 .unwrap_or_else(|e| panic!("{name}: the round failed: {e:?}"));
+            // The round keeps the union's own faces (WR-459), which come without UV trims,
+            // so the trims are made once here, as the enclosure would make them: the check
+            // then runs on the body itself (#21105) and the trims its walk repairs, the
+            // corner patch's edges among them, stay on the body the enclosure measures.
+            create_missing_uv_trim_curves(&k, &mut body).expect("trims");
             let lines = check_brep(&mut k, &mut body, CheckLevel::Level2)
                 .expect("check")
                 .lines();
@@ -2813,15 +2805,13 @@ mod wr56_certificates {
 /// centre on x = -3.5 at distance 4.5 from the origin, so the round is the torus about the
 /// x axis with major radius sqrt(8) and minor radius 0.5, through the circle x = -4,
 /// rho = sqrt(8) on the plane and the circle on the sphere at 10/9 of the centre circle.
-/// The round face's net and its contact edges on the plane and on the sphere are each
-/// closer to it than before (CLOSER against the closed form, enclosed over every rational
-/// Bezier piece: at most 2.3e-6, 8.8e-12 and 2.1e-6 here, at least 4.1e-6, 3.5e-11 and
-/// 4.1e-6 on main), and each lies within its own tolerance (4e-5).
+/// The round face's net and its contact edges on the plane and on the sphere each lie
+/// within their own tolerance (4e-5) of it, enclosed over every rational Bezier piece (at
+/// most 2.3e-6, 8.8e-12 and 2.1e-6).
 #[cfg(test)]
 mod wr493_certificates {
-    use super::{apply, build, eu, face, loopuse, RealSolid};
+    use super::{apply, build, eu, RealSolid};
     use crate::interval::{exact_sum, homogeneous, two_prod, Bern, Iv};
-    use crate::refit::state::{self, Refit};
     use solidcore::curve::curve::CurveKind;
     use solidcore::kernel::Kernel;
     use solidcore::nurbs::math::CPoint;
@@ -2839,13 +2829,8 @@ mod wr493_certificates {
         inputs.real_solid.expect("a real_solid case")
     }
 
-    /// The round on `NAME`'s body, as is or with the refit (the fitted-NURB (seam) build:
-    /// the file's sphere given upstream's fitted NURB before its topology is made; its
-    /// result geometry is main's run's, bit for bit, [`the_round_is_closer_to_its_torus`]).
-    fn round(refit: bool) -> (Kernel, Brep) {
-        if refit {
-            state::set(Some(Refit::default()));
-        }
+    /// The round on `NAME`'s body.
+    fn round() -> (Kernel, Brep) {
         let input = load();
         let mut k = Kernel::default();
         let mut body = build(&mut k, &input).expect("fixture").expect("file");
@@ -2857,13 +2842,6 @@ mod wr493_certificates {
             .map(|&i| *edges.get(i).expect("selected edge"))
             .collect();
         apply(&mut k, &mut body, &selected, &input).expect("the round");
-        if refit {
-            let seen = state::take().expect("the refit");
-            assert!(
-                seen.replaced == 1 && seen.failures.is_empty(),
-                "{NAME}: {seen:?}"
-            );
-        }
         (k, body)
     }
 
@@ -3015,17 +2993,6 @@ mod wr493_certificates {
         out
     }
 
-    /// A proved lower bound of the distance from the torus at `(u, v)` of a rational
-    /// Bezier piece: the point in interval arithmetic, then `|s - r|`.
-    fn torus_distance_below(net: &[Vec<CPoint>], u: f64, v: f64) -> f64 {
-        let [x, y, z, w] = homogeneous(net).map(|b| b.at(u, v));
-        let (px, py, pz) = (x.div(w).sub(Iv::exact(CX)), y.div(w), z.div(w));
-        let rho = py.mul(py).add(pz.mul(pz)).sqrt();
-        let a = rho.sub(Iv::exact(R2).sqrt());
-        let s = a.mul(a).add(px.mul(px)).sqrt();
-        s.sub(Iv::exact(TUBE)).mig()
-    }
-
     /// An edge's curve as rational Bezier pieces, each with its parameter span; its
     /// interval is its NURB's whole knot domain (asserted).
     fn edge_pieces(b: &Brep, e: EdgeId) -> Vec<Vec<Vec<CPoint>>> {
@@ -3063,23 +3030,6 @@ mod wr493_certificates {
             .map(|p| p.cpts())
             .collect();
         (pieces, blend.bound())
-    }
-
-    /// The largest proved lower bound of the distance from the torus at `samples + 1`
-    /// parameters each way per piece: a lower bound of the pieces' largest distance.
-    fn largest_below(pieces: &[Vec<Vec<CPoint>>], samples: u32) -> f64 {
-        let mut lower = 0.0_f64;
-        for net in pieces {
-            let ns = if net[0].len() == 1 { 0 } else { samples };
-            for i in 0..=samples {
-                for j in 0..=ns {
-                    let u = f64::from(i) / f64::from(samples);
-                    let v = f64::from(j) / f64::from(ns.max(1));
-                    lower = lower.max(torus_distance_below(net, u, v));
-                }
-            }
-        }
-        lower
     }
 
     /// The largest [`torus_bound`] over pieces.
@@ -3120,250 +3070,85 @@ mod wr493_certificates {
         }
     }
 
-    /// One body's topology record ([`super::topology`]'s format) with its edges in the
-    /// order `order` and each edge's uses sorted: equal for two bodies exactly when they
-    /// are the same topology up to the edges' labels and the order uses are listed in.
-    fn canonical(b: &Brep, order: &[EdgeId]) -> Vec<f64> {
-        let vertices = p1::vertices(b, None).expect("vertices");
-        let faces = p1::faces(b, None).expect("faces");
-        let mut out = vec![order.len() as f64];
-        for &id in order {
-            let e = b.edge(id).expect("edge");
-            out.push(e.curve.as_ref().map_or(0.0, |c| c.type_code() as f64));
-            let ends = edge::vertices(b, id, None).expect("ends");
-            out.push(ends.len() as f64);
-            out.extend(ends.into_iter().map(|v| super::label(&vertices, v)));
-            let mut uses: Vec<(f64, f64)> = edge::edgeuses(b, id, None, None)
-                .expect("uses")
-                .into_iter()
-                .map(|u| {
-                    (
-                        super::label(&faces, eu::face(b, u).expect("face")),
-                        f64::from(eu::orientation(b, u).expect("orientation") as i32),
-                    )
-                })
-                .collect();
-            uses.sort_by(|p, q| p.partial_cmp(q).expect("labels"));
-            out.push(uses.len() as f64);
-            out.extend(uses.into_iter().flat_map(|(f, o)| [f, o]));
-        }
-        out.push(faces.len() as f64);
-        for &id in &faces {
-            let f = b.face(id).expect("face");
-            out.push(f.surface.as_ref().map_or(0.0, |s| s.type_code() as f64));
-            let loops = face::loops(b, id, false, None).expect("loops");
-            out.push(loops.len() as f64);
-            for l in loops {
-                let uses = loopuse::loop_edgeuses(b, l).expect("loop");
-                out.push(uses.len() as f64);
-                for u in uses {
-                    let u = b.edgeuse(u).expect("edgeuse");
-                    out.extend([
-                        super::label(order, u.edge),
-                        f64::from(u.orientation as i32),
-                    ]);
-                }
-            }
-        }
-        out
-    }
-
     /// The `sphere_plane` round against its exact torus (about the x axis, centre circle
     /// `x = -3.5`, `y^2 + z^2 = 8`, tube 0.5: the ball of radius 0.5 touching the plane
-    /// `x = -4` and, inside, the sphere of radius 5 about the origin), here and replayed
-    /// in the fitted-NURB (seam) build ([`round`]: the file's sphere given upstream's fitted
-    /// NURB). That build is main's: its `result_geometry` is main's run's bit for bit (its
-    /// record, pinned, captured on #19588's head a3c61d838d, main 21b4ba5387 with the
-    /// kept-trim prover fix; main's committed block agrees with that run within 1e-13 of
-    /// its scale, which is asserted too).
+    /// `x = -4` and, inside, the sphere of radius 5 about the origin).
     ///
+    /// - The body passes the level-2 check.
     /// - The contact edges' curves and the round face's net (rational Bezier pieces): each
-    ///   piece's distance from the torus is enclosed ([`torus_bound`]), and the largest
-    ///   bound here is below a proved lower bound of main's largest distance (its pieces
-    ///   at 65 parameters for the edges, 17 each way for the net,
-    ///   [`torus_distance_below`]): CLOSER. The seam (a circle
-    ///   of the torus, one piece) is within `1e-12` in both.
-    /// - Topology: the same up to the edges' labels and the order an edge's uses are
-    ///   listed in ([`canonical`]). Main replaced the sphere's NURB, made its
-    ///   contact edge last (`EdgeId(8)` after the seam's 7; the plane's is 6), listing
-    ///   its uses the other way round; here it is made first (`EdgeId(5)`), so the
-    ///   record lists the round's edges sphere, plane, seam where main's listed plane,
-    ///   seam, sphere: the `result_topology` blocks' sum is unchanged and their weighted
-    ///   sum moves.
-    /// - Geometry (`util::primitive::append`, entity by entity, matched by role): the
-    ///   file's edges, the plane face and the two pole vertices are bit for bit
-    ///   main's. What moves: the round's tolerance and its edges' (`6.743e-5` to
-    ///   `4e-5`, the tolerance the net and curves are made to), the contact edges'
-    ///   parameter spans and samples (on the closer curves), the round face's domain and
-    ///   samples, the sphere face's samples (the same fractions of the same domain of
-    ///   the file's NURB here, of upstream's fitted NURB on main), and the
-    ///   two round vertices, both closer to their exact contact circles (proved). The one
-    ///   on the plane is `2.4e-15` from its circle where the fitted NURB's is `4.3e-15`
-    ///   (main's run has that vertex, bit for bit), both a few units in the last place of
-    ///   `sqrt(8)`; its certified upper bound, below `2.5e-15`, is pinned, and is far inside
-    ///   the vertex's tolerance (`4e-5`), which is asserted.
+    ///   piece's distance from the torus is enclosed ([`torus_bound`]) and lies within
+    ///   the edge's or the face's tolerance (the net's with its certified distance from
+    ///   the round's definition, which the face evaluates). The seam (a circle of the
+    ///   torus, one piece) is within `1e-12`.
+    /// - Topology: the round's edges follow the file's three, the sphere's contact edge
+    ///   first (`EdgeId(5)`), then the plane's and the seam.
+    /// - Geometry (`util::primitive::append`): the round face, its edges and its two
+    ///   vertices have the tolerance the net and curves are made to (`4e-5`). The vertex on
+    ///   the plane lies on `x = -4`, `2.4e-15` from its exact contact circle (a few units in
+    ///   the last place of `sqrt(8)`; its certified upper bound, below `2.5e-15`, is
+    ///   pinned); both round vertices are within their tolerance of their circles (proved).
     #[test]
-    fn the_round_is_closer_to_its_torus() {
-        let (_, old) = round(true);
-        let (mut k, new) = round(false);
+    fn the_round_is_within_its_tolerance_of_its_torus() {
+        let (mut k, new) = round();
         // (on a copy: the check writes the edges' curves, which the record below measures)
         let mut checked = new.clone_standing_for_self().expect("copy");
         let lines = check_brep(&mut k, &mut checked, CheckLevel::Level2)
             .expect("check")
             .lines();
         assert!(lines.is_empty(), "{NAME}: Level 2: {lines:?}");
-        let (po, pn) = (parts(&old), parts(&new));
+        let pn = parts(&new);
 
         // the curves and the net
-        for (what, eo, en) in [
-            ("edge on the plane", po.on_plane, pn.on_plane),
-            ("edge on the sphere", po.on_sphere, pn.on_sphere),
+        for (what, en) in [
+            ("edge on the plane", pn.on_plane),
+            ("edge on the sphere", pn.on_sphere),
         ] {
-            let before = largest_below(&edge_pieces(&old, eo), 64);
             let now = largest_above(&edge_pieces(&new, en), 8);
             let tol = new.edge(en).expect("edge").tolerance;
-            eprintln!("{NAME}: {what} at most {now:e} off the torus (tol {tol:e}), main at least {before:e}");
-            assert!(now < before, "{NAME}: {what} {now:e}, main {before:e}");
+            eprintln!("{NAME}: {what} at most {now:e} off the torus (tol {tol:e})");
             assert!(now <= tol, "{NAME}: {what} {now:e} beyond its tolerance {tol:e}");
         }
-        for b in [&old, &new] {
-            let seam = parts(b).seam;
-            let off = largest_above(&edge_pieces(b, seam), 4);
-            assert!(off <= 1e-12, "{NAME}: the seam {off:e} off the torus");
-        }
-        let (old_net, _) = face_pieces(&old, po.face);
+        let off = largest_above(&edge_pieces(&new, pn.seam), 4);
+        assert!(off <= 1e-12, "{NAME}: the seam {off:e} off the torus");
         let (new_net, net_bound) = face_pieces(&new, pn.face);
-        let before = largest_below(&old_net, 16);
         let now = largest_above(&new_net, 3);
         let tol = new.face(pn.face).expect("face").tolerance;
-        eprintln!("{NAME}: net at most {now:e} off the torus, from its definition {net_bound:e} (tol {tol:e}), main at least {before:e}");
-        assert!(now < before, "{NAME}: the net {now:e}, main {before:e}");
+        eprintln!("{NAME}: net at most {now:e} off the torus, from its definition {net_bound:e} (tol {tol:e})");
         assert!(now + net_bound <= tol, "{NAME}: the net beyond the face's tolerance");
 
         // topology
-        let roles = |b: &Brep, p: &Parts| {
-            let mut order: Vec<EdgeId> = p1::edges(b, None)
-                .expect("edges")
-                .into_iter()
-                .filter(|&e| ![p.on_plane, p.on_sphere, p.seam].contains(&e))
-                .collect();
-            order.extend([p.on_plane, p.on_sphere, p.seam]);
-            order
-        };
-        let (ro, rn) = (roles(&old, &po), roles(&new, &pn));
-        assert_eq!(&ro[..3], &rn[..3], "{NAME}: the file's edges");
-        assert_eq!(canonical(&old, &ro), canonical(&new, &rn), "{NAME}: topology");
-        let head = |b: &Brep| p1::edges(b, None).expect("edges")[3..].to_vec();
-        assert_eq!(head(&old), [po.on_plane, po.seam, po.on_sphere]);
-        assert_eq!(
-            [po.on_plane, po.seam, po.on_sphere],
-            [6, 7, 8].map(EdgeId::from_index)
-        );
-        assert_eq!(head(&new), [pn.on_sphere, pn.on_plane, pn.seam]);
+        let edges = p1::edges(&new, None).expect("edges");
+        assert_eq!(edges[3..], [pn.on_sphere, pn.on_plane, pn.seam]);
         assert_eq!(
             [pn.on_sphere, pn.on_plane, pn.seam],
             [5, 6, 7].map(EdgeId::from_index)
         );
 
-        // geometry, entity by entity
-        let entities = |b: &Brep, order: &[EdgeId]| {
-            let mut g = Vec::new();
-            crate::util::primitive::append(&Kernel::default(), b, &mut g).expect("geometry");
-            let edges = p1::edges(b, None).expect("edges");
-            assert_eq!(g.len(), 4 * 4 + 6 * 18 + 3 * 18, "{NAME}: geometry length");
-            let vertices: Vec<Vec<f64>> = g[..16].chunks(4).map(<[f64]>::to_vec).collect();
-            let by_role: Vec<Vec<f64>> = order
-                .iter()
-                .map(|e| {
-                    let at = 16 + 18 * edges.iter().position(|x| x == e).expect("edge");
-                    g[at..at + 18].to_vec()
-                })
-                .collect();
-            let faces: Vec<Vec<f64>> = g[124..].chunks(18).map(<[f64]>::to_vec).collect();
-            (vertices, by_role, faces)
-        };
-        // the refit build is main's: its record is, value by value and bit for bit, the
-        // record main's run of this case produced (captured on #19588's head a3c61d838d:
-        // main 21b4ba5387 with the kept-trim prover fix), and agrees with main's committed
-        // block within 1e-13 of its scale
-        {
-            let mut g = Vec::new();
-            crate::util::primitive::append(&Kernel::default(), &old, &mut g).expect("geometry");
-            let main_run: Vec<u64> =
-                include_str!("../fixtures/blend_fillet_executive_p3_wr493_main_geometry.txt")
-                    .lines()
-                    .map(|l| u64::from_str_radix(l, 16).expect("bits"))
-                    .collect();
-            let bits: Vec<u64> = g.iter().map(|x| x.to_bits()).collect();
-            assert_eq!(bits, main_run, "{NAME}: the refit build is not main's run");
-            let (mut sum, mut abs, mut weighted) = (0.0f64, 0.0f64, 0.0f64);
-            for (j, &x) in g.iter().enumerate() {
-                sum += x;
-                abs += x.abs();
-                weighted += (j as f64 + 1.0) * x;
-            }
-            let committed = [41.617_968_596_419_11, 332.078_693_403_764_93, 4_093.749_889_732_379];
-            for (a, b) in [sum, abs, weighted].iter().zip(committed) {
-                assert!((a - b).abs() <= 1e-13 * weighted, "{NAME}: main's committed block");
-            }
+        // geometry: the tolerances (vertices first, then edges, then faces: sphere, plane,
+        // round) and the round's vertices' positions
+        let mut g = Vec::new();
+        crate::util::primitive::append(&Kernel::default(), &new, &mut g).expect("geometry");
+        assert_eq!(g.len(), 4 * 4 + 6 * 18 + 3 * 18, "{NAME}: geometry length");
+        let tol = 4e-5;
+        for e in [pn.on_sphere, pn.on_plane, pn.seam] {
+            let at = 16 + 18 * edges.iter().position(|&x| x == e).expect("edge");
+            assert_eq!(g[at], tol, "{NAME}: edge {e:?} tolerance");
         }
-        let (vo, eo, fo) = entities(&old, &ro);
-        let (vn, en, fnn) = entities(&new, &rn);
-        let moved = |a: &[f64], b: &[f64]| -> Vec<usize> {
-            (0..a.len()).filter(|&i| a[i].to_bits() != b[i].to_bits()).collect()
-        };
-        let (old_tol, new_tol) = (6.743_092_552_193_158e-5, 4e-5);
-        // the poles; the file's three edges; the plane face (faces: sphere, plane, round)
-        for i in 0..2 {
-            assert_eq!(moved(&vo[i], &vn[i]), [0_usize; 0], "{NAME}: vertex {i}");
-        }
-        for i in 0..3 {
-            assert_eq!(moved(&eo[i], &en[i]), [0_usize; 0], "{NAME}: file edge {i}");
-        }
-        assert_eq!(moved(&fo[1], &fnn[1]), [0_usize; 0], "{NAME}: the plane face");
-        // the round's edges: tolerance, span and samples (the seam's span is kept; the
-        // entries not listed below have the same bits in both)
-        let mut got = Vec::new();
-        for i in 3..6 {
-            assert_eq!((eo[i][0], en[i][0]), (old_tol, new_tol), "{NAME}: edge {i} tolerance");
-            got.push(moved(&eo[i], &en[i]));
-        }
-        assert_eq!(
-            got,
-            [
-                vec![0, 2, 6, 7, 9, 10, 11, 13, 14, 15],
-                vec![0, 2, 5, 6, 7, 9, 10, 11, 13, 14, 15],
-                vec![0, 5, 6, 7, 9, 10, 11, 13, 14, 15],
-            ],
-            "{NAME}: the round's edges"
-        );
-        // the round face: tolerance, domain and samples
-        assert_eq!((fo[2][0], fnn[2][0]), (old_tol, new_tol));
-        assert_eq!(moved(&fo[2], &fnn[2]), [0, 3, 8, 9, 11, 12, 13, 15, 16, 17]);
-        // the sphere face: its samples at the same fractions of the same domain, of the
-        // file's NURB here and of upstream's fitted NURB on main (one sphere, two
-        // parametrisations)
-        assert_eq!(moved(&fo[0], &fnn[0]), [7, 8, 9, 11, 12, 13, 15, 16, 17]);
-        // the round's vertices: tolerance and position
-        for i in 2..4 {
-            assert_eq!((vo[i][3], vn[i][3]), (old_tol, new_tol), "{NAME}: vertex {i} tolerance");
+        assert_eq!(g[124 + 2 * 18], tol, "{NAME}: the round face's tolerance");
+        let vertices: Vec<&[f64]> = g[..16].chunks(4).collect();
+        for (i, v) in vertices.iter().enumerate().skip(2) {
+            assert_eq!(v[3], tol, "{NAME}: vertex {i} tolerance");
         }
         let point = |v: &[f64]| [v[0], v[1], v[2]];
-        assert!(vo[2][0] == -4.0 && vn[2][0] == -4.0, "{NAME}: the plane vertex off x = -4");
-        let (before, now) = (
-            off_circle(point(&vo[2]), -4.0, 1.0, 8.0, 1.0),
-            off_circle(point(&vn[2]), -4.0, 1.0, 8.0, 1.0),
-        );
-        eprintln!("{NAME}: plane vertex {now:?} off its circle, main {before:?}");
-        // CLOSER, by a few units in the last place: pinned, and within the vertex's tolerance
-        assert!(now.hi < before.lo && now.hi < 2.5e-15, "{NAME}: plane vertex {now:?}, main {before:?}");
-        assert!(now.hi <= vn[2][3], "{NAME}: plane vertex {now:?} beyond its tolerance");
-        let (before, now) = (
-            off_circle(point(&vo[3]), -35.0, 9.0, 800.0, 81.0),
-            off_circle(point(&vn[3]), -35.0, 9.0, 800.0, 81.0),
-        );
-        eprintln!("{NAME}: sphere vertex {now:?} off its circle, main {before:?}");
-        assert!(now.hi < before.lo, "{NAME}: sphere vertex {now:?}, main {before:?}");
+        assert!(vertices[2][0] == -4.0, "{NAME}: the plane vertex off x = -4");
+        let now = off_circle(point(vertices[2]), -4.0, 1.0, 8.0, 1.0);
+        eprintln!("{NAME}: plane vertex {now:?} off its circle");
+        // a few units in the last place: pinned, and within the vertex's tolerance
+        assert!(now.hi < 2.5e-15, "{NAME}: plane vertex {now:?}");
+        assert!(now.hi <= vertices[2][3], "{NAME}: plane vertex {now:?} beyond its tolerance");
+        let now = off_circle(point(vertices[3]), -35.0, 9.0, 800.0, 81.0);
+        eprintln!("{NAME}: sphere vertex {now:?} off its circle");
+        assert!(now.hi <= vertices[3][3], "{NAME}: sphere vertex {now:?} beyond its tolerance");
     }
 }
 
@@ -3545,11 +3330,17 @@ mod g5_blend_corner_certificates {
     }
 }
 
-/// WR-613 (#18640): the rows a face-sided corner patch can move, each checked against
-/// main's figures.
+/// WR-613 (#18640): the rows with corner-patch sides on plane faces, each checked on its
+/// finished body.
 #[cfg(test)]
-#[path = "wr613_certificates.rs"]
-mod wr613_certificates;
+#[path = "corner_patch_certificates.rs"]
+mod corner_patch_certificates;
+
+/// WR-646 (#18917): the variable-radius rows whose rounds now follow their law, each
+/// certified on its finished body.
+#[cfg(test)]
+#[path = "wr646_certificates.rs"]
+mod wr646_certificates;
 
 #[cfg(test)]
 mod wr664_near_knot_trims {
@@ -3561,13 +3352,14 @@ mod wr664_near_knot_trims {
 
     /// The rows whose results the near-knot snap (WR-664) moves: name, the golden's status
     /// and vertex, edge and face counts, which the snap leaves as they were, and the number
-    /// of rail edges.
+    /// of rail edges. (The `sphere_diff` rows keep the target's two sphere patches since
+    /// WR-459's retirement, `wr459_sphere_rows`: 29/46/11, main's 27/42/10.)
     const ROWS: [(&str, [i64; 4], usize); 5] = [
         ("stubs4-delete-edge-bottle-e8-r0.1", [0, 31, 47, 18], 5),
-        ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", [0, 27, 42, 10], 2),
-        ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", [0, 27, 42, 10], 2),
-        ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1", [0, 27, 42, 10], 2),
-        ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", [0, 27, 42, 10], 2),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", [0, 29, 46, 11], 2),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", [0, 29, 46, 11], 2),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1", [0, 29, 46, 11], 2),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", [0, 29, 46, 11], 2),
     ];
 
     /// `name` builds with the golden's counts and `rails` rail edges (an edge between a blend
@@ -3726,5 +3518,766 @@ mod wr664_near_knot_trims {
     #[test]
     fn sphere_diff_3cylinders_e4_r0_5() {
         check(ROWS[4].0, ROWS[4].1, ROWS[4].2);
+    }
+}
+
+/// Rounds on files with a found sphere, read on the file's kept sphere NURB and trims: the
+/// round edges' ends lie within their edges' and vertices' tolerances, the trims the cone
+/// face's classification makes are within their edges' tolerances, certified, and the
+/// found spheres keep the file's trims and their samples lie on the sphere.
+#[cfg(test)]
+mod found_sphere_certificates {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::*;
+    use crate::UnitDiff;
+    use solidcore::topology::brep::p1;
+
+    /// The rows of the classified trims (#20179): their result body holds five UV trims the
+    /// file's read makes when it classifies on the cone face [`TRIM_FACE`] (the face has loop
+    /// uses, so the read point-tests there and `CreateUVTrimCurves` makes its missing trims),
+    /// and the fillet keeps them.
+    const TRIM_ROWS: [&str; 6] = [
+        "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5",
+        "sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1",
+        "sweep4-sphere_diff_3cylinders-all-r0.1",
+        "sweep5-sphere_diff_3cylinders-e29-r1.0",
+    ];
+    /// Those rows' result body's vertex count (the record's edges start at 4 per vertex).
+    const TRIM_VERTICES: usize = 25;
+    /// The face (in `faces` order) whose classification makes the trims.
+    const TRIM_FACE: usize = 6;
+    /// The edges (in `edges` order) whose use on [`TRIM_FACE`] holds a trim.
+    const TRIM_EDGES: [usize; 5] = [20, 22, 27, 31, 33];
+    /// Those edge uses, by index: the same uses the file's read classifies trims onto.
+    const TRIM_EDGEUSES: [u32; 5] = [127, 129, 130, 132, 135];
+    /// Offset of an edge's trim count in its 18 record entries (`util::primitive::append`).
+    const TRIM_COUNT: usize = 17;
+
+    /// `source-file-box_w_slot-all-edges`: the result record (`util::primitive::append`) is
+    /// the body's; 24 edges with a use on a found sphere count two UV trims (the file's trim
+    /// on the sphere is kept), and every sample the record holds of a found sphere face
+    /// lies on the sphere to `1e-12` of its radius.
+    #[test]
+    fn box_w_slot_keeps_the_sphere_trims_and_samples_the_sphere() {
+        use solidcore::surface::surface::SurfaceKind;
+        use solidcore::topology::edgeuse::p1::face as face_of;
+        const CASE: &str = "source-file-box_w_slot-all-edges";
+        let runner = crate::units::blend_fillet_executive_p3::Runner;
+        let output = runner
+            .run_rust(&crate::case::regression_case(&runner, CASE))
+            .unwrap();
+        assert!(output.error.is_none(), "{CASE}: {:?}", output.error);
+        let g = &output.values["result_geometry"];
+        let mut k = Kernel::default();
+        let body = result_body_of(&mut k, CASE);
+        let (vertices, edges, faces) = (
+            p1::vertices(&body, None).unwrap(),
+            p1::edges(&body, None).unwrap(),
+            p1::faces(&body, None).unwrap(),
+        );
+        let at_edges = 4 * vertices.len();
+        let at_faces = at_edges + 18 * edges.len();
+        assert_eq!(g.len(), at_faces + 18 * faces.len(), "{CASE}: record length");
+        let sphere = |f| match body.face(f).unwrap().surface.as_ref().unwrap().kind() {
+            SurfaceKind::Sphere(s) => Some((s.base().position().origin(), s.radius())),
+            _ => None,
+        };
+        let kept = edges
+            .iter()
+            .enumerate()
+            .filter(|&(i, &e)| {
+                g[at_edges + 18 * i + 17] == 2.0
+                    && body.edge(e).unwrap().edgeuses.iter().any(|&eu| {
+                        face_of(&body, eu)
+                            .unwrap()
+                            .is_some_and(|f| sphere(f).is_some())
+                    })
+            })
+            .count();
+        assert_eq!(kept, 24, "{CASE}: edges on a found sphere with two trims");
+        let mut sampled = 0;
+        for (i, &f) in faces.iter().enumerate() {
+            let Some((centre, radius)) = sphere(f) else {
+                continue;
+            };
+            let at = at_faces + 18 * i;
+            for s in 0..3 {
+                let p = &g[at + 7 + 4 * s..at + 10 + 4 * s];
+                assert_eq!(g[at + 6 + 4 * s], 0.0, "{CASE}: face {i} sample {s} status");
+                let d = (Vec3::new(p[0], p[1], p[2]) - centre).length();
+                assert!(
+                    (d - radius).abs() <= 1e-12 * radius,
+                    "{CASE}: face {i} sample {s} {:e} off the sphere",
+                    d - radius
+                );
+            }
+            sampled += 1;
+        }
+        assert!(sampled > 0, "{CASE}: no found sphere face");
+    }
+
+    /// `stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5` and `-e4-r0.5` (rounds of 0.5 on
+    /// two edges that are mirror images), each with its round edge (in `p1::edges` order)
+    /// whose end lies 2.1e-8 or 9.9e-7 from its end vertex: each round edge holds the
+    /// round's tolerance (4e-5) from its interval's start, and both its ends lie inside the
+    /// edge's tolerance and their vertex's (the gaps are float evaluations, good to about
+    /// 1e-13 here, far inside the margins). WR-459 keeps the target's own faces, which splits
+    /// the round into two edges with the same start: the one checked here is edge 41 in
+    /// `e1-r0.5` (37 before) and edge 40 in `e4-r0.5` (36 before), as main renumbered them.
+    #[test]
+    fn sphere_diff_r05_round_ends_are_within_tolerance() {
+        use solidcore::topology::edge::{end_vertex, start_vertex};
+        for (case, i) in [
+            ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 41),
+            ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 40),
+        ] {
+            let mut k = Kernel::default();
+            let b = result_body_of(&mut k, case);
+            let e = p1::edges(&b, None).unwrap()[i];
+            let edge = b.edge(e).unwrap();
+            assert_eq!(
+                (edge.tolerance, edge.interval.min()),
+                (4e-5, 4.000_000_000_004_888_5e-3),
+                "{case}"
+            );
+            let c = edge.curve.as_ref().unwrap();
+            for (t, v) in [
+                (edge.interval.min(), start_vertex(&b, e).unwrap().unwrap()),
+                (edge.interval.max(), end_vertex(&b, e).unwrap().unwrap()),
+            ] {
+                let vertex = b.vertex(v).unwrap();
+                let gap = (c.evaluate_point(&k, t).unwrap() - vertex.point).length();
+                eprintln!("{case} edge {i} at {t}: gap {gap:e}, vertex tol {:e}", vertex.tolerance);
+                assert!(vertex.tolerance >= 4e-5, "{case}: vertex tolerance");
+                assert!(
+                    gap < 4e-5 && gap < vertex.tolerance,
+                    "{case} edge {i} at {t}: gap {gap:e}"
+                );
+            }
+        }
+    }
+
+    /// The [`TRIM_ROWS`]: the five trims the classification on [`TRIM_FACE`] made are the
+    /// only difference from the body without them, each within its edge's tolerance of the
+    /// edge (certified). For each row:
+    /// * the run's record is the result body's record, and the face is a cone with loop uses;
+    /// * each [`TRIM_EDGES`] edge has exactly two uses holding a trim, one of them its use on
+    ///   the face, the [`TRIM_EDGEUSES`];
+    /// * with those five trims taken off, the body's record is the run's with exactly those
+    ///   five trim counts lowered from 2 to 1 and nothing else changed, bit for bit;
+    /// * the five are bit for bit the trims the file's read holds on the same edge uses, so the
+    ///   fillet keeps them as the read makes them; and with them taken off the read, one B-rep
+    ///   ray classification while it is edited makes them again, bit for bit (since WR-732's
+    ///   retirement, #18934, the ray builds the cone face's tree against its current trims, and
+    ///   the implant makes them): they are what the implant makes, not another change;
+    /// * each trim's same-parameter gap to its edge is certified (`curve_uv_gap_bound`,
+    ///   interval Taylor models, every rounding included) within the edge's tolerance.
+    ///
+    /// (A face classification on the finished body, as this test asked before #18934, makes
+    /// edge 20's trim with control points up to 2.7e-9 off the implant's in UV, as #18934
+    /// measured; that is not how the read makes them, so it is not asked.)
+    #[test]
+    fn classified_trims_are_the_only_change_and_within_tolerance() {
+        use solidcore::curve::curve::CurveKind;
+        use solidcore::query::curve_surface_gap::curve_uv_gap_bound;
+        use solidcore::surface::surface::SurfaceKind;
+        use solidcore::topology::edgeuse::p1 as eu1;
+        use solidcore::topology::{edge, face};
+        let record = |k: &Kernel, b: &Brep| {
+            let mut out = Vec::new();
+            crate::util::primitive::append(k, b, &mut out).unwrap();
+            out
+        };
+        let encoding = |k: &Kernel, c: &solidcore::curve::curve::Curve| {
+            let mut enc = Vec::new();
+            crate::util::trim_curve::put_trim_curve(k, &mut enc, Some(c)).unwrap();
+            enc.iter().map(|x| x.to_bits()).collect::<Vec<u64>>()
+        };
+        // the file's read, as the runner reads it
+        let read = {
+            let path = crate::case::repo_root()
+                .join(crate::fixtures::UPSTREAM_TEST_FILES)
+                .join("Fillet/sphere_diff_3cylinders.smb");
+            let mut k = crate::runner_kernel();
+            crate::own_reader::read_file(&mut k, path.to_str().unwrap())
+                .unwrap()
+                .unwrap()
+        };
+        // the read with its five classified trims taken off, and one B-rep ray classification
+        // while it is edited: the ray builds the cone face's tree against its current trims,
+        // and the implant makes the five (from 20 off the read's box middle along y, whose rays
+        // cross the cone face; from the middle itself they do not reach it)
+        let remade = {
+            use solidcore::query::brep::BrepQuery;
+            let k = crate::runner_kernel();
+            // (the box on a copy of the read: building it leaves caches on the B-rep it measures)
+            let mid = {
+                let mut c = read.clone_standing_for_self().unwrap();
+                solidcore::query::brep::calculate_tight_bounding_box(&k, &mut c)
+                    .unwrap()
+                    .mid()
+            };
+            let mut b = read.clone_standing_for_self().unwrap();
+            let ids: Vec<_> = b
+                .edgeuses()
+                .iter()
+                .filter(|(id, _)| TRIM_EDGEUSES.contains(&id.index()))
+                .map(|(id, _)| id)
+                .collect();
+            assert_eq!(ids.len(), 5, "the read's classified edge uses");
+            for id in ids {
+                assert!(b.edgeuse_mut(id).unwrap().uv_trim_curve.take().is_some());
+            }
+            let p = solidcore::math::Point3::new(mid.x, mid.y + 20.0, mid.z);
+            b.set_editing_enabled(true);
+            BrepQuery::of_brep(&b)
+                .point_3d_classify(&k, &mut b, p, 1e-6, false)
+                .unwrap();
+            b.set_editing_enabled(false);
+            b
+        };
+        let runner = crate::units::blend_fillet_executive_p3::Runner;
+        let at = |i: usize| 4 * TRIM_VERTICES + 18 * i + TRIM_COUNT;
+        for case in TRIM_ROWS {
+            let output = runner
+                .run_rust(&crate::case::regression_case(&runner, case))
+                .unwrap();
+            assert!(output.error.is_none(), "{case}: {:?}", output.error);
+            let now = output.values["result_geometry"].clone();
+            let mut k = Kernel::default();
+            let mut body = result_body_of(&mut k, case);
+            assert_eq!(record(&k, &body), now, "{case}: the run is not the body's record");
+            assert_eq!(p1::vertices(&body, None).unwrap().len(), TRIM_VERTICES, "{case}");
+            let edges = p1::edges(&body, None).unwrap();
+            let f = p1::faces(&body, None).unwrap()[TRIM_FACE];
+            let surface = face::p2::surface(&body, f).unwrap().unwrap().clone();
+            assert!(
+                matches!(surface.kind(), SurfaceKind::Cone(_)),
+                "{case}: the face is not a cone"
+            );
+            assert!(face::p4::has_loopuses(&body, f).unwrap());
+            // the five trims, taken off
+            let mut taken = Vec::new();
+            for i in TRIM_EDGES {
+                let e = edges[i];
+                let uses = body.edge(e).unwrap().edgeuses.clone();
+                let trimmed: Vec<_> = uses
+                    .iter()
+                    .copied()
+                    .filter(|&eu| body.edgeuse(eu).unwrap().uv_trim_curve.is_some())
+                    .collect();
+                assert_eq!(trimmed.len(), 2, "{case}: edge {i}: uses holding a trim");
+                let on_face: Vec<_> = trimmed
+                    .iter()
+                    .copied()
+                    .filter(|&eu| eu1::face(&body, eu).unwrap() == Some(f))
+                    .collect();
+                assert_eq!(on_face.len(), 1, "{case}: edge {i}: trims on the face");
+                let eu = on_face[0];
+                let trim = body.edgeuse_mut(eu).unwrap().uv_trim_curve.take().unwrap();
+                // the trim fits its edge: certified same-parameter gap within the tolerance
+                let tol = edge::tolerance(&body, e).unwrap();
+                let interval = edge::interval(&body, e).unwrap();
+                let rail = edge::curve(&body, e).unwrap().unwrap().clone();
+                let c = match rail.kind() {
+                    CurveKind::BSpline(c) => c.clone_exact(),
+                    CurveKind::Line(l) => l.base_with_nurb().unwrap().into_owned(),
+                    other => panic!("{case}: edge {i}: an edge curve {other:?}"),
+                };
+                let w = match trim.kind() {
+                    CurveKind::BSpline(w) => w.clone_exact(),
+                    CurveKind::Line(l) => l.base_with_nurb().unwrap().into_owned(),
+                    other => panic!("{case}: edge {i}: a trim {other:?}"),
+                };
+                let gap = curve_uv_gap_bound(
+                    &k,
+                    &c,
+                    &w,
+                    &surface,
+                    [interval.min(), interval.max()],
+                    tol / 100.0,
+                )
+                .unwrap()
+                .unwrap_or_else(|| panic!("{case}: edge {i}: the gap is not enclosed"));
+                assert!(
+                    gap <= tol,
+                    "{case}: edge {i}: certified gap {gap:e} over the tolerance {tol:e}"
+                );
+                taken.push((i, eu, encoding(&k, &trim)));
+            }
+            let without = record(&k, &body);
+            let moved: Vec<usize> = (0..now.len())
+                .filter(|&j| without[j].to_bits() != now[j].to_bits())
+                .collect();
+            assert_eq!(moved, TRIM_EDGES.map(at).to_vec(), "{case}: entries the trims move");
+            for i in TRIM_EDGES {
+                assert_eq!((now[at(i)], without[at(i)]), (2.0, 1.0), "{case}: edge {i}");
+            }
+            let mut ids: Vec<u32> = taken.iter().map(|t| t.1.index()).collect();
+            ids.sort_unstable();
+            assert_eq!(ids, TRIM_EDGEUSES, "{case}: not the read's classified trims");
+            // the five are the read's own trims, bit for bit: the fillet keeps them as the read
+            // of the file makes them (`read`), and the ray's implant makes them (`remade`)
+            for (i, eu, bits) in &taken {
+                for (what, b) in [("the read", &read), ("the ray's implant", &remade)] {
+                    let made = b.edgeuse(*eu).unwrap().uv_trim_curve.as_ref();
+                    let made = made.unwrap_or_else(|| panic!("{case}: edge {i}: not on {what}"));
+                    assert_eq!(
+                        &encoding(&k, made),
+                        bits,
+                        "{case}: edge {i}: another trim on {what}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// WR-459 (#17169): the four `sphere_diff_3cylinders` rows the kept target faces move from
+/// main's 27/42/10 to 29/46/11. The target is a sphere less three cylinders, in two sphere
+/// patches on one surface; the round splits one patch and the clean-up now keeps both, so
+/// their boundary (the input's own same-surface edge) stays. These tests check, row by
+/// row, that this is the only change: every face but the round's has a target face's
+/// surface, the round's surface is main's, the near-seam vertices and the other Level 2
+/// failures are main's (constants printed on main a2b7ec60e2 by a one-off probe of the
+/// same rows, not a recorder kept here), and the kept boundary adds exactly one
+/// `check_brep` Level 2 failure, a
+/// "Face Near missing Seam" whose cause is a vertex the round places a few nanometres off
+/// the sphere's seam on main too (bit-identical), well inside that vertex's tolerance
+/// (that placement is #21421). The volume is certified in `round_definition_rows`.
+#[cfg(test)]
+mod wr459_sphere_rows {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::round_definition_rows::inputs;
+    use super::*;
+    use solidcore::geom::extent1d::Extent1d;
+    use solidcore::math::EFF_ZERO;
+    use solidcore::surface::surface::SurfaceKind;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+    use solidcore::topology::{vertex, FaceId, VertexId};
+
+    /// A Level 2 failure: its label and its reporter's key (the object space in the high
+    /// 32 bits, the arena index in the low).
+    type Failure = (&'static str, Option<(u64, u64)>);
+
+    const SEAM: &str = "Face Near missing Seam";
+    const FACE: u64 = 16002;
+    const EDGE: u64 = 20001;
+    const EDGEUSE: u64 = 20003;
+
+    /// One row: the case; main's (a2b7ec60e2) Level 2 failures of its result, less the three
+    /// of edgeuse 142's trim that the clamped-sliver drop rule (#21353) took out of the
+    /// target itself (the target's own failures are checked in `check`); the sphere
+    /// face whose seam failure the kept boundary adds; the round's vertex near the seam,
+    /// with main's coordinate bits and the bound on its distance from the seam (the
+    /// measured distance rounded up); the other vertices within 1e-4 of the seam that the
+    /// check may be reporting, each with main's bits; and the hash of main's round surface
+    /// (`fnv1a64` of its `Debug` form) and of main's other faces (`fnv1a64` of their
+    /// sorted `geometry_text`s, joined by newlines); and main's one sphere face.
+    struct Row {
+        name: &'static str,
+        main_failures: &'static [Failure],
+        added_on: usize,
+        vertex: (usize, [u64; 3], f64),
+        others: &'static [(usize, [u64; 3])],
+        round_surface: u64,
+        main_faces: u64,
+        main_sphere: u64,
+    }
+
+    /// The failures every row's body shares with the target (`check_brep` of the target:
+    /// the cone faces 4, 5 and 7 near their seams) less face 4,
+    /// which the round splits, plus the round's rail on the cone (edge and edgeuse).
+    const fn shared(rail: u64, rail_use: u64, cone: u64) -> [Failure; 5] {
+        [
+            (SEAM, Some((FACE, 5))),
+            (SEAM, Some((FACE, 7))),
+            (SEAM, Some((FACE, cone))),
+            ("Bad Repeated CPts", Some((EDGE, rail))),
+            ("Bad Repeated CPts", Some((EDGEUSE, rail_use))),
+        ]
+    }
+
+    const E1: [Failure; 5] = shared(40, 162, 9);
+    const E4_R01: [Failure; 5] = [
+        (SEAM, Some((FACE, 0))),
+        (SEAM, Some((FACE, 4))),
+        (SEAM, Some((FACE, 7))),
+        ("Bad Repeated CPts", Some((EDGE, 43))),
+        ("Bad Repeated CPts", Some((EDGEUSE, 172))),
+    ];
+    const E4_R05: [Failure; 7] = [
+        (SEAM, Some((FACE, 0))),
+        (SEAM, Some((FACE, 4))),
+        (SEAM, Some((FACE, 7))),
+        ("Bad Repeated CPts", Some((EDGE, 41))),
+        ("Bad Repeated CPts", Some((EDGEUSE, 164))),
+        ("Bad Repeated CPts", Some((EDGE, 43))),
+        ("Bad Repeated CPts", Some((EDGEUSE, 172))),
+    ];
+
+    /// e4's vertex 2, the target's patch corner on the seam (4.4e-14 off it in the
+    /// target), which the round leaves 9.5e-7 off the seam on main too.
+    const E4_V2: (usize, [u64; 3]) = (2, [0x4036026500000000, 0x3eafffffffc57405, 0x4045540c8e2b6b68]);
+
+    const ROWS: [Row; 4] = [
+        Row {
+            name: "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
+            main_failures: &E1,
+            added_on: 8,
+            vertex: (27, [0x403627cf90d5c75d, 0xbe31ee9f830c0a25, 0xc0454a5b0aeac7b9], 4.2e-9),
+            others: &[],
+            round_surface: 13763335099436623647,
+            main_faces: 14750437352760065621,
+            main_sphere: 8,
+        },
+        Row {
+            name: "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
+            main_failures: &E1,
+            added_on: 8,
+            vertex: (27, [0x4036bf0d23081593, 0xbe56aa7ba247c332, 0xc0452256756ad4f1], 2.12e-8),
+            others: &[],
+            round_surface: 14051174420061070167,
+            main_faces: 14750437352760065621,
+            main_sphere: 8,
+        },
+        Row {
+            name: "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
+            main_failures: &E4_R01,
+            added_on: 1,
+            vertex: (25, [0x403627cf90d5c76b, 0xbe31ee9f8404242c, 0x40454a5b0aeac7b6], 4.2e-9),
+            others: &[E4_V2],
+            round_surface: 2325416645222036088,
+            main_faces: 16065100554185304934,
+            main_sphere: 0,
+        },
+        Row {
+            name: "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
+            main_failures: &E4_R05,
+            added_on: 1,
+            vertex: (25, [0x4036bf0d230815a1, 0xbe56aa7bab70d538, 0x40452256756ad4ed], 2.12e-8),
+            others: &[E4_V2],
+            round_surface: 744541229302824343,
+            main_faces: 16065100554185304934,
+            main_sphere: 0,
+        },
+    ];
+
+    fn failures(b: &mut Brep) -> Vec<Failure> {
+        let check = check_brep(&mut Kernel::default(), b, CheckLevel::Level2).unwrap();
+        let mut out: Vec<Failure> = check
+            .failures()
+            .map(|f| (f.name, f.reporter.map(|r| (r.0 >> 32, r.0 & 0xffff_ffff))))
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// The face's whole surface object, as `Debug` prints it (its kind and its owner,
+    /// tolerance and cache state).
+    fn surface_text(b: &Brep, f: FaceId) -> String {
+        format!("{:?}", b.face(f).unwrap().surface.as_ref().unwrap())
+    }
+
+    /// The face's surface geometry, as `Debug` prints its kind (the surface's type and
+    /// its defining data), less the lazily built NURBS form (`NurbSlot`, a cache the
+    /// first evaluation fills, so it differs with what has been evaluated).
+    fn geometry_text(b: &Brep, f: FaceId) -> String {
+        let text = format!("{:?}", b.face(f).unwrap().surface.as_ref().unwrap().kind());
+        let mut out = String::new();
+        let mut rest = text.as_str();
+        while let Some(at) = rest.find("NurbSlot(") {
+            out.push_str(&rest[..at]);
+            out.push_str("NurbSlot(..)");
+            let mut depth = 0usize;
+            let mut end = rest.len();
+            for (i, c) in rest[at + "NurbSlot".len()..].char_indices() {
+                match c {
+                    '(' => depth += 1,
+                    ')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = at + "NurbSlot".len() + i + 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            rest = &rest[end..];
+        }
+        out.push_str(rest);
+        out
+    }
+
+    fn is_sphere(b: &Brep, f: FaceId) -> bool {
+        let surface = b.face(f).unwrap().surface.as_ref().unwrap();
+        matches!(surface.kind(), SurfaceKind::Sphere(_))
+    }
+
+    /// The vertices of the sphere face `f` within 1e-4 of its seam (the half-plane of
+    /// its frame's x axis, u = 0) but at least the near-miss distance (`EFF_ZERO * 1000`,
+    /// `CurveClassification::has_near_misses`) off it: each with its distance from the
+    /// seam's plane, its tolerance and its coordinate bits.
+    fn near_seam(b: &Brep, f: FaceId) -> Vec<(usize, f64, f64, [u64; 3])> {
+        let surface = b.face(f).unwrap().surface.as_ref().unwrap();
+        let SurfaceKind::Sphere(sphere) = surface.kind() else {
+            panic!("{f:?} is not a sphere face")
+        };
+        let frame = sphere.base().position();
+        let mut out = Vec::new();
+        for v in solidcore::topology::face::p4::vertices(b, f, None, false, None).unwrap() {
+            let p = vertex::point(b, v).unwrap();
+            let local = p - frame.origin();
+            let (x, y) = (local.dot(frame.x_axis()), local.dot(frame.y_axis()).abs());
+            if x > 0.0 && (EFF_ZERO * 1000.0..1e-4).contains(&y) {
+                let bits = [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()];
+                out.push((v.index() as usize, y, vertex::tolerance(b, v).unwrap(), bits));
+            }
+        }
+        out.sort_by_key(|n| n.0);
+        out
+    }
+
+    /// The edges of `b` between two distinct sphere faces, each with its 3D curve's
+    /// interval, its tolerance and its end points.
+    fn sphere_seams(b: &Brep) -> Vec<(EdgeId, Extent1d, f64, [Vec3; 2])> {
+        let mut out = Vec::new();
+        for e in p1::edges(b, None).unwrap() {
+            let mut faces = edge::faces(b, e, None).unwrap();
+            faces.sort();
+            faces.dedup();
+            if faces.len() == 2 && faces.iter().all(|&f| is_sphere(b, f)) {
+                let (s, t) = edge::start_end_vertices(b, e).unwrap();
+                let ends = [s.unwrap(), t.unwrap()].map(|v| vertex::point(b, v).unwrap());
+                out.push((e, edge::interval(b, e).unwrap(), edge::tolerance(b, e).unwrap(), ends));
+            }
+        }
+        out
+    }
+
+    /// The result's boundary between the two sphere patches is the target's: the target's
+    /// sphere patches meet along arcs of one great circle of the sphere (each sampled
+    /// point within its edge's tolerance of the circle); the result keeps at least one
+    /// edge between its two sphere patches, and every point sampled on every such edge
+    /// lies on that circle within the edge's tolerance and inside the span of one of the
+    /// target's arcs (by angle, the round shortening an arc at its end); and the edges kept
+    /// on every target arc form one chain from one of the arc's own end points (bit for
+    /// bit) to its other end point (bit for bit) or to a vertex of the round.
+    /// Compared by geometry, not by arena ids, so a boundary split into more edges over
+    /// the same span passes too.
+    fn shares_the_target_boundary(name: &str, target: &Brep, body: &Brep) {
+        const SAMPLES: usize = 32;
+        let k = Kernel::default();
+        let sample = |b: &Brep, e: EdgeId, iv: &Extent1d| -> Vec<Vec3> {
+            let curve = edge::curve(b, e).unwrap().unwrap();
+            (0..=SAMPLES)
+                .map(|i| {
+                    let t = iv.min() + (iv.max() - iv.min()) * (i as f64 / SAMPLES as f64);
+                    curve.evaluate_point(&k, t).unwrap()
+                })
+                .collect()
+        };
+        let sphere_face = p1::faces(target, None).unwrap().into_iter().find(|&f| is_sphere(target, f)).unwrap();
+        let surface = target.face(sphere_face).unwrap().surface.as_ref().unwrap();
+        let SurfaceKind::Sphere(sphere) = surface.kind() else { unreachable!() };
+        let c = sphere.base().position().origin();
+        let arcs = sphere_seams(target);
+        assert!(!arcs.is_empty(), "{name}: the target's sphere patches share no edge");
+        // the circle's plane, through the centre and the first arc's ends
+        let [a0, b0] = arcs[0].3;
+        let n = (a0 - c).cross(b0 - c);
+        let n = n * (1.0 / n.length());
+        let radius = (a0 - c).length();
+        let off_circle = |p: Vec3| {
+            let d = p - c;
+            let h = d.dot(n);
+            let r = (d - n * h).length();
+            (h * h + (r - radius) * (r - radius)).sqrt()
+        };
+        let angle = |p: Vec3, q: Vec3| (p - c).cross(q - c).length().atan2((p - c).dot(q - c));
+        for (e, iv, tol, _) in &arcs {
+            for p in sample(target, *e, iv) {
+                let d = off_circle(p);
+                assert!(d <= *tol, "{name}: target edge {e:?} is {d:e} off its circle, past {tol:e}");
+            }
+        }
+        let seams = sphere_seams(body);
+        assert!(!seams.is_empty(), "{name}: the result's sphere patches share no edge");
+        let within = |p: Vec3, tol: f64, (_, _, atol, [s, t]): &(EdgeId, Extent1d, f64, [Vec3; 2])| {
+            let excess = angle(*s, p) + angle(p, *t) - angle(*s, *t);
+            excess * radius <= tol + atol
+        };
+        // each result edge lies on the circle and inside one target arc
+        let mut on_arc = vec![Vec::new(); arcs.len()];
+        for (e, iv, tol, _) in &seams {
+            let points = sample(body, *e, iv);
+            for &p in &points {
+                let d = off_circle(p);
+                assert!(d <= *tol, "{name}: edge {e:?} is {d:e} off the target's circle, past {tol:e}");
+            }
+            let arc = arcs.iter().position(|a| points.iter().all(|&p| within(p, *tol, a)));
+            let arc = arc.unwrap_or_else(|| panic!("{name}: edge {e:?} leaves the target's arcs"));
+            on_arc[arc].push(*e);
+        }
+        // the round's vertices
+        let mut round_vertices = Vec::new();
+        for f in p1::faces(body, None).unwrap() {
+            if body.face(f).unwrap().surface.as_ref().unwrap().procedural_blend().is_some() {
+                round_vertices.extend(solidcore::topology::face::p4::vertices(body, f, None, false, None).unwrap());
+            }
+        }
+        // and the edges kept on every target arc run as one chain, with no gap or overlap,
+        // from one of the arc's own ends (bit for bit) to its other end (bit for bit) or to
+        // a vertex of the round: the round only shortens an arc at its other end, and never
+        // further than the round reaches
+        for ((e, _, _, [s, t]), kept) in arcs.iter().zip(&on_arc) {
+            let ends: Vec<[VertexId; 2]> = kept
+                .iter()
+                .map(|&k| {
+                    let (a, b) = edge::start_end_vertices(body, k).unwrap();
+                    [a.unwrap(), b.unwrap()]
+                })
+                .collect();
+            let point = |v: VertexId| vertex::point(body, v).unwrap();
+            let start = ends.iter().flatten().copied().find(|&v| point(v) == *s || point(v) == *t);
+            let start = start.unwrap_or_else(|| panic!("{name}: the target's arc {e:?} keeps no edge from its own ends"));
+            let other = if point(start) == *s { *t } else { *s };
+            let mut used = vec![false; ends.len()];
+            let mut at = start;
+            while let Some(i) = (0..ends.len()).find(|&i| !used[i] && ends[i].contains(&at)) {
+                used[i] = true;
+                at = if ends[i][0] == at { ends[i][1] } else { ends[i][0] };
+            }
+            assert!(used.iter().all(|&u| u), "{name}: the edges kept on the target's arc {e:?} are not one chain");
+            assert!(
+                point(at) == other || round_vertices.contains(&at),
+                "{name}: the edges kept on the target's arc {e:?} end at {:?}, neither the arc's other end nor the round",
+                point(at)
+            );
+        }
+    }
+
+    /// The row's target and its rounded result.
+    fn bodies(name: &str) -> (Brep, Brep) {
+        let input = inputs(name).real_solid.expect("a real solid");
+        let mut k = Kernel::default();
+        let target = build(&mut k, &input).unwrap().unwrap();
+        let mut body = build(&mut k, &input).unwrap().unwrap();
+        let (selected, _) = select_edges(&k, &body, &input).ok().unwrap();
+        let result = fillet_selected(&mut k, &mut body, &selected, &input).ok().unwrap();
+        assert!(result.is_ok(), "{name}: {result:?}");
+        (target, body)
+    }
+
+    fn check(row: &Row) {
+        let name = row.name;
+        let (target, mut body) = bodies(name);
+        let counts = |b: &Brep| {
+            [
+                p1::vertices(b, None).unwrap().len(),
+                p1::edges(b, None).unwrap().len(),
+                p1::faces(b, None).unwrap().len(),
+            ]
+        };
+        assert_eq!(counts(&body), [29, 46, 11], "{name}");
+
+        // the faces but the round's are main's (fnv1a64 of their sorted geometry texts,
+        // printed on main a2b7ec60e2) plus one more patch of the target's sphere: the
+        // sphere both patches share is the target's, with the `swap_uv` bit the round's
+        // set-up clears (main's merged patch has it cleared too); the round's surface is
+        // main's
+        let target_sphere: Vec<String> = p1::faces(&target, None)
+            .unwrap()
+            .into_iter()
+            .filter(|&f| is_sphere(&target, f))
+            .map(|f| geometry_text(&target, f).replace("swap_uv: true", "swap_uv: false"))
+            .collect();
+        let sphere = target_sphere.first().unwrap().clone();
+        assert!(target_sphere.iter().all(|t| *t == sphere), "{name}: one sphere in the target");
+        let mut rounds = Vec::new();
+        let mut others = Vec::new();
+        for f in p1::faces(&body, None).unwrap() {
+            if body.face(f).unwrap().surface.as_ref().unwrap().procedural_blend().is_some() {
+                rounds.push(crate::rng::fnv1a64(&surface_text(&body, f)));
+            } else {
+                if is_sphere(&body, f) {
+                    assert_eq!(geometry_text(&body, f), sphere, "{name}: {f:?} is not the target's sphere");
+                }
+                others.push(geometry_text(&body, f));
+            }
+        }
+        let extra = others.iter().position(|t| *t == sphere).unwrap();
+        others.remove(extra);
+        others.sort();
+        assert_eq!(
+            crate::rng::fnv1a64(&others.join("\n")),
+            row.main_faces,
+            "{name}: the faces but the round's and the added patch are not main's"
+        );
+        assert_eq!(rounds, [row.round_surface], "{name}: the round's surface is not main's");
+
+        // the round's vertex near the seam is main's, bit for bit, within its bound of the
+        // seam and inside its own tolerance
+        let added = FaceId::from_index(row.added_on as u32);
+        let near = near_seam(&body, added);
+        let (vertex, bits, bound) = row.vertex;
+        let mut expected: Vec<(usize, [u64; 3])> = row.others.to_vec();
+        expected.push((vertex, bits));
+        expected.sort_by_key(|n| n.0);
+        let found: Vec<(usize, [u64; 3])> = near.iter().map(|n| (n.0, n.3)).collect();
+        assert_eq!(found, expected, "{name}: the vertices near the seam of {added:?}");
+        for &(v, d, tol, _) in &near {
+            if v == vertex {
+                assert!(d <= bound, "{name}: vertex {v} is {d:e} off the seam, past {bound:e}");
+            }
+            assert!(d <= tol, "{name}: vertex {v} is {d:e} off the seam, past its tolerance {tol:e}");
+        }
+
+        shares_the_target_boundary(name, &target, &body);
+        // the target's own failures: the cone faces 4, 5 and 7 near their seams (edgeuse
+        // 142's trim failures went with the clamped-sliver drop rule, #21353, which leaves
+        // the trim's folded end span out on read)
+        let target_failures = failures(&mut target.clone_standing_for_self().unwrap());
+        assert_eq!(
+            target_failures,
+            [(SEAM, Some((FACE, 4))), (SEAM, Some((FACE, 5))), (SEAM, Some((FACE, 7)))],
+            "{name}: the target's Level 2 failures"
+        );
+
+        // the kept boundary adds exactly one failure: the seam near miss on that patch
+        let mut with_one: Vec<Failure> = row.main_failures.to_vec();
+        with_one.push((SEAM, Some((FACE, row.added_on as u64))));
+        with_one.sort();
+        assert_eq!(failures(&mut body), with_one, "{name}: Level 2 failures");
+
+        // on main the two patches were one face (main_sphere, holding the same vertices
+        // at the same bits: printed by a one-off probe on main a2b7ec60e2); on e4
+        // main's merged patch already fails the seam check, so the near-seam placement is
+        // main's, which the kept boundary exposes on e1 too and does not cause
+        let main_fails_seam = row.main_failures.contains(&(SEAM, Some((FACE, row.main_sphere))));
+        assert_eq!(main_fails_seam, name.contains("-e4-"), "{name}: main's merged patch");
+    }
+
+    #[test]
+    fn e1_r0_1() {
+        check(&ROWS[0]);
+    }
+
+    #[test]
+    fn e1_r0_5() {
+        check(&ROWS[1]);
+    }
+
+    #[test]
+    fn e4_r0_1() {
+        check(&ROWS[2]);
+    }
+
+    #[test]
+    fn e4_r0_5() {
+        check(&ROWS[3]);
     }
 }

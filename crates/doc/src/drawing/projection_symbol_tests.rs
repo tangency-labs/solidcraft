@@ -111,14 +111,14 @@ fn a_chain_line_crosses_on_a_long_dash() {
 }
 
 /// The built-in block on A3 draws its lines, the same in either projection, and then its one
-/// symbol, 3.5 mm, centred in its projection cell's value box, (381.175, 45.175) to (408.65, 54.15),
-/// in the drawing's projection: 22 records of lines and 15 of the symbol (2 centre lines of one
+/// symbol, 3.5 mm, centred in its projection cell's value box, (381.175, 45.175) to (408.65, 54.325),
+/// in the drawing's projection: 34 records of lines and 15 of the symbol (2 centre lines of one
 /// piece, 3 outlines of 4, 2 and 2), and the scene takes them.
 #[test]
 fn the_built_in_block_draws_its_symbol_in_the_drawings_projection() {
     let sheet = DrawingBorderProfile::iso().layout(&Sheet::standard(PaperSize::A3, Orientation::Landscape)).unwrap();
     let layout = default_block().layout(&sheet).unwrap();
-    let centre = Aabb2 { min: Vec2::new(381.175, 45.175), max: Vec2::new(408.65, 54.15) }.center();
+    let centre = Aabb2 { min: Vec2::new(381.175, 45.175), max: Vec2::new(408.65, 54.325) }.center();
     let lines = layout.paper(7);
     let [first, third] = [Projection::First, Projection::Third].map(|projection| title_block_paper(&layout, 7, projection));
     for (group, projection) in [(first, Projection::First), (third, Projection::Third)] {
@@ -127,7 +127,7 @@ fn the_built_in_block_draws_its_symbol_in_the_drawings_projection() {
         let symbol = projection_symbol(projection, 3.5, centre).map(|item| pieces(&item));
         let drawn: Vec<_> = group.items[lines.items.len()..].iter().map(pieces).collect();
         assert!(same_pieces(&drawn, &symbol), "{projection:?}: {drawn:?}");
-        assert_eq!((lines.records(), group.records()), (22, 37), "{projection:?}");
+        assert_eq!((lines.records(), group.records()), (34, 49), "{projection:?}");
         Scene::new(Vec2::new(420.0, 297.0), vec![group]).validate().unwrap();
     }
 }

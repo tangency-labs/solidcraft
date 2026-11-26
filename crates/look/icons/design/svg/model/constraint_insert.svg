@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Insert constraint</title>
+  <path d="M14 41.28L14 48.28A18 10.39 0 0 0 50 48.28L50 41.28Z" fill="#b8c3cf"/>
+  <path d="M38.3 41.28L38.3 58.01A18 10.39 0 0 0 50 48.28L50 41.28Z" fill="#8e9faf"/>
+  <path d="M14 41.28L14 48.28A18 10.39 0 0 0 50 48.28L50 41.28Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M14 41.28A18 10.39 0 1 0 50 41.28A18 10.39 0 1 0 14 41.28Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M24 41.28A8 4.62 0 1 0 40 41.28A8 4.62 0 1 0 24 41.28Z" fill="#34465b"/>
+  <path d="M26 20.28L26 32.28A6 3.46 0 0 0 38 32.28L38 20.28Z" fill="#b8c3cf"/>
+  <path d="M34.1 20.28L34.1 35.52A6 3.46 0 0 0 38 32.28L38 20.28Z" fill="#8e9faf"/>
+  <path d="M26 20.28L26 32.28A6 3.46 0 0 0 38 32.28L38 20.28Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M26 20.28A6 3.46 0 1 0 38 20.28A6 3.46 0 1 0 26 20.28Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 7.28L32 22.28" fill="none" stroke="#ffffff" stroke-width="6.45" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 29.28L28 21.28L36 21.28Z" fill="#ffffff" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 7.28L32 22.28" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 29.28L28 21.28L36 21.28Z" fill="#236ead"/>
+</svg>

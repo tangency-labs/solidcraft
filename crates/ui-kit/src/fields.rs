@@ -189,17 +189,38 @@ pub fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -> bool 
     let (enter, _, response) = editor_reserving(ui, value, "", true, reserve);
     ui.ctx().data_mut(|d| d.insert_temp(focus_id, response.id));
     let row = label(ui).to_owned();
-    if let Some(next) = keyboard_step.or_else(|| step_arrows(ui, response.rect, reserve, &row, |delta| step_count(value, delta, limits))) {
+    if let Some(next) = keyboard_step.or_else(|| step_arrows(ui, response.rect, reserve, &row, "1", |delta| step_count(value, delta, limits))) {
         *value = next;
     }
     enter
 }
 
+/// Expression editor with up and down step arrows at its right edge, like [`count_field`] for
+/// any value: `next` says what the field's own text steps to for an arrow (`1` up, `-1` down),
+/// and None on an arrow disables it, so an expression can be left as typed. `step` names the
+/// amount the arrows add, for their accessible name. Returns accepted Enter. Tokens: field
+/// tokens, `control_border`, `selected_bg`, `form_ink`, `form_dim`.
+pub fn stepped_field(ui: &mut Ui, value: &mut String, hint: &str, step: &str, next: impl Fn(&str, i64) -> Option<String>) -> bool {
+    let t = Tokens::get();
+    let reserve = (t.control_height * 0.75).round();
+    let (enter, _, response) = editor_reserving(ui, value, hint, true, reserve);
+    let row = label(ui).to_owned();
+    let stepped = {
+        let text = value.as_str();
+        step_arrows(ui, response.rect, reserve, &row, step, |delta| next(text, delta))
+    };
+    if let Some(stepped) = stepped {
+        *value = stepped;
+    }
+    enter
+}
+
 /// The up and down step arrows at the right edge of a field (`rect`), in a column `width` wide:
-/// `next(1)` and `next(-1)` say what each arrow steps to, None disabling it. Returns what the
-/// clicked arrow stepped to. Tokens: `control_border`, `control_radius`, `selected_bg`,
-/// `form_ink`, `form_dim`.
-fn step_arrows<V>(ui: &mut Ui, rect: egui::Rect, width: f32, row: &str, next: impl Fn(i64) -> Option<V>) -> Option<V> {
+/// `next(1)` and `next(-1)` say what each arrow steps to, None disabling it, and `step` names
+/// the amount for the button's accessible name ("1" for a whole number, "10 deg" for an angle).
+/// Returns what the clicked arrow stepped to. Tokens: `control_border`, `control_radius`,
+/// `selected_bg`, `form_ink`, `form_dim`.
+fn step_arrows<V>(ui: &mut Ui, rect: egui::Rect, width: f32, row: &str, step: &str, next: impl Fn(i64) -> Option<V>) -> Option<V> {
     let t = Tokens::get();
     let column = egui::Rect::from_min_max(egui::pos2((rect.right() - width).max(rect.left()), rect.top()), rect.max);
     let painter = ui.painter_at(rect);
@@ -227,8 +248,8 @@ fn step_arrows<V>(ui: &mut Ui, rect: egui::Rect, width: f32, row: &str, next: im
             ink,
             egui::Stroke::NONE,
         ));
-        let sign = if delta > 0 { "+1" } else { "−1" };
-        arrow.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, format!("{} {sign}", solidcraft_ui_text::tr_label(row))));
+        let sign = if delta > 0 { "+" } else { "−" };
+        arrow.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, format!("{} {sign}{step}", solidcraft_ui_text::tr_label(row))));
         solidcraft_ui_registry::publish_handle(&format!("dialog:{row} {name}"), half.center());
         if enabled && arrow.clicked() {
             stepped = next;
@@ -459,6 +480,8 @@ pub struct SearchOption<'a> {
 }
 
 /// Searchable dropdown with an optional custom-value action and loading message.
+/// Focuses the search box on opening. The editor keeps its usual key handling; Escape closes
+/// the popup regardless of which widget has focus.
 /// Returns a chosen value; callers keep domain-specific validation and discovery.
 /// Tokens: control_height, space_24, font_label and scope control tokens.
 pub fn searchable_dropdown(
@@ -470,13 +493,46 @@ pub fn searchable_dropdown(
     custom: Option<&str>,
     pending: Option<&str>,
 ) -> Option<String> {
-    searchable_dropdown_with(ui, id, current, filter, options, SearchMenu { custom, pending, icon: None })
+    searchable_dropdown_with(
+        ui,
+        id,
+        current,
+        filter,
+        options,
+        SearchMenu { custom, pending, icon: None, fit_contents: false, keyboard_selection: false },
+    )
+}
+
+/// Searchable dropdown whose list fits its matches up to the usual scrolling limit.
+/// Keeps a loading status below the list, inside the popup, using [`searchable_dropdown`] theme tokens.
+/// Opting into `keyboard_selection` lets Up/Down highlight a match and Enter choose it (the
+/// current value when unfiltered, otherwise the first match before an arrow is used). Escape
+/// closes only the popup. Leave it off to keep the editor's usual key handling.
+pub fn searchable_dropdown_fitting(
+    ui: &mut Ui,
+    id: &str,
+    current: &str,
+    filter: &mut String,
+    options: &[SearchOption<'_>],
+    pending: Option<&str>,
+    keyboard_selection: bool,
+) -> Option<String> {
+    searchable_dropdown_with(
+        ui,
+        id,
+        current,
+        filter,
+        options,
+        SearchMenu { custom: None, pending, icon: None, fit_contents: true, keyboard_selection },
+    )
 }
 
 struct SearchMenu<'a> {
     custom: Option<&'a str>,
     pending: Option<&'a str>,
     icon: Option<&'static str>,
+    fit_contents: bool,
+    keyboard_selection: bool,
 }
 
 fn searchable_dropdown_with(
@@ -487,7 +543,7 @@ fn searchable_dropdown_with(
     options: &[SearchOption<'_>],
     menu: SearchMenu<'_>,
 ) -> Option<String> {
-    let SearchMenu { custom, pending, icon } = menu;
+    let SearchMenu { custom, pending, icon, fit_contents, keyboard_selection } = menu;
     super::settings_search::note_current(ui, current);
     let mut chosen = None;
     let row = label(ui).to_owned();
@@ -501,13 +557,69 @@ fn searchable_dropdown_with(
     } else {
         combo.icon(dropdown_arrow)
     };
+    let state = ui.make_persistent_id(egui::IdSalt::new(id)).with("search_keyboard");
+    if fit_contents {
+        let query = filter.to_lowercase();
+        let layout = (options.iter().filter(|option| option.label.to_lowercase().contains(&query)).count(), pending.is_some());
+        let changed = ui.data_mut(|data| {
+            let previous = data.get_temp::<(usize, bool)>(state.with("layout"));
+            data.insert_temp(state.with("layout"), layout);
+            let changed = previous.is_some_and(|previous| previous != layout);
+            if changed {
+                // The popup is measured again below, and the editor can lose the keyboard in that
+                // pass; ask for focus again instead of treating the earlier request as final.
+                data.remove::<bool>(state.with("focused"));
+            }
+            changed
+        });
+        let widget = ui.make_persistent_id(egui::IdSalt::new(id));
+        let popup = widget.with("popup");
+        // The native combo's outer scroll area otherwise keeps the last frame's height,
+        // preventing a short list from growing when the filter or loading state changes.
+        if changed
+            && egui::ComboBox::is_open(ui.ctx(), widget)
+            && let Some(mut area) = egui::containers::AreaState::load(ui.ctx(), popup)
+        {
+            area.size = None;
+            ui.memory_mut(|memory| memory.areas_mut().set_state(egui::LayerId::new(egui::Order::Foreground, popup), area));
+            ui.ctx().request_discard("searchable dropdown contents changed");
+        }
+    }
     let popup = super::container::show_combo(ui, ui.make_persistent_id(egui::IdSalt::new(id)), combo, |ui| {
+        // Opted-in pickers keep editor focus while arrows move the highlighted result.
+        // Only those pickers consume Enter before it reaches an enclosing dialog.
+        let search_id = state.with("editor");
+        let focused = ui.memory(|memory| memory.has_focus(search_id));
+        let (up, down, enter, escape) = if keyboard_selection && focused {
+            ui.input_mut(|input| {
+                (
+                    input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
+                    input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
+                    input.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
+                    input.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
+                )
+            })
+        } else {
+            (false, false, false, false)
+        };
+        if escape {
+            ui.close();
+        }
         let search = ui.add(
             text_input(egui::TextEdit::singleline(filter))
-                .id_salt(format!("{id}_search"))
+                .id(search_id)
+                .char_limit(1024)
                 .hint_text(solidcraft_ui_text::tr_label("Search"))
                 .desired_width(f32::INFINITY),
         );
+        if !ui.data(|data| data.get_temp::<bool>(state.with("focused"))).unwrap_or(false) {
+            if search.has_focus() {
+                ui.data_mut(|data| data.insert_temp(state.with("focused"), true));
+            } else {
+                search.request_focus();
+                ui.ctx().request_repaint();
+            }
+        }
         // Preferences types into its own search only while no field has the keyboard.
         if search.has_focus() {
             super::settings_search::note_key_sink(ui.ctx());
@@ -516,21 +628,55 @@ fn searchable_dropdown_with(
         if let Some(custom) = custom {
             let response = ui.selectable_label(false, custom);
             solidcraft_ui_registry::publish_handle(&format!("dialog:{row} file"), response.rect.center());
-            if response.clicked() {
+            if response.clicked() || enter {
                 chosen = Some(filter.trim().to_owned());
                 ui.close();
             }
             return;
         }
         let query = filter.to_lowercase();
+        let visible: Vec<_> = options.iter().filter(|o| o.label.to_lowercase().contains(&query)).collect();
+        let cursor_id = state.with("cursor");
+        let initial = if query.is_empty() { visible.iter().position(|option| option.label == current) } else { None };
+        // Only deliberate arrow navigation is stored. Until then, discovery can add the
+        // current value and update its automatic highlight without leaving a stale cursor.
+        let mut cursor = initial;
+        if keyboard_selection {
+            let navigated = ui.data(|data| data.get_temp::<String>(cursor_id));
+            if !search.changed() {
+                cursor = navigated.as_ref().and_then(|value| visible.iter().position(|option| option.value == value.as_str())).or(initial);
+            }
+            if search.changed() || navigated.as_ref().is_some_and(|value| !visible.iter().any(|option| option.value == value.as_str())) {
+                ui.data_mut(|data| data.remove::<String>(cursor_id));
+            }
+        }
+        if down && !visible.is_empty() {
+            cursor = Some(cursor.map_or(0, |index| (index + 1).min(visible.len().saturating_sub(1))));
+        }
+        if up && !visible.is_empty() {
+            cursor = Some(cursor.map_or(visible.len().saturating_sub(1), |index| index.saturating_sub(1)));
+        }
+        if enter && let Some(option) = visible.get(cursor.unwrap_or(0)) {
+            chosen = Some(option.value.to_owned());
+            ui.close();
+        }
+        if (up || down)
+            && let Some(option) = cursor.and_then(|index| visible.get(index))
+        {
+            // Keep the chosen value when newly discovered options change the row order.
+            ui.data_mut(|data| data.insert_temp(cursor_id, option.value.to_owned()));
+        }
         egui::ScrollArea::vertical()
             .id_salt(format!("{id}_list"))
             .max_height(Tokens::get().space_24 * 10.0)
-            .min_scrolled_height(Tokens::get().space_24 * 10.0)
-            .auto_shrink([false, false])
+            .min_scrolled_height(if fit_contents { 0.0 } else { Tokens::get().space_24 * 10.0 })
+            .auto_shrink([false, fit_contents])
             .show(ui, |ui| {
-                for option in options.iter().filter(|o| o.label.to_lowercase().contains(&query)) {
-                    let response = ui.selectable_label(current == option.label, option.label);
+                for (index, option) in visible.iter().enumerate() {
+                    let response = ui.selectable_label(cursor.map_or(current == option.label, |cursor| cursor == index), option.label);
+                    if (up || down) && cursor == Some(index) {
+                        response.scroll_to_me(Some(egui::Align::Center));
+                    }
                     if let Some(handle) = option.handle {
                         solidcraft_ui_registry::publish_handle(handle, response.rect.center());
                     }
@@ -539,14 +685,23 @@ fn searchable_dropdown_with(
                         ui.close();
                     }
                 }
-                if let Some(pending) = pending {
+                if !fit_contents && let Some(pending) = pending {
                     ui.label(pending);
                 }
             });
+        if fit_contents && let Some(pending) = pending {
+            ui.label(pending);
+        }
     });
     let response = popup.response;
     if popup.inner.is_some() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         response.request_focus();
+    }
+    if !egui::ComboBox::is_open(ui.ctx(), response.id) {
+        ui.data_mut(|data| {
+            data.remove::<bool>(state.with("focused"));
+            data.remove::<String>(state.with("cursor"));
+        });
     }
     publish(ui, &response, egui::Role::ComboBox);
     chosen
@@ -1355,7 +1510,7 @@ pub fn cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, in
 
 /// Stable-ID cell/name editor with a caller-supplied character cap. Tokens: cell_editor tokens.
 pub fn bounded_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool, limit: usize) -> Response {
-    cell_editor_frame(ui, id, value, hint, invalid, limit, EditorSurface::Form)
+    cell_editor_frame(ui, id, value, hint, invalid, limit, EditorSurface::Form, 0.0)
 }
 
 enum EditorSurface {
@@ -1364,8 +1519,39 @@ enum EditorSurface {
     Shell,
 }
 
-fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool, limit: usize, surface: EditorSurface) -> Response {
+// A refused grid edit shares the editor's border, rather than adding an outer outline.
+pub(super) const CELL_INVALID: &str = "sc_cell_invalid";
+
+fn cell_invalid(ui: &Ui) -> bool {
+    ui.stack().iter().any(|node| node.tags().contains(CELL_INVALID))
+}
+
+fn paint_cell_border(ui: &Ui, response: &Response, rect: egui::Rect, invalid: bool) {
+    let t = Tokens::get();
+    let stroke = if invalid {
+        egui::Stroke::new(1.0, t.form_error)
+    } else if response.has_focus() {
+        egui::Stroke::new(1.5, solidcraft_theme::TabAccent::number_focus_color(ui))
+    } else {
+        egui::Stroke::new(1.0, if response.hovered() { t.control_border.lerp_to_gamma(t.form_dim, 0.35) } else { t.control_border })
+    };
+    ui.painter().rect_stroke(rect, t.control_radius, stroke, egui::StrokeKind::Inside);
+}
+
+/// Draw a table editor with the requested surface and space reserved for an in-field control.
+fn cell_editor_frame(
+    ui: &mut Ui,
+    id: egui::Id,
+    value: &mut String,
+    hint: &str,
+    invalid: bool,
+    limit: usize,
+    surface: EditorSurface,
+    reserve: f32,
+) -> Response {
     let mut t = Tokens::get();
+    let invalid = invalid || cell_invalid(ui);
+    let cell_frame = matches!(surface, EditorSurface::Form);
     let frame = !matches!(surface, EditorSurface::Frameless);
     if matches!(surface, EditorSurface::Shell) {
         t.control_fill = t.field;
@@ -1379,7 +1565,23 @@ fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, 
         .background_color(if invalid { t.form_error_fill } else { t.input_fill() })
         .text_color(if invalid { t.form_error } else { t.form_ink })
         .clip_text(true);
-    let editor = if invalid {
+    let editor = if reserve > 0.0 {
+        let inset = t.form_inset.round() as i8;
+        editor.margin(egui::Margin { left: inset, right: inset.saturating_add(reserve.round() as i8), top: 0, bottom: 0 })
+    } else {
+        editor
+    };
+    // Own the table border completely: egui's frame, accent overlay and bevel must not
+    // compete for the same corners. Keep the reserved in-field control's text margin.
+    let editor = if cell_frame {
+        let inset = t.form_inset.round() as i8;
+        editor.frame(
+            egui::Frame::NONE
+                .inner_margin(egui::Margin { left: inset, right: inset.saturating_add(reserve.round() as i8), top: 0, bottom: 0 })
+                .fill(if invalid { t.form_error_fill } else { t.input_fill() })
+                .corner_radius(t.control_radius),
+        )
+    } else if invalid {
         editor.frame(
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(t.form_inset as i8, 0))
@@ -1404,8 +1606,12 @@ fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, 
         info.current_text_value = Some(value.clone());
         info
     });
-    solidcraft_theme::TabAccent::number_focus(ui, &response);
-    t.input_bevel(ui, &response);
+    if cell_frame {
+        paint_cell_border(ui, &response, response.rect, invalid);
+    } else {
+        solidcraft_theme::TabAccent::number_focus(ui, &response);
+        t.input_bevel(ui, &response);
+    }
     response
 }
 
@@ -1416,6 +1622,7 @@ fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, 
 /// line: the caller commits on it as for the cell. Tokens: cell_editor tokens, popup frame.
 pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool, right: f32, note: (&str, bool)) -> Response {
     let t = Tokens::get();
+    let invalid = invalid || cell_invalid(ui);
     let cell = egui::Rect::from_min_size(ui.cursor().min, vec2(dimension(ui.available_width()), row_height()));
     let focused = ui.memory(|m| m.has_focus(id) || m.had_focus_last_frame(id));
     let font = egui::FontId::monospace(t.font_label);
@@ -1429,17 +1636,13 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
     ui.painter().rect_filled(rect, t.control_radius, if invalid { t.form_error_fill } else { t.input_fill() });
     let width = right - rect.left();
     let (ctx, enabled) = (ui.ctx().clone(), ui.is_enabled());
-    // The border sits outside the cell, so the text stays where it was.
-    let border = t.primary_border(t.dialog_border);
-    let area = Container::new(&ctx, Surface::Popup)
-        .area(id.with("wide"))
-        .fixed_pos(rect.min - vec2(border.width, border.width))
-        .constrain(true)
-        .order(egui::Order::Foreground);
+    let focus_color = solidcraft_theme::TabAccent::number_focus_color(ui);
+    let area = Container::new(&ctx, Surface::Popup).area(id.with("wide")).fixed_pos(rect.min).constrain(true).order(egui::Order::Foreground);
     let shown = area.show(&ctx, |ui| {
-        Container::popup_frame(ui.style())
+        ui.visuals_mut().selection.stroke.color = focus_color;
+        let frame = Container::popup_frame(ui.style())
             .fill(t.control_fill)
-            .stroke(border)
+            .stroke(egui::Stroke::NONE)
             .corner_radius(t.control_radius)
             .inner_margin(0.0)
             .show(ui, |ui| {
@@ -1451,6 +1654,12 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
                     .desired_width(width)
                     .hint_text(solidcraft_ui_text::tr_label(hint))
                     .font(font)
+                    .frame(
+                        egui::Frame::NONE
+                            .inner_margin(egui::Margin::symmetric(t.form_inset as i8, 0))
+                            .fill(if invalid { t.form_error_fill } else { t.input_fill() })
+                            .corner_radius(t.control_radius),
+                    )
                     .background_color(if invalid { t.form_error_fill } else { t.input_fill() })
                     .text_color(if invalid { t.form_error } else { t.form_ink });
                 let mut response = ui.add(editor);
@@ -1473,8 +1682,6 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
                 }
                 super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
                 publish(ui, &response, egui::Role::TextInput);
-                solidcraft_theme::TabAccent::number_focus(ui, &response);
-                t.input_bevel(ui, &response);
                 let (text, error) = note;
                 if !text.is_empty() {
                     ui.add_space(t.space_2);
@@ -1485,8 +1692,9 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
                     ui.add_space(t.space_2);
                 }
                 response
-            })
-            .inner
+            });
+        paint_cell_border(ui, &frame.inner, frame.response.rect, invalid);
+        frame.inner
     });
     let response = shown.inner;
     response.widget_info(|| {
@@ -1494,6 +1702,158 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
         info.current_text_value = Some(value.clone());
         info
     });
+    response
+}
+
+/// Keep wrapped editing visually multiline while storing every pasted line ending as one space.
+struct SingleLineBuffer<'a>(&'a mut String);
+
+impl egui::TextBuffer for SingleLineBuffer<'_> {
+    fn type_id(&self) -> std::any::TypeId {
+        std::any::TypeId::of::<SingleLineBuffer<'static>>()
+    }
+
+    fn is_mutable(&self) -> bool {
+        true
+    }
+
+    fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    fn insert_text(&mut self, text: &str, at: egui::text::CharIndex) -> usize {
+        self.0.insert_text(&text.replace("\r\n", " ").replace(['\r', '\n'], " "), at)
+    }
+
+    fn delete_char_range(&mut self, range: std::ops::Range<egui::text::CharIndex>) {
+        self.0.delete_char_range(range);
+    }
+}
+
+/// A grid cell's text and expand control before its editor opens. The button's response
+/// lets the grid start its normal edit while the host requests the expanded view.
+/// Tokens: cell_editor, form_close_size, font_label.
+pub fn expandable_cell_preview(ui: &mut Ui, id: egui::Id, value: &str, handle: &str) -> Response {
+    let t = Tokens::get();
+    let (rect, response) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height()), egui::Sense::hover());
+    ui.painter().rect_filled(rect, t.control_radius, t.input_fill());
+    let text = egui::Rect::from_min_max(rect.min, egui::pos2((rect.right() - t.form_close_size).max(rect.left()), rect.bottom()));
+    paint_text(ui, text.shrink2(vec2(t.form_inset, 0.0)), value, egui::FontId::monospace(t.font_label), t.form_ink, false);
+    solidcraft_ui_registry::publish_target(handle, rect);
+    response.union(expand_cell_button(ui, id, rect, handle, false))
+}
+
+fn expand_cell_button(ui: &mut Ui, id: egui::Id, rect: egui::Rect, handle: &str, open: bool) -> Response {
+    let t = Tokens::get();
+    let button_rect =
+        egui::Rect::from_center_size(egui::pos2(rect.right() - t.form_close_size / 2.0, rect.center().y), vec2(t.form_close_size, t.form_close_size));
+    let button = ui
+        .scope_builder(egui::UiBuilder::new().id_salt(id.with("expand_button")).max_rect(button_rect), |ui| {
+            ui.set_clip_rect(ui.clip_rect().intersect(rect.shrink(t.control_border_stroke(t.control_border).width.max(1.0))));
+            super::compact_button(ui, "…", solidcraft_ui_text::tr("ui.expand_text_editor"), true, open)
+        })
+        .inner;
+    button.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), solidcraft_ui_text::tr("ui.expand_text_editor")));
+    solidcraft_ui_registry::publish_target(&format!("{handle}:expand"), button.rect);
+    button
+}
+
+/// A compact single-line cell with an explicit, wrapped 30-character/five-row editor.
+/// The returned editor response retains the caller's change and focus-loss commit handling.
+/// Its rectangle includes the overlay frame and scrollbar while expanded.
+/// Tokens: cell_editor, form_close_size, popup frame and font_label.
+pub fn expandable_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, handle: &str) -> Response {
+    let t = Tokens::get();
+    let open_id = id.with("expanded");
+    let focused = ui.memory(|m| m.has_focus(id) || m.had_focus_last_frame(id));
+    let mut open = focused && ui.data(|d| d.get_temp::<bool>(open_id).unwrap_or(false));
+    let width = dimension(ui.available_width());
+    let anchor = egui::Rect::from_min_size(ui.cursor().min, vec2(width, row_height()));
+    if open && !ui.is_rect_visible(anchor) {
+        ui.memory_mut(|m| m.surrender_focus(id));
+        open = false;
+    }
+    let mut response = if open {
+        let (rect, response) = ui.allocate_exact_size(anchor.size(), egui::Sense::hover());
+        ui.painter().rect_filled(rect, t.control_radius, t.input_fill());
+        let text = egui::Rect::from_min_max(rect.min, egui::pos2((rect.right() - t.form_close_size).max(rect.left()), rect.bottom()));
+        paint_text(ui, text.shrink2(vec2(t.form_inset, 0.0)), value, egui::FontId::monospace(t.font_label), t.form_ink, false);
+        response
+    } else {
+        cell_editor_frame(ui, id, value, hint, false, usize::MAX, EditorSurface::Form, t.form_close_size)
+    };
+    let button = expand_cell_button(ui, id, response.rect, handle, open);
+    // Focus leaves a field on pointer press, before the button reports a released click.
+    let opening = (button.clicked() || button.is_pointer_button_down_on()) && !open;
+    open |= opening;
+    if open && ui.is_rect_visible(response.rect) {
+        let font = egui::FontId::monospace(t.font_label);
+        let text_width = ui.fonts_mut(|f| f.layout_no_wrap("M".repeat(30), font.clone(), t.form_ink)).size().x;
+        let width = (text_width + 2.0 * t.form_inset).max(width);
+        let height = (ui.fonts_mut(|f| f.row_height(&font)) + ui.spacing().extra_text_line_spacing) * 5.0 + t.space_8;
+        let ctx = ui.ctx().clone();
+        let shown = Container::new(&ctx, Surface::Popup)
+            .area(id.with("expanded_popup"))
+            .fixed_pos(response.rect.min)
+            .constrain(true)
+            .order(egui::Order::Foreground)
+            .show(&ctx, |ui| {
+                Container::popup_frame(ui.style())
+                    .fill(t.control_fill)
+                    .show(ui, |ui| {
+                        ui.set_width(width);
+                        egui::ScrollArea::vertical()
+                            .max_height(height.min(ctx.content_rect().height() - t.space_24))
+                            .show(ui, |ui| {
+                                let mut buffer = SingleLineBuffer(value);
+                                let mut response = ui.add(
+                                    text_input(egui::TextEdit::multiline(&mut buffer))
+                                        .id(id)
+                                        .font(font)
+                                        .hint_text(solidcraft_ui_text::tr_label(hint))
+                                        .align(egui::Align2::LEFT_TOP)
+                                        .desired_width(width)
+                                        .desired_rows(5)
+                                        .return_key(None)
+                                        .lock_focus(false)
+                                        .text_color(t.form_ink)
+                                        .background_color(t.input_fill()),
+                                );
+                                if opening || button.clicked() || ui.is_sizing_pass() {
+                                    response.request_focus();
+                                }
+                                super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
+                                let enter = ui.input(|i| i.raw.events.iter().any(|event| matches!(event,
+                                    egui::Event::Key { key: egui::Key::Enter, pressed: true, repeat: false, modifiers, .. } if *modifiers == egui::Modifiers::NONE
+                                )));
+                                if response.has_focus() && enter {
+                                    response.surrender_focus();
+                                }
+                                publish(ui, &response, egui::Role::TextInput);
+                                response
+                            })
+                            .inner
+                    })
+                    .inner
+            });
+        response = shown.inner.with_new_rect(shown.response.rect);
+        if egui::Popup::is_id_open(&ctx, egui::Popup::default_response_id(&response))
+            || (response.lost_focus() && shown.response.contains_pointer() && ui.input(|i| i.pointer.any_down()))
+        {
+            response.request_focus();
+        }
+        solidcraft_ui_registry::publish_target(&format!("{handle}:popup"), response.rect.intersect(shown.response.rect));
+        open = opening || ctx.memory(|m| m.has_focus(id));
+    } else {
+        open = false;
+    }
+    ui.data_mut(|d| d.insert_temp(open_id, open));
+    response.widget_info(|| {
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), solidcraft_ui_text::tr_label(hint));
+        info.current_text_value = Some(value.clone());
+        info
+    });
+    solidcraft_ui_registry::publish_target(handle, response.rect);
     response
 }
 
@@ -1542,14 +1902,21 @@ pub fn shell_search_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &
         for state in [&mut visuals.widgets.inactive, &mut visuals.widgets.hovered, &mut visuals.widgets.active] {
             state.bg_stroke = egui::Stroke::new(1.0, t.border);
         }
-        cell_editor_frame(ui, id, value, hint, false, usize::MAX, EditorSurface::Shell)
+        cell_editor_frame(ui, id, value, hint, false, usize::MAX, EditorSurface::Shell, 0.0)
     })
     .inner
 }
 
 /// Compact icon action opening the shared searchable menu.
 pub fn searchable_icon_dropdown(ui: &mut Ui, icon: &'static str, label: &str, filter: &mut String, options: &[SearchOption<'_>]) -> Option<String> {
-    searchable_dropdown_with(ui, "icon_search_menu", label, filter, options, SearchMenu { custom: None, pending: None, icon: Some(icon) })
+    searchable_dropdown_with(
+        ui,
+        "icon_search_menu",
+        label,
+        filter,
+        options,
+        SearchMenu { custom: None, pending: None, icon: Some(icon), fit_contents: false, keyboard_selection: false },
+    )
 }
 
 /// The filter at the top of a long menu: a search glyph, a frameless editor and a rule under
@@ -1969,7 +2336,7 @@ pub fn whole_number_field<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, r
         .inner;
     let row = label(ui).to_owned();
     let (now, lo, hi) = (value.to_f64(), range.start().to_f64(), range.end().to_f64());
-    if let Some(next) = step_arrows(ui, response.rect, reserve, &row, |delta| step_whole(now, lo, hi, delta)) {
+    if let Some(next) = step_arrows(ui, response.rect, reserve, &row, "1", |delta| step_whole(now, lo, hi, delta)) {
         *value = T::from_f64(next);
         response.mark_changed();
     }
@@ -2173,7 +2540,7 @@ pub fn library_cell(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, m
     let response = ui
         .scope_builder(egui::UiBuilder::new().max_rect(field).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
             ui.set_clip_rect(ui.clip_rect().intersect(field));
-            cell_editor_frame(ui, id, value, hint, false, usize::MAX, EditorSurface::Frameless)
+            cell_editor_frame(ui, id, value, hint, false, usize::MAX, EditorSurface::Frameless, 0.0)
         })
         .inner;
     let button = egui::Rect::from_min_max(egui::pos2(split, rect.top()), rect.max);
