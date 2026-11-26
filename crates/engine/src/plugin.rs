@@ -629,6 +629,7 @@ pub fn run_workspace_hook(
                     sketch_exits: vec![],
                     view: None,
                     param_warnings: vec![],
+                    messages: vec![],
                 },
                 PanelUpdates { plugin, approval, ..Default::default() },
             ));
