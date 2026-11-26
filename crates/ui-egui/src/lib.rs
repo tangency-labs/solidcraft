@@ -75,6 +75,7 @@ pub mod dialogs_plastic;
 pub mod dialogs_pulley;
 pub mod dialogs_rotate_member;
 pub mod dialogs_save_mesh;
+pub mod dialogs_shaft_spline;
 pub mod dialogs_sheet;
 pub mod dialogs_surface;
 pub mod dialogs_sweep;
@@ -3790,9 +3791,22 @@ impl SolveApp {
     }
 
     /// Is the browser's Origin folder shown? The design keeps it once it is toggled; until then
-    /// the Hide Origin by Default preference decides.
+    /// the Origin visibility preference decides. Automatic follows the model as shown, so it saves
+    /// nothing in the design: undoing the first body, or rolling back before it, shows the Origin
+    /// again. While a dialog edits a feature it follows the design from before that edit's own
+    /// rollback, so editing the first body leaves the Origin hidden.
     pub fn origin_shown(&self) -> bool {
-        !self.session.visibility.origin_hidden.unwrap_or(self.preferences.hide_origin)
+        if let Some(hidden) = self.session.visibility.origin_hidden {
+            return !hidden;
+        }
+        match self.preferences.hide_origin {
+            prefs::OriginDisplay::Shown => true,
+            prefs::OriginDisplay::Automatic => {
+                let session = self.editing_state.as_ref().map_or(&self.session, |editing| &editing.original);
+                session.model.state().bodies.is_empty()
+            }
+            prefs::OriginDisplay::Hidden => false,
+        }
     }
 
     /// Show or hide the browser's Origin folder (saved with the design).

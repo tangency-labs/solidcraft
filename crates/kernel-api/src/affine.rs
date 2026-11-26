@@ -133,4 +133,17 @@ pub trait Affine: Backend {
     /// The circle of a loop of arcs making one directed turn on one stored support: its centre
     /// and radius.
     fn loop_circle(&self, lp: &Loop2) -> Option<(Vec2, f64)>;
+    /// Whether `lp` holds `p` by the even-odd rule, decided exactly: `None` when `p` is on the
+    /// loop or within rounding of it.
+    fn loop_holds(&self, lp: &Loop2, p: Vec2) -> Option<bool>;
+    /// How far `p` is from `seg`, exactly, for a line or a circular arc: the foot clamped to a
+    /// line's ends; on an arc the radial distance where `p` is within its angles, else the
+    /// distance to the nearer end. `None` for a free-form segment or a point that is no number.
+    fn segment_distance(&self, seg: &Seg2, p: Vec2) -> Option<f64>;
+    /// Whether the circles `a` and `b` (centre and radius) are one hole: their centres and their
+    /// radii each less than `tol` apart.
+    fn same_circle(&self, a: (Vec2, f64), b: (Vec2, f64), tol: f64) -> bool;
+    /// Where a note `height` high stands to name the circle `at` (centre and radius), level with
+    /// its centre and clear of its rim on the right: its lower left corner.
+    fn note_beside(&self, at: (Vec2, f64), height: f64) -> Vec2;
 }

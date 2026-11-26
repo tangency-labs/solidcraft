@@ -24,6 +24,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::ViewNavigator(_) => Some("view.navigator"),
         Kind::InsertDrawing(p) => Some(if p.command.ends_with("dxf") { "sketch.insert_dxf" } else { "sketch.insert_svg" }),
         Kind::InsertAirfoil(_) => Some("sketch.insert_airfoil"),
+        Kind::ShaftSpline(_) => Some(crate::dialogs_shaft_spline::COMMAND),
         Kind::Sketch => Some("sketch.create"),
         Kind::SketchIntersect { .. } => Some("sketch.intersect"),
         Kind::SketchProject { .. } => Some("sketch.project"),
@@ -86,6 +87,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_sheet::Sm::Recognize { .. } => Some("sheet.recognize"),
             crate::dialogs_sheet::Sm::Rules { .. } => Some("sheet.manage_rules"),
             crate::dialogs_sheet::Sm::FlatPattern { .. } => Some("sheet.flat_pattern"),
+            crate::dialogs_sheet::Sm::Hardware { .. } => Some("sheet.hardware"),
             _ => k.simple_metadata().map(|(command, _)| command),
         },
         Kind::Frame(_) => Some("frame.member"),
@@ -494,6 +496,11 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         crate::dialogs_move::type_row(app, d, ui);
         let n = d.inputs.len();
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 1..n);
+    } else if matches!(d.kind, Kind::ShaftSpline(_)) {
+        // The face a part's teeth start from shows once the part's round face is picked (#17693).
+        for rows in crate::dialogs_shaft_spline::shown_picks(&d.inputs) {
+            input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, rows);
+        }
     } else if matches!(d.kind, Kind::Frame(_)) {
         // Corner Overrides shows among Frame Member's own rows, under the corner settings.
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..2);
@@ -523,6 +530,18 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::ViewNavigator(form) => crate::view_gizmo::rows(app, ui, form, &d.inputs),
         Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::rows(ui, p),
         Kind::InsertAirfoil(a) => crate::dialogs_insert_airfoil::rows(ui, a),
+        Kind::ShaftSpline(k) => {
+            // A face taken by a row it does not belong in goes to its own row (a bore out of Shaft, a shaft out
+            // of Bore, a start face out of a round face's row). After any change of the picks the row that
+            // waits next takes the next click: the face a picked part's teeth start from, before any other
+            // free row.
+            if crate::dialogs_shaft_spline::sort_picks(app, k, &mut d.inputs).is_some()
+                && let Some(next) = crate::dialogs_shaft_spline::next_pick(&d.inputs)
+            {
+                d.active = next;
+            }
+            enter |= crate::dialogs_shaft_spline::rows(app, ui, k, &d.inputs)
+        }
         Kind::Sketch => {
             let edge_on = edge_on_origin_planes(&app.cam);
             if !edge_on.is_empty() {
@@ -597,6 +616,8 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             offset_start,
             symmetric_offset,
             all,
+            all2,
+            to_offset2,
             thin,
             wall,
             wall_side,
@@ -658,7 +679,22 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 enter |= expr_row(ui, "To Offset", to_offset);
             }
             if two_sided(*direction) {
-                enter |= expr_row(ui, "Distance 2", distance2);
+                // The second side takes the extent types of the first (#18691).
+                let cur2 = if object_on(&d.inputs, TO_OBJECT2) { 1 } else { usize::from(*all2) * 2 };
+                let mut ext2 = cur2;
+                form_row(ui, "ui.extrude_extent_type_2", |ui| {
+                    combo(ui, "ex_ext2", &["Distance", "To Object", "All"], &mut ext2);
+                    *all2 = ext2 == 2;
+                    set_object(&mut d.inputs, &mut d.active, TO_OBJECT2, ext2 == 1);
+                });
+                match ext2 {
+                    0 => enter |= expr_row(ui, "Distance 2", distance2),
+                    1 => enter |= expr_row(ui, "ui.extrude_to_offset_2", to_offset2),
+                    _ => {}
+                }
+            } else {
+                *all2 = false;
+                set_object(&mut d.inputs, &mut d.active, TO_OBJECT2, false);
             }
             // A choice made by hand sticks, the shown one included (#6901): Extrude's own choice
             // stops before the next frame makes it.
@@ -859,11 +895,13 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::PatternRect { .. } => {
             enter |= pattern_direction_group(app, d, ui, 0);
             enter |= pattern_direction_group(app, d, ui, 1);
+            pattern_join_option(ui, d);
         }
         Kind::PatternCirc { count, angle } => {
             enter |= quantity_row(ui, &app.session.doc, "Quantity", count);
             enter |= expr_row(ui, "Total angle", angle);
             solid_pattern_alignment_row(ui, &mut d.extra, 0);
+            pattern_join_option(ui, d);
         }
         Kind::Hole { kind, opts, cb_diameter, cb_depth, cs_diameter, cs_angle, .. } => {
             let doc = &app.session.doc;
@@ -986,6 +1024,16 @@ fn extra_segments(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>,
 }
 
 /// Only user changes add optional JSON keys, preserving no-op feature edits.
+/// A pattern of bodies or features: Join bodies if possible, which joins the copies with what they
+/// copy where they touch (#21625). A pattern of components places occurrences, which never join.
+fn pattern_join_option(ui: &mut egui::Ui, d: &mut Dialog) {
+    if d.inputs.first().is_some_and(|i| i.items.iter().any(|x| matches!(x, Sel::Occurrence { .. }))) {
+        d.extra.remove("join");
+        return;
+    }
+    extra_options(ui, "pattern_join", &mut d.extra, &[("Join bodies if possible", "join")]);
+}
+
 fn extra_options(ui: &mut egui::Ui, id: &str, extra: &mut serde_json::Map<String, Value>, choices: &[(&str, &str)]) {
     let mut values: Vec<bool> = choices.iter().map(|(_, key)| extra.get(*key).and_then(Value::as_bool).unwrap_or(false)).collect();
     let before = values.clone();

@@ -71,9 +71,12 @@ fn schemas_and_the_key_check_agree() {
             "thickness2",
             "thin",
             "through_all",
+            "through_all2",
             "to",
+            "to2",
             "to_body_apart",
             "to_offset",
+            "to_offset2",
             "touching",
         ],
     );
@@ -146,7 +149,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<PlaneAtAngleParams>(), &["angle", "axis", "base", "direction_only", "name", "participants", "pivot"]);
     assert_keys(
         input_schema_for::<MirrorParams>(),
-        &["bodies", "body_name", "body_names", "combine", "features", "name", "participants", "plane", "touching"],
+        &["bodies", "body_name", "body_names", "combine", "features", "name", "participants", "placements", "plane", "touching"],
     );
     assert_keys(
         input_schema_for::<FilletParams>(),
@@ -1272,7 +1275,21 @@ fn ring_with(key: &str, value: Value) -> Value {
 fn circular_pattern_schema_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<PatternCircularParams>(),
-        &["alignment", "angle", "axis", "bodies", "body_name", "body_names", "components", "count", "features", "name", "participants", "reversed"],
+        &[
+            "alignment",
+            "angle",
+            "axis",
+            "bodies",
+            "body_name",
+            "body_names",
+            "components",
+            "count",
+            "features",
+            "join",
+            "name",
+            "participants",
+            "reversed",
+        ],
     );
 }
 
@@ -1409,6 +1426,7 @@ fn pattern_schemas_and_the_key_check_agree() {
             "extent1",
             "extent2",
             "features",
+            "join",
             "name",
             "participants",
             "reversed",
@@ -1858,4 +1876,26 @@ fn shell_and_draft_reply_with_their_schemas() {
     assert!(r["param_warnings"].to_string().contains("tangent_chian"), "{r}");
     let error = cube(ParamCheck::Strict).execute("solid.shell", &p).err().map(|e| e.to_string()).unwrap_or_default();
     assert!(error.contains("`tangent_chian`"), "{error}");
+}
+
+#[test]
+fn mirror_placements_schema_and_contract_agree() {
+    let schema = input_schema_for::<MirrorParams>();
+    let schema = schema.as_value();
+    for (p, takes) in [
+        (json!({"bodies": ["B"], "placements": null, "plane": "YZ"}), true),
+        (json!({"bodies": ["B"], "placements": [], "plane": "YZ"}), true),
+        (json!({"bodies": ["B"], "placements": [[]], "plane": "YZ"}), true),
+        (json!({"bodies": ["B"], "placements": [[1]], "plane": "YZ"}), true),
+        (json!({"bodies": ["B", "B"], "placements": [[1], [2, 3]], "plane": "YZ"}), true),
+        (json!({"bodies": ["B"], "placements": "bad", "plane": "YZ"}), false),
+        (json!({"bodies": ["B"], "placements": 5, "plane": "YZ"}), false),
+        (json!({"bodies": ["B"], "placements": [1], "plane": "YZ"}), false),
+        (json!({"bodies": ["B"], "placements": [[-1]], "plane": "YZ"}), false),
+        (json!({"bodies": ["B"], "placements": [["a"]], "plane": "YZ"}), false),
+    ] {
+        let issues = crate::schema::issues("solid.mirror", &p);
+        assert_eq!(issues.is_empty(), takes, "{p}: {issues:?}");
+        assert_eq!(conforms(schema, schema, &p), takes, "{p}");
+    }
 }

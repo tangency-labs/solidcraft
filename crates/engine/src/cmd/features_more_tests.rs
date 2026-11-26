@@ -4247,9 +4247,8 @@ fn an_emboss_that_works_has_no_warning() {
     }
 }
 
-/// #6612: a converted mesh's faces have no history that can keep an attachment, so extruding
-/// one is refused, and the refusal offers `fixed:true`. Extrude takes it: the sketch goes on the
-/// face's plane as a fixed plane and the face extrudes. A 20 x 20 x 10 block with a bore of
+/// #6612: an explicitly fixed face extrusion stays on its fixed plane even when the converted
+/// mesh also supports dynamic attachments. A 20 x 20 x 10 block with a bore of
 /// radius 3, through STL and Convert Mesh, joined 5 up from its top face.
 #[test]
 fn a_converted_meshs_face_extrudes_on_a_fixed_plane_when_asked() {
@@ -4269,11 +4268,15 @@ fn a_converted_meshs_face_extrudes_on_a_fixed_plane_when_asked() {
     run(&mut s, "mesh.convert", json!({"body": name}));
     let before = body_volume(&s, name);
     let top = json!({"face": [2, 2, 10], "distance": 5, "operation": "join"});
-    let refused = s.execute("solid.extrude", &top).expect_err("the face keeps no attachment").to_string();
-    assert!(refused.contains("fixed:true"), "{refused}");
     let mut fixed = top.clone();
     fixed["fixed"] = json!(true);
     run(&mut s, "solid.extrude", fixed);
+    assert!(
+        s.doc
+            .features
+            .iter()
+            .any(|feature| matches!(&feature.kind, solidcraft_doc::FeatureKind::Sketch { plane: solidcraft_doc::PlaneRef::Custom { .. }, .. }))
+    );
     let area = 400.0 - std::f64::consts::PI * 9.0;
     let grown = body_volume(&s, name) - before;
     assert!((grown - area * 5.0).abs() < 1e-3 * area * 5.0, "the join added {grown}, not {}", area * 5.0);
