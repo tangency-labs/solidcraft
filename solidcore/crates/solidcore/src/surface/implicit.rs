@@ -13,7 +13,7 @@ use crate::error::surface::SurfaceFailure;
 use crate::error::{Failure, Result, SolidError, SM_ERR};
 use crate::geom::axis2_placement::{axes_are_orthonormal, Axis2Placement};
 use crate::geom::extent2d::Extent2d;
-use crate::kernel::Kernel;
+use crate::kernel::{CancelToken, Kernel};
 use crate::math::{Vec2, Vec3, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::BSplineSurface;
@@ -837,12 +837,18 @@ impl IPoly {
 /// convex combination of the exact control weights, so at least their least lower end
 /// `W₀ > 0`: `|F| ≤ c / W₀^d`. Nothing is sampled.
 ///
+/// A decomposition that fails gives no patch with a bound (an empty list, as a net that is
+/// not finite does). The token `cancel` is polled before each patch's residual, so a stop
+/// asked for while the patches are composed ends the work at the next patch.
+///
 /// # Errors
 ///
-/// Those of the Bézier decomposition.
+/// A cancel ([`SolidError::Cancelled`], or [`SolidError::OutOfFuel`] for a fuel budget),
+/// never a missing bound.
 pub(crate) fn side_bounds(
     net: &crate::nurbs::srf_basic::Surface,
     rev: &Revolution,
+    cancel: Option<&CancelToken>,
 ) -> Result<Vec<SideBound>> {
     let (origin, frame) = match *rev {
         Revolution::Sphere { centre, .. } => (centre, None),
@@ -856,9 +862,16 @@ pub(crate) fn side_bounds(
         // (no patch with a bound: a component reads none as no bound)
         return Ok(Vec::new());
     };
+    let Ok(rows) = decompose_to_bez(net) else {
+        // (no patch with a bound: a component reads none as no bound)
+        return Ok(Vec::new());
+    };
     let mut out = Vec::new();
-    for row in decompose_to_bez(net)? {
+    for row in rows {
         for patch in row {
+            if let Some(token) = cancel {
+                token.check(SIDE_BOUNDS_OP)?;
+            }
             let (p, q) = patch.degrees();
             let span = |knots: &[f64], d: usize| match (knots.get(d), knots.get(d + 1)) {
                 (Some(&a), Some(&b)) => Some([a, b]),
@@ -877,6 +890,9 @@ pub(crate) fn side_bounds(
     }
     Ok(out)
 }
+
+/// The operation a cancel in [`side_bounds`] names.
+const SIDE_BOUNDS_OP: &str = "surface::implicit::side_bounds";
 
 /// [`side_bounds`] on one Bézier patch: `None` where it shows none.
 fn patch_residual(

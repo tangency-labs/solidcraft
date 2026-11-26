@@ -2214,7 +2214,10 @@ impl Surface {
     /// B-spline's own, or the NURB of a cone, sphere, torus, surface of revolution or
     /// surface of extrusion, made when missing; `None` for every other kind (not upstream;
     /// the one list of these kinds, read by [`Surface::certified_bounding_box`] and the
-    /// certified line solve, [`super::certified_line`]).
+    /// certified line solve, [`super::certified_line`]). A B-spline whose net is a fitted
+    /// approximation of a definition ([`Surface::net_is_fitted`]: a swept wall, or an
+    /// evaluation copy of one) is evaluated on its net too, which is then not the surface:
+    /// the line solve refuses it there.
     ///
     /// # Errors
     ///

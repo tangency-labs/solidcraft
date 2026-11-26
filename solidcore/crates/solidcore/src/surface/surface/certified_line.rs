@@ -425,8 +425,9 @@
 //! carrier; a point in the unique boxes of two roots not shown one, or of another
 //! component's root, is undecided. What the boxes left at the floor hold beyond the roots
 //! is the component's parity less its count of roots: with every root carried once, the
-//! other points are touching where that is even, and the single other point a crossing
-//! where it is odd; otherwise they are undecided. A component typed by its sides in leaves
+//! single other point is touching where that is even and a crossing where it is odd;
+//! otherwise (two other points or more, not one seam location, whose parity cannot tell two
+//! crossings from two touching points) they are undecided. A component typed by its sides in leaves
 //! not all wholly inside the face may straddle its border (a leaf on the trim is searched
 //! whole), so its other points are undecided. A component the solutions do not stand for
 //! (a root not carried once, an odd rest with no single point to carry it, or undecided)
@@ -574,12 +575,19 @@ impl LineNet {
     /// The net of `surface` when its net is the surface (the kinds of
     /// [`Surface::certified_bounding_box`], B-splines in power-basis form apart) and the
     /// enclosures take it (positive weights, knots and points that agree); `None` for any
-    /// other surface, which keeps the guesses alone.
+    /// other surface, which keeps the guesses alone. A net fitted to a definition
+    /// ([`Surface::net_is_fitted`]: a swept wall's, a Setback or Mixed corner's, kept by the
+    /// evaluation copy a surface cache holds though the copy drops the definition) is not
+    /// the surface: a root certified on it may lie within the bound of a line that misses
+    /// the definition, so it gets no pass.
     ///
     /// # Errors
     ///
     /// Those of making a missing NURB.
     pub(crate) fn of(k: &Kernel, surface: &Surface) -> Result<Option<Self>> {
+        if surface.net_is_fitted() {
+            return Ok(None);
+        }
         let Some(base) = surface.certified_net(k)? else {
             return Ok(None);
         };
@@ -612,10 +620,14 @@ impl LineNet {
 
     /// The certified bounds of [`side_bounds`] over the net's Bézier patches, for its
     /// surface of revolution; none for another surface, or where the decomposition fails.
-    fn side_bounds(&self) -> Vec<SideBound> {
+    ///
+    /// # Errors
+    ///
+    /// A cancel of `cancel`, polled before each patch.
+    fn side_bounds(&self, cancel: Option<&CancelToken>) -> Result<Vec<SideBound>> {
         match (&self.form, &self.revolved) {
-            (Some(form), Some(rev)) => side_bounds(form, &rev.revolution()).unwrap_or_default(),
-            _ => Vec::new(),
+            (Some(form), Some(rev)) => side_bounds(form, &rev.revolution(), cancel),
+            _ => Ok(Vec::new()),
         }
     }
 
@@ -1024,26 +1036,99 @@ fn covered(across: &[(usize, [f64; 2])], [a, z]: [f64; 2]) -> bool {
     reach >= z
 }
 
+/// One kind of side of every leaf (the sides u = u1, u = u0, v = v1 or v = v0), indexed for
+/// [`leaf_sides`]: by the side's line, then by the start of its stretch along the line, then
+/// by the leaf, each with its stretch, and the furthest a stretch reaches among those before
+/// it on the same line (itself included). A query visits only the entries of its line from
+/// the first whose stretches before it could reach the query's start to the last that
+/// starts at or before the query's end, so a side meeting few others costs a binary search
+/// and those few, not a scan of every side on its line.
+struct SideIndex {
+    /// `(line, stretch start, stretch end, leaf)`, by the line, the start (`total_cmp`) and
+    /// the leaf.
+    keys: Vec<(f64, f64, f64, usize)>,
+    /// For each key, the greatest stretch end among the keys of its line up to it (from
+    /// `−∞`: a NaN end is passed over, it meets nothing).
+    reach: Vec<f64>,
+}
+
+impl SideIndex {
+    /// The index of the sides `line` picks out of each domain of `all`, each with the
+    /// stretch `stretch` picks along it.
+    fn of(
+        all: &[[[f64; 2]; 2]],
+        line: fn(&[[f64; 2]; 2]) -> f64,
+        stretch: fn(&[[f64; 2]; 2]) -> [f64; 2],
+    ) -> Self {
+        let mut keys: Vec<(f64, f64, f64, usize)> = all
+            .iter()
+            .enumerate()
+            .map(|(i, b)| {
+                let [b0, b1] = stretch(b);
+                (line(b), b0, b1, i)
+            })
+            .collect();
+        keys.sort_by(|a, b| {
+            a.0.total_cmp(&b.0)
+                .then(a.1.total_cmp(&b.1))
+                .then(a.3.cmp(&b.3))
+        });
+        let mut reach = Vec::new();
+        let mut prev: Option<f64> = None;
+        let mut most = f64::NEG_INFINITY;
+        for &(x, _, b1, _) in &keys {
+            if prev.is_none_or(|p| p.total_cmp(&x).is_ne()) {
+                most = f64::NEG_INFINITY;
+            }
+            most = most.max(b1);
+            reach.push(most);
+            prev = Some(x);
+        }
+        Self { keys, reach }
+    }
+
+    /// The entries of the line `line` that may meet the stretch `[o0, o1]`: every entry on
+    /// it whose stretch meets `[o0, o1]` (ends included) is among them, in the index's
+    /// order. Those passed over before the first returned all end below `o0` (their reach
+    /// does), and those after the last all start past `o1`.
+    fn candidates(&self, line: f64, [o0, o1]: [f64; 2]) -> &[(f64, f64, f64, usize)] {
+        let first = self.keys.partition_point(|k| k.0.total_cmp(&line).is_lt());
+        let last = self.keys.partition_point(|k| k.0.total_cmp(&line).is_le());
+        let (Some(keys), Some(reach)) = (self.keys.get(first..last), self.reach.get(first..last))
+        else {
+            return &[];
+        };
+        let from = reach.partition_point(|&r| r < o0);
+        // (`total_cmp` puts −0 before +0, which `<=` holds equal: either order counts, so
+        // the entries kept are a prefix of the line's that holds every start `<= o1`)
+        let to = keys.partition_point(|k| k.1.total_cmp(&o1).is_le() || k.1 <= o1);
+        keys.get(from..to.max(from)).unwrap_or_default()
+    }
+}
+
 /// What lies across each searched leaf's sides, from the domains of every leaf the
 /// traversal searched (`domains`) and the solve's `(u, v)` domain: two leaves are across a
 /// side from each other when that side's line is the same number in both and their
 /// stretches along it meet. Where the solve wraps (`seams`), a side on one end of the
 /// knots' range is across from the sides on the other end (a leaf over the whole range from
 /// itself), and lies inside the solve: a stretch of it that no searched leaf or strip
-/// covers across the seam faces a trim cull.
+/// covers across the seam faces a trim cull. The sides on each line are found through a
+/// [`SideIndex`], so the work is the sort and the sides that meet, not the square of the
+/// leaves on one line (full strips along a seam all share the seam's line), wherever the
+/// stretches on a line meet only at their ends, as the domains of distinct leaves of the
+/// tree do; stretches that overlap on one line (a domain repeated, or one stretch along
+/// the whole line) are still visited by each query that reaches past them.
 pub(crate) fn leaf_sides(domains: &[Extent2d], solve: &Extent2d, seams: Seams) -> Vec<LeafSides> {
     let all: Vec<[[f64; 2]; 2]> = domains.iter().map(bounds_of).collect();
-    // each leaf's sides by their line: u1, u0, v1, v0 (what a side u = u0 meets is a u1)
-    let keyed = |pick: fn(&[[f64; 2]; 2]) -> f64| {
-        let mut k: Vec<(f64, usize)> = all.iter().enumerate().map(|(i, b)| (pick(b), i)).collect();
-        k.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-        k
-    };
-    let by: [Vec<(f64, usize)>; 4] = [
-        keyed(|&[[_, u1], _]| u1),
-        keyed(|&[[u0, _], _]| u0),
-        keyed(|&[_, [_, v1]]| v1),
-        keyed(|&[_, [v0, _]]| v0),
+    // each leaf's sides by their line: u1, u0, v1, v0 (what a side u = u0 meets is a u1),
+    // with their stretches along it (in v for the sides of constant u)
+    let in_v = |&[_, v]: &[[f64; 2]; 2]| v;
+    let in_u = |&[u, _]: &[[f64; 2]; 2]| u;
+    let by: [SideIndex; 4] = [
+        SideIndex::of(&all, |&[[_, u1], _]| u1, in_v),
+        SideIndex::of(&all, |&[[u0, _], _]| u0, in_v),
+        SideIndex::of(&all, |&[_, [_, v1]]| v1, in_u),
+        SideIndex::of(&all, |&[_, [v0, _]]| v0, in_u),
     ];
     let (lo, hi) = (solve.min(), solve.max());
     let [[r0, r1], [q0, q1]] = seams.range;
@@ -1062,24 +1147,15 @@ pub(crate) fn leaf_sides(domains: &[Extent2d], solve: &Extent2d, seams: Seams) -
             ];
             let mut across: [Vec<(usize, [f64; 2])>; 4] = Default::default();
             for (s, slot) in across.iter_mut().enumerate() {
-                let (Some(&own), Some(keys)) = (lines.get(s), by.get(s)) else {
+                let (Some(&own), Some(index)) = (lines.get(s), by.get(s)) else {
                     continue;
                 };
                 let seam = glued.get(s).copied().flatten();
                 let line = seam.unwrap_or(own);
-                let first = keys.partition_point(|&(x, _)| x.total_cmp(&line).is_lt());
-                let same = keys.get(first..).unwrap_or_default();
-                for &(x, j) in same {
-                    if x.total_cmp(&line).is_ne() {
-                        break;
-                    }
+                let [o0, o1] = if s < 2 { [v0, v1] } else { [u0, u1] };
+                for &(_, b0, b1, j) in index.candidates(line, [o0, o1]) {
                     let Some(&[[a0, a1], [c0, c1]]) = all.get(j) else {
                         continue;
-                    };
-                    let ([b0, b1], [o0, o1]) = if s < 2 {
-                        ([c0, c1], [v0, v1])
-                    } else {
-                        ([a0, a1], [u0, u1])
                     };
                     // (a domain with no area covers no stretch: nothing was searched there;
                     // across a seam a leaf over the whole range faces itself)
@@ -3527,7 +3603,8 @@ pub(crate) fn type_components(
                     &boxes,
                     (t, others),
                     &mut bounds,
-                )
+                    cancel,
+                )?
             }
         };
         c.contact = match typed {
@@ -3560,12 +3637,13 @@ fn type_one(
     boxes: &[PlacedBox],
     (t, others): (Ivl, Option<Overlap>),
     bounds: &mut Option<Vec<SideBound>>,
-) -> Typed {
+    cancel: Option<&CancelToken>,
+) -> Result<Typed> {
     // (a whole turn has no lift less than a turn wide, which only the side chart and the
     // foot chain read; the count reads no lift, its boxes all regular, each root unique in
     // its native box and off the seam: answer11, Q3)
     if c.whole_turn && c.holds.left > 0 {
-        return Typed::Undecided(Why::WholeTurn);
+        return Ok(Typed::Undecided(Why::WholeTurn));
     }
     // a certified root whose enclosure reaches a seam the solve wraps is not counted, by any
     // rule: its unique box and one on the seam's other end cannot be shown to hold one root
@@ -3581,7 +3659,7 @@ fn type_one(
         _ => false,
     });
     if on_seam {
-        return Typed::Undecided(Why::OnABoundary);
+        return Ok(Typed::Undecided(Why::OnABoundary));
     }
     let [s0, s1] = line.span;
     let past = |e: &I3| {
@@ -3612,11 +3690,11 @@ fn type_one(
                 match tight {
                     Some(e) if within_span(&e) => counted.push(*b),
                     Some(e) if past(&e) => beyond.push(*b),
-                    _ => return Typed::Undecided(Why::ReachesEnd),
+                    _ => return Ok(Typed::Undecided(Why::ReachesEnd)),
                 }
             }
             Part::Floor(FloorKind::Unshown { enclosure, .. }) if !past(&enclosure) => {
-                return Typed::Undecided(Why::Unshown);
+                return Ok(Typed::Undecided(Why::Unshown));
             }
             // (a root past the interval not reported: its unique box, like a reported one's)
             Part::Floor(FloorKind::Unshown { unique, .. }) => {
@@ -3626,7 +3704,7 @@ fn type_one(
         }
     }
     let (Some(classes), Some(far)) = (root_classes(&counted), root_classes(&beyond)) else {
-        return Typed::Undecided(Why::RootsNotTold);
+        return Ok(Typed::Undecided(Why::RootsNotTold));
     };
     let n = classes.len();
     c.classes = classes;
@@ -3656,7 +3734,12 @@ fn type_one(
             typed => typed,
         }
     } else {
-        let bounds = bounds.get_or_insert_with(|| net.side_bounds());
+        let bounds = match bounds {
+            Some(b) => b,
+            // (made with the solve's cancel token: a stop while the patches are composed is
+            // the solve's stop, never a missing bound)
+            None => bounds.insert(net.side_bounds(cancel)?),
+        };
         by_sides(net, line, leaves, c, (t, ends, others), bounds)
     };
     // every clipped end of a decided component certified farther than the tolerance from
@@ -3673,10 +3756,10 @@ fn type_one(
             .all(|&(clipped, at)| !clipped || end_off_the_net(net, line, boxes, at, &mut budget));
         if !certified {
             c.contact = Contact::Undecided;
-            return Typed::Undecided(Why::ReachesEnd);
+            return Ok(Typed::Undecided(Why::ReachesEnd));
         }
     }
-    typed
+    Ok(typed)
 }
 
 /// A box about the certified root at `point` (Newton's, of the root the `(u, v)` box
@@ -5350,20 +5433,25 @@ fn covered_by_leaves(u: Ivl, v: Ivl, leaves: &[SearchedLeaf]) -> bool {
     };
     let xs = grid(|r| r[0], u.lo, u.hi);
     let ys = grid(|r| r[1], v.lo, v.hi);
-    let middles = |zs: &[f64]| -> Vec<f64> {
+    // each cell by both its bounds, never a point sampled in it: a cell between two
+    // adjacent doubles has a middle that rounds onto one of them, which a rectangle ending
+    // there holds although the open cell between them was not searched. Every rectangle's
+    // sides are grid lines, so one holds the whole closed cell exactly when it holds both
+    // its corners.
+    let cells = |zs: &[f64]| -> Vec<[f64; 2]> {
         zs.windows(2)
             .filter_map(|w| match *w {
-                [a, b] => Some(0.5 * (a + b)),
+                [a, b] => Some([a, b]),
                 _ => None,
             })
             .collect()
     };
-    let (cxs, cys) = (middles(&xs), middles(&ys));
-    cxs.iter().all(|&cx| {
-        cys.iter().all(|&cy| {
+    let (cxs, cys) = (cells(&xs), cells(&ys));
+    cxs.iter().all(|&[x0, x1]| {
+        cys.iter().all(|&[y0, y1]| {
             rects
                 .iter()
-                .any(|&[[a0, a1], [c0, c1]]| a0 <= cx && cx <= a1 && c0 <= cy && cy <= c1)
+                .any(|&[[a0, a1], [c0, c1]]| a0 <= x0 && x1 <= a1 && c0 <= y0 && y1 <= c1)
         })
     })
 }
@@ -5410,10 +5498,11 @@ enum Placing {
 /// its distinct roots carries that root, a transversal crossing (a crossing, when it is the
 /// root's only carrier; two carriers of one root are undecided). The component's parity
 /// less its roots' leaves what its boxes left at the floor hold: with every root carried
-/// once, the other points are touching when that is even, and the one other point is a
-/// crossing when it is odd; two other points that are one seam location (module docs,
-/// "The seam pair") are one slot, both crossing or both touching, and share an id;
-/// otherwise they are undecided. A component typed by its sides
+/// once, the one other point is touching when that is even and a crossing when it is odd;
+/// two other points that are one seam location (module docs, "The seam pair") are one
+/// slot, both crossing or both touching, and share an id; otherwise (two slots or more,
+/// whose parity cannot tell two crossings from two touching points) they are undecided.
+/// A component typed by its sides
 /// whose leaves are not all inside the face may straddle its border, so its other points
 /// are undecided. A component stands for itself when every root is carried once and its
 /// parity is accounted for (a touching one with no point does).
@@ -5508,9 +5597,11 @@ pub(crate) fn type_solutions(
             _ => None,
         };
         let slots = if pair.is_some() { 1 } else { others.len() };
+        // (one slot at most: the parity of two says nothing of each, two crossings and two
+        // touching points both even; with none the component stands for itself)
         let other = match (carried && !straddles, rest, slots) {
-            (true, 0, _) => Some(Contact::Touching),
-            (true, _, 1) => Some(Contact::Crossing),
+            (true, 0, 0 | 1) => Some(Contact::Touching),
+            (true, 1, 1) => Some(Contact::Crossing),
             _ => None,
         };
         if let Some(contact) = other {
@@ -6477,16 +6568,27 @@ impl LinePasses {
         self.searches.get(net)?.get(&key.rest).cloned()
     }
 
-    /// Keeps `search` under `key`, within the bounds; a search past them is not kept.
-    pub(crate) fn keep(&mut self, key: PassKey, search: &Arc<Search>) {
+    /// Keeps `search` under `key`, within the bounds; a search past them is not kept. The
+    /// key's lists are shrunk to their words before they are kept, and charged by what they
+    /// then hold (their capacity, as [`Search::held_bytes`] charges a search's lists): the
+    /// spare room a key grew with is never held past the budget.
+    pub(crate) fn keep(&mut self, mut key: PassKey, search: &Arc<Search>) {
         use core::mem::size_of;
         if self.kept >= MAX_KEPT_SEARCHES {
             return;
         }
         let words = |n: usize| n.saturating_mul(size_of::<u64>());
         let new_net = !self.nets.contains_key(&key.net);
-        let bytes = words(key.rest.len())
-            .saturating_add(if new_net { words(key.net.len()) } else { 0 })
+        key.rest.shrink_to_fit();
+        if new_net {
+            key.net.shrink_to_fit();
+        }
+        let bytes = words(key.rest.capacity())
+            .saturating_add(if new_net {
+                words(key.net.capacity())
+            } else {
+                0
+            })
             .saturating_add(search.held_bytes());
         let total = self.bytes.saturating_add(bytes);
         if total > MAX_KEPT_BYTES {
@@ -7382,6 +7484,115 @@ mod tests {
         );
     }
 
+    /// What lies across each leaf's sides is found through an index of the sides on each
+    /// line ([`SideIndex`]), not by scanning every side on the line: over full strips in u
+    /// stacked along v on a surface that wraps in u (every strip's sides u = u0 and u = u1
+    /// on the seam's one line), a side's query visits at most three entries (itself across
+    /// the seam and the strips it touches at its ends), where a scan visited all of them.
+    /// The result is the scan's, entry for entry, on that tiling and on a mix of seams,
+    /// duplicates, domains with no area, a signed zero and a NaN.
+    #[test]
+    fn leaf_sides_visit_only_the_sides_that_may_meet() {
+        // the scan the index replaces: every side on the line, by (line, leaf)
+        let scan = |domains: &[Extent2d], solve: &Extent2d, seams: Seams| -> Vec<LeafSides> {
+            let all: Vec<[[f64; 2]; 2]> = domains.iter().map(bounds_of).collect();
+            let [[r0, r1], [q0, q1]] = seams.range;
+            let [wu, wv] = seams.wrap;
+            let (lo, hi) = (solve.min(), solve.max());
+            all.iter()
+                .enumerate()
+                .map(|(i, &bounds)| {
+                    let [[u0, u1], [v0, v1]] = bounds;
+                    let lines = [u0, u1, v0, v1];
+                    let glued = [
+                        (wu && u0 <= r0).then_some(r1),
+                        (wu && u1 >= r1).then_some(r0),
+                        (wv && v0 <= q0).then_some(q1),
+                        (wv && v1 >= q1).then_some(q0),
+                    ];
+                    let mut across: [Vec<(usize, [f64; 2])>; 4] = Default::default();
+                    for (s, slot) in across.iter_mut().enumerate() {
+                        let seam = glued[s];
+                        let line = seam.unwrap_or(lines[s]);
+                        for (j, &[[a0, a1], [c0, c1]]) in all.iter().enumerate() {
+                            let x = [a1, a0, c1, c0][s];
+                            if x.total_cmp(&line).is_ne() {
+                                continue;
+                            }
+                            let ([b0, b1], [o0, o1]) = if s < 2 {
+                                ([c0, c1], [v0, v1])
+                            } else {
+                                ([a0, a1], [u0, u1])
+                            };
+                            let area = a0 < a1 && c0 < c1;
+                            if (j != i || seam.is_some()) && area && b0 <= o1 && b1 >= o0 {
+                                slot.push((j, [b0, b1]));
+                            }
+                        }
+                        slot.sort_by(|(i, [a, _]), (j, [b, _])| a.total_cmp(b).then(i.cmp(j)));
+                    }
+                    let [g0, g1, g2, g3] = glued.map(|g| g.is_some());
+                    LeafSides {
+                        bounds,
+                        inside: [
+                            u0 > lo.x || g0,
+                            u1 < hi.x || g1,
+                            v0 > lo.y || g2,
+                            v1 < hi.y || g3,
+                        ],
+                        across,
+                        seam: [g0, g1, g2, g3],
+                    }
+                })
+                .collect()
+        };
+        let whole = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let wrap_u = Seams {
+            range: [[0.0, 1.0], [0.0, 1.0]],
+            wrap: [true, false],
+        };
+        let n = 2000;
+        let strips: Vec<Extent2d> = (0..n)
+            .map(|i| {
+                let (a, b) = (f64::from(i) / f64::from(n), f64::from(i + 1) / f64::from(n));
+                Extent2d::from_bounds(0.0, a, 1.0, b)
+            })
+            .collect();
+        let all: Vec<[[f64; 2]; 2]> = strips.iter().map(bounds_of).collect();
+        let u1s = SideIndex::of(&all, |&[[_, u1], _]| u1, |&[_, v]| v);
+        for &[_, v] in &all {
+            let visited = u1s.candidates(1.0, v).len();
+            assert!((1..=3).contains(&visited), "{v:?}: {visited}");
+        }
+        assert_eq!(
+            leaf_sides(&strips, &whole, wrap_u),
+            scan(&strips, &whole, wrap_u)
+        );
+        let mixed = [
+            Extent2d::from_bounds(0.0, 0.0, 0.5, 0.5),
+            Extent2d::from_bounds(0.5, 0.0, 1.0, 0.25),
+            Extent2d::from_bounds(0.5, 0.25, 1.0, 1.0),
+            Extent2d::from_bounds(0.0, 0.5, 0.5, 1.0),
+            Extent2d::from_bounds(0.0, 0.5, 0.5, 1.0),
+            Extent2d::from_bounds(0.25, 0.5, 0.25, 0.75),
+            Extent2d::from_bounds(-0.0, 0.0, 0.5, 0.5),
+            Extent2d::from_bounds(0.5, f64::NAN, 1.0, 0.5),
+            Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        ];
+        for wrap in [[false, false], [true, false], [false, true], [true, true]] {
+            let seams = Seams {
+                range: [[0.0, 1.0], [0.0, 1.0]],
+                wrap,
+            };
+            // (by their debug forms: a NaN bound is never equal to itself)
+            assert_eq!(
+                format!("{:?}", leaf_sides(&mixed, &whole, seams)),
+                format!("{:?}", scan(&mixed, &whole, seams)),
+                "{wrap:?}"
+            );
+        }
+    }
+
     /// A line tangent to the cylinder leaves boxes with no root about the contact, which
     /// the exclusion phase cuts. Its budget running out keeps what it has not decided: the
     /// pass stays finished, the phase spent exactly its budget, and the boxes with no root
@@ -8116,7 +8327,7 @@ mod tests {
         ] {
             let net = LineNet::of(&k, &s).unwrap().unwrap();
             let rev = net.revolved.expect("a surface of revolution");
-            let bounds = net.side_bounds();
+            let bounds = net.side_bounds(None).unwrap();
             assert!(!bounds.is_empty(), "{s:?}");
             assert!(bounds.iter().all(|b| b.residual.is_some()), "{bounds:?}");
             let [[u0, u1], [v0, v1]] = net.range;
@@ -8134,11 +8345,97 @@ mod tests {
             centre: v3(rev.origin),
             radius: 2.5 * (1.0 + 1.0e-6),
         };
-        let bounds = side_bounds(net.form.as_ref().unwrap(), &off).unwrap();
+        let bounds = side_bounds(net.form.as_ref().unwrap(), &off, None).unwrap();
         assert!(!bounds.is_empty());
         for b in &bounds {
             assert!(b.residual.unwrap() >= 1.2e-5, "{b:?}");
         }
+    }
+
+    /// A net fitted to a definition is not its surface, and gets no pass: a B-spline net
+    /// carrying a swept wall's definition (a screw motion, its bound above 0) is refused, and
+    /// so is the evaluation copy a surface cache holds of it, which drops the definition but
+    /// keeps that its net is fitted. The same net with no definition (a plain B-spline: its
+    /// net is the surface), and its evaluation copy, keep the pass.
+    #[test]
+    fn a_net_fitted_to_a_definition_gets_no_pass() {
+        use crate::surface::procedural_sweep::{ProceduralSweep, ScrewMotion};
+        let k = Kernel::default();
+        let bare = Surface::from(
+            crate::nurbs::b_spline_surface::BSplineSurface::create_bilinear_surface(
+                Vec3::new(4.0, 0.0, 0.0),
+                Vec3::new(5.0, 0.0, 0.0),
+                Vec3::new(4.0, 1.0, 1.0),
+                Vec3::new(5.0, 1.0, 1.0),
+            )
+            .unwrap(),
+        );
+        let line = crate::nurbs::b_spline_curve::BSplineCurve::create_line_segment(
+            3,
+            Vec3::new(4.0, 0.0, 0.0),
+            Vec3::new(5.0, 0.0, 1.0),
+        )
+        .unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0), 1.5, None).unwrap();
+        let sweep =
+            ProceduralSweep::create(&line, motion, &[0.0, 0.5, 1.0], &[0.25, 0.25]).unwrap();
+        assert!(sweep.bound() > 0.0);
+        let mut swept = bare.clone();
+        swept.set_sweep_definition(sweep);
+        assert!(LineNet::of(&k, &bare).unwrap().is_some());
+        assert!(LineNet::of(&k, &bare.clone_for_evaluation().unwrap())
+            .unwrap()
+            .is_some());
+        assert!(swept.net_is_fitted());
+        assert!(LineNet::of(&k, &swept).unwrap().is_none());
+        let copy = swept.clone_for_evaluation().unwrap();
+        assert!(copy.procedural_definition().is_none());
+        assert!(copy.net_is_fitted());
+        assert!(LineNet::of(&k, &copy).unwrap().is_none());
+        assert!(LineNet::of(&k, &copy.clone_for_evaluation().unwrap())
+            .unwrap()
+            .is_none());
+    }
+
+    /// The side bounds poll the solve's cancel token before each Bézier patch: a token
+    /// already cancelled stops them with the cancel (never an empty list, which reads as no
+    /// bound), a fuel budget that runs out between patches stops them with its own error,
+    /// and a token that only counts sees one poll a patch and changes no bound.
+    #[test]
+    fn the_side_bounds_stop_at_a_cancel() {
+        let k = Kernel::default();
+        let mut torus = Torus::new(
+            &k,
+            Vec3::new(1.0, -2.0, 3.0),
+            Vec3::new(0.6, 0.8, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            Extent2d::from_bounds(0.0, 0.0, 360.0, 360.0),
+            4.0,
+            1.0,
+            TorusOptions::default(),
+        )
+        .unwrap();
+        torus.make_nurb(&k).unwrap();
+        let net = LineNet::of(&k, &Surface::from(torus)).unwrap().unwrap();
+        let plain = net.side_bounds(None).unwrap();
+        assert!(plain.len() > 1, "{plain:?}");
+        let counting = CancelToken::after_polls(u64::MAX);
+        let counted = net.side_bounds(Some(&counting)).unwrap();
+        assert_eq!(counted, plain);
+        assert_eq!(counting.polls(), Some(plain.len() as u64));
+        let cancelled = CancelToken::new();
+        cancelled.cancel();
+        let r = net.side_bounds(Some(&cancelled));
+        assert!(
+            matches!(r, Err(crate::SolidError::Cancelled { .. })),
+            "{r:?}"
+        );
+        let fuel = CancelToken::with_fuel(1);
+        let r = net.side_bounds(Some(&fuel));
+        assert!(
+            matches!(r, Err(crate::SolidError::OutOfFuel { .. })),
+            "{r:?}"
+        );
     }
 
     /// A line tangent to the sphere touches it: one component of boxes left at the floor,
@@ -8422,7 +8719,8 @@ mod tests {
 
     /// A hull is covered by the searched leaves and strips when every cell of their grid
     /// inside it lies in one: two leaves meeting along a side cover the hull across them;
-    /// with a hole (a trim cull) inside it, or a leaf missing at its corner, it is not.
+    /// with a hole (a trim cull) inside it, a leaf missing at its corner, or a gap between
+    /// two leaves one ulp wide, it is not.
     #[test]
     fn a_hull_is_covered_only_by_searched_domains() {
         let leaf = |a: f64, b: f64, c: f64, d: f64| {
@@ -8443,6 +8741,18 @@ mod tests {
         assert!(!covered_by_leaves(u, v, &holed));
         let corner = [leaf(0.0, 0.5, 0.0, 1.0), leaf(0.5, 1.0, 0.0, 0.85)];
         assert!(!covered_by_leaves(u, v, &corner));
+        // a gap one ulp wide between two leaves is not covered: the open strip between 1
+        // and the next double was not searched, though the gap's middle rounds to 1, which
+        // the first leaf holds; the same leaves meeting at 1 cover the hull
+        let (u, v) = (Ivl::new(0.0, 2.0), Ivl::new(0.0, 1.0));
+        let gap = [
+            leaf(0.0, 1.0, 0.0, 1.0),
+            leaf(1.0_f64.next_up(), 2.0, 0.0, 1.0),
+        ];
+        assert_eq!(0.5 * (1.0 + 1.0_f64.next_up()), 1.0);
+        assert!(!covered_by_leaves(u, v, &gap));
+        let met = [leaf(0.0, 1.0, 0.0, 1.0), leaf(1.0, 2.0, 0.0, 1.0)];
+        assert!(covered_by_leaves(u, v, &met));
     }
 
     /// A net of `rows` (each a row of homogeneous points `(x w, y w, z w, w)` along v, the
@@ -9304,7 +9614,8 @@ mod tests {
     /// for an even rest). Failing: a third other point; `A` and `B` joined only through a
     /// third box (`A`'s stretch along the seam apart from `B`'s, `C` on the high end meeting
     /// both); `p`'s line parameter outside the meet of `A`'s and `B`'s, or its coordinate
-    /// along the seam outside the meet of their stretches; `q`'s gap at or above the
+    /// along the seam outside the meet of their stretches (for an odd rest and for an even
+    /// one: two unlinked points are never both touching); `q`'s gap at or above the
     /// tolerance (not placed: `p` alone carries the rest, unlinked); the component in leaves
     /// not all inside the face; certified roots in unique boxes about `p` and `q` (each a
     /// carrier, no pair); and the component not joined across the seam. At a corner of the
@@ -9372,6 +9683,13 @@ mod tests {
         let b_high = ([u1 - h, u1], [vm, vm + 2.0 * h], b.2);
         let (_, typed, stood, _) =
             cyl_records(&[a, b_high], &[[0.75, u0, vm - 0.5 * h], q], &|_| {});
+        assert!(undecided(&typed, &stood), "{typed:?}");
+        // the same two unlinked points of an even rest: two crossings and two touching
+        // points are both even, so neither is touching, and the component is not stood for
+        let (_, typed, stood, _) =
+            cyl_records(&[a, b_high], &[[0.75, u0, vm - 0.5 * h], q], &|c| {
+                c.list[0].contact = Contact::Touching;
+            });
         assert!(undecided(&typed, &stood), "{typed:?}");
         // q's gap above the tolerance: not placed, p alone carries the odd rest, unlinked
         let wide = ([u1 - h, u1], [vm - h, vm + h], [0.7495, 0.77]);
@@ -9886,5 +10204,50 @@ mod tests {
         let small = Arc::new(Search::default());
         passes.keep(key(2.0), &small);
         assert_eq!(passes.found(&key(2.0)), Some(small));
+    }
+
+    /// A key is charged by the storage it is kept with, not by its words alone: a key that
+    /// grew room for more than [`MAX_KEPT_BYTES`] is kept shrunk to its words, and the bytes
+    /// held are exactly the capacity of the lists kept (each net once).
+    #[test]
+    fn a_kept_key_is_charged_by_its_storage() {
+        let k = Kernel::default();
+        let s = cylinder(&k);
+        let net = LineNet::of(&k, &s).unwrap().unwrap();
+        let solve = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let (p, d) = across(0.25);
+        let key = |end: f64| {
+            let line = PassLine {
+                point: p,
+                vector: d,
+                span: [0.0, end],
+                solve_domain: solve,
+                tol: TOL,
+            };
+            PassKey::of(&net, &line, &[], &[])
+        };
+        let mut roomy = key(1.0);
+        roomy.rest.reserve(MAX_KEPT_BYTES / size_of::<u64>() + 1);
+        roomy.net.reserve(MAX_KEPT_BYTES / size_of::<u64>() + 1);
+        let search = Arc::new(Search::default());
+        let mut passes = LinePasses::default();
+        passes.keep(roomy, &search);
+        passes.keep(key(2.0), &search);
+        assert!(passes.found(&key(1.0)).is_some());
+        assert!(passes.found(&key(2.0)).is_some());
+        let held: usize = passes
+            .nets
+            .keys()
+            .map(Vec::capacity)
+            .chain(
+                passes
+                    .searches
+                    .values()
+                    .flat_map(|m| m.keys().map(Vec::capacity)),
+            )
+            .sum::<usize>()
+            * size_of::<u64>();
+        assert_eq!(passes.bytes, held);
+        assert!(held < MAX_KEPT_BYTES / 1024, "{held}");
     }
 }
