@@ -243,11 +243,8 @@ fn face_digest(b: &Brep, f: FaceId, salt: ContentId, parts: &Parts) -> Option<Co
     let mut d = Digest::new();
     d.tag(0xF);
     d.hashed(&salt);
-    let face = b.face(f).ok()?;
-    face.surface.as_ref()?.content(&mut d)?;
-    d.f64(crate::topology::face::p2::tolerance(b, f).ok()?);
-    face.uv_domain.content(&mut d)?;
-    d.hashed(&face.rectangular_trim);
+    // the surface, tolerance, domain and rectangular-trim flag ([`surface_id`])
+    parts.surface(b, f, &mut d)?;
     let fu = crate::topology::face::p2::upward_faceuse(b, f).ok()??;
     let loopuses = eu1::faceuse_loopuses(b, fu, false, None).ok()?;
     d.usize(loopuses.len());
@@ -263,9 +260,7 @@ fn face_digest(b: &Brep, f: FaceId, salt: ContentId, parts: &Parts) -> Option<Co
         }
         for eu in edgeuses {
             d.hashed(&eu1::orientation(b, eu).ok()?);
-            let (trim, holder) = eu1::uv_trim_curve(b, eu).ok()?;
-            trim.content(&mut d)?;
-            d.bool(holder == Some(eu));
+            parts.trim(b, eu, &mut d)?;
             let e = eu1::edge(b, eu).ok()??;
             parts.edge(b, e, &mut d)?;
             let vu = eu1::vertexuse(b, eu).ok()??;
@@ -303,9 +298,7 @@ fn edge_digest(
         d.bool(eu1::is_loop_edgeuse(b, eu).ok()?);
         d.hashed(&place(eu1::radial(b, eu).ok()?));
         d.hashed(&place(eu1::mate(b, eu).ok()?));
-        let (trim, holder) = eu1::uv_trim_curve(b, eu).ok()?;
-        trim.content(&mut d)?;
-        d.bool(holder == Some(eu));
+        parts.trim(b, eu, &mut d)?;
         match eu1::face(b, eu).ok()? {
             Some(f) => d.hashed(faces.get(&f)?),
             None => d.bool(false),
@@ -410,9 +403,7 @@ impl Ring {
         self.edgeuses.push(x);
         d.hashed(&eu1::orientation(b, x).ok()?);
         d.bool(eu1::is_loop_edgeuse(b, x).ok()?);
-        let (trim, holder) = eu1::uv_trim_curve(b, x).ok()?;
-        trim.content(d)?;
-        d.bool(holder == Some(x));
+        parts.trim(b, x, d)?;
         match eu1::edge(b, x).ok()? {
             Some(e) => parts.edge(b, e, d)?,
             None => d.bool(false),
@@ -433,6 +424,7 @@ struct Parts {
     edges: HashMap<EdgeId, Option<ContentId>>,
     vertices: HashMap<VertexId, Option<ContentId>>,
     surfaces: HashMap<FaceId, Option<ContentId>>,
+    trims: HashMap<crate::topology::EdgeuseId, Option<ContentId>>,
 }
 
 impl Parts {
@@ -452,11 +444,29 @@ impl Parts {
             .iter()
             .map(|&f| (f, surface_id(b, f)))
             .collect();
+        let trims = b
+            .edge_list()
+            .iter()
+            .filter_map(|&e| b.edge(e).ok())
+            .flat_map(|edge| edge.edgeuses.iter().copied())
+            .map(|eu| (eu, trim_id(b, eu)))
+            .collect();
         Self {
             edges,
             vertices,
             surfaces,
+            trims,
         }
+    }
+
+    /// Writes edge use `eu`'s trim digest; `None` when it has none.
+    fn trim(&self, b: &Brep, eu: crate::topology::EdgeuseId, d: &mut Digest) -> Option<()> {
+        let id = match self.trims.get(&eu) {
+            Some(id) => (*id)?,
+            None => trim_id(b, eu)?,
+        };
+        d.hashed(&id);
+        Some(())
     }
 
     /// Writes face `f`'s surface digest; `None` when it has none.
@@ -494,6 +504,16 @@ fn edge_geometry_id(b: &Brep, e: EdgeId) -> Option<ContentId> {
     let mut d = Digest::new();
     d.tag(0xE6);
     edge_geometry(b, e, &mut d)?;
+    Some(d.finish())
+}
+
+/// Edge use `eu`'s UV trim and whether it holds the trim itself (or reads its mate's).
+fn trim_id(b: &Brep, eu: crate::topology::EdgeuseId) -> Option<ContentId> {
+    let mut d = Digest::new();
+    d.tag(0x7A);
+    let (trim, holder) = crate::topology::edgeuse::p1::uv_trim_curve(b, eu).ok()?;
+    trim.content(&mut d)?;
+    d.bool(holder == Some(eu));
     Some(d.finish())
 }
 

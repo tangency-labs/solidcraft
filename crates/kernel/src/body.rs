@@ -840,6 +840,22 @@ impl Body {
         }
     }
 
+    /// [`Body::smlib`] for an operation that consumes the form: the form the body keeps, when it
+    /// keeps one, else one made from the record now and not kept, so that the operation may take
+    /// it over rather than copy it. Made as [`Body::smlib`] makes it, so it is the same form; a
+    /// record SMLib refuses is refused, and kept refused, as there.
+    pub(crate) fn smlib_to_consume(&self) -> Result<std::sync::Arc<solidcraft_smlib::Brep>> {
+        self.require_brep("an SMLib operation")?;
+        if self.smlib.refusal().is_some() || self.smlib.get().is_some() {
+            return self.smlib();
+        }
+        match solidcraft_smlib::stop::unstoppable(|| solidcraft_smlib::Brep::from_record(&self.record, true)) {
+            Ok(b) => Ok(std::sync::Arc::new(b)),
+            // the refusal as [`Body::smlib`] gives it, and keeps it
+            Err(_) => self.smlib(),
+        }
+    }
+
     /// Lets go of the body's kernel forms, its SMLib form ([`Body::smlib`]) and its
     /// solidcore-ops form ([`Body::ops_body`]): the kernel's own topology of it and everything
     /// its operations kept there (curve and surface caches, analyses), several times the

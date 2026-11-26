@@ -1018,6 +1018,13 @@ fn joint_origin_arg(origin: &solidcraft_doc::joints::JointOrigin, doc: &Document
                 arg.insert("x".into(), xref(x));
             }
         }
+        Snap::SketchPoint { sketch, point, x } => {
+            arg.insert("sketch".into(), json!(sketch));
+            arg.insert("point".into(), json!(point));
+            if let Some(x) = x {
+                arg.insert("x".into(), xref(x));
+            }
+        }
         _ => return Ok(None),
     }
     Ok(Some(Value::Object(arg)))

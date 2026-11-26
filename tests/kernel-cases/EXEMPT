@@ -541,6 +541,7 @@ tab.view.beside                   puts a view beside another in the tiling: no g
 tab.view.close                    closes a view of the design: no geometry, tested in the engine's tab_views tests and the UI's documents tests
 tab.view.close_others             closes the other views in a window; no geometry, tested in the engine and UI
 tab.view.close_right              closes the views to the right of a view in a window; no geometry, tested in the engine and UI
+tab.view.collapse                 collapses a view in the tiling: no geometry, tested in the engine's tab_views tests and the UI's documents tests
 tab.view.duplicate                copies a view of the design: no geometry, tested in the engine's tab_views tests and the UI's documents tests
 tab.view.equal_sizes              changes tile ratios; no geometry, tested in the views crate and engine
 tab.view.layout                   sets how the design's views are tiled: no geometry, tested in the views crate and the UI's documents tests

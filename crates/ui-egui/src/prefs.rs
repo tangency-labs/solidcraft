@@ -811,6 +811,68 @@ impl OriginPlaneNames {
     }
 }
 
+/// Whether the browser's Origin folder shows in a design that doesn't keep its eye itself
+/// (Preferences › Design › Origin). Saved as the on/off setting it was before Automatic (`false`
+/// is Shown, `true` is Hidden), so older releases and scripts read and write it as they did.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "SavedOriginDisplay", into = "SavedOriginDisplay")]
+pub enum OriginDisplay {
+    /// Also what a value this version doesn't know reads as (`lenient`).
+    #[default]
+    Shown,
+    /// Shown until the design has a body, as the model is at the history marker.
+    Automatic,
+    Hidden,
+}
+
+impl OriginDisplay {
+    pub const ALL: [Self; 3] = [Self::Shown, Self::Automatic, Self::Hidden];
+
+    /// Its name in the Preferences (a message id).
+    pub fn label_id(self) -> &'static str {
+        match self {
+            Self::Shown => "prefs.origin_display_shown",
+            Self::Automatic => "prefs.origin_display_automatic",
+            Self::Hidden => "prefs.origin_display_hidden",
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum SavedOriginDisplay {
+    Hidden(bool),
+    Named(OriginDisplayName),
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum OriginDisplayName {
+    Shown,
+    Automatic,
+    Hidden,
+}
+
+impl From<SavedOriginDisplay> for OriginDisplay {
+    fn from(saved: SavedOriginDisplay) -> Self {
+        match saved {
+            SavedOriginDisplay::Hidden(false) | SavedOriginDisplay::Named(OriginDisplayName::Shown) => Self::Shown,
+            SavedOriginDisplay::Named(OriginDisplayName::Automatic) => Self::Automatic,
+            SavedOriginDisplay::Hidden(true) | SavedOriginDisplay::Named(OriginDisplayName::Hidden) => Self::Hidden,
+        }
+    }
+}
+
+impl From<OriginDisplay> for SavedOriginDisplay {
+    fn from(display: OriginDisplay) -> Self {
+        match display {
+            OriginDisplay::Shown => Self::Hidden(false),
+            OriginDisplay::Automatic => Self::Named(OriginDisplayName::Automatic),
+            OriginDisplay::Hidden => Self::Hidden(true),
+        }
+    }
+}
+
 /// Where a sketch dimension's value is typed (Preferences › Sketch, "Dimension values", #7246).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -11647,6 +11709,56 @@ mod tests {
         assert_eq!(h.app.preferences.origin_plane_names, TopFrontRight);
     }
 
+    /// Origin visibility: the old on/off values keep their meaning both ways, Automatic is a name, an
+    /// unknown value is refused, and Cancel and Restore Defaults take the choice back.
+    #[test]
+    fn origin_visibility_keeps_the_old_on_off_values() {
+        crate::i18n::install();
+        use OriginDisplay::{Automatic, Hidden, Shown};
+        assert_eq!(Prefs::default().hide_origin, Shown);
+        for (saved, choice, written) in [
+            (json!(false), Shown, json!(false)),
+            (json!(true), Hidden, json!(true)),
+            (json!("automatic"), Automatic, json!("automatic")),
+            (json!("shown"), Shown, json!(false)),
+            (json!("hidden"), Hidden, json!(true)),
+        ] {
+            let read = lenient(&json!({"hide_origin":saved, "zoom_reverse":true}));
+            assert_eq!((read.hide_origin, read.zoom_reverse), (choice, true), "{saved}");
+            assert_eq!(serde_json::to_value(&read).unwrap()["hide_origin"], written, "{saved}");
+        }
+        for unknown in [json!("sometimes"), json!(1), json!(null), json!([true]), json!({"hidden":true})] {
+            let read = lenient(&json!({"hide_origin":unknown, "zoom_reverse":true}));
+            assert_eq!((read.hide_origin, read.zoom_reverse), (Shown, true), "{unknown}");
+        }
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        for (key, choice) in [("hidden", Hidden), ("shown", Shown), ("automatic", Automatic)] {
+            h.call("ui.prefs", json!({"open":"Design"}));
+            let handle = format!("prefs:hide_origin:{key}");
+            super::reveal_preference(&mut h, &handle);
+            h.step(&json!({"click":{"handle":handle}})).unwrap();
+            assert_eq!(h.app.preferences.hide_origin, choice);
+            h.call("ui.prefs", json!({"button":"ok"}));
+        }
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert_eq!(restored.preferences.hide_origin, Automatic, "the choice is saved");
+        let before = h.app.preferences.clone();
+        assert!(control(&mut h.app, &json!({"hide_origin":"sometimes", "zoom_reverse":true})).is_err());
+        assert_eq!(h.app.preferences, before, "an unknown choice fails atomically");
+        h.call("ui.prefs", json!({"open":"Design","hide_origin":true}));
+        assert_eq!(h.app.preferences.hide_origin, Hidden, "the old value still sets it");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(h.app.preferences.hide_origin, Automatic, "Cancel takes it back");
+        h.call("ui.prefs", json!({"open":"Design"}));
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert_eq!(h.app.preferences.hide_origin, Shown, "Restore Defaults");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(h.app.preferences.hide_origin, Automatic);
+    }
+
     /// The snap-suppress choice and Direct interaction read in the user's language: the classic
     /// choice's "or" was English in every language, and Direct interaction had no message.
     #[test]
@@ -14985,7 +15097,7 @@ mod settings_search_tests {
             for (query, id, page, handle) in [
                 ("Step values with the arrow keys and the wheel", "ui.step_values", crate::prefs::PAGE_DESIGN, "prefs:step_values"),
                 ("For files from unknown programs", "prefs.stand_up_unknown", crate::prefs::PAGE_DESIGN, "prefs:stand_up_unknown"),
-                ("Hide origin by default", "ui.hide_origin_by_default", crate::prefs::PAGE_DESIGN, "prefs:hide_origin"),
+                ("Hide origin by default", "prefs.origin_display", crate::prefs::PAGE_DESIGN, "prefs:hide_origin:automatic"),
                 ("Snap to face and edge centres", "Snap to face and edge centres", crate::prefs::PAGE_TOOLS, "prefs:hole_snaps"),
                 ("Move holes by clicking or dragging", "Move holes by clicking or dragging", crate::prefs::PAGE_TOOLS, "prefs:hole_moves"),
                 ("Several holes on one face", "prefs.design_tools.hole_several", crate::prefs::PAGE_TOOLS, "prefs:hole_several"),
