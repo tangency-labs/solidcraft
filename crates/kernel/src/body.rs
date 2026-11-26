@@ -192,6 +192,11 @@ pub struct Body {
     /// The exact box ([`Body::exact_bounds`]), measured on first use and shared by clones
     /// because they share the record.
     pub(crate) bounds: std::sync::Arc<std::sync::Mutex<Option<Aabb3>>>,
+    /// A box that holds the body without being its exact box ([`Body::holding_bounds`]): a
+    /// measured box moved with the body by a translation, rounded outward, or the boxes of the
+    /// pieces it was joined from. Never reported as the exact box, which is always measured, so
+    /// a body's measurements are the same whichever boxes were measured before it was made.
+    pub(crate) held_bounds: Option<Aabb3>,
     /// Set for mesh bodies (`record` is then empty).
     pub(crate) mesh: Option<std::sync::Arc<crate::meshbody::TriMesh>>,
     /// Display colour (linear RGB 0..1) from an imported file; operations drop it.
@@ -512,6 +517,65 @@ pub use solidcore_tess::{DISPLAY_ANGLE, MeshTolerance};
 /// How [`Body::export_mesh`] meshes (the mesh path's spec and its default smallest angle), and what it reports.
 pub use solidcore_tess::{MESH_MIN_ANGLE, MeshSpec, PlanStats};
 
+impl Body {
+    /// The box that holds this body as [`Body::holding_bounds`] reads it without measuring: the
+    /// exact box when it is measured, else the held box. `None` when neither is known.
+    fn known_holding_bounds(&self) -> Option<Aabb3> {
+        let exact = *self.bounds.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        exact.or(self.held_bounds)
+    }
+
+    /// The box that holds this body ([`Body::known_holding_bounds`]) moved by `matrix`, when
+    /// `matrix` is a translation ([`is_translation`]) and that box is known: through
+    /// [`solidcore_ops::affine::transformed_box`], which rounds outward, so the moved box holds
+    /// the moved body but may be larger than its exact box by rounding. Not for a turn: the box of
+    /// a turned box holds the turned body but is larger than it by more than rounding.
+    fn translated_bounds(&self, matrix: &[[f64; 4]; 4]) -> Option<Aabb3> {
+        if !is_translation(matrix) {
+            return None;
+        }
+        let b = self.known_holding_bounds()?;
+        let (lo, hi) = solidcore_ops::affine::transformed_box(matrix, [b.min.x, b.min.y, b.min.z], [b.max.x, b.max.y, b.max.z]).ok()?;
+        Some(Aabb3 { min: v3(lo), max: v3(hi) })
+    }
+
+    /// This body with the box of `pieces` together as the box that holds it: this body is those
+    /// pieces side by side. Only when each piece's holding box is known already: nothing is
+    /// measured here.
+    pub(crate) fn with_bounds_of(mut self, pieces: &[Body]) -> Body {
+        let mut all = Aabb3::EMPTY;
+        for p in pieces {
+            let Some(b) = p.known_holding_bounds() else { return self };
+            all = all.union(&b);
+        }
+        if !all.is_empty() && all.min.is_finite() && all.max.is_finite() {
+            self.held_bounds = Some(all);
+        }
+        self
+    }
+
+    /// A box that holds the body: its exact box when that is measured, else the box it holds
+    /// ([`Body::held_bounds`]: a measured box moved with it, or its pieces' boxes), else its exact
+    /// box, measured ([`Body::exact_bounds`]). For tests of whether bodies are apart, where a
+    /// box larger by rounding only ever says they may meet; never for what a body measures.
+    pub fn holding_bounds(&self) -> Result<Aabb3> {
+        if !self.is_mesh()
+            && let Some(b) = self.known_holding_bounds()
+        {
+            return Ok(b);
+        }
+        self.exact_bounds()
+    }
+}
+
+/// Whether `m` is a translation exactly (its other entries the identity's), in the layout
+/// [`crate::transform_matrix`] takes: the offset in the last row.
+fn is_translation(m: &[[f64; 4]; 4]) -> bool {
+    let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
+    let [r0, r1, r2, [x, y, z, w]] = *m;
+    [r0, r1, r2] == identity && w == 1.0 && x.is_finite() && y.is_finite() && z.is_finite()
+}
+
 pub(crate) fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0], p[1], p[2])
 }
@@ -751,6 +815,7 @@ impl Body {
             size,
             volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
             bounds: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            held_bounds: None,
             mesh,
             color: None,
             paint: None,
@@ -1500,6 +1565,9 @@ impl Body {
         if !movable.by(&motion) {
             return None;
         }
+        // A translation moves the box that holds the body with it: a hole's tools moved to each
+        // copy of a pattern were measured again at every copy (#2358).
+        let held_bounds = self.translated_bounds(&matrix);
         // Moved lazily already and not moved yet: both motions from the part's record.
         // A placed copy of a part another body shows (an assembly's instance) still shows it,
         // placed by both: it is meshed and planned from the part's, not on its own.
@@ -1522,6 +1590,7 @@ impl Body {
             size: self.size,
             volume: self.volume.clone(),
             bounds: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            held_bounds,
             mesh: None,
             color: self.color,
             paint: self.paint.clone(),

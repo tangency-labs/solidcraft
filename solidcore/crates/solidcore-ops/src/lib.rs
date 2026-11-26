@@ -173,6 +173,7 @@ pub use error::Unblendable;
 pub use error::Unsoundness;
 pub use faceted::faceted_volume;
 pub use measure::centroid_and_mean_radius;
+pub use measure::cylinder_box;
 pub use measure::distance_across_surface;
 pub use measure::nearer_line_meeting;
 pub use measure::point_along_line;

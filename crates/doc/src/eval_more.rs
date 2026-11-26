@@ -2630,12 +2630,13 @@ pub(super) fn surface_thin_layer_refused(
     Ok(())
 }
 
-/// The exact box of `body`, grown by twice its tolerance: bodies whose boxes are apart do not
-/// meet. None when it can't be worked out.
+/// A box that holds `body` (its exact box, or one larger by rounding: [`Body::holding_bounds`]),
+/// grown by twice its tolerance: bodies whose boxes are apart do not meet. None when it can't be
+/// worked out.
 pub(super) fn exact_box(body: &Body) -> Option<Aabb3> {
     #[cfg(test)]
     cost_tests::count(|c| c.tight_boxes += 1);
-    let b = body.exact_bounds().ok()?;
+    let b = body.holding_bounds().ok()?;
     (!b.is_empty() && b.min.is_finite() && b.max.is_finite()).then(|| b.inflated(2.0 * body.record().tolerance + 1e-6))
 }
 

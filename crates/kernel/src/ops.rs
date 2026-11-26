@@ -72,7 +72,7 @@ pub fn apart(a: &Body, b: &Body) -> Result<bool> {
     {
         return Ok(false);
     }
-    let grown = |x: &Body| x.exact_bounds().map(|bb| bb.inflated(2.0 * x.record().tolerance));
+    let grown = |x: &Body| x.holding_bounds().map(|bb| bb.inflated(2.0 * x.record().tolerance));
     Ok(!grown(a)?.meets(&grown(b)?))
 }
 
@@ -108,7 +108,7 @@ pub fn union_apart(bodies: &[Body]) -> Result<Option<Body>> {
         }
         let mut boxes = Vec::with_capacity(bodies.len());
         for b in bodies {
-            boxes.push(b.exact_bounds()?.inflated(2.0 * b.record().tolerance));
+            boxes.push(b.holding_bounds()?.inflated(2.0 * b.record().tolerance));
         }
         if any_two_meet(&boxes) {
             return Ok(None);
@@ -155,7 +155,9 @@ pub fn join_apart(bodies: &[Body]) -> Result<Option<Body>> {
     let (joined, part) = joined(bodies)?;
     let counts: Vec<(usize, usize)> = bodies.iter().map(|b| (b.face_count(), b.edge_count())).collect();
     let history = crate::history::of_part(&part, &counts);
-    Ok(Some(joined.with_checked_history(Some(history), &counts)))
+    // The pieces' boxes, when each is known, hold the joined body: a pattern's cut tools, joined,
+    // were measured again as one (#2358).
+    Ok(Some(joined.with_checked_history(Some(history), &counts).with_bounds_of(bodies)))
 }
 
 /// Bodies (apart from each other) as one body of several pieces, their face sources carried.

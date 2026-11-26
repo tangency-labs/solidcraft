@@ -23,6 +23,7 @@ pub use solidcore_ops::centroid_and_mean_radius;
 pub use solidcore_ops::constraint;
 pub use solidcore_ops::curve;
 pub use solidcore_ops::curve_fit;
+pub use solidcore_ops::cylinder_box;
 pub use solidcore_ops::develop;
 pub use solidcore_ops::dxf;
 pub use solidcore_ops::face_pair;
