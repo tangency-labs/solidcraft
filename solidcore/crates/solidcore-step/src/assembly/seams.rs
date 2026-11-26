@@ -301,6 +301,17 @@ fn turned(p: Vec3, o: Vec3, k: Vec3, angle: f64) -> Vec3 {
     o + x * c + k.cross(x) * s + k * (k.dot(x) * (1.0 - c))
 }
 
+/// `v`'s direction square to unit `z`, as a record frame's x axis beside `z` must be (unit and
+/// square within a few ulps, `solidcore::geom::axis2_placement::axes_are_orthonormal`); `None`
+/// along `z`. One projection off `z` leaves a component along it of the rounding of `v`'s whole
+/// length, which normalising a short remainder (`v` near `z`, as a seam's end near a pole has
+/// it) makes many ulps of the direction; a second projection of that remainder leaves only its
+/// own rounding (Kahan's "twice is enough", Parlett, The Symmetric Eigenvalue Problem, §6.9).
+fn square_to(z: Vec3, v: Vec3) -> Option<Vec3> {
+    let once = v - z * v.dot(z);
+    (once - z * once.dot(z)).normalized()
+}
+
 /// A revolution's profile turned by `angle`: the meridian there, with the profile's parameter.
 fn meridian(profile: &BCurve, o: Vec3, k: Vec3, angle: f64) -> R<BCurve> {
     let turn = |h: &[f64; 4]| {
@@ -704,18 +715,20 @@ impl Assembly<'_> {
             Kind::Sphere(r) => {
                 // The sphere's own meridian through the end further from the axis: angle 0 on the
                 // equator, π/2 at the upper pole, so its angle is the surface's latitude and its
-                // quarters the surface's.
+                // quarters the surface's. Its frame is the record's, unit and square to rounding
+                // ([`square_to`]).
+                let z = ax.z.normalized().ok_or("a sphere with no axis")?;
                 let (da, db) = (pa - ax.origin, pb - ax.origin);
-                let (ra, rb) = (da - ax.z * da.dot(ax.z), db - ax.z * db.dot(ax.z));
-                let x = if ra.len() >= rb.len() { ra } else { rb }.normalized().ok_or("a seam along the sphere's axis")?;
-                let latitude = |d: Vec3| d.dot(ax.z).atan2(d.dot(x));
+                let (ra, rb) = (da - z * da.dot(z), db - z * db.dot(z));
+                let x = square_to(z, if ra.len() >= rb.len() { ra } else { rb }).ok_or("a seam along the sphere's axis")?;
+                let latitude = |d: Vec3| d.dot(z).atan2(d.dot(x));
                 let (ta, tb) = (latitude(da), latitude(db));
                 if !(ta.abs() <= 0.5 * PI + 1e-9 && tb.abs() <= 0.5 * PI + 1e-9) {
                     return Err(unsupported("a seam between loops at opposite angles"));
                 }
                 let along = ta < tb;
                 (
-                    BCurve::Circle { frame: Frame { origin: arr(ax.origin), x_axis: arr(x), y_axis: arr(ax.z) }, radius: *r },
+                    BCurve::Circle { frame: Frame { origin: arr(ax.origin), x_axis: arr(x), y_axis: arr(z) }, radius: *r },
                     if along { [ta, tb] } else { [tb, ta] },
                     along,
                 )
@@ -1942,8 +1955,12 @@ impl Assembly<'_> {
         let d = |t: f64| {
             c.point(t).and_then(|p| eval.project(p, None, f64::INFINITY)).and_then(|q| q.get(at).copied()).map(|x| wrap_by(x - target, period))
         };
-        // A jump across the half period is the wrap, not a crossing.
-        let near = period / TAU;
+        // A sign change between two samples (each within half a period of the target) passed
+        // the target by the short way between them, less than half a period, and the half
+        // period opposite it, the wrap, by the long way. Steps along the edge are taken to turn
+        // less than half a period, so the short way is the one it took. Near a pole an edge
+        // turns fast: one a few tenths of a millimetre from a sphere's pole turns more than a
+        // radian from one sample to the next.
         let n = 64;
         let mut prev: Option<(f64, f64)> = None;
         for k in 0..=n {
@@ -1951,8 +1968,7 @@ impl Assembly<'_> {
             let Some(x) = d(t) else { continue };
             if let Some((t0, x0)) = prev
                 && x0.signum() != x.signum()
-                && x0.abs() < near
-                && x.abs() < near
+                && (x - x0).abs() < 0.5 * period
             {
                 let (mut a, mut b, mut fa) = (t0, t, x0);
                 for _ in 0..100 {

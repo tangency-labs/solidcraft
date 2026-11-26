@@ -739,7 +739,7 @@ fn sphere_lens_step(x1: f64, pole: [f64; 3], closed: bool) -> (String, f64, f64,
 /// with the pole outside (#22669; a dished face of a part from another CAD program has it so):
 /// the issue's lens with the pole at (100, 0, 0), outside it, then with the pole inside, on the
 /// lens up to x = 62 and on the thinner one up to x = 61, each as a sheet and closed. With the
-/// pole inside, the face gets a seam from its loop to the pole: one edge and one vertex more.
+/// pole inside, the face gets a seam from its loop to the pole.
 /// The seam's meridian frame missed the curve record's unit-and-square check on the first
 /// ("the frame's axes are not unit and square"), and on the thinner one, whose arcs pass 0.6 mm
 /// from the pole, the loop was not found to cross the seam's angle ("a loop round a pole that
@@ -757,10 +757,15 @@ fn a_sphere_face_that_holds_its_frames_pole_reads_as_with_the_pole_outside() {
             assert!(body.refused.is_none(), "{case}: {:?}", imp.warnings);
             assert_eq!((body.closed, body.body.is_surface()), (closed, !closed), "{case}: {:?}", imp.warnings);
             let m = measure(&body.body).unwrap_or_else(|e| panic!("{case}: {e}"));
-            // The arcs (and the chord) between A and B, and with the pole inside the seam to it.
+            // The arcs (and the chord) between A and B. With the pole inside, the seam to it and
+            // the arc it starts on split in two: A and B lie at angles about the axis that the
+            // arcs' pieces passing near the pole also reach (their control hulls fan out round
+            // it), so the seam starts in the middle of the widest range of angles the loop passes
+            // once, on a new vertex.
             let (faces, edges) = if closed { (3, 3) } else { (1, 2) };
-            let seam = usize::from(inside);
+            let seam = 2 * usize::from(inside);
             assert_eq!((m.faces, m.edges, m.vertices, m.shells), (faces, edges + seam, 2 + seam, 1), "{case}: {:?}", imp.warnings);
+            assert!(!imp.warnings.iter().any(|w| w.contains("left out") || w.contains("refused")), "{case}: {:?}", imp.warnings);
             if closed {
                 assert!(rel(m.area, area) < 1e-6, "{case}: area {} vs {area}", m.area);
                 assert!(rel(m.volume, volume) < 1e-6, "{case}: volume {} vs {volume}", m.volume);
