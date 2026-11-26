@@ -183,3 +183,33 @@ fn a_slot_open_at_the_part_s_edge_and_depths_past_the_top_are_refused() {
     let bad = PlugStyle { fill: PlugFill::Partial { depth: f64::NAN }, ..PlugStyle::default() };
     assert!(matches!(weld(&top, &below, IN, X, bad), Err(PlugRefusal::Invalid(_))));
 }
+
+/// Turned about z through the profile points `(r, z)`, in order, closed back to the first.
+fn turned_profile(points: &[[f64; 2]]) -> Body {
+    let n = points.len();
+    let line = |a: [f64; 2], b: [f64; 2]| Curve::Line { start: [a[0], 0.0, a[1]], end: [b[0], 0.0, b[1]] };
+    let profile: Vec<Curve> = (0..n).map(|i| line(points[i], points[(i + 1) % n])).collect();
+    sweep::revolve(&profile, [0.0; 3], UP, TAU, true).unwrap()
+}
+
+#[test]
+fn a_part_with_chamfered_outer_edges_still_has_its_top() {
+    // a round plate, its top edge chamfered: the top face touches the chamfer, not the side
+    let disc = turned_profile(&[[0.0, 0.0], [30.0, 0.0], [30.0, 6.0], [28.0, 8.0], [0.0, 8.0]]);
+    let top = ordered(boolean(disc, round_hole(), BooleanOp::Subtract).unwrap().unwrap());
+    close(volume(&weld(&top, &lower(60.0), IN, X, PlugStyle::default()).unwrap()), ROUND * T);
+}
+
+#[test]
+fn a_partial_fill_is_cut_where_the_hole_widens_past_the_part_s_bottom() {
+    // the part widens from radius 10 to 30, its hole from 2 to 18: at depth 2 the cut must reach
+    // past radius 10 (CodeRabbit's case on #22646)
+    let frustum = |h: f64, r0: f64, r1: f64| PI * h / 3.0 * (r0 * r0 + r0 * r1 + r1 * r1);
+    let part = turned_profile(&[[0.0, 0.0], [10.0, 0.0], [30.0, T], [0.0, T]]);
+    let top = ordered(boolean(part, turned(1.0, -0.5, 19.0, T + 0.5), BooleanOp::Subtract).unwrap().unwrap());
+    let below = lower(60.0);
+    let at = [0.0, 0.0, 1.0];
+    close(volume(&weld(&top, &below, at, X, PlugStyle::default()).unwrap()), frustum(T, 2.0, 18.0));
+    let two = PlugStyle { fill: PlugFill::Partial { depth: 2.0 }, ..PlugStyle::default() };
+    close(volume(&weld(&top, &below, at, X, two).unwrap()), frustum(2.0, 2.0, 6.0));
+}

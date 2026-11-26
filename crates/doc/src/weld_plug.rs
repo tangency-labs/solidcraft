@@ -35,7 +35,10 @@
 //! A dome needs a top outline that is star-shaped about its centre ([`DomeRefusal::NotStar`]): an
 //! L-shaped slot is filled flush or partly, not convex or concave.
 
+use std::f64::consts::FRAC_PI_2;
+
 use solidcore_record::brep::Brep;
+use solidcraft_kernel::affine;
 use solidcraft_kernel::services::boolean::{BooleanOp, boolean};
 use solidcraft_kernel::services::dome::{DomeRefusal, DomeShape, dome};
 use solidcraft_kernel::services::measure::PointClass;
@@ -79,6 +82,9 @@ pub enum PlugRefusal {
     /// An ops call failed.
     #[error(transparent)]
     Ops(solidcraft_kernel::services::Error),
+    /// A placement call refused its numbers, in the kernel's words.
+    #[error(transparent)]
+    Placement(#[from] affine::AffineRefused),
 }
 
 impl From<solidcraft_kernel::services::Error> for PlugRefusal {
@@ -229,10 +235,7 @@ pub fn plug_weld(top: (&Body, &Order), below: (&Body, &Order), wall: usize, styl
         PlugFill::Full => thickness,
         PlugFill::Partial { depth } if depth >= thickness => return Err(PlugRefusal::TooDeep { max: thickness }),
         PlugFill::Partial { depth } => {
-            // everything above `depth`: the bottom face's outline raised by it
-            let cutter = sweep::extrude(&curves(&t.record, &hole.outer_loop)?, hole.up, thickness, 0.0, DraftCorner::Curvature, true)?;
-            let [x, y, z] = hole.up.map(|v| v * depth);
-            cutter.transform(&[[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [x, y, z, 1.0]])?;
+            let cutter = above(&fill, hole.up, hole.at, depth)?;
             fill = boolean(fill, cutter, BooleanOp::Subtract)?.ok_or(PlugRefusal::NotClosed)?;
             depth
         }
@@ -263,9 +266,8 @@ pub fn plug_weld(top: (&Body, &Order), below: (&Body, &Order), wall: usize, styl
 
 /// A hole of the top part, read from its copy: record faces and edges of [`Copied::order`].
 struct Hole {
-    /// The bottom face, its outer loop and the hole's loop on it.
+    /// The bottom face and the hole's loop on it.
     bottom: usize,
-    outer_loop: Vec<usize>,
     bottom_loop: Vec<usize>,
     /// The hole's faces, its top face and the loop on it.
     faces: Vec<usize>,
@@ -298,52 +300,63 @@ fn find_hole(t: &Copied, b: &Copied, picked: usize) -> Result<Hole> {
             if b.body.face_hits_by_ray(&b.order, at, down)?.is_empty() {
                 continue;
             }
-            let sides = across(outer_loop, bottom);
-            let touches_sides = |f: usize| {
-                adj.face_edges
-                    .get(f)
-                    .is_some_and(|es| es.iter().any(|&e| adj.edge_faces.get(e).is_some_and(|fs| fs.iter().any(|g| sides.contains(g)))))
+            let up = down.map(|v| -v);
+            // A flat face square to the weld with a hole in it is a stop: the top, or a step inside
+            // the hole (a counterbore's). The part's outside is everything reached from the faces
+            // round the bottom face without crossing a stop; the hole is everything reached from
+            // the bottom loop the same way. A stop next to both is the top; a stop next to the hole
+            // only is a step, and the hole goes on through it. Chamfered or split outer edges are
+            // just more outside (CodeRabbit on #22646).
+            let is_stop = |g: usize| -> Result<bool> {
+                Ok(t.body.face_square_level(&t.order, g, up, at)?.is_some() && t.body.face_loops(&t.order, g)?.len() >= 2)
             };
-            let mut faces = across(bottom_loop, bottom);
-            let (mut tops, mut opens) = (Vec::new(), false);
-            let mut stack = faces.clone();
-            while let Some(f) = stack.pop() {
-                for g in across(adj.face_edges.get(f).map_or(&[][..], Vec::as_slice), f) {
-                    if g == bottom || faces.contains(&g) || tops.contains(&g) {
+            let mut stop = vec![false; t.order.faces.len()];
+            for (g, s) in stop.iter_mut().enumerate() {
+                *s = g != bottom && is_stop(g)?;
+            }
+            let walk = |from: Vec<usize>, region: &mut Vec<usize>, met: &mut Vec<usize>| {
+                let mut stack = from;
+                while let Some(f) = stack.pop() {
+                    if f == bottom || region.contains(&f) || met.contains(&f) {
                         continue;
                     }
-                    if sides.contains(&g) {
-                        opens = true;
-                    } else if touches_sides(g) {
-                        tops.push(g);
-                    } else {
-                        faces.push(g);
-                        stack.push(g);
+                    if stop.get(f).copied().unwrap_or(false) {
+                        met.push(f);
+                        continue;
                     }
+                    region.push(f);
+                    stack.extend(across(adj.face_edges.get(f).map_or(&[][..], Vec::as_slice), f));
+                }
+            };
+            let (mut outside, mut outer_stops) = (Vec::new(), Vec::new());
+            walk(across(outer_loop, bottom), &mut outside, &mut outer_stops);
+            let (mut faces, mut stops) = (Vec::new(), Vec::new());
+            walk(across(bottom_loop, bottom), &mut faces, &mut stops);
+            loop {
+                let steps: Vec<usize> = stops.iter().copied().filter(|g| !outer_stops.contains(g) && !faces.contains(g)).collect();
+                if steps.is_empty() {
+                    break;
+                }
+                for g in steps {
+                    stops.retain(|&s| s != g);
+                    faces.push(g);
+                    let next = across(adj.face_edges.get(g).map_or(&[][..], Vec::as_slice), g);
+                    walk(next, &mut faces, &mut stops);
                 }
             }
-            if !faces.contains(&picked) {
+            if !faces.contains(&picked) && !stops.contains(&picked) {
                 continue;
             }
-            if opens {
+            if faces.iter().any(|f| outside.contains(f)) {
                 return Err(PlugRefusal::NotAHole { face: picked });
             }
-            let [top] = tops[..] else {
+            let [top] = stops[..] else {
                 return Err(PlugRefusal::NoTopFace);
             };
             let top_loop = adj.face_edges.get(top).map_or(Vec::new(), |es| {
                 es.iter().copied().filter(|&e| adj.edge_faces.get(e).is_some_and(|fs| fs.iter().any(|g| faces.contains(g)))).collect()
             });
-            return Ok(Hole {
-                bottom,
-                outer_loop: outer_loop.clone(),
-                bottom_loop: bottom_loop.clone(),
-                faces,
-                top,
-                top_loop,
-                up: down.map(|v| -v),
-                at,
-            });
+            return Ok(Hole { bottom, bottom_loop: bottom_loop.clone(), faces, top, top_loop, up, at });
         }
     }
     Err(PlugRefusal::NotAHole { face: picked })
@@ -378,6 +391,27 @@ fn floor_under(t: &Copied, b: &Copied, hole: &Hole, tol: f64) -> Result<f64> {
         }
     }
     Ok(gap)
+}
+
+/// A block holding everything of `fill` above `depth` along `up` from `at`: a square in the plane at
+/// that depth, wider than the fill's box reaches from it, extruded up as far. It does not lean on
+/// the plate's outline, so a hole that widens past it is still cut (CodeRabbit on #22646).
+fn above(fill: &Body, up: [f64; 3], at: [f64; 3], depth: f64) -> Result<Body> {
+    let (lo, hi) = fill.bounds()?;
+    // the box's edges added up are at least its diagonal: no point of the fill is farther from
+    // the square's middle than that plus the depth
+    let reach = lo.iter().zip(hi).map(|(a, b)| b - a).sum::<f64>() + depth;
+    let [u, w] = match affine::orthonormal_axes(up, [1.0, 0.0, 0.0]) {
+        Ok([_, u]) => [u, affine::apply_point(&affine::rotation([0.0; 3], up, FRAC_PI_2)?, u)],
+        Err(_) => {
+            let [_, u] = affine::orthonormal_axes(up, [0.0, 1.0, 0.0])?;
+            [u, affine::apply_point(&affine::rotation([0.0; 3], up, FRAC_PI_2)?, u)]
+        }
+    };
+    let corner = |a: f64, b: f64| std::array::from_fn(|i| at[i] + up[i] * depth + (u[i] * a + w[i] * b) * reach);
+    let square = [corner(-1.0, -1.0), corner(1.0, -1.0), corner(1.0, 1.0), corner(-1.0, 1.0)];
+    let sides: Vec<Curve> = (0..4).map(|i| Curve::Line { start: square[i], end: square[(i + 1) % 4] }).collect();
+    Ok(sweep::extrude(&sides, up, reach, 0.0, DraftCorner::Curvature, true)?)
 }
 
 /// The dome of `height` on record face `face` of `body` in `shape`; with none, spherical where the
