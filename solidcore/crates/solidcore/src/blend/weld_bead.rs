@@ -1108,9 +1108,9 @@ fn span_parameters(
     blend: &crate::blend::foot_blend::FootBlend,
     spans: &[BeadSpan],
 ) -> Result<Vec<[f64; 2]>> {
-    let (lo, hi) = (blend.interval.min(), blend.interval.max());
-    let curve = Curve::from(blend.leader.clone());
-    let length = curve.length(k, &blend.interval, LENGTH_ACCURACY)?;
+    let (lo, hi) = (blend.interval().min(), blend.interval().max());
+    let curve = Curve::from(blend.leader().clone());
+    let length = curve.length(k, blend.interval(), LENGTH_ACCURACY)?;
     let at = |share: f64| -> Result<f64> {
         if share <= 0.0 {
             return Ok(lo);
@@ -1204,7 +1204,7 @@ struct CornerEnd {
 impl CornerEnd {
     /// Which support of this bead is on `face`.
     fn side_on(&self, face: FaceId) -> Option<usize> {
-        self.blend.sides.iter().position(|s| s.face == Some(face))
+        self.blend.sides().iter().position(|s| s.face == Some(face))
     }
 
     /// The unit direction from the root to the foot on support `i`.
@@ -1216,7 +1216,7 @@ impl CornerEnd {
     /// Whether support `i` is a plane.
     fn planar(&self, i: usize) -> bool {
         self.blend
-            .sides
+            .sides()
             .get(i)
             .is_some_and(|s| matches!(s.surface.kind(), SurfaceKind::Plane(_)))
     }
@@ -1343,11 +1343,11 @@ fn corner_beads(
                 return Err(refuse(v));
             }
             let length =
-                Curve::from(blend.leader.clone()).length(k, &blend.interval, LENGTH_ACCURACY)?;
+                Curve::from(blend.leader().clone()).length(k, blend.interval(), LENGTH_ACCURACY)?;
             let t = if at_start {
-                blend.interval.min()
+                blend.interval().min()
             } else {
-                blend.interval.max()
+                blend.interval().max()
             };
             let station = blend.station(k, t, legs, None)?;
             let away = if at_start {
@@ -1368,7 +1368,7 @@ fn corner_beads(
         }
         // the unit normal of support `i` of a corner's bead end at `uv`
         let normal = |k: &Kernel, e: &CornerEnd, i: usize, uv: Point2| -> Result<Vec3> {
-            let side = e.blend.sides.get(i).ok_or_else(|| {
+            let side = e.blend.sides().get(i).ok_or_else(|| {
                 defect("a corner's bead end had no support of an index its own faces gave")
             })?;
             normal_at(k, &side.surface, uv)?
@@ -1397,10 +1397,10 @@ fn corner_beads(
                 return Err(refuse(v));
             }
             // the face both beads lie on (the floor), and each bead's other face (its wall)
-            let faces_a: Vec<FaceId> = ea.blend.sides.iter().filter_map(|s| s.face).collect();
+            let faces_a: Vec<FaceId> = ea.blend.sides().iter().filter_map(|s| s.face).collect();
             let common: Vec<FaceId> = eb
                 .blend
-                .sides
+                .sides()
                 .iter()
                 .filter_map(|s| s.face)
                 .filter(|f| faces_a.contains(f))

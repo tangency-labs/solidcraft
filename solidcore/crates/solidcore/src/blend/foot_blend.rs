@@ -86,6 +86,13 @@ const NEWTON_STEPS: usize = 40;
 /// `1e-7 * 2^64` they end first.
 const FIT_STEPS: usize = 64;
 
+/// How narrow a leg fit's bracket is halved, as a share of `1 +` its upper end: the size named
+/// is within this of the largest leg that holds. A ten-millionth is a hundredth of a body's
+/// default tolerance (1e-5), so the size named reads the same at any tolerance a leg is
+/// compared at, and [`FIT_STEPS`] halvings reach it from any leg below `1e-7 * 2^64`. Chosen
+/// for that, not derived from the faces.
+const LEG_FIT_BRACKET: f64 = 1e-7;
+
 /// One support of a foot blend: its surface, the face it is on the part (where the blend was
 /// made from one), and the face's side.
 #[derive(Debug, Clone)]
@@ -100,19 +107,22 @@ pub struct FootSide {
 }
 
 /// A foot blend's leader and supports: the joint edge's curve, as its B-spline form, over
-/// its interval, and the edge's two faces.
+/// its interval, and the edge's two faces. They are read through [`FootBlend::edge`],
+/// [`FootBlend::leader`], [`FootBlend::interval`] and [`FootBlend::sides`] and are not
+/// changed once the blend is made, so what was read from the edge with them (the wedge of a
+/// straight edge between two planes) stays the joint's.
 #[derive(Debug, Clone)]
 pub struct FootBlend {
     /// The joint edge of the part, where the blend was made from one.
-    pub edge: Option<EdgeId>,
+    edge: Option<EdgeId>,
     /// The leader: the edge's curve as its B-spline form, in the edge curve's parameter.
-    pub leader: BSplineCurve,
+    leader: BSplineCurve,
     /// The leader as a curve, for its evaluations.
     curve: Curve,
     /// The edge's interval on its curve.
-    pub interval: Extent1d,
+    interval: Extent1d,
     /// The two supports, support 1 first.
-    pub sides: [FootSide; 2],
+    sides: [FootSide; 2],
     /// Whether the joint closes on itself (its start vertex is its end vertex).
     pub closed: bool,
     /// The wedge between the faces of a straight edge between two planes, as the planar
@@ -253,6 +263,30 @@ fn binormal_reading(
 }
 
 impl FootBlend {
+    /// The joint edge of the part, where the blend was made from one.
+    #[must_use]
+    pub fn edge(&self) -> Option<EdgeId> {
+        self.edge
+    }
+
+    /// The leader: the edge's curve as its B-spline form, in the edge curve's parameter.
+    #[must_use]
+    pub fn leader(&self) -> &BSplineCurve {
+        &self.leader
+    }
+
+    /// The edge's interval on its curve.
+    #[must_use]
+    pub fn interval(&self) -> &Extent1d {
+        &self.interval
+    }
+
+    /// The two supports, support 1 first.
+    #[must_use]
+    pub fn sides(&self) -> &[FootSide; 2] {
+        &self.sides
+    }
+
     /// The foot blend of `edge` of `target`: its curve as its B-spline form, and its two faces
     /// through the edge uses on the void's side (whose faces' normals point out of the
     /// material), each with its side read from the edge use's binormal at the middle of the
@@ -326,6 +360,10 @@ impl FootBlend {
                 .map(|n| n.cross(tangent))
                 .ok_or_else(|| defect("the support's surface had no normal at the joint's middle, where the edge use's binormal was just evaluated on it"))?;
             let dot = across.dot(into.binormal);
+            // the binormal lies in the face, square to the edge, as `n x e'` does: on a face
+            // that lies on its surface the two are parallel and their cosine is 1 or -1, whose
+            // sign is the face's side. A half (60 degrees) sits midway between a cosine that
+            // tells the side and 0, where it tells nothing: chosen, not derived
             if dot.abs() <= 0.5 * across.length() * into.binormal.length() {
                 return Err(SolidError::invalid_input(
                     OP,
@@ -688,9 +726,11 @@ impl FootBlend {
         if holds(z)? {
             return Ok(z);
         }
+        // the bracket's width, `LEG_FIT_BRACKET` of its upper end (and of 1, for legs below
+        // it)
         let (mut lo, mut hi) = (0.0_f64, z);
         for _ in 0..FIT_STEPS {
-            if hi - lo <= 1e-7 * (1.0 + hi) {
+            if hi - lo <= LEG_FIT_BRACKET * (1.0 + hi) {
                 break;
             }
             let mid = 0.5 * (lo + hi);
@@ -1003,39 +1043,6 @@ impl FootBlend {
         Ok(fit)
     }
 
-    /// The wedge kept for a straight edge between two planes ([`FootBlend::of_edge`]), while
-    /// it still describes this blend: the supports and the leader are public and can be
-    /// changed after the edge was read, so the wedge is taken only where both supports are
-    /// planes and the angle between the directions they leave the root in, at the middle of
-    /// `span`, is the wedge to a millionth of a radian. `None` otherwise (the joint is then
-    /// enclosed like any other).
-    ///
-    /// # Errors
-    ///
-    /// Those of the evaluations.
-    fn planar_wedge(&self, k: &Kernel, span: [f64; 2]) -> Result<Option<f64>> {
-        use crate::surface::surface::p2::SurfaceKind;
-        let Some(wedge) = self.planar else {
-            return Ok(None);
-        };
-        let [from, to] = span;
-        let (_, tangent) = self.root_at(k, 0.5 * (from + to))?;
-        let mut into = [Vec3::ZERO; 2];
-        for (side, d) in self.sides.iter().zip(into.iter_mut()) {
-            let SurfaceKind::Plane(_) = side.surface.geometry().kind() else {
-                return Ok(None);
-            };
-            // (a plane's normal is the same at every parameter)
-            let Some(n) = normal_at(k, &side.surface, Point2::new(0.0, 0.0))? else {
-                return Ok(None);
-            };
-            *d = n.cross(tangent) * side.side;
-        }
-        let [d1, d2] = into;
-        let angle = d1.cross(d2).length().atan2(d1.dot(d2));
-        Ok(((angle - wedge).abs() <= 1e-6).then_some(wedge))
-    }
-
     /// The sagitta that fits over the span `span` (a magnitude) and the leader's parameter
     /// the least bound is near; the feet's chains are not proved here
     /// ([`FootBlend::sagitta_that_fits`] proves them before it names the size).
@@ -1045,9 +1052,9 @@ impl FootBlend {
     /// the size is the float below it, the planar bead's own fit, so the bead takes every
     /// sagitta the planar bead takes and no other. That closed form is evaluated in floats,
     /// not enclosed: it is within rounding of the bound, and can take a sagitta a few last
-    /// places past it, as the planar bead does. The wedge kept from the edge is used only
-    /// while the supports are still what it was read from
-    /// ([`FootBlend::planar_wedge`]). On any other joint it is the float below
+    /// places past it, as the planar bead does. The wedge is the one read from the edge
+    /// ([`FootBlend::of_edge`]): the blend's edge, leader, interval and supports are not
+    /// changed after it, so it is used as it is. On any other joint it is the float below
     /// the lower end [`FootBlend::bound_over`] encloses over the span (the bound is open, and
     /// every sagitta below that lower end is below the bound at every parameter); a lower end
     /// not above 0 proves no size and is not named.
@@ -1069,7 +1076,7 @@ impl FootBlend {
         use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
         let within = core::slice::from_ref(&span);
         let planar = self
-            .planar_wedge(k, span)?
+            .planar
             .and_then(|wedge| ChamferDefinition::new(ChamferSize::Distances(legs), wedge).ok());
         if let Some(chamfer) = planar {
             let bound = BeadDefinition { chamfer, sagitta }.bound(sagitta);
@@ -1411,7 +1418,7 @@ impl FootBlend {
         // gets its fit
         let (mut lo, mut hi) = (0.0_f64, z);
         for _ in 0..FIT_STEPS {
-            if hi - lo <= 1e-7 * (1.0 + hi) {
+            if hi - lo <= LEG_FIT_BRACKET * (1.0 + hi) {
                 break;
             }
             let mid = 0.5 * (lo + hi);
@@ -1451,6 +1458,10 @@ impl FootBlend {
 
 /// Whether `uv` lies on the rim of `domain` (to a millionth of its size): where a Newton the
 /// surface's evaluation holds inside its domain stops when the point it seeks is past it.
+/// Held there, the parameter is the rim's to rounding (about 1e-16 of the domain's size); a
+/// millionth is far above that and far below any leg's share of a support, and a foot read as
+/// on the rim is refused (no toe at the leg), never built: the margin errs to the refusal.
+/// Chosen, not derived.
 fn on_rim(domain: &Extent2d, periods: [Option<f64>; 2], uv: Point2) -> bool {
     let (lo, hi) = (domain.min(), domain.max());
     let rim = |x: f64, lo: f64, hi: f64, period: Option<f64>| {
@@ -1869,7 +1880,7 @@ impl FootBlend {
     /// [`crate::blend::fillet_executive::NoRoomReason::BeadCutsFace`] at the station's root,
     /// with no size; those of [`FootBlend::station_bound`].
     fn ramp_sagitta(&self, k: &Kernel, s: &FootStation, sagitta: f64) -> Result<()> {
-        if self.planar_wedge(k, [s.t, s.t])?.is_some() {
+        if self.planar.is_some() {
             return Ok(());
         }
         if sagitta != 0.0 && sagitta.abs() >= self.station_bound(k, s, sagitta)? {
@@ -2716,12 +2727,20 @@ fn strip_face(
         }
         match period {
             Some(p) if p > 0.0 && b - a < p => {
+                // a billionth of the period, twice: a box that starts on the natural domain's
+                // start to rounding is not moved a whole period down, and one that ends on its
+                // end to rounding still fits. Far above the samples' rounding (about 1e-16 of
+                // the period), far below any strip's width
                 let shift = -p * ((a - nlo) / p + 1e-9).floor();
                 let (a, b) = (a + shift, b + shift);
                 let slack = 1e-9 * p;
                 if a < nlo - slack || b > nhi + slack {
                     return (nlo, nhi);
                 }
+                // a twentieth of the period's free part on each side keeps the strip's
+                // boundary off the edge of its own domain; the two margins together take a
+                // tenth of the free part, so they never meet round the period. Chosen, not
+                // derived
                 let m = 0.05 * (p - (b - a));
                 ((a - m).max(nlo), (b + m).min(nhi))
             }

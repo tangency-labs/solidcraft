@@ -261,8 +261,8 @@ between two stations (the construction puts a station there).
 ### 2.5 The foot blend: weld beads
 
 A weld bead is not a rolling ball's round: a leg gauge measures it straight from the root (the
-joint line) to the toe, and both legs hold along the whole joint, on flat and curved faces alike
-(#15129). The **foot blend** (`blend::foot_blend`) is that definition, a kind of its own beside the
+joint line) to the toe, and both legs hold along the whole joint, on flat and curved faces
+alike. The **foot blend** (`blend::foot_blend`) is that definition, a kind of its own beside the
 rolling-ball blend, which it leaves unchanged.
 
 - **Leader.** The joint edge e(t) itself, as its B-spline form in the edge curve's own parameter (a
@@ -403,7 +403,7 @@ face in common and a bead wholly behind the other's wall are refused, naming the
 | Newton does not converge from either start | `StationDidNotConverge` | a defect | none |
 | the feet between two stations not proved after the halvings | `NotCertified` (`NoToeAtLeg` with its leg fit where the equations are near singular at an end: the toes on the leg's circle meet there) | `NotWithinTolerance` | none (the fit where `NoToeAtLeg`) |
 | the net does not hold the tolerance after its refinements | `SkinPastStationCap` | `NotWithinTolerance` | none |
-| beads meeting at a vertex in a corner not built yet (see Corners) | `WeldNotBuilt(BeadsMeetAtVertex)`, naming the vertex | `Unsupported` | none (#17916) |
+| beads meeting at a vertex in a corner not built yet (see Corners) | `WeldNotBuilt(BeadsMeetAtVertex)`, naming the vertex | `Unsupported` | none |
 | a concave bead on a face where the bound at the toe is not proved enough: any face but a plane and the outside of a cylinder, a cone or a sphere, or one of those with the other toe not on the bead's side of its tangent plane (§2); checked on every joint before any sagitta is read against its size | `WeldNotBuilt(ConcaveNotProved)`, naming the edge, the face and the toe | `Unsupported` | none |
 
 ## 3. Events of the trace
