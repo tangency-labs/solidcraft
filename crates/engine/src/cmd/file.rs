@@ -2289,11 +2289,15 @@ fn write_file(
 }
 
 /// Report a requested model cache missing from the file just written. Inspecting the
-/// container directory avoids decoding the large model a second time (#18815). `checking`: an
-/// import's check of its parts was still running when the save began, so the save left the
-/// cache out without waiting for it ([`saved_geometry`], #20133); taken then, as the check may
-/// have ended since.
-fn missing_save_cache(s: &Session, cache: bool, checking: bool, reader: Option<&DesignContainerReader<Cursor<&[u8]>>>) -> Option<String> {
+/// container directory avoids decoding the large model a second time (#18815). `skip_reason`:
+/// why [`solidcraft_doc::Model::saved_if_checked`] skipped building a cache when the save began
+/// (taken beforehand, since a background check may have ended since, #20133).
+fn missing_save_cache(
+    s: &Session,
+    cache: bool,
+    skip_reason: Option<&'static str>,
+    reader: Option<&DesignContainerReader<Cursor<&[u8]>>>,
+) -> Option<String> {
     if !cache || s.doc.features.is_empty() || reader?.has_model_cache() {
         return None;
     }
@@ -2306,10 +2310,10 @@ fn missing_save_cache(s: &Session, cache: bool, checking: bool, reader: Option<&
         "temporary component placements are active (for example an exploded view)".into()
     } else if s.model.state().bodies.is_empty() {
         "there are no evaluated bodies to cache".into()
-    } else if checking {
-        "an imported file's parts were still being checked (a save once the check ends keeps it)".into()
     } else if let Some(refusal) = solidcraft_io::take_last_cache_refusal() {
         refusal
+    } else if let Some(reason) = skip_reason.or_else(|| s.model.cache_skip_reason(&s.doc)) {
+        reason.into()
     } else {
         "the cache could not fit or be encoded within the design file budget".into()
     };
@@ -2340,7 +2344,7 @@ fn write_bytes(
     signing_key: Option<&str>,
 ) -> Result<Value> {
     // Before the bytes are made: a check that ends meanwhile leaves this save without the cache.
-    let checking = s.model.checking_imports();
+    let skip_reason = cache.then(|| s.model.cache_skip_reason(&s.design_saved(Some(path)))).flatten();
     let chain = s.provenance_chain.clone().unwrap_or_default();
     let mut signature = None;
     let mut notes: Vec<String> = Vec::new();
@@ -2419,7 +2423,7 @@ fn write_bytes(
     // Inspect the directory once. A save over the opening limit keeps its history for the next save.
     let reader = if format == "container" { DesignContainerReader::from_written_bytes(&bytes).ok() } else { None };
     let limit_warning = save_limit_warning(bytes.len(), reader.as_ref().is_some_and(DesignContainerReader::exceeds_expanded_open_limit));
-    let cache_not_saved = missing_save_cache(s, cache, checking, reader.as_ref());
+    let cache_not_saved = missing_save_cache(s, cache, skip_reason, reader.as_ref());
     s.provenance_chain = reader.and_then(|mut r| r.provenance_chain());
     s.provenance = None;
     s.mark_saved();
@@ -2685,12 +2689,44 @@ impl Session {
         // found on, before a change can move it (#17229).
         session.pin_dropped_link_names();
         let dropped = session.has_dropped_link_names();
-        if unpinned || dropped || !std::sync::Arc::ptr_eq(&before, &session.doc) {
+        if unpinned || dropped || !std::sync::Arc::ptr_eq(&before, &session.doc) || session.has_duplicate_rolled_back_body_names() {
             session.pin_rolled_back_body_names();
         }
         session.follow_design_token();
         session.saved = session.doc.clone();
         session
+    }
+
+    /// Whether a rolled-back design has stored body names past the marker that collide with
+    /// earlier stored names (e.g. linked or imported bodies saved before disambiguated names were
+    /// pinned), so [`Self::pin_rolled_back_body_names`] should pin their evaluated names on open.
+    fn has_duplicate_rolled_back_body_names(&self) -> bool {
+        let Some(marker) = self.doc.marker.filter(|&m| m < self.doc.features.len()) else {
+            return false;
+        };
+        let mut seen = std::collections::HashSet::new();
+        for (i, f) in self.doc.features.iter().enumerate() {
+            if f.suppressed {
+                continue;
+            }
+            let skip: Option<&[u64]> = match &f.kind {
+                solidcraft_doc::FeatureKind::Import { skip, .. } if !skip.is_empty() => Some(skip.as_slice()),
+                _ => None,
+            };
+            for (slot, name) in f.body_names.iter().enumerate() {
+                if skip.is_some_and(|s| s.contains(&(slot as u64))) {
+                    continue;
+                }
+                let trimmed = name.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if !seen.insert(trimmed) && i >= marker {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// Pin the names of the bodies the features after the timeline marker make, in a design
@@ -2716,12 +2752,14 @@ impl Session {
         // is the one it had at the geometry the design opened with, before an edit moves it.
         whole.pin_dropped_link_names();
         let link_pins = self.dropped_link_pins(&whole);
-        let pins: Vec<(u64, Vec<String>)> = whole
+        let pins: Vec<(u64, Vec<String>, bool)> = whole
             .doc
             .features
             .iter()
-            .filter(|f| self.doc.feature(f.id).is_some_and(|mine| mine.body_names != f.body_names))
-            .map(|f| (f.id, f.body_names.clone()))
+            .filter(|f| {
+                self.doc.feature(f.id).is_some_and(|mine| mine.body_names != f.body_names || mine.pattern_names_in_order != f.pattern_names_in_order)
+            })
+            .map(|f| (f.id, f.body_names.clone(), f.pattern_names_in_order))
             .collect();
         let reserve: Vec<String> = whole.doc.reserved_body_names.difference(&self.doc.reserved_body_names).cloned().collect();
         if pins.is_empty() && reserve.is_empty() && link_pins.is_empty() {
@@ -2729,12 +2767,13 @@ impl Session {
         }
         // As `pin_body_names` stores names: the bodies keep the names they have, so no result
         // changes and none is evaluated again.
-        let renamed: Vec<u64> = pins.iter().map(|(id, _)| *id).chain(link_pins.iter().map(|(id, ..)| *id)).collect();
+        let renamed: Vec<u64> = pins.iter().map(|(id, _, _)| *id).chain(link_pins.iter().map(|(id, ..)| *id)).collect();
         let keep = self.model.pinned_prefix(&self.doc, &renamed);
         let doc = self.doc_mut();
-        for (id, names) in pins {
+        for (id, names, in_order) in pins {
             if let Some(f) = doc.feature_mut(id) {
                 f.body_names = names;
+                f.pattern_names_in_order = in_order;
             }
         }
         store_link_names(doc, link_pins);
@@ -5547,16 +5586,26 @@ mod tests {
         s.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
         let omitted = s.design_container(solidcraft_io::DesignCompression::Fast, false, false).unwrap();
         let omitted = DesignContainerReader::new(Cursor::new(omitted.as_slice())).unwrap();
-        let notice = missing_save_cache(&s, true, false, Some(&omitted)).unwrap();
+        let notice = missing_save_cache(&s, true, None, Some(&omitted)).unwrap();
         assert!(notice.contains("design file budget"), "{notice}");
         // Left out while an import's parts were being checked (#20133): that is the reason given.
-        let checking = missing_save_cache(&s, true, true, Some(&omitted)).unwrap();
+        let checking = missing_save_cache(
+            &s,
+            true,
+            Some("an imported file's parts were still being checked (a save once the check ends keeps it)"),
+            Some(&omitted),
+        )
+        .unwrap();
         assert!(checking.contains("still being checked") && !checking.contains("budget"), "{checking}");
-        assert!(missing_save_cache(&s, false, false, Some(&omitted)).is_none());
-        assert!(missing_save_cache(&s, true, false, None).is_none());
+        assert!(missing_save_cache(&s, false, None, Some(&omitted)).is_none());
+        assert!(missing_save_cache(&s, true, None, None).is_none());
         let included = s.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
         let included = DesignContainerReader::new(Cursor::new(included.as_slice())).unwrap();
-        assert!(missing_save_cache(&s, true, false, Some(&included)).is_none());
+        assert!(missing_save_cache(&s, true, None, Some(&included)).is_none());
+        // Left out because the model is not up to date with the design: reports that instead of budget.
+        s.doc_mut().features[0].suppressed = true;
+        let not_current = missing_save_cache(&s, true, None, Some(&omitted)).unwrap();
+        assert!(not_current.contains("not up to date") && !not_current.contains("budget"), "{not_current}");
     }
 
     #[test]
@@ -5584,7 +5633,7 @@ mod tests {
         // Without an explicit refusal, it falls back to the default design file budget message.
         assert!(solidcraft_io::take_last_cache_refusal().is_none());
         let default_notice =
-            missing_save_cache(&s, true, false, Some(&omitted_reader)).ok_or_else(|| EngineError::Other("expected default notice".into()))?;
+            missing_save_cache(&s, true, None, Some(&omitted_reader)).ok_or_else(|| EngineError::Other("expected default notice".into()))?;
         assert!(default_notice.contains("the cache could not fit or be encoded within the design file budget"), "{default_notice}");
 
         // Now test that when an unencodable body refusal is recorded, missing_save_cache reports it:
@@ -5611,9 +5660,13 @@ mod tests {
         let reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(bytes.as_slice()))?;
         assert!(!reader.has_model_cache());
 
-        let notice = missing_save_cache(&s, true, false, Some(&reader)).ok_or_else(|| EngineError::Other("expected notice".into()))?;
+        // Even if a background check was still running at the start of write_bytes and finished
+        // before encoding, an actual encoder refusal takes precedence over the stale skip reason.
+        let notice = missing_save_cache(&s, true, Some("a feature's geometry check was still running (a save once it ends keeps it)"), Some(&reader))
+            .ok_or_else(|| EngineError::Other("expected notice".into()))?;
         assert!(notice.contains("body 'GraphicsCore' in feature 'PCIe Board Import' could not be stored exactly"), "{notice}");
         assert!(!notice.contains("design file budget"), "must not mention budget: {notice}");
+        assert!(!notice.contains("still running"), "must not report stale check reason: {notice}");
         Ok(())
     }
 

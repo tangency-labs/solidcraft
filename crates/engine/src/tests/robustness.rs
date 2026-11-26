@@ -462,26 +462,65 @@ fn chamfer_of_a_concave_edge_adds_material() {
     assert!(r.outcome.kind != "volume", "seed 7100465: {:?}\n{}", r.outcome, r.script());
 }
 
+/// The volume of the ball of radius `ball` about (50, 0, 0) cut out of the solid torus of radii 50
+/// and `tube` about the z axis (`tube` < `ball`). At a point of the tube's disc at distance `t`
+/// from its centre and angle `th`, which is ρ = 50 + t cos th from the axis, the ball takes the
+/// angle 2 arccos(1 + (t² − ball²) / (2 · 50 · ρ)) about the axis. Simpson's rule over t and the
+/// trapezoid rule over th (periodic) give it to about 1e-12 of itself.
+fn lens_volume(tube: f64, ball: f64) -> f64 {
+    const MAJOR: f64 = 50.0;
+    let (n, m) = (2000_u32, 256_u32);
+    let h = tube / f64::from(n);
+    let mut total = 0.0;
+    for i in 0..=n {
+        let t = f64::from(i) * h;
+        let weight = if i == 0 || i == n {
+            1.0
+        } else if i % 2 == 1 {
+            4.0
+        } else {
+            2.0
+        };
+        let ring: f64 = (0..m)
+            .map(|j| {
+                let rho = MAJOR + t * (std::f64::consts::TAU * f64::from(j) / f64::from(m)).cos();
+                rho * 2.0 * (1.0 + (t * t - ball * ball) / (2.0 * MAJOR * rho)).acos()
+            })
+            .sum::<f64>()
+            * std::f64::consts::TAU
+            / f64::from(m);
+        total += weight * t * ring;
+    }
+    total * h / 3.0
+}
+
 /// A closed hollow of a tiny lens (a Ø1.2 ball meeting a Ø1 ring tube, #18373; stress corpus
-/// S1195) made walls SMLib can't read back ("flat arrays: face 5: a NURBS form that is not its
-/// analytic surface"), yet reported success, and the body could no longer be measured. The
-/// 0.1 mm wall the report saw build fails the same way (face 6). Each shell is refused with a
-/// message, and the lens stays as it was and measures.
+/// S1195) is made and measures. Its walls are pieces of tori that sweep about a degree and a half
+/// round the ring's axis, which the flat reader could not read back ("flat arrays: face 5: a NURBS
+/// form that is not its analytic surface"): the shell reported success and the body could no
+/// longer be measured, and since #18636 such a shell was refused and the lens kept. The reader now
+/// reads each wall back as the torus of the arrays' own numbers where the kernel proves it on the
+/// face's form, and else as that exact form, so both walls of the report build (0.06 and 0.1 mm).
+/// Each hollow passes the kernel's check, has its cavity as a second shell, and is the lens less
+/// its inward offset, the ball of radius 0.6 − w cut out of the tube of radius 0.5 − w
+/// ([`lens_volume`]).
 #[test]
-fn a_shell_whose_walls_cant_be_read_back_is_refused_and_the_body_kept() {
+fn a_closed_hollow_of_a_tiny_lens_builds_and_measures() {
     for wall in [0.06, 0.1] {
         let mut s = script(json!([
             {"command": "solid.torus", "params": {"major": 50, "minor": 0.5, "operation": "new", "body_name": "Base", "name": "Ring"}},
             {"command": "solid.sphere", "params": {"diameter": 1.2, "center": [50, 0, 0], "operation": "new", "body_name": "Tool", "name": "Ball"}},
             {"command": "solid.combine", "params": {"target": "Base", "tools": ["Tool"], "operation": "intersect"}}
         ]));
-        let before = s.model.state().bodies.iter().find(|b| b.name == "Base").map(|b| b.body.face_count());
-        let shell = s.execute("solid.shell", &json!({"faces": [], "thickness": wall, "body": "Base", "name": "Hollow"}));
-        let err = shell.map(|_| ()).unwrap_err().to_string();
-        assert!(err.contains("can't be used afterwards") && err.contains("flat arrays"), "{wall}: {err}");
+        s.execute("solid.shell", &json!({"faces": [], "thickness": wall, "body": "Base", "name": "Hollow"}))
+            .unwrap_or_else(|e| panic!("{wall}: {e}"));
         let state = s.model.state();
         let base = state.bodies.iter().find(|b| b.name == "Base").unwrap();
-        assert_eq!(Some(base.body.face_count()), before, "{wall}: the lens is kept as it was");
-        assert!(solidcraft_kernel::measure(&base.body).is_ok(), "{wall}: the kept lens measures");
+        assert!(base.body.validity().is_empty(), "{wall}: {:?}", base.body.validity());
+        solidcraft_kernel::check_kept(&base.body).unwrap_or_else(|e| panic!("{wall}: {e}"));
+        let m = solidcraft_kernel::measure(&base.body).unwrap();
+        assert_eq!(m.shells, 2, "{wall}: the lens's wall and its cavity");
+        let want = lens_volume(0.5, 0.6) - lens_volume(0.5 - wall, 0.6 - wall);
+        assert!((m.volume - want).abs() < 1e-9 * want, "{wall}: {} mm3, the lens less its offset {want}", m.volume);
     }
 }

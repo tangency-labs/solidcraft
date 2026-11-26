@@ -2619,6 +2619,7 @@ fn a_pattern_replays_every_grouped_thread_pick_on_its_named_body() {
                 placements: Vec::new(),
                 components: Vec::new(),
                 occurrences: Vec::new(),
+                join: false,
             },
             None,
         )
@@ -2675,6 +2676,7 @@ fn a_patterned_modelled_thread_reuses_its_final_check() {
                 placements: Vec::new(),
                 components: Vec::new(),
                 occurrences: Vec::new(),
+                join: false,
             },
             None,
         )
@@ -3155,6 +3157,7 @@ fn a_tap_marking_searches_only_the_bodies_near_it() {
         to: None,
         references: Vec::new(),
         old_surface_start: false,
+        hardware: None,
     };
     let (work, threads) = marking_work(&mut doc, hole);
     assert_eq!(work.cylinder_search, 1, "only the plate is searched");
@@ -3299,6 +3302,7 @@ fn a_tapped_hole_reads_the_bodies_along_its_drill_line() {
         to: None,
         references: Vec::new(),
         old_surface_start: false,
+        hardware: None,
     };
     let (work, threads) = marking_work(&mut doc, hole);
     assert_eq!(work.tapped_wall, 3, "Plate, Below and Grazing are read");
@@ -4631,6 +4635,102 @@ fn a_heal_that_ends_after_the_preference_turned_off_leaves_no_healed_note() {
     assert!(model.settle_import_checks_under(false), "settled again: still owed");
     assert!(!model.has_import_heals() && model.take_import_notices().is_empty());
     assert!(model.results.iter().all(|r| r.stale), "the import and what follows it are stale");
+}
+
+/// An import whose background check healed a part keeps its model cache across save and open:
+/// the heal digest travels in the saved manifest, `Model::adopt` restores it so the cached healed
+/// bodies are accepted without re-importing, later edits after the import reuse it, saving again
+/// keeps the cache, and turning off the heal preference or re-evaluating the import itself drops
+/// the digest cleanly.
+#[test]
+fn a_healed_import_keeps_its_model_cache_across_save_and_open() {
+    let _on = kernel::heal_preference_for_tests(true);
+    let mut doc = placed_imports(1);
+    let sketch = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(10.0, 1.0)), None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let import = doc.features[0].id;
+    let unhealed_fp = model.result(import).unwrap().fingerprint;
+
+    let issue = kernel::ImportIssue {
+        kind: kernel::IssueKind::Repaired,
+        item: Some(1),
+        part: String::new(),
+        paths: Vec::new(),
+        faces: 0,
+        times: 1,
+        detail: "healed SMLib's check failures".into(),
+    };
+    let healed = kernel::box_solid(Vec3::ZERO, Vec3::new(3.0, 3.0, 3.0)).unwrap();
+    let healed_vol = healed.volume_at(1e-6).unwrap();
+    let n = healed.face_count();
+    let checks = kernel::ImportChecks::ended_for_tests(
+        vec![issue],
+        vec![kernel::HealedBody { index: 0, body: healed, face_origin: vec![0; n], face_source: (0..n).collect() }],
+    );
+    let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks }));
+
+    // Before settling the new heal, saving reports why it skips the cache.
+    assert!(model.cache_skip_reason(&doc).is_some_and(|r| r.contains("healed after evaluation")), "{:?}", model.cache_skip_reason(&doc));
+    assert!(model.saved_if_checked(&doc).is_none());
+
+    // Settle the heal and evaluate so the model carries the healed body.
+    assert!(model.settle_import_checks_under(true));
+    model.evaluate(&doc);
+    assert!(model.has_import_heals());
+    assert!(model.cache_skip_reason(&doc).is_none(), "{:?}", model.cache_skip_reason(&doc));
+    let healed_fp = model.result(import).unwrap().fingerprint;
+    assert_ne!(healed_fp, unhealed_fp);
+    assert!((model.state().bodies[0].body.volume_at(1e-6).unwrap() - healed_vol).abs() < 1e-6);
+
+    // First save + adopt: the cache is written and adopted with the healed body.
+    let saved = model.saved_if_checked(&doc).expect("healed import keeps its model cache");
+    assert!(saved.records.get("import_heals").is_some());
+    // Thinning the cache preserves `import_heals` so adopting a thinned cache still succeeds.
+    let pieces: Vec<Vec<(usize, usize)>> = (0..saved.bodies.len()).map(|i| vec![(i, 1)]).collect();
+    let (thinned, _, _) = saved.thinned(&pieces, usize::MAX).expect("thinning succeeds");
+    assert_eq!(thinned.records.get("import_heals"), saved.records.get("import_heals"));
+    assert!(Model::adopt(&doc, &thinned).is_ok(), "adopt accepts thinned healed import cache");
+    let mut adopted = Model::adopt(&doc, &saved).expect("adopt accepts healed import cache");
+    assert!(adopted.is_current(&doc));
+    assert!(adopted.has_import_heals());
+    assert!((adopted.state().bodies[0].body.volume_at(1e-6).unwrap() - healed_vol).abs() < 1e-6);
+
+    // Editing a feature after the import reuses the adopted healed import without re-evaluating it.
+    let _ = sketch;
+    doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(20.0, 2.0)), None).unwrap();
+    adopted.evaluate(&doc);
+    assert_eq!(adopted.last_recomputed, 1, "only the new feature should evaluate");
+    assert_eq!(adopted.result(import).unwrap().fingerprint, healed_fp);
+    assert!((adopted.state().bodies[0].body.volume_at(1e-6).unwrap() - healed_vol).abs() < 1e-6);
+
+    // Saving a second time from the adopted model keeps the cache too.
+    let saved_again = adopted.saved_if_checked(&doc).expect("second save keeps the model cache");
+    let mut adopted_again = Model::adopt(&doc, &saved_again).expect("second adopt succeeds");
+    assert!(adopted_again.is_current(&doc));
+
+    // Inserting an unrelated feature before the import reuses the healed import from the change
+    // cache without re-importing it.
+    let mut before_doc = doc.clone();
+    let early = line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(5.0, 5.0));
+    before_doc.add_feature(early, None).unwrap();
+    let last = before_doc.features.pop().unwrap();
+    before_doc.features.insert(0, last);
+    adopted_again.evaluate(&before_doc);
+    assert!(adopted_again.has_import_heals(), "change-cache hit keeps the healed import");
+    assert!((adopted_again.state().bodies[0].body.volume_at(1e-6).unwrap() - healed_vol).abs() < 1e-6);
+
+    // If the import itself must actually be re-evaluated (cache miss), the digest-only heal
+    // entry is dropped so it evaluates cleanly with the unhealed fingerprint.
+    adopted_again.no_cache = true;
+    adopted_again.evaluate(&doc);
+    assert!(!adopted_again.has_import_heals(), "digest-only heal dropped on re-evaluation");
+    assert_eq!(adopted_again.result(import).unwrap().fingerprint, unhealed_fp);
+
+    // Turning off the tolerance heal preference invalidates the adopted healed model.
+    let _off = kernel::heal_preference_for_tests(false);
+    assert!(!adopted.is_current(&doc));
 }
 
 /// A cut measures the tight box of its tool, and the body's only when the box can show

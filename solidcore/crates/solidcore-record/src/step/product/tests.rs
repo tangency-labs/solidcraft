@@ -482,6 +482,62 @@ fn mapped_items() {
     );
 }
 
+/// Some writers leave an operator's description out (`'',axis1,...`, #2340): the operator reads
+/// the same written either way, uniform or not, with its axes and scales unset or set.
+#[test]
+fn an_operator_written_without_its_description() {
+    let target = |op: &str| {
+        let mut t = String::from(BASE);
+        t += &context(20, MM);
+        t += &product(50, "Holder");
+        t += "#60=SHAPE_REPRESENTATION('',(#110),#20);\n#61=SHAPE_DEFINITION_REPRESENTATION(#54,#60);\n";
+        t += "#110=MAPPED_ITEM('',#111,#116);\n#111=REPRESENTATION_MAP(#113,#120);\n";
+        t += "#113=AXIS2_PLACEMENT_3D('',#1130,$,$);\n#1130=CARTESIAN_POINT('',(0.,0.,0.));\n";
+        t += "#116=CARTESIAN_TRANSFORMATION_OPERATOR_3D";
+        t += op;
+        t += ";\n";
+        t += "#1160=CARTESIAN_POINT('',(0.,7.,0.));\n#1161=DIRECTION('',(0.,1.,0.));\n";
+        t += "#120=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101,#113),#20);\n";
+        match &structure(&t).representations[0].items[0].kind {
+            ItemKind::Mapped { target, .. } => target.clone(),
+            k => panic!("{k:?}"),
+        }
+    };
+    let operator = |axis1, scale, scale3| {
+        Frame::Operator(Operator {
+            axis1,
+            axis2: None,
+            axis3: None,
+            origin: [0.0, 7.0, 0.0],
+            scale,
+            scale2: None,
+            scale3,
+        })
+    };
+    for (op, want) in [
+        (
+            "_NON_UNIFORM('','',#1161,$,#1160,2.,$,$,3.)",
+            operator(Some([0.0, 1.0, 0.0]), Some(2.0), Some(3.0)),
+        ),
+        (
+            "_NON_UNIFORM('',#1161,$,#1160,2.,$,$,3.)",
+            operator(Some([0.0, 1.0, 0.0]), Some(2.0), Some(3.0)),
+        ),
+        (
+            "_NON_UNIFORM('',$,$,#1160,$,$,$,$)",
+            operator(None, None, None),
+        ),
+        ("('','',$,$,#1160,$,$)", operator(None, None, None)),
+        ("('',$,$,#1160,$,$)", operator(None, None, None)),
+        (
+            "('',#1161,$,#1160,2.,$)",
+            operator(Some([0.0, 1.0, 0.0]), Some(2.0), None),
+        ),
+    ] {
+        assert_eq!(target(op), want, "{op}");
+    }
+}
+
 /// Colours on a body and on a face: a fill colour, a rendering colour with a transparency, a
 /// pre-defined colour, one ISO 10303-46 does not name, a curve style's colour, and an override.
 #[test]

@@ -569,6 +569,19 @@ fn display_menu(app: &SolveApp) -> Menu {
             selected(app, slot.id),
         )));
     }
+    let mode = crate::prefs::ground_shadow_mode(app);
+    let key = match mode {
+        "off" => "ui.ground_shadow_off",
+        "projected" => "ui.ground_shadow_projected",
+        _ => "ui.ground_shadow_ellipse",
+    };
+    let mut style = MenuRow::new("ground_shadow_style", app.tr("ui.ground_shadow_style"), "", "view:ground_shadow_style");
+    style.detail = Some(app.tr(key).to_owned());
+    style.submenu = [("off", "ui.ground_shadow_off"), ("ellipse", "ui.ground_shadow_ellipse"), ("projected", "ui.ground_shadow_projected")]
+        .into_iter()
+        .map(|(value, label)| MenuEntry::Row(row(value, app.tr(label), "", &format!("view:ground_shadow:{value}"), mode == value)))
+        .collect();
+    entries.push(MenuEntry::Row(style));
     let mut axes = row(
         "origin_axes_across_view",
         app.tr("prefs.origin_axes_across_view"),
@@ -622,6 +635,9 @@ fn display_pick(app: &mut SolveApp, item: &str) {
     match item {
         "performance" | "quality" => {
             let _ = app.run("view.graphics_preset", json!({"preset":item}));
+        }
+        "off" | "ellipse" | "projected" => {
+            let _ = app.run("view.ground_shadow", json!({"mode":item}));
         }
         "navbar.orthographic" | "navbar.perspective" => {
             set_projection(app, item == "navbar.perspective");

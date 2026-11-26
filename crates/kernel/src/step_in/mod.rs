@@ -872,8 +872,8 @@ impl Reader {
         let reader = solidcore_step::read::Reader::new(&self.ex, u.units);
         let e = self.ex.get(item).ok_or_else(|| format!("missing entity #{item}"))?;
         if matches!(e.name(), "CARTESIAN_TRANSFORMATION_OPERATOR_3D" | "CARTESIAN_TRANSFORMATION_OPERATOR_3D_NON_UNIFORM") {
-            let p = e.params();
-            let o = reader.point(p.get(4).and_then(Param::as_ref_id).ok_or("transformation without origin")?)?;
+            let p = solidcore_record::step::product::operator_attributes(e);
+            let o = reader.point(p.get(2).and_then(Param::as_ref_id).ok_or("transformation without origin")?)?;
             let direction = |i: usize, global: [f64; 3]| -> R<[f64; 3]> {
                 match p.get(i) {
                     None | Some(Param::Null) => Ok(global),
@@ -887,9 +887,9 @@ impl Reader {
                     Some(v) => v.as_f64().filter(|x| x.is_finite() && *x != 0.0).ok_or_else(|| "invalid transformation scale".into()),
                 }
             };
-            let sx = scale(5, 1.0)?;
-            let (sy, sz) = (scale(7, sx)?, scale(8, sx)?);
-            let (x, y, z) = (direction(2, [1.0, 0.0, 0.0])?, direction(3, [0.0, 1.0, 0.0])?, direction(6, [0.0, 0.0, 1.0])?);
+            let sx = scale(3, 1.0)?;
+            let (sy, sz) = (scale(5, sx)?, scale(6, sx)?);
+            let (x, y, z) = (direction(0, [1.0, 0.0, 0.0])?, direction(1, [0.0, 1.0, 0.0])?, direction(4, [0.0, 0.0, 1.0])?);
             let col = |d: [f64; 3], s: f64| [d[0] * s, d[1] * s, d[2] * s, 0.0];
             let m = [col(x, sx), col(y, sy), col(z, sz), [o[0], o[1], o[2], 1.0]];
             if !m.iter().flatten().all(|x| x.is_finite()) {

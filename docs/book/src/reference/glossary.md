@@ -423,6 +423,13 @@ a new row takes the next number at its level. A row listed under another reads a
 - **Elsewhere:** item number, item, find number, balloon number.
 - **For translators:** a label, not a quantity or a count; not a part number.
 
+### lay
+
+The predominant pattern or direction of marks left on a manufactured surface.
+
+- **In SolidCraft:** `solidcraft_geom::surface_texture::Lay`, used by a surface texture indication.
+- **For translators:** use the manufacturing sense of direction and pattern.
+
 ### leader
 
 The line from a note to what it points at on the model. It is worked out from where that thing is
@@ -459,6 +466,16 @@ its provenance, not its place.
 - **Don't use:** source (that is where the data came from), location, path.
 - **Elsewhere:** library location, library path.
 - **For translators:** a place on a disk or a drive; not a place in a design.
+
+### master spline
+
+One tooth left out, or one space filled, in a shaft spline, so that the hub goes on in one position only.
+
+- **In SolidCraft:** the `master_spline` parameter of `shaft_spline.insert` (`none`, `tooth_out`,
+  `wide_tooth`) and its `master_angle`.
+- **Don't use:** key, keyway (for the odd tooth).
+- **Elsewhere:** master spline, indexing spline.
+- **For translators:** not a sketch spline, which is a curve through points.
 
 ### material
 
@@ -656,6 +673,14 @@ design, which then keeps a copy of its own. It is an app setting, not part of a 
 - **Elsewhere:** rule library, sheet metal style library.
 - **For translators:** "personal" as in the user's own, not private or confidential.
 
+### press-in hardware
+
+A nut, stud or standoff that is pressed into a punched hole in sheet metal and holds there without welding or a loose nut.
+
+- **In SolidCraft:** `sheet.hardware` cuts its mounting hole and records it in a Hole's `hardware` (`kind`: `nut`, `flush_nut`, `stud`, `standoff`; `thread`; `length`; `part`); sizes in `docs/hardware-catalogue.md`.
+- **Don't use:** insert, and a maker's product names.
+- **For translators:** a fastener fixed in the sheet itself, not a loose screw or a standard part inserted as a component (`parts.fastener`).
+
 ### print face
 
 The flat face of a body that lies on the print bed when the body is sent to a slicer.
@@ -756,6 +781,19 @@ computer (the 3D mouse, graphics, units) stay out. It is an app setting, not par
 - **For translators:** not a sketch profile and not a frame profile (see *Words with more than
   one meaning*, "Profile"), and not a design configuration.
 
+### shaft spline
+
+A ring of teeth along a round shaft that fits spaces in a hub, so that the hub turns with the shaft.
+
+A shaft spline is one feature that cuts the teeth into a picked shaft or bore, or makes a new
+splined shaft and hub.
+
+- **In SolidCraft:** `shaft_spline.insert` ("Shaft Spline"); the `shaft_spline` feature kind.
+- **Don't use:** gear (for a spline), keyed shaft.
+- **Elsewhere:** spline shaft, splined shaft, spline.
+- **For translators:** not a sketch spline, which is a curve through points, and not a gear that
+  transmits motion between two shafts.
+
 ### sketch
 
 A set of points and curves, with their constraints, on one plane, that features use as profiles,
@@ -801,6 +839,16 @@ flange slope.
 - **Don't use:** catalogue profile, library profile (for the size).
 - **Elsewhere:** standard section, section size, section designation.
 - **For translators:** a steel section's size by name, not a dimension and not a standard part.
+
+### surface texture indication
+
+A drawing requirement for the small-scale shape of a manufactured surface, expressed by
+parameters and a production-process symbol.
+
+- **In SolidCraft:** `solidcraft_geom::surface_texture::Indication`; the record retains its
+  standard, parameter limits, lay, process note and all-round intent.
+- **Don't use:** appearance, render material.
+- **For translators:** describes manufactured geometry and acceptance requirements.
 
 ### thin-film interference
 
