@@ -94,8 +94,8 @@
 //!   frame (top-knot circle, reversed Z; WR-496, #1463), where upstream keeps the
 //!   bottom-knot circle and reverses the cylinder's Z.
 //! - **Cylinder iso arcs from control points.** [`Cone::is_nurb_surface_cylinder`] makes its
-//!   end circles from the iso curves' control points (`iso_arc_exact`, The NURBS Book Â§7.3,
-//!   Â§7.5), not fitted through three samples as `IsArc` does: two fitted end circles of an
+//!   end circles from the iso curves' control points (`iso_arc_exact`, The NURBS Book §7.3,
+//!   §7.5), not fitted through three samples as `IsArc` does: two fitted end circles of an
 //!   extruded arc put its axis off the extrusion's direction by more than rounding (1.4e-13
 //!   rad on a 94 mm r 40 wall), so the cylinder was off its own NURBS form and failed the
 //!   exact-class proof (`implicit::lies_on`). The cone recogniser and the rebuild keep `IsArc`.
@@ -183,14 +183,14 @@ fn iso_arc(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<Option<
 /// The circle a rational quadratic iso curve is, made from its control points (not
 /// upstream, which fits a circle through three samples, `pIsoCrv->IsArc(5, dScaledZero, ..)`).
 ///
-/// Each BÃ©zier segment `Q0, Q1, Q2` (weights `w0, w1, w2`) of a circular arc has equal
-/// tangent legs `|Q1 âˆ’ Q0| = |Q2 âˆ’ Q1|`, and its middle weight in standard form,
-/// `w1 / âˆš(w0 w2)`, is the cosine of the half sweep `Î±`, the angle between the leg
-/// `Q1 âˆ’ Q0` and the chord `Q2 âˆ’ Q0` (The NURBS Book, Piegl and Tiller, Â§7.3 and Â§7.5). The
+/// Each Bézier segment `Q0, Q1, Q2` (weights `w0, w1, w2`) of a circular arc has equal
+/// tangent legs `|Q1 − Q0| = |Q2 − Q1|`, and its middle weight in standard form,
+/// `w1 / √(w0 w2)`, is the cosine of the half sweep `α`, the angle between the leg
+/// `Q1 − Q0` and the chord `Q2 − Q0` (The NURBS Book, Piegl and Tiller, §7.3 and §7.5). The
 /// centre is then `Q0 + r n`, `n` the unit normal into the arc in its plane and
-/// `r = |Q1 âˆ’ Q0| / tan Î±`: the circle passes through `Q0` exactly, so an error in `r`
+/// `r = |Q1 − Q0| / tan α`: the circle passes through `Q0` exactly, so an error in `r`
 /// and the matching one in the centre cancel along the arc instead of growing with
-/// `1 / (1 âˆ’ w1Â²)` as the centre found from the legs' meeting does. Everything is built from
+/// `1 / (1 − w1²)` as the centre found from the legs' meeting does. Everything is built from
 /// differences of control points, so rows that are translates of each other (an extruded
 /// arc) give circles that are translates of each other, and the axis through their centres
 /// is the extrusion's direction to rounding, where two independently fitted circles tilt
@@ -200,7 +200,7 @@ fn iso_arc(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<Option<
 /// conditioned one, and
 /// the curve is that circle when every segment is an arc of it, end to end: its legs equal and
 /// its weight the half sweep's cosine (within `EFF_ZERO_SQRT`), its plane parallel (within
-/// `EFF_ZERO_SQRT`), its end points on the circle and its middle point `r / cos Î±` from the
+/// `EFF_ZERO_SQRT`), its end points on the circle and its middle point `r / cos α` from the
 /// centre, the lengths within `scaled_zero`. (A segment a hair long, an arc's extension, fixes
 /// a centre of its own only to the rounding of its points over its sweep, so it is checked on
 /// the circle, not compared by its own centre.)
@@ -211,9 +211,9 @@ fn iso_arc(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<Option<
 ///
 /// # Errors
 ///
-/// Those of the degeneracy test and the BÃ©zier decomposition.
+/// Those of the degeneracy test and the Bézier decomposition.
 fn iso_arc_exact(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<Option<IsoArc>> {
-    /// One BÃ©zier segment: its Euclidean control points, half sweep and plane normal.
+    /// One Bézier segment: its Euclidean control points, half sweep and plane normal.
     struct Segment {
         q0: Point3,
         q1: Point3,
@@ -279,7 +279,7 @@ fn iso_arc_exact(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<O
     let (Ok(tangent), Ok(across)) = (leg0.unitize(), chord.unitize()) else {
         return Ok(None);
     };
-    // r = |leg| / tan Î± = |leg| cos Î± / sin Î±, from the leg's direction and the chord's
+    // r = |leg| / tan α = |leg| cos α / sin α, from the leg's direction and the chord's
     let radius = leg0.length() * tangent.dot(across) / tangent.cross(across).length();
     // as `IsArc`: a radius too large for the arc's length makes no accurate circle
     if radius.is_nan() || radius > (leg0.length() + leg1.length()) / EFF_ZERO_SQRT {
@@ -289,7 +289,7 @@ fn iso_arc_exact(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<O
     let mut sweep = 0.0_f64;
     for s in &segments {
         let on = |p: Point3| ((p - centre).length() - radius).abs() <= scaled_zero;
-        // the middle point is where the end tangents meet, r / cos Î± from the centre
+        // the middle point is where the end tangents meet, r / cos α from the centre
         let corner = ((s.q1 - centre).length() * s.half.cos() - radius).abs() <= scaled_zero;
         let flat = s
             .normal
@@ -318,7 +318,7 @@ fn iso_arc_exact(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<O
     if !(end_ang > 0.0 && end_ang <= 360.0 + EFF_ZERO_SQRT) {
         return Ok(None);
     }
-    // Snap a closed full circle whose summed BÃ©zier half-sweeps rounded slightly below
+    // Snap a closed full circle whose summed Bézier half-sweeps rounded slightly below
     // 360 degrees (for example, far from the origin) up to 360 degrees, matching
     // `is_arc_base`.
     if segments
@@ -337,9 +337,9 @@ fn iso_arc_exact(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<O
 }
 
 /// The circle of a rational quadratic iso curve recovered from each segment's chord and
-/// normalised middle weight `w = cos Î±` instead of its legs: `r = |Q2 âˆ’ Q0| / (2 sin Î±)`, the
-/// centre `r cos Î±` from the chord's midpoint, square to the chord in the circle's plane
-/// (The NURBS Book, Piegl and Tiller, Â§7.3). When the end nets are translates of each other,
+/// normalised middle weight `w = cos α` instead of its legs: `r = |Q2 − Q0| / (2 sin α)`, the
+/// centre `r cos α` from the chord's midpoint, square to the chord in the circle's plane
+/// (The NURBS Book, Piegl and Tiller, §7.3). When the end nets are translates of each other,
 /// `axis`, the form's linear direction, gives the plane normal, and the arc's control points
 /// must be within `scaled_zero` of the plane square to it through the start of the first
 /// segment at least half as wide as the widest (#17462). A very
@@ -349,14 +349,14 @@ fn iso_arc_exact(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<O
 ///
 /// # Errors
 ///
-/// Those of the degeneracy test and the BÃ©zier decomposition.
+/// Those of the degeneracy test and the Bézier decomposition.
 fn iso_arc_from_chord(
     k: &Kernel,
     curve: &BSplineCurve,
     scaled_zero: f64,
     axis: Option<Vec3>,
 ) -> Result<Option<IsoArc>> {
-    /// One BÃ©zier segment: its Euclidean control points, half sweep and plane normal.
+    /// One Bézier segment: its Euclidean control points, half sweep and plane normal.
     struct Segment {
         q0: Point3,
         q1: Point3,
@@ -452,7 +452,7 @@ fn iso_arc_from_chord(
     let mut sweep = 0.0_f64;
     for s in &segments {
         let on = |p: Point3| ((p - centre).length() - radius).abs() <= scaled_zero;
-        // the middle point is where the end tangents meet, r / cos Î± from the centre
+        // the middle point is where the end tangents meet, r / cos α from the centre
         let corner = ((s.q1 - centre).length() * s.weight - radius).abs() <= scaled_zero;
         let flat = s
             .normal
@@ -480,7 +480,7 @@ fn iso_arc_from_chord(
     if !(end_ang > 0.0 && end_ang <= 360.0 + EFF_ZERO_SQRT) {
         return Ok(None);
     }
-    // Snap a closed full circle whose summed BÃ©zier half-sweeps rounded slightly below
+    // Snap a closed full circle whose summed Bézier half-sweeps rounded slightly below
     // 360 degrees (for example, far from the origin) up to 360 degrees, matching
     // `is_arc_base`.
     if segments
@@ -2759,7 +2759,7 @@ mod tests {
         );
     }
 
-    /// A canonical cylinder of radius 2.94 (the goldens' gen0196), its net reaching Â±1.2e6
+    /// A canonical cylinder of radius 2.94 (the goldens' gen0196), its net reaching ±1.2e6
     /// along its axis, recognised at a thousandth of the default tolerance. Its control points
     /// are known to the rounding of coordinates that large (about 2.3e-10), which turns its
     /// middle circle's plane by about 2.5e-11 rad, more than that scaled tolerance (1.75e-11
@@ -4091,7 +4091,7 @@ mod tests {
         assert!(lies_on(&form, &support.implicit()).unwrap(), "{support:?}");
     }
 
-    /// A full or partial cylinder far from the origin whose summed BÃ©zier half-sweeps
+    /// A full or partial cylinder far from the origin whose summed Bézier half-sweeps
     /// round slightly below 360 degrees still recognises cleanly and passes
     /// `Surface::assert_valid` (including `SmSurfOfRevolution::Test #7`).
     #[test]

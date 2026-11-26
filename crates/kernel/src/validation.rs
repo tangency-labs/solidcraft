@@ -623,6 +623,27 @@ mod tests {
         }
     }
 
+    /// Valid spheres far from the origin across small, typical and large diameters pass
+    /// post-export decoded-record validation under both `EachStep` and `EachFeature` (inline and
+    /// detached).
+    #[test]
+    fn valid_spheres_pass_decoded_record_validation() {
+        use solidcore_record::Vec3;
+        let center = Vec3::new(0.0, 0.0, 6000.0);
+        for diameter in [0.2_f64, 20.0, 5000.0] {
+            let radius = diameter / 2.0;
+            for mode in [Validation::EachStep, Validation::EachFeature] {
+                let (ball, _) = validating(mode, || crate::sphere(center, radius));
+                let ball = ball.unwrap_or_else(|e| panic!("sphere diameter {diameter} under {mode:?}: {e}"));
+                if mode == Validation::EachFeature {
+                    check_kept(&ball).unwrap_or_else(|e| panic!("sphere diameter {diameter} check_kept: {e}"));
+                    let (ball2, _) = validating(mode, || crate::sphere(center, radius));
+                    detach_kept(&ball2.unwrap()).run().unwrap_or_else(|e| panic!("sphere diameter {diameter} detach_kept: {e}"));
+                }
+            }
+        }
+    }
+
     #[test]
     fn modes_are_named_as_they_are_saved() {
         for v in Validation::ALL {
