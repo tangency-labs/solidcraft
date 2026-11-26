@@ -33,10 +33,11 @@
 //! would leave the definition behind. (not upstream, WR-777) A given surface is turned by
 //! its normal where it passes nearest the old face's middle, not at its own domain's
 //! middle, which for a full cylinder given to a round lies across the axis.
-//! (not upstream) The static API contracts a complete cylindrical draft by subtracting
-//! its closed radial sweep (`contract_complete_cylinder`), intersecting intervening
-//! walls through their interiors. Exact support and trim predicates select that event
-//! before execution; the supplied draft definition and source attributes are preserved.
+//! (not upstream) The static API contracts a complete cylindrical or conical draft by
+//! subtracting its closed radial sweep (`contract_complete_cone`), intersecting intervening
+//! walls through their interiors. Exact trim predicates, and the two supports' one axis and
+//! slab to the body's tolerance (`coaxial_slab`), select that event before execution; the
+//! supplied draft definition and source attributes are preserved.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -48,7 +49,7 @@ use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::expansion as exact;
 use crate::kernel::Kernel;
 use crate::mass::enclosure::VolumeSign;
-use crate::math::{Vec3, EFF_ZERO};
+use crate::math::{Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_surface::p1::{BSplineSurface, SurfParamType};
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::{CPoint, NOW};
@@ -73,8 +74,9 @@ pub use crate::offset::offset_executive::p2::local_operation_simple;
 
 const OP: &str = "topology::brep::local_operation::local_operation";
 
-/// A complete cylindrical wall contracts by removing the closed radial sweep between
-/// its old and new supports. The two end planes stay fixed. Unlike boundary-only
+/// A complete cylindrical or conical wall contracts by removing the closed radial sweep
+/// between its old and new supports, `{ r_new(z) <= rho <= r_old(z) }` over the wall's
+/// axial slab (both radii affine in height). The two end planes stay fixed. Unlike boundary-only
 /// stitching, Boolean subtraction imprints the sweep on intervening cavity walls.
 /// This is selected from the supports and exact UV boundary before construction;
 /// an error never switches to another construction.
@@ -82,7 +84,7 @@ const OP: &str = "topology::brep::local_operation::local_operation";
 /// The static API owns its notification stores, so the Boolean carries the body's own
 /// attributes, including the selected face's attributes on the sweep's inner wall.
 /// The general caller-notified API continues to use its executive.
-pub(crate) fn contract_complete_cylinder(
+pub(crate) fn contract_complete_cone(
     k: &mut Kernel,
     b: &mut Brep,
     faces: &[FaceId],
@@ -127,12 +129,10 @@ pub(crate) fn contract_complete_cylinder(
     // its exact definition on the copied inner wall; neither surface is fitted here.
     if old.procedural_definition().is_some()
         || draft.source().procedural_definition().is_some()
-        || c.semi_angle_deg() != 0.0
         || c.inside_out()
         || c.rev.swap_uv()
         || d.inside_out()
         || d.rev.swap_uv()
-        || c.rev.position != d.rev.position
         || !exact::is_zero(&exact::sub(&sweep, &[360.0]))
     {
         return Ok(None);
@@ -141,34 +141,26 @@ pub(crate) fn contract_complete_cylinder(
     if new.natural_uv_domain_if_built() != domain {
         return Ok(None);
     }
-    let material_regions = bp1::regions(b, None)?
-        .into_iter()
-        .try_fold(0_usize, |n, r| {
-            Ok::<_, SolidError>(n.saturating_add(usize::from(b.region(r)?.is_void() == 0)))
-        })?;
+    let regions = bp1::regions(b, None)?;
+    let material_regions = regions.iter().try_fold(0_usize, |n, &r| {
+        Ok::<_, SolidError>(n.saturating_add(usize::from(b.region(r)?.is_void() == 0)))
+    })?;
+    // A cone (not a cylinder, which this has always taken) in a body with a closed cavity
+    // (a shelled cone) is left to the local operation, whose result for it the Boolean here
+    // does not yet reproduce (its enclosure check refuses a face between the cavity and the
+    // material).
+    let tol = b.tolerance();
     if !complete_cylinder_boundary(k, b, *f, domain)?
         || !p2::is_manifold_solid(b)?
         || material_regions != 1
-        || d.bot_height() != c.bot_height()
-        || d.top_height() != c.top_height()
+        || (regions.len() != 2 && c.semi_angle_deg() != 0.0)
     {
         return Ok(None);
     }
-    // The radius and displacement are affine in height. Exact expansion signs at
-    // both ends prove positivity and one-sided contraction over the entire slab.
-    let mut caps = [false; 2];
-    for (cap, h) in caps.iter_mut().zip([c.bot_height(), c.top_height()]) {
-        let Some(product) = exact::product(d.tan_semi_angle(), h) else {
-            return Ok(None);
-        };
-        let radius = exact::add(&[d.base_radius], &product);
-        let gap = exact::sub(&radius, &[c.base_radius]);
-        if exact::sign(&radius) <= 0 || exact::sign(&gap) > 0 {
-            return Ok(None);
-        }
-        *cap = exact::sign(&gap) < 0;
-    }
-    if !caps.iter().any(|&cap| cap) {
+    let Some(slab) = coaxial_slab(c, d, tol)? else {
+        return Ok(None);
+    };
+    if !slab.caps.iter().any(|&cap| cap) {
         return Ok(None);
     }
     draft.recertify(k, new)?;
@@ -177,7 +169,7 @@ pub(crate) fn contract_complete_cylinder(
     b.with_rollback_untouched(
         |b| {
             let input = validation::standing(k, &mut b.clone_standing_for_self()?)?;
-            let mut tool = radial_sweep(k, &old, &new, caps, b.tolerance())?;
+            let mut tool = radial_sweep(k, &old, &new, &slab, b.tolerance())?;
             // The inner wall is the only drafted face, and must inherit its source's marks.
             crate::offset::offset_executive::p2::copy_local_sweep_attributes(
                 k,
@@ -202,6 +194,101 @@ pub(crate) fn contract_complete_cylinder(
         Result::is_ok,
     )?;
     Ok(Some(()))
+}
+
+/// The slab a drafted support `new` sweeps over with the face's support `old`: the old
+/// face's end planes (its stored heights on its own axis), each plane's height on the new
+/// support's axis, and whether the two supports' circles there differ (an annular cap) or
+/// meet (the hinge).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CoaxialSlab {
+    /// The heights, on the new support's axis, of the old support's end planes at its
+    /// bottom and top heights.
+    pub(crate) heights: [f64; 2],
+    /// Whether the end is closed by an annular cap (the new radius below the old by more
+    /// than the tolerance) rather than at the hinge.
+    pub(crate) caps: [bool; 2],
+}
+
+/// [`CoaxialSlab`] of the face's support `old` and the drafted support `new`, or `None`
+/// where `new` is not the same axis and slab within the body's tolerance `tol`, or does
+/// not lie inside `old` across the slab.
+///
+/// A draft keeps its source's axis and moves each control point of its net radially at its
+/// own height ([`crate::offset::draft`]), and puts its frame's origin on the hinge circle's
+/// centre; a support recognised again after an earlier operation can carry its frame on
+/// the other end of its axis, its origin and axes off by rounding, and its stored axial
+/// interval recovered from its evaluated corners. So the frames are compared as an axis, to
+/// the body's tolerance over the slab's extent, not bit for bit: the new axis's offset from
+/// the old one plus its tilt times the extent, and the twist of the x axes (the seams)
+/// times the largest radius, are each at most `tol`; the new net's first and last rows of
+/// control points lie within `tol` of the old ones' planes, as heights on the old axis.
+/// The radii are affine in height, so their signs and the sign of the contraction at both
+/// ends hold across the slab: both radii above `tol` at both ends, the new one nowhere
+/// past the old by more than `tol`, and an end closed by a cap where it is below by more.
+fn coaxial_slab(
+    old: &crate::surface::cone::Cone,
+    new: &crate::surface::cone::Cone,
+    tol: f64,
+) -> Result<Option<CoaxialSlab>> {
+    use crate::nurbs::b_spline_curve::ControlPointForm;
+    let (po, pn) = (old.rev.position, new.rev.position);
+    let (zo, zn) = (po.z_axis(), pn.z_axis());
+    let (xo, xn) = (po.x_axis(), pn.x_axis());
+    if tol.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater)
+        || zo.dot(zn) <= 0.0
+        || xo.dot(xn) <= 0.0
+    {
+        return Ok(None);
+    }
+    let shift = (po.origin() - pn.origin()).dot(zn);
+    let old_heights = [old.bot_height(), old.top_height()];
+    let heights = old_heights.map(|h| h + shift);
+    let was = old_heights.map(|h| old.radius(h));
+    let now = [new.radius(heights[0]), new.radius(heights[1])];
+    let extent = old_heights
+        .iter()
+        .chain(&heights)
+        .fold(0.0_f64, |m, h| m.max(h.abs()));
+    let reach = was.iter().chain(&now).fold(0.0_f64, |m, r| m.max(r.abs()));
+    let away = pn.origin() - po.origin();
+    let off = (away - zo * away.dot(zo)).length();
+    let tilt = zo.cross(zn).length();
+    let twist = xo.cross(xn).length();
+    if !(off + tilt * extent <= tol && twist * reach <= tol) {
+        return Ok(None);
+    }
+    let mut caps = [false; 2];
+    for ((cap, w), n) in caps.iter_mut().zip(was).zip(now) {
+        let gap = n - w;
+        if !(w > tol && n > tol && gap <= tol) {
+            return Ok(None);
+        }
+        *cap = gap < -tol;
+    }
+    // the drafted net's end rows on the old end planes
+    let (a, z) = (old.rev.base(), new.rev.base());
+    let nu = a.number_control_points(SurfParamType::U);
+    let nv = a.number_control_points(SurfParamType::V);
+    let Some(last) = nv.checked_sub(1) else {
+        return Ok(None);
+    };
+    if z.number_control_points(SurfParamType::U) != nu
+        || z.number_control_points(SurfParamType::V) != nv
+    {
+        return Ok(None);
+    }
+    for j in [0, last] {
+        for i in 0..nu {
+            let (p, _) = a.control_point(ControlPointForm::EuclideanRational, i, j)?;
+            let (q, _) = z.control_point(ControlPointForm::EuclideanRational, i, j)?;
+            let along = (q - p).dot(zo).abs();
+            if along.partial_cmp(&tol) == Some(core::cmp::Ordering::Greater) || along.is_nan() {
+                return Ok(None);
+            }
+        }
+    }
+    Ok(Some(CoaxialSlab { heights, caps }))
 }
 
 /// The four exact box sides, and bare planar faces across both circular rims.
@@ -283,25 +370,32 @@ fn complete_cylinder_boundary(
     Ok(true)
 }
 
-/// A perpendicular rim plane through the exact axial endpoint, before rounding a
-/// point or a cross product: the tool's own cap support, built from the defining
-/// circles, must be exactly the cylinder's end plane.
-fn fixed_rim_plane(p: &Axis2Placement, cylinder: &crate::surface::cone::Cone, h: f64) -> bool {
+/// A rim plane square to the cylinder's axis through the rims' own centre `centre`, proved
+/// on the stored numbers before rounding a point or a cross product: the tool's cap support,
+/// built from the defining circles, must be exactly the plane they were drawn on.
+///
+/// `centre` is the end point `origin + h z` of the cylinder's axis as the rims were built,
+/// rounded once. The exact sum is in general not a double (an origin at z = 0.3 and an end
+/// height 0.7 give 0.3 + 0.7, which rounds), so no stored centre or plane lies exactly on it;
+/// the check proves the cap is on the plane of the very point both rims are drawn about, one
+/// value for both, not on an exact end plane no stored plane can be on.
+fn fixed_rim_plane(
+    p: &Axis2Placement,
+    cylinder: &crate::surface::cone::Cone,
+    centre: Point3,
+) -> bool {
     let (x, y) = (p.x_axis(), p.y_axis());
     let frame = cylinder.rev.position;
-    let axis = frame.z_axis();
     let prove = || {
         if !exact::is_zero(&exact::det3(frame.x_axis(), frame.y_axis(), x)?)
             || !exact::is_zero(&exact::det3(frame.x_axis(), frame.y_axis(), y)?)
         {
             return Some(false);
         }
-        let height = exact::scale(&exact::det3(x, y, axis)?, h)?;
-        let origin = exact::sub(
-            &exact::det3(x, y, frame.origin())?,
+        Some(exact::is_zero(&exact::sub(
+            &exact::det3(x, y, centre)?,
             &exact::det3(x, y, p.origin())?,
-        );
-        Some(exact::is_zero(&exact::add(&origin, &height)))
+        )))
     };
     prove() == Some(true)
 }
@@ -311,7 +405,7 @@ fn radial_sweep(
     k: &mut Kernel,
     old: &Surface,
     new: &Surface,
-    caps: [bool; 2],
+    slab: &CoaxialSlab,
     tolerance: f64,
 ) -> Result<(Brep, FaceId)> {
     use crate::curve::curve::CurveKind;
@@ -334,34 +428,40 @@ fn radial_sweep(
     let inner_surface = new.copy(k)?;
     crate::topology::brep::sheet::face_on(k, &mut tool, outer_surface, &domain)?;
     let inner = crate::topology::brep::sheet::face_on(k, &mut tool, inner_surface, &domain)?;
-    for ((height, target_height), cap) in [
-        (cylinder.bot_height(), target.bot_height()),
-        (cylinder.top_height(), target.top_height()),
-    ]
-    .into_iter()
-    .zip(caps)
+    // The slab is the old support's: each cap lies on its end plane, and both its circles
+    // are drawn in the old support's frame there, the outer one of the old radius and the
+    // inner one of the target's radius at that plane's height on the target's axis
+    // (`slab.heights`). The target's own stored interval is not used: it is recovered from
+    // its net and may differ by rounding from the plane its end row lies in, and its frame
+    // may stand off the old one by rounding (`coaxial_slab`).
+    for ((height, target_height), cap) in [cylinder.bot_height(), cylinder.top_height()]
+        .into_iter()
+        .zip(slab.heights)
+        .zip(slab.caps)
     {
         if !cap {
             continue;
         }
         // Define the rims from the supports themselves. An iso curve's sampled
         // radius is not a defining radius and must not become the cap's support.
-        let rim = |cone: &crate::surface::cone::Cone, h: f64| -> Result<_> {
-            let frame = cone.rev.position;
+        // Both rims are drawn about one centre, the end point rounded once, and the cap is
+        // proved to lie on the plane through that same point (`fixed_rim_plane`).
+        let frame = cylinder.rev.position;
+        let centre = frame.origin() + height * frame.z_axis();
+        let rim = |radius: f64| -> Result<_> {
             let mut circle = crate::curve::ellipse::Ellipse::empty_circle();
-            circle.position = Axis2Placement::from_stored(
-                frame.origin() + h * frame.z_axis(),
-                frame.x_axis(),
-                frame.y_axis(),
-            );
-            circle.anal_domain = cone.rev.anal_uv_domain.u_interval();
-            circle.radius_x = cone.radius(h);
+            circle.position = Axis2Placement::from_stored(centre, frame.x_axis(), frame.y_axis());
+            circle.anal_domain = cylinder.rev.anal_uv_domain.u_interval();
+            circle.radius_x = radius;
             circle.radius_y = circle.radius_x;
             circle.make_nurb(k)?;
             circle.base.form = crate::nurbs::b_spline_curve::BSplineCurveForm::CircularArc;
             Ok(crate::curve::curve::Curve::from(circle))
         };
-        let curves = [rim(cylinder, height)?, rim(target, target_height)?];
+        let curves = [
+            rim(cylinder.radius(height))?,
+            rim(target.radius(target_height))?,
+        ];
         let [outer, inner] = &curves;
         let (CurveKind::Ellipse(a), CurveKind::Ellipse(z)) = (outer.kind(), inner.kind()) else {
             return Err(SolidError::topology(
@@ -388,7 +488,7 @@ fn radial_sweep(
                 TopologyFailure::RadialCapWithoutPlane,
             ));
         };
-        if !fixed_rim_plane(support.position(), cylinder, height) {
+        if !fixed_rim_plane(support.position(), cylinder, centre) {
             return Err(SolidError::topology(
                 OP,
                 TopologyFailure::RadialRimsOffEndPlane,
@@ -2071,7 +2171,7 @@ mod tests {
                 let mut contracted = b.clone_standing_for_self().unwrap();
                 let target = cone.copy(&k).unwrap();
                 assert_eq!(
-                    contract_complete_cylinder(&mut k, &mut contracted, &[f], &[target]).unwrap(),
+                    contract_complete_cone(&mut k, &mut contracted, &[f], &[target]).unwrap(),
                     Some(())
                 );
                 let (volume, manifold) = volume_and_manifold(&k, &mut contracted);
@@ -2103,14 +2203,14 @@ mod tests {
                 };
                 assert_eq!(draft.recertify(&k, moved).unwrap(), 0.0);
             }
-            let (mut tool, inner) = radial_sweep(
-                &mut k,
-                cylinder,
-                &cone,
-                [neutral != 0.0, true],
-                b.tolerance(),
-            )
-            .unwrap();
+            let (SurfaceKind::Cone(c), SurfaceKind::Cone(d)) = (cylinder.kind(), cone.kind())
+            else {
+                panic!("a cylinder drafted is a cone");
+            };
+            let slab = coaxial_slab(c, d, b.tolerance()).unwrap().unwrap();
+            assert_eq!(slab.caps, [neutral != 0.0, true]);
+            let (mut tool, inner) =
+                radial_sweep(&mut k, cylinder, &cone, &slab, b.tolerance()).unwrap();
             crate::offset::offset_executive::p2::copy_local_sweep_attributes(
                 &mut k, &b, f, &mut tool, inner,
             )
@@ -2134,6 +2234,44 @@ mod tests {
                 validation::check_brep(&mut k, &mut tool, validation::CheckLevel::Level2).unwrap();
             assert!(report.lines().is_empty(), "{:?}", report.lines());
         }
+    }
+
+    /// A cylinder of radius 1 standing on z = 0.3 to the height 0.7, drafted 1 in 10 about
+    /// its bottom: its top rim's centre 0.3 + 0.7 is not a double and rounds. The removal is
+    /// still the cylinder less the frustum of radii 1 and 0.93, closed by an annular cap on
+    /// the plane through the rims' one rounded centre, not refused as off its end plane.
+    #[test]
+    fn a_cylinder_whose_top_rounds_contracts_with_a_cap_on_its_rims_plane() {
+        use crate::offset::draft::{draft_surface, Draft};
+        let mut k = Kernel {
+            fixes: UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let origin = Point3::new(0.1, 0.2, 0.3);
+        let mut b =
+            crate::primitive::api_primitives::create_cylinder(&mut k, origin, 1.0, 0.7).unwrap();
+        let f = bp1::faces(&b, None)
+            .unwrap()
+            .into_iter()
+            .find(|&f| {
+                matches!(
+                    b.face(f).unwrap().surface.as_ref().unwrap().kind(),
+                    SurfaceKind::Cone(_)
+                )
+            })
+            .unwrap();
+        let draft = Draft::new(origin, Vec3::Z, Vec3::Z, 0.1_f64.atan()).unwrap();
+        let cone = draft_surface(&k, &b, f, &draft).unwrap().unwrap();
+        assert_eq!(
+            contract_complete_cone(&mut k, &mut b, &[f], &[cone]).unwrap(),
+            Some(())
+        );
+        let (volume, manifold) = volume_and_manifold(&k, &mut b);
+        let expected = core::f64::consts::PI * 0.7 * (1.0 + 0.93 + 0.93 * 0.93) / 3.0;
+        assert!(
+            manifold && (volume - expected).abs() <= 1e-9 * expected,
+            "{volume} vs {expected}"
+        );
     }
 
     #[test]
@@ -2541,7 +2679,7 @@ mod tests {
         assert!((v - 32000.0).abs() <= 1e-9 * 32000.0, "{v}");
     }
 
-    /// Second review, finding 11: with the exact analytic mate opt-in, the analytic copies
+    /// Second review, finding 11: with the exact analytic mate (WR-495), the analytic copies
     /// of the faces' surfaces are extended by each face's derived reach (not five offset
     /// distances, 2.5 times the body's bounding radius in a local operation): a cylinder's
     /// top raised 0.5 meets its side on the exact circle there, a sound solid of the
@@ -2550,7 +2688,6 @@ mod tests {
     fn a_raised_cylinder_top_mates_on_its_exact_circle_within_the_derived_reach() {
         use crate::primitive::api_primitives as ap;
         let mut k = Kernel::default();
-        k.fixes.offset_analytic_mate_edges = true;
         let mut b = ap::create_cylinder(&mut k, Point3::ZERO, 5.0, 20.0).unwrap();
         let top = box_top(&k, &b);
         let raised = Surface::from(Plane::from_normal(Vec3::new(0.0, 0.0, 20.5), Vec3::Z));
@@ -3758,7 +3895,7 @@ mod tests {
                 assert!(reports.add_unique_delete_duplicate(report(t, owner)));
             }
             validation::BrepCheck {
-                pointers_status: crate::error::SM_SUCCESS,
+                pointers: validation::PointerCheck::Passed,
                 pointer_reports: AssertArray::new(),
                 assert_valid: Some(tests.is_empty()),
                 reports,
@@ -3820,7 +3957,7 @@ mod tests {
     }
 
     /// The fix sets the tangent-edge cases run with: none (the kernel's default) and every
-    /// one (as an application turns them on, `offset_analytic_mate_edges` among them).
+    /// one (as an application turns them on).
     fn tangent_edge_fixes() -> [UpstreamFixes; 2] {
         [UpstreamFixes::default(), UpstreamFixes::all()]
     }

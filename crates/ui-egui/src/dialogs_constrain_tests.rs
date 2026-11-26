@@ -18,6 +18,7 @@ const COLORS: crate::preview::Colors = crate::preview::Colors {
     ghost: true,
     tint_new: true,
     cut_tint: true,
+    replaced_ghost: true,
     glass_new: false,
 };
 
@@ -163,7 +164,7 @@ fn the_status_line_reads_the_preview() {
     let block = occ(&app, "Block:1");
     app.preview.placed = Some(json!({"dof": [{"occurrence": block, "dof": 3}], "conflicts": []}));
     let (text, out) = shown(&mut app);
-    let want = solidcraft_ui_text::format("constrain.dof", &[("part", "Block:1"), ("count", "3")]);
+    let want = tr!("constrain.dof", part = "Block:1", count = "3");
     assert!(text.contains(&want), "{text:?}");
     let line = crate::test_support::text_shapes(&out).find(|t| t.galley.text() == want).unwrap();
     let at = line.galley.rect.translate(line.pos.to_vec2());
@@ -172,7 +173,7 @@ fn the_status_line_reads_the_preview() {
     // Nothing previewed: the saved design, where the block is free.
     app.preview.placed = None;
     let (text, _) = shown(&mut app);
-    let free = solidcraft_ui_text::format("constrain.dof", &[("part", "Block:1"), ("count", "6")]);
+    let free = tr!("constrain.dof", part = "Block:1", count = "6");
     assert!(text.contains(&free), "{text:?}");
     // A conflict names the other constraint.
     app.preview.placed = Some(json!({"dof": [], "conflicts": [{"joint": 999, "name": "Other", "why": "off"}]}));
@@ -245,7 +246,7 @@ fn a_new_pick_after_loading_makes_a_new_rule() {
 #[test]
 fn apply_keeps_the_pair_and_starts_the_next_rule_fresh() {
     let mut h = crate::scenario::Harness::new();
-    h.app = plate_and_block();
+    *h.app = plate_and_block();
     picked(&mut h.app);
     {
         let f = form(&mut h.app);
@@ -287,7 +288,7 @@ fn a_datum_reference_names_its_part() {
     assert_eq!(r.parts, [occ(&app, "Plate:1"), occ(&app, "Block:1")]);
     let (text, _) = shown(&mut app);
     assert!(text.iter().any(|t| t.starts_with("Mate1")), "the rule between them is listed: {text:?}");
-    let block = solidcraft_ui_text::format("constrain.dof", &[("part", "Block:1"), ("count", "3")]);
+    let block = tr!("constrain.dof", part = "Block:1", count = "3");
     assert!(text.contains(&block), "{text:?}");
 }
 
@@ -354,7 +355,7 @@ fn a_gap_edit_keeps_a_flipped_mate_flipped() {
 #[test]
 fn a_refused_apply_keeps_the_picks() {
     let mut h = crate::scenario::Harness::new();
-    h.app = plate_and_block();
+    *h.app = plate_and_block();
     picked(&mut h.app);
     form(&mut h.app).offset = "no such length".into();
     h.frames(3);

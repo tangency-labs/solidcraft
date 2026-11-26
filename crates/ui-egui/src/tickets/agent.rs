@@ -74,6 +74,10 @@ fn failure(app: &SolveApp) -> Option<String> {
 
 fn start(app: &mut SolveApp, ctx: &egui::Context, r: &Request) {
     let ask = ask_of(r);
+    if !app.policy.allows("problem_reports") {
+        status(&ask.id, "failed", "The organization's policy turns problem reports off on this computer: nothing was sent.", json!({}));
+        return;
+    }
     let title: String = r.params.get("title").and_then(Value::as_str).unwrap_or_default().trim().chars().take(payload::MAX_TITLE).collect();
     let description: String =
         r.params.get("description").and_then(Value::as_str).unwrap_or_default().chars().take(payload::MAX_DESCRIPTION).collect();

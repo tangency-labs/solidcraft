@@ -1,0 +1,10 @@
+{
+  "en": { "ui.pasteInPlace": "Paste in Place" },
+  "ar": { "ui.pasteInPlace": "لصق في المكان نفسه" },
+  "de": { "ui.pasteInPlace": "An gleicher Stelle einfügen" },
+  "he": { "ui.pasteInPlace": "הדבקה באותו מקום" },
+  "ja": { "ui.pasteInPlace": "同じ位置に貼り付け" },
+  "ko": { "ui.pasteInPlace": "같은 위치에 붙여넣기" },
+  "vi": { "ui.pasteInPlace": "Dán tại chỗ" },
+  "zh": { "ui.pasteInPlace": "原位粘贴" }
+}

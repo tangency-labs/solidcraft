@@ -56,6 +56,9 @@ static PORTUGUESE_PT: Catalog =
 static ROMANIAN: Catalog = Catalog::numbered("ro", "Română", json!("ro"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ro.tbl.z")));
 static RUSSIAN: Catalog = Catalog::numbered("ru", "Русский", json!("ru"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ru.tbl.z")));
 static SERBIAN: Catalog = Catalog::numbered("sr", "Српски", json!("sr"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/sr.tbl.z")));
+/// Serbian in Latin script: the Cyrillic catalog transliterated at build time (`build.rs`).
+static SERBIAN_LATIN: Catalog =
+    Catalog::numbered("sr-Latn", "Srpski (latinica)", json!("sr-Latn"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/sr-Latn.tbl.z")));
 static SWEDISH: Catalog = Catalog::numbered("sv", "Svenska", json!("sv"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/sv.tbl.z")));
 static TURKISH: Catalog = Catalog::numbered("tr", "Türkçe", json!("tr"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/tr.tbl.z")));
 static UKRAINIAN: Catalog = Catalog::numbered("uk", "Українська", json!("uk"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/uk.tbl.z")));
@@ -100,6 +103,7 @@ pub const LOCALES: &[&Catalog] = &[
     &ROMANIAN,
     &RUSSIAN,
     &SERBIAN,
+    &SERBIAN_LATIN,
     &SWEDISH,
     &TURKISH,
     &UKRAINIAN,
@@ -496,7 +500,11 @@ mod tests {
             assert_eq!(match_system_tags(&tags(&[tag])), want, "{tag}");
         }
         // Other languages keep the exact tag, then the base language.
-        assert_eq!(match_system_tags(&tags(&["sr-Latn-RS"])), "sr");
+        // Serbian in Latin script is only used when chosen by hand: every Serbian system tag,
+        // with or without a script, keeps Cyrillic, as before sr-Latn existed.
+        for tag in ["sr-Latn-RS", "sr_Latn", "sr-Latn", "sr-Cyrl-RS", "sr-RS"] {
+            assert_eq!(match_system_tags(&tags(&[tag])), "sr", "{tag}");
+        }
         assert_eq!(match_system_tags(&tags(&["zhx-TW", "de"])), "de", "only zh itself is Chinese");
     }
 
@@ -1700,6 +1708,22 @@ mod tests {
         assert_eq!(vi.dynamic("Sketch of bracket"), "Sketch of bracket");
     }
 
+    /// Serbian in Latin script is built from the Cyrillic catalog, so it has every message the
+    /// Cyrillic one has, in Latin letters only, with Lj, Nj and Dž in capitals inside capitals.
+    #[test]
+    fn serbian_latin_is_the_cyrillic_catalog_transliterated() {
+        install();
+        let cyrillic: Messages = serde_json::from_str(SERBIAN.source).unwrap();
+        let latin: Messages = serde_json::from_str(SERBIAN_LATIN.source).unwrap();
+        assert_eq!(cyrillic.keys().collect::<Vec<_>>(), latin.keys().collect::<Vec<_>>());
+        let cyrillic_left: Vec<&String> = latin.values().filter(|text| text.chars().any(|c| ('\u{400}'..='\u{4ff}').contains(&c))).collect();
+        assert!(cyrillic_left.is_empty(), "Cyrillic left in sr-Latn: {cyrillic_left:?}");
+        let sr = Locale::for_language("sr-Latn");
+        assert_eq!(sr.text("ui.shell"), "Ljuska");
+        assert_eq!(sr.text("ui.heading_shell"), "LJUSKA");
+        assert_eq!(sr.text("ui.tab_manage"), "Upravljanje");
+    }
+
     #[test]
     fn new_languages_translate_keys_labels_and_default_names() {
         install();
@@ -1707,6 +1731,7 @@ mod tests {
             ("bs", "Bosanski", "Postavke", "Ekstrudiraj", "Skica1", "Sačuvati promjene u My {design}?"),
             ("hr", "Hrvatski", "Postavke", "Ekstrudiraj", "Skica1", "Spremiti promjene u My {design}?"),
             ("sr", "Српски", "Подешавања", "Екструдирај", "Скица1", "Сачувати промене у My {design}?"),
+            ("sr-Latn", "Srpski (latinica)", "Podešavanja", "Ekstrudiraj", "Skica1", "Sačuvati promene u My {design}?"),
             ("ka", "ქართული", "პარამეტრები", "ამოწევა", "ესკიზი1", "შევინახოთ ცვლილებები My {design}-ში?"),
             ("lv", "Latviešu", "Iestatījumi", "Izspiešana", "Skice1", "Saglabāt izmaiņas failā My {design}?"),
             ("hu", "Magyar", "Beállítások", "Kihúzás", "Vázlat1", "Menti a(z) My {design} módosításait?"),
@@ -1714,7 +1739,7 @@ mod tests {
             ("nl", "Nederlands", "Voorkeuren", "Extruderen", "Schets1", "Wijzigingen in My {design} opslaan?"),
             ("ro", "Română", "Preferințe", "Extrudare", "Schița1", "Salvați modificările în My {design}?"),
             ("sv", "Svenska", "Inställningar", "Extrudera", "Skiss1", "Spara ändringar i My {design}?"),
-            ("zh-TW", "繁體中文", "首選項", "拉伸", "草圖1", "儲存對 My {design} 的更改？"),
+            ("zh-TW", "繁體中文", "偏好設置", "拉伸", "草圖1", "儲存對 My {design} 的更改？"),
         ] {
             let locale = Locale::for_language(id);
             assert_eq!(locale.name(), name);
@@ -1919,7 +1944,10 @@ mod tests {
         fn inside_kit(&self, path: &std::path::Path) -> bool {
             let module = module_path(path);
             module.get(1).is_some_and(|module| module == "ui_kit")
-                && !module.get(2).is_some_and(|name| crate::test_support::KIT_COMPONENTS.contains(&format!("{name}.rs").as_str()))
+                && !module.get(2).is_some_and(|name| {
+                    crate::test_support::KIT_COMPONENTS.contains(&name.as_str())
+                        || crate::test_support::KIT_COMPONENTS.contains(&format!("{name}.rs").as_str())
+                })
         }
     }
 
@@ -2849,5 +2877,12 @@ mod tests {
         let lo = Locale::for_language("lo");
         assert_eq!(lo.name(), "ພາສາລາວ");
         assert!(is_supported("lo"));
+    }
+
+    #[test]
+    fn inside_kit_excludes_directory_backed_kit_components() {
+        let context = Context::new(&[]);
+        assert!(!context.inside_kit(std::path::Path::new("crates/ui-kit/src/panel_runtime/workspace.rs")));
+        assert!(context.inside_kit(std::path::Path::new("crates/ui-kit/src/choice.rs")));
     }
 }

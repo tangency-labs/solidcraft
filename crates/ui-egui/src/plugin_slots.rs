@@ -22,12 +22,12 @@ use solidcraft_engine::plugin::UiSlot;
 pub(crate) struct Item {
     pub command: String,
     pub plugin: String,
-    pub entry: String,
+    pub button_label: String,
     pub label: String,
     pub slot: Slot,
     /// An importer chooses its own file, so it needs no open design.
     pub importer: bool,
-    /// The command's icon: its own from the package, else the generic plugin icon.
+    /// The entry's icon: its own from the package, else the generic plugin icon.
     pub icon: String,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -123,14 +123,14 @@ fn declared(plugin: &plugins::Plugin) -> Vec<Item> {
     let mut items = Vec::new();
     for entry in &plugin.entries {
         for slot in &entry.slots {
-            let slot = match slot {
-                UiSlot::Menu { name } => {
+            let (slot, slot_label) = match slot {
+                UiSlot::Menu { name, label } => {
                     let Some(name) = menu_name(name) else { continue };
-                    Slot::Menu(name)
+                    (Slot::Menu(name), label.as_deref())
                 }
-                UiSlot::Ribbon { name } => {
+                UiSlot::Ribbon { name, label, .. } => {
                     let Some(name) = ribbon_name(name) else { continue };
-                    Slot::Ribbon(name)
+                    (Slot::Ribbon(name), label.as_deref())
                 }
             };
             let command = format!("{}.{}", plugin.id, entry.name);
@@ -140,11 +140,17 @@ fn declared(plugin: &plugins::Plugin) -> Vec<Item> {
             if items.iter().any(|item: &Item| item.command == command && item.slot == slot) {
                 continue;
             }
+            let button_label = slot_label
+                .filter(|l| !l.trim().is_empty())
+                .map(str::trim)
+                .or_else(|| (!entry.label.trim().is_empty()).then(|| entry.label.trim()))
+                .unwrap_or(entry.name.as_str())
+                .to_owned();
             items.push(Item {
                 command,
                 plugin: plugin.name.clone(),
-                entry: entry.name.clone(),
-                label: format!("{} · {}", plugin.name, entry.name),
+                button_label: button_label.clone(),
+                label: format!("{} · {}", plugin.name, button_label),
                 slot,
                 importer: entry.kind == solidcraft_engine::plugin::EntryKind::Importer,
                 icon: crate::plugin_menu::command_icon(plugin, entry).to_owned(),
@@ -166,6 +172,10 @@ pub(crate) fn invalidate(app: &mut SolveApp) {
 fn discovered(app: &mut SolveApp, inventory: Inventory) {
     #[cfg(not(target_arch = "wasm32"))]
     {
+        if inventory.root.as_deref().is_some_and(Path::is_dir) {
+            let present = |id: &str| inventory.plugins.iter().any(|p| p.id == id) || inventory.skipped.iter().any(|s| s.folder == id);
+            crate::plugin_shaders::drop_pictures_not_in(app, &present);
+        }
         app.plugin_slots.items = inventory.plugins.iter().flat_map(declared).take(8192).collect();
     }
     let root = inventory.root.clone();
@@ -435,10 +445,10 @@ impl RibbonGroup {
                 .map(|entry| ribbon::Button {
                     id: &entry.command,
                     run: &entry.command,
-                    label: &entry.entry,
+                    label: &entry.button_label,
                     name: &entry.label,
-                    icon: "prefs_plugins",
-                    size: ribbon::ButtonSize { width: ribbon::button_width(ui.painter(), &entry.entry), min_width: ribbon::BUTTON_MIN_WIDTH },
+                    icon: &entry.icon,
+                    size: ribbon::ButtonSize { width: ribbon::button_width(ui.painter(), &entry.button_label), min_width: ribbon::BUTTON_MIN_WIDTH },
                     planned: false,
                     enabled: true,
                     pressed: false,
@@ -457,15 +467,7 @@ impl RibbonGroup {
             more: self
                 .entries
                 .iter()
-                .map(|e| ribbon::MoreRow {
-                    id: &e.command,
-                    label: &e.label,
-                    icon: "prefs_plugins",
-                    shortcut: "",
-                    enabled: true,
-                    checked: None,
-                    hint: None,
-                })
+                .map(|e| ribbon::MoreRow { id: &e.command, label: &e.label, icon: &e.icon, shortcut: "", enabled: true, checked: None, hint: None })
                 .collect(),
         }
     }
@@ -564,8 +566,11 @@ mod tests {
             approval: String::new(),
             disabled: false,
             groups: Default::default(),
+            ribbon_groups: Vec::new(),
             images: Default::default(),
             swatches: Default::default(),
+            updates: None,
+            themes: Vec::new(),
             entries: serde_json::from_value(json!([
                 {"name":"report","effect":"read","slots":[
                     {"kind":"menu","name":"Manufacturing"}, {"kind":"menu","name":"Plugins"},
@@ -577,6 +582,10 @@ mod tests {
             ]))
             .unwrap(),
             shaders: Vec::new(),
+            tints: Vec::new(),
+            panels: Vec::new(),
+            shader_settings: Default::default(),
+            pictures: Vec::new(),
         };
         let items = declared(&plugin);
         assert_eq!(items.len(), 3, "unmapped menus and the Model tab are omitted and repeated placements are deduplicated");
@@ -584,6 +593,35 @@ mod tests {
         assert_eq!(items[1].slot, Slot::Menu("File"));
         assert_eq!(items[2].slot, Slot::Menu("Help"));
         assert_eq!(menu_name("Manufacturing"), None);
+    }
+
+    /// A plugin folder deleted by hand takes the pictures chosen for its backgrounds with it.
+    #[test]
+    fn a_deleted_plugin_folder_drops_its_chosen_pictures() {
+        let mut h = crate::scenario::Harness::new();
+        let root = h.dir.join("installed");
+        let dir = root.join("own");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("plugin.json"),
+            r#"{"id":"own","name":"Own","version":"1","capabilities":["shaders@0.2"],"shaders":[{"id":"own","name":"Own","kind":"background","source":"own.wgsl","textures":[{"name":"picture","choose":"Picture"}]}]}"#,
+        )
+        .unwrap();
+        h.app.session.plugin_state.plugins_dir = Some(root);
+        let picked = h.dir.join("a.png").to_string_lossy().into_owned();
+        for key in ["own/own/picture", "gone/own/picture"] {
+            h.app.preferences.background_shader_pictures.insert(key.into(), picked.clone());
+        }
+        invalidate(&mut h.app);
+        refresh(&mut h.app);
+        wait_for_discovery(&mut h.app);
+        let kept = |h: &crate::scenario::Harness| h.app.preferences.background_shader_pictures.keys().cloned().collect::<Vec<_>>();
+        assert_eq!(kept(&h), ["own/own/picture"], "a plugin that is not installed has no pictures kept; an installed one keeps its");
+        std::fs::remove_dir_all(&dir).unwrap();
+        invalidate(&mut h.app);
+        refresh(&mut h.app);
+        wait_for_discovery(&mut h.app);
+        assert!(kept(&h).is_empty(), "{:?}", kept(&h));
     }
 
     #[test]

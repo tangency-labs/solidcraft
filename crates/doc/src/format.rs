@@ -700,6 +700,27 @@ pub(crate) fn decode(
             unplaced.join(", ")
         )));
     }
+    let bad_base: Vec<String> = d
+        .occurrences
+        .iter()
+        .filter(|o| o.base_transform.as_ref().is_some_and(|m| !crate::is_placement(m)))
+        .map(|o| format!("`{}`", o.name))
+        .collect();
+    if !bad_base.is_empty() {
+        return Err(DocError::Invalid(format!(
+            "damaged design: {} an invalid base placement: {}",
+            if bad_base.len() == 1 { "an occurrence has" } else { "occurrences have" },
+            bad_base.join(", ")
+        )));
+    }
+    for j in &d.assembly.joints {
+        if j.base_values.as_ref().is_some_and(|v| v.len() > 64) || j.base_exprs.len() > 64 {
+            return Err(DocError::Invalid(format!("damaged design: joint `{}` has too many base values", j.name)));
+        }
+        if j.base_values.as_ref().is_some_and(|v| v.iter().any(|x| !x.is_finite() || x.abs() > MAX_REAL)) {
+            return Err(DocError::Invalid(format!("damaged design: joint `{}` has an out-of-range base value", j.name)));
+        }
+    }
     if !all_unique(d.features.iter().map(|f| f.id))
         || !all_unique(d.components.iter().map(|c| c.id))
         || !all_unique(d.occurrences.iter().map(|o| o.id))
@@ -743,12 +764,45 @@ pub(crate) fn decode(
         {
             return Err(DocError::Invalid(format!("damaged design: feature `{}` has an invalid profile frame", feature.name)));
         }
+        if let crate::FeatureKind::CapturePosition { moves, joints } = &feature.kind {
+            if moves.len() > crate::MAX_PLACEMENTS || joints.len() > crate::MAX_PLACEMENTS {
+                return Err(DocError::Invalid(format!("damaged design: feature `{}` has too many captured entries", feature.name)));
+            }
+            for m in moves {
+                if let Some(rot) = &m.rotation
+                    && (!crate::is_placement(rot) || rot[3][..3].iter().any(|v| v.abs() >= 1e-9))
+                {
+                    return Err(DocError::Invalid(format!("damaged design: feature `{}` has an invalid captured rotation", feature.name)));
+                }
+                if let Some(axis) = m.rotate_axis
+                    && axis.iter().any(|v| !v.is_finite())
+                {
+                    return Err(DocError::Invalid(format!("damaged design: feature `{}` has an invalid rotation axis", feature.name)));
+                }
+                if let Some(path) = &m.path
+                    && path.len() > crate::MAX_PLACEMENT_DEPTH + 1
+                {
+                    return Err(DocError::Invalid(format!(
+                        "damaged design: feature `{}` has a placement path deeper than {}",
+                        feature.name,
+                        crate::MAX_PLACEMENT_DEPTH
+                    )));
+                }
+            }
+            for cj in joints {
+                if cj.values.len() > 64 || cj.exprs.len() > 64 {
+                    return Err(DocError::Invalid(format!("damaged design: feature `{}` has too many captured joint values", feature.name)));
+                }
+                if cj.values.iter().any(|v| !v.is_finite() || v.abs() > MAX_REAL) {
+                    return Err(DocError::Invalid(format!("damaged design: feature `{}` has an out-of-range captured joint value", feature.name)));
+                }
+            }
+        }
     }
-    // Fill in what older designs (and hand-edited files) may lack; a no-op otherwise.
     crate::format_offsets::validate_typed(&d)?;
     // `next_id` is trusted by nothing: a hand-edited or generated file may omit it or leave it stale,
     // and the next feature, component or occurrence would then reuse an id that is already taken.
-    // It is repaired before `normalise`, which gives an occurrence to each component that has none.
+    // Raised before `normalise`, which adds the occurrences older designs lack under new ids.
     let largest =
         d.features.iter().map(|f| f.id).chain(d.components.iter().map(|c| c.id)).chain(d.occurrences.iter().map(|o| o.id)).max().unwrap_or(0);
     let floor = largest.checked_add(1).ok_or_else(|| DocError::Invalid("damaged design: the id space is exhausted".into()))?;
@@ -756,6 +810,7 @@ pub(crate) fn decode(
     // These lists used to allocate independently. Keep their existing identities, but never
     // let a later deletion make them available again after loading an older design.
     d.next_id = d.next_item_id()?;
+    // Fill in what older designs (and hand-edited files) may lack; a no-op otherwise.
     normalise(&mut d)?;
     d.drawings = crate::drawing::in_design(drawings).map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
     d.format = format_string(FORMAT);
@@ -821,8 +876,10 @@ fn validate_sketch_sizes(value: &Value) -> Result<()> {
                         }
                     }
                 }
-                if curve.get("spline_handle_of").and_then(Value::as_str).is_some_and(|id| id.len() > 512) {
-                    return Err(invalid());
+                for key in ["spline_handle_of", "spline_control_polygon_of"] {
+                    if curve.get(key).and_then(Value::as_str).is_some_and(|id| id.len() > 512) {
+                        return Err(invalid());
+                    }
                 }
             }
         }
@@ -1242,7 +1299,7 @@ fn validate_freeform_chain_offsets(value: &Value) -> Result<()> {
 
 /// Largest coordinate or size a design may hold (mm): a kilometre-scale part is already far
 /// outside what the kernel's tolerances serve.
-pub(crate) const MAX_REAL: f64 = 1e9;
+pub const MAX_REAL: f64 = 1e9;
 
 /// Every number the design itself holds is in range ([`check_numbers`]). `metadata` is left
 /// alone: it is other tools' data, kept as it is and never read as a number (#1015); parsing
@@ -1864,6 +1921,7 @@ mod tests {
             corner_relief_shape: shape.map(Into::into),
             corner_relief: size.map(Into::into),
             height_from: None,
+            bend_relief_shape: None,
         };
         let saved = |document: &Document| -> Value { serde_json::from_str(&document.to_json()).unwrap() };
         // A flange that follows the rule saves neither key, and a design of format 23 opens as it was.
@@ -2080,6 +2138,9 @@ mod tests {
                         to_offset: Some("offset + 1 mm".into()),
                         from: Some(crate::FacePick(solidcore_record::Vec3::new(0.0, 0.0, 5.0))),
                         to_body_apart: false,
+                        through_all2: false,
+                        to2: None,
+                        to_offset2: None,
                         from_level: false,
                         picked_placements: Vec::new(),
                         one_sided_direction: None,
@@ -2904,6 +2965,25 @@ mod tests {
     }
 
     #[test]
+    fn occurrences_added_on_open_take_fresh_ids_and_the_design_reopens() {
+        let mut d = Document::new("Legacy");
+        d.add_component(None, 0).unwrap();
+        let b = d.add_component(None, 0).unwrap();
+        // No `next_id`, `b` without its occurrence, and the other occurrence on id 1.
+        let json = edited(&d, |v| {
+            v.as_object_mut().unwrap().remove("next_id");
+            let occurrences = v["occurrences"].as_array_mut().unwrap();
+            occurrences.retain(|o| o["component"] != b);
+            occurrences[0]["id"] = 1.into();
+        });
+        let back = read(&json).unwrap();
+        assert_eq!(back.occurrences.len(), 2);
+        assert!(back.occurrences.iter().any(|o| o.component == b));
+        assert!(all_unique(back.occurrences.iter().map(|o| o.id)), "{:?}", back.occurrences);
+        read(&back.to_json()).unwrap();
+    }
+
+    #[test]
     fn missing_or_stale_next_id_does_not_reuse_existing_ids() {
         let d = two_components_one_occurrence();
         let largest = d.components.iter().map(|c| c.id).chain(d.occurrences.iter().map(|o| o.id)).max().unwrap();
@@ -3030,6 +3110,7 @@ mod tests {
             parent,
             name: format!("{cname}:{k}"),
             transform,
+            base_transform: None,
             grounded: false,
             expressed_moves: Vec::new(),
             bom_type: None,
@@ -3093,7 +3174,17 @@ mod tests {
     }
 
     fn occurrence(id: u64, component: u64, parent: u64, name: String) -> crate::Occurrence {
-        crate::Occurrence { id, component, parent, name, transform: crate::IDENTITY, grounded: false, expressed_moves: Vec::new(), bom_type: None }
+        crate::Occurrence {
+            id,
+            component,
+            parent,
+            name,
+            transform: crate::IDENTITY,
+            base_transform: None,
+            grounded: false,
+            expressed_moves: Vec::new(),
+            bom_type: None,
+        }
     }
 
     /// A small design with components to place while loading. Components share a name or have

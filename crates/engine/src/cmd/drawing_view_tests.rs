@@ -66,7 +66,7 @@ pub(crate) fn three_views_of(mut s: Session) -> (Session, [u64; 3]) {
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let mut add = |d: &mut Drawing, kind: ViewKind, place: ViewPlace, settings: ViewOverrides| {
         let id = d.allocate_id(&mut id_source).unwrap();
-        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0, label: None })]);
+        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0, centre_marks: None, label: None })]);
         id
     };
     let front_settings =
@@ -2603,6 +2603,33 @@ fn an_exploded_view_takes_what_measures_its_parts_where_it_draws_them() {
     assert!(near_value(&run(&mut s, "drawing.dimension.inspect", json!({"dimension": on_above})), 70.0));
 }
 
+/// A balloon and a note are taken off a drawing by their own commands (#22193): each reply names
+/// what went, the other stays, a second delete is refused, and one undo puts it back.
+#[test]
+fn a_balloon_and_a_note_are_deleted_by_their_own_commands() {
+    let (mut s, view, [_, second], _) = exploded_pair();
+    let edge = json!({"point": [35, 0, 0], "path": [second]});
+    let balloon = run(&mut s, "drawing.balloon.add", json!({"view": ids::encode(view), "edge": edge, "at": [60, 40]}))["balloon"].clone();
+    let note = json!({"anchor": {"view": ids::encode(view)}, "at": [60, -40], "content": "Deburr"});
+    let note = run(&mut s, "drawing.note.add", note)["note"].clone();
+
+    let gone = run(&mut s, "drawing.balloon.delete", json!({"balloon": balloon}));
+    assert_eq!(gone, json!({"balloon": balloon}));
+    assert!(s.execute("drawing.balloon.inspect", &json!({"balloon": balloon})).is_err(), "the balloon is gone");
+    assert!(s.execute("drawing.balloon.delete", &json!({"balloon": balloon})).is_err(), "a second delete is refused");
+    assert_eq!(run(&mut s, "drawing.note.inspect", json!({"note": note}))["status"], "ok", "the note stays");
+
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(run(&mut s, "drawing.balloon.inspect", json!({"balloon": balloon}))["status"], "ok", "one undo brings it back");
+
+    let gone = run(&mut s, "drawing.note.delete", json!({"note": note}));
+    assert_eq!(gone, json!({"note": note}));
+    assert!(s.execute("drawing.note.inspect", &json!({"note": note})).is_err(), "the note is gone");
+    assert!(s.execute("drawing.note.delete", &json!({"note": note})).is_err(), "a second delete is refused");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(run(&mut s, "drawing.note.inspect", json!({"note": note}))["status"], "ok", "one undo brings it back");
+}
+
 /// A projected view's centre annotation blocks its parent from exploding until the follower
 /// explicitly chooses the assembled design for itself.
 #[test]
@@ -2622,6 +2649,36 @@ fn a_centre_line_on_a_follower_blocks_an_exploded_parent() {
     edit_view(&mut s, above, json!({"exploded": "assembled"}));
     edit_view(&mut s, parent, json!({"exploded": apart}));
     assert_eq!(run(&mut s, "drawing.center_line.inspect", json!({"line": line}))["status"], "ok");
+}
+
+/// A projected view's automatic centre-mark rule blocks its parent from exploding, and a view that
+/// draws an exploded view through its parent can't turn the rule on, until the follower explicitly
+/// chooses the assembled design for itself; turning the rule off is never refused.
+#[test]
+fn an_automatic_centre_mark_rule_on_a_follower_blocks_an_exploded_parent() {
+    let (mut s, parent, _, apart) = exploded_pair();
+    let (_, above) = create(&mut s, PROJECTED, json!({"parent": ids::encode(parent), "side": "above", "place": {"at": [150, 250]}}));
+    let set = |s: &mut Session, view: u64, enabled: bool| {
+        s.execute("drawing.auto_center_mark.set", &json!({"view": ids::encode(view), "enabled": enabled}))
+    };
+    set(&mut s, above, true).unwrap();
+    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    let error = edit_refused(&mut s, parent, json!({"exploded": apart}));
+    assert!(error.contains("automatic centre marks enabled"), "{error}");
+    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    edit_view(&mut s, above, json!({"exploded": "assembled"}));
+    edit_view(&mut s, parent, json!({"exploded": apart}));
+    assert!((width(&mut s, parent) - 70.0).abs() < 1e-6 && (width(&mut s, above) - 40.0).abs() < 1e-6);
+
+    // Following the exploded parent again would draw the rule's view exploded: refused.
+    let error = edit_refused(&mut s, above, json!({"exploded": null}));
+    assert!(error.contains("automatic centre marks enabled"), "{error}");
+    // The parent now draws exploded: a rule can't be enabled on it, but a follower's can be disabled.
+    let error = set(&mut s, parent, true).unwrap_err().to_string();
+    assert!(error.contains("automatic centre marks on an exploded view"), "{error}");
+    assert_eq!(set(&mut s, above, false).unwrap()["enabled"], false);
+    edit_view(&mut s, above, json!({"exploded": null}));
+    assert!((width(&mut s, above) - 70.0).abs() < 1e-6);
 }
 
 /// A shaded view's pictures are rendered from the design as it places its parts, so an exploded view
@@ -3795,6 +3852,7 @@ fn section_of(
         place,
         settings: ViewOverrides::default(),
         reference_shown_percent: 0.0,
+        centre_marks: None,
         label: None,
     };
     d.add_views([Arc::new(view)]);
@@ -5152,6 +5210,65 @@ fn a_cut_hole_is_not_hatched() {
     let sides: BTreeSet<i32> =
         block.strokes.iter().map(stroke_ends).map(|(p, q)| (side(p.x), side(q.x))).map(|(p, q)| if p == q { p } else { 0 }).collect();
     assert_eq!(sides, BTreeSet::from([-1, 1]), "{block:?}");
+}
+
+/// A 100 x 60 x 10 plate cut through a centred 10 mm bore and a 30 x 20 x 5 pocket.
+/// The bore removes -30 < x < -20 throughout the centred section; the pocket removes
+/// 5 < x < 35 above y = 0. Every complete stroke must stay out of both open rectangles.
+#[test]
+fn a_full_section_through_a_bore_and_pocket_hatches_only_material() {
+    for (hole, pocket, cut_y) in
+        [(true, true, 30.0_f64), (true, true, 29.99), (true, true, 30.01), (true, false, 30.0), (false, true, 30.0), (false, false, 30.0)]
+    {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 10, "body_name": "Plaque"}));
+        if hole {
+            run(&mut s, "solid.hole", json!({"position": [25, 30, 10], "diameter": 10}));
+        }
+        if pocket {
+            run(&mut s, "solid.box", json!({"length": 30, "width": 20, "height": 5, "corner": [55, 20, 5], "operation": "cut"}));
+        }
+        run(&mut s, "drawing.create", json!({}));
+        let base = run(&mut s, "drawing.view.base", json!({"sheet": "Sheet 1", "view": "top", "scale": "1:1", "position_mm": [90, 220]}));
+        let cut = run(
+            &mut s,
+            "drawing.view.section",
+            json!({"parent": base["view"], "line": {"kind": "full", "points": [[-10, cut_y], [110, cut_y]], "arrows": "left"}}),
+        );
+        let id = ids::decode(cut["view"].as_str().unwrap()).unwrap();
+        let (set, hatches) = drawn_hatches(&s, id);
+        let hatch = hatch_of(&set, &hatches, "Plaque");
+        assert!(!hatch.filled && !hatch.strokes.is_empty(), "hole={hole}, pocket={pocket}, y={cut_y}: {hatch:?}");
+        let hole_half = (25.0 - (cut_y - 30.0).powi(2)).sqrt();
+        let mut left = false;
+        let mut right = false;
+        let mut below_pocket = false;
+        for stroke in &hatch.strokes {
+            let (a, b) = stroke_ends(stroke);
+            let (a, b) = if a.x <= b.x { (a, b) } else { (b, a) };
+            assert!(a.x < b.x && a.y >= -5.0 - EPS && b.y <= 5.0 + EPS, "{stroke:?}");
+            if hole {
+                assert!(b.x <= -25.0 - hole_half + EPS || a.x >= -25.0 + hole_half - EPS, "a stroke crosses the bore: {stroke:?}");
+            }
+            if pocket {
+                let lo = a.x.max(5.0 + EPS);
+                let hi = b.x.min(35.0 - EPS);
+                if lo < hi {
+                    let y = |x| a.y + (b.y - a.y) * ((x - a.x) / (b.x - a.x));
+                    assert!(y(lo).max(y(hi)) <= EPS || y(lo).min(y(hi)) >= 5.0 - EPS, "a stroke crosses the pocket: {stroke:?}");
+                    below_pocket |= y(lo).min(y(hi)) < -1.0;
+                }
+            }
+            left |= b.x < -30.0;
+            right |= a.x > 35.0;
+        }
+        assert!(left && right && (!pocket || below_pocket), "material on both sides and below the pocket is hatched");
+        let scene = run(&mut s, "drawing.scene", json!({"sheet": "Sheet 1"}));
+        let state = scene["views"].as_array().unwrap().iter().find(|v| v["view"] == cut["view"]).unwrap();
+        assert!(state.get("reason").is_none(), "{state}");
+        assert_eq!(state["hatches"][0]["filled"], false, "{state}");
+        assert_eq!(state["hatches"][0]["strokes"], hatch.strokes.len(), "{state}");
+    }
 }
 
 /// The tapped block cut through its hole's axis (#13051's section): the drill's sides are cut edges

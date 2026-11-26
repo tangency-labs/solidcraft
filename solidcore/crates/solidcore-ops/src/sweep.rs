@@ -1159,6 +1159,25 @@ pub fn match_loft_sections(
     ))
 }
 
+/// For a loft's sections as its walls are built through them (each section's segments in its
+/// plane's coordinates, the same number in every section, in the order [`loft`] takes their
+/// curves), which segments the skin should take joined to the segment before them, as one curve
+/// (the kernel's `sweep::loft_sections::one_curve_runs`): `true` at `i` for segment `i` of every
+/// section. Those are the free-form segments that in every section carry on the one before them
+/// with one first derivative on the spans that keep the first section's speed, in a run with a
+/// joint where the speeds differ. A caller that hands such a run to [`loft`] as one B-spline on
+/// those spans, every section on the first section's knots, gets the same walls without a jump
+/// of their first derivative where the segments meet.
+#[must_use]
+pub fn loft_one_curve_runs(sections: &[Vec<solidcore_record::Seg2>]) -> Vec<bool> {
+    use solidcore::sweep::loft_sections as kl;
+    let given: Vec<Vec<kp::Seg2>> = sections
+        .iter()
+        .map(|s| s.iter().map(convert::seg2).collect())
+        .collect();
+    kl::one_curve_runs(&given)
+}
+
 /// A skin through `sections` (`SmApiCreateSkinPrimitive`), `degree` (1 to 3) across them.
 ///
 /// # Errors
@@ -1803,7 +1822,8 @@ pub fn sweep_stations(profile: &[Curve], stations: &[Affine], end: Ends) -> Resu
 /// The screw sweep of `profile` about the axis through `origin` along `axis`: `turns` turns
 /// rising `pitch` each, the walls within `tolerance` of their screw surfaces, capped; with a
 /// `law`, the section moved off the axis by the piecewise linear offset of its (turn, offset)
-/// pairs as it turns (`sweep::screw`).
+/// pairs as it turns (`sweep::screw`). Its walls are laid out a face per piece
+/// ([`ScrewWalls::Pieces`]); [`screw_sweep_with`] chooses.
 ///
 /// # Errors
 /// [`Error::Argument`] for a number, law or curve list refused (and the kernel's refusals of
@@ -1817,6 +1837,82 @@ pub fn screw_sweep(
     law: Option<&[(f64, f64)]>,
     tolerance: f64,
 ) -> Result<Body> {
+    screw_sweep_with(
+        profile,
+        origin,
+        axis,
+        pitch,
+        turns,
+        &ScrewSweepOptions {
+            law,
+            tolerance,
+            walls: ScrewWalls::Pieces,
+        },
+    )
+}
+
+/// How a screw sweep lays its B-spline walls out in faces (`sweep::screw::Walls`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ScrewWalls {
+    /// A face per piece: every wall breaks at a radial law's angles and, when a profile line
+    /// along the axis sweeps a cylinder, every half turn.
+    #[default]
+    Pieces,
+    /// A B-spline wall runs on as one face across the half turns only the cylinders need,
+    /// breaking at a law's angles only: a thread's flanks as one continuous face each. The
+    /// surface and its edges are the same curves as the pieces'; cylinder walls keep their
+    /// half-turn faces.
+    Joined,
+}
+
+/// The options of [`screw_sweep_with`].
+#[derive(Debug, Clone, Copy)]
+pub struct ScrewSweepOptions<'a> {
+    /// The radial law as (turn, offset) pairs, turns ascending within `[0, turns]`; `None`
+    /// for none.
+    pub law: Option<&'a [(f64, f64)]>,
+    /// How far a wall may stray from its screw surface, mm (`1e-6` up to `1e3`).
+    pub tolerance: f64,
+    /// The walls' faces.
+    pub walls: ScrewWalls,
+}
+
+/// [`screw_sweep`] with its options: the law, the tolerance and the walls' layout.
+///
+/// ```
+/// use solidcore_ops::sweep::{screw_sweep_with, Curve, ScrewSweepOptions, ScrewWalls};
+/// // a square thread 1 x 1 from radius 5 to 6, two turns of pitch 2: its inner and outer
+/// // walls are cylinders, which come in half turns
+/// let corners = [[5.0, 0.0, 0.0], [6.0, 0.0, 0.0], [6.0, 0.0, 1.0], [5.0, 0.0, 1.0]];
+/// let profile: Vec<Curve> = (0..4)
+///     .map(|i| Curve::Line { start: corners[i], end: corners[(i + 1) % 4] })
+///     .collect();
+/// let thread = |walls| {
+///     let options = ScrewSweepOptions { law: None, tolerance: 1e-5, walls };
+///     screw_sweep_with(&profile, [0.0; 3], [0.0, 0.0, 1.0], 2.0, 2.0, &options)
+/// };
+/// // four half turns of four walls, and two caps
+/// assert_eq!(thread(ScrewWalls::Pieces)?.counts()?[0], 18);
+/// // the flanks run on as one face each; the cylinders keep their half turns
+/// assert_eq!(thread(ScrewWalls::Joined)?.counts()?[0], 12);
+/// # Ok::<(), solidcore_ops::Error>(())
+/// ```
+///
+/// # Errors
+/// Those of [`screw_sweep`].
+pub fn screw_sweep_with(
+    profile: &[Curve],
+    origin: [f64; 3],
+    axis: [f64; 3],
+    pitch: f64,
+    turns: f64,
+    options: &ScrewSweepOptions<'_>,
+) -> Result<Body> {
+    let ScrewSweepOptions {
+        law,
+        tolerance,
+        walls,
+    } = *options;
     let ok = coord_ok(&origin)
         && pitch.is_finite()
         && pitch.abs() > 1e-6
@@ -1847,29 +1943,23 @@ pub fn screw_sweep(
     } else {
         "screw_sweep"
     };
+    let walls = match walls {
+        ScrewWalls::Pieces => screw::Walls::Pieces,
+        ScrewWalls::Joined => screw::Walls::Joined,
+    };
     making(call, |k| {
         let made = parsed!(parse(k, profile));
-        let built = match law {
-            None => screw::screw_sweep_body(
-                k,
-                &made.curves,
-                v3(origin),
-                v3(axis),
-                pitch,
-                turns,
-                tolerance,
-            ),
-            Some(l) => screw::screw_sweep_radial_body(
-                k,
-                &made.curves,
-                v3(origin),
-                v3(axis),
-                pitch,
-                turns,
-                l,
-                tolerance,
-            ),
-        };
+        let built = screw::screw_sweep_with_body(
+            k,
+            &made.curves,
+            v3(origin),
+            v3(axis),
+            pitch,
+            turns,
+            law,
+            tolerance,
+            walls,
+        );
         match built {
             Ok(b) => finish(k, b, Expect::SOLID),
             Err(e) => Ok(Err(argument_or_status(e))),

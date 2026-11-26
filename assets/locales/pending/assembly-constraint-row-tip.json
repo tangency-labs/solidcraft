@@ -22,5 +22,8 @@
   },
   "he": {
     "constrain.row_tip": "אילוץ {rule}"
+  },
+  "fr": {
+    "constrain.row_tip": "Contrainte : {rule}"
   }
 }

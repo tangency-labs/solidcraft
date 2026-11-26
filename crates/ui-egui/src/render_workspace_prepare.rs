@@ -337,8 +337,13 @@ mod native {
                     let successful = result.is_ok();
                     #[cfg(test)]
                     if disconnect_retirement && successful {
-                        // Inject an actual disconnected return/ack channel after
-                        // handing the owned proof to the ordinary UI receiver.
+                        // Inject an actual disconnected return/ack channel, then
+                        // hand the owned proof to the ordinary UI receiver. Close
+                        // both first: if the window could still return the proof
+                        // into an open channel, this thread would drop it from the
+                        // channel buffer on exit and release its credit (#15077).
+                        drop(retired);
+                        drop(ack);
                         if let Err(returned) = ready_tx.send(result) {
                             drop(returned);
                         }

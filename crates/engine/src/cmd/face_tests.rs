@@ -328,21 +328,23 @@ fn internal_capture_in_another_component_anchors_an_offset_face_by_its_history_n
 }
 
 /// Extrude from a face in another component whose occurrence has an uncaptured move, where the
-/// face has neither a construction certificate nor an exact history name: a half of a box's top
-/// that Split Face divided. The face profile would take the legacy path, which can't capture the
-/// source's pending position, so the extrude is refused and changes nothing.
+/// face has neither a construction certificate nor an exact history name: one of two arms of a
+/// notched box's top that Split Face cut off on the same side of its plane, told apart only by
+/// place. The face profile would take the legacy path, which can't capture the source's pending
+/// position, so the extrude is refused and changes nothing.
 #[test]
 fn face_extrude_of_a_split_face_in_another_component_refuses_an_uncaptured_source() {
     let mut s = Session::default();
     let component = run(&mut s, "component.create", json!({"name":"Source","grounded":false}));
     let occurrence = component["occurrence"].as_u64().unwrap();
     run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Stock"}));
-    run(&mut s, "solid.split_face", json!({"faces":[[10,15,20]],"plane":{"origin":[20,0,0],"normal":[1,0,0]}}));
+    run(&mut s, "solid.box", json!({"length":24,"width":10,"height":5,"corner":[16,10,15],"operation":"cut","targets":["Stock"]}));
+    run(&mut s, "solid.split_face", json!({"faces":[[5,15,20]],"plane":{"origin":[28,0,0],"normal":[1,0,0]}}));
     run(&mut s, "component.activate", json!({"component":0}));
     run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[30,0,0],"capture":false}));
     let before = s.doc.to_json();
     let pending = s.pending_moves.clone();
-    let error = s.execute("solid.extrude", &json!({"face":[40,15,20],"distance":5,"operation":"new"})).unwrap_err();
+    let error = s.execute("solid.extrude", &json!({"face":[64,5,20],"distance":5,"operation":"new"})).unwrap_err();
     assert!(error.to_string().contains("capture the source occurrence position"), "{error}");
     assert_eq!(s.doc.to_json(), before);
     assert_eq!(s.pending_moves, pending);

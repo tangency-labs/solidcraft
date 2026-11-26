@@ -80,6 +80,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let tip = tr!(app, "prefs.keep_unsaved_in_browser_tip").to_string();
                 ui_kit::checkbox(ui, tr!(app, "prefs.keep_unsaved_in_browser"), &mut app.preferences.keep_unsaved_in_browser)
                     .backing_on_hover_text(tip);
+                if !app.preferences.keep_unsaved_in_browser {
+                    let response = setting::recover_after_browser_leave(app, ui);
+                    crate::scenario::publish_target("prefs:recover_after_browser_leave", response.rect);
+                }
                 if app.preferences.keep_unsaved_in_browser {
                     let tip = tr!(app, "prefs.keep_unsaved_also_asks_tip").to_string();
                     ui_kit::checkbox(ui, tr!(app, "prefs.keep_unsaved_also_asks"), &mut app.preferences.keep_unsaved_also_asks)

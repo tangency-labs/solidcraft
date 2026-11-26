@@ -46,6 +46,8 @@ way, the error names the files already written and the one that failed.
 | `images` | false | Also write each picture shown on the model as a textured visual; see [Decals](#decals). |
 | `mimic` | false | Write `<mimic>` for motion links. `false` leaves each joint free, as older versions did. The desktop dialog's **Couple motion links** (`urdf_mimic`). |
 | `place_meshes` | false | Write the meshes where `mesh_prefix` points, making the folder. `false` writes them next to the URDF whatever the prefix says, as older versions did; copy them where the prefix points yourself. The desktop dialog's **Write meshes where the prefix points** (`urdf_place_meshes`). |
+| `quality` | standard | How closely the link meshes follow curved faces, as for an STL export: a chord tolerance of 2e-4 (`standard`), 5e-5 (`fine`) or 1e-5 (`finest`) of each body's size. |
+| `chord` | none | Instead of `quality`: one chord tolerance for every body, in mm, from 0.001 to 1000. A coarser chord gives fewer triangles: a Ø3 × 14 mm screw with a Ø5.5 mm head gets about 1 000 triangles at `chord: 0.05`, instead of about 15 000 at `standard`. MuJoCo refuses an STL of more than 200 000 triangles. |
 
 URDF requires `effort` and `velocity` on every moving joint. A joint's own values come first, then
 these parameters, then the defaults, with a warning naming the joints that used them. A value that
@@ -85,7 +87,8 @@ set. In a chain, each step uses the values of the joint value it follows.
   it.
 - **Mass and inertia** come from each body's mesh and material density: the mass in kg, the
   centre of mass and the inertia tensor about it in the link frame, in kg m². Bodies of the
-  same link combine with the parallel-axis theorem.
+  same link combine with the parallel-axis theorem. Changing `quality` or `chord` can change the
+  computed mass, centre of mass and inertia.
 - **Mass override:** `component.physical_override {component, mass?, com?, inertia?}` replaces the
   values of a component's own bodies, for a bought motor modelled as a solid block. With only `mass`,
   the centre of mass stays and the inertia is scaled. Nested components are links of their own and keep
@@ -213,5 +216,5 @@ The export still writes the file, and warns about:
 
 - Images wrapped around curved faces: a decal is a flat image on a plane.
 - Automatic convex decomposition of a concave part.
-- SDF and MJCF export, and URDF import.
+- URDF import. (SDF and MJCF have exports of their own: [SDF](sdf.md), [MJCF](mjcf.md).)
 - Joint motion inside the copies of a component placed several times.
