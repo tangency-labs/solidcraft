@@ -52,7 +52,11 @@
 //! edge curves, and fans at the loop corners), so the faces bound one closed surface and
 //! the volume and volume moments do not depend on the origin; upstream integrates each
 //! face over its own trims, and the tolerant edges' gaps leak to first order in the
-//! tolerance.
+//! tolerance. The area and area moments are closed the same way (#16854): in
+//! `brep_properties`, and in [`face_area`], [`face_centroid`], [`brep_area`] and
+//! [`brep_area_about`] (each face's closure's area group): upstream's area is the trims',
+//! off by the gap times the edges' length. [`face_properties`] and [`boundary_properties`]
+//! still integrate over the trims given, as upstream.
 //! [`brep_mass_properties`] and [`brep_mass_properties_estimated`] (through
 //! [`brep_properties_in_box`]) integrate about the middle of the body's exact box and
 //! scale their errors by that box's size (#17361): the loose box upstream takes holds the
@@ -1664,12 +1668,25 @@ fn add_selected(
 // differs from the solid only within each edge's tolerance tube and each vertex's
 // tolerance ball, where the strips and corners lie, so the volume is right to
 // sum(pi tol_e^2 L_e) + sum(4/3 pi tol_v^3), where it was right to O(tol L).
+//
+// The area (#16854) is closed the same way. A face's area element is its area vector's
+// component along the face's unit normal; a strip's or corner's is its area vector's along
+// the unit normal of the face at its trim, so a strip that widens the face adds to its area
+// and one that narrows it takes away. On a plane the closed face is then the region its
+// edges bound, exactly; on a curved face the normal turns across the strip's width by its
+// curvature times the gap, so the area left is of second order in the gap, as the volume's.
 
-/// The volume group's integrands at `x` (relative to the origin) for the area vector
-/// `n` (per unit parameter area): the volume and the volume moments `4..8`, in the
-/// layout of [`PrecisePropertyLayout`]'s volume terms (see `OdeIsoCurveLength`).
-fn closure_integrands(x: Vec3, n: Vec3, out: &mut [f64; 13]) {
+/// The closure's terms: the volume group (`..13`) and the area group (`13..`).
+const CLOSURE_TERMS: usize = 26;
+
+/// The closure's integrands at `x` (relative to the origin) for the area vector `n` (per
+/// unit parameter area): the volume and the volume moments `4..8` (`..13`), in the layout
+/// of [`PrecisePropertyLayout`]'s volume terms (see `OdeIsoCurveLength`), then the area and
+/// the area moments `0..4` (`13..`), their area element `n . unit` for the face's unit
+/// normal `unit` (zero where the face has none).
+fn closure_integrands(x: Vec3, n: Vec3, unit: Vec3, out: &mut [f64; CLOSURE_TERMS]) {
     let vd = x.z * n.z;
+    let ad = n.dot(unit);
     let vals = [
         vd,
         x.x * vd,
@@ -1684,17 +1701,53 @@ fn closure_integrands(x: Vec3, n: Vec3, out: &mut [f64; 13]) {
         (x.y * x.y + x.z * x.z / 3.0) * vd,
         (x.x * x.x + x.z * x.z / 3.0) * vd,
         (x.x * x.x + x.y * x.y) * vd,
+        ad,
+        x.x * ad,
+        x.y * ad,
+        x.z * ad,
+        (x.x * x.x) * ad,
+        (x.y * x.y) * ad,
+        (x.z * x.z) * ad,
+        (x.y * x.z) * ad,
+        (x.z * x.x) * ad,
+        (x.x * x.y) * ad,
+        (x.y * x.y + x.z * x.z) * ad,
+        (x.x * x.x + x.z * x.z) * ad,
+        (x.x * x.x + x.y * x.y) * ad,
     ];
     for (o, v) in out.iter_mut().zip(vals) {
         *o += v;
     }
 }
 
-/// The volume group over `w` in `[0, 1]` of the ruled patch `X = (1 - w) a + w c` at one
+/// The unit normal `su x sv / |su x sv|` of a face's surface from its partials, the way
+/// round the face's area element and volume integrand take it (`OdeIsoCurveLength`); zero
+/// where the cross product is zero or not finite (a surface singularity, where a strip's
+/// area vector is zero too).
+fn unit_normal(su: Vec3, sv: Vec3) -> Vec3 {
+    let n = su.cross(sv);
+    let l = n.length();
+    if l > 0.0 && l.is_finite() {
+        n * (1.0 / l)
+    } else {
+        Vec3::ZERO
+    }
+}
+
+/// The closure's terms over `w` in `[0, 1]` of the ruled patch `X = (1 - w) a + w c` at one
 /// value of its other parameter, `da` and `dc` the rails' derivatives in it, the area
-/// vector `X_t x X_w`, into `out` (with `weight`). The integrands are polynomials of
-/// degree 4 in `w`, which the 3-point Gauss rule integrates exactly.
-fn ruled_column(a: Vec3, da: Vec3, c: Vec3, dc: Vec3, weight: f64, out: &mut [f64; 13]) {
+/// vector `X_t x X_w`, the face's unit normal `unit` ([`closure_integrands`]), into `out`
+/// (with `weight`). The integrands are polynomials of degree 4 in `w`, which the 3-point
+/// Gauss rule integrates exactly.
+fn ruled_column(
+    a: Vec3,
+    da: Vec3,
+    c: Vec3,
+    dc: Vec3,
+    unit: Vec3,
+    weight: f64,
+    out: &mut [f64; CLOSURE_TERMS],
+) {
     let xw = c - a;
     for (i, &node) in KRONROD_NODES.iter().enumerate() {
         let wg = GAUSS_WEIGHTS.get(i).copied().unwrap_or(0.0);
@@ -1706,8 +1759,8 @@ fn ruled_column(a: Vec3, da: Vec3, c: Vec3, dc: Vec3, weight: f64, out: &mut [f6
             let w = 0.5 + 0.5 * side * node;
             let x = a * (1.0 - w) + c * w;
             let xt = da * (1.0 - w) + dc * w;
-            let mut col = [0.0; 13];
-            closure_integrands(x, xt.cross(xw), &mut col);
+            let mut col = [0.0; CLOSURE_TERMS];
+            closure_integrands(x, xt.cross(xw), unit, &mut col);
             for (o, v) in out.iter_mut().zip(col) {
                 *o += 0.5 * wg * weight * v;
             }
@@ -1715,11 +1768,11 @@ fn ruled_column(a: Vec3, da: Vec3, c: Vec3, dc: Vec3, weight: f64, out: &mut [f6
     }
 }
 
-/// The volume group of the polygon `points` (relative to the origin), its area vector by
-/// the right-hand rule round them: a fan of triangles from their centroid, each the
-/// ruled patch from the centroid to its side, whose integrands are polynomials of
-/// degree 4 in both parameters (3-point Gauss rules, exact).
-fn polygon_closure(points: &[Vec3], out: &mut [f64; 13]) {
+/// The closure's terms of the polygon `points` (relative to the origin), its area vector by
+/// the right-hand rule round them, the face's unit normal `unit` there: a fan of triangles
+/// from their centroid, each the ruled patch from the centroid to its side, whose
+/// integrands are polynomials of degree 4 in both parameters (3-point Gauss rules, exact).
+fn polygon_closure(points: &[Vec3], unit: Vec3, out: &mut [f64; CLOSURE_TERMS]) {
     if points.is_empty() {
         return;
     }
@@ -1737,7 +1790,7 @@ fn polygon_closure(points: &[Vec3], out: &mut [f64; 13]) {
             .copied()
             .unwrap_or(p);
         let side = q - p;
-        let mut tri = [0.0; 13];
+        let mut tri = [0.0; CLOSURE_TERMS];
         for (j, &node) in KRONROD_NODES.iter().enumerate() {
             let wg = GAUSS_WEIGHTS.get(j).copied().unwrap_or(0.0);
             if wg == 0.0 {
@@ -1746,7 +1799,7 @@ fn polygon_closure(points: &[Vec3], out: &mut [f64; 13]) {
             let sides: &[f64] = if j == 0 { &[0.0] } else { &[-1.0, 1.0] };
             for &s in sides {
                 let t = 0.5 + 0.5 * s * node;
-                ruled_column(centre, zero, p + side * t, side, 0.5 * wg, &mut tri);
+                ruled_column(centre, zero, p + side * t, side, unit, 0.5 * wg, &mut tri);
             }
         }
         // the ruled patch's area vector is minus the triangle's right-hand one
@@ -1890,7 +1943,7 @@ fn correspondence_bends(table: &[(f64, f64)], span: f64) -> Vec<(f64, f64)> {
 
 /// One edge use of a loop, in the direction of its edge: its UV trim, its edge's curve
 /// on the edge's interval (`None` for an edge without a curve: the vertex), and the
-/// points at the loop's start and end of it.
+/// points at the loop's start and end of it, with the face's unit normal at the trim's.
 struct ClosureSide {
     trim: Curve,
     edge: Option<(Curve, f64, f64)>,
@@ -1898,6 +1951,7 @@ struct ClosureSide {
     same: bool,
     trim_ends: [Vec3; 2],
     edge_ends: [Vec3; 2],
+    trim_normals: [Vec3; 2],
 }
 
 /// The side of a UV line the face's boundary fills a gap with (#16735): no edge, so it
@@ -1910,14 +1964,17 @@ fn gap_side(trim: Curve, vertex: Vec3) -> ClosureSide {
         same: true,
         trim_ends: [vertex; 2],
         edge_ends: [vertex; 2],
+        trim_normals: [Vec3::ZERO; 2],
     }
 }
 
-/// Not upstream (#16735): the volume group of the strips and corners closing face `f`'s
-/// trims onto its edges' curves and vertices (see above), its area vectors the face's
-/// surface normal's way round, relative to `origin`; the strips integrated along the
-/// trims by [`kronrod_integrate`] to `accuracy` with the error scales of the face's own
-/// integration (`estimated_area`, see [`boundary_properties`]).
+/// Not upstream (#16735, #16854): the volume group and the area group of the strips and
+/// corners closing face `f`'s trims onto its edges' curves and vertices (see above), its
+/// area vectors the face's surface normal's way round, relative to `origin`; the strips
+/// integrated along the trims by [`kronrod_integrate`] to `accuracy` with the error scales
+/// of the face's own integration (`estimated_area`, see [`boundary_properties`]). The area
+/// group is the face's way round as its own area is taken over the same trims (not signed
+/// by its use's orientation, as the volume is).
 ///
 /// # Errors
 ///
@@ -1982,6 +2039,7 @@ fn gap_closure(
                     same,
                     trim_ends: [vertex; 2],
                     edge_ends: [vertex; 2],
+                    trim_normals: [Vec3::ZERO; 2],
                 }),
             ));
         }
@@ -2109,28 +2167,37 @@ fn gap_closure(
     let length = (10.0 * estimated_area.sqrt())
         .max(face_box(k, b, f)?.min_distance(&Extent3d::from_point(origin)));
     let area_scale = estimated_area / 10.0;
-    let mut scale = [area_scale * length; 13];
+    let mut scale = [area_scale * length; CLOSURE_TERMS];
     for (i, s) in scale.iter_mut().enumerate().skip(1) {
-        *s = area_scale * length.powi(if i <= 3 { 2 } else { 3 });
+        // then the area group's: its area, first moments and second moments
+        *s = match i {
+            1..=3 => area_scale * length.powi(2),
+            4..=12 => area_scale * length.powi(3),
+            13 => area_scale,
+            14..=16 => area_scale * length,
+            _ => area_scale * length.powi(2),
+        };
     }
     let accuracy = if accuracy < EFF_ZERO {
         EFF_ZERO_SQ
     } else {
         accuracy
     };
-    let mut sum = [0.0_f64; 13];
+    let mut sum = [0.0_f64; CLOSURE_TERMS];
     for sides in &mut loops {
         // the strips, each along its edge's direction
         for side in sides.iter_mut() {
             let ivl = side.trim.natural_interval();
             let (c0, c1) = (ivl.min(), ivl.max());
-            let p0 = at(side.trim.evaluate_point(k, c0)?)?.0;
-            let p1 = at(side.trim.evaluate_point(k, c1)?)?.0;
+            let (p0, su0, sv0) = at(side.trim.evaluate_point(k, c0)?)?;
+            let (p1, su1, sv1) = at(side.trim.evaluate_point(k, c1)?)?;
+            let (n0, n1) = (unit_normal(su0, sv0), unit_normal(su1, sv1));
+            side.trim_normals = if side.same { [n0, n1] } else { [n1, n0] };
             let Some((curve, e0, e1)) = &side.edge else {
                 // no edge curve: the strip is the cone from the trim to the vertex
                 let v = side.vertex;
                 side.trim_ends = if side.same { [p0, p1] } else { [p1, p0] };
-                let mut strip = [0.0; 13];
+                let mut strip = [0.0; CLOSURE_TERMS];
                 let breaks = trim_curve_breaks(k, &side.trim, &surface, &v_lines)?;
                 for piece in breaks.windows(2) {
                     let [lo, hi] = piece else { continue };
@@ -2144,13 +2211,14 @@ fn gap_closure(
                             return Err(missing());
                         };
                         let (p, su, sv) = at(uv)?;
-                        let mut col = [0.0; 13];
+                        let mut col = [0.0; CLOSURE_TERMS];
                         let zero = Vec3::new(0.0, 0.0, 0.0);
                         ruled_column(
                             p - origin,
                             su * duv.x + sv * duv.y,
                             v - origin,
                             zero,
+                            unit_normal(su, sv),
                             1.0,
                             &mut col,
                         );
@@ -2210,7 +2278,7 @@ fn gap_closure(
             breaks.extend(table.iter().map(|&(tau, _)| tau));
             breaks.sort_by(f64::total_cmp);
             breaks.dedup();
-            let mut strip = [0.0; 13];
+            let mut strip = [0.0; CLOSURE_TERMS];
             for piece in breaks.windows(2) {
                 let [lo, hi] = piece else { continue };
                 // the grid segment holding the piece
@@ -2235,8 +2303,9 @@ fn gap_closure(
                     let (Some(&ep), Some(&de)) = (e.first(), e.get(1)) else {
                         return Err(missing());
                     };
-                    let mut col = [0.0; 13];
-                    ruled_column(p - origin, dp, ep - origin, de * slope, 1.0, &mut col);
+                    let mut col = [0.0; CLOSURE_TERMS];
+                    let unit = unit_normal(su, sv);
+                    ruled_column(p - origin, dp, ep - origin, de * slope, unit, 1.0, &mut col);
                     for (o, c) in dy.iter_mut().zip(col) {
                         *o = c;
                     }
@@ -2256,17 +2325,26 @@ fn gap_closure(
             let [q_start, _] = next.trim_ends;
             let [e_start, _] = next.edge_ends;
             let polygon = [q_end, e_end, next.vertex, e_start, q_start].map(|p| p - origin);
-            polygon_closure(&polygon, &mut sum);
+            // the corner's area along the face's normal at the trim's end
+            let [_, unit] = side.trim_normals;
+            polygon_closure(&polygon, unit, &mut sum);
         }
     }
     let mut out = PreciseProperties::default();
-    let [vol, m4x, m4y, m4z, m5x, m5y, m5z, m6x, m6y, m6z, m7x, m7y, m7z] = sum;
-    out.volume = vol;
-    let [_, _, _, _, m4, m5, m6, m7] = &mut out.moments;
-    *m4 = Vec3::new(m4x, m4y, m4z);
-    *m5 = Vec3::new(m5x, m5y, m5z);
-    *m6 = Vec3::new(m6x, m6y, m6z);
-    *m7 = Vec3::new(m7x, m7y, m7z);
+    let (volume, area) = sum.split_at(13);
+    let term = |terms: &[f64], i: usize| terms.get(i).copied().unwrap_or(0.0);
+    let triple =
+        |terms: &[f64], i: usize| Vec3::new(term(terms, i), term(terms, i + 1), term(terms, i + 2));
+    out.volume = term(volume, 0);
+    out.area = term(area, 0);
+    for (j, m) in out.moments.iter_mut().enumerate() {
+        // moments 0..4 from the area group, 4..8 from the volume group, three terms each
+        *m = if j < 4 {
+            triple(area, 1 + 3 * j)
+        } else {
+            triple(volume, 1 + 3 * (j - 4))
+        };
+    }
     Ok(out)
 }
 /// `SmBrep::ComputePreciseProperties`, including density attributes and wire/point solids.
@@ -2454,9 +2532,10 @@ fn properties_in_box(
                     record(&mut terms, |t| {
                         add_selected(t, &delta, mass.x, do_volume, do_area);
                     });
-                    // Not upstream (#16735): the strips and corners closing the face onto
-                    // its edges, the use's way round as its volume
-                    if do_volume {
+                    // Not upstream (#16735, #16854): the strips and corners closing the face
+                    // onto its edges, the volume the use's way round as its volume, the area
+                    // the face's as its area
+                    if do_volume || do_area {
                         if closure.is_none() {
                             closure = Some(gap_closure(k, b, f, origin, accuracy, estimated)?);
                         }
@@ -2471,8 +2550,10 @@ fn properties_in_box(
                             for m in c.moments.iter_mut().skip(4) {
                                 *m *= sign;
                             }
-                            add_selected(&mut total, &c, mass.x, true, false);
-                            record(&mut terms, |t| add_selected(t, &c, mass.x, true, false));
+                            add_selected(&mut total, &c, mass.x, do_volume, do_area);
+                            record(&mut terms, |t| {
+                                add_selected(t, &c, mass.x, do_volume, do_area);
+                            });
                         }
                     }
                 } else {
@@ -2564,7 +2645,8 @@ fn area_estimate(bbox: &Extent3d) -> f64 {
     let d = s.x.max(s.y).max(s.z);
     d * d / 100.0
 }
-/// `SmApiFaceComputeArea`: rejects a non-finite accuracy and integrates only area.
+/// `SmApiFaceComputeArea`: rejects a non-finite accuracy and integrates only area, on the
+/// face closed onto its edges (not upstream, #16854: `closed_face_area`).
 pub fn face_area(k: &Kernel, b: &mut Brep, f: FaceId, accuracy: f64) -> Result<f64> {
     face_area_in(k, &mut QueryTopology::Mutable(b), f, accuracy)
 }
@@ -2585,23 +2667,59 @@ pub fn face_area_prepared(k: &Kernel, b: &Brep, f: FaceId, accuracy: f64) -> Res
 fn face_area_in(k: &Kernel, b: &mut QueryTopology<'_>, f: FaceId, accuracy: f64) -> Result<f64> {
     valid_api_number(accuracy)?;
     let bbox = face_box(k, b, f)?;
-    Ok(face_properties_in(
+    Ok(closed_face_area(
+        k,
+        b,
+        f,
+        accuracy,
+        bbox.mid(),
+        area_estimate(&bbox),
+        PPF_AREA,
+    )?
+    .area
+    .abs())
+}
+
+/// Not upstream (#16854): a face's area and, with [`PPF_AREA_FIRST_MOMENTS`] in `flags`,
+/// its first moments, taken on the face closed onto its edges as [`brep_properties`] takes
+/// them: over its loops closed ([`closed_boundary`]), plus the area group of its closure
+/// ([`gap_closure`]). Over its trims alone, a face whose trims run a gap `d` inside or
+/// outside its edges' curves is `d` times their length off, to first order.
+///
+/// # Errors
+///
+/// Those of [`face_properties`] and of the closure.
+fn closed_face_area(
+    k: &Kernel,
+    b: &mut QueryTopology<'_>,
+    f: FaceId,
+    accuracy: f64,
+    origin: Point3,
+    estimated_area: f64,
+    flags: u64,
+) -> Result<PreciseProperties> {
+    let mut p = face_properties_in(
         k,
         b,
         f,
         OrientType::Same,
         accuracy,
-        bbox.mid(),
-        area_estimate(&bbox),
+        origin,
+        estimated_area,
         0.0,
-        PPF_AREA,
-        false,
-    )?
-    .area
-    .abs())
+        flags,
+        true,
+    )?;
+    let closure = gap_closure(k, b, f, origin, accuracy, estimated_area)?;
+    p.area += closure.area;
+    if flags & PPF_AREA_FIRST_MOMENTS != 0 {
+        let ([first, ..], [closure_first, ..]) = (&mut p.moments, closure.moments);
+        *first += closure_first;
+    }
+    Ok(p)
 }
 /// `SmApiFaceComputeCentroid`: rejects a non-finite accuracy; one area/first-moment
-/// integration.
+/// integration, on the face closed onto its edges (not upstream, #16854).
 pub fn face_centroid(k: &Kernel, b: &mut Brep, f: FaceId, accuracy: f64) -> Result<(f64, Point3)> {
     face_centroid_in(k, &mut QueryTopology::Mutable(b), f, accuracy)
 }
@@ -2632,17 +2750,14 @@ fn face_centroid_in(
     valid_api_number(accuracy)?;
     let bbox = face_box(k, b, f)?;
     let origin = bbox.mid();
-    let p = face_properties_in(
+    let p = closed_face_area(
         k,
         b,
         f,
-        OrientType::Same,
         accuracy,
         origin,
         area_estimate(&bbox),
-        0.0,
         PPF_AREA | PPF_AREA_FIRST_MOMENTS,
-        false,
     )?;
     if p.area.abs() < EFF_ZERO {
         return Err(SolidError::invalid_input(OP, "zero area"));
@@ -3367,18 +3482,7 @@ fn faces_area_about(
             AreaAbout::FaceMiddle => fbox.mid(),
             AreaAbout::Point(p) => p,
         };
-        let p = face_properties_in(
-            k,
-            b,
-            f,
-            OrientType::Same,
-            accuracy,
-            origin,
-            area_estimate(&fbox),
-            0.0,
-            flags,
-            false,
-        )?;
+        let p = closed_face_area(k, b, f, accuracy, origin, area_estimate(&fbox), flags)?;
         // |area|, as `SmApiFaceComputeArea` takes it; the first moments flip with it
         area += p.area.abs();
         if first {
