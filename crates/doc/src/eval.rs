@@ -16053,27 +16053,76 @@ fn runs_along(st: &ModelState, (bi, fi): (usize, usize), n: Vec3) -> bool {
 
 /// Whether a face that runs along the normal of `plane` ([`runs_along`]), seen along that
 /// normal, meets one of the profile `regions`. Seen so, the face is the curve its boundary edges
-/// make: their exact curves, sampled finely, meet a region where a sample lies in it or a step
-/// between two samples crosses one of its loops (a profile narrower than the steps).
+/// make: their exact curves, sampled finely, meet a region where they run through its inside
+/// ([`runs_inside`], so also across a profile narrower than the steps between the samples), not
+/// where they only run along its outline or through one of its corners (#7330).
 fn meets_footprint(st: &ModelState, (bi, fi): (usize, usize), plane: &Plane, regions: &[Region2]) -> bool {
     let Some(b) = st.bodies.get(bi) else { return false };
     let tol = (b.body.size() * 1e-4).max(1e-4);
     let Ok(edges) = b.body.edges(tol) else { return true };
     let own = kernel::face_edge_indices(&b.body, fi);
     let curves: Vec<Vec<Vec2>> = own.iter().filter_map(|e| edges.get(*e)).map(|e| e.points.iter().map(|q| plane.to_local(*q)).collect()).collect();
-    if curves.iter().flatten().any(|q| regions.iter().any(|r| r.contains(*q))) {
-        return true;
-    }
-    let loops: Vec<_> = regions.iter().flat_map(|r| std::iter::once(&r.outer).chain(&r.holes)).map(|l| l.polyline(1e-3)).collect();
-    curves.iter().flat_map(|c| c.windows(2)).any(|w| loops.iter().any(|l| l.edges().any(|(a, b)| segments_meet(w[0], w[1], *a, *b))))
+    // Off the outline is farther than the wall's samples (`tol`) and the outline's (1e-3) can
+    // stray from each other: a round wall flush with a round profile crosses its chords.
+    curves.iter().any(|c| runs_inside(c, regions, tol + 1e-3))
 }
 
-/// Whether segments `p`-`q` and `a`-`b` cross or touch.
-fn segments_meet(p: Vec2, q: Vec2, a: Vec2, b: Vec2) -> bool {
-    let side = |o: Vec2, u: Vec2, v: Vec2| (u.x - o.x) * (v.y - o.y) - (u.y - o.y) * (v.x - o.x);
-    let (d1, d2) = (side(a, b, p), side(a, b, q));
-    let (d3, d4) = (side(p, q, a), side(p, q, b));
-    d1 * d2 <= 0.0 && d3 * d4 <= 0.0 && !(d1 == 0.0 && d2 == 0.0 && d3 == 0.0 && d4 == 0.0)
+/// Whether the polyline `c` runs through the inside of one of `regions`, not only along their
+/// outline or through one of its corners (#7330). Each step of `c` is split where it meets the
+/// outline (where it crosses a loop, and level with each loop vertex). It runs inside where a
+/// piece's middle lies in a region farther than `margin` from every loop, or where a run of
+/// pieces in a region, from one crossing of a loop to the next inside the step, has its middle
+/// farther from every loop than a quarter of the run's length: a run across a profile thinner
+/// than `margin` is as long as the profile is wide and its middle half that from the outline
+/// (#11923), while a sliver between a round wall's samples and the outline's lies far closer to
+/// the outline than that.
+fn runs_inside(c: &[Vec2], regions: &[Region2], margin: f64) -> bool {
+    let loops: Vec<_> = regions.iter().flat_map(Region2::loops).map(|l| l.polyline(1e-3)).collect();
+    let held = |q: Vec2| regions.iter().any(|r| r.contains(q));
+    let off = crate::sheet_surface_cuts::to_segment;
+    let clear = |q: Vec2| loops.iter().flat_map(|l| l.edges()).map(|(a, b)| off(q, *a, *b)).fold(f64::INFINITY, f64::min);
+    if let [q] = c {
+        return held(*q) && clear(*q) > margin;
+    }
+    c.windows(2).any(|w| {
+        let (p, q) = (w[0], w[1]);
+        let (rx, ry) = (q.x - p.x, q.y - p.y);
+        let len2 = rx * rx + ry * ry;
+        let mut ts = vec![0.0, 1.0];
+        for (a, b) in loops.iter().flat_map(|l| l.edges()) {
+            let (sx, sy) = (b.x - a.x, b.y - a.y);
+            let den = rx * sy - ry * sx;
+            let (ax, ay) = (a.x - p.x, a.y - p.y);
+            if den != 0.0 {
+                ts.push((ax * sy - ay * sx) / den);
+            }
+            if len2 > 0.0 {
+                ts.push((ax * rx + ay * ry) / len2);
+            }
+        }
+        ts.retain(|t| (0.0..=1.0).contains(t));
+        ts.sort_by(f64::total_cmp);
+        let at = |t: f64| Vec2::new(p.x + rx * t, p.y + ry * t);
+        let run_inside = |t0: f64, t1: f64| {
+            let m = at((t0 + t1) / 2.0);
+            t0 > 0.0 && held(m) && clear(m) > ((t1 - t0) * len2.sqrt() / 4.0).max(1e-9)
+        };
+        let mut run: Option<f64> = None;
+        for t in ts.windows(2) {
+            let m = at((t[0] + t[1]) / 2.0);
+            if held(m) {
+                if clear(m) > margin {
+                    return true;
+                }
+                run.get_or_insert(t[0]);
+            } else if let Some(t0) = run.take()
+                && run_inside(t0, t[0])
+            {
+                return true;
+            }
+        }
+        false
+    })
 }
 
 /// The body at `p` when the face there is not planar.
