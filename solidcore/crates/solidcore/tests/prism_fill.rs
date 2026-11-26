@@ -16,7 +16,7 @@ use solidcore::math::{Point2, Vec2};
 use solidcore::prism::fill::{
     fill, Channel, Contour, FillFailure, FillNote, FillOptions, FillSide, Filled,
 };
-use solidcore::prism::profile::{loop_crosses, Seg2};
+use solidcore::prism::profile::{loop_crosses, Loop2, Seg2};
 use solidcore::{Kernel, SolidError};
 
 /// Gap between the plates in every example.
@@ -1900,6 +1900,29 @@ fn nearly_straight_arcs_far_from_the_origin_keep_a_tight_area_bound() {
             "{value} vs {exact}, bound {bound}"
         );
     }
+}
+
+#[test]
+fn a_small_circle_far_from_the_origin_keeps_its_area_sign() {
+    // two half turns of radius 1 about (1e8, 1e8): area π. Read from its chord alone, each
+    // arc's bound is about 12 (the ends' coordinates squared), so the loop had no sign
+    // (CodeRabbit on #22552); read about its centre it is 4e-7, as before #22552, and the
+    // tighter reading is the one kept
+    let c = p(1e8, 1e8);
+    let half = |start: f64| Seg2::Arc {
+        center: c,
+        radius: 1.0,
+        start,
+        sweep: PI,
+    };
+    let (_, bound) = half(0.0).area_term().unwrap();
+    assert!(bound < 1e-6, "{bound}");
+    let circle = Loop2 {
+        segs: vec![half(0.0), half(PI)],
+    };
+    let area = circle.signed_area().unwrap();
+    assert_eq!(area.sign(), Some(true), "{area:?}");
+    assert!((area.value - PI).abs() <= area.bound, "{area:?}");
 }
 
 #[test]
