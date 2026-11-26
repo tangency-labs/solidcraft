@@ -648,6 +648,7 @@ pub use validation::Validation;
 pub use validation::check_kept;
 pub use validation::detach_kept;
 pub use validation::failing_check;
+pub use validation::is_result_only_check_refusal;
 pub use validation::validating;
 pub use validity::SmlibCheck;
 pub use validity::Validity;
