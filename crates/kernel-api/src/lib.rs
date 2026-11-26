@@ -26,11 +26,13 @@ pub mod cell_grid;
 pub mod exchange;
 pub mod frames;
 pub mod modelling;
+pub mod query;
 
 pub use cell_grid::{CellGrid, CellGridLimits};
 pub use exchange::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWritten, Exchange};
 pub use frames::{Frames, GussetFailure, MemberRefusal, PathFailure, PathRefusal, TrimRefusal, TrimTarget};
 pub use modelling::{Axis2, BoolOp, ChamferSide, FilletTurn, Modelling, Primitive};
+pub use query::{OutlineStretch, Queries, QueryRefused};
 
 /// A kernel's stable name: what build features, the support matrix and reports call it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -77,6 +79,8 @@ pub enum OpKind {
     CellGrid,
     /// The exchange helpers: a STEP string, CADIR read and written ([`Exchange`]).
     Exchange,
+    /// Exact queries of a body's record ([`Queries`]).
+    Query,
     /// Frame-stock paths, member trims and gusset plates ([`Frames`]).
     Frames,
 }
@@ -98,6 +102,7 @@ impl OpKind {
         OpKind::OffsetFaces,
         OpKind::CellGrid,
         OpKind::Exchange,
+        OpKind::Query,
         OpKind::Frames,
     ];
 
@@ -118,6 +123,7 @@ impl OpKind {
             OpKind::OffsetFaces => "offset_faces",
             OpKind::CellGrid => "cell_grid",
             OpKind::Exchange => "exchange",
+            OpKind::Query => "query",
             OpKind::Frames => "frames",
         }
     }

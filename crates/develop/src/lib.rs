@@ -10,7 +10,7 @@
 //!
 //! [`Query`] answers exact questions of a B-rep record, as reading a sheet off a body asks them:
 //! where a point lies on the record's faces and which way they face there, how far it is from an
-//! edge, and which faces a ray meets (solidcore's, `solidcraft_kernel::services::query`).
+//! edge, and which faces a ray meets (solidcore's, `solidcraft_kernel::query`).
 //!
 //! [`hermite`] follows a curve carried into the flat by cubic pieces, each proved within a
 //! tolerance of it from bounds on the curve's derivatives and the map's (solidcore's,
@@ -52,6 +52,7 @@ pub use solidcore_record::develop::Tail;
 pub use solidcore_record::develop::Trim;
 pub use solidcore_record::develop::Zone;
 pub use solidcore_record::develop::ZoneEnds;
+pub use solidcraft_kernel::query::Query;
 pub use solidcraft_kernel::services::develop::BeadAgainst;
 pub use solidcraft_kernel::services::develop::BeadRefusal;
 pub use solidcraft_kernel::services::develop::Bent;
@@ -67,7 +68,6 @@ pub use solidcraft_kernel::services::develop::hermite;
 pub use solidcraft_kernel::services::develop::offset_contour;
 pub use solidcraft_kernel::services::develop::segment_in_region;
 pub use solidcraft_kernel::services::develop::tear_slit;
-pub use solidcraft_kernel::services::query::Query;
 
 /// The maths of the record's motions, bends and laps (solidcore's), as methods.
 pub mod prelude {

@@ -1456,6 +1456,6 @@ fn a_planar_pick_checks_face_trims_before_testing_plane_ambiguity() {
     assert_eq!(body, "L");
     assert!((plane.origin.z - 10.0).abs() < 1e-9 && plane.normal().z.abs() > 1.0 - 1e-9);
     let (index, _) = crate::naming::face_on_body(&state.bodies[0], &name, pick).unwrap();
-    assert!(solidcraft_kernel::services::query::Query::new(state.bodies[0].body.record()).face_contains(index, pick, 1e-6));
+    assert!(solidcraft_kernel::query::Query::new(state.bodies[0].body.record()).face_contains(index, pick, 1e-6));
     assert!(crate::project::pick_planar_face(&state, Some("L"), Vec3::new(20.0, 15.0, 10.0)).unwrap_err().contains("different planes meet"));
 }

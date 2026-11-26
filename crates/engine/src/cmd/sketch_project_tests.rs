@@ -3602,7 +3602,7 @@ fn against_true_outline(s: &Session, sketch: u64) -> (f64, f64) {
     let plane = solved.plane;
     let body = state.body("Plate").unwrap();
     let record = body.body.record();
-    let q = solidcraft_kernel::services::query::Query::new(record);
+    let q = solidcraft_kernel::query::Query::new(record);
     let mut truth: Vec<(solidcore_record::Vec2, solidcore_record::Vec2)> = Vec::new();
     // Each face's edge points, for the axial reach of its round wall.
     let mut on_face: Vec<Vec<solidcore_record::Vec3>> = vec![Vec::new(); record.faces.len()];

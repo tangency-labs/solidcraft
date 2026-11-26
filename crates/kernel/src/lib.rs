@@ -453,6 +453,7 @@ pub use route::member_extent;
 pub use route::offset_faces;
 pub use route::orient_stock;
 pub use route::plan_cell_grid;
+pub use route::query;
 pub use route::read_cadir;
 pub use route::revolve;
 pub use route::revolve_whole;

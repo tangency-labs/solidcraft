@@ -1,5 +1,5 @@
 //! The router: which kernel runs each operation (`docs/design/kernel-layer.md`), one module per
-//! family of the interface ([`modelling`], [`cell_grid`], [`exchange`], [`frames`]).
+//! family of the interface ([`modelling`], [`cell_grid`], [`exchange`], [`query`], [`frames`]).
 //!
 //! These are the application's entry points for the operations of the kernel interface
 //! ([`OpKind`]). Each asks [`which`] kernel runs it and calls that kernel's adapter. Which kernels
@@ -7,6 +7,8 @@
 //! constant and every call is exactly the adapter's, which is the call made before the router.
 
 use solidcraft_kernel_api::OpKind;
+
+pub mod query;
 
 mod cell_grid;
 mod exchange;

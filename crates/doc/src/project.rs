@@ -2161,7 +2161,7 @@ pub fn pick_planar_face(st: &ModelState, body: Option<&str>, at: Vec3) -> std::r
     let mut found: Vec<(String, usize, Plane, &crate::ModelBody)> = Vec::new();
     for b in st.bodies.iter().filter(|b| body.is_none_or(|n| b.name == n) && !b.body.is_mesh()) {
         let tol = (b.body.size() * 1e-9).max(1e-6);
-        let query = solidcraft_kernel::services::query::Query::new(b.body.record());
+        let query = solidcraft_kernel::query::Query::new(b.body.record());
         for (_, i) in query.faces_at(at, tol) {
             if let Some(p) = b.body.planar_face(i) {
                 found.push((b.name.clone(), i, p, b));
@@ -3052,7 +3052,7 @@ fn extruded_along(rec: &solidcore_record::brep::Brep, f: usize, n: Vec3) -> bool
 /// The outline of a solid seen along the sketch normal, from its exact faces and edges: the
 /// stretches of its edges between a face that faces the sketch and one that does not (and of an
 /// open sheet's border where its face faces the sketch; the kernel's
-/// [`Query::outline_stretches`](solidcraft_kernel::services::query::Query::outline_stretches)), each projected exactly as an edge link
+/// [`Query::outline_stretches`](solidcraft_kernel::query::Query::outline_stretches)), each projected exactly as an edge link
 /// projects it ([`exact_edges`], or the kernel's projection of the stretch), and the silhouettes of
 /// its curved faces as the drawing's hidden lines trace them ([`hlr::silhouettes`]). A face faces
 /// the sketch where its normal out of the material leans toward it; edge-on is away, as in
@@ -3074,7 +3074,7 @@ fn exact_silhouette_traced(body: &crate::ModelBody, plane: &Plane) -> Option<Vec
     let rec = body.body.record();
     let n = plane.normal();
     let size = body.body.size().max(1e-9);
-    let q = solidcraft_kernel::services::query::Query::new(rec);
+    let q = solidcraft_kernel::query::Query::new(rec);
     let mut edges = Vec::new();
     // The stretches of the edges on the outline, each projected as an edge link projects it.
     for stretch in q.outline_stretches(n, size).ok()? {
