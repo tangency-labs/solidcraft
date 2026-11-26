@@ -1,0 +1,10 @@
+{
+  "en": { "prefs.plugin_effect": "{kind}: {name} ({plugin})" },
+  "en-GB": { "prefs.plugin_effect": "{kind}: {name} ({plugin})" },
+  "de": { "prefs.plugin_effect": "{kind}: {name} ({plugin})" },
+  "ar": { "prefs.plugin_effect": "{kind}: {name} ({plugin})" },
+  "he": { "prefs.plugin_effect": "{kind}: {name} ({plugin})" },
+  "ja": { "prefs.plugin_effect": "{kind}：{name}（{plugin}）" },
+  "vi": { "prefs.plugin_effect": "{kind}: {name} ({plugin})" },
+  "zh": { "prefs.plugin_effect": "{kind}：{name}（{plugin}）" }
+}
