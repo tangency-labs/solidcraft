@@ -13,6 +13,7 @@ use solidcraft_kernel_api::{Backend, BackendError, BackendId, Exported, OpKind, 
 mod cell_grid;
 mod exchange;
 mod frames;
+mod hatch;
 mod modelling;
 mod projection;
 

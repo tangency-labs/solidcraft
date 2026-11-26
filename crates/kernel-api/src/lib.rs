@@ -25,6 +25,7 @@ use solidcore_record::brep::history::History;
 pub mod cell_grid;
 pub mod exchange;
 pub mod frames;
+pub mod hatch;
 pub mod modelling;
 pub mod projection;
 
@@ -79,6 +80,8 @@ pub enum OpKind {
     CellGrid,
     /// The exchange helpers: a STEP string, CADIR read and written ([`Exchange`]).
     Exchange,
+    /// Hatching: line families clipped into marks, pen dots ([`hatch::Hatching`]).
+    Hatch,
     /// Frame-stock paths, member trims and gusset plates ([`Frames`]).
     Frames,
     /// Planar projection: sketch curves between planes, edges read in a plane, outlines tidied
@@ -103,6 +106,7 @@ impl OpKind {
         OpKind::OffsetFaces,
         OpKind::CellGrid,
         OpKind::Exchange,
+        OpKind::Hatch,
         OpKind::Frames,
         OpKind::Projection,
     ];
@@ -124,6 +128,7 @@ impl OpKind {
             OpKind::OffsetFaces => "offset_faces",
             OpKind::CellGrid => "cell_grid",
             OpKind::Exchange => "exchange",
+            OpKind::Hatch => "hatch",
             OpKind::Frames => "frames",
             OpKind::Projection => "projection",
         }
