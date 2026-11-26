@@ -41,6 +41,7 @@ pub mod bead;
 pub mod blend;
 pub mod blend_definition;
 pub mod blend_surface;
+pub mod board_drill;
 pub mod body;
 pub mod boolean;
 pub mod bspline;
