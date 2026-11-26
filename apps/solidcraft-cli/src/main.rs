@@ -28,7 +28,7 @@
 //! solidcraft-cli licences                                     SolidCraft's licence and the third-party licences
 //! solidcraft-cli icon --out F.png|F.ico [--size N]             the app icon (packaging; drawn, not a file)
 //!
-//! --plugin-limits FILE.json (local sessions only)              user fuel/memory ceilings; connected desktops use their own preferences
+//! --plugin-limits FILE.json (local sessions only)              user plugin resource ceilings; connected desktops use their own preferences
 //! --plugins-dir DIR (local sessions only)                     installed plugins (default: the app's own)
 //! --keep-plugin-approvals (local sessions only)               keep plugin approvals between runs, in the plugins folder's grant store
 //! --debug (with any command)                                  SolidCraft's debug log on stderr (or RUST_LOG=LEVEL)
@@ -141,7 +141,7 @@ const USAGE_SAVE_STRESS: &str = "  solidcraft-cli save-stress <path> <rounds>\n"
 /// The flags every command takes, at the end of the top-level usage.
 const USAGE_DEBUG: &str = "  --debug, with any command: what SolidCraft logs (why a body has no display plan, why a save left its\n      model cache out), on stderr; RUST_LOG=error|warn|info|debug|trace sets one level for every crate\n  --max-file-size SIZE, with any command: read STEP and import files and design files up to SIZE for this run\n      (for example 2GB or 1500MB; at most 16GB; the defaults are 512 MB and 256 MB, and a smaller SIZE keeps them)\n";
 
-const USAGE_PLUGIN_LIMITS: &str = "  --plugin-limits FILE.json, with local commands: user ceilings {max_fuel, max_memory_mib}; defaults 100000000000 / 128, invocation defaults remain 10000000 / 64 MiB. With mcp use --headless; connected desktops keep their own preferences.\n";
+const USAGE_PLUGIN_LIMITS: &str = "  --plugin-limits FILE.json, with local commands: user ceilings {max_fuel, max_memory_mib, max_host_calls, max_deadline_ms}; defaults 100000000000 / 128 MiB / 256 calls / 30000 ms, invocation defaults remain 10000000 / 64 MiB / 256 calls / 5000 ms of guest time. With mcp use --headless; connected desktops keep their own preferences.\n";
 
 const USAGE_PLUGINS_DIR: &str = "  --plugins-dir DIR, with local commands: the folder plugin.install installs to and importers are found in;\n      default: the desktop app's plugins folder.\n  --keep-plugin-approvals, with local commands: keep plugin approvals between runs, in the plugins folder's grant\n      store (DIR/.grants), shared with the desktop app, so a plugin installed and approved there or in an earlier run\n      is used here; list them with plugin.grants and take one back with plugin.revoke. Without it, approvals last for\n      the run.\n";
 
@@ -208,7 +208,58 @@ fn main() -> ExitCode {
     }
     // Compiled plugins are kept in the per-user cache folder, as the desktop app keeps them.
     solidcraft_engine::plugin::configure_compile_cache();
-    let r = match args.first().map(String::as_str) {
+    // The command, wrapped in solidcore-ops' per-call kernel profiler when a kernel profile
+    // file is named (feature `solidcore-profile`).
+    #[cfg(feature = "solidcore-profile")]
+    let (r, ops_call_profiles) = if std::env::var_os("SOLIDCRAFT_KERNEL_PROFILE").is_some() {
+        let (r, profiles) = solidcraft_engine::kernel::profiled(|| run_command(&args));
+        (r, Some(profiles))
+    } else {
+        (run_command(&args), None)
+    };
+    #[cfg(not(feature = "solidcore-profile"))]
+    let r = run_command(&args);
+    // The table also when the command failed: where it spent its time before failing.
+    let r = match (r, profiling.map(profiling::Profiling::finish)) {
+        (Ok(()), Some(Err(e))) => Err(e),
+        (r, _) => r,
+    };
+    // Solidcore's own profiler too (feature `solidcore-profile`), when a file is named: the
+    // kernel's scopes and counted work of this run, as JSON Lines, failing runs included.
+    #[cfg(feature = "solidcore-profile")]
+    if let Ok(path) = std::env::var("SOLIDCRAFT_KERNEL_PROFILE") {
+        match std::fs::File::create(&path) {
+            Ok(mut file) => {
+                use std::io::Write as _;
+                let _ = solidcraft_engine::kernel::write_kernel_profiles(&mut file);
+                if let Some(calls) = ops_call_profiles {
+                    for call in calls {
+                        let marker = serde_json::json!({"type": "ops_call", "name": call.call});
+                        let _ = writeln!(file, "{marker}");
+                        let _ = call.profile.write_jsonl(&mut file);
+                    }
+                }
+            }
+            Err(e) => {
+                solidcraft_engine::note!("warning: SOLIDCRAFT_KERNEL_PROFILE {path}: not written: {e}");
+            }
+        }
+    }
+    // The device that drew this run's pictures closes before the process exits: with it open, a
+    // driver's exit handler can crash after the work is done (#19431).
+    solidcraft_viewport_gpu::capture::close_shared_before_exit();
+    match r {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            solidcraft_engine::note!("error: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The command `args` names, run once (main's dispatch).
+fn run_command(args: &[String]) -> Result<(), String> {
+    match args.first().map(String::as_str) {
         // Asked-for help is not an error: the command's usage on stdout, exit 0. It is read
         // before the command runs, so `--help` never starts a run (a fuzz run, a server).
         Some(cmd) if wants_help(&args[1..]) && is_command(cmd) => {
@@ -268,21 +319,6 @@ fn main() -> ExitCode {
             Ok(())
         }
         _ => Err(usage()),
-    };
-    // The table also when the command failed: where it spent its time before failing.
-    let r = match (r, profiling.map(profiling::Profiling::finish)) {
-        (Ok(()), Some(Err(e))) => Err(e),
-        (r, _) => r,
-    };
-    // The device that drew this run's pictures closes before the process exits: with it open, a
-    // driver's exit handler can crash after the work is done (#19431).
-    solidcraft_viewport_gpu::capture::close_shared_before_exit();
-    match r {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            solidcraft_engine::note!("error: {e}");
-            ExitCode::FAILURE
-        }
     }
 }
 

@@ -842,6 +842,7 @@ fn edit_start_metadata_is_semantic_and_mixed_setters_preserve_visibility() {
         "body.repair",
         "timeline.paste",
         "sheet.flange",
+        "sheet.hardware",
         "plastic.boss",
         "frame.member",
         "frame.end_cap",

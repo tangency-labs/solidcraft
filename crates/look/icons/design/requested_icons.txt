@@ -287,6 +287,7 @@ prefs_plugins	false
 prefs_shortcuts	false
 prefs_sketch	false
 prefs_tools	false
+press_in_hardware	false
 presspull	false
 print_face	false
 project	false
@@ -383,6 +384,7 @@ surface_extrude	false
 surface_fair	false
 surface_fillet	false
 surface_loft	false
+surface_morph	false
 surface_offset	false
 surface_patch	false
 surface_reverse_normal	false

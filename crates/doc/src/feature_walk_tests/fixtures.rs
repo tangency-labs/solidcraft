@@ -96,6 +96,11 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             h["references"] = json!([{"edge": o, "distance": "hole.reference1"}, {"edge": o, "distance": "hole.reference2"}]);
             h
         }),
+        ("hole_hardware", {
+            let mut h = hole(json!({"type": "simple"}));
+            h["hardware"] = json!({"kind": "stud", "thread": "M3", "length": "hole.hardware_length", "part": "stud.m3"});
+            h
+        }),
         ("thread", json!({"type": "thread", "face": o, "length": "thread.length"})),
         (
             "shaft_spline",
@@ -273,6 +278,11 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ),
         ("surface_match", json!({"type": "surface_match", "body": "B", "faces": [o], "target": "C", "edges": [o]})),
         ("surface_fair", json!({"type": "surface_fair", "body": "B", "faces": [o], "tolerance": "sfair.tolerance"})),
+        (
+            "surface_morph",
+            json!({"type": "surface_morph", "body": "B", "faces": [o], "base": "B", "base_face": o,
+                "control": "B", "control_face": o, "scale": "smorph.scale", "tolerance": "smorph.tolerance"}),
+        ),
         ("unstitch", json!({"type": "unstitch", "body": "B"})),
         ("reverse_normal", json!({"type": "reverse_normal", "body": "B"})),
         ("surface_untrim", json!({"type": "surface_untrim", "face": {"body": "B", "point": o}, "holes": [o], "outer": true})),

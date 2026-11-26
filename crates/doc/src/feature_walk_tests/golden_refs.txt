@@ -68,6 +68,7 @@ hole_countersink
   sketches: [3]
   remap_refs: points.sketch
 hole_references
+hole_hardware
 thread
 shaft_spline
 loft
@@ -245,6 +246,8 @@ surface_match
   remap_bodies: body
 surface_fair
   remap_bodies: body
+surface_morph
+  remap_bodies: base, body, control
 unstitch
   remap_bodies: body
 reverse_normal

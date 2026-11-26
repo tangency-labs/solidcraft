@@ -176,6 +176,12 @@ hole_references
     Reference distance = hole.reference1 (Length)
     Reference distance = hole.reference2 (Length)
   expressions: hole.diameter, hole.depth, hole.reference1, hole.reference2, 0, 0, 1
+hole_hardware
+  inputs:
+    Diameter = hole.diameter (Length)
+    Depth = hole.depth (Length)
+    Hardware length = hole.hardware_length (Length)
+  expressions: hole.diameter, hole.depth, hole.hardware_length, 0, 0, 1
 thread
   inputs:
     Length = thread.length (Length)
@@ -502,6 +508,11 @@ surface_fair
   inputs:
     Tolerance = sfair.tolerance (Length)
   expressions: sfair.tolerance
+surface_morph
+  inputs:
+    Scale factor = smorph.scale (Unitless)
+    Tolerance = smorph.tolerance (Length)
+  expressions: smorph.scale, smorph.tolerance
 unstitch
 reverse_normal
 surface_untrim

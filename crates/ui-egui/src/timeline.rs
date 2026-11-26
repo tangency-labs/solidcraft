@@ -363,6 +363,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
             PointDef::AlongPath { .. } => "point_along_path",
             PointDef::Average { .. } => "c_midpoint",
         },
+        FeatureKind::Hole { hardware: Some(_), .. } => "press_in_hardware",
         FeatureKind::Hole { .. } => "hole",
         FeatureKind::Loft { .. } => "loft",
         FeatureKind::Sweep { .. } => "sweep",
@@ -2105,6 +2106,8 @@ mod tests {
             pattern: PatternKind::Path {
                 path_sketch: solidcraft_engine::doc::SketchId(0),
                 path: Vec::new(),
+                path_body: None,
+                path_edges: Vec::new(),
                 count: "2".into(),
                 spacing: "10".into(),
                 extent: false,

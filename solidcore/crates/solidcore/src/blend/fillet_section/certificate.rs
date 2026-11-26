@@ -4704,6 +4704,59 @@ mod tests {
         }
     }
 
+    /// A span index outside the net's spans is refused before an offset is taken from it
+    /// (`ku + i − p` wrapped below the first span), with the geometry's invalid-input cause
+    /// naming the direction, the span and the net's spans there (status
+    /// `SM_ERR_INVALID_INPUT`); the end spans stay usable, also continued over a box past the
+    /// knots' range.
+    #[test]
+    fn a_span_outside_the_net_is_refused() {
+        use crate::error::geom::GeomFailure;
+        use crate::error::{ErrorKind, SM_ERR_INVALID_INPUT};
+        let n = cubic_with_knot(1);
+        let (first_u, last_u) = (n.p, n.nu - 1);
+        let (first_v, last_v) = (n.q, n.nv - 1);
+        let in_u = |span| GeomFailure::SpanOutsideNet {
+            in_v: false,
+            span,
+            first: first_u,
+            last: last_u,
+        };
+        let in_v = |span| GeomFailure::SpanOutsideNet {
+            in_v: true,
+            span,
+            first: first_v,
+            last: last_v,
+        };
+        for (ku, kv, want) in [
+            (0, first_v, in_u(0)),
+            (first_u - 1, first_v, in_u(first_u - 1)),
+            (last_u + 1, first_v, in_u(last_u + 1)),
+            (first_u, last_v + 1, in_v(last_v + 1)),
+            (usize::MAX, first_v, in_u(usize::MAX)),
+            (first_u, first_v - 1, in_v(first_v - 1)),
+        ] {
+            let e = nurbs_partials_over_piece(&n, ku, kv, 0.2, 0.3, 0.2, 0.3, 0).unwrap_err();
+            assert_eq!(e.geom_failure(), Some(&want), "({ku}, {kv})");
+            assert_eq!(e.kind(), ErrorKind::InvalidInput, "({ku}, {kv})");
+            assert_eq!(
+                e.upstream_status(),
+                Some(SM_ERR_INVALID_INPUT),
+                "({ku}, {kv})"
+            );
+            assert!(
+                e.to_string()
+                    .contains("a span index outside the net's spans"),
+                "{e}"
+            );
+        }
+        for (ku, kv) in [(first_u, first_v), (last_u, last_v)] {
+            assert!(nurbs_partials_over_piece(&n, ku, kv, 0.2, 0.3, 0.2, 0.3, 1).is_ok());
+            // the end piece continued past the knots' range
+            assert!(nurbs_partials_over_piece(&n, ku, kv, -0.5, 2.5, -0.5, 1.5, 1).is_ok());
+        }
+    }
+
     #[test]
     fn a_box_across_a_knot_line_is_enclosed_piece_by_piece() {
         let n = cubic_with_knot(1);

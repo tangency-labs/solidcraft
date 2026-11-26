@@ -1395,11 +1395,11 @@ mod tests {
 
     fn flat_sheet_surface(width: f64, depth: f64) -> Surface {
         let mut grid = Vec::new();
-        for iu in 0..=1 {
-            let x = iu as f64 * width;
+        for iu in 0..=1_i32 {
+            let x = f64::from(iu) * width;
             let mut row = Vec::new();
-            for iv in 0..=1 {
-                let y = iv as f64 * depth;
+            for iv in 0..=1_i32 {
+                let y = f64::from(iv) * depth;
                 row.push(CPoint::from_point(Vec3::new(x, y, 0.0)));
             }
             grid.push(row);
@@ -1417,12 +1417,12 @@ mod tests {
 
     fn dome_surface(width: f64, depth: f64, height: f64) -> Surface {
         let mut grid = Vec::new();
-        for iu in 0..=2 {
-            let u = iu as f64 / 2.0;
+        for iu in 0..=2_i32 {
+            let u = f64::from(iu) / 2.0;
             let x = u * width;
             let mut row = Vec::new();
-            for iv in 0..=2 {
-                let v = iv as f64 / 2.0;
+            for iv in 0..=2_i32 {
+                let v = f64::from(iv) / 2.0;
                 let y = v * depth;
                 // Quadratic Bezier basis at (0.5, 0.5) has weight 0.25 on the center pole,
                 // so placing the center pole at 4*height gives surface peak = height.

@@ -1130,5 +1130,16 @@ fn fs() -> @builtin(frag_depth) f32 {
         let cpu_edge = read(&cpu.edges.as_ref().unwrap().args().unwrap(), edge_bytes);
         assert_eq!(gpu_tri, cpu_tri, "triangle indirect args must match CPU cull without being overwritten by edges");
         assert_eq!(gpu_edge, cpu_edge, "edge indirect args must match CPU cull");
+        // If either argument buffer was refused on an earlier frame, the next frame retries even
+        // when the shown placements did not change.
+        gpu.indirect.as_mut().unwrap().clear_args();
+        gpu.edges.as_mut().unwrap().clear_args();
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        gpu.cull(&device, &queue, &mut encoder, &vp, size, &moving, crate::view::EDGE_PX, None, None);
+        queue.submit([encoder.finish()]);
+        let retried_tri = read(&gpu.indirect.as_ref().unwrap().args().unwrap(), tri_bytes);
+        let retried_edge = read(&gpu.edges.as_ref().unwrap().args().unwrap(), edge_bytes);
+        assert_eq!(retried_tri, cpu_tri, "triangle indirect args are retried when missing");
+        assert_eq!(retried_edge, cpu_edge, "edge indirect args are retried when missing");
     }
 }
