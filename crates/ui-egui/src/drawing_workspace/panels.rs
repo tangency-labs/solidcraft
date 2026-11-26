@@ -1,9 +1,11 @@
 use serde_json::{Value, json};
+use solidcraft_engine::doc::drawing::view::SetBy;
 use solidcraft_engine::doc::drawing::{
     Drawing, MAX_DPI, MAX_NAME_BYTES, MIN_DPI, Sheet,
     dimension::DimensionKind,
     table::{Kind, MassFormat, PartsList},
 };
+use solidcraft_engine::doc::drawing_view::{HiddenBodies, HiddenBody};
 use solidcraft_engine::doc::ids;
 use solidcraft_engine::geom::{
     drawing_sheet::{DrawingBorderProfile, Orientation, PaperSize, Sheet as Paper, SheetSize},
@@ -200,6 +202,44 @@ pub(super) struct ViewEdit {
     view: u64,
     scale: String,
     style: VisualStyle,
+    /// The bodies the view leaves out one by one (#22107), read once as the panel opens: each with
+    /// its row's label and whether it is still left out (unticked).
+    hidden: Vec<HiddenRow>,
+    /// The list is the parent view's, not the view's own.
+    inherited: bool,
+    /// The view's list the rows were read from: when the view's list changes under the open panel
+    /// (Hide in This View, Undo), the rows are read again.
+    read_from: Option<HiddenBodies>,
+}
+
+/// One body in Edit View's "Hidden in this view" list.
+struct HiddenRow {
+    body: HiddenBody,
+    label: String,
+    hidden: bool,
+}
+
+/// The rows for the bodies a view leaves out: the body's name, and for a body of a component the
+/// component's name after it, as the Browser names them.
+fn hidden_rows(app: &SolveApp, bodies: &[HiddenBody]) -> Vec<HiddenRow> {
+    bodies
+        .iter()
+        .map(|body| {
+            let component = (!body.path.is_empty()).then(|| app.session.occurrence_placement(&body.path).ok()).flatten();
+            let label = match component {
+                Some(placement) => format!("{} · {}", body.body, placement.name),
+                None => body.body.clone(),
+            };
+            HiddenRow { body: body.clone(), label, hidden: true }
+        })
+        .collect()
+}
+
+/// What Apply sends for the list, when it changed: the bodies still unticked, as the view's own
+/// list. Ticking every body back sends `[]`, the view's own choice to hide none, so a parent's list
+/// doesn't come back in its place.
+fn hidden_bodies_to_send(rows: &[HiddenRow]) -> Option<Vec<HiddenBody>> {
+    rows.iter().any(|row| !row.hidden).then(|| rows.iter().filter(|row| row.hidden).map(|row| row.body.clone()).collect())
 }
 
 pub(super) fn view_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Option<u64>) -> bool {
@@ -223,13 +263,24 @@ pub(super) fn view_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Optio
             Some(id) => drawing.view(id).filter(|view| Some(view.sheet) == sheet),
             None => drawing.views.iter().find(|view| Some(view.sheet) == sheet).map(|view| view.as_ref()),
         }?;
-        drawing.resolve_view(view.id).ok().map(|settings| (view.id, settings.scale.value, settings.visual_style.value))
+        drawing.resolve_view(view.id).ok().map(|settings| (view.id, settings.scale.value, settings.visual_style.value, settings.hide_bodies))
     });
-    let Some((view, scale, style)) = resolved else {
+    let Some((view, scale, style, hide_bodies)) = resolved else {
         return ui_kit::button(ui, tr("ui.cancel"), Button::Normal).clicked();
     };
-    let mut edit =
-        app.drawing_workspace.view_edit.take().filter(|edit| edit.view == view).unwrap_or_else(|| ViewEdit { view, scale: scale.to_string(), style });
+    let mut edit = app.drawing_workspace.view_edit.take().filter(|edit| edit.view == view).unwrap_or_else(|| ViewEdit {
+        view,
+        scale: scale.to_string(),
+        style,
+        hidden: Vec::new(),
+        inherited: false,
+        read_from: None,
+    });
+    if edit.read_from != hide_bodies.value {
+        edit.hidden = hidden_rows(app, hide_bodies.value.as_deref().unwrap_or_default());
+        edit.inherited = hide_bodies.set_by != SetBy::This;
+        edit.read_from = hide_bodies.value.clone();
+    }
     let styles = VisualStyle::ALL;
     let labels = [
         tr("ui.drawing_panel.visible"),
@@ -249,6 +300,22 @@ pub(super) fn view_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Optio
         ui_kit::section_heading(ui, tr("ui.scale"));
         ui_kit::text_row(ui, tr("ui.scale"), &mut edit.scale, "1:1");
         let valid = edit.scale.trim().parse::<Scale>().is_ok();
+        if !edit.hidden.is_empty() {
+            ui_kit::section_heading(ui, tr("ui.drawing_panel.hidden_in_view"));
+            if edit.inherited {
+                ui_kit::text(ui, &format!("ⓘ {}", tr("ui.drawing_panel.from_parent")), ui_kit::Text::Note("ui.drawing_panel.from_parent"));
+            }
+            ui_kit::text(ui, tr("ui.drawing_panel.hidden_in_view_hint"), ui_kit::Text::Hint("ui.drawing_panel.hidden_in_view_hint"));
+            // A long list scrolls in about eight rows, so Apply and OK stay in a small window.
+            let room = Tokens::get().control_height * 8.0;
+            egui::ScrollArea::vertical().id_salt(("drawing:edit:hidden", view)).max_height(room).show(ui, |ui| {
+                for row in &mut edit.hidden {
+                    let mut drawn = !row.hidden;
+                    ui_kit::checkbox(ui, &row.label, &mut drawn);
+                    row.hidden = !drawn;
+                }
+            });
+        }
         ui.separator();
         ui.horizontal(|ui| {
             let cancel = ui_kit::button(ui, tr("ui.cancel"), Button::Normal).clicked();
@@ -270,11 +337,15 @@ pub(super) fn view_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Optio
     if edit.style != style {
         settings.insert("visual_style".into(), json!(edit.style));
     }
+    if let Some(bodies) = hidden_bodies_to_send(&edit.hidden) {
+        settings.insert("hide_bodies".into(), json!(bodies));
+    }
     app.drawing_workspace.view_edit = Some(edit);
     if (!apply && !ok) || settings.is_empty() {
         return ok;
     }
     match app.run("drawing.view.edit", json!({"view": ids::encode(view), "set": settings})) {
+        // The view's list changed, so the next frame reads the rows again.
         Ok(_) => ok,
         Err(error) => {
             app.set_status(error, true);

@@ -1,0 +1,50 @@
+{
+  "en": {
+    "ui.drawing_panel.from_parent": "From the parent view",
+    "ui.drawing_panel.hidden_in_view": "Hidden in this view",
+    "ui.drawing_panel.hidden_in_view_hint": "Tick a body to draw it again.",
+    "ui.hide_in_this_view": "Hide in This View"
+  },
+  "ar": {
+    "ui.drawing_panel.from_parent": "من المسقط الأصلي",
+    "ui.drawing_panel.hidden_in_view": "مخفي في هذا المسقط",
+    "ui.drawing_panel.hidden_in_view_hint": "حدّد جسمًا لرسمه مجددًا.",
+    "ui.hide_in_this_view": "إخفاء في هذا المسقط"
+  },
+  "de": {
+    "ui.drawing_panel.from_parent": "Aus der übergeordneten Ansicht",
+    "ui.drawing_panel.hidden_in_view": "In dieser Ansicht ausgeblendet",
+    "ui.drawing_panel.hidden_in_view_hint": "Einen Körper ankreuzen, um ihn wieder zu zeichnen.",
+    "ui.hide_in_this_view": "In dieser Ansicht ausblenden"
+  },
+  "he": {
+    "ui.drawing_panel.from_parent": "מהמבט ההורה",
+    "ui.drawing_panel.hidden_in_view": "מוסתר במבט זה",
+    "ui.drawing_panel.hidden_in_view_hint": "סמנו גוף כדי לשרטט אותו שוב.",
+    "ui.hide_in_this_view": "הסתר במבט זה"
+  },
+  "ja": {
+    "ui.drawing_panel.from_parent": "親ビューから",
+    "ui.drawing_panel.hidden_in_view": "このビューで非表示",
+    "ui.drawing_panel.hidden_in_view_hint": "ボディにチェックを入れると再び描画されます。",
+    "ui.hide_in_this_view": "このビューで非表示"
+  },
+  "ko": {
+    "ui.drawing_panel.from_parent": "상위 뷰에서",
+    "ui.drawing_panel.hidden_in_view": "이 뷰에서 숨김",
+    "ui.drawing_panel.hidden_in_view_hint": "바디를 선택하면 다시 그려집니다.",
+    "ui.hide_in_this_view": "이 뷰에서 숨기기"
+  },
+  "vi": {
+    "ui.drawing_panel.from_parent": "Từ hình chiếu gốc",
+    "ui.drawing_panel.hidden_in_view": "Ẩn trong hình chiếu này",
+    "ui.drawing_panel.hidden_in_view_hint": "Đánh dấu một thân để vẽ lại.",
+    "ui.hide_in_this_view": "Ẩn trong hình chiếu này"
+  },
+  "zh": {
+    "ui.drawing_panel.from_parent": "来自父视图",
+    "ui.drawing_panel.hidden_in_view": "在此视图中隐藏",
+    "ui.drawing_panel.hidden_in_view_hint": "勾选实体即可重新绘制。",
+    "ui.hide_in_this_view": "在此视图中隐藏"
+  }
+}
