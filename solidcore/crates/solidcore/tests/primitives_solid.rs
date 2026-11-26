@@ -253,11 +253,63 @@ fn small_boxes_at_1e4_answer_as_at_the_origin() {
 fn linear_sweep_preserves_edges_and_gaps_between_one_and_two_zone_tolerances() {
     use solidcore::curve::curve::Curve;
     use solidcore::curve::line::Line;
+    use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+    use solidcore::mass::integrator::properties::{
+        brep_properties, MassPropertyBehavior, PropertyAttributes,
+    };
     use solidcore::math::Vec3;
+    use solidcore::query::brep::{calculate_bounding_box, BoundingBoxOptions};
     use solidcore::sweep::api_brep::create_linear_sweep;
     use solidcore::topology::brep::p2::is_manifold_solid;
     use solidcore::topology::brep::validation::{check_brep, CheckLevel};
     use solidcore::Kernel;
+
+    let assert_solid = |label: &str,
+                        k: &mut Kernel,
+                        b: &mut solidcore::topology::Brep,
+                        counts: [usize; 3],
+                        expected_vol: f64| {
+        let check = check_brep(k, b, CheckLevel::Level2).unwrap();
+        assert!(
+            is_manifold_solid(b).unwrap(),
+            "{label}: not a closed solid (faces={}, edges={}, verts={}, check={:?})",
+            b.face_list().len(),
+            b.edge_list().len(),
+            b.vertex_list().len(),
+            check.lines()
+        );
+        assert!(check.is_valid(), "{label}: {:?}", check.lines());
+        assert_eq!(
+            [
+                b.face_list().len(),
+                b.edge_list().len(),
+                b.vertex_list().len()
+            ],
+            counts,
+            "{label}: unexpected topology counts"
+        );
+        let bbox = calculate_bounding_box(k, &*b, BoundingBoxOptions::default()).unwrap();
+        let store = AttributeStore::default();
+        let key_of = |_| ObjectKey(0);
+        let props = brep_properties(
+            k,
+            b,
+            1e-10,
+            bbox.mid(),
+            MassPropertyBehavior::default(),
+            &PropertyAttributes {
+                store: &store,
+                key_of: &key_of,
+            },
+        )
+        .unwrap();
+        // Tolerance 1e-6 is >200x smaller than the narrow feature volume 20*d >= 2.2e-4.
+        assert!(
+            (props.volume - expected_vol).abs() < 1e-6,
+            "{label}: volume={} expected={expected_vol}",
+            props.volume
+        );
+    };
 
     let poly = |pts: &[[f64; 2]]| -> Vec<Curve> {
         pts.windows(2)
@@ -291,22 +343,13 @@ fn linear_sweep_preserves_edges_and_gaps_between_one_and_two_zone_tolerances() {
         let refs: Vec<Option<&Curve>> = step_curves.iter().map(Some).collect();
         let mut k = Kernel::default();
         let mut b = create_linear_sweep(&mut k, &refs, Vec3::Z, 10.0, true).unwrap();
-        let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
-        let lamina = b
-            .edge_list()
-            .iter()
-            .filter(|&&e| solidcore::topology::edge::is_lamina(&b, e).unwrap_or(false))
-            .count();
-        assert!(
-            is_manifold_solid(&b).unwrap(),
-            "step d={d:e}: not a closed solid (faces={}, edges={}, verts={}, lamina={}, check={:?})",
-            b.face_list().len(),
-            b.edge_list().len(),
-            b.vertex_list().len(),
-            lamina,
-            check.lines()
+        assert_solid(
+            &format!("step d={d:e}"),
+            &mut k,
+            &mut b,
+            [10, 24, 16],
+            9000.0 + 20.0 * d,
         );
-        assert!(check.is_valid(), "step d={d:e}: {:?}", check.lines());
 
         // (2) Profile with an inner notch stopping d short of the outer wall (parallel edges d apart):
         let gap_curves = poly(&[
@@ -323,12 +366,13 @@ fn linear_sweep_preserves_edges_and_gaps_between_one_and_two_zone_tolerances() {
         let gap_refs: Vec<Option<&Curve>> = gap_curves.iter().map(Some).collect();
         let mut k = Kernel::default();
         let mut b = create_linear_sweep(&mut k, &gap_refs, Vec3::Z, 10.0, true).unwrap();
-        assert!(
-            is_manifold_solid(&b).unwrap(),
-            "gap d={d:e}: not a closed solid"
+        assert_solid(
+            &format!("gap d={d:e}"),
+            &mut k,
+            &mut b,
+            [10, 24, 16],
+            8400.0 + 20.0 * d,
         );
-        let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
-        assert!(check.is_valid(), "gap d={d:e}: {:?}", check.lines());
 
         // (3) Standalone narrow sliver rectangle of width d in (1e-5, 2e-5]:
         let sliver_curves = poly(&[
@@ -342,12 +386,13 @@ fn linear_sweep_preserves_edges_and_gaps_between_one_and_two_zone_tolerances() {
         let mut k = Kernel::default();
         k.fixes = solidcore::kernel::UpstreamFixes::all();
         let mut b = create_linear_sweep(&mut k, &sliver_refs, Vec3::Z, 10.0, true).unwrap();
-        assert!(
-            is_manifold_solid(&b).unwrap(),
-            "sliver d={d:e}: not a closed solid"
+        assert_solid(
+            &format!("sliver d={d:e}"),
+            &mut k,
+            &mut b,
+            [6, 12, 8],
+            20.0 * d,
         );
-        let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
-        assert!(check.is_valid(), "sliver d={d:e}: {:?}", check.lines());
 
         // (4) Outer rectangle with a narrow sliver inner hole of width d in (1e-5, 2e-5]:
         let mut hole_curves = poly(&[
@@ -368,11 +413,12 @@ fn linear_sweep_preserves_edges_and_gaps_between_one_and_two_zone_tolerances() {
         let mut k = Kernel::default();
         k.fixes = solidcore::kernel::UpstreamFixes::all();
         let mut b = create_linear_sweep(&mut k, &hole_refs, Vec3::Z, 10.0, true).unwrap();
-        assert!(
-            is_manifold_solid(&b).unwrap(),
-            "sliver hole d={d:e}: not a closed solid"
+        assert_solid(
+            &format!("sliver hole d={d:e}"),
+            &mut k,
+            &mut b,
+            [10, 24, 16],
+            31350.0 - 20.0 * d,
         );
-        let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
-        assert!(check.is_valid(), "sliver hole d={d:e}: {:?}", check.lines());
     }
 }

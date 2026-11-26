@@ -3225,16 +3225,13 @@ pub(crate) fn stitch_and_orient_open(
     stitch_and_orient_searching(k, b, options, identity, None, false)
 }
 
-/// Stitches a linear sweep whose walls and caps are built from identical profile curves: pass 1
-/// matches vertices and edges strictly within `b.tolerance()` without squeezing profile edges or
-/// splitting edges at nearby vertices. When `second_pass` is true and lamina edges remain (for
-/// example, a profile whose input curves had a gap larger than `b.tolerance()`), pass 2 runs the
-/// normal stitch pass at the looser tolerance.
+/// Stitches a linear sweep whose walls and caps are built from identical profile curves: matches
+/// vertices and edges strictly within `b.tolerance()` without squeezing profile edges or splitting
+/// edges at nearby vertices.
 pub(crate) fn stitch_and_orient_exact_sweep(
     k: &mut Kernel,
     b: &mut Brep,
     identity: Option<crate::query::brep::BrepIdentity<'_>>,
-    second_pass: bool,
 ) -> Result<()> {
     k.check_cancelled(OP)?;
     let raises = StitchRaises::before(b);
@@ -3244,11 +3241,7 @@ pub(crate) fn stitch_and_orient_exact_sweep(
         initial_stitch_tolerance(b.tolerance(), -0.1)
     };
     let outcome = super::p4::stitch_faces_exact_sweep(k, b, tol, identity)?;
-    let mut lamina = outcome.lamina_edges as usize;
-    if second_pass && lamina > 1 {
-        let fallback = initial_stitch_tolerance(b.tolerance(), -0.1) * 20.0;
-        stitch_faces(k, b, fallback, false, &mut lamina, identity, None)?;
-    }
+    let lamina = outcome.lamina_edges as usize;
     let covered = raises.covered(k, b)?;
     let joined = raises.joined(b);
     plain_edit(k, b, |k, b, env| {

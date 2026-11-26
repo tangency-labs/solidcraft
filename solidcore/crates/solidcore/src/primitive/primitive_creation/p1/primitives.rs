@@ -336,7 +336,10 @@ fn stitch_faces_of(
     }
 }
 
-fn stitch_sweep(k: &mut Kernel, b: &mut Brep) -> Result<()> {
+/// Stitches a linear sweep (capped or open) whose walls and caps share identical profile curves
+/// strictly within `b.tolerance()`, without squeezing short profile edges or splitting edges at
+/// nearby vertices.
+fn stitch_exact_sweep(k: &mut Kernel, b: &mut Brep) -> Result<()> {
     use crate::query::brep::BrepIdentity;
     use crate::topology::brep::p5::stitch_and_orient_exact_sweep;
     let keys = |object| {
@@ -346,26 +349,7 @@ fn stitch_sweep(k: &mut Kernel, b: &mut Brep) -> Result<()> {
         keys: &keys,
         ..BrepIdentity::default()
     });
-    stitch_and_orient_exact_sweep(k, b, identity, true)
-}
-
-/// Stitches the walls of an uncapped sweep, whose lamina edges are the profile's two
-/// copies by construction, in the first pass only
-/// ([`stitch_and_orient_exact_sweep`](crate::topology::brep::p5::stitch_and_orient_exact_sweep)):
-/// the walls meet at the profile's shared curve ends, and the second pass would squeeze out
-/// a profile edge shorter than its tolerance, leaving the wall's loop open. Not upstream
-/// (WR-18515).
-fn stitch_open(k: &mut Kernel, b: &mut Brep) -> Result<()> {
-    use crate::query::brep::BrepIdentity;
-    use crate::topology::brep::p5::stitch_and_orient_exact_sweep;
-    let keys = |object| {
-        crate::topology::brep::p2::caller_cache_key(&crate::topology::loopuse::notify_ref, object)
-    };
-    let identity = Some(BrepIdentity {
-        keys: &keys,
-        ..BrepIdentity::default()
-    });
-    stitch_and_orient_exact_sweep(k, b, identity, false)
+    stitch_and_orient_exact_sweep(k, b, identity)
 }
 
 /// `CreatePlanarFaceWith3DCurves`; `None` when the curves bound no face.
@@ -1583,11 +1567,11 @@ impl PrimitiveCreation {
                 if outside.is_some() {
                     stitch_solid(k, brep, outside)?;
                 } else {
-                    stitch_sweep(k, brep)?;
+                    stitch_exact_sweep(k, brep)?;
                 }
             } else {
                 // the profile's two copies stay open: the walls are a sheet
-                stitch_open(k, brep)?;
+                stitch_exact_sweep(k, brep)?;
             }
             brep.set_editing_enabled(false);
             Ok(())
