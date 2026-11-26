@@ -66,6 +66,7 @@
   "case": "20499-revolve-two-sided-130-40",
   "expected": {
     "body_count": 1,
+    "edges": 3,
     "faces": 3,
     "method": "Pappus: the circle's area pi r^2 = 25 pi times the path of its centre, 2 pi R (170/360) with R = 30: V = 2 pi^2 R r^2 (170/360) = 6990.969784104961. Faces: the torus sector and two caps = 3; edges: the two cap circles and the seam = 3; vertices: 2.",
     "source": "analytic",
@@ -75,6 +76,7 @@
     "tolerance": {
       "rel": 1e-09
     },
+    "vertices": 2,
     "volume_mm3": 6990.969784104961,
     "what": "a circle of radius 5, its centre 30 from the Z axis, revolved about Z two-sided by 130 and 40 degrees: a 170 degree sector of a torus with two flat caps (refused by the check as 'Bad Infinite Region': the ray that looks for the infinite region entered and left the torus face within one leaf of its cache, 2.5 and 2 degrees off the surface, and was given the exit as its first hit)"
   },
