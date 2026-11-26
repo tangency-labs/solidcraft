@@ -3023,6 +3023,40 @@ fn a_block_of_three_hundred_points_solves_fast() {
     eprintln!("300-point block: {ms} ms");
 }
 
+/// A block placed by position and angle (as Insert as block makes one) starts at that point,
+/// along that angle, with its members where they were; making a block of a thousand curves
+/// looks each up without a search of the sketch.
+#[test]
+fn a_block_made_at_a_point_and_angle_keeps_its_members_and_searches_no_ids() {
+    let mut sk = Sketch::new();
+    let mut ids = Vec::new();
+    // 1800 points: with the axis, within what the solver takes in one group.
+    let n = 900;
+    for i in 0..n {
+        let x = i as f64 * 0.1;
+        let l = sk.add_line(v(x, 0.0), v(x + 0.05, 1.0 + (i % 3) as f64), None, None, None).unwrap();
+        ids.push(sk.curves[l].id.clone());
+    }
+    for bad in [f64::NAN, f64::INFINITY] {
+        assert!(sk.clone().make_block_at(&ids[..1], BlockScale::Fixed, v(0.0, 0.0), bad, None).is_err());
+        assert!(sk.clone().make_block_at(&ids[..1], BlockScale::Fixed, v(bad, 0.0), 0.0, None).is_err());
+    }
+    let before: Vec<Vec2> = sk.points.iter().map(|p| p.pos).collect();
+    ID_SEARCHES.with(|c| c.set(0));
+    let made = sk.make_block_at(&ids, BlockScale::Fixed, v(-20.0, 5.0), 40f64.to_radians(), None).unwrap();
+    let searches = ID_SEARCHES.with(std::cell::Cell::get);
+    assert!(searches <= 4, "{searches} id searches for {n} curves");
+    assert_eq!(sk.blocks[0].curves.len(), n);
+    assert!(sk.points.iter().zip(&before).all(|(p, b)| p.pos == *b), "nothing moved");
+    let o = sk.point_index(&made.origin).unwrap();
+    let (a, b) = line_pts(&sk, sk.curve_index(&made.axis).unwrap());
+    assert_eq!(sk.points[o].pos, v(-20.0, 5.0));
+    assert!(a.dist(v(-20.0, 5.0)) < 1e-12 && ((b - a).angle() - 40f64.to_radians()).abs() < 1e-12);
+    assert!((a.dist(b) - sk.blocks[0].length).abs() < 1e-9);
+    let rep = solve(&mut sk);
+    assert!(rep.ok() && rep.dof == 3, "{rep:?}");
+}
+
 /// A profile as an import brings it: a closed polyline of `n` points around a wavy circle, made
 /// one rigid block. Returns the block and the polyline's points in order.
 fn polyline_block(n: usize) -> (Sketch, BlockMade, Vec<usize>) {

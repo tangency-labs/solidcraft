@@ -14,6 +14,8 @@
     "ui.delete_block": "Delete Block",
     "ui.heading_edit_block": "EDIT BLOCK",
     "ui.heading_make_block": "MAKE BLOCK",
+    "ui.insert_as_block": "Insert as block",
+    "ui.insert_as_block_tip": "Brings the drawing in as one block that keeps its shape. Its origin is the placed point and its axis follows the angle: constrain them to place and turn the drawing. Text stays outside the block. For now, a block of more than about 2000 points can only be solved while its axis is fixed.",
     "ui.select_block": "Select Block"
   },
   "ar": {
@@ -31,6 +33,8 @@
     "ui.delete_block": "حذف الكتلة",
     "ui.heading_edit_block": "تحرير الكتلة",
     "ui.heading_make_block": "إنشاء كتلة",
+    "ui.insert_as_block": "إدراج ككتلة",
+    "ui.insert_as_block_tip": "يُدرج الرسم ككتلة واحدة تحافظ على شكلها. أصلها هو النقطة الموضوعة ومحورها يتبع الزاوية: قيّدهما لوضع الرسم وتدويره. يبقى النص خارج الكتلة. حاليًا لا يمكن حل كتلة تزيد على نحو 2000 نقطة إلا ما دام محورها مثبتًا.",
     "ui.select_block": "تحديد الكتلة"
   },
   "de": {
@@ -48,6 +52,8 @@
     "ui.delete_block": "Block löschen",
     "ui.heading_edit_block": "BLOCK BEARBEITEN",
     "ui.heading_make_block": "BLOCK ERSTELLEN",
+    "ui.insert_as_block": "Als Block einfügen",
+    "ui.insert_as_block_tip": "Fügt die Zeichnung als einen Block ein, der seine Form behält. Sein Ursprung ist der platzierte Punkt und seine Achse folgt dem Winkel: Mit Abhängigkeiten daran platzieren und drehen Sie die Zeichnung. Text bleibt außerhalb des Blocks. Ein Block mit mehr als etwa 2000 Punkten lässt sich vorerst nur lösen, solange seine Achse fixiert ist.",
     "ui.select_block": "Block auswählen"
   },
   "he": {
@@ -65,6 +71,8 @@
     "ui.delete_block": "מחיקת בלוק",
     "ui.heading_edit_block": "עריכת בלוק",
     "ui.heading_make_block": "יצירת בלוק",
+    "ui.insert_as_block": "הוספה כבלוק",
+    "ui.insert_as_block_tip": "מוסיף את השרטוט כבלוק אחד ששומר על צורתו. הראשית שלו היא הנקודה שנבחרה והציר שלו עוקב אחרי הזווית: אילוצים עליהם ממקמים ומסובבים את השרטוט. טקסט נשאר מחוץ לבלוק. בינתיים, בלוק של יותר מכ-2000 נקודות נפתר רק כל עוד הציר שלו מקובע.",
     "ui.select_block": "בחירת בלוק"
   },
   "ja": {
@@ -82,6 +90,8 @@
     "ui.delete_block": "ブロックを削除",
     "ui.heading_edit_block": "ブロックを編集",
     "ui.heading_make_block": "ブロックを作成",
+    "ui.insert_as_block": "ブロックとして挿入",
+    "ui.insert_as_block_tip": "図面を形を保つ 1 つのブロックとして取り込みます。原点は配置した点、軸は角度の向きです。これらに拘束を付けて図面を配置・回転します。テキストはブロックに含まれません。現在、約 2000 点を超えるブロックは軸が固定されている間だけ解けます。",
     "ui.select_block": "ブロックを選択"
   },
   "ko": {
@@ -99,6 +109,8 @@
     "ui.delete_block": "블록 삭제",
     "ui.heading_edit_block": "블록 편집",
     "ui.heading_make_block": "블록 만들기",
+    "ui.insert_as_block": "블록으로 삽입",
+    "ui.insert_as_block_tip": "도면을 모양이 유지되는 하나의 블록으로 가져옵니다. 원점은 배치한 점이고 축은 각도를 따릅니다. 여기에 구속 조건을 걸어 도면을 배치하고 회전합니다. 텍스트는 블록에 포함되지 않습니다. 현재 약 2000개가 넘는 점으로 된 블록은 축이 고정되어 있을 때만 풀 수 있습니다.",
     "ui.select_block": "블록 선택"
   },
   "vi": {
@@ -116,6 +128,8 @@
     "ui.delete_block": "Xóa khối",
     "ui.heading_edit_block": "SỬA KHỐI",
     "ui.heading_make_block": "TẠO KHỐI",
+    "ui.insert_as_block": "Chèn dưới dạng khối",
+    "ui.insert_as_block_tip": "Đưa bản vẽ vào thành một khối giữ nguyên hình dạng. Gốc của khối là điểm đã đặt và trục theo góc: ràng buộc chúng để đặt và xoay bản vẽ. Văn bản nằm ngoài khối. Hiện tại, khối có hơn khoảng 2000 điểm chỉ giải được khi trục của nó được cố định.",
     "ui.select_block": "Chọn khối"
   },
   "zh": {
@@ -133,6 +147,8 @@
     "ui.delete_block": "删除块",
     "ui.heading_edit_block": "编辑块",
     "ui.heading_make_block": "创建块",
+    "ui.insert_as_block": "作为块插入",
+    "ui.insert_as_block_tip": "将图纸作为一个保持形状的块插入。块的原点是放置点，轴沿角度方向：约束它们即可放置和旋转图纸。文字不在块内。目前，超过约 2000 个点的块只有在其轴固定时才能求解。",
     "ui.select_block": "选择块"
   }
 }

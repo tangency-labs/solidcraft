@@ -36,6 +36,7 @@ fn schemas_and_the_key_check_agree() {
         "align",
         "angle",
         "at",
+        "block",
         "fixed",
         "height",
         "name",
@@ -75,6 +76,9 @@ fn strict_keeps_todays_errors() {
         ("sketch.insert_svg", json!({})),
         ("sketch.insert_svg", json!({"path": " "})),
         ("sketch.insert_svg", json!({"text": null})),
+        ("sketch.insert_svg", json!({"block": "yes", "text": SVG})),
+        ("sketch.insert_dxf", json!({"block": 1, "text": DXF})),
+        ("sketch.insert_dxf", json!({"block": [true], "text": DXF})),
         ("sketch.drawing_bounds", json!({})),
         ("sketch.drawing_bounds", json!({"path": ""})),
         ("sketch.drawing_bounds", json!({"path": "  "})),
@@ -209,6 +213,9 @@ fn the_types_read_like_the_handler() {
     assert_eq!(issues(json!({"text": "x", "size_from": "sheet"})), ["`size_from` must be \"geometry\" or \"viewbox\""]);
     assert!(issues(json!({"text": "x", "size_from": "viewbox", "fixed": true})).is_empty());
     assert_eq!(issues(json!({"text": "x", "fixed": "yes"})).len(), 1);
+    assert!(issues(json!({"text": "x", "block": true, "fixed": true})).is_empty() && issues(json!({"text": "x", "block": null})).is_empty());
+    assert_eq!(issues(json!({"text": "x", "block": "yes"})), ["`block` must be true or false"]);
+    assert_eq!(issues(json!({"text": "x", "block": 1})), ["`block` must be true or false"]);
     assert_eq!(issues(json!({"path": " "})), ["give `path` or `text`"]);
     assert_eq!(issues(json!({"text": "x", "sketch": true})), ["`sketch` must be an id or a name"]);
     assert_eq!(issues(json!({"text": "x", "wdth": 5})), ["unknown key `wdth`; did you mean `width`?"]);
@@ -426,6 +433,11 @@ fn replies_match_the_output_schema() {
     let r = run(&mut s, "sketch.insert_svg", json!({"text": SVG, "fixed": true, "size_from": "geometry"}));
     matches(output_schema_for::<DrawingInserted>(), &r);
     assert_eq!(r["fixed"], json!(4), "{r}");
+    // As a block: the reply names it, and matches the schema.
+    let r = run(&mut s, "sketch.insert_svg", json!({"text": SVG, "block": true, "fixed": true}));
+    matches(output_schema_for::<DrawingInserted>(), &r);
+    assert_eq!(r["fixed"], json!(2), "{r}");
+    assert!(r["block"]["id"].is_string() && r["block"]["axis"].is_string() && r["block"]["origin"].is_string(), "{r}");
     let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
     // With no sketch being edited: a new one is made, on the plane and with the name given.
     let r = run(&mut s, "sketch.insert_dxf", json!({"text": DXF, "plane": "XZ", "name": "Plate", "at": [5, 5]}));

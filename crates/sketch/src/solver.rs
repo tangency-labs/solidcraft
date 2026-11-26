@@ -112,6 +112,9 @@ pub struct SolveReport {
     /// the solve fails without a conflicting constraint to name (#5280).
     #[serde(default)]
     pub oversized: Option<usize>,
+    /// A group too large to solve holds a sketch block: a block joins all its points.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub oversized_block: bool,
     /// The solve of the 3D constraints among drawn 3D curves (#10608), for a sketch that has
     /// drawn 3D curves. Its freedoms are not in `dof` nor its failures in `status`: those are
     /// the planar sketch's, which planar edits measure themselves by.
@@ -146,6 +149,11 @@ impl SolveReport {
     /// or else `conflict` of the constraints still violated (listed, comma-separated).
     pub fn failure(&self, conflict: impl FnOnce(&str) -> String) -> String {
         if let Some(n) = self.oversized {
+            if self.oversized_block {
+                return format!(
+                    "the sketch joins {n} unknowns (point coordinates and radii) in one connected group, more than the {MAX_COMPONENT_VARS} the solver takes at once; a block joins all its points: for now a block this large solves only while both ends of its axis are fixed, or explode it, or make it of fewer curves"
+                );
+            }
             return format!(
                 "the sketch joins {n} unknowns (point coordinates and radii) in one connected group, more than the {MAX_COMPONENT_VARS} the solver takes at once; a pattern joins all its copies: make fewer copies, or split them over several patterns or sketches"
             );
@@ -3827,6 +3835,7 @@ fn solve_inner(
             curve_determined: Vec::new(),
             redundant: Vec::new(),
             oversized: None,
+            oversized_block: false,
             wires: None,
         };
     }
@@ -4101,6 +4110,9 @@ fn solve_inner(
     if too_large.is_some() {
         max_residual = f64::MAX;
     }
+    let oversized_block = comps.iter().filter(|(_, vars, _)| oversized(vars)).any(|(_, _, bis)| {
+        bis.iter().any(|bi| matches!(all_blocks.get(*bi), Some((Block::Frame { .. } | Block::FrameLength { .. } | Block::FrameRadius { .. }, _))))
+    });
     let mut check = |r: &[f64], owner: &[usize], blocks: &[(Block, Vec<usize>)], failing: &mut Vec<String>| {
         max_residual = max_residual.max(max_abs(r));
         for (row, v) in r.iter().enumerate() {
@@ -4354,6 +4366,7 @@ fn solve_inner(
         curve_determined,
         redundant,
         oversized: too_large,
+        oversized_block,
         wires: None,
     }
 }

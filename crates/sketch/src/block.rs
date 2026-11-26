@@ -91,6 +91,17 @@ pub struct BlockMade {
     pub held: Vec<String>,
 }
 
+/// Where a new block's origin goes.
+#[derive(Clone, Copy)]
+enum Anchor {
+    /// The middle of its curves' bounding box.
+    Middle,
+    /// On this point (by index).
+    Point(usize),
+    /// At this sketch position.
+    At(Vec2),
+}
+
 /// What releasing a block's held constraints did: the ones that hold where the geometry is now
 /// drive again, the others are removed.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -242,6 +253,23 @@ impl Sketch {
     /// unknown curve, and curves that cannot be members: in another block, projected, text,
     /// offset outputs and pattern geometry.
     pub fn make_block(&mut self, ids: &[String], scale: BlockScale, origin: Option<usize>, name: Option<String>) -> Result<BlockMade> {
+        self.make_posed_block(ids, scale, origin.map_or(Anchor::Middle, Anchor::Point), 0.0, name)
+    }
+
+    /// [`Sketch::make_block`] with the block origin at the sketch position `at` and its axis
+    /// turned `angle` (radians, counter-clockwise) from sketch +X, as Insert as block places a
+    /// drawing's block: at the drawing's placement anchor, along its insert angle. The axis is
+    /// half the curves' bounding-box diagonal long (rounded to a tidy length), however far `at`
+    /// lies from them.
+    pub fn make_block_at(&mut self, ids: &[String], scale: BlockScale, at: Vec2, angle: f64, name: Option<String>) -> Result<BlockMade> {
+        if !(angle.is_finite() && in_range(at)) {
+            return Err(SketchError::Invalid("the block's axis would lie out of range".into()));
+        }
+        self.make_posed_block(ids, scale, Anchor::At(at), angle, name)
+    }
+
+    /// [`Sketch::make_block`] with its origin at `anchor` and its axis `angle` radians from +X.
+    fn make_posed_block(&mut self, ids: &[String], scale: BlockScale, anchor: Anchor, angle: f64, name: Option<String>) -> Result<BlockMade> {
         let members = self.block_members(ids, None)?;
         let points = self.member_points(&members);
         let (lo, hi) = self.members_box(&members).ok_or_else(|| SketchError::Invalid("the curves have no size to make a block of".into()))?;
@@ -250,17 +278,26 @@ impl Sketch {
             return Err(SketchError::Invalid("the curves have no size to make a block of".into()));
         }
         let name = block_name(name)?;
-        let at = match origin {
-            Some(p) => self.point(p).ok_or_else(|| SketchError::Unknown(format!("point {p}")))?,
-            None => lo.lerp(hi, 0.5),
+        let (origin, at) = match anchor {
+            Anchor::Point(p) => (Some(p), self.point(p).ok_or_else(|| SketchError::Unknown(format!("point {p}")))?),
+            Anchor::Middle => (None, lo.lerp(hi, 0.5)),
+            Anchor::At(at) => (None, at),
         };
-        let reach = points.iter().filter_map(|p| self.point(*p)).map(|p| p.dist(at)).fold(0.0_f64, f64::max);
-        let length = tidy(reach.max(diagonal / 2.0));
-        if !(length.is_finite() && length > 0.0) || !in_range(at) || !in_range(at + Vec2::new(length, 0.0)) {
+        // A position away from the curves (a file origin far from its drawing) keeps the axis
+        // the curves' own size; a point or the middle reaches to the farthest member.
+        let length = match anchor {
+            Anchor::At(_) => tidy(diagonal / 2.0),
+            Anchor::Point(_) | Anchor::Middle => {
+                let reach = points.iter().filter_map(|p| self.point(*p)).map(|p| p.dist(at)).fold(0.0_f64, f64::max);
+                tidy(reach.max(diagonal / 2.0))
+            }
+        };
+        let end = at + Vec2::from_angle(angle) * length;
+        if !(length.is_finite() && length > 0.0) || !in_range(at) || !in_range(end) {
             return Err(SketchError::Invalid("the block's axis would lie out of range".into()));
         }
         let o = self.add_point(at, None)?;
-        let x = self.add_point(at + Vec2::new(length, 0.0), None)?;
+        let x = self.add_point(end, None)?;
         let axis_index = self.add_curve(CurveKind::Line { a: o, b: x }, None)?;
         if let Some(axis) = self.curves.get_mut(axis_index) {
             axis.construction = true;
@@ -620,21 +657,32 @@ impl Sketch {
         if ids.len() > MAX_BLOCK_CURVES {
             return Err(SketchError::TooLarge);
         }
+        // Looked up once, so a block of a whole inserted drawing takes time in proportion to it.
+        let mut index: HashMap<&str, usize> = HashMap::with_capacity(self.curves.len());
+        for (i, c) in self.curves.iter().enumerate() {
+            index.entry(c.id.as_str()).or_insert(i);
+        }
+        let mut owner: HashMap<&str, &SketchBlock> = HashMap::new();
+        for b in &self.blocks {
+            for c in [&b.axis].into_iter().chain(&b.curves) {
+                owner.entry(c.as_str()).or_insert(b);
+            }
+        }
         let mut members = Vec::new();
         let mut seen = HashSet::new();
         for id in ids {
             if !seen.insert(id.as_str()) {
                 continue;
             }
-            let c = self.curve_index(id).ok_or_else(|| SketchError::Unknown(id.clone()))?;
-            if let Some(b) = self.block_of(id).filter(|b| Some(b.id.as_str()) != except) {
+            let c = index.get(id.as_str()).copied().ok_or_else(|| SketchError::Unknown(id.clone()))?;
+            if let Some(b) = owner.get(id.as_str()).filter(|b| Some(b.id.as_str()) != except) {
                 return Err(SketchError::Invalid(if b.axis == *id {
                     format!("`{id}` is the axis of block {}", b.label())
                 } else {
                     format!("`{id}` is already part of block {}", b.label())
                 }));
             }
-            if self.blocks.iter().any(|b| b.axis == *id) {
+            if owner.get(id.as_str()).is_some_and(|b| b.axis == *id) {
                 return Err(SketchError::Invalid(format!("`{id}` is the block's own axis")));
             }
             if self.is_text_curve(c) {
@@ -657,11 +705,12 @@ impl Sketch {
             members.push(c);
         }
         let splines: HashSet<&str> = members.iter().filter_map(|c| self.curves.get(*c)).map(|c| c.id.as_str()).collect();
+        let named: HashSet<usize> = members.iter().copied().collect();
         let guides: Vec<usize> = self
             .curves
             .iter()
             .enumerate()
-            .filter(|(i, c)| !members.contains(i) && c.spline_guide_owner().is_some_and(|o| splines.contains(o)))
+            .filter(|(i, c)| c.spline_guide_owner().is_some_and(|o| splines.contains(o)) && !named.contains(i))
             .map(|(i, _)| i)
             .collect();
         members.extend(guides);

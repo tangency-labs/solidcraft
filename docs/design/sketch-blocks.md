@@ -251,14 +251,30 @@ How each existing command treats a block member:
 
 ## Insert as block (#22102)
 
-- **Param.** `sketch.insert_dxf` and `sketch.insert_svg` (`crates/engine/src/cmd/sketch_import.rs:36`,
-  `:42`) get `block?: bool`. With it, the inserted curves go through the same code as
-  `sketch.block`, with the origin at the placement anchor and the axis along the insert angle.
-- **With `fixed`.** `block: true, fixed: true` fixes only the axis: two Fix constraints instead of
-  one per point (`sketch_import.rs:372-391`).
+- **Param.** `sketch.insert_dxf` and `sketch.insert_svg` (`insert()` in
+  `crates/engine/src/cmd/sketch_import.rs`) get `block?: bool`. With it, the inserted curves go
+  through the same code as `sketch.block` (`Sketch::make_block_at`, which `make_block` shares),
+  with Fixed scale, the origin at the placement anchor (where `at` puts the file's origin, or the
+  drawing's middle with `align: "center"`; with `size_from: "viewbox"` as well, the sheet's
+  middle, not the drawing's) and the axis along the insert angle, half the drawing's diagonal
+  long (rounded), however far the file origin is from the drawing. The reply's `block` gives the
+  block's id, axis and origin. Making the block looks every curve up once, so a 20,000-curve
+  drawing takes no per-curve search of the sketch.
+- **Text.** `sketch.block` refuses text, so the drawing's text comes in beside the block, and the
+  reply warns that it is not part of it. A drawing with only text makes no block (and says so).
+- **With `fixed`.** `block: true, fixed: true` fixes only the axis: two Fix constraints on its
+  ends, plus one on any point the drawing adds outside every curve (a DXF `POINT`). With the
+  axis length row the two Fixes are one row more than a rigid block's 3 degrees of freedom, but
+  no Fix is wholly redundant, so none is reported; a block later made Free is held exactly.
+  Exploding such a block leaves its curves free and only the leftover axis line fixed.
+- **Size, for now.** An unfixed block is one connected group for the solver, which takes at most
+  `MAX_COMPONENT_VARS` (4000) unknowns at once, about 2000 points. Until the solver handles a
+  larger block (phase 4b), an unfixed insert above that is refused, and a fixed one that loses an
+  axis Fix fails to solve with a message about the block.
 - **Dialog.** `crates/ui-egui/src/dialogs_insert_drawing.rs` gets an **Insert as block** row after
-  Angle (`:113`), saved on `Place` and sent by `commands()` (`:130`), which already builds the
-  command JSON. The shared-controls skill asks for 1280×720 screenshots of the new row.
+  Angle, held on `Place` while the window is open and sent by `commands()`. The live preview is
+  the drawing alone (`preview_placement` leaves `block` out): the axis takes its length from the
+  placed size, which the scale-1 preview import does not have.
 - **Phase 5:** one block per DXF `BLOCK`. The DXF reader flattens blocks today
   (`crates/io/src/dxf.rs:3`, `:1334`), so `io` would first have to say which block each piece
   came from.

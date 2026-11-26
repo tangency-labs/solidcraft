@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use serde_json::{Value, json};
 use solidcore_record::{Seg2, Vec2};
 use solidcraft_io::{AirfoilFormat, DxfEntity, DxfLayer, Geom2, MAX_AIRFOIL_BYTES, MAX_DRAWING_BYTES, SvgShape};
-use solidcraft_sketch::{Analysis, ConstraintKind, CurveKind, LinkKind, LinkSource, Sketch};
+use solidcraft_sketch::{Analysis, BlockScale, ConstraintKind, CurveKind, LinkKind, LinkSource, Sketch};
 
 use super::CommandSpec;
 use super::sketch::{Left, edit_solved, ids_of};
@@ -14,7 +14,7 @@ use super::sketch_store;
 use crate::params::{bad, bool_, num, str_, vec2};
 use crate::schema::sketch_import::{
     AirfoilInserted, DrawingBoundsParams, DrawingBoundsResult, DrawingBox, DrawingInserted, DxfExported, ExportDxfParams, ExportDxfResult,
-    ExportSvgParams, ExportSvgResult, InsertAirfoilParams, InsertDxfParams, InsertSvgParams, SketchSolve, SvgExported,
+    ExportSvgParams, ExportSvgResult, InsertAirfoilParams, InsertDxfParams, InsertSvgParams, InsertedBlock, SketchSolve, SvgExported,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -38,13 +38,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sketch_dxf")
         .contract(&INSERT_DXF_CONTRACT)
         .output(output_schema_for::<DrawingInserted>)
-        .params(concat!("path | text: ASCII DXF (blocks expanded); at?: [x,y] offset, scale? | width? | height?: mm, the size of the drawn geometry's bounds before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); simplify?: mm on the drawing as it is drawn, at any scale, 0 to 100 (default 0: every edge as drawn) — runs of lines that meet end to end are replaced by fewer lines that follow them within this distance, so a dense drawing comes in with fewer curves (arcs, circles, splines and text stay as drawn); fixed?: bool (a Fix constraint on every point the drawing adds, as sketch.constraint.fix puts one; a circle's or ellipse's radius stays free; default false); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
+        .params(concat!("path | text: ASCII DXF (blocks expanded); at?: [x,y] offset, scale? | width? | height?: mm, the size of the drawn geometry's bounds before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); simplify?: mm on the drawing as it is drawn, at any scale, 0 to 100 (default 0: every edge as drawn) — runs of lines that meet end to end are replaced by fewer lines that follow them within this distance, so a dense drawing comes in with fewer curves (arcs, circles, splines and text stay as drawn); block?: bool (default false: the curves it adds become one block, as sketch.block makes one, with Fixed scale: its origin where `at` puts the file's origin (or the drawing's middle with align center), its axis along `angle` and about the drawing's size; text stays outside the block; for now a block of more than about 2000 points solves only while it is fixed: without `fixed` it is refused, and removing one of its axis Fixes leaves the sketch unsolved; the reply's `block` gives its id, axis and origin); fixed?: bool (a Fix constraint on every point the drawing adds, as sketch.constraint.fix puts one; a circle's or ellipse's radius stays free; with block, only the block's two axis ends and the points no curve holds, so Explode Block then leaves its curves free and only the axis line fixed; default false); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
     CommandSpec::new("sketch.insert_svg", "Insert SVG", crate::checked!("sketch.insert_svg", insert_svg))
         .at("SKETCH", "INSERT")
         .icon("svg")
         .contract(&INSERT_SVG_CONTRACT)
         .output(output_schema_for::<DrawingInserted>)
-        .params(concat!("path | text: SVG; at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); size_from?: \"geometry\" (default: width and height are the bounds of the drawn geometry) | \"viewbox\" (the SVG sheet: its viewBox, else its width and height; a drawing smaller than its sheet then comes out smaller than width or height say); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's (or sheet's) middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); simplify?: mm on the drawing as it is drawn, at any scale, 0 to 100 (default 0: every edge as drawn) — runs of lines that meet end to end are replaced by fewer lines that follow them within this distance, so a dense drawing comes in with fewer curves (arcs, circles, splines and text stay as drawn); fixed?: bool (every point it adds gets a Fix constraint, so the drawing stays where it is put); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
+        .params(concat!("path | text: SVG; at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); size_from?: \"geometry\" (default: width and height are the bounds of the drawn geometry) | \"viewbox\" (the SVG sheet: its viewBox, else its width and height; a drawing smaller than its sheet then comes out smaller than width or height say); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's (or sheet's) middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); simplify?: mm on the drawing as it is drawn, at any scale, 0 to 100 (default 0: every edge as drawn) — runs of lines that meet end to end are replaced by fewer lines that follow them within this distance, so a dense drawing comes in with fewer curves (arcs, circles, splines and text stay as drawn); block?: bool (default false: the curves it adds become one block, as sketch.block makes one, with Fixed scale: its origin where `at` puts the file's origin (or the drawing's middle with align center, the sheet's middle with size_from viewbox too), its axis along `angle` and about the drawing's size; text stays outside the block; for now a block of more than about 2000 points solves only while it is fixed: without `fixed` it is refused, and removing one of its axis Fixes leaves the sketch unsolved; the reply's `block` gives its id, axis and origin); fixed?: bool (every point it adds gets a Fix constraint, so the drawing stays where it is put; with block, only the block's two axis ends and the points no curve holds, so Explode Block then leaves its curves free and only the axis line fixed); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
     CommandSpec::new("sketch.insert_airfoil", "Insert Airfoil", crate::checked!("sketch.insert_airfoil", insert_airfoil))
         .at("SKETCH", "INSERT")
         .icon("airfoil")
@@ -432,6 +432,11 @@ fn point_segment_distance(p: Vec2, a: Vec2, b: Vec2) -> f64 {
 }
 
 fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
+    let block = match p.get("block") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err(bad(cmd, "`block` must be true or false")),
+    };
     let (geom, (lo, hi), text, mut warnings) = read_drawing(p, cmd, svg)?;
     // The drawing's own span, for `simplify`'s cap: `size_from` below may replace `lo` and `hi`
     // with the SVG's sheet, which is not what is simplified.
@@ -496,36 +501,82 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
     // before adding so the message names the cap and what reduces it (#10874). Scale alone does
     // not shrink the count; `simplify` does.
     let limit = solidcraft_sketch::limits::max_points();
-    if geom.len() > limit {
+    // A block adds its axis: one line and its two points.
+    let axis = if block { 2 } else { 0 };
+    if geom.len() + axis > limit {
         // Not a parameter's fault: the drawing itself is too dense (and `simplify`, a parameter,
         // is what brings it under the cap), so the message stands on its own.
         return Err(EngineError::Other(format!(
-            "the drawing has {} curves, and a sketch takes at most {limit} points or curves: insert it with `simplify` (mm, the Simplify field) so the drawing is followed with fewer edges, split it across sketches or raise Preferences > Sketch > Largest sketch (up to {}); changing scale does not reduce how many curves it has",
+            "the drawing has {} curves{}, and a sketch takes at most {limit} points or curves: insert it with `simplify` (mm, the Simplify field) so the drawing is followed with fewer edges, split it across sketches or raise Preferences > Sketch > Largest sketch (up to {}); changing scale does not reduce how many curves it has",
             geom.len(),
+            if block { " and a block's axis" } else { "" },
             solidcraft_sketch::limits::CEILING_POINTS
         )));
     }
     let fixed = bool_(p, "fixed").unwrap_or(false);
+    let has_lines = geom.iter().any(|g| matches!(g, Geom2::Line(..)));
     // `sketch::edit`, but keeping the solve as a typed value for the reply.
     let target = sketch_store::target(s, p, cmd)?;
-    let ((curves, texts, n_fixed), report) = edit_solved(s, target, false, Analysis::Freedom, |sk, _| {
+    let ((curves, texts, n_fixed, made), report) = edit_solved(s, target, false, Analysis::Freedom, |sk, _| {
         let first = sk.points.len();
         let (cs, texts) = add_geometry(sk, &geom, &f, k, tol)?;
-        // Fixed where it is put: a Fix constraint on every point the drawing added (a circle's
-        // or ellipse's radius stays free). Refused as a whole when the constraints would not fit.
-        let mut n_fixed = 0;
-        if fixed {
-            let limit = solidcraft_sketch::limits::max_constraints();
-            if sk.constraints.len() + (sk.points.len() - first) > limit {
-                return Err(bad(cmd, format!("fixing the drawing's points needs more than the sketch's {limit} constraints")));
-            }
-            for q in first..sk.points.len() {
-                sk.add_constraint(ConstraintKind::Fix { p: q }, None)?;
-                n_fixed += 1;
+        let added = first..sk.points.len();
+        let ids = ids_of(sk, &cs);
+        // As a block: the curves keep their shape about an origin where the placement puts the
+        // file's origin (or the drawing's middle), its axis along the insert angle.
+        if block && !ids.is_empty() {
+            let (points, curves) = (solidcraft_sketch::limits::max_points(), solidcraft_sketch::limits::max_curves());
+            if sk.points.len() + 2 > points || sk.curves.len() + 1 > curves {
+                return Err(EngineError::Other(format!(
+                    "the drawing fills the sketch ({points} points, {curves} curves at most), which leaves no room for a block's axis line: insert it without Insert as block (`block`), with Simplify, or raise Preferences > Sketch > Largest sketch"
+                )));
             }
         }
-        Ok(((ids_of(sk, &cs), texts, n_fixed), Left::Unsolved))
+        let made = if block && !ids.is_empty() {
+            Some(sk.make_block_at(&ids, BlockScale::Fixed, off, angle, None).map_err(|e| bad(cmd, e.to_string()))?)
+        } else {
+            None
+        };
+        // A block that is not fixed is one connected group of its points, its axis ends and its
+        // radii, which the solver takes only up to a size; fixed, each member stands alone.
+        if let (Some(m), false) = (&made, fixed) {
+            let unknowns = sk.blocks.iter().find(|b| b.id == m.block).map_or(0, |b| 2 * (b.points.len() + 2) + b.radii.len());
+            let most = solidcraft_sketch::MAX_COMPONENT_VARS;
+            if unknowns > most {
+                let simplify = if has_lines { "; a raised Simplify (`simplify`) brings runs of short lines in with fewer points" } else { "" };
+                return Err(EngineError::Other(format!(
+                    "as one block the drawing has {unknowns} unknowns (point coordinates and radii), more than the {most} the sketch solver takes in one block for now: untick Insert as block (leave out `block`), or in a script insert it with `fixed: true` so the block is held by its axis{simplify}"
+                )));
+            }
+        }
+        // Fixed where it is put: a Fix constraint on every point the drawing added (a circle's
+        // or ellipse's radius stays free); for a block, on its axis ends and on the points no
+        // member holds. Refused as a whole when the constraints would not fit.
+        let to_fix: Vec<usize> = match (&made, fixed) {
+            (_, false) => Vec::new(),
+            (None, true) => added.collect(),
+            (Some(m), true) => {
+                let Some(CurveKind::Line { a, b }) = sk.curve_index(&m.axis).and_then(|i| sk.curves.get(i)).map(|c| &c.kind) else {
+                    return Err(bad(cmd, "the block has no axis to fix"));
+                };
+                let members: std::collections::HashSet<&str> =
+                    sk.blocks.iter().find(|b| b.id == m.block).map(|b| b.points.iter().map(|(id, _)| id.as_str()).collect()).unwrap_or_default();
+                let loose = added.filter(|q| sk.points.get(*q).is_some_and(|pt| !members.contains(pt.id.as_str())));
+                [*a, *b].into_iter().chain(loose).collect()
+            }
+        };
+        let limit = solidcraft_sketch::limits::max_constraints();
+        if !to_fix.is_empty() && sk.constraints.len() + to_fix.len() > limit {
+            return Err(bad(cmd, format!("fixing the drawing's points needs more than the sketch's {limit} constraints")));
+        }
+        for q in &to_fix {
+            sk.add_constraint(ConstraintKind::Fix { p: *q }, None)?;
+        }
+        Ok(((ids, texts, to_fix.len(), made), Left::Unsolved))
     })?;
+    if block && made.is_none() {
+        warnings.push("the drawing has no curves to make a block of; nothing was made a block".into());
+    }
     let info = report.map(|rep| SketchSolve { solved: rep.keeps_orientation(), dof: rep.dof });
     // Text becomes sketch text.
     let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch"))?;
@@ -552,6 +603,9 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
             }
         }
     }
+    if made.is_some() && n_text > 0 {
+        warnings.push(format!("the drawing's text ({n_text}) is not part of the block: blocks of text are not supported yet"));
+    }
     reply(
         cmd,
         DrawingInserted {
@@ -560,6 +614,7 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
             curves: curves.len(),
             texts: n_text,
             fixed: fixed.then_some(n_fixed),
+            block: made.map(|m| InsertedBlock { id: m.block, axis: m.axis, origin: m.origin }),
             info,
             created: None,
             warnings,
@@ -1638,6 +1693,360 @@ EOF
         let r = s.execute("sketch.insert_svg", &json!({"text": circle, "fixed": true})).unwrap();
         assert_eq!(r["fixed"], json!(1), "{r}");
         assert_eq!(s.execute("sketch.solve", &json!({})).unwrap()["dof"], json!(1), "the radius");
+    }
+
+    /// The active sketch as the model solved it.
+    fn solved_sketch(s: &Session) -> solidcraft_sketch::Sketch {
+        s.model.state().sketch(s.active_sketch.unwrap()).unwrap().sketch.clone()
+    }
+
+    fn at_point(sk: &solidcraft_sketch::Sketch, id: &str) -> Vec2 {
+        sk.point(sk.resolve_point(id).unwrap_or_else(|| panic!("no point {id}"))).unwrap()
+    }
+
+    /// The block's member curves' starts, by "<curve>.start".
+    fn member_starts(sk: &solidcraft_sketch::Sketch) -> Vec<String> {
+        sk.blocks[0].curves.iter().map(|c| format!("{c}.start")).collect()
+    }
+
+    /// Every distance between the points `ids`.
+    fn spans_between(sk: &solidcraft_sketch::Sketch, ids: &[String]) -> Vec<f64> {
+        ids.iter().flat_map(|a| ids.iter().map(move |b| at_point(sk, a).dist(at_point(sk, b)))).collect()
+    }
+
+    /// #22102: `block: true` makes the curves the drawing adds one rigid block, its origin where
+    /// the placement puts the file's origin (or the drawing's middle) and its axis along the
+    /// insert angle; the drawing lands where it would without it.
+    #[test]
+    fn an_inserted_drawing_can_come_in_as_a_block() {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let r = s.execute("sketch.insert_svg", &json!({"text": PLATE, "block": true, "at": [50, 30], "angle": 30})).unwrap();
+        assert_eq!(r["curves"], json!(4), "{r}");
+        assert_eq!(r["info"]["dof"], json!(3), "a rigid block moves and turns: {r}");
+        assert!(r.get("fixed").is_none() && r.get("warnings").is_none(), "{r}");
+        let sk = solved_sketch(&s);
+        assert_eq!(sk.blocks.len(), 1);
+        let b = &sk.blocks[0];
+        assert_eq!((r["block"]["id"].as_str(), r["block"]["axis"].as_str()), (Some(b.id.as_str()), Some(b.axis.as_str())), "{r}");
+        assert_eq!(b.scale, solidcraft_sketch::BlockScale::Fixed);
+        // Its members are the four lines the drawing added; its axis is a construction line.
+        let mut lines: Vec<&str> = sk.curves.iter().filter(|c| c.id != b.axis).map(|c| c.id.as_str()).collect();
+        let mut members: Vec<&str> = b.curves.iter().map(String::as_str).collect();
+        lines.sort_unstable();
+        members.sort_unstable();
+        assert_eq!(members, lines);
+        assert!(sk.curves[sk.curve_index(&b.axis).unwrap()].construction);
+        // The origin is where `at` put the file's origin, the axis turned by the insert angle.
+        let origin = at_point(&sk, r["block"]["origin"].as_str().unwrap());
+        assert!(origin.dist(Vec2::new(50.0, 30.0)) < 1e-9, "{origin:?}");
+        let end = at_point(&sk, &format!("{}.end", b.axis));
+        assert!(((end - origin).angle() - 30f64.to_radians()).abs() < 1e-9, "{:?}", end - origin);
+        // The drawing itself: the plate's corners (0, 0) to (20, -10), turned 30° and moved.
+        let turn = Vec2::from_angle(30f64.to_radians());
+        for (x, y) in [(0.0, 0.0), (20.0, 0.0), (20.0, -10.0), (0.0, -10.0)] {
+            let want = Vec2::new(50.0, 30.0) + turn * x + turn.perp() * y;
+            assert!(member_starts(&sk).iter().any(|p| at_point(&sk, p).dist(want) < 1e-9), "corner {want:?}");
+        }
+        // With `align: center` the origin is where the drawing's middle went.
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let r = s.execute("sketch.insert_dxf", &json!({"text": RECT_DXF, "block": true, "align": "center", "at": [-5, 7]})).unwrap();
+        let sk = solved_sketch(&s);
+        assert!(at_point(&sk, r["block"]["origin"].as_str().unwrap()).dist(Vec2::new(-5.0, 7.0)) < 1e-9, "{r}");
+        let b = &sk.blocks[0];
+        let (o, x) = (at_point(&sk, &format!("{}.start", b.axis)), at_point(&sk, &format!("{}.end", b.axis)));
+        assert!((x.y - o.y).abs() < 1e-12 && x.x > o.x, "along +X at angle 0: {o:?} {x:?}");
+        // Without `block`, as before: no block, no axis.
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let r = s.execute("sketch.insert_svg", &json!({"text": PLATE, "block": false})).unwrap();
+        assert!(r.get("block").is_none() && solved_sketch(&s).blocks.is_empty(), "{r}");
+        assert_eq!(solved_sketch(&s).curves.len(), 4);
+    }
+
+    /// A 30 x 20 rectangle as DXF lines, from the origin.
+    const RECT_DXF: &str = "0\nSECTION\n2\nENTITIES\n0\nLINE\n10\n0\n20\n0\n11\n30\n21\n0\n0\nLINE\n10\n30\n20\n0\n11\n30\n21\n20\n0\nLINE\n10\n30\n20\n20\n11\n0\n21\n20\n0\nLINE\n10\n0\n20\n20\n11\n0\n21\n0\n0\nENDSEC\n0\nEOF\n";
+
+    /// An inserted block keeps the drawing's shape when one of its curves is dragged or moved.
+    #[test]
+    fn an_inserted_block_keeps_the_drawings_shape_when_dragged_and_moved() {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        s.execute("sketch.insert_dxf", &json!({"text": RECT_DXF, "block": true, "angle": 20, "at": [10, 10]})).unwrap();
+        let sk = solved_sketch(&s);
+        let starts = member_starts(&sk);
+        let shape = spans_between(&sk, &starts);
+        let line = sk.blocks[0].curves[0].clone();
+        let from = at_point(&sk, &format!("{line}.start"));
+        let dragged = s.execute("sketch.drag", &json!({"entity": line, "from": [from.x, from.y], "to": [from.x - 12.0, from.y + 7.0]})).unwrap();
+        assert!(dragged["reached"].as_f64().unwrap() > 0.0, "{dragged}");
+        let sk = solved_sketch(&s);
+        assert!(at_point(&sk, &format!("{line}.start")).dist(from) > 1.0, "the block moved");
+        for (a, b) in spans_between(&sk, &starts).iter().zip(&shape) {
+            assert!((a - b).abs() < 1e-9, "{a} != {b}");
+        }
+        let before: Vec<Vec2> = starts.iter().map(|p| at_point(&sk, p)).collect();
+        let moved = s.execute("sketch.move", &json!({"entities": [line], "translate": [10, 5]})).unwrap();
+        assert!(moved["sketch"]["solved"].as_bool().unwrap(), "{moved}");
+        let sk = solved_sketch(&s);
+        for (p, was) in starts.iter().zip(before) {
+            assert!(at_point(&sk, p).dist(was + Vec2::new(10.0, 5.0)) < 1e-6, "{p} moved with the block");
+        }
+    }
+
+    /// `block` with `fixed` fixes only the block's axis ends (and a point no curve holds), which
+    /// holds the whole drawing: nothing is left to move and nothing is redundant.
+    #[test]
+    fn a_fixed_inserted_block_is_held_by_its_axis_alone() {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let r = s.execute("sketch.insert_svg", &json!({"text": PLATE, "block": true, "fixed": true, "at": [5, 5], "angle": 15})).unwrap();
+        assert_eq!(r["fixed"], json!(2), "{r}");
+        assert_eq!(r["created"]["constraints"].as_array().map(Vec::len), Some(2), "{r}");
+        assert_eq!(r["info"]["dof"], json!(0), "{r}");
+        assert_eq!(s.execute("sketch.solve", &json!({})).unwrap()["dof"], json!(0));
+        let st = s.model.state();
+        let solved = st.sketch(s.active_sketch.unwrap()).unwrap();
+        assert!(solved.report.ok() && solved.report.redundant.is_empty(), "{:?}", solved.report);
+        let sk = &solved.sketch;
+        let (o, x) = match sk.curves[sk.curve_index(&sk.blocks[0].axis).unwrap()].kind {
+            solidcraft_sketch::CurveKind::Line { a, b } => (a, b),
+            ref other => panic!("{other:?}"),
+        };
+        let mut fixed: Vec<usize> = sk
+            .constraints
+            .iter()
+            .map(|c| match c.kind {
+                solidcraft_sketch::ConstraintKind::Fix { p } => p,
+                ref other => panic!("only Fix constraints: {other:?}"),
+            })
+            .collect();
+        fixed.sort_unstable();
+        assert_eq!(fixed, [o.min(x), o.max(x)], "the axis ends");
+        // A point the drawing adds outside any curve is fixed on its own.
+        let with_point = RECT_DXF.replace("0\nENDSEC", "0\nPOINT\n10\n50\n20\n50\n0\nENDSEC");
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let r = s.execute("sketch.insert_dxf", &json!({"text": with_point, "block": true, "fixed": true})).unwrap();
+        assert_eq!((r["fixed"].as_u64(), r["info"]["dof"].as_u64()), (Some(3), Some(0)), "{r}");
+        // Fixed without a block, as before: one Fix per point.
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let r = s.execute("sketch.insert_dxf", &json!({"text": RECT_DXF, "fixed": true})).unwrap();
+        assert_eq!(r["fixed"], json!(4), "{r}");
+    }
+
+    /// Simplify and block together: the simplified outline is the block, every curve a member.
+    #[test]
+    fn a_simplified_drawing_comes_in_as_one_block() {
+        let n = 2000;
+        let mut path = String::from("M 20 0");
+        for k in 1..=n {
+            let a = std::f64::consts::PI * k as f64 / n as f64;
+            path.push_str(&format!(" L {:.6} {:.6}", 20.0 * a.cos(), 20.0 * a.sin()));
+        }
+        let svg =
+            format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"40mm\" height=\"20mm\" viewBox=\"-20 0 40 20\"><path d=\"{path}\"/></svg>");
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let r = s.execute("sketch.insert_svg", &json!({"text": svg, "simplify": 0.05, "block": true, "align": "center"})).unwrap();
+        let curves = r["curves"].as_u64().unwrap() as usize;
+        assert!(curves > 1 && curves < 100, "simplified: {r}");
+        let sk = solved_sketch(&s);
+        assert_eq!(sk.blocks[0].curves.len(), curves, "every curve kept is a member");
+        assert_eq!(sk.curves.len(), curves + 1, "and the axis");
+        assert_eq!(r["info"]["dof"], json!(3), "{r}");
+    }
+
+    /// The drawing's text is not part of its block (blocks of text are not supported yet): it
+    /// comes in beside it, and the reply says so.
+    #[test]
+    fn an_inserted_blocks_text_stays_outside_it() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="40mm" height="40mm" viewBox="0 0 40 40"><path d="M0 0 H40 V40 H0 Z"/><text x="5" y="20" font-size="10">Hi</text></svg>"#;
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let r = s.execute("sketch.insert_svg", &json!({"text": svg, "block": true})).unwrap();
+        assert_eq!((r["curves"].as_u64(), r["texts"].as_u64()), (Some(4), Some(1)), "{r}");
+        assert!(r["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("text")), "{r}");
+        let sk = solved_sketch(&s);
+        assert_eq!(sk.blocks[0].curves.len(), 4, "the outline only");
+        assert!(sk.blocks[0].curves.iter().all(|c| !sk.is_text_curve(sk.curve_index(c).unwrap())));
+        // Only text: nothing to make a block of, and the reply says so.
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let only = r#"<svg xmlns="http://www.w3.org/2000/svg" width="40mm" height="40mm" viewBox="0 0 40 40"><text x="5" y="20" font-size="10">Hi</text></svg>"#;
+        let r = s.execute("sketch.insert_svg", &json!({"text": only, "block": true})).unwrap();
+        assert!(r.get("block").is_none(), "{r}");
+        assert!(r["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("no curves to make a block")), "{r}");
+    }
+
+    /// `block` must be true or false: anything else is refused before the drawing is read, and
+    /// leaves no sketch behind.
+    #[test]
+    fn a_block_that_is_not_true_or_false_is_refused() {
+        for bad in [json!("yes"), json!(1), json!(0.5), json!([true]), json!({"on": true}), json!(f64::MAX)] {
+            let mut s = Session::default();
+            let e = s.execute("sketch.insert_svg", &json!({"text": PLATE, "block": bad})).unwrap_err().to_string();
+            assert!(e.contains("`block` must be true or false"), "{bad}: {e}");
+            assert!(s.active_sketch.is_none(), "{bad}: no sketch made");
+            let e = s.execute("sketch.insert_dxf", &json!({"path": "/nonexistent.dxf", "block": bad})).unwrap_err().to_string();
+            assert!(e.contains("`block` must be true or false"), "{bad}: {e}");
+        }
+        let mut s = Session::default();
+        let r = s.execute("sketch.insert_svg", &json!({"text": PLATE, "block": null})).unwrap();
+        assert!(r.get("block").is_none(), "null reads as left out: {r}");
+    }
+
+    /// A zigzag of `n` DXF lines end to end: `n + 1` points.
+    fn zigzag_dxf(n: usize) -> String {
+        let mut dxf = String::from("0\nSECTION\n2\nENTITIES\n");
+        for i in 0..n {
+            let (x0, x1) = (i as f64 * 0.01, (i + 1) as f64 * 0.01);
+            dxf.push_str(&format!("0\nLINE\n10\n{x0}\n20\n{}\n11\n{x1}\n21\n{}\n", (i % 2) as f64, ((i + 1) % 2) as f64));
+        }
+        dxf.push_str("0\nENDSEC\n0\nEOF\n");
+        dxf
+    }
+
+    /// A dense drawing comes in as a fixed block in about the time it comes in without one:
+    /// making the block looks each curve up once, and the fixed block is constructed, not
+    /// iterated.
+    #[test]
+    fn a_dense_drawing_comes_in_as_a_block_in_reasonable_time() {
+        let n = 15_000;
+        let dxf = zigzag_dxf(n);
+        let timed = |block: bool| {
+            let mut s = Session::default();
+            s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+            let t = std::time::Instant::now();
+            let r = s.execute("sketch.insert_dxf", &json!({"text": dxf, "block": block, "fixed": block})).unwrap();
+            (t.elapsed().as_secs_f64(), r, s)
+        };
+        let (plain, _, _) = timed(false);
+        let (as_block, r, s) = timed(true);
+        eprintln!("{n} lines: {:.0} ms as drawn, {:.0} ms as a fixed block", plain * 1e3, as_block * 1e3);
+        assert_eq!(r["curves"], json!(n), "{r}");
+        assert_eq!((r["fixed"].as_u64(), r["info"]["dof"].as_u64(), r["info"]["solved"].as_bool()), (Some(2), Some(0), Some(true)), "{r}");
+        assert_eq!(solved_sketch(&s).blocks[0].curves.len(), n);
+        assert!(as_block < 3.0 * plain + 2.0, "{as_block} s as a block, {plain} s without");
+    }
+
+    /// A block that is not fixed is one connected group for the solver, which takes at most
+    /// `MAX_COMPONENT_VARS` unknowns at once: up to that it solves, past it the insert is refused
+    /// and names what helps, leaving nothing behind.
+    #[test]
+    fn an_unfixed_block_larger_than_the_solver_takes_is_refused() {
+        // n lines, n + 1 points, and the axis's two: 2 (n + 3) unknowns.
+        let fits = solidcraft_sketch::MAX_COMPONENT_VARS / 2 - 3;
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let r = s.execute("sketch.insert_dxf", &json!({"text": zigzag_dxf(fits), "block": true})).unwrap();
+        assert_eq!((r["info"]["dof"].as_u64(), r["info"]["solved"].as_bool()), (Some(3), Some(true)), "{r}");
+        let mut s = Session::default();
+        let e = s.execute("sketch.insert_dxf", &json!({"text": zigzag_dxf(fits + 1), "block": true})).unwrap_err();
+        assert!(matches!(e, crate::EngineError::Other(_)), "not a parameter's fault: {e:?}");
+        let e = e.to_string();
+        assert!(e.contains("unknowns") && e.contains("Insert as block") && e.contains("`fixed: true`") && e.contains("Simplify"), "{e}");
+        assert!(s.active_sketch.is_none() && s.doc.features.is_empty(), "nothing is left behind");
+        // Simplify is offered only where it helps: a drawing of circles has no runs of lines.
+        let circles: String = (0..1400).map(|i| format!("0\nCIRCLE\n10\n{}\n20\n0\n40\n1\n", i * 3)).collect();
+        let circles = format!("0\nSECTION\n2\nENTITIES\n{circles}0\nENDSEC\n0\nEOF\n");
+        let e = s.execute("sketch.insert_dxf", &json!({"text": circles, "block": true})).unwrap_err().to_string();
+        assert!(e.contains("unknowns") && !e.contains("Simplify"), "{e}");
+        let r = s.execute("sketch.insert_dxf", &json!({"text": zigzag_dxf(fits + 1), "block": true, "fixed": true})).unwrap();
+        assert_eq!((r["info"]["dof"].as_u64(), r["info"]["solved"].as_bool()), (Some(0), Some(true)), "{r}");
+        // A fixed block well past the limit that loses one of its axis Fixes: the delete is
+        // accepted, and the sketch then says why it can't solve.
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        s.execute("sketch.insert_dxf", &json!({"text": zigzag_dxf(2 * fits), "block": true, "fixed": true})).unwrap();
+        let sk = solved_sketch(&s);
+        let fix = sk.constraints.last().map(|c| c.id.clone()).unwrap();
+        let deleted = s.execute("sketch.delete", &json!({"entities": [fix]})).unwrap();
+        assert_eq!(deleted["sketch"]["solved"], json!(false), "{deleted}");
+        let st = s.model.state();
+        let report = &st.sketch(s.active_sketch.unwrap()).unwrap().report;
+        assert!(!report.ok() && report.oversized_block, "{:?} {:?}", report.status, report.oversized);
+        let why = report.failure(|f| f.to_string());
+        assert!(why.contains("a block joins all its points") && !why.contains("copies"), "{why}");
+    }
+
+    /// A file origin far from its drawing still places the block's origin there, but the axis
+    /// is about the drawing's own size, and the block solves and moves as one.
+    #[test]
+    fn a_block_placed_by_a_far_file_origin_keeps_a_short_axis() {
+        let far = RECT_DXF
+            .replace("\n10\n0\n", "\n10\n100000\n")
+            .replace("\n11\n0\n", "\n11\n100000\n")
+            .replace("\n10\n30\n", "\n10\n100030\n")
+            .replace("\n11\n30\n", "\n11\n100030\n");
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let r = s.execute("sketch.insert_dxf", &json!({"text": far, "block": true, "align": "origin", "at": [5, 5]})).unwrap();
+        assert_eq!((r["info"]["dof"].as_u64(), r["info"]["solved"].as_bool()), (Some(3), Some(true)), "{r}");
+        let sk = solved_sketch(&s);
+        let b = &sk.blocks[0];
+        let (o, x) = (at_point(&sk, &format!("{}.start", b.axis)), at_point(&sk, &format!("{}.end", b.axis)));
+        assert!(o.dist(Vec2::new(5.0, 5.0)) < 1e-9, "the origin is where the file's origin went: {o:?}");
+        // Half the 30 x 20 rectangle's diagonal (18.03), rounded to a tidy 20.
+        assert!((o.dist(x) - 20.0).abs() < 1e-9, "{}", o.dist(x));
+        let starts = member_starts(&sk);
+        assert!(starts.iter().all(|p| at_point(&sk, p).x > 100_000.0), "the drawing stays where it was drawn");
+        let shape = spans_between(&sk, &starts);
+        let moved = s.execute("sketch.move", &json!({"entities": [b.curves[0]], "translate": [10, 5]})).unwrap();
+        assert!(moved["sketch"]["solved"].as_bool().unwrap(), "{moved}");
+        let sk = solved_sketch(&s);
+        for (a, b) in spans_between(&sk, &starts).iter().zip(&shape) {
+            assert!((a - b).abs() < 1e-6, "{a} != {b}");
+        }
+    }
+
+    /// A drawing that fills the sketch to its limit comes in as drawn, but has no room for a
+    /// block's axis: that is refused as the drawing's size, not as a bad parameter.
+    #[test]
+    fn a_drawing_that_fills_the_sketch_has_no_room_for_a_block() {
+        let _turn = SKETCH_LIMIT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        // Separate lines, two points each, and a lone point when the room left is odd.
+        let room = solidcraft_sketch::limits::max_points() - solved_sketch(&s).points.len();
+        let mut dxf = String::from("0\nSECTION\n2\nENTITIES\n");
+        for i in 0..room / 2 {
+            dxf.push_str(&format!("0\nLINE\n10\n{i}\n20\n0\n11\n{i}\n21\n1\n"));
+        }
+        if room % 2 == 1 {
+            dxf.push_str("0\nPOINT\n10\n-5\n20\n-5\n");
+        }
+        dxf.push_str("0\nENDSEC\n0\nEOF\n");
+        s.execute("sketch.insert_dxf", &json!({"text": dxf})).unwrap();
+        assert_eq!(solved_sketch(&s).points.len(), solidcraft_sketch::limits::max_points(), "as drawn, it fills the sketch");
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let e = s.execute("sketch.insert_dxf", &json!({"text": dxf, "block": true, "fixed": true})).unwrap_err();
+        assert!(matches!(e, crate::EngineError::Other(_)), "{e:?}");
+        assert!(e.to_string().contains("axis"), "{e}");
+    }
+
+    /// An insert that fixes nothing is not refused for the constraints a sketch already holds,
+    /// even past the limit in force (a limit lowered since they were added).
+    #[test]
+    fn a_plain_insert_ignores_the_constraint_limit() {
+        let _turn = SKETCH_LIMIT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        use solidcraft_sketch::limits;
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let id = s.active_sketch.unwrap();
+        let mut doc = (*s.doc).clone();
+        let sk = doc.sketch_mut(id).unwrap();
+        let p = sk.add_point(Vec2::new(-50.0, -50.0), None).unwrap();
+        for i in 0..=limits::max_constraints() {
+            sk.constraints.push(solidcraft_sketch::Constraint {
+                id: format!("kx{i}"),
+                kind: solidcraft_sketch::ConstraintKind::Fix { p },
+                param: None,
+                driven: false,
+                text: None,
+            });
+        }
+        *s.doc_mut() = doc;
+        let r = s.execute("sketch.insert_svg", &json!({"text": PLATE}));
+        assert!(r.is_ok(), "{r:?}");
+        let e = s.execute("sketch.insert_svg", &json!({"text": PLATE, "fixed": true})).unwrap_err().to_string();
+        assert!(e.contains("fixing the drawing's points"), "{e}");
     }
 
     /// A NACA 00xx section (the public four-digit formula), `n` points per side on a cosine
