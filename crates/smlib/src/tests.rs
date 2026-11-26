@@ -131,7 +131,7 @@ fn in_own_process(test: &str, f: impl FnOnce()) {
 }
 
 /// Entry points that ask no kernel, so have nothing to say here.
-const NO_KERNEL: [&str; 16] = [
+const NO_KERNEL: [&str; 17] = [
     "inertia_tensor",
     "is_valid",
     "failed_tests",
@@ -148,6 +148,7 @@ const NO_KERNEL: [&str; 16] = [
     "in_call",
     "hold_a_kernel",
     "start",
+    "write_kernel_profiles",
 ];
 
 const ANSWERING: &[&str] = &[

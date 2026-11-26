@@ -208,7 +208,58 @@ fn main() -> ExitCode {
     }
     // Compiled plugins are kept in the per-user cache folder, as the desktop app keeps them.
     solidcraft_engine::plugin::configure_compile_cache();
-    let r = match args.first().map(String::as_str) {
+    // The command, wrapped in solidcore-ops' per-call kernel profiler when a kernel profile
+    // file is named (feature `solidcore-profile`).
+    #[cfg(feature = "solidcore-profile")]
+    let (r, ops_call_profiles) = if std::env::var_os("SOLIDCRAFT_KERNEL_PROFILE").is_some() {
+        let (r, profiles) = solidcraft_engine::kernel::profiled(|| run_command(&args));
+        (r, Some(profiles))
+    } else {
+        (run_command(&args), None)
+    };
+    #[cfg(not(feature = "solidcore-profile"))]
+    let r = run_command(&args);
+    // The table also when the command failed: where it spent its time before failing.
+    let r = match (r, profiling.map(profiling::Profiling::finish)) {
+        (Ok(()), Some(Err(e))) => Err(e),
+        (r, _) => r,
+    };
+    // Solidcore's own profiler too (feature `solidcore-profile`), when a file is named: the
+    // kernel's scopes and counted work of this run, as JSON Lines, failing runs included.
+    #[cfg(feature = "solidcore-profile")]
+    if let Ok(path) = std::env::var("SOLIDCRAFT_KERNEL_PROFILE") {
+        match std::fs::File::create(&path) {
+            Ok(mut file) => {
+                use std::io::Write as _;
+                let _ = solidcraft_engine::kernel::write_kernel_profiles(&mut file);
+                if let Some(calls) = ops_call_profiles {
+                    for call in calls {
+                        let marker = serde_json::json!({"type": "ops_call", "name": call.call});
+                        let _ = writeln!(file, "{marker}");
+                        let _ = call.profile.write_jsonl(&mut file);
+                    }
+                }
+            }
+            Err(e) => {
+                solidcraft_engine::note!("warning: SOLIDCRAFT_KERNEL_PROFILE {path}: not written: {e}");
+            }
+        }
+    }
+    // The device that drew this run's pictures closes before the process exits: with it open, a
+    // driver's exit handler can crash after the work is done (#19431).
+    solidcraft_viewport_gpu::capture::close_shared_before_exit();
+    match r {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            solidcraft_engine::note!("error: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The command `args` names, run once (main's dispatch).
+fn run_command(args: &[String]) -> Result<(), String> {
+    match args.first().map(String::as_str) {
         // Asked-for help is not an error: the command's usage on stdout, exit 0. It is read
         // before the command runs, so `--help` never starts a run (a fuzz run, a server).
         Some(cmd) if wants_help(&args[1..]) && is_command(cmd) => {
@@ -268,21 +319,6 @@ fn main() -> ExitCode {
             Ok(())
         }
         _ => Err(usage()),
-    };
-    // The table also when the command failed: where it spent its time before failing.
-    let r = match (r, profiling.map(profiling::Profiling::finish)) {
-        (Ok(()), Some(Err(e))) => Err(e),
-        (r, _) => r,
-    };
-    // The device that drew this run's pictures closes before the process exits: with it open, a
-    // driver's exit handler can crash after the work is done (#19431).
-    solidcraft_viewport_gpu::capture::close_shared_before_exit();
-    match r {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            solidcraft_engine::note!("error: {e}");
-            ExitCode::FAILURE
-        }
     }
 }
 
