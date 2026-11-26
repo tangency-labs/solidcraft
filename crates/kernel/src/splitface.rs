@@ -845,6 +845,29 @@ pub fn split_at_facing_side(tool: &Body, sheet: &Body, face: usize, near: Vec3, 
     split_body(tool, &SplitTool::Face { body: &trough, face: round })
 }
 
+/// `tool`, a prism run on past the surface of `face` of `target`, cut at that surface carried on
+/// past the face's edges (a plane without end, a cylinder, cone, sphere or torus along its
+/// surface), keeping the pieces that start at `start`: no on-face test, as the whole profile ends
+/// on the extended surface (#827). `None` when a kept piece still has its end cap at `far`: the
+/// surface does not cross the prism's path over some of the profile (a cone's apex side, a plane
+/// running along the path), so that part has no end.
+///
+/// The two heights are told apart by the body's own tolerance, never more than a quarter of the
+/// distance between them, as in [`face_split_if_on_face`].
+pub fn face_split_extended(tool: &Body, target: &Body, face: usize, plane: &Plane, start: f64, far: f64) -> Result<Option<Vec<Body>>> {
+    let mut out = Vec::new();
+    for part in split_body(tool, &SplitTool::Face { body: target, face })? {
+        if !has_cap_at(&part, plane, start, far - start) {
+            continue;
+        }
+        if has_cap_at(&part, plane, far, far - start) {
+            return Ok(None);
+        }
+        out.push(part);
+    }
+    Ok(Some(out))
+}
+
 /// Whether `body` has a planar face square to `plane`'s normal at `height` along it (a prism's
 /// cap there), by the body's own tolerance never over a quarter of `span`
 /// ([`solidcore_ops::cap::is_square_plane_at_height`]).

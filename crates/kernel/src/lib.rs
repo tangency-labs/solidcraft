@@ -564,6 +564,7 @@ pub use solidcraft_smlib::write_kernel_profiles;
 #[cfg(feature = "solidcore-profile")]
 pub use solidcraft_smlib::profiled;
 pub use splitface::SplitTool;
+pub use splitface::face_split_extended;
 pub use splitface::face_split_if_on_face;
 pub use splitface::has_cap_at;
 pub use splitface::split_at_facing_side;
