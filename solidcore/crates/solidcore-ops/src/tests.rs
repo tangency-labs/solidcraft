@@ -1581,7 +1581,7 @@ fn periodic_seam_completion_keeps_every_trim_over_its_edge_interval() {
     }
     crate::record_check::validate(&completed).unwrap();
     crate::record_check::agreement(&completed).unwrap();
-    assert!(crate::pcurve::passes_import_checks(&completed));
+    assert!(crate::pcurve::import_check_failure(&completed).is_none());
     // A completion that leaves a trim over only the first half of its edge's interval, as
     // rebuilding a split edge's trim by sampling did for a real model, is refused by the
     // record's validity check, so the import keeps the record it had.
@@ -1596,7 +1596,28 @@ fn periodic_seam_completion_keeps_every_trim_over_its_edge_interval() {
         *t = 0.5 * (first + last);
     }
     assert!(crate::record_check::validate(&short).is_err());
-    assert!(!crate::pcurve::passes_import_checks(&short));
+    assert!(crate::pcurve::import_check_failure(&short).is_some());
+    // A completion that is used says nothing. One the checks refuse is named, so the import
+    // can tell a reader why the body kept its imported trims.
+    let (used, skipped) = crate::pcurve::complete_periodic_seams_noted(&source).unwrap();
+    assert!(used.is_some() && skipped.is_none());
+    let why = crate::pcurve::import_check_failure(&short).unwrap();
+    assert!(why.contains("the completed record is invalid"), "{why}");
+    assert!(crate::pcurve::import_check_failure(&completed).is_none());
+    // A trim that starts a rounding error off its edge's interval is moved onto it.
+    let mut rounded = completed.clone();
+    let Loop::Edges { edges } = &mut rounded.faces[0].loops[0] else {
+        panic!("the wall's first loop is an edge loop");
+    };
+    let edge_interval = completed.edges[edges[0].edge as usize].interval;
+    let (Curve2::Spline { knots, .. } | Curve2::RationalSpline { knots, .. }) =
+        &mut edges[0].pcurve;
+    for t in knots.iter_mut().filter(|t| **t == edge_interval[0]) {
+        *t += 5.5e-17;
+    }
+    assert_ne!(knots[0], edge_interval[0]);
+    crate::pcurve::snap_trim_ends(&mut rounded);
+    assert_eq!(rounded, completed);
     let (body, _) = Body::from_record(&completed, true).unwrap();
     let check = body.check(CheckLevel::All).unwrap();
     assert!(check.is_valid(), "{check}");
