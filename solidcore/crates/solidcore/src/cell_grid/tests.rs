@@ -2871,3 +2871,171 @@ fn a_conic_whose_chord_is_too_short_to_measure_stays_within_the_tolerance_of_its
         assert!(near <= TOL, "t {i}/20000: {near} from the chords");
     }
 }
+
+// --- voronoi cells ---
+
+/// A voronoi grid with the test size and web.
+fn voronoi(seed: u32, irregularity: f64, clip: Clip) -> CellGridSpec {
+    CellGridSpec {
+        seed,
+        irregularity,
+        clip,
+        ..spec(CellShape::Voronoi)
+    }
+}
+
+/// The corners of a cell's single loop of lines.
+fn corners(cell: &GridCell) -> Vec<Vec2> {
+    assert_eq!(cell.loops.len(), 1, "cell ({}, {})", cell.i, cell.j);
+    vertices(cell)
+}
+
+#[test]
+fn a_voronoi_grid_with_the_same_seed_is_planned_the_same() {
+    let field = [rect(0.0, 0.0, 60.0, 40.0)];
+    let a = run(&field, &voronoi(7, 0.8, Clip::Free));
+    let b = run(&field, &voronoi(7, 0.8, Clip::Free));
+    assert!(!a.cells.is_empty());
+    assert_eq!(a, b);
+}
+
+#[test]
+fn a_voronoi_grid_with_another_seed_is_planned_differently() {
+    let field = [rect(0.0, 0.0, 60.0, 40.0)];
+    let a = run(&field, &voronoi(7, 0.8, Clip::Free));
+    let b = run(&field, &voronoi(8, 0.8, Clip::Free));
+    assert_ne!(a.cells, b.cells);
+}
+
+#[test]
+fn a_voronoi_grid_without_irregularity_is_the_hexagon_grid() {
+    let field = [rect(-3.0, -2.0, 47.0, 41.0)];
+    for clip in [Clip::Whole, Clip::Free] {
+        let hex = run(&field, &with_clip(CellShape::Hexagon, clip));
+        let vor = run(&field, &voronoi(3, 0.0, clip));
+        assert_eq!(hex.cells.len(), vor.cells.len(), "{clip:?}");
+        assert!((hex.open_area - vor.open_area).abs() < 1e-6, "{clip:?}");
+        let mut hex_cells: Vec<(i64, i64, f64)> =
+            hex.cells.iter().map(|c| (c.i, c.j, c.area)).collect();
+        let mut vor_cells: Vec<(i64, i64, f64)> =
+            vor.cells.iter().map(|c| (c.i, c.j, c.area)).collect();
+        hex_cells.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+        vor_cells.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+        for (h, v) in hex_cells.iter().zip(&vor_cells) {
+            assert_eq!((h.0, h.1), (v.0, v.1), "{clip:?}");
+            assert!((h.2 - v.2).abs() < 1e-6, "{clip:?} {h:?} {v:?}");
+        }
+    }
+    let whole = run(&field, &voronoi(3, 0.0, Clip::Whole));
+    for c in &whole.cells {
+        assert!((c.area - CELL_AREA).abs() < 1e-6, "{c:?}");
+    }
+}
+
+#[test]
+fn voronoi_cells_are_convex_inside_the_field_and_a_web_apart() {
+    let (x0, y0, x1, y1) = (0.0, 0.0, 30.0, 25.0);
+    let tol = 1e-6;
+    for seed in [0, 1, 42] {
+        for irregularity in [0.3, 1.0] {
+            let plan = run(
+                &[rect(x0, y0, x1, y1)],
+                &voronoi(seed, irregularity, Clip::Free),
+            );
+            assert!(plan.cells.len() > 10);
+            let cells: Vec<Vec<Vec2>> = plan.cells.iter().map(corners).collect();
+            let mut total = 0.0;
+            for (cell, pts) in plan.cells.iter().zip(&cells) {
+                total += cell.area;
+                assert!((poly_area(pts) - cell.area).abs() < tol, "{cell:?}");
+                let n = pts.len();
+                for k in 0..n {
+                    let (a, b, c) = (pts[k], pts[(k + 1) % n], pts[(k + 2) % n]);
+                    assert!(cross2(b - a, c - b) > -tol, "not convex: {cell:?}");
+                    assert!(a.x > x0 - tol && a.x < x1 + tol, "{cell:?}");
+                    assert!(a.y > y0 - tol && a.y < y1 + tol, "{cell:?}");
+                }
+            }
+            assert!(total < (x1 - x0) * (y1 - y0));
+            for a in 0..cells.len() {
+                let ca = Convex::new(cells[a].clone()).unwrap();
+                for b in a + 1..cells.len() {
+                    assert!(
+                        poly_gap(&cells[a], &cells[b]) >= W - tol,
+                        "cells {a} and {b} closer than the web"
+                    );
+                    assert!(cells[b].iter().all(|&q| !ca.contains(q, tol)));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn voronoi_cells_with_rounded_corners_are_smaller_and_as_many() {
+    let field = [rect(0.0, 0.0, 40.0, 30.0)];
+    let sharp = run(&field, &voronoi(5, 0.6, Clip::Whole));
+    let round = run(
+        &field,
+        &CellGridSpec {
+            corner_radius: 0.5,
+            ..voronoi(5, 0.6, Clip::Whole)
+        },
+    );
+    assert_eq!(sharp.cells.len(), round.cells.len());
+    for (s, r) in sharp.cells.iter().zip(&round.cells) {
+        assert!(r.area < s.area && r.area > 0.0, "{r:?}");
+        assert!(r.loops[0]
+            .segs
+            .iter()
+            .any(|seg| matches!(seg, Seg2::Arc { .. })));
+        // The loop closes and its area is the one reported.
+        let area = r.loops[0].signed_area().unwrap().value;
+        assert!((area - r.area).abs() < 1e-6, "{area} {}", r.area);
+    }
+    // Trimmed rounded cells chain into closed loops too.
+    let free = run(
+        &field,
+        &CellGridSpec {
+            corner_radius: 0.5,
+            ..voronoi(5, 0.6, Clip::Free)
+        },
+    );
+    assert!(free.warnings.is_empty(), "{:?}", free.warnings);
+    assert!(free.partial > 0);
+}
+
+#[test]
+fn a_voronoi_grid_snaps_as_whole_cells() {
+    let field = [rect(0.0, 0.0, 40.0, 30.0)];
+    let snap = run(&field, &voronoi(9, 0.5, Clip::Snap));
+    let whole = run(&field, &voronoi(9, 0.5, Clip::Whole));
+    assert_eq!(snap, whole);
+    assert_eq!(snap.partial, 0);
+}
+
+#[test]
+fn an_irregularity_outside_zero_to_one_or_a_negative_corner_radius_is_refused() {
+    let field = [rect(0.0, 0.0, 20.0, 20.0)];
+    for irregularity in [-0.1, 1.5, f64::NAN, f64::INFINITY] {
+        let err = plan(&field, &voronoi(0, irregularity, Clip::Free)).unwrap_err();
+        assert!(
+            matches!(&err, CellGridError::Parameter(m) if m.contains("irregularity")),
+            "{err}"
+        );
+    }
+    for corner_radius in [-0.5, f64::NAN] {
+        let err = plan(
+            &field,
+            &CellGridSpec {
+                corner_radius,
+                ..voronoi(0, 0.5, Clip::Free)
+            },
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, CellGridError::Parameter(m) if m.contains("corner radius")),
+            "{err}"
+        );
+    }
+}

@@ -23,6 +23,13 @@ const MIN_AREA: f64 = 1e-9;
 pub(crate) enum Cell<'a> {
     Polygon(&'a Convex),
     Circle { c: Vec2, r: f64 },
+    /// A convex polygon with rounded corners: the points within `r` of the convex `core`, its
+    /// outline `prims` (counter-clockwise lines and arcs).
+    Rounded {
+        core: &'a Convex,
+        r: f64,
+        prims: Vec<Prim>,
+    },
 }
 
 impl Cell<'_> {
@@ -35,6 +42,7 @@ impl Cell<'_> {
                 x1: c.x + r,
                 y1: c.y + r,
             },
+            Cell::Rounded { core, r, .. } => core.bounds.grown(*r),
         }
     }
 
@@ -57,6 +65,7 @@ impl Cell<'_> {
                     p1: start,
                 }]
             }
+            Cell::Rounded { prims, .. } => prims.clone(),
         }
     }
 
@@ -64,6 +73,16 @@ impl Cell<'_> {
         match self {
             Cell::Polygon(poly) => poly.contains(p, 0.0),
             Cell::Circle { c, r } => p.distance(*c) < *r,
+            Cell::Rounded { core, r, .. } => {
+                let n = core.pts.len();
+                core.contains(p, 0.0)
+                    || (0..n).any(|k| {
+                        matches!(
+                            (core.pts.get(k), core.pts.get(ring_next(k, n))),
+                            (Some(&a), Some(&b)) if Prim::line(a, b).distance(p) < *r
+                        )
+                    })
+            }
         }
     }
 }

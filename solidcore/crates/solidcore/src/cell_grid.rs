@@ -47,6 +47,7 @@ pub(crate) mod lattice;
 pub(crate) mod region;
 pub(crate) mod snap;
 mod vec;
+pub(crate) mod voronoi;
 
 #[cfg(test)]
 mod tests;
@@ -394,12 +395,8 @@ pub fn cell_center(spec: &CellGridSpec, i: i64, j: i64) -> Result<Vec2, CellGrid
 
 /// The cells of a grid over a field given as closed loops (see the module docs).
 pub fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan, CellGridError> {
-    // VORONOI-TODO: plan voronoi cells here instead of refusing them.
     if spec.shape == CellShape::Voronoi {
-        spec.validate()?;
-        return Err(CellGridError::Parameter(
-            "the voronoi shape is not built yet".into(),
-        ));
+        return voronoi::plan(field, spec);
     }
     let lat = spec.lattice()?;
     let mut warnings = Vec::new();
