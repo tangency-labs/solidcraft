@@ -2,7 +2,7 @@
 //!
 //! A [`Table`] is a definition: its columns, the side its heading is on, its row height, its text
 //! height, its two line widths, a filter and overrides. A [`Column`]'s cells are cell content
-//! ([`crate::cell`]) read against the row each is on: row fields and text. The rows are input
+//! ([`solidcraft_geom::cell`]) read against the row each is on: row fields and text. The rows are input
 //! ([`Row`]), in the order they are listed (a bill of materials' item order), with their values
 //! worked out and formatted: nothing here works one out, so a filter hides rows and never changes
 //! a count or a quantity. [`Table::validate`] checks a definition on its own, as when one is read,
@@ -27,10 +27,10 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::Aabb2;
-use crate::cell::{self, Content, HAlign, PADDING_MM, Part, Source, Warning, check_text, is_snake_case};
-use crate::paper::{Group, Item, MAX_COORDINATE_MM, MAX_LINE_MM, MAX_SIDE_MM, ObjectKind};
 use solidcore_record::{Loop2, Seg2, Vec2};
+use solidcraft_geom::Aabb2;
+use solidcraft_geom::cell::{self, Content, HAlign, PADDING_MM, Part, Source, Warning, check_text, is_snake_case};
+use solidcraft_geom::paper::{Group, Item, MAX_COORDINATE_MM, MAX_LINE_MM, MAX_SIDE_MM, ObjectKind};
 
 /// The most rows a table may list, and the most overrides it may keep.
 pub const MAX_ROWS: usize = 10_000;
@@ -38,7 +38,7 @@ pub const MAX_ROWS: usize = 10_000;
 pub const MAX_COLUMNS: usize = 64;
 /// The most bytes of text a table and its rows may hold in all.
 pub const MAX_TEXT_BYTES: usize = 1 << 20;
-use crate::cell::MISSING;
+use solidcraft_geom::cell::MISSING;
 /// The distance between baselines, in cap heights: ISO 3098-0's line spacing.
 pub const LINE_PITCH: f64 = 10.0 / 7.0;
 /// The longest row field key or field.
@@ -530,5 +530,5 @@ fn wrap(text: &str, room: f64, width: &dyn Fn(&str) -> Result<f64>) -> Result<(V
 }
 
 #[cfg(test)]
-#[path = "table_tests.rs"]
+#[path = "table_layout_tests.rs"]
 mod tests;

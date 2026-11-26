@@ -7,8 +7,8 @@
 //! A tag reads no model: the sheet sets it with its own notes, in paper coordinates.
 
 use solidcore_record::{Seg2, Vec2};
+use solidcraft_doc::drawing::revision::{RevisionRecord, Tag, TagText};
 use solidcraft_geom::paper::{Group, Item, ObjectKind};
-use solidcraft_geom::revision::{RevisionRecord, Tag, TagText};
 use solidcraft_sketch::{PaperFonts, TextStyle};
 
 use crate::drawing_dimension_paper::{GAP_MM, Layout, OnPaper, TEXT_MM, Text, placed, text_box};

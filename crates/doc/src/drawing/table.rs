@@ -17,9 +17,9 @@ use serde::{Deserialize, Serialize};
 use solidcraft_geom::cell::{Content, Format, HAlign, Part, Source};
 use solidcraft_geom::drawing_view::is_paper_coordinate;
 use solidcraft_geom::paper::MAX_SIDE_MM;
-use solidcraft_geom::table::{self, BALLOONED, Column, Filter, Heading, Table};
 
 use super::by_id::Record;
+use super::table_layout::{self as table, BALLOONED, Column, Filter, Heading, Table};
 use super::{Drawing, SheetComponent, require};
 use crate::assembly::BomType;
 use crate::bom::{self, Bom, Group, Mass, Quantity, Request, View};

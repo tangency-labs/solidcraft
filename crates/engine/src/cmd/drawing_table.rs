@@ -13,11 +13,11 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use solidcraft_doc::drawing::table::{Kind, MassFormat, PartsList, SheetTable};
+use solidcraft_doc::drawing::table_layout::BALLOONED;
 use solidcraft_doc::drawing::{Drawing, OnSheet, SheetComponent};
 use solidcraft_doc::ids;
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::cell::Warning;
-use solidcraft_geom::table::BALLOONED;
 use solidcraft_sketch::PaperFonts;
 
 use super::CommandSpec;

@@ -1,7 +1,7 @@
 use solidcraft_doc::drawing::SheetComponent;
 use solidcraft_doc::drawing::table::PartsList;
+use solidcraft_doc::drawing::table_layout::Heading;
 use solidcraft_geom::cell::Content;
-use solidcraft_geom::table::Heading;
 
 use super::*;
 

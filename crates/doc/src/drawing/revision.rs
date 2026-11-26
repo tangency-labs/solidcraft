@@ -1,6 +1,6 @@
 //! A drawing's revisions: the revision record, its numbering, its issued history and its tags, as
-//! data. The revision table shows the record through the sheet table ([`crate::table`]), and a
-//! title block's revision fields ([`crate::cell::Source::Revision`]) read its newest row through the
+//! data. The revision table shows the record through the sheet table ([`super::table_layout`]), and a
+//! title block's revision fields ([`solidcraft_geom::cell::Source::Revision`]) read its newest row through the
 //! same [`RevisionRow::field`].
 //!
 //! - One record covers the whole drawing, or each sheet on its own (`per_sheet`), numbered apart.
@@ -24,10 +24,10 @@
 use std::collections::{BTreeSet, HashSet};
 
 use serde::{Deserialize, Serialize};
+use solidcraft_geom::cell::{self, Content, HAlign, Part, Source, check_label, check_text};
+use solidcraft_geom::drawing_view::is_paper_coordinate;
 
-use crate::cell::{self, Content, HAlign, Part, Source, check_label, check_text};
-use crate::drawing_view::is_paper_coordinate;
-use crate::table::{self, Column, Heading, RowKind, Table};
+use super::table_layout::{self as table, Column, Heading, RowKind, Table};
 
 /// The most rows a record may have.
 pub const MAX_ROWS: usize = 1000;
@@ -73,7 +73,7 @@ pub struct RevisionRow {
     #[serde(with = "crate::ids")]
     pub id: u64,
     /// Its sheet in a record kept per sheet (opaque here), else none.
-    #[serde(default, with = "crate::ids::option")]
+    #[serde(default, with = "solidcraft_geom::ids::option")]
     pub sheet: Option<u64>,
     pub revision: String,
     #[serde(default)]

@@ -154,7 +154,7 @@ fn require(condition: bool, message: &'static str) -> Result<()> {
 
 /// A lowercase letter, then lowercase letters, digits and underscores: at most 64 in all. Cells and
 /// columns are named by it.
-pub(crate) fn is_snake_case(name: &str) -> bool {
+pub fn is_snake_case(name: &str) -> bool {
     let mut bytes = name.bytes();
     name.len() <= MAX_NAME_BYTES
         && bytes.next().is_some_and(|b| b.is_ascii_lowercase())

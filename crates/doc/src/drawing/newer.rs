@@ -5,9 +5,9 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, value::RawValue};
-use solidcraft_geom::revision::{self, RevisionRow, Tag};
 
 use super::image::{self, ImageFile, SheetImage};
+use super::revision::{self, RevisionRow, Tag};
 use super::table::{Kind, SheetTable};
 use super::view::{View, ViewKind};
 use super::{

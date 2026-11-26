@@ -32,11 +32,11 @@ use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
 use solidcraft_geom::drawing_view::is_paper_coordinate;
 use solidcraft_geom::paper::MAX_SIDE_MM;
-use solidcraft_geom::table::Ballooned;
 
 use super::by_id::Record;
 use super::dimension::{Lookup, ModelEdge, Status, check_edge};
 use super::table::{Kind, PartsList, SheetTable};
+use super::table_layout::Ballooned;
 use super::{Drawing, require};
 use crate::bom::{self, Bom, Tree, Unlisted, item_text};
 use crate::{DocError, Document, Model, ModelState, Result, ids};

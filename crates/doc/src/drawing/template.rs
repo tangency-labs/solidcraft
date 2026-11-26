@@ -26,11 +26,11 @@ use std::sync::Arc;
 
 use solidcraft_geom::cell::Part;
 use solidcraft_geom::drawing_sheet::{self, DrawingBorderProfile, Orientation, PaperSize};
-use solidcraft_geom::revision::RevisionRecord;
 use solidcraft_geom::title_block::{self, CellKind, TitleBlock};
 
 use super::Drawing;
 use super::image::ImageFile;
+use super::revision::RevisionRecord;
 use crate::format::DRAWING;
 use crate::ids::{self, IdSource};
 use crate::{DocError, Document, Result};
