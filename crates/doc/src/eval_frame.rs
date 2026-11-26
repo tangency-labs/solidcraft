@@ -1522,9 +1522,7 @@ fn open_reach((a, b): (Vec3, Vec3), at_start: bool, own: &Plane, corners: &[Vec2
             let (p, q) = solidcraft_geom::mesh_distance::closest_on_segments(end, end, *c, *d);
             p.dist(q) <= *r
         })
-        .flat_map(|&(c, d, r)| {
-            starts.iter().filter_map(move |s| solidcraft_kernel::services::section_corners::exit_through_round(*s, toward, (c, d), r))
-        })
+        .flat_map(|&(c, d, r)| starts.iter().filter_map(move |s| solidcraft_kernel::planar::exit_through_round(*s, toward, (c, d), r)))
         .fold(0.0, f64::max);
     if reach.is_finite() { reach.clamp(0.0, a.dist(b)) } else { 0.0 }
 }

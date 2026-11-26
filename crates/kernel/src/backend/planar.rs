@@ -56,6 +56,10 @@ impl Planar for Solidcore {
         section_corners::exit_through_box(end, toward, rect)
     }
 
+    fn exit_through_round(&self, start: Vec3, toward: Vec3, axis: (Vec3, Vec3), radius: f64) -> Option<f64> {
+        section_corners::exit_through_round(start, toward, axis, radius)
+    }
+
     fn straight_length(&self, a: [f64; 2], b: [f64; 2]) -> f64 {
         paper_gaps::straight_length(a, b)
     }

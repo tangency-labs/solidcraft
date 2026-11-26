@@ -121,6 +121,16 @@ pub fn exit_through_box(end: Vec3, toward: Vec3, rect: [Vec3; 4]) -> Option<f64>
     }
 }
 
+/// How far along `toward` from `start` its line leaves the round bar of `radius` (mm) about the
+/// line `axis`, without end. `None` for a zero `toward`, a radius not finite and positive, a
+/// degenerate axis, or a line that misses the bar or runs along it.
+#[must_use]
+pub fn exit_through_round(start: Vec3, toward: Vec3, axis: (Vec3, Vec3), radius: f64) -> Option<f64> {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.exit_through_round(start, toward, axis, radius),
+    }
+}
+
 /// The length of a straight paper stroke from `a` to `b`.
 #[must_use]
 pub fn straight_length(a: [f64; 2], b: [f64; 2]) -> f64 {
