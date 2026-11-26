@@ -343,9 +343,9 @@ impl OffsetExecutive {
         let mut segments: Vec<GapSegment> = Vec::new();
         // (WR-657) the corners whose offset planes no longer meet in one point
         self.split_corner_vertices(kernel, original, b, approx_tol, notifications)?;
-        // (fork ccbf77a) each edge that closed to a point: its offset face and the original
-        // face across it
-        let mut closed_edges: Vec<(FaceId, Option<FaceId>)> = Vec::new();
+        // (fork ccbf77a) each edge that closed to a point: its offset face, and the original
+        // edge and the original face across it
+        let mut closed_edges: Vec<(FaceId, Option<(EdgeId, FaceId)>)> = Vec::new();
         let closing = self.close_gaps_of_faces(
             kernel,
             original,
@@ -404,7 +404,7 @@ impl OffsetExecutive {
         b: &mut Brep,
         approx_tol: f64,
         notifications: &mut OffsetNotifications<'_>,
-        closed_edges: &mut Vec<(FaceId, Option<FaceId>)>,
+        closed_edges: &mut Vec<(FaceId, Option<(EdgeId, FaceId)>)>,
         segments: &mut Vec<GapSegment>,
     ) -> Result<()> {
         for f in bp1::faces(b, None)? {
@@ -582,7 +582,7 @@ impl OffsetExecutive {
         kernel: &Kernel,
         original: &Brep,
         b: &mut Brep,
-        closed_edges: &[(FaceId, Option<FaceId>)],
+        closed_edges: &[(FaceId, Option<(EdgeId, FaceId)>)],
     ) -> Result<(Vec<FaceId>, BTreeSet<FaceId>)> {
         // offset faces closed to nothing, in the order they closed, and the original faces
         // they were offset from
@@ -603,7 +603,7 @@ impl OffsetExecutive {
         }
         for &(face, across) in closed_edges {
             let explained = gone.contains(&face)
-                || across.is_some_and(|a| gone_orig.contains(&a))
+                || across.is_some_and(|(_, a)| gone_orig.contains(&a))
                 || self.closed_on_both_sides(original, b, closed_edges, face, across)?;
             if !explained {
                 return Err(self.edge_vanishes(original, face, None));
@@ -612,13 +612,14 @@ impl OffsetExecutive {
         Ok((gone_list, gone))
     }
 
-    /// (#1126) Whether the edge of `face` closed to a point (the original face `across`
-    /// beside it) is one edge closed on both its sides: `face`'s only closed edge, the
-    /// face across having closed exactly one edge, the one across from `face`, and both
-    /// faces keeping a loop of three edges or more. The point is then a vertex where the
-    /// faces either side meet the two faces whose edge closed (an offset that just
-    /// reaches where its neighbours converge). An edge of a face that closed more than
-    /// once, or that leaves a face fewer than three edges, is no such vertex.
+    /// (#1126) Whether the edge of `face` closed to a point (the original edge and the
+    /// original face beside it, `across`) is one edge closed on both its sides: `face`'s
+    /// only closed edge, the face across having closed exactly one edge, that same
+    /// original edge across from `face`, and both faces keeping a loop of three edges or
+    /// more. The point is then a vertex where the faces either side meet the two faces
+    /// whose edge closed (an offset that just reaches where its neighbours converge). An
+    /// edge of a face that closed more than once, or that leaves a face fewer than three
+    /// edges, is no such vertex.
     ///
     /// # Errors
     ///
@@ -627,11 +628,11 @@ impl OffsetExecutive {
         &self,
         original: &Brep,
         b: &Brep,
-        closed_edges: &[(FaceId, Option<FaceId>)],
+        closed_edges: &[(FaceId, Option<(EdgeId, FaceId)>)],
         face: FaceId,
-        across: Option<FaceId>,
+        across: Option<(EdgeId, FaceId)>,
     ) -> Result<bool> {
-        let Some(across) = across else {
+        let Some((edge, across)) = across else {
             return Ok(false);
         };
         let original_of = |f: FaceId| -> Result<Option<FaceId>> {
@@ -651,10 +652,10 @@ impl OffsetExecutive {
             }
         }
         let once = closed_edges.iter().filter(|&&(f, _)| f == face).count() == 1;
-        let [(other, Some(back))] = across_closed[..] else {
+        let [(other, Some((back_edge, back)))] = across_closed[..] else {
             return Ok(false);
         };
-        if !once || back != this_orig {
+        if !once || back_edge != edge || back != this_orig {
             return Ok(false);
         }
         for f in [face, other] {
@@ -683,7 +684,7 @@ impl OffsetExecutive {
         kernel: &mut Kernel,
         original: &Brep,
         b: &mut Brep,
-        closed_edges: &[(FaceId, Option<FaceId>)],
+        closed_edges: &[(FaceId, Option<(EdgeId, FaceId)>)],
         notifications: &mut OffsetNotifications<'_>,
     ) -> Result<()> {
         let (gone_list, gone) = self.closed_faces(kernel, original, b, closed_edges)?;
@@ -739,7 +740,7 @@ impl OffsetExecutive {
         f: FaceId,
         gap: Gap,
         notifications: &mut OffsetNotifications<'_>,
-        closed_edges: &mut Vec<(FaceId, Option<FaceId>)>,
+        closed_edges: &mut Vec<(FaceId, Option<(EdgeId, FaceId)>)>,
     ) -> Result<Option<(Point3, Point3, Option<BSplineCurve>)>> {
         let Gap {
             u,
@@ -1173,8 +1174,8 @@ impl OffsetExecutive {
 
     /// `CloseLoopGap`'s closed edge (fork ccbf77a): when the edge's other vertex is at
     /// `vertex_point`, the edge is squeezed into the vertex at the gap and noted with
-    /// `face` and the original face across it (`None` where the edge use maps to no single
-    /// original edge use); `false` (nothing done) otherwise.
+    /// `face`, and the original edge and the original face across it (`None` where the
+    /// edge use maps to no single original edge use); `false` (nothing done) otherwise.
     #[allow(clippy::too_many_arguments)] // one fork branch
     fn squeeze_closed_edge(
         &mut self,
@@ -1188,7 +1189,7 @@ impl OffsetExecutive {
         vertex_point: Point3,
         tol: f64,
         notifications: &mut OffsetNotifications<'_>,
-        closed_edges: &mut Vec<(FaceId, Option<FaceId>)>,
+        closed_edges: &mut Vec<(FaceId, Option<(EdgeId, FaceId)>)>,
     ) -> Result<bool> {
         let at = if at_start {
             edgeuse_vertex(b, u)?
@@ -1216,7 +1217,7 @@ impl OffsetExecutive {
             let orig_face = eu::face(original, *orig_eu)?;
             for of in edge::faces(original, orig_edge, None)? {
                 if Some(of) != orig_face {
-                    across = Some(of);
+                    across = Some((orig_edge, of));
                 }
             }
         }
