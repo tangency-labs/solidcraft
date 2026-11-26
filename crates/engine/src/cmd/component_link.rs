@@ -2560,7 +2560,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         }
         let old = (old_step.clone(), old_records.clone());
         let file = resolve(own.as_deref(), &link.path);
-        let before = s.model.result(link.feature).map(|r| r.state.clone());
+        let before = s.model.result(link.feature).map(|r| (*r.state).clone());
         if link.importer.is_some() {
             if let Some(error) = importer_file_refusal(s, &file) {
                 if !go_on {
