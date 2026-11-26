@@ -188,12 +188,16 @@ Levenberg–Marquardt. That is cheap: the shape already holds at the start, and 
 the pose. Exact placement comes later:
 
 - **Propagation.** A `Tie::Frame { p, o, x, u, v }` places P as soon as O and X are placed, in the
-  same way `Tie::Midpoint` works (`loci.rs:1279`).
+  same way `Tie::Midpoint` works (`loci.rs:1279`). Like a midpoint it also works backwards: P and
+  one end of the axis place the other end, unless P is within 1 % of the axis length of that end.
+- **Radii.** A Fixed block's member circles and ellipses are seeded at k·L0 with the dimensioned
+  radii; a Free block's at k·|d| once the seed has placed O and X.
 - **Rigid clusters.** A Fixed block adds `Rel::Dist(O, X, L0)`, so O–X starts as a pair cluster in
   `Graph::build` (`decompose.rs:557-634`) and the frame ties grow it. `pair()` (`decompose.rs:845`)
   then lands it exactly on two shared ground points.
-- **Free blocks** would need a `Frame::Similar` cluster. Until then they stay with LM until a
-  length makes them rigid.
+- **Free blocks** would need a `Frame::Similar` cluster. Until then they stay with LM unless a
+  length on the axis makes them rigid, or the seed places two of their points (O and a member,
+  or X and a member).
 
 The seed is checked automatically, because in tests every solve also runs without the seed and
 must give the same status and DOF (`solver.rs:2839-2857`).

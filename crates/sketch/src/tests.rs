@@ -3023,6 +3023,252 @@ fn a_block_of_three_hundred_points_solves_fast() {
     eprintln!("300-point block: {ms} ms");
 }
 
+/// A profile as an import brings it: a closed polyline of `n` points around a wavy circle, made
+/// one rigid block. Returns the block and the polyline's points in order.
+fn polyline_block(n: usize) -> (Sketch, BlockMade, Vec<usize>) {
+    let mut sk = Sketch::new();
+    let pts: Vec<usize> = (0..n)
+        .map(|i| {
+            let t = i as f64 / n as f64 * std::f64::consts::TAU;
+            let r = 40.0 + 3.0 * (7.0 * t).sin();
+            sk.add_point(v(60.0 + r * t.cos(), 25.0 + r * t.sin()), None).unwrap()
+        })
+        .collect();
+    let lines: Vec<usize> = (0..n).map(|i| sk.add_line_pts(pts[i], pts[(i + 1) % n], None).unwrap()).collect();
+    let ids = block_ids(&sk, &lines);
+    let made = sk.make_block(&ids, BlockScale::Fixed, None, None).unwrap();
+    (sk, made, pts)
+}
+
+/// A 300-point profile block placed by its origin and axis is constructed whole by the seed (LM
+/// gets nothing), and solving it, dragging it and moving it stay fast and keep its shape.
+#[test]
+fn a_profile_block_of_three_hundred_points_is_constructed_dragged_and_moved() {
+    use std::time::Instant;
+    let (sk, made, pts) = polyline_block(300);
+    let o = sk.point_index(&made.origin).unwrap();
+    let axis = sk.curve_index(&made.axis).unwrap();
+    let probe: Vec<usize> = pts.iter().step_by(15).copied().collect();
+    let shape = spans(&sk, &probe);
+    let same_shape = |sk: &Sketch| spans(sk, &probe).iter().zip(&shape).all(|(a, b)| (a - b).abs() < 1e-9);
+
+    // Placed: coincident on the sketch origin, the axis at 40°.
+    let mut placed = sk.clone();
+    placed.add_constraint(ConstraintKind::Coincident { p: o, q: 0 }, None).unwrap();
+    placed.add_constraint(ConstraintKind::LineAngle { l: axis, value: 40f64.to_radians() }, None).unwrap();
+    let mut plain = placed.clone();
+    crate::solver::lm_vars::take();
+    let t = Instant::now();
+    let rep = seeded(true, || solve(&mut placed));
+    let place_ms = t.elapsed().as_secs_f64() * 1e3;
+    let lm = crate::solver::lm_vars::take();
+    let t = Instant::now();
+    let without = seeded(false, || solve(&mut plain));
+    let plain_ms = t.elapsed().as_secs_f64() * 1e3;
+
+    // Free to move: a member held at the cursor for 20 drag frames.
+    let mut free = sk.clone();
+    assert!(solve(&mut free).ok());
+    let grip = pts[0];
+    let start = free.points[grip].pos;
+    let t = Instant::now();
+    for f in 1..=20 {
+        let before: Vec<Vec2> = free.points.iter().map(|p| p.pos).collect();
+        free.points[grip].pos = start + v(f as f64 * 0.5, f as f64 * 0.3);
+        let hold = Hold { points: vec![grip], radii: vec![] };
+        let frame = seeded(true, || solve_with(&mut free, &hold, Some(&before), Analysis::StatusOnly, Some(&mut Budget::frame())));
+        assert!(frame.ok(), "frame {f}: {frame:?}");
+    }
+    let drag_ms = t.elapsed().as_secs_f64() * 1e3 / 20.0;
+
+    // Moved as Move moves a block: every point of it turned and shifted, then solved.
+    let mut moved = free.clone();
+    let (turn, shift) = (Vec2::from_angle(30f64.to_radians()), v(15.0, -4.0));
+    let block_points: Vec<usize> = pts.iter().copied().chain([o, line_pts_ids(&moved, axis).1]).collect();
+    for p in &block_points {
+        let q = moved.points[*p].pos;
+        moved.points[*p].pos = v(q.x * turn.x - q.y * turn.y, q.x * turn.y + q.y * turn.x) + shift;
+    }
+    let after_move: Vec<Vec2> = moved.points.iter().map(|p| p.pos).collect();
+    let t = Instant::now();
+    let rep_moved = seeded(true, || solve(&mut moved));
+    let move_ms = t.elapsed().as_secs_f64() * 1e3;
+    eprintln!(
+        "300-point profile block: placed {place_ms:.1} ms ({lm} LM variables; without the seed {plain_ms:.1} ms), drag frame {drag_ms:.1} ms, move {move_ms:.1} ms"
+    );
+
+    assert!(rep.ok() && rep.dof == 0, "{rep:?}");
+    assert!(rep.point_determined.iter().all(|d| *d), "{rep:?}");
+    assert_eq!(lm, 0, "the seed constructs the whole block");
+    assert_eq!((without.status, without.dof), (rep.status, rep.dof));
+    assert!(same_shape(&placed) && same_shape(&plain) && same_shape(&free) && same_shape(&moved));
+    assert!(placed.points.iter().zip(&plain.points).all(|(a, b)| a.pos.dist(b.pos) < 1e-9), "the seeded and the plain solve agree");
+    assert!(placed.points[o].pos.dist(v(0.0, 0.0)) < 1e-12);
+    assert!(free.points[grip].pos.dist(start + v(10.0, 6.0)) < 1e-12);
+    assert!(rep_moved.ok() && rep_moved.dof == 3, "{rep_moved:?}");
+    assert!(moved.points.iter().zip(&after_move).all(|(a, b)| a.pos.dist(*b) < 1e-9), "a moved block is solved where it was put");
+    assert!(place_ms + plain_ms + 20.0 * drag_ms + move_ms < 10_000.0);
+}
+
+/// The point indices of line `l`'s ends.
+fn line_pts_ids(sk: &Sketch, l: usize) -> (usize, usize) {
+    match sk.curves[l].kind {
+        CurveKind::Line { a, b } => (a, b),
+        _ => panic!("a line"),
+    }
+}
+
+/// The rect-and-circle profile of [`block_profile`] made one block of `scale`; returns the
+/// sketch's rectangle sides, circle, block origin and axis.
+fn profile_block(scale: BlockScale) -> (Sketch, [usize; 4], usize, usize, usize) {
+    let mut sk = Sketch::new();
+    let (l, c) = block_profile(&mut sk);
+    let mut ids = block_ids(&sk, &l);
+    ids.push(sk.curves[c].id.clone());
+    let made = sk.make_block(&ids, scale, None, None).unwrap();
+    let (o, axis) = (sk.point_index(&made.origin).unwrap(), sk.curve_index(&made.axis).unwrap());
+    (sk, l, c, o, axis)
+}
+
+/// The block's member points, by index.
+fn member_points(sk: &Sketch) -> Vec<usize> {
+    sk.blocks[0].points.iter().map(|(p, _)| sk.point_index(p).unwrap()).collect()
+}
+
+/// Solve `sk` with and without the constructive seed: the seeded solve gives LM nothing, both
+/// agree on every position, and the seeded one is returned.
+fn constructed_whole(sk: &mut Sketch) -> SolveReport {
+    let mut plain = sk.clone();
+    crate::solver::lm_vars::take();
+    let rep = seeded(true, || solve(sk));
+    assert_eq!(crate::solver::lm_vars::take(), 0, "LM gets nothing: {rep:?}");
+    let without = seeded(false, || solve(&mut plain));
+    assert_eq!((without.status, without.dof, &without.point_determined), (rep.status, rep.dof, &rep.point_determined));
+    for (a, b) in sk.points.iter().zip(&plain.points) {
+        assert!(a.pos.dist(b.pos) < 1e-9, "seeded {:?}, plain {:?}", a.pos, b.pos);
+    }
+    for (a, b) in sk.curves.iter().zip(&plain.curves) {
+        if let (CurveKind::Circle { r: ra, .. }, CurveKind::Circle { r: rb, .. }) = (&a.kind, &b.kind) {
+            assert!((ra - rb).abs() < 1e-9);
+        }
+    }
+    rep
+}
+
+/// A rigid block placed by coincident on its origin and an angle on its axis is constructed by
+/// the seed: the axis end from the axis length and direction, every member from the frame, the
+/// circle's radius from the block's length. The frame rows hold there exactly.
+#[test]
+fn the_seed_constructs_a_rigid_block_from_its_origin_and_axis_angle() {
+    use crate::construct::Placement;
+    let (mut sk, l, c, o, axis) = profile_block(BlockScale::Fixed);
+    sk.add_constraint(ConstraintKind::Coincident { p: o, q: 0 }, None).unwrap();
+    sk.add_constraint(ConstraintKind::LineAngle { l: axis, value: 25f64.to_radians() }, None).unwrap();
+    let shape = spans(&sk, &member_points(&sk));
+    let seed = seed_of(&sk);
+    let (_, x) = line_pts_ids(&sk, axis);
+    assert_eq!(seed.placed_by[o], Some(Placement::TwoLoci { a: 0, b: 0, transversal: true }));
+    assert_eq!(seed.placed_by[x], Some(Placement::TwoLoci { a: o, b: o, transversal: true }), "{seed:?}");
+    for p in member_points(&sk) {
+        assert_eq!(seed.placed_by[p], Some(Placement::TwoLoci { a: o, b: o, transversal: true }), "member {p}: {seed:?}");
+    }
+    assert_eq!(seed.radius[c], Some(5.0));
+    let rows = sk.frame_rows();
+    let at = |i: usize| seed.pos[i].unwrap();
+    let d = at(x) - at(o);
+    assert!((d.len() - rows[0].length).abs() < 1e-12 && (d.angle() - 25f64.to_radians()).abs() < 1e-12);
+    for (p, [u, w]) in &rows[0].points {
+        assert!(at(*p).dist(at(o) + d * *u + d.perp() * *w) < 1e-12);
+    }
+    let rep = constructed_whole(&mut sk);
+    assert!(rep.ok() && rep.dof == 0 && rep.iterations == 0, "{rep:?}");
+    assert!(spans(&sk, &member_points(&sk)).iter().zip(&shape).all(|(a, b)| (a - b).abs() < 1e-9));
+    let (a, b) = line_pts(&sk, l[0]);
+    assert!(((b - a).angle() - 25f64.to_radians()).abs() < 1e-9, "the block turned with its axis");
+}
+
+/// A rigid block whose two corners are coincident with two fixed points is a cluster (its axis
+/// pair grown by the frame) that lands on them exactly.
+#[test]
+fn the_seed_lands_a_rigid_block_on_two_fixed_points() {
+    use crate::construct::Placement;
+    let (mut sk, l, c, o, axis) = profile_block(BlockScale::Fixed);
+    let (corner, _) = line_pts_ids(&sk, l[0]);
+    let (_, far) = line_pts_ids(&sk, l[1]);
+    let diagonal = sk.points[far].pos - sk.points[corner].pos;
+    let g1 = sk.add_point(v(100.0, -30.0), None).unwrap();
+    let turn = Vec2::from_angle(25f64.to_radians());
+    let g2 = sk.add_point(v(100.0, -30.0) + turn * diagonal.x + turn.perp() * diagonal.y, None).unwrap();
+    for (g, p) in [(g1, corner), (g2, far)] {
+        sk.add_constraint(ConstraintKind::Fix { p: g }, None).unwrap();
+        sk.add_constraint(ConstraintKind::Coincident { p: g, q: p }, None).unwrap();
+    }
+    let shape = spans(&sk, &member_points(&sk));
+    let seed = seed_of(&sk);
+    let (_, x) = line_pts_ids(&sk, axis);
+    for p in member_points(&sk).into_iter().filter(|p| ![corner, far].contains(p)).chain([o, x]) {
+        assert_eq!(seed.placed_by[p], Some(Placement::Cluster), "point {p}: {seed:?}");
+    }
+    let rep = constructed_whole(&mut sk);
+    assert!(rep.ok() && rep.dof == 0 && rep.iterations == 0, "{rep:?}");
+    assert!(spans(&sk, &member_points(&sk)).iter().zip(&shape).all(|(a, b)| (a - b).abs() < 1e-9));
+    assert!(sk.points[corner].pos.dist(v(100.0, -30.0)) < 1e-12);
+    assert!((sk.radius(c).unwrap() - 5.0).abs() < 1e-12);
+}
+
+/// A free block sized by a length between members has no rigid pair to construct from: LM
+/// places it. With its origin and one member pinned, the frame gives the axis end, and the seed
+/// constructs it after all, its circle's radius included.
+#[test]
+fn a_free_block_is_left_to_lm_unless_two_of_its_points_are_placed() {
+    use crate::construct::Placement;
+    let (sk, l, c, o, axis) = profile_block(BlockScale::Free);
+    let (_, x) = line_pts_ids(&sk, axis);
+    let mut sized = sk.clone();
+    sized.add_constraint(ConstraintKind::Coincident { p: o, q: 0 }, None).unwrap();
+    sized.add_constraint(ConstraintKind::Horizontal { l: axis }, None).unwrap();
+    sized.add_constraint(ConstraintKind::Length { l: l[0], value: 80.0 }, None).unwrap();
+    let seed = seed_of(&sized);
+    assert!(seed.placed_by[x].is_none() && member_points(&sized).iter().all(|p| seed.placed_by[*p].is_none()), "{seed:?}");
+    assert!(seed.radius[c].is_none());
+    crate::solver::lm_vars::take();
+    let rep = seeded(true, || solve(&mut sized));
+    assert!(crate::solver::lm_vars::take() > 0);
+    assert!(rep.ok() && rep.dof == 0, "{rep:?}");
+    let (a, b) = line_pts(&sized, l[1]);
+    assert!((a.dist(b) - 40.0).abs() < 1e-9 && (sized.radius(c).unwrap() - 10.0).abs() < 1e-9);
+
+    let mut pinned = sk.clone();
+    let (corner, _) = line_pts_ids(&pinned, l[0]);
+    let g = pinned.add_point(v(-50.0, -12.0), None).unwrap();
+    pinned.add_constraint(ConstraintKind::Fix { p: g }, None).unwrap();
+    pinned.add_constraint(ConstraintKind::Coincident { p: o, q: 0 }, None).unwrap();
+    pinned.add_constraint(ConstraintKind::Coincident { p: corner, q: g }, None).unwrap();
+    let seed = seed_of(&pinned);
+    assert_eq!(seed.placed_by[x], Some(Placement::TwoLoci { a: corner, b: corner, transversal: true }), "{seed:?}");
+    let grown = v(-50.0, -12.0).len() / v(10.0, 5.0).dist(v(30.0, 15.0));
+    assert!(seed.radius[c].is_some_and(|r| (r - 5.0 * grown).abs() < 1e-9), "{:?}", seed.radius[c]);
+    let rep = constructed_whole(&mut pinned);
+    assert!(rep.ok() && rep.dof == 0 && rep.iterations == 0, "{rep:?}");
+}
+
+/// The constraints a block holds are not read by the seed: a block turned off them (its
+/// horizontals no longer hold) is constructed from its frame alone.
+#[test]
+fn the_seed_reads_no_constraint_a_block_holds() {
+    let (mut sk, l, _, o, axis) = profile_block(BlockScale::Fixed);
+    let slope = sk.add_line(v(-50.0, 0.0), v(-50.0 + 30f64.to_radians().cos() * 20.0, 30f64.to_radians().sin() * 20.0), None, None, None).unwrap();
+    sk.curves[slope].fixed = true;
+    sk.add_constraint(ConstraintKind::Parallel { a: axis, b: slope }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Coincident { p: o, q: 0 }, None).unwrap();
+    let seed = seed_of(&sk);
+    assert!(member_points(&sk).iter().all(|p| seed.placed_by[*p].is_some()), "{seed:?}");
+    let rep = constructed_whole(&mut sk);
+    assert!(rep.ok() && rep.dof == 0, "{rep:?}");
+    let (a, b) = line_pts(&sk, l[0]);
+    assert!(((b - a).angle() - 30f64.to_radians()).abs() < 1e-9, "the held horizontal no longer holds");
+}
+
 /// Exploding a free block that a length resized scales its held plain dimensions with it; they
 /// all hold, and the sketch stays solved.
 #[test]
