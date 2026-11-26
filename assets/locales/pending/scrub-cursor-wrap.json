@@ -1,0 +1,18 @@
+{
+  "en": {
+    "nav.scrub_cursor_wrap.help": "Dragging a value's label sideways past the edge of the window moves the cursor to the opposite edge and keeps changing the value. Off: the drag stops at the edge of the screen. Has no effect on Wayland or in the browser.",
+    "nav.scrub_cursor_wrap.label": "Wrap the cursor while dragging a value"
+  },
+  "de": {
+    "nav.scrub_cursor_wrap.help": "Wird die Beschriftung eines Werts seitlich über den Fensterrand gezogen, springt der Mauszeiger an den gegenüberliegenden Rand und der Wert ändert sich weiter. Aus: Das Ziehen endet am Bildschirmrand. Ohne Wirkung unter Wayland und im Browser.",
+    "nav.scrub_cursor_wrap.label": "Mauszeiger beim Ziehen eines Werts umbrechen"
+  },
+  "ja": {
+    "nav.scrub_cursor_wrap.help": "値のラベルを横にドラッグしてウィンドウの端を越えると、カーソルが反対側の端へ移動し、値は変わり続けます。オフ: ドラッグは画面の端で止まります。Wayland とブラウザーでは効果がありません。",
+    "nav.scrub_cursor_wrap.label": "値のドラッグ中にカーソルを反対側へ回す"
+  },
+  "zh": {
+    "nav.scrub_cursor_wrap.help": "横向拖动数值的标签越过窗口边缘时，光标会移到对侧边缘，数值继续变化。关闭：拖动在屏幕边缘停止。在 Wayland 和浏览器中无效。",
+    "nav.scrub_cursor_wrap.label": "拖动数值时光标循环"
+  }
+}

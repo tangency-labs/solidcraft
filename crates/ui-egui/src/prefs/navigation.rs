@@ -133,6 +133,8 @@ fn mouse(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         crate::scenario::publish_target("prefs:nav_drag_keeps_mode", keeps.rect);
         let wrap = setting::orbit_cursor_wrap(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.orbit_cursor_wrap.help"));
         crate::scenario::publish_target("prefs:orbit_cursor_wrap", wrap.rect);
+        let scrub = setting::scrub_cursor_wrap(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.scrub_cursor_wrap.help"));
+        crate::scenario::publish_target("prefs:scrub_cursor_wrap", scrub.rect);
         let unrolls = setting::upright_orbit_unrolls(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.upright_orbit_unrolls.help"));
         crate::scenario::publish_target("prefs:upright_orbit_unrolls", unrolls.rect);
         let mark = setting::mark_orbit_point(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.mark_orbit_point.help"));

@@ -86,6 +86,10 @@ macro_rules! navigation_preferences {
             /// An orbit drag that reaches the edge of the view moves the cursor to the opposite edge and
             /// keeps turning; false stops the drag at the edge of the screen, as before.
             orbit_cursor_wrap: bool = true, PAGE_NAVIGATION => check_tr("nav.orbit_cursor_wrap.label");
+            /// Dragging a value row's label sideways past the edge of the window moves the cursor to
+            /// the opposite edge and keeps changing the value (#22495); false stops the drag at the
+            /// edge of the screen, as before.
+            scrub_cursor_wrap: bool = true, PAGE_NAVIGATION => check_tr("nav.scrub_cursor_wrap.label");
             /// Shift with two-finger trackpad scrolling orbits the view the other way, both ways at once,
             /// as natural scrolling turns it (#8410).
             orbit_reverse: bool = false, PAGE_NAVIGATION => check("ui.reverse_trackpad_orbit_direction", "Shift with two-finger scrolling orbits the other way");
