@@ -1787,8 +1787,8 @@ fn check_vertex_clearance(
     if vertices.is_empty() {
         return Ok(());
     }
-    let mut vertex_balls = Vec::with_capacity(vertices.len());
-    let mut vertex_boxes = Vec::with_capacity(vertices.len());
+    let mut vertex_balls = Vec::new();
+    let mut vertex_boxes = Vec::new();
     for &v in vertices {
         let vertex = b.vertex(v)?;
         let point = vertex.point;
