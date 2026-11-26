@@ -9479,17 +9479,24 @@ fn saved_frame_caches_require_trim_records_only_for_rebuildable_ordinary_members
                 json!({"sketch": "Chassis", "lines": [ids[1]], "body_name": "Tube",
                     "profile": {"kind": "round_tube", "diameter": 40, "wall": 2}}),
             )
+        } else if route == "continuous" {
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Tube path"}));
+            run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+            run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [200, 0, 0]]}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(
+                &mut s,
+                "frame.member",
+                json!({"sketch": "Tube path", "lines": ["w1"], "continuous": true, "body_name": "Tube",
+                    "profile": {"kind": "round_tube", "diameter": 40, "wall": 2}}),
+            )
         } else {
             round_stock(&mut s, "Tube", [0.0, 0.0, 0.0], [200.0, 0.0, 0.0], json!(40))
         };
         let feature = created["feature"].as_u64().unwrap();
-        if let solidcraft_doc::FeatureKind::FrameMember { corner, continuous, lines, .. } = &mut s.doc_mut().feature_mut(feature).unwrap().kind {
+        if let solidcraft_doc::FeatureKind::FrameMember { corner, .. } = &mut s.doc_mut().feature_mut(feature).unwrap().kind {
             if route == "auto" {
                 *corner = solidcraft_doc::frame::CornerType::Auto;
-            }
-            if route == "continuous" {
-                *continuous = true;
-                *lines = vec!["w1".into()];
             }
         } else {
             panic!("not a member");
