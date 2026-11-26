@@ -1,0 +1,28 @@
+{
+  "en": {
+    "MODELING FEATURES": "MODELING FEATURES",
+    "ASSEMBLY & JOINTS": "ASSEMBLY & JOINTS",
+    "Modeling Features": "Modeling Features",
+    "Modeling": "Modeling",
+    "Assembly & Joints": "Assembly & Joints",
+    "Assembly": "Assembly",
+    "Modeling Track contracted. Click to restore split view.": "Modeling Track contracted. Click to restore split view.",
+    "Assembly Track contracted. Click to restore split view.": "Assembly Track contracted. Click to restore split view.",
+    "ui.timeline_2d_steps_badge": "{count} Steps",
+    "ui.timeline_2d_joints_badge": "{count} Joints",
+    "ui.timeline_2d_active_summary": "Active: {active} / {total}"
+  },
+  "cs": {
+    "MODELING FEATURES": "MODELOVACÍ PRVKY",
+    "ASSEMBLY & JOINTS": "SESTAVA A SPOJE",
+    "Modeling Features": "Modelovací prvky",
+    "Modeling": "Modelování",
+    "Assembly & Joints": "Sestava a spoje",
+    "Assembly": "Sestava",
+    "Modeling Track contracted. Click to restore split view.": "Stopa modelování je sbalená. Kliknutím obnovíte rozdělené zobrazení.",
+    "Assembly Track contracted. Click to restore split view.": "Stopa sestavy je sbalená. Kliknutím obnovíte rozdělené zobrazení.",
+    "ui.timeline_2d_steps_badge": "Kroky: {count}",
+    "ui.timeline_2d_joints_badge": "Spoje: {count}",
+    "ui.timeline_2d_active_summary": "Aktivní: {active} / {total}"
+  }
+}
