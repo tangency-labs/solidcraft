@@ -10,7 +10,16 @@
 use solidcore_record::brep::Brep;
 use solidcraft_kernel_api::{Backend, BackendError, BackendId, Exported, OpKind, Support};
 
+mod affine;
+mod cell_grid;
+mod curves;
+mod develop;
+mod exchange;
+mod frames;
 mod modelling;
+mod points;
+mod projection;
+mod query;
 
 use crate::body::Body;
 use crate::{KernelError, Result};
@@ -58,6 +67,7 @@ impl From<KernelError> for BackendError {
             KernelError::Lip(r) => BackendError::Failed(format!("raising a band: {r}")),
             KernelError::Repair(r) => BackendError::Failed(r.to_string()),
             KernelError::Heal(h) => BackendError::Failed(h.to_string()),
+            KernelError::Dome(r) => BackendError::Failed(r.to_string()),
         }
     }
 }

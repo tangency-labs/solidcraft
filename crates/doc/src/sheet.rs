@@ -77,6 +77,13 @@ pub struct SheetRule {
     /// end is cut straight from that corner to where its flange's end starts).
     #[serde(default = "rule_corner_relief_shape")]
     pub corner_relief_shape: String,
+    /// What is cut beside a bend's end where its panel runs on past it: `rectangular` (a slot
+    /// `relief_width` wide, from `relief_depth` inside the panel's tangent line out), `obround`
+    /// (that slot with a half round inner end) or `tear` (no material: the panel is torn from the
+    /// bend along the bend's end). A choice, not an expression; saved only when it isn't
+    /// `rectangular`.
+    #[serde(default = "rule_bend_relief_shape", skip_serializing_if = "is_rectangular_bend_relief")]
+    pub bend_relief_shape: String,
     /// The space between a flat hem's leg and the face it folds over (its bend's inner radius is
     /// half of it).
     #[serde(default = "rule_hem_gap")]
@@ -155,6 +162,14 @@ fn rule_corner_relief() -> String {
 fn rule_corner_relief_shape() -> String {
     ReliefShape::Notch.name().into()
 }
+fn rule_bend_relief_shape() -> String {
+    BendReliefShape::Rectangular.name().into()
+}
+/// A rule with the rectangular bend relief leaves the setting out of the design, which then
+/// saves as it did before the setting existed.
+fn is_rectangular_bend_relief(s: &str) -> bool {
+    BendReliefShape::parse(s) == Some(BendReliefShape::Rectangular)
+}
 /// Why a bend radius of 0 is refused wherever it is given (a rule, a fold, a flange): every bend
 /// keeps an inside radius. At 0 the inside fiber would close to nothing (all of its length
 /// compressed away), no press brake or forming tool makes that, and the part could not be built
@@ -186,6 +201,7 @@ impl SheetRule {
             relief_depth: rule_relief_depth(),
             corner_relief: rule_corner_relief(),
             corner_relief_shape: rule_corner_relief_shape(),
+            bend_relief_shape: rule_bend_relief_shape(),
             hem_gap: rule_hem_gap(),
             gap: rule_gap(),
             angle_display: rule_angle_display(),
@@ -254,6 +270,47 @@ impl ReliefShape {
     }
 }
 
+/// The shape of the bend relief cut beside a bend's end where its panel runs on past it (a
+/// rule's `bend_relief_shape`, or an edge flange's own).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BendReliefShape {
+    /// A slot `relief_width` wide from `relief_depth` inside the panel's tangent line out past
+    /// the flange.
+    #[default]
+    Rectangular,
+    /// The same slot, its inner end a half round `relief_width` across: no sharp inside corner
+    /// for a laser or a crack to start from.
+    Obround,
+    /// No material removed: the panel is torn from the bend along the bend's end as it folds.
+    Tear,
+}
+
+impl BendReliefShape {
+    pub const ALL: [BendReliefShape; 3] = [BendReliefShape::Rectangular, BendReliefShape::Obround, BendReliefShape::Tear];
+
+    pub fn parse(s: &str) -> Option<BendReliefShape> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "rectangular" => Some(BendReliefShape::Rectangular),
+            "obround" => Some(BendReliefShape::Obround),
+            "tear" => Some(BendReliefShape::Tear),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            BendReliefShape::Rectangular => "rectangular",
+            BendReliefShape::Obround => "obround",
+            BendReliefShape::Tear => "tear",
+        }
+    }
+
+    pub fn is_rectangular(&self) -> bool {
+        *self == BendReliefShape::Rectangular
+    }
+}
+
 /// How a rule's bend angles read in the DXF bend notes (a rule's `angle_display`). The bend
 /// table gives both angles, and a flange's `angle` is always the bend angle.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -306,6 +363,7 @@ pub struct RuleValues {
     pub relief_depth: f64,
     pub corner_relief: f64,
     pub corner_relief_shape: ReliefShape,
+    pub bend_relief_shape: BendReliefShape,
     pub hem_gap: f64,
     pub gap: f64,
     pub angle_display: AngleDisplay,
@@ -358,6 +416,8 @@ impl Document {
             corner_relief_shape: ReliefShape::parse(&r.corner_relief_shape).ok_or_else(|| {
                 DocError::Invalid(format!("unknown corner relief shape `{}` (notch, round, rectangular or tear)", r.corner_relief_shape))
             })?,
+            bend_relief_shape: BendReliefShape::parse(&r.bend_relief_shape)
+                .ok_or_else(|| DocError::Invalid(format!("unknown bend relief shape `{}` (rectangular, obround or tear)", r.bend_relief_shape)))?,
             hem_gap: with_t(&r.hem_gap, Kind::Length)?,
             gap: with_t(&r.gap, Kind::Length)?,
             angle_display: AngleDisplay::parse(&r.angle_display)
@@ -763,6 +823,27 @@ mod tests {
         for name in ["", "sheet", "sheet:Body1", "sheet:Body1:top", "sheet::base:top", "sheet:Body1::top", "sheet:Body1:base:", "Body1:base:top"] {
             assert_eq!(split_sheet_face_name(name), None, "{name}");
         }
+    }
+
+    #[test]
+    fn a_rule_reads_its_bend_relief_shape_and_saves_it_only_when_it_is_not_rectangular() {
+        let doc = Document::default();
+        let (vals, _) = doc.param_values();
+        let steel = SheetRule::steel();
+        assert_eq!(doc.rule_values(&vals, &steel).unwrap().bend_relief_shape, BendReliefShape::Rectangular);
+        assert!(serde_json::to_value(&steel).unwrap().get("bend_relief_shape").is_none());
+        for (text, shape) in [(" Obround ", BendReliefShape::Obround), ("TEAR", BendReliefShape::Tear), ("rectangular", BendReliefShape::Rectangular)]
+        {
+            let rule = SheetRule { bend_relief_shape: text.into(), ..steel.clone() };
+            assert_eq!(doc.rule_values(&vals, &rule).unwrap().bend_relief_shape, shape, "{text}");
+        }
+        let obround = SheetRule { bend_relief_shape: "obround".into(), ..steel.clone() };
+        let saved = serde_json::to_value(&obround).unwrap();
+        assert_eq!(saved["bend_relief_shape"], "obround");
+        let back: SheetRule = serde_json::from_value(saved).unwrap();
+        assert_eq!(back, obround);
+        let err = doc.rule_values(&vals, &SheetRule { bend_relief_shape: "round".into(), ..steel }).unwrap_err().to_string();
+        assert!(err.contains("rectangular, obround or tear"), "{err}");
     }
 
     #[test]

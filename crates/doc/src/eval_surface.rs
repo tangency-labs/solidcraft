@@ -85,7 +85,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             apply_traced(doc, st, f, tools, *operation, &crate::plain(targets))
         }
-        FeatureKind::SurfaceTrim { body, plane, tool, keep, keep_more, curves, with, keep_with, stitch, extend } => {
+        FeatureKind::SurfaceTrim { body, plane, tool, tool_body, keep, keep_more, curves, with, keep_with, stitch, extend } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let picks: Vec<Vec3> = std::iter::once(keep.0).chain(keep_more.iter().map(|p| p.0)).collect();
@@ -93,14 +93,32 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             if let Some(other) = with {
                 return mutual_trim(st, i, other, keeps, &crate::plain(keep_with), *stitch, *extend);
             }
-            let trimmed = match (tool, curves) {
-                (Some(t), _) => {
-                    let tb = st.body(&t.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", t.body)))?;
-                    let face = crate::appearance::face_index_at(tb, t.point.0)
+            // A cutting body or tool face is used where it is shown: the model as seen from this
+            // feature's component, as Revolve's To does (a body is kept in its own component's frame).
+            let tst = if tool_body.is_some() || tool.is_some() {
+                crate::eval::state_in_frame(doc, st, f.component)?
+            } else {
+                std::borrow::Cow::Borrowed(&*st)
+            };
+            let trimmed = match (tool_body, tool, curves) {
+                (Some(name), None, None) => {
+                    if name == body {
+                        return Err(DocError::Invalid("the cutting sheet must be another body".into()));
+                    }
+                    let tb = tst.body(name).ok_or_else(|| DocError::Unknown(format!("body `{name}`")))?;
+                    kernel::trim_sheet_keep(&mb.body, &tb.body, keeps)?
+                }
+                (Some(_), _, _) => return Err(DocError::Invalid("give a cutting sheet, a tool face or curves, not several tools".into())),
+                (None, Some(t), _) => {
+                    let tb = tst.body(&t.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", t.body)))?;
+                    let (_, face) = tb
+                        .body
+                        .nearest_face(t.point.0)
+                        .filter(|(distance, _)| *distance <= crate::appearance::pick_tolerance(tb))
                         .ok_or_else(|| DocError::Invalid(format!("no face of `{}` at the tool point", t.body)))?;
                     kernel::trim_keep(&mb.body, &kernel::SplitTool::Face { body: &tb.body, face }, keeps)?
                 }
-                (None, Some(c)) => {
+                (None, None, Some(c)) => {
                     let ss = st
                         .sketch(c.sketch.0)
                         .ok_or_else(|| DocError::Unknown(format!("sketch {} (it must come earlier in the timeline)", c.sketch)))?;
@@ -124,7 +142,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                         )?
                     }
                 }
-                (None, None) => {
+                (None, None, None) => {
                     kernel::trim_keep(&mb.body, &kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?), keeps)?
                 }
             };
@@ -134,7 +152,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             Ok(())
         }
-        FeatureKind::SurfaceExtend { body, edges, distance, mode, up_to, neighbours } => {
+        FeatureKind::SurfaceExtend { body, edges, distance, mode, up_to, neighbours, stays_surface } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let mode = match mode {
@@ -152,6 +170,13 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                     let tool = kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?);
                     kernel::extend_surface(&mb.body, &crate::plain(edges), &at(kernel::ExtendLimit::UpTo(&tool)))?
                 }
+                Some(crate::ExtendTo::Body(target)) => {
+                    if target == body {
+                        return Err(DocError::Invalid("a surface can't extend up to itself".into()));
+                    }
+                    let tb = st.body(target).ok_or_else(|| DocError::Unknown(format!("body `{target}`")))?;
+                    kernel::extend_surface(&mb.body, &crate::plain(edges), &at(kernel::ExtendLimit::UpToBody(&tb.body)))?
+                }
                 Some(crate::ExtendTo::Face(t)) => {
                     let tb = st.body(&t.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", t.body)))?;
                     let face = crate::appearance::face_index_at(tb, t.point.0)
@@ -161,7 +186,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 }
             };
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody::new(mb.name, out, mb.feature);
+                *slot = ModelBody { sheet: mb.sheet || *stays_surface, ..ModelBody::new(mb.name, out, mb.feature) };
             }
             Ok(())
         }
@@ -263,7 +288,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             // A match rebuilds the face in place: the body keeps its name, and whatever meets it
             // downstream still finds it.
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody::new(mb.name, made, mb.feature);
+                *slot = ModelBody { sheet: mb.sheet, ..ModelBody::new(mb.name, made, mb.feature) };
             }
             Ok(())
         }
@@ -301,35 +326,45 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 report.movement
             ));
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody::new(mb.name, faired, mb.feature);
+                *slot = ModelBody { sheet: mb.sheet, ..ModelBody::new(mb.name, faired, mb.feature) };
             }
             Ok(())
         }
-        FeatureKind::SurfaceExtrude { sketch, profiles, curves, extent } => {
+        FeatureKind::SurfaceExtrude { sketch, profiles, curves, extent, to_next } => {
             let ss = constructor_profile_in_frame(
                 doc,
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
                 f,
             )?;
-            if extent.through_all || extent.taper.is_some() || extent.from.is_some() || extent.symmetric_offset {
+            if extent.through_all
+                || extent.through_all2
+                || extent.taper.is_some()
+                || extent.to2.is_some()
+                || extent.from.is_some()
+                || extent.symmetric_offset
+            {
                 return Err(DocError::Invalid(
                     "not supported yet: a surface extrude through all, from an object, with a taper, or with symmetric offset".into(),
                 ));
+            }
+            if *to_next && extent.to.is_some() {
+                return Err(DocError::Invalid("a surface extrude goes To Next or To Object, not both".into()));
             }
             let off = extent.start_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
             let chains = sheet_chains(&ss, profiles.as_ref(), curves)?;
             let body = match extent.to {
                 Some(to) => sheet_to_object(doc, vals, f, st, &ss, &chains, extent, to.0, off)?,
+                None if *to_next => sheet_to_next(doc, f, st, &ss, &chains, extent, off)?,
                 None => {
                     let d = val(vals, &extent.distance, Kind::Length)?;
-                    let (a, b) = extent_sides(vals, extent, d, extent.direction)?;
+                    let (a, b) = extent_sides(vals, extent, d, extent.direction, None)?;
                     kernel::extrude_sheet(&ss.plane, &chains, a + off, b + off)?
                 }
             };
             push_sheet(st, f, crate::lineage::ChainRoles { sketch: &ss, chains: &chains }.tool(body));
             Ok(())
         }
-        FeatureKind::SurfaceRevolve { sketch, profiles, curves, axis, angle, angle2, symmetric, faced } => {
+        FeatureKind::SurfaceRevolve { sketch, profiles, curves, axis, angle, angle2, symmetric, faced, stays_surface } => {
             let ss = constructor_profile_in_frame(
                 doc,
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
@@ -368,6 +403,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 kernel::revolve_sheet_legacy_sides(&ss.plane, &chains, o, d, start, sweep)?
             };
             push_sheet(st, f, crate::lineage::ChainRoles { sketch: &ss, chains: &chains }.tool(body));
+            stays_a_surface(st, *stays_surface);
             Ok(())
         }
         FeatureKind::Unstitch { body, faces } => {
@@ -415,6 +451,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             rails,
             rail_fit,
             spline_as_samples,
+            stays_surface,
         } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?;
             // The path is a chain of a body's edges (#2216) or the curves of a sketch.
@@ -469,9 +506,10 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             };
             let traced = crate::lineage::ChainRoles { sketch: ss, chains: &chains }.tool(body);
             push_sheet(st, f, traced);
+            stays_a_surface(st, *stays_surface);
             Ok(())
         }
-        FeatureKind::SurfaceLoft { sections, continuity, crown, rails, rail_fit, faced } => {
+        FeatureKind::SurfaceLoft { sections, continuity, crown, rails, rail_fit, faced, stays_surface } => {
             // A loft with edge chains or 3D sketch curves for sections, or one that has to leave its
             // ends a particular way, is built through `loft_blend` from the frames of every
             // section; the plain one (planar sketch chains only, both ends G0) is the loft of old.
@@ -484,7 +522,9 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                         "not supported yet: guide rails on a loft with edge sections or end continuity".into()
                     }));
                 }
-                return loft_blend(st, f, sections, *continuity, *crown, doc);
+                loft_blend(st, f, sections, *continuity, *crown, doc)?;
+                stays_a_surface(st, *stays_surface);
+                return Ok(());
             }
             let mut secs = Vec::with_capacity(sections.len());
             let mut sketches = Vec::with_capacity(sections.len());
@@ -525,9 +565,10 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let loops: Vec<solidcore_record::Loop2> = secs.iter().map(|(_, c)| solidcore_record::Loop2 { segs: c.clone() }).collect();
             let traced = crate::lineage::SectionRoles { sections: sketches.iter().zip(&loops).map(|(s, lp)| (s, vec![lp])).collect() }.tool(body);
             push_sheet(st, f, traced);
+            stays_a_surface(st, *stays_surface);
             Ok(())
         }
-        FeatureKind::SurfaceOffset { faces, body, distance, chain, tolerance } => {
+        FeatureKind::SurfaceOffset { faces, body, distance, chain, tolerance, stays_surface } => {
             let d = val(vals, distance, Kind::Length)?;
             let tol = match tolerance {
                 Some(t) => val(vals, t, Kind::Length)?,
@@ -547,9 +588,70 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let made = Traced::step(kernel::offset_surface(&mb.body, &picked, d, tol)?, &[&mb.traced()]);
             let name = new_name(st, f, 0);
             st.bodies.push(ModelBody::traced_new(name, made, f.id));
+            stays_a_surface(st, *stays_surface);
             Ok(())
         }
-        FeatureKind::SurfaceRuled { body, edges, distance, mode, angle, direction, flip, corners, face, far } => {
+        FeatureKind::SurfaceMidsurface {
+            body,
+            faces,
+            max_thickness,
+            min_thickness,
+            min_aspect,
+            carry_holes,
+            suppress_holes_below,
+            stitch,
+            remove_original,
+        } => {
+            use crate::midsurface as mid;
+            let max = val(vals, max_thickness, Kind::Length)?;
+            let min = match min_thickness {
+                Some(e) => val(vals, e, Kind::Length)?,
+                None => 0.0,
+            };
+            let below = match suppress_holes_below {
+                Some(e) => val(vals, e, Kind::Length)?,
+                None => 0.0,
+            };
+            let picks: Vec<Vec3> = crate::plain(faces);
+            let (pairs, rest) = picks.as_chunks::<2>();
+            if picks.is_empty() || !rest.is_empty() {
+                return Err(DocError::Invalid("Midsurface: `faces` must hold two points for each pair of faces".into()));
+            }
+            let points: Vec<[[f64; 3]; 2]> = pairs.iter().map(|[a, b]| [[a.x, a.y, a.z], [b.x, b.y, b.z]]).collect();
+            let i = body_at(st, body, &picks)?;
+            let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+            let defaults = mid::Options::default();
+            let opts = mid::Options { min_thickness: min, max_thickness: max, min_aspect: min_aspect.unwrap_or(defaults.min_aspect), ..defaults };
+            let analysis = mid::analyze(&mb.body, &opts)?;
+            let chosen = mid::pairs_at(&mb.body, &analysis, &points)?;
+            let sheets = mid::sheets_with(&mb.body, &chosen, &mid::Build { carry_holes: *carry_holes, suppress_holes_below: below })?;
+            let notes = mid::report_chosen(&analysis, &chosen, &sheets);
+            mid::something_built(&sheets, &notes)?;
+            // The sheets are read in the solid's own frame: a placement the solid has (a body
+            // offset) goes with them, as a reduced mesh's does, unless the new body has its own.
+            let source_offset = doc.model_body_offset(&mb).copied();
+            for (k, made) in mid::surface_bodies(&sheets, *stitch)?.into_iter().enumerate() {
+                let name = new_name(st, f, k);
+                let made = match source_offset.filter(|_| !doc.body_offsets.contains_key(&name)) {
+                    Some(offset) => kernel::transform_matrix(&made, offset)?,
+                    None => made,
+                };
+                let made = Traced::step(made, &[&mb.traced()]);
+                st.bodies.push(ModelBody::traced_new(name, made, f.id));
+            }
+            if *remove_original {
+                // The records tied to the solid go with it, as a boolean's do.
+                st.bodies.retain(|b| b.name != mb.name);
+                st.threads.retain(|t| t.body != mb.name);
+                st.surface_sheets.retain(|s| s.body != mb.name);
+            }
+            // Never silent: what the sheets leave out is the feature's warning.
+            if !notes.is_empty() {
+                *warning = Some(format!("Midsurface: {}", notes.join("; ")));
+            }
+            Ok(())
+        }
+        FeatureKind::SurfaceRuled { body, edges, distance, mode, angle, direction, flip, corners, face, far, stays_surface } => {
             let d = val(vals, distance, Kind::Length)?;
             let mode = match mode {
                 RuledMode::Normal => kernel::RuledMode::Normal,
@@ -572,6 +674,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let made = Traced::step(kernel::ruled_surface_with(&mb.body, &crate::plain(edges), &r, &handles)?, &[&mb.traced()]);
             let name = new_name(st, f, 0);
             st.bodies.push(ModelBody::traced_new(name, made, f.id));
+            stays_a_surface(st, *stays_surface);
             Ok(())
         }
         FeatureKind::SurfaceUntrim { face, holes, outer, in_place } => {
@@ -643,7 +746,7 @@ fn sheet_to_object(
         if (end - start).abs() < 1e-9 {
             return Err(DocError::Invalid("the To object is where the surface extrude starts".into()));
         }
-        let (a, b) = extent_sides(vals, extent, end - start, crate::Direction::Positive)?;
+        let (a, b) = extent_sides(vals, extent, end - start, crate::Direction::Positive, None)?;
         return Ok(kernel::extrude_sheet(plane, chains, a + start, b + start)?);
     };
     if to_offset.abs() > 1e-9 {
@@ -692,7 +795,60 @@ fn sheet_to_object(
     Err(DocError::Invalid("part of the surface extrude never meets the To face's surface".into()))
 }
 
+/// A surface extrude To Next, starting `start` along the sketch normal: each wall runs one way
+/// (`extent.direction`: positive along the normal, negative against it) until it first meets a
+/// body, any face of a solid or surface body as it is ([`kernel::stop_at_bodies`]). A wall that
+/// meets no body is refused, as To Object refuses one that never meets its face, and so is a
+/// symmetric or two-sided To Next.
+fn sheet_to_next(
+    doc: &Document,
+    f: &Feature,
+    st: &ModelState,
+    ss: &SolvedSketch,
+    chains: &[Vec<Seg2>],
+    extent: &crate::Extent,
+    start: f64,
+) -> Result<kernel::Body> {
+    if extent.direction == crate::Direction::Symmetric || extent.distance2.is_some() {
+        return Err(DocError::Invalid("not supported yet: a surface extrude To Next to both sides (symmetric or a second side)".into()));
+    }
+    let plane = &ss.plane;
+    let toward = if extent.direction == crate::Direction::Negative { -1.0 } else { 1.0 };
+    // The bodies as this feature's component sees them, as To Object measures its target. A
+    // component's envelope only stands in for its contents: it stops nothing.
+    let tst = state_in_frame_pinned_to(doc, st, f.component, &extent.picked_placements)?;
+    let bodies: Vec<&kernel::Body> = tst.bodies.iter().filter(|b| !b.envelope).map(|b| &b.body).filter(|b| !b.is_mesh()).collect();
+    if bodies.is_empty() {
+        return Err(DocError::Invalid("a surface extrude To Next needs a body in its way, and the model has none".into()));
+    }
+    // Past every body, so a wall that meets none still runs to the far end.
+    let reach = through_all_distance(&tst, plane, start, &[])?;
+    let far = start + toward * reach;
+    extrude_within_reach([start, far])?;
+    let long = kernel::extrude_sheet(plane, chains, start.min(far), start.max(far))?;
+    // A corner of each chain's wall at the start picks the pieces to keep.
+    let start_plane = plane.offset(start);
+    let starts: Vec<Vec3> = chains.iter().filter_map(|c| c.first()).map(|s| start_plane.to_world(s.start())).collect();
+    let (kept, met) = kernel::stop_at_bodies(&long, &bodies, &starts, plane.normal() * toward)?;
+    // `reach` runs at least 1 past every body, so a wall that met one ends within half of it.
+    let [low, high] = kernel::levels_along(&kept, plane)?;
+    let furthest = if toward > 0.0 { high } else { -low };
+    if !met || furthest > toward * far - 0.5 {
+        return Err(DocError::Invalid("part of the surface extrude To Next meets no body".into()));
+    }
+    Ok(kept)
+}
+
 /// A surface builder's body, added to the model with what its faces came from.
+/// The body a surface feature just made is a surface body even where its shells close, when the
+/// feature says so (`stays_surface`, #21969); without it (designs saved before), a result that
+/// closes is a solid, as it always was.
+fn stays_a_surface(st: &mut ModelState, stays_surface: bool) {
+    if stays_surface && let Some(made) = st.bodies.last_mut() {
+        made.sheet = true;
+    }
+}
+
 fn push_sheet(st: &mut ModelState, f: &Feature, traced: crate::lineage::Traced) {
     let name = new_name(st, f, 0);
     st.bodies.push(ModelBody::traced_new(name, traced, f.id));

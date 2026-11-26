@@ -16,7 +16,7 @@ use solidcore::geom::vector3d::Vec3;
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::sweep::api_brep::create_linear_sweep;
 
-use super::offset::{draft, mark_moved, moved_faces, offset_faces, offset_sheet, refused, shell, thicken};
+use super::offset::{draft, mark_moved, moved_faces, offset_faces, offset_sheet, offset_solid, refused, shell, thicken};
 use super::{Body, area, bounds, counts, make_box, make_cylinder, make_sphere, run, to_arrays, volume};
 use crate::export::native;
 use crate::{BooleanOp, Error};
@@ -161,6 +161,8 @@ enum Op {
     Thicken(Shape, f64, bool),
     /// `Brep::offset_sheet`: distance.
     OffsetSheet(Shape, f64),
+    /// `Brep::offset_solid`: distance, round.
+    OffsetSolid(Shape, f64, bool),
     /// `Brep::draft`: faces, neutral origin, neutral normal, pull, angle.
     Draft(Shape, Vec<[f64; 3]>, [f64; 3], [f64; 3], [f64; 3], f64),
 }
@@ -241,6 +243,32 @@ fn case(name: &str) -> Case {
         // each face moved out 1 along its normal, the convex edges extended, gives the block
         // (a + 2d)(b + 2d)(c + 2d) of six planes, from -d to (a, b, c) + d.
         "offset_sheet_a_solid" => c(Op::OffsetSheet(BLOCK, 1.0), Expect::Solid(32.0 * 22.0 * 12.0, [-1.0, -1.0, -1.0], [31.0, 21.0, 11.0])),
+        // A closed solid grown 1, the convex edges extended: the block (a + 2d)(b + 2d)(c + 2d),
+        // from -d to (a, b, c) + d.
+        "offset_solid_sharp" => c(Op::OffsetSolid(BLOCK, 1.0, false), Expect::Solid(32.0 * 22.0 * 12.0, [-1.0, -1.0, -1.0], [31.0, 21.0, 11.0])),
+        // Shrunk 1, sharp: (a - 2d)(b - 2d)(c - 2d), from d to (a, b, c) - d.
+        "offset_solid_shrunk" => c(Op::OffsetSolid(BLOCK, -1.0, false), Expect::Solid(28.0 * 18.0 * 8.0, [1.0, 1.0, 1.0], [29.0, 19.0, 9.0])),
+        // Grown 1 with the convex edges rounded: every point within d of the block (Steiner's
+        // formula for a box): abc + 2(ab + bc + ca) d + π (a + b + c) d² + (4/3) π d³; the six
+        // faces moved out, a quarter cylinder along each edge, an eighth of the ball at each
+        // corner. Its bounds are the sharp offset's.
+        "offset_solid_round" => c(
+            Op::OffsetSolid(BLOCK, 1.0, true),
+            Expect::Solid(ABC + 2.0 * 1100.0 + PI * 60.0 + 4.0 / 3.0 * PI, [-1.0, -1.0, -1.0], [31.0, 21.0, 11.0]),
+        ),
+        // A cylinder r 5, h 10 grown d = 1, rounded: the side moved out, π (r + d)² h; the caps
+        // moved out, 2 π r² d; at each rim a quarter disc of radius d (area π d² / 4, centroid
+        // 4d / (3π) out from the rim) turned about the axis, 2 π (r + 4d / (3π)) π d² / 4 by Pappus.
+        "offset_solid_round_cylinder" => {
+            let (r, h, d) = (5.0, 10.0, 1.0);
+            let rim = 2.0 * PI * (r + 4.0 * d / (3.0 * PI)) * PI * d * d / 4.0;
+            c(
+                Op::OffsetSolid(Shape::Cylinder([0.0; 3], r, h), d, true),
+                Expect::Solid(PI * (r + d) * (r + d) * h + 2.0 * PI * r * r * d + 2.0 * rim, [-6.0, -6.0, -1.0], [6.0, 6.0, 11.0]),
+            )
+        }
+        // A sheet is not a closed solid.
+        "offset_solid_of_a_sheet" => c(Op::OffsetSolid(PLATE, 1.0, false), Expect::Fails(Error::Argument)),
         // The top moved out 2: abc + d·ab.
         "offset_faces_top_out" => c(Op::OffsetFaces(BLOCK, vec![TOP], 2.0), Expect::Volume(ABC + 2.0 * 600.0)),
         // The top moved in 10, as deep as the block: nothing left behind it.
@@ -376,6 +404,7 @@ fn on_core(name: &str, c: &Case) -> crate::Result<Body> {
         Op::OffsetFaces(s, points, d) => offset_faces(&s.core(), points, tol, *d),
         Op::Thicken(s, t, sym) => thicken(&s.core(), *t, *sym),
         Op::OffsetSheet(s, d) => offset_sheet(&s.core(), *d),
+        Op::OffsetSolid(s, d, round) => offset_solid(&s.core(), *d, *round),
         Op::Draft(s, points, o, n, pull, angle) => draft(&s.core(), points, tol, *o, *n, *pull, *angle),
     }
 }
@@ -472,6 +501,11 @@ cases!(
     offset_sheet_a_solid,
     offset_sheet_a_sphere,
     offset_sheet_a_sphere_to_its_centre,
+    offset_solid_sharp,
+    offset_solid_shrunk,
+    offset_solid_round,
+    offset_solid_round_cylinder,
+    offset_solid_of_a_sheet,
     offset_faces_top_out,
     offset_faces_through,
     draft_box_sides,
@@ -819,6 +853,32 @@ fn a_draft_into_a_shelled_cones_cavity_is_refused_naming_the_largest_angle() {
             assert!(rel(got, DRAFTED) < 1e-9, "{got}");
         }
     }
+}
+
+/// A frustum r 100 at z = 0 to r 40 at z = 200 with six blind holes r 5 from z = 150 up through
+/// the top on the circle r 32, its side drafted about its base to lean 18 degrees, through the
+/// kernel wrapper's draft (the cone solidcore's draft gives, carrying its definition). The drafted
+/// side, r(z) = 100 - z tan 18 degrees, is r 35.02 at the top and passes the holes' outer reach,
+/// r 37, at z = 193.89, so every hole breaks out through it. The kernel's test (solidcore-ops
+/// `offset/tests.rs`, `a_cones_side_drafted_through_blind_holes_near_its_top_breaks_them_out`)
+/// derives the volume: the frustum less the holes, the discs' closed-form overlap integrated
+/// over z, 3061182.2920648409. Here the side's cone comes back from the hole cuts with its
+/// frame at the top of its axis, so the drafted cone's frame and stored heights differ from it.
+#[test]
+fn a_cones_side_drafted_through_blind_holes_near_its_top_breaks_them_out() {
+    // 18 degrees less atan 0.3, radians
+    const TURN: f64 = 0.022_702_470_881_112_213;
+    const DRAFTED: f64 = 3_061_182.292_064_841;
+    let z = [0.0, 0.0, 1.0];
+    let s = 3.0_f64.sqrt();
+    let mut body = super::make_cone([0.0; 3], 100.0, 40.0, 200.0).unwrap();
+    for (x, y) in [(32.0, 0.0), (16.0, 16.0 * s), (-16.0, 16.0 * s), (-32.0, 0.0), (-16.0, -16.0 * s), (16.0, -16.0 * s)] {
+        let hole = make_cylinder([x, y, 150.0], 5.0, 51.0).unwrap();
+        body = super::boolean::boolean(&body, &hole, BooleanOp::Subtract).unwrap().unwrap();
+    }
+    let drafted = draft(&body, &[[70.0, 0.0, 100.0]], TOL, [0.0; 3], z, z, TURN).unwrap();
+    let got = volume(&drafted, 1e-8).unwrap();
+    assert!(rel(got, DRAFTED) < 1e-8, "{got}");
 }
 
 /// A flat L of two faces thickened by 2 with mitred walls: 2 x 10 x (20 + 22).

@@ -413,6 +413,48 @@ fn a_copy_keeps_the_provenance_on_its_faces_and_edges() {
     }
 }
 
+/// Attached by record index through the body, read back per face and edge; a copy carries it.
+#[test]
+fn attached_provenance_reads_back_by_record_index() {
+    use crate::provenance::{CarriedBy, Carrier};
+    all_fixes();
+    let b = make_box([0.0; 3], [1.0; 3]).unwrap();
+    let o = b.own_order();
+    let data = vec![
+        (Carrier::Face(2), Origin(vec![7])),
+        (Carrier::Edge(5), Origin(vec![105])),
+        // attaching again replaces
+        (Carrier::Face(2), Origin(vec![2])),
+    ];
+    b.attach(&o, data).unwrap();
+    let want = |faces: usize, edges: usize| CarriedBy {
+        faces: (0..faces)
+            .map(|i| (i == 2).then(|| Origin(vec![2])))
+            .collect(),
+        edges: (0..edges)
+            .map(|i| (i == 5).then(|| Origin(vec![105])))
+            .collect(),
+    };
+    assert_eq!(b.carried::<Origin>(&o), Ok(want(6, 12)));
+    assert!(b.tolerance().unwrap() > 0.0);
+    let c = b.copy().unwrap();
+    assert_eq!(c.carried::<Origin>(&c.own_order()), Ok(want(6, 12)));
+    // an index past the lists is refused before anything is attached
+    let past = vec![
+        (Carrier::Face(0), Origin(vec![0])),
+        (Carrier::Edge(12), Origin(vec![1])),
+    ];
+    assert_eq!(b.attach(&o, past), Err(Error::Argument));
+    assert_eq!(b.carried::<Origin>(&o), Ok(want(6, 12)));
+    // another type under the same ID is refused, and reads as none
+    assert_eq!(
+        b.attach(&o, vec![(Carrier::Face(0), Impostor)]),
+        Err(Error::Argument)
+    );
+    let none = b.carried::<Impostor>(&o).unwrap();
+    assert!(none.faces.iter().chain(&none.edges).all(Option::is_none));
+}
+
 #[test]
 fn a_copy_maps_record_order_through_renumbered_entities() {
     all_fixes();
@@ -1539,7 +1581,7 @@ fn periodic_seam_completion_keeps_every_trim_over_its_edge_interval() {
     }
     crate::record_check::validate(&completed).unwrap();
     crate::record_check::agreement(&completed).unwrap();
-    assert!(crate::pcurve::passes_import_checks(&completed));
+    assert!(crate::pcurve::import_check_failure(&completed).is_none());
     // A completion that leaves a trim over only the first half of its edge's interval, as
     // rebuilding a split edge's trim by sampling did for a real model, is refused by the
     // record's validity check, so the import keeps the record it had.
@@ -1554,7 +1596,28 @@ fn periodic_seam_completion_keeps_every_trim_over_its_edge_interval() {
         *t = 0.5 * (first + last);
     }
     assert!(crate::record_check::validate(&short).is_err());
-    assert!(!crate::pcurve::passes_import_checks(&short));
+    assert!(crate::pcurve::import_check_failure(&short).is_some());
+    // A completion that is used says nothing. One the checks refuse is named, so the import
+    // can tell a reader why the body kept its imported trims.
+    let (used, skipped) = crate::pcurve::complete_periodic_seams_noted(&source).unwrap();
+    assert!(used.is_some() && skipped.is_none());
+    let why = crate::pcurve::import_check_failure(&short).unwrap();
+    assert!(why.contains("the completed record is invalid"), "{why}");
+    assert!(crate::pcurve::import_check_failure(&completed).is_none());
+    // A trim that starts a rounding error off its edge's interval is moved onto it.
+    let mut rounded = completed.clone();
+    let Loop::Edges { edges } = &mut rounded.faces[0].loops[0] else {
+        panic!("the wall's first loop is an edge loop");
+    };
+    let edge_interval = completed.edges[edges[0].edge as usize].interval;
+    let (Curve2::Spline { knots, .. } | Curve2::RationalSpline { knots, .. }) =
+        &mut edges[0].pcurve;
+    for t in knots.iter_mut().filter(|t| **t == edge_interval[0]) {
+        *t += 5.5e-17;
+    }
+    assert_ne!(knots[0], edge_interval[0]);
+    crate::pcurve::snap_trim_ends(&mut rounded);
+    assert_eq!(rounded, completed);
     let (body, _) = Body::from_record(&completed, true).unwrap();
     let check = body.check(CheckLevel::All).unwrap();
     assert!(check.is_valid(), "{check}");

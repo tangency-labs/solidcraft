@@ -125,6 +125,8 @@ struct Row {
     comment: String,
     source: String,
     group: String,
+    /// The component the row's sketch or feature belongs to; 0 = the top level.
+    component: u64,
     favorite: bool,
     /// A text parameter's text.
     text: Option<String>,
@@ -158,6 +160,12 @@ fn rows(app: &mut SolveApp) -> Vec<Row> {
             }
         }
     }
+    // The component each sketch or feature belongs to, as the design records it.
+    let doc = &app.session.doc;
+    let mut component_of: std::collections::HashMap<&str, u64> = Default::default();
+    for f in &doc.features {
+        component_of.insert(f.name.as_str(), shown_component(&doc.components, f.component));
+    }
     let s = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
     list["parameters"]
         .as_array()
@@ -171,7 +179,9 @@ fn rows(app: &mut SolveApp) -> Vec<Row> {
                 "sketch" => owner.get(&name).cloned().unwrap_or_else(|| "Sketch".into()),
                 _ => String::new(),
             };
+            let component = component_of.get(group.as_str()).copied().unwrap_or(0);
             Row {
+                component,
                 expression: s(r, "expression"),
                 unit: s(r, "unit"),
                 // The dialog shows the parameter's own unit, so it reads `display_value`
@@ -188,6 +198,138 @@ fn rows(app: &mut SolveApp) -> Vec<Row> {
         })
         .collect()
 }
+
+/// The component to list a feature under: its own when it is in the design tree, else the top
+/// level (a component that is missing, or whose parents never reach the top, cannot be shown
+/// as a folder).
+fn shown_component(components: &[solidcraft_engine::doc::Component], id: u64) -> u64 {
+    let mut at = id;
+    for _ in 0..=components.len() {
+        if at == 0 {
+            return id;
+        }
+        match components.iter().find(|c| c.id == at) {
+            Some(c) => at = c.parent,
+            None => return 0,
+        }
+    }
+    0
+}
+
+/// One entry of the Model Parameters list, in the order it is drawn.
+#[derive(Debug, PartialEq)]
+enum Entry {
+    /// The model group at this index of the sections' groups.
+    Group(usize),
+    /// A component's folder, holding its own groups and then its child components' folders.
+    Folder { id: u64, name: String, entries: Vec<Entry> },
+}
+
+/// The order the Model Parameters list is drawn in (#20648). `group_components` is each group's
+/// component (0 = the top level) in listing order; `components` is every component as
+/// (id, parent, name) in the design's order. With `grouped` off the list is flat. Otherwise the
+/// top-level groups come first (so do groups whose component is not in the tree, so a row is
+/// never lost), then a folder per component with groups in it or below it, nested like the
+/// components, a component's own groups before its child folders.
+fn listing_order(group_components: &[u64], components: &[(u64, u64, &str)], grouped: bool) -> Vec<Entry> {
+    if !grouped {
+        return (0..group_components.len()).map(Entry::Group).collect();
+    }
+    let mut children: std::collections::HashMap<u64, Vec<(u64, &str)>> = Default::default();
+    for (id, parent, name) in components.iter().filter(|(id, parent, _)| *id != 0 && id != parent) {
+        children.entry(*parent).or_default().push((*id, *name));
+    }
+    let mut by_component: std::collections::HashMap<u64, Vec<usize>> = Default::default();
+    for (index, component) in group_components.iter().enumerate().filter(|(_, c)| **c != 0) {
+        by_component.entry(*component).or_default().push(index);
+    }
+    fn build(
+        parent: u64,
+        children: &std::collections::HashMap<u64, Vec<(u64, &str)>>,
+        by_component: &std::collections::HashMap<u64, Vec<usize>>,
+        seen: &mut std::collections::HashSet<u64>,
+    ) -> Vec<Entry> {
+        let mut folders = Vec::new();
+        for (id, name) in children.get(&parent).into_iter().flatten() {
+            // A component is visited once, so a damaged parent loop ends.
+            if !seen.insert(*id) {
+                continue;
+            }
+            let mut entries: Vec<Entry> = by_component.get(id).into_iter().flatten().map(|i| Entry::Group(*i)).collect();
+            entries.extend(build(*id, children, by_component, seen));
+            if !entries.is_empty() {
+                folders.push(Entry::Folder { id: *id, name: (*name).to_owned(), entries });
+            }
+        }
+        folders
+    }
+    let folders = build(0, &children, &by_component, &mut Default::default());
+    fn placed(entries: &[Entry], into: &mut std::collections::HashSet<usize>) {
+        for entry in entries {
+            match entry {
+                Entry::Group(i) => {
+                    into.insert(*i);
+                }
+                Entry::Folder { entries, .. } => placed(entries, into),
+            }
+        }
+    }
+    let mut inside: std::collections::HashSet<usize> = Default::default();
+    placed(&folders, &mut inside);
+    let mut order: Vec<Entry> = (0..group_components.len()).filter(|i| !inside.contains(i)).map(Entry::Group).collect();
+    order.extend(folders);
+    order
+}
+
+/// Rows in `entries`, counting every group below a folder.
+fn entry_rows(entries: &[Entry], groups: &[(&str, Vec<&Row>)]) -> usize {
+    entries
+        .iter()
+        .map(|entry| match entry {
+            Entry::Group(i) => groups.get(*i).map_or(0, |(_, members)| members.len()),
+            Entry::Folder { entries, .. } => entry_rows(entries, groups),
+        })
+        .sum()
+}
+
+/// Draw `entries` into the shared table: each group as its band, each component folder as a
+/// header band holding its own entries, indented one step per level. A closed folder hides all
+/// that is in it. The table has no nesting of its own, so depth is shown by the label's indent.
+fn draw_entries(
+    app: &mut SolveApp,
+    ui: &mut egui::Ui,
+    table: &mut ui_kit::Table<'_>,
+    d: &mut ParamsDialog,
+    (entries, groups): (&[Entry], &[(&str, Vec<&Row>)]),
+    widths: (f32, f32),
+    depth: usize,
+) {
+    for entry in entries {
+        match entry {
+            Entry::Group(i) => {
+                if let Some((group, members)) = groups.get(*i) {
+                    band_at(app, ui, table, d, (&format!("model:{group}"), group, members), widths, depth);
+                }
+            }
+            Entry::Folder { id, name, entries } => {
+                // A component's name is the user's own text, so the header shows it as written
+                // and never as a catalog word (a component named "Frame" is not the word "Frame").
+                let salt = format!("component:{id}");
+                let open = *d.bands.entry(salt.clone()).or_insert(true);
+                let mut now = open;
+                let response = table.group(ui, &salt, &format!("{}{name}", INDENT.repeat(depth)), entry_rows(entries, groups), &mut now);
+                d.bands.insert(salt, now);
+                crate::scenario::publish_target(&format!("dialog:section:{name}"), response.rect);
+                if now {
+                    draw_entries(app, ui, table, d, (entries, groups), widths, depth + 1);
+                }
+            }
+        }
+    }
+}
+
+/// One level of a component folder's indent in a band label.
+const INDENT: &str = "\u{2003}\u{2003}";
 
 fn show_value(r: &Row) -> String {
     match r.value {
@@ -309,6 +451,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             |ui| {
                 ui_kit::text(ui, hint(live), ui_kit::Text::Hint("manage"));
                 apply_live_checkbox(app, ui, &mut d, &all);
+                group_checkbox(app, ui);
                 ui_kit::row(ui, "Filter", |ui| {
                     let id = ui.make_persistent_id("parameter_filter");
                     ui_kit::search_field(ui, id, &mut d.filter, "Filter");
@@ -758,9 +901,14 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, sections: 
         // Keep the editable user rows above model groups, as in the original dialog: a
         // design with many feature parameters must not push its user parameters off screen.
         band(app, ui, table, d, ("user", solidcraft_ui_text::tr_label("User Parameters"), &sections.users), widths);
-        for (group, members) in &sections.groups {
-            band(app, ui, table, d, (&format!("model:{group}"), group, members), widths);
-        }
+        // Top-level features first, then a folder per component, nested like the component
+        // tree (#20648). Off, the groups are in listing order, as before.
+        let order = {
+            let components: Vec<_> = app.session.doc.components.iter().map(|c| (c.id, c.parent, c.name.as_str())).collect();
+            let of_group: Vec<u64> = sections.groups.iter().map(|(_, m)| m.first().map_or(0, |r| r.component)).collect();
+            listing_order(&of_group, &components, app.preferences.params_group_by_component)
+        };
+        draw_entries(app, ui, table, d, (&order, &sections.groups), widths, 0);
     });
     // The sections now share one horizontal viewport; existing agents may still ask for
     // their original grid's viewport and content width.
@@ -776,16 +924,22 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, sections: 
     }
 }
 
-fn band(
+fn band(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>, d: &mut ParamsDialog, band: (&str, &str, &[&Row]), widths: (f32, f32)) {
+    band_at(app, ui, table, d, band, widths, 0);
+}
+
+/// A band `depth` component folders deep.
+fn band_at(
     app: &mut SolveApp,
     ui: &mut egui::Ui,
     table: &mut ui_kit::Table<'_>,
     d: &mut ParamsDialog,
     (salt, label, rows): (&str, &str, &[&Row]),
     (name_floor, unit_width): (f32, f32),
+    depth: usize,
 ) {
     let open = d.bands.entry(salt.to_owned()).or_insert(true);
-    let response = table.group(ui, salt, label, rows.len(), open);
+    let response = table.group(ui, salt, &format!("{}{label}", INDENT.repeat(depth)), rows.len(), open);
     let section = match salt {
         "fav" => "Favorites",
         "user" => "User Parameters",
@@ -1134,6 +1288,13 @@ fn apply_live_checkbox(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDial
     if response.changed() && app.preferences.parameters_apply_live {
         apply_held(app, d, rows);
     }
+}
+
+/// "Group model parameters by component" (#20648), remembered across sessions; off lists the model
+/// parameters flat, in listing order.
+fn group_checkbox(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let response = ui_kit::checkbox(ui, solidcraft_ui_text::tr("parameters.group_by_component"), &mut app.preferences.params_group_by_component);
+    crate::scenario::publish_handle("params:group_by_component", response.rect.center());
 }
 
 /// The add row's draft (name, unit, expression, comment) an add was refused with, the design
@@ -2005,6 +2166,26 @@ mod tests {
         assert!(!other.app.preferences.parameters_apply_live, "the choice persists with the preferences");
     }
 
+    /// #20648: the Parameters window's own option turns the grouping on and off, and the choice is kept
+    /// with the stored preferences; there is no Preferences page row for it.
+    #[test]
+    fn the_windows_option_toggles_the_grouping_and_is_remembered() {
+        crate::i18n::install();
+        assert!(!crate::prefs::Prefs::default().params_group_by_component, "grouping stays off by default");
+        let mut h = held_dialog();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"params:group_by_component"}})).unwrap();
+        assert!(h.app.preferences.params_group_by_component, "the option turns the grouping on");
+        let saved = h.app.prefs();
+        let mut other = crate::scenario::Harness::new();
+        other.app.load_prefs(&saved);
+        assert!(other.app.preferences.params_group_by_component, "the choice persists with the preferences");
+        // A new harness clears the published handles: draw the first window again before clicking.
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"params:group_by_component"}})).unwrap();
+        assert!(!h.app.preferences.params_group_by_component, "and off again");
+    }
+
     #[test]
     fn words_and_suggestions() {
         assert_eq!(word_before("2 * wid", 7), (4, "wid".to_string()));
@@ -2634,6 +2815,148 @@ mod tests {
         h.frames(5);
         assert_eq!(crate::scenario::rects("dialog:table:parameters:group:model:").len(), 1, "filtering keeps only the matching group");
         assert!(crate::scenario::handle_at(&format!("param:{last}")).is_some());
+    }
+
+    /// #20648: the order the list is drawn in. Top level first, components in the design's order,
+    /// folders nested like the components, empty components skipped, flat when grouping is off.
+    #[test]
+    fn the_model_list_is_ordered_by_component() {
+        use super::Entry::{Folder, Group};
+        // Components: 1 Frame, 2 Lid, 3 Hinge (in Frame), 4 Empty, 5 Pin (in Hinge).
+        let components = [(1, 0, "Frame"), (2, 0, "Lid"), (3, 1, "Hinge"), (4, 0, "Empty"), (5, 3, "Pin")];
+        // Groups in listing order: Lid, Pin, top level, Frame, Frame.
+        let of_group = [2, 5, 0, 1, 1];
+        let folder = |id: u64, name: &str, entries| Folder { id, name: name.into(), entries };
+        assert_eq!(
+            listing_order(&of_group, &components, true),
+            vec![
+                Group(2),
+                folder(1, "Frame", vec![Group(3), Group(4), folder(3, "Hinge", vec![folder(5, "Pin", vec![Group(1)])])]),
+                folder(2, "Lid", vec![Group(0)]),
+            ]
+        );
+        assert_eq!(listing_order(&of_group, &components, false), (0..5).map(Group).collect::<Vec<_>>(), "flat when grouping is off");
+        assert_eq!(listing_order(&[], &components, true), vec![], "nothing listed, nothing drawn");
+        // A group whose component is unknown, or whose parents loop, is still drawn at the top.
+        let broken = [(1, 2, "A"), (2, 1, "B")];
+        assert_eq!(listing_order(&[1, 9, 0], &broken, true), vec![Group(0), Group(1), Group(2)]);
+    }
+
+    /// #20648: model parameters sit under the component their feature belongs to: top-level
+    /// features first, then a folder per component; a design without components stays flat.
+    #[test]
+    fn model_parameters_group_under_their_component() {
+        use solidcraft_engine::doc::{Document, FeatureKind, PlaneRef};
+        let plane = |i: u32| FeatureKind::ConstructionPlane {
+            plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: format!("{} mm", i + 1).into() },
+        };
+        let mut doc = Document::default();
+        let a = doc.add_component(Some("Frame"), 0).unwrap();
+        let b = doc.add_component(Some("Lid"), 0).unwrap();
+        for (name, component) in [("PlaneB", b), ("PlaneA", a), ("PlaneTop", 0)] {
+            doc.add_feature(plane(1), Some(name)).unwrap();
+            if let Some(f) = doc.features.iter_mut().find(|f| f.name == name) {
+                f.component = component;
+            }
+        }
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.session = solidcraft_engine::Session::new(doc);
+        // Grouping is opt-in (the Parameters window's own option).
+        h.app.preferences.params_group_by_component = true;
+        h.app.start("parameters.change");
+        h.frames(5);
+        let listed = h.app.params.as_ref().unwrap().listed.as_ref().unwrap().1.clone();
+        let row_of = |group: &str| listed.iter().find(|r| r.group == group).unwrap().clone();
+        assert_eq!((row_of("PlaneTop").component, row_of("PlaneA").component, row_of("PlaneB").component), (0, a, b));
+        // A group off the dialog's visible part is not drawn, so scroll the body to the end: the
+        // last folder's row must then be drawn, inside the dialog.
+        let viewport = crate::scenario::rect_of("dialog:body:viewport").unwrap();
+        h.call("ui.scroll", json!({"x":viewport.center().x,"y":viewport.center().y,"delta":-100_000}));
+        h.frames(10);
+        let at = crate::scenario::handle_at(&format!("param:{}", row_of("PlaneB").name)).unwrap();
+        assert!(crate::scenario::rect_of("dialog:body:viewport").unwrap().contains(at), "a row inside a component folder is drawn");
+        h.app.preferences.params_group_by_component = true;
+
+        let mut flat = Document::default();
+        flat.add_feature(plane(1), Some("PlaneTop")).unwrap();
+        h.app.session = solidcraft_engine::Session::new(flat);
+        h.app.params = None;
+        h.app.start("parameters.change");
+        h.frames(5);
+        let listed = &h.app.params.as_ref().unwrap().listed.as_ref().unwrap().1;
+        assert!(listed.iter().all(|r| r.component == 0), "a design without components lists every row at the top level");
+        assert!(crate::scenario::handle_at(&format!("param:{}", listed.iter().find(|r| r.group == "PlaneTop").unwrap().name)).is_some());
+    }
+
+    /// #20648: in the one Parameters table, grouping on draws the top-level features' bands first,
+    /// then a header band per component with that component's bands after it, in tree order; off,
+    /// the bands are in listing order and there are no component headers.
+    #[test]
+    fn the_table_draws_component_bands_in_tree_order_when_grouped() {
+        use solidcraft_engine::doc::{Document, FeatureKind, PlaneRef};
+        let plane = FeatureKind::ConstructionPlane {
+            plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "1 mm".into() },
+        };
+        let mut doc = Document::default();
+        let a = doc.add_component(Some("Frame"), 0).unwrap();
+        let b = doc.add_component(Some("Lid"), 0).unwrap();
+        for (name, component) in [("PlaneB", b), ("PlaneA", a), ("PlaneTop", 0)] {
+            doc.add_feature(plane.clone(), Some(name)).unwrap();
+            if let Some(f) = doc.features.iter_mut().find(|f| f.name == name) {
+                f.component = component;
+            }
+        }
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1600}));
+        h.app.session = solidcraft_engine::Session::new(doc);
+        let order = || {
+            let mut bands = crate::scenario::rects("dialog:table:parameters:group:");
+            bands.sort_by(|x, y| x.1.top().total_cmp(&y.1.top()));
+            bands.into_iter().map(|(key, _)| key.trim_start_matches("dialog:table:parameters:group:").to_owned()).collect::<Vec<_>>()
+        };
+        h.app.start("parameters.change");
+        h.frames(6);
+        assert_eq!(order(), ["user", "model:PlaneB", "model:PlaneA", "model:PlaneTop"], "off: the listing order, no folders");
+        h.app.preferences.params_group_by_component = true;
+        h.frames(6);
+        let model = |name: &str| format!("model:{name}");
+        assert_eq!(
+            order(),
+            ["user".to_owned(), model("PlaneTop"), format!("component:{a}"), model("PlaneA"), format!("component:{b}"), model("PlaneB")],
+            "on: top level first, then a header band per component with its own bands after it"
+        );
+    }
+
+    /// A component's name is the user's text, so its folder in the Model Parameters list shows
+    /// the name as written in every language: "Frame" is also a catalog word, and in German the
+    /// folder read "BILDAUSSCHNITT".
+    #[test]
+    fn a_component_folder_shows_the_components_name_in_german() {
+        use solidcraft_engine::doc::{Document, FeatureKind, PlaneRef};
+        crate::i18n::install();
+        assert_ne!(solidcraft_ui_text::Locale::for_language("de").label("Frame"), "Frame", "the German catalog translates the word Frame");
+        let mut doc = Document::default();
+        let a = doc.add_component(Some("Frame"), 0).unwrap();
+        let plane = FeatureKind::ConstructionPlane {
+            plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "1 mm".into() },
+        };
+        doc.add_feature(plane, Some("PlaneA")).unwrap();
+        if let Some(f) = doc.features.iter_mut().find(|f| f.name == "PlaneA") {
+            f.component = a;
+        }
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.session = solidcraft_engine::Session::new(doc);
+        h.app.preferences.params_group_by_component = true;
+        h.app.preferences.language = "de".into();
+        h.app.start("parameters.change");
+        h.frames(5);
+        let texts: Vec<String> =
+            h.shapes.iter().filter_map(|s| if let egui::Shape::Text(t) = &s.shape { Some(t.galley.job.text.to_string()) } else { None }).collect();
+        assert!(texts.iter().any(|t| t.eq_ignore_ascii_case("Frame")), "the folder is named Frame: {texts:?}");
+        assert!(!texts.iter().any(|t| t.eq_ignore_ascii_case("Bildausschnitt")), "the name was not translated: {texts:?}");
     }
 
     /// #2919: the add row starts blank; a blank expression shows no error and adds nothing, and

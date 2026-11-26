@@ -1247,7 +1247,6 @@ fn trim_other_uv_curves(
     });
     tk.seed = k.seed;
     tk.cancel.clone_from(&k.cancel);
-    tk.fixes.bspline_trim_preserves_uv_spans = k.fixes.bspline_trim_preserves_uv_spans;
     for x in crate::topology::edge::edgeuses(b, e, None, None)? {
         if x == this {
             continue;
@@ -1567,6 +1566,29 @@ fn brute_force(
         .then_some(natural.v_interval().length())
         .filter(|p| p.is_finite() && *p > 0.0);
 
+    // The face's own parameter box may be narrower than where its edge's lift goes: an import
+    // lifts a rim continuously round a closed surface, past the box the face had before its
+    // seams were completed. Solving inside that box pulls every sample beyond it onto its
+    // edge, the same point again and again, which the spacing test below then drops: the trim
+    // is built over the part of the edge inside the box only. Along a periodic direction every
+    // parameter of the period is a place on the face's surface, so solve over all of it.
+    let mut solve_u = (face_domain.u_min(), face_domain.u_max());
+    let mut solve_v = (face_domain.v_min(), face_domain.v_max());
+    if u_period.is_some() {
+        solve_u = (
+            solve_u.0.min(natural.u_min()),
+            solve_u.1.max(natural.u_max()),
+        );
+    }
+    if v_period.is_some() {
+        solve_v = (
+            solve_v.0.min(natural.v_min()),
+            solve_v.1.max(natural.v_max()),
+        );
+    }
+    let solve_domain =
+        crate::geom::extent2d::Extent2d::from_bounds(solve_u.0, solve_v.0, solve_u.1, solve_v.1);
+
     // for 101 points
     for ii in 0..=100_u32 {
         // evaluate the curve at evenly spaced parameter points
@@ -1578,7 +1600,7 @@ fn brute_force(
         let solutions = surface.global_point_solve::<NoObject>(
             k,
             Some(NoObject),
-            face_domain,
+            &solve_domain,
             SolverOperation::Minimize,
             p0,
             edge_tol,
@@ -4588,14 +4610,114 @@ mod tests {
         }
     }
 
+    /// A closed NURBS wall whose face box leaves out the stretch of the period an edge crosses
+    /// (an import's face before its seams are completed): the point-drop trim still covers the
+    /// whole edge, continuing across the seam, instead of the part inside the box.
+    #[test]
+    fn point_drop_over_a_face_box_narrower_than_the_edge_covers_the_whole_edge() {
+        use crate::nurbs::b_spline_curve::p1::{KnotType, NurbCircleParam};
+        use crate::nurbs::b_spline_surface::p1::{BSplineSurfaceForm, CanonicalSurfaceData};
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::primitive::api_primitives::create_cylinder;
+
+        let mut k = Kernel::default();
+        let mut b = create_cylinder(&mut k, Vec3::ZERO, 5.0, 3.0).unwrap();
+        let (eu, e) = b
+            .edgeuses()
+            .iter()
+            .find_map(|(eu, u)| u.edge.map(|e| (eu, e)))
+            .unwrap();
+        // The rational circle of radius 5 in u (a quarter turn per knot span), straight in v.
+        let (r, w) = (5.0, std::f64::consts::FRAC_1_SQRT_2);
+        let ring = [
+            (r, 0.0, 1.0),
+            (r, r, w),
+            (0.0, r, 1.0),
+            (-r, r, w),
+            (-r, 0.0, 1.0),
+            (-r, -r, w),
+            (0.0, -r, 1.0),
+            (r, -r, w),
+            (r, 0.0, 1.0),
+        ];
+        let mut points = Vec::new();
+        let mut weights = Vec::new();
+        for (x, y, weight) in ring {
+            for z in [0.0, 3.0] {
+                points.push(Point3::new(x, y, z));
+                weights.push(weight);
+            }
+        }
+        let surface = Surface::from(
+            BSplineSurface::create_canonical(&CanonicalSurfaceData {
+                u_degree: 2,
+                v_degree: 1,
+                control_points: &points,
+                form: BSplineSurfaceForm::Unspecified,
+                u_multiplicities: &[3, 2, 2, 2, 3],
+                v_multiplicities: &[2, 2],
+                u_knots: &[0.0, 1.0, 2.0, 3.0, 4.0],
+                v_knots: &[0.0, 3.0],
+                knot_type: KnotType::Unspecified,
+                weights: Some(&weights),
+                uv_domain: None,
+            })
+            .unwrap(),
+        );
+        // The rim at v = 0 from 10 degrees before the seam to 10 degrees past it.
+        let curve = Curve::from(
+            BSplineCurve::create_circle_segment(
+                3,
+                &Axis2Placement::default(),
+                5.0,
+                -10.0,
+                10.0,
+                NurbCircleParam::Quadratic,
+            )
+            .unwrap(),
+        );
+        let interval = curve.natural_interval();
+        let natural = surface.natural_uv_domain_with_nurb(&k).unwrap();
+        // the box leaves out the first and the last tenth of the period, where the rim runs
+        let narrow = crate::geom::extent2d::Extent2d::from_bounds(
+            natural.u_min() + 0.1 * natural.x_length(),
+            natural.v_min(),
+            natural.u_max() - 0.1 * natural.x_length(),
+            natural.v_max(),
+        );
+        let mut fail = DropCurveFail::default();
+        let made = brute_force(
+            &k, &mut b, eu, e, &surface, &narrow, &curve, &interval, false, true, &mut fail,
+        )
+        .unwrap();
+        let span = made.curve.natural_interval();
+        assert!(
+            (span.min() - interval.min()).abs() < 1e-9
+                && (span.max() - interval.max()).abs() < 1e-9,
+            "the trim runs over [{}, {}], the edge over [{}, {}]",
+            span.min(),
+            span.max(),
+            interval.min(),
+            interval.max()
+        );
+        // and it is one lift: its ends are a fifth of a period apart, not a period or none
+        let first = made.curve.evaluate_point(&k, interval.min()).unwrap();
+        let last = made.curve.evaluate_point(&k, interval.max()).unwrap();
+        assert!(
+            (last.x - first.x - 4.0 * 20.0 / 360.0).abs() < 0.05,
+            "the lift runs from u = {} to {}",
+            first.x,
+            last.x
+        );
+    }
+
     #[test]
     fn uv_trim_fix_survives_edge_zone_kernel() {
         use crate::nurbs::b_spline_curve::p1::NurbCircleParam;
         use crate::nurbs::b_spline_curve::BSplineCurve;
 
-        for enabled in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.bspline_trim_preserves_uv_spans = enabled;
+        {
+            let k = Kernel::default();
             let uv = BSplineCurve::create_circle_segment(
                 2,
                 &Axis2Placement::default(),
@@ -4641,29 +4763,23 @@ mod tests {
                     gap
                 })
                 .fold(0.0, f64::max);
-            if enabled {
-                assert!(gap < 1e-12, "enabled fix was lost: gap {gap}");
-            } else {
-                // the circle segment is rational: WR-575 keeps its short end span, so the
-                // trimmed curve is the original's sub-arc with or without the UV fix
-                assert!(gap < 1e-12, "rational end span was lost: gap {gap}");
-            }
+            // the circle segment is rational: WR-575 keeps its short end span, and a UV
+            // curve keeps it anyway (WR-441), so the trimmed curve is the original's sub-arc
+            assert!(gap < 1e-12, "short UV end span was lost: gap {gap}");
         }
     }
 
     /// As [`uv_trim_fix_survives_edge_zone_kernel`] on a polynomial UV curve (weights
-    /// 1), whose short end span upstream's cleanup still removes by default: the UV fix
-    /// must reach the edge-zone kernel the trim runs in, or the span goes and the curve
-    /// moves.
+    /// 1), whose short end span upstream's cleanup removes: the edge-zone kernel the
+    /// trim runs in keeps it (WR-441), so the curve does not move.
     #[test]
     fn uv_trim_fix_survives_edge_zone_kernel_on_a_polynomial_curve() {
         use crate::nurbs::b_spline_curve::BSplineCurve;
         use crate::nurbs::math::{CPoint, NOW};
         use crate::nurbs::nurbs_crv::allocate_nurb_curve;
 
-        for enabled in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.bspline_trim_preserves_uv_spans = enabled;
+        {
+            let k = Kernel::default();
             let r = 0.14;
             let mut nurb = allocate_nurb_curve(4, 2, 7).unwrap();
             nurb.cpts_mut().copy_from_slice(&[
@@ -4705,11 +4821,7 @@ mod tests {
                     .length()
                 })
                 .fold(0.0, f64::max);
-            if enabled {
-                assert!(gap < 1e-12, "enabled fix was lost: gap {gap}");
-            } else {
-                assert!(gap > 1e-9, "default gap {gap}");
-            }
+            assert!(gap < 1e-12, "short UV end span was lost: gap {gap}");
         }
     }
 

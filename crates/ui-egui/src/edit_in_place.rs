@@ -80,7 +80,7 @@ impl EditInPlace {
 pub(crate) fn edits_on_double_click(app: &SolveApp, component: u64) -> bool {
     app.preferences.double_click_components
         && app.session.path.is_some()
-        && app.session.doc.links.get(&component).is_some_and(|link| link.step_names.is_none())
+        && app.session.doc.links.get(&component).is_some_and(|link| link.is_design())
 }
 
 /// A component double-clicked in the browser: a linked one is edited in place (Preferences:

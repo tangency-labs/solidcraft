@@ -56,7 +56,7 @@ pub(crate) fn plate() -> Drawing {
     let (assembly, bolt_sheet) = (d.sheets[0].id, d.sheets[1].id);
     let mut add = |d: &mut Drawing, sheet, kind, place, settings, reference_shown_percent| {
         let id = d.allocate_id(&mut id_source).unwrap();
-        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent, label: None })]);
+        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent, centre_marks: None, label: None })]);
         id
     };
     let half = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
@@ -2305,6 +2305,7 @@ fn sheet_sketch_unsupported_equations_and_centerlines_are_refused_before_solving
                 end: "1".into(),
                 tolerance: 0.01,
                 variable_unit: solidcraft_sketch::VariableUnit::Number,
+                radians_trig: false,
             });
             "equations"
         };
