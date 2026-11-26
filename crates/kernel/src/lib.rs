@@ -478,6 +478,11 @@ pub use solidcraft_smlib::trace as smlib_trace;
 /// scopes and counted work of the calls this process made.
 #[cfg(feature = "solidcore-profile")]
 pub use solidcraft_smlib::write_kernel_profiles;
+
+/// [`solidcraft_smlib::profiled`]: each solidcore-ops call's kernel profile, scoped per call
+/// (feature `solidcore-profile`).
+#[cfg(feature = "solidcore-profile")]
+pub use solidcraft_smlib::profiled;
 pub use splitface::SplitTool;
 pub use splitface::face_split_if_on_face;
 pub use splitface::has_cap_at;
