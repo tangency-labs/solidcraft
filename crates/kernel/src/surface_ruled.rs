@@ -102,6 +102,36 @@ pub fn ruled_far_handles(body: &Body, at: &[Vec3], r: &Ruled) -> Result<Vec<Opti
         .collect())
 }
 
+/// Samples along each strip where [`refuse_folds`] compares its far edge with its edge.
+const FOLD_SAMPLES: usize = 64;
+/// Samples along a free strip where [`ruled_surface_close`] measures its far curve against its
+/// rulings' ends.
+const REFINE_SAMPLES: usize = 64;
+/// Most rounds of halving a free strip's spans ([`ruled_surface_close`]).
+const MAX_REFINE: usize = 6;
+
+/// Refuses a ruled surface whose strips fold over themselves: where a strip's far edge runs
+/// against its edge (or stands still), the rulings between have crossed, and the strip overlaps
+/// itself there (an arc's rulings leaning in past its axis, a curve's past its centre of
+/// curvature). Each strip's far edge and edge share their parameter, so their tangents are
+/// compared at the same parameters, [`FOLD_SAMPLES`] along each.
+fn refuse_folds(plan: &Plan) -> Result<()> {
+    for s in &plan.strips {
+        for i in 0..=FOLD_SAMPLES {
+            let f = i as f64 / FOLD_SAMPLES as f64;
+            let (Some((_, edge)), Some((_, far))) = (point_tangent(&s.base, f), point_tangent(&s.top, f)) else {
+                return Err(KernelError::Invalid("a strip's edge can't be evaluated".into()));
+            };
+            if !(far.dot(edge) > 1e-9 * edge.dot(edge)) {
+                return Err(KernelError::Invalid(
+                    "the strip would fold over itself (its rulings cross before they end): use a shorter distance or a smaller angle".into(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The strips and chain of a ruled surface, before its joints.
 struct Plan {
     chain: Vec<(usize, bool)>,
@@ -117,7 +147,24 @@ struct Plan {
 /// order, as [`ruled_far_handles`] lists them; `None` or missing: the default curve). A handle
 /// list of the wrong length, or one for an exact strip, is refused.
 pub fn ruled_surface_with(body: &Body, at: &[Vec3], r: &Ruled, handles: &[Option<Vec<Vec3>>]) -> Result<Body> {
-    let Plan { chain, closed, mode, eps, strips, .. } = planned(body, at, r, handles)?;
+    built(body, r, planned(body, at, r, handles)?)
+}
+
+/// [`ruled_surface`] whose free strips' far curves pass within `tol` of their rulings' ends:
+/// each such strip's edge is taken with its spans halved (exact knot insertion, the same curve)
+/// until its far curve, solved as [`far_curves`] solves it, comes that close at
+/// [`REFINE_SAMPLES`] points along it, for at most [`MAX_REFINE`] rounds (what is left is
+/// refused). Strips that fold over themselves are refused ([`refuse_folds`]). The law extension's
+/// strip (Surface › Extend); Ruled Surface keeps its own far curves (and its saved handles).
+pub(crate) fn ruled_surface_close(body: &Body, at: &[Vec3], r: &Ruled, tol: f64) -> Result<Body> {
+    let plan = planned_refined(body, at, r, &[], Some(tol))?;
+    refuse_folds(&plan)?;
+    built(body, r, plan)
+}
+
+/// The ruled surface of `plan` (strips, joints and corner faces) as one surface body.
+fn built(body: &Body, r: &Ruled, plan: Plan) -> Result<Body> {
+    let Plan { chain, closed, mode, eps, strips, .. } = plan;
     let n = chain.len();
     let rec = body.record();
     // Joints at the chain's vertices: joint j is where strip j starts (and strip j - 1 ends); an
@@ -176,6 +223,12 @@ pub fn ruled_surface_with(body: &Body, at: &[Vec3], r: &Ruled, handles: &[Option
 /// The chain picked by `at`, each edge's rulings read, and its strips with their far edges (the
 /// free ones solved with `handles` given; see [`ruled_surface_with`]).
 fn planned(body: &Body, at: &[Vec3], r: &Ruled, handles: &[Option<Vec<Vec3>>]) -> Result<Plan> {
+    planned_refined(body, at, r, handles, None)
+}
+
+/// [`planned`], with `refine` (a tolerance) the free strips' far curves solved as
+/// [`ruled_surface_close`] solves them.
+fn planned_refined(body: &Body, at: &[Vec3], r: &Ruled, handles: &[Option<Vec<Vec3>>], refine: Option<f64>) -> Result<Plan> {
     body.require_brep("ruled surface")?;
     let d = r.distance;
     if !(d.is_finite() && d > 0.0 && d < 1e6) {
@@ -300,7 +353,7 @@ fn planned(body: &Body, at: &[Vec3], r: &Ruled, handles: &[Option<Vec<Vec3>>]) -
     // edge does not, and a strip with a corner inside it is no valid face. So a free strip's edge
     // is taken on the knots it needs ([`without_smooth_joints`]): the same curve, and a far curve
     // as smooth as it. Handles given for the edge's own knots (a design saved before) keep them.
-    let bases: Vec<CurveN<4>> = bases
+    let mut bases: Vec<CurveN<4>> = bases
         .into_iter()
         .zip(&sampled)
         .enumerate()
@@ -313,31 +366,6 @@ fn planned(body: &Body, at: &[Vec3], r: &Ruled, handles: &[Option<Vec<Vec3>>]) -
             if given.is_some_and(|g| g + 2 == c.ctrl.len()) { c } else { without_smooth_joints(c, eps) }
         })
         .collect();
-    let rulings = rulings_on(&bases, &sides, &field);
-    // Exact strips' far edges are their edges' images; the rest are solved together.
-    let exact: Vec<Option<CurveN<4>>> = sampled.iter().zip(&bases).map(|(s, base)| s.affine.as_ref().map(|m| mapped(base, |p| m.apply(p)))).collect();
-    let corner = |r: &Reading| r.0 + r.3 * d;
-    let mut index = 0;
-    let mut fars = Vec::with_capacity(n);
-    for (k, (ru, s)) in rulings.into_iter().zip(&sampled).enumerate() {
-        let given = handles.get(k).cloned().flatten();
-        if s.affine.is_some() {
-            if given.is_some() {
-                return Err(KernelError::Invalid(format!("edge {} of the chain has an exact strip: it takes no far-curve handles", k + 1)));
-            }
-            fars.push(None);
-            continue;
-        }
-        let count = ru.base.ctrl.len();
-        if given.as_ref().is_some_and(|g| g.len() + 2 != count) {
-            return Err(KernelError::Invalid(format!("edge {} of the chain takes {} far-curve handles", k + 1, count.saturating_sub(2))));
-        }
-        let start = index;
-        if given.is_none() {
-            index += count.saturating_sub(2);
-        }
-        fars.push(Some(Far { rulings: ru, a: corner(&s.first), b: corner(&s.last), given, index: start }));
-    }
     // Smooth shared joints: the chain runs on (its tangents agree) and the rulings agree.
     let smooth: Vec<bool> = (0..n)
         .map(|k| {
@@ -349,7 +377,69 @@ fn planned(body: &Body, at: &[Vec3], r: &Ruled, handles: &[Option<Vec<Vec3>>]) -
                     .is_some_and(|(a, b)| a.last.1.dot(b.first.1) > (1e-3f64).cos() && (a.last.3 - b.first.3).len() <= SAME_RULING)
         })
         .collect();
-    let tops = far_curves(&fars, &exact, &smooth)?;
+    let corner = |r: &Reading| r.0 + r.3 * d;
+    let mut round = 0;
+    let (exact, tops) = loop {
+        let rulings = rulings_on(&bases, &sides, &field);
+        // Exact strips' far edges are their edges' images; the rest are solved together.
+        let exact: Vec<Option<CurveN<4>>> =
+            sampled.iter().zip(&bases).map(|(s, base)| s.affine.as_ref().map(|m| mapped(base, |p| m.apply(p)))).collect();
+        let mut index = 0;
+        let mut fars = Vec::with_capacity(n);
+        for (k, (ru, s)) in rulings.into_iter().zip(&sampled).enumerate() {
+            let given = handles.get(k).cloned().flatten();
+            if s.affine.is_some() {
+                if given.is_some() {
+                    return Err(KernelError::Invalid(format!("edge {} of the chain has an exact strip: it takes no far-curve handles", k + 1)));
+                }
+                fars.push(None);
+                continue;
+            }
+            let count = ru.base.ctrl.len();
+            if given.as_ref().is_some_and(|g| g.len() + 2 != count) {
+                return Err(KernelError::Invalid(format!("edge {} of the chain takes {} far-curve handles", k + 1, count.saturating_sub(2))));
+            }
+            let start = index;
+            if given.is_none() {
+                index += count.saturating_sub(2);
+            }
+            fars.push(Some(Far { rulings: ru, a: corner(&s.first), b: corner(&s.last), given, index: start }));
+        }
+        let Some(tol) = refine else {
+            let tops = far_curves(&fars, &exact, &smooth)?;
+            break (exact, tops);
+        };
+        let tops = fars.iter().map(|f| f.as_ref().map(close_far_curve).transpose()).collect::<Result<Vec<_>>>()?;
+        // The free strips whose far curves stray more than `tol` from their rulings' ends.
+        let mut far_off = Vec::new();
+        for (k, (far, top)) in fars.iter().zip(&tops).enumerate() {
+            let (Some(far), Some(top)) = (far, top) else { continue };
+            for i in 0..=REFINE_SAMPLES {
+                let f = i as f64 / REFINE_SAMPLES as f64;
+                let p = point(top, f).ok_or_else(|| KernelError::Failed("ruled surface: a far curve".into()))?;
+                if p.dist(far.rulings.end_at(f)?) > tol {
+                    far_off.push(k);
+                    break;
+                }
+            }
+        }
+        if far_off.is_empty() {
+            break (exact, tops);
+        }
+        let free_points: usize = bases.iter().zip(&sampled).filter(|(_, s)| s.affine.is_none()).map(|(b, _)| b.ctrl.len()).sum();
+        if round >= MAX_REFINE || 2 * free_points > MAX_FREE {
+            return Err(KernelError::Invalid(format!(
+                "the strip's far edge can't be made to follow its rulings within {tol} mm: try a shorter distance or a smaller angle"
+            )));
+        }
+        drop(fars);
+        for k in far_off {
+            if let Some(b) = bases.get_mut(k) {
+                *b = halved(b)?;
+            }
+        }
+        round += 1;
+    };
     let mut strips = Vec::with_capacity(n);
     let mut free = Vec::with_capacity(n);
     for (k, s) in sampled.iter().enumerate() {
@@ -447,6 +537,19 @@ fn without_smooth_joints(c: CurveN<4>, tol: f64) -> CurveN<4> {
         }
         _ => c,
     }
+}
+
+/// `c` with a knot inserted at the middle of each of its spans (Boehm's insertion: the same curve,
+/// twice the spans), so a far curve on its knots has twice the freedom.
+fn halved(c: &CurveN<4>) -> Result<CurveN<4>> {
+    let [t0, t1] = range(c);
+    let mids: Vec<f64> = c.knots.windows(2).filter(|w| w[1] > w[0] && w[0] >= t0 && w[1] <= t1).map(|w| 0.5 * (w[0] + w[1])).collect();
+    let (mut knots, mut ctrl) = (c.knots.clone(), hpoints(c));
+    for u in mids {
+        (knots, ctrl) = solidcraft_geom::bspline::insert_knot(c.degree, &knots, &ctrl, u)
+            .map_err(|e| KernelError::Failed(format!("ruled surface: refining an edge: {e}")))?;
+    }
+    Ok(CurveN { degree: c.degree, knots, ctrl: ctrl.iter().map(|h| [h.x, h.y, h.z, h.w]).collect() })
 }
 
 fn degree(knots: &[f64], n: usize) -> Result<usize> {
@@ -874,6 +977,52 @@ fn far_curves(fars: &[Option<Far>], exact: &[Option<CurveN<4>>], smooth: &[bool]
             Ok(Some(with_points(far.rulings.base, &pts)))
         })
         .collect()
+}
+
+/// Samples per knot span where [`close_far_curve`] fits its curve.
+const CLOSE_PER_SPAN: usize = 6;
+
+/// A free strip's far curve that follows its rulings' ends as closely as its edge's spline space
+/// allows: from corner to corner, its interior control points the least-squares fit of the
+/// rulings' ends at [`CLOSE_PER_SPAN`] parameters in each span and at the Greville abscissae
+/// (no bending or end-tangent terms, which [`far_curves`] weighs in for a fair default). With
+/// spans enough ([`ruled_surface_close`] halves them) it runs as near the ends as asked.
+fn close_far_curve(far: &Far) -> Result<CurveN<4>> {
+    let c = far.rulings.base;
+    let count = c.ctrl.len();
+    let m = count.saturating_sub(2);
+    let slot = |i: usize| -> std::result::Result<usize, Vec3> {
+        if i == 0 {
+            Err(far.a)
+        } else if i + 1 >= count {
+            Err(far.b)
+        } else {
+            Ok(i - 1)
+        }
+    };
+    let pts: Vec<Vec3> = if m == 0 {
+        vec![far.a, far.b]
+    } else {
+        let [t0, t1] = range(c);
+        let mut params: Vec<f64> = (0..count).map(|i| c.knots.iter().skip(i + 1).take(c.degree).sum::<f64>() / c.degree.max(1) as f64).collect();
+        for w in c.knots.windows(2).filter(|w| w[1] > w[0] && w[0] >= t0 && w[1] <= t1) {
+            params.extend((0..CLOSE_PER_SPAN).map(|q| w[0] + (w[1] - w[0]) * (q as f64 + 0.5) / CLOSE_PER_SPAN as f64));
+        }
+        let mut sys = Normal::new(m);
+        for t in params {
+            let basis = rational_basis(c, t).ok_or_else(|| KernelError::Failed("ruled surface: the far curve's basis".into()))?;
+            let row: Vec<(std::result::Result<usize, Vec3>, f64)> = basis.into_iter().map(|(i, r)| (slot(i), r[0])).collect();
+            sys.row(&row, far.rulings.end_at(((t - t0) / (t1 - t0)).clamp(0.0, 1.0))?, 1.0);
+        }
+        let x = sys.solve()?;
+        (0..count)
+            .map(|i| match slot(i) {
+                Ok(j) => x.get(j).copied().ok_or_else(|| KernelError::Failed("ruled surface: the far curve".into())),
+                Err(p) => Ok(p),
+            })
+            .collect::<Result<_>>()?
+    };
+    Ok(with_points(c, &pts))
 }
 
 /// `c` with the control points `pts` (Cartesian), its knots and weights kept.

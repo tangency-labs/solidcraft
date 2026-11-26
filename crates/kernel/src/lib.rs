@@ -560,6 +560,7 @@ pub use step_out::step_export_products;
 pub use surface_extend::ExtendLimit;
 pub use surface_extend::ExtendMode;
 pub use surface_extend::ExtendOptions;
+pub use surface_extend::LAW_ANGLE_LIMIT;
 pub use surface_extend::extend_surface;
 pub use surface_kind::AxialPiece;
 pub use surface_kind::EdgeCircle;
