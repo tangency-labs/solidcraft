@@ -43,6 +43,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&LIST)
         .output(output_schema_for::<NotesList>)
         .noundo()
+        .read_only()
         .doc_only()
         .params("→ notes: [{id, anchor: [x,y,z], text, hidden}] in creation order"),
 ];

@@ -146,11 +146,10 @@
 //!   cbiDoSplit = FALSE` and is not ported.
 //! - The `SM_DEBUG_CODE` blocks (dumps, drawing) are not ported; release `SM_ASSERT`s
 //!   are expression statements whose only effect is the dereference they make.
-//! - **Edge use binormals.** `SmEdgeuse::EvaluateBinormal` of `UpdateFaces` is
-//!   [`ProtoBrep::edgeuse_evaluate_binormal`] on the owner's B-rep. Its status is ignored
-//!   as upstream: a failed evaluation leaves the binormal at its previous value
-//!   (`SM_UNDEF_DOUBLE` components before the first success), and a missing splitting
-//!   edge, which upstream dereferences, is [`SolidError::InvalidInput`].
+//! - **Proto faces in `UpdateFaces`.** Not sorted between the split face's children:
+//!   nothing reads that sorting (see [`ProtoTopologyManager::update_faces`]), so neither
+//!   its edge use binormals (`SmEdgeuse::EvaluateBinormal`) nor its classifications of
+//!   coincident proto edges are made.
 //! - **Recursion.** None.
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
@@ -897,6 +896,7 @@ fn classify_param_on_faces<O: ClassObject>(
     } else {
         zone_tol_for_xsect_result(k, brep, face1, face2)?
     };
+    k.work_counters.add_split_face_classification();
     if brep.face_point_classify_uv(k, face1, uv, tolerance)? == PointClassType::Face {
         return Ok(1);
     }
@@ -3739,18 +3739,16 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// Updates the proto topology after the face `old_face` of B-rep `which` was split
     /// by `splitting_edge` into itself and `new_face` (`UpdateFaces`): the faces' UV
     /// domains shrink to their trim curves; vertex and edge definitions on the old face
-    /// move to the new face when their UV point is in the new face only; and each proto
-    /// face on the old face is assigned to the child face coincident with its other
-    /// face (by binormals across `other_edge`, the splitting edge's counterpart in the
-    /// other B-rep, or by its coincident proto edges' midpoints), its proto edges on
-    /// the other child moving to a new proto face.
+    /// move to the new face when their UV point is in the new face only. Not upstream:
+    /// the proto faces on the old face are left as they are (upstream sorts them between
+    /// the two children, work nothing reads; see the comment at the end). `splitting_edge`
+    /// and `other_edge`, the splitting edge's counterpart in the other B-rep, were that
+    /// sorting's inputs.
     ///
     /// # Errors
     ///
-    /// Those of the owning-face domain and classification callbacks and of
-    /// [`ProtoBrep::edgeuse_evaluate_binormal`] (other than its ignored statuses);
-    /// [`SolidError::InvalidInput`] for deleted objects, unknown handles or a missing
-    /// splitting edge.
+    /// Those of the owning-face domain and classification callbacks;
+    /// [`SolidError::InvalidInput`] for deleted objects or unknown handles.
     pub fn update_faces(
         &mut self,
         k: &Kernel,
@@ -3867,169 +3865,18 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             }
         }
 
-        // See if ProtoFaces on the split face need to be split as well (the faces
-        // this loop creates are not processed).
-        let mut binorm_old = Vec3::UNDEF;
-        let mut binorm_new = Vec3::UNDEF;
-        let mut got_binormals = false;
-        let pfs = self.proto_faces().to_vec();
-        for pf in pfs {
-            let f = self
-                .proto_face(pf)
-                .ok_or(dangling("proto face is deleted"))?;
-            let Some(face) = as_kind(f.src_topo(which), ClassObjectKind::Face) else {
-                continue;
-            };
-            if face != old_face {
-                continue;
-            }
-
-            let other_face = as_kind(f.src_topo(3 - which), ClassObjectKind::Face);
-            let eu = match (other_face, other_edge) {
-                (Some(of), Some(oe)) => brep.edge_edgeuse_of_face(oe, of)?,
-                _ => None,
-            };
-            let Some(other_face) = other_face else {
-                continue;
-            };
-            let mut did_reclassify = false;
-            let mut which_face = 0;
-
-            if let Some(eu) = eu {
-                if !got_binormals {
-                    let se = splitting_edge.ok_or(dangling("splitting edge is null"))?;
-                    if let Some(this_eu) = brep.edge_edgeuse_of_face(se, old_face)? {
-                        let mid = brep
-                            .edge_interval(se)
-                            .ok_or(dangling("edge handle is unknown"))?
-                            .mid();
-                        binorm_old = brep.edgeuse_evaluate_binormal(k, this_eu, mid)?;
-                        if let Some(this_eu) = brep.edge_edgeuse_of_face(se, new_face)? {
-                            binorm_new = brep.edgeuse_evaluate_binormal(k, this_eu, mid)?;
-                            got_binormals = true;
-                        }
-                    }
-                }
-                let oe = other_edge.ok_or(dangling("other edge is null"))?;
-                let mid = brep
-                    .edge_interval(oe)
-                    .ok_or(dangling("edge handle is unknown"))?
-                    .mid();
-                let binorm_other = brep.edgeuse_evaluate_binormal(k, eu, mid)?;
-                let dot_old = binorm_old.dot(binorm_other);
-                let dot_new = binorm_new.dot(binorm_other);
-                which_face = if dot_old > 0.0 && dot_new < 0.0 {
-                    1
-                } else if dot_old < 0.0 && dot_new > 0.0 {
-                    2
-                } else {
-                    0
-                };
-                if which_face == 1 || which_face == 2 {
-                    did_reclassify = true;
-                }
-            }
-
-            let mut coinc_pes: Vec<Option<ProtoEdgeId>> = self
-                .proto_face(pf)
-                .ok_or(dangling("proto face is deleted"))?
-                .coinc_proto_edges()
-                .iter()
-                .copied()
-                .map(Some)
-                .collect();
-
-            if !did_reclassify {
-                for &coinc_pe in coinc_pes.iter().flatten() {
-                    // (status ignored upstream; passed on as the fork does, bcc6f01)
-                    let mid_pt = self
-                        .proto_edge_evaluate_mid(k, brep, coinc_pe, true, false)?
-                        .0
-                        .unwrap_or(Vec3::UNDEF);
-                    let surface = brep.face_surface(old_face).ok_or_else(unknown)?;
-                    let Some(face_uv) =
-                        ignore_soft(surface_drop_point(k, brep, surface, mid_pt))?.flatten()
-                    else {
-                        continue;
-                    };
-                    let zone_tol = zone_tol_for_xsect_result(k, brep, old_face, new_face)?;
-                    which_face = classify_param_on_faces(
-                        k,
-                        brep,
-                        face_uv,
-                        zone_tol,
-                        old_face,
-                        &old_domain,
-                        new_face,
-                        &new_domain,
-                    )?;
-                    if which_face == 1 || which_face == 2 {
-                        did_reclassify = true;
-                        break;
-                    }
-                }
-            }
-            if !did_reclassify {
-                continue;
-            }
-
-            let this_face = if which_face == 1 { old_face } else { new_face };
-            let that_face = if which_face == 1 { new_face } else { old_face };
-            self.proto_face_mut(pf)
-                .ok_or(dangling("proto face is deleted"))?
-                .set_src_topo(which, PointClassType::Face, Some(this_face));
-
-            // sort the coincident proto edges into those that stay and those to move
-            let mut to_move = Vec::new();
-            for slot in &mut coinc_pes {
-                let Some(pe) = *slot else { continue };
-                let mut in_this_face = true;
-                let e = self
-                    .proto_edge(pe)
-                    .ok_or(dangling("proto edge is deleted"))?;
-                for &ed in e.edge_definitions() {
-                    let d = self.ed_ref(ed)?;
-                    match d.src_topo_type(which) {
-                        PointClassType::Face => {
-                            if let Some(f) = as_kind(d.src_topo(which), ClassObjectKind::Face) {
-                                if f != this_face {
-                                    in_this_face = false;
-                                }
-                            }
-                            break;
-                        }
-                        PointClassType::Edge => {
-                            if let Some(e) = as_kind(d.src_topo(which), ClassObjectKind::Edge) {
-                                if !brep.edge_is_connected_to_face(e, this_face)? {
-                                    in_this_face = false;
-                                }
-                            }
-                            break;
-                        }
-                        _ => {}
-                    }
-                }
-                if !in_this_face {
-                    to_move.push(pe);
-                    *slot = None;
-                }
-            }
-            let staying: Vec<ProtoEdgeId> = coinc_pes.into_iter().flatten().collect();
-
-            if !to_move.is_empty() {
-                if staying.is_empty() {
-                    // All PEs were moved: just update this ProtoFace.
-                    self.proto_face_mut(pf)
-                        .ok_or(dangling("proto face is deleted"))?
-                        .set_src_topo(which, PointClassType::Face, Some(new_face));
-                } else if which == 1 {
-                    // Make a new ProtoFace
-                    self.create_proto_face(Some(that_face), Some(other_face), &to_move)?;
-                } else {
-                    self.create_proto_face(Some(other_face), Some(that_face), &to_move)?;
-                }
-            }
-        }
+        // Not upstream: the proto faces on the split face are not re-sorted. Upstream
+        // assigns each to the child face coincident with its other face (by binormals
+        // across the splitting edge, else by classifying its coincident proto edges'
+        // midpoints) and moves the proto edges on the other child to a new proto face.
+        // Nothing reads a proto face's faces but that sorting itself, and the one reader of
+        // the coincident proto edges past this point, `glue_coincident_brep_vertices`, takes
+        // each of them once whatever proto face lists it. The sorting classified every
+        // coincident proto edge of every proto face on the face at every split of it: a
+        // union of two halves of a woven panel of 32 strips made 2,191,773 classifications
+        // there, 2,154,634 of them on no face's interior, and they grew about 65 times for
+        // each doubling of the strips.
+        let _ = (splitting_edge, other_edge);
         Ok(())
     }
 

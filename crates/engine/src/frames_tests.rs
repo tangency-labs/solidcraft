@@ -965,7 +965,7 @@ fn a_hole_picked_on_a_turned_part_drills_it_past_other_parts_frames() {
         let f = s.doc.find_feature("H").unwrap();
         let participants = f.participants.clone();
         let solidcraft_doc::FeatureKind::Hole { direction, .. } = &f.kind else { panic!("{case}: not a hole") };
-        let direction = direction.0;
+        let direction = solidcraft_doc::literal_dir(direction).unwrap();
         let (b, c) = (body_volume(&s, "Base block"), body_volume(&s, "Cap block"));
         // The box's 6 faces, 12 edges and 8 corners, and the hole's wall and floor, its two rims
         // and the wall's seam, and the seam's two ends.

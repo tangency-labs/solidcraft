@@ -38,5 +38,10 @@
     "POINT AT AVERAGE OF POINTS": "多点平均位置的点",
     "cmd.construct_point_average": "多点平均位置的点",
     "help.construct.point.average": "在你选择的两个或更多点的平均位置创建一个构造点；选择两个点时就是它们的正中间。所选的点移动时，新创建的点随之移动。"
+  },
+  "fr": {
+    "POINT AT AVERAGE OF POINTS": "POINT AU BARYCENTRE DES POINTS",
+    "cmd.construct_point_average": "Point au barycentre des points",
+    "help.construct.point.average": "Crée un point de construction au centre de deux points ou plus que vous sélectionnez ; avec deux points, il se trouve à mi-distance entre eux. Le nouveau point suit les points sélectionnés lorsqu’ils se déplacent."
   }
 }

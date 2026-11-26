@@ -33,16 +33,19 @@
 //! |A_u x A_v|^2`, `H = E'n'' + G'l'' - 2F'm''`, `K = l''n'' - m''^2`, `E' = A_u.A_u`, ...
 //! and `l'' = (P_uu w - w_uu P).(A_u x A_v)`, ...: polynomials and one square root,
 //! bounded per patch and subdivided until certified, or until a point with `Q < 0` (a
-//! fold) is found. The forms are built in the patch's own frame and carry a running error
-//! bound (`bernstein::Bounded`) that the bound counts, so their rounding follows the
-//! patch's size, not its distance from the origin. The homogeneous normal carries a
-//! factor w, `A_u x A_v = w N'`, so `X = w X'`, `H = w H'`,
+//! fold) is found. Where the term under the root counts against `Q`, the root is bounded
+//! by its tangent, `X <= (X^2 + c^2) / (2c)`, so one polynomial bounds `Q` and the bound
+//! closes quadratically as a patch shrinks. The forms are built in the patch's own frame
+//! and carry a running error bound (`bernstein::Bounded`) that both bounds count, so
+//! their rounding follows the patch's size, not its distance from the origin. The
+//! homogeneous normal carries a factor w, `A_u x A_v = w N'`, so `X = w X'`, `H = w H'`,
 //! `K = w^2 K'` (`X'`, `H'`, `K'` the same forms on `N'`) and
 //! `Q = w^4 (X'^4 - d X' H' + d^2 w^2 K')`: the bracket, of the same sign, is what is
 //! bounded, of degree `4 deg w` less in each parameter (#2487: a G2 round's rational
-//! bicubic-by-septic net reaches degree 112 in Q, past the Bernstein forms' cap of 96, and
-//! 80 in the bracket). A face not certified regular is refused (D5), naming the largest
-//! wall that works: the smallest radius of curvature on the displaced side.
+//! bicubic-by-septic net reaches degree 112 in Q and 80 in the bracket; the tangent bound's
+//! product reaches 100, within the Bernstein forms' cap of 128). A face not certified
+//! regular is refused (D5), naming the largest wall that works: the smallest radius of
+//! curvature on the displaced side.
 //!
 //! Deviations: not upstream. Bounds: at most [`MAX_ROUNDS`] refinement rounds and
 //! [`MAX_SPANS`] spans per direction for the offset; at most [`MAX_REGULARITY_PATCHES`]
@@ -75,7 +78,7 @@ use crate::nurbs::srf_basic::Surface as Nurb;
 use super::bernstein::{
     cross, cross_bounded, deriv_u3, deriv_u3_bounded, deriv_v3, deriv_v3_bounded, dot, dot_bounded,
     eval3, mul3, mul3_bounded, restrict3, sub3, sub3_bounded, unbounded3, Bernstein2, Bernstein3,
-    Binomials, Bounded, Bounded3,
+    Binomials, Bounded, Bounded3, MAX_DEGREE,
 };
 
 const OP: &str = "offset::construction::sheets";
@@ -1056,17 +1059,22 @@ impl RegularityForms {
         Ok(Self { q0, q1, x2 })
     }
 
-    /// Whether `Q > 0` is certified on the whole patch by the coefficients' ranges. Each
-    /// form's coefficients are widened by their rounding bound, and the comparison by
-    /// `gamma(8)` of the magnitudes it compares (the few roundings of the root, the
-    /// products and the sums). A form that is not finite certifies nothing.
-    fn certified(&self) -> bool {
+    /// Whether `Q > 0` is certified on the whole patch: by the coefficients' ranges, or
+    /// else by the tangent bound ([`Self::tangent_certified`]). Each form's coefficients
+    /// are widened by their rounding bound, and the comparison by `gamma(8)` of the
+    /// magnitudes it compares (the few roundings of the root, the products and the sums).
+    /// A form that is not finite certifies nothing.
+    ///
+    /// # Errors
+    ///
+    /// Those of the Bernstein products.
+    fn certified(&self, b: &Binomials) -> Result<bool> {
         if !(self.q0.is_finite() && self.q1.is_finite() && self.x2.is_finite()) {
-            return false;
+            return Ok(false);
         }
         let x2_min = self.x2.f.min_coefficient() - self.x2.err;
         if !positive(x2_min) {
-            return false;
+            return Ok(false);
         }
         let x_max = (self.x2.f.max_coefficient() + self.x2.err).sqrt();
         let x_min = x2_min.sqrt();
@@ -1078,7 +1086,71 @@ impl RegularityForms {
             x_min * q1_max
         };
         let q0_min = self.q0.f.min_coefficient() - self.q0.err;
-        q0_min - worst > gamma(8) * (q0_min.abs() + worst.abs()) + f64::MIN_POSITIVE
+        if q0_min - worst > gamma(8) * (q0_min.abs() + worst.abs()) + f64::MIN_POSITIVE {
+            return Ok(true);
+        }
+        self.tangent_certified(b)
+    }
+
+    /// `Q > 0` on the whole patch from one polynomial, where `q1 >= 0`. The square root is
+    /// concave, so for any `c > 0` it lies under its tangent at `c^2`:
+    /// `X <= (x2 + c^2) / (2c)`, and with `q1 >= 0`
+    /// `Q = q0 - X q1 >= R = q0 - q1 (x2 + c^2) / (2c)`, a Bernstein polynomial whose
+    /// least coefficient bounds it. The ranges above bound `q0` and `X q1` apart, at
+    /// different points of the patch, so their gap closes only linearly as the patch
+    /// shrinks; `R` is off `Q` by `q1 (X - c)^2 / (2c)`, which closes quadratically, and
+    /// its coefficients approach its values quadratically too (Farouki & Rajan 1987). On a
+    /// round inset to 86 % of its radius, `Q` is 0.14 of `q0`: the ranges needed about 790
+    /// quarters per patch, `R` certifies the patch whole (#18557).
+    ///
+    /// Every `c > 0` makes `R` a lower bound; `c` only chooses where it is tight, at the
+    /// value of `X` at the patch's middle. With `c^2` and `1 / (2c)` rounded, the tangent
+    /// is above `X` within `gamma(2)` of itself, a slack of `gamma(2)` of
+    /// `max|q1 (x2 + c^2)| / (2c)`. `R`'s least coefficient, less its rounding bound
+    /// ([`Bounded`]: the forms', the products' and the sums') and that slack, must stay
+    /// above 0 by `gamma(4)` of the magnitudes compared. `q1 >= 0` is proved the same way,
+    /// its least coefficient above its rounding bound. A product past [`MAX_DEGREE`] is not
+    /// formed, and a coefficient that is not finite certifies nothing: the patch is left to
+    /// the ranges and to subdivision.
+    ///
+    /// `R` touches `Q` at the middle, where `c` is taken, so its least coefficient is at
+    /// most `Q` there, up to rounding, and must clear at least `q0`'s rounding bound. A
+    /// patch whose middle is not above that bound is left to the ranges without forming the
+    /// products: on a face that collapses (`Q = 0`) or folds, every patch of the budget
+    /// would otherwise form them.
+    ///
+    /// # Errors
+    ///
+    /// Those of the Bernstein products.
+    fn tangent_certified(&self, b: &Binomials) -> Result<bool> {
+        if self.q1.f.min_coefficient() - self.q1.err < 0.0 {
+            return Ok(false);
+        }
+        if self.middle() <= self.q0.err {
+            return Ok(false);
+        }
+        let ((pu, pv), (xu, xv)) = (self.q1.f.degrees(), self.x2.f.degrees());
+        if pu + xu > MAX_DEGREE || pv + xv > MAX_DEGREE {
+            return Ok(false);
+        }
+        let c = self.x2.f.eval(0.5, 0.5).sqrt();
+        if !positive(c) || !c.is_finite() {
+            return Ok(false);
+        }
+        let c2 = c * c;
+        let scale = 0.5 / c;
+        let up = self
+            .x2
+            .add_scaled(&Bounded::exact(Bernstein2::constant(1.0)), c2, b)?;
+        let t = self.q1.mul(&up, b)?;
+        let r = self.q0.add_scaled(&t, -scale, b)?;
+        let finite = r.f.coefficients().iter().all(|x| x.is_finite()) && r.err.is_finite();
+        if !finite {
+            return Ok(false);
+        }
+        let slack = gamma(2) * scale * (t.f.max_abs_coefficient() + t.err);
+        let least = r.f.min_coefficient();
+        Ok(least - r.err - slack > gamma(4) * (least.abs() + r.err + slack) + f64::MIN_POSITIVE)
     }
 
     /// `Q` at the middle of the patch.
@@ -1189,7 +1261,7 @@ pub fn certify_regular_knowing(
     while let Some((middle, forms, range)) = stack.pop() {
         k.check_cancelled(OP)?;
         examined += 1;
-        if forms.certified() {
+        if forms.certified(&b)? {
             continue;
         }
         let [u0, u1, v0, v1] = range;
@@ -1917,6 +1989,7 @@ mod tests {
     /// certifies nothing.
     #[test]
     fn a_margin_inside_the_counted_rounding_is_not_certified() {
+        let b = Binomials::new();
         let form = |x: f64, err: f64| Bounded {
             f: Bernstein2::constant(x),
             err,
@@ -1926,15 +1999,15 @@ mod tests {
             q1: form(1.0, 0.0),
             x2: form((1.0 - margin) * (1.0 - margin), 0.0),
         };
-        assert!(!forms(1e-12, 1e-10).certified());
-        assert!(forms(1e-8, 1e-10).certified());
-        assert!(!forms(1e-8, f64::INFINITY).certified());
+        assert!(!forms(1e-12, 1e-10).certified(&b).unwrap());
+        assert!(forms(1e-8, 1e-10).certified(&b).unwrap());
+        assert!(!forms(1e-8, f64::INFINITY).certified(&b).unwrap());
         let mut overflowed = forms(1e-8, 0.0);
         overflowed.q0 = Bounded {
             f: Bernstein2::new(1, 0, vec![1.0, f64::NAN]).unwrap(),
             err: 0.0,
         };
-        assert!(!overflowed.certified());
+        assert!(!overflowed.certified(&b).unwrap());
     }
 
     /// The regularity forms are built in the patch's own frame, so their counted rounding
@@ -1967,6 +2040,148 @@ mod tests {
             };
             assert!((largest - 10.0).abs() < 1e-3, "{largest} {far}");
         }
+    }
+
+    /// 32 of the 472 spans of the round from #18557: a 0.28 round along the top edge of an
+    /// extruded spline outline, rational of degree 3 along the edge and 2 across, written
+    /// out as its Bezier patches (`tests/data/issue_18557_spline_round_spans.json`).
+    fn spline_round_spans() -> Nurb {
+        let data: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/data/issue_18557_spline_round_spans.json"
+        )))
+        .unwrap();
+        let floats = |v: &serde_json::Value| -> Vec<f64> {
+            v.as_array()
+                .unwrap()
+                .iter()
+                .map(|x| x.as_f64().unwrap())
+                .collect()
+        };
+        let net = data["net"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| {
+                row.as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|c| match floats(c)[..] {
+                        [x, y, z, w] => CPoint::new(x, y, z, w),
+                        _ => panic!("a control point is x, y, z, w"),
+                    })
+                    .collect()
+            })
+            .collect();
+        let degree = |key: &str| usize::try_from(data[key].as_u64().unwrap()).unwrap();
+        Nurb::new(
+            net,
+            degree("p"),
+            degree("q"),
+            floats(&data["u"]),
+            floats(&data["v"]),
+        )
+        .unwrap()
+    }
+
+    /// #18557: a shell 0.24 thick insets the 0.28 round by 86 % of its radius. The offset
+    /// is regular, `det(I - d W)` about 1 - 0.24 / 0.28 = 0.14 across the round, and is
+    /// certified within the patch budget; bounding `q0` and `X q1` apart took about 790
+    /// patches for each of these 32 and ran out of it. Inset by its radius it is not
+    /// certified (the offset collapses onto the round's spine), and past it the offset
+    /// folds, naming the round's radius 0.28, to the net's approximation of the round.
+    #[test]
+    fn a_round_inset_close_to_its_radius_is_certified_within_the_budget() {
+        let s = spline_round_spans();
+        let k = Kernel::default();
+        for d in [-0.24, -0.2, -0.1] {
+            assert_eq!(
+                certify_regular(&k, &s, d, None).unwrap(),
+                Regularity::Regular,
+                "{d}"
+            );
+        }
+        assert_ne!(
+            certify_regular(&k, &s, -0.28, None).unwrap(),
+            Regularity::Regular
+        );
+        let Regularity::Folds { largest } = certify_regular(&k, &s, -0.3, None).unwrap() else {
+            panic!("an inset past the round's radius folds");
+        };
+        assert!((largest - 0.28).abs() < 1e-5, "{largest}");
+    }
+
+    /// The quarter cylinder (radius 10) inset close to its radius, `det(I - d W) =
+    /// 1 - |d| / 10`, is certified regular: the tangent bound closes on the thin margin where
+    /// the coefficients' ranges ran out of the budget. Moved 10^4 from the origin the forms
+    /// are built in the patch's own frame, so the same insets certify and the inset by the
+    /// radius (`Q = 0` everywhere) still does not; past the radius it folds.
+    #[test]
+    fn a_cylinder_inset_close_to_its_radius_is_certified() {
+        let k = Kernel::default();
+        for (s, far) in [
+            (quarter_cylinder(), false),
+            (quarter_cylinder_at(1e4, -1e4), true),
+        ] {
+            for d in [-9.9, -9.99] {
+                assert_eq!(
+                    certify_regular(&k, &s, d, None).unwrap(),
+                    Regularity::Regular,
+                    "{d} {far}"
+                );
+            }
+            assert_eq!(
+                certify_regular(&k, &s, -10.0, None).unwrap(),
+                Regularity::NotCertified,
+                "{far}"
+            );
+            let Regularity::Folds { largest } = certify_regular(&k, &s, -10.5, None).unwrap()
+            else {
+                panic!("an inset past the radius folds ({far})");
+            };
+            assert!((largest - 10.0).abs() < 1e-9, "{largest} {far}");
+        }
+    }
+
+    /// #2487's G2 round patch (the quarter cylinder raised to septic across, cubic along)
+    /// inset close to its radius: the tangent bound's product `q1 (x2 + c^2)` is of degree
+    /// 100 across, within the Bernstein forms' cap, and certifies it.
+    #[test]
+    fn a_septic_rational_patch_inset_close_to_its_radius_is_certified() {
+        let s = elevated_quarter_cylinder(7, 3);
+        let k = Kernel::default();
+        assert_eq!(
+            certify_regular(&k, &s, -9.9, None).unwrap(),
+            Regularity::Regular
+        );
+    }
+
+    /// The tangent bound on patches written out as forms. Figure 2's patch (`q0` from 1 to
+    /// 1.3, `X q1` from 0.86 to 1.12, `q1 = 1`): the ranges overlap, the tangent certifies
+    /// it; with `q1` written at the forms' cap the product would pass [`MAX_DEGREE`], so it
+    /// is not formed and the patch is left to subdivision, not an error. Where `q1 < 0` the
+    /// tangent is an upper bound of `Q` and is not used: here `Q = -0.5 + X` is -0.4 at
+    /// `u = 0`, where the tangent line would give `R > 0` on the whole patch.
+    #[test]
+    fn the_tangent_bound_certifies_only_where_it_bounds_from_below() {
+        let b = Binomials::new();
+        let along_u =
+            |c0: f64, c1: f64| Bounded::exact(Bernstein2::new(1, 0, vec![c0, c1]).unwrap());
+        let one = |du: usize| Bounded::exact(Bernstein2::new(du, 0, vec![1.0; du + 1]).unwrap());
+        let figure = |q1: Bounded| RegularityForms {
+            q0: along_u(1.0, 1.3),
+            q1,
+            x2: along_u(0.86 * 0.86, 1.12 * 1.12),
+        };
+        assert!(figure(one(0)).tangent_certified(&b).unwrap());
+        assert!(figure(one(0)).certified(&b).unwrap());
+        assert!(!figure(one(MAX_DEGREE)).certified(&b).unwrap());
+        let saddle = RegularityForms {
+            q0: along_u(-0.5, -0.5),
+            q1: along_u(-1.0, -1.0),
+            x2: along_u(0.01, 4.0),
+        };
+        assert!(!saddle.certified(&b).unwrap());
     }
 
     /// The shell searches a face's least radius on the displaced side once

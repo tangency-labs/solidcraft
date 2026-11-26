@@ -285,6 +285,14 @@ pub fn surface(s: &BSurface) -> R<(Surface, Map)> {
         BSurface::Plane { origin, u_axis, v_axis } => plane(*origin, *u_axis, *v_axis)?,
         BSurface::PlaneThrough { origin, u_point, v_point } => plane(*origin, sub(*u_point, *origin), sub(*v_point, *origin))?,
         BSurface::Cylinder { frame, radius } => (Surface::Cylinder { position: placement(frame), radius: *radius }, Map::IDENTITY),
+        BSurface::Cone { frame, radius_at_origin, half_angle } if *half_angle == 0.0 => {
+            // A cone of no angle (a round's straight edge) is the cylinder over its section, in the
+            // same (u, v), as the CADIR reader reads it; STEP's semi-angle must be above 0.
+            if !(*radius_at_origin > 0.0) {
+                return Err(unsupported("a cone of no angle and no radius"));
+            }
+            (Surface::Cylinder { position: placement(frame), radius: *radius_at_origin }, Map::IDENTITY)
+        }
         BSurface::Cone { frame, radius_at_origin, half_angle } => {
             // STEP's semi-angle is positive: a cone narrowing along z is the one widening along −z,
             // its frame turned over about x, (u, v) → (−u, −v).

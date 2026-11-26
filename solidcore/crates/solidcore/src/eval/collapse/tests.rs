@@ -484,6 +484,48 @@ fn a_row_collapsed_over_part_of_its_range_is_a_pole_there() {
     assert!(!collapsed(&s, at, 1, 0.0).unwrap());
 }
 
+/// A strip 10 by 1 mm (u along x, v along y, degree 1 by 3, v's cubic net evenly spaced so v is
+/// y) and the iso-line across it at its end, x = 10, about the centre (10, 0.5, 0): its piece v
+/// 0.1 to 0.9 lies within 0.4 of it, the whole line within 0.5. Within 0.45 the piece is, the
+/// whole line is not, and lifted 0.3 off the strip the centre is 0.5 from the piece's ends. A
+/// collapse check of the piece (its diameter, 0.8) never takes it within 0.45. A plane's
+/// iso-line is decided by its ends; a piece off the knots is refused.
+#[test]
+fn an_iso_line_piece_within_reach_of_a_point_is_certified() {
+    let rows: Vec<Vec<([f64; 3], f64)>> = [0.0, 10.0]
+        .iter()
+        .map(|&x| {
+            (0..4)
+                .map(|j| ([x, f64::from(j) / 3.0, 0.0], 1.0))
+                .collect()
+        })
+        .collect();
+    let s = spline([1, 3], &rows);
+    let at = [1.0, 0.3];
+    let centre = Vec3::new(10.0, 0.5, 0.0);
+    assert!(iso_within(&s, at, 1, (0.1, 0.9), centre, 0.45).unwrap());
+    assert!(
+        iso_within(&s, at, 1, (0.9, 0.1), centre, 0.45).unwrap(),
+        "either order"
+    );
+    assert!(iso_within(&s, at, 1, (0.0, 1.0), centre, 0.5 + 1e-9).unwrap());
+    assert!(!iso_within(&s, at, 1, (0.0, 1.0), centre, 0.45).unwrap());
+    let above = Vec3::new(10.0, 0.5, 0.3);
+    assert!(!iso_within(&s, at, 1, (0.1, 0.9), above, 0.45).unwrap());
+    assert!(iso_within(&s, at, 1, (0.1, 0.9), above, 0.5 + 1e-9).unwrap());
+    assert!(!collapsed_on(&s, at, 1, 0.45, Some((0.1, 0.9))).unwrap());
+    // One point of it: the piece is that point.
+    assert!(iso_within(&s, at, 1, (0.5, 0.5), centre, 1e-9).unwrap());
+    assert!(iso_within(&s, at, 1, (-0.1, 0.5), centre, 1.0).is_err());
+    let plane = EvalSurface::Plane {
+        origin: Vec3::ZERO,
+        du: Vec3::new(10.0, 0.0, 0.0),
+        dv: Vec3::new(0.0, 1.0, 0.0),
+    };
+    assert!(iso_within(&plane, at, 1, (0.1, 0.9), centre, 0.45).unwrap());
+    assert!(!iso_within(&plane, at, 1, (0.0, 1.0), centre, 0.45).unwrap());
+}
+
 /// R2-6: knots with an empty span where one is needed are malformed (Invalid), not a point off
 /// the surface; a revolution's axis must be of unit length.
 #[test]
