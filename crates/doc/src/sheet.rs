@@ -38,6 +38,11 @@ pub const TAB_OVERLAPS: &str = "the tab would overlap another panel of the sheet
 pub const TAB_SEVERAL: &str = "not supported yet: a tab that would join more than one panel; draw it out from an edge of one panel only";
 /// A tab lies inside the face already.
 pub const TAB_ADDS_NOTHING: &str = "the tab adds no material: it lies inside the face already; draw it out past an edge of the face";
+/// A tab fills where a cut took a bend away, out past where the bend's other side began.
+pub const TAB_PAST_BEND: &str = "not supported yet: a tab that fills where a cut took a bend away must end before the far side of that bend; past it, the tab would run into the next panel in the flat pattern";
+/// Part of what a tab fills where a cut took material away would still be cut away.
+pub const TAB_CUT_AWAY: &str =
+    "not supported yet: part of the tab would still be cut away in the flat pattern, by another cut or a relief; keep the tab clear of them";
 
 fn flat_budget_error() -> DocError {
     DocError::Invalid("sheet metal flat geometry exceeds the bounded processing budget".into())
@@ -553,6 +558,26 @@ pub struct SheetPerforation {
     /// edges, on a grid that starts from their bounding box. None: the whole flat.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outline: Option<Vec<Region2>>,
+}
+
+/// The mounting hole of press-in hardware (a self-clinching nut, stud or standoff) in the flat
+/// (#17752): the hardware the hole is for, and the hole's circle, in the flat's own coordinates as
+/// the sheet keeps them (`SurfaceSheet::shown` reads them as the flat pattern is read).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SheetHardware {
+    /// The hole feature that cut it (or the pattern or mirror that copied it).
+    pub feature: u64,
+    pub kind: crate::hardware_catalog::HardwareKind,
+    /// The thread as written (`M3`).
+    pub thread: String,
+    /// A stud's or standoff's length (mm); none for a nut.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub length: Option<f64>,
+    /// The id of the part that stands for it (`nut.m3`).
+    pub part: String,
+    pub center: Vec2,
+    /// The hole's radius (mm).
+    pub radius: f64,
 }
 
 /// A pocket in the flat: `region` recessed from `z0` to `z1` through the thickness, z 0 the

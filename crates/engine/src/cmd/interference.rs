@@ -280,7 +280,11 @@ pub(crate) enum OverlapOutcome {
     /// Overlap could not be determined safely; caller reports this pair in `unchecked`.
     /// `measure_distance` is `true` when the caller may still compute a non-boolean fallback
     /// distance for the `unchecked` entry.
-    Unchecked { reason: String, measure_distance: bool },
+    Unchecked {
+        reason: String,
+        #[cfg_attr(not(test), allow(dead_code))]
+        measure_distance: bool,
+    },
 }
 
 /// Operations used by [`resolve_overlap_with`], factored out so the fallback and sanity-bound
@@ -384,28 +388,90 @@ where
     if (ops.is_disjoint)() {
         return OverlapOutcome::Empty;
     }
+    match try_unchecked_fallback(
+        (&first_err, &second_err),
+        ops.run_unchecked,
+        ops.measure,
+        ops.accept_unchecked_volume,
+        ops.check_unchecked_bounds,
+        &ops.is_cancelled,
+    ) {
+        UncheckedFallback::Measured(m) => OverlapOutcome::Measured(m),
+        UncheckedFallback::Cancelled => OverlapOutcome::Unchecked { reason: first_err.to_string(), measure_distance: false },
+        UncheckedFallback::NotRecovered => OverlapOutcome::Unchecked { reason: first_err.to_string(), measure_distance: !(ops.is_cancelled)() },
+    }
+}
+
+/// Outcome of [`fallback_unchecked_overlap`].
+pub(crate) enum UncheckedFallback {
+    /// Sanity-verified overlap measured under `Validation::Off`.
+    Measured(solidcraft_kernel::MassMeasure),
+    /// Neither order recovered a valid fallback overlap.
+    NotRecovered,
+    /// Cancelled before or during the fallback attempt.
+    Cancelled,
+}
+
+/// Retries whichever operand order(s) failed solely because SMLib's `CheckLevel::All` refused the
+/// temporary overlap solid (while both operands passed SMLib's check) under `Validation::Off`,
+/// accepting the measurement only when `accept_unchecked_volume` holds and
+/// [`unchecked_overlap_invalid`] certifies its volume, area, bounding box, and centroid.
+pub(crate) fn fallback_unchecked_overlap(
+    a: &Body,
+    b: &Body,
+    errs: (&solidcraft_kernel::KernelError, &solidcraft_kernel::KernelError),
+    measure: impl Fn(&Body) -> solidcraft_kernel::Result<solidcraft_kernel::MassMeasure>,
+    accept_unchecked_volume: impl Fn(f64) -> bool,
+    is_cancelled: impl Fn() -> bool,
+) -> UncheckedFallback {
+    try_unchecked_fallback(
+        errs,
+        |swapped| {
+            let (first, second) = if swapped { (b, a) } else { (a, b) };
+            solidcraft_kernel::validating(solidcraft_kernel::Validation::Off, || {
+                solidcraft_kernel::boolean(first, second, solidcraft_kernel::BoolOp::Intersect)
+            })
+            .0
+        },
+        measure,
+        accept_unchecked_volume,
+        |m| unchecked_overlap_invalid(m, a, b),
+        is_cancelled,
+    )
+}
+
+/// Shared implementation of the sanity-checked unchecked-overlap fallback used by both
+/// [`resolve_overlap_with`] and [`fallback_unchecked_overlap`].
+fn try_unchecked_fallback<T>(
+    (first_err, second_err): (&solidcraft_kernel::KernelError, &solidcraft_kernel::KernelError),
+    run_unchecked: impl Fn(bool) -> solidcraft_kernel::Result<Option<T>>,
+    measure: impl Fn(&T) -> solidcraft_kernel::Result<solidcraft_kernel::MassMeasure>,
+    accept_unchecked_volume: impl Fn(f64) -> bool,
+    check_unchecked_bounds: impl Fn(&solidcraft_kernel::MassMeasure) -> Option<String>,
+    is_cancelled: impl Fn() -> bool,
+) -> UncheckedFallback {
     let orders =
-        [(false, solidcraft_kernel::is_result_only_check_refusal(&first_err)), (true, solidcraft_kernel::is_result_only_check_refusal(&second_err))];
+        [(false, solidcraft_kernel::is_result_only_check_refusal(first_err)), (true, solidcraft_kernel::is_result_only_check_refusal(second_err))];
     for (swapped, recoverable) in orders {
         if !recoverable {
             continue;
         }
-        if (ops.is_cancelled)() {
-            return OverlapOutcome::Unchecked { reason: first_err.to_string(), measure_distance: false };
+        if is_cancelled() {
+            return UncheckedFallback::Cancelled;
         }
-        let unchecked = (ops.run_unchecked)(swapped);
-        if (ops.is_cancelled)() {
-            return OverlapOutcome::Unchecked { reason: first_err.to_string(), measure_distance: false };
+        let unchecked = run_unchecked(swapped);
+        if is_cancelled() {
+            return UncheckedFallback::Cancelled;
         }
         if let Ok(Some(body)) = unchecked
-            && let Ok(m) = (ops.measure)(&body)
-            && (ops.accept_unchecked_volume)(m.volume)
-            && (ops.check_unchecked_bounds)(&m).is_none()
+            && let Ok(m) = measure(&body)
+            && accept_unchecked_volume(m.volume)
+            && check_unchecked_bounds(&m).is_none()
         {
-            return OverlapOutcome::Measured(m);
+            return UncheckedFallback::Measured(m);
         }
     }
-    OverlapOutcome::Unchecked { reason: first_err.to_string(), measure_distance: !(ops.is_cancelled)() }
+    UncheckedFallback::NotRecovered
 }
 
 /// Why a shared part of `a` and `b` measured as `volume` within `bbox` can't be theirs: a part

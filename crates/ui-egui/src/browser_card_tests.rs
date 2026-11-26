@@ -1977,6 +1977,7 @@ fn reveal_browser_at_height(h: &mut Harness, height: f32) {
 fn assert_no_pending_reveals(h: &Harness) {
     assert!(h.app.tree.reveal.is_none());
     assert!(h.app.tree.reveal_source.is_none());
+    assert!(h.app.tree.reveal_occurrence.is_none());
     assert!(h.app.tree.reveal_feature.is_none());
     assert!(h.app.tree.timeline_reveal.is_none());
     assert!(h.app.tree.view_pick.is_none());
