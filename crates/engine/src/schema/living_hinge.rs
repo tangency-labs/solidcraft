@@ -10,7 +10,7 @@ use super::types::{AngleExpr, FeatureCommon, IdOrName, LengthExpr, PointExpr3, P
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum HingeClipParam {
-    /// Of two neighbouring rows, the one whose slot centre is nearer the plate's edge runs out
+    /// Of two neighboring rows, the one whose slot center is nearer the plate's edge runs out
     /// through it; the rest are shortened.
     RunOut,
     /// No slot runs out: a solid border along the plate's edge.
@@ -26,7 +26,7 @@ pub struct HingePattern {
     pub slot_length: LengthExpr,
     /// The material between two slots in one row, at least 0.001 mm.
     pub bridge: LengthExpr,
-    /// Centre line to centre line between rows: more than `slot_width` by at least 0.001 mm.
+    /// Center line to center line between rows: more than `slot_width` by at least 0.001 mm.
     pub row_spacing: LengthExpr,
     /// The cut's width, about a laser's kerf, at least 0.001 mm. Default: 0.2 mm.
     #[serde(default)]
@@ -34,8 +34,8 @@ pub struct HingePattern {
     /// The slots' direction, which is the bend axis, from the sketch's X axis. Default: 0.
     #[serde(default)]
     pub angle: Option<AngleExpr>,
-    /// A slot of row 0 is centred on this point, projected onto the sketch plane. Default: the
-    /// pattern centred on the area.
+    /// A slot of row 0 is centered on this point, projected onto the sketch plane. Default: the
+    /// pattern centered on the area.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "PointExpr3")]
     pub anchor: Option<PointExpr3>,
@@ -91,7 +91,7 @@ pub struct LivingHingeResult {
     pub run_out: usize,
     /// Lattice slots that met the material and were left out.
     pub left_out: usize,
-    /// The slots' centre lines, summed (mm).
+    /// The slots' center lines, summed (mm).
     pub cut_length_mm: f64,
     /// The slots' outlines, summed (mm).
     pub outline_length_mm: f64,
