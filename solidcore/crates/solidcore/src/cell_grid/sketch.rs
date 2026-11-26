@@ -40,6 +40,8 @@
 //! refused: it moves field edges onto the cell's own chords, which a sketched cell does not have.
 //! The nearness of a spline edge is measured as for the built-in cells (see [`super::exact`]).
 
+use std::f64::consts::TAU;
+
 use crate::math::Vec2;
 use crate::prism::profile::{Loop2, Seg2};
 
@@ -341,6 +343,7 @@ fn on_piece(p: &Prim, c: &Prim) -> bool {
             Prim::Arc {
                 c: pc,
                 r: pr,
+                a0: pa0,
                 sweep: ps,
                 p0,
                 p1,
@@ -349,14 +352,24 @@ fn on_piece(p: &Prim, c: &Prim) -> bool {
             Prim::Arc {
                 c: cc,
                 r: cr,
+                a0: ca0,
                 sweep: cs,
                 ..
             },
         ) => {
-            pc.distance(cc) <= EPS
-                && (pr - cr).abs() <= EPS
-                && (ps >= 0.0) == (cs >= 0.0)
-                && (ps.abs() - cs.abs()) * cr <= EPS
+            if !(pc.distance(cc) <= EPS && (pr - cr).abs() <= EPS && (ps >= 0.0) == (cs >= 0.0)) {
+                return false;
+            }
+            // How far along the outline arc, in its own direction, the piece starts; a start just
+            // short of the outline's start (a whole turn less a rounding) is at its start.
+            let turned = if cs >= 0.0 { pa0 - ca0 } else { ca0 - pa0 };
+            let mut along = turned.rem_euclid(TAU);
+            if (TAU - along) * cr <= EPS {
+                along = 0.0;
+            }
+            let span = cs.abs();
+            along * cr <= span * cr + EPS
+                && (along + ps.abs()) * cr <= span * cr + EPS
                 && c.distance(p0) <= EPS
                 && c.distance(p1) <= EPS
         }

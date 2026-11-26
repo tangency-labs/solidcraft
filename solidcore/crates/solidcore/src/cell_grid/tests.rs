@@ -3171,6 +3171,27 @@ fn a_clipped_piece_is_the_cells_own_only_on_one_outline_piece_of_its_kind() {
         arc.distance(other.mid())
     );
     assert!(!one(vec![other], &cell), "another circle");
+    // Directed containment: an outline arc of radius 10 from 0 to 270 degrees (counter-clockwise).
+    // A piece over 0..90 or 180..270 lies on it, one starting at its start (0..270) does, but the
+    // piece 270..360 on the same circle has both its ends on the outline (at 270 and, at 360, its
+    // start) and runs outside it, so it is not the cell's own.
+    let big = Prim::arc(v(0.0, 0.0), 10.0, 0.0, 3.0 * FRAC_PI_2);
+    let outline = [big];
+    let part = |from: f64, sweep: f64| Prim::arc(v(0.0, 0.0), 10.0, from, sweep);
+    assert!(one(vec![part(0.0, FRAC_PI_2)], &outline), "0..90");
+    assert!(one(vec![part(PI, FRAC_PI_2)], &outline), "180..270");
+    assert!(
+        one(vec![part(0.0, 3.0 * FRAC_PI_2)], &outline),
+        "the whole arc"
+    );
+    assert!(
+        one(vec![part(-1e-9, FRAC_PI_2)], &outline),
+        "a rounding before the start"
+    );
+    assert!(
+        !one(vec![part(3.0 * FRAC_PI_2, FRAC_PI_2)], &outline),
+        "270..360 runs outside"
+    );
     // Lines: on one segment, or across two, and a line against an arc.
     let square = [
         Prim::line(v(0.0, 0.0), v(10.0, 0.0)),
