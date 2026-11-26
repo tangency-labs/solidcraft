@@ -5,10 +5,13 @@ use egui::{
     epaint::{ClippedShape, Shape},
     layers::{PaintList, ShapeIdx},
 };
-use solidcraft_engine::panels::{Destination, InstanceId};
+use solidcraft_panel_layout::{Destination, Direction, InstanceId, Zone};
 use solidcraft_theme::Tokens;
+use solidcraft_ui_kit as ui_kit;
 
-use super::{HostLayout, HostPreview, egui_rect};
+use super::interaction::HostPreview;
+use super::layout::{HostLayout, HostSection};
+use super::workspace::egui_rect;
 
 /// The draw range of a real panel from this egui pass. Widget input and the
 /// runtime's published geometry retain their committed identities.
@@ -206,7 +209,7 @@ fn relocate_shape(shape: &mut Shape, original: Rect, bounds: Rect) -> bool {
     false
 }
 
-pub(super) fn paint_unmounted(ui: &Ui, layout: &HostLayout, section: &super::HostSection, title: &str, dragged: bool) {
+pub(super) fn paint_unmounted(ui: &Ui, layout: &HostLayout, section: &HostSection, title: &str, dragged: bool) {
     let bounds = egui_rect(section.outer);
     let clip = bounds.intersect(egui_rect(layout.capacity)).intersect(ui.clip_rect());
     if !clip.is_positive() {
@@ -217,14 +220,10 @@ pub(super) fn paint_unmounted(ui: &Ui, layout: &HostLayout, section: &super::Hos
         painter.multiply_opacity(0.68);
     }
     let tokens = Tokens::get();
-    let frame = crate::ui_kit::panel_host_frame(ui.ctx(), section.zone == solidcraft_engine::panels::Zone::Floating);
-    crate::ui_kit::Container::paint_frame(&painter, frame, bounds);
+    let frame = ui_kit::panel_host_frame(ui.ctx(), section.zone == Zone::Floating);
+    ui_kit::Container::paint_frame(&painter, frame, bounds);
     let header = egui_rect(section.header);
     let title = painter.layout_no_wrap(title.to_owned(), egui::FontId::proportional(tokens.font_heading), tokens.form_ink);
-    let x = if layout.direction == solidcraft_engine::panels::Direction::Rtl {
-        header.right() - tokens.space_8 - title.size().x
-    } else {
-        header.left() + tokens.space_8
-    };
+    let x = if layout.direction == Direction::Rtl { header.right() - tokens.space_8 - title.size().x } else { header.left() + tokens.space_8 };
     painter.with_clip_rect(header.intersect(clip)).galley(egui::pos2(x, header.center().y - title.size().y / 2.0), title, tokens.form_ink);
 }

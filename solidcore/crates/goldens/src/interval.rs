@@ -25,11 +25,6 @@ impl Iv {
         Self { lo: x, hi: x }
     }
 
-    /// `[x - e, x + e]`, rounded outward.
-    pub fn around(x: f64, e: f64) -> Self {
-        Self::out(x - e, x + e)
-    }
-
     fn out(lo: f64, hi: f64) -> Self {
         Self {
             lo: lo.next_down(),
@@ -92,11 +87,6 @@ impl Iv {
         } else {
             self.lo.abs().min(self.hi.abs())
         }
-    }
-
-    /// Whether `x` lies in the interval.
-    pub fn contains(self, x: f64) -> bool {
-        self.lo <= x && x <= self.hi
     }
 }
 
@@ -323,25 +313,4 @@ pub(crate) fn homogeneous(net: &[Vec<CPoint>]) -> [Bern; 4] {
         }
     }
     out
-}
-
-impl Bern {
-    /// The value at `(u, v)` by de Casteljau in interval arithmetic: it holds the
-    /// polynomial's exact value there.
-    pub(crate) fn at(&self, u: f64, v: f64) -> Iv {
-        let at = |row: &[Iv], t: f64| {
-            let mut work = row.to_vec();
-            let (t, s) = (Iv::exact(t), Iv::exact(1.0).sub(Iv::exact(t)));
-            for r in 1..work.len() {
-                for i in 0..work.len() - r {
-                    work[i] = work[i].mul(s).add(work[i + 1].mul(t));
-                }
-            }
-            work[0]
-        };
-        let cols: Vec<Iv> = (0..=self.p)
-            .map(|i| at(&self.c[i * (self.q + 1)..(i + 1) * (self.q + 1)], v))
-            .collect();
-        at(&cols, u)
-    }
 }
