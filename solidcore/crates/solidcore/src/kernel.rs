@@ -140,6 +140,10 @@ pub struct Caches {
     /// is not solved again. A [`RefCell`] so the check can fill it through the `&Kernel`
     /// it takes (the kernel stays `Send`; it is not shared between threads).
     pub(crate) curve_analysis: RefCell<crate::nurbs::b_spline_curve::analysis::AnalysisMemo>,
+    /// Not upstream (#22467): proved upper bounds on trim-image gaps (`sup |C(ψ(s)) - S(W(s))|`),
+    /// keyed by the exact content of the pair's data (`query::curve_surface_gap::TrimBoundMemo`),
+    /// so repeated rigid moves reuse and propagate proved bounds instead of re-proving them.
+    pub(crate) trim_move_bounds: RefCell<crate::query::curve_surface_gap::TrimBoundMemo>,
     /// Not upstream (#18166): whether a lazily built UV trim raises its edge's tolerance by
     /// the trim's proved distance from the edge (`topology::edgeuse::p3::trim_raise_distance`),
     /// as it does by default, or by upstream's sampled distance, as a file's translation asks
@@ -167,6 +171,7 @@ impl Default for Caches {
     fn default() -> Self {
         Self {
             curve_analysis: RefCell::default(),
+            trim_move_bounds: RefCell::default(),
             prove_lazy_trim_raise: true,
             hold_trim_raise: false,
             refit_raising_trims: Cell::new(false),
