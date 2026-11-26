@@ -26,12 +26,16 @@ These are proposed here and are open for comment until the RFC is accepted.
 3. **Launch is argv only, never a shell.** No `sh -c`, no `cmd /c`, no string pasted into a command line (section 4.3).
 4. **The first change needs no plugin:** a host "Send to App" the user sets up themselves (section 4).
 5. **A plugin declares targets in its manifest; the host does the export and the launch.** This needs a new `launch` permission, approved by the user once per target, shown with the exact command template (section 5). Each send shows the real command (section 8).
-6. **Tiers apply.** In the marketplace, `launch` is a high-risk grant: Listed and Custom items get the second confirmation (section 7).
+6. **Tiers apply.** In the Workshop, `launch` is a high-risk grant: Unverified and Custom items get the second confirmation (section 7).
 7. **Nothing comes back by default.** Reporting back is opt-in, uses a one-use token, and adds no new inbound listener (section 9).
 8. **Authentication belongs to the local app, never to SolidCraft** (section 10).
 9. **The web app does not launch anything;** it offers a download (section 11).
 10. **`net` stays reserved.** This RFC does not need it (section 12).
 11. **No new Preferences rows.** Targets are managed in their own dialog.
+
+**Where it stands.** The maintainers have agreed to start with Part 1, a user-added Send to App target next to Slicer, local only. The first implementation is the host-only step of section 4 (no plugin, no `launch` permission), in [#22350](https://github.com/tangency-labs/solidcraft/pull/22350). Two parts of this RFC are held:
+- **The plugin `launch` permission** (sections 5 and 7) is **pending security review**, because it lets a plugin ask the host to start programs.
+- **The app report-back callback** (section 9) is **parked**, because it needs the `solidcraft://` handler and a token design that are not wanted yet.
 
 ## 1. Goals and non-goals
 
@@ -136,7 +140,9 @@ These hold for every target, however it was declared.
 
 Targets are saved in an unpaged field of their own, in the same place as the custom slicers, not as a Preferences row. Existing custom slicers are not migrated or changed. The window's "Add…" opens the same program picker as Custom…, with the extra fields. A design remembers its copy folder, as it does for slicers.
 
-## 5. Part 1: a plugin-declared target, the smallest change
+## 5. A plugin-declared target, the smallest change (pending security review)
+
+*Held: the `launch` permission is pending security review, because it lets a plugin ask to start programs. Nothing in this section is implemented until that review is done; the host-only step in section 4 does not depend on it.*
 
 A plugin gets a "Send to <App>" button without any new ability to run anything, by declaring the target and letting the host do the work.
 
@@ -196,7 +202,9 @@ The full design makes the slicer a kind of target, not a separate feature.
 - **Where the list shows:** the Send window shows both kinds, slicers first; a plugin's targets appear with the plugin's badge (RFC 0015), so one can't pass as built in.
 - **Export rules:** exports use the same code as Save As and Export for each format. A format SolidCraft can't write for this design (a mesh-only body to STEP, say) is refused in the reply with the reason, and the button says why.
 
-## 7. Part 2: plugin targets and the marketplace tiers
+## 7. Part 2: plugin targets and the Workshop tiers (pending security review)
+
+*Held with section 5: it applies only if the `launch` permission passes its security review.*
 
 RFC 0017's rule is that a tier changes what we say and how much friction a risky grant carries, not what the sandbox allows. `launch` fits that, with two additions.
 
@@ -204,13 +212,13 @@ RFC 0017's rule is that a tier changes what we say and how much friction a risky
 
 **A tier rule.** In RFC 0017 section 6, `launch` joins the high-risk grants (write access to a folder, the `file` group, settings, other plugins, raised limits, `input_folder`):
 
-| | Verified | Listed | Custom |
+| | Official and Community | Unverified | Custom |
 |---|---|---|---|
 | `launch` approval shows the program, the exact command and the formats | yes | yes | yes |
-| Confirmation | one | a second step: the user ticks the `launch` line on its own | same as Listed |
+| Confirmation | one | a second step: the user ticks the `launch` line on its own | same as Unverified |
 | Headless install | `approval` and `archive` from a dry run, as today | plus `"accept_unreviewed": true` | same |
 
-The listing check in the index build (RFC 0017 section 4.3) would add: a target's argument template parses; no placeholder is unknown; `executable` names no shell or interpreter; and the target's `formats` are known. The review checklist for Verified adds "does the declared program match what the plugin says it is for".
+The listing check in the index build (RFC 0017 section 4.3) would add: a target's argument template parses; no placeholder is unknown; `executable` names no shell or interpreter; and the target's `formats` are known. The review checklist for Community adds "does the declared program match what the plugin says it is for".
 
 This RFC does not edit RFC 0017's file. Its amendments are applied by the pull request that accepts this RFC, so each topic stays in one pull request.
 
@@ -223,7 +231,9 @@ This RFC does not edit RFC 0017's file. Its amendments are applied by the pull r
 5. **The reply** of `file.send_to_app` carries `delivery`: `started`, `finished` (with `exit_code`), `error`, or `timeout`, in the shape slicers already use, plus the `reveal` path.
 6. **Never blocks, never crashes.** A program that hangs, floods its output or exits at once is handled the same way as a missing one.
 
-## 9. Part 2: an optional round trip, so the app can say "uploaded"
+## 9. Part 2: an optional round trip, so the app can say "uploaded" (parked)
+
+*Parked: the report-back callback waits. It needs the link handler and a token design, and is not part of the first implementation.*
 
 A toast that says "started" is the least that can be said. An upload app can know more: "uploaded: <link>" or "failed: not signed in". We would like to show that, as an option, without a new door into SolidCraft.
 
@@ -280,11 +290,11 @@ None of this needs the network. The upload app has its own, and `net` stays rese
 | Phase | What |
 |---|---|
 | 0 | This RFC, discussed in its pull request. |
-| 1 | Section 4: the Send to App kind, user-added targets with argument templates and per-target formats including `sc` and STEP, `file.send_to_app` and `file.apps` with schemas. Not a slicer, no plugin. One topic, one PR. Per-target format also closes the STEP half of #16089. |
+| 1 | Section 4 (first implementation, [#22350](https://github.com/tangency-labs/solidcraft/pull/22350)): the Send to App kind, user-added targets with argument templates and per-target formats including `sc` and STEP, `file.send_to_app` and `file.apps` with schemas. Not a slicer, no plugin. One topic, one PR. Per-target format also closes the STEP half of #16089. |
 | 2 | Section 6: slicers as a kind in the same list, the file-association start, one set of schemas. |
-| 3 | Sections 5 and 7: the `launch` permission, `send_targets` in the manifest, the approval screen, the tier rule, and the amendment to RFC 0017. |
+| 3 | Sections 5 and 7 (pending security review): the `launch` permission, `send_targets` in the manifest, the approval screen, the tier rule, and the amendment to RFC 0017. |
 | 4 | Section 8's exit status and reveal, if they are not already in phase 1. |
-| 5 | Section 9, option A, then B, each its own PR. |
+| 5 | Section 9, option A, then B, each its own PR. Parked. |
 | 6 | The web download (section 11), with phase 1 if it is small. |
 
 A phase is done when its tests pass and the screenshots (English and German, landscape) are in its pull request. Phases 1 and 3 get a hostile-input test: a missing program, a path that is a directory, a template with an unknown placeholder, a design name that starts with `-`, and a program that never exits.
