@@ -233,25 +233,19 @@ fn check(job: &Job) -> Done {
 
 fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String), size: f64, envelope: bool) -> Outcome {
     let threshold = 1e-9 * size.max(1.0).powi(3);
-    // A pair whose shared part can't be worked out is reported, not passed as clear. SMLib's
-    // check of the shared part runs here: a part it refuses is reported, not measured.
-    let shared = match solidcraft_kernel::validating(solidcraft_kernel::Validation::EachStep, || {
-        solidcraft_kernel::boolean(a, b, solidcraft_kernel::BoolOp::Intersect)
-    })
-    .0
-    {
-        Ok(Some(o)) => o,
-        Ok(None) => return Outcome::Clear,
-        Err(e) => return Outcome::Unchecked(e.to_string()),
-    };
-    let m = match solidcraft_kernel::measure_mass(&shared) {
-        Ok(m) => m,
-        Err(e) => return Outcome::Unchecked(e.to_string()),
+    let m = match measure_overlap(
+        a,
+        b,
+        solidcraft_kernel::measure_mass,
+        |m| (m.volume > threshold).then(|| impossible_overlap(m.volume, &m.bbox, a, b)).flatten(),
+        |v| v > threshold,
+        false,
+    ) {
+        OverlapOutcome::Empty => return Outcome::Clear,
+        OverlapOutcome::Unchecked { reason, .. } => return Outcome::Unchecked(reason),
+        OverlapOutcome::Measured(m) => m,
     };
     if m.volume > threshold {
-        if let Some(why) = impossible_overlap(m.volume, &m.bbox, a, b) {
-            return Outcome::Unchecked(why);
-        }
         return Outcome::Hit(Overlap {
             a: na.clone(),
             b: nb.clone(),
@@ -272,6 +266,136 @@ fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String), size: f64, envelo
     Outcome::Clear
 }
 
+/// Result of measuring the intersection of two bodies for `inspect.clearance` and
+/// `inspect.interference`.
+#[derive(Debug)]
+pub(crate) enum OverlapOutcome {
+    /// Checked intersection was empty, or the two bodies' interiors were certified disjoint.
+    Empty,
+    /// Measured overlap, either from a checked intersection or from a sanity-verified unchecked
+    /// measurement-only fallback when SMLib's `CheckLevel::All` alone refused the temporary
+    /// intersection solid while both operands passed SMLib's check.
+    Measured(solidcraft_kernel::MassMeasure),
+    /// Overlap could not be determined safely; caller reports this pair in `unchecked`.
+    /// `measure_distance` is `true` when the caller may still compute a non-boolean fallback
+    /// distance for the `unchecked` entry.
+    Unchecked { reason: String, measure_distance: bool },
+}
+
+/// Operations used by [`resolve_overlap_with`], factored out so the fallback and sanity-bound
+/// state machine can be unit-tested directly.
+struct OverlapOps<FChecked, FUnchecked, FMeasure, FCheckedBounds, FUncheckedBounds, FAcceptVol, FDisjoint, FCancelled> {
+    run_checked: FChecked,
+    run_unchecked: FUnchecked,
+    measure: FMeasure,
+    check_checked_bounds: FCheckedBounds,
+    check_unchecked_bounds: FUncheckedBounds,
+    accept_unchecked_volume: FAcceptVol,
+    is_disjoint: FDisjoint,
+    is_cancelled: FCancelled,
+}
+
+/// Intersects `a` and `b` for overlap measurement (`inspect.clearance` and `inspect.interference`).
+///
+/// 1. Runs the checked intersection (`Validation::EachStep`) on `(a, b)`, retrying `(b, a)` if the
+///    first order fails. A checked result is measured with `measure` and checked against
+///    `check_checked_bounds`.
+/// 2. When both checked orders fail and `check_disjoint` is `true`, certifies whether the bodies'
+///    interiors are disjoint (`solidcraft_kernel::interiors_disjoint`), returning
+///    [`OverlapOutcome::Empty`] when certified.
+/// 3. When a checked order failed solely because SMLib's `CheckLevel::All` rejected the temporary
+///    overlap solid while both operands passed SMLib's check
+///    ([`solidcraft_kernel::is_result_only_check_refusal`]), retries that order under
+///    `Validation::Off` and accepts the temporary measurement only when `accept_unchecked_volume`
+///    holds and [`unchecked_overlap_invalid`] certifies its volume, area, bounding box, and
+///    centroid against both operands. Otherwise returns [`OverlapOutcome::Unchecked`] with the
+///    primary checked error.
+pub(crate) fn measure_overlap(
+    a: &Body,
+    b: &Body,
+    measure: impl Fn(&Body) -> solidcraft_kernel::Result<solidcraft_kernel::MassMeasure>,
+    check_checked_bounds: impl Fn(&solidcraft_kernel::MassMeasure) -> Option<String>,
+    accept_unchecked_volume: impl Fn(f64) -> bool,
+    check_disjoint: bool,
+) -> OverlapOutcome {
+    let intersect = |mode, swapped: bool| {
+        let (first, second) = if swapped { (b, a) } else { (a, b) };
+        solidcraft_kernel::validating(mode, || solidcraft_kernel::boolean(first, second, solidcraft_kernel::BoolOp::Intersect)).0
+    };
+    resolve_overlap_with(OverlapOps {
+        run_checked: |swapped| intersect(solidcraft_kernel::Validation::EachStep, swapped),
+        run_unchecked: |swapped| intersect(solidcraft_kernel::Validation::Off, swapped),
+        measure,
+        check_checked_bounds,
+        check_unchecked_bounds: |m: &solidcraft_kernel::MassMeasure| unchecked_overlap_invalid(m, a, b),
+        accept_unchecked_volume,
+        is_disjoint: || check_disjoint && solidcraft_kernel::interiors_disjoint(a, b) == Some(true),
+        is_cancelled: || solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled()),
+    })
+}
+
+fn resolve_overlap_with<T, FChecked, FUnchecked, FMeasure, FCheckedBounds, FUncheckedBounds, FAcceptVol, FDisjoint, FCancelled>(
+    ops: OverlapOps<FChecked, FUnchecked, FMeasure, FCheckedBounds, FUncheckedBounds, FAcceptVol, FDisjoint, FCancelled>,
+) -> OverlapOutcome
+where
+    FChecked: Fn(bool) -> solidcraft_kernel::Result<Option<T>>,
+    FUnchecked: Fn(bool) -> solidcraft_kernel::Result<Option<T>>,
+    FMeasure: Fn(&T) -> solidcraft_kernel::Result<solidcraft_kernel::MassMeasure>,
+    FCheckedBounds: Fn(&solidcraft_kernel::MassMeasure) -> Option<String>,
+    FUncheckedBounds: Fn(&solidcraft_kernel::MassMeasure) -> Option<String>,
+    FAcceptVol: Fn(f64) -> bool,
+    FDisjoint: Fn() -> bool,
+    FCancelled: Fn() -> bool,
+{
+    let finish_checked = |body: &T| match (ops.measure)(body) {
+        Ok(m) => {
+            if let Some(why) = (ops.check_checked_bounds)(&m) {
+                OverlapOutcome::Unchecked { reason: why, measure_distance: false }
+            } else {
+                OverlapOutcome::Measured(m)
+            }
+        }
+        Err(e) => OverlapOutcome::Unchecked { reason: e.to_string(), measure_distance: true },
+    };
+    let first_err = match (ops.run_checked)(false) {
+        Ok(None) => return OverlapOutcome::Empty,
+        Ok(Some(body)) => return finish_checked(&body),
+        Err(e) => e,
+    };
+    if (ops.is_cancelled)() {
+        return OverlapOutcome::Unchecked { reason: first_err.to_string(), measure_distance: false };
+    }
+    let second_err = match (ops.run_checked)(true) {
+        Ok(None) => return OverlapOutcome::Empty,
+        Ok(Some(body)) => return finish_checked(&body),
+        Err(e) => e,
+    };
+    if (ops.is_cancelled)() {
+        return OverlapOutcome::Unchecked { reason: first_err.to_string(), measure_distance: false };
+    }
+    if (ops.is_disjoint)() {
+        return OverlapOutcome::Empty;
+    }
+    let orders =
+        [(false, solidcraft_kernel::is_result_only_check_refusal(&first_err)), (true, solidcraft_kernel::is_result_only_check_refusal(&second_err))];
+    for (swapped, recoverable) in orders {
+        if !recoverable {
+            continue;
+        }
+        if (ops.is_cancelled)() {
+            return OverlapOutcome::Unchecked { reason: first_err.to_string(), measure_distance: false };
+        }
+        if let Ok(Some(body)) = (ops.run_unchecked)(swapped)
+            && let Ok(m) = (ops.measure)(&body)
+            && (ops.accept_unchecked_volume)(m.volume)
+            && (ops.check_unchecked_bounds)(&m).is_none()
+        {
+            return OverlapOutcome::Measured(m);
+        }
+    }
+    OverlapOutcome::Unchecked { reason: first_err.to_string(), measure_distance: true }
+}
+
 /// Why a shared part of `a` and `b` measured as `volume` within `bbox` can't be theirs: a part
 /// shared by two bodies is no bigger than the smaller one and lies inside both of their boxes.
 /// A boolean that misreads a pin seated in its bore can hand back the whole larger body (#21553);
@@ -280,6 +404,55 @@ fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String), size: f64, envelo
 pub(crate) fn impossible_overlap(volume: f64, bbox: &Aabb3, a: &Body, b: &Body) -> Option<String> {
     let (ma, mb) = (solidcraft_kernel::measure_mass(a).ok()?, solidcraft_kernel::measure_mass(b).ok()?);
     overlap_out_of_bounds(volume, bbox, (ma.volume, &ma.bbox), (mb.volume, &mb.bbox))
+}
+
+/// Strict sanity check for a temporary overlap measured without SMLib's `CheckLevel::All` gate.
+/// Unlike [`impossible_overlap`], both operands must measure cleanly with finite positive volumes;
+/// any failure or geometric bound violation returns `Some(reason)` so the caller rejects the
+/// unchecked fallback and keeps the pair in `unchecked`.
+fn unchecked_overlap_invalid(m: &solidcraft_kernel::MassMeasure, a: &Body, b: &Body) -> Option<String> {
+    let (Ok(ma), Ok(mb)) = (solidcraft_kernel::measure_mass(a), solidcraft_kernel::measure_mass(b)) else {
+        return Some("could not measure operands to verify unchecked overlap".into());
+    };
+    unchecked_overlap_out_of_bounds(m, (ma.volume, &ma.bbox), (mb.volume, &mb.bbox))
+}
+
+/// [`unchecked_overlap_invalid`] on the measured numbers.
+fn unchecked_overlap_out_of_bounds(m: &solidcraft_kernel::MassMeasure, (va, ba): (f64, &Aabb3), (vb, bb): (f64, &Aabb3)) -> Option<String> {
+    if !m.volume.is_finite() || m.volume <= 0.0 {
+        return Some("unchecked overlap has non-positive or non-finite volume".into());
+    }
+    if !m.area.is_finite() || m.area <= 0.0 {
+        return Some("unchecked overlap has non-positive or non-finite area".into());
+    }
+    if m.bbox.is_empty() || !m.bbox.min.is_finite() || !m.bbox.max.is_finite() {
+        return Some("unchecked overlap has an empty or non-finite bounding box".into());
+    }
+    if !m.centroid.is_finite() {
+        return Some("unchecked overlap has a non-finite centroid".into());
+    }
+    if !va.is_finite() || va <= 0.0 || !vb.is_finite() || vb <= 0.0 {
+        return Some("operand volume is non-positive or non-finite".into());
+    }
+    if ba.is_empty() || !ba.min.is_finite() || !ba.max.is_finite() || bb.is_empty() || !bb.min.is_finite() || !bb.max.is_finite() {
+        return Some("operand bounding box is empty or non-finite".into());
+    }
+    if let Some(why) = overlap_out_of_bounds(m.volume, &m.bbox, (va, ba), (vb, bb)) {
+        return Some(why);
+    }
+    let size = ba.diagonal().max(bb.diagonal()).max(1.0);
+    let tol = 1e-6 * size;
+    // A positive-density solid's volume cannot exceed its own bounding box's volume.
+    let d = m.bbox.size();
+    let box_vol = d.x * d.y * d.z;
+    if !box_vol.is_finite() || m.volume > box_vol * (1.0 + 1e-6) + 1e-9 * size.powi(3) {
+        return Some(format!("not checked: the shared part measured {:.3} mm³, more than its own bounding box's {:.3} mm³", m.volume, box_vol));
+    }
+    // A positive-density solid's centroid always lies inside its own bounding box.
+    if !m.bbox.inflated(tol).contains(m.centroid) {
+        return Some("not checked: the shared part's centroid lies outside its own bounding box".into());
+    }
+    None
 }
 
 /// [`impossible_overlap`] on the measured numbers.

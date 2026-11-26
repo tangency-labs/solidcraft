@@ -431,14 +431,6 @@ fn measure_pair(
     };
     let touching = mesh.is_some_and(|m| m.distance <= slack);
     if touching || holds(ba, bb) || holds(bb, ba) {
-        // A pair whose shared part can't be worked out is reported, not passed as clear. SMLib's
-        // check of the shared part runs here: a part it refuses is reported, not measured.
-        let intersect = |first, second| {
-            solidcraft_kernel::validating(solidcraft_kernel::Validation::EachStep, || {
-                solidcraft_kernel::boolean(first, second, solidcraft_kernel::BoolOp::Intersect)
-            })
-            .0
-        };
         let is_cancelled = || solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled());
         let fallback_distance = |out: &mut PairResult| {
             if is_cancelled() {
@@ -451,43 +443,25 @@ fn measure_pair(
                 out.distance = Some(d);
             }
         };
-        let shared = match intersect(ka, kb) {
-            Ok(o) => Ok(o),
-            Err(first_err) => {
-                if is_cancelled() {
-                    Err(first_err)
-                } else {
-                    match intersect(kb, ka) {
-                        Ok(o) => Ok(o),
-                        Err(_) if !is_cancelled() && solidcraft_kernel::interiors_disjoint(ka, kb) == Some(true) => Ok(None),
-                        Err(_) => Err(first_err),
-                    }
+        match super::interference::measure_overlap(
+            ka,
+            kb,
+            |o| measure_near_origin(o, shared_region(a, b).center()),
+            |m| (m.volume > 0.0).then(|| super::interference::impossible_overlap(m.volume, &m.bbox, ka, kb)).flatten(),
+            |v| v > 0.0 && v >= min_volume,
+            true,
+        ) {
+            super::interference::OverlapOutcome::Unchecked { reason, measure_distance } => {
+                out.unchecked = Some(reason);
+                if measure_distance {
+                    fallback_distance(&mut out);
                 }
-            }
-        };
-        match shared {
-            Err(e) => {
-                out.unchecked = Some(e.to_string());
-                fallback_distance(&mut out);
                 return out;
             }
-            Ok(Some(o)) => match measure_near_origin(&o, shared_region(a, b).center()) {
-                Ok(m) => {
-                    if m.volume > 0.0
-                        && let Some(why) = super::interference::impossible_overlap(m.volume, &m.bbox, ka, kb)
-                    {
-                        out.unchecked = Some(why);
-                        return out;
-                    }
-                    out.overlap = Some((m.volume, m.area, m.bbox, m.centroid));
-                }
-                Err(e) => {
-                    out.unchecked = Some(e.to_string());
-                    fallback_distance(&mut out);
-                    return out;
-                }
-            },
-            Ok(None) => {}
+            super::interference::OverlapOutcome::Measured(m) => {
+                out.overlap = Some((m.volume, m.area, m.bbox, m.centroid));
+            }
+            super::interference::OverlapOutcome::Empty => {}
         }
         if out.overlap.is_some_and(|o| o.0 >= min_volume) {
             return out;
@@ -528,11 +502,11 @@ fn shared_region(a: &DistanceShape, b: &DistanceShape) -> Aabb3 {
     Aabb3 { min: min - g, max: max + g }
 }
 
-/// [`solidcraft_kernel::measure`] of `body` moved by `-at` and back: far from the origin, the
+/// [`solidcraft_kernel::measure_mass`] of `body` moved by `-at` and back: far from the origin, the
 /// centre of a thin part loses its precision (its moments are large numbers that nearly cancel).
-fn measure_near_origin(body: &solidcraft_kernel::Body, at: solidcore_record::Vec3) -> solidcraft_kernel::Result<solidcraft_kernel::BodyMeasure> {
+fn measure_near_origin(body: &solidcraft_kernel::Body, at: solidcore_record::Vec3) -> solidcraft_kernel::Result<solidcraft_kernel::MassMeasure> {
     let moved = solidcraft_kernel::transform(body, -at, solidcore_record::Vec3::ZERO, solidcore_record::Vec3::Z, 0.0)?;
-    let mut m = solidcraft_kernel::measure(&moved)?;
+    let mut m = solidcraft_kernel::measure_mass(&moved)?;
     m.centroid += at;
     m.bbox = Aabb3 { min: m.bbox.min + at, max: m.bbox.max + at };
     Ok(m)

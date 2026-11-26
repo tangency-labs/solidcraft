@@ -203,6 +203,12 @@ pub(crate) fn refuses(checks: impl ExactSizeIterator<Item = solidcraft_smlib::Re
     format!("SMLib's check refuses the result{whose}")
 }
 
+/// Whether `err` is a step refusal caused solely by SMLib's check rejecting the result while
+/// every input operand passed SMLib's check (the operation itself succeeded).
+pub fn is_result_only_check_refusal(err: &KernelError) -> bool {
+    matches!(err, KernelError::Failed(msg) if msg.contains("SMLib's check refuses the result:"))
+}
+
 /// SMLib's full check of a body a feature keeps, once a step of the feature left its check to
 /// the end: an error with the check's reason unless it passes. A body decoded from a step's
 /// result is checked as that step would have checked it, on its result; any other (a copy moved
@@ -578,5 +584,36 @@ mod tests {
         }
         assert_eq!(Validation::parse("each step"), None);
         assert_eq!(Validation::default(), Validation::EachFeature);
+    }
+
+    #[test]
+    fn result_only_check_refusal_distinguishes_result_from_operand_and_operation_errors() {
+        use solidcore_record::Vec3;
+
+        let result_only = KernelError::Failed("SMLib boolean: SMLib's check refuses the result: 9 failed tests:\nSmFace::Test #33".into());
+        assert!(is_result_only_check_refusal(&result_only));
+
+        for non_result_only in [
+            KernelError::Failed("SMLib boolean: SMLib's check refuses the result (the first operand already fails it): 1 failed test".into()),
+            KernelError::Failed("SMLib boolean: SMLib's check refuses the result (the second operand already fails it): 1 failed test".into()),
+            KernelError::Failed(
+                "SMLib boolean: SMLib's check refuses the result (the first operand and the second operand already fails it): 1 failed test".into(),
+            ),
+            KernelError::Failed("SMLib boolean: operation: relate conflict".into()),
+            KernelError::Failed("boolean cancelled".into()),
+            KernelError::Invalid("SMLib's check refuses the result: bad input".into()),
+            KernelError::Internal("SMLib boolean: SMLib's check refuses the result: panic".into()),
+        ] {
+            assert!(!is_result_only_check_refusal(&non_result_only), "{non_result_only:?}");
+        }
+
+        // A real boolean against an invalid operand names that operand, so it is not result-only.
+        let good = crate::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let mut record = good.record().clone();
+        record.vertices[0].point[2] += 0.5;
+        let bad = Body::from_record(record).unwrap();
+        let tool = crate::box_solid(Vec3::new(5.0, 5.0, 5.0), Vec3::new(20.0, 20.0, 20.0)).unwrap();
+        let err = validating(Validation::EachStep, || crate::boolean(&bad, &tool, crate::BoolOp::Union)).0.unwrap_err();
+        assert!(!is_result_only_check_refusal(&err), "{err}");
     }
 }
