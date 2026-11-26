@@ -1110,18 +1110,43 @@ fn facing(s: FaceSurface, at: Vec3, towards: Vec3, angle: f64) -> Result<Vec3> {
     })
 }
 
-fn face_surface_at(ctx: &Ctx, g: &GeoRef) -> Result<(FaceSurface, Vec3)> {
+/// What a tangent plane touches: a surface of one of the analytic kinds, or a face of any other
+/// kind (a spline face, such as a loft's), kept as its body and its index there.
+enum Touched<'a> {
+    Surface(FaceSurface),
+    Face(&'a ModelBody, usize),
+}
+
+fn touched<'a>(ctx: &Ctx<'a>, g: &GeoRef) -> Result<Touched<'a>> {
     match g {
         GeoRef::Face { at, name } => {
-            let (b, fi, q) = face_of(ctx.st, *at, name)?;
-            kernel::face_surface(&b.body, fi).map(|s| (s, q)).ok_or_else(|| bad("the face's surface is not a plane, cylinder, cone, sphere or torus"))
+            let (b, fi, _) = face_of(ctx.st, *at, name)?;
+            Ok(kernel::face_surface(&b.body, fi).map_or(Touched::Face(b, fi), Touched::Surface))
         }
         GeoRef::Plane { .. } => {
             let pl = plane(ctx, g)?;
-            Ok((FaceSurface::Plane { normal: pl.normal().unit().ok_or_else(|| bad("degenerate plane"))?, point: pl.origin }, pl.origin))
+            Ok(Touched::Surface(FaceSurface::Plane { normal: pl.normal().unit().ok_or_else(|| bad("degenerate plane"))?, point: pl.origin }))
         }
         _ => Err(bad("pick a face")),
     }
+}
+
+fn face_surface_at(ctx: &Ctx, g: &GeoRef) -> Result<FaceSurface> {
+    match touched(ctx, g)? {
+        Touched::Surface(s) => Ok(s),
+        Touched::Face(..) => Err(bad("the face's surface is not a plane, cylinder, cone, sphere or torus")),
+    }
+}
+
+/// The point of face `face` of `b` nearest `at` and the face's unit normal there, both exact:
+/// the kernel's closest point on the face as it is trimmed ([`kernel::point_closest`]) and its
+/// normal at that point ([`kernel::Body::face_normal_at`]), out of the material or, on a
+/// surface body, to the side the face faces. A pick lies on the display mesh, a little off the
+/// face, so the point is found first and the normal taken there (#6074).
+fn face_normal_near(b: &ModelBody, face: usize, at: Vec3) -> Result<(Vec3, Vec3)> {
+    let on = kernel::point_closest(at, &b.body, kernel::Members::Faces(&[face]))?.ok_or_else(|| bad("the face has no exact surface to touch"))?.to;
+    let n = b.body.face_normal_at(face, on)?.ok_or_else(|| bad("the face has no normal at the point nearest the pick"))?;
+    Ok((on, n))
 }
 
 /// Where two planes meet.
@@ -1205,7 +1230,7 @@ pub(crate) fn resolve_axis(ctx: &Ctx, d: &AxisDef) -> Result<(Vec3, Vec3)> {
             Ok((o, dir))
         }
         AxisDef::NormalToFace { face, point: p } => {
-            let (s, _) = face_surface_at(ctx, face)?;
+            let s = face_surface_at(ctx, face)?;
             let q = point(ctx, p)?;
             let (on, n) = surface_normal(s, q).ok_or_else(|| bad("the point is on the face's axis"))?;
             Ok((on, n))
@@ -1349,7 +1374,19 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
             Plane::new(pa, pb - pa, pc - pa).ok_or_else(degenerate)
         }
         PlaneRef::Tangent { face, at, reference, angle } => {
-            let (s, _) = face_surface_at(ctx, face)?;
+            let s = match touched(ctx, face)? {
+                Touched::Surface(s) => s,
+                // Any other curved face: where it is nearest the point, with its normal there.
+                Touched::Face(b, fi) => {
+                    if reference.is_some() {
+                        return Err(bad(
+                            "a reference lines the plane up only on a cylinder, cone, sphere or torus: this face has no axis or centre to turn the plane about; leave the reference out and pick where the plane touches",
+                        ));
+                    }
+                    let (on, n) = face_normal_near(b, fi, *at)?;
+                    return Plane::from_normal(on, n).ok_or_else(degenerate);
+                }
+            };
             let at = match reference {
                 Some(r) => {
                     let towards = plane(ctx, r)?.normal().normalized().ok_or_else(degenerate)?;

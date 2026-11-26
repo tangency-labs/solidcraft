@@ -37,6 +37,9 @@ pub(super) struct Saved {
     pub moved: Vec<(u64, Vec<ModelBody>)>,
     pub failed: HashMap<u64, (String, String)>,
     pub rolled_results: HashMap<u64, (u64, FeatureResult)>,
+    pub occurrence_transforms: Option<Vec<crate::Mat>>,
+    pub joint_states: Option<Vec<(Vec<f64>, Vec<Option<String>>)>>,
+    pub resolved_joints: std::collections::BTreeMap<u64, crate::CapturedJoint>,
 }
 
 /// How a feature whose check refused its bodies ends: as the check in line ended it.
@@ -319,6 +322,9 @@ mod tests {
             moved: Vec::new(),
             failed: HashMap::new(),
             rolled_results: HashMap::new(),
+            occurrence_transforms: None,
+            joint_states: None,
+            resolved_joints: Default::default(),
         }
     }
 

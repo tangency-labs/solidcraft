@@ -70,5 +70,14 @@
     "prefs.folder_browse": "浏览…",
     "prefs.folder_hint": "上次使用的文件夹",
     "prefs.folders": "文件夹"
+  },
+  "fr": {
+    "prefs.designs_folder": "Dossier des conceptions",
+    "prefs.designs_folder_help": "Pour une conception qui n’a jamais été enregistrée, les commandes Enregistrer et Enregistrer sous ouvrent ce dossier. Pour une conception déjà enregistrée, Enregistrer sous ouvre le dossier qui la contient. Laissez vide pour ouvrir le dernier dossier utilisé.",
+    "prefs.exports_folder": "Dossier des exportations",
+    "prefs.exports_folder_help": "Les boîtes de dialogue d’exportation (STEP, STL, 3MF, dessins et autres fichiers enregistrés) s’ouvrent dans ce dossier, jusqu’à ce que vous en choisissiez un autre dans l’une d’elles. Laissez vide pour ouvrir le dernier dossier utilisé.",
+    "prefs.folder_browse": "Parcourir…",
+    "prefs.folder_hint": "Dernier dossier utilisé",
+    "prefs.folders": "Dossiers"
   }
 }

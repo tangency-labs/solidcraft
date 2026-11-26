@@ -21,6 +21,8 @@ mod arena_uv_trim_owner;
 mod assert_valid_level0_helpers;
 #[path = "../brep_query_cache_lifetime.rs"]
 mod brep_query_cache_lifetime;
+#[path = "../check_memo_incremental.rs"]
+mod check_memo_incremental;
 #[path = "../constructed_transforms.rs"]
 mod constructed_transforms;
 #[path = "../contact_between_bodies.rs"]

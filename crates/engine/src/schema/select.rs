@@ -1,5 +1,5 @@
 //! Contracts and result types for the selection commands in `cmd/edit.rs`: `select.set`,
-//! `select.filter`, `select.clear`, `select.same_look` and
+//! `select.filter`, `select.clear`, `select.same_look`, `select.edge_loop` and
 //! `select.sharp_edges`.
 //!
 //! `select.set` reads `items` and `add` from the raw JSON. Each item reads as the handler reads
@@ -176,6 +176,42 @@ pub struct SharpEdgesParams {
     pub add: Option<bool>,
 }
 
+/// Select the closed loop of edges around a face that holds one edge (#18094): the edges of that
+/// face's boundary loop, read from the body's exact topology, not from its mesh. `body` and `edge`
+/// name the edge together; without them, the last selected edge. `face` says which of the edge's
+/// faces gives the loop. Without it, a flat face comes before a curved one (a fillet or a hole's
+/// wall), then a face with more than one loop (the edge bounds a pocket, a hole or a boss on it),
+/// then the face with the lowest index. The loop follows the face, so a vertex where three or more
+/// edges meet does not make the choice ambiguous. A mesh body has no edge loops and is refused.
+/// Not an undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct EdgeLoopParams {
+    /// The name of a body in the design. Given with `edge`; default: the body of the last selected edge.
+    pub body: Option<String>,
+    /// The index of an edge of that body. Given with `body`; default: the last selected edge.
+    pub edge: Option<usize>,
+    /// The index of the face whose loop is selected: one of the edge's faces.
+    pub face: Option<usize>,
+    /// Add the loop to the current selection instead of replacing it. Default: false.
+    pub add: Option<bool>,
+}
+
+/// What `select.edge_loop` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct EdgeLoopResult {
+    /// How many items are selected now.
+    pub selected: usize,
+    /// The face whose loop was selected.
+    pub face: usize,
+    /// The loop's edges, in the order the loop runs, each once.
+    pub edges: Vec<usize>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// `select.all`: in an open sketch it selects every curve of that sketch, construction curves
 /// too, and every point of it that is on no curve; projected geometry and the sketch's origin are
 /// left out. With a drawing open and the model not focused it selects the views, dimensions,
@@ -266,6 +302,48 @@ pub struct SelectFilterParams {
 pub struct SelectFilterResult {
     /// The mode the window picks at now.
     pub mode: SelectMode,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Select the edges round a set of faces (#18098), read from the body's exact topology, not from
+/// its mesh: the edges that bound exactly one face of the set. `body` and `faces` name the set;
+/// `body` alone means the whole body, whose boundary is its free edges (an open surface's rim; a
+/// closed solid has none). Without either, the selected faces, or else the last selected body.
+/// The boundary comes in closed loops, walked round the faces (two loops that only meet at a
+/// vertex are two). On a face set only the outer loops are selected unless `holes` is true: a
+/// loop is a hole when all its edges come from the faces' inner loops (a hole in a plate, the
+/// edge of an island the set leaves out), from the topology, not from geometry. Both rims of a
+/// tube are kept. A body's free edges are all selected. With `add`, an edge already selected
+/// stays as it was picked. A mesh body has no edge topology and is refused. Not an undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct BoundaryParams {
+    /// The name of a body in the design. Default: the body of the selected faces, or the last selected body.
+    pub body: Option<String>,
+    /// Face indices of that body; needs `body`. Default with `body`: every face, so its free edges.
+    pub faces: Option<Vec<usize>>,
+    /// Also select the loops round holes and islands of a face set. Default: false.
+    pub holes: Option<bool>,
+    /// Add the edges to the current selection instead of replacing it. Default: false.
+    pub add: Option<bool>,
+}
+
+/// What `select.boundary` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BoundaryResult {
+    /// How many items are selected now.
+    pub selected: usize,
+    /// The body whose edges were selected.
+    pub body: String,
+    /// The selected edges, loop by loop.
+    pub edges: Vec<usize>,
+    /// How many closed loops were selected.
+    pub loops: usize,
+    /// How many loops were left out as holes (0 with `holes: true`).
+    pub holes_left: usize,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

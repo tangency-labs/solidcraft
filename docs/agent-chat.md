@@ -29,6 +29,9 @@ Everything about it is on one page: **Preferences → AI**.
   as nothing was asked in that empty design's chat.
 - **Open the Assistant panel when SolidCraft starts** (off by default): the panel (or its own
   window) is shown at each launch.
+- **Keep one chat across design tabs** (off by default, under **Preferences → AI → Panel**): keep the same
+  Assistant conversation and connection when switching tabs, opening linked sub-assemblies, or editing in
+  place; tools always act on the active tab in front.
 
 Neither applies when SolidCraft is started with `--control` for automation.
 
@@ -563,7 +566,8 @@ saves, opens or inserts. A sweep's or pattern's `path` (curve ids) and an occurr
 - **Files wait for you** unless you chose **Allow everything**. **Cancel** or **Stop** declines
   everything that's waiting, and a question nobody answers is declined after four minutes. The
   [MCP server's folder limits](mcp.md) still apply after you allow: the design's folder, the
-  recovery folder and the server's own scratch folder.
+  recovery folder, the server's own scratch folder, and any extra folders you add under
+  **Preferences → Assistant → Allowed folders** (passed as `--allow-path` to the bridged server).
 - **An optional limit per message.** There's none by default. Untick **Unlimited** on the AI
   page to cap the changes the agent may make per message (it starts at 24). Reading the design
   doesn't count. At the limit, it's told to stop and report what's left; send another message to
