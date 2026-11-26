@@ -25,11 +25,13 @@ use solidcore_record::brep::history::History;
 pub mod cell_grid;
 pub mod exchange;
 pub mod frames;
+pub mod hole_stacks;
 pub mod modelling;
 
 pub use cell_grid::{CellGrid, CellGridLimits};
 pub use exchange::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWritten, Exchange};
 pub use frames::{Frames, GussetFailure, MemberRefusal, PathFailure, PathRefusal, TrimRefusal, TrimTarget};
+pub use hole_stacks::{HoleStacks, HoleStacksRefused};
 pub use modelling::{Axis2, BoolOp, ChamferSide, FilletTurn, Modelling, Primitive};
 
 /// A kernel's stable name: what build features, the support matrix and reports call it.
@@ -77,6 +79,8 @@ pub enum OpKind {
     CellGrid,
     /// The exchange helpers: a STEP string, CADIR read and written ([`Exchange`]).
     Exchange,
+    /// Hole stacks through touching bodies ([`HoleStacks`]).
+    HoleStacks,
     /// Frame-stock paths, member trims and gusset plates ([`Frames`]).
     Frames,
 }
@@ -98,6 +102,7 @@ impl OpKind {
         OpKind::OffsetFaces,
         OpKind::CellGrid,
         OpKind::Exchange,
+        OpKind::HoleStacks,
         OpKind::Frames,
     ];
 
@@ -118,6 +123,7 @@ impl OpKind {
             OpKind::OffsetFaces => "offset_faces",
             OpKind::CellGrid => "cell_grid",
             OpKind::Exchange => "exchange",
+            OpKind::HoleStacks => "hole_stacks",
             OpKind::Frames => "frames",
         }
     }
