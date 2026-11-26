@@ -2367,3 +2367,47 @@ fn a_saved_designs_linked_component_shows_its_badge() {
     h.frames(5);
     assert!(!h.app.tree.links.busy(), "one answer, no asking again every frame");
 }
+
+/// "Fold other components on activate": activating one component folds every other placement's
+/// row and opens the active one's; off, activating leaves the rows as they are.
+#[test]
+fn activating_a_component_folds_the_others_when_the_preference_is_on() {
+    let mut h = Harness::new();
+    let made = |h: &mut Harness, name: &str, x: f64| {
+        let reply = h.app.run("component.create", json!({"name": name})).unwrap();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"body_name":name})).unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        (reply["component"].as_u64().unwrap(), reply["occurrence"].as_u64().unwrap())
+    };
+    let (a, a_at) = made(&mut h, "A", 0.0);
+    let (b, b_at) = made(&mut h, "B", 20.0);
+    let (a_key, b_key) = (occurrence_key(&[a_at]), occurrence_key(&[b_at]));
+    let open_both = |h: &mut Harness| {
+        h.app.tree.open_row(&a_key);
+        h.app.tree.open_row(&b_key);
+        h.settle();
+        assert!(fold_open(&h.app, &a_key, true) && fold_open(&h.app, &b_key, true));
+    };
+    open_both(&mut h);
+    h.app.run("component.activate", json!({"component":a})).unwrap();
+    h.settle();
+    assert!(fold_open(&h.app, &a_key, true) && fold_open(&h.app, &b_key, true), "off by default: the rows stay as they were");
+
+    h.app.preferences.browser_fold_other_components = true;
+    h.app.run("component.activate", json!({"component":b})).unwrap();
+    h.settle();
+    assert!(!fold_open(&h.app, &a_key, true), "the component left folds");
+    assert!(fold_open(&h.app, &b_key, true), "the active one stays open");
+    h.app.run("component.activate", json!({"component":a})).unwrap();
+    h.settle();
+    assert!(fold_open(&h.app, &a_key, true) && !fold_open(&h.app, &b_key, true), "activating opens the one made active");
+    // The design itself active: every placement folds.
+    open_both(&mut h);
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    h.settle();
+    assert!(!fold_open(&h.app, &a_key, true) && !fold_open(&h.app, &b_key, true));
+    // A row opened by hand afterwards stays open until the next activation.
+    open_both(&mut h);
+    h.frames(3);
+    assert!(fold_open(&h.app, &a_key, true) && fold_open(&h.app, &b_key, true));
+}
