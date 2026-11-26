@@ -8,7 +8,7 @@ use std::f64::consts::PI;
 
 use common::*;
 use solidcore_record::Vec3;
-use solidcraft_doc::{Dir, Document, FeatureKind, Model, Operation, UserMaterial, point_expr};
+use solidcraft_doc::{Document, FeatureKind, Model, Operation, UserMaterial, dir_expr, point_expr};
 use solidcraft_exchange::{
     BodyName, Elasticity, Error, FaceName, MaterialAxes, Mm, Options, Override, ParameterValue, Point, Property, Quantity, Radians, Snapshot,
     Surface, Tolerance, from_json, open, to_json,
@@ -97,7 +97,7 @@ fn a_torus_and_a_cone_are_their_analytic_surfaces() {
     doc.add_feature(
         FeatureKind::Cone {
             base: point_expr(Vec3::new(0.0, 0.0, 0.0)),
-            axis: Dir(Vec3::Z),
+            axis: dir_expr(Vec3::Z),
             radius: "10".into(),
             top_radius: "5".into(),
             height: "10".into(),

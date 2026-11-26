@@ -173,6 +173,7 @@ impl Design {
                             tool_plane: false,
                             tool_sheet: solidcraft_doc::SplitSheet::default(),
                             tool_faces: Vec::new(),
+                            tool_bodies: Vec::new(),
                             sketch: None,
                             line: None,
                         };

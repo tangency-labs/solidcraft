@@ -205,7 +205,7 @@ pub(crate) fn features(doc: &Document, state: &ModelState, bodies: &[Body]) -> V
                 }
                 DocKind::Torus { center, operation: op, .. } => FeatureKind::Torus { operation: operation(*op), center: at(center) },
                 DocKind::Hole { position, direction: d, .. } => {
-                    FeatureKind::Hole { position: point(**position), direction: direction(**d), diameter: length("Diameter"), depth: length("Depth") }
+                    FeatureKind::Hole { position: point(**position), direction: axis_of(d), diameter: length("Diameter"), depth: length("Depth") }
                 }
                 DocKind::Combine { target, tools, operation: op, .. } => {
                     FeatureKind::Combine { operation: operation(*op), target: BodyName(target.to_string()), tools: names(&plain(tools)) }
