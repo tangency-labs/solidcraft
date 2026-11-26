@@ -1115,8 +1115,9 @@ fn a_cusp_swept_onto_a_coaxial_cylinder_cuts_whatever_the_sketch_rounding() {
         let removed: f64 = tools.iter().map(volume).sum();
         let expected = volume(&block.body) - removed;
         // points of the tools' faces halfway along the back arc, each turned there from the
-        // sketch: the middle of each triangle's arc and of its side line, which bound the
-        // result; and a point inside each triangle, which the cut removes
+        // sketch: the middle of each triangle's arc, which bounds the result (its side line
+        // sweeps onto the block's side, which the cut opens); and a point inside each
+        // triangle, which the cut removes
         let (yc, _, phi_t) = block.back;
         let beta = (PI - phi_t) / 2.0;
         let swept = |(a, b): (f64, f64)| {
@@ -1129,16 +1130,11 @@ fn a_cusp_swept_onto_a_coaxial_cylinder_cuts_whatever_the_sketch_rounding() {
             ]
         };
         let (w, r0, c) = (CUSP_W, CUSP_R0, CUSP_C);
-        let (side, top) = (c + (r0 * r0 - w * w).sqrt(), c + r0);
+        let top = c + r0;
         let mid_arc = (r0 * r0 - w * w).sqrt().atan2(w) / 2.0 + PI / 4.0;
         let on_faces: Vec<[f64; 3]> = [1.0, -1.0]
             .iter()
-            .flat_map(|&sgn: &f64| {
-                [
-                    swept((sgn * r0 * mid_arc.cos(), c + r0 * mid_arc.sin())),
-                    swept((sgn * w, (side + top) / 2.0)),
-                ]
-            })
+            .map(|&sgn: &f64| swept((sgn * r0 * mid_arc.cos(), c + r0 * mid_arc.sin())))
             .collect();
         let removed_points: Vec<[f64; 3]> = [1.0, -1.0]
             .iter()
