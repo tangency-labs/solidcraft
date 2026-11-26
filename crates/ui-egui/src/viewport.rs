@@ -9695,10 +9695,13 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         let position = app.preferences.space_mouse_ghost_position;
         let navigation = app.viewport.layout.as_ref().map(|layout| layout.navigation);
         let obstacles = navigation.into_iter().chain(toasts).collect::<Vec<_>>();
-        // The Viewport positions sit in the content area (right of the browser), Left Window in the
-        // corner of the whole window; both stay above the floating History card, like the legend.
+        // The Viewport positions sit in the content area, Left Window in the corner of the whole
+        // window; all stay above the History card and the other bottom panels, like the bottom
+        // readouts. Left Viewport moves right of a Browser grown down over its corner.
         let area = if position == SpaceMouseGhost::LeftWindow { rect } else { crate::shell::content_rect(app, rect) };
-        let picture = crate::space_mouse_model::corner_rect(area, position, &obstacles);
+        let area = crate::shell::bottom_readout_rect(app, area);
+        let beside = if position == SpaceMouseGhost::LeftViewport { crate::shell::left_panels(app) } else { Vec::new() };
+        let picture = crate::space_mouse_model::corner_rect(area, position, &obstacles, &beside);
         crate::space_mouse_model::corner(
             ui,
             picture,

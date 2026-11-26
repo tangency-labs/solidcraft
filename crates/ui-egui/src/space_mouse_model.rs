@@ -204,10 +204,12 @@ const CORNER: egui::Vec2 = egui::vec2(160.0, 120.0);
 
 /// Where the corner picture sits in `view`: the two left positions at its lower left, the right one
 /// at its lower right, each a margin in from the edge (the caller passes the viewport area for the
-/// Viewport positions and the whole window for Left Window). Any of `obstacles` (the History bar,
-/// the navigation bar, the agent chip) that would cover it moves it up to just above them, and it
+/// Viewport positions and the whole window for Left Window, each above the History bar). Left
+/// Viewport moves right of any of `beside` (the panels along the left, such as a Browser grown
+/// down to the bottom) that would cover it, the same margin from its edge. Any of `obstacles` (the
+/// navigation bar, the agent chip) that would cover it moves it up to just above them, and it
 /// stays inside `view`.
-pub(crate) fn corner_rect(view: egui::Rect, position: crate::prefs::SpaceMouseGhost, obstacles: &[egui::Rect]) -> egui::Rect {
+pub(crate) fn corner_rect(view: egui::Rect, position: crate::prefs::SpaceMouseGhost, obstacles: &[egui::Rect], beside: &[egui::Rect]) -> egui::Rect {
     use crate::prefs::SpaceMouseGhost;
     const MARGIN: f32 = 12.0;
     let x = match position {
@@ -215,6 +217,16 @@ pub(crate) fn corner_rect(view: egui::Rect, position: crate::prefs::SpaceMouseGh
         SpaceMouseGhost::RightViewport => (view.right() - MARGIN - CORNER.x).max(view.left() + MARGIN),
     };
     let mut rect = egui::Rect::from_min_size(egui::pos2(x, view.bottom() - MARGIN - CORNER.y), CORNER);
+    if position == SpaceMouseGhost::LeftViewport {
+        for _ in 0..beside.len() {
+            let Some(panel) = beside.iter().find(|panel| panel.is_positive() && panel.intersects(rect)) else { break };
+            let right = (panel.right() + MARGIN).min(view.right() - MARGIN - CORNER.x).max(view.left() + MARGIN);
+            if right <= rect.left() {
+                break;
+            }
+            rect = rect.translate(egui::vec2(right - rect.left(), 0.0));
+        }
+    }
     for _ in 0..obstacles.len() {
         let Some(blocking) = obstacles.iter().find(|bar| bar.is_positive() && bar.intersects(rect)) else { break };
         rect = rect.translate(egui::vec2(0.0, blocking.top() - MARGIN - rect.bottom()));
