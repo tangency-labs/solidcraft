@@ -402,6 +402,15 @@ impl Brep {
         r
     }
 
+    /// Like [`Brep::merge_faces`], keeping the edges at indices `keep` (in SMLib's edge order)
+    /// directly instead of picking them by 3D proximity. Has no [`MAX_POINTS`] cap and avoids the
+    /// quadratic closest-point pick loop when keeping thousands of split-line edges.
+    pub fn merge_faces_keeping_edges(&self, keep: &[usize]) -> Result<Brep> {
+        let r = core::merge::merge_faces_keeping_edges(self.core(), keep).map(Brep::made_core);
+        trace::made("merge_faces_keeping_edges", &[self], &r, || json!({"keep_edges": keep.len()}));
+        r
+    }
+
     /// The faces nearest to `faces` (each within `tolerance`) tilted by `angle` radians
     /// (0 < |angle| < 89.94 degrees) about the line or circle where each meets the neutral plane
     /// through `neutral_origin` with normal `neutral_normal`, a positive angle leaning them in going
