@@ -1,0 +1,34 @@
+{
+  "en": {
+    "ui.cut_bodies": "Bodies to Cut",
+    "dialog.no_cut_body": "No body ticked to cut: tick one, or choose another operation"
+  },
+  "ar": {
+    "ui.cut_bodies": "الأجسام المراد قطعها",
+    "dialog.no_cut_body": "لم يتم تحديد أي جسم للقطع: حدد جسمًا أو اختر عملية أخرى"
+  },
+  "he": {
+    "ui.cut_bodies": "גופים לחיתוך",
+    "dialog.no_cut_body": "לא סומן גוף לחיתוך: סמנו גוף או בחרו פעולה אחרת"
+  },
+  "ja": {
+    "ui.cut_bodies": "切り取るボディ",
+    "dialog.no_cut_body": "切り取るボディが選ばれていません。ボディを選ぶか、別の操作を選んでください"
+  },
+  "vi": {
+    "ui.cut_bodies": "Các thân cần cắt",
+    "dialog.no_cut_body": "Chưa chọn thân nào để cắt: hãy chọn một thân hoặc chọn thao tác khác"
+  },
+  "zh": {
+    "ui.cut_bodies": "要切除的实体",
+    "dialog.no_cut_body": "没有勾选要切除的实体：请勾选一个，或选择其他操作"
+  },
+  "de": {
+    "ui.cut_bodies": "Zu schneidende Körper",
+    "dialog.no_cut_body": "Kein Körper zum Schneiden angehakt: Haken setzen oder eine andere Operation wählen"
+  },
+  "ko": {
+    "ui.cut_bodies": "절단할 바디",
+    "dialog.no_cut_body": "절단할 바디가 선택되지 않았습니다. 하나를 선택하거나 다른 작업을 고르세요"
+  }
+}

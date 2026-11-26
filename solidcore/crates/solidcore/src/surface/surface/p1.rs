@@ -112,6 +112,13 @@
 //!   [`get_surface_cache_with_face`], giving `GetFace()` as a
 //!   [`CacheFace`]; without it a face-owned surface's trimmed cache stops at
 //!   `GetFace` ([`SolidError::Unported`]).
+//! - **End-knot clamp.** `GetDomainWithContinuity` decides whether to clamp the domain at
+//!   the first or last knot from the start point's parameter (`crUV.x < dKnots[0]`,
+//!   `crUV.x > dKnots[n-1]`, and the same in v). Upstream compares the direction's
+//!   component (`sVec.x`) with the knot, so off the domain its answer depends on the
+//!   direction's length (WR-20239). On and near the domain both tests set the bound to
+//!   the end knot, so only start points off the domain change: they get the span next
+//!   to them.
 //! - **Silhouettes.** `CreateSilhouetteCurves` always computes both the 3D and the
 //!   UV curves (upstream's output arrays are optional) and returns them. It does not
 //!   copy the surface's `SM_AI_COLOR` attribute onto the traced curves: a free
@@ -179,6 +186,7 @@ use crate::geom::vector3d::{Point3, Vec3};
 use crate::intersect::surface_silhouette::SurfaceSilhouette;
 use crate::intersect::surface_tracer::SurfaceTrace;
 use crate::kernel::Kernel;
+use std::borrow::Cow;
 
 #[cfg(test)]
 use crate::math::EFF_ZERO_DEG;
@@ -1258,6 +1266,16 @@ pub trait SurfaceSolveContext<O: Copy + PartialEq> {
 
     /// Read-only classification of the topology prepared by this context.
     fn face_queries(&self) -> Option<&dyn FaceQueries<O>>;
+
+    /// The searches of the certified line pass this context's operation keeps for its
+    /// solves that repeat one on the same inputs
+    /// ([`crate::surface::surface::certified_line::LinePasses`]; not upstream). By default
+    /// none: every solve searches.
+    fn line_passes(
+        &self,
+    ) -> Option<&core::cell::RefCell<crate::surface::surface::certified_line::LinePasses>> {
+        None
+    }
 }
 
 /// A surface's cache handed to a solve that reads it
@@ -1933,6 +1951,12 @@ impl Surface {
     /// which are empty until that cache's tree is built, so its answer off the natural
     /// domain depends on what ran before. No cache is made here.
     ///
+    /// Off the natural domain in a direction (not upstream, #20239), the answer in that
+    /// direction is the span next to `uv`: from the end knot on `uv`'s side to the
+    /// nearest knot of lower continuity (or the other end knot). Upstream picked the
+    /// end from `uv_vector`'s component, so its answer changed with the vector's length
+    /// and could collapse to zero width.
+    ///
     /// A curve-bounded surface answers for its basis (not upstream, whose
     /// `SmCurveBoundedSurface` does not override `GetKnots` and so leaves an
     /// uninitialised domain, WR-663). That is exact: the kind holds only its basis, its
@@ -2032,9 +2056,11 @@ impl Surface {
             for (i, &cont) in u_conts.iter().enumerate() {
                 if (cont as i32) < (min_continuity as i32) {
                     let ki = knot_at(&knots, i)?;
-                    if i == 0 && vec.x < ki {
+                    // (WR-20239: upstream compares `sVec.x`, a direction component,
+                    // with the knot; the start point's parameter is compared here)
+                    if i == 0 && uv.x < ki {
                         min.x = ki;
-                    } else if i == n - 1 && vec.x > ki {
+                    } else if i == n - 1 && uv.x > ki {
                         max.x = ki;
                     } else if (ki - uv.x).abs() < EFF_ZERO_SQRT {
                         if vec.x <= 0.0 && i > 0 {
@@ -2067,9 +2093,10 @@ impl Surface {
             for (j, &cont) in v_conts.iter().enumerate() {
                 if (cont as i32) < (min_continuity as i32) {
                     let kj = knot_at(&knots, j)?;
-                    if j == 0 && vec.y < kj {
+                    // (WR-20239: as for u, the start point's parameter, not `sVec.y`)
+                    if j == 0 && uv.y < kj {
                         min.y = kj;
-                    } else if j == n - 1 && vec.y > kj {
+                    } else if j == n - 1 && uv.y > kj {
                         max.y = kj;
                     } else if (kj - uv.y).abs() < EFF_ZERO_SQRT {
                         // (upstream tests the unfiltered vector here)
@@ -2193,20 +2220,36 @@ impl Surface {
         k: &Kernel,
         uv_domain: &Extent2d,
     ) -> Result<Option<Extent3d>> {
+        Ok(self
+            .certified_net(k)?
+            .and_then(|net| net.piece_box(uv_domain))
+            .filter(Extent3d::is_defined))
+    }
+
+    /// The net the surface is evaluated on, for the kinds whose net is the surface: a
+    /// B-spline's own, or the NURB of a cone, sphere, torus, surface of revolution or
+    /// surface of extrusion, made when missing; `None` for every other kind (not upstream;
+    /// the one list of these kinds, read by [`Surface::certified_bounding_box`] and the
+    /// certified line solve, [`super::certified_line`]). A B-spline whose net is a fitted
+    /// approximation of a definition ([`Surface::net_is_fitted`]: a swept wall, or an
+    /// evaluation copy of one) is evaluated on its net too, which is then not the surface:
+    /// the line solve refuses it there.
+    ///
+    /// # Errors
+    ///
+    /// Those of making a missing NURB.
+    pub(crate) fn certified_net(&self, k: &Kernel) -> Result<Option<Cow<'_, BSplineSurface>>> {
         Ok(match self.kind() {
-            SurfaceKind::BSpline(s) => s.piece_box(uv_domain),
+            SurfaceKind::BSpline(s) => Some(Cow::Borrowed(s)),
             SurfaceKind::Cone(_)
             | SurfaceKind::Sphere(_)
             | SurfaceKind::Torus(_)
             | SurfaceKind::SurfOfRevolution(_) => {
-                self.analytic_base_with_nurb(k)?.piece_box(uv_domain)
+                Some(Cow::Borrowed(self.analytic_base_with_nurb(k)?))
             }
-            SurfaceKind::SurfOfExtrusion(_) => {
-                self.extrusion_base_with_nurb(k)?.piece_box(uv_domain)
-            }
+            SurfaceKind::SurfOfExtrusion(_) => Some(self.extrusion_base_with_nurb(k)?),
             _ => None,
-        }
-        .filter(Extent3d::is_defined))
+        })
     }
 
     /// [`Surface::calculate_bounding_box`] with upstream's optional basis guesses
@@ -4138,6 +4181,44 @@ pub fn is_node_valid<O: Copy + PartialEq>(
     }
 }
 
+/// Whether the surface tree node `node` lies wholly inside its face (not upstream): its
+/// trim classification is inside, or no point can be rejected by the face (a tree no
+/// surface cache owns, the solve's point test, `modes`, off, or a trimmed cache whose
+/// surface has no face: it keeps every point whatever built it,
+/// [`SurfaceCache::point_test_with_under`]). Otherwise a cache that is not current
+/// classifies no node while the face's point test still filters points, so its nodes are
+/// not inside.
+/// [`is_node_valid`] keeps a node on the face's border too; this tells the two apart for
+/// the certified line pass, whose component in a border node may straddle the trim.
+///
+/// # Errors
+///
+/// A surface cache node without surface data.
+pub(crate) fn is_node_inside<O: Copy + PartialEq>(
+    owner: Option<TreeOwner>,
+    cache: &SurfaceCache<O>,
+    modes: SolveModes,
+    node: &TreeNode<O>,
+) -> Result<bool> {
+    if !is_surface_cache_owner(owner) || !modes.point_test_enabled {
+        return Ok(true);
+    }
+    // (no face, so no trim to straddle; a face the cache cannot name stays undecided)
+    if cache.trimmed_dispatch && matches!(cache.face(), Ok(None)) {
+        return Ok(true);
+    }
+    if cache.face_was_modified || !cache.have_t_surface_cache {
+        return Ok(false);
+    }
+    match &node.data {
+        NodeData::Surface(aux) => Ok(aux.node_class == NodeClass::Inside),
+        _ => Err(SolidError::invalid_input(
+            "surface::surface::p1::is_node_inside",
+            "surface cache node without surface data",
+        )),
+    }
+}
+
 // ---- SmSurfaceEval accessors ---------------------------------------------------------
 
 impl SurfaceEval<'_> {
@@ -5450,8 +5531,8 @@ mod tests {
     /// `surface.surface_p1` `domhist` cases had (none; a cache made during a Boolean
     /// operation, so without tree; the same with its tree then built; the call itself
     /// during a Boolean operation): the C1 domain around a point left of the crease ends
-    /// at the crease, and the one around a point off the natural domain is empty,
-    /// clamped by the end knots. Upstream answers the whole domain after the second
+    /// at the crease, and the one around a point off the natural domain is the span next
+    /// to it, clamped by the end knot (#20239). Upstream answers the whole domain after the second
     /// history, from the empty arrays of the cache without tree (#20054).
     #[test]
     fn domain_with_continuity_is_the_same_under_every_cache_history() {
@@ -5474,6 +5555,8 @@ mod tests {
         let crease = Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(0.5, 1.0));
         let off = Point2::new(1.4, 0.5);
         let fresh_off = domain(0, off);
+        let right_span = Extent2d::from_points(Point2::new(0.5, 0.0), Point2::new(1.0, 1.0));
+        assert_eq!(fresh_off, Ok(right_span));
         assert_eq!(domain(0, left).unwrap(), crease);
         for history in 1..=3 {
             assert_eq!(domain(history, left).unwrap(), crease, "history {history}");
@@ -5484,6 +5567,76 @@ mod tests {
             );
         }
     }
+    /// #20239: off the natural domain, `GetDomainWithContinuity` clamps at an end knot
+    /// from the side of that knot the start point is on, so the answer is the span next
+    /// to the point and does not depend on the direction's length. Upstream compared the
+    /// direction's component with the knot (WR-20239), so the same request with the
+    /// direction scaled by 1e-3, 1 or 1e3 answered a zero-width box or the span.
+    ///
+    /// The issue's cases: a single-span surface with u knots `[-0.7286 x3, 1.778 x3]`
+    /// and v knots `[0.04241 x2, 1.67 x2]`, started at u = -1.18 with `du = -0.235`
+    /// (`domhist0011`); and the roof (C0 crease at u = 1/2) started off both ends with
+    /// the direction `(0.82, 0.52)` pointing into the domain (the start point and
+    /// direction of `domhist0067`, whose own surface differs), and its mirror past the
+    /// far ends. Every span is worked from the knots: the end knots are
+    /// discontinuities (multiplicity degree + 1), the crease a C0 knot, so the C1 span
+    /// next to a point before the first knot runs to the first discontinuity after it,
+    /// and the one after the last knot from the last discontinuity before it.
+    #[test]
+    fn domain_with_continuity_off_the_domain_is_the_span_next_to_the_point() {
+        use crate::nurbs::math::CPoint;
+        let k = &Kernel::default();
+        let (u0, u1, v0, v1) = (-0.7286, 1.778, 0.04241, 1.67);
+        let row = |x: f64, z: f64| vec![CPoint::new(x, v0, z, 1.0), CPoint::new(x, v1, z, 1.0)];
+        let single_span = Surface::from(
+            BSplineSurface::from_data(
+                2,
+                1,
+                2,
+                1,
+                5,
+                3,
+                &[row(u0, 0.0), row(0.5, 0.7), row(u1, 0.1)],
+                &[u0, u0, u0, u1, u1, u1],
+                &[v0, v0, v1, v1],
+            )
+            .unwrap(),
+        );
+        let cases = [
+            (
+                single_span,
+                Point2::new(-1.18, 0.8),
+                Vec2::new(-0.235, 0.3),
+                Extent2d::from_points(Point2::new(u0, v0), Point2::new(u1, v1)),
+            ),
+            (
+                roof(),
+                Point2::new(-0.66, -0.64),
+                Vec2::new(0.82, 0.52),
+                Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(0.5, 1.0)),
+            ),
+            (
+                roof(),
+                Point2::new(1.66, 1.64),
+                Vec2::new(-0.82, -0.52),
+                Extent2d::from_points(Point2::new(0.5, 0.0), Point2::new(1.0, 1.0)),
+            ),
+        ];
+        for (s, uv, dir, want) in cases {
+            for f in [1e-3, 1.0, 1e3] {
+                let got = s
+                    .domain_with_continuity(k, ContinuityType::C1, uv, dir * f)
+                    .unwrap();
+                assert_eq!(got, want, "start {uv:?}, direction {dir:?} x {f}");
+                // the reverse direction too: the side of the knot decides, not the sign
+                let got = s
+                    .domain_with_continuity(k, ContinuityType::C1, uv, dir * -f)
+                    .unwrap();
+                assert_eq!(got, want, "start {uv:?}, direction {dir:?} x {}", -f);
+            }
+        }
+    }
+
     /// The roof `S(u, v) = (2u, v, 1 - |2u - 1|)`: degree 1 in u with a C0 crease at
     /// u = 1/2, degree 1 in v.
     fn roof() -> Surface {

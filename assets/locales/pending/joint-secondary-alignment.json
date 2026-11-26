@@ -88,5 +88,15 @@
     "dialog.secondary_alignment_origins_required": "보조 정렬을 사용하려면 면, 원, 평면 또는 축 원점을 선택하세요.",
     "settings.joint_moving_first": "조인트 선택 순서 반전",
     "settings.joint_moving_first_help": "조인트를 만들 때 이동할 구성요소를 먼저 선택한 다음 고정된 구성요소를 선택합니다."
+  },
+  "fr": {
+    "dialog.alignment_1_optional": "Alignement 1 (facultatif)",
+    "dialog.alignment_2_optional": "Alignement 2 (facultatif)",
+    "dialog.invert_alignment": "Inverser l’alignement",
+    "dialog.missing_alignment_reference": "Référence manquante",
+    "dialog.preview_alignment_on_hover": "Prévisualiser l’alignement au survol",
+    "dialog.secondary_alignment_origins_required": "Choisissez des origines de face, de cercle, de plan ou d’axe pour utiliser l’alignement secondaire.",
+    "settings.joint_moving_first": "Inverser l’ordre de sélection des composants de la liaison",
+    "settings.joint_moving_first_help": "Lors de la création d’une liaison, sélectionnez d’abord le composant mobile, puis le composant fixe."
   }
 }
