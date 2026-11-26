@@ -9,9 +9,9 @@
 use std::f64::consts::PI;
 
 use solidcore_ops::sweep::{extrude, planar_faces, project_curves, Curve, DraftCorner};
+use solidcore_ops::trim::split_sheet;
 use solidcore_ops::trim::{
-    remove_faces, split_face_by_curves, split_sheet, trim_by_dropped_curves, trim_sheet, Region,
-    MAX_PICKS,
+    remove_faces, split_face_by_curves, trim_by_dropped_curves, trim_sheet, Region, MAX_PICKS,
 };
 use solidcore_ops::{Body, Error, Order};
 
