@@ -58,8 +58,10 @@ fn helix_profile(
     turns: f64,
 ) -> Result<(Vec3, crate::numbered::NumberedLoop)> {
     let k = axis.normalized().ok_or_else(|| KernelError::Invalid("helix axis".into()))?;
-    if !(pitch.is_finite() && turns.is_finite() && turns > 0.0 && turns <= 200.0 && pitch.abs() < 1e7 && axis_origin.is_finite()) {
-        return Err(KernelError::Invalid("helix: turns must be in (0, 200] and the pitch finite".into()));
+    // The kernel's bound: as many turns as its spans hold.
+    const MAX_TURNS: f64 = solidcore_ops::sweep::SCREW_MAX_TURNS;
+    if !(pitch.is_finite() && turns.is_finite() && turns > 0.0 && turns <= MAX_TURNS && pitch.abs() < 1e7 && axis_origin.is_finite()) {
+        return Err(KernelError::Invalid(format!("helix: turns must be in (0, {MAX_TURNS}] and the pitch finite")));
     }
     if region.area().abs() < 1e-9 {
         return Err(KernelError::Invalid("profile has no area".into()));
