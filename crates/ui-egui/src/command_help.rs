@@ -162,6 +162,7 @@ pub const DOCUMENTED: &[&str] = &[
     "plastic.snap_fit",
     "pointcloud.insert",
     "pulley.insert",
+    "shaft_spline.insert",
     "sheet.convert",
     "sheet.export_bend_table",
     "sheet.export_dxf",
