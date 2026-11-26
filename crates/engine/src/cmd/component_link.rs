@@ -2936,6 +2936,10 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         #[cfg(test)]
         UPDATE_LINKS_REFRESHES.with(|n| n.set(n.get() + 1));
         s.refresh();
+    } else if !needs_first_refresh && !std::sync::Arc::ptr_eq(&doc_before_update, &s.doc) && *s.doc == *doc_before_update {
+        // Restore the original Arc when helper probes (`s.doc_mut()`) made no actual changes so
+        // `Session::execute` does not record a spurious undo step or extra evaluation.
+        s.doc = doc_before_update;
     } else if !std::sync::Arc::ptr_eq(&doc_after_rebind, &s.doc) || (!needs_first_refresh && !std::sync::Arc::ptr_eq(&doc_before_update, &s.doc)) {
         s.revision += 1;
     }
