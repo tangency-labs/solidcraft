@@ -14,5 +14,17 @@
   "zh": {
     "nav.scrub_cursor_wrap.help": "横向拖动数值的标签越过窗口边缘时，光标会移到对侧边缘，数值继续变化。关闭：拖动在屏幕边缘停止。在 Wayland 和浏览器中无效。",
     "nav.scrub_cursor_wrap.label": "拖动数值时光标循环"
+  },
+  "ar": {
+    "nav.scrub_cursor_wrap.help": "عند سحب تسمية قيمة أفقيًا إلى ما بعد حافة النافذة، ينتقل المؤشر إلى الحافة المقابلة وتستمر القيمة في التغير. عند الإيقاف: يتوقف السحب عند حافة الشاشة. لا تأثير له على Wayland أو داخل المتصفح.",
+    "nav.scrub_cursor_wrap.label": "نقل المؤشر إلى الجهة المقابلة أثناء سحب قيمة"
+  },
+  "he": {
+    "nav.scrub_cursor_wrap.help": "גרירה הצידה של תווית ערך אל מעבר לקצה החלון מעבירה את הסמן לקצה הנגדי, והערך ממשיך להשתנות. כבוי: הגרירה נעצרת בקצה המסך. אין השפעה ב-Wayland או בדפדפן.",
+    "nav.scrub_cursor_wrap.label": "העברת הסמן לצד השני בזמן גרירת ערך"
+  },
+  "vi": {
+    "nav.scrub_cursor_wrap.help": "Khi kéo nhãn của một giá trị sang ngang qua mép cửa sổ, con trỏ chuyển sang mép đối diện và giá trị tiếp tục thay đổi. Tắt: thao tác kéo dừng ở mép màn hình. Không có tác dụng trên Wayland hoặc trong trình duyệt.",
+    "nav.scrub_cursor_wrap.label": "Đưa con trỏ sang mép đối diện khi kéo giá trị"
   }
 }
