@@ -409,7 +409,7 @@ impl Writer {
                 Some(record)
             })
             .collect::<Option<Vec<_>>>()?;
-        let r = json!({
+        let mut r = json!({
             "bodies": runs(&bodies), "sketches": runs(&sketches), "body_counter": st.body_counter,
             "reserved_body_names": st.reserved_body_names.iter().collect::<Vec<_>>(),
             "surface_sheets": surface_sheets, "construct": serde_json::to_value(&st.construct).ok()?,
@@ -420,8 +420,10 @@ impl Writer {
             "blend_edges": serde_json::to_value(&st.blend_edges).ok()?, "fitted": serde_json::to_value(&st.fitted).ok()?,
             "tapered": serde_json::to_value(&st.tapered).ok()?,
             "pattern_left_out": serde_json::to_value(&st.pattern_left_out).ok()?,
-            "pattern_body_layouts": serde_json::to_value(&st.pattern_body_layouts).ok()?,
         });
+        if !st.pattern_body_layouts.is_empty() {
+            r["pattern_body_layouts"] = serde_json::to_value(&st.pattern_body_layouts).ok()?;
+        }
         self.states.push(r);
         self.state_index.insert(id, self.states.len() - 1);
         Some(self.states.len() - 1)

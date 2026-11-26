@@ -1161,13 +1161,13 @@ pub struct PatternCircularParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub join: Option<bool>,
     /// Entire placements to omit, using public instance numbers (2 is the first copy) or saved placement steps.
-    #[serde(default, deserialize_with = "skipped_pattern_instances")]
+    #[serde(default, deserialize_with = "skipped_pattern_instances", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "skipped_pattern_instances_schema")]
     pub skip: Option<Vec<solidcraft_doc::PatternAddress>>,
     /// Individually omitted copies as [instance, source feature name or ID, zero-based member].
     /// The original is 1 and cannot be skipped; the first copy is 2. For bodies the source is 0.
     /// Saved placement steps and stable member identities can be sent back unchanged.
-    #[serde(default, deserialize_with = "skipped_pattern_members")]
+    #[serde(default, deserialize_with = "skipped_pattern_members", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "skipped_pattern_members_schema")]
     pub skip_members: Option<Value>,
     #[serde(flatten, deserialize_with = "feature_common")]
@@ -1450,14 +1450,14 @@ pub struct PatternRectangularParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub join: Option<bool>,
     /// One-based copy numbers to leave out. The original (1) always remains.
-    #[serde(default, deserialize_with = "skipped_pattern_instances")]
+    #[serde(default, deserialize_with = "skipped_pattern_instances", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "skipped_pattern_instances_schema")]
     pub skip: Option<Vec<solidcraft_doc::PatternAddress>>,
 
     /// Individually omitted copies as [instance, source feature name or ID, zero-based member].
     /// The original is 1 and cannot be skipped; the first copy is 2. For bodies the source is 0.
     /// Saved placement steps and stable member identities can be sent back unchanged.
-    #[serde(default, deserialize_with = "skipped_pattern_members")]
+    #[serde(default, deserialize_with = "skipped_pattern_members", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "skipped_pattern_members_schema")]
     pub skip_members: Option<Value>,
     #[serde(flatten, deserialize_with = "feature_common")]
@@ -1627,13 +1627,13 @@ pub struct PatternPathParams {
     #[serde(default)]
     pub flip: Option<bool>,
     /// Entire placements to omit, using public instance numbers (2 is the first copy) or saved placement steps.
-    #[serde(default, deserialize_with = "skipped_pattern_instances")]
+    #[serde(default, deserialize_with = "skipped_pattern_instances", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "skipped_pattern_instances_schema")]
     pub skip: Option<Vec<solidcraft_doc::PatternAddress>>,
     /// Individually omitted copies as [instance, source feature name or ID, zero-based member].
     /// The original is 1 and cannot be skipped; the first copy is 2. For bodies the source is 0.
     /// Saved placement steps and stable member identities can be sent back unchanged.
-    #[serde(default, deserialize_with = "skipped_pattern_members")]
+    #[serde(default, deserialize_with = "skipped_pattern_members", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "skipped_pattern_members_schema")]
     pub skip_members: Option<Value>,
     #[serde(flatten, deserialize_with = "feature_common")]
