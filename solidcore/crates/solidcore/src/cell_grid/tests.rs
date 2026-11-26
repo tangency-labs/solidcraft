@@ -2877,9 +2877,9 @@ fn a_conic_whose_chord_is_too_short_to_measure_stays_within_the_tolerance_of_its
 /// A voronoi grid with the test size and web.
 fn voronoi(seed: u32, irregularity: f64, clip: Clip) -> CellGridSpec {
     CellGridSpec {
+        clip,
         seed,
         irregularity,
-        clip,
         ..spec(CellShape::Voronoi)
     }
 }
@@ -2919,8 +2919,8 @@ fn a_voronoi_grid_without_irregularity_is_the_hexagon_grid() {
             hex.cells.iter().map(|c| (c.i, c.j, c.area)).collect();
         let mut vor_cells: Vec<(i64, i64, f64)> =
             vor.cells.iter().map(|c| (c.i, c.j, c.area)).collect();
-        hex_cells.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
-        vor_cells.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+        hex_cells.sort_by_key(|a| (a.0, a.1));
+        vor_cells.sort_by_key(|a| (a.0, a.1));
         for (h, v) in hex_cells.iter().zip(&vor_cells) {
             assert_eq!((h.0, h.1), (v.0, v.1), "{clip:?}");
             assert!((h.2 - v.2).abs() < 1e-6, "{clip:?} {h:?} {v:?}");
