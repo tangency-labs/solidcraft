@@ -513,7 +513,7 @@ impl JsonSchema for JointOriginArg {
                     "properties": {
                         "occurrence": {"description": "The occurrence the origin is on, by id or name. Default: found from the point, or the named face's or sketch's component.", "type": ["number", "string"]},
                         "path": {"description": "The placement picked, as occurrence ids from the top of the assembly down to occurrence: says which copy of a sub-assembly placed more than once.", "anyOf": [path, {"type": "null"}]},
-                        "face": {"description": "The centre of a planar face: a point on it [x, y, z], or its name.", "anyOf": [point, {"type": "string"}]},
+                        "face": {"description": "The centre of a planar face, or a round end of a round face: a point on it [x, y, z], or its name.", "anyOf": [point, {"type": "string"}]},
                         "circle": {"description": "The centre of a round end: a point [x, y, z] on its wall, rim or centre, or the round face's name.", "anyOf": [point, {"type": "string"}]},
                         "edge": at("A point [x, y, z] on an edge of a planar face."),
                         "point": {"description": "A point [x, y, z], or with sketch a sketch point id (e.g. \"c1.center\", \"p1\", \"origin\").", "anyOf": [point, {"type": "string", "minLength": 1}]},
@@ -749,8 +749,8 @@ pub struct CreateConstraintParams {
     #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ConstraintTypeParam")]
     pub kind: Option<ConstraintTypeParam>,
-    /// Side a's reference: a joint origin, as joint.create takes it (a face for a plane, a circle
-    /// for an axis, a point). A round face given as a face is its axis where the rule needs one.
+    /// Side a's reference: a joint origin, as joint.create takes it (a planar face or datum plane
+    /// for a plane, a round face, circle or axis for an axis, a point).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointOriginArg")]
     pub a: Option<JointOriginArg>,
@@ -2399,8 +2399,9 @@ pub struct MakeJointOriginParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<OccurrencePath>")]
     pub path: Option<Value>,
-    /// The centre of a planar face: a point on it, or its name. The first of `face` and `circle`
-    /// given by name wins; then the first given as a point of `face`, `circle`, `edge` and `point`.
+    /// The centre of a planar face, or a round end of a round face: a point on it, or its name.
+    /// The first of `face` and `circle` given by name wins; then the first given as a point of
+    /// `face`, `circle`, `edge` and `point`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "OriginFace")]
     pub face: Option<Value>,
