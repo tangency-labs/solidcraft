@@ -14,7 +14,7 @@ use solidcore_record::brep::Curve as Record;
 use crate::body::Body;
 use crate::order::{self, Order};
 use crate::session::{read_body, run};
-use crate::Result;
+use crate::{Error, Result};
 
 /// A record spline or rational spline read as the kernel's curve.
 pub struct GapCurve(BSplineCurve);
@@ -83,13 +83,13 @@ impl GapCurve {
 impl Body {
     /// A proved upper bound on the distance from `curve` over `interval` to the surface of record
     /// face `face` ([`solidcore::query::curve_surface_gap::curve_face_gap_bound`]); `None` when
-    /// the kernel does not enclose the gap (a face without a surface or whose surface has no
-    /// exact NURBS net, an empty or unordered `interval`, a `floor` that is not finite and
-    /// non-negative, or a piece the bisection cannot bound). `floor` is the scale below which a
-    /// tighter bound changes nothing. The body is only read.
+    /// the kernel does not enclose the gap (a face without a surface or whose surface is not a
+    /// NURBS net, an interval past the curve's domain, or a piece the bisection cannot bound).
+    /// `floor` is the scale below which a tighter bound changes nothing. The body is only read.
     ///
     /// # Errors
-    /// [`crate::Error::Argument`] for a `face` index past `order.faces`; the kernel's error (a
+    /// [`Error::Argument`] for a `face` index past `order.faces`, a non-finite or non-increasing
+    /// `interval`, or a `floor` that is not finite and non-negative; the kernel's error (a
     /// dangling face in `order`, unported steps, cancellation or fuel exhaustion).
     pub fn curve_face_gap_bound(
         &self,
@@ -100,6 +100,14 @@ impl Body {
         floor: f64,
     ) -> Result<Option<f64>> {
         let f = order::face(order, face)?;
+        if !(interval[0].is_finite()
+            && interval[1].is_finite()
+            && interval[0] < interval[1]
+            && floor.is_finite()
+            && floor >= 0.0)
+        {
+            return Err(Error::Argument);
+        }
         read_body("curve_face_gap_bound", self, |k, b| {
             solidcore::query::curve_surface_gap::curve_face_gap_bound(
                 k, b, f, &curve.0, interval, floor,

@@ -97,6 +97,9 @@ pub(crate) fn curve_face_gap_bound(
     if body.kernel_left_unfinished() {
         return Err(Error::Internal("curve_face_gap_bound: the body was left unfinished by an earlier panic".to_owned()));
     }
+    if !(interval[0].is_finite() && interval[1].is_finite() && interval[0] < interval[1] && floor.is_finite() && floor >= 0.0) {
+        return Err(Error::Argument);
+    }
     // a circle or ellipse is the kernel's exact rational spline, over its interval there
     let (curve, interval) =
         match crate::stop::unstoppable(|| ops_on("curve_face_gap_bound", &[], || solidcore_ops::curve_gap::GapCurve::of_conic(curve, interval)))? {

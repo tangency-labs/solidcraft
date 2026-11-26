@@ -367,11 +367,36 @@ fn face_points_lie_inside_every_face_of_a_box_and_holed_plate() {
     assert_eq!(stop.within(|| super::trim::face_points(&b)).unwrap(), pts);
 
     let p = plate();
-    let [faces, _, _] = counts(&p).unwrap();
+    assert_eq!(counts(&p).unwrap(), [7, 15, 10]);
     let plate_pts = super::trim::face_points(&p).unwrap();
-    assert_eq!(plate_pts.len(), faces);
+    assert_eq!(plate_pts.len(), 7);
+    let mut plate_faces = std::collections::BTreeSet::new();
     for &pt in &plate_pts {
         assert!(pt.iter().all(|x| x.is_finite()), "{pt:?}");
         assert_eq!(super::classify_point(&p, pt).unwrap(), crate::measure::PointClass::OnBoundary, "{pt:?}");
+        let [x, y, z] = pt;
+        let r = (x - 10.0).hypot(y - 10.0);
+        let in_x = x > 1e-6 && x < 20.0 - 1e-6;
+        let in_y = y > 1e-6 && y < 20.0 - 1e-6;
+        let in_z = z > 1e-6 && z < 5.0 - 1e-6;
+        let tag = if x.abs() < 1e-6 && in_y && in_z {
+            0
+        } else if (x - 20.0).abs() < 1e-6 && in_y && in_z {
+            1
+        } else if y.abs() < 1e-6 && in_x && in_z {
+            2
+        } else if (y - 20.0).abs() < 1e-6 && in_x && in_z {
+            3
+        } else if z.abs() < 1e-6 && in_x && in_y && r > 3.0 + 1e-6 {
+            4
+        } else if (z - 5.0).abs() < 1e-6 && in_x && in_y && r > 3.0 + 1e-6 {
+            5
+        } else if (r - 3.0).abs() < 1e-6 && in_z {
+            6
+        } else {
+            panic!("point {pt:?} not strictly inside any face of the holed plate");
+        };
+        assert!(plate_faces.insert(tag), "duplicate plate face {tag}: {pt:?}");
     }
+    assert_eq!(plate_faces.len(), 7);
 }

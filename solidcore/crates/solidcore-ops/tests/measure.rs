@@ -1372,7 +1372,7 @@ fn curve_face_gap_bound_bounds_splines_and_conics_and_honours_cancel() {
         .curve_face_gap_bound(&order, top, &lifted, [0.0, 1.0], 1e-9)
         .unwrap()
         .unwrap();
-    assert!((2.5 - 1e-9..=2.5 + 1e-6).contains(&gap), "lifted gap {gap}");
+    assert!((2.5..=2.5 + 1e-6).contains(&gap), "lifted gap {gap}");
 
     // Bisection stops once a piece's remainder is at most `floor`, so `floor = 1e-10` proves a
     // zero-gap quarter circle within 1e-9 (remainder <= 1e-10 plus evaluation rounding).
@@ -1393,6 +1393,31 @@ fn curve_face_gap_bound_bounds_splines_and_conics_and_honours_cancel() {
         .unwrap();
     assert!(arc_gap < 1e-9, "quarter circle on top face: {arc_gap}");
 
+    // A quarter circle rising off the top face to z = 35 at theta = pi/2 proves the full
+    // converted spline interval is measured (not truncated to `[0, pi/2]` in degree domain,
+    // which would give ~0.055 mm). Pieces close at `CLOSE_RELATIVE = 1e-3` of end distance,
+    // so the proved upper bound lies in `[2.0, 2.0 * (1 + 2e-3)]`.
+    let vertical_circle = Curve::Circle {
+        frame: Frame {
+            origin: [6.0, 8.0, 33.0],
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 0.0, 1.0],
+        },
+        radius: 2.0,
+    };
+    let (v_arc, v_arc_ivl) =
+        GapCurve::of_conic(&vertical_circle, [0.0, std::f64::consts::FRAC_PI_2])
+            .unwrap()
+            .unwrap();
+    let v_gap = b
+        .curve_face_gap_bound(&order, top, &v_arc, v_arc_ivl, 1e-9)
+        .unwrap()
+        .unwrap();
+    assert!(
+        (2.0..=2.0 * (1.0 + 2.0e-3)).contains(&v_gap),
+        "vertical arc {v_gap}"
+    );
+
     assert_eq!(
         b.curve_face_gap_bound(&order, 6, &on_top, [0.0, 1.0], 1e-9),
         Err(Error::Argument)
@@ -1401,36 +1426,25 @@ fn curve_face_gap_bound_bounds_splines_and_conics_and_honours_cancel() {
         b.curve_face_gap_bound(&order, usize::MAX, &on_top, [0.0, 1.0], 1e-9),
         Err(Error::Argument)
     );
-    assert_eq!(
-        b.curve_face_gap_bound(&order, top, &on_top, [1.0, 0.0], 1e-9)
-            .unwrap(),
-        None
-    );
-    assert_eq!(
-        b.curve_face_gap_bound(&order, top, &on_top, [f64::NAN, 1.0], 1e-9)
-            .unwrap(),
-        None
-    );
-    assert_eq!(
-        b.curve_face_gap_bound(&order, top, &on_top, [f64::NEG_INFINITY, 1.0], 1e-9)
-            .unwrap(),
-        None
-    );
-    assert_eq!(
-        b.curve_face_gap_bound(&order, top, &on_top, [0.0, 1.0], -1.0)
-            .unwrap(),
-        None
-    );
-    assert_eq!(
-        b.curve_face_gap_bound(&order, top, &on_top, [0.0, 1.0], f64::NAN)
-            .unwrap(),
-        None
-    );
-    assert_eq!(
-        b.curve_face_gap_bound(&order, top, &on_top, [0.0, 1.0], f64::INFINITY)
-            .unwrap(),
-        None
-    );
+    for bad_ivl in [
+        [1.0, 0.0],
+        [1.0, 1.0],
+        [f64::NAN, 1.0],
+        [f64::NEG_INFINITY, 1.0],
+    ] {
+        assert_eq!(
+            b.curve_face_gap_bound(&order, top, &on_top, bad_ivl, 1e-9),
+            Err(Error::Argument),
+            "interval {bad_ivl:?}"
+        );
+    }
+    for bad_floor in [-1.0, f64::NAN, f64::INFINITY] {
+        assert_eq!(
+            b.curve_face_gap_bound(&order, top, &on_top, [0.0, 1.0], bad_floor),
+            Err(Error::Argument),
+            "floor {bad_floor}"
+        );
+    }
 
     let token = CancelToken::new();
     token.cancel();
@@ -1519,12 +1533,32 @@ fn face_internal_points_lie_inside_each_face_and_honour_cancel() {
         cancel::within(&token, || b.face_internal_points(&order)),
         Err(Error::Cancelled)
     );
-    // Mid-loop cancellation stops after a bounded number of polls inside `face_internal_points`.
-    let limited = CancelToken::after_polls(2);
+    // Mid-loop cancellation: count exact polls on the warmed box to prove `face_internal_points`
+    // polls once per face inside its loop (beyond `run_with` entry and `kept` exit) and stops
+    // before face 1 when cancelled at that poll.
+    let mut single_kernel_polls = 0u64;
+    let mut first_face_polls = 0u64;
+    for f in 0..6 {
+        let p = CancelToken::after_polls(u64::MAX);
+        cancel::within(&p, || b.face_internal_point(&order, f)).unwrap();
+        let k_polls = p.polls().unwrap().saturating_sub(2);
+        if f == 0 {
+            first_face_polls = k_polls;
+        }
+        single_kernel_polls += k_polls;
+    }
+    let probe = CancelToken::after_polls(u64::MAX);
+    cancel::within(&probe, || b.face_internal_points(&order)).unwrap();
+    let whole = probe.polls().unwrap();
+    assert_eq!(whole, 8 + single_kernel_polls, "batch polls {whole}");
+    let cut = 3 + first_face_polls;
+    assert!(cut + 1 < whole, "cut {cut} vs whole {whole}");
+    let limited = CancelToken::after_polls(cut);
     assert_eq!(
         cancel::within(&limited, || b.face_internal_points(&order)),
         Err(Error::Cancelled)
     );
+    assert_eq!(limited.polls(), Some(cut + 1));
     assert_eq!(b.counts().unwrap(), [6, 12, 8]);
 
     // Holed plate (20 x 20 x 5 box minus radius-3 cylinder): 7 faces, 15 edges, 10 vertices.
@@ -1537,6 +1571,7 @@ fn face_internal_points_lie_inside_each_face_and_honour_cancel() {
     let plate_order = plate.own_order();
     let plate_pts = plate.face_internal_points(&plate_order).unwrap();
     assert_eq!(plate_pts.len(), 7);
+    let mut plate_faces = std::collections::BTreeSet::new();
     for (f, &p) in plate_pts.iter().enumerate() {
         assert_eq!(plate.face_internal_point(&plate_order, f).unwrap(), p);
         assert!(p.iter().all(|x| x.is_finite()), "{p:?}");
@@ -1545,12 +1580,43 @@ fn face_internal_points_lie_inside_each_face_and_honour_cancel() {
             PointClass::OnBoundary,
             "{p:?}"
         );
-        assert!(
-            plate
-                .point_on_face(&plate_order, f, p, 1e-6)
-                .unwrap()
-                .is_some(),
-            "holed plate face {f}: {p:?}"
-        );
+        // Strictly inside face `f` alone: not on any edge or vertex shared with another face.
+        let matching: Vec<usize> = (0..7)
+            .filter(|&other| {
+                plate
+                    .point_on_face(&plate_order, other, p, 1e-6)
+                    .unwrap()
+                    .is_some()
+            })
+            .collect();
+        assert_eq!(matching, vec![f], "face {f} point {p:?}");
+        let [x, y, z] = p;
+        let dx = x - 10.0;
+        let dy = y - 10.0;
+        let r2 = dx * dx + dy * dy;
+        let hole_lo = (3.0 - 1e-6) * (3.0 - 1e-6);
+        let hole_hi = (3.0 + 1e-6) * (3.0 + 1e-6);
+        let in_x = x > 1e-6 && x < 20.0 - 1e-6;
+        let in_y = y > 1e-6 && y < 20.0 - 1e-6;
+        let in_z = z > 1e-6 && z < 5.0 - 1e-6;
+        let tag = if x.abs() < 1e-6 && in_y && in_z {
+            0
+        } else if (x - 20.0).abs() < 1e-6 && in_y && in_z {
+            1
+        } else if y.abs() < 1e-6 && in_x && in_z {
+            2
+        } else if (y - 20.0).abs() < 1e-6 && in_x && in_z {
+            3
+        } else if z.abs() < 1e-6 && in_x && in_y && r2 > hole_hi {
+            4
+        } else if (z - 5.0).abs() < 1e-6 && in_x && in_y && r2 > hole_hi {
+            5
+        } else if (hole_lo..=hole_hi).contains(&r2) && in_z {
+            6
+        } else {
+            panic!("point {p:?} not strictly inside any face of the holed plate");
+        };
+        assert!(plate_faces.insert(tag), "duplicate plate face {tag}: {p:?}");
     }
+    assert_eq!(plate_faces.len(), 7);
 }
