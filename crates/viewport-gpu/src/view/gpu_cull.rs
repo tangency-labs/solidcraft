@@ -663,18 +663,20 @@ mod tests {
         ];
         let tri_table = tri_entry_table(&draw_levels, &tri_entries);
         for (i, &len) in draw_levels.iter().enumerate() {
-            for k in 0..len {
+            assert_eq!(tri_table[i].len(), len);
+            for (k, &got) in tri_table[i].iter().enumerate() {
                 let linear = tri_entries.iter().position(|e| e.0 == i && e.1 == k);
-                assert_eq!(tri_table[i][k], linear, "draw {i}, level {k}");
+                assert_eq!(got, linear, "draw {i}, level {k}");
             }
         }
 
         let part_count = 4usize;
         let edge_entries = vec![(2, 0, 0, 10), (0, 0, 10, 8), (0, 1, 18, 4), (2, 1, 22, 5), (2, 2, 27, 2), (3, 0, 29, 12)];
         let edge_table = edge_entry_table(part_count, &edge_entries);
-        for part in 0..part_count {
+        assert_eq!(edge_table.len(), part_count);
+        for (part, got) in edge_table.iter().enumerate() {
             let linear: Vec<(usize, usize)> = edge_entries.iter().enumerate().filter(|(_, x)| x.0 == part).map(|(n, x)| (n, x.1)).collect();
-            assert_eq!(edge_table[part], linear, "edge part {part}");
+            assert_eq!(*got, linear, "edge part {part}");
         }
     }
 
