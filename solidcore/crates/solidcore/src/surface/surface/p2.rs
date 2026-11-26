@@ -465,6 +465,12 @@ pub struct Surface {
     /// definition is a set the net is on, or within its bound of); a motion moves it; an
     /// evaluation copy, which only evaluates, has none.
     definition: Option<Box<KeptDefinition>>,
+    /// Not upstream: whether the stored net is a fitted approximation of a definition (a
+    /// bound above 0: a swept wall, a Setback or Mixed corner's patch), kept by an
+    /// evaluation copy, which drops the definition itself, so that what proves a final
+    /// answer on the net alone ([`Surface::net_is_fitted`]) never takes such a net for its
+    /// surface. A copy carries it.
+    fitted_net: bool,
 }
 
 /// The trimmed surface cache a surface's cache slot holds: the `SM_OC_TRIMSRF` entry of
@@ -625,6 +631,7 @@ impl Clone for Surface {
             singularities_memo: SingularitiesMemo::new(),
             continuity_memo: ContinuityMemo::new(),
             definition: self.definition.clone(),
+            fitted_net: self.fitted_net,
         };
         s.update_owned_bases();
         s
@@ -991,6 +998,8 @@ impl Surface {
             singularities_memo: SingularitiesMemo::new(),
             continuity_memo: self.continuity_memo.share(),
             definition: None,
+            // (the definition goes, what it says of the net stays)
+            fitted_net: self.net_is_fitted(),
         })
     }
 
@@ -1098,6 +1107,7 @@ impl Surface {
             singularities_memo: SingularitiesMemo::new(),
             continuity_memo: self.continuity_memo.share(),
             definition: self.definition.clone(),
+            fitted_net: self.fitted_net,
         }
     }
 }
@@ -1265,6 +1275,7 @@ impl Surface {
             singularities_memo: SingularitiesMemo::new(),
             continuity_memo: ContinuityMemo::new(),
             definition: None,
+            fitted_net: false,
         }
     }
 
@@ -1305,6 +1316,21 @@ impl Surface {
             }
             _ => None,
         }
+    }
+
+    /// Whether the stored net is a fitted approximation of a definition rather than the
+    /// surface itself (not upstream): a definition kept with a bound other than 0 (a swept
+    /// wall, a Setback or Mixed corner's patch; a bound that is not a number counts), or an
+    /// evaluation copy of such a surface, which keeps this though it drops the definition.
+    /// A plain B-spline, an analytic surface and a net whose definition is exact (bound 0:
+    /// an exact round, a drafted face, a section blend, a Ball, Swept or End corner) are
+    /// their nets.
+    #[must_use]
+    pub fn net_is_fitted(&self) -> bool {
+        self.fitted_net
+            || self
+                .procedural_definition()
+                .is_some_and(|d| d.bound() != 0.0)
     }
 
     /// The definition this surface is the net of, whatever made it (#2572): a blend's
@@ -7955,6 +7981,7 @@ impl crate::geom::content::Content for Surface {
             singularities_memo: _,
             continuity_memo: _,
             definition,
+            fitted_net: _,
         } = self;
         if definition.is_some() {
             return None;

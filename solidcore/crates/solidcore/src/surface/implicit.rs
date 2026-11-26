@@ -13,7 +13,7 @@ use crate::error::surface::SurfaceFailure;
 use crate::error::{Failure, Result, SolidError, SM_ERR};
 use crate::geom::axis2_placement::{axes_are_orthonormal, Axis2Placement};
 use crate::geom::extent2d::Extent2d;
-use crate::kernel::Kernel;
+use crate::kernel::{CancelToken, Kernel};
 use crate::math::{Vec2, Vec3, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::BSplineSurface;
@@ -682,6 +682,311 @@ pub(crate) fn off_surface_bound(
     }
     let bound = bound * (1.0 + 8.0 * f64::EPSILON);
     Ok(bound.is_finite().then_some(bound))
+}
+
+/// A complete surface of revolution as the certified line pass's side test reads it
+/// (`surface::surface::certified_line`, module docs "Typing"): its side function `f` is
+/// defined from the placement's stored axes `x`, `y`, `z` and origin `O` as they are, with
+/// `w = X − O`, `ρ = √((x · w)² + (y · w)²)` and `h = z · w`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Revolution {
+    /// `f = |w| − radius`, from `F = |w|² − radius²` (the stored axes are not read).
+    Sphere {
+        /// The centre `O`.
+        centre: Vec3,
+        /// The radius, positive.
+        radius: f64,
+    },
+    /// `f = (ρ − R) / √(1 + slope²)` with `R = radius + slope h`, from
+    /// `F = ρ² − R² = (ρ − R)(ρ + R)` (a cylinder for `slope = 0`).
+    Cone {
+        /// `O`.
+        origin: Vec3,
+        /// The stored axes `x`, `y`, `z`.
+        frame: [Vec3; 3],
+        /// The radius at `h = 0`.
+        radius: f64,
+        /// The radius's change per unit `h`.
+        slope: f64,
+    },
+    /// `f = d − minor` with `d = √((ρ − major)² + h²)`, a ring torus (`major > minor > 0`),
+    /// from `F = (ρ² + h² + major² − minor²)² − 4 major² ρ²
+    /// = (d − minor)(d + minor)((ρ + major)² + h² − minor²)`.
+    Torus {
+        /// `O`.
+        origin: Vec3,
+        /// The stored axes `x`, `y`, `z`.
+        frame: [Vec3; 3],
+        /// The major radius.
+        major: f64,
+        /// The minor radius.
+        minor: f64,
+    },
+}
+
+/// What [`side_bounds`] proves of one Bézier patch of a net.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SideBound {
+    /// The patch's parameter rectangle, `[[u0, u1], [v0, v1]]`.
+    pub span: [[f64; 2]; 2],
+    /// A certified bound on `|F|` ([`Revolution`]) at every point of the net over the
+    /// patch; `None` where none is shown (a weight not proved positive, a bound that is not
+    /// finite).
+    pub residual: Option<f64>,
+}
+
+/// A polynomial in Bernstein form over a patch with interval coefficients, degrees
+/// `(p, q)`, `c[i (q + 1) + j]`: each coefficient encloses the exact one of every
+/// polynomial whose inputs lie in the inputs' intervals.
+#[derive(Debug, Clone, PartialEq)]
+struct IPoly {
+    p: usize,
+    q: usize,
+    c: Vec<Ivl>,
+}
+
+/// `C(n, k)` exactly, as a double (exact for every `n` the degrees here reach: the
+/// products are integers below `2⁵³`); `None` past that.
+fn exact_binom(n: usize, k: usize) -> Option<f64> {
+    let mut r: u64 = 1;
+    for i in 0..k {
+        // (r C(n, i) times (n − i) is divisible by i + 1)
+        let n_i = u64::try_from(n.checked_sub(i)?).ok()?;
+        let d = u64::try_from(i + 1).ok()?;
+        r = r.checked_mul(n_i)?.checked_div(d)?;
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let f = r as f64;
+    (r < (1_u64 << 53)).then_some(f)
+}
+
+impl IPoly {
+    fn at(&self, i: usize, j: usize) -> Ivl {
+        self.c
+            .get(i * (self.q + 1) + j)
+            .copied()
+            .unwrap_or_else(Ivl::whole)
+    }
+
+    /// The product, of degrees `(p + p', q + q')`; `None` past the exact binomials.
+    fn mul(&self, o: &Self) -> Option<Self> {
+        let (p, q) = (self.p + o.p, self.q + o.q);
+        let mut c = vec![Ivl::from(0.0); (p + 1) * (q + 1)];
+        for i in 0..=self.p {
+            for j in 0..=self.q {
+                for k in 0..=o.p {
+                    for l in 0..=o.q {
+                        let num = Ivl::from(exact_binom(self.p, i)?)
+                            * Ivl::from(exact_binom(o.p, k)?)
+                            * Ivl::from(exact_binom(self.q, j)?)
+                            * Ivl::from(exact_binom(o.q, l)?);
+                        let den =
+                            Ivl::from(exact_binom(p, i + k)?) * Ivl::from(exact_binom(q, j + l)?);
+                        let slot = c.get_mut((i + k) * (q + 1) + j + l)?;
+                        *slot = *slot + num / den * self.at(i, j) * o.at(k, l);
+                    }
+                }
+            }
+        }
+        Some(Self { p, q, c })
+    }
+
+    /// `a self + b o`, of the same degrees.
+    fn combine(&self, a: Ivl, o: &Self, b: Ivl) -> Self {
+        Self {
+            p: self.p,
+            q: self.q,
+            c: self
+                .c
+                .iter()
+                .zip(&o.c)
+                .map(|(&x, &y)| a * x + b * y)
+                .collect(),
+        }
+    }
+
+    /// The largest magnitude of a coefficient, rounded up (not a number: the whole line's).
+    fn mag(&self) -> f64 {
+        self.c.iter().fold(0.0_f64, |m, x| {
+            if x.is_finite() {
+                m.max(x.mag())
+            } else {
+                f64::INFINITY
+            }
+        })
+    }
+}
+
+/// Not upstream (#20499): for each Bézier patch of the net `net`, a certified bound on the
+/// implicit polynomial `F` of `rev` ([`Revolution`]) over the net's points there, which the
+/// certified line pass's side test divides by `F`'s other factor to bound its side function
+/// (`surface::surface::certified_line`, module docs "Typing"), in place of a check at
+/// sample points.
+///
+/// PROVEN, per patch. The patches are made from the net by knot insertions, so each
+/// computed homogeneous point, moved to `O`, is within `γ A` of the exact one in every
+/// coordinate and its weight within `γ W_max` (`γ = γ_(8L+16)`, `A = max |H|∞ + |O|∞ W_max`
+/// of the net and the patch: [`off_surface_bound`]'s derivation, §4.4). Each point is
+/// enclosed in intervals that widen it by those, moved to `O` and, for the cone and the
+/// torus, into the frame (`q = M (H − O W)`, `M` the rows `x`, `y`, `z`) in rounded interval
+/// arithmetic; the exact patch's points then lie in the boxes. `W^d F` (`d` = 2 for the
+/// sphere and the cone, 4 for the torus) is composed from them in Bernstein form with
+/// interval coefficients (each product's binomial weights exact integers), so each encloses
+/// the exact patch's coefficient, and by the convex hull property of the Bernstein basis
+/// `|W^d F| ≤ c` over the patch, `c` the largest coefficient magnitude. The exact weight is a
+/// convex combination of the exact control weights, so at least their least lower end
+/// `W₀ > 0`: `|F| ≤ c / W₀^d`. Nothing is sampled.
+///
+/// A decomposition that fails gives no patch with a bound (an empty list, as a net that is
+/// not finite does). The token `cancel` is polled before each patch's residual, so a stop
+/// asked for while the patches are composed ends the work at the next patch.
+///
+/// # Errors
+///
+/// A cancel ([`SolidError::Cancelled`], or [`SolidError::OutOfFuel`] for a fuel budget),
+/// never a missing bound.
+pub(crate) fn side_bounds(
+    net: &crate::nurbs::srf_basic::Surface,
+    rev: &Revolution,
+    cancel: Option<&CancelToken>,
+) -> Result<Vec<SideBound>> {
+    let (origin, frame) = match *rev {
+        Revolution::Sphere { centre, .. } => (centre, None),
+        Revolution::Cone { origin, frame, .. } | Revolution::Torus { origin, frame, .. } => {
+            (origin, Some(frame))
+        }
+    };
+    let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+    let frame_ok = frame.is_none_or(|f| f.iter().all(|&a| finite(a)));
+    let Some(net_size) = net_size(net, origin).filter(|_| finite(origin) && frame_ok) else {
+        // (no patch with a bound: a component reads none as no bound)
+        return Ok(Vec::new());
+    };
+    let Ok(rows) = decompose_to_bez(net) else {
+        // (no patch with a bound: a component reads none as no bound)
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::new();
+    for row in rows {
+        for patch in row {
+            if let Some(token) = cancel {
+                token.check(SIDE_BOUNDS_OP)?;
+            }
+            let (p, q) = patch.degrees();
+            let span = |knots: &[f64], d: usize| match (knots.get(d), knots.get(d + 1)) {
+                (Some(&a), Some(&b)) => Some([a, b]),
+                _ => None,
+            };
+            let (Some(su), Some(sv)) = (span(patch.u_knots(), p), span(patch.v_knots(), q)) else {
+                // (a patch left out would leave its points unbounded: no patch has a bound)
+                return Ok(Vec::new());
+            };
+            let residual = patch_residual(&patch, rev, (origin, frame), net_size);
+            out.push(SideBound {
+                span: [su, sv],
+                residual,
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// The operation a cancel in [`side_bounds`] names.
+const SIDE_BOUNDS_OP: &str = "surface::implicit::side_bounds";
+
+/// [`side_bounds`] on one Bézier patch: `None` where it shows none.
+fn patch_residual(
+    patch: &crate::nurbs::srf_basic::Surface,
+    rev: &Revolution,
+    (origin, frame): (Vec3, Option<[Vec3; 3]>),
+    (net_absolute, net_wmax): (f64, f64),
+) -> Option<f64> {
+    let (p, q) = patch.degrees();
+    let own = net_size(patch, origin)?;
+    let g = gamma(rounding_index(p, q));
+    let absolute = net_absolute.max(own.0);
+    let wmax = net_wmax.max(own.1);
+    let (spread, wspread) = (
+        Ivl::new(-g * absolute, g * absolute),
+        Ivl::new(-g * wmax, g * wmax),
+    );
+    if !(spread.is_finite() && wspread.is_finite()) {
+        return None;
+    }
+    let o = [origin.x, origin.y, origin.z].map(Ivl::from);
+    // the exact patch's points, enclosed: moved to `O` (and into the frame), and weights
+    let mut coords: [Vec<Ivl>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+    let mut weights: Vec<Ivl> = Vec::new();
+    for c in patch.rows().flatten() {
+        let wi = if c.w == NOW { 1.0 } else { c.w };
+        let cz = if c.z == NOZ { 0.0 } else { c.z };
+        let w = Ivl::from(wi) + wspread;
+        let [o0, o1, o2] = o;
+        let moved = [
+            Ivl::from(c.x) - o0 * Ivl::from(wi) + spread,
+            Ivl::from(c.y) - o1 * Ivl::from(wi) + spread,
+            Ivl::from(cz) - o2 * Ivl::from(wi) + spread,
+        ];
+        let x = match frame {
+            None => moved,
+            Some(rows) => rows.map(|a| {
+                let [m0, m1, m2] = moved;
+                Ivl::from(a.x) * m0 + Ivl::from(a.y) * m1 + Ivl::from(a.z) * m2
+            }),
+        };
+        for (slot, xi) in coords.iter_mut().zip(x) {
+            slot.push(xi);
+        }
+        weights.push(w);
+    }
+    let w0 = weights.iter().fold(f64::INFINITY, |m, w| m.min(w.lo));
+    if !(w0 > 0.0 && w0.is_finite()) {
+        return None;
+    }
+    let poly = |c: Vec<Ivl>| IPoly { p, q, c };
+    let [x0, x1, x2] = coords;
+    let (a, b, h, w) = (poly(x0), poly(x1), poly(x2), poly(weights));
+    let one = Ivl::from(1.0);
+    let sq = |x: &IPoly| x.mul(x);
+    let (f, degree) = match *rev {
+        Revolution::Sphere { radius, .. } => {
+            let r2 = Ivl::from(radius) * Ivl::from(radius);
+            let n2 = sq(&a)?
+                .combine(one, &sq(&b)?, one)
+                .combine(one, &sq(&h)?, one);
+            (n2.combine(one, &sq(&w)?, Ivl::from(0.0) - r2), 2)
+        }
+        Revolution::Cone { radius, slope, .. } => {
+            let r = w.combine(Ivl::from(radius), &h, Ivl::from(slope));
+            let rho2 = sq(&a)?.combine(one, &sq(&b)?, one);
+            (rho2.combine(one, &sq(&r)?, Ivl::from(-1.0)), 2)
+        }
+        Revolution::Torus { major, minor, .. } => {
+            let (big, small) = (Ivl::from(major), Ivl::from(minor));
+            let rho2 = sq(&a)?.combine(one, &sq(&b)?, one);
+            let w2 = sq(&w)?;
+            let n2 = rho2.combine(one, &sq(&h)?, one);
+            let gw = n2.combine(one, &w2, big * big - small * small);
+            let four = Ivl::from(4.0) * big * big;
+            (
+                sq(&gw)?.combine(one, &rho2.mul(&w2)?, Ivl::from(0.0) - four),
+                4,
+            )
+        }
+    };
+    let top = f.mag();
+    let w0i = Ivl::new(w0, w0);
+    let power = if degree == 2 {
+        w0i * w0i
+    } else {
+        let w2 = w0i * w0i;
+        w2 * w2
+    };
+    if power.lo.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+        return None;
+    }
+    let bound = (Ivl::from(top) / Ivl::new(power.lo, power.lo)).hi;
+    bound.is_finite().then_some(bound)
 }
 
 /// The longest chain of knot-insertion levels behind a point of [`off_surface_bound`]'s
