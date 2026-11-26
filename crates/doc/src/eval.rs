@@ -2107,8 +2107,8 @@ fn fingerprint(doc: &Document, prev: u64, f: &Feature, vals: &BTreeMap<String, V
         ("tolerance heal", "off").hash(&mut h);
     }
     // An import whose checks healed its parts is the healed import ([`ImportDigests::heals`]).
-    if let Some(heals) = steps.heals(f.id) {
-        heals.digest().hash(&mut h);
+    if let Some(digest) = steps.heal_digest(f.id) {
+        digest.hash(&mut h);
     }
     if matches!(f.kind, FeatureKind::FrameMember { .. }) {
         // Older cached member bodies do not have line provenance; rebuild them once.
@@ -2129,6 +2129,33 @@ fn fingerprint(doc: &Document, prev: u64, f: &Feature, vals: &BTreeMap<String, V
     h.finish()
 }
 
+/// The healed state of an import feature in [`ImportDigests`].
+#[derive(Clone, Debug)]
+enum ImportHeal {
+    /// Healed bodies in memory, produced by SMLib's background check in this process.
+    Bodies(Arc<kernel::ImportHeals>),
+    /// Only the heal digest, restored from a saved model cache. The adopted states already hold
+    /// the healed bodies; if the import feature itself must be evaluated again, this entry is
+    /// dropped first so it evaluates cleanly and its check heals it again.
+    Digest(u64),
+}
+
+impl ImportHeal {
+    fn digest(&self) -> u64 {
+        match self {
+            ImportHeal::Bodies(h) => h.digest(),
+            ImportHeal::Digest(d) => *d,
+        }
+    }
+
+    fn bodies(&self) -> Option<&Arc<kernel::ImportHeals>> {
+        match self {
+            ImportHeal::Bodies(h) => Some(h),
+            ImportHeal::Digest(_) => None,
+        }
+    }
+}
+
 /// Content digests for embedded imports. Shared, unchanged arrays/text are read once;
 /// feature metadata is still fingerprinted on every evaluation. Rebuilding this map prunes
 /// removed features and never trusts an address without retaining and checking its Arc.
@@ -2142,7 +2169,7 @@ struct ImportDigests {
     /// first shown: [`Model::settle_import_checks`]), by import feature, with the digest of the
     /// text they were read from: the import is then its healed bodies, and its fingerprint (and
     /// so every fingerprint after it) says so. Kept while the feature's text is the same.
-    heals: std::collections::HashMap<u64, (u64, Arc<kernel::ImportHeals>)>,
+    heals: std::collections::HashMap<u64, (u64, ImportHeal)>,
     /// Evaluated with the tolerance heal preference off: imports and Repair features say so in
     /// their fingerprints ([`fingerprint`]), so turning the preference either way evaluates them
     /// again. Nothing is added with it on, so the fingerprints saved before it stand.
@@ -2204,9 +2231,19 @@ impl ImportDigests {
         out
     }
 
-    /// The heals the import `id` is evaluated with, if its checks healed its parts.
+    /// The heals the import `id` is evaluated with, if its checks healed its parts in memory.
     fn heals(&self, id: u64) -> Option<&Arc<kernel::ImportHeals>> {
-        self.heals.get(&id).map(|(_, heals)| heals)
+        self.heals.get(&id).and_then(|(_, heals)| heals.bodies())
+    }
+
+    /// The digest of the heals applied to import `id` (whether in memory or restored from a cache).
+    fn heal_digest(&self, id: u64) -> Option<u64> {
+        self.heals.get(&id).map(|(_, heals)| heals.digest())
+    }
+
+    /// Whether `id` only carries a heal digest restored from a saved model cache (no bodies in memory).
+    fn has_digest_only_heal(&self, id: u64) -> bool {
+        self.heals.get(&id).is_some_and(|(_, heals)| matches!(heals, ImportHeal::Digest(_)))
     }
 
     fn get(&self, id: u64, step: &Arc<str>) -> Option<u64> {
@@ -4995,7 +5032,7 @@ impl Model {
             // The read that brings healed parts in checks and heals the file again: that run ends
             // with the heals the model already has, and is not news.
             let heals = run.heals();
-            let known = heals.as_ref().is_some_and(|h| digests.heals(r.id).is_some_and(|k| k.digest() == h.digest()));
+            let known = heals.as_ref().is_some_and(|h| digests.heal_digest(r.id) == Some(h.digest()));
             // With the heal preference off, a run that healed (begun while it was on) is not taken,
             // nor its notes (the heal's note over the part as read): the run is dropped, so no
             // view of the report shows them, and the import is read again.
@@ -5009,7 +5046,7 @@ impl Model {
                 && !known
                 && let Some((_, text)) = digests.steps.get(&r.id)
             {
-                digests.heals.insert(r.id, (*text, heals));
+                digests.heals.insert(r.id, (*text, ImportHeal::Bodies(heals)));
                 stale_from = Some(stale_from.map_or(i, |s| s.min(i)));
             }
             let fresh = !known && run.issues().is_some_and(|i| !i.is_empty()) && !told.iter().any(|(id, t)| *id == r.id && t == run);
@@ -5036,6 +5073,7 @@ impl Model {
     }
 
     /// Some import is its bodies as its checks healed them ([`Self::settle_import_checks`]).
+    #[cfg(test)]
     pub(crate) fn has_import_heals(&self) -> bool {
         !self.import_digests.heals.is_empty()
     }
@@ -5483,7 +5521,7 @@ impl Model {
                 };
                 // Opening was cancelled: the rest is skipped and the result discarded.
                 let cancelled = watched.step(i);
-                let fp = chain_fingerprint(eval_doc, &vals, f, prev_fp, rolled_back, &self.import_digests, Some(&state));
+                let mut fp = chain_fingerprint(eval_doc, &vals, f, prev_fp, rolled_back, &self.import_digests, Some(&state));
                 prev_fp = fp;
                 let pose = pose_only(f).then(|| placement_digest(eval_doc, f, Some(&state)));
                 if let Some(pose) = pose {
@@ -5585,7 +5623,7 @@ impl Model {
                     continue;
                 }
                 // The same feature on the same inputs: its earlier result.
-                let key = EvalKey::new(eval_doc, &vals, f, fp, ctx, shared_ctx, &state, &self.import_digests);
+                let mut key = EvalKey::new(eval_doc, &vals, f, fp, ctx, shared_ctx, &state, &self.import_digests);
                 // A check that refused this feature's bodies on these inputs after its evaluation
                 // returned: it fails as it would have failed there.
                 if let Some(c) = carried.as_ref().filter(|c| c.id == f.id && c.key == key.whole) {
@@ -5675,15 +5713,31 @@ impl Model {
                 }
                 // Or what it changed when what it reads was as it is now, made again on the rest of the
                 // model as it is now. Never in place of a result a check refused.
+                let (hit_relative, reused) = {
+                    let reads = key.reads.as_ref().filter(|_| {
+                        !self.no_cache && checks.refused_at(i).is_none() && param_names(f).iter().all(|n| !self.param_errors.contains_key(n))
+                    });
+                    let relative = reads.and(key.relative);
+                    let change_at = |k: u64| self.cache.lock().ok().and_then(|mut m| m.change(k));
+                    let by_relative = relative.and_then(change_at).and_then(|c| state.with_relative(&c.state, f.id).map(|next| (next, c)));
+                    let hit_relative = by_relative.is_some();
+                    let reused = by_relative
+                        .or_else(|| reads.and_then(|(k, _)| change_at(*k)).and_then(|c| state.with_change(&c.state, f.id).map(|next| (next, c))));
+                    (hit_relative, reused)
+                };
+                // An import restored from a saved model cache carries only its heal digest, not
+                // the healed bodies in memory. If the import itself must be evaluated again, drop
+                // that digest so it evaluates unhealed and its check can heal and settle it anew.
+                if reused.is_none() && self.import_digests.has_digest_only_heal(f.id) {
+                    self.import_digests.heals.remove(&f.id);
+                    fp = chain_fingerprint(eval_doc, &vals, f, prev_fp_in, rolled_back, &self.import_digests, Some(&state));
+                    prev_fp = fp;
+                    key = EvalKey::new(eval_doc, &vals, f, fp, ctx, shared_ctx, &state, &self.import_digests);
+                }
                 let reads = key.reads.as_ref().filter(|_| {
                     !self.no_cache && checks.refused_at(i).is_none() && param_names(f).iter().all(|n| !self.param_errors.contains_key(n))
                 });
                 let relative = reads.and(key.relative);
-                let change_at = |k: u64| self.cache.lock().ok().and_then(|mut m| m.change(k));
-                let by_relative = relative.and_then(change_at).and_then(|c| state.with_relative(&c.state, f.id).map(|next| (next, c)));
-                let hit_relative = by_relative.is_some();
-                let reused = by_relative
-                    .or_else(|| reads.and_then(|(k, _)| change_at(*k)).and_then(|c| state.with_change(&c.state, f.id).map(|next| (next, c))));
                 // Each feature computed is a profiler span named after its kind.
                 let _feature_span = solidcraft_profile::span("feature", f.kind.type_name());
                 let before = state.clone();
