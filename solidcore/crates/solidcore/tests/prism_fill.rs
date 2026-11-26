@@ -1926,6 +1926,26 @@ fn a_small_circle_far_from_the_origin_keeps_its_area_sign() {
 }
 
 #[test]
+fn an_arc_whose_end_angle_rounds_away_keeps_an_honest_area_bound() {
+    // CodeRabbit on #22653: from 2^53 a sweep of 1 rounds `start + sweep` back to `start`, so
+    // the reading about the centre gave 0.5 with a bound of 3e-15; the exact term is
+    // (1 + sin 1) / 2, about 0.92. That reading's bound now holds the end angle's rounding
+    let start = 2f64.powi(53);
+    let arc = Seg2::Arc {
+        center: p(start.cos(), start.sin()),
+        radius: 1.0,
+        start,
+        sweep: 1.0,
+    };
+    let (value, bound) = arc.area_term().unwrap();
+    let exact = (1.0 + 1f64.sin()) * 0.5;
+    assert!(
+        (value - exact).abs() <= bound,
+        "{value} vs {exact}, bound {bound}"
+    );
+}
+
+#[test]
 fn very_wide_blends_and_near_flat_walls_build_or_refuse_with_a_fit_that_builds() {
     // #21152: blended toes running 1000 past toes 7.9 apart, at small heights, were refused as
     // no area (the arc's area bound) or not one closed loop (its ends' rounding past 10 eps)

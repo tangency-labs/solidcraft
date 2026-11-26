@@ -534,8 +534,15 @@ impl Seg2 {
                 let (s0, c0, s1, c1) = (start.sin(), start.cos(), end.sin(), end.cos());
                 let terms = [r * r * sweep, r * c.x * (s1 - s0), -(r * c.y * (c1 - c0))];
                 let size = r * r * sweep.abs() + 2.0 * r * (c.x.abs() + c.y.abs());
+                // the end's angle `start + sweep` is rounded, by up to gamma(1) |start + sweep|;
+                // sin and cos move by no more than their angle, so `r (c.x s1 - c.y c1)` by up to
+                // `r (|c.x| + |c.y|)` times that (from 2^53 a sweep of 1 rounds away entirely)
+                let turn = gamma(1) * r * end.abs();
                 // libm's sin and cos within two ulps; gamma covers the products and the sums
-                let about_centre = (terms.iter().sum::<f64>() * 0.5, gamma(16) * size * 0.5);
+                let about_centre = (
+                    terms.iter().sum::<f64>() * 0.5,
+                    (gamma(16) * size + turn * (c.x.abs() + c.y.abs())) * 0.5,
+                );
                 // From the chord: the chord's term from the arc's ends as `start` and `end` give
                 // them, plus the segment between the arc and its chord, `r^2 (θ - sin θ) / 2`
                 // (θ the sweep). Its terms are of the size of the ends' coordinates squared:
@@ -546,7 +553,6 @@ impl Seg2 {
                 // sin and cos within two ulps, the product and the sum one each); the end's
                 // angle `start + sweep` is rounded too, by up to gamma(1) |start + sweep|
                 let (ax, ay) = (gamma(4) * (c.x.abs() + r), gamma(4) * (c.y.abs() + r));
-                let turn = gamma(1) * r * end.abs();
                 let (bx, by) = (ax + turn, ay + turn);
                 // (A + dA) x (B + dB) - A x B, the ends' errors dA, dB
                 let ends = ax * b.y.abs()
