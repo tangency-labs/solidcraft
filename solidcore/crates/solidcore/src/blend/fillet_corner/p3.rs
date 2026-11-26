@@ -347,6 +347,11 @@ pub struct FilletCorner {
     /// The fork's `m_pEndCap` (smlib 41a39ec, WR-697): an End at a smooth vertex's plane
     /// square to its edge there (`GetEndCapSurface`), set by its topology.
     pub end_cap: Option<Surface>,
+    /// Not upstream (#13710): a Join of two chamfers of setbacks at a smooth seam, whose
+    /// shared section lies in the vertex's station plane and which one blend reaches only
+    /// past its own face (`join::setback_seam_sides`): its vertices and edges are computed
+    /// after the rails' classification, once the roll-over pieces exist.
+    pub deferred_join: bool,
     /// Not upstream (solidcore-native): for each rail of an Nx1 end that ends inside the face
     /// it rolled onto ([`crate::blend::fillet_corner::topology::nx1_end::TurnedBack`]), the cap
     /// edge along the foot edge's continuation there (an `SM_FE_ON_EXTEND_EDGE` fillet edge).
@@ -728,6 +733,7 @@ impl FilletCorner {
             setback: None,
             mixed: None,
             end_cap: None,
+            deferred_join: false,
             turned_back_arcs: [None, None],
             roll_over: false,
             seam_cap: None,

@@ -2169,6 +2169,15 @@ pub trait CornerEdgeAccess<O: ClassObject + SolutionObject + Ord>: CornerVertexA
         corner: O,
         executive: &mut FilletExecutive<O>,
     ) -> Result<()>;
+    /// Not upstream (#13710): whether the corner's vertices and edges wait for the rails'
+    /// classification (a deferred Join, `FilletCorner::deferred_join`, made only by a Join's
+    /// topology between chamfers of setbacks); an adapter without corners has none.
+    ///
+    /// # Errors
+    /// Actual corner resolution failures.
+    fn edges_deferred(&self, _corner: O) -> Result<bool> {
+        Ok(false)
+    }
 }
 
 impl<O, A> CornerEdgeAccess<O> for A
@@ -3873,42 +3882,98 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut index = 0;
         while let Some(corner) = self.corners.get(index).copied() {
             k.check_cancelled(OP)?;
-            if let Err(stage) = caught(access.edges_adjust_tangent(k, corner, self))? {
-                return self.corner_vertex_failure(
+            index += 1;
+            // (#13710) a deferred Join waits for the rails' classification
+            // (`calculate_deferred_corner_edges`)
+            if access.edges_deferred(corner)? {
+                continue;
+            }
+            if !self.corner_edges(k, access, corner)? {
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+
+    /// Not upstream (#13710): the deferred Joins' vertices and edges
+    /// ([`CornerEdgeAccess::edges_deferred`]), after the rails' classification, whose roll-over
+    /// makes the pieces they join, each as [`Self::calculate_corner_edges`] computes a corner's
+    /// ([`Self::corner_edges`]).
+    ///
+    /// # Errors
+    /// As [`Self::calculate_corner_edges`].
+    pub fn calculate_deferred_corner_edges(
+        &mut self,
+        k: &mut Kernel,
+        access: &mut impl CornerEdgeAccess<O>,
+    ) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::executive::deferred_corner_edges");
+        let mut index = 0;
+        while let Some(corner) = self.corners.get(index).copied() {
+            k.check_cancelled(OP)?;
+            index += 1;
+            if !access.edges_deferred(corner)? {
+                continue;
+            }
+            if !self.corner_edges(k, access, corner)? {
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+
+    /// One corner's tangent topology adjustment, vertices and edges, for
+    /// [`Self::calculate_corner_edges`] and [`Self::calculate_deferred_corner_edges`]: `true` to
+    /// go on with the next corner; `false` where a failure was noted on the corner
+    /// (`corner_vertex_failure`) and the pass ends, as it always has.
+    ///
+    /// # Errors
+    /// A refusal the corner noted, or a failure that is not noted.
+    fn corner_edges(
+        &mut self,
+        k: &mut Kernel,
+        access: &mut impl CornerEdgeAccess<O>,
+        corner: O,
+    ) -> Result<bool> {
+        if let Err(stage) = caught(access.edges_adjust_tangent(k, corner, self))? {
+            return self
+                .corner_vertex_failure(
                     access,
                     corner,
                     "Fillet Corner Error: Topology Adjustment Failure",
                     stage,
-                );
-            }
-            if let Err(stage) = caught_but_refusal(access.vertices_calculate(k, corner, self))? {
-                return self.corner_vertex_failure(
+                )
+                .map(|()| false);
+        }
+        if let Err(stage) = caught_but_refusal(access.vertices_calculate(k, corner, self))? {
+            return self
+                .corner_vertex_failure(
                     access,
                     corner,
                     "Fillet Corner Error: Vertex Computation Failure",
                     stage,
-                );
+                )
+                .map(|()| false);
+        }
+        let noted_before = self.error.code;
+        if let Err(stage) = caught(access.edges_calculate(k, corner, self))? {
+            // SolidCraft change (the fork's, 41a39ec): a corner that noted why it refused,
+            // or one refused as one the blends cannot pass (SM_FILERR_NO_ROOM, noted by
+            // the corner), keeps that reason
+            if self.error.code != noted_before || self.error.code == FilletErrorType::NoRoom as i32
+            {
+                return Err(failure_after(stage));
             }
-            let noted_before = self.error.code;
-            if let Err(stage) = caught(access.edges_calculate(k, corner, self))? {
-                // SolidCraft change (the fork's, 41a39ec): a corner that noted why it refused,
-                // or one refused as one the blends cannot pass (SM_FILERR_NO_ROOM, noted by
-                // the corner), keeps that reason
-                if self.error.code != noted_before
-                    || self.error.code == FilletErrorType::NoRoom as i32
-                {
-                    return Err(failure_after(stage));
-                }
-                return self.corner_vertex_failure(
+            return self
+                .corner_vertex_failure(
                     access,
                     corner,
                     "Fillet Corner Error: Corner Edge Computation Failure",
                     stage,
-                );
-            }
-            index += 1;
+                )
+                .map(|()| false);
         }
-        Ok(())
+        Ok(true)
     }
 
     /// Trim every solver's rails after all corner boundary geometry is complete.
@@ -4048,6 +4113,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 index += 1;
             }
             for corner in adjusted.iter().copied() {
+                // (#13710) a deferred Join is built once, by its own pass after this one
+                if access.edges_deferred(corner)? {
+                    continue;
+                }
                 ignore(access.rails_reinitialize_corner(k, corner, self))?;
                 self.rollover_adjusting = true;
                 let edges = caught(access.edges_calculate(k, corner, self));
@@ -4839,6 +4908,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         if let Err(failed) = self.classify_solver_rails(k, access) {
             return self.refuse_rollover_past_its_fit(k, access, failed);
         }
+        // not upstream (#13710): the Joins that wait for the roll-over's pieces
+        self.calculate_deferred_corner_edges(k, access)?;
         let fillet = self.build_fillet_faces(k, access)?;
         self.stitch_fillet_faces(k, access, fillet)?;
         if let Some(output) = error_out {

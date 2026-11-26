@@ -1503,5 +1503,39 @@ mod tests {
                 );
             }
         }
+
+        /// The enclosure front's slanted chain chamfered by equal setbacks 0.02, small enough that
+        /// no Join waits for a roll-over: at the side vertices V = (+-50, 30, 12) the round's foot at
+        /// V lies off the cylinder face only by the cylinder's sag over the foot's drop below the
+        /// seam, (0.02 * 0.8 / sqrt(1.64))^2 / (2 * 10) = 7.8e-6, within the solvers' 3D tolerance
+        /// (4e-5), so the Join keeps its ends where the rails cross the seam, as before
+        /// (`join::setback_seam_sides` decides nothing, the Join is not deferred). The rails' seam
+        /// crossings then meet within the tolerance: the solid is closed with one chamfer of
+        /// setbacks per edge, five (no rail runs off its face, so no roll-over piece).
+        #[test]
+        fn the_enclosure_front_chain_with_setbacks_below_the_seams_sag_is_joined_on_the_seams() {
+            let d = [0.02, 0.02];
+            let mut k = fixed_kernel();
+            let mut b = enclosure_front(&mut k);
+            let slant = face_holding(&k, &b, |bx| {
+                bx.min().z.abs() < 1e-6
+                    && (bx.max().z - 20.0).abs() < 1e-6
+                    && (bx.min().y - 15.0).abs() < 1e-6
+                    && (bx.max().y - 40.0).abs() < 1e-6
+            })[0];
+            let front_face = face_holding(&k, &b, |bx| {
+                bx.min().z.abs() < 1e-6 && bx.max().z.abs() < 1e-6
+            });
+            assert_eq!(front_face.len(), 1);
+            let chain: Vec<EdgeId> = crate::topology::face::p4::edges(&b, slant, None, false, None)
+                .unwrap()
+                .into_iter()
+                .filter(|&e| !edge::faces(&b, e, None).unwrap().contains(&front_face[0]))
+                .collect();
+            assert_eq!(chain.len(), 5);
+            chamfer_setbacks(&mut k, &mut b, &chain, &[d; 5], &[slant; 5]).unwrap();
+            assert!(closed(&b));
+            assert_eq!(setback_faces(&k, &b).len(), 5);
+        }
     }
 }

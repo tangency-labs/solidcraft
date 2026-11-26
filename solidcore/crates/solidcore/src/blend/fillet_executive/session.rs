@@ -3533,6 +3533,17 @@ impl<'target> FilletSession<'target> {
 const OP_NOTE_OPEN_END: &str = "blend::fillet_executive::session::note_open_end";
 
 impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
+    /// (#13710) A Join of chamfers of setbacks at a smooth seam (`FilletCorner::deferred_join`).
+    fn edges_deferred(&self, corner: FilletObject) -> Result<bool> {
+        let FilletObject::Corner(id) = corner else {
+            return Ok(false);
+        };
+        Ok(self
+            .corners
+            .get(id.0 as usize)
+            .is_some_and(|c| c.deferred_join))
+    }
+
     fn edges_adjust_tangent(
         &mut self,
         _k: &mut Kernel,

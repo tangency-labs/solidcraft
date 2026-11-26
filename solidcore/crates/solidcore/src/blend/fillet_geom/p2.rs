@@ -4015,6 +4015,9 @@ impl FilletBrep {
         let at_cliff = owner
             .blend
             .is_some_and(crate::blend::blend_corner::BlendCorner::is_cliff_join);
+        // (#13710) a Join of chamfers of setbacks at a smooth seam: its section's ends are
+        // those of the blend whose own faces are the section's two (`join::setback_seam_sides`)
+        let deferred = owner.deferred_join;
         let cp_vertex = owner
             .filleted_vertex()
             .ok_or_else(|| missing_set_up(OP, FilletSetUp::CornerVertex))?;
@@ -4236,7 +4239,7 @@ impl FilletBrep {
             // puts the section's end there when only the other blend rolls over); a blend
             // still on its own face there has its feet on that face's surface, not the face
             // beyond's
-            let first = if !any_rolled {
+            let first = if !any_rolled && !deferred {
                 (gg == 0).then_some(usize::from(eu1::face(target, eu)? != Some(first_face)))
             } else if ends.is_some() {
                 None
@@ -4275,7 +4278,7 @@ impl FilletBrep {
         if let Some((uv_first, p_first, uv_other, p_other)) = ends {
             self.set_processed(v, uv_first, p_first)?;
             self.set_processed(mate, uv_other, p_other)?;
-        } else if any_rolled {
+        } else if any_rolled || deferred {
             // no blend of the join rolls on the two faces its shared section ends on
             return Err(SolidError::blend(
                 OP,

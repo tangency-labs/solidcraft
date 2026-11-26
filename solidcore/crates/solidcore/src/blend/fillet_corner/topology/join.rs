@@ -34,7 +34,7 @@ use crate::blend::fillet_executive::{p3::FitKind, session::SolverObject};
 use crate::blend::fillet_geom::p1::{
     CornerLookup, FilletBrep, FilletCornerId, FilletEdgeType, FilletSolverId, FilletVertexType,
 };
-use crate::blend::fillet_solver::p1::FilletSolver;
+use crate::blend::fillet_solver::p1::{test_manifold_tangent_rollover, FilletSolver};
 use crate::error::blend::CornerShape;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::intersect::point_class::PointClassType;
@@ -515,6 +515,161 @@ fn rolled_sides(
     Ok(out)
 }
 
+/// Not the fork's (#13710): two chamfers of setbacks continuing each other at a smooth
+/// vertex V, on a side where the one edge between them (`between`) is a smooth seam between
+/// their faces there (`side`; tangent across, [`test_manifold_tangent_rollover`]). The edges
+/// are tangent at V, so the two chamfers' station planes there are one, the plane through V
+/// square to the edges. Each blend's foot on this side at V is its exact station at V's
+/// parameter on its edge (`SetbackFs::station` on its own supports, the solver's faces at
+/// offset 0 as set up, extended as the trace extends them: no extension of the trace to its
+/// rails has run yet), classified against that blend's own face (`point_classify`). Where
+/// one blend's foot lies inside its face and the other's outside its own (beyond the seam),
+/// and the two feet are farther apart than the solver's 3D tolerance (the support's sag off
+/// the face beyond: the rails would meet on no section at the seam crossings), the Join
+/// ends on V's station plane on this side: the side's edge is taken out of `between` and
+/// the native blend's face returned for it, and the Join is deferred (its vertices and
+/// edges after the classification, whose roll-over makes the other blend's piece on the face
+/// beyond). Anywhere else (a foot on a face's boundary, as where the seam lies in the
+/// station plane; both feet on or both off their faces; feet within the tolerance; a station
+/// not found) nothing is decided and the side keeps today's end.
+///
+/// # Errors
+/// A reviewed `Defect` without a live solver; those of the topology queries, the tangency
+/// test, the drops and the classification.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn setback_seam_sides(
+    k: &Kernel,
+    target: &mut Brep,
+    solvers: &[Option<SolverObject>],
+    ids: &[Option<FilletSolverId>],
+    solver_eus: &[EdgeuseId],
+    vertex: Option<crate::topology::VertexId>,
+    side: &[[Option<FaceId>; 2]; 2],
+    between: &mut [Vec<EdgeuseId>; 2],
+) -> Result<[Option<FaceId>; 2]> {
+    use crate::blend::fillet_custom_solver::surface_global_point_solve;
+    use crate::blend::fillet_standard_solver::p1::SolverRails;
+    use crate::intersect::point_class::PointClassification;
+    use crate::query::face::p2::{point_classify, PointClassifyOptions};
+    use crate::surface::surface::Surface;
+    use crate::topology::edge;
+    let mut out = [None, None];
+    let (Some(vertex), [Some(id0), Some(id1)], [eu_b0, eu_b1]) = (vertex, ids, solver_eus) else {
+        return Ok(out);
+    };
+    let setback = |id: &FilletSolverId| match solvers.get(id.0 as usize) {
+        Some(Some(SolverObject::Setback(fs))) => Some(fs.as_ref().clone()),
+        _ => None,
+    };
+    let (Some(fs0), Some(fs1)) = (setback(id0), setback(id1)) else {
+        return Ok(out);
+    };
+    let tangency = live(solvers, Some(*id0))?.tangency_tolerance;
+    let vertex_point = target.vertex(vertex)?.point;
+    // blend `fs`'s foot at V on its face `face` (on edge use `eu`'s edge): its point and
+    // whether it lies inside the face (`Some(true)`), outside it (`Some(false)`), or neither
+    let foot = |target: &mut Brep,
+                fs: &mut crate::blend::fillet_standard_solver::setback::SetbackFs,
+                eu: EdgeuseId,
+                face: FaceId|
+     -> Result<Option<(crate::math::Point3, bool)>> {
+        let Some(e) = eu1::edge(target, eu)? else {
+            return Ok(None);
+        };
+        let ivl = edge::interval(target, e)?;
+        let s = if edge::start_vertex(target, e)? == Some(vertex) {
+            ivl.min()
+        } else {
+            ivl.max()
+        };
+        let domains = fs.trace_domains(k)?;
+        let mut uvs = [crate::math::Point2::new(0.0, 0.0); 2];
+        for (rail, slot) in uvs.iter_mut().enumerate() {
+            let support = Surface::from(fs.curve_based.solver.rail(rail)?.surface.clone());
+            let Some(domain) = domains.get(rail) else {
+                return Ok(None);
+            };
+            let found = surface_global_point_solve(
+                k,
+                &support,
+                None,
+                domain,
+                vertex_point,
+                crate::math::EFF_ZERO_SQ,
+            )?;
+            let Some(&uv) = found.first() else {
+                return Ok(None);
+            };
+            *slot = uv;
+        }
+        let Ok(Some(station)) = fs.station(k, s, uvs, &domains) else {
+            return Ok(None);
+        };
+        let rail = fs
+            .curve_based
+            .solver
+            .find_index_of_rail_on_face(target, Some(face))?;
+        let Some(f) = station.feet.get(rail) else {
+            return Ok(None);
+        };
+        let tol = fs.curve_based.solver.approx_tol_3d;
+        let mut pc = PointClassification::new(tol);
+        point_classify(
+            k,
+            target,
+            face,
+            f.uv,
+            &mut pc,
+            PointClassifyOptions::default(),
+        )?;
+        Ok(match pc.point_class() {
+            PointClassType::Face => Some((f.point, true)),
+            PointClassType::Unknown => Some((f.point, false)),
+            _ => None,
+        })
+    };
+    let (mut fs0, mut fs1) = (fs0, fs1);
+    for (s, (slot, faces)) in out.iter_mut().zip(side).enumerate() {
+        let Some([only]) = between.get(s).map(Vec::as_slice) else {
+            continue;
+        };
+        let only = *only;
+        let [Some(fa), Some(fb)] = *faces else {
+            continue;
+        };
+        let Some(seam) = eu1::edge(target, only)? else {
+            continue;
+        };
+        let bounds = edge::faces(target, seam, None)?;
+        if fa == fb
+            || !bounds.contains(&fa)
+            || !bounds.contains(&fb)
+            || !test_manifold_tangent_rollover(k, target, seam, tangency)?.0
+        {
+            continue;
+        }
+        let (Some((pa, in_a)), Some((pb, in_b))) = (
+            foot(target, &mut fs0, *eu_b0, fa)?,
+            foot(target, &mut fs1, *eu_b1, fb)?,
+        ) else {
+            continue;
+        };
+        let tol = fs0
+            .curve_based
+            .solver
+            .approx_tol_3d
+            .max(fs1.curve_based.solver.approx_tol_3d);
+        if in_a == in_b || pa.distance(pb) <= tol {
+            continue;
+        }
+        *slot = Some(if in_a { fa } else { fb });
+        if let Some(b) = between.get_mut(s) {
+            b.clear();
+        }
+    }
+    Ok(out)
+}
+
 /// Not the fork's (#17224): where the Join's section ends on a side edge `side_eu`
 /// (`SM_FV_RAIL_X_EDGEUSE`), whether the constant round `fs` has a ball of its radius
 /// touching its face F there (F the round's face the side edge bounds, G `other_face` its
@@ -672,7 +827,25 @@ impl FilletCorner {
             ));
         }
         let (side, mut between) = join_sides(target, &solver_eus, &all_eus)?;
-        let rolled = rolled_sides(target, solvers, &solver_eu_solvers, &side, &mut between)?;
+        let mut rolled = rolled_sides(target, solvers, &solver_eu_solvers, &side, &mut between)?;
+        // (#13710) chamfers of setbacks at a smooth seam: their shared section in the
+        // vertex's station plane, their edges after the rails' classification
+        let seams = setback_seam_sides(
+            k,
+            target,
+            solvers,
+            &solver_eu_solvers,
+            &solver_eus,
+            self.filleted_vertex(),
+            &side,
+            &mut between,
+        )?;
+        if seams.iter().any(Option::is_some) {
+            self.deferred_join = true;
+        }
+        for (slot, seam) in rolled.iter_mut().zip(seams) {
+            *slot = slot.or(seam);
+        }
         let cliff_join = self
             .blend
             .is_some_and(crate::blend::blend_corner::BlendCorner::is_cliff_join);
