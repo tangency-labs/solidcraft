@@ -31,6 +31,7 @@ use solidcraft_theme::Tokens;
 mod auto;
 #[path = "dialogs_dense.rs"]
 mod dense;
+pub(crate) use dense::angle_step;
 #[cfg(test)]
 pub(crate) use dense::primitive_label;
 
