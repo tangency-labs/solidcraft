@@ -349,6 +349,7 @@ pub use fill::patch_edges_report;
 pub use fill::patch_edges_with;
 pub use helix::loft_to_point;
 pub use helix::loft_to_point_with_rails;
+pub use helix::require_plane_through_axis;
 pub use helix::sweep_helix;
 pub use helix::sweep_helix_mesh;
 pub use helix::sweep_helix_radial;
