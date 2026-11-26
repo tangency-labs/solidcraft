@@ -66,6 +66,8 @@ pub(crate) struct Counts {
     pub contact_tests: usize,
     /// Kernel union calls (`union` or `union_all`) made by `join`.
     pub join_unions: usize,
+    /// Per-step placement joint solves made while stepping a `CapturePosition` timeline.
+    pub step_joint_solves: usize,
 }
 
 thread_local! {
@@ -104,6 +106,7 @@ thread_local! {
             hole_points: 0,
             contact_tests: 0,
             join_unions: 0,
+            step_joint_solves: 0,
         })
     };
 }
@@ -5465,4 +5468,309 @@ fn mirroring_cuts_that_consume_the_target_matches_sequential_refusal() {
     let err_seq = run(1);
     assert!(err_batch.as_deref().is_some_and(|e| e.contains("no body to cut")), "{err_batch:?}");
     assert_eq!(err_batch, err_seq);
+}
+
+#[test]
+fn saved_model_states_share_origin_frames() {
+    use crate::joints::{Joint, JointKind, JointOrigin, Snap};
+    let mut doc = Document::new("shared origin frames");
+    let comp_a = doc.add_component(Some("A"), 0).unwrap();
+    let comp_b = doc.add_component(Some("B"), 0).unwrap();
+    let occ_a = doc.occurrences.iter().find(|o| o.component == comp_a).unwrap().id;
+    let occ_b = doc.occurrences.iter().find(|o| o.component == comp_b).unwrap().id;
+
+    let add_box = |doc: &mut Document, comp: u64, origin: Vec3| {
+        let id = doc
+            .add_feature(
+                FeatureKind::Box {
+                    corner: point_expr(origin),
+                    length: "10 mm".into(),
+                    width: "10 mm".into(),
+                    height: "10 mm".into(),
+                    operation: Operation::NewBody,
+                    centred: false,
+                },
+                None,
+            )
+            .unwrap();
+        doc.feature_mut(id).unwrap().component = comp;
+    };
+    add_box(&mut doc, comp_a, Vec3::ZERO);
+    add_box(&mut doc, comp_b, Vec3::new(20.0, 0.0, 0.0));
+    add_box(&mut doc, comp_b, Vec3::new(40.0, 0.0, 0.0));
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+
+    let pick = Vec3::new(5.0, 5.0, 10.0);
+    let face = joints::face_name_at(&doc, &model.state(), comp_a, pick, false).unwrap();
+    let origin_a = JointOrigin::new(occ_a, Snap::FaceCenter { pick, face: Some(face), x: None });
+    doc.assembly.joints.push(Joint {
+        id: 1,
+        name: "J1".into(),
+        kind: JointKind::Rigid,
+        a: origin_a.clone(),
+        b: JointOrigin::new(occ_b, Snap::Point { point: Vec3::ZERO, z: None, x: None }),
+        values: Vec::new(),
+        limits: Vec::new(),
+        dynamics: Vec::new(),
+        flip: false,
+        offset: 0.0,
+        offset_xy: [0.0; 2],
+        angle: 0.0,
+        suppressed: false,
+        exprs: Default::default(),
+        captured: None,
+        base_values: None,
+        base_exprs: Vec::new(),
+        constraint: None,
+    });
+    model.evaluate(&doc);
+    let saved = model.saved(&doc).expect("saved model");
+    let adopted = Model::adopt(&doc, &saved).expect("adopt saved model");
+    assert_eq!(adopted.results.len(), 3);
+
+    let first = &adopted.results[0].state;
+    for r in &adopted.results[1..] {
+        assert!(r.state.origin_frames.shares(&first.origin_frames), "adopted states must share one OriginFrames cache");
+    }
+    assert_eq!(first.origin_resolutions(), 0);
+    let frame0 = joints::resolve_origin(&doc, first, &origin_a).unwrap();
+    assert_eq!(first.origin_resolutions(), 1);
+    let frame2 = joints::resolve_origin(&doc, &adopted.results[2].state, &origin_a).unwrap();
+    assert_eq!(frame0, frame2);
+    assert_eq!(
+        adopted.results[2].state.origin_resolutions(),
+        1,
+        "resolving the same origin on a later adopted state must reuse the shared OriginFrames cache"
+    );
+}
+
+#[test]
+fn capture_position_lazy_step_joints_match_cold_and_reduce_solves() {
+    use crate::joints::{Joint, JointKind, JointOrigin, Snap};
+    let mut doc = Document::new("lazy capture step joints");
+    let comp_a = doc.add_component(Some("A"), 0).unwrap();
+    let comp_b = doc.add_component(Some("B"), 0).unwrap();
+    let comp_c = doc.add_component(Some("C"), 0).unwrap();
+    let occ_a = doc.occurrences.iter().find(|o| o.component == comp_a).unwrap().id;
+    let occ_b = doc.occurrences.iter().find(|o| o.component == comp_b).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_a).unwrap().base_transform = Some(IDENTITY);
+    doc.add_user_param("dx", "25 mm", Some("mm"), None).unwrap();
+
+    let add_box = |doc: &mut Document, comp: u64, origin: Vec3| {
+        let id = doc
+            .add_feature(
+                FeatureKind::Box {
+                    corner: point_expr(origin),
+                    length: "10 mm".into(),
+                    width: "10 mm".into(),
+                    height: "10 mm".into(),
+                    operation: Operation::NewBody,
+                    centred: false,
+                },
+                None,
+            )
+            .unwrap();
+        doc.feature_mut(id).unwrap().component = comp;
+        id
+    };
+    add_box(&mut doc, comp_a, Vec3::ZERO);
+    add_box(&mut doc, comp_b, Vec3::ZERO);
+    for k in 0..10 {
+        add_box(&mut doc, comp_c, Vec3::new(f64::from(k) * 15.0, 40.0, 0.0));
+    }
+
+    let plane_a = doc
+        .add_feature(
+            FeatureKind::ConstructionPlane {
+                plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "YZ".into() }), distance: "5 mm".into() },
+            },
+            Some("PlaneA"),
+        )
+        .unwrap();
+    doc.feature_mut(plane_a).unwrap().component = comp_a;
+
+    // Resolve face names on A and B before adding the joint and CapturePosition.
+    let mut seed = Model::new();
+    seed.evaluate(&doc);
+    let pick = Vec3::new(5.0, 5.0, 10.0);
+    let face_a = joints::face_name_at(&doc, &seed.state(), comp_a, pick, false).unwrap();
+    let face_b = joints::face_name_at(&doc, &seed.state(), comp_b, pick, false).unwrap();
+
+    doc.assembly.joints.push(Joint {
+        id: 1,
+        name: "SlideAB".into(),
+        kind: JointKind::Slider,
+        a: JointOrigin::new(occ_a, Snap::FaceCenter { pick, face: Some(face_a), x: None }),
+        b: JointOrigin::new(occ_b, Snap::FaceCenter { pick, face: Some(face_b), x: None }),
+        values: vec![15.0],
+        limits: vec![None],
+        dynamics: Vec::new(),
+        flip: false,
+        offset: 0.0,
+        offset_xy: [0.0; 2],
+        angle: 0.0,
+        suppressed: false,
+        exprs: Default::default(),
+        captured: Some(vec![15.0]),
+        base_values: Some(vec![0.0]),
+        base_exprs: Vec::new(),
+        constraint: None,
+    });
+
+    doc.add_feature(
+        FeatureKind::CapturePosition {
+            moves: vec![CapturedOccurrenceMove {
+                occurrence: occ_a,
+                space: MoveSpace::Local,
+                translate: ["dx".into(), "0".into(), "0".into()],
+                origin: None,
+                rotate_axis: None,
+                angle: None,
+                rotation: None,
+                path: None,
+            }],
+            joints: vec![CapturedJoint { joint: 1, values: vec![15.0], exprs: Vec::new() }],
+        },
+        Some("CaptureAB"),
+    )
+    .unwrap();
+
+    for k in 10..20 {
+        add_box(&mut doc, comp_c, Vec3::new(f64::from(k) * 15.0, 40.0, 0.0));
+    }
+
+    let mut sk = Sketch::new();
+    let p0 = sk.add_point(Vec2::new(0.0, 0.0), None).unwrap();
+    let p1 = sk.add_point(Vec2::new(10.0, 0.0), None).unwrap();
+    sk.add_line_pts(p0, p1, None).unwrap();
+    sk.add_link(
+        solidcraft_sketch::LinkKind::Project,
+        solidcraft_sketch::LinkSource::Plane { name: "PlaneA".into() },
+        &[solidcraft_sketch::LinkGeom::Line(Vec2::new(30.0, -5.0), Vec2::new(30.0, 5.0))],
+    )
+    .unwrap();
+    let sk_id = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, Some("SkB")).unwrap();
+    doc.feature_mut(sk_id).unwrap().component = comp_b;
+
+    let mut cold = Model::new();
+    cold.no_cache = true;
+    cold.evaluate(&doc);
+    assert!(cold.results.iter().all(|r| r.error.is_none()), "{:?}", cold.results);
+
+    let mut model = Model::new();
+    let eval_counts = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    assert_eq!(model.resolved_occurrences(), cold.resolved_occurrences());
+    assert_eq!(model.resolved_joints(), cold.resolved_joints());
+    assert!(
+        eval_counts.step_joint_solves <= 4,
+        "lazy component-scoped joints should avoid solving on every unrelated feature, got {}",
+        eval_counts.step_joint_solves
+    );
+
+    let current_counts = counted(|| assert!(model.is_current(&doc)));
+    assert!(
+        current_counts.step_joint_solves <= 3,
+        "is_current should only flush joints before placement-reading features, got {}",
+        current_counts.step_joint_solves
+    );
+
+    let saved = model.saved(&doc).expect("saved model");
+    let mut adopted = None;
+    let adopt_counts = counted(|| {
+        adopted = Some(Model::adopt(&doc, &saved).expect("adopt saved model"));
+    });
+    let mut adopted = adopted.unwrap();
+    assert_eq!(adopted.resolved_occurrences(), model.resolved_occurrences());
+    assert_eq!(adopted.resolved_joints(), model.resolved_joints());
+    assert!(adopted.is_current(&doc));
+    assert!(
+        adopt_counts.step_joint_solves <= 4,
+        "single-pass adopt with lazy joints should not re-solve across a second pass, got {}",
+        adopt_counts.step_joint_solves
+    );
+
+    // An incremental edit in unrelated component C reuses the single-pass adopted cache and
+    // skips solving joints across the unchanged prefix.
+    add_box(&mut doc, comp_c, Vec3::new(400.0, 40.0, 0.0));
+    let edit_counts = counted(|| adopted.evaluate(&doc));
+    assert_eq!(adopted.last_recomputed, 1);
+    assert!(
+        edit_counts.step_joint_solves <= 3,
+        "incremental edit on unrelated component should not solve per prefix feature, got {}",
+        edit_counts.step_joint_solves
+    );
+}
+
+#[test]
+fn parallel_sketch_cache_load_matches_evaluated_sketches() {
+    let mut doc = Document::new("parallel sketch cache");
+    let planes = ["XY", "XZ", "YZ"];
+    let mut first_rect = None;
+    for i in 0..20usize {
+        let mut sk = Sketch::new();
+        let off = i as f64 * 5.0;
+        if i % 2 == 0 {
+            let p = [
+                sk.add_point(Vec2::new(off, 0.0), None).unwrap(),
+                sk.add_point(Vec2::new(off + 10.0, 0.0), None).unwrap(),
+                sk.add_point(Vec2::new(off + 10.0, 10.0), None).unwrap(),
+                sk.add_point(Vec2::new(off, 10.0), None).unwrap(),
+            ];
+            for k in 0..4 {
+                sk.add_line_pts(p[k], p[(k + 1) % 4], None).unwrap();
+            }
+        } else {
+            let a = sk.add_point(Vec2::new(off, 0.0), None).unwrap();
+            let b = sk.add_point(Vec2::new(off + 8.0, 4.0), None).unwrap();
+            sk.add_line_pts(a, b, None).unwrap();
+        }
+        let id = doc
+            .add_feature(
+                FeatureKind::Sketch { plane: PlaneRef::Origin { name: planes[i % planes.len()].into() }, sketch: sk },
+                Some(&format!("Sk{i}")),
+            )
+            .unwrap();
+        if first_rect.is_none() {
+            first_rect = Some(id);
+        }
+    }
+    doc.add_feature(
+        FeatureKind::Extrude {
+            sketch: crate::SketchId(first_rect.unwrap()),
+            profiles: ProfileSel::Indices { indices: vec![0] },
+            extent: Extent { distance: "5 mm".into(), ..Extent::default() },
+            operation: Operation::NewBody,
+            targets: Vec::new(),
+            thin: None,
+        },
+        None,
+    )
+    .unwrap();
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+
+    let saved = model.saved(&doc).expect("saved model");
+    assert_eq!(saved.records["sketches"].as_array().map(Vec::len), Some(20));
+
+    let mut adopted = Model::adopt(&doc, &saved).expect("adopt saved model");
+    assert_eq!(adopted.state().sketches.len(), model.state().sketches.len());
+    for (a, b) in adopted.state().sketches.iter().zip(&model.state().sketches) {
+        assert_eq!(a.feature, b.feature);
+        assert_eq!(a.name, b.name);
+        assert_eq!(a.plane, b.plane);
+        assert_eq!(a.profiles.len(), b.profiles.len());
+        assert_eq!(a.profiles_3d.len(), b.profiles_3d.len());
+        assert_eq!(a.ends, b.ends);
+        assert_eq!(a.sketch.points.len(), b.sketch.points.len());
+        assert_eq!(a.sketch.curves.len(), b.sketch.curves.len());
+    }
+    assert!(adopted.is_current(&doc));
+    adopted.evaluate(&doc);
+    assert_eq!(adopted.last_recomputed, 0);
 }

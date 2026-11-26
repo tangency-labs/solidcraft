@@ -174,6 +174,9 @@ struct Writer {
     /// large to keep).
     surface_sheets: Vec<Json>,
     surface_sheet_index: HashMap<String, usize>,
+    /// The state written last and the places of its surface sheets: a state mostly keeps the
+    /// sheets of the one before it, which are found again without writing them as text.
+    last_surface_sheets: Option<(Arc<ModelState>, Vec<usize>)>,
     /// Tap markings (cosmetic threads) by their record, as the sheets: every state lists the
     /// markings of all the features before it, so writing them with each state grew with the
     /// square of the features (400 marked cylinders: 34 of a 37 MB manifest, past its limit).
@@ -359,8 +362,22 @@ impl Writer {
         Some(self.sketches.len() - 1)
     }
 
-    fn surface_sheet(&mut self, sheet: &crate::SurfaceSheet) -> Option<usize> {
-        shared(&mut self.surface_sheets, &mut self.surface_sheet_index, sheet)
+    /// The places of `st`'s surface sheets among the written ones. A sheet at the same place in
+    /// the state written last that compares equal is that one (no text built); any other is keyed
+    /// by its text.
+    fn surface_sheets(&mut self, st: &Arc<ModelState>) -> Option<Vec<usize>> {
+        let mut out = Vec::with_capacity(st.surface_sheets.len());
+        for (i, sheet) in st.surface_sheets.iter().enumerate() {
+            let before = self.last_surface_sheets.as_ref().and_then(|(s, at)| Some((s.surface_sheets.get(i)?, *at.get(i)?)));
+            if let Some((_, at)) = before.filter(|(b, _)| *b == sheet) {
+                out.push(at);
+                continue;
+            }
+            let at = shared(&mut self.surface_sheets, &mut self.surface_sheet_index, sheet)?;
+            out.push(at);
+        }
+        self.last_surface_sheets = Some((st.clone(), out.clone()));
+        Some(out)
     }
 
     /// The places of `st`'s markings among the written ones. A marking at the same place in the
@@ -396,16 +413,27 @@ impl Writer {
         }
         let bodies = st.bodies.iter().map(|b| self.model_body(b)).collect::<Option<Vec<_>>>()?;
         let sketches = st.sketches.iter().map(|s| self.sketch(s)).collect::<Option<Vec<_>>>()?;
-        let surface_sheets = st.surface_sheets.iter().map(|s| self.surface_sheet(s)).collect::<Option<Vec<_>>>()?;
+        let surface_sheets = self.surface_sheets(st)?;
         let threads = self.threads(st)?;
         // Shape identity is process-local. Persist the decision in each timeline state,
         // then restore its shared shape from that state's body after decoding the cache.
+        let body_by_name: HashMap<&str, &ModelBody> = if st.frame_members.is_empty() {
+            HashMap::new()
+        } else {
+            let mut map = HashMap::with_capacity(st.bodies.len());
+            for b in &st.bodies {
+                map.entry(b.name.as_str()).or_insert(b);
+            }
+            map
+        };
         let members = st
             .frame_members
             .iter()
             .map(|m| {
                 let mut record = serde_json::to_value(m).ok()?;
-                record["unmodified"] = json!(st.body(&m.body).is_some_and(|b| b.feature == m.feature && !b.transferred && m.is_unchanged(&b.body)));
+                record["unmodified"] = json!(
+                    body_by_name.get(m.body.as_str()).is_some_and(|b| b.feature == m.feature && !b.transferred && m.is_unchanged(&b.body))
+                );
                 Some(record)
             })
             .collect::<Option<Vec<_>>>()?;
@@ -626,11 +654,10 @@ impl SavedModel {
                 .collect();
             names.push(Arc::new(Names { faces: Arc::new(faces), info }));
         }
-        let mut sketches = Vec::new();
-        for s in list("sketches")? {
+        let sketches: Vec<Arc<SolvedSketch>> = kernel::map_on_threads(list("sketches")?, 16, |s: &Json| -> Result<Arc<SolvedSketch>> {
             let sketch: solidcraft_sketch::Sketch = serde_json::from_value(parse(s.get("sketch"))?).map_err(|_| bad("saved model: sketch"))?;
             let plane: Plane = serde_json::from_value(parse(s.get("plane"))?).map_err(|_| bad("saved model: sketch"))?;
-            sketches.push(Arc::new(SolvedSketch {
+            Ok(Arc::new(SolvedSketch {
                 feature: s.get("feature").and_then(Json::as_u64).ok_or_else(|| bad("saved model: sketch"))?,
                 name: text(s.get("name"))?,
                 plane,
@@ -639,8 +666,11 @@ impl SavedModel {
                 profiles_3d: solidcraft_sketch::find_planar_3d_profiles(&sketch, plane),
                 ends: solidcraft_sketch::loose_ends(&sketch),
                 sketch,
-            }));
-        }
+            }))
+        })
+        .into_iter()
+        .map(|r| r.unwrap_or_else(|| Err(bad("saved model: sketch"))))
+        .collect::<Result<Vec<_>>>()?;
         let mut model_bodies = Vec::new();
         for r in list("model_bodies")? {
             let body = bodies.get(index(r.get("body"), bodies.len())?).cloned().ok_or_else(|| bad("saved model: body"))?;
@@ -809,6 +839,9 @@ impl SavedModel {
         }
         // Each state is independent of the others once the records they share are read: built
         // on threads (a 5,484-feature design spent 3.5 s building them one after another).
+        // All states of a loaded model share one `OriginFrames` cache (as evaluated states do),
+        // so joint origin resolution on one state is reused across the timeline.
+        let origin_frames = OriginFrames::default();
         let built = kernel::map_on_threads(records, 16, |s: &Json| -> Result<ModelState> {
             // Runs of consecutive indices, each within the list it indexes.
             let ids = |key: &str, len: usize| -> Result<Vec<usize>> {
@@ -836,7 +869,7 @@ impl SavedModel {
             }
             let mut st = ModelState {
                 frame_bodies: Default::default(),
-                origin_frames: Default::default(),
+                origin_frames: origin_frames.clone(),
                 bodies: ids("bodies", model_bodies.len())?.into_iter().filter_map(|i| model_bodies.get(i).cloned()).collect(),
                 sketches: ids("sketches", sketches.len())?.into_iter().filter_map(|i| sketches.get(i).cloned()).collect(),
                 // A world state's alone: a model's own state has none.
@@ -1235,7 +1268,9 @@ impl Model {
         let marker = doc.marker.unwrap_or(usize::MAX);
         let ctx = context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let shared = shared_context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
-        let mut before = Arc::new(ModelState::default());
+        let origin_frames = states.first().map(|s| s.origin_frames.clone()).unwrap_or_default();
+        let empty = Arc::new(ModelState { origin_frames, ..ModelState::default() });
+        let mut before = empty.clone();
         // Whether `before` is the state before the feature: one the file left out only stands in.
         let mut exact = true;
         let mut prev = 0;
@@ -1244,10 +1279,16 @@ impl Model {
         let mut prepared_states = std::collections::HashSet::new();
         // The pose-only features saved at the pose `doc` gives them: their results stand.
         let mut poses = HashMap::new();
-        let mut step_doc_owned = super::init_capture_step_doc(doc, &vals);
+        let mut stepper = super::CaptureStepper::new(doc, &vals);
         let mut resolved_joints = std::collections::BTreeMap::new();
+        // Populate the evaluation cache in pass 1 while every state is kept and unposed, avoiding
+        // a second full timeline/capture-step walk when `unkept == 0 && !posed`.
+        let mut pass1_cache = Some(EvalCache::default());
         for (i, (f, r)) in doc.features.iter().zip(features).enumerate() {
-            let eval_doc = step_doc_owned.as_ref().unwrap_or(doc);
+            if let Some(s) = stepper.as_mut() {
+                s.flush_for_feature(f, &before);
+            }
+            let eval_doc = stepper.as_ref().map_or(doc, super::CaptureStepper::doc);
             let saved = unhex(r.get("fingerprint").unwrap_or(&Json::Null))?;
             // A fingerprint reads the state before its feature (where the bodies it takes lie).
             // After a state the file left out, the saved one is taken: `evaluate` works that state
@@ -1314,12 +1355,22 @@ impl Model {
             {
                 return Err(bad("saved model: frame members"));
             }
+            if result.unkept || (!result.skipped && pose_only(f) && !poses.contains_key(&f.id)) {
+                pass1_cache = None;
+            }
             if !result.skipped {
+                if !pose_only(f) && let Some(cache) = pass1_cache.as_mut() {
+                    cache_adopted_result(cache, eval_doc, &vals, f, &result, ctx, shared, &before, &import_digests);
+                }
                 exact = !result.unkept;
-                let changed = super::bodies_changed(&before, &result.state);
+                let prev_state = before;
                 before = result.state.clone();
-                if result.error.is_none() && i < marker && !f.suppressed {
-                    super::advance_capture_step(&mut step_doc_owned, &mut resolved_joints, &vals, f, &before, changed);
+                if result.error.is_none()
+                    && i < marker
+                    && !f.suppressed
+                    && let Some(s) = stepper.as_mut()
+                {
+                    s.advance(&mut resolved_joints, &vals, f, &prev_state, &before);
                 }
             }
             results.push(result);
@@ -1329,10 +1380,16 @@ impl Model {
         for (f, r) in doc.features.iter().zip(results.iter_mut()).filter(|(_, r)| !r.skipped && !r.unkept) {
             r.warning = crate::eval::with_retained_notes(doc, r.warning.take(), f, &r.state);
         }
-        let resolved_occurrences = step_doc_owned.map(|d| d.occurrences.into_iter().map(|o| (o.id, o.transform)).collect()).unwrap_or_default();
+        let resolved_occurrences = stepper.map(|s| s.into_resolved_occurrences(&before)).unwrap_or_default();
+        let unkept = results.iter().filter(|r| r.unkept).count();
+        // A pose-only feature's fingerprint leaves its pose out, so its saved result may be from
+        // another pose than `doc`'s: evaluated again, with what reads none of it kept (#12139).
+        // One saved with the pose `doc` gives it is `doc`'s result as it is.
+        let posed = doc.features.iter().zip(&results).any(|(f, r)| !r.skipped && pose_only(f) && !poses.contains_key(&f.id));
         let mut model = Model {
             results,
             param_errors,
+            empty,
             import_digests,
             context: ctx,
             frame_bodies,
@@ -1340,15 +1397,11 @@ impl Model {
             heal_off: !heal,
             resolved_occurrences,
             resolved_joints,
+            poses,
             ..Model::default()
         };
-        let unkept = model.results.iter().filter(|r| r.unkept).count();
-        // A pose-only feature's fingerprint leaves its pose out, so its saved result may be from
-        // another pose than `doc`'s: evaluated again, with what reads none of it kept (#12139).
-        // One saved with the pose `doc` gives it is `doc`'s result as it is.
-        let posed = doc.features.iter().zip(&model.results).any(|(f, r)| !r.skipped && pose_only(f) && !poses.contains_key(&f.id));
-        model.poses = poses;
         if unkept > 0 || posed {
+            drop(pass1_cache);
             // The features whose state the file did not keep, each evaluated again from the state
             // before it: nothing else in the model is missing then.
             model.evaluate(doc);
@@ -1358,63 +1411,77 @@ impl Model {
                 model.results.len(),
                 model.last_recomputed
             );
-        }
-        // Each result where an evaluation would have put it, so an edit undone (or set back)
-        // finds it again rather than evaluating the feature anew.
-        let mut before = Arc::new(ModelState::default());
-        let mut cache_step_doc = super::init_capture_step_doc(doc, &vals);
-        let mut cache_joints = std::collections::BTreeMap::new();
-        if let Ok(mut cache) = model.cache.lock() {
-            for (i, (f, r)) in doc.features.iter().zip(&model.results).enumerate().filter(|(_, (_, r))| !r.skipped && r.error.is_none()) {
-                let eval_doc = cache_step_doc.as_ref().unwrap_or(doc);
-                // A pose-only feature's fingerprint leaves its pose out, so its saved result may be
-                // from another pose than `doc`'s: it is no result for `doc`'s key (#12139).
-                if pose_only(f) {
-                    let changed = super::bodies_changed(&before, &r.state);
+            // Each result where an evaluation would have put it, so an edit undone (or set back)
+            // finds it again rather than evaluating the feature anew.
+            let mut before = model.empty.clone();
+            let mut cache_stepper = super::CaptureStepper::new(doc, &vals);
+            let mut cache_joints = std::collections::BTreeMap::new();
+            if let Ok(mut cache) = model.cache.lock() {
+                for (i, (f, r)) in doc.features.iter().zip(&model.results).enumerate().filter(|(_, (_, r))| !r.skipped && r.error.is_none()) {
+                    if let Some(s) = cache_stepper.as_mut() {
+                        s.flush_for_feature(f, &before);
+                    }
+                    let eval_doc = cache_stepper.as_ref().map_or(doc, super::CaptureStepper::doc);
+                    // A pose-only feature's fingerprint leaves its pose out, so its saved result may be
+                    // from another pose than `doc`'s: it is no result for `doc`'s key (#12139).
+                    if !pose_only(f) {
+                        cache_adopted_result(&mut cache, eval_doc, &vals, f, r, ctx, shared, &before, &model.import_digests);
+                    }
+                    let prev_state = before;
                     before = r.state.clone();
-                    if i < marker && !f.suppressed {
-                        super::advance_capture_step(&mut cache_step_doc, &mut cache_joints, &vals, f, &before, changed);
+                    if i < marker && !f.suppressed && let Some(s) = cache_stepper.as_mut() {
+                        s.advance(&mut cache_joints, &vals, f, &prev_state, &before);
                     }
-                    continue;
-                }
-                let key = EvalKey::new(eval_doc, &vals, f, r.fingerprint, ctx, shared, &before, &model.import_digests);
-                let whole = CachedEval {
-                    error: None,
-                    error_code: None,
-                    warning: crate::eval::without_retained_notes(r.warning.clone()),
-                    import_report: r.import_report.clone(),
-                    repair: r.repair.clone(),
-                    lost_projections: None,
-                    ms: r.ms,
-                    state: r.state.clone(),
-                };
-                // And what it changed, by what it read, as an evaluation keeps it: the first edit
-                // after opening then evaluates only the features that read what the edit changed,
-                // as every later edit does, not every feature after the edit. Features that name
-                // their pieces as later features pick them are left out, as is any feature whose
-                // bodies were not stamped with this key (saved by a version that keyed them
-                // otherwise, or stamped by the whole model): `stamp` would work their names out
-                // afresh, with no lineage to work them from. It is evaluated again instead.
-                if let Some((k, read)) = &key.reads
-                    && !f.shell_piece_order
-                    && let Some(change) = r.state.change_from(&before, f, read)
-                {
-                    // A change that holds whatever the bodies it did not read was stamped with the
-                    // key without them; one saved before that key, with the other.
-                    let relative = key.relative.filter(|_| change.relative().is_some());
-                    if let Some(k) = relative.into_iter().chain([*k]).find(|k| change.made_bodies_stamped(*k)) {
-                        let bytes = change.retained_bytes();
-                        cache.changes.put(k, whole.with(change), bytes, r.ms);
-                    }
-                }
-                cache.states.put(key.whole, whole, r.state.retained_bytes(), r.ms);
-                let changed = super::bodies_changed(&before, &r.state);
-                before = r.state.clone();
-                if i < marker && !f.suppressed {
-                    super::advance_capture_step(&mut cache_step_doc, &mut cache_joints, &vals, f, &before, changed);
                 }
             }
+        } else if let Some(cache) = pass1_cache {
+            model.cache = Arc::new(std::sync::Mutex::new(cache));
         }
         Ok(model)
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cache_adopted_result(
+    cache: &mut EvalCache,
+    eval_doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    r: &FeatureResult,
+    ctx: u64,
+    shared: u64,
+    before: &ModelState,
+    import_digests: &ImportDigests,
+) {
+    let key = EvalKey::new(eval_doc, vals, f, r.fingerprint, ctx, shared, before, import_digests);
+    let whole = CachedEval {
+        error: None,
+        error_code: None,
+        warning: crate::eval::without_retained_notes(r.warning.clone()),
+        import_report: r.import_report.clone(),
+        repair: r.repair.clone(),
+        lost_projections: None,
+        ms: r.ms,
+        state: r.state.clone(),
+    };
+    // And what it changed, by what it read, as an evaluation keeps it: the first edit
+    // after opening then evaluates only the features that read what the edit changed,
+    // as every later edit does, not every feature after the edit. Features that name
+    // their pieces as later features pick them are left out, as is any feature whose
+    // bodies were not stamped with this key (saved by a version that keyed them
+    // otherwise, or stamped by the whole model): `stamp` would work their names out
+    // afresh, with no lineage to work them from. It is evaluated again instead.
+    if let Some((k, read)) = &key.reads
+        && !f.shell_piece_order
+        && let Some(change) = r.state.change_from(before, f, read)
+    {
+        // A change that holds whatever the bodies it did not read was stamped with the
+        // key without them; one saved before that key, with the other.
+        let relative = key.relative.filter(|_| change.relative().is_some());
+        if let Some(k) = relative.into_iter().chain([*k]).find(|k| change.made_bodies_stamped(*k)) {
+            let bytes = change.retained_bytes();
+            cache.changes.put(k, whole.with(change), bytes, r.ms);
+        }
+    }
+    cache.states.put(key.whole, whole, r.state.retained_bytes(), r.ms);
 }
