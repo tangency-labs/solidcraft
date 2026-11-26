@@ -88,6 +88,7 @@ pub mod offset;
 pub mod order;
 pub mod outline;
 pub mod paper_gaps;
+pub mod path_plane;
 pub mod pcurve;
 pub mod pick;
 pub mod point_identity;
