@@ -44,7 +44,7 @@ TYPES = [
       "u_min", "u_max", "v_min", "v_max", "w_min", "w_max", "u_interval", "v_interval",
       "w_interval", "set_u_interval", "set_v_interval", "set_min_max", "set_min_max_coords",
       "set_u_min", "set_u_max", "set_v_min", "set_v_max", "boundary_types", "is_bounded",
-      "span_along"}),
+      "span_along", "meets_ray"}),
     ("geom/extent2d.rs", "Extent2d", "solidcore::geom::extent2d::Extent2d",
      {"new", "from_bounds", "init", "is_init", "set_min_max", "set_min_max_coords",
       "set_u_interval", "set_v_interval", "set_u_min", "set_u_max", "set_v_min", "set_v_max",

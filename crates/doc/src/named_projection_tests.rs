@@ -1033,6 +1033,33 @@ fn numbered_edge_projection_recovers_the_edge_between_whole_faces() {
     assert!(lost_one(&error, numbered), "{error}");
 }
 
+/// #21739: a 360° revolve saved by 0.45 had its turned seam side faces named after the wrong
+/// profile line (e.g. `l7` instead of `l2`), qualified by adjacent faces (`F2:side:l7#[F2:side:l4,F2:side:l3]|F2:side:l3`).
+/// In 0.48, each side face is named cleanly after its true profile line (`l2`), but the stored 0.45
+/// edge reference must still resolve to the edge under the saved pick on open.
+#[test]
+fn a_revolve_edge_saved_before_seam_profile_naming_migration_is_found_at_its_pick() {
+    let doc = ring();
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    let state = model.state();
+    let body = state.body("Ring").expect("revolve ring body");
+    let at = Vec3::new(0., -20., 5.);
+
+    // The edge between l2 and l3 on the ring at z = 5, as saved by 0.45 when turned seam named
+    // side faces with neighbour qualifiers or shifted curve stems:
+    let saved_qualified = "F2:side:l7#[F2:side:l4,F2:side:l3]|F2:side:l3";
+    let hit = crate::name_lookup::locate_edge(body, saved_qualified, at).unwrap_or_else(|e| panic!("{saved_qualified}: {e}"));
+    assert!(hit.on_point, "resolves on pick point");
+    assert_eq!(hit.point, at);
+
+    let names = crate::naming::edge_names(body);
+    assert_eq!(names.get(hit.edge).map(String::as_str), Some("F2:side:l2|F2:side:l3"));
+
+    // A pick elsewhere on another edge fails asking to reselect:
+    assert!(crate::name_lookup::locate_edge(body, saved_qualified, Vec3::new(0., -10., 0.)).is_err());
+}
+
 /// A drafted face's edge is a circle seen at a slant: an ellipse. The sketch takes it as the
 /// ellipse it is, not as the point set a spline of its own would be (#15061).
 #[test]
@@ -1241,6 +1268,7 @@ fn a_projected_plane_of_another_component_lands_where_the_two_planes_meet() {
         parent: 0,
         name: "Part".into(),
         transform: PART_FRAME,
+        base_transform: None,
         grounded: false,
         expressed_moves: Vec::new(),
         bom_type: None,
@@ -1290,6 +1318,17 @@ fn a_projected_plane_of_another_component_lands_where_the_two_planes_meet() {
 
 /// Where the part of the test above stands: turned half about X and lifted 100 mm.
 const PART_FRAME: crate::Mat = [[1.0, 0.0, 0.0, 0.0], [0.0, -1.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 100.0, 0.0, 1.0]];
+
+/// A deleted member of a face projection is kept by its edge family's name. One saved before
+/// nested names were written in parentheses (#5857) names the same family as today's name, so it
+/// stays deleted in a design opened after that change.
+#[test]
+fn a_deleted_member_saved_in_the_older_name_form_names_the_same_family() {
+    let old = crate::project::omit_name("F5:blend:F2:+x|F2:+z");
+    let now = crate::project::omit_name("F5:blend(F2:+x|F2:+z)");
+    assert_eq!(old, now);
+    assert_eq!(crate::project::omit_name("F2:+x|F3:+z"), "F2:+x|F3:+z", "a name with nothing nested is kept as it is");
+}
 
 #[test]
 fn a_pick_named_by_position_past_the_depth_limit_survives_deleting_unrelated_features() {
@@ -1375,6 +1414,7 @@ fn model_plane_resolution_places_both_cached_and_uncached_construction_planes() 
         grounded: false,
         expressed_moves: Vec::new(),
         bom_type: None,
+        base_transform: None,
     });
     let built = Plane::new(Vec3::new(0.0, 0.0, 5.0), Vec3::X, Vec3::Y).unwrap();
     let id = doc.add_feature(crate::FeatureKind::ConstructionPlane { plane: PlaneRef::Custom { plane: built } }, Some("Shelf")).unwrap();

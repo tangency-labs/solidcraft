@@ -9,8 +9,13 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
+use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::Kernel;
-use solidcore::topology::Brep;
+use solidcore::topology::brep_data_write::FromBrepEnv;
+use solidcore::topology::topology::NotifyRecords;
+use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId};
+
+use super::convert::key_of;
 
 use super::Body;
 use crate::{Error, Result};
@@ -36,7 +41,24 @@ pub(crate) fn set_dir(dir: Option<PathBuf>) {
 fn serialise(k: &Kernel, b: &Brep) -> std::result::Result<Vec<u8>, String> {
     #[cfg(test)]
     SERIALISED.with(|n| n.set(n.get() + 1));
-    super::file::bytes(k, b, false).map_err(|e| e.to_string())
+    bytes(k, b).map_err(|e| e.to_string())
+}
+
+/// `b` as the contents of a binary `.smb` file, the bytes [`solidcore_ops::Body::to_smb`] writes.
+/// Kept on the kernel the failed call ran on, with the session: a body a panic left unfinished is
+/// still written, where solidcore-ops refuses to read it.
+fn bytes(k: &Kernel, b: &Brep) -> solidcore::Result<Vec<u8>> {
+    let store = AttributeStore::default();
+    let records = NotifyRecords::new();
+    let env = FromBrepEnv {
+        attributes: &store,
+        key_of: &key_of,
+        records: &records,
+        curve_key: &|_: EdgeId| ObjectKey(0),
+        uv_curve_key: &|_: EdgeuseId| ObjectKey(0),
+        surface_key: &|_: FaceId| ObjectKey(0),
+    };
+    solidcore::topology::api_files::write_brep_to_file(k, Some(b), &env, false)
 }
 
 fn safe(call: &str) -> String {

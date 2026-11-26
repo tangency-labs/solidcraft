@@ -412,10 +412,10 @@ fn both_sides(
 /// The manifold solid `body` cut in two by `tool`: the part behind the surface (its normal
 /// points away) and the part in front, each closed by the tool's piece inside the body and
 /// each possibly several solids. A tool that closes on itself (a sphere, a whole torus) cuts
-/// the body into the part inside it and the part outside. A tool that misses leaves both parts
-/// the whole body. `None`
-/// when a side is left empty, or when the tool ends inside the body: it only nicks it, and a
-/// part that is no manifold solid is no cut. `body` is unchanged.
+/// the body into the part inside it and the part outside. An open tool that misses leaves both
+/// parts the whole body; a closed tool that misses leaves nothing inside it, so it gives `None`.
+/// `None` when a side is left empty, or when the tool ends inside the body: it only nicks it,
+/// and a part that is no manifold solid is no cut. `body` is unchanged.
 ///
 /// # Errors
 /// [`Error::NotSolid`] for a body that is no manifold solid; the kernel's errors (a tool it

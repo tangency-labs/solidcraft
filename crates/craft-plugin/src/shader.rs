@@ -28,6 +28,8 @@ pub const MAX_SETTINGS: usize = 4;
 pub const MAX_TEXTURE_BYTES: usize = 16 * 1024 * 1024;
 /// The longest side of a texture after the host loads it; larger pictures are scaled down.
 pub const MAX_TEXTURE_SIDE: u32 = 8192;
+/// The largest side of a `state` grid, in texels.
+pub const MAX_STATE_SIDE: u32 = 1024;
 /// Loop iterations and calls of the plugin's own functions one pixel may make, all together. A
 /// loop that reaches the cap ends as if its condition had failed, and a call returns zero at once,
 /// so the work per pixel is bounded by the budget times the size of the source.
@@ -64,13 +66,30 @@ impl ShaderKind {
     }
 }
 
+/// A grid kept between frames: `fn state` writes it from `sc_state_prev`, the background reads `sc_state`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ShaderState {
+    /// Texels across, 1 to [`MAX_STATE_SIDE`].
+    pub width: u32,
+    /// Texels down, 1 to [`MAX_STATE_SIDE`].
+    pub height: u32,
+}
+
+/// A picture a shader samples: one shipped in the plugin's folder, one the person chooses, or
+/// both (the shipped one until a person picks another).
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ShaderTexture {
     /// The name the shader uses for it, a WGSL identifier (`sky`, `city_lights`).
     pub name: String,
-    /// A `.png` or `.jpg` file name in the plugin's folder.
-    pub file: String,
+    /// A `.png` or `.jpg` file name in the plugin's folder. Needed unless `choose` is given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    /// Makes the texture one the person chooses: the label shown beside it, 1..40 printable
+    /// characters. Needs `shaders@0.2` and a background.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub choose: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
@@ -88,6 +107,9 @@ pub struct Shader {
     /// view changes, and `sc.time` stays at 0.
     #[serde(default)]
     pub animated: bool,
+    /// A grid stepped by `fn state` every frame; needs `animated`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<ShaderState>,
     /// Sliders on the plugin's card, read as `sc.settings` in order (`shaders@0.2`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub settings: Vec<ShaderSetting>,
@@ -142,12 +164,12 @@ fn plain_file(name: &str, extensions: &[&str]) -> bool {
 
 /// A WGSL identifier the host does not reserve: lowercase, digits and `_`, not starting with
 /// `sc_` or a digit, at most 32 characters.
-fn texture_name(name: &str) -> bool {
+pub fn texture_name(name: &str) -> bool {
     (1..=32).contains(&name.len())
         && name.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')
         && name.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
         && !name.starts_with("sc_")
-        && !matches!(name, "sc" | "background" | "tint" | "panel")
+        && !matches!(name, "sc" | "background" | "tint" | "panel" | "state")
 }
 
 /// Checks a manifest's `shaders` list: count, distinct ids, file names and texture names.
@@ -167,6 +189,17 @@ pub fn validate(shaders: &[Shader]) -> Result<()> {
         if !plain_file(&shader.source, &["wgsl"]) {
             return Err(invalid(format!("{field}.source"), "must be one lowercase .wgsl file name in the plugin's folder"));
         }
+        if let Some(state) = shader.state {
+            if shader.kind != ShaderKind::Background {
+                return Err(invalid(format!("{field}.state"), "only a background keeps a state grid"));
+            }
+            if !shader.animated {
+                return Err(invalid(format!("{field}.state"), "needs \"animated\": true, the state is stepped every frame"));
+            }
+            if !(1..=MAX_STATE_SIDE).contains(&state.width) || !(1..=MAX_STATE_SIDE).contains(&state.height) {
+                return Err(invalid(format!("{field}.state"), format!("width and height 1 to {MAX_STATE_SIDE} texels")));
+            }
+        }
         if shader.textures.len() > MAX_TEXTURES {
             return Err(invalid(format!("{field}.textures"), format!("at most {MAX_TEXTURES} textures")));
         }
@@ -178,8 +211,21 @@ pub fn validate(shaders: &[Shader]) -> Result<()> {
                     "each texture needs a distinct WGSL name: lowercase letters, digits and _, not starting with sc_",
                 ));
             }
-            if !plain_file(&texture.file, &["png", "jpg", "jpeg"]) {
+            if texture.file.is_none() && texture.choose.is_none() {
+                return Err(invalid(format!("{field}.textures.{}", texture.name), "needs a file, a choose label, or both"));
+            }
+            if let Some(file) = &texture.file
+                && !plain_file(file, &["png", "jpg", "jpeg"])
+            {
                 return Err(invalid(format!("{field}.textures.{}", texture.name), "must be one lowercase .png or .jpg file name"));
+            }
+            if let Some(label) = &texture.choose
+                && !crate::plain(label, 40)
+            {
+                return Err(invalid(format!("{field}.textures.{}", texture.name), "choose must be a label of 1..40 printable characters"));
+            }
+            if texture.choose.is_some() && shader.kind != ShaderKind::Background {
+                return Err(invalid(format!("{field}.textures.{}", texture.name), "only a background's textures may be chosen"));
             }
         }
         if shader.blur.is_some_and(|b| shader.kind != ShaderKind::Panel || !(b.is_finite() && (1.0..=60.0).contains(&b))) {
@@ -228,9 +274,10 @@ struct ScHost {
     text: vec4<f32>,
     // 1 for a dark theme, 0 for a light one.
     dark: f32,
-    sc_pad0: f32,
-    sc_pad1: f32,
-    sc_pad2: f32,
+    // The step of a shader's `state` this frame: 0 on the first and after a reset.
+    frame: f32,
+    // The `state` grid's size in texels; 0 for a shader without one.
+    state_size: vec2<f32>,
     // The values of the shader's settings, in the order its manifest lists them; 0 past the last.
     settings: vec4<f32>,
 }
@@ -283,7 +330,7 @@ fn sc_fragment(v: ScVarying) -> @location(0) vec4<f32> {
     let colour = clamp(background(ScPixel(v.uv, v.uv * sc.size, normalize(v.ray))), vec4<f32>(0.0), vec4<f32>(1.0));
     return vec4<f32>(sc_encode(colour.rgb) * colour.a, colour.a);
 }
-"
+{state}"
 );
 
 /// What the host declares around a tint shader's source: the region it asks about and the compute
@@ -425,6 +472,27 @@ fn sc_fragment(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
 pub const PANEL_RECT_BINDING: u32 = FIRST_TEXTURE_BINDING + MAX_TEXTURES as u32;
 /// The size of `ScPanelRect`, one per panel.
 pub const PANEL_RECT_UNIFORM_BYTES: usize = 64;
+/// Added with a `state` grid: `sc_state` and `sc_state_prev` (bound per pass by the app) and `sc_state_fragment`.
+pub const STATE_PRELUDE: &str = r"
+@group(0) @binding(7) var sc_state: texture_2d<f32>;
+@group(0) @binding(8) var sc_state_prev: texture_2d<f32>;
+
+struct ScStatePixel {
+    // The texel's position in the grid, from its top left.
+    texel: vec2<u32>,
+    // The texel's centre, 0..1 across the grid.
+    uv: vec2<f32>,
+}
+
+@fragment
+fn sc_state_fragment(v: ScVarying) -> @location(0) vec4<f32> {
+    let texel = vec2<u32>(v.clip.xy);
+    return state(ScStatePixel(texel, (vec2<f32>(texel) + 0.5) / sc.state_size));
+}
+";
+
+/// The binding of a shader's `sc_state` grid (`sc_state_prev` is the next one).
+pub const STATE_BINDING: u32 = FIRST_TEXTURE_BINDING + MAX_TEXTURES as u32;
 
 /// The first texture's binding; the textures follow in manifest order.
 pub const FIRST_TEXTURE_BINDING: u32 = 3;
@@ -481,6 +549,9 @@ fn host_functions(kind: ShaderKind) -> &'static [&'static str] {
     }
 }
 
+const NO_STATE_GRID: &str = "uses the state (ScStatePixel, sc_state), but its manifest has no state grid: add \"state\" to the shader";
+const NEEDS_STATE: &str = "needs fn state(px: ScStatePixel) -> vec4<f32>, since its manifest has a state grid";
+
 fn refuse(shader: &Shader, reason: impl Into<String>) -> HostError {
     invalid(format!("shaders.{}", shader.id), format!("{}: {}", shader.source, reason.into()))
 }
@@ -497,6 +568,7 @@ pub fn compile(shader: &Shader, source: &str) -> Result<Compiled> {
         .enumerate()
         .map(|(i, t)| format!("@group(0) @binding({}) var {}: texture_2d<f32>;\n", FIRST_TEXTURE_BINDING as usize + i, t.name))
         .collect();
+    let state = if shader.state.is_some() { STATE_PRELUDE } else { "" };
     let lines = source.lines().count();
     let prelude = match shader.kind {
         ShaderKind::Background => PRELUDE,
@@ -504,7 +576,11 @@ pub fn compile(shader: &Shader, source: &str) -> Result<Compiled> {
         ShaderKind::Panel => PANEL_PRELUDE,
     };
     let (function, needs) = (shader.kind.function(), shader.kind.signature());
-    let full = format!("{source}\n{}", prelude.replace("{textures}", &textures));
+    let full = format!(
+        "{source}
+{}",
+        prelude.replace("{textures}", &textures).replace("{state}", state)
+    );
     let at = |location: Option<naga::SourceLocation>| match location {
         Some(l) if l.line_number as usize <= lines => format!("line {}: ", l.line_number),
         Some(_) => "where it meets the host's declarations (a name starting sc or ScHost?): ".to_string(),
@@ -515,6 +591,10 @@ pub fn compile(shader: &Shader, source: &str) -> Result<Compiled> {
         let in_host = e.location(&full).is_some_and(|l| l.line_number as usize > lines);
         if in_host && e.message().contains(function) {
             refuse(shader, needs)
+        } else if in_host && shader.state.is_some() && e.message().contains("state") {
+            refuse(shader, NEEDS_STATE)
+        } else if shader.state.is_none() && (e.message().contains("ScStatePixel") || e.message().contains("sc_state")) {
+            refuse(shader, NO_STATE_GRID)
         } else {
             refuse(shader, format!("{}{}", at(e.location(&full)), e.message()))
         }
@@ -529,18 +609,28 @@ pub fn compile(shader: &Shader, source: &str) -> Result<Compiled> {
     if shader.kind == ShaderKind::Panel {
         host.extend(["sc_panel", "sc_scene", "sc_scene_blurred"]);
     }
-    if module.entry_points.iter().any(|e| !matches!(e.name.as_str(), "sc_vertex" | "sc_fragment" | "sc_tint_main")) {
+    if shader.state.is_some() && !module.functions.iter().any(|(_, f)| f.name.as_deref() == Some("state")) {
+        return Err(refuse(shader, NEEDS_STATE));
+    }
+    let mut entries = vec!["sc_vertex", "sc_fragment", "sc_tint_main"];
+    if shader.state.is_some() {
+        host.extend(["sc_state", "sc_state_prev"]);
+        entries.push("sc_state_fragment");
+    }
+    if module.entry_points.iter().any(|e| !entries.contains(&e.name.as_str())) {
         return Err(refuse(shader, "declares an entry point (@vertex, @fragment or @compute); the host supplies them"));
     }
-    if let Some((_, global)) = module
-        .global_variables
-        .iter()
-        .find(|(_, g)| !(g.space == naga::AddressSpace::Private && g.binding.is_none()) && !host.contains(g.name.as_deref().unwrap_or("")))
-    {
+    // A global the host does not bind is refused; with a state grid, so is a private one named sc_.
+    let grid = shader.state.is_some();
+    if let Some((_, global)) = module.global_variables.iter().find(|(_, g)| {
+        let name = g.name.as_deref().unwrap_or("");
+        let private = g.space == naga::AddressSpace::Private && g.binding.is_none();
+        (!private || (grid && name.starts_with("sc_"))) && !host.contains(name)
+    }) {
         return Err(refuse(
             shader,
             format!(
-                "declares the resource `{}`; a shader reads only what the host binds: sc, sc_clamp, sc_repeat, the textures its manifest names, a tint's sc_regions and sc_tints, and a panel's sc_panel, sc_scene and sc_scene_blurred",
+                "declares the resource `{}`; a shader reads only what the host binds: sc, sc_clamp, sc_repeat, the textures its manifest names, a state grid's sc_state and sc_state_prev, a tint's sc_regions and sc_tints, and a panel's sc_panel, sc_scene and sc_scene_blurred",
                 global.name.as_deref().unwrap_or("?")
             ),
         ));

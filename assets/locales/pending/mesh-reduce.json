@@ -86,5 +86,16 @@
     "ui.mesh_reduce_result": "已简化网格：原有 {original} 个三角形，目标 {target} 个，结果 {achieved} 个。",
     "ui.mesh_reduce_shortfall": "已简化网格：原有 {original} 个三角形，目标 {target} 个，结果 {achieved} 个。本次运行未达到目标。",
     "prefs.legacy_surface_toolbar_hint": "旧版模式会隐藏网格面板的自定义设置，关闭旧版模式后将重新显示。"
+  },
+  "fr": {
+    "REDUCE MESH": "RÉDUIRE LE MAILLAGE",
+    "Retained percentage": "Pourcentage conservé",
+    "Triangle count": "Nombre de triangles",
+    "cmd.mesh_reduce": "Réduire le maillage",
+    "help.mesh.reduce": "Crée une copie simplifiée d’un maillage en fonction d’un pourcentage conservé ou d’un nombre de triangles. L’original reste inchangé et le résultat peut être utilisé par Convertir le maillage.",
+    "ui.feature_kind.mesh_reduce": "Réduction du maillage",
+    "ui.mesh_reduce_result": "Maillage réduit : {original} triangles d’origine, {target} visés, {achieved} obtenus.",
+    "ui.mesh_reduce_shortfall": "Maillage réduit : {original} triangles d’origine, {target} visés, {achieved} obtenus ; cette opération n’a pas atteint l’objectif.",
+    "prefs.legacy_surface_toolbar_hint": "Les personnalisations du panneau Maillage sont masquées en mode hérité et réapparaissent lorsque vous le désactivez."
   }
 }

@@ -46,5 +46,13 @@
     "Damping": "阻尼",
     "Friction": "摩擦",
     "Not a number": "不是数字"
+  },
+  "fr": {
+    "cmd.joint_dynamics": "Dynamique de la liaison",
+    "Dynamics": "Dynamique",
+    "Effort": "Effort",
+    "Damping": "Amortissement",
+    "Friction": "Frottement",
+    "Not a number": "Non numérique"
   }
 }

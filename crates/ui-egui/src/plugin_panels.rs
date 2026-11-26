@@ -75,7 +75,7 @@ pub(crate) fn prepare(app: &mut SolveApp, ctx: &egui::Context) {
             let pending: Pending = Arc::default();
             let (slot, repaint, k, limit) = (pending.clone(), ctx.clone(), key.clone(), rs.device.limits().max_texture_dimension_2d);
             std::thread::spawn(move || {
-                let result = crate::plugin_shaders::load(folder, k, limit);
+                let result = crate::plugin_shaders::load(folder, k, Default::default(), limit);
                 *slot.lock().unwrap_or_else(PoisonError::into_inner) = Some(result);
                 repaint.request_repaint();
             });
@@ -115,7 +115,7 @@ pub(crate) fn prepare(app: &mut SolveApp, ctx: &egui::Context) {
     let window = ctx.content_rect().size() * ppp;
     let size = [window.x.round().max(1.0) as u32, window.y.round().max(1.0) as u32];
     let settings = crate::plugin_shaders::settings(&app.preferences.shader_settings, &active.key, &active.shader);
-    let bytes = crate::plugin_shaders::host_uniforms(size, time, ppp, &app.cam, &solidcraft_theme::Tokens::get(), settings);
+    let bytes = crate::plugin_shaders::host_uniforms(size, time, ppp, &app.cam, &solidcraft_theme::Tokens::get(), (0.0, [0.0, 0.0]), settings);
     app.blur.set_panel_hook_globals(&bytes);
 }
 
