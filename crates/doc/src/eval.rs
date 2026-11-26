@@ -2973,19 +2973,45 @@ impl PlacementReads {
     }
 
     fn link(&mut self, doc: &Document, st: Option<&ModelState>, source: &solidcraft_sketch::LinkSource) {
+        self.link_with_pins(doc, st, source, &std::collections::BTreeSet::new());
+    }
+
+    /// [`PlacementReads::link`], omitting source sketches whose relative placement to the author
+    /// was captured in `Link::sketch_placements` (and whose wires are not world-space).
+    fn link_with_pins(
+        &mut self,
+        doc: &Document,
+        st: Option<&ModelState>,
+        source: &solidcraft_sketch::LinkSource,
+        pinned_sketches: &std::collections::BTreeSet<u64>,
+    ) {
         use solidcraft_sketch::LinkSource as L;
         match source {
             L::Edge { body, .. } | L::Face { body, .. } | L::Body { body } | L::Vertex { body, .. } | L::Iso { body, .. } | L::Spun { body, .. } => {
                 self.body(doc, st, body)
             }
-            L::SketchCurve { sketch, .. } | L::SketchPoint { sketch, .. } => self.sketch(doc, *sketch),
+            L::SketchCurve { sketch, .. } | L::SketchPoint { sketch, .. } => {
+                if pinned_sketches.contains(sketch) {
+                    if doc.sketch(*sketch).is_ok_and(|sk| sk.wires.iter().any(|w| w.space == solidcraft_sketch::WireSpace::World)) {
+                        self.components.insert(0);
+                    }
+                } else {
+                    self.sketch(doc, *sketch);
+                }
+            }
             L::OnSurface { sketch, body, .. } => {
-                self.sketch(doc, *sketch);
+                if pinned_sketches.contains(sketch) {
+                    if doc.sketch(*sketch).is_ok_and(|sk| sk.wires.iter().any(|w| w.space == solidcraft_sketch::WireSpace::World)) {
+                        self.components.insert(0);
+                    }
+                } else {
+                    self.sketch(doc, *sketch);
+                }
                 self.body(doc, st, body);
             }
             L::Intersection { a, b } => {
-                self.link(doc, st, a);
-                self.link(doc, st, b);
+                self.link_with_pins(doc, st, a, pinned_sketches);
+                self.link_with_pins(doc, st, b, pinned_sketches);
             }
             // In the sketch's own frame: the component's origin, axes and planes, its own axes, text.
             // A construction point is kept in its own component's frame: the sketch reads where
@@ -3031,7 +3057,15 @@ impl PlacementReads {
         }
     }
 
-    fn geo(&mut self, doc: &Document, comp: u64, g: &crate::construct::GeoRef) {
+    fn geo_with_anchor(
+        &mut self,
+        doc: &Document,
+        comp: u64,
+        st: Option<&ModelState>,
+        g: &crate::construct::GeoRef,
+        h: &mut impl Hasher,
+        has_captured: &mut bool,
+    ) {
         use crate::construct::GeoRef as G;
         match g {
             G::Point { .. } | G::Origin | G::World { .. } | G::Datum { .. } => {}
@@ -3054,6 +3088,10 @@ impl PlacementReads {
                 None => self.all = true,
             },
             G::Plane { plane } => match crate::face_anchor::plane_face_anchor(plane) {
+                Some(anchor) if anchor.placement.is_some() && !plane_outer_reads_geometry(plane) => {
+                    hash_captured_face_anchor(doc, comp, anchor, st, h);
+                    *has_captured = true;
+                }
                 Some(anchor) => {
                     if anchor.path.is_empty() {
                         if anchor.component != comp {
@@ -3061,6 +3099,9 @@ impl PlacementReads {
                         }
                     } else {
                         self.paths.push(anchor.path.clone());
+                    }
+                    if plane_outer_reads_geometry(plane) {
+                        self.all = true;
                     }
                 }
                 None if plane_reads_geometry(plane) => {
@@ -3071,7 +3112,7 @@ impl PlacementReads {
                 }
                 None => {}
             },
-            G::Snap { of, .. } => self.geo(doc, comp, of),
+            G::Snap { of, .. } => self.geo_with_anchor(doc, comp, st, of, h, has_captured),
             // An edge on one occurrence reads that placement (and the one it was authored in).
             G::PlacedEdge { path, author_path, .. } => {
                 self.paths.push(path.clone());
@@ -4658,6 +4699,145 @@ fn gusset_placements_digest(doc: &Document, f: &Feature, st: Option<&ModelState>
     h.finish() | 1
 }
 
+/// Whether the outer wrappers of `plane` (outside an inner `PlaneRef::Face`) read model geometry
+/// from the framed state (`ThroughPoint`, `AtAngle` with a line or pivot). Plain `Face`, `Offset`,
+/// `Flipped`, and plain `AtAngle` resolve solely from the anchored face.
+pub(crate) fn plane_outer_reads_geometry(plane: &PlaneRef) -> bool {
+    match plane {
+        PlaneRef::Face { .. } => false,
+        PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => plane_outer_reads_geometry(base),
+        PlaneRef::AtAngle { base, line, pivot, .. } => line.is_some() || pivot.is_some() || plane_outer_reads_geometry(base),
+        PlaneRef::ThroughPoint { .. } => true,
+        _ => plane_reads_geometry(plane),
+    }
+}
+
+/// Hash the placement read by a [`crate::FaceAnchor`] whose `placement` was captured at creation
+/// time: it stays rigid across assembly joint motion, while still invalidating if either occurrence
+/// path breaks or becomes singular, body ownership changes, or the target body's offset changes.
+fn hash_captured_face_anchor(doc: &Document, author: u64, anchor: &crate::FaceAnchor, st: Option<&ModelState>, h: &mut impl Hasher) {
+    "captured face anchor".hash(h);
+    match st.and_then(|st| st.body(&anchor.target.body)) {
+        Some(body) => match anchor.source_to_author(doc, author, body) {
+            Ok(transform) => {
+                1u8.hash(h);
+                hash_placement(&transform, h);
+            }
+            Err(err) => {
+                2u8.hash(h);
+                err.to_string().hash(h);
+            }
+        },
+        None => {
+            0u8.hash(h);
+            let valid_author = anchor
+                .author_frame(doc, author)
+                .and_then(|m| crate::mat_inverse(&m).ok_or_else(|| DocError::Invalid("attached sketch author frame is invalid".into())));
+            match valid_author {
+                Ok(_) => 1u8.hash(h),
+                Err(err) => (2u8, err.to_string()).hash(h),
+            }
+            match crate::EmbossFace::component_frame(doc, anchor.component, &anchor.path) {
+                Ok(_) => 1u8.hash(h),
+                Err(err) => (2u8, err.to_string()).hash(h),
+            }
+            if let Some(m) = &anchor.placement {
+                hash_placement(m, h);
+            }
+            if let Some(offset) = doc.body_offsets.get(&anchor.target.body) {
+                hash_placement(offset, h);
+            }
+        }
+    }
+}
+
+/// Hash components read through [`state_in_frame_pinned_to`]: components pinned in `pins` contribute
+/// their captured rigid placement instead of their live occurrence transform, while unpinned foreign
+/// components remain live in `reads.components`. Returns `false` when `pins` is empty or `st` is
+/// absent (caller falls back to `reads.all`).
+fn hash_pinned_components(
+    doc: &Document,
+    author: u64,
+    st: Option<&ModelState>,
+    pins: &[crate::PickedPlacement],
+    reads: &mut PlacementReads,
+    h: &mut impl Hasher,
+) -> bool {
+    let (false, Some(st)) = (pins.is_empty(), st) else {
+        return false;
+    };
+    "pinned object components".hash(h);
+    crate::mat_inverse(&doc.component_transform(author)).is_some().hash(h);
+    for c in doc.body_owners(st) {
+        if c == author {
+            continue;
+        }
+        if let Some(pin) = pins.iter().find(|p| p.component == c) {
+            (c, 1u8).hash(h);
+            hash_placement(&pin.placement, h);
+        } else {
+            reads.components.insert(c);
+        }
+    }
+    serde_json::to_string(&doc.body_offsets).unwrap_or_default().hash(h);
+    true
+}
+
+/// Like [`PlacementReads::object_faces`], respecting `Extent::picked_placements` (#16732): target
+/// faces belonging to pinned foreign components hash their captured placement and body offset rather
+/// than the component's live occurrence transform. Returns whether captured placements were hashed.
+#[allow(clippy::too_many_arguments)]
+fn hash_object_faces_pinned(
+    doc: &Document,
+    author: u64,
+    st: Option<&ModelState>,
+    names: Option<&[String]>,
+    pins: &[crate::PickedPlacement],
+    reads: &mut PlacementReads,
+    h: &mut impl Hasher,
+) -> bool {
+    if pins.is_empty() {
+        reads.object_faces(st, names);
+        return false;
+    }
+    "pinned object faces".hash(h);
+    crate::mat_inverse(&doc.component_transform(author)).is_some().hash(h);
+    let bodies: Option<Vec<&str>> = st.zip(names).and_then(|(st, names)| {
+        let first_of_its_name = |b: &&ModelBody| st.body(&b.name).is_some_and(|first| std::ptr::eq(first, *b));
+        names.iter().map(|n| crate::name_lookup::face_body(st, n).filter(first_of_its_name).map(|b| b.name.as_str())).collect()
+    });
+    match bodies {
+        Some(bodies) => {
+            for body_name in bodies {
+                if let Some(b) = st.and_then(|st| st.body(body_name)) {
+                    let c = doc.model_body_component(b);
+                    if c != author
+                        && let Some(pin) = pins.iter().find(|p| p.component == c)
+                    {
+                        (body_name, c, 1u8).hash(h);
+                        hash_placement(&pin.placement, h);
+                        match doc.model_body_offset(b) {
+                            Some(offset) => {
+                                1u8.hash(h);
+                                hash_placement(offset, h);
+                            }
+                            None => 0u8.hash(h),
+                        }
+                        continue;
+                    }
+                }
+                reads.placed_body(st, body_name);
+            }
+        }
+        None => {
+            if !hash_pinned_components(doc, author, st, pins, reads, h) {
+                reads.all = true;
+            }
+        }
+    }
+    true
+}
+
 /// Where the geometry a feature reads from other components is placed, as its own component
 /// sees it: the placement of each component (or occurrence path) it reads relative to its own
 /// frame. A feature that reads nothing outside its own frame gives 0, so moving parts around
@@ -4677,6 +4857,7 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
     let mut copied = false;
     let mut h = std::collections::hash_map::DefaultHasher::new();
     let mut has_captured_profile = false;
+    let mut has_captured_anchor = false;
     // A sketch, profile or path of another component is moved through both placements, unless the
     // feature captured its component's frame at creation time (in which case only the sketch's
     // component motion relative to their common ancestor affects the local profile).
@@ -4821,10 +5002,15 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
     });
     match &f.kind {
         // To / From Object finds its target where the target's body is placed (#928): only that
-        // body's placement, not every part's (#6325). Its tools meet their targets as other
-        // joins and cuts do.
+        // body's placement, not every part's (#6325). Extrudes with captured `picked_placements`
+        // (#16732) keep pinned foreign components rigid across assembly motion. Its tools meet
+        // their targets as other joins and cuts do.
         kind if object_names > 0 => {
-            reads.object_faces(st, f.face_names.get(..object_names));
+            let picked_pins: &[crate::PickedPlacement] = match kind {
+                FeatureKind::Extrude { extent, .. } | FeatureKind::SurfaceExtrude { extent, .. } => &extent.picked_placements,
+                _ => &[],
+            };
+            has_captured_anchor |= hash_object_faces_pinned(doc, f.component, st, f.face_names.get(..object_names), picked_pins, &mut reads, &mut h);
             if drawn_tools_change_bodies(kind) {
                 reads.drawn_targets(st, f);
             }
@@ -4894,8 +5080,15 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 reads.placed_body(st, &b.0);
             }
         }
-        // A surface extrude To Next runs into whichever body is in its way, wherever it is placed.
-        FeatureKind::SurfaceExtrude { to_next: true, .. } => reads.all = true,
+        // A surface extrude To Next runs into whichever body is in its way, respecting any pinned
+        // placements captured when it was created.
+        FeatureKind::SurfaceExtrude { to_next: true, extent, .. } => {
+            if hash_pinned_components(doc, f.component, st, &extent.picked_placements, &mut reads, &mut h) {
+                has_captured_anchor = true;
+            } else {
+                reads.all = true;
+            }
+        }
         // Copies meet the bodies they change where those are placed relative to their source's
         // tools' frame, whatever the pattern's own placement (#14271).
         FeatureKind::Pattern { features, bodies, .. } | FeatureKind::Mirror { features, bodies, .. } if bodies.is_empty() => {
@@ -4952,23 +5145,10 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         }
         FeatureKind::FramePlate { plane, .. } => {
             if let Some(anchor) = crate::face_anchor::plane_face_anchor(plane) {
-                match anchor.author_frame(doc, f.component) {
-                    Ok(m) => frame = Some(m),
-                    Err(e) => e.to_string().hash(&mut h),
-                }
-                if anchor.path.is_empty() {
-                    reads.components.insert(anchor.component);
+                if anchor.placement.is_some() {
+                    hash_captured_face_anchor(doc, f.component, anchor, st, &mut h);
+                    has_captured_anchor = true;
                 } else {
-                    reads.paths.push(anchor.path.clone());
-                }
-                reads.placed_body(st, &anchor.target.body);
-            }
-        }
-        FeatureKind::Sketch { plane, sketch } => {
-            match crate::face_anchor::plane_face_anchor(plane) {
-                // Read in the frame of the placement it was drawn in, its face through the
-                // placement it was picked at.
-                Some(anchor) => {
                     match anchor.author_frame(doc, f.component) {
                         Ok(m) => frame = Some(m),
                         Err(e) => e.to_string().hash(&mut h),
@@ -4978,13 +5158,83 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                     } else {
                         reads.paths.push(anchor.path.clone());
                     }
+                    reads.placed_body(st, &anchor.target.body);
+                }
+            }
+        }
+        FeatureKind::Sketch { plane, sketch } => {
+            let plane_anchor = crate::face_anchor::plane_face_anchor(plane);
+            let captured_plane_anchor = plane_anchor.filter(|a| a.placement.is_some() && !plane_outer_reads_geometry(plane));
+            match (captured_plane_anchor, plane_anchor) {
+                (Some(anchor), _) => {
+                    if let Ok(m) = anchor.author_frame(doc, f.component) {
+                        frame = Some(m);
+                    }
+                    hash_captured_face_anchor(doc, f.component, anchor, st, &mut h);
+                    has_captured_anchor = true;
+                }
+                // Read in the frame of the placement it was drawn in, its face through the
+                // placement it was picked at.
+                (None, Some(anchor)) => {
+                    match anchor.author_frame(doc, f.component) {
+                        Ok(m) => frame = Some(m),
+                        Err(e) => e.to_string().hash(&mut h),
+                    }
+                    if anchor.path.is_empty() {
+                        reads.components.insert(anchor.component);
+                    } else {
+                        reads.paths.push(anchor.path.clone());
+                    }
+                    if plane_outer_reads_geometry(plane) {
+                        reads.all = true;
+                    }
                 }
                 // A face or edges picked on whatever body lies there.
-                None if plane_reads_geometry(plane) => reads.all = true,
-                None => {}
+                (None, None) if plane_reads_geometry(plane) => reads.all = true,
+                (None, None) => {}
             }
             // A frozen link reads nothing: its geometry stays as it is wherever its source goes.
             for link in sketch.links.iter().filter(|l| !l.frozen) {
+                // Auto-projected border of a captured face anchor is resolved against the anchor's
+                // captured relative placement (already hashed by `hash_captured_face_anchor`).
+                if link.auto_face
+                    && link.placement.is_none()
+                    && link.sketch_placements.is_empty()
+                    && captured_plane_anchor.is_some_and(|a| {
+                        link.face_name.as_ref() == Some(&a.target.name)
+                            && matches!(&link.source, solidcraft_sketch::LinkSource::Face { body, .. } if *body == a.target.body)
+                    })
+                {
+                    continue;
+                }
+                // Pinned source-sketch placements (#17980) keep foreign sketches at their captured
+                // relative transform across assembly motion (`project::state_for_link`).
+                if !link.sketch_placements.is_empty() {
+                    let author_m = frame.unwrap_or_else(|| doc.component_transform(f.component));
+                    "captured sketch link".hash(&mut h);
+                    crate::mat_inverse(&author_m).is_some().hash(&mut h);
+                    let mut pinned = std::collections::BTreeSet::new();
+                    for pin in &link.sketch_placements {
+                        pin.sketch.hash(&mut h);
+                        hash_placement(&pin.placement, &mut h);
+                        match doc.feature(pin.sketch) {
+                            Some(src) => {
+                                1u8.hash(&mut h);
+                                src.component.hash(&mut h);
+                                let invertible =
+                                    src.component == f.component || crate::mat_inverse(&doc.component_transform(src.component)).is_some();
+                                invertible.hash(&mut h);
+                                if invertible {
+                                    pinned.insert(pin.sketch);
+                                }
+                            }
+                            None => 0u8.hash(&mut h),
+                        }
+                    }
+                    has_captured_anchor = true;
+                    reads.link_with_pins(doc, st, &link.source, &pinned);
+                    continue;
+                }
                 match &link.placement {
                     // Read at that placement, not at its component's first one.
                     Some(p) => reads.placed.push((p.author.clone(), p.source.clone())),
@@ -4997,46 +5247,65 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             }
         }
         // Each end is read as a sketch on a face is: in the frame it was capped in, its member
-        // through the placement it was picked at, so moving that occurrence rebuilds the cap.
+        // through the placement it was picked at, so moving that occurrence rebuilds the cap
+        // unless the anchor captured its relative placement.
         FeatureKind::FrameEndCap { ends, .. } => {
             for anchor in ends.iter().filter_map(|end| crate::face_anchor::plane_face_anchor(&end.plane)) {
-                match anchor.author_frame(doc, f.component) {
-                    Ok(m) => {
-                        hash_placement(&m, &mut h);
-                        frame.get_or_insert(m);
-                    }
-                    Err(e) => e.to_string().hash(&mut h),
-                }
-                if anchor.path.is_empty() {
-                    reads.components.insert(anchor.component);
+                if anchor.placement.is_some() {
+                    hash_captured_face_anchor(doc, f.component, anchor, st, &mut h);
+                    has_captured_anchor = true;
                 } else {
-                    reads.paths.push(anchor.path.clone());
+                    match anchor.author_frame(doc, f.component) {
+                        Ok(m) => {
+                            hash_placement(&m, &mut h);
+                            frame.get_or_insert(m);
+                        }
+                        Err(e) => e.to_string().hash(&mut h),
+                    }
+                    if anchor.path.is_empty() {
+                        reads.components.insert(anchor.component);
+                    } else {
+                        reads.paths.push(anchor.path.clone());
+                    }
                 }
             }
         }
         // A trim's face targets are read as an end cap's faces are: in the frame each was picked
-        // in, through the placement it was picked at, so moving that occurrence trims again.
+        // in, through the placement it was picked at, unless the anchor captured its placement.
         FeatureKind::FrameTrim { to, .. } => {
-            let faces = to.iter().filter_map(|t| match t {
-                crate::frame::TrimTarget::Plane { plane } => crate::face_anchor::plane_face_anchor(plane),
+            let planes = to.iter().filter_map(|t| match t {
+                crate::frame::TrimTarget::Plane { plane } => Some(plane),
                 crate::frame::TrimTarget::Member { .. } => None,
             });
-            for anchor in faces {
-                match anchor.author_frame(doc, f.component) {
-                    Ok(m) => {
-                        hash_placement(&m, &mut h);
-                        frame.get_or_insert(m);
-                    }
-                    Err(e) => e.to_string().hash(&mut h),
-                }
-                if anchor.path.is_empty() {
-                    reads.components.insert(anchor.component);
+            for plane in planes {
+                let Some(anchor) = crate::face_anchor::plane_face_anchor(plane) else { continue };
+                if anchor.placement.is_some() && !plane_outer_reads_geometry(plane) {
+                    hash_captured_face_anchor(doc, f.component, anchor, st, &mut h);
+                    has_captured_anchor = true;
                 } else {
-                    reads.paths.push(anchor.path.clone());
+                    match anchor.author_frame(doc, f.component) {
+                        Ok(m) => {
+                            hash_placement(&m, &mut h);
+                            frame.get_or_insert(m);
+                        }
+                        Err(e) => e.to_string().hash(&mut h),
+                    }
+                    if anchor.path.is_empty() {
+                        reads.components.insert(anchor.component);
+                    } else {
+                        reads.paths.push(anchor.path.clone());
+                    }
+                    if plane_outer_reads_geometry(plane) {
+                        reads.all = true;
+                    }
                 }
             }
         }
         FeatureKind::ConstructionPlane { plane } => match crate::face_anchor::plane_face_anchor(plane) {
+            Some(anchor) if anchor.placement.is_some() && !plane_outer_reads_geometry(plane) => {
+                hash_captured_face_anchor(doc, f.component, anchor, st, &mut h);
+                has_captured_anchor = true;
+            }
             Some(anchor) => {
                 match anchor.author_frame(doc, f.component) {
                     Ok(m) => frame = Some(m),
@@ -5047,22 +5316,25 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 } else {
                     reads.paths.push(anchor.path.clone());
                 }
+                if plane_outer_reads_geometry(plane) {
+                    reads.all = true;
+                }
             }
             None if plane_reads_geometry(plane) => reads.all = true,
             None => {}
         },
         FeatureKind::ConstructionAxis { def } => {
             for r in def.refs() {
-                reads.geo(doc, f.component, r);
+                reads.geo_with_anchor(doc, f.component, st, r, &mut h, &mut has_captured_anchor);
             }
         }
         FeatureKind::ConstructionPoint { def } => {
             for r in def.refs() {
-                reads.geo(doc, f.component, r);
+                reads.geo_with_anchor(doc, f.component, st, r, &mut h, &mut has_captured_anchor);
             }
         }
         FeatureKind::Move { rotate_about: Some(about), .. } => {
-            reads.geo(doc, f.component, about);
+            reads.geo_with_anchor(doc, f.component, st, about, &mut h, &mut has_captured_anchor);
         }
         FeatureKind::CapturePosition { moves, joints } => {
             "capture_position".hash(&mut h);
@@ -5104,7 +5376,13 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
     }
     reads.paths.extend(datums);
     if reads.is_empty() && !copied {
-        return if has_captured_profile { h.finish() } else { 0 };
+        return if has_captured_anchor {
+            h.finish() | 1
+        } else if has_captured_profile {
+            h.finish()
+        } else {
+            0
+        };
     }
     let frame = frame.unwrap_or_else(|| doc.component_transform(f.component));
     let Some(inverse) = crate::mat_inverse(&frame) else { return placements_hash(doc) };
@@ -16919,7 +17197,11 @@ fn eval_feature_kind(
             // On a body face: follow the face as it is now, as a sketch on that face does.
             let pl = match crate::face_anchor::plane_face_anchor(plane) {
                 Some(anchor) => {
-                    let fst = crate::state_in_face_anchor_frame(doc, st, anchor, f.component)?;
+                    let fst = if plane_outer_reads_geometry(plane) {
+                        crate::state_in_face_anchor_frame(doc, st, anchor, f.component)?
+                    } else {
+                        crate::anchor_frame::state_for_face_anchor_only(doc, st, anchor, f.component)?
+                    };
                     let (pl, note) = doc.resolve_attached_plane_noted(vals, plane, f.component, st, &fst)?;
                     if let Some(note) = note {
                         append_warning(warning, note);
@@ -18057,7 +18339,19 @@ fn eval_sketch(
     lost_names: crate::project::LostNames,
 ) -> Result<()> {
     let anchor = crate::face_anchor::plane_face_anchor(plane);
+    let anchor_only = |anchor: &crate::FaceAnchor| {
+        !plane_outer_reads_geometry(plane)
+            && !sketch.wire_constraints.iter().any(|c| c.kind.model_plane().is_some())
+            && sketch.links.iter().all(|l| {
+                link_reads_own_frames(l)
+                    || (l.auto_face
+                        && l.placement.is_none()
+                        && l.sketch_placements.is_empty()
+                        && matches!(&l.source, solidcraft_sketch::LinkSource::Face { body, .. } if *body == anchor.target.body))
+            })
+    };
     let fst = match anchor {
+        Some(anchor) if anchor_only(anchor) => crate::anchor_frame::state_for_face_anchor_only(doc, st, anchor, f.component)?,
         Some(anchor) => crate::state_in_face_anchor_frame(doc, st, anchor, f.component)?,
         // A sketch that reads no geometry (a fixed plane, no projections) needs no other
         // component's bodies moved into its frame: placing every body of a large
@@ -18380,7 +18674,7 @@ fn move_constructions_with(doc: &Document, st: &mut ModelState, moved: &[crate::
 fn link_reads_own_frames(link: &solidcraft_sketch::Link) -> bool {
     use solidcraft_sketch::LinkSource;
     link.frozen
-        || link.placement.is_some()
+        || (link.placement.is_some() && link.sketch_placements.is_empty())
         || matches!(link.source, LinkSource::Text { .. } | LinkSource::SketchAxis { .. } | LinkSource::Origin | LinkSource::Axis { .. })
 }
 
