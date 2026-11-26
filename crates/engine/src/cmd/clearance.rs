@@ -37,7 +37,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("inspect.clearance", "C
      \"component\" (pairs of bodies inside one placed component, its subcomponents included) | null; envelopes?: bool (default false: component envelopes, solid.bounding_solid with `component`, are left out unless named; true: each is checked instead of the bodies inside it, and a body named inside one means it; an envelope is never paired with a body inside it); tolerance?: mm (default 1e-6: a gap \
      below it is contact, 0) → overlaps: [{a, b, volume_mm3, area_mm2, bbox, center}]; near: [{a, b, distance_mm, from, to, overlap_mm3?: \
      a contact's shared volume below min_volume, exact?: false when measured on the meshes}], nearest by body (the same for pairs that overlap: 0); \
-     nearest: {body: [{body, distance_mm}]} (omits pairs in unchecked); unchecked: [{a, b, reason}] (pairs whose overlap could not be worked out; each mesh body, STL/3MF/OBJ import, is not measured and is listed as {a: name, b: null, reason: \"mesh body: not checked\"}, also when named in `bodies` or `against`; the result's `bodies` counts the solid bodies only); pairs_checked; \
+     nearest: {body: [{body, distance_mm}]} (omits pairs in unchecked); unchecked: [{a, b, reason, distance_mm?, exact?}] (pairs whose overlap could not be worked out, with non-boolean minimum distance when computable and exact: false when measured on the meshes; each mesh body, STL/3MF/OBJ import, is not measured and is listed as {a: name, b: null, reason: \"mesh body: not checked\"}, also when named in `bodies` or `against`; the result's `bodies` counts the solid bodies only); pairs_checked; \
      pairs_reused (of those, measured by an earlier call: neither body changed or moved since); pairs_pruned (ruled out by their boxes); ms. Distances are measured on the exact faces and edges, the meshes only rule pairs out",
 )];
 
@@ -283,7 +283,7 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
     let mut unchecked: Vec<Unchecked> = mesh_bodies
         .iter()
         .filter(|b| p.get("bodies").is_none_or(Value::is_null) || asked.contains(&b.name))
-        .map(|b| Unchecked { a: b.name.clone(), b: None, reason: super::interference::MESH_NOT_CHECKED.to_string() })
+        .map(|b| Unchecked { a: b.name.clone(), b: None, reason: super::interference::MESH_NOT_CHECKED.to_string(), distance_mm: None, exact: None })
         .collect();
     let names: Vec<&str> = solid.iter().map(|b| b.name.as_str()).collect();
     let ctx = PairContext { names: &names, subjects: &subjects, boxes: &boxes, allowed: &allowed, gap, min_volume, nearest };
@@ -340,19 +340,25 @@ fn collect_pair_results(
     let mut unchecked_pairs: HashSet<(usize, usize)> = HashSet::new();
     let (mut overlaps, mut near) = (Vec::new(), Vec::new());
     let name = |i: usize| ctx.names.get(i).copied().unwrap_or("");
-    let pair = |i: usize, j: usize, reason: String| Unchecked { a: name(i).to_string(), b: Some(name(j).to_string()), reason };
+    let pair = |i: usize, j: usize, reason: String, distance: Option<BodyDistance>| Unchecked {
+        a: name(i).to_string(),
+        b: Some(name(j).to_string()),
+        reason,
+        distance_mm: distance.map(|d| d.distance),
+        exact: distance.and_then(|d| (!d.exact).then_some(false)),
+    };
     let key = |i: usize, j: usize| (i.min(j), i.max(j));
     for (&(i, j), r) in close.iter().zip(results) {
         let r = match r {
             Ok(r) => r,
             Err(e) => {
-                unchecked.push(pair(i, j, e.to_string()));
+                unchecked.push(pair(i, j, e.to_string(), None));
                 unchecked_pairs.insert(key(i, j));
                 continue;
             }
         };
         if let Some(reason) = r.unchecked {
-            unchecked.push(pair(i, j, reason));
+            unchecked.push(pair(i, j, reason, r.distance));
             unchecked_pairs.insert(key(i, j));
             continue;
         }
@@ -427,19 +433,57 @@ fn measure_pair(
     if touching || holds(ba, bb) || holds(bb, ba) {
         // A pair whose shared part can't be worked out is reported, not passed as clear. SMLib's
         // check of the shared part runs here: a part it refuses is reported, not measured.
-        match solidcraft_kernel::validating(solidcraft_kernel::Validation::EachStep, || {
-            solidcraft_kernel::boolean(ka, kb, solidcraft_kernel::BoolOp::Intersect)
-        })
-        .0
-        {
+        let intersect = |first, second| {
+            solidcraft_kernel::validating(solidcraft_kernel::Validation::EachStep, || {
+                solidcraft_kernel::boolean(first, second, solidcraft_kernel::BoolOp::Intersect)
+            })
+            .0
+        };
+        let is_cancelled = || solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled());
+        let fallback_distance = |out: &mut PairResult| {
+            if is_cancelled() {
+                return;
+            }
+            if let Ok(Some(mut d)) = solidcraft_kernel::body_distance(a, b, f64::INFINITY) {
+                if d.distance < tolerance {
+                    d.distance = 0.0;
+                }
+                out.distance = Some(d);
+            }
+        };
+        let shared = match intersect(ka, kb) {
+            Ok(o) => Ok(o),
+            Err(first_err) => {
+                if is_cancelled() {
+                    Err(first_err)
+                } else {
+                    match intersect(kb, ka) {
+                        Ok(o) => Ok(o),
+                        Err(_) if !is_cancelled() && solidcraft_kernel::interiors_disjoint(ka, kb) == Some(true) => Ok(None),
+                        Err(_) => Err(first_err),
+                    }
+                }
+            }
+        };
+        match shared {
             Err(e) => {
                 out.unchecked = Some(e.to_string());
+                fallback_distance(&mut out);
                 return out;
             }
             Ok(Some(o)) => match measure_near_origin(&o, shared_region(a, b).center()) {
-                Ok(m) => out.overlap = Some((m.volume, m.area, m.bbox, m.centroid)),
+                Ok(m) => {
+                    if m.volume > 0.0
+                        && let Some(why) = super::interference::impossible_overlap(m.volume, &m.bbox, ka, kb)
+                    {
+                        out.unchecked = Some(why);
+                        return out;
+                    }
+                    out.overlap = Some((m.volume, m.area, m.bbox, m.centroid));
+                }
                 Err(e) => {
                     out.unchecked = Some(e.to_string());
+                    fallback_distance(&mut out);
                     return out;
                 }
             },

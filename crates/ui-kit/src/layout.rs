@@ -7,6 +7,7 @@ use solidcraft_theme::Tokens;
 pub(super) const FORM: &str = "sc_dense_form";
 
 pub(super) const LABEL: &str = "sc_form_label";
+pub(super) const HANDLE: &str = "sc_form_handle";
 pub(super) const FIXED_LABEL: &str = "sc_fixed_label_width";
 pub(super) const GROW_LABEL: &str = "sc_grow_label_column";
 const LABEL_TOOLTIP: &str = "sc_row_label_tooltip";
@@ -193,6 +194,10 @@ pub fn label(ui: &Ui) -> &str {
     ui.stack().iter().find_map(|node| node.tags().get_downcast::<String>(LABEL)).map(String::as_str).unwrap_or("")
 }
 
+fn handle_tag(ui: &Ui) -> Option<&str> {
+    ui.stack().iter().find_map(|node| node.tags().get_downcast::<String>(HANDLE)).map(String::as_str)
+}
+
 /// Publish accessibility and scenario geometry. Tokens: `none`.
 pub(super) fn publish(ui: &Ui, response: &Response, kind: egui::Role) {
     let t = Tokens::get();
@@ -268,6 +273,15 @@ pub fn expr_row(ui: &mut Ui, label: &str, value: &mut String) -> bool {
         }
         super::field(ui, value)
     })
+}
+
+/// Expression row whose scenario/accessibility handles use `handle` instead of `label`, for
+/// disambiguating rows that share a caption in the same dialog.
+pub fn expr_row_as(ui: &mut Ui, label: &str, handle: &str, value: &mut String) -> bool {
+    ui.scope_builder(egui::UiBuilder::new().ui_stack_info(egui::UiStackInfo::default().with_tag_value(HANDLE, handle.to_owned())), |ui| {
+        expr_row(ui, label, value)
+    })
+    .inner
 }
 
 /// Expression row whose scrubbed value stops at zero (for physical dimensions like radius or thickness).
@@ -460,10 +474,11 @@ fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, scrub: bool, control:
             },
         )
         .inner;
-    solidcraft_ui_registry::publish_rect(&format!("dialog:row:{text}"), rect);
-    solidcraft_ui_registry::publish_rect(&format!("dialog:label:{text}"), label_rect);
-    solidcraft_ui_registry::publish_rect(&format!("dialog:control:{text}"), control_rect);
-    solidcraft_ui_registry::publish_handle(&format!("dialog:row:{text}"), rect.center());
+    let handle_key = handle_tag(ui).unwrap_or(text);
+    solidcraft_ui_registry::publish_rect(&format!("dialog:row:{handle_key}"), rect);
+    solidcraft_ui_registry::publish_rect(&format!("dialog:label:{handle_key}"), label_rect);
+    solidcraft_ui_registry::publish_rect(&format!("dialog:control:{handle_key}"), control_rect);
+    solidcraft_ui_registry::publish_handle(&format!("dialog:row:{handle_key}"), rect.center());
     result
 }
 
@@ -837,13 +852,13 @@ pub fn named_control<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R
 
 /// Publish geometry without replacing native accessibility. Tokens: `none`.
 pub(super) fn publish_geometry(ui: &Ui, response: &Response) {
-    let label = label(ui);
-    solidcraft_ui_registry::publish_rect(&format!("dialog:widget:{label}"), response.rect);
+    let handle = handle_tag(ui).unwrap_or_else(|| label(ui));
+    solidcraft_ui_registry::publish_rect(&format!("dialog:widget:{handle}"), response.rect);
     // A click lands where the field shows: a field scrolled out of a dialog's field area, under
     // its footer, has no handle (a click at its centre would press the button over it).
     let shown = response.rect.intersect(ui.clip_rect());
     if shown.is_positive() {
-        solidcraft_ui_registry::publish_handle(&format!("dialog:{label}"), shown.center());
+        solidcraft_ui_registry::publish_handle(&format!("dialog:{handle}"), shown.center());
     }
 }
 

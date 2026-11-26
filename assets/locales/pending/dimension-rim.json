@@ -16,5 +16,8 @@
   },
   "zh": {
     "prefs.dimension_rim": "尺寸和固定草图线的描边"
+  },
+  "fr": {
+    "prefs.dimension_rim": "Rebord sous les cotes et les lignes d’esquisse fixes"
   }
 }

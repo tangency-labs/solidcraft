@@ -983,6 +983,9 @@ impl Sketch {
 
     /// Make the entities of link `id` for `lay`. Returns the point each layout point became.
     fn build_link(&mut self, id: &str, lay: &Layout) -> Result<Vec<Option<usize>>> {
+        if self.curves.len().saturating_add(lay.curves.len()) > crate::limits::max_curves() {
+            return Err(SketchError::TooLarge);
+        }
         let mut idx: Vec<Option<usize>> = vec![None; lay.pts.len()];
         let mut point = |sk: &mut Sketch, li: usize| -> Result<usize> {
             if let Some(Some(i)) = idx.get(li) {
@@ -1026,6 +1029,7 @@ impl Sketch {
                 fixed: false,
                 infinite: false,
                 spline_handle_of: None,
+                spline_control_polygon_of: None,
             });
         }
         for li in &lay.lone {

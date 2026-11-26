@@ -17,6 +17,7 @@
 //! whether a copy meets the body it was made from: the dialog sets its operation from that.
 
 use solidcraft_engine::geom::prelude::*;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -113,6 +114,8 @@ pub struct SketchPreview {
     pub sketch: std::sync::Arc<solidcraft_engine::doc::SolvedSketch>,
     pub curves: Vec<usize>,
     pub points: Vec<usize>,
+    /// The drawn 3D curves that are new or changed (a Fillet on two 3D lines, #21319).
+    pub wires: Vec<usize>,
 }
 
 /// A computed preview: the scene to draw and the bodies it stands in for.
@@ -948,7 +951,10 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             let guard =
                 |f: &dyn Fn() -> Built| std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).map_err(|_| "the preview failed".to_string());
             let combine = combine_of(cmds);
-            let mut b = guard(&|| build_as(&p.before, &p.after, colors, combine.as_ref()))?;
+            // A plugin run's new bodies in the colours Run gives them (#19707).
+            let plugin = cmds.iter().all(|(command, _)| command == "plugin.run");
+            let looks = if plugin { new_body_looks(&p) } else { HashMap::new() };
+            let mut b = guard(&|| build_as(&p.before, &p.after, colors, combine.as_ref(), &looks))?;
             b.bounds = state_bounds(&p.after);
             // The radius a previewed fillet used when it reduced the one asked for (a new
             // fillet or an edited one: the feature the replies name).
@@ -1264,22 +1270,42 @@ fn same(a: &Mesh, b: &Mesh) -> bool {
 pub(crate) fn build_motion(before: &ModelState, after: &ModelState, mut colors: Colors) -> Built {
     colors.tint_new = false;
     colors.cut_tint = false;
-    build_scene(before, after, colors, None, true)
+    build_scene(before, after, colors, None, true, &HashMap::new())
 }
 
 pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
-    build_as(before, after, c, None)
+    build_as(before, after, c, None, &HashMap::new())
 }
 
 /// [`build`], or as a combine shows its result: in the selected colour (with any piece a cut or
 /// intersect splits off its target), never tinted, and nothing drawn through the bodies. A join
 /// shows the joined body alone; a cut, its tools whole as red ghosts (a kept tool too, the
 /// preview standing in for it); an intersect, the tools' material it drops as yellow ghosts.
-fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<&Combine>) -> Built {
-    build_scene(before, after, c, combine, false)
+fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<&Combine>, looks: &HashMap<String, [u8; 4]>) -> Built {
+    build_scene(before, after, c, combine, false, looks)
 }
 
-fn build_scene(before: &ModelState, after: &ModelState, c: Colors, combine: Option<&Combine>, motion: bool) -> Built {
+/// The colour each body the previewed commands make has once they are applied (its look,
+/// material or imported colour), by name: a plugin's live preview shows them as Run will
+/// (#19707). Bodies without one keep the New Body colour.
+fn new_body_looks(p: &solidcraft_engine::Preview) -> HashMap<String, [u8; 4]> {
+    let to8 = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
+    p.after
+        .bodies
+        .iter()
+        .filter(|b| p.before.body(&b.name).is_none())
+        .filter_map(|b| p.doc.body_color(b).map(|[r, g, bl]| (b.name.clone(), [to8(r), to8(g), to8(bl), 255])))
+        .collect()
+}
+
+fn build_scene(
+    before: &ModelState,
+    after: &ModelState,
+    c: Colors,
+    combine: Option<&Combine>,
+    motion: bool,
+    looks: &HashMap<String, [u8; 4]>,
+) -> Built {
     let mut sc = GpuScene::default();
     let added_color = sc.color(c.added);
     let added_plane = sc.color([c.added[0], c.added[1], c.added[2], 64]);
@@ -1373,6 +1399,8 @@ fn build_scene(before: &ModelState, after: &ModelState, c: Colors, combine: Opti
             selected
         } else if old.is_some() {
             body_color
+        } else if let Some(look) = looks.get(&a.name) {
+            sc.color(*look)
         } else {
             new_body
         };
@@ -1521,7 +1549,8 @@ fn on_surface(index: &SurfaceIndex, [a, b, c]: [Vec3; 3]) -> bool {
 const FACE_SAMPLES: usize = 24;
 
 /// What of `sketch` differs from `old`, the same sketch before a change: the curves whose shape
-/// or points moved and the points that moved (`None`: nothing did).
+/// or points moved, the points that moved and the drawn 3D curves that changed (`None`: nothing
+/// did).
 pub(crate) fn sketch_changes(
     old: Option<&solidcraft_engine::doc::SolvedSketch>,
     sketch: &std::sync::Arc<solidcraft_engine::doc::SolvedSketch>,
@@ -1548,7 +1577,20 @@ pub(crate) fn sketch_changes(
         .enumerate()
         .filter_map(|(i, p)| if old_points.get(p.id.as_str()) == Some(&p.pos) { None } else { Some(i) })
         .collect::<Vec<_>>();
-    if indices.is_empty() && points.is_empty() { None } else { Some(SketchPreview { sketch: sketch.clone(), curves: indices, points }) }
+    // Drawn 3D curves only: a linked one follows the model, which a sketch tool does not change.
+    let old_wires = old.into_iter().flat_map(|s| s.sketch.wires.iter().map(|w| (w.id.as_str(), &w.pts))).collect::<std::collections::HashMap<_, _>>();
+    let wires = sketch
+        .sketch
+        .wires
+        .iter()
+        .enumerate()
+        .filter_map(|(i, w)| if w.link.is_some() || old_wires.get(w.id.as_str()) == Some(&&w.pts) { None } else { Some(i) })
+        .collect::<Vec<_>>();
+    if indices.is_empty() && points.is_empty() && wires.is_empty() {
+        None
+    } else {
+        Some(SketchPreview { sketch: sketch.clone(), curves: indices, points, wires })
+    }
 }
 
 /// Which of the `nf` faces of `m` are new surface, i.e. not on the old mesh? Each is decided by
@@ -1708,8 +1750,8 @@ pub fn paint_sketches(app: &SolveApp, painter: &egui::Painter, proj: &crate::vie
     crate::scenario::publish_count("sketch_preview_curves", curves as f64);
 }
 
-/// Draw what a change moves in a sketch, its curves and points, in the preview colour; returns
-/// how many curves it drew.
+/// Draw what a change moves in a sketch, its curves, points and 3D curves, in the preview colour;
+/// returns how many curves it drew.
 pub(crate) fn paint_sketch(
     preview: &SketchPreview,
     painter: &egui::Painter,
@@ -1726,7 +1768,18 @@ pub(crate) fn paint_sketch(
             painter.circle_filled(point, 3.0, stroke.color);
         }
     }
-    preview.curves.len()
+    // A 3D point (a corner a fillet keeps) is a dot, like a point on the plane; a curve is counted.
+    let mut wires = 0;
+    for wire in preview.wires.iter().filter_map(|index| sketch.sketch.wires.get(*index)) {
+        let line: Vec<egui::Pos2> = wire.pts.iter().filter_map(|p| proj.to_screen(*p)).collect();
+        if let [point] = line.as_slice() {
+            painter.circle_filled(*point, 3.0, stroke.color);
+        } else {
+            painter.add(egui::Shape::line(line, stroke));
+            wires += 1;
+        }
+    }
+    preview.curves.len() + wires
 }
 
 #[cfg(test)]
@@ -2802,6 +2855,29 @@ mod tests {
         assert!(b.scene.ghost.is_empty());
         assert!(compute(&s, &[("solid.extrude".into(), json!({"distance": "1 +"}))], colors()).is_err());
         assert!(s.model.state().bodies.is_empty());
+    }
+
+    /// A plugin's live preview shows the bodies it makes in the colours Run gives them (#19707):
+    /// a new body with a look is drawn in it, one without keeps the New Body colour, and other
+    /// commands' new bodies keep it whatever their look.
+    #[test]
+    fn new_bodies_are_drawn_in_the_colour_they_are_given() {
+        let s = Session::default();
+        let cmds = [
+            ("solid.box".to_owned(), json!({"length": 10, "width": 10, "height": 2, "body_name": "Plate"})),
+            ("solid.box".to_owned(), json!({"length": 4, "width": 4, "height": 4, "corner": [20, 0, 0], "body_name": "Text"})),
+            ("appearance.assign".to_owned(), json!({"bodies": ["Plate"], "color": "#228b22", "name": "Forest"})),
+        ];
+        let p = s.preview(&cmds).unwrap();
+        let looks = new_body_looks(&p);
+        let green = *looks.get("Plate").expect("the plate has its look");
+        assert!(green[1] > green[0] && green[1] > green[2] && green[3] == 255, "{green:?}");
+        assert!(!looks.contains_key("Text"), "{looks:?}");
+        let b = build_as(&p.before, &p.after, colors(), None, &looks);
+        assert!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, green) > 0, "the plate in its colour");
+        assert!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, colors().new_body) > 0, "the text in the New Body colour");
+        let b = compute(&s, &cmds, colors()).unwrap();
+        assert_eq!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, green), 0, "not a plugin run: the New Body colour");
     }
 
     fn session_of(cmds: &[(&str, Value)]) -> Session {

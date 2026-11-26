@@ -776,6 +776,54 @@ fn doc_len(units: &str) -> f64 {
     }
 }
 
+/// Rename parameter `old` to `new` in a sketch: its dimensions, pattern counts and spacings,
+/// point and text expressions, equation formulas and text words. How many references changed.
+/// [`Document::rename_param`] renames a design's sketches with it, and the model the solved
+/// copies it keeps of them (#611).
+pub(crate) fn rename_param_in_sketch(sketch: &mut solidcraft_sketch::Sketch, old: &str, new: &str) -> usize {
+    let mut n = 0;
+    for param in sketch.dimension_params_mut() {
+        if param.as_deref() == Some(old) {
+            *param = Some(new.to_string());
+            n += 1;
+        }
+    }
+    for e in sketch.patterns.iter_mut().flat_map(|p| p.count_expression.iter_mut().chain(p.expressions.values_mut())) {
+        let r = expr::rename_reference(e, old, new);
+        if r != *e {
+            *e = r;
+            n += 1;
+        }
+    }
+    for e in sketch.text_exprs_mut() {
+        let r = expr::rename_reference(e, old, new);
+        if r != *e {
+            *e = r;
+            n += 1;
+        }
+    }
+    // An equation curve's variable hides a parameter of its name: such a parameter is not what
+    // its formulas refer to.
+    for (variable, e) in sketch.equation_exprs_mut() {
+        if variable == old {
+            continue;
+        }
+        let r = expr::rename_reference(e, old, new);
+        if r != *e {
+            *e = r;
+            n += 1;
+        }
+    }
+    for e in sketch.text_word_exprs_mut() {
+        let r = crate::text_params::rename_reference(e, old, new);
+        if r != *e {
+            *e = r;
+            n += 1;
+        }
+    }
+    n
+}
+
 /// The parameters the design's sheet metal rules and its plastic rules read. Every sheet metal
 /// or plastic feature reads all the rules of its kind, so they are read once for a whole list of
 /// features ([`Document::feature_reads`]), not again for each feature.
@@ -913,6 +961,21 @@ impl Document {
                     out.push(ParamUser::Feature { feature: f.id, name: f.name.clone(), input: "Text".into() });
                 }
             }
+            if let FeatureKind::CapturePosition { joints, .. } = &f.kind {
+                for cj in joints {
+                    let joint = self.assembly.joints.iter().find(|j| j.id == cj.joint);
+                    let jname = joint.map(|j| j.name.clone()).unwrap_or_else(|| cj.joint.to_string());
+                    let dofs = joint.map(|j| j.kind.dofs()).unwrap_or(&[]);
+                    for (idx, e) in cj.exprs.iter().enumerate() {
+                        if let Some(e) = e.as_deref()
+                            && expr::references(e).iter().any(|r| r == name)
+                        {
+                            let dof = dofs.get(idx).copied().unwrap_or("value");
+                            out.push(ParamUser::Feature { feature: f.id, name: f.name.clone(), input: format!("{jname} ({dof})") });
+                        }
+                    }
+                }
+            }
         }
         for (joint, input, e) in self.assembly.exprs() {
             if expr::references(e).iter().any(|r| r == name) {
@@ -1045,40 +1108,11 @@ impl Document {
                 }
             }
             if let FeatureKind::Sketch { sketch, .. } = &mut f.kind {
-                for param in sketch.dimension_params_mut() {
-                    if param.as_deref() == Some(old) {
-                        *param = Some(new.to_string());
-                        n += 1;
-                    }
-                }
-                for e in sketch.patterns.iter_mut().flat_map(|p| p.count_expression.iter_mut().chain(p.expressions.values_mut())) {
+                n += rename_param_in_sketch(sketch, old, new);
+            }
+            if let FeatureKind::CapturePosition { joints, .. } = &mut f.kind {
+                for e in joints.iter_mut().flat_map(|cj| cj.exprs.iter_mut()).flatten() {
                     let r = expr::rename_reference(e, old, new);
-                    if r != *e {
-                        *e = r;
-                        n += 1;
-                    }
-                }
-                for e in sketch.text_exprs_mut() {
-                    let r = expr::rename_reference(e, old, new);
-                    if r != *e {
-                        *e = r;
-                        n += 1;
-                    }
-                }
-                // An equation curve's variable hides a parameter of its name: such a parameter is
-                // not what its formulas refer to.
-                for (variable, e) in sketch.equation_exprs_mut() {
-                    if variable == old {
-                        continue;
-                    }
-                    let r = expr::rename_reference(e, old, new);
-                    if r != *e {
-                        *e = r;
-                        n += 1;
-                    }
-                }
-                for e in sketch.text_word_exprs_mut() {
-                    let r = crate::text_params::rename_reference(e, old, new);
                     if r != *e {
                         *e = r;
                         n += 1;
@@ -1205,6 +1239,9 @@ impl Document {
             names.extend(sketch.patterns.iter().filter_map(|p| p.count_expression.as_deref()).flat_map(expr::references));
             names.extend(sketch.text_word_exprs().into_iter().flat_map(|e| crate::text_params::references(e)));
         }
+        if let FeatureKind::CapturePosition { joints, .. } = &f.kind {
+            names.extend(joints.iter().flat_map(|cj| cj.exprs.iter().flatten()).flat_map(|e| expr::references(e)));
+        }
         // Sheet metal and plastic features rebuild when their rules' parameters change (#4420).
         if f.kind.is_sheet() {
             names.extend(rules.sheet.iter().cloned());
@@ -1253,6 +1290,9 @@ impl Document {
                 hit |= sketch.patterns.iter().flat_map(|p| p.expressions.values()).any(|e| expr::references(e).iter().any(|r| affected.contains(r)));
                 hit |= sketch.text_exprs().iter().any(|(_, e)| expr::references(e).iter().any(|r| affected.contains(r)));
                 hit |= sketch.text_word_exprs().iter().any(|e| crate::text_params::references(e).iter().any(|r| affected.contains(r)));
+            }
+            if let FeatureKind::CapturePosition { joints, .. } = &f.kind {
+                hit |= joints.iter().flat_map(|cj| cj.exprs.iter().flatten()).any(|e| expr::references(e).iter().any(|r| affected.contains(r)));
             }
             if hit {
                 out.push(f.id);
