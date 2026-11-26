@@ -2717,6 +2717,41 @@ fn raise_band_where_two_arcs_meet_at_sharp_corners() {
     assert!(text.contains("can't go round"), "{text}");
 }
 
+/// A plate shaped as two 20 × 20 squares joined by a neck 10 long and 4 wide, with a hole in one
+/// square. A band 1.5 wide along the outer loop still fits through the neck: it adds its area
+/// (840 − 591) times its height and 25 faces, 60 edges and 36 vertices. A band 3 wide moves the
+/// neck's two sides past each other, so its far edge crosses itself: refused.
+#[test]
+fn raise_band_refuses_a_band_whose_far_edge_crosses_itself_at_a_neck() {
+    let dumbbell = Loop2::polygon(&[
+        Vec2::new(0.0, -10.0),
+        Vec2::new(20.0, -10.0),
+        Vec2::new(20.0, -2.0),
+        Vec2::new(30.0, -2.0),
+        Vec2::new(30.0, -10.0),
+        Vec2::new(50.0, -10.0),
+        Vec2::new(50.0, 10.0),
+        Vec2::new(30.0, 10.0),
+        Vec2::new(30.0, 2.0),
+        Vec2::new(20.0, 2.0),
+        Vec2::new(20.0, 10.0),
+        Vec2::new(0.0, 10.0),
+    ]);
+    let plate = Region2 { outer: dumbbell, holes: vec![Loop2::circle(Vec2::new(10.0, 0.0), 3.0)] };
+    let plate = extrude(&Plane::XY, &[plate], 0.0, 5.0).unwrap().pop().unwrap();
+    let v0 = measure(&plate).unwrap().volume;
+    let at = Vec3::new(45.0, 0.0, 5.0);
+    let lip = raise_band(&plate, at, 1.5, 2.0, true).unwrap();
+    assert!(lip.validity().is_empty(), "{:?}", lip.validity());
+    let v = measure(&lip).unwrap().volume;
+    assert!(rel(v, v0 + 249.0 * 2.0) < 1e-6, "{v} vs {}", v0 + 249.0 * 2.0);
+    let counts = |b: &Body| (b.face_count(), b.edge_count(), b.vertex_count());
+    let (f, e, n) = counts(&plate);
+    assert_eq!(counts(&lip), (f + 25, e + 60, n + 36));
+    let text = raise_band(&plate, at, 3.0, 2.0, true).unwrap_err().to_string();
+    assert!(text.contains("crosses itself"), "{text}");
+}
+
 #[test]
 fn orientation_mesh_reuses_missing_face_check_at_matching_tolerance() {
     for scale in [0.001, 1.0, 1000.0] {
