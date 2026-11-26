@@ -285,7 +285,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&MIRROR_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(concat!(
-            "features: [names] | bodies: [names] (combine?: join with the original); ",
+            "features: [names] | bodies: [names] (combine?: join with the original; placements?: [[occurrence ids]] one per body to pick exact placements); ",
             "plane: XY|XZ|YZ|construction plane name or id|{origin, normal}|{origin, x_dir, y_dir} (origin coordinates may be length expressions; the mirror follows them, or a construction plane)",
         )),
     CommandSpec::new("solid.hole", "Hole", hole).begins_edit()
@@ -3412,13 +3412,13 @@ fn finish_pattern(
     p: &Value,
     features: Vec<solidcraft_doc::FeatureId>,
     pattern: solidcraft_doc::PatternKind,
-    (bodies, placements): (Vec<String>, Vec<Vec<u64>>),
+    ResolvedBodies { bodies, placements, warning }: ResolvedBodies,
 ) -> Result<Value> {
     let comps = string_list(UNKNOWN_COMMAND, p, "components")?;
     let paths = pattern_occurrences(p, "pattern (components)")?;
     if comps.is_empty() && paths.is_empty() {
         let copied = bodies.clone();
-        let reply = add_feature(
+        let mut reply = add_feature(
             s,
             p,
             FeatureKind::Pattern {
@@ -3435,6 +3435,9 @@ fn finish_pattern(
         // and they keep no look, as before. (Appearance copy from main.)
         if !copied.is_empty() {
             let _ = copy_keeps_appearance(s, &reply, &copied, "pattern");
+        }
+        if let Some(note) = warning {
+            append_reply_warning(&mut reply, &note);
         }
         return Ok(reply);
     }
@@ -3514,28 +3517,34 @@ fn pattern_occurrences(p: &Value, cmd: &str) -> Result<Vec<Vec<u64>>> {
     Ok(paths)
 }
 
-/// The bodies a pattern copies and the placement each was picked at.
-type PatternBodies = (Vec<String>, Vec<Vec<u64>>);
+/// The bodies a mirror or pattern copies, the placement each was picked at, and any warning about
+/// bare names that resolved to the first of several placements.
+struct ResolvedBodies {
+    bodies: Vec<String>,
+    placements: Vec<Vec<u64>>,
+    warning: Option<String>,
+}
 
 /// What a pattern copies: features (replayed), bodies (`bodies: [names]`), or components
 /// (`components: [names]`, or `occurrences: [paths]` for particular placements, placed again as
 /// occurrences). A body may be named as a placement of its part shows it (its world name, as the
-/// view and the Browser name it): it is copied where that placement shows it, as a mirror copies
-/// it.
-fn pattern_sources(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<solidcraft_doc::FeatureId>, PatternBodies)> {
+/// view and the Browser name it, or explicitly qualified as `NAME (Occ:1)`): it is copied where
+/// that placement shows it, as a mirror copies it.
+fn pattern_sources(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<solidcraft_doc::FeatureId>, ResolvedBodies)> {
+    let empty = || ResolvedBodies { bodies: Vec::new(), placements: Vec::new(), warning: None };
     if !string_list(cmd, p, "components")?.is_empty() || !pattern_occurrences(p, cmd)?.is_empty() {
-        return Ok((Vec::new(), (Vec::new(), Vec::new())));
+        return Ok((Vec::new(), empty()));
     }
     let bodies = string_list(cmd, p, "bodies")?;
     if bodies.is_empty() {
-        return Ok((source_features(s, p, cmd)?, (Vec::new(), Vec::new())));
+        return Ok((source_features(s, p, cmd)?, empty()));
     }
-    let (bodies, placements) = placed_bodies(s, bodies, cmd)?;
+    let resolved = placed_bodies(s, bodies, cmd)?;
     let st = s.model.state();
-    if let Some(b) = bodies.iter().find(|b| st.body(b).is_none()) {
+    if let Some(b) = resolved.bodies.iter().find(|b| st.body(b).is_none()) {
         return Err(bad(cmd, format!("no body `{b}`")));
     }
-    Ok((Vec::new(), (bodies, placements)))
+    Ok((Vec::new(), resolved))
 }
 
 fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
@@ -3736,15 +3745,26 @@ fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
 fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.mirror";
     let bodies = string_list(cmd, p, "bodies")?;
+    let explicit_placements = body_placements(p, cmd)?;
+    if !explicit_placements.is_empty() && bodies.is_empty() {
+        return Err(bad(cmd, "`placements` requires `bodies`"));
+    }
     let features = if bodies.is_empty() { source_features(s, p, cmd)? } else { Vec::new() };
     let plane = plane_param(s, p.get("plane"), cmd)?;
     let combine = bool_(p, "combine").unwrap_or(false);
-    let (bodies, placements) = placed_bodies(s, bodies, cmd)?;
-    let reply =
+    let ResolvedBodies { bodies, placements, warning } = if explicit_placements.is_empty() {
+        placed_bodies(s, bodies, cmd)?
+    } else {
+        resolve_explicit_placements(s, bodies, explicit_placements, cmd)?
+    };
+    let mut reply =
         add_feature(s, p, FeatureKind::Mirror { features, plane, bodies: bodies.iter().cloned().map(BodyName).collect(), combine, placements })?;
     if !combine {
         super::print_face::copies_keep_print_faces(s, &reply, &bodies);
         copies_keep_looks(s, &reply, &bodies)?;
+    }
+    if let Some(note) = warning {
+        append_reply_warning(&mut reply, &note);
     }
     Ok(reply)
 }
@@ -3889,26 +3909,212 @@ impl Session {
     }
 }
 
-/// Bodies picked where the viewport shows them: each world name ("Body1", or "Body1 (Occ:2)"
-/// for a further instance) becomes its component's body name, with the occurrence path of the
-/// placement it was picked at (where the copy goes). Names stay as they are, and no placement is
-/// kept, while every body is in the active component and every component in place, or when one
-/// of them is not a body.
-fn placed_bodies(s: &Session, names: Vec<String>, cmd: &str) -> Result<(Vec<String>, Vec<Vec<u64>>)> {
+type BodyFrameEntry = (String, String, u64, Vec<u64>, solidcraft_doc::Mat);
+
+/// Attach a command-level warning to a feature reply without overwriting an evaluator warning.
+fn append_reply_warning(reply: &mut Value, note: &str) {
+    let Some(obj) = reply.as_object_mut() else { return };
+    match obj.get("warning").and_then(Value::as_str) {
+        Some(existing) if !existing.is_empty() => {
+            obj.insert("warning".into(), Value::String(format!("{existing}; {note}")));
+        }
+        _ => {
+            obj.insert("warning".into(), Value::String(note.to_string()));
+        }
+    }
+}
+
+/// Explicit per-body placement paths (`placements`: list of occurrence-id paths from the root,
+/// each `[]` for a root body or `[occ_id, ...]`), empty when omitted or `null`.
+fn body_placements(p: &Value, cmd: &str) -> Result<Vec<Vec<u64>>> {
+    let list = match p.get("placements") {
+        None | Some(Value::Null) => return Ok(Vec::new()),
+        Some(list) => list,
+    };
+    let want = || bad(cmd, "`placements` must list occurrence paths, each a list of occurrence ids");
+    let paths: Vec<Vec<u64>> = list
+        .as_array()
+        .ok_or_else(want)?
+        .iter()
+        .map(|path| path.as_array().and_then(|ids| ids.iter().map(Value::as_u64).collect::<Option<Vec<u64>>>()))
+        .collect::<Option<_>>()
+        .ok_or_else(want)?;
+    if paths.len() > 10_000 {
+        return Err(bad(cmd, "`placements` must list at most 10000 occurrence paths"));
+    }
+    let max_len = solidcraft_doc::MAX_PLACEMENT_DEPTH + 1;
+    if paths.iter().any(|path| path.len() > max_len) {
+        return Err(bad(cmd, format!("each placement path must list at most {max_len} occurrence ids")));
+    }
+    Ok(paths)
+}
+
+/// Occurrence path label (`Part:1` or `Sub:1/Part:2`) for a non-empty occurrence path.
+fn occurrence_path_label(doc: &solidcraft_doc::Document, path: &[u64]) -> Option<String> {
+    if path.is_empty() {
+        return None;
+    }
+    let names: Option<Vec<&str>> = path.iter().map(|id| doc.occurrences.iter().find(|o| o.id == *id).map(|o| o.name.as_str())).collect();
+    Some(names?.join("/"))
+}
+
+/// Explicitly occurrence-qualified body label (`NAME (Occ:1)` or `NAME (Sub:1/Occ:1)`).
+fn qualified_body_name(doc: &solidcraft_doc::Document, own: &str, path: &[u64]) -> Option<String> {
+    Some(format!("{own} ({})", occurrence_path_label(doc, path)?))
+}
+
+/// Actionable name for a placement of `own`: uses `world` when already qualified, else
+/// `NAME (Occ:1)` when that label uniquely identifies this placement among `frames`, else `world`.
+fn placement_display_name(doc: &solidcraft_doc::Document, frames: &[BodyFrameEntry], world: &str, own: &str, path: &[u64]) -> String {
+    if world != own {
+        return world.to_string();
+    }
+    if let Some(label) = qualified_body_name(doc, own, path) {
+        let unique = frames.iter().filter(|(_, o, _, p, _)| qualified_body_name(doc, o, p).as_deref() == Some(label.as_str())).count() == 1
+            && !frames.iter().any(|(w, ..)| w == &label);
+        if unique {
+            return label;
+        }
+    }
+    world.to_string()
+}
+
+/// Actionable list of placement names for `own`, capped so large assemblies stay readable.
+fn format_placement_choices(doc: &solidcraft_doc::Document, frames: &[BodyFrameEntry], own: &str) -> String {
+    const LIMIT: usize = 8;
+    let matches: Vec<String> = frames
+        .iter()
+        .filter(|(_, frame_own, ..)| frame_own == own)
+        .map(|(world, frame_own, _, path, _)| format!("`{}`", placement_display_name(doc, frames, world, frame_own, path)))
+        .collect();
+    if matches.len() <= LIMIT {
+        matches.join(", ")
+    } else {
+        let head = matches.iter().take(LIMIT).cloned().collect::<Vec<_>>().join(", ");
+        format!("{head}, … ({} total)", matches.len())
+    }
+}
+
+/// Match a body name against placed frames: exact world name first (`Body1`, `Body1 (Occ:2)`,
+/// fallback `@occ[...]`), then an unambiguous explicit occurrence-qualified name (`Body1 (Occ:1)`).
+fn find_placed_frame<'a>(
+    doc: &solidcraft_doc::Document,
+    frames: &'a [BodyFrameEntry],
+    name: &str,
+    cmd: &str,
+) -> Result<Option<(&'a BodyFrameEntry, bool)>> {
+    if let Some(entry) = frames.iter().find(|(world, ..)| world == name) {
+        let bare = entry.0 == entry.1;
+        return Ok(Some((entry, bare)));
+    }
+    let mut qualified = frames.iter().filter(|(_, own, _, path, _)| qualified_body_name(doc, own, path).as_deref() == Some(name));
+    let Some(first) = qualified.next() else { return Ok(None) };
+    if qualified.next().is_some() {
+        let choices = format_placement_choices(doc, frames, &first.1);
+        let hint = if cmd == "solid.mirror" { " or pass `placements`" } else { "" };
+        return Err(bad(cmd, format!("`{name}` matches more than one placement: name one of {choices}{hint}")));
+    }
+    Ok(Some((first, false)))
+}
+
+/// Resolve explicit `(body, placement)` pairs given via `bodies` + `placements`: each path must
+/// be an active placement showing its body's component, and duplicate `(body, placement)` pairs
+/// are refused.
+fn resolve_explicit_placements(s: &Session, names: Vec<String>, placements: Vec<Vec<u64>>, cmd: &str) -> Result<ResolvedBodies> {
+    if placements.len() != names.len() {
+        return Err(bad(cmd, "`placements` must have one occurrence path per entry in `bodies`"));
+    }
+    let st = s.model.state();
+    let frames = s.doc.body_frames_with_source(&st);
+    let mut resolved_bodies = Vec::with_capacity(names.len());
+    let mut resolved_paths = Vec::with_capacity(placements.len());
+    let mut seen: std::collections::BTreeSet<(String, Vec<u64>)> = std::collections::BTreeSet::new();
+    for (name, path) in names.into_iter().zip(placements) {
+        let (at, _) = s.doc.path_placement(&path).ok_or_else(|| bad(cmd, format!("no placement {path:?}")))?;
+        let own = if let Some(mb) = st.body(&name) {
+            if s.doc.model_body_component(mb) != at {
+                return Err(bad(cmd, format!("placement {path:?} does not show body `{name}`")));
+            }
+            mb.name.clone()
+        } else if let Some(((_, own, component, matched_path, _), _)) = find_placed_frame(&s.doc, &frames, &name, cmd)? {
+            if matched_path != &path {
+                return Err(bad(cmd, format!("body `{name}` is at placement {matched_path:?}, not {path:?}")));
+            }
+            if *component != at {
+                return Err(bad(cmd, format!("placement {path:?} does not show body `{name}`")));
+            }
+            own.clone()
+        } else {
+            return Err(bad(cmd, format!("no body `{name}`")));
+        };
+        if !seen.insert((own.clone(), path.clone())) {
+            return Err(bad(cmd, format!("body `{own}` was listed more than once at placement {path:?}")));
+        }
+        resolved_bodies.push(own);
+        resolved_paths.push(path);
+    }
+    shown_as_placed(s, resolved_bodies.iter().cloned().zip(resolved_paths.iter().map(Vec::as_slice)), cmd)?;
+    Ok(ResolvedBodies { bodies: resolved_bodies, placements: resolved_paths, warning: None })
+}
+
+/// Bodies picked where the viewport shows them: each world name ("Body1", "Body1 (Occ:2)"
+/// for a further instance, or explicitly qualified "Body1 (Occ:1)") becomes its component's body
+/// name, with the occurrence path of the placement it was picked at (where the copy goes). Names
+/// stay as they are, and no placement is kept, while every body is in the active component and
+/// every component in place, or when one of them is not a body. Duplicate picks of the same
+/// multi-placement body at the same placement are refused, and bare names that resolve to the
+/// first of several placements emit a warning naming all placements.
+fn placed_bodies(s: &Session, names: Vec<String>, cmd: &str) -> Result<ResolvedBodies> {
     if names.is_empty() || s.doc.occurrences.is_empty() {
-        return Ok((names, Vec::new()));
+        return Ok(ResolvedBodies { bodies: names, placements: Vec::new(), warning: None });
     }
     let frames = s.doc.body_frames_with_source(&s.model.state());
-    let mut picked = Vec::with_capacity(names.len());
+    let mut picked: Vec<(String, u64, Vec<u64>, bool)> = Vec::with_capacity(names.len());
     for name in &names {
-        let Some((_, own, component, path, _)) = frames.iter().find(|(world, ..)| world == name) else { return Ok((names, Vec::new())) };
-        picked.push((own.clone(), *component, path.clone()));
+        let Some(((_, own, component, path, _), bare)) = find_placed_frame(&s.doc, &frames, name, cmd)? else {
+            return Ok(ResolvedBodies { bodies: names, placements: Vec::new(), warning: None });
+        };
+        picked.push((own.clone(), *component, path.clone(), bare));
     }
-    if !crate::frames::placed(s) && picked.iter().all(|(_, component, _)| *component == s.active_component) {
-        return Ok((names, Vec::new()));
+    let mut placement_counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for (_, own, ..) in &frames {
+        *placement_counts.entry(own.as_str()).or_default() += 1;
     }
-    shown_as_placed(s, picked.iter().map(|(own, _, path)| (own.clone(), path.as_slice())), cmd)?;
-    Ok(picked.into_iter().map(|(own, _, path)| (own, path)).unzip())
+    let hint =
+        if cmd == "solid.mirror" { "qualify each with its occurrence name or pass `placements`" } else { "qualify each with its occurrence name" };
+    let mut seen: std::collections::BTreeSet<(&str, &[u64])> = std::collections::BTreeSet::new();
+    for (own, _, path, _) in &picked {
+        let count = placement_counts.get(own.as_str()).copied().unwrap_or(0);
+        if count > 1 && !seen.insert((own.as_str(), path.as_slice())) {
+            let at = occurrence_path_label(&s.doc, path).unwrap_or_else(|| format!("{path:?}"));
+            let choices = format_placement_choices(&s.doc, &frames, own);
+            return Err(bad(cmd, format!("body `{own}` was listed more than once at the same placement (`{at}`); {hint} ({choices})")));
+        }
+    }
+    let mut qualified_owns: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for (own, _, _, bare) in &picked {
+        if !bare {
+            qualified_owns.insert(own.as_str());
+        }
+    }
+    let mut warnings = Vec::new();
+    let mut warned_owns: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for (own, _, path, bare) in &picked {
+        let count = placement_counts.get(own.as_str()).copied().unwrap_or(0);
+        if *bare && count > 1 && !qualified_owns.contains(own.as_str()) && warned_owns.insert(own.as_str()) {
+            let at = occurrence_path_label(&s.doc, path).unwrap_or_else(|| format!("{path:?}"));
+            let choices = format_placement_choices(&s.doc, &frames, own);
+            warnings.push(format!("body `{own}` appears in {count} placements ({choices}); used the first (`{at}`) — {hint} to choose another"));
+        }
+    }
+    let warning = (!warnings.is_empty()).then(|| warnings.join("; "));
+    if !crate::frames::placed(s) && picked.iter().all(|(_, component, _, _)| *component == s.active_component) {
+        let bodies = picked.into_iter().map(|(own, ..)| own).collect();
+        return Ok(ResolvedBodies { bodies, placements: Vec::new(), warning });
+    }
+    shown_as_placed(s, picked.iter().map(|(own, _, path, _)| (own.clone(), path.as_slice())), cmd)?;
+    let (bodies, placements) = picked.into_iter().map(|(own, _, path, _)| (own, path)).unzip();
+    Ok(ResolvedBodies { bodies, placements, warning })
 }
 
 /// Refuses a picked placement (`what` names it, with its occurrence path from the root) that the

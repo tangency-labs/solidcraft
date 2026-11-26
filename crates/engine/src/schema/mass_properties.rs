@@ -44,6 +44,8 @@ pub struct RigidMass {
 /// One body of an occurrence.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BodyMassEntry {
+    /// The body's world name (matching `inspect.measure`: qualified with its occurrence path for
+    /// further placements).
     pub name: String,
     /// Its physical material (the default material when none is assigned).
     pub material: String,

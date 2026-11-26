@@ -874,10 +874,15 @@ pub struct MirrorParams {
     /// The features to mirror, by name. Read when `bodies` lists none.
     #[serde(default)]
     pub features: Option<NameList>,
-    /// The bodies to mirror, by name as the viewport shows them: a further instance's copy goes
-    /// where that instance is.
+    /// The bodies to mirror, by name as the viewport shows them (or explicitly qualified as
+    /// `NAME (Occ:1)`): a further instance's copy goes where that instance is.
     #[serde(default)]
     pub bodies: Option<NameList>,
+    /// Optional per-body occurrence paths from the root (`[]` for a root body), one per entry in
+    /// `bodies`, matching the stored feature definition (`timeline.inspect` / `timeline.edit`).
+    /// Omit to resolve placements from `bodies` names.
+    #[serde(default)]
+    pub placements: Option<Vec<Vec<u64>>>,
     /// The plane to mirror across. The mirror follows a construction plane, and an explicit
     /// plane's origin given as length expressions.
     pub plane: PlaneParam,
