@@ -50,6 +50,10 @@
 //!   [`SolidError::Unported`] still propagates. The edge curve and surface
 //!   evaluations of `ComputeUVSector`, whose failure leaves uninitialised locals
 //!   upstream, propagate their error instead.
+//! - **Not upstream: kept UV points.** [`compute_uv_sector`] and [`is_sector_missing_seam`]
+//!   have crate variants (`compute_uv_sector_with`, `is_sector_missing_seam_with`) that
+//!   reuse a UV point solved earlier for the same vertex use while the B-rep is unwritten
+//!   (`UvPoints`); the vertex check passes one through its uses' sector tests.
 //! - **Not upstream: an edge vertex use's UV point on its trims' side of a seam.**
 //!   `ComputeUVPoint`'s guess is its trims' end; on a closed surface the drop of a vertex
 //!   off the surface can cross the seam where it stops on the domain's bound, and land a
@@ -1609,7 +1613,67 @@ pub fn compute_uv_sector(
     vu: VertexuseId,
     ok_to_make: bool,
 ) -> Result<UvSector> {
-    uv_sector_in(k, &mut Changing(b), vu, ok_to_make)?.ok_or_else(|| {
+    compute_uv_sector_with(k, b, vu, ok_to_make, &mut UvPoints::default())
+}
+
+/// Not upstream: the UV points ([`compute_uv_point`]) a run of sector computations has
+/// solved, keyed by vertex use and `ok_to_make`. One vertex's check solves each of its
+/// uses' points twice, as a sector's own use and as the end use of a neighbouring use's
+/// sector. A kept point is given back only while the B-rep's [`Brep::write_stamps`] equal
+/// those it was solved under, and only a solve that wrote nothing (made no UV trim curve,
+/// built no surface cache) is kept. The solve reads only the kernel and the B-rep, so a
+/// kept point is the one it would return. Errors are not kept: the solve runs again and
+/// returns its error again.
+#[derive(Debug, Default)]
+pub(crate) struct UvPoints {
+    /// The stamps the kept points were solved under.
+    stamps: Option<crate::topology::WriteStamps>,
+    /// The kept points: vertex use, `ok_to_make`, the point.
+    kept: Vec<(VertexuseId, bool, Point2)>,
+}
+
+impl UvPoints {
+    /// [`uv_point_in`] on `b`, reusing the point kept for `vu` and `ok_to_make` while the
+    /// B-rep is unwritten.
+    fn solve<B: SectorBrep>(
+        &mut self,
+        k: &Kernel,
+        b: &mut B,
+        vu: VertexuseId,
+        ok_to_make: bool,
+    ) -> Result<Option<Point2>> {
+        let stamps = b.write_stamps();
+        if self.stamps.as_ref() != Some(&stamps) {
+            self.kept.clear();
+            self.stamps = None;
+        }
+        if let Some(&(_, _, p)) = self.kept.iter().find(|x| x.0 == vu && x.1 == ok_to_make) {
+            return Ok(Some(p));
+        }
+        let p = uv_point_in(k, b, vu, ok_to_make)?;
+        if let Some(p) = p {
+            if b.write_stamps() == stamps {
+                self.stamps = Some(stamps);
+                self.kept.push((vu, ok_to_make, p));
+            }
+        }
+        Ok(p)
+    }
+}
+
+/// [`compute_uv_sector`] reusing the UV points `points` kept (see [`UvPoints`]).
+///
+/// # Errors
+///
+/// As [`compute_uv_sector`].
+pub(crate) fn compute_uv_sector_with(
+    k: &Kernel,
+    b: &mut Brep,
+    vu: VertexuseId,
+    ok_to_make: bool,
+    points: &mut UvPoints,
+) -> Result<UvSector> {
+    uv_sector_in(k, &mut Changing(b), vu, ok_to_make, points)?.ok_or_else(|| {
         SolidError::port_invariant(OP, "ComputeUVSector gave up on a B-rep it may change")
     })
 }
@@ -1629,7 +1693,13 @@ pub fn compute_uv_sector_read_only(
     b: &Brep,
     vu: VertexuseId,
 ) -> Result<Option<UvSector>> {
-    uv_sector_in(k, &mut Reading::for_vertexuse(b, vu), vu, false)
+    uv_sector_in(
+        k,
+        &mut Reading::for_vertexuse(b, vu),
+        vu,
+        false,
+        &mut UvPoints::default(),
+    )
 }
 
 /// [`compute_uv_sector`] on `b`; `None` when a step that could change a B-rep only read
@@ -1639,6 +1709,7 @@ fn uv_sector_in<B: SectorBrep>(
     b: &mut B,
     vu: VertexuseId,
     ok_to_make: bool,
+    points: &mut UvPoints,
 ) -> Result<Option<UvSector>> {
     // init output
     let mut io = UvSectorIo::new(Some(vu));
@@ -1671,7 +1742,7 @@ fn uv_sector_in<B: SectorBrep>(
     let uv_domain = face_uv_domain(b, f)?;
 
     // compute the UV point - pass the call along (status ignored)
-    if let Some(p) = ignored_status(or_give_up!(uv_point_in(k, b, vu, ok_to_make).transpose()))? {
+    if let Some(p) = ignored_status(or_give_up!(points.solve(k, b, vu, ok_to_make).transpose()))? {
         io.beg_edge_uv_point = p;
     }
 
@@ -1710,7 +1781,7 @@ fn uv_sector_in<B: SectorBrep>(
 
             // compute EndSector UVPoint (status ignored)
             if let Some(p) = ignored_status(or_give_up!(
-                uv_point_in(k, b, end_vu, ok_to_make).transpose()
+                points.solve(k, b, end_vu, ok_to_make).transpose()
             ))? {
                 io.end_edge_uv_point = p;
             }
@@ -1946,7 +2017,22 @@ pub fn is_sector_missing_seam(
     vu: VertexuseId,
     uv_space_okay: bool,
 ) -> Result<MissingSeam> {
-    let s = compute_uv_sector(k, b, vu, uv_space_okay)?;
+    is_sector_missing_seam_with(k, b, vu, uv_space_okay, &mut UvPoints::default())
+}
+
+/// [`is_sector_missing_seam`] reusing the UV points `points` kept (see [`UvPoints`]).
+///
+/// # Errors
+///
+/// As [`compute_uv_sector`].
+pub(crate) fn is_sector_missing_seam_with(
+    k: &Kernel,
+    b: &mut Brep,
+    vu: VertexuseId,
+    uv_space_okay: bool,
+    points: &mut UvPoints,
+) -> Result<MissingSeam> {
+    let s = compute_uv_sector_with(k, b, vu, uv_space_okay, points)?;
     Ok(MissingSeam {
         missing: s.io.sector_missing_seam_u || s.io.sector_missing_seam_v,
         u: s.io.sector_missing_seam_u,
