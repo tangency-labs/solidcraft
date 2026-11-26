@@ -361,7 +361,8 @@ fn a_piece_of_a_sphere_with_corners_is_its_exact_area() {
 }
 
 /// `model.faces` lists each face of a sliced sphere at its exact area, as a pick's measure
-/// does: the flat disc at z = 12.5 is π(50² − 12.5²), not the mesh's 3413.946 (#22556).
+/// does: the flat disc at z = 12.5 is π(50² − 12.5²), not the sum of the mesh's triangles
+/// (#22556, where the disc at z = 37.5 read 3413.946 for 3436.117).
 #[test]
 fn model_faces_lists_a_sliced_spheres_faces_at_their_exact_areas() {
     let mut s = Session::default();
