@@ -1511,8 +1511,14 @@ mod tests {
         let want_pyramid = 4.0 * 0.5 * 20.0 * 10.0 / steep.sin();
         assert!((area(&s, "Pyramid") - want_pyramid).abs() < want_pyramid * 1e-9, "{} vs {want_pyramid}", area(&s, "Pyramid"));
         assert!((bounds(&s, "Pyramid").max.z - 10.0 / steep.tan()).abs() < 1e-9);
-        // What the solid refuses is refused: a cone closing before the far end. And a taper that is no angle.
-        assert!(s.execute("surface.extrude", &json!({"sketch": "C", "curves": [circle], "distance": 10, "taper": "-60 deg"})).is_err());
+        // So does a circle: leaning in by 60°, radius 5 closes 5 / tan 60° up, and the sheet is the
+        // cone to that apex, π · 5 · 5 / sin 60°, as the solid's is.
+        run(&mut s, "surface.extrude", json!({"sketch": "C", "curves": [circle], "distance": 10, "taper": "-60 deg", "body_name": "Apex"}));
+        let lean = 60f64.to_radians();
+        let want_apex = PI * 25.0 / lean.sin();
+        assert!((area(&s, "Apex") - want_apex).abs() < want_apex * 1e-3, "{} vs {want_apex}", area(&s, "Apex"));
+        assert!((bounds(&s, "Apex").max.z - 5.0 / lean.tan()).abs() < 1e-6);
+        // Refused: a taper that is no angle, and a corner rule that is none of the three.
         assert!(s.execute("surface.extrude", &json!({"sketch": "R", "distance": 10, "taper": "5 mm"})).is_err());
         assert!(s.execute("surface.extrude", &json!({"sketch": "R", "distance": 10, "taper": "10 deg", "corner": "sharp"})).is_err());
     }

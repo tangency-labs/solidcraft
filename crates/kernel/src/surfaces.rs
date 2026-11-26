@@ -1949,18 +1949,35 @@ mod tests {
         let solid = measure(&crate::extrude_tapered(&Plane::XY, &ring, h, 1.0, beta, corner[0]).unwrap()).unwrap().area;
         let caps = (400.0 - PI * 16.0) + ((20.0 + 2.0 * g).powi(2) - PI * (4.0 - g).powi(2));
         assert!(rel(area, solid - caps) < 1e-3, "{area} vs {}", solid - caps);
+        // A circle of radius r leaning in by 60° closes at its centre r / tan 60° up, before the
+        // far end: the sheet is the cone to that apex, as the solid's is, π r · r / sin 60°.
+        let steep = 60f64.to_radians();
+        let disc = Region2 { outer: Loop2::circle(Vec2::ZERO, 5.0), holes: vec![] };
+        let m = measure(&extrude_sheet_tapered(&Plane::XY, std::slice::from_ref(&disc), &corner, 0.0, h, -steep).unwrap()).unwrap();
+        let want = PI * 5.0 * 5.0 / steep.sin();
+        assert!(rel(m.area, want) < 1e-3, "{} vs {want}", m.area);
+        assert!((m.bbox.max.z - 5.0 / steep.tan()).abs() < 1e-6 && m.bbox.min.z.abs() < 1e-6, "{:?}", m.bbox);
     }
 
     /// What a tapered sheet refuses: a loop that does not close, a taper of a right angle or
-    /// more, a taper that closes the profile before the far end, no distance, and numbers that
-    /// are not finite.
+    /// more, a taper that runs a hole into the outer wall (as the solid refuses it), no distance,
+    /// and numbers that are not finite.
     #[test]
     fn extrude_sheet_tapered_refuses_bad_input() {
         let corner = [crate::DraftCorner::default()];
         let disc = Region2 { outer: Loop2::circle(Vec2::ZERO, 5.0), holes: vec![] };
         let one = std::slice::from_ref(&disc);
         assert!(extrude_sheet_tapered(&Plane::XY, one, &corner, 0.0, 10.0, 0.1).is_ok());
-        assert!(extrude_sheet_tapered(&Plane::XY, one, &corner, 0.0, 10.0, -60f64.to_radians()).is_err(), "closes the profile");
+        // A square of side 20 with a hole of radius 4 at its middle, leaning in by 30° over 10:
+        // the sides come in 5.77 and the hole grows by as much, so they meet (10 − 5.77 < 4 + 5.77).
+        let ring = Region2 {
+            outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(20.0, 0.0), Vec2::new(20.0, 20.0), Vec2::new(0.0, 20.0)]),
+            holes: vec![Loop2::circle(Vec2::new(10.0, 10.0), 4.0)],
+        };
+        assert!(
+            extrude_sheet_tapered(&Plane::XY, std::slice::from_ref(&ring), &corner, 0.0, 10.0, -30f64.to_radians()).is_err(),
+            "the hole meets the outer wall"
+        );
         assert!(extrude_sheet_tapered(&Plane::XY, one, &corner, 0.0, 10.0, std::f64::consts::FRAC_PI_2).is_err());
         assert!(extrude_sheet_tapered(&Plane::XY, one, &corner, 0.0, 10.0, f64::NAN).is_err());
         assert!(extrude_sheet_tapered(&Plane::XY, one, &corner, 2.0, 2.0, 0.1).is_err());
