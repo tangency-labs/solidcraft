@@ -10686,11 +10686,11 @@ fn feature_tools_with_constructor(
                 let start_plane = ss.plane.offset(base);
                 let growth = (b.abs() * taper.tan().abs()).max(a.abs() * taper2.tan().abs());
                 let mut tools = Vec::new();
-                // `taper2 == -taper` (compared exactly, as evaluated) drafts one plane through
+                // `taper2 == -taper` (to 1e-12 rad, so an expression that rounds differently still counts) drafts one plane through
                 // the profile: the second side's walls continue the first side's, so the tool is
                 // one drafted extrusion through the start plane, one wall per curve. (To a curved
                 // face the first side is cut back on its own, below.)
-                if a != 0.0 && b != 0.0 && taper2 == -taper && target.is_none() {
+                if a != 0.0 && b != 0.0 && (taper + taper2).abs() <= 1e-12 && target.is_none() {
                     let ((c0, s0), (c1, s1)) = (at(base + a), at(base + b));
                     for r in &regions {
                         let roles = crate::lineage::ProfileRoles {
