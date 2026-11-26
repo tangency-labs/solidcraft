@@ -20,6 +20,7 @@
 //! | [`FilletIntersector::flush_curve`]                      | `FlushCurve`                                    |
 //! | [`FilletIntersector::evaluate_law_point`]               | `EvaluateLawPoint`                              |
 //! | [`FilletIntersector::do_point_intersection`], [`FilletIntersector::do_law_intersection`], [`FilletDispatch`] | `DoPointIntersection`, `DoLawIntersection` (inherited) run on `*this` |
+//! | [`FilletIntersector::do_station_intersection`], [`FilletSolverOps::station_leader`], [`FilletSolverOps::given_station`], [`FilletSolverOps::station_point`] | none (#13710): `DoLawIntersection`'s trace at a solver's own stations (a chamfer of setbacks) |
 //! | [`FilletIntersector::curr_fillet_geom`], [`FilletIntersector::curr_fillet_touch_boundary`], [`FilletIntersector::is_curr_fillet_touch_boundary`], [`FilletIntersector::self_intersect`] | `GetCurrFilletGeom`, `GetCurrFilletTouchBoundary`, `IsCurrFilletTouchBoundary`, `GetSelfIntersect` |
 //! | [`FilletIntersector::set_self_intersect`]               | `SetSelfIntersect`                              |
 //! | [`FilletIntersector::is_kind_of`], [`TYPE`]             | `IsKindOf`, `SmFilletIntersector_TYPE`          |
@@ -110,6 +111,10 @@
 //!   `build_flush_geometry`, step 5 `equalise_spans` and step 5a `solve_mid_point`; the
 //!   pieces a round whose law has corners keeps are handed to the solver once, for the
 //!   final skin ([`FilletSolverOps::keep_law_corner_pieces`]).
+//! - **A solver's own stations.** (not upstream, #13710) Where the solver has stations of
+//!   its own ([`FilletSolverOps::station_leader`], a chamfer of setbacks), step 5a solves
+//!   the span's middle station at the share of its ends' s, never on a plane (whose
+//!   adjusting retry may solve another s).
 //! - **Loops.** `FlushCurve`'s span equalisation stops once the knot count exceeds
 //!   three times its start, as upstream; each pass at most doubles it. The skin's
 //!   stations are added in at most `SKIN_ROUNDS` rounds and to at most
@@ -147,8 +152,9 @@ use crate::intersect::surface_intersector::p1::{
 use crate::intersect::surface_intersector::p2::TsectCurves;
 use crate::intersect::surface_intersector::p3::NextPoint;
 use crate::intersect::surface_intersector::p4::{
-    do_law_intersection_with, do_point_intersection_with, IntersectionCurve, IntersectorVirtuals,
-    LawIntersectionOptions, PointIntersectionOptions,
+    do_law_intersection_with, do_point_intersection_with, reverse_station_tangents,
+    IntersectionCurve, IntersectorVirtuals, LawIntersectionOptions, PointIntersectionOptions,
+    StationLeader, StationStep, StationTraceOptions, TraceStations,
 };
 use crate::kernel::Kernel;
 use crate::math::{max2, max4, min2, EFF_ZERO, EFF_ZERO_SQ};
@@ -166,6 +172,7 @@ const OP_DELTA: &str = "blend::fillet_intersector::FilletIntersector::compute_po
 const OP_SPAN: &str = "blend::fillet_intersector::FilletIntersector::test_span_accuracy";
 const OP_NEXT: &str = "blend::fillet_intersector::FilletIntersector::compute_next_point";
 const OP_FLUSH: &str = "blend::fillet_intersector::FilletIntersector::flush_curve";
+const OP_STATIONS: &str = "blend::fillet_intersector::FilletSolverOps::station_point";
 /// `SOLV_BASE_TYPE`.
 const SOLV_BASE_TYPE: i64 = 19000;
 
@@ -699,6 +706,57 @@ pub trait FilletSolverOps {
         rail: usize,
         uv_curve: BSplineCurve,
     ) -> Result<()>;
+
+    /// (not upstream, #13710) The leader of the solver's own stations (a chamfer of
+    /// setbacks' edge), which the intersector traces at instead of a ball's centre
+    /// ([`IntersectorVirtuals::station_leader`]); `None` (the default) for a solver without.
+    ///
+    /// # Errors
+    ///
+    /// The solver's failure.
+    fn station_leader(&mut self, _k: &Kernel) -> Result<Option<StationLeader>> {
+        Ok(None)
+    }
+
+    /// (not upstream, #13710) The given point `point` as the solver's station
+    /// ([`IntersectorVirtuals::given_station`]), its feet sought over `domains`.
+    ///
+    /// # Errors
+    ///
+    /// The solver's refusal; [`SolidError::InvalidInput`] for a solver without stations
+    /// (the default).
+    fn given_station(
+        &mut self,
+        _k: &Kernel,
+        _point: &mut TsectPnt,
+        _tol: f64,
+        _domains: &[Extent2d; 2],
+    ) -> Result<()> {
+        Err(no_stations())
+    }
+
+    /// (not upstream, #13710) The solver's station at the edge parameter `s`
+    /// ([`IntersectorVirtuals::station_point`]), its feet solved from `guesses` over
+    /// `domains`.
+    ///
+    /// # Errors
+    ///
+    /// The solver's refusal; [`SolidError::InvalidInput`] for a solver without stations
+    /// (the default).
+    fn station_point(
+        &mut self,
+        _k: &Kernel,
+        _s: f64,
+        _guesses: [Point2; 2],
+        _domains: &[Extent2d; 2],
+    ) -> Result<Option<TsectPnt>> {
+        Err(no_stations())
+    }
+}
+
+/// The error of a solver asked for stations it does not have.
+fn no_stations() -> SolidError {
+    SolidError::invalid_input(OP_STATIONS, "the solver has no stations of its own")
 }
 
 /// The `SmFilletSolver` members `SmFilletIntersector` reaches through the
@@ -2732,6 +2790,27 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         let mut mid_pnt = TsectPnt::new();
         find_guess_mid_tsect_pnt(pj, pj1, frac, &mut mid_pnt);
 
+        // (not upstream, #13710) a solver's own stations: its station at the share of the
+        // span's s, never a plane's (whose adjusting retry may solve another s), its
+        // tangents along the span
+        if solver.station_leader(k)?.is_some() {
+            let s = (1.0 - frac) * pj.user_doubles[0] + frac * pj1.user_doubles[0];
+            let guesses = [
+                mid_pnt.uv_pos(SrfIndex::First),
+                mid_pnt.uv_pos(SrfIndex::Second),
+            ];
+            let Some(mut station) = solver.station_point(k, s, guesses, &uv_domains)? else {
+                return Ok(None);
+            };
+            if station.crv_deriv().dot(pj.crv_deriv()) < 0.0 {
+                reverse_station_tangents(&mut station);
+            }
+            station.point_type = IntersectionPointType::Crossing;
+            station.curve_parameter = mid_pnt.curve_parameter;
+            station.deviation = mid_pnt.deviation;
+            return Ok(Some(station));
+        }
+
         let plane_orig = mid_pnt.crv_pos();
         let uv1 = mid_pnt.uv_pos(SrfIndex::First);
         let uv2 = mid_pnt.uv_pos(SrfIndex::Second);
@@ -3139,8 +3218,37 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             },
             k,
             points,
-            opts,
-            law,
+            TraceStations::Law(opts, law),
+        )
+    }
+
+    /// (not upstream, #13710) The trace at the solver's own stations (a chamfer of
+    /// setbacks: the station at the edge's parameter s, which has no ball) through the given
+    /// points `points` ([`do_law_intersection_with`] for [`TraceStations::Solver`]), run on
+    /// this intersector's overrides as [`Self::do_law_intersection`]: the solver's
+    /// stations and steps, `TestSpanAccuracy` and `FlushCurve`.
+    ///
+    /// # Errors
+    ///
+    /// As [`do_law_intersection_with`] for the solver's stations, with the errors of the
+    /// overrides.
+    pub fn do_station_intersection<S: FilletSolverOps<FilletGeom = G>>(
+        &mut self,
+        solver: &mut S,
+        pseudo: &mut FilletBrep,
+        k: &Kernel,
+        points: &[TsectId],
+        opts: &StationTraceOptions,
+    ) -> Result<IntersectionCurve> {
+        do_law_intersection_with(
+            &mut FilletDispatch {
+                intersector: self,
+                solver,
+                pseudo,
+            },
+            k,
+            points,
+            TraceStations::Solver(opts),
         )
     }
 }
@@ -3265,6 +3373,59 @@ where
     ) -> Result<SpanAccuracy> {
         self.intersector
             .test_span_accuracy(self.solver, k, point, next, mid)
+    }
+
+    /// The solver's [`FilletSolverOps::station_leader`].
+    fn station_leader(&mut self, k: &Kernel) -> Result<Option<StationLeader>> {
+        self.solver.station_leader(k)
+    }
+
+    /// The solver's [`FilletSolverOps::given_station`] over the intersector's domains.
+    fn given_station(&mut self, k: &Kernel, point: &mut TsectPnt, tol: f64) -> Result<()> {
+        let domains = self.intersector.base.base.uv_domains;
+        self.solver.given_station(k, point, tol, &domains)
+    }
+
+    /// The solver's [`FilletSolverOps::station_point`] over the intersector's domains.
+    fn station_point(
+        &mut self,
+        k: &Kernel,
+        s: f64,
+        guesses: [Point2; 2],
+    ) -> Result<Option<TsectPnt>> {
+        let domains = self.intersector.base.base.uv_domains;
+        self.solver.station_point(k, s, guesses, &domains)
+    }
+
+    /// The solver's `StepSolve` from `from` by `step` over the intersector's domains, then
+    /// its exact station at the s the step found ([`FilletSolverOps::station_point`], from
+    /// the step's feet); a step that finds nothing is [`StationStep::Boundary`] where it
+    /// hit a domain boundary.
+    fn station_step(&mut self, k: &Kernel, from: &TsectPnt, step: f64) -> Result<StationStep> {
+        let domains = self.intersector.base.base.uv_domains;
+        let [d0, d1] = &domains;
+        let mut step = step;
+        let mut flags = StepSolve::default();
+        let mut next = TsectPnt::new();
+        self.solver
+            .step_solve(k, from, &mut step, d0, d1, &mut flags, &mut next)?;
+        if !flags.found_answer {
+            return Ok(if flags.boundary_hit {
+                StationStep::Boundary
+            } else {
+                StationStep::NotFound
+            });
+        }
+        let s = next.user_doubles[0];
+        let guesses = [next.uv_pos(SrfIndex::First), next.uv_pos(SrfIndex::Second)];
+        Ok(match self.solver.station_point(k, s, guesses, &domains)? {
+            Some(point) => StationStep::Found {
+                point: Box::new(point),
+                step,
+                clipped: flags.clipped,
+            },
+            None => StationStep::NotFound,
+        })
     }
 }
 

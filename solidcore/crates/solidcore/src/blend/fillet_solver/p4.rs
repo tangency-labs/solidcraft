@@ -5605,6 +5605,61 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
             .ok_or_else(|| invalid("rail edge use without a mate"))?;
         pseudo.set_edgeuse_uv_curve(mate, Some(Curve::from(uv_curve)), true, true)
     }
+
+    /// (#13710) A chamfer of setbacks' leader
+    /// ([`crate::blend::fillet_standard_solver::setback::SetbackFs::station_leader`]); `None`
+    /// for every other solver.
+    fn station_leader(
+        &mut self,
+        k: &Kernel,
+    ) -> Result<Option<crate::intersect::surface_intersector::p4::StationLeader>> {
+        match self.ops.setback_mut() {
+            Some(setback) => setback.station_leader(k).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    /// (#13710) A chamfer of setbacks' given station
+    /// ([`crate::blend::fillet_standard_solver::setback::SetbackFs::given_station`]); every
+    /// other solver has none.
+    fn given_station(
+        &mut self,
+        k: &Kernel,
+        point: &mut TsectPnt,
+        tol: f64,
+        domains: &[Extent2d; 2],
+    ) -> Result<()> {
+        if self.ops.setback_mut().is_none() {
+            return Err(invalid("the solver has no stations of its own"));
+        }
+        self.pre()?;
+        let r = match self.ops.setback_mut() {
+            Some(setback) => setback.given_station(k, point, tol, domains),
+            None => Err(invalid("the solver has no stations of its own")),
+        };
+        self.synced(r)
+    }
+
+    /// (#13710) A chamfer of setbacks' exact station
+    /// ([`crate::blend::fillet_standard_solver::setback::SetbackFs::station_point`]); every
+    /// other solver has none.
+    fn station_point(
+        &mut self,
+        k: &Kernel,
+        s: f64,
+        guesses: [Point2; 2],
+        domains: &[Extent2d; 2],
+    ) -> Result<Option<TsectPnt>> {
+        if self.ops.setback_mut().is_none() {
+            return Err(invalid("the solver has no stations of its own"));
+        }
+        self.pre()?;
+        let r = match self.ops.setback_mut() {
+            Some(setback) => setback.station_point(k, s, guesses, domains),
+            None => Err(invalid("the solver has no stations of its own")),
+        };
+        self.synced(r)
+    }
 }
 
 /// The solver members `SmMakeCurveBlendSIH::SmoothOutIntersection` reaches.

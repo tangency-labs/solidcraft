@@ -12,6 +12,7 @@
 //! | [`SetbackFs::station`], [`SetbackFs::station_through`], [`SetbackFs::station_point`], [`SetbackStation`] | none: the exact station at a given s |
 //! | [`SetbackFs::compute_uv_vectors`]     | none (`SmFilletSolver::ComputeUVVectors`'s job, each foot's own tangent) |
 //! | [`SetbackFs::check_not_folding`]      | none: the fold check |
+//! | [`SetbackFs::station_leader`], [`SetbackFs::given_station`] | none: the station trace's leader and given points |
 //!
 //! **The station** is [`super::super::fillet_section::setback_station`]'s: at a parameter s of
 //! the edge C (the extended edge curve, the solver's curve), foot i is the point `S_i` of
@@ -25,6 +26,11 @@
 //! two feet. Newton does not start on the edge, where `|S − C|` has no derivative: a guess on
 //! the edge (the marcher's guesses from the offsets, 0 here) is replaced by the station's
 //! feet from `setback_start` and `setback_foot` ([`SetbackFs::load_initial_values`]).
+//!
+//! **The station trace** (`do_law_intersection_with` at the solver's own stations) takes the
+//! extended edge as its leader ([`SetbackFs::station_leader`]), each given point at its own s
+//! with its feet kept ([`SetbackFs::given_station`]) and every other station exact at its s
+//! ([`SetbackFs::station_point`]).
 //!
 //! **A clipped step** (a foot on its face's boundary iso-line) solves that foot on the line
 //! and s together, then the other foot at that s ([`SetbackFs::clipped_feet`]).
@@ -66,6 +72,7 @@ use crate::geom::krawczyk::NEWTON_STEPS;
 use crate::geom::matrix::Matrix;
 use crate::geom::vector2d::Point2;
 use crate::intersect::surface_intersector::p1::TsectPnt;
+use crate::intersect::surface_intersector::p4::StationLeader;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -674,14 +681,96 @@ impl SetbackFs {
             [station.feet[0].uv, station.feet[1].uv],
             &mut point,
         )?;
+        Self::put_station(&mut point, &station);
+        Ok(Some(point))
+    }
+
+    /// The station's tangents and s in the trace point `point`: its curve tangent foot 0's
+    /// unit motion with s, its uv tangents each foot's own ([`SetbackStation::uv_tangents`]),
+    /// s in `user_doubles[0]` and `[1]`.
+    fn put_station(point: &mut TsectPnt, station: &SetbackStation) {
         let forward = station.feet[0].per_s;
         point.curve_pv[1] = forward * (1.0 / forward.length());
         let [t0, t1] = station.uv_tangents(forward);
         point.uv_curve_pv[0][1] = t0;
         point.uv_curve_pv[1][1] = t1;
-        point.user_doubles[0] = s;
-        point.user_doubles[1] = s;
-        Ok(Some(point))
+        point.user_doubles[0] = station.s;
+        point.user_doubles[1] = station.s;
+    }
+
+    /// The leader of the solver's stations, for a station trace
+    /// ([`crate::intersect::surface_intersector::p4::TraceStations::Solver`]): the extended
+    /// edge's interval, whether the edge is closed (its ends within the 3D tolerance over
+    /// [`Self::edge_interval`]; the extension of a closed edge is not), and the larger
+    /// setback as the stand-off.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] without an edge curve; those of the evaluations.
+    pub fn station_leader(&self, k: &Kernel) -> Result<StationLeader> {
+        let interval = self.edge_curve()?.natural_interval();
+        let original = self
+            .curve_based
+            .original
+            .as_ref()
+            .ok_or_else(|| SolidError::invalid_input(OP, "no edge curve"))?;
+        let start = original.evaluate_point(k, self.edge_interval.min())?;
+        let end = original.evaluate_point(k, self.edge_interval.max())?;
+        Ok(StationLeader {
+            interval,
+            closed: start.distance(end) <= self.curve_based.solver.approx_tol_3d,
+            stand_off: self.setbacks[0].max(self.setbacks[1]),
+        })
+    }
+
+    /// A point given to a station trace (a rail end the corner code placed) as its station:
+    /// its feet as given (`uv_curve_pv[i][0]`, never moved), its surface values there, its s
+    /// ([`Self::station_parameter`]: `user_doubles[0]` where foot 0 is at its station there,
+    /// else foot 0's drop on the edge, held to the same test), the tangents of the station
+    /// through its feet ([`Self::station_through`], along increasing s) and s in
+    /// `user_doubles[0]` and `[1]`. The station at that s solved from the feet
+    /// ([`Self::station`]) must have each foot within `tol` of the given one: a given point
+    /// off the chamfer is refused, not moved onto it.
+    ///
+    /// # Errors
+    ///
+    /// `SetbackFootOffStation` for a foot farther than `tol` from its station;
+    /// `StationNotSolved` where the station is not found; `NoRoom(SetbackFootTangent)`
+    /// where a foot's system is singular at the given feet; those of
+    /// [`Self::station_parameter`] and [`Self::station`].
+    pub fn given_station(
+        &mut self,
+        k: &Kernel,
+        point: &mut TsectPnt,
+        tol: f64,
+        domains: &[Extent2d; 2],
+    ) -> Result<()> {
+        let uvs = [point.uv_curve_pv[0][0], point.uv_curve_pv[1][0]];
+        let mut at = point.clone();
+        FilletSolver::compute_surface_values(k, self, uvs, &mut at)?;
+        let s = self.station_parameter(k, &at)?;
+        let solved = self
+            .station(k, s, uvs, domains)?
+            .ok_or_else(|| SolidError::blend_solver(OP, SolverFailure::StationNotSolved { s }))?;
+        for (rail, foot) in solved.feet.iter().enumerate() {
+            let given = at.surface_pv.get(rail).map_or(Vec3::UNDEF, |pv| pv[0][0]);
+            let moved = foot.point.distance(given);
+            if moved.is_nan() || moved > tol {
+                return Err(SolidError::blend_solver(
+                    OP,
+                    SolverFailure::SetbackFootOffStation { rail, moved },
+                ));
+            }
+        }
+        let Some(through) = self.station_through(k, s, uvs)? else {
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::NoRoom(NoRoomReason::SetbackFootTangent),
+            ));
+        };
+        Self::put_station(&mut at, &through);
+        *point = at;
+        Ok(())
     }
 
     /// The base surface domains the solver's feet are sought over: each rail's natural
@@ -1539,9 +1628,15 @@ mod tests {
     /// side is inside the material: the top face's into the wall (down), the wall's into the
     /// top face (towards the axis).
     fn rim(k: &Kernel, d: [f64; 2]) -> SetbackFs {
+        rim_on(k, d, quarter(RIM_R, RIM_Z), 1e-6)
+    }
+
+    /// [`rim`] on the edge `edge` (an arc of the rim's circle), the solver's 3D tolerance
+    /// `tol`.
+    fn rim_on(k: &Kernel, d: [f64; 2], edge: BSplineCurve, tol: f64) -> SetbackFs {
         let [plate, wall] = plate_and_wall(RIM_W, RIM_Z, RIM_R, [0.0, RIM_Z]);
-        let mut curve_based = CurveBasedFs::new(1e-6, 0.1, 0.01);
-        curve_based.original = Some(Curve::from(quarter(RIM_R, RIM_Z)));
+        let mut curve_based = CurveBasedFs::new(tol, 0.1, 0.01);
+        curve_based.original = Some(Curve::from(edge));
         let np = plate
             .evaluate_normal(k, Point2::new(0.5, 0.5), Side::Left, Side::Left)
             .unwrap();
@@ -1860,6 +1955,578 @@ mod tests {
         assert_eq!(
             err.blend_failure(),
             Some(&BlendFailure::NoRoom(NoRoomReason::SetbacksCross)),
+            "{err:?}"
+        );
+    }
+
+    // ---- the station trace (`do_law_intersection_with` at the solver's stations) ----
+    //
+    // The rim above, on a half turn of its edge. Every station's plane is the half-plane
+    // through the axis at the station's angle θ, where the top face's section is the line
+    // z = 20 and the wall's the line r = 10: foot 0 is at (r, z) = (9, 20), foot 1 at
+    // (10, 19.5), whatever θ. So the rails are the circles r = 9 at z = 20 and r = 10 at
+    // z = 19.5, and the chord between them the line r = 9 + 2 (20 − z) (from (9, 20) to
+    // (10, 19.5): slope −1/2 in z per unit r).
+    //
+    // An extension step from a station is `StepSolve`'s plane at the step h along foot 0's
+    // unit tangent τ from foot 0, foot 0 on the circle r = 9: the next foot 0 is where
+    // 9 sin Δθ = h, Δθ = asin(h / 9). The steps are the stand-off h = max(d) = 1 each, up to
+    // 5 of them (the cap 5 max(d)): an extension ends 5 asin(1/9) past its end station.
+
+    use crate::blend::fillet_geom::p1::{
+        FilletEdgeType, FilletEdgeuse, FilletGeom, FilletGeomId, FilletGeomType, FilletVertex,
+        FilletVertexuse,
+    };
+    use crate::blend::fillet_intersector::{FilletDispatch, FilletIntersector};
+    use crate::blend::fillet_solver::p1::{FilletExecutiveRef, FilletSurfaceGenerator};
+    use crate::blend::fillet_solver::p4::IntersectorSolver;
+    use crate::blend::fillet_standard_solver::p1::FilletLaw;
+    use crate::error::intersect::IntersectFailure;
+    use crate::intersect::adv_surface_intersector::NoSurfaceHandle;
+    use crate::intersect::surface_intersector::p1::{SpanAccuracy, SurfaceIntersector, TsectId};
+    use crate::intersect::surface_intersector::p2::TsectCurves;
+    use crate::intersect::surface_intersector::p3::NextPoint;
+    use crate::intersect::surface_intersector::p4::{
+        do_law_intersection_with, IntersectorVirtuals, StationStep, StationTraceOptions,
+        TraceStations,
+    };
+    use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+    use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
+    use crate::surface::surface::SurfaceKind;
+    use crate::topology::{EdgeId, Edgeuse, Vertexuse, VertexuseOwner};
+
+    /// The station trace's 3D tolerance, the solver's and the chord's.
+    const TRACE_TOL: f64 = 1.0e-4;
+
+    /// The rational quadratic arc of radius `r` about the z axis at height `z` from the
+    /// angle `start_deg` (degrees) through `quarters` quarter turns (each span's middle
+    /// control point at its corner `r √2` out, weight `√2 / 2`), its parameter s in [0, 1]
+    /// with a knot at each quarter.
+    fn arc(r: f64, z: f64, start_deg: f64, quarters: u32) -> BSplineCurve {
+        let w = 0.5_f64.sqrt();
+        let at = |deg: f64, rho: f64| {
+            let a = deg.to_radians();
+            Point3::new(rho * a.cos(), rho * a.sin(), z)
+        };
+        let (mut cps, mut ws) = (vec![at(start_deg, r)], vec![1.0]);
+        let mut knots = vec![0.0];
+        let mut mults = vec![3];
+        for q in 0..quarters {
+            let a = start_deg + 90.0 * f64::from(q);
+            cps.push(at(a + 45.0, r / w));
+            cps.push(at(a + 90.0, r));
+            ws.push(w);
+            ws.push(1.0);
+            knots.push(f64::from(q + 1) / f64::from(quarters));
+            mults.push(2);
+        }
+        if let Some(m) = mults.last_mut() {
+            *m = 3;
+        }
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 2,
+            control_points: &cps,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &mults,
+            knots: &knots,
+            knot_type: KnotType::Unspecified,
+            weights: Some(&ws),
+            trim: None,
+        })
+        .unwrap()
+    }
+
+    /// A half turn of the rim's edge from −45 to 135 degrees, inside the wall's three
+    /// quarters (−90 to 180) so that no foot is on a domain boundary.
+    fn half() -> BSplineCurve {
+        arc(RIM_R, RIM_Z, -45.0, 2)
+    }
+
+    /// A rail edge for the pseudo geometry (as `fillet_solver::p4`'s tests make one): two
+    /// edge uses, the second the first's mate, and their vertex uses.
+    fn add_rail(k: &Kernel, fb: &mut FilletBrep, y: f64) -> EdgeId {
+        let p0 = Point3::new(0.0, y, 0.0);
+        let p1 = Point3::new(1.0, y, 0.0);
+        let v0 = fb.brep_mut().add_vertex(p0).unwrap();
+        let v1 = fb.brep_mut().add_vertex(p1).unwrap();
+        fb.insert_fillet_vertex(v0, FilletVertex::new(k, None));
+        fb.insert_fillet_vertex(v1, FilletVertex::new(k, None));
+        let e = fb.new_fillet_edge(v0, v1, None).unwrap();
+        fb.fillet_edge_mut(e)
+            .unwrap()
+            .set_fillet_edge_type(FilletEdgeType::Rail);
+        for (v, o) in [(v0, OrientType::Same), (v1, OrientType::Opposite)] {
+            let b = fb.brep_mut();
+            let e_u = b.add_edgeuse_record(Edgeuse::default()).unwrap();
+            let vu = b.add_vertexuse_record(Vertexuse::default()).unwrap();
+            b.edgeuse_mut(e_u).unwrap().edge = Some(e);
+            b.edgeuse_mut(e_u).unwrap().orientation = o;
+            b.edgeuse_mut(e_u).unwrap().vertexuse = Some(vu);
+            b.vertexuse_mut(vu).unwrap().vertex = Some(v);
+            b.vertexuse_mut(vu).unwrap().owner = VertexuseOwner::Edgeuse(Some(e_u));
+            b.vertex_mut(v).unwrap().vertexuses.push(vu);
+            b.edge_mut(e).unwrap().edgeuses.push(e_u);
+            fb.insert_fillet_edgeuse(e_u, FilletEdgeuse::default());
+            fb.insert_fillet_vertexuse(vu, FilletVertexuse::new());
+        }
+        e
+    }
+
+    /// The half rim's solver set up to trace and flush: its pseudo geometry with two rails,
+    /// the linear generator and the chamfer of setbacks `d`, the trace surfaces (the
+    /// solver's offsets at distance 0) and their domains.
+    struct HalfRim {
+        k: Kernel,
+        fs: SetbackFs,
+        pseudo: FilletBrep,
+        geom: FilletGeomId,
+        rails: [EdgeId; 2],
+        surfaces: [Surface; 2],
+        domains: [Extent2d; 2],
+    }
+
+    fn half_rim(d: [f64; 2]) -> HalfRim {
+        half_rim_on(d, half())
+    }
+
+    fn half_rim_on(d: [f64; 2], edge: BSplineCurve) -> HalfRim {
+        let k = Kernel::default();
+        let mut fs = rim_on(&k, d, edge, TRACE_TOL);
+        let mut pseudo = FilletBrep::new();
+        let rails = [
+            add_rail(&k, &mut pseudo, 0.0),
+            add_rail(&k, &mut pseudo, 1.0),
+        ];
+        let mut geom = FilletGeom::new(&k, None, FilletGeomType::Default).unwrap();
+        geom.rails = [Some(rails[0]), Some(rails[1])];
+        let g = pseudo.add_geom(geom);
+        let solver = &mut fs.curve_based.solver;
+        solver.fillet_geoms = vec![g];
+        solver.executive = Some(FilletExecutiveRef);
+        solver.set_fillet_surface_generator(Some(FilletSurfaceGenerator::Linear));
+        solver.chamfer = Some(ChamferDefinition::of_setbacks(ChamferSize::Distances(d)).unwrap());
+        let domains = fs.trace_domains(&k).unwrap();
+        let surfaces =
+            [0, 1].map(|r| Surface::from(fs.curve_based.solver.rail(r).unwrap().surface.clone()));
+        HalfRim {
+            k,
+            fs,
+            pseudo,
+            geom: g,
+            rails,
+            surfaces,
+            domains,
+        }
+    }
+
+    /// The edge's angle at s.
+    fn angle_at(edge: &BSplineCurve, s: f64) -> f64 {
+        let c = edge.evaluate_point(s).unwrap();
+        c.y.atan2(c.x)
+    }
+
+    /// A point's angle about the axis.
+    fn angle_of(p: Point3) -> f64 {
+        p.y.atan2(p.x)
+    }
+
+    /// The closed-form feet at the angle θ.
+    fn feet_at_angle(theta: f64, d: [f64; 2]) -> [Point3; 2] {
+        let e = Vec3::new(theta.cos(), theta.sin(), 0.0);
+        [
+            e * (RIM_R - d[0]) + Vec3::Z * RIM_Z,
+            e * RIM_R + Vec3::Z * (RIM_Z - d[1]),
+        ]
+    }
+
+    /// The wall's parameters of a point on it.
+    fn wall_uv(h: &HalfRim, p: Point3) -> Point2 {
+        let wall = h.fs.curve_based.solver.rail(1).unwrap();
+        offset_local_point_solve(&h.k, wall, &h.domains[1], p, Point2::new(0.5, 0.9))
+            .unwrap()
+            .expect("on the wall")
+            .0
+    }
+
+    /// The given point at the edge's s (a rail end as the corner code places one: the exact
+    /// station, its s in `user_doubles[0]`), not yet processed (curve parameter −1).
+    fn given_at(h: &mut HalfRim, s: f64, d: [f64; 2]) -> TsectPnt {
+        let feet = feet_at_angle(angle_at(&half(), s), d);
+        let guesses = [plate_uv(feet[0]), wall_uv(h, feet[1])];
+        let mut p =
+            h.fs.station_point(&h.k, s, guesses, &h.domains)
+                .unwrap()
+                .expect("a station");
+        p.curve_parameter = -1.0;
+        p
+    }
+
+    /// The driver on a recorder of the curve's points when it flushes them.
+    struct Recorder<V> {
+        inner: V,
+        flushed: Vec<TsectPnt>,
+    }
+
+    impl<'s, V: IntersectorVirtuals<'s>> IntersectorVirtuals<'s> for Recorder<V> {
+        fn intersector(&self) -> &SurfaceIntersector<'s> {
+            self.inner.intersector()
+        }
+        fn intersector_mut(&mut self) -> &mut SurfaceIntersector<'s> {
+            self.inner.intersector_mut()
+        }
+        fn compute_point_values(
+            &mut self,
+            k: &Kernel,
+            uv_values: [Point2; 2],
+            point: &mut TsectPnt,
+            previous: Option<&TsectPnt>,
+            step_size: Option<f64>,
+        ) -> Result<()> {
+            self.inner
+                .compute_point_values(k, uv_values, point, previous, step_size)
+        }
+        fn compute_next_point(
+            &mut self,
+            k: &Kernel,
+            prev: TsectId,
+            step_size: f64,
+            next: TsectId,
+        ) -> Result<NextPoint> {
+            self.inner.compute_next_point(k, prev, step_size, next)
+        }
+        fn flush_curve(&mut self, k: &Kernel, out: &mut TsectCurves) -> Result<()> {
+            let base = self.inner.intersector();
+            self.flushed = base
+                .curve_points()
+                .iter()
+                .map(|&id| base.point(id).unwrap().clone())
+                .collect();
+            self.inner.flush_curve(k, out)
+        }
+        fn evaluate_law_point(
+            &mut self,
+            _k: &Kernel,
+            _parameter: f64,
+            _uv0: Point2,
+            _uv1: Point2,
+            _law: &mut FilletLaw,
+            _law_orient: bool,
+            _point_curve_interval: &Extent1d,
+            _surface_orientations: [f64; 2],
+            _plane_origin: Point3,
+            _plane_normal: Vec3,
+        ) -> Result<(Option<f64>, [Point2; 2])> {
+            panic!("a station trace evaluates no law point");
+        }
+        fn test_span_accuracy(
+            &mut self,
+            k: &Kernel,
+            point: TsectId,
+            next: TsectId,
+            mid: Option<TsectId>,
+        ) -> Result<SpanAccuracy> {
+            self.inner.test_span_accuracy(k, point, next, mid)
+        }
+        fn station_leader(&mut self, k: &Kernel) -> Result<Option<StationLeader>> {
+            self.inner.station_leader(k)
+        }
+        fn given_station(&mut self, k: &Kernel, point: &mut TsectPnt, tol: f64) -> Result<()> {
+            self.inner.given_station(k, point, tol)
+        }
+        fn station_point(
+            &mut self,
+            k: &Kernel,
+            s: f64,
+            guesses: [Point2; 2],
+        ) -> Result<Option<TsectPnt>> {
+            self.inner.station_point(k, s, guesses)
+        }
+        fn station_step(&mut self, k: &Kernel, from: &TsectPnt, step: f64) -> Result<StationStep> {
+            self.inner.station_step(k, from, step)
+        }
+    }
+
+    /// What a station trace of the half rim did: its result, the curve's points as flushed,
+    /// and the given points as the trace left them.
+    struct Traced {
+        result: Result<()>,
+        flushed: Vec<TsectPnt>,
+        given: Vec<TsectPnt>,
+    }
+
+    fn trace(h: &mut HalfRim, given: &[TsectPnt], opts: &StationTraceOptions) -> Traced {
+        let [s0, s1] = &h.surfaces;
+        let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, FilletGeomId> =
+            FilletIntersector::new(&h.k, s0, &h.domains[0], s1, &h.domains[1], None).unwrap();
+        let ids: Vec<TsectId> = given
+            .iter()
+            .map(|p| fi.base.base.alloc_point(p.clone()))
+            .collect();
+        let surfaces = [
+            fi.base.base.surface(SrfIndex::First),
+            fi.base.base.surface(SrfIndex::Second),
+        ];
+        let mut solver = IntersectorSolver::new(&mut h.fs, surfaces).unwrap();
+        let mut rec = Recorder {
+            inner: FilletDispatch {
+                intersector: &mut fi,
+                solver: &mut solver,
+                pseudo: &mut h.pseudo,
+            },
+            flushed: Vec::new(),
+        };
+        let result =
+            do_law_intersection_with(&mut rec, &h.k, &ids, TraceStations::Solver(opts)).map(|_| ());
+        let flushed = rec.flushed;
+        let given = ids
+            .iter()
+            .map(|&id| fi.base.base.point(id).unwrap().clone())
+            .collect();
+        Traced {
+            result,
+            flushed,
+            given,
+        }
+    }
+
+    /// The flushed stations' feet are the closed form's at their own angle, and their s
+    /// runs strictly one way (`up` for increasing).
+    fn assert_stations(stations: &[TsectPnt], d: [f64; 2], up: bool) {
+        assert!(stations.len() >= 2, "{} stations", stations.len());
+        for (j, p) in stations.iter().enumerate() {
+            let foot0 = p.surface_pv[0][0][0];
+            let want = feet_at_angle(angle_of(foot0), d);
+            for (rail, w) in want.iter().enumerate() {
+                let got = p.surface_pv[rail][0][0];
+                assert!(
+                    got.distance(*w) < 1e-9,
+                    "station {j} rail {rail}: {got:?} vs {w:?}"
+                );
+            }
+            assert!(p.curve_parameter >= 0.0, "station {j}");
+        }
+        for pair in stations.windows(2) {
+            let (a, b) = (pair[0].user_doubles[0], pair[1].user_doubles[0]);
+            assert!(if up { b > a } else { b < a }, "s {a} then {b}");
+            assert!(pair[1].curve_parameter > pair[0].curve_parameter);
+        }
+    }
+
+    /// The flushed rails are the circles of the closed form within the chord's certified
+    /// bound, itself within the asked tolerance, and the chord between them is the line
+    /// r = 9 + 2 (20 − z).
+    fn assert_flushed(h: &HalfRim, d: [f64; 2]) {
+        let geom = h.pseudo.geom(h.geom).unwrap();
+        let surface = geom
+            .fillet_surface(None)
+            .unwrap()
+            .expect("a chamfer surface")
+            .clone();
+        let SurfaceKind::ProceduralBlend(pb) = surface.kind() else {
+            panic!("a chamfer of setbacks by its definition: {surface:?}");
+        };
+        let bound = pb.def.bound;
+        assert!(bound <= TRACE_TOL, "certified bound {bound}");
+        let slack = bound + 1e-9;
+        let want = [(RIM_R - d[0], RIM_Z), (RIM_R, RIM_Z - d[1])];
+        for (rail, &(r, z)) in want.iter().enumerate() {
+            let curve = h
+                .pseudo
+                .brep()
+                .edge(h.rails[rail])
+                .unwrap()
+                .curve
+                .clone()
+                .unwrap();
+            let ivl = curve.natural_interval();
+            for i in 0..=40 {
+                let p = curve
+                    .evaluate_point(&h.k, ivl.evaluate(f64::from(i) / 40.0))
+                    .unwrap();
+                let rho = (p.x * p.x + p.y * p.y).sqrt();
+                assert!((rho - r).abs() <= slack, "rail {rail}: r {rho} vs {r}");
+                assert!((p.z - z).abs() <= slack, "rail {rail}: z {} vs {z}", p.z);
+            }
+        }
+        let dom = surface.natural_uv_domain_with_nurb(&h.k).unwrap();
+        for i in 0..=8 {
+            for j in 1..4 {
+                let uv = dom.evaluate(f64::from(i) / 8.0, f64::from(j) / 4.0);
+                let p = surface.evaluate_point(&h.k, uv).unwrap();
+                let rho = (p.x * p.x + p.y * p.y).sqrt();
+                let on_line = RIM_R - d[0] + (d[0] / d[1]) * (RIM_Z - p.z);
+                assert!(
+                    (rho - on_line).abs() <= 3.0 * slack,
+                    "({rho}, {}) off the chord",
+                    p.z
+                );
+            }
+        }
+    }
+
+    /// The station trace on the half rim through its two rail-end points (s = 0 and 1):
+    /// the stations at the closed-form feet, s strictly increasing, the given points
+    /// processed, and the flushed rails and chord the closed form's within the certified
+    /// bound. The trace surfaces are the faces as offset surfaces at distance 0, which the
+    /// driver's offset check takes.
+    #[test]
+    fn station_trace_of_a_half_rim_runs_on_the_closed_form_feet() {
+        let d = [1.0, 0.5];
+        let mut h = half_rim(d);
+        assert!(h
+            .surfaces
+            .iter()
+            .all(|s| matches!(s.kind(), SurfaceKind::OffsetSurface(_))));
+        let given = [given_at(&mut h, 0.0, d), given_at(&mut h, 1.0, d)];
+        let t = trace(&mut h, &given, &StationTraceOptions::default());
+        t.result.unwrap();
+        assert_stations(&t.flushed, d, true);
+        assert_eq!(t.flushed.first().unwrap().user_doubles[0], 0.0);
+        assert_eq!(t.flushed.last().unwrap().user_doubles[0], 1.0);
+        for (p, g) in t.given.iter().zip(&given) {
+            assert!(p.curve_parameter >= 0.0, "{p:?}");
+            // (a rail end is never moved)
+            for rail in 0..2 {
+                assert_eq!(p.uv_curve_pv[rail][0], g.uv_curve_pv[rail][0]);
+            }
+        }
+        assert_eq!(t.given[0].curve_parameter, 0.0);
+        assert_flushed(&h, d);
+    }
+
+    /// The same trace with the rail ends given the other way round: s strictly decreasing,
+    /// the same feet, rails and chord.
+    #[test]
+    fn station_trace_of_a_half_rim_runs_backwards_along_the_edge() {
+        let d = [1.0, 0.5];
+        let mut h = half_rim(d);
+        let given = [given_at(&mut h, 1.0, d), given_at(&mut h, 0.0, d)];
+        let t = trace(&mut h, &given, &StationTraceOptions::default());
+        t.result.unwrap();
+        assert_stations(&t.flushed, d, false);
+        assert!(t.given.iter().all(|p| p.curve_parameter >= 0.0));
+        // (the tangents run along the trace: foot 0 from 135 degrees towards -45)
+        let first = t.flushed.first().unwrap();
+        let theta = angle_of(first.surface_pv[0][0][0]);
+        let tau = Vec3::new(-theta.sin(), theta.cos(), 0.0);
+        assert!(
+            (first.curve_pv[1] + tau).length() < 1e-9,
+            "{:?}",
+            first.curve_pv[1]
+        );
+        assert_flushed(&h, d);
+    }
+
+    /// Extensions both ways from given points inside the edge (s = 0.3 and 0.6): five steps
+    /// of the larger setback each way, so the trace ends 5 asin(1/9) past each given point's
+    /// foot 0 (above), the given points processed, the first after the extension's
+    /// stations.
+    #[test]
+    fn station_trace_extensions_step_five_setbacks_past_the_given_points() {
+        let d = [1.0, 0.5];
+        let mut h = half_rim(d);
+        let given = [given_at(&mut h, 0.3, d), given_at(&mut h, 0.6, d)];
+        let opts = StationTraceOptions {
+            extend_before_start: true,
+            extend_after_end: true,
+            ..StationTraceOptions::default()
+        };
+        let t = trace(&mut h, &given, &opts);
+        t.result.unwrap();
+        assert_stations(&t.flushed, d, true);
+        let reach = 5.0 * (1.0_f64 / 9.0).asin();
+        let first = angle_of(t.flushed.first().unwrap().surface_pv[0][0][0]);
+        let last = angle_of(t.flushed.last().unwrap().surface_pv[0][0][0]);
+        let given_first = angle_of(given[0].surface_pv[0][0][0]);
+        let given_last = angle_of(given[1].surface_pv[0][0][0]);
+        assert!(
+            (given_first - reach - first).abs() < 1e-9,
+            "{first} vs {given_first} - {reach}"
+        );
+        assert!(
+            (given_last + reach - last).abs() < 1e-9,
+            "{last} vs {given_last} + {reach}"
+        );
+        assert!(t.given[0].curve_parameter > 0.0);
+        assert!(t.given[1].curve_parameter > t.given[0].curve_parameter);
+        assert_flushed(&h, d);
+    }
+
+    /// Given points whose s does not run one way are refused, typed, before anything is
+    /// traced.
+    #[test]
+    fn station_trace_refuses_given_points_out_of_order() {
+        let d = [1.0, 0.5];
+        let mut h = half_rim(d);
+        let given = [
+            given_at(&mut h, 0.2, d),
+            given_at(&mut h, 0.6, d),
+            given_at(&mut h, 0.4, d),
+        ];
+        let t = trace(&mut h, &given, &StationTraceOptions::default());
+        let err = t.result.expect_err("refused");
+        assert_eq!(
+            err.blend_failure(),
+            Some(&BlendFailure::Solver(SolverFailure::StationsNotMonotone {
+                index: 2
+            })),
+            "{err:?}"
+        );
+        assert!(t.flushed.is_empty());
+    }
+
+    /// A given point whose foot 1 is 0.01 above its station (z = 19.51 on the wall) is
+    /// refused, typed, with its distance, not moved onto the chamfer.
+    #[test]
+    fn station_trace_refuses_a_given_foot_off_its_station() {
+        let d = [1.0, 0.5];
+        let mut h = half_rim(d);
+        let mut off = given_at(&mut h, 0.5, d);
+        let foot1 = off.surface_pv[1][0][0] + Vec3::Z * 0.01;
+        off.uv_curve_pv[1][0] = wall_uv(&h, foot1);
+        let given = [given_at(&mut h, 0.0, d), off];
+        let t = trace(&mut h, &given, &StationTraceOptions::default());
+        let err = t.result.expect_err("refused");
+        let Some(&BlendFailure::Solver(SolverFailure::SetbackFootOffStation { rail, moved })) =
+            err.blend_failure()
+        else {
+            panic!("{err:?}");
+        };
+        assert_eq!(rail, 1);
+        assert!((moved - 0.01).abs() < 1e-9, "{moved}");
+    }
+
+    /// A given point outside a trace domain (the top face's cut to x, y >= 0, foot 0 of the
+    /// station at −45 degrees below y = 0) would clip the trace before its last given point:
+    /// refused, typed.
+    #[test]
+    fn station_trace_refuses_a_given_point_outside_a_domain() {
+        let d = [1.0, 0.5];
+        let mut h = half_rim(d);
+        let given = [given_at(&mut h, 0.0, d), given_at(&mut h, 1.0, d)];
+        h.domains[0] = Extent2d::from_points(Point2::new(0.5, 0.5), Point2::new(1.0, 1.0));
+        let t = trace(&mut h, &given, &StationTraceOptions::default());
+        let err = t.result.expect_err("refused");
+        assert_eq!(
+            err.intersect_failure(),
+            Some(&IntersectFailure::PointOutsideDomain { surface: 0 }),
+            "{err:?}"
+        );
+    }
+
+    /// A closed leader (the rim's whole circle as the edge) is refused, typed: its period is
+    /// not handled yet.
+    #[test]
+    fn station_trace_refuses_a_closed_leader() {
+        let d = [1.0, 0.5];
+        let mut h = half_rim_on(d, arc(RIM_R, RIM_Z, -45.0, 4));
+        let given = [TsectPnt::new(), TsectPnt::new()];
+        let t = trace(&mut h, &given, &StationTraceOptions::default());
+        let err = t.result.expect_err("refused");
+        assert_eq!(
+            err.blend_failure(),
+            Some(&BlendFailure::Solver(SolverFailure::StationLeaderClosed)),
             "{err:?}"
         );
     }
