@@ -1492,6 +1492,25 @@ fn a_sheet_made_thinner_than_its_hardware_warns_and_still_builds() {
     assert!(w.starts_with("Body1 is 1 mm thick: ") && !w.contains('`'), "a message starts with a capital and has no markdown marks: {w}");
 }
 
+/// A mounting hole made from a parameter that is later changed out of the makers' tolerance (an M3
+/// nut: 4.25 to 4.33 mm) warns on the rebuild and still builds; back in tolerance it has none.
+#[test]
+fn a_hardware_hole_changed_out_of_tolerance_warns_and_still_builds() {
+    let mut s = plate();
+    run(&mut s, "parameters.add", json!({"name": "drill", "expression": "4.25 mm"}));
+    let reply = run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [50, 30, T], "diameter": "drill"}));
+    let id = reply["feature"].as_u64().unwrap();
+    assert_eq!(warning(&reply), "");
+    run(&mut s, "parameters.change", json!({"name": "drill", "expression": "6 mm"}));
+    let result = s.model.result(id).cloned().expect("the hardware feature was evaluated");
+    assert!(result.error.is_none(), "{:?}", result.error);
+    let w = result.warning.unwrap_or_default();
+    assert!(w.starts_with("The hole at (50, 30) is 6 mm across") && w.contains("an M3 nut takes a hole of 4.25 to 4.33 mm"), "{w}");
+    run(&mut s, "parameters.change", json!({"name": "drill", "expression": "4.3 mm"}));
+    let result = s.model.result(id).cloned().expect("the hardware feature was evaluated");
+    assert_eq!(result.warning.unwrap_or_default(), "");
+}
+
 /// A mirrored copy of a sheet is sheet metal with its flat pattern (`SurfaceSheet::copied`): the
 /// hardware holes of the source are the copy's, at the mirror image of their centres, with the DXF
 /// notes beside them.
