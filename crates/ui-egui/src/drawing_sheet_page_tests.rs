@@ -1336,6 +1336,67 @@ fn a_double_click_with_the_dimension_tool_in_hand_changes_no_mode() {
     }
 }
 
+/// The part's overall size (#20123): the plate's bottom edge picked, then the panel's option set, and
+/// the dimension placed reads the plate's 100 between its two end faces, a `faces` dimension, where
+/// the edge alone is a `length`. The option is set directly (the checkbox's state); the harness's
+/// double-click is not a user's, so a double-click's own frames are covered by the frame unit test.
+#[test]
+fn the_overall_size_option_makes_the_dimension_the_parts_width() {
+    let (mut h, _) = plate_sheet();
+    // Drawing ids are not in the order they were made in, so the new dimension is the one that wasn't here.
+    let before = h.app.session.drawing("drawing.inspect").unwrap().dimensions[0].id;
+    assert!(crate::drawing_workspace::start(&mut h.app, "drawing.dimension"));
+    h.frames(4);
+    let [x, y] = on_screen(140.0, 175.0);
+    h.step(&json!({"move": [x, y]})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click": [x, y]})).unwrap();
+    h.frames(2);
+    assert_eq!(crate::drawing_workspace::dimension::picked_shapes(&h.app).len(), 1, "one pick");
+    assert!(crate::drawing_workspace::dimension::set_overall(&mut h.app, true), "a lone straight edge offers it");
+    h.step(&json!({"click": on_screen(300.0, 60.0)})).unwrap();
+    h.frames(2);
+    let dimensions = &h.app.session.drawing("drawing.inspect").unwrap().dimensions;
+    assert_eq!(dimensions.len(), 2, "the dimension was placed");
+    let placed = dimensions.iter().find(|d| d.id != before).expect("a new dimension").id;
+    let id = solidcraft_engine::doc::ids::encode(placed);
+    let read = h.app.run("drawing.dimension.inspect", json!({"dimension": id})).unwrap();
+    assert!(read["record"]["kind"].get("faces").is_some(), "{read}");
+    assert!((read["value"].as_f64().unwrap() - 100.0).abs() < 1e-6, "{read}");
+}
+
+/// The overall size is offered only for an edge that runs across or up the sheet (#20123): along it, as
+/// the view shows it, a slanted edge has no overall width or height, so the option isn't offered rather
+/// than placing the edge's own length with the option ticked.
+#[test]
+fn the_overall_option_is_offered_only_for_an_edge_across_or_up_the_sheet() {
+    use crate::drawing_workspace::dimension::overall_direction;
+    let at = |x, y| solidcore_record::Vec2::new(x, y);
+    assert_eq!(overall_direction(at(0.0, 0.0), at(10.0, 0.0)), Some("horizontal"));
+    assert_eq!(overall_direction(at(10.0, 5.0), at(0.0, 5.0)), Some("horizontal"), "either way along");
+    assert_eq!(overall_direction(at(3.0, 0.0), at(3.0, -7.0)), Some("vertical"));
+    assert_eq!(overall_direction(at(0.0, 0.0), at(10.0, 3.0)), None, "slanted");
+    assert_eq!(overall_direction(at(0.0, 0.0), at(5.0, 5.0)), None, "diagonal");
+}
+
+/// The frames a user's double-click gives the Dimension tool (#20123): the first click only picks (no
+/// double-click, so no toggle); the second, where egui answers `clicked` and `double_clicked` both, is
+/// the double-click alone (no click to place with), and only offers the option (a hint; it sets
+/// nothing) on a draft that offers it and on the edge it picked.
+#[test]
+fn a_double_click_offers_the_overall_option_only_on_the_picked_edge() {
+    use crate::drawing_workspace::dimension::Clicks;
+    let first = Clicks::of_frame(true, false);
+    let second = Clicks::of_frame(true, true);
+    assert_eq!((first.clicked, first.double), (true, false));
+    assert_eq!((second.clicked, second.double), (false, true), "the second click is the double-click alone");
+    assert!(!first.offers_overall(true, || true), "a first click never offers it");
+    assert!(second.offers_overall(true, || true));
+    assert!(!second.offers_overall(false, || true), "a draft that doesn't offer it");
+    assert!(!second.offers_overall(true, || false), "off the picked edge");
+    assert!(!Clicks::of_frame(false, false).offers_overall(true, || true), "a quiet frame");
+}
+
 /// A placed dimension's text drags, as a sketch dimension's does: it follows the pointer by the
 /// same drag (`dim_view`), and the whole drag is one undo step.
 #[test]

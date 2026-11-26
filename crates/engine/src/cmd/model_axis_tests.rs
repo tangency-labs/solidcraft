@@ -270,3 +270,37 @@ fn hostile_model_axes_are_refused_without_panicking() {
     let e = s.execute("solid.revolve", &json!({"sketch": "Flat", "axis": {"face": [45, 0, 5]}})).unwrap_err().to_string();
     assert!(e.contains("does not lie in the sketch plane"), "{e}");
 }
+
+/// An edge picked as an axis on a moved component is the edge at the pick, though another moved
+/// component's edge lies at the same point before it is moved (#20492). A is moved 50 along X, B
+/// (whose box starts 50 along X) 100: B's unmoved box is where A's moved one is.
+#[test]
+fn an_axis_picked_on_a_moved_component_is_the_edge_at_the_pick() {
+    let mut s = Session::default();
+    for (name, base, shift) in [("A", 0, 50), ("B", 50, 100)] {
+        let c = run(&mut s, "component.create", json!({"name": name, "grounded": false}))["component"].as_u64().unwrap();
+        run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [base, 0, 0], "body_name": name}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let occurrence = s.doc.occurrence_of(c).unwrap().id;
+        run(&mut s, "occurrence.move", json!({"occurrence": occurrence, "translate": [shift, 0, 0]}));
+    }
+    let boxes = volume(&mut s);
+    // A 2 × 1 section on XZ, x 54…56, z 0…1: its centre 5 from A's edge at x = 50, y = 0.
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [54, 0], "p1": [56, -1]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch": "Profile", "axis": {"edge": [50, 0, 1]}, "operation": "new", "name": "Turn", "body_name": "Turn"}));
+    let turned = volume(&mut s) - boxes;
+    assert!(rel(turned, 2.0 * PI * 5.0 * 2.0) < 1e-4, "turned about A's edge at x = 50, not B's: {turned}");
+    // A circular pattern reads its axis the same way: a half turn about A's edge puts a 1 mm cube
+    // 4 mm from it on the other side, 1 mm from B's moved box rather than 100.
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "corner": [54, 0, 0], "body_name": "Cube"}));
+    run(&mut s, "solid.pattern.circular", json!({"bodies": ["Cube"], "axis": {"edge": [50, 0, 1]}, "count": 2, "name": "Copies"}));
+    let st = s.world_state().unwrap();
+    let copy = st
+        .bodies
+        .iter()
+        .filter(|b| b.name.starts_with("Cube"))
+        .find(|b| b.body.classify_point(Vec3::new(45.5, -0.5, 0.5)).unwrap() == solidcraft_kernel::PointClass::Inside);
+    assert!(copy.is_some(), "the copy is turned about A's edge: {:?}", st.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+}

@@ -12,6 +12,7 @@ pub mod attribute;
 pub mod axial_section;
 pub mod axis2_placement;
 pub mod certified;
+pub mod check_memo;
 pub mod content;
 pub mod context;
 pub(crate) mod expansion;

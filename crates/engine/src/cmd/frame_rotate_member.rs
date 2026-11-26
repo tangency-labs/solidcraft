@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::expr::Expr;
 use solidcraft_doc::{FeatureKind, PlaneRef, end_cap};
 use solidcraft_geom::PlaneGeom;
-use solidcraft_kernel::{ParallelTurnError, parallel_turn};
+use solidcraft_kernel::{ParallelTurnError, turn_to_parallel};
 
 const CONTRACT: TypedContract<RotateMemberParams> = TypedContract::new();
 
@@ -80,7 +80,7 @@ fn parallel_angle(s: &Session, plane: &PlaneRef, member: &end_cap::Member, targe
     let PlaneRef::Face { plane: picked, .. } = plane else { return Err(bad(cmd, "Select a face of a frame member")) };
     let normal = picked.normal();
     let v = |v: solidcore_record::Vec3| [v.x, v.y, v.z];
-    let delta = parallel_turn(v(axis), v(normal), v(line)).map_err(|e| match e {
+    let delta = turn_to_parallel(v(axis), v(normal), v(line)).map_err(|e| match e {
         ParallelTurnError::NotASide => bad(cmd, "The member's face must be a flat side"),
         ParallelTurnError::NotALine => line_err(),
         ParallelTurnError::AlongAxis => bad(cmd, "That line runs along the member: its sides are already parallel to it"),

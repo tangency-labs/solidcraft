@@ -672,6 +672,49 @@ pub fn points_meet(a: [f64; 3], b: [f64; 3], tol: f64) -> Result<bool> {
     Ok(point_distance(a, b)?.value <= tol)
 }
 
+/// Why [`turn_to_parallel`] cannot answer a turn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParallelTurnError {
+    /// The given normal is not square to the axis.
+    NotASide,
+    /// The axis, normal or line is a zero or non-finite vector.
+    NotALine,
+    /// The line runs along the axis: turning about the axis never makes a perpendicular direction
+    /// parallel to it.
+    AlongAxis,
+}
+
+/// A normal is square to the axis within this (a dot product of unit vectors).
+const SQUARE_NORMAL_TOL: f64 = 1e-6;
+/// A line this close to the axis (radians) is along it.
+const ALONG_AXIS_TOL: f64 = 1e-9;
+
+/// The turn (radians, in (-PI/2, PI/2]) about `axis` that makes a direction square to `axis`
+/// (with normal `face_normal`) parallel to `line`.
+///
+/// # Errors
+///
+/// [`ParallelTurnError`], see its variants.
+pub fn turn_to_parallel(
+    axis: [f64; 3],
+    face_normal: [f64; 3],
+    line: [f64; 3],
+) -> std::result::Result<f64, ParallelTurnError> {
+    let m = solidcore::query::edge_turn::turn_to_parallel(
+        Vec3::from(axis),
+        Vec3::from(face_normal),
+        Vec3::from(line),
+    )
+    .map_err(|_| ParallelTurnError::NotALine)?;
+    if m.normal_along_axis > SQUARE_NORMAL_TOL {
+        return Err(ParallelTurnError::NotASide);
+    }
+    if m.line_off_axis < ALONG_AXIS_TOL {
+        return Err(ParallelTurnError::AlongAxis);
+    }
+    Ok(m.turn)
+}
+
 impl Body {
     /// Mass properties at `relative_accuracy` (the kernel's rule: finite and positive, clamped
     /// to [1e-8, 1e-1]): the sum over the body's material regions, so several lumps, or lumps
@@ -1513,13 +1556,17 @@ impl Body {
     /// [`Error::Argument`] for an entity of the body that `order` does not hold; any other
     /// kernel error.
     pub fn adjacency(&self, order: &Order) -> Result<Adjacency> {
-        let at = |list: &[EdgeId], e: EdgeId| list.iter().position(|&x| x == e);
+        // where each kernel entity stands in `order`, its first place there, as a search of
+        // the list finds it: looked up once per use instead of searching the list each time
+        let faces_at = first_places(&order.faces);
+        let edges_at = first_places(&order.edges);
+        let vertices_at = first_places(&order.vertices);
         read_body("adjacency", self, |_, b| {
             let mut face_edges = Vec::with_capacity(order.faces.len());
             for &f in &order.faces {
                 let mut edges = Vec::new();
                 for e in face_p4::edges(b, f, None, false, None)? {
-                    let Some(i) = at(&order.edges, e) else {
+                    let Some(&i) = edges_at.get(&e) else {
                         return Ok(Err(Error::Argument));
                     };
                     edges.push(i);
@@ -1531,7 +1578,7 @@ impl Body {
             for &e in &order.edges {
                 let mut faces = Vec::new();
                 for f in edge::faces(b, e, None)? {
-                    let Some(i) = order.faces.iter().position(|&x| x == f) else {
+                    let Some(&i) = faces_at.get(&f) else {
                         return Ok(Err(Error::Argument));
                     };
                     faces.push(i);
@@ -1539,8 +1586,8 @@ impl Body {
                 edge_faces.push(faces);
                 let ends = match edge::start_end_vertices(b, e)? {
                     (Some(s), Some(t)) => {
-                        let index = |v: VertexId| order.vertices.iter().position(|&x| x == v);
-                        let (Some(s), Some(t)) = (index(s), index(t)) else {
+                        let (Some(&s), Some(&t)) = (vertices_at.get(&s), vertices_at.get(&t))
+                        else {
                             return Ok(Err(Error::Argument));
                         };
                         Some([s, t])
@@ -2577,6 +2624,16 @@ pub fn point_along_line(
 pub fn distance_across_surface(point_: [f64; 3], foot: [f64; 3], q: [f64; 3]) -> Option<f64> {
     let (p, f, q) = (point(point_).ok()?, point(foot).ok()?, point(q).ok()?);
     Some(solidcore::query::distance_across_surface(p, f, q))
+}
+
+/// Each entry of `list` with its first place in it: the index a search of the list from the
+/// start finds for it.
+fn first_places<T: Copy + Eq + std::hash::Hash>(list: &[T]) -> std::collections::HashMap<T, usize> {
+    let mut at = std::collections::HashMap::new();
+    for (i, &x) in list.iter().enumerate() {
+        at.entry(x).or_insert(i);
+    }
+    at
 }
 
 #[cfg(test)]
@@ -3902,6 +3959,45 @@ pub(crate) mod tests {
         assert_eq!(b.adjacency(&short), Err(Error::Argument));
     }
 
+    /// An order with its lists reversed numbers every face, edge and vertex from the other
+    /// end: the adjacency in it is the adjacency in the first order, renumbered.
+    #[test]
+    fn adjacency_follows_the_orders_numbering() {
+        all_fixes();
+        let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+        let o = kernel_order(&b);
+        let a = b.adjacency(&o).unwrap();
+        let mut r = o.clone();
+        r.faces.reverse();
+        r.edges.reverse();
+        r.vertices.reverse();
+        let ar = b.adjacency(&r).unwrap();
+        let (nf, ne, nv) = (o.faces.len(), o.edges.len(), o.vertices.len());
+        for f in 0..nf {
+            let want: Vec<usize> = a.face_edges[nf - 1 - f]
+                .iter()
+                .map(|e| ne - 1 - e)
+                .collect();
+            assert_eq!(ar.face_edges[f], want, "face {f}");
+        }
+        for e in 0..ne {
+            let want: Vec<usize> = a.edge_faces[ne - 1 - e]
+                .iter()
+                .map(|f| nf - 1 - f)
+                .collect();
+            assert_eq!(ar.edge_faces[e], want, "edge {e}");
+            let want = a.edge_vertices[ne - 1 - e].map(|[s, t]| [nv - 1 - s, nv - 1 - t]);
+            assert_eq!(ar.edge_vertices[e], want, "edge {e}");
+        }
+        for v in 0..nv {
+            assert_eq!(
+                ar.vertex_points[v],
+                a.vertex_points[nv - 1 - v],
+                "vertex {v}"
+            );
+        }
+    }
+
     #[test]
     fn edge_samples_run_from_start_to_end() {
         // a box's edges are lines: the samples at 0 and 1 are its corners, the one at a half
@@ -4048,5 +4144,33 @@ pub(crate) mod tests {
             .unwrap()
             .unwrap();
         assert!((cc[0] - 2.0).abs() < 1e-9 && cc[1].abs() < 1e-9);
+    }
+
+    #[test]
+    fn turn_to_parallel_cases() {
+        use core::f64::consts::PI;
+        let z = [0.0, 0.0, 1.0];
+        let x = [1.0, 0.0, 0.0];
+        let ok = |l: [f64; 3], want: f64| {
+            let got = turn_to_parallel(z, x, l).unwrap();
+            assert!((got - want).abs() < 1e-12, "{l:?}: {got} vs {want}");
+        };
+        ok([0.0, 1.0, 0.0], 0.0);
+        ok([1.0, 1.0, 0.0], -PI / 4.0);
+        ok([1.0, 1.0, 5.0], -PI / 4.0);
+        ok([1.0, 0.0, 0.0], PI / 2.0);
+        assert_eq!(turn_to_parallel(z, x, z), Err(ParallelTurnError::AlongAxis));
+        assert_eq!(
+            turn_to_parallel(z, z, [0.0, 1.0, 0.0]),
+            Err(ParallelTurnError::NotASide)
+        );
+        assert_eq!(
+            turn_to_parallel(z, x, [f64::NAN, 0.0, 0.0]),
+            Err(ParallelTurnError::NotALine)
+        );
+        assert_eq!(
+            turn_to_parallel(z, x, [0.0; 3]),
+            Err(ParallelTurnError::NotALine)
+        );
     }
 }
