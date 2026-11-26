@@ -170,6 +170,13 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                     let tool = kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?);
                     kernel::extend_surface(&mb.body, &crate::plain(edges), &at(kernel::ExtendLimit::UpTo(&tool)))?
                 }
+                Some(crate::ExtendTo::Body(target)) => {
+                    if target == body {
+                        return Err(DocError::Invalid("a surface can't extend up to itself".into()));
+                    }
+                    let tb = st.body(target).ok_or_else(|| DocError::Unknown(format!("body `{target}`")))?;
+                    kernel::extend_surface(&mb.body, &crate::plain(edges), &at(kernel::ExtendLimit::UpToBody(&tb.body)))?
+                }
                 Some(crate::ExtendTo::Face(t)) => {
                     let tb = st.body(&t.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", t.body)))?;
                     let face = crate::appearance::face_index_at(tb, t.point.0)

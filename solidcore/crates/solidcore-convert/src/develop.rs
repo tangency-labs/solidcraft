@@ -146,7 +146,9 @@ pub fn record_corner_relief(c: k::CornerRelief) -> r::CornerRelief {
     }
 }
 
-fn anchor(a: &r::Anchor) -> k::Anchor {
+/// The record's anchor as the kernel's.
+#[must_use]
+pub fn anchor(a: &r::Anchor) -> k::Anchor {
     k::Anchor {
         panel: a.panel,
         origin: vec2(a.origin),
@@ -292,6 +294,7 @@ fn relief(x: r::Relief) -> k::Relief {
         r::Relief::Notch => k::Relief::Notch,
         r::Relief::Outline => k::Relief::Outline,
         r::Relief::Slot { width, depth } => k::Relief::Slot { width, depth },
+        r::Relief::Obround { width, depth } => k::Relief::Obround { width, depth },
         r::Relief::Tear { normal, offset } => k::Relief::Tear {
             normal: vec3(normal),
             offset,
@@ -305,6 +308,7 @@ fn record_relief(x: k::Relief) -> r::Relief {
         k::Relief::Notch => r::Relief::Notch,
         k::Relief::Outline => r::Relief::Outline,
         k::Relief::Slot { width, depth } => r::Relief::Slot { width, depth },
+        k::Relief::Obround { width, depth } => r::Relief::Obround { width, depth },
         k::Relief::Tear { normal, offset } => r::Relief::Tear {
             normal: record_vec3(normal),
             offset,

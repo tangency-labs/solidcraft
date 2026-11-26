@@ -10,7 +10,8 @@ use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use super::features::{
-    add_face_feature, add_feature, axis_dir_param, check_expr, feature_sketch, length_operands, plane_param, point_param, profiles, typed_length_unit,
+    add_face_feature, add_feature, axis_expr_param, check_expr, feature_sketch, length_operands, plane_param, point_param, profiles,
+    typed_length_unit,
 };
 use crate::params::{bad, bool_, expr, expr_problem, req_expr, str_, string_list, vec3};
 use crate::schema::align::AlignParams;
@@ -112,11 +113,11 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
                 || v.is_object() && ["origin", "dir", "curve", "edge", "face", "type"].iter().any(|key| v.get(*key).is_some()))
     });
     let (axis, axis_ref) = if let Some(geo) = coil_placed_edge(s, p.get("axis"), cmd)? {
-        (Vec3::Z, Some(solidcraft_doc::AxisRef::Model { geo }))
+        (solidcraft_doc::dir_expr(Vec3::Z), Some(solidcraft_doc::AxisRef::Model { geo }))
     } else if reference {
-        (Vec3::Z, Some(super::features::axis_param(s, sketch.map_or(0, |id| id.0), p, cmd)?))
+        (solidcraft_doc::dir_expr(Vec3::Z), Some(super::features::axis_param(s, sketch.map_or(0, |id| id.0), p, cmd)?))
     } else {
-        (axis_dir_param(p, cmd)?, None)
+        (axis_expr_param(s, p, cmd)?.0, None)
     };
     let diameter = if profile_mode {
         None
@@ -177,7 +178,7 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
         p,
         FeatureKind::Coil {
             base,
-            axis: Dir(axis),
+            axis,
             axis_ref,
             reversed: super::reversed_param(p, "reversed", cmd)?,
             sketch,

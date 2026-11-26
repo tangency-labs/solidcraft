@@ -424,7 +424,10 @@ fn editing_a_coil_reopens_its_dialog_filled_in_and_ok_redefines_it() {
     match h.app.session.doc.feature(id).map(|f| &f.kind) {
         Some(FeatureKind::Coil { base, axis, reversed, pitch, turns, section, position, clockwise, start_angle, .. }) => {
             assert!(*reversed);
-            assert!(axis.0.dist(Vec3::new(1.0, 2.0, 3.0).normalized().unwrap()) < 1e-9);
+            assert!(
+                solidcraft_engine::doc::literal_dir(axis).is_some_and(|a| a.dist(Vec3::new(1.0, 2.0, 3.0).normalized().unwrap()) < 1e-9),
+                "{axis:?}"
+            );
             assert_eq!((pitch.to_string(), turns.to_string()), ("10".to_string(), "4".to_string()));
             assert_eq!((*section, *position, *clockwise), (CoilSection::Square, 1, true));
             assert_eq!(start_angle.as_ref().map(|a| a.to_string()).as_deref(), Some("30 deg"));

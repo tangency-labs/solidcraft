@@ -6377,14 +6377,15 @@ pub(crate) fn point(vals: &BTreeMap<String, Value>, p: &crate::PointExpr) -> Res
     if [v.x, v.y, v.z].iter().all(|c| c.is_finite() && c.abs() < 1e9) { Ok(v) } else { Err(DocError::Invalid("the position is out of range".into())) }
 }
 
-/// A primitive's axis (#18822): its components evaluated as unitless numbers, normalized.
-fn direction(vals: &BTreeMap<String, Value>, d: &crate::DirExpr) -> Result<Vec3> {
+/// A primitive's axis (#18822) or a hole's direction: its components evaluated as unitless
+/// numbers, normalized. `field` names it in the errors (`axis`, `direction`).
+fn direction(vals: &BTreeMap<String, Value>, d: &crate::DirExpr, field: &str) -> Result<Vec3> {
     let [x, y, z] = d;
     let v = Vec3::new(val(vals, x, Kind::Unitless)?, val(vals, y, Kind::Unitless)?, val(vals, z, Kind::Unitless)?);
     if ![v.x, v.y, v.z].iter().all(|c| c.is_finite()) {
-        return Err(DocError::Invalid("the axis is not a finite direction".into()));
+        return Err(DocError::Invalid(format!("the {field} is not a finite direction")));
     }
-    crate::unit_direction(v).ok_or_else(|| DocError::Invalid("the axis is zero: give it a direction [x, y, z] that isn't [0, 0, 0]".into()))
+    crate::unit_direction(v).ok_or_else(|| DocError::Invalid(format!("the {field} is zero: give it a direction [x, y, z] that isn't [0, 0, 0]")))
 }
 
 pub(crate) fn val(vals: &BTreeMap<String, Value>, e: &str, k: Kind) -> Result<f64> {
@@ -8902,7 +8903,7 @@ fn naming_feature<'a>(vals: &BTreeMap<String, Value>, f: &'a Feature) -> std::bo
     // goes in as the numbers it is now (#18822).
     if let FeatureKind::Cylinder { axis, .. } = &f.kind
         && crate::literal_dir(axis).is_none()
-        && let Ok(d) = direction(vals, axis)
+        && let Ok(d) = direction(vals, axis, "axis")
     {
         let mut g = f.clone();
         if let FeatureKind::Cylinder { axis, .. } = &mut g.kind {
@@ -9299,7 +9300,7 @@ fn hole_spots<'a>(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelStat
             (v, dir)
         }
         _ => {
-            let dir = direction.normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
+            let dir = self::direction(vals, direction, "direction")?;
             let at = hole_start(st, f, single_hole_position(vals, st, position, at, points)?, dir);
             let at = with_references(vals, st, f, at, dir, true)?;
             let dir = hole_dir_into_face(st, at, dir, hole_drill_scope(f));
@@ -9376,7 +9377,7 @@ fn hole_spots_raw<'a>(vals: &BTreeMap<String, Value>, st: &ModelState, f: &'a Fe
             Ok((v, dir))
         }
         _ => {
-            let dir = direction.normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
+            let dir = self::direction(vals, direction, "direction")?;
             let p = single_hole_position(vals, st, position, at, points)?;
             let p = if hole_references(f).is_empty() { p } else { with_references(vals, st, f, hole_start(st, f, p, dir), dir, false)? };
             Ok((vec![HoleSpot { at: p, point: None }], hole_dir_into_face(st, hole_start(st, f, p, dir), dir, hole_drill_scope(f))))
@@ -11129,7 +11130,7 @@ fn feature_tools_with_constructor(
                     };
                     (solved.plane.origin, direction)
                 }
-                None => (point(vals, base)?, axis.0),
+                None => (point(vals, base)?, direction(vals, axis, "axis")?),
             };
             let base = &base;
             let k = direction.normalized().ok_or_else(|| DocError::Invalid("coil axis".into()))?;
@@ -11321,7 +11322,7 @@ fn feature_tools_with_constructor(
             Ok(vec![crate::lineage::box_tool(kernel::box_solid(corner, corner + s)?).with_recipe(tool_recipe(doc, f, vals))])
         }
         FeatureKind::Cylinder { base, axis, radius, height, .. } => {
-            let axis = direction(vals, axis)?;
+            let axis = direction(vals, axis, "axis")?;
             Ok(vec![
                 crate::lineage::cylinder_tool(kernel::cylinder(
                     cylinder_base(vals, st, f, base, axis)?,
@@ -11338,7 +11339,7 @@ fn feature_tools_with_constructor(
         }
         FeatureKind::Cone { base, axis, radius, top_radius, height, .. } => Ok(vec![more::cone(
             point(vals, base)?,
-            axis.0,
+            direction(vals, axis, "axis")?,
             val(vals, radius, Kind::Length)?,
             val(vals, top_radius, Kind::Length)?,
             val(vals, height, Kind::Length)?,
@@ -12233,12 +12234,24 @@ fn mirrored_placement(doc: &Document, own: u64, mb: &ModelBody, path: Option<&[u
     } else if let Some(migrated) = migrated_copy_placement(doc, mb, path, at) {
         std::borrow::Cow::Owned(migrated)
     } else {
-        return Err(lost());
+        std::borrow::Cow::Borrowed(outer_placement(doc, mb, path).ok_or_else(lost)?)
     };
     let singular = || DocError::Invalid(format!("the placement `{}` was copied from is singular", mb.name));
     let (component, frame, picked) = mirror_copy_frame(doc, own, &effective).ok_or_else(singular)?;
     let source = doc.model_body_offset(mb).map(|offset| crate::mat_mul(&picked, offset)).unwrap_or(picked);
     Ok(Some((component, frame, source)))
+}
+
+/// The placement on the way to `path` that shows body `mb`, when `path` itself does not: the
+/// longest of its leading occurrences that leads to the body's component. A copy a mirror or
+/// pattern makes at a placement joins the innermost component around it that is placed once
+/// ([`mirror_copy_frame`]), so placing the part picked there again (a linked part inserted once
+/// more with `reuse`) moves those copies out to a component that placement passes through. A
+/// later pattern or mirror that picked them at the part's placement copies them where they are
+/// now: before, it left them out, and its copies with them.
+fn outer_placement<'p>(doc: &Document, mb: &ModelBody, path: &'p [u64]) -> Option<&'p [u64]> {
+    let owner = doc.model_body_component(mb);
+    (0..path.len()).rev().filter_map(|k| path.get(..k)).find(|outer| doc.path_placement(outer).is_some_and(|(at, _)| at == owner))
 }
 
 /// Follow a pattern or mirror copy whose owning component shifted between an ancestor and a
@@ -13515,7 +13528,9 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
     // the face along the hole's axis and never slides sideways to the face's nearest
     // point when the face no longer reaches it.
     let hole_axis = match &f.kind {
-        FeatureKind::Hole { direction, points: None | Some(crate::SketchPoints { single: true, .. }), .. } => direction.normalized(),
+        FeatureKind::Hole { direction, points: None | Some(crate::SketchPoints { single: true, .. }), .. } => {
+            self::direction(vals, direction, "direction").ok()
+        }
         _ => None,
     };
     let placed = match &f.kind {
@@ -16414,7 +16429,7 @@ fn eval_feature_kind(
             apply_traced(doc, st, f, vec![crate::lineage::box_tool(b).with_recipe(tool_recipe(doc, f, vals))], *operation, &[])
         }
         FeatureKind::Cylinder { base, axis, radius, height, operation, .. } => {
-            let axis = direction(vals, axis)?;
+            let axis = direction(vals, axis, "axis")?;
             let base = cylinder_base(vals, st, f, base, axis)?;
             let (radius, height) = (val(vals, radius, Kind::Length)?, val(vals, height, Kind::Length)?);
             let b = kernel::cylinder(base, axis, radius, height)?;
@@ -16432,7 +16447,7 @@ fn eval_feature_kind(
         FeatureKind::Cone { base, axis, radius, top_radius, height, operation } => {
             let (radius, top_radius, height) =
                 (val(vals, radius, Kind::Length)?, val(vals, top_radius, Kind::Length)?, val(vals, height, Kind::Length)?);
-            let tool = more::cone(point(vals, base)?, axis.0, radius, top_radius, height)?;
+            let tool = more::cone(point(vals, base)?, direction(vals, axis, "axis")?, radius, top_radius, height)?;
             apply_traced(doc, st, f, vec![tool], *operation, &[])
         }
         FeatureKind::Combine { target, tools, operation, keep_tools, offset, offset_edges, offset_faces, offset_radius } => {

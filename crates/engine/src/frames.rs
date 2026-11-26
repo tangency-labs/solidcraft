@@ -86,7 +86,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         // turns a bare direction as `PrimitiveAxis` does and passes X, Y or Z by name through.
         "solid.coil" => &[("base", Make), ("center", Make), ("axis", Axis)],
         "solid.fillet" | "solid.chamfer" => &[("edges", Picks), ("body", Body)],
-        "solid.hole" => &[("position", Pick), ("references", Picks), ("direction", Dir), ("body", Body)],
+        "solid.hole" => &[("position", Pick), ("references", Picks), ("direction", PrimitiveAxis), ("body", Body)],
         "solid.scale" => &[("origin", Make), ("bodies", Body)],
         "solid.offset_face" | "solid.shell" | "face.delete" => &[("faces", Picks), ("body", Body)],
         "solid.thread" => &[("face", Pick), ("faces", Picks), ("from", Pick), ("up_to", Plane)],
@@ -1071,7 +1071,7 @@ fn primitive_placement(kind: &solidcraft_doc::FeatureKind, cmd: &str) -> Vec<(&'
         (Feature::Box { corner, centred, .. }, "solid.box") => vec![(if *centred { "center" } else { "corner" }, point(corner))],
         (Feature::Sphere { center, .. }, "solid.sphere") | (Feature::Torus { center, .. }, "solid.torus") => vec![("center", point(center))],
         (Feature::Cylinder { base, axis, .. }, "solid.cylinder") => vec![("base", point(base)), ("axis", point(axis))],
-        (Feature::Coil { base, axis, .. }, "solid.coil") => vec![("base", point(base)), ("axis", pt(axis.0))],
+        (Feature::Coil { base, axis, .. }, "solid.coil") => vec![("base", point(base)), ("axis", point(axis))],
         _ => Vec::new(),
     }
 }

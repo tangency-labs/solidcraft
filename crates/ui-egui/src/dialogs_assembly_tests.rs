@@ -1924,8 +1924,116 @@ fn as_built_animation_drives_the_new_shared_id_and_handles_exhaustion() {
     assert!(result.is_err() && !matches!(result, Err(solidcraft_engine::EngineError::Internal(..))), "{result:?}");
 }
 
-/// As-built joints and rigid groups take components from body picks; New Component makes one
-/// from bodies when bodies are picked.
+/// Two boxes as separate bodies of the design (Body1, Body2), no component, and the New Component
+/// window opened on `picked` with the Name `name` and Activate `activate`.
+fn new_component_window(picked: &[&str], name: &str, activate: bool) -> (SolveApp, crate::dialogs::Dialog) {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    for x in [0, 40] {
+        app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0], "operation": "new"})).unwrap();
+    }
+    app.session.selection = picked.iter().map(|body| Sel::Body { name: body.to_string() }).collect();
+    app.start("component.create");
+    let mut d = app.dialog.take().unwrap();
+    let Kind::Assembly(Asm::NewComponent { name: typed, activate: active }) = &mut d.kind else { panic!("expected New Component") };
+    *typed = name.into();
+    *active = activate;
+    (app, d)
+}
+
+/// New Component with bodies picked makes ONE component with the typed name, moves the bodies
+/// into it and activates it (#21840), as one undo step whose History is one folder named after
+/// the component.
+#[test]
+fn new_component_with_bodies_picked_puts_them_in_one_named_component() {
+    let (mut app, d) = new_component_window(&["Body1", "Body2"], "Holder", true);
+    let (before, undo) = (app.session.doc.to_json(), app.session.undo.len());
+    crate::dialogs::run_dialog(&mut app, &d).unwrap();
+    let doc = &app.session.doc;
+    assert_eq!(doc.components.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["Holder"]);
+    let holder = occ(&app, "Holder");
+    for body in ["Body1", "Body2"] {
+        assert_eq!(occurrence_of_body(&app.session, body), Some(holder), "{body} is in Holder");
+    }
+    assert_eq!(app.session.active_component, doc.find_component("Holder").unwrap(), "Activate made it active");
+    assert_eq!(app.session.undo.len(), undo + 1, "one undo step");
+    let folders: Vec<_> = doc.timeline_groups.iter().map(|g| (g.name.as_str(), g.features.len())).collect();
+    assert_eq!(folders, [("Holder", 2)], "the two moves are one History folder");
+
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(app.session.doc.to_json(), before, "one Undo takes it all back");
+    assert_eq!(app.session.active_component, 0);
+    app.run("edit.redo", json!({})).unwrap();
+    let holder = occ(&app, "Holder");
+    for body in ["Body1", "Body2"] {
+        assert_eq!(occurrence_of_body(&app.session, body), Some(holder), "Redo puts {body} back in Holder");
+    }
+}
+
+/// With the default name and Activate off, one picked body goes into a new component that is not
+/// made active, and its move is one History item.
+#[test]
+fn new_component_with_a_body_picked_and_activate_off_keeps_the_active_component() {
+    let (mut app, d) = new_component_window(&["Body2"], "", false);
+    let undo = app.session.undo.len();
+    crate::dialogs::run_dialog(&mut app, &d).unwrap();
+    let doc = &app.session.doc;
+    assert_eq!(doc.components.len(), 1, "{:?}", doc.components);
+    let made = &doc.components[0].name;
+    assert_eq!(made, "Component1", "the default name the window shows");
+    assert_eq!(occurrence_of_body(&app.session, "Body2"), Some(occ(&app, made)));
+    assert_eq!(occurrence_of_body(&app.session, "Body1"), Some(0), "the body not picked stays in the design");
+    assert_eq!(app.session.active_component, 0, "Activate off");
+    assert_eq!(app.session.undo.len(), undo + 1);
+    assert!(doc.timeline_groups.is_empty(), "one move needs no folder");
+}
+
+/// A move the engine refuses leaves no empty component and no undo step behind, and the window
+/// gets the reason.
+#[test]
+fn new_component_whose_move_is_refused_leaves_nothing_behind() {
+    let (mut app, d) = new_component_window(&["Body1", "Nope"], "Holder", true);
+    let (before, undo) = (app.session.doc.to_json(), app.session.undo.len());
+    let redo = app.session.redo.len();
+    assert!(crate::dialogs::run_dialog(&mut app, &d).is_err());
+    assert_eq!(app.session.doc.to_json(), before);
+    assert_eq!((app.session.undo.len(), app.session.redo.len()), (undo, redo));
+    assert_eq!(app.session.active_component, 0);
+}
+
+/// A refused move inside an active component, with a body selected and a step to redo, leaves
+/// the design, the undo and redo steps, the active component and the selection as they were.
+#[test]
+fn new_component_refused_inside_a_component_keeps_redo_the_active_component_and_the_selection() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("component.create", json!({"name": "Inner", "activate": true})).unwrap();
+    app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0], "operation": "new"})).unwrap();
+    app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [40, 0, 0], "operation": "new"})).unwrap();
+    app.run("edit.undo", json!({})).unwrap();
+    app.session.selection = vec![Sel::Body { name: "Body1".into() }];
+    app.start("component.create");
+    let mut d = app.dialog.take().unwrap();
+    d.inputs[0].items.push(Sel::Body { name: "Nope".into() });
+    let labels = |steps: &[solidcraft_engine::Snapshot]| steps.iter().map(|step| step.label.clone()).collect::<Vec<_>>();
+    let state = |app: &SolveApp| {
+        let s = &app.session;
+        (s.doc.to_json(), labels(&s.undo), labels(&s.redo), s.active_component, s.active_occurrence_path.clone(), s.selection.clone())
+    };
+    let before = state(&app);
+    assert!(!before.2.is_empty(), "a step to redo");
+    assert_ne!(before.3, 0, "inside Inner");
+    assert!(crate::dialogs::run_dialog(&mut app, &d).is_err());
+    let after = state(&app);
+    assert!(after.0 == before.0, "the design is as it was");
+    assert_eq!(after.1, before.1, "the undo steps");
+    assert_eq!(after.2, before.2, "the redo steps");
+    assert_eq!((after.3, &after.4), (before.3, &before.4), "the active component");
+    assert_eq!(after.5, before.5, "the selection");
+    app.run("edit.redo", json!({})).unwrap();
+    assert!(app.session.model.state().body("Body2").is_some(), "Redo still brings the second box back");
+}
+
+/// As-built joints and rigid groups take components from body picks; New Component with no
+/// bodies picked makes an empty component (with bodies it moves them into the one it makes).
 #[test]
 fn component_picks_become_occurrences() {
     let mut app = two_boxes();
@@ -2111,6 +2219,112 @@ fn picks_on_one_component_say_why_and_offer_components() {
     assert_eq!((c[0].1["a"]["occurrence"].clone(), c[0].1["b"]["occurrence"].clone()), (json!(occ(&app, "Body1")), json!(occ(&app, "Body2"))));
     let out = frame(&mut app, vec![]);
     assert!(text_at(&out, &why).is_none(), "nothing left to say");
+}
+
+/// Stand with two bodies and Umbrella with one, both placed at the top level, which is active.
+fn stand_and_umbrella() -> (crate::scenario::Harness, u64, u64) {
+    let mut h = crate::scenario::Harness::new();
+    let component = |h: &mut crate::scenario::Harness, name: &str, corners: &[[f64; 3]]| {
+        let occ = h.app.run("component.create", json!({ "name": name })).unwrap()["occurrence"].as_u64().unwrap();
+        for c in corners {
+            h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": c})).unwrap();
+        }
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        occ
+    };
+    let stand = component(&mut h, "Stand", &[[0.0, 0.0, 0.0], [20.0, 0.0, 0.0]]);
+    let umbrella = component(&mut h, "Umbrella", &[[0.0, 40.0, 0.0]]);
+    h.app.preferences.browser_components_open = true;
+    h.frames(3);
+    (h, stand, umbrella)
+}
+
+fn click_row(h: &mut crate::scenario::Harness, occurrence: u64) {
+    let at = h.call("ui.at", json!({"occurrence": [occurrence], "control": "row"}));
+    assert_eq!(at["ok"], true, "{at}");
+    let clicked = h.call("ui.click", json!({"x": at["result"][0], "y": at["result"][1]}));
+    assert_eq!(clicked["ok"], true, "{clicked}");
+    h.frames(2);
+}
+
+/// The one-component hint As-Built would show now, if any.
+fn as_built_hint(h: &crate::scenario::Harness) -> Option<Vec<String>> {
+    let d = h.app.dialog.as_ref().expect("As-Built is open");
+    let Kind::Assembly(k) = &d.kind else { panic!("{:?}", d.kind) };
+    joint_problem(&h.app, k, &d.inputs).map(|p| p.1)
+}
+
+/// #21842: a component with two bodies picked by its Browser row, or selected when As-Built
+/// starts, is one component: Components stays active with no hint to split it, and the second
+/// component's row then moves on to Position with the two components as a and b.
+#[test]
+fn as_built_takes_a_two_body_component_as_one() {
+    for preselected in [false, true] {
+        let (mut h, stand, umbrella) = stand_and_umbrella();
+        if preselected {
+            h.app.session.selection = vec![Sel::Occurrence { path: vec![stand] }];
+        }
+        h.app.start("joint.as_built");
+        h.frames(2);
+        if !preselected {
+            click_row(&mut h, stand);
+        }
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs[0].items.len(), 2, "both of Stand's bodies");
+        assert_eq!(d.active, 0, "one component: Components stays active (preselected {preselected})");
+        assert_eq!(as_built_hint(&h), None, "nothing to split (preselected {preselected})");
+        click_row(&mut h, umbrella);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.active, 1, "two components: Position is next");
+        let c = apply_commands(&h.app, d).unwrap();
+        assert_eq!(c[0].0, "joint.as_built");
+        assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(stand), json!(umbrella)));
+    }
+}
+
+/// #21842: the hint stays for its own case, the bodies of one component picked one by one, and a
+/// whole-component pick stops hiding it once Components no longer holds that pick or the window
+/// opens again.
+#[test]
+fn as_built_hint_stays_for_bodies_picked_one_by_one() {
+    let (mut h, stand, _) = stand_and_umbrella();
+    let bodies = h.app.session.occurrence_bodies(&[stand], true).unwrap();
+    let pick_bodies = |h: &mut crate::scenario::Harness, names: &[String]| {
+        let mut d = h.app.dialog.take().unwrap();
+        for name in names {
+            d.pick(&h.app.session, Sel::Body { name: name.clone() });
+        }
+        h.app.dialog = Some(d);
+        h.frames(2);
+    };
+    h.app.start("joint.as_built");
+    h.frames(2);
+    pick_bodies(&mut h, &bodies);
+    assert_eq!(as_built_hint(&h), Some(bodies.clone()), "picked one by one: the hint");
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 0, "still one component");
+    // Components cleared, then the same bodies one by one.
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clear();
+    h.frames(2);
+    click_row(&mut h, stand);
+    assert_eq!(as_built_hint(&h), None);
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clear();
+    h.frames(2);
+    pick_bodies(&mut h, &bodies);
+    assert_eq!(as_built_hint(&h), Some(bodies.clone()), "after a clear");
+    // One body taken out and picked again.
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clear();
+    h.frames(2);
+    click_row(&mut h, stand);
+    pick_bodies(&mut h, &bodies[..1]);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "the pick took it out");
+    pick_bodies(&mut h, &bodies[..1]);
+    assert_eq!(as_built_hint(&h), Some(vec![bodies[1].clone(), bodies[0].clone()]), "after a body went out (in pick order)");
+    // A new window: the bodies selected before it opens.
+    h.app.dialog = None;
+    h.app.session.selection = bodies.iter().map(|name| Sel::Body { name: name.clone() }).collect();
+    h.app.start("joint.as_built");
+    h.frames(2);
+    assert_eq!(as_built_hint(&h), Some(bodies.clone()), "a new window");
 }
 
 #[test]

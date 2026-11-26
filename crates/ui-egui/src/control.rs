@@ -1382,10 +1382,14 @@ fn ui_view(app: &mut SolveApp, ctx: &egui::Context, q: params::View) -> Outcome 
     app.cancel_view_animation();
     match v {
         "fit" => app.fit_view(),
-        "home" => {
-            app.cam.set_view(StandardView::Iso);
-            app.fit_view();
-        }
+        // The design's own Home view as it was set (#19972), else the iso view fitted.
+        "home" => match solidcraft_engine::view::home_view(&app.session) {
+            Some(home) => app.cam = home,
+            None => {
+                app.cam.set_view(StandardView::Iso);
+                app.fit_view();
+            }
+        },
         v => {
             if let Some(sv) = StandardView::parse(v) {
                 app.cam.set_view(sv);

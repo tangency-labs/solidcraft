@@ -4464,6 +4464,12 @@ impl SolveApp {
             drawing_sheet_page::fit(self);
             return;
         }
+        // The design's own Home view: its camera as it was set, not fitted again (#19972).
+        if home && let Some(to) = solidcraft_engine::view::home_view(&self.session) {
+            self.pending_fit = None;
+            self.animate_to(to);
+            return;
+        }
         if render_workspace::active(self) {
             if home {
                 self.cam.set_view(StandardView::Iso);

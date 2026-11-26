@@ -1077,6 +1077,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         if one_flat {
             v.push(cmd(app, "solid.press_pull", "Press Pull"));
         }
+        v.push(cmd(app, "select.boundary", "Select Boundary"));
         v.push(cmd(app, "inspect.measure", "Measure"));
         // What cannot act on these faces is left out.
         v.retain(|i| i.enabled || i.is_sep());
@@ -2617,6 +2618,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         | "ui.shortcutKey"
         | "ui.quickAccessAdd"
         | "ui.quickAccessRemove" => crate::toolbar_custom::run(app, &item.id, &p),
+        "ui.setHome" => crate::view_gizmo::set_home(app),
         "ui.navigatorStyle" => {
             if let Some(style) = p.get("style").and_then(|s| serde_json::from_value(s.clone()).ok()) {
                 crate::view_gizmo::pick_style(app, style);
