@@ -942,6 +942,17 @@ impl Body {
         self.history.as_deref()
     }
 
+    /// The identity step over this body, shared by its unchanged and rigidly moved copies.
+    fn kept_identity(&self) -> std::sync::Arc<crate::history::History> {
+        self.placing.identity.get_or_init(|| std::sync::Arc::new(<crate::history::History as crate::history::BodyHistory>::identity(self))).clone()
+    }
+
+    /// A proved no-op: keep all geometry and construction metadata, with every entity kept
+    /// relative to this step's single input (not the inputs of the preceding step).
+    pub(crate) fn unchanged_step(&self) -> Body {
+        Body { history: Some(self.kept_identity()), ..self.clone() }
+    }
+
     /// Attach the history of the operation that made this body from `operands`, after checking
     /// it describes this body.
     pub(crate) fn with_history(mut self, history: crate::history::History, operands: &[&Body]) -> Result<Self> {
@@ -1529,12 +1540,7 @@ impl Body {
             face_sources: None,
             regularization_protected: self.regularization_protected,
             // A move keeps every face and edge where it was: one history for every placement.
-            history: Some(
-                self.placing
-                    .identity
-                    .get_or_init(|| std::sync::Arc::new(<crate::history::History as crate::history::BodyHistory>::identity(self)))
-                    .clone(),
-            ),
+            history: Some(self.kept_identity()),
             display_of,
             meshes: None,
             unchecked: None,

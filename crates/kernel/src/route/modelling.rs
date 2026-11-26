@@ -110,3 +110,11 @@ pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
         Which::Solidcore => Solidcore.offset_faces(b, at, distance),
     }
 }
+
+/// Rotate one face's support about `axis` through `origin` by `angle` radians, then translate
+/// it. The neighbouring faces extend or trim to meet it.
+pub fn transform_face(b: &Body, at: Vec3, translate: Vec3, origin: Vec3, axis: Vec3, angle: f64) -> Result<Body> {
+    match which(OpKind::TransformFace) {
+        Which::Solidcore => Solidcore.transform_face(b, at, translate, origin, axis, angle),
+    }
+}

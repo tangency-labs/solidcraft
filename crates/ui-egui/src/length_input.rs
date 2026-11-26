@@ -183,6 +183,7 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
         D::PatternRect { spacing, spacing2, extent, extent2, .. } => vec![spacing, spacing2, extent, extent2],
         D::OffsetPlane { offset } | D::Section { offset, .. } => vec![offset],
         D::OffsetFaces { distance } => vec![distance],
+        D::TransformFace { translate, origin, .. } => translate.iter_mut().chain(origin).collect(),
         D::MeshConvert { tolerance } => vec![tolerance],
         D::Thread { length, .. } => vec![length],
         D::Emboss { depth, offset_x, offset_y, .. } => vec![depth, offset_x, offset_y],

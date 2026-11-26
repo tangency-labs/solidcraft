@@ -15,6 +15,7 @@ use crate::ui_kit;
 pub(crate) const DRAG_ZOOM: &str = crate::navigation_slots::ZOOM_TOOL;
 /// The command behind the navigation bar's Look At button and its key.
 const LOOK_AT: &str = "view.normal_to";
+const TRANSFORM_FACE: &str = "solid.transform_face";
 
 /// Keys the application handles before any command shortcut.
 pub const RESERVED: &[&str] = &[
@@ -479,7 +480,7 @@ pub fn command_for(app: &SolveApp, key: &str) -> Option<&'static str> {
             solidcraft_engine::panels::ContextualPanelAction::from_command_id(id).is_none()
                 && (scope(id) != Scope::Render || here == Scope::Render)
                 && (here != Scope::Render || scope(id) != Scope::Sketch)
-                && solidcraft_engine::find_command(id).is_some_and(|c| crate::render_workspace::interactive_command_info(app, c).enabled)
+                && shortcut_enabled(app, id)
         })
         .collect();
     // Saved custom keys must take precedence over a newly introduced default in the
@@ -493,6 +494,10 @@ pub fn command_for(app: &SolveApp, key: &str) -> Option<&'static str> {
     } else {
         mine.or(enabled.first()).copied()
     }
+}
+
+fn shortcut_enabled(app: &SolveApp, id: &str) -> bool {
+    solidcraft_engine::find_command(id).is_some_and(|c| crate::render_workspace::interactive_command_info(app, c).enabled)
 }
 
 /// Run a shortcut key: its enabled command; outside a sketch, a sketch tool's key opens Create
@@ -524,7 +529,22 @@ pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
             }
             return;
         }
-        let resolved = variant_for_key(app, id);
+        // Only the winning Move/Copy binding is contextual. Opening the form consumes the
+        // face selection, so a second press must also recognize the form it opened.
+        let resolved = if id == "solid.move"
+            && app.session.active_sketch.is_none()
+            && !crate::render_workspace::active(app)
+            && !crate::drawing_workspace::active(app)
+            && (matches!(app.session.selection.as_slice(), [solidcraft_engine::Sel::Face { .. }])
+                || app.dialog.as_ref().and_then(|d| d.command()) == Some(TRANSFORM_FACE))
+        {
+            if repeat {
+                return;
+            }
+            TRANSFORM_FACE
+        } else {
+            variant_for_key(app, id)
+        };
         if app.preferences.shortcut_again_ends_tool {
             if repeat {
                 return;
@@ -532,6 +552,9 @@ pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
             if crate::toolbar::end_running_command(app, resolved) {
                 return;
             }
+        }
+        if resolved == TRANSFORM_FACE && id != resolved && !shortcut_enabled(app, resolved) {
+            return;
         }
         app.start(resolved);
     } else if app.session.active_sketch.is_some() && !crate::render_workspace::active(app) && commands_for(app, key).contains(&LOOK_AT) {
@@ -1204,6 +1227,103 @@ pub fn capturing(app: &SolveApp) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcraft_engine::Sel;
+
+    fn move_shortcut_fixture() -> (crate::scenario::Harness, Sel, Sel) {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Block"})).unwrap();
+        let faces = h.app.session.world_state().unwrap().body("Block").unwrap().body.faces(0.01).unwrap();
+        let pick = |i: usize| Sel::Face { body: "Block".into(), index: faces[i].index, point: faces[i].centroid };
+        (h, pick(0), pick(1))
+    }
+
+    #[test]
+    fn transform_face_move_shortcut_is_not_replayed_by_an_occluded_window() {
+        let (mut h, face, _) = move_shortcut_fixture();
+        h.app.home.open = false;
+        h.frames(2);
+        h.ctx.options_mut(|options| options.max_passes = 1.try_into().unwrap());
+        h.app.session.selection = vec![face];
+        h.frame_with(crate::test_support::key(egui::Key::M));
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some(TRANSFORM_FACE));
+        // eframe runs logic but not a new input pass when the window is occluded.
+        let _ = h.ctx.run_logic(&egui::RawInput::default(), |ctx| h.app.logic(ctx));
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some(TRANSFORM_FACE));
+        h.frame_with(vec![egui::Event::Key { key: egui::Key::M, physical_key: None, pressed: false, repeat: false, modifiers: Default::default() }]);
+        h.frame_with(crate::test_support::key(egui::Key::M));
+        assert!(h.app.dialog.is_none(), "the next real press still closes the form");
+    }
+
+    #[test]
+    fn transform_face_move_shortcut_toggles_the_running_face_form_after_consuming_the_pick() {
+        let (mut h, face, _) = move_shortcut_fixture();
+        h.app.session.selection = vec![face.clone()];
+        press(&mut h.app, "M", false);
+        let dialog = h.app.dialog.as_ref().unwrap();
+        assert_eq!(dialog.command(), Some(TRANSFORM_FACE));
+        assert_eq!(dialog.inputs[0].items, [face.clone()]);
+        assert!(h.app.session.selection.is_empty());
+        press(&mut h.app, "M", true);
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, [face.clone()], "holding the key does not restart or close the form");
+        press(&mut h.app, "M", false);
+        assert!(h.app.dialog.is_none());
+        press(&mut h.app, "M", true);
+        assert!(h.app.dialog.is_none(), "holding the key after closing must not open Move/Copy");
+
+        h.app.preferences.shortcut_again_ends_tool = false;
+        h.app.session.selection = vec![face.clone()];
+        press(&mut h.app, "M", false);
+        press(&mut h.app, "M", true);
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, [face]);
+        press(&mut h.app, "M", false);
+        assert_eq!(h.app.dialog.as_ref().unwrap().command(), Some(TRANSFORM_FACE));
+    }
+
+    #[test]
+    fn transform_face_follows_the_configured_model_move_binding_only() {
+        let (mut h, face, _) = move_shortcut_fixture();
+        bind(&mut h.app, "solid.move", "Shift+M", false).unwrap();
+        bind(&mut h.app, "solid.offset_face", "M", false).unwrap();
+        h.app.session.selection = vec![face.clone()];
+        press(&mut h.app, "M", false);
+        assert_eq!(h.app.dialog.as_ref().unwrap().command(), Some("solid.offset_face"));
+        crate::dialogs::cancel(&mut h.app);
+        h.app.session.selection = vec![face.clone()];
+        press(&mut h.app, "Shift+M", false);
+        assert_eq!(h.app.dialog.as_ref().unwrap().command(), Some(TRANSFORM_FACE));
+        press(&mut h.app, "Shift+M", false);
+        assert!(h.app.dialog.is_none());
+
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.session.selection = vec![face];
+        h.app.preferences.sketch_keys_only = true;
+        assert_eq!(command_for(&h.app, "Shift+M"), None);
+        press(&mut h.app, "Shift+M", false);
+        assert!(h.app.session.active_sketch.is_some() && h.app.dialog.is_none(), "a model-only key leaves the sketch alone");
+
+        h.app.preferences.sketch_keys_only = false;
+        assert_eq!(command_for(&h.app, "Shift+M"), Some("solid.move"));
+        press(&mut h.app, "Shift+M", false);
+        h.settle();
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.move"), "a model Move binding allowed in a sketch stays Move/Copy");
+    }
+
+    #[test]
+    fn transform_face_requires_exactly_one_face_and_does_not_override_explicit_move() {
+        let (mut h, face, other) = move_shortcut_fixture();
+        let body = Sel::Body { name: "Block".into() };
+        for selection in [vec![], vec![body.clone()], vec![face.clone(), other], vec![face.clone(), body.clone()]] {
+            h.app.session.selection = selection;
+            press(&mut h.app, "M", false);
+            assert_eq!(h.app.dialog.as_ref().unwrap().command(), Some("solid.move"));
+            crate::dialogs::cancel(&mut h.app);
+        }
+        h.app.session.selection = vec![face];
+        h.call("ui.start", json!({"command":"solid.move"}));
+        let dialog = h.app.dialog.as_ref().unwrap();
+        assert_eq!(dialog.command(), Some("solid.move"));
+        assert_eq!(dialog.inputs[0].items, [body], "explicit Move/Copy takes the face's owning body");
+    }
 
     #[test]
     fn existing_custom_sketch_mirror_key_outweighs_new_move_default() {

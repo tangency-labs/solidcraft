@@ -279,6 +279,16 @@ pub(crate) fn offset_faces(body: &Body, points: &[[f64; 3]], tolerance: f64, dis
     Ok(w)
 }
 
+/// Retrim only the selected face on a working copy, in the copy's own face order.
+pub(crate) fn transform_face(body: &Body, face: usize, translate: [f64; 3], origin: [f64; 3], axis: [f64; 3], angle: f64) -> Result<(Body, bool)> {
+    const CALL: &str = "smlib_transform_face";
+    let w = working_copy(CALL, body)?;
+    let changed = ops_as(CALL, &[("brep", body)], offset_error, || {
+        solidcore_ops::offset::transform_face(&w, &w.own_order(), face, translate, origin, axis, angle)
+    })?;
+    Ok((w, changed))
+}
+
 /// `smlib_thicken`: a sheet thickened by `thickness` along its normals, or (symmetric) moved back
 /// by half first; a closed solid is [`Error::Argument`].
 pub(crate) fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Body> {

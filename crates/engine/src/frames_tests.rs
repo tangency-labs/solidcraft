@@ -256,6 +256,38 @@ fn move_expression_distances_follow_world_axes_in_a_turned_component() {
 }
 
 #[test]
+fn transform_face_uses_the_picked_components_frame_on_create_and_redefine() {
+    let mut s = block_in_component();
+    run(&mut s, "occurrence.move", json!({"occurrence":"C:1","axis":[1,0,0],"angle":"90 deg","translate":[50,10,20],"capture":true}));
+    run(&mut s, "solid.box", json!({"corner":[95,0,20],"length":10,"width":10,"height":10,"operation":"new","body_name":"Neighbour"}));
+    run(&mut s, "parameters.add", json!({"name":"travel","expression":"2 mm"}));
+    let (lo, hi) = world_bbox(&s, "Body1");
+    let other = world_bbox(&s, "Neighbour");
+    let st = s.model.state();
+    let b = st.body("Body1").unwrap();
+    let local_top = b.body.face_at_point(Vec3::new(20., 30., 10.)).unwrap().unwrap();
+    let name = &solidcraft_doc::naming::face_names(b)[local_top];
+    let cmd = "solid.transform_face";
+    run(&mut s, cmd, json!({"face":name,"translate":[0,0,"travel"],"name":"Raise"}));
+    let check = |s: &Session, rise| {
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+        let after = world_bbox(s, "Body1");
+        assert!(near(after.0, lo) && near(after.1, hi + Vec3::Z * rise), "{after:?} vs {lo:?} {hi:?}+{rise}");
+        assert_eq!(world_bbox(s, "Neighbour"), other);
+    };
+    check(&s, 2.);
+    let world_pick = [(lo.x + hi.x) / 2., (lo.y + hi.y) / 2., hi.z];
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Raise","command":cmd,"params":{"face":world_pick,"body":"Body1","translate":[0,0,"2 * travel"]}}),
+    );
+    check(&s, 4.);
+    run(&mut s, "parameters.change", json!({"name":"travel","expression":"3 mm"}));
+    check(&s, 6.);
+}
+
+#[test]
 fn move_expression_distances_keep_parameters_through_rebuild_and_reopen() {
     for copy in [false, true] {
         let mut s = block_in_component();

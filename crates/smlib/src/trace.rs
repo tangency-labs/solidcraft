@@ -160,7 +160,9 @@ pub(crate) fn imported(r: &Result<Brep>, record: &b::Brep, trusted: bool, keepin
     }
 }
 
-pub(crate) fn exported(body: &Brep, record: &b::Brep) {
+/// Associate an operation's output with the record returned to the application. Normally this
+/// is an export; when the kernel proves the operation was a no-op it is the original record.
+pub fn exported(body: &Brep, record: &b::Brep) {
     if on() {
         push(Event::Export { id: body.id, record: Box::new(record.clone()) });
     }
@@ -331,6 +333,37 @@ mod tests {
         assert!(events.iter().any(|e| matches!(e, Event::Export { id, record: r } if *id == round.id && **r == record)));
         assert!(events.iter().any(|e| matches!(e, Event::Import { id, record: r, trusted: true, .. } if *id == again.id && **r == record)));
         assert_ne!(again.id, round.id);
+    }
+
+    #[test]
+    fn transform_face_records_the_resolved_pick_and_motion() {
+        let block = Brep::make_box([0.0; 3], [10.0; 3]).unwrap();
+        let index = block.face_points().unwrap().iter().position(|p| p[2] == 10.0).unwrap();
+        // A pick on the rim: record the face supplied by the caller, never an ambiguous re-pick.
+        let face = crate::PickedFace { index, at: [5.0, 0.0, 10.0], tolerance: 0.02 };
+        let origin = [0.0, 0.0, 10.0];
+        let axis = [1.0, 0.0, 0.0];
+        let angle = std::f64::consts::FRAC_PI_4;
+        let translate = [0.0, 0.0, 2.0];
+        let run = Run::new();
+        let (roof, changed) = run.within(|| block.transform_face(face, translate, origin, axis, angle)).unwrap();
+        assert!(changed);
+        let events = run.take();
+        let (params, outputs) = events
+            .iter()
+            .find_map(|e| match e {
+                Event::Call { op: "transform_face", params, outputs, .. } => Some((params, outputs)),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(outputs, &Ok(vec![roof.id]));
+        assert_eq!(
+            params,
+            &json!({
+                "face": {"kind": "face", "points": [face.at], "tolerance": face.tolerance, "picked": [{"index": index, "at": []}]},
+                "origin": origin, "axis": axis, "angle": angle, "translate": translate
+            })
+        );
     }
 
     /// Two runs traced side by side on two threads keep their own events: each has its own

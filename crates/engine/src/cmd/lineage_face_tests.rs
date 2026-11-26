@@ -300,6 +300,41 @@ fn a_raised_piece_of_a_split_top_takes_a_sketch_by_its_own_name() {
     assert!((healthy(&t, "Raised").0.origin.z - 13.).abs() < 1e-9);
 }
 
+#[test]
+fn transform_face_moves_only_the_picked_piece_and_rebuilds_through_zero() {
+    let mut s = slotted_block();
+    run(&mut s, "parameters.add", json!({"name":"raise","expression":"2 mm"}));
+    run(&mut s, "solid.transform_face", json!({"face":[5,15,10],"translate":[0,0,"raise"],"name":"Raise"}));
+    no_errors(&s);
+    sketch_on(&mut s, [5., 15., 12.], "Raised");
+    sketch_on(&mut s, [35., 15., 10.], "Kept");
+    for height in [0, -1, 3] {
+        run(&mut s, "parameters.change", json!({"name":"raise","expression":format!("{height} mm")}));
+        no_errors(&s);
+        assert!((healthy(&s, "Raised").0.origin.z - f64::from(10 + height)).abs() < 1e-9);
+        assert!((healthy(&s, "Kept").0.origin.z - 10.).abs() < 1e-9);
+    }
+    assert!((healthy(&reopened(&s), "Raised").0.origin.z - 13.).abs() < 1e-9);
+}
+
+#[test]
+fn transform_face_patterns_carry_the_pivot_and_mirror_the_rotation() {
+    for (command, params) in [
+        ("solid.pattern.rectangular", json!({"features":["Tilt"],"dir1":[1,0,0],"count1":2,"spacing1":25})),
+        ("solid.mirror", json!({"features":["Tilt"],"plane":{"origin":[20,0,0],"normal":[1,0,0]}})),
+    ] {
+        let mut s = slotted_block();
+        run(&mut s, "solid.transform_face", json!({"face":[5,15,10],"axis":[0,-1,0],"angle":"10 deg","origin":[0,0,10],"name":"Tilt"}));
+        no_errors(&s);
+        run(&mut s, command, params);
+        no_errors(&s);
+        let measured = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+        // Stock minus the slot, plus two triangular prisms (width 15, depth 30).
+        let want = 40. * 30. * 10. - 10. * 30. * 5. + 30. * 15. * 15. * 10_f64.to_radians().tan();
+        assert!((measured - want).abs() < 1e-5, "{command}: {measured} vs {want}");
+    }
+}
+
 /// A plastic Boss keeps the history of the body it stands on (#494): the plate's faces still
 /// take attached sketches, and so does the boss's own top, which follows its height.
 #[test]

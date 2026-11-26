@@ -467,6 +467,7 @@ pub use route::stock_section_plane;
 pub use route::stock_spatial_arc;
 pub use route::thicken;
 pub use route::torus;
+pub use route::transform_face;
 pub use route::trim_member;
 pub use route::which;
 pub use route::write_cadir;

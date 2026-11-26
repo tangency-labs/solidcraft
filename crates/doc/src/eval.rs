@@ -13553,7 +13553,9 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
         };
         let body = f.kind.thread_target_body(k).or_else(|| f.kind.face_body());
         // Only a thread may find a numbered piece of a round side again as its whole face (#16602).
-        let hit = if matches!(f.kind, FeatureKind::Thread { .. }) {
+        let hit = if let FeatureKind::TransformFace { body, .. } = &f.kind {
+            crate::name_lookup::locate_owned_face(input, body, n, from)
+        } else if matches!(f.kind, FeatureKind::Thread { .. }) {
             crate::name_lookup::locate_thread_face_on_body(input, body, n, from)
         } else {
             crate::name_lookup::locate_face_on_body(input, body, n, from)
@@ -13567,6 +13569,18 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
             Some(hit) => {
                 if let Some(note) = hit.note(n) {
                     notes.push(note);
+                }
+                if matches!(f.kind, FeatureKind::TransformFace { .. }) {
+                    let owner = input.bodies.get(hit.body).ok_or_else(|| DocError::reselect(n.as_str()))?;
+                    // Keep the saved pivot if it still picks this face. Otherwise a boundary
+                    // shared with another face must not silently redirect the native operation.
+                    if owner.body.face_at_point(*p)? != Some(hit.face) {
+                        *p = hit.pick_point(input, *p);
+                        if owner.body.face_at_point(*p)? != Some(hit.face) {
+                            return Err(DocError::reselect(n.as_str()));
+                        }
+                    }
+                    continue;
                 }
                 match (k, hole_axis) {
                     (0, Some(axis)) => match hit.along(input, from, axis) {
@@ -13726,6 +13740,55 @@ fn moved_blend(src: &Feature, m: &Mat) -> Feature {
     copy
 }
 
+/// One face's evaluated motion, in the frame of its owning body.
+#[derive(Clone, Copy)]
+struct FaceMotion {
+    at: Vec3,
+    translate: Vec3,
+    origin: Vec3,
+    axis: Vec3,
+    angle: f64,
+}
+
+impl FaceMotion {
+    fn resolve(
+        vals: &BTreeMap<String, Value>,
+        at: Vec3,
+        translate: &[expr::Expr; 3],
+        axis: Vec3,
+        origin: Option<&crate::PointExpr>,
+        angle: Option<&expr::Expr>,
+    ) -> Result<Self> {
+        let [x, y, z] = translate;
+        Ok(Self {
+            at,
+            translate: Vec3::new(val(vals, x, Kind::Length)?, val(vals, y, Kind::Length)?, val(vals, z, Kind::Length)?),
+            origin: origin.map(|p| point(vals, p)).transpose()?.unwrap_or(at),
+            axis,
+            angle: angle.map(|a| val(vals, a, Kind::Angle)).transpose()?.unwrap_or(0.0),
+        })
+    }
+
+    fn copied(self, m: &Mat) -> Self {
+        Self {
+            at: crate::apply_point(m, self.at),
+            translate: crate::apply_vector(m, self.translate),
+            origin: crate::apply_point(m, self.origin),
+            axis: crate::apply_vector(m, self.axis),
+            // A rotation axis is axial: reflecting a turn reverses its sense about the copied direction.
+            angle: if crate::assembly::linear_determinant(m) < 0.0 { -self.angle } else { self.angle },
+        }
+    }
+
+    fn apply(self, owner: &mut ModelBody) -> Result<()> {
+        let result = kernel::transform_face(&owner.body, self.at, self.translate, self.origin, self.axis, self.angle)?;
+        if !result.same_shape(&owner.body) {
+            *owner = owner.remade(Traced::step(result, &[&owner.traced()]));
+        }
+        Ok(())
+    }
+}
+
 /// Apply transformed copies of the tools of `features` (patterns, mirrors).
 fn replay(
     doc: &Document,
@@ -13856,6 +13919,27 @@ fn replay(
                 if let Some(slot) = st.bodies.get_mut(i) {
                     *slot = mb.remade(nb);
                 }
+            }
+            continue;
+        }
+        if let FeatureKind::TransformFace { face, body, translate, rotate_axis, origin, angle } = &src.kind {
+            // Use the pick as resolved *before* this edit changed its supporting surface.
+            let at = match st.named_faces.get(&src.id).and_then(|p| p.first()) {
+                Some(at) => *at,
+                None => match with_named_face_points(doc, vals, named_from.as_ref().unwrap_or(st), src)? {
+                    Some((Feature { kind: FeatureKind::TransformFace { face, .. }, .. }, _)) => face.0,
+                    _ => face.0,
+                },
+            };
+            let motion = FaceMotion::resolve(vals, at, translate, rotate_axis.0, origin.as_ref(), angle.as_ref())?;
+            let owner = st.bodies.iter_mut().find(|b| b.name == *body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
+            let frame = body_in(doc, own, owner);
+            for m in mats {
+                match &frame {
+                    Some(at) => motion.copied(&moved_in(m, at)?),
+                    None => motion.copied(m),
+                }
+                .apply(owner)?;
             }
             continue;
         }
@@ -14161,6 +14245,7 @@ fn picked_body(doc: &Document, st: &ModelState, src: &Feature) -> Option<usize> 
             (body.as_deref(), st.blend_edges.get(&src.id).and_then(|e| e.first().copied()).or(edges.first().map(|e| e.0)))
         }
         FeatureKind::OffsetFace { faces, body, .. } => (body.as_deref(), faces.first().map(|q| q.0)),
+        FeatureKind::TransformFace { face, body, .. } => (Some(body.as_ref()), Some(face.0)),
         FeatureKind::Hole { position, points: None, .. } => (
             match src.participants.as_slice() {
                 [one] if one != "*" => Some(one.as_str()),
@@ -16661,6 +16746,10 @@ fn eval_feature_kind(
             }
             Ok(())
         }
+        FeatureKind::TransformFace { face, body, translate, rotate_axis, origin, angle } => {
+            let owner = st.bodies.iter_mut().find(|b| b.name == *body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
+            FaceMotion::resolve(vals, face.0, translate, rotate_axis.0, origin.as_ref(), angle.as_ref())?.apply(owner)
+        }
         FeatureKind::DeleteFace { faces, body, heal } => {
             let i = body_at(st, body, &crate::plain(faces))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
@@ -17430,6 +17519,11 @@ fn extrude_normal(doc: &Document, st: &ModelState, kind: &FeatureKind, comp: u64
 /// point on that body first: another body with a face a hair from the pick (#16871) would
 /// otherwise take the name, and evaluation would move the pick onto that body's face.
 pub fn face_point_names(doc: &Document, st: &ModelState, kind: &FeatureKind, comp: u64) -> Result<Vec<String>> {
+    if let FeatureKind::TransformFace { body, face, .. } = kind {
+        let owner = st.body(body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
+        let name = owner.body.face_at_point(face.0)?.and_then(|i| crate::naming::face_names(owner).get(i).cloned());
+        return Ok(vec![name.filter(|s| !s.is_empty()).ok_or_else(|| DocError::Invalid(format!("no named face of `{body}` at {}", face.0)))?]);
+    }
     let pts = kind.face_points();
     if thread_target_bodies(doc, st, kind)?.is_some() {
         let mut names = Vec::with_capacity(pts.len());
@@ -18869,6 +18963,30 @@ mod named_face_lookup_tests {
         }
         let moved = crate::name_lookup::locate_face_on_body(&st, Some("Part1"), &name, top).unwrap();
         assert_eq!(moved.body, 2);
+    }
+
+    #[test]
+    fn transform_face_will_not_follow_a_name_onto_another_body() {
+        let st = parts(2);
+        let p = Vec3::new(5.0, 5.0, 10.0);
+        let mut doc = Document::new("Owned face");
+        let id = doc
+            .add_feature(
+                FeatureKind::TransformFace {
+                    face: p.into(),
+                    body: "Part0".into(),
+                    translate: crate::point_expr(Vec3::Z),
+                    rotate_axis: Vec3::Z.into(),
+                    origin: None,
+                    angle: None,
+                },
+                None,
+            )
+            .unwrap();
+        let other = name_at(&st, "Part1", Vec3::new(25.0, 5.0, 10.0));
+        assert!(crate::naming::locate_face(&st, &other, p).is_some());
+        doc.feature_mut(id).unwrap().face_names = vec![other];
+        assert!(with_named_face_points(&doc, &BTreeMap::new(), &st, doc.feature(id).unwrap()).is_err());
     }
 
     /// A copy of a body has its source's face names. Over every body the name finds the face on

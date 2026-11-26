@@ -57,4 +57,8 @@ impl Modelling for Solidcore {
     fn offset_faces(&self, body: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
         crate::polyhedron::offset_faces(body, at, distance)
     }
+
+    fn transform_face(&self, body: &Body, at: Vec3, translate: Vec3, origin: Vec3, axis: Vec3, angle: f64) -> Result<Body> {
+        crate::offset_backend::transform_face(body, at, translate, origin, axis, angle)
+    }
 }

@@ -318,6 +318,7 @@ pub const DOCUMENTED: &[&str] = &[
     "solid.sweep",
     "solid.thread",
     "solid.torus",
+    "solid.transform_face",
     "solid.web",
     "surface.blend",
     "surface.boundary",

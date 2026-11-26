@@ -329,6 +329,20 @@ fn offset_moves_a_face() {
     assert!(e.to_string().contains("no room"), "{e}");
 }
 
+#[test]
+fn transform_face_tracks_the_retrimmed_cap_and_the_stationary_floor() {
+    let b = cube();
+    let top = Vec3::new(20.0, 15.0, 20.0);
+    let floor = Vec3::new(20.0, 15.0, 0.0);
+    let raised = crate::transform_face(&b, top, Vec3::Z * 2.0, top, Vec3::Z, 0.0).unwrap();
+    let h = verified(&raised, &b, Reach { made: 0.0, moved: 2.1 });
+    for (before, after, change) in [(top, top + Vec3::Z * 2.0, Change::Modified), (floor, floor, Change::Kept)] {
+        let i = raised.face_at_point(after).unwrap().unwrap();
+        assert_eq!(h.faces[i].origins, [face(b.face_at_point(before).unwrap().unwrap())]);
+        assert_eq!(h.faces[i].change, change);
+    }
+}
+
 /// A narrow annular end must be picked on its exact trims, independently of the body's length
 /// (and hence the chord tolerance of the old picking mesh).
 #[test]

@@ -73,6 +73,8 @@ pub enum OpKind {
     Thicken,
     /// Faces moved along their normals ([`Modelling::offset_faces`]).
     OffsetFaces,
+    /// One face retrimmed on its rigidly moved surface ([`Modelling::transform_face`]).
+    TransformFace,
     /// A cell grid planned over a profile ([`CellGrid`]).
     CellGrid,
     /// The exchange helpers: a STEP string, CADIR read and written ([`Exchange`]).
@@ -96,6 +98,7 @@ impl OpKind {
         OpKind::Shell,
         OpKind::Thicken,
         OpKind::OffsetFaces,
+        OpKind::TransformFace,
         OpKind::CellGrid,
         OpKind::Exchange,
         OpKind::Frames,
@@ -116,6 +119,7 @@ impl OpKind {
             OpKind::Shell => "shell",
             OpKind::Thicken => "thicken",
             OpKind::OffsetFaces => "offset_faces",
+            OpKind::TransformFace => "transform_face",
             OpKind::CellGrid => "cell_grid",
             OpKind::Exchange => "exchange",
             OpKind::Frames => "frames",

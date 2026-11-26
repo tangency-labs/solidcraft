@@ -95,7 +95,7 @@ impl FeatureKind {
             FeatureKind::SheetConvert { .. } | FeatureKind::Lip { .. } | FeatureKind::SurfaceUntrim { .. } | FeatureKind::SurfaceRuled { .. } => {
                 &["face"]
             }
-            FeatureKind::Emboss { .. } | FeatureKind::Dome { .. } => &["face"],
+            FeatureKind::Emboss { .. } | FeatureKind::Dome { .. } | FeatureKind::TransformFace { .. } => &["face"],
             FeatureKind::Revolve { .. } => &["to"],
             FeatureKind::Extrude { .. } | FeatureKind::SurfaceExtrude { .. } => &["extent.to", "extent.from"],
             FeatureKind::SurfaceExtend { .. } => &["up_to"],
@@ -122,7 +122,8 @@ impl FeatureKind {
             | FeatureKind::Lip { body, .. }
             | FeatureKind::SnapFit { body, .. }
             | FeatureKind::Rest { body, .. } => body.as_deref(),
-            FeatureKind::SheetConvert { body, .. }
+            FeatureKind::TransformFace { body, .. }
+            | FeatureKind::SheetConvert { body, .. }
             | FeatureKind::SheetSurfaceConvert { body, .. }
             | FeatureKind::SheetRecognize { body, .. }
             | FeatureKind::SurfaceRuled { body, .. } => Some(body.as_ref()),

@@ -94,7 +94,7 @@ pub struct Axis2 {
 }
 
 /// The body-making operations of one kernel ([`crate::OpKind`]'s primitives, `Extrude` to
-/// `OffsetFaces`).
+/// `TransformFace`).
 ///
 /// Edges and faces are picked by points, as the application picks them: the edge or face nearest
 /// each point.
@@ -122,4 +122,7 @@ pub trait Modelling: Backend {
     fn thicken(&self, sheet: &Self::Form, thickness: f64, symmetric: bool) -> Result<Self::Form, Self::Error>;
     /// The faces nearest `at` moved `distance` along their normals.
     fn offset_faces(&self, body: &Self::Form, at: &[Vec3], distance: f64) -> Result<Self::Form, Self::Error>;
+    /// Rotate one face's support by `angle` radians about the axis through `origin`, then
+    /// translate it (mm). Adjacent faces stay on their own supports.
+    fn transform_face(&self, body: &Self::Form, at: Vec3, translate: Vec3, origin: Vec3, axis: Vec3, angle: f64) -> Result<Self::Form, Self::Error>;
 }
