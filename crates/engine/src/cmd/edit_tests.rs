@@ -1035,6 +1035,46 @@ fn timeline_move_many_with_allow_errors_moves_block_into_folder_and_lists_broken
 }
 
 #[test]
+fn timeline_move_many_with_active_true_reports_features_broken_after_marker_advances() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[10, 5, 10]], "distance": 1, "name": "Bevel"}));
+    let group = run(&mut s, "timeline.group", json!({"name": "Body", "features": ["Base", "Bevel"]}))["group"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 2, "name": "Extension"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, -5], "p1": [15, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Extension", "distance": 12, "operation": "join", "name": "Extend"}));
+
+    run(&mut s, "timeline.roll_to", json!({"position": 2}));
+    assert_eq!(s.doc.marker, Some(2));
+    let before = s.doc.clone();
+    let undo = s.undo.len();
+
+    let error = s
+        .execute("timeline.move_many", &json!({"features": ["Extension", "Extend"], "group": group, "position": 1, "active": true}))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("breaks Bevel"), "{error}");
+    assert_eq!(s.doc, before);
+    assert_eq!(s.undo.len(), undo, "a refused move adds no undo step");
+
+    let r = run(
+        &mut s,
+        "timeline.move_many",
+        json!({"features": ["Extension", "Extend"], "group": group, "position": 1, "active": true, "allow_errors": true}),
+    );
+    assert_eq!(feature_names(&s), ["Base", "Extension", "Extend", "Bevel"]);
+    assert_eq!(s.doc.marker, None, "active: true brings all features before the marker");
+    let broken = r["broken"].as_array().unwrap();
+    assert_eq!(broken.len(), 1, "{r}");
+    assert_eq!(broken[0]["feature"], "Bevel", "{r}");
+    assert!(broken[0]["error"].as_str().is_some_and(|e| !e.is_empty()), "{r}");
+
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc, before, "one undo restores order, folder membership and marker");
+}
+
+#[test]
 fn timeline_folders_can_nest_and_reject_cycles() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base"}));

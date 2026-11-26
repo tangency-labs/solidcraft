@@ -1109,10 +1109,7 @@ fn move_many(s: &mut Session, p: &Value) -> Result<Value> {
     let slot = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?;
     let active = active_param(p, cmd)?;
     let allow = allow_errors(p, cmd)?;
-    let (mut next, ordered, broken, checked) = reorder_features(s, next, &moving, slot, allow, cmd)?;
-    let marker = next.marker;
-    place_marker(s, &mut next, &moving, active, cmd)?;
-    let checked = checked.filter(|_| next.marker == marker);
+    let (next, ordered, broken, checked) = reorder_features(s, next, &moving, slot, active, allow, cmd)?;
     if next != *s.doc {
         if let Some(model) = checked {
             s.model = model;
@@ -2700,11 +2697,7 @@ fn reorder_many(s: &mut Session, p: &Value) -> Result<Value> {
     let slot = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?;
     let active = active_param(p, cmd)?;
     let allow = allow_errors(p, cmd)?;
-    let (mut next, ordered, broken, checked) = reorder_features(s, (*s.doc).clone(), &ids, slot, allow, cmd)?;
-    let marker = next.marker;
-    place_marker(s, &mut next, &ordered, active, cmd)?;
-    // The checked results stand only when placing the marker left the design as they were made for.
-    let checked = checked.filter(|_| next.marker == marker);
+    let (next, ordered, broken, checked) = reorder_features(s, (*s.doc).clone(), &ids, slot, active, allow, cmd)?;
     if next != *s.doc {
         if let Some(model) = checked {
             s.model = model;
@@ -2716,12 +2709,13 @@ fn reorder_many(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// The reordered design, the moved features in order, and the model the move was checked on
-/// (none when the order didn't change), for the caller to keep (#6186).
+/// (none when neither the order nor the history marker changed), for the caller to keep (#6186).
 fn reorder_features(
     s: &Session,
     mut next: solidcraft_doc::Document,
     ids: &[u64],
     slot: usize,
+    active: Option<bool>,
     allow_errors: bool,
     cmd: &str,
 ) -> Result<(solidcraft_doc::Document, Vec<u64>, Vec<(String, String)>, Option<solidcraft_doc::Model>)> {
@@ -2749,14 +2743,16 @@ fn reorder_features(
     next.features.splice(insert_at..insert_at, moving);
     sort_group_features(&mut next);
     require_contiguous_groups(&next, cmd)?;
-    if unchanged {
+    let marker = next.marker;
+    place_marker(s, &mut next, &ordered, active, cmd)?;
+    if unchanged && next.marker == marker {
         return Ok((next, ordered, Vec::new(), None));
     }
     // From the session's own results: the features before the first one moved are kept, not
     // evaluated again from an empty model (#6186).
     let mut after = s.model.clone();
     after.evaluate(&next);
-    let broken = newly_broken(&s.model, &after);
+    let broken = if unchanged { Vec::new() } else { newly_broken_in_history(&s.doc, &s.model, &next, &after) };
     if !broken.is_empty() && !allow_errors {
         let list: Vec<String> = broken.iter().map(|(name, error)| format!("{name} ({error})")).collect();
         return Err(bad(cmd, format!("moving the selected features there breaks {}", list.join("; "))));
