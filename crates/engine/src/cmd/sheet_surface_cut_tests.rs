@@ -2082,7 +2082,10 @@ fn shop_presets_are_saved_listed_used_and_deleted() {
     let mine = run(&mut s, "sheet.save_shop_preset", json!({"name": "Mine", "profile": generic["profile"].clone()}));
     assert_eq!(mine["id"], "mine");
     let (a, b) = (run(&mut s, "sheet.check_shop", json!({"shop": "generic"})), run(&mut s, "sheet.check_shop", json!({"shop": "mine"})));
-    assert_eq!((&a["findings"], &a["checked"], &a["not_checked"], &a["dxf"]), (&b["findings"], &b["checked"], &b["not_checked"], &b["dxf"]));
+    // The same findings and the same rules checked; the notes name the shop they were read for.
+    let unnamed = |r: &Value, name: &str| r["not_checked"].to_string().replace(name, "SHOP");
+    assert_eq!((&a["findings"], &a["checked"], &a["dxf"]), (&b["findings"], &b["checked"], &b["dxf"]));
+    assert_eq!(unnamed(&a, "Generic"), unnamed(&b, "Mine"));
     assert_eq!((b["shop"]["id"].as_str(), b["shop"]["name"].as_str()), (Some("mine"), Some("Mine")));
     // A preset's own object comes back to be edited.
     let own = run(&mut s, "sheet.shop_presets", json!({"profile": "my-shop"}));
