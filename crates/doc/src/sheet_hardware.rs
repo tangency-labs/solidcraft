@@ -10,7 +10,7 @@
 use solidcore_record::{Loop2, Region2, Vec2};
 use solidcraft_kernel::affine::{loop_circle, loop_holds, same_circle, segment_distance};
 
-use crate::hardware_catalog::{HardwareSize, hardware_size};
+use crate::hardware_catalog::{HOLE_TOLERANCE, HardwareSize, hardware_size};
 use crate::sheet::SheetHardware;
 use crate::{Document, Feature, FeatureKind, Hardware, SurfaceSheet};
 
@@ -36,7 +36,7 @@ fn mm(v: f64) -> String {
 }
 
 /// What `after`, the sheet a Hole with `hardware` was cut from, lacks for that hardware: one
-/// note for a sheet too thin, then one for each new hole too near an edge or a bend. The holes are
+/// note for a sheet too thin, one for each new hole out of the hardware's size, then one for each new hole too near an edge or a bend. The holes are
 /// the whole circles in `after`'s flat that `before` (the sheet as the feature found it) lacks.
 pub(crate) fn findings(before: Option<&SurfaceSheet>, after: &SurfaceSheet, hardware: &Hardware) -> Vec<String> {
     let Some(size) = hardware_size(hardware.kind, &hardware.thread) else {
@@ -46,6 +46,22 @@ pub(crate) fn findings(before: Option<&SurfaceSheet>, after: &SurfaceSheet, hard
     let mut out = Vec::new();
     if after.thickness + 1e-9 < size.min_sheet {
         out.push(format!("{} is {} mm thick: {what} is made for a sheet of at least {} mm", after.body, mm(after.thickness), mm(size.min_sheet)));
+    }
+    // The mounting hole's size is checked when `sheet.hardware` cuts it; a parameter changed later
+    // (a `drill` expression) can take it out of the makers' tolerance, which only warns.
+    for (_, _, (center, radius)) in new_circles(before, after) {
+        let (low, high) = (size.hole, size.hole + HOLE_TOLERANCE);
+        let d = 2.0 * radius;
+        if !(d >= low - SAME && d <= high + SAME) {
+            out.push(format!(
+                "The hole at ({}, {}) is {} mm across: {what} takes a hole of {} to {} mm",
+                mm(center.x),
+                mm(-center.y),
+                mm(d),
+                mm(low),
+                mm(high)
+            ));
+        }
     }
     out.extend(distances(before, after, &size, &what));
     out
