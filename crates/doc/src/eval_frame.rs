@@ -1477,7 +1477,7 @@ fn fit_reach(segments: &[(String, Vec3, Vec3)], regions: &[Region2], placed: &dy
                 .as_chunks::<4>()
                 .0
                 .iter()
-                .filter_map(|r| solidcraft_kernel::services::section_corners::exit_through_box(end, toward, r.map(|q| plane.to_world(q))));
+                .filter_map(|r| solidcraft_kernel::planar::exit_through_box(end, toward, r.map(|q| plane.to_world(q))));
             exits.reduce(f64::max)
         })
         .fold(0.0, f64::max);
@@ -2949,7 +2949,7 @@ fn round_record(
 ) -> Result<Option<crate::frame_cope::RoundMember>> {
     use crate::frame_cope::{Bounds, RoundMember, Terminal};
     use solidcore_record::frame::Segment;
-    use solidcraft_kernel::services::tube_cope;
+    use solidcraft_kernel::tube_cope;
     let MemberProfile::Library { profile } = profile else { return Ok(None) };
     let frame::Profile::RoundTube { diameter, wall } = profile.resolve(|_, e, kind| val(vals, e, kind))? else { return Ok(None) };
     // An off-centre circular profile sweeps about a different centreline at a bend.

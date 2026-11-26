@@ -1243,6 +1243,34 @@ impl Body {
         self.closest_to(order, faces, edges, probe, "closest_to_point")
     }
 
+    /// The closest points of the segment from `start` to `end` and the selected faces or edges.
+    /// When the ends coincide the segment is a point.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for a non-finite coordinate or an index past the faces or edges;
+    /// any error from constructing or measuring the segment.
+    pub fn closest_to_segment(
+        &self,
+        order: &Order,
+        faces: &[usize],
+        edges: &[usize],
+        start: [f64; 3],
+        end: [f64; 3],
+    ) -> Result<Option<MembersClosest>> {
+        if start == end {
+            return self.closest_to_point(order, faces, edges, start);
+        }
+        let line =
+            solidcore::primitive::api_curves::create_line_segment(point(start)?, point(end)?)
+                .map_err(status)?;
+        let curve = solidcore::curve::curve::Curve::from(line);
+        let segment = EdgeCurve {
+            interval: curve.natural_interval(),
+            curve,
+        };
+        self.closest_to_curve(order, faces, edges, &segment)
+    }
+
     /// The closest points between selected trimmed faces of two bodies. The kernel solves
     /// both faces' interiors, edges and vertices on their exact geometry. The bodies may be
     /// the same body; their geometry and record orders are left unchanged.
