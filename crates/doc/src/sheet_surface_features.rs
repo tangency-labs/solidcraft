@@ -1821,7 +1821,7 @@ impl SurfaceSheet {
                         }
                         // Only what the sheet's cuts leave of a bend can be in the way: where a cut
                         // took the bend away, the fold may run past its line (#17543).
-                        let left = left_along(an, length, sheet_cuts, tol);
+                        let left = crate::sheet_surface_convert::left_along(an, length, sheet_cuts, tol);
                         let left = if left.is_empty() { vec![(0.0, length)] } else { left };
                         let at = |x: f64| side(an.origin + an.dir * x);
                         let (s, e) = left.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &(a, b)| {
@@ -1919,16 +1919,29 @@ impl SurfaceSheet {
         };
         let moved_cuts = beyond(self.sheet.cuts.iter().map(|c| starts(c.panel == i, &c.region.outer)).collect(), None)?;
         let recesses = beyond(self.recesses.iter().map(|r| starts(r.panel == i, &r.region.outer)).collect(), Some("a pocket"))?;
+        let countersinks = beyond(
+            self.countersinks
+                .iter()
+                .map(|c| {
+                    (c.panel == i).then(|| {
+                        let r = c.outer_radius;
+                        let along = c.center.dot(u);
+                        (vec![c.center + n * r, c.center - n * r, c.center + u * r, c.center - u * r], (along - r, along + r))
+                    })
+                })
+                .collect(),
+            Some("a countersink"),
+        )?;
         let loose = beyond(self.loose.iter().map(|l| starts(l.panel == i, &l.region.outer)).collect(), Some("a loose piece of the sheet"))?;
         let t = self.sheet.thickness;
         let beads = beyond(self.beads.iter().map(|b| b.footprint_loop(t).and_then(|l| starts(b.panel == i, &l))).collect(), Some("a bead"))?;
-        Ok(Ok(FoldPlan { n, u, s0, ba, stays, moves, cuts, anchors, rips, moved_cuts, recesses, loose, beads }))
+        Ok(Ok(FoldPlan { n, u, s0, ba, stays, moves, cuts, anchors, rips, moved_cuts, recesses, countersinks, loose, beads }))
     }
 
     /// Makes the fold `plan` of panel `i` (see [`SurfaceSheet::add_fold`]). Returns the fold's
     /// first joint.
     fn apply_fold(&mut self, i: usize, plan: FoldPlan) -> usize {
-        let FoldPlan { n, u, s0, ba, stays, moves, cuts, anchors, rips, moved_cuts, recesses, loose, beads } = plan;
+        let FoldPlan { n, u, s0, ba, stays, moves, cuts, anchors, rips, moved_cuts, recesses, countersinks, loose, beads } = plan;
         for (k, on_a, p) in anchors {
             if let Some(joint) = self.sheet.joints.get_mut(k) {
                 if on_a {
@@ -1956,6 +1969,11 @@ impl SurfaceSheet {
         for (k, p) in recesses {
             if let Some(r) = self.recesses.get_mut(k) {
                 r.panel = p;
+            }
+        }
+        for (k, p) in countersinks {
+            if let Some(c) = self.countersinks.get_mut(k) {
+                c.panel = p;
             }
         }
         for (k, p) in loose {
@@ -2112,6 +2130,9 @@ impl SurfaceSheet {
         for x in &mut self.recesses {
             x.region = r(&x.region);
         }
+        for c in &mut self.countersinks {
+            c.center = f(c.center);
+        }
         for l in &mut self.loose {
             l.region = r(&l.region);
         }
@@ -2145,6 +2166,10 @@ impl SurfaceSheet {
         for b in &mut self.bores {
             b.base.x = -b.base.x;
             b.axis.x = -b.axis.x;
+        }
+        // The press-in hardware's holes lie in the flat: turned over with it (#17752).
+        for h in &mut self.hardware {
+            h.center = f(h.center);
         }
         // Each panel's own sketch lines as its own layout would keep them: each edge where its
         // chart turned it, the material still on its left.
@@ -2204,6 +2229,19 @@ impl SurfaceSheet {
     /// panel's material, each bend's zone, each loose piece), the panel's index for a panel's.
     #[allow(clippy::type_complexity)]
     pub(crate) fn pieces_in_space(&self) -> Option<(Vec<(usize, Rigid3, Region2)>, Vec<(Option<usize>, solidcraft_geom::Aabb3)>)> {
+        let (panels, boxes) = self.piece_boxes_in_space()?;
+        let own = |piece: Option<crate::sheet_surface::Piece>| match piece {
+            Some(crate::sheet_surface::Piece::Panel(i)) => Some(i),
+            _ => None,
+        };
+        Some((panels, boxes.into_iter().map(|(piece, b)| (own(piece), b)).collect()))
+    }
+
+    /// [`Self::pieces_in_space`], with each box's piece of the flat (`None` for a loose piece).
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn piece_boxes_in_space(
+        &self,
+    ) -> Option<(Vec<(usize, Rigid3, Region2)>, Vec<(Option<crate::sheet_surface::Piece>, solidcraft_geom::Aabb3)>)> {
         let dev = self.develop().ok()?;
         let frames = crate::sheet_surface_cuts::frames(self, &dev).ok()?;
         let fold = if self.unfolded { None } else { Some(crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places).ok()?) };
@@ -2225,7 +2263,7 @@ impl SurfaceSheet {
                 crate::sheet_surface::Piece::Panel(i) | crate::sheet_surface::Piece::Tab(_, i) => {
                     let (Some(frame), Some(Some(at))) = (frames.get(i).copied().flatten(), dev.placements.get(i)) else { return None };
                     let own = at.inverse().region(region);
-                    boxes.push((matches!(piece, crate::sheet_surface::Piece::Panel(_)).then_some(i), slab(&frame, &own)));
+                    boxes.push((Some(*piece), slab(&frame, &own)));
                     if matches!(piece, crate::sheet_surface::Piece::Panel(_)) && matches!(self.sheet.panels.get(i)?.surface, Surface::Plane) {
                         panels.push((i, frame, own));
                     }
@@ -2238,7 +2276,7 @@ impl SurfaceSheet {
                         Some(fold) => bent_box(&fold.bends.get(zone.joint).copied().flatten()?, region, t),
                         None => slab(&self.flat, region),
                     };
-                    boxes.push((None, b));
+                    boxes.push((Some(*piece), b));
                 }
             }
         }
@@ -2933,20 +2971,6 @@ fn runs_along(r: &Region2, a: Vec2, b: Vec2) -> bool {
     })
 }
 
-/// The stretches of a joint's anchor `an`, `length` long, that none of `cuts` (in its panel's
-/// chart) takes, as lengths along it from its origin: what a cut across a bend leaves of it. A
-/// stretch no longer than `tol` is none.
-fn left_along(an: &Anchor, length: f64, cuts: &[Region2], tol: f64) -> Vec<(f64, f64)> {
-    let mut left: Vec<(f64, f64)> = vec![(0.0, length)];
-    for c in cuts {
-        let inside = crate::sheet_surface_convert::crossings_across(c, (an.origin, an.dir));
-        for &[lo, hi] in inside.as_chunks::<2>().0 {
-            left = left.into_iter().flat_map(|(a, b)| [(a, b.min(lo)), (a.max(hi), b)]).filter(|(a, b)| b - a > tol).collect();
-        }
-    }
-    left
-}
-
 /// How far (mm) a rip's cut may differ along it and still be one cut, as the development takes it.
 const RIP_EVEN: f64 = 1e-9;
 
@@ -2962,7 +2986,7 @@ const CURVE_REACH: f64 = 1e-3;
 
 /// How wide (mm) a piece the planar booleans leave must be to be one: where two of their edges
 /// coincide they leave slivers of no width, about their tolerance (1e-9 mm) across.
-const SLIVER: f64 = 1e-8;
+pub(crate) const SLIVER: f64 = 1e-8;
 
 /// One stretch of an edge to bend (see [`SurfaceSheet::flanges_on`]), worked out on the sheet as
 /// it was before any stretch of the edge moved it: its bend's angle and side, the virtual sharp
@@ -3012,10 +3036,11 @@ struct FoldPlan {
     /// The rips the zone parts: the joint, its stretch that stays (in its place) and its stretch
     /// that folds (a joint of its own).
     rips: Vec<(usize, Joint, Joint)>,
-    /// The sheet's cuts, recesses, loose pieces and beads that go with a piece that folds: each
-    /// one's index, and the piece's panel.
+    /// The sheet's cuts, recesses, countersinks, loose pieces and beads that go with a piece that
+    /// folds: each one's index, and the piece's panel.
     moved_cuts: Vec<(usize, usize)>,
     recesses: Vec<(usize, usize)>,
+    countersinks: Vec<(usize, usize)>,
     loose: Vec<(usize, usize)>,
     beads: Vec<(usize, usize)>,
 }
@@ -3108,7 +3133,7 @@ fn overlap(a: &[(f64, f64)], b: &[(f64, f64)], tol: f64) -> bool {
 }
 
 /// How wide a region is on average: twice its area over the length of its loops.
-fn width(r: &Region2) -> f64 {
+pub(crate) fn width(r: &Region2) -> f64 {
     let around: f64 = std::iter::once(&r.outer).chain(&r.holes).flat_map(|l| &l.segs).map(|s| s.length()).sum();
     if around > 0.0 { 2.0 * r.area() / around } else { 0.0 }
 }
@@ -3810,6 +3835,7 @@ mod tests {
             corner_relief_size: 0.0,
             relief_width: 0.0,
             relief_depth: 0.0,
+            bend_relief: crate::sheet::BendReliefShape::Rectangular,
         };
         let (r, x0) = (3.05, 50.0);
         let v = Vec2::new;
@@ -3919,6 +3945,7 @@ mod tests {
             corner_relief_size: 0.0,
             relief_width: 0.0,
             relief_depth: 0.0,
+            bend_relief: crate::sheet::BendReliefShape::Rectangular,
         };
         let pts = [Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0), Vec2::new(100.0, 60.0), Vec2::new(0.0, 60.0)];
         let plate = Region2 { outer: Loop2::polygon(&pts).ccw(), holes: Vec::new() };

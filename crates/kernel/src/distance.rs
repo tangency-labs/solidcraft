@@ -15,11 +15,12 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use solidcore_record::Vec3;
+use solidcore_record::brep::Curve;
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_geom::mesh_distance::{MeshClosest, TriangleSet};
 use solidcraft_geom::{Aabb3, Mesh};
 
-use crate::body::Body;
+use crate::body::{Body, PointClass};
 use crate::surface_kind::{FaceSurface, surface_of};
 use crate::{KernelError, Result, guard};
 
@@ -49,7 +50,7 @@ pub struct DistanceShape<'a> {
 }
 
 /// Most face pairs near the nearest mesh points whose exact distance is worked out.
-const MAX_FACE_PAIRS: usize = 24;
+const MAX_FACE_PAIRS: usize = 128;
 /// Most projection rounds for one pair of features.
 const MAX_ROUNDS: usize = 400;
 
@@ -92,7 +93,7 @@ impl<'a> DistanceShape<'a> {
         let distances = body
             .face_distances(order, face as usize, &[[p.x, p.y, p.z]])
             .map_err(|e| crate::KernelError::Failed(format!("body distance: trimmed face: {e}")))?;
-        let tiny = 1e-9 * self.body.size().max(1.0);
+        let tiny = (1e-9 * self.body.size().max(1.0)).max(self.body.record().tolerance);
         Ok(distances.first().copied().flatten().is_some_and(|d| d <= tiny))
     }
 
@@ -179,7 +180,7 @@ struct Hint {
 /// Settle a pair of points on features `fa` of `a` and `fb` of `b`, starting from `pb` on `b`.
 fn settle(a: &DistanceShape, fa: Feature, b: &DistanceShape, fb: Feature, pb: Vec3) -> Option<(f64, Vec3, Vec3)> {
     let (mut ha, mut hb) = (Hint::default(), Hint::default());
-    let scale = a.body.size().max(b.body.size()).max(1.0);
+    let scale = a.body.size().max(b.body.size()).max(pb.len()).max(1.0);
     let mut q = b.project(fb, pb, &mut hb)?;
     let mut p = a.project(fa, q, &mut ha)?;
     for _ in 0..MAX_ROUNDS {
@@ -219,10 +220,11 @@ pub fn body_distance(a: &DistanceShape, b: &DistanceShape, limit: f64) -> Result
     let mut seeds: Vec<((u32, u32), MeshClosest)> = seeds.into_iter().collect();
     seeds.sort_by(|x, y| x.1.distance.total_cmp(&y.1.distance).then(x.0.cmp(&y.0)));
     seeds.truncate(MAX_FACE_PAIRS);
+    let contact_tol = 1e-12 * a.body.size().max(b.body.size()).max(1.0);
     let best = guard("body distance", || {
         let mut best: Option<BodyDistance> = None;
         let mut tried = std::collections::HashSet::new();
-        for ((fa, fb), c) in &seeds {
+        'search: for ((fa, fb), c) in &seeds {
             for xa in a.features(*fa, c.a) {
                 for xb in b.features(*fb, c.b) {
                     if !tried.insert((xa, xb)) {
@@ -235,6 +237,9 @@ pub fn body_distance(a: &DistanceShape, b: &DistanceShape, limit: f64) -> Result
                     };
                     if holds(a, xa, p)? && holds(b, xb, q)? && best.is_none_or(|bd| d < bd.distance) {
                         best = Some(BodyDistance { distance: d, from: p, to: q, exact: true });
+                        if d <= contact_tol {
+                            break 'search;
+                        }
                     }
                 }
             }
@@ -247,6 +252,203 @@ pub fn body_distance(a: &DistanceShape, b: &DistanceShape, limit: f64) -> Result
         Some(e) if e.distance <= m.distance + chords && e.distance >= m.distance - chords => e,
         _ => mesh,
     }))
+}
+
+/// Exact point witness proving two closed solids share interior volume, for catching a boolean
+/// intersection that falsely returned empty (for example, a rib piercing a curved wall without
+/// placing any vertex strictly inside the other solid).
+///
+/// Every returned point is verified by exact kernel point classification: either an exact vertex
+/// or edge point of one solid that classifies strictly [`PointClass::Inside`] the other, or a
+/// candidate point that classifies strictly [`PointClass::Inside`] both solids. Touching-only
+/// solids never produce a witness.
+pub fn overlap_witness(a: &DistanceShape, b: &DistanceShape) -> Result<Option<Vec3>> {
+    if a.body.is_mesh() || b.body.is_mesh() || a.body.is_surface() || b.body.is_surface() {
+        return Ok(None);
+    }
+    let box_a = a.body.exact_bounds()?;
+    let box_b = b.body.exact_bounds()?;
+    let shared = box_a.intersection(&box_b);
+    if shared.is_empty() {
+        return Ok(None);
+    }
+
+    // Pass 1: exact boundary points (vertices and edge samples) of one solid strictly inside the
+    // other. Any boundary point of a closed solid strictly away from the other solid's boundary
+    // guarantees positive shared 3D volume (never triggered by coplanar/touching faces).
+    const MAX_BOUNDARY_SAMPLES: usize = 512;
+    const MAX_VERIFY_HITS: usize = 32;
+    for (source, other) in [(a, b), (b, a)] {
+        let samples = boundary_samples_in(source, &shared, MAX_BOUNDARY_SAMPLES);
+        if samples.is_empty() {
+            continue;
+        }
+        let classes = other.body.classify_points(&samples)?;
+        for (&point, _) in samples.iter().zip(classes).filter(|(_, c)| *c == PointClass::Inside).take(MAX_VERIFY_HITS) {
+            if away_from_boundary(point, other.body)? {
+                return Ok(Some(point));
+            }
+        }
+    }
+
+    // Pass 2: interior candidates near crossing/touching mesh triangles and in the shared box,
+    // requiring strict `Inside` and positive exact boundary distance on BOTH bodies (catches
+    // face-interior-only penetrations with zero false positives on touching faces or chord error).
+    const MAX_INTERIOR_SAMPLES: usize = 512;
+    let candidates = interior_candidates(a, b, &shared, MAX_INTERIOR_SAMPLES);
+    if candidates.is_empty() {
+        return Ok(None);
+    }
+    let classes_a = a.body.classify_points(&candidates)?;
+    let inside_a: Vec<Vec3> = candidates.into_iter().zip(classes_a).filter_map(|(p, c)| (c == PointClass::Inside).then_some(p)).collect();
+    if inside_a.is_empty() {
+        return Ok(None);
+    }
+    let classes_b = b.body.classify_points(&inside_a)?;
+    for (point, _) in inside_a.into_iter().zip(classes_b).filter(|(_, c)| *c == PointClass::Inside).take(MAX_VERIFY_HITS) {
+        if away_from_boundary(point, a.body)? && away_from_boundary(point, b.body)? {
+            return Ok(Some(point));
+        }
+    }
+    Ok(None)
+}
+
+/// Whether `p` lies strictly away from `body`'s exact boundary (beyond tolerance), preventing
+/// touching-face points whose raw point classification fluctuates near a boundary from being
+/// misread as interior overlap witnesses.
+fn away_from_boundary(p: Vec3, body: &Body) -> Result<bool> {
+    let faces: Vec<usize> = (0..body.face_count()).collect();
+    if faces.is_empty() {
+        return Ok(false);
+    }
+    let tol = (body.record().tolerance * 4.0).max(body.size() * 1e-7).max(1e-6);
+    Ok(point_closest(p, body, Members::Faces(&faces))?.is_some_and(|d| d.distance > tol))
+}
+
+/// Exact vertices and exact edge curve samples of `shape` that lie inside `region`.
+fn boundary_samples_in(shape: &DistanceShape, region: &Aabb3, cap: usize) -> Vec<Vec3> {
+    let record = shape.body.record();
+    let mut out = Vec::new();
+    for v in &record.vertices {
+        if out.len() >= cap {
+            return out;
+        }
+        let p = Vec3::from(v.point);
+        if p.is_finite() && region.contains(p) {
+            out.push(p);
+        }
+    }
+    for (i, edge) in record.edges.iter().enumerate() {
+        if out.len() >= cap {
+            break;
+        }
+        let Some((curve, [t0, t1])) = shape.edges.get(i).and_then(Option::as_ref) else {
+            continue;
+        };
+        if matches!(edge.curve, Curve::Line { .. }) {
+            let (Some(p0), Some(p1)) = (curve.point(*t0), curve.point(*t1)) else {
+                continue;
+            };
+            if p0.is_finite()
+                && p1.is_finite()
+                && let Some((u0, u1)) = clip_segment_to_box(p0, p1, region)
+            {
+                let d = p1 - p0;
+                for frac in [0.25, 0.5, 0.75] {
+                    if out.len() >= cap {
+                        break;
+                    }
+                    let u = u0 + (u1 - u0) * frac;
+                    let p = p0 + d * u;
+                    if p.is_finite() && region.contains(p) {
+                        out.push(p);
+                    }
+                }
+            }
+            continue;
+        }
+        const CURVE_STEPS: u8 = 8;
+        for step in 1..CURVE_STEPS {
+            if out.len() >= cap {
+                break;
+            }
+            let t = *t0 + (*t1 - *t0) * (f64::from(step) / f64::from(CURVE_STEPS));
+            if let Some(p) = curve.point(t)
+                && p.is_finite()
+                && region.contains(p)
+            {
+                out.push(p);
+            }
+        }
+    }
+    out
+}
+
+/// Parameter sub-interval `[t0, t1]` in `[0, 1]` where segment `p0..p1` lies inside `bx`.
+fn clip_segment_to_box(p0: Vec3, p1: Vec3, bx: &Aabb3) -> Option<(f64, f64)> {
+    let (mut t0, mut t1) = (0.0_f64, 1.0_f64);
+    let axes = [(p0.x, p1.x - p0.x, bx.min.x, bx.max.x), (p0.y, p1.y - p0.y, bx.min.y, bx.max.y), (p0.z, p1.z - p0.z, bx.min.z, bx.max.z)];
+    for (o, d, lo, hi) in axes {
+        if d.abs() <= 1e-15 {
+            if o < lo || o > hi {
+                return None;
+            }
+            continue;
+        }
+        let inv = 1.0 / d;
+        let (a, b) = ((lo - o) * inv, (hi - o) * inv);
+        let (enter, exit) = if a <= b { (a, b) } else { (b, a) };
+        t0 = t0.max(enter);
+        t1 = t1.min(exit);
+        if t0 > t1 {
+            return None;
+        }
+    }
+    Some((t0, t1))
+}
+
+/// Candidate points in `region` near close/crossing mesh triangles and at the shared box centres.
+fn interior_candidates(a: &DistanceShape, b: &DistanceShape, region: &Aabb3, cap: usize) -> Vec<Vec3> {
+    let mut out = Vec::new();
+    let push = |out: &mut Vec<Vec3>, p: Vec3| {
+        if out.len() < cap && p.is_finite() && region.contains(p) {
+            out.push(p);
+        }
+    };
+    let center = region.center();
+    push(&mut out, center);
+    let quarter = region.size() * 0.25;
+    for sx in [-1.0, 1.0] {
+        for sy in [-1.0, 1.0] {
+            for sz in [-1.0, 1.0] {
+                push(&mut out, Vec3::new(center.x + sx * quarter.x, center.y + sy * quarter.y, center.z + sz * quarter.z));
+            }
+        }
+    }
+    let slack = 2.0 * (a.chord + b.chord);
+    let mut pairs = 0usize;
+    const MAX_TRI_PAIRS: usize = 64;
+    a.set.within(&b.set, slack, |c| {
+        if pairs >= MAX_TRI_PAIRS || out.len() >= cap {
+            return;
+        }
+        pairs += 1;
+        let mid = (c.a + c.b) * 0.5;
+        push(&mut out, mid);
+        if let Some([p0, p1, p2]) = a.set.triangle(c.tri_a) {
+            push(&mut out, (p0 + p1 + p2) * (1.0 / 3.0));
+            push(&mut out, (mid + p0) * 0.5);
+            push(&mut out, (mid + p1) * 0.5);
+            push(&mut out, (mid + p2) * 0.5);
+        }
+        if let Some([q0, q1, q2]) = b.set.triangle(c.tri_b) {
+            push(&mut out, (q0 + q1 + q2) * (1.0 / 3.0));
+            push(&mut out, (mid + q0) * 0.5);
+            push(&mut out, (mid + q1) * 0.5);
+            push(&mut out, (mid + q2) * 0.5);
+        }
+    });
+    out
 }
 
 /// Faces or edges of a body, by their index in the body's face or edge order: what one item of a
@@ -314,6 +516,35 @@ pub fn point_closest(p: Vec3, b: &Body, to: Members) -> Result<Option<BodyDistan
     let c = ops_b.closest_to_point(order_b, faces, edges, [p.x, p.y, p.z]).map_err(|e| failed(&e))?;
     let c = c.ok_or_else(|| KernelError::Failed("measure: the kernel found no closest point".into()))?;
     Ok(Some(BodyDistance { distance: c.distance, from: Vec3::from(c.from), to: Vec3::from(c.to), exact: true }))
+}
+
+/// The closest points of a bounded line segment and the selected faces or edges of a body.
+/// `from` lies on the segment, including its ends. A mesh body gives `None`.
+///
+/// # Errors
+///
+/// [`KernelError::Failed`] when the kernel cannot take the body or measure the segment.
+pub fn segment_closest(start: Vec3, end: Vec3, body: &Body, to: Members) -> Result<Option<BodyDistance>> {
+    let Some(form) = exact_body(body)? else { return Ok(None) };
+    let (ops, order) = &*form;
+    let (faces, edges) = members(to);
+    let c = ops.closest_to_segment(order, faces, edges, start.into(), end.into()).map_err(|e| failed(&e))?;
+    let c = c.ok_or_else(|| KernelError::Failed("measure: the kernel found no closest points".into()))?;
+    Ok(Some(BodyDistance { distance: c.distance, from: Vec3::from(c.from), to: Vec3::from(c.to), exact: true }))
+}
+
+/// Certified non-boolean test for whether two solid B-rep bodies share no interior volume
+/// (pure contact or disjoint, never penetrating).
+///
+/// Returns `Some(true)` when certified disjoint or flush contact with no interior overlap,
+/// `Some(false)` when real interior overlap is proved, and `None` for mesh bodies, conversion
+/// errors, or undecided geometry.
+pub fn interiors_disjoint(a: &Body, b: &Body) -> Option<bool> {
+    let (Some(form_a), Some(form_b)) = (exact_body(a).ok()?, exact_body(b).ok()?) else {
+        return None;
+    };
+    let ((ops_a, _), (ops_b, _)) = (&*form_a, &*form_b);
+    ops_a.interiors_disjoint(ops_b).ok().flatten()
 }
 
 /// `body`'s exact B-rep for a measurement: `None` for a mesh body, whose triangles are its

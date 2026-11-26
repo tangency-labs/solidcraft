@@ -79,3 +79,12 @@ Last, in a tab of its own, it makes the drawing milestone's test plate and its d
 (`examples/acceptance/drawing_m2.json`) and exports the sheet as SVG and PNG. It then starts the app
 again with the design put back (`document.export`, `document.import`): the drawing reads and exports the same.
 Set `CHROME` to a Chrome or Chromium executable if it is not installed in a usual location.
+
+For a short startup check, use `cargo xtask web-api-test --smoke --site dist/web`.
+It starts a separate headless Chrome with a fresh profile and reports early JavaScript or wasm errors.
+It creates a synthetic 30 × 20 × 10 mm box, saves it, opens the saved design and checks its
+6000 mm³ volume. It then changes the camera three times and requires different frames through
+`ui.screenshot`, whose request tokens identify frames painted after each camera command.
+Each run uses a free local server port; it never controls an existing browser.
+The smoke runs in the WebAssembly job in the merge queue, for a group that touches the web app or
+what it builds from, and nightly; pull requests skip it so their CI stays fast. The full API and offline tests still run in Pages.

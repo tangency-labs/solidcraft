@@ -1478,9 +1478,18 @@ pub fn gn_top_jets<T: GnScalar>(top: usize, tr: Trunc, n: &[VSer<T>; 2], f: &mut
 ///
 /// Those of [`gn_evaluate`].
 pub fn gn_jacobian<T: GnScalar>(sys: &GnSystem<'_, T>, x: &[Ser<T>; 4]) -> Result<[[T; 4]; 4]> {
+    Ok(gn_linearize(sys, x)?.1)
+}
+
+/// Each seeded column has the same constant term, G(x) at tau = 1.
+fn gn_linearize<T: GnScalar>(
+    sys: &GnSystem<'_, T>,
+    x: &[Ser<T>; 4],
+) -> Result<([T; 4], [[T; 4]; 4])> {
     let tr = Trunc::new(0, 1)?;
     let mut held = sys.clone();
     held.hold = true;
+    let mut residual = [T::of(0.0); 4];
     let mut jac = [[T::of(0.0); 4]; 4];
     for j in 0..4 {
         let mut sx = core::array::from_fn(|_| Ser::constant(T::of(0.0)));
@@ -1491,13 +1500,16 @@ pub fn gn_jacobian<T: GnScalar>(sys: &GnSystem<'_, T>, x: &[Ser<T>; 4]) -> Resul
             }
         }
         let (g, _) = gn_evaluate(&held, &sx, tr)?;
+        if j == 0 {
+            residual = g.each_ref().map(|gi| gi.at(0, 0));
+        }
         for (row, gi) in jac.iter_mut().zip(&g) {
             if let Some(x) = row.get_mut(j) {
                 *x = gi.at(0, 1);
             }
         }
     }
-    Ok(jac)
+    Ok((residual, jac))
 }
 
 /// `sm_Solve4`: solves `A y = b`, 4 x 4, by Gaussian elimination with partial pivoting.
@@ -1855,7 +1867,6 @@ fn solve_station_body(
 
     // the feet at tau = 1, by Newton (the leader at sigma = 0 only)
     let mut x = seed;
-    let point = Trunc::new(0, 0)?;
     let mut converged = false;
     let mut it = 0;
     // the last iteration's residual and step, for a station that does not converge
@@ -1875,12 +1886,11 @@ fn solve_station_body(
             equal_setback,
         };
         let sx = x.map(Ser::constant);
-        let (g, _) = gn_evaluate(&sys, &sx, point)?;
-        let jac = gn_jacobian(&sys, &sx)?;
+        let (g, jac) = gn_linearize(&sys, &sx)?;
         let mut b = [0.0_f64; 4];
         let mut res = 0.0_f64;
         for (bi, gi) in b.iter_mut().zip(&g) {
-            *bi = -gi.at(0, 0);
+            *bi = -gi;
             res = smax(res, bi.abs());
         }
         let dx = solve4(&jac, &b)?;
@@ -2636,6 +2646,47 @@ mod tests {
             gn_evaluate_vn(&sys, &sx, tr).unwrap()
         );
         (before, whole, near)
+    }
+
+    #[test]
+    fn seeded_newton_residual_matches_the_point_evaluation() {
+        let (n, u, v, ku, kv) = cylinder_at();
+        let curved = nurbs_partials::<f64>(&n, ku, kv, u, v, 2);
+        let flat = surface_partials(
+            &Kernel::default(),
+            &plane(Vec3::X, Vec3::Y),
+            Point2::new(0.4, 0.7),
+            2,
+        )
+        .unwrap();
+        let sx = [u, v, 0.4, 0.7].map(Ser::constant);
+        let law = Ser::constant(0.85);
+        for (law, equal_setback) in [(None, None), (Some(&law), None), (None, Some(0.75))] {
+            let sys = GnSystem {
+                p: [&curved, &flat],
+                leader: VSer::constant(V3 {
+                    x: 0.3,
+                    y: 0.4,
+                    z: 0.5,
+                }),
+                tangent: VSer::constant(V3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                }),
+                r: [9.99, 1.25],
+                side: [-1.0, 1.0],
+                hold: false,
+                law,
+                equal_setback,
+            };
+            let (point, _) = gn_evaluate(&sys, &sx, Trunc::new(0, 0).unwrap()).unwrap();
+            let (residual, _) = gn_linearize(&sys, &sx).unwrap();
+            assert_eq!(
+                residual.map(f64::to_bits),
+                point.map(|g| g.at(0, 0).to_bits())
+            );
+        }
     }
 
     #[test]

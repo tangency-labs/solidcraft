@@ -59,8 +59,7 @@ impl Found {
                 let units = expr::length_unit_or_mm(&self.units);
                 (with_unit(rhs, units), Some(units.to_string()))
             }
-            Reads::Typed(Kind::Angle) => (rhs.to_string(), Some("deg".to_string())),
-            Reads::Typed(Kind::Unitless) => (rhs.to_string(), Some(String::new())),
+            Reads::Typed(kind) => (rhs.to_string(), Some(kind.default_unit().to_string())),
             Reads::Unit(u) => (rhs.to_string(), Some(u.to_string())),
             Reads::Millimetres => (rhs.to_string(), Some("mm".to_string())),
             Reads::Inferred => (rhs.to_string(), None),
@@ -152,11 +151,14 @@ impl Document {
                 }
                 for link in &mut sketch.links {
                     if let solidcraft_sketch::LinkSource::Text { exprs, .. } = &mut link.source {
-                        for e in [&mut exprs.x, &mut exprs.y, &mut exprs.height].into_iter().flatten() {
+                        for e in [&mut exprs.x, &mut exprs.y, &mut exprs.height, &mut exprs.letter_spacing].into_iter().flatten() {
                             found.take(e, Reads::Typed(Kind::Length));
                         }
                         if let Some(e) = exprs.angle.as_mut() {
                             found.take(e, Reads::Typed(Kind::Angle));
+                        }
+                        if let Some(e) = exprs.line_spacing.as_mut() {
+                            found.take(e, Reads::Typed(Kind::Unitless));
                         }
                     }
                 }

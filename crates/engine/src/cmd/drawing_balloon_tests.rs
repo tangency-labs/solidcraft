@@ -41,7 +41,16 @@ fn placed() -> (Session, u64, [u64; 2]) {
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
     let settings = ViewOverrides { scale: Some("1:1".parse().unwrap()), ..ViewOverrides::default() };
-    d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At([200.0, 150.0]), settings, reference_shown_percent: 0.0, label: None })]);
+    d.add_views([Arc::new(View {
+        id,
+        sheet,
+        kind,
+        place: ViewPlace::At([200.0, 150.0]),
+        settings,
+        reference_shown_percent: 0.0,
+        centre_marks: None,
+        label: None,
+    })]);
     d.validate().unwrap();
     s.doc_mut().put_drawing(Arc::new(d));
     (s, id, bracket)
@@ -943,4 +952,32 @@ fn a_held_drawing_keeps_its_balloons_and_exports_them_from_a_scratch_copy() {
     assert_eq!(*now.scene, built(&s, sheet));
     let listed = run(&mut s, "drawing.export", json!({"sheet": ids::encode(sheet)}));
     assert!(!listed["out_of_date"].as_array().into_iter().flatten().any(|v| *v == json!(ids::encode(id))), "{listed}");
+}
+
+/// A view's `hide_bodies` leaves out one body of a part (#22107): a balloon on it is refused in words
+/// that name the body and its path, on the view and on a view projected from it (naming the parent),
+/// and the drawing is left as it was; one added before warns until the edit is undone. Hiding another
+/// body refuses nothing.
+#[test]
+fn a_balloon_is_refused_on_a_body_its_view_leaves_out() {
+    let (mut s, view, [_, bracket]) = placed();
+    let v = ids::encode(view);
+    let id = add(&mut s, view, bracket)["balloon"].clone();
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"hide_bodies": [{"body": "Base"}]}}));
+    assert!(run(&mut s, INSPECT, json!({"balloon": id}))["warnings"].is_null(), "another body is hidden");
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"hide_bodies": [{"path": [bracket], "body": "Box"}]}}));
+    let words = format!("its hide leaves out body `Box` at occurrence path [{bracket}]");
+    let warned = run(&mut s, INSPECT, json!({"balloon": id}));
+    assert_eq!(warned["warnings"], json!([format!("view {v} doesn't draw this part now: {words}")]), "{warned}");
+    let projected = run(&mut s, "drawing.view.projected", json!({"parent": v, "side": "right"}))["view"].as_str().unwrap().to_string();
+    let before = saved(&s);
+    let on = |view: &str| json!({"view": view, "edge": {"point": [40, 0, 0], "path": [bracket]}, "at": [60, 40]});
+    let e = refused(&mut s, ADD, on(&v));
+    assert!(e.contains(&format!("view {v} doesn't draw that part: {words}")), "{e}");
+    let e = refused(&mut s, ADD, on(&projected));
+    assert!(e.contains(&format!("view {projected} doesn't draw that part: {words} (set on view {v})")), "{e}");
+    assert_eq!(saved(&s), before);
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(run(&mut s, INSPECT, json!({"balloon": id}))["warnings"].is_null());
 }

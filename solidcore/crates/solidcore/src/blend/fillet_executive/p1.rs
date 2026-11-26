@@ -1271,6 +1271,11 @@ pub enum CornerCreation<O> {
         /// The size of `fit_edge`'s blend that builds and what it sizes, where one does
         /// (the chamfer event's, WR-716); `None` notes 0, no size.
         fit: Option<(f64, crate::blend::fillet_executive::FitKind)>,
+        /// Not the fork's: the refusal as data where the corner names one (a Swept turn's
+        /// side edge the ball cannot pass,
+        /// [`crate::blend::blend_refusal::BlendRefusal::SweptTurnPastSharpEdge`]), which the
+        /// operation's failure carries.
+        refusal: Option<crate::blend::blend_refusal::BlendRefusal>,
     },
 }
 
@@ -1332,7 +1337,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     ///
     /// # Errors
     ///
-    /// Those of [`Self::create_fillet_corners`]; `SM_ERR` after a refused corner.
+    /// Those of [`Self::create_fillet_corners`]; `SM_ERR` after a refused corner: the refusal
+    /// of the corner last noted as data ([`SolidError::BlendRefused`]) where it has one, else
+    /// [`BlendFailure::CornerRefused`].
     pub fn create_fillet_corners_recording_vertex_errors(
         &mut self,
         k: &Kernel,
@@ -1343,6 +1350,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
 
         const OP: &str = "blend::fillet_executive::p1::FilletExecutive::create_fillet_corners";
         let mut refused = false;
+        // the typed refusal of the corner last noted, whose note the error info keeps
+        let mut typed = None;
         for &vertex in &self.filleted_vertices {
             let pending = match self.vertex_corner_map.get(&vertex) {
                 Some(VertexEntry::SolverEdgeuses(edgeuses)) => edgeuses,
@@ -1363,7 +1372,12 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     comment,
                     fit_edge,
                     fit,
+                    refusal,
                 } => {
+                    // `note_vertex_error` notes nothing for a null vertex
+                    if vertex.is_some() {
+                        typed = refusal;
+                    }
                     // NoteFitRadius(0.0, edge), or the size that builds where one does
                     if let Some(edge) = fit_edge {
                         let (size, kind) =
@@ -1402,7 +1416,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             info.assign(&self.error);
         }
         if refused {
-            return Err(SolidError::blend(OP, BlendFailure::CornerRefused));
+            return Err(match typed {
+                Some(refusal) => refusal.error(OP, crate::error::SM_ERR),
+                None => SolidError::blend(OP, BlendFailure::CornerRefused),
+            });
         }
         Ok(())
     }

@@ -30,5 +30,9 @@
   "zh": {
     "prefs.plugin_busy_running": "插件包任务仍在运行：{what}，已 {seconds} 秒。它会在完成或 {limit} 秒后自动结束，之后请重试。",
     "prefs.plugin_job_abandoned": "{command}：插件包任务在 {seconds} 秒内未完成，已被放弃。未应用任何内容。"
+  },
+  "fr": {
+    "prefs.plugin_busy_running": "Une opération sur un paquet de plugiciel est toujours en cours : {what}, depuis {seconds} s. Elle se termine automatiquement après {limit} s ou lorsqu’elle est achevée ; réessayez ensuite.",
+    "prefs.plugin_job_abandoned": "{command} : l’opération sur le paquet de plugiciel ne s’est pas terminée en {seconds} s et a été abandonnée. Aucun changement n’a été appliqué."
   }
 }

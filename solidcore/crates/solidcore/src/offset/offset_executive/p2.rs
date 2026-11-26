@@ -14,7 +14,7 @@
 //! | `order_edgeuses_by_brep` (private) | `sm_OrderEdgeusesByBrep` |
 //! | [`api_shell_brep_full`], [`ShellCopyIdentities`] | `SmApiShellBrepFull` (and its working copy's identities) |
 //! | [`api_offset_brep_full`] | `SmApiOffsetBrepFull` |
-//! | [`offset_brep_simple`], [`shell_brep_simple`], [`local_operation_simple`] | (not upstream) the API calls with their own notification identities |
+//! | [`offset_brep_simple`], [`shell_brep_simple`], [`shell_brep_simple_reporting`], [`SimpleShell`], [`local_operation_simple`] | (not upstream) the API calls with their own notification identities |
 //! | [`faceuse_offset`] | `SmOffsetGeometryCreation::FaceuseOffset` over the owned B-rep |
 //!
 //! Deviations: original B-reps and the kernel are explicit arguments, not retained
@@ -106,6 +106,7 @@ use crate::topology::proto_topology::p1::CopyBrepMap;
 #[cfg(test)]
 use crate::geom::attribute::ObjectKey;
 use crate::offset::offset_geometry_creation::make_edges_on_analytics_exact;
+use crate::offset::shell_seams::SeamReport;
 use crate::sweep::topology_sweep::store::SweepIdentities;
 use crate::topology::edge::{NotificationStores, NotifyState};
 use crate::topology::edgeuse::{p1 as eu, p2 as eu2};
@@ -270,7 +271,8 @@ fn refuse_singular_or_folding_offset(
     operation: &'static str,
 ) -> Result<()> {
     use crate::offset::construction::sheets::{
-        certify_regular_knowing, check_reach, least_wall, singular_at, Regularity,
+        certify_regular_knowing, certify_regular_on, check_reach, least_wall, singular_at,
+        Regularity,
     };
     let Some(nurb) = crate::topology::brep::p3::with_nurb(kernel, offset.base_surface())? else {
         return Ok(());
@@ -297,7 +299,13 @@ fn refuse_singular_or_folding_offset(
             .into_error());
         }
     }
-    match certify_regular_knowing(kernel, base, distance, Some(uv_box), least)? {
+    // the fold over the face's own part of its parameter box (#20961), sized on the face;
+    // over the whole box, knowing its least radius, where its trims cannot be bounded
+    let regularity = match TrimmedFace::of(kernel, original, face, uv_box)? {
+        Some(region) => certify_regular_on(kernel, base, distance, Some(uv_box), &region, None)?,
+        None => certify_regular_knowing(kernel, base, distance, Some(uv_box), least)?,
+    };
+    match regularity {
         Regularity::Regular => Ok(()),
         Regularity::Folds { largest } => Err(Failure::new(
             operation,
@@ -530,6 +538,263 @@ fn collapsed_face_radius(
         )
     };
     proved().ok().flatten().unwrap_or_else(|| distance.abs())
+}
+
+/// Not upstream (#20961): a face's place in its surface's parameters, for the fold test of
+/// [`refuse_folding_offset`]. A parameter box that meets none of the boxes holding the face's
+/// trims holds no point of its boundary, so it lies on the face or off it whole, as its middle
+/// does. The classifier ([`point_classify_prepared`]) also calls a point on the boundary,
+/// and so on the face, within its tolerances of it; a box is put off the face only when no
+/// point of it can be in that band (see [`TrimmedFace::far`]).
+///
+/// [`point_classify_prepared`]: crate::query::face::p2::point_classify_prepared
+struct TrimmedFace<'a> {
+    kernel: &'a Kernel,
+    brep: &'a Brep,
+    face: FaceId,
+    /// The boxes holding the trims and the chords between them (in parameters).
+    trims: Vec<[f64; 4]>,
+    /// The boxes in space holding the face's edge curves, and its vertices' points.
+    edges: Vec<[f64; 6]>,
+    vertices: Vec<Vec3>,
+    /// The largest of the face's, its edges' and its vertices' tolerances: the classifier's
+    /// reach in space from the boundary.
+    tolerance: f64,
+    /// The surface's natural parameter domain `[u0, u1, v0, v1]`, where the surface has a pole
+    /// on a side of it (`None`: none).
+    natural: Option<[f64; 4]>,
+}
+
+impl<'a> TrimmedFace<'a> {
+    /// `Ok(None)` where the face cannot be bounded so: a loop's trims
+    /// ([`crate::query::r#loop::trim_boxes`], in boxes a 512th of the parameter box across), an
+    /// edge's curve ([`crate::query::r#loop::edge_curve_boxes`]), or a tolerance or domain that
+    /// is not finite. The caller then keeps the whole-box test.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Cancelled`] from the trims' subdivision.
+    fn of(
+        kernel: &'a Kernel,
+        brep: &'a Brep,
+        face: FaceId,
+        uv_box: [f64; 4],
+    ) -> Result<Option<Self>> {
+        let size = (uv_box[1] - uv_box[0])
+            .abs()
+            .max((uv_box[3] - uv_box[2]).abs());
+        // the rounding of a box's corners, far below a trim box's size
+        let slack = 1e-9 * size;
+        if !(slack.is_finite() && slack > 0.0) {
+            return Ok(None);
+        }
+        let Ok(mut tolerance) = crate::topology::face::p2::tolerance(brep, face) else {
+            return Ok(None);
+        };
+        let Ok(loops) = crate::topology::face::p2::loops(brep, face, false, None) else {
+            return Ok(None);
+        };
+        let mut trims = Vec::new();
+        let mut edges = Vec::new();
+        let mut budget = crate::query::r#loop::MAX_TRIM_BOXES;
+        for &l in &loops {
+            let Some(boxes) = crate::query::r#loop::trim_boxes(kernel, brep, l, size / 512.0)?
+            else {
+                return Ok(None);
+            };
+            trims.extend(
+                boxes
+                    .into_iter()
+                    .map(|[u0, u1, v0, v1]| [u0 - slack, u1 + slack, v0 - slack, v1 + slack]),
+            );
+            let Some(lu) = brep.loop_(l).ok().and_then(|lp| lp.loopuse) else {
+                return Ok(None);
+            };
+            let Ok(eus) = eu::loopuse_edgeuses(brep, lu) else {
+                return Ok(None);
+            };
+            for e in eus {
+                let Some(edge) = eu::edge(brep, e)
+                    .ok()
+                    .flatten()
+                    .and_then(|e| brep.edge(e).ok())
+                else {
+                    return Ok(None);
+                };
+                // pieces a 512th of the edge's own extent across
+                let Some(whole) =
+                    crate::query::r#loop::edge_curve_boxes(kernel, edge, f64::MAX, &mut budget)?
+                else {
+                    return Ok(None);
+                };
+                let extent = whole.iter().fold(0.0_f64, |m, b| {
+                    m.max(b[1] - b[0]).max(b[3] - b[2]).max(b[5] - b[4])
+                });
+                let fine = (extent / 512.0).max(f64::MIN_POSITIVE);
+                let Some(boxes) =
+                    crate::query::r#loop::edge_curve_boxes(kernel, edge, fine, &mut budget)?
+                else {
+                    return Ok(None);
+                };
+                tolerance = tolerance.max(edge.tolerance);
+                edges.extend(boxes);
+            }
+        }
+        let mut vertices = Vec::new();
+        let Ok(ids) = crate::query::face::p2::face_vertices(brep, face, false, None) else {
+            return Ok(None);
+        };
+        for v in ids {
+            let Ok(vertex) = brep.vertex(v) else {
+                return Ok(None);
+            };
+            tolerance = tolerance.max(vertex.tolerance);
+            vertices.push(vertex.point);
+        }
+        let Some(surface) = brep.face(face).ok().and_then(|f| f.surface.as_ref()) else {
+            return Ok(None);
+        };
+        let Ok(d) = surface.natural_uv_domain_with_nurb(kernel) else {
+            return Ok(None);
+        };
+        let natural = [d.min.x, d.max.x, d.min.y, d.max.y];
+        // the walk reads a side of the natural domain only where the surface has a pole there
+        let Ok(poles) = crate::query::r#loop::surface_singularities(kernel, surface) else {
+            return Ok(None);
+        };
+        let finite = tolerance.is_finite()
+            && natural.iter().all(|x| x.is_finite())
+            && edges.iter().flatten().all(|x| x.is_finite())
+            && vertices
+                .iter()
+                .all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite());
+        Ok((finite && !trims.is_empty()).then_some(Self {
+            kernel,
+            brep,
+            face,
+            trims,
+            edges,
+            vertices,
+            tolerance,
+            natural: (poles != 0).then_some(natural),
+        }))
+    }
+
+    /// Whether no point of the parameter box `range`, whose surface `reach` bounds, is within
+    /// the classifier's tolerances of the face's boundary, so that each is classified as the
+    /// trims alone place it. The classifier calls a point on the boundary (and so on the face):
+    /// - when its surface point is within its tolerance (at most [`TrimmedFace::tolerance`]) of
+    ///   a vertex or of an edge's curve: `reach.hull`, the box in space of the surface over
+    ///   `range`, is farther than that from every vertex and from every edge curve's box;
+    /// - when a trim or a chord between two passes within its UV tolerance of the point, the
+    ///   face's tolerance mapped to UV there (`map_to_2d`: the tolerance over the larger first
+    ///   derivative, at least `100 SM_EFF_ZERO`; a hundredth of the domain where a derivative
+    ///   is under `SM_EFF_ZERO`): with `reach.stretch` a lower bound on the surface's
+    ///   smallest stretch over `range`, so on each first derivative, that is at most
+    ///   `max(tolerance / stretch, 100 SM_EFF_ZERO)` once `stretch` passes `SM_EFF_ZERO`, and
+    ///   `range` keeps that far from every trim box;
+    /// - when it lies on a side of the surface's natural domain at that UV tolerance that is a
+    ///   pole the loop shares (the walk's first test, `common_poles`): on a surface with a
+    ///   pole, `range` keeps as far from every side.
+    ///
+    /// Each margin is widened by a millionth for rounding.
+    fn far(&self, range: [f64; 4], reach: &crate::offset::construction::sheets::Reach) -> bool {
+        use crate::math::EFF_ZERO;
+        let Some(hull) = reach.hull else {
+            return false;
+        };
+        if reach.stretch.partial_cmp(&EFF_ZERO) != Some(std::cmp::Ordering::Greater) {
+            return false;
+        }
+        let band = (self.tolerance / reach.stretch).max(100.0 * EFF_ZERO) * (1.0 + 1e-6);
+        let reach3 = self.tolerance * (1.0 + 1e-6);
+        if !band.is_finite() {
+            return false;
+        }
+        let [u0, u1, v0, v1] = range;
+        let near_trim = |t: &[f64; 4]| {
+            u0 - band <= t[1] && t[0] <= u1 + band && v0 - band <= t[3] && t[2] <= v1 + band
+        };
+        let near_side = self.natural.is_some_and(|[n0, n1, m0, m1]| {
+            u0 - band <= n0 || u1 + band >= n1 || v0 - band <= m0 || v1 + band >= m1
+        });
+        let [x0, x1, y0, y1, z0, z1] = hull;
+        let near_edge = |e: &[f64; 6]| {
+            x0 - reach3 <= e[1]
+                && e[0] <= x1 + reach3
+                && y0 - reach3 <= e[3]
+                && e[2] <= y1 + reach3
+                && z0 - reach3 <= e[5]
+                && e[4] <= z1 + reach3
+        };
+        let near_vertex = |p: &Vec3| {
+            x0 - reach3 <= p.x
+                && p.x <= x1 + reach3
+                && y0 - reach3 <= p.y
+                && p.y <= y1 + reach3
+                && z0 - reach3 <= p.z
+                && p.z <= z1 + reach3
+        };
+        let r = (
+            self.trims.iter().any(near_trim),
+            near_side,
+            self.edges.iter().any(near_edge),
+            self.vertices.iter().any(near_vertex),
+        );
+        !(r.0 || r.1 || r.2 || r.3)
+    }
+
+    /// The point class of `(u, v)` on the face: `Some(true)` inside or on its boundary,
+    /// `Some(false)` outside, `None` where the classification fails.
+    fn classify(&self, u: f64, v: f64) -> Option<bool> {
+        use crate::intersect::point_class::{PointClassType, PointClassification};
+        use crate::query::face::p2::{point_classify_prepared, PointClassifyOptions};
+        let tol = crate::topology::face::p2::tolerance(self.brep, self.face).ok()?;
+        let mut pc = PointClassification::new(tol);
+        point_classify_prepared(
+            self.kernel,
+            self.brep,
+            self.face,
+            crate::math::Point2::new(u, v),
+            &mut pc,
+            PointClassifyOptions {
+                src_zone_tol_3d: tol,
+                use_uv_classification: true,
+                ..PointClassifyOptions::default()
+            },
+        )
+        .ok()?;
+        Some(matches!(
+            pc.point_class(),
+            PointClassType::Face | PointClassType::Edge | PointClassType::Vertex
+        ))
+    }
+}
+
+impl crate::offset::construction::sheets::FaceRegion for TrimmedFace<'_> {
+    fn place(
+        &self,
+        range: [f64; 4],
+        reach: &crate::offset::construction::sheets::Reach,
+    ) -> crate::offset::construction::sheets::Place {
+        use crate::offset::construction::sheets::Place;
+        let [u0, u1, v0, v1] = range;
+        let meets = |t: &[f64; 4]| u0 <= t[1] && t[0] <= u1 && v0 <= t[3] && t[2] <= v1;
+        if self.trims.iter().any(meets) {
+            return Place::Unknown;
+        }
+        // on the face whole: its points are inside the trims, or in the boundary band, which
+        // the classifier also calls the face's; off it only clear of that band
+        match self.classify(0.5 * (u0 + u1), 0.5 * (v0 + v1)) {
+            Some(true) => Place::Inside,
+            Some(false) if self.far(range, reach) => Place::Outside,
+            _ => Place::Unknown,
+        }
+    }
+
+    fn contains(&self, u: f64, v: f64) -> bool {
+        self.classify(u, v) == Some(true)
+    }
 }
 
 /// Static offset entry point, with a non-null original and an owned result.
@@ -2289,8 +2554,8 @@ pub fn offset_brep_simple(
 /// with notification identities of its own, as [`offset_brep_simple`]: for a caller that
 /// keeps no notification stores (`SmBrep::LocalOperation` on a B-rep of the caller's).
 /// The B-rep's attributes stay on its faces as upstream's notifications carry them; its
-/// [`Brep::key`] is restored. A complete inward cylindrical draft with fixed axial
-/// end planes uses its exact closed radial removal volume before the executive;
+/// [`Brep::key`] is restored. A complete inward cylindrical or conical draft with fixed
+/// axial end planes uses its exact closed radial removal volume before the executive;
 /// this also trims intervening walls against the drafted support.
 ///
 /// # Errors
@@ -2302,10 +2567,8 @@ pub fn local_operation_simple(
     faces: &[FaceId],
     surfaces: Vec<crate::surface::surface::Surface>,
 ) -> Result<()> {
-    if crate::topology::brep::local_operation::contract_complete_cylinder(
-        kernel, b, faces, &surfaces,
-    )?
-    .is_some()
+    if crate::topology::brep::local_operation::contract_complete_cone(kernel, b, faces, &surfaces)?
+        .is_some()
     {
         return Ok(());
     }
@@ -2363,25 +2626,58 @@ pub(crate) fn copy_local_sweep_attributes(
     attributes::write_back_attributes(target, &attributes::result_key, &store)
 }
 
-/// (not upstream) [`api_shell_brep_full`] with notification identities of its own,
-/// on faces of `original` (`faces` removed: open faces; empty: a closed shell). The
-/// source's attributes reach the result as upstream's notifications carry them; the
-/// source is not changed.
+/// (not upstream) [`shell_brep_simple_reporting`]'s body, without its report of the seam
+/// turns that failed: such a turn moves no point of the body (`shell_seams`), so a caller
+/// that only takes the body loses nothing of it.
 ///
 /// # Errors
 ///
-/// Those of [`api_shell_brep_full`].
+/// Those of [`shell_brep_simple_reporting`].
 pub fn shell_brep_simple(
     kernel: &mut Kernel,
     original: &Brep,
     options: ShellOptions,
     faces: &[FaceId],
 ) -> Result<Brep> {
+    shell_brep_simple_reporting(kernel, original, options, faces).map(|made| made.shell)
+}
+
+/// A shell of [`shell_brep_simple_reporting`]: the body, and the seam turns that failed.
+#[derive(Debug)]
+pub struct SimpleShell {
+    /// The shell.
+    pub shell: Brep,
+    /// The faces whose seam was not turned clear of their holes before the shell, or not
+    /// turned back after it, each with its cause ([`SeamReport`]).
+    pub seams: SeamReport,
+}
+
+/// (not upstream) [`api_shell_brep_full`] with notification identities of its own,
+/// on faces of `original` (`faces` removed: open faces; empty: a closed shell). The
+/// source's attributes reach the result as upstream's notifications carry them; the
+/// source is not changed. The working copy's cones and cylinders have their seams turned
+/// clear of the holes in them first, and the faces the shell keeps are turned back after
+/// it (`shell_seams`, solidcore#3353). A turn that fails leaves its face's seam where it
+/// was and is reported with its cause in [`SimpleShell::seams`]; it refuses nothing.
+///
+/// # Errors
+///
+/// Those of [`api_shell_brep_full`]; a cancellation, or an unported step, of a seam's turn.
+pub fn shell_brep_simple_reporting(
+    kernel: &mut Kernel,
+    original: &Brep,
+    options: ShellOptions,
+    faces: &[FaceId],
+) -> Result<SimpleShell> {
     let source_id = BrepId::from_index(0);
     // The working copy keeps the faces' definitions (not upstream: an exact round's
     // definition rides beside its net, #2485), so that a round offsets by its definition
     // (#2487: the round of the moved radius on the offset supports), never by its net.
+    kernel.work_counters.add_shell();
     let mut source = original.clone_standing_for_self_keeping_definitions()?;
+    // (not upstream, solidcore#3353) a cylinder's seam turned clear of the holes in it, so
+    // that no hole's offset crosses it; turned back on the faces the shell keeps
+    let cleared = crate::offset::shell_seams::seams_clear_of_loops(kernel, &mut source)?;
     source.set_key(attributes::original_key(EntityRef::Brep(source_id)).key);
     let mut records = attributes::simple_records(&source);
     let mut store = AttributeStore::default();
@@ -2397,7 +2693,7 @@ pub fn shell_brep_simple(
         merge_identities: Some(&attributes::SimpleIdentities),
     };
     let selections: Vec<Option<FaceKey>> = faces.iter().map(|&f| Some((source_id, f))).collect();
-    api_shell_brep_full(
+    let mut shell = api_shell_brep_full(
         kernel,
         Some(BrepRef {
             brep: &source,
@@ -2411,7 +2707,15 @@ pub fn shell_brep_simple(
             boolean_source_lists: &attributes::copy_source_lists,
         },
         &mut notifications,
-    )
+    )?;
+    let not_restored = crate::offset::shell_seams::seams_back(kernel, &mut shell, &cleared.turned)?;
+    Ok(SimpleShell {
+        shell,
+        seams: SeamReport {
+            not_cleared: cleared.not_cleared,
+            not_restored,
+        },
+    })
 }
 
 /// `SmOffsetGeometryCreation(distance, approx_tol_3d).FaceuseOffset(faceuse, TRUE)`: the
@@ -2434,6 +2738,33 @@ pub fn faceuse_offset(
         approx_tol_3d,
     );
     Ok(super::face::build(kernel, &creator, original, faceuse, true)?.0)
+}
+
+/// (not upstream, solidcore#3353) Whether the inset by `wall` (> 0) of face `face` of the
+/// solid `original` leaves no offset surface (a cylinder, cone, sphere or torus shrunk onto
+/// its spine, a round offset by its radius): the face use and distance the extended inset's
+/// executive offsets it with (`select_offset_faceuse`, `|distance|`), at the input's
+/// tolerance, as `offset_face_prefix` makes it a collapsed face.
+///
+/// # Errors
+///
+/// Those of the face use's selection and of `FaceuseOffset`.
+pub(crate) fn inset_face_collapses(
+    kernel: &Kernel,
+    original: &Brep,
+    face: FaceId,
+    wall: f64,
+) -> Result<bool> {
+    let faceuse = select_offset_faceuse(original, face, true, true, OP_EXTENDED)?;
+    let creator = crate::offset::offset_geometry_creation::OffsetGeometryCreation::new(
+        wall,
+        original.tolerance(),
+    );
+    Ok(
+        super::face::build(kernel, &creator, original, faceuse, true)?
+            .0
+            .is_none(),
+    )
 }
 
 fn configured_executive(original: &Brep, options: OffsetOptions) -> OffsetExecutive {

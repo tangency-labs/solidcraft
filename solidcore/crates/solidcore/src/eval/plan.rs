@@ -360,13 +360,19 @@ fn nurbs_derivs(degree: [usize; 2], knots: &[Vec<f64>; 2], count: [usize; 2], ct
     basis_ders_into(&knots[0], su, pu, u, &mut bu)?;
     basis_ders_into(&knots[1], sv, pv, v, &mut bv)?;
     let (mut s, mut s_u, mut s_v) = ([0.0; 4], [0.0; 4], [0.0; 4]);
-    for (b, (nv0, nv1)) in bv[0].iter().zip(&bv[1]).take(pv + 1).enumerate() {
-        for (a, (nu0, nu1)) in bu[0].iter().zip(&bu[1]).take(pu + 1).enumerate() {
-            let c = ctrl.get((sv + b - pv) * nu + su + a - pu)?;
-            for (((sd, sud), svd), cd) in s.iter_mut().zip(s_u.iter_mut()).zip(s_v.iter_mut()).zip(c.iter()) {
-                *sd += nu0 * nv0 * cd;
-                *sud += nu1 * nv0 * cd;
-                *svd += nu0 * nv1 * cd;
+    let u0 = su.checked_sub(pu)?;
+    let v0 = sv.checked_sub(pv)?;
+    for (b, (&nv0, &nv1)) in bv[0].iter().zip(&bv[1]).take(pv + 1).enumerate() {
+        let start = (v0 + b).checked_mul(nu)?.checked_add(u0)?;
+        let row = ctrl.get(start..start + pu + 1)?;
+        for ((&nu0, &nu1), c) in bu[0].iter().zip(&bu[1]).take(pu + 1).zip(row) {
+            let w00 = nu0 * nv0;
+            let w10 = nu1 * nv0;
+            let w01 = nu0 * nv1;
+            for (((sd, sud), svd), &cd) in s.iter_mut().zip(s_u.iter_mut()).zip(s_v.iter_mut()).zip(c.iter()) {
+                *sd += w00 * cd;
+                *sud += w10 * cd;
+                *svd += w01 * cd;
             }
         }
     }
@@ -378,16 +384,18 @@ fn nurbs_derivs(degree: [usize; 2], knots: &[Vec<f64>; 2], count: [usize; 2], ct
 /// The knot span used at `t`: the last non-empty span starting at or before `t`, clamped to
 /// the valid spans `p ≤ k < n` so parameters just outside the domain extend the end spans.
 pub fn span_of(knots: &[f64], p: usize, n: usize, t: f64) -> usize {
-    let mut k = p;
-    for i in p..n {
-        let (Some(&a), Some(&b)) = (knots.get(i), knots.get(i + 1)) else { continue };
-        if a < b {
-            if a <= t {
-                k = i;
-            } else {
-                break;
-            }
-        }
+    let end = n.min(knots.len().saturating_sub(1));
+    if p >= end || t.is_nan() {
+        return p;
+    }
+    let Some(slice) = knots.get(p..end) else { return p };
+    let below = slice.partition_point(|&x| x <= t);
+    if below == 0 {
+        return p;
+    }
+    let mut k = p + below - 1;
+    while k > p && !matches!((knots.get(k), knots.get(k + 1)), (Some(&a), Some(&b)) if a < b) {
+        k -= 1;
     }
     k
 }
@@ -435,10 +443,22 @@ fn basis_ders_into(knots: &[f64], span: usize, p: usize, t: f64, ders: &mut [[f6
     }
     let kn = |i: usize| knots.get(i).copied();
     let [values, slopes] = ders;
-    // The degree p − 1 functions first, kept in the derivative row: walked from the top down, so
-    // each slot still holds them when it and the slot above it are read.
+    // The degree p − 1 functions first, kept in the derivative row, then one A2.2 step into
+    // `values` for degree p (avoiding recomputing degrees 1..p − 1); the derivative row is then
+    // walked from the top down so each slot still holds degree p − 1 when read.
     basis_funs(knots, span, p - 1, t, slopes)?;
-    basis_funs(knots, span, p, t, values)?;
+    values.fill(0.0);
+    let mut saved = 0.0;
+    for r in 0..p {
+        let right = kn(span + r + 1)? - t;
+        let left = t - kn((span + 1 + r).checked_sub(p)?)?;
+        let den = right + left;
+        let nr = *slopes.get(r)?;
+        let temp = if den != 0.0 { nr / den } else { 0.0 };
+        *values.get_mut(r)? = saved + right * temp;
+        saved = left * temp;
+    }
+    *values.get_mut(p)? = saved;
     // N'_{i,p} = p·(N_{i,p−1}/(u_{i+p}−u_i) − N_{i+1,p−1}/(u_{i+p+1}−u_{i+1})), i = span − p + r.
     for r in (0..=p).rev() {
         let mut d = 0.0;
@@ -585,4 +605,87 @@ mod tests {
         }
     }
 
+    #[test]
+    fn span_of_and_nurbs_derivs_match_on_dense_knot_vectors() {
+        let linear_span = |knots: &[f64], p: usize, n: usize, t: f64| {
+            let mut k = p;
+            for i in p..n {
+                let (Some(&a), Some(&b)) = (knots.get(i), knots.get(i + 1)) else { continue };
+                if a < b {
+                    if a <= t {
+                        k = i;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            k
+        };
+        let clamped = |p: usize, n: usize| {
+            let mut k = vec![0.0; p + 1];
+            let inner = n - p - 1;
+            k.extend((1..=inner).map(|i| i as f64 / (inner + 1) as f64));
+            k.extend(vec![1.0; p + 1]);
+            k
+        };
+        let (nu, nv) = (361, 12);
+        let ku = clamped(3, nu);
+        let kv = clamped(3, nv);
+        for &t in &[-1.0, 0.0, 1e-6, 0.123, 0.5, 0.75, 1.0 - 1e-9, 1.0, 2.0, f64::NAN, f64::NEG_INFINITY, f64::INFINITY] {
+            assert_eq!(span_of(&ku, 3, nu, t), linear_span(&ku, 3, nu, t), "t = {t}");
+        }
+        for &knots in &[
+            &[0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 2.0][..],
+            &[0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 2.0][..],
+            &[0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 2.0, 2.0][..],
+        ] {
+            for &t in &[-1.0, 0.0, 0.5, 1.0, 1.5, 2.0, 3.0] {
+                assert_eq!(span_of(knots, 2, 5, t), linear_span(knots, 2, 5, t), "{knots:?} at {t}");
+            }
+        }
+        let mut ctrl = Vec::with_capacity(nu * nv);
+        for j in 0..nv {
+            let s = j as f64 / (nv - 1) as f64;
+            for i in 0..nu {
+                let t = std::f64::consts::TAU * (i as f64 / (nu - 1) as f64);
+                let r = 10.0 + 0.4 * (24.0 * t + 0.6 * s).sin() + 0.3 * (3.0 * t + 0.2 * s).sin();
+                ctrl.push([r * t.cos(), r * t.sin(), 30.0 * s, 1.0]);
+            }
+        }
+        let surf = EvalSurface::nurbs([3, 3], [ku, kv], [nu, nv], ctrl);
+        for i in 0..10 {
+            let u = (i as f64 + 0.37) / 10.0;
+            for j in 0..4 {
+                let v = (j as f64 + 0.29) / 4.0;
+                let (p, du, dv) = surf.derivs(u, v).unwrap();
+                let d = surf.partials(u, v).unwrap();
+                assert!(close(p, d[0][0], 1e-12), "p at ({u}, {v})");
+                assert!(close(du, d[1][0], 1e-11), "du at ({u}, {v})");
+                assert!(close(dv, d[0][1], 1e-11), "dv at ({u}, {v})");
+            }
+        }
+    }
+
+    #[test]
+    fn nurbs_derivs_extreme_homogeneous_controls_stay_finite() {
+        // Degree (2, 2) flat unit square scaled homogeneously by M = 1e308:
+        // at (u, v) = (0.05, 0.5), N'_0(u) = -1.9 so `nu1 * M` overflows f64::MAX (~1.797e308),
+        // whereas per-term `(nu1 * nv0) * M` stays finite because max(nv0) = 0.5.
+        let m = 1e308;
+        let knots = [vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]];
+        let mut ctrl = Vec::with_capacity(9);
+        for j in 0..3u8 {
+            let y = 0.5 * f64::from(j);
+            for i in 0..3u8 {
+                let x = 0.5 * f64::from(i);
+                ctrl.push([x * m, y * m, 0.0, m]);
+            }
+        }
+        let surf = EvalSurface::nurbs([2, 2], knots, [3, 3], ctrl);
+        let (p, du, dv) = surf.derivs(0.05, 0.5).expect("extreme homogeneous controls stay finite");
+        assert!(p.is_finite() && du.is_finite() && dv.is_finite(), "p={p:?} du={du:?} dv={dv:?}");
+        assert!(close(p, Vec3::new(0.05, 0.5, 0.0), 1e-12), "{p:?}");
+        assert!(close(du, Vec3::new(1.0, 0.0, 0.0), 1e-12), "{du:?}");
+        assert!(close(dv, Vec3::new(0.0, 1.0, 0.0), 1e-12), "{dv:?}");
+    }
 }

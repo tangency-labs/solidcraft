@@ -386,6 +386,7 @@ fn point_cloud_points_pick_in_view_pick_viewport_and_construct_tools() {
         colors: Colors::default(),
         source_points: 4,
         units: "mm".into(),
+        up: Default::default(),
         transform: solidcraft_engine::doc::IDENTITY,
         point_size: 4.0,
         color_by: ColorBy::File,
