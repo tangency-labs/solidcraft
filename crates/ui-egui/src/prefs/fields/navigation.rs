@@ -19,6 +19,10 @@ macro_rules! navigation_preferences {
             /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
             /// Independent of mouse bindings; false also preserves existing saved presets' behavior.
             free_orbit: bool = false, PAGE_NAVIGATION;
+            /// A key that, held when a mouse orbit drag starts, makes that drag the other orbit style:
+            /// free where the orbit is turntable, turntable where `free_orbit` is on (#20917). `none`
+            /// (default), `alt` or `ctrl`. A key the mouse mapping already needs for that orbit does nothing.
+            free_orbit_key: String = "none".into(), PAGE_NAVIGATION;
             /// With free orbit, mouse drags turn sideways about the world's up axis (a turntable without
             /// the pole limit) instead of the screen's.
             free_orbit_upright: bool = false, PAGE_NAVIGATION => check_tr("nav.free_orbit_upright.label");

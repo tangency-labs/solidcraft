@@ -1086,6 +1086,80 @@ fn one_fillet_over_stacked_boxes_saved_named_on_the_lower_asks_for_the_upper_edg
     assert!(solid_at(&s, [24.8, -24.8, 20.0]) && solid_at(&s, [-24.8, -24.8, 45.0]), "nothing is rounded");
 }
 
+/// A round saved on a whole closed edge builds again where a whole-turn revolve join's turned
+/// seam split that edge (#21997): the join turns its tool off the body's seam, and the turned
+/// seam vertex lands on the closed edge where the ring's outer surface meets the joined wedge's
+/// base, splitting it into numbered pieces. The saved whole-edge name finds the pieces that join
+/// back into that one closed curve, and every piece is rounded. A pick on another edge still
+/// asks for the saved edge again, and rounds nothing.
+#[test]
+fn a_round_saved_on_a_whole_closed_edge_builds_again_where_a_seam_split_it() {
+    let mut s = Session::default();
+    // A ring (outer radius 30) and a wedge joined on with a corner of its profile exactly on the
+    // ring's outer surface: the corner's circle, at radius 30 and z -5, is the edge that splits.
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "A"}));
+    run(&mut s, "sketch.line", json!({"points": [[10, 0], [30, 0], [30, 20], [10, 20]], "closed": true}));
+    run(&mut s, "sketch.line", json!({"points": [[0, -5], [0, 25]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.revolve",
+        json!({"sketch": "A", "profiles": [0], "axis": {"type": "sketch_line", "curve": "l5"}, "angle": "360 deg", "operation": "new", "name": "Ring", "body_name": "Body1"}),
+    );
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "B"}));
+    run(&mut s, "sketch.line", json!({"points": [[30, 5], [34, 5], [34, 12], [27, 12]], "closed": true}));
+    run(&mut s, "sketch.line", json!({"points": [[0, -5], [0, 25]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.revolve",
+        json!({"sketch": "B", "profiles": [0], "axis": {"type": "sketch_line", "curve": "l5"}, "angle": "360 deg", "operation": "join", "name": "Wedge"}),
+    );
+    // A round of 1 mm on both pieces of the split circle, as a pick made today stores it: the
+    // pieces meet at the seams (angle 0 and 0.5 rad), and each pick sits between them.
+    let on_circle = |angle: f64| [30.0 * angle.cos(), 30.0 * angle.sin(), -5.0];
+    let volume = |s: &mut Session| run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+    let sharp = volume(&mut s);
+    run(&mut s, "solid.fillet", json!({"edges": [on_circle(std::f64::consts::PI), on_circle(0.25)], "radius": 1, "name": "Round"}));
+    assert_eq!(error(&s, "Round"), None);
+    let names = s.doc.feature(id(&s, "Round")).unwrap().edge_names.clone();
+    let whole = match names[0].rsplit_once('~') {
+        Some((stem, number)) if !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()) => stem,
+        _ => panic!("the round's edges are not numbered pieces: {names:?}"),
+    };
+    assert_eq!(names, [format!("{whole}~1"), format!("{whole}~2")], "the seam split the circle into two pieces");
+    // The corner is concave, so the round on both pieces adds material.
+    let both_pieces = volume(&mut s);
+    assert!(both_pieces > sharp + 0.1, "the round on both pieces adds material: {sharp} -> {both_pieces}");
+    // As a design saved before the split stored it: one whole-edge name and one pick on it.
+    let mut reopen = |picks: Vec<[f64; 3]>| {
+        let round = id(&s, "Round");
+        let feature = s.doc_mut().feature_mut(round).unwrap();
+        feature.edge_names = vec![whole.to_string()];
+        feature.edge_refs = Vec::new();
+        let solidcraft_doc::FeatureKind::Fillet { edges, .. } = &mut feature.kind else { panic!("Round is not a fillet") };
+        *edges = picks.iter().map(|p| solidcraft_doc::Position(Vec3::new(p[0], p[1], p[2]))).collect();
+        let mut cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        cold.model.no_cache = true;
+        cold.refresh();
+        cold
+    };
+    let mut cold = reopen(vec![on_circle(std::f64::consts::PI)]);
+    assert_eq!(error(&cold, "Round"), None, "the whole-edge name finds the pieces of the split circle");
+    assert_eq!(reselect(&cold, "Round"), None);
+    let whole_edge = volume(&mut cold);
+    assert!(
+        (whole_edge - both_pieces).abs() < 1e-6 * both_pieces,
+        "the whole-edge name rounds the same as both pieces: {both_pieces} vs {whole_edge}"
+    );
+    assert!(warning(&cold, "Round").as_deref().is_some_and(|w| w.contains("2 pieces")), "{:?}", warning(&cold, "Round"));
+    // A pick on the ring's top rim, an edge the saved name never named: the reference asks for
+    // the saved edge again, and nothing is rounded.
+    let mut cold = reopen(vec![[-30.0, 0.0, -20.0]]);
+    assert_eq!(reselect(&cold, "Round").as_deref(), Some(whole));
+    assert!((volume(&mut cold) - sharp).abs() < 1e-6 * sharp, "nothing is rounded");
+}
+
 /// A shell opened by a point pick on a bar's end face keeps opening that face when a parameter
 /// edit moves the bar so the stored point no longer lies on it (it now lies on the bottom face).
 /// The point is moved onto the named face clear of its edges: the face's nearest point to the old

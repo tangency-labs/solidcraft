@@ -535,7 +535,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     let at_rest = on_screen(&sh, proj, Moved::NONE);
     // Seen edge-on, a pointer on the section's plane is centimetres a pixel: nothing takes a press.
     let ray = proj.ray(start).1;
-    let live = solidcraft_kernel::services::affine::distance_along([0.0; 3], [n.x, n.y, n.z], [ray.x, ray.y, ray.z]).abs() >= 0.05;
+    let live = solidcraft_kernel::affine::distance_along([0.0; 3], [n.x, n.y, n.z], [ray.x, ray.y, ray.z]).abs() >= 0.05;
     // Too small on screen, the dots, arrows and arc would sit on one another: none of them.
     let handles = live && at_rest.across >= MIN_ACROSS;
     let dots: Vec<(Dot, Pos2)> = if handles { at_rest.dots.clone() } else { Vec::new() };

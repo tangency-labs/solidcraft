@@ -105,7 +105,7 @@ pub(super) fn check_remove_tree(root: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn remove(s: &mut Session, id: &str) -> Result<RemoveResult> {
+pub fn remove(s: &mut Session, id: &str, remove_user_data: bool) -> Result<RemoveResult> {
     if !valid_id(id) {
         return Err(invalid("invalid plugin id"));
     }
@@ -118,6 +118,15 @@ pub fn remove(s: &mut Session, id: &str) -> Result<RemoveResult> {
     check_remove_tree(&path)?;
     // The delete and the approvals' update are one write: none overlaps an install's.
     let _write = install::write_lock();
+    // Refuse an out-of-scope settings deletion before taking back approvals or removing files.
+    let settings = if remove_user_data {
+        let settings = s.plugin_state.user_settings_dir().ok_or_else(|| invalid("no user settings folder is available"))?;
+        let record = settings.join("plugin-user-data").join(format!("{id}.json"));
+        solidcraft_io::vfs::check_new(&record.to_string_lossy()).map_err(|e| HostError::PermissionDenied { permission: e.to_string() })?;
+        Some(settings)
+    } else {
+        None
+    };
     s.plugin_state.refresh_stored();
     // The approvals go first: a store that cannot be written leaves the package installed, with
     // nothing granted in this session, and the error is reported. A record left behind could
@@ -125,6 +134,9 @@ pub fn remove(s: &mut Session, id: &str) -> Result<RemoveResult> {
     s.plugin_state.grants.remove(id);
     s.plugin_state.persist_stored()?;
     s.plugin_state.forget_stored(id)?;
+    if let Some(settings) = settings {
+        user_storage::remove(&settings, id)?;
+    }
     std::fs::remove_dir_all(path).map_err(io)?;
     s.plugin_state.packages.remove(id);
     s.disabled_plugins.remove(id);

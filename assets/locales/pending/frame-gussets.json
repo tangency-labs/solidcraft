@@ -162,5 +162,25 @@
     "ui.gusset.relief": "角部避空",
     "ui.gusset.triangle": "三角形",
     "ui.gusset_title": "加强板"
+  },
+  "fr": {
+    "cmd.frame.gusset": "Gousset",
+    "error.gusset_support": "Sélectionnez deux faces planes d’appui.",
+    "help.frame.gusset": "Ajoute une plaque plane dans l’angle formé par deux éléments de structure, en la fixant sur une face de chacun d’eux. Utilisez cette fonction pour rigidifier un assemblage soudé.",
+    "ui.gusset.center": "Centré",
+    "ui.gusset.clip": "Découpe de l’extrémité extérieure",
+    "ui.gusset.clipped": "Extrémités découpées",
+    "ui.gusset.face1": "Premier appui",
+    "ui.gusset.face2": "Deuxième appui",
+    "ui.gusset.leg1": "Première branche",
+    "ui.gusset.leg2": "Deuxième branche",
+    "ui.gusset.negative": "Côté négatif",
+    "ui.gusset.offset": "Décalage de la liaison",
+    "ui.gusset.placement": "Positionnement de l’épaisseur",
+    "ui.gusset.positive": "Côté positif",
+    "ui.gusset.profile": "Contour",
+    "ui.gusset.relief": "Dégagement d’angle",
+    "ui.gusset.triangle": "Triangulaire",
+    "ui.gusset_title": "GOUSSET"
   }
 }

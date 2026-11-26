@@ -26,6 +26,7 @@
 //! | [`contact_tol_3d`]                     | not upstream (WR-787, #15429): when circles a hair less than tangent touch |
 //! | [`within_contact_tol`]                 | not upstream: the one reading of a contact at the tolerance, shared by every contact site |
 //! | [`coincidence_tol_3d`], [`coincidence_reach_3d`], [`within_coincidence_tol`] | not upstream: when two places are one, the larger of the contact tolerance and the two zone tolerances |
+//! | [`zone_reach_3d`]                      | not upstream: when two places are one within a body's own tolerance, no contact floor |
 //! | [`ang_tol_rad`]                        | `SmTol::GetAngTolRad()`                        |
 //! | [`model_size_estimate`]                | `SmTol::GetModelSizeEstimate()`                |
 //! | [`context_model_size_estimate`]        | `SmTol::GetModelSizeEstimate(const SmContext&)` |
@@ -494,8 +495,9 @@ fn rounding_of_copies(size: f64) -> f64 {
 /// The tolerance within which two places coincide (are one place), for two objects with
 /// zone tolerances `zone1` and `zone2`: the larger of the contact tolerance
 /// ([`contact_tol_3d`]) and the two zone tolerances. Not upstream: one rule for every site
-/// that decides whether two places are one (a point on a side of a surface's domain, and,
-/// as the sites move to it, a curve along an edge and two points one vertex), in place of
+/// that decides whether two places on two objects are one (as the sites move to it, a curve
+/// along an edge and two points one vertex; where a body's own tolerances decide, as for a
+/// sample of an edge on a side of its face's domain, [`zone_reach_3d`]), in place of
 /// the intersection tolerance, the two zone tolerances' sum, that upstream reads there.
 ///
 /// A zone tolerance is how far an object's stored geometry may stand from the place it
@@ -531,6 +533,19 @@ pub fn coincidence_tol_3d(k: &Kernel, zone1: f64, zone2: f64) -> f64 {
 #[must_use]
 pub fn coincidence_reach_3d(k: &Kernel, zone1: f64, zone2: f64, size: f64) -> f64 {
     coincidence_tol_3d(k, zone1, zone2) + rounding_of_copies(size)
+}
+
+/// The largest distance at which two places held to tolerance `zone` are one place: that
+/// tolerance and the rounding of the copies past it, `size` the largest coordinate of either
+/// place. Not upstream. For a site where the body's own tolerances decide, so the contact
+/// tolerance ([`coincidence_tol_3d`]'s floor, which keeps a contact between two operands'
+/// curves and a coincidence of them in agreement) does not apply: the side test of an edge
+/// use, where a sample of the edge dropped onto its face's surface meets a side of that
+/// surface's domain, `zone` the larger of the two tolerances. A NaN zone tolerance gives
+/// NaN, within which nothing lies.
+#[must_use]
+pub fn zone_reach_3d(zone: f64, size: f64) -> f64 {
+    zone + rounding_of_copies(size)
 }
 
 /// Whether two places `distance` apart, on objects with zone tolerances `zone1` and
