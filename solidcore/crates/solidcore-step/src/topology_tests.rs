@@ -3916,6 +3916,10 @@ fn a_pcurve_a_little_past_a_spline_patchs_knot_range_is_put_on_it() {
 /// completion would move it a whole turn, to u = lo, a turn from the sides it joins. A side half
 /// a billionth of a turn past (the base period holds it), one that runs past the seam further
 /// than it misses its neighbours (it crosses the seam), and a loop of one use stay as they are.
+/// So does a side a quarter turn past the seam whose neighbours do not end on it, the next one
+/// starting a whole turn back (a loop lifted past the seam, as at the pole of the sphere faces
+/// #98053 and #98718 of file 211 in #12859): put on the seam it would be a quarter turn from its
+/// edge, and the face was left out.
 #[test]
 fn a_pcurve_its_fit_leaves_past_a_closed_surfaces_seam_is_put_on_it() {
     let frame = Frame { origin: [0.0; 3], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] };
@@ -3954,6 +3958,18 @@ fn a_pcurve_its_fit_leaves_past_a_closed_surfaces_seam_is_put_on_it() {
     let mut pcs = vec![alone.clone()];
     assert_eq!(onto_seam(&cylinder, &[vec![(0, true)]], &mut pcs), 0);
     assert_eq!(pcs[0], alone);
+    // A loop lifted a quarter turn past the seam: its side there misses the next side by a whole
+    // turn, which starts a turn back, and neither side beside it ends on the seam.
+    let q = hi + 0.25 * period;
+    let lifted = vec![
+        side([hi - 1.0, 0.2], [q, 0.2]),
+        side([q, 0.2], [q, 0.8]),
+        side([lo + 0.25 * period, 0.8], [hi - 1.0, 0.8]),
+        side([hi - 1.0, 0.8], [hi - 1.0, 0.2]),
+    ];
+    let mut pcs = vec![lifted.clone()];
+    assert_eq!(onto_seam(&cylinder, std::slice::from_ref(&uses), &mut pcs), 0);
+    assert_eq!(pcs[0], lifted);
 }
 
 /// A closed spline edge whose end vertex sits a few µm off the curve's seam (its start and end

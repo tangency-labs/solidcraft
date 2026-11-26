@@ -2187,6 +2187,29 @@ pub struct OccurrencePropertiesParams {
     pub about: Option<Point3>,
 }
 
+/// Where an occurrence sits in one frame, in the forms `occurrence.move` takes.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PlacementPose {
+    /// Its origin, in mm.
+    pub position: [f64; 3],
+    /// The unit axis of its turn from the frame's axes. No turn: +Z.
+    pub axis: [f64; 3],
+    /// The turn about `axis`, in degrees, from 0 to 180.
+    pub angle_deg: f64,
+    /// The same placement as three rows of four: the rotation, with the translation in the last
+    /// column of each row.
+    pub matrix: [[f64; 4]; 3],
+}
+
+/// Where an occurrence sits: in its parent component and in the world.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct OccurrencePlacement {
+    /// Its own placement, in the component it is placed in.
+    pub in_parent: PlacementPose,
+    /// Its placement in the world: every placement above it applied.
+    pub world: PlacementPose,
+}
+
 /// What `occurrence.properties` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct OccurrencePropertiesResult {
@@ -2196,6 +2219,9 @@ pub struct OccurrencePropertiesResult {
     pub name: Option<String>,
     #[serde(flatten)]
     pub properties: PhysicalProperties,
+    /// Where it sits, in its parent and in the world, pending moves included.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<OccurrencePlacement>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

@@ -2106,6 +2106,8 @@ mod tests {
             pattern: PatternKind::Path {
                 path_sketch: solidcraft_engine::doc::SketchId(0),
                 path: Vec::new(),
+                path_body: None,
+                path_edges: Vec::new(),
                 count: "2".into(),
                 spacing: "10".into(),
                 extent: false,
