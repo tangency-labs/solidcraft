@@ -826,8 +826,11 @@ impl OffsetExecutive {
         // edge closed to a point where the faces either side meet (a draft that just
         // reaches where its neighbours converge). It is squeezed out like a closed edge
         // above; `closed_faces` takes it only where its edge on the face across closed
-        // with it.
+        // with it. Only a straight edge: its curve keeps its old ends (the vertices moved,
+        // not the curve), and a straight edge between two vertices at one point is that
+        // point, where a curved one whose ends meet can still bound the face.
         if self.operation() == OffsetOperation::LocalOperation
+            && curve.is_line(5, tol)?.is_some()
             && self.squeeze_closed_edge(
                 kernel,
                 original,
