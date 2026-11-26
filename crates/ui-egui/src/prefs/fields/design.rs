@@ -59,8 +59,8 @@ macro_rules! design_preferences {
             /// background once it is imported, and Repair heals a part first (#17689). Off: the part
             /// stays as read, with its check's warning, and Repair does not heal first, as before.
             heal_tolerance_defects: bool = true, PAGE_DESIGN => check_id("prefs.heal_tolerance_defects");
-            /// The browser's Origin folder starts hidden in designs that don't keep its eye themselves.
-            hide_origin: bool = false, PAGE_DESIGN => check_tr("ui.hide_origin_by_default");
+            /// Whether the browser's Origin folder shows in designs that don't keep its eye themselves.
+            hide_origin: OriginDisplay = OriginDisplay::default(), PAGE_DESIGN;
             /// Insert Design lists the designs open in other tabs, each inserted with one click, then
             /// Browse… for a file (#8570). Off: it opens the file picker at once, as before.
             insert_lists_open_designs: bool = true, PAGE_DESIGN => check_id("settings.insert_lists_open_designs");
