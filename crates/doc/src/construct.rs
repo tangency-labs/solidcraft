@@ -1485,13 +1485,8 @@ impl GeoRef {
                             .any(|q| q.dist(*at) <= tol)
                     };
                     let edge_names = crate::naming::edge_name_index(b);
-                    let mut meet: Vec<String> = rec
-                        .edges
-                        .iter()
-                        .zip(&edge_names.names)
-                        .filter(|(e, n)| !n.is_empty() && ends_here(e))
-                        .map(|(_, n)| n.clone())
-                        .collect();
+                    let mut meet: Vec<String> =
+                        rec.edges.iter().zip(&edge_names.names).filter(|(e, n)| !n.is_empty() && ends_here(e)).map(|(_, n)| n.clone()).collect();
                     if meet.is_empty() {
                         continue;
                     }

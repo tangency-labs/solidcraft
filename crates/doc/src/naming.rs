@@ -1428,12 +1428,7 @@ pub(crate) fn vertex_names_from_record(record: &solidcore_record::brep::Brep, in
         .collect();
     let limit = names.len().min(record.vertices.len());
     if let Some(prefix) = names.get_mut(..limit) {
-        number_pieces_by(
-            prefix,
-            |j| record.vertices.get(j).map(|v| Vec3::new(v.point[0], v.point[1], v.point[2])).unwrap_or(Vec3::ZERO),
-            '~',
-            true,
-        );
+        number_pieces_by(prefix, |j| record.vertices.get(j).map(|v| Vec3::new(v.point[0], v.point[1], v.point[2])).unwrap_or(Vec3::ZERO), '~', true);
     }
     names
 }
@@ -2168,8 +2163,8 @@ mod tests {
                         continue;
                     }
                     let p = rec.vertices[v].point;
-                    let hit = locate_vertex(body, name, Vec3::new(p[0], p[1], p[2]))
-                        .unwrap_or_else(|e| panic!("{label}: vertex `{name}` failed: {e}"));
+                    let hit =
+                        locate_vertex(body, name, Vec3::new(p[0], p[1], p[2])).unwrap_or_else(|e| panic!("{label}: vertex `{name}` failed: {e}"));
                     assert_eq!(hit.vertex, v, "{label}: vertex `{name}` resolved to wrong index");
                 }
             }
