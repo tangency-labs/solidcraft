@@ -5417,6 +5417,7 @@ mod test_support;
 /// `start`.
 const STARTED_WITH_VALUES: &[&str] = &[
     "body.print_face",
+    "browser.opacity",
     "browser.visibility",
     "component.move_features",
     "component.relink",
