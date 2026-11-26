@@ -433,6 +433,30 @@ fn a_representable_skinny_hole_is_not_joined_by_a_geometric_epsilon() {
 }
 
 #[test]
+fn a_strictly_negative_rounded_corner_is_not_an_uncertain_contact() {
+    // The reported section's pocket corner is (5, next_down(5)). On this stored
+    // tangent its exact normal numerator is negative, but separately enclosed
+    // products give [-2^-51, 0]. A nonzero residual excludes the upper zero.
+    let top = -crate::geom::certified::next_up(-5.0);
+    let region = Region2 {
+        outer: rectangle(0.0, -5.0, 5.0, top),
+        holes: vec![],
+    };
+    let mut budget = Budget::default();
+    let prepared = PreparedRegion::new(&region, &mut budget).unwrap();
+    let frame = Frame::new(
+        Vec2::ZERO,
+        p(
+            f64::from_bits(0x3fe6_a09e_667f_3bcd),
+            f64::from_bits(0x3fe6_a09e_667f_3bcc),
+        ),
+    )
+    .unwrap();
+    let line = prepared.clip(&frame, 0.0, &mut budget).unwrap();
+    assert_spans(&line, &[(0.0, 5.0 * SQRT_2)]);
+}
+
+#[test]
 fn underflowed_product_residual_is_not_an_exact_boundary_contact() {
     // u=2^-52, a=(2-u)*2^-485, b=(2-u)*2^-486, v=2^-969-2^-1021.
     let a = f64::from_bits(0x21af_ffff_ffff_ffff);
