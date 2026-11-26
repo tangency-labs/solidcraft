@@ -106,6 +106,11 @@ fn same(label: &str, make: &dyn Fn() -> Brep, digested: bool) -> bool {
 /// A `side` by `side` by 10 plate with `n` by `n` circular holes of radius 3 on a 20
 /// grid, swept from a square of lines and B-spline circles.
 fn plate(n: u32) -> Brep {
+    plate_with_first_hole_moved(n, 0.0)
+}
+
+/// [`plate`] with its first hole's centre moved `dx` along x.
+fn plate_with_first_hole_moved(n: u32, dx: f64) -> Brep {
     let side = 20.0 * f64::from(n);
     let corners = [
         Point3::new(0.0, 0.0, 0.0),
@@ -118,7 +123,7 @@ fn plate(n: u32) -> Brep {
         .collect();
     for i in 0..n * n {
         let c = Point3::new(
-            10.0 + f64::from(i % n) * 20.0,
+            10.0 + f64::from(i % n) * 20.0 + if i == 0 { dx } else { 0.0 },
             10.0 + f64::from(i / n) * 20.0,
             0.0,
         );
@@ -305,6 +310,22 @@ fn another_body_tolerance_is_tested_again() {
     let want = full(&tight);
     assert!(!want.is_empty(), "the tight plate is valid");
     assert_eq!(on(&mut k, &tight), want);
+}
+
+/// A plate checked clean, then the same plate with one hole moved: both checks give the
+/// same lines, and the vertices whose tests read nothing the move changed (round the other
+/// holes and at the outer corners) stay clean, though they sit on the faces the moved hole
+/// is cut into.
+#[test]
+fn moving_one_hole_leaves_the_other_vertices_clean() {
+    let mut k = Kernel::default();
+    assert!(on(&mut k, &|| plate(2)).is_empty());
+    let moved = || plate_with_first_hole_moved(2, 1.0);
+    let want = full(&moved);
+    assert!(want.is_empty(), "the moved plate is valid: {want:?}");
+    assert_eq!(on(&mut k, &moved), want);
+    let [_, _, vertices] = k.check_memo.borrow().last_clean();
+    assert!(vertices > 0, "no vertex was clean");
 }
 
 #[test]

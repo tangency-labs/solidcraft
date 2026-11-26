@@ -34,6 +34,7 @@ const MOST_CLEAN: usize = 1 << 20;
 pub struct CheckMemo {
     clean: HashSet<ContentId>,
     current: Option<Stars>,
+    last_clean: [usize; 3],
 }
 
 impl std::fmt::Debug for CheckMemo {
@@ -47,6 +48,13 @@ impl CheckMemo {
     #[must_use]
     pub fn len(&self) -> usize {
         self.clean.len()
+    }
+
+    /// How many faces, edges and vertices the last check began found clean, and so skipped
+    /// the geometric tests of.
+    #[must_use]
+    pub fn last_clean(&self) -> [usize; 3] {
+        self.last_clean
     }
 
     /// Whether it keeps none.
@@ -92,7 +100,7 @@ impl Stars {
             }
         }
         for v in b.vertex_list().iter().copied() {
-            if let Some(d) = vertex_digest(b, v, salt, &parts, &out.faces, &out.edges) {
+            if let Some(d) = vertex_digest(b, v, salt, &parts) {
                 out.vertices.insert(v, d);
             }
         }
@@ -163,6 +171,11 @@ fn body_salt(b: &Brep, salt: ContentId) -> ContentId {
 pub(crate) fn begin(k: &Kernel, mut stars: Stars) {
     let mut memo = k.check_memo.borrow_mut();
     stars.mark(&memo.clean);
+    memo.last_clean = [
+        stars.clean_faces.len(),
+        stars.clean_edges.len(),
+        stars.clean_vertices.len(),
+    ];
     memo.current = Some(stars);
 }
 
@@ -301,21 +314,22 @@ fn edge_digest(
     Some(d.finish())
 }
 
-/// The digest of vertex `v`'s neighbourhood: its point and tolerance and, use by use, the
-/// kind of the use's owner and the digests of the face and the edge it is on.
-fn vertex_digest(
-    b: &Brep,
-    v: VertexId,
-    salt: ContentId,
-    parts: &Parts,
-    faces: &HashMap<FaceId, ContentId>,
-    edges: &HashMap<EdgeId, ContentId>,
-) -> Option<ContentId> {
+/// The digest of vertex `v`'s neighbourhood, as far as its tests read: its point and
+/// tolerance (with its uses' UV points and cached gaps) and, use by use, the kind of the
+/// use's owner, which of the vertex's faces it is on and that face's surface, and the edge
+/// uses the gap and sector tests read at the vertex: the use's own edge use, its clockwise
+/// neighbour (the one ending at the vertex), their mates and the mates' clockwise
+/// neighbours, each with its sense, trim and edge geometry. Not the rest of the faces' or
+/// edges' boundaries, which no vertex test reads, so an edit elsewhere on a face leaves its
+/// other vertices clean.
+fn vertex_digest(b: &Brep, v: VertexId, salt: ContentId, parts: &Parts) -> Option<ContentId> {
+    use crate::topology::edgeuse::p1 as eu1;
     use crate::topology::{vertexuse as tvu, VertexuseOwner};
     let mut d = Digest::new();
-    d.tag(0x7);
+    d.tag(0x77);
     d.hashed(&salt);
     parts.vertex(b, v, &mut d)?;
+    let mut ring = Ring::default();
     let uses = &b.vertex(v).ok()?.vertexuses;
     d.usize(uses.len());
     for &vu in uses {
@@ -327,15 +341,88 @@ fn vertex_digest(
             VertexuseOwner::Unknown => 4,
         });
         match tvu::faceuse(b, vu).ok()? {
-            Some(fu) => d.hashed(faces.get(&b.faceuse(fu).ok()?.face?)?),
+            Some(fu) => ring.face(b, parts, b.faceuse(fu).ok()?.face?, &mut d)?,
             None => d.bool(false),
         }
-        match tvu::edgeuse(b, vu).ok()? {
-            Some(eu) => d.hashed(edges.get(&b.edgeuse(eu).ok()?.edge?)?),
-            None => d.bool(false),
+        let eu = tvu::edgeuse(b, vu).ok()?;
+        let cw = match eu {
+            Some(eu) => b.edgeuse(eu).ok()?.cw,
+            None => None,
+        };
+        let mate = |x: Option<crate::topology::EdgeuseId>| match x {
+            Some(x) => eu1::mate(b, x).ok(),
+            None => Some(None),
+        };
+        let cw_of = |x: Option<crate::topology::EdgeuseId>| match x {
+            Some(x) => b.edgeuse(x).ok().map(|r| r.cw),
+            None => Some(None),
+        };
+        let eu_mate = mate(eu)?;
+        let cw_mate = mate(cw)?;
+        for x in [eu, cw, eu_mate, cw_mate, cw_of(eu_mate)?, cw_of(cw_mate)?] {
+            ring.edgeuse(b, parts, x, &mut d)?;
         }
     }
     Some(d.finish())
+}
+
+/// The faces and edge uses a vertex digest has met, numbered in the order it met them:
+/// the digest writes each one's number, so it says which uses share a face or are the same
+/// edge use, and writes each one's content the first time.
+#[derive(Default)]
+struct Ring {
+    faces: Vec<FaceId>,
+    edgeuses: Vec<crate::topology::EdgeuseId>,
+}
+
+impl Ring {
+    /// Writes face `f`'s number and, the first time, its surface digest.
+    fn face(&mut self, b: &Brep, parts: &Parts, f: FaceId, d: &mut Digest) -> Option<()> {
+        if let Some(i) = self.faces.iter().position(|&x| x == f) {
+            d.usize(i);
+            return Some(());
+        }
+        d.usize(self.faces.len());
+        self.faces.push(f);
+        parts.surface(b, f, d)
+    }
+
+    /// Writes edge use `x`'s number and, the first time, its sense, loop membership, trim,
+    /// edge geometry and face; `false` for none.
+    fn edgeuse(
+        &mut self,
+        b: &Brep,
+        parts: &Parts,
+        x: Option<crate::topology::EdgeuseId>,
+        d: &mut Digest,
+    ) -> Option<()> {
+        use crate::topology::edgeuse::p1 as eu1;
+        let Some(x) = x else {
+            d.bool(false);
+            return Some(());
+        };
+        d.bool(true);
+        if let Some(i) = self.edgeuses.iter().position(|&y| y == x) {
+            d.usize(i);
+            return Some(());
+        }
+        d.usize(self.edgeuses.len());
+        self.edgeuses.push(x);
+        d.hashed(&eu1::orientation(b, x).ok()?);
+        d.bool(eu1::is_loop_edgeuse(b, x).ok()?);
+        let (trim, holder) = eu1::uv_trim_curve(b, x).ok()?;
+        trim.content(d)?;
+        d.bool(holder == Some(x));
+        match eu1::edge(b, x).ok()? {
+            Some(e) => parts.edge(b, e, d)?,
+            None => d.bool(false),
+        }
+        match eu1::face(b, x).ok()? {
+            Some(f) => self.face(b, parts, f, d)?,
+            None => d.bool(false),
+        }
+        Some(())
+    }
 }
 
 /// The digests of each edge's geometry ([`edge_geometry`]) and each vertex's point
@@ -345,6 +432,7 @@ fn vertex_digest(
 struct Parts {
     edges: HashMap<EdgeId, Option<ContentId>>,
     vertices: HashMap<VertexId, Option<ContentId>>,
+    surfaces: HashMap<FaceId, Option<ContentId>>,
 }
 
 impl Parts {
@@ -359,7 +447,26 @@ impl Parts {
             .iter()
             .map(|&v| (v, vertex_point_id(b, v)))
             .collect();
-        Self { edges, vertices }
+        let surfaces = b
+            .face_list()
+            .iter()
+            .map(|&f| (f, surface_id(b, f)))
+            .collect();
+        Self {
+            edges,
+            vertices,
+            surfaces,
+        }
+    }
+
+    /// Writes face `f`'s surface digest; `None` when it has none.
+    fn surface(&self, b: &Brep, f: FaceId, d: &mut Digest) -> Option<()> {
+        let id = match self.surfaces.get(&f) {
+            Some(id) => (*id)?,
+            None => surface_id(b, f)?,
+        };
+        d.hashed(&id);
+        Some(())
     }
 
     /// Writes edge `e`'s geometry digest; `None` when it has none.
@@ -387,6 +494,18 @@ fn edge_geometry_id(b: &Brep, e: EdgeId) -> Option<ContentId> {
     let mut d = Digest::new();
     d.tag(0xE6);
     edge_geometry(b, e, &mut d)?;
+    Some(d.finish())
+}
+
+/// Face `f`'s surface, tolerance, parameter domain and whether its domain is its trim.
+fn surface_id(b: &Brep, f: FaceId) -> Option<ContentId> {
+    let mut d = Digest::new();
+    d.tag(0x5F);
+    let face = b.face(f).ok()?;
+    face.surface.as_ref()?.content(&mut d)?;
+    d.f64(crate::topology::face::p2::tolerance(b, f).ok()?);
+    face.uv_domain.content(&mut d)?;
+    d.hashed(&face.rectangular_trim);
     Some(d.finish())
 }
 
