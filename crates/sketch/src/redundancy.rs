@@ -35,7 +35,7 @@ pub const CONSISTENT: f64 = 1e-6;
 pub(super) fn block_constraint(b: &Block) -> Option<usize> {
     match b {
         Block::User(ci, _) | Block::TangentAt(ci, _, _) => Some(*ci),
-        Block::Closure { .. } | Block::Arc { .. } => None,
+        Block::Closure { .. } | Block::Arc { .. } | Block::Frame { .. } | Block::FrameLength { .. } | Block::FrameRadius { .. } => None,
     }
 }
 
@@ -189,12 +189,19 @@ fn classify_rows(j: &Mat, owner: &[usize], block_count: usize, support: Option<u
 /// dimension (it constrains nothing) or an unknown index.
 pub fn constraint_residual(sk: &Sketch, ci: usize) -> Option<f64> {
     let c = sk.constraints.get(ci).filter(|c| !c.driven)?;
+    Some(kind_residual(sk, &c.kind))
+}
+
+/// [`constraint_residual`] of a constraint of kind `k` on the sketch's entities, whether or not
+/// the sketch holds it.
+pub fn kind_residual(sk: &Sketch, k: &crate::ConstraintKind) -> f64 {
+    let ci = usize::MAX;
     let fixed =
         Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new(), heavy: Vec::new() };
     let on_curve = points_on_curves(sk);
-    let b = match super::touch_point(sk, &c.kind, &on_curve) {
-        Some(p) => Block::TangentAt(ci, &c.kind, p),
-        None => Block::User(ci, &c.kind),
+    let b = match super::touch_point(sk, k, &on_curve) {
+        Some(p) => Block::TangentAt(ci, k, p),
+        None => Block::User(ci, k),
     };
     let state = State { sk, lay: &fixed, x: &[] };
     let mut r = Vec::new();
@@ -203,9 +210,9 @@ pub fn constraint_residual(sk: &Sketch, ci: usize) -> Option<f64> {
     // is not on both: the touch-free form (distance from the centre equals the radius) shows a
     // violated tying constraint as well, so the larger of the two is the constraint's distance.
     if matches!(b, Block::TangentAt(..)) {
-        super::residuals(&state, &c.kind, &mut r);
+        super::residuals(&state, k, &mut r);
     }
-    Some(max_abs(&r))
+    max_abs(&r)
 }
 
 /// The constraints (indices) that already determine what the constraint at index `ci` asks

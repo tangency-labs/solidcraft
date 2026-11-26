@@ -77,6 +77,9 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
             expressions.insert("spacing2".into(), e);
         }
         let (mut cs, mut ps) = entities(sk, &params, cmd)?;
+        if !sk.blocks_touching(&cs, &ps).is_empty() {
+            return Err(bad(cmd, "not supported yet: patterns of blocks (explode the block first)"));
+        }
         cs.sort_unstable();
         cs.dedup();
         ps.sort_unstable();

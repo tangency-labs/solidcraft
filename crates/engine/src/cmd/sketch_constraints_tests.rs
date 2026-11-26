@@ -2183,3 +2183,347 @@ fn midpoint_is_offered_for_a_point_and_an_arc_but_not_a_circle() {
     s.selection = pick(&circle);
     assert!(midpoint.for_selection(&s).is_none(), "a point and a circle");
 }
+
+/// A 40 × 20 rectangle (l1 bottom, l2 right, l3 top, l4 left) with its sizes dimensioned and a
+/// circle c1 of radius 5 inside, made into block "Plate" with `scale`; returns the block's reply.
+fn plate_block(s: &mut Session, scale: &str) -> Value {
+    run(s, "sketch.rectangle.two_point", json!({"p0": [10, 5], "p1": [50, 25]}));
+    run(s, "sketch.dimension", json!({"entities": ["l1"], "value": 40}));
+    run(s, "sketch.dimension", json!({"entities": ["l2"], "value": 20}));
+    run(s, "sketch.circle.center", json!({"center": [30, 15], "radius": 5}));
+    run(s, "sketch.block", json!({"curves": ["l1", "l2", "l3", "l4", "c1"], "scale": scale, "name": "Plate"}))
+}
+
+fn at(s: &Session, point: &str) -> Vec2 {
+    let sk = sketch(s);
+    sk.point(sk.resolve_point(point).unwrap()).unwrap()
+}
+
+fn refused(s: &mut Session, id: &str, p: Value) -> String {
+    match s.execute(id, &p) {
+        Ok(v) => panic!("{id} {p} should be refused: {v}"),
+        Err(e) => e.to_string(),
+    }
+}
+
+/// #4069: Make Block holds the profile's own constraints and leaves the block three freedoms;
+/// a coincident on its origin and a horizontal on its axis place it fully.
+#[test]
+fn a_block_is_placed_by_a_coincident_on_its_origin_and_a_direction_on_its_axis() {
+    let mut s = new_sketch();
+    let made = plate_block(&mut s, "fixed");
+    assert_eq!(made["dof"], json!(3), "{made}");
+    assert!(made["sketch"]["solved"].as_bool().unwrap(), "{made}");
+    let held = ids(&made["held"]);
+    assert!(held.len() >= 6, "the rectangle's relations and dimensions are held: {made}");
+    let sk = sketch(&s);
+    assert!(held.iter().all(|h| sk.is_held(h)));
+    let origin = made["origin"].as_str().unwrap().to_string();
+    let axis = made["axis"].as_str().unwrap().to_string();
+    assert!(at(&s, &origin).dist(Vec2::new(30.0, 15.0)) < 1e-9, "the origin goes at the box centre");
+    run(&mut s, "sketch.constraint.coincident", json!({"a": origin, "b": "origin"}));
+    let placed = run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": axis, "mode": "horizontal"}));
+    assert_eq!(placed["sketch"]["dof"], json!(0), "{placed}");
+    assert!(at(&s, "l1.start").dist(Vec2::new(-20.0, -10.0)) < 1e-6, "the block moved as one: {:?}", at(&s, "l1.start"));
+    assert!(at(&s, "l3.start").dist(Vec2::new(20.0, 10.0)) < 1e-6);
+}
+
+/// Exploding a block makes its held constraints drive again; a block's id given to Delete, or its
+/// axis deleted, explodes it too; deleting its last member deletes it with its axis.
+#[test]
+fn explode_and_delete_turn_a_block_back_into_plain_geometry() {
+    let mut s = new_sketch();
+    let made = plate_block(&mut s, "fixed");
+    let block = made["block"].as_str().unwrap().to_string();
+    let exploded = run(&mut s, "sketch.explode_block", json!({"block": block}));
+    assert_eq!(ids(&exploded["restored"]), ids(&made["held"]));
+    assert_eq!(ids(&exploded["curves"]), ["l1", "l2", "l3", "l4", "c1"]);
+    let sk = sketch(&s);
+    assert!(sk.blocks.is_empty() && !sk.is_held(&ids(&made["held"])[0]));
+    assert!(sk.curve_index(made["axis"].as_str().unwrap()).is_some(), "the axis stays as a construction line");
+
+    let mut s = new_sketch();
+    let made = plate_block(&mut s, "fixed");
+    run(&mut s, "sketch.delete", json!({"entities": [made["block"]]}));
+    let sk = sketch(&s);
+    assert!(sk.blocks.is_empty() && sk.curves.len() == 6, "only the block goes: {:?}", sk.curves);
+
+    let mut s = new_sketch();
+    let made = plate_block(&mut s, "fixed");
+    run(&mut s, "sketch.delete", json!({"entities": [made["axis"]]}));
+    assert!(sketch(&s).blocks.is_empty());
+
+    let mut s = new_sketch();
+    let made = plate_block(&mut s, "fixed");
+    run(&mut s, "sketch.delete", json!({"entities": ["c1"]}));
+    assert_eq!(sketch(&s).blocks[0].curves, ["l1", "l2", "l3", "l4"]);
+    run(&mut s, "sketch.delete", json!({"entities": ["l1", "l2", "l3", "l4"]}));
+    let sk = sketch(&s);
+    assert!(sk.blocks.is_empty() && sk.curve_index(made["axis"].as_str().unwrap()).is_none(), "{:?}", sk.curves);
+}
+
+/// In a free block one length dimension between members sets the size; a second that disagrees
+/// is refused. In a rigid block a relation that agrees with the shape is redundant and one that
+/// does not is refused; neither ever names the block.
+#[test]
+fn a_block_takes_one_size_when_free_and_none_when_rigid() {
+    let mut s = new_sketch();
+    let made = plate_block(&mut s, "free");
+    assert_eq!(made["dof"], json!(4), "{made}");
+    let sized = run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": 80}));
+    assert_eq!(sized["sketch"]["dof"], json!(3), "{sized}");
+    assert!((at(&s, "l2.start").dist(at(&s, "l2.end")) - 40.0).abs() < 1e-6, "the proportions stay");
+    let second = refused(&mut s, "sketch.dimension", json!({"entities": ["l2"], "value": 50}));
+    assert!(second.contains("over-constrain"), "{second}");
+
+    let mut s = new_sketch();
+    let made = plate_block(&mut s, "fixed");
+    let block = made["block"].as_str().unwrap();
+    let parallel = run(&mut s, "sketch.constraint.parallel", json!({"a": "l1", "b": "l3"}));
+    assert_eq!(parallel["redundant"], json!(true), "{parallel}");
+    assert!(!parallel.to_string().contains(block), "{parallel}");
+    let length = refused(&mut s, "sketch.dimension", json!({"entities": ["l3"], "value": 45}));
+    assert!(length.contains("over-constrain") && !length.contains(block), "{length}");
+}
+
+/// Members cannot be trimmed, filleted, offset or patterned on their own; what cannot be a
+/// member is refused; bad parameters are refused, not crashed on.
+#[test]
+fn block_members_refuse_edits_that_would_change_them_alone() {
+    let mut s = new_sketch();
+    plate_block(&mut s, "fixed");
+    let why = "`l1` is part of block Plate: explode it, edit, then make the block again";
+    assert!(refused(&mut s, "sketch.trim", json!({"curve": "l1", "at": [20, 5]})).contains(why));
+    assert!(refused(&mut s, "sketch.fillet", json!({"a": "l1", "b": "l2", "radius": 2})).contains("is part of block Plate"));
+    assert!(refused(&mut s, "sketch.offset", json!({"curves": ["l1"], "distance": 2})).contains(why));
+    assert!(refused(&mut s, "sketch.pattern.circular", json!({"entities": ["c1"], "center": [0, 0], "count": 3})).contains("patterns of blocks"));
+    run(&mut s, "sketch.line", json!({"points": [[100, 0], [120, 0]], "infer": false}));
+    let lines = sketch(&s).curves.iter().filter(|c| c.link.is_none()).count();
+    assert!(refused(&mut s, "sketch.block", json!({"curves": ["l2"]})).contains("already part of block Plate"));
+    let axis = sketch(&s).blocks[0].axis.clone();
+    assert!(refused(&mut s, "sketch.block", json!({"curves": [axis]})).contains("axis"));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "l6.start", "b": "x"}));
+    let linked = sketch(&s).curves.iter().find(|c| c.link.is_some()).map(|c| c.id.clone()).unwrap();
+    assert!(refused(&mut s, "sketch.block", json!({"curves": [linked]})).contains("projected"));
+    for p in [
+        json!({}),
+        json!({"curves": []}),
+        json!({"curves": ["nope"]}),
+        json!({"curves": ["l6"], "origin": "nope"}),
+        json!({"curves": ["l6"], "scale": "huge"}),
+        json!({"curves": ["l6"], "origin": [f64::MAX, 0]}),
+    ] {
+        refused(&mut s, "sketch.block", p);
+    }
+    refused(&mut s, "sketch.explode_block", json!({"block": "l6"}));
+    refused(&mut s, "sketch.block_edit", json!({"block": "nope"}));
+    assert_eq!(sketch(&s).curves.iter().filter(|c| c.link.is_none()).count(), lines, "refusals change nothing");
+}
+
+/// Move, Transform and Scale take the whole block when any member is picked; Scale resizes a
+/// rigid block, which keeps its new size.
+#[test]
+fn a_block_moves_turns_and_scales_as_one() {
+    let mut s = new_sketch();
+    plate_block(&mut s, "fixed");
+    let before = [at(&s, "l1.start"), at(&s, "l3.start"), at(&s, "c1.center")];
+    let moved = run(&mut s, "sketch.move", json!({"entities": ["l1"], "translate": [10, 5]}));
+    assert!(moved["sketch"]["solved"].as_bool().unwrap(), "{moved}");
+    for (p, was) in ["l1.start", "l3.start", "c1.center"].into_iter().zip(before) {
+        assert!(at(&s, p).dist(was + Vec2::new(10.0, 5.0)) < 1e-6, "{p}");
+    }
+    run(&mut s, "sketch.transform", json!({"entities": ["c1"], "angle": 90, "center": [0, 0]}));
+    assert!(at(&s, "l1.start").dist(Vec2::new(-10.0, 20.0)) < 1e-6, "{:?}", at(&s, "l1.start"));
+    let scaled = run(&mut s, "sketch.scale", json!({"entities": ["l2"], "base": [0, 0], "factor": 2}));
+    assert!(scaled["sketch"]["solved"].as_bool().unwrap(), "{scaled}");
+    assert_eq!(scaled["sketch"]["dof"], json!(3), "{scaled}");
+    assert!((at(&s, "l1.start").dist(at(&s, "l1.end")) - 80.0).abs() < 1e-6);
+    let sk = sketch(&s);
+    assert!((sk.blocks[0].length - 40.0).abs() < 1e-9, "the rigid block's length doubled: {}", sk.blocks[0].length);
+    let r = sk.radius(sk.curve_index("c1").unwrap()).unwrap();
+    assert!((r - 10.0).abs() < 1e-6, "{r}");
+    let spans = |s: &Session| at(s, "l1.start").dist(at(s, "l3.start"));
+    let diagonal = spans(&s);
+    let turned = run(&mut s, "sketch.move", json!({"entities": ["l4"], "angle": 30, "center": [0, 0]}));
+    assert_eq!(turned["sketch"]["dof"], json!(3), "{turned}");
+    assert!((spans(&s) - diagonal).abs() < 1e-6);
+    let state = s.model.state();
+    let report = &state.sketch(s.active_sketch.unwrap()).unwrap().report;
+    assert!(report.redundant.is_empty(), "the relations put in place of the held ones are held too: {report:?}");
+}
+
+/// Copying a whole block pastes an independent block; copying part of one pastes plain geometry.
+/// Move with copy makes a block of a whole block's copies too.
+#[test]
+fn a_whole_block_copies_as_a_block_and_a_part_as_plain_geometry() {
+    let mut s = new_sketch();
+    plate_block(&mut s, "free");
+    run(&mut s, "sketch.copy", json!({"entities": ["l1", "l2", "l3", "l4", "c1"]}));
+    let pasted = run(&mut s, "sketch.paste", json!({"at": [100, 0]}));
+    let sk = sketch(&s);
+    assert_eq!(sk.blocks.len(), 2, "{pasted}");
+    assert_eq!(sk.blocks[1].scale, solidcraft_sketch::BlockScale::Free);
+    assert_eq!(sk.blocks[1].name.as_deref(), Some("Plate"));
+    assert_eq!(sk.blocks[1].curves.len(), 5);
+    assert!(pasted["sketch"]["solved"].as_bool().unwrap(), "{pasted}");
+    run(&mut s, "sketch.copy", json!({"entities": ["l1", "l2"]}));
+    run(&mut s, "sketch.paste", json!({"at": [0, 100]}));
+    assert_eq!(sketch(&s).blocks.len(), 2, "a part of a block pastes as plain geometry");
+    run(&mut s, "sketch.move", json!({"entities": ["l1", "l2", "l3", "l4", "c1"], "translate": [0, -60], "copy": true}));
+    assert_eq!(sketch(&s).blocks.len(), 3, "a copy of a whole block is a block");
+}
+
+/// AutoConstrain adds nothing among a block's members: that would only lock its pose.
+#[test]
+fn auto_constrain_leaves_a_blocks_insides_alone() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0], [30, 10]], "infer": false}));
+    run(&mut s, "sketch.block", json!({"curves": ["l1", "l2"]}));
+    let out = run(&mut s, "sketch.auto_constrain", json!({}));
+    let sk = sketch(&s);
+    let insides = sk.block_members_now(true);
+    for id in ids(&out["constraints"]) {
+        let c = sk.constraints.iter().find(|c| c.id == id).unwrap();
+        assert!(!insides.hold(&c.kind), "{id}: {:?}, nothing among the members or on the axis", c.kind);
+    }
+}
+
+/// Blocks are saved with the design and read back as they were.
+#[test]
+fn a_block_survives_save_and_open() {
+    let mut s = new_sketch();
+    plate_block(&mut s, "free");
+    let saved = s.doc.to_json();
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    reopened.refresh();
+    let id = s.active_sketch.unwrap();
+    let state = reopened.model.state();
+    let back = state.sketch(id).unwrap();
+    assert_eq!(back.sketch.blocks, sketch(&s).blocks);
+    assert_eq!(back.report.dof, 4);
+}
+
+/// A block of 300 points (150 separate lines) is made, placed and solved through the commands.
+#[test]
+fn a_block_of_three_hundred_points_is_made_and_placed() {
+    let mut s = new_sketch();
+    let id = s.active_sketch.unwrap();
+    let mut doc = (*s.doc).clone();
+    let sk = doc.sketch_mut(id).unwrap();
+    let mut curves = Vec::new();
+    for i in 0..150 {
+        let x = i as f64 * 3.0;
+        let l = sk.add_line(Vec2::new(x, 0.0), Vec2::new(x + 2.0, 1.0 + (i % 7) as f64), None, None, None).unwrap();
+        curves.push(sk.curves[l].id.clone());
+    }
+    *s.doc_mut() = doc;
+    s.refresh();
+    let made = run(&mut s, "sketch.block", json!({"curves": curves}));
+    assert_eq!(made["dof"], json!(3), "{made}");
+    let placed = run(&mut s, "sketch.constraint.coincident", json!({"a": made["origin"], "b": "origin"}));
+    assert_eq!(placed["sketch"]["dof"], json!(1), "{placed}");
+}
+
+/// Fillet and Chamfer at a point held coincident with a block member's end would weld the member
+/// in and cut it back: refused, as on the member itself.
+#[test]
+fn a_corner_welded_to_a_block_member_is_refused() {
+    let mut s = new_sketch();
+    plate_block(&mut s, "fixed");
+    let line = run(&mut s, "sketch.line", json!({"points": [[-10, -20], [10, 5]], "infer": false}));
+    let end = format!("{}.end", ids(&line["curves"])[0]);
+    for (cmd, p) in [("sketch.fillet", json!({"point": end, "radius": 1})), ("sketch.chamfer.equal_distance", json!({"point": end, "distance": 1}))] {
+        let why = refused(&mut s, cmd, p);
+        assert!(why.contains("is part of block Plate"), "{cmd}: {why}");
+    }
+}
+
+/// Explode leaves a solved sketch: a resized free block's parameter-driven dimensions, and a
+/// turned rigid block's horizontals and verticals, no longer hold and are dropped (and reported);
+/// what still holds drives again.
+#[test]
+fn explode_drops_held_constraints_that_no_longer_hold() {
+    let mut s = new_sketch();
+    let made = plate_block(&mut s, "free");
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": 80}));
+    let exploded = run(&mut s, "sketch.explode_block", json!({"block": made["block"]}));
+    assert_eq!(exploded["sketch"]["solved"], json!(true), "{exploded}");
+    assert_eq!(ids(&exploded["dropped"]).len(), 2, "the two old dimensions: {exploded}");
+    assert!((at(&s, "l2.start").dist(at(&s, "l2.end")) - 40.0).abs() < 1e-6);
+
+    let mut s = new_sketch();
+    let made = plate_block(&mut s, "fixed");
+    let slope = run(&mut s, "sketch.line", json!({"points": [[-50, 0], [-32.679, 10]], "infer": false}));
+    let slope = ids(&slope["curves"])[0].clone();
+    run(&mut s, "sketch.constraint.fix", json!({"entity": slope}));
+    run(&mut s, "sketch.constraint.parallel", json!({"a": "l1", "b": slope}));
+    let exploded = run(&mut s, "sketch.explode_block", json!({"block": made["block"]}));
+    assert_eq!(exploded["sketch"]["solved"], json!(true), "{exploded}");
+    let sk = sketch(&s);
+    for id in ids(&exploded["dropped"]) {
+        assert!(sk.constraints.iter().all(|c| c.id != id), "{id} is gone");
+    }
+    assert!(!ids(&exploded["dropped"]).is_empty() && !ids(&exploded["restored"]).is_empty(), "{exploded}");
+}
+
+/// A block member spline keeps its points and handles until the block is exploded; a held
+/// dimension, and the parameter that drives only it, cannot be changed while it is held.
+#[test]
+fn block_members_and_held_dimensions_refuse_changes_that_would_do_nothing_or_break_them() {
+    let mut s = new_sketch();
+    let spline = run(&mut s, "sketch.spline.fit_point", json!({"points": [[0, 0], [10, 5], [20, 0]]}));
+    let curve = ids(&spline["curves"])[0].clone();
+    let made = run(&mut s, "sketch.block", json!({"curves": [curve]}));
+    assert_eq!(made["dof"], json!(3), "{made}");
+    for (cmd, p) in [
+        ("sketch.spline.insert_point", json!({"curve": curve, "at": [5, 3]})),
+        ("sketch.spline.insert_point", json!({"curve": curve, "at": [25, 0], "end": "end"})),
+        ("sketch.spline.remove_point", json!({"curve": curve, "point": format!("{curve}.end")})),
+        ("sketch.spline.handles", json!({"curve": curve})),
+        ("sketch.spline.reset_handles", json!({"curve": curve})),
+    ] {
+        assert!(refused(&mut s, cmd, p.clone()).contains("is part of block"), "{cmd} {p}");
+    }
+
+    let mut s = new_sketch();
+    let made = plate_block(&mut s, "fixed");
+    let held = ids(&made["held"]);
+    let sk = sketch(&s);
+    let dimension = sk.constraints.iter().find(|c| held.contains(&c.id) && c.param.is_some()).unwrap().clone();
+    let why = refused(&mut s, "sketch.toggle_driven", json!({"constraint": dimension.id}));
+    assert!(why.contains("held by block Plate"), "{why}");
+    let why = refused(&mut s, "parameters.change", json!({"name": dimension.param, "expression": "45 mm"}));
+    assert!(why.contains("explode the block"), "{why}");
+}
+
+/// A pasted copy of a whole sized free block keeps the size: the length that drove in the source
+/// drives in the copy, so the copy has three freedoms, not four.
+#[test]
+fn a_pasted_sized_free_block_keeps_its_size() {
+    let mut s = new_sketch();
+    plate_block(&mut s, "free");
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": 80}));
+    let before = sketch(&s).blocks[0].held.len();
+    run(&mut s, "sketch.copy", json!({"entities": ["l1", "l2", "l3", "l4", "c1"]}));
+    let pasted = run(&mut s, "sketch.paste", json!({"at": [300, 0]}));
+    assert_eq!(pasted["sketch"]["dof"], json!(6), "two placed-free blocks of three freedoms each: {pasted}");
+    assert_eq!(sketch(&s).blocks[1].held.len(), before);
+}
+
+/// Move with copy follows the clipboard: a whole block makes a new block with an axis of its own,
+/// part of one makes plain geometry.
+#[test]
+fn move_copy_of_a_block_follows_the_clipboard_rule() {
+    let mut s = new_sketch();
+    plate_block(&mut s, "fixed");
+    let axis = sketch(&s).blocks[0].axis.clone();
+    let curves = sketch(&s).curves.len();
+    run(&mut s, "sketch.move", json!({"entities": ["l1", "l2", "l3", "l4", "c1", axis], "translate": [0, 60], "copy": true}));
+    let sk = sketch(&s);
+    assert_eq!(sk.blocks.len(), 2);
+    assert_eq!(sk.curves.len(), curves * 2, "five copies and one new axis, no stray copy of the old axis");
+    run(&mut s, "sketch.move", json!({"entities": ["l1"], "translate": [0, -60], "copy": true}));
+    let sk = sketch(&s);
+    assert_eq!(sk.blocks.len(), 2, "part of a block copies as plain geometry");
+    assert_eq!(sk.curves.len(), curves * 2 + 1);
+}

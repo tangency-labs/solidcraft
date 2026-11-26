@@ -875,6 +875,9 @@ pub struct Sketch {
     /// Editable sketch patterns; their relations are ordinary solver constraints.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub patterns: Vec<crate::pattern::SketchPattern>,
+    /// Sets of curves that keep their shape; their rows are solved with the curves' own.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocks: Vec<crate::block::SketchBlock>,
     /// Links to geometry outside the sketch (projections, intersections, includes).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub links: Vec<crate::link::Link>,
@@ -925,6 +928,7 @@ impl Sketch {
             curves,
             constraints: _,
             patterns,
+            blocks,
             links,
             offsets,
             freeform_offsets,
@@ -938,7 +942,7 @@ impl Sketch {
             frame,
         } = self;
         format!(
-            "{points:?}{curves:?}{patterns:?}{links:?}{offsets:?}{freeform_offsets:?}{freeform_chain_offsets:?}{wires:?}{wire_constraints:?}{wires_joined:?}{equations:?}{frame:?}"
+            "{points:?}{curves:?}{patterns:?}{blocks:?}{links:?}{offsets:?}{freeform_offsets:?}{freeform_chain_offsets:?}{wires:?}{wire_constraints:?}{wires_joined:?}{equations:?}{frame:?}"
         )
     }
 }
@@ -969,6 +973,7 @@ impl Sketch {
             curves: Vec::new(),
             constraints: Vec::new(),
             patterns: Vec::new(),
+            blocks: Vec::new(),
             links: Vec::new(),
             offsets: Vec::new(),
             freeform_offsets: Vec::new(),
@@ -1012,6 +1017,7 @@ impl Sketch {
             .saturating_add(self.curves.len())
             .saturating_add(self.constraints.len())
             .saturating_add(self.patterns.len())
+            .saturating_add(self.blocks.len())
             .saturating_add(self.links.len())
             .saturating_add(self.wires.len())
             .saturating_add(self.wire_constraints.len())
@@ -1051,6 +1057,7 @@ impl Sketch {
             .chain(self.curves.iter().map(|c| c.id.as_str()))
             .chain(self.constraints.iter().map(|c| c.id.as_str()))
             .chain(self.patterns.iter().map(|p| p.id.as_str()))
+            .chain(self.blocks.iter().map(|b| b.id.as_str()))
             .chain(self.links.iter().map(|l| l.id.as_str()))
             .chain(self.wires.iter().map(|w| w.id.as_str()))
             .chain(self.wire_constraints.iter().map(|c| c.id.as_str()))
@@ -1075,6 +1082,7 @@ impl Sketch {
             || self.curves.iter().any(|c| c.id == id)
             || self.constraints.iter().any(|c| c.id == id)
             || self.patterns.iter().any(|p| p.id == id)
+            || self.blocks.iter().any(|b| b.id == id)
             || self.links.iter().any(|l| l.id == id)
             || self.wires.iter().any(|w| w.id == id)
             || self.wire_constraints.iter().any(|c| c.id == id)
@@ -1756,7 +1764,7 @@ impl Sketch {
     }
 
     /// Does something already fix a size of the sketch: a driving length dimension, a fix,
-    /// pattern or pierce constraint, a pattern, an offset or a 3D curve? Fixed and projected
+    /// pattern or pierce constraint, a pattern, a block of fixed scale, an offset or a 3D curve? Fixed and projected
     /// geometry is left to the callers, since a linked sketch axis gives no size.
     fn has_size(&self) -> bool {
         let sizes = self.constraints.iter().any(|c| match c.kind {
@@ -1768,6 +1776,7 @@ impl Sketch {
         });
         sizes
             || !self.patterns.is_empty()
+            || self.blocks.iter().any(|b| b.scale == crate::block::BlockScale::Fixed)
             || !self.offsets.is_empty()
             || !self.freeform_offsets.is_empty()
             || !self.freeform_chain_offsets.is_empty()
@@ -2067,7 +2076,14 @@ impl Sketch {
             },
             _ => None,
         });
-        let edges = own.chain(self.constraints.iter().filter(|c| !c.driven).map(|c| {
+        // A block joins its axis ends, its member points and its member radii.
+        let blocks = self.frame_rows().into_iter().map(|f| {
+            let mut v = vec![f.o, f.x];
+            v.extend(f.points.iter().map(|(p, _)| *p));
+            v.extend(f.radii.iter().map(|(c, _)| n + c));
+            v
+        });
+        let edges = own.chain(blocks).chain(self.constraints.iter().filter(|c| !c.driven).map(|c| {
             let (mut v, curves) = c.kind.indices();
             v.extend(curves.into_iter().flat_map(curve_nodes));
             v
@@ -2684,6 +2700,8 @@ impl Sketch {
         self.remove_points(&orphans);
         self.prune_links();
         self.prune_patterns();
+        let axes = self.prune_blocks();
+        self.remove_block_axes(axes);
     }
 
     /// Points held on one of the curves `which` exactly at one of its ends, and that end: a point
@@ -2860,6 +2878,8 @@ impl Sketch {
         });
         self.prune_links();
         self.prune_patterns();
+        let axes = self.prune_blocks();
+        self.remove_block_axes(axes);
     }
 
     /// Resolve a point reference: a point id (`origin`, `l1.end`, `p3`) or `<curve>.start|end|center`.

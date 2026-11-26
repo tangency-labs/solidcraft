@@ -328,6 +328,9 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let (unit, comment) = (str_(p, "unit"), str_(p, "comment"));
     let before = s.doc.param_values().0;
+    if e.is_some() {
+        super::sketch_block::refuse_held_parameters(&s.doc, &[name.as_str()], cmd)?;
+    }
     match &e {
         Some(e) => s.doc_mut().change_param(&name, e, unit, comment)?,
         None => {
@@ -562,6 +565,8 @@ fn change_many(s: &mut Session, changes: &Value, solved: &crate::SketchValues) -
         }
         list.push((name.trim().to_string(), e));
     }
+    let names: Vec<&str> = list.iter().map(|(n, _)| n.as_str()).collect();
+    super::sketch_block::refuse_held_parameters(&s.doc, &names, cmd)?;
     let before = s.doc.param_values().0;
     s.doc_mut().change_params_atomic(&list)?;
     let switched = switch_by_rules(s, &before);

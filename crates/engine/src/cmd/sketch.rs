@@ -379,7 +379,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&DELETE_CONTRACT)
         .output(output_schema_for::<DeleteResult>)
-        .params("entities: [curve, point or constraint ids]; preserve_projection_link?: bool (default false: break what remains of a partially deleted projection into normal geometry). With true, leave deleted source edges out and keep the rest linked where identifiable; otherwise break it off (listed in `broken_links` with why)"),
+        .params("entities: [curve, point, constraint or block ids] (a block's id or its axis line explodes the block; its last member takes the block and its axis with it); preserve_projection_link?: bool (default false: break what remains of a partially deleted projection into normal geometry). With true, leave deleted source edges out and keep the rest linked where identifiable; otherwise break it off (listed in `broken_links` with why)"),
     CommandSpec::new("sketch.move_point", "Drag Sketch Point", crate::checked!("sketch.move_point", move_point))
         .in_sketch_part()
         .icon("sketch_move")
@@ -554,6 +554,7 @@ pub(super) fn edit_solved<T>(
             sk.points.clone(),
             sk.curves.clone(),
             sk.constraints.clone(),
+            sk.blocks.clone(),
             sk.wires.clone(),
             sk.wire_constraints.clone(),
             sk.wire_constraints_holding(),
@@ -561,9 +562,14 @@ pub(super) fn edit_solved<T>(
         )
     });
     let (out, left) = f(&mut sk, &mut doc)?;
+    // A block the edit left without members goes with its axis (positions kept by index for a
+    // drag's reference stay as they are).
+    if !matches!(left, Left::MovedFrom(_)) {
+        sk.prune_blocks_and_axes();
+    }
     let strictness = match before {
-        Some((points, curves, constraints, wires, wire_constraints, held, was_big)) => Strict {
-            planar: sk.points != points || sk.curves != curves || sk.constraints != constraints,
+        Some((points, curves, constraints, blocks, wires, wire_constraints, held, was_big)) => Strict {
+            planar: sk.points != points || sk.curves != curves || sk.constraints != constraints || sk.blocks != blocks,
             wires: sk.wires != wires || sk.wire_constraints != wire_constraints,
             held,
             was_big,
@@ -5167,9 +5173,25 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
             } else if sk.link(id).is_some() {
                 curves.extend(sk.link_curves(id));
                 points.extend(sk.link_points(id));
+            } else if sk.blocks.iter().any(|b| &b.id == id) {
+                // A block's id explodes it: its curves stay, as plain geometry.
+                sk.explode_block(id)?;
             } else {
                 return Err(bad(cmd, format!("unknown sketch entity `{id}`")));
             }
+        }
+        // A block whose axis goes is exploded first, while its axis still gives its size.
+        let exploding: Vec<String> = sk
+            .blocks
+            .iter()
+            .filter(|b| {
+                sk.curve_index(&b.axis)
+                    .is_some_and(|a| curves.contains(&a) || sk.curves.get(a).is_some_and(|c| c.kind.point_ids().iter().any(|q| points.contains(q))))
+            })
+            .map(|b| b.id.clone())
+            .collect();
+        for b in &exploding {
+            sk.explode_block(b)?;
         }
         sk.remove_wire_constraints(&wire_cons);
         sk.remove_wires(&wires);

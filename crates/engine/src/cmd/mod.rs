@@ -289,6 +289,7 @@ pub(crate) use sketch::point_arg_form;
 mod canvas_sketch;
 mod canvas_svg;
 mod sketch_3d;
+mod sketch_block;
 mod sketch_canvas;
 pub mod sketch_clipboard;
 mod sketch_constraints;
@@ -643,6 +644,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sketch_merge_lines::COMMANDS.iter());
     v.extend(sketch_equation::COMMANDS.iter());
     v.extend(sketch_constraints::COMMANDS.iter());
+    v.extend(sketch_block::COMMANDS.iter());
     v.extend(sketch_import::COMMANDS.iter());
     v.extend(sketch_inspect::COMMANDS.iter());
     v.extend(sketch_ends::COMMANDS.iter());

@@ -225,6 +225,7 @@ fn curve_by_id(sk: &Sketch, id: &str, cmd: &str) -> Result<usize> {
     {
         return Err(bad(cmd, "break the offset association before editing its output"));
     }
+    super::sketch_block::refuse_members(sk, &[id.to_string()], cmd)?;
     Ok(c)
 }
 
@@ -1132,7 +1133,8 @@ fn trim_path_reply(s: &mut Session, p: &Value) -> Result<TrimPathResult> {
             after = (si, t);
             // A piece trim refuses (a closed spline crossed once) stays as it was.
             let before = sk.clone();
-            let cut = release_trim_offsets(sk, doc, ci, cmd).and_then(|released| {
+            let id: Vec<String> = sk.curves.get(ci).map(|c| c.id.clone()).into_iter().collect();
+            let cut = super::sketch_block::refuse_members(sk, &id, cmd).and_then(|()| release_trim_offsets(sk, doc, ci, cmd)).and_then(|released| {
                 let (out, gone) = remove_piece(sk, ci, q, cmd)?;
                 Ok((out.released(released), gone))
             });
@@ -2148,6 +2150,42 @@ fn refuse_infinite_corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<()> {
 /// could not release (#2874). The output's ends are recomputed from its source curves on every
 /// solve, so a corner cut there would be pulled back to the sharp corner, leaving full circles
 /// and an unsolved sketch.
+/// A corner (`point` or `a`, `b`) that would change a block member is refused: a block keeps its
+/// shape, so its curves change only once it is exploded. The corner reaches every curve at its
+/// point or at a point held coincident with it, since rounding it welds those points together.
+fn refuse_block_corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<()> {
+    if sk.blocks.is_empty() {
+        return Ok(());
+    }
+    let named: Vec<usize> = ["a", "b"].iter().filter_map(|k| str_(p, k)).filter_map(|id| sk.curve_index(id)).collect();
+    let mut at: Vec<usize> = str_(p, "point").and_then(|r| sk.resolve_point(r)).into_iter().collect();
+    at.extend(named.iter().filter_map(|c| sk.curves.get(*c)).filter_map(|c| c.kind.ends()).flat_map(|(a, b)| [a, b]));
+    // The points held coincident with those, through any chain of coincidences.
+    loop {
+        let more: Vec<usize> = sk
+            .constraints
+            .iter()
+            .filter_map(|k| match k.kind {
+                ConstraintKind::Coincident { p, q } if at.contains(&p) && !at.contains(&q) => Some(q),
+                ConstraintKind::Coincident { p, q } if at.contains(&q) && !at.contains(&p) => Some(p),
+                _ => None,
+            })
+            .collect();
+        if more.is_empty() {
+            break;
+        }
+        at.extend(more);
+    }
+    let curves: Vec<String> = sk
+        .curves
+        .iter()
+        .enumerate()
+        .filter(|(i, c)| named.contains(i) || c.kind.point_ids().iter().any(|q| at.contains(q)))
+        .map(|(_, c)| c.id.clone())
+        .collect();
+    super::sketch_block::refuse_members(sk, &curves, cmd)
+}
+
 fn refuse_offset_corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<()> {
     let output = |c: usize| sk.curves.get(c).filter(|c| sk.offset_distance(&c.id).is_some()).map(|c| c.id.clone());
     let found = match str_(p, "point").and_then(|r| sk.resolve_point(r)) {
@@ -2722,6 +2760,9 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let on_sheet = s.sheet_sketching();
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
+        for q in &corners {
+            refuse_block_corner(sk, q, cmd)?;
+        }
         let r = doc.eval(&r_expr, solidcraft_doc::expr::Kind::Length).map_err(|e| bad(cmd, format!("radius: {e}")))?;
         if !(r > 1e-9 && r < 1e8) {
             return Err(bad(cmd, "radius must be positive"));
@@ -2736,6 +2777,9 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
         }
         // A corner symmetric to another is rounded with it (#18075).
         let corners = symmetric_corners(sk, &corners, cmd);
+        for q in &corners {
+            refuse_block_corner(sk, q, cmd)?;
+        }
         let released = release_corner_offsets(sk, doc, &corners, cmd)?;
         let pname = if on_sheet { r_expr.to_string() } else { doc.new_model_param(&r_expr, "mm") };
         // The arcs by id: a fillet that takes a whole line removes it, which renumbers the curves.
@@ -3102,8 +3146,14 @@ fn chamfer(s: &mut Session, p: &Value, cmd: &str, distance: f64, second: Chamfer
     let corners = corner_list(p, cmd)?;
     let on_sheet = s.sheet_sketching();
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
+        for q in &corners {
+            refuse_block_corner(sk, q, cmd)?;
+        }
         // A corner symmetric to another is cut with it (#18075).
         let corners = symmetric_corners(sk, &corners, cmd);
+        for q in &corners {
+            refuse_block_corner(sk, q, cmd)?;
+        }
         let released = release_corner_offsets(sk, doc, &corners, cmd)?;
         // Every corner is cut alike, in one edit: a corner that can't be cut refuses them all.
         // A corner named twice (its point, then its two lines, say) would be cut again where
@@ -4149,6 +4199,7 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`param` and `param2` must be different names"));
     }
     let ((sides, param, param2), info) = edit(s, p, cmd, true, |sk, doc| {
+        super::sketch_block::refuse_members(sk, &ids, cmd)?;
         sk.refresh_offsets()?;
         let rep = solve_current(sk, doc)?;
         if !rep.keeps_orientation() {
@@ -4414,6 +4465,49 @@ fn entities(sk: &Sketch, p: &Value, cmd: &str) -> Result<(Vec<usize>, Vec<usize>
         }
     }
     Ok((cs, ps))
+}
+
+/// `cs` with every curve of each block a curve of `cs` or a point of `ps` belongs to: its
+/// members, and its axis with `axes`. Returns those blocks' ids.
+fn with_blocks(sk: &Sketch, cs: &mut Vec<usize>, ps: &[usize], axes: bool) -> Vec<String> {
+    let blocks = sk.blocks_touching(cs, ps);
+    for c in sk.block_curves(&blocks, axes) {
+        if !cs.contains(&c) {
+            cs.push(c);
+        }
+    }
+    blocks
+}
+
+/// The blocks all of whose members are among the curves `cs`, with their axes taken out of `cs`:
+/// their copies get axes of their own.
+fn whole_blocks(sk: &Sketch, cs: &mut Vec<usize>) -> Vec<String> {
+    let whole: Vec<String> =
+        sk.blocks.iter().filter(|b| b.curves.iter().all(|c| sk.curve_index(c).is_some_and(|i| cs.contains(&i)))).map(|b| b.id.clone()).collect();
+    let axes: Vec<usize> = sk.blocks.iter().filter(|b| whole.contains(&b.id)).filter_map(|b| sk.curve_index(&b.axis)).collect();
+    cs.retain(|c| !axes.contains(c));
+    whole
+}
+
+/// After a copy of the curves `originals` as `copies` (the same order), each of the blocks
+/// `blocks` whose members were all copied gets a new block of its copies, with its scale and name.
+fn copy_blocks(sk: &mut Sketch, blocks: &[String], originals: &[usize], copies: &[usize]) -> Result<()> {
+    for id in blocks {
+        let Some(b) = sk.blocks.iter().find(|b| b.id == *id).cloned() else { continue };
+        let copied: Option<Vec<String>> = b
+            .curves
+            .iter()
+            .map(|c| {
+                let i = sk.curve_index(c)?;
+                let k = originals.iter().position(|o| *o == i)?;
+                copies.get(k).and_then(|n| sk.curves.get(*n)).map(|n| n.id.clone())
+            })
+            .collect();
+        if let Some(ids) = copied {
+            sk.make_block(&ids, b.scale, None, b.name.clone())?;
+        }
+    }
+    Ok(())
 }
 
 /// `cs` with the ellipse of every axis line in it and the axis lines of every ellipse in it: an
@@ -4919,8 +5013,14 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
         // move too, each by itself.
         let own: Vec<usize> = ps.iter().copied().filter(|q| !cs.iter().any(|c| sk.curves.get(*c).is_some_and(|c| c.kind.uses(*q)))).collect();
         let point_ids = |sk: &Sketch, qs: &[usize]| qs.iter().filter_map(|q| sk.points.get(*q).map(|x| x.id.clone())).collect::<Vec<_>>();
+        // A pick of a block member moves the whole block once. A copy of a whole block is a new
+        // block of its own, with an axis of its own; a copy of part of one is plain geometry.
+        let blocks = if copy { whole_blocks(sk, &mut cs) } else { with_blocks(sk, &mut cs, &ps, true) };
         if copy {
+            let mut seen = std::collections::BTreeSet::new();
+            let originals: Vec<usize> = cs.iter().copied().filter(|c| seen.insert(*c)).collect();
             let (mut m, map) = copy_through(sk, &cs, &ps, &f, false, &|_| false, 1.0)?;
+            copy_blocks(sk, &blocks, &originals, &m)?;
             m.extend(text_curves);
             let copies: Vec<usize> = own.iter().filter_map(|q| map.iter().find(|(old, _)| old == q).map(|(_, new)| *new)).collect();
             let ids = ids_of(sk, &m);
@@ -4942,6 +5042,8 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
             return Ok((ids, point_ids(sk, &copies), drawn_ids));
         }
         with_ellipse_axes(sk, &mut cs);
+        let mut blocks = blocks;
+        blocks.extend(with_blocks(sk, &mut cs, &ps, true));
         let riding = riders(sk, &involved_points(sk, &cs, &ps));
         ps.extend(riding);
         let held = holding(sk, &involved_points(sk, &cs, &ps));
@@ -4950,7 +5052,9 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
         released = release_broken(sk, &held);
         if rotate_constraints {
             let moved = involved_points(sk, &cs, &ps);
+            let before: Vec<String> = sk.constraints.iter().map(|c| c.id.clone()).collect();
             added = rotate_axis_constraints(sk, doc, &moved, ang)?;
+            sk.hold_added(&blocks, &before);
         }
         cs.extend(text_curves);
         Ok((ids_of(sk, &cs), point_ids(sk, &own), Vec::new()))
@@ -5005,15 +5109,20 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
         for link in links {
             text_curves.extend(super::sketch_create::transform_text(sk, cmd, &link, &f, ang, k, false)?);
         }
+        let mut blocks = with_blocks(sk, &mut cs, &ps, true);
         with_ellipse_axes(sk, &mut cs);
+        blocks.extend(with_blocks(sk, &mut cs, &ps, true));
         let riding = riders(sk, &involved_points(sk, &cs, &ps));
         ps.extend(riding);
         // As Move does (#2980): what ties the picked geometry to what stays and no longer holds
         // after the turn is let go, else the solve drags the shape back and bends it (#15697).
         let held = holding(sk, &involved_points(sk, &cs, &ps));
         transform_in_place(sk, &cs, &ps, &f, k, cmd)?;
+        sk.scale_block_lengths(&blocks, k)?;
         let moved = involved_points(sk, &cs, &ps);
+        let before: Vec<String> = sk.constraints.iter().map(|c| c.id.clone()).collect();
         let _ = rotate_axis_constraints(sk, doc, &moved, ang)?;
+        sk.hold_added(&blocks, &before);
         scale_dimensions(sk, doc, &cs, &moved, k)?;
         released = release_broken(sk, &held);
         cs.extend(text_curves);
@@ -5132,7 +5241,9 @@ fn scale(s: &mut Session, p: &Value) -> Result<Value> {
     let k = num(p, "factor").filter(|k| *k > 1e-9 && *k < 1e6).ok_or_else(|| bad(cmd, "`factor` must be a positive number"))?;
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let (mut cs, ps) = entities(sk, p, cmd)?;
+        let mut blocks = with_blocks(sk, &mut cs, &ps, true);
         with_ellipse_axes(sk, &mut cs);
+        blocks.extend(with_blocks(sk, &mut cs, &ps, true));
         let b = if p.get("base").is_some() { point_or_ref(sk, p, "base", cmd)? } else { Vec2::ZERO };
         let f = move |q: Vec2| b + (q - b) * k;
         // A constraint tying the selection to a point that stays (a fillet's virtual corner on
@@ -5140,6 +5251,7 @@ fn scale(s: &mut Session, p: &Value) -> Result<Value> {
         // away from it, else the solve bends the profile back toward it (#16611).
         let held = holding(sk, &involved_points(sk, &cs, &ps));
         transform_in_place(sk, &cs, &ps, &f, k, cmd)?;
+        sk.scale_block_lengths(&blocks, k)?;
         // The dimensions go with the geometry, else the solve pulls it back to the old sizes (#14411).
         let moved = involved_points(sk, &cs, &ps);
         scale_dimensions(sk, doc, &cs, &moved, k)?;

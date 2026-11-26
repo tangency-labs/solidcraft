@@ -788,7 +788,9 @@ pub(crate) fn radii(sk: &Sketch) -> Vec<Option<f64>> {
         }
     }
     let round = |k: usize| round_of(sk, k).is_some();
-    for c in sk.constraints.iter().filter(|c| !c.driven) {
+    let held = sk.held_mask();
+    for (_, c) in sk.constraints.iter().enumerate().filter(|(i, c)| !c.driven && !held.as_ref().is_some_and(|h| h.get(*i).copied().unwrap_or(false)))
+    {
         match c.kind {
             Radius { c, value } if round(c) && radius_in_range(value) => radii.push((c, value)),
             Diameter { c, value } if round(c) && radius_in_range(value / 2.0) => radii.push((c, value / 2.0)),
@@ -830,7 +832,14 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
     let rounds: Vec<Option<Round>> = (0..m).map(|k| round_of(sk, k)).collect();
     let line = |l: usize| lines.get(l).copied().flatten();
     let round = |k: usize| rounds.get(k).copied().flatten();
-    let cons: Vec<&ConstraintKind> = sk.constraints.iter().filter(|c| !c.driven && !sk.follows_its_source(&c.kind)).map(|c| &c.kind).collect();
+    let held = sk.held_mask();
+    let cons: Vec<&ConstraintKind> = sk
+        .constraints
+        .iter()
+        .enumerate()
+        .filter(|(i, c)| !c.driven && !sk.follows_its_source(&c.kind) && !held.as_ref().is_some_and(|h| h.get(*i).copied().unwrap_or(false)))
+        .map(|(_, c)| &c.kind)
+        .collect();
     let dim = |v: f64| (v.is_finite() && (0.0..=MAX_COORD).contains(&v)).then_some(v);
 
     // Radii and lengths the dimensions set, also through equal curves.

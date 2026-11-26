@@ -1,0 +1,66 @@
+{
+  "en": {
+    "cmd.sketch.block": "Make Block",
+    "cmd.sketch.block_edit": "Edit Block",
+    "cmd.sketch.explode_block": "Explode Block",
+    "help.sketch.block": "Makes the selected sketch curves one block that keeps its shape while it moves and turns. Use it to place a profile with a few constraints on its origin and axis.",
+    "help.sketch.block_edit": "Changes a block's scale, name or curves and keeps its shape as it is now. Use it after you edit the curves of an exploded block.",
+    "help.sketch.explode_block": "Turns a block back into plain sketch geometry, with the constraints it held. Use it to change the curves inside a block."
+  },
+  "ar": {
+    "cmd.sketch.block": "إنشاء كتلة",
+    "cmd.sketch.block_edit": "تحرير الكتلة",
+    "cmd.sketch.explode_block": "تفكيك الكتلة",
+    "help.sketch.block": "يجعل منحنيات الرسم المحددة كتلة واحدة تحافظ على شكلها أثناء تحريكها وتدويرها. استخدمه لوضع مقطع بقيود قليلة على أصله ومحوره.",
+    "help.sketch.block_edit": "يغيّر مقياس الكتلة أو اسمها أو منحنياتها ويحافظ على شكلها الحالي. استخدمه بعد تعديل منحنيات كتلة مفككة.",
+    "help.sketch.explode_block": "يعيد الكتلة إلى هندسة رسم عادية مع القيود التي كانت تحتفظ بها. استخدمه لتغيير المنحنيات داخل الكتلة."
+  },
+  "de": {
+    "cmd.sketch.block": "Block erstellen",
+    "cmd.sketch.block_edit": "Block bearbeiten",
+    "cmd.sketch.explode_block": "Block auflösen",
+    "help.sketch.block": "Macht die gewählten Skizzenkurven zu einem Block, der beim Verschieben und Drehen seine Form behält. Damit platzieren Sie ein Profil mit wenigen Abhängigkeiten an Ursprung und Achse.",
+    "help.sketch.block_edit": "Ändert Maßstab, Namen oder Kurven eines Blocks und übernimmt seine jetzige Form. Verwenden Sie es, nachdem Sie die Kurven eines aufgelösten Blocks geändert haben.",
+    "help.sketch.explode_block": "Macht einen Block wieder zu normaler Skizzengeometrie, mit den Abhängigkeiten, die er gehalten hat. Verwenden Sie es, um Kurven in einem Block zu ändern."
+  },
+  "he": {
+    "cmd.sketch.block": "יצירת בלוק",
+    "cmd.sketch.block_edit": "עריכת בלוק",
+    "cmd.sketch.explode_block": "פירוק בלוק",
+    "help.sketch.block": "הופך את עקומות הסקיצה שנבחרו לבלוק אחד ששומר על צורתו בזמן הזזה וסיבוב. משתמשים בו כדי למקם פרופיל בעזרת מעט אילוצים על הראשית והציר שלו.",
+    "help.sketch.block_edit": "משנה את קנה המידה, השם או העקומות של בלוק ושומר את צורתו הנוכחית. משתמשים בו אחרי עריכת העקומות של בלוק שפורק.",
+    "help.sketch.explode_block": "מחזיר בלוק לגאומטריית סקיצה רגילה, עם האילוצים שהחזיק. משתמשים בו כדי לשנות עקומות בתוך בלוק."
+  },
+  "ja": {
+    "cmd.sketch.block": "ブロックを作成",
+    "cmd.sketch.block_edit": "ブロックを編集",
+    "cmd.sketch.explode_block": "ブロックを分解",
+    "help.sketch.block": "選択したスケッチ曲線を、移動や回転をしても形を保つ 1 つのブロックにします。原点と軸に少しの拘束を付けてプロファイルを配置するときに使います。",
+    "help.sketch.block_edit": "ブロックの尺度、名前、曲線を変更し、今の形をそのまま保ちます。分解したブロックの曲線を編集した後に使います。",
+    "help.sketch.explode_block": "ブロックを、保持していた拘束付きの通常のスケッチ ジオメトリに戻します。ブロック内の曲線を変更するときに使います。"
+  },
+  "ko": {
+    "cmd.sketch.block": "블록 만들기",
+    "cmd.sketch.block_edit": "블록 편집",
+    "cmd.sketch.explode_block": "블록 분해",
+    "help.sketch.block": "선택한 스케치 곡선을 이동하거나 회전해도 모양이 유지되는 하나의 블록으로 만듭니다. 원점과 축에 몇 개의 구속 조건만으로 프로파일을 배치할 때 사용합니다.",
+    "help.sketch.block_edit": "블록의 축척, 이름 또는 곡선을 바꾸고 현재 모양을 그대로 유지합니다. 분해한 블록의 곡선을 편집한 뒤에 사용합니다.",
+    "help.sketch.explode_block": "블록을 유지하던 구속 조건과 함께 일반 스케치 형상으로 되돌립니다. 블록 안의 곡선을 바꿀 때 사용합니다."
+  },
+  "vi": {
+    "cmd.sketch.block": "Tạo khối",
+    "cmd.sketch.block_edit": "Sửa khối",
+    "cmd.sketch.explode_block": "Rã khối",
+    "help.sketch.block": "Biến các đường cong phác thảo đã chọn thành một khối giữ nguyên hình dạng khi di chuyển và xoay. Dùng để đặt một biên dạng chỉ bằng vài ràng buộc trên gốc và trục của nó.",
+    "help.sketch.block_edit": "Thay đổi tỉ lệ, tên hoặc các đường cong của khối và giữ hình dạng hiện tại của nó. Dùng sau khi sửa các đường cong của một khối đã rã.",
+    "help.sketch.explode_block": "Đưa khối trở lại thành hình học phác thảo thông thường, cùng các ràng buộc mà khối đã giữ. Dùng để thay đổi các đường cong bên trong khối."
+  },
+  "zh": {
+    "cmd.sketch.block": "创建块",
+    "cmd.sketch.block_edit": "编辑块",
+    "cmd.sketch.explode_block": "分解块",
+    "help.sketch.block": "将所选草图曲线组成一个块，移动和旋转时保持形状不变。用于通过原点和轴上的少量约束来放置轮廓。",
+    "help.sketch.block_edit": "更改块的比例、名称或曲线，并保留其当前形状。在编辑已分解块的曲线后使用。",
+    "help.sketch.explode_block": "将块恢复为普通草图几何体，并恢复其保持的约束。用于更改块内的曲线。"
+  }
+}

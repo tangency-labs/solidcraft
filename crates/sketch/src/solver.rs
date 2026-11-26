@@ -34,7 +34,7 @@ mod lm_memo;
 
 #[path = "redundancy.rs"]
 mod redundancy;
-pub use redundancy::{CONSISTENT, constraint_residual, determined_by};
+pub use redundancy::{CONSISTENT, constraint_residual, determined_by, kind_residual};
 
 const MAX_ITERS: usize = 500;
 /// Components of at least this many unknowns solve LM's steps with the sparse factorisation
@@ -956,8 +956,39 @@ pub fn point_along(sk: &Sketch, c: usize, at: f64) -> Option<Vec2> {
 /// touch point (better conditioned than the distance form when an end point is on the curve).
 #[derive(Debug)]
 enum Block<'a> {
-    Closure { a: usize, b: usize },
-    Arc { c: usize, a: usize, b: usize },
+    Closure {
+        a: usize,
+        b: usize,
+    },
+    Arc {
+        c: usize,
+        a: usize,
+        b: usize,
+    },
+    /// A sketch block's member point `p` at its place (u, v) in the frame of the block's axis
+    /// from `o` to `x`: `p = o + u·d + v·perp(d)`, `d = x − o`.
+    Frame {
+        p: usize,
+        o: usize,
+        x: usize,
+        u: f64,
+        v: f64,
+    },
+    /// A sketch block of fixed scale keeps its axis from `o` to `x` at length `l0`.
+    FrameLength {
+        o: usize,
+        x: usize,
+        l0: f64,
+    },
+    /// A sketch block member's radius (curve `r`) at `k` times the block's length: `l0` for a
+    /// block of fixed scale, else the length of its axis from `o` to `x`.
+    FrameRadius {
+        r: usize,
+        o: usize,
+        x: usize,
+        k: f64,
+        l0: Option<f64>,
+    },
     User(usize, &'a ConstraintKind),
     TangentAt(usize, &'a ConstraintKind, usize),
 }
@@ -966,6 +997,9 @@ fn copy_block<'a>(b: &Block<'a>) -> Block<'a> {
     match b {
         Block::Closure { a, b } => Block::Closure { a: *a, b: *b },
         Block::Arc { c, a, b } => Block::Arc { c: *c, a: *a, b: *b },
+        Block::Frame { p, o, x, u, v } => Block::Frame { p: *p, o: *o, x: *x, u: *u, v: *v },
+        Block::FrameLength { o, x, l0 } => Block::FrameLength { o: *o, x: *x, l0: *l0 },
+        Block::FrameRadius { r, o, x, k, l0 } => Block::FrameRadius { r: *r, o: *o, x: *x, k: *k, l0: *l0 },
         Block::User(i, k) => Block::User(*i, k),
         Block::TangentAt(i, k, p) => Block::TangentAt(*i, k, *p),
     }
@@ -982,6 +1016,17 @@ fn block_residuals(s: &State, b: &Block, out: &mut Vec<f64>) {
         Block::Arc { c, a, b } => {
             let cc = s.p(*c);
             out.push(cc.dist(s.p(*b)) - cc.dist(s.p(*a)));
+        }
+        Block::Frame { p, o, x, u, v } => {
+            let origin = s.p(*o);
+            let d = s.p(*x) - origin;
+            let q = s.p(*p) - origin - d * *u - d.perp() * *v;
+            out.extend([q.x, q.y]);
+        }
+        Block::FrameLength { o, x, l0 } => out.push(s.p(*o).dist(s.p(*x)) - l0),
+        Block::FrameRadius { r, o, x, k, l0 } => {
+            let l = l0.unwrap_or_else(|| s.p(*o).dist(s.p(*x)));
+            out.push(s.radius_of(*r) - k * l);
         }
         Block::User(_, k) => residuals(s, k, out),
         Block::TangentAt(_, k, p) => {
@@ -1178,6 +1223,10 @@ fn block_refs(sk: &Sketch, b: &Block) -> Vec<Ref> {
     match b {
         Block::Closure { a, b } => vec![P(*a), P(*b)],
         Block::Arc { c, a, b } => vec![P(*c), P(*a), P(*b)],
+        Block::Frame { p, o, x, .. } => vec![P(*p), P(*o), P(*x)],
+        Block::FrameLength { o, x, .. } => vec![P(*o), P(*x)],
+        Block::FrameRadius { r, l0: Some(_), .. } => vec![C(*r)],
+        Block::FrameRadius { r, o, x, l0: None, .. } => vec![C(*r), P(*o), P(*x)],
         Block::User(_, k) => match **k {
             PatternPoint { p, q, center, directions, .. } => {
                 vec![P(p), P(q)].into_iter().chain(center.map(P)).chain(directions.into_iter().flatten().map(|(l, _)| L(l))).collect()
@@ -2780,8 +2829,8 @@ fn initial_x(sk: &Sketch, lay: &Layout) -> Vec<f64> {
     x
 }
 
-/// The solve's blocks in order (the curves' own relations, then the driving constraints in
-/// constraint order) with the variables each reads, and per block whether it reads a constant
+/// The solve's blocks in order (the curves' own relations, then the sketch blocks' frames, then
+/// the driving constraints not held by a sketch block, in constraint order) with the variables each reads, and per block whether it reads a constant
 /// point.
 fn build_blocks<'a>(sk: &'a Sketch, lay: &Layout, on_curve: &[(usize, usize)]) -> (Vec<(Block<'a>, Vec<usize>)>, Vec<bool>) {
     let mut raw = Vec::new();
@@ -2798,8 +2847,26 @@ fn build_blocks<'a>(sk: &'a Sketch, lay: &Layout, on_curve: &[(usize, usize)]) -
             raw.push(Block::Arc { c, a, b });
         }
     }
+    for f in sk.frame_rows() {
+        let (o, x) = (f.o, f.x);
+        for (p, [u, v]) in f.points {
+            raw.push(Block::Frame { p, o, x, u, v });
+        }
+        let l0 = (f.scale == crate::block::BlockScale::Fixed).then_some(f.length);
+        if let Some(l0) = l0 {
+            raw.push(Block::FrameLength { o, x, l0 });
+        }
+        for (r, k) in f.radii {
+            raw.push(Block::FrameRadius { r, o, x, k, l0 });
+        }
+    }
+    let held = sk.held_mask();
     for (i, c) in sk.constraints.iter().enumerate() {
-        if c.driven || matches!(c.kind, ConstraintKind::OffsetDistance { .. }) || sk.follows_its_source(&c.kind) {
+        if c.driven
+            || matches!(c.kind, ConstraintKind::OffsetDistance { .. })
+            || sk.follows_its_source(&c.kind)
+            || held.as_ref().is_some_and(|h| h.get(i).copied().unwrap_or(false))
+        {
             continue;
         }
         raw.push(match touch_point(sk, &c.kind, on_curve) {
@@ -3764,6 +3831,7 @@ fn solve_inner(
         };
     }
     sk.prune_patterns();
+    sk.prune_blocks();
     sk.refresh_pattern_shapes();
     place_pierced_points(sk);
     let mut orientation_before = Vec::new();

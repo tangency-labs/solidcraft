@@ -16,6 +16,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod block;
 pub mod cancel;
 mod construct;
 mod curves;
@@ -52,6 +53,13 @@ mod wire;
 mod wire_fillet;
 mod wire_solve;
 
+pub use block::BlockMade;
+pub use block::BlockMembers;
+pub use block::BlockScale;
+pub use block::MAX_BLOCK_CURVES;
+pub use block::MAX_BLOCK_NAME;
+pub use block::Released;
+pub use block::SketchBlock;
 pub use curves::MAX_SPLINE_POINTS;
 pub use curves::ToleranceFit;
 pub use curves::bezier_distance;
@@ -227,6 +235,7 @@ pub use solver::fillets_kept;
 pub use solver::flips_from_stored;
 pub use solver::keep_point_order;
 pub use solver::keep_sides_at_zero;
+pub use solver::kind_residual;
 pub use solver::measure_dimension;
 pub use solver::move_line_towards;
 pub use solver::move_point_towards;

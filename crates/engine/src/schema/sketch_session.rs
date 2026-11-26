@@ -581,7 +581,9 @@ pub struct DeleteParams {
     #[serde(default)]
     pub preserve_projection_link: bool,
     // Optional in the type and required in the schema (`entities_required`).
-    /// What to delete: curve, point, constraint, wire or link ids.
+    /// What to delete: curve, point, constraint, wire, link or block ids. A block's id, or its
+    /// axis line, explodes the block (its curves stay); deleting a block's last member deletes
+    /// the block and its axis.
     #[serde(default, deserialize_with = "entities", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "EntityIds")]
     pub entities: Option<EntityIds>,

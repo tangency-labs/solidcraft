@@ -93,6 +93,19 @@ pub struct ClipExternalEqual {
     pub external_first: bool,
 }
 
+/// A block whose members were all copied: a paste makes a new block of their copies.
+#[derive(Clone, Debug)]
+pub struct ClipBlock {
+    /// Its members, as indices into [`SketchClip::curves`].
+    pub curves: Vec<usize>,
+    /// Its axis, when that was copied too.
+    pub axis: Option<usize>,
+    pub scale: solidcraft_sketch::BlockScale,
+    pub name: Option<String>,
+    /// The constraints it holds, as indices into [`SketchClip::constraints`].
+    pub held: Vec<usize>,
+}
+
 /// Sketch geometry copied with `sketch.copy`, in the sketch coordinates it was copied from.
 #[derive(Clone, Debug, Default)]
 pub struct SketchClip {
@@ -111,6 +124,8 @@ pub struct SketchClip {
     /// Text sources (their outlines are made again on paste). A path, when kept, is the index of
     /// a clipboard curve.
     pub texts: Vec<(LinkSource, Option<usize>)>,
+    /// The blocks copied whole.
+    pub blocks: Vec<ClipBlock>,
     /// Lone points (not used by a copied curve), as indices into `points`.
     pub lone: Vec<usize>,
     /// Centre of the copied geometry's bounding box: what `at` places.
@@ -267,6 +282,17 @@ fn clip_of(doc: &Document, sk: &Sketch, id: u64, ids: &[String], whole: bool, cm
             clip.lone.push(n);
         }
     }
+    // A block copied whole is copied as a block; one copied in part comes as plain geometry.
+    let mut whole_blocks = Vec::new();
+    for b in &sk.blocks {
+        let members: Option<Vec<usize>> = b.curves.iter().map(|c| sk.curve_index(c).and_then(|i| cmap.get(&i).copied())).collect();
+        if let Some(curves) = members.filter(|m| !m.is_empty()) {
+            let axis = sk.curve_index(&b.axis).and_then(|i| cmap.get(&i).copied());
+            whole_blocks.push((b, ClipBlock { curves, axis, scale: b.scale, name: b.name.clone(), held: Vec::new() }));
+        }
+    }
+    // Where each copied constraint went in the clipboard, by its id.
+    let mut copied: BTreeMap<&str, usize> = BTreeMap::new();
     for c in &sk.constraints {
         // Pattern or offset relations stay with the original, and so do the fixes of a part copy.
         if matches!(c.kind, ConstraintKind::PatternPoint { .. } | ConstraintKind::PatternRadius { .. } | ConstraintKind::OffsetDistance { .. })
@@ -274,7 +300,18 @@ fn clip_of(doc: &Document, sk: &Sketch, id: u64, ids: &[String], whole: bool, cm
         {
             continue;
         }
-        let mut kind = c.kind.clone();
+        // A held constraint comes as it would drive once released; one of a block copied in part
+        // comes only where it holds, as Explode Block keeps it.
+        let mut kind = match sk.held_kind_now(&c.id) {
+            Some(kind) => {
+                let in_whole = whole_blocks.iter().any(|(b, _)| b.held.contains(&c.id));
+                if !in_whole && solidcraft_sketch::kind_residual(sk, &kind) > solidcraft_sketch::CONSISTENT {
+                    continue;
+                }
+                kind
+            }
+            None => c.kind.clone(),
+        };
         if !kind.remap(&|q| pmap.get(&q).copied(), &|k| cmap.get(&k).copied()) {
             if !whole
                 && let ConstraintKind::Equal { a, b } = c.kind
@@ -288,7 +325,12 @@ fn clip_of(doc: &Document, sk: &Sketch, id: u64, ids: &[String], whole: bool, cm
             Some(x) => (x.expr.clone(), x.unit.clone()),
             None => (format!("{}", kind.value().unwrap_or_default()), if kind.is_angle() { "rad".into() } else { "mm".into() }),
         });
+        copied.insert(c.id.as_str(), clip.constraints.len());
         clip.constraints.push(ClipConstraint { kind, param, driven: c.driven, text: c.text });
+    }
+    for (b, mut block) in whole_blocks {
+        block.held = b.held.iter().filter_map(|h| copied.get(h.as_str()).copied()).collect();
+        clip.blocks.push(block);
     }
     for t in &texts {
         let Some(mut src) = sk.link(t).map(|l| l.source.clone()) else { continue };
@@ -485,6 +527,7 @@ fn replace(s: &mut Session, p: &Value) -> Result<Value> {
         fresh.curves.clear();
         fresh.constraints.clear();
         fresh.patterns.clear();
+        fresh.blocks.clear();
         fresh.links.clear();
         fresh.offsets.clear();
         fresh.freeform_offsets.clear();
@@ -557,9 +600,12 @@ fn paste_clip(sk: &mut Sketch, doc: &mut Document, clip: &SketchClip, t: Vec2, s
         made.push(i);
     }
     let mut cons = Vec::new();
+    // Each clipboard constraint's id in the sketch, once pasted.
+    let mut pasted: Vec<Option<String>> = Vec::with_capacity(clip.constraints.len());
     for c in &clip.constraints {
         let mut kind = c.kind.clone();
         if !kind.remap(&|q| pts.get(q).copied(), &|k| made.get(k).copied()) {
+            pasted.push(None);
             continue;
         }
         // Each pasted dimension gets its own parameter, with the same expression.
@@ -569,6 +615,7 @@ fn paste_clip(sk: &mut Sketch, doc: &mut Document, clip: &SketchClip, t: Vec2, s
             nc.driven = c.driven;
             nc.text = c.text;
         }
+        pasted.push(Some(id.clone()));
         cons.push(id);
     }
     if same_sketch {
@@ -578,6 +625,16 @@ fn paste_clip(sk: &mut Sketch, doc: &mut Document, clip: &SketchClip, t: Vec2, s
             let (a, b) = if eq.external_first { (ext_idx, copied_idx) } else { (copied_idx, ext_idx) };
             cons.push(sk.add_constraint(ConstraintKind::Equal { a, b }, None)?);
         }
+    }
+    for b in &clip.blocks {
+        let id_of = |k: &usize| made.get(*k).and_then(|i| sk.curves.get(*i)).map(|c| c.id.clone());
+        let members: Vec<String> = b.curves.iter().filter_map(id_of).collect();
+        let block = match b.axis.as_ref().and_then(id_of) {
+            Some(axis) => sk.make_block_on(&members, &axis, b.scale, b.name.clone())?,
+            None => sk.make_block(&members, b.scale, None, b.name.clone())?,
+        };
+        let held: Vec<String> = b.held.iter().filter_map(|k| pasted.get(*k).cloned().flatten()).collect();
+        sk.set_block_held(&block.block, &held);
     }
     let mut ids = BTreeMap::new();
     for (c, i) in clip.curves.iter().zip(&made) {
