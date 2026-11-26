@@ -46,10 +46,11 @@
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 use solidcore_record::brep::Curve as RecordCurve;
+use solidcraft_kernel::affine;
 use solidcraft_kernel::curves as curve;
 use solidcraft_kernel::services::measure::FaceHit;
 use solidcraft_kernel::services::sweep::{self, Curve};
-use solidcraft_kernel::services::{ExactBody as Body, Order, affine, make_sphere};
+use solidcraft_kernel::services::{ExactBody as Body, Order, make_sphere};
 
 /// Why a spot is refused.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -96,6 +97,9 @@ pub enum SpotRefusal {
     /// An ops call failed.
     #[error(transparent)]
     Ops(#[from] solidcraft_kernel::services::Error),
+    /// A placement call refused its numbers, in the kernel's words.
+    #[error(transparent)]
+    Placement(#[from] affine::AffineRefused),
     /// A curve call refused, in the kernel's words.
     #[error(transparent)]
     Curve(#[from] curve::CurveRefused),
