@@ -181,9 +181,10 @@ impl Sketch {
                     continue;
                 }
                 // Two ends fixed by coordinates of their own cannot become one point fixed
-                // once: dropping either would lose the expressions that place it.
-                if let (WireConstraintKind::Fix { exprs: first, .. }, WireConstraintKind::Fix { exprs: second, .. }) = (&earlier.kind, &c.kind)
-                    && first != second
+                // once: dropping either would lose the place or the expressions it holds.
+                if let (WireConstraintKind::Fix { at: here, exprs: first, .. }, WireConstraintKind::Fix { at: there, exprs: second, .. }) =
+                    (&earlier.kind, &c.kind)
+                    && (first != second || here.dist(*there) > ACCEPT)
                 {
                     return Err(bad(format!(
                         "both lines' ends at the corner are fixed, each by its own coordinates (`{}` and `{}`): remove one of them first",
@@ -372,6 +373,11 @@ mod tests {
         let by_expression =
             sk.add_wire_constraint(WireConstraintKind::Fix { p: end(&ids[1], 0), at: v(100.0, 0.0, 0.0), exprs: Some(Box::new(exprs)) }).unwrap();
         refused(&mut sk, &ids[0], &ids[1], 20.0, &format!("each by its own coordinates (`{by_number}` and `{by_expression}`)"));
+        // Or both by numbers, a millimetre apart.
+        let (mut sk, ids) = path(&[v(0.0, 0.0, 0.0), v(100.0, 0.0, 0.0), v(100.0, 0.0, 80.0)]);
+        let here = sk.add_wire_constraint(WireConstraintKind::Fix { p: end(&ids[0], 1), at: v(100.0, 0.0, 0.0), exprs: None }).unwrap();
+        let there = sk.add_wire_constraint(WireConstraintKind::Fix { p: end(&ids[1], 0), at: v(100.0, 0.0, 1.0), exprs: None }).unwrap();
+        refused(&mut sk, &ids[0], &ids[1], 20.0, &format!("each by its own coordinates (`{here}` and `{there}`)"));
         // In one straight line, and back along each other.
         let (mut sk, ids) = path(&[v(0.0, 0.0, 0.0), v(10.0, 0.0, 5.0), v(20.0, 0.0, 10.0)]);
         refused(&mut sk, &ids[0], &ids[1], 2.0, "one straight line");
