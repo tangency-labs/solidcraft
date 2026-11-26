@@ -13,7 +13,7 @@ use crate::schema::{check_arguments, check_prompt_arguments};
 pub const PROTOCOL_VERSION: &str = "2025-06-18";
 pub const SUPPORTED_VERSIONS: &[&str] = &[PROTOCOL_VERSION, "2025-03-26", "2024-11-05"];
 
-const PARSE_ERROR: i64 = -32700;
+pub(crate) const PARSE_ERROR: i64 = -32700;
 const INVALID_REQUEST: i64 = -32600;
 const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
@@ -258,7 +258,7 @@ pub struct Server<T: Tools> {
     on_cancel: Option<Box<dyn FnMut(&Value, Option<&str>) + Send>>,
 }
 
-fn error(id: Value, code: i64, message: impl Into<String>) -> Value {
+pub(crate) fn error(id: Value, code: i64, message: impl Into<String>) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message.into()}})
 }
 
@@ -424,16 +424,23 @@ impl<T: Tools> Server<T> {
             return None;
         }
         let reply = match serde_json::from_str::<Value>(line) {
-            Ok(Value::Array(batch)) if batch.is_empty() => Some(error(Value::Null, INVALID_REQUEST, "empty batch")),
-            Ok(Value::Array(batch)) if batch.len() > MAX_BATCH => Some(error(Value::Null, INVALID_REQUEST, "batch too large")),
-            Ok(Value::Array(batch)) => {
-                let replies: Vec<Value> = batch.into_iter().filter_map(|m| self.handle(m)).collect();
-                (!replies.is_empty()).then_some(Value::Array(replies))
-            }
-            Ok(msg) => self.handle(msg),
+            Ok(value) => self.handle_value(value),
             Err(e) => Some(error(Value::Null, PARSE_ERROR, format!("parse error: {e}"))),
         };
         reply.map(|r| r.to_string())
+    }
+
+    /// One parsed JSON-RPC message or batch in, at most one JSON-RPC reply out.
+    pub(crate) fn handle_value(&mut self, value: Value) -> Option<Value> {
+        match value {
+            Value::Array(batch) if batch.is_empty() => Some(error(Value::Null, INVALID_REQUEST, "empty batch")),
+            Value::Array(batch) if batch.len() > MAX_BATCH => Some(error(Value::Null, INVALID_REQUEST, "batch too large")),
+            Value::Array(batch) => {
+                let replies: Vec<Value> = batch.into_iter().filter_map(|m| self.handle(m)).collect();
+                (!replies.is_empty()).then_some(Value::Array(replies))
+            }
+            msg => self.handle(msg),
+        }
     }
 
     pub fn handle(&mut self, msg: Value) -> Option<Value> {

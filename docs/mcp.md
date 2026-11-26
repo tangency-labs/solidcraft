@@ -31,7 +31,63 @@ solidcraft-cli mcp          # finds the running app; headless when none runs (--
 # A fixed port, or a second app: name it.
 solidcraft --control 7878 &
 solidcraft-cli mcp --connect 127.0.0.1:7878
+
+# Local Streamable HTTP server: multiple local clients share one warm headless session
+# (for example a large .sc assembly kept hot in RAM, optionally with --render-gpu).
+solidcraft-cli mcp --http 127.0.0.1:8765 --in assembly.sc --render-gpu
 ```
+
+### Streamable HTTP (`--http`)
+
+`solidcraft-cli mcp --http <addr>` serves the standard MCP Streamable HTTP transport on `/mcp` so
+multiple local MCP clients (Claude Code sessions, Codex, Python scripts) can share **one**
+persistent warm SolidCraft session in RAM without reloading a large `.sc` assembly per client:
+
+```sh
+# Fixed loopback port (prints the ready URL and generated bearer token on stderr).
+solidcraft-cli mcp --http 127.0.0.1:8765 --in assembly.sc --render-gpu
+
+# Ephemeral loopback port + owner-only connection metadata file (0600 on Unix):
+# writes {"url": "http://127.0.0.1:<port>/mcp", "token": "...", "pid": ...}.
+solidcraft-cli mcp --http 127.0.0.1:0 --http-info-file /tmp/solidcraft-mcp.json --in assembly.sc
+
+# Explicit bearer token from a file or environment variable (preferred over command-line args).
+solidcraft-cli mcp --http 127.0.0.1:8765 --http-token-file ~/.config/solidcraft/mcp.token --in assembly.sc
+SOLIDCRAFT_MCP_TOKEN="..." solidcraft-cli mcp --http 127.0.0.1:8765 --in assembly.sc
+```
+
+Security model:
+
+- **Loopback only:** `--http` accepts only loopback bind addresses (`127.0.0.1:PORT`,
+  `127.0.0.1:0`, `[::1]:PORT`, or `localhost:PORT`). Non-loopback addresses (`0.0.0.0`, `[::]`,
+  LAN IPs) are refused at startup.
+- **Mandatory Bearer authentication:** every HTTP request must carry `Authorization: Bearer <token>`
+  (verified in constant time; missing or wrong tokens receive `401 Unauthorized`). By default a
+  random 32-byte hex token is generated on startup from OS entropy; pass `--http-token-file` or
+  `SOLIDCRAFT_MCP_TOKEN` to supply one explicitly, and `--http-info-file` to write `url`, `token`
+  and `pid` with owner-only permissions (`0600` on Unix) instead of printing the generated token to
+  stderr.
+- **DNS rebinding protection:** requests with a non-loopback `Host` or `Origin` header are refused
+  with `403 Forbidden`.
+- **File scope:** `--allow-path`, `--require-allow-path` and `--allow-any-path` apply identically
+  to stdio mode.
+
+Endpoints and multi-client serialization:
+
+- `POST /mcp` accepts JSON-RPC requests and notifications (up to 16 MiB). `initialize` creates a
+  new per-client `Mcp-Session-Id` returned in the response header; subsequent requests must send
+  that `Mcp-Session-Id`. Requests return `200 OK` (`application/json`, or `text/event-stream` when
+  `Accept` requests SSE only); notifications return `202 Accepted`.
+- `DELETE /mcp` with `Mcp-Session-Id` closes that client's MCP session (`204 No Content`) without
+  shutting down the shared SolidCraft server or disrupting other connected clients.
+- `GET /mcp` returns `405 Method Not Allowed` (`Allow: POST, DELETE`) because this server does not
+  push unsolicited server-initiated SSE streams.
+- **Serialized shared session & atomic `batch` guidance:** all connected clients share the same
+  in-memory design session, and concurrent HTTP requests are dispatched serially in strict FIFO
+  order so the session is never corrupted. When multiple clients edit the same design, wrap
+  multi-step edits (such as sketch creation, geometry, `sketch.finish` and `solid.extrude`) in a
+  single atomic `batch` (default `rollback: true`) so another client's request cannot interleave
+  mid-sequence, and check `document.revision` when coordinating reads and writes across clients.
 
 `execute` `view.pick` with `rays: [{origin, dir}…]` answers in every session, headless too:
 for each world ray, the body, face index, world `point`, outward `normal` and `depth` where it

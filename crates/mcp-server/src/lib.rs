@@ -10,6 +10,8 @@
 #![forbid(unsafe_code)]
 
 mod content;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod http;
 mod schema;
 mod server;
 
@@ -17,6 +19,10 @@ pub use content::Contents;
 pub use content::base64;
 pub use content::image_result;
 pub use content::text_result;
+#[cfg(not(target_arch = "wasm32"))]
+pub use http::HttpConfig;
+#[cfg(not(target_arch = "wasm32"))]
+pub use http::HttpStop;
 pub use schema::Effect;
 pub use schema::check_arguments;
 pub use schema::object;

@@ -810,4 +810,20 @@ impl Server {
     pub fn handle(&mut self, msg: Value) -> Option<Value> {
         self.inner.handle(msg)
     }
+    /// Bind a loopback-only TCP listener on `addr` and serve MCP Streamable HTTP (`POST /mcp`,
+    /// `GET /mcp`, `DELETE /mcp`) until `config.shutdown` is triggered.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn serve_http(&mut self, addr: std::net::SocketAddr, config: solidcraft_mcp_server::HttpConfig) -> std::io::Result<()> {
+        let config =
+            if config.session_id_generator.is_none() { config.with_session_id_generator(solidcraft_control::server::new_token) } else { config };
+        self.inner.serve_http(addr, config)
+    }
+    /// Serve MCP Streamable HTTP on an already-bound loopback `listener` until `config.shutdown`
+    /// is triggered. Multiple local MCP clients share this warm session in strict FIFO order.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn serve_http_listener(&mut self, listener: std::net::TcpListener, config: solidcraft_mcp_server::HttpConfig) -> std::io::Result<()> {
+        let config =
+            if config.session_id_generator.is_none() { config.with_session_id_generator(solidcraft_control::server::new_token) } else { config };
+        self.inner.serve_http_listener(listener, config)
+    }
 }

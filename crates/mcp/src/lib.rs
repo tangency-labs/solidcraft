@@ -11,6 +11,8 @@
 #![forbid(unsafe_code)]
 
 mod backend;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod http;
 mod mesh_warnings;
 mod options;
 mod plugin_tools;
