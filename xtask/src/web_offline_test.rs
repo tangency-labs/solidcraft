@@ -82,7 +82,7 @@ const SIGN_IN: &str = "/sign-in";
 const CONNECTIONS_PER_SERVER: usize = 6;
 
 /// Exercise the real browser build's command bridge, using the same Chrome harness as the offline test.
-pub fn run_api(site: &str) -> Result<(), String> {
+pub fn run_api(site: &str, smoke: bool) -> Result<(), String> {
     let site = std::fs::canonicalize(site).map_err(|e| format!("{site}: {e}; build apps/solidcraft-web with trunk first"))?;
     if !site.join("index.html").is_file() {
         return Err(format!("{}: index.html missing; build apps/solidcraft-web with trunk first", site.display()));
@@ -95,7 +95,10 @@ pub fn run_api(site: &str) -> Result<(), String> {
     let mut cdp = browser.connect()?;
     let downloads = work.0.join("downloads");
     std::fs::create_dir_all(&downloads).map_err(|e| e.to_string())?;
-    cdp.call("Browser.setDownloadBehavior", json!({"behavior": "allow", "downloadPath": downloads}))?;
+    cdp.call("Browser.setDownloadBehavior", json!({"behavior": "allow", "downloadPath": &downloads}))?;
+    if smoke {
+        return smoke_test(&mut cdp, server.port, &downloads);
+    }
     cdp.call("Emulation.setDeviceMetricsOverride", json!({"width": 1280, "height": 900, "deviceScaleFactor": 1, "mobile": false}))?;
     // The page has the keyboard, as a tab the user is looking at does (for KEYS_TEST).
     cdp.call("Emulation.setFocusEmulationEnabled", json!({"enabled": true}))?;
@@ -121,12 +124,224 @@ pub fn run_api(site: &str) -> Result<(), String> {
     println!("web-api-test: {result}");
     let keys = cdp.eval(KEYS_TEST)?;
     println!("web-api-test: {keys}");
+    println!("web-api-test: {}", drawing_test(&browser, server.port)?);
     Ok(())
 }
 
+/// One launch, a synthetic saved design opened through the real UI thread, and three
+/// token-correlated frames after camera changes. The full API and offline tests remain separate.
+fn smoke_test(cdp: &mut Cdp, port: u16, downloads: &Path) -> Result<(), String> {
+    let started = Instant::now();
+    cdp.call("Page.enable", json!({}))?;
+    cdp.call("Page.addScriptToEvaluateOnNewDocument", json!({"source": SMOKE_ERRORS}))?;
+    cdp.call("Emulation.setDeviceMetricsOverride", json!({"width": 1280, "height": 720, "deviceScaleFactor": 1, "mobile": false}))?;
+    cdp.call("Page.navigate", json!({"url": format!("http://127.0.0.1:{port}{PREFIX}")}))?;
+    loop {
+        let state = match cdp.eval("({error: window.smokeError, ready: !!window.solidcraft && !document.getElementById('solidcraft_loading')})") {
+            Ok(state) => state,
+            // Navigation can replace about:blank's execution context during the first poll.
+            Err(e) if e.contains("Execution context was destroyed") || e.contains("Cannot find context") => Value::Null,
+            Err(e) => return Err(e),
+        };
+        if let Some(error) = state["error"].as_str() {
+            return Err(format!("web-api-test smoke: startup: {error}"));
+        }
+        if state["ready"] == true {
+            break;
+        }
+        if started.elapsed() > LAUNCH_TIMEOUT {
+            return Err(format!("web-api-test smoke: startup timed out after {LAUNCH_TIMEOUT:?}"));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    println!("web-api-test smoke: {}", cdp.eval(&format!("window.smokeRun(() => {SMOKE_TEST})"))?);
+    let mut previous_image = Vec::new();
+    for (index, yaw) in [0.3, 0.8, 1.3].into_iter().enumerate() {
+        let name = format!("smoke-{index}.png");
+        // ui.screenshot's token is queued after this camera command. The app answers only
+        // with that request's frame, after at least three paints and its GPU readback.
+        let shot = cdp.eval(&format!(
+            "window.smokeRun(async () => {{
+                await window.solidcraft.request('ui.camera', {{yaw: {yaw}, fit: true}});
+                const shot = await window.solidcraft.request('ui.screenshot', {{path: '/downloads/{name}'}});
+                const ui = await window.solidcraft.request('ui.inspect');
+                if (!Number.isFinite(ui.camera.yaw) || Math.abs(ui.camera.yaw - {yaw}) > 1e-6) throw new Error('camera did not reach yaw {yaw}');
+                return shot;
+            }})"
+        ))?;
+        if shot["width"] != 1280 || shot["height"] != 720 {
+            return Err(format!("web-api-test smoke: unexpected captured frame: {shot}"));
+        }
+        let frame_started = Instant::now();
+        let image = loop {
+            if let Some(error) = cdp.eval("window.smokeError")?.as_str() {
+                return Err(format!("web-api-test smoke: frame: {error}"));
+            }
+            if let Ok(bytes) = std::fs::read(downloads.join(&name))
+                && bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+                && bytes.ends_with(b"\0\0\0\0IEND\xaeB`\x82")
+            {
+                break bytes;
+            }
+            if frame_started.elapsed() > Duration::from_secs(30) {
+                return Err(format!("web-api-test smoke: captured frame {name} was not downloaded"));
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        };
+        if image == previous_image {
+            return Err(format!("web-api-test smoke: the captured image did not change at yaw {yaw}"));
+        }
+        previous_image = image;
+    }
+    println!("web-api-test smoke: three token-correlated model frames; passed in {:.1}s", started.elapsed().as_secs_f64());
+    Ok(())
+}
+
+// Installed before navigation, so a panic in the first app frame cannot escape the test.
+const SMOKE_ERRORS: &str = r#"
+window.smokeError = null;
+const reportError = console.error;
+console.error = (...args) => {
+    window.smokeError ||= args.map(String).join(' ');
+    reportError.apply(console, args);
+};
+addEventListener('error', e => { window.smokeError ||= String(e.error?.stack || e.message); });
+addEventListener('unhandledrejection', e => { window.smokeError ||= String(e.reason?.stack || e.reason); });
+window.smokeRun = async run => {
+    let timer;
+    const failed = new Promise((_, reject) => {
+        const deadline = performance.now() + 60_000;
+        timer = setInterval(() => {
+            if (window.smokeError) reject(new Error(window.smokeError));
+            else if (performance.now() > deadline) reject(new Error('browser smoke commands timed out'));
+        }, 100);
+    });
+    try { return await Promise.race([run(), failed]); }
+    finally { clearInterval(timer); }
+};
+"#;
+
+const SMOKE_TEST: &str = r#"(async () => {
+    const app = window.solidcraft;
+    const check = (ok, message) => { if (!ok) throw new Error(message); };
+    await app.request('ui.home', {open: false});
+    await app.execute('solid.box', {length: 30, width: 20, height: 10, body_name: 'Browser smoke box'});
+    const kept = await app.request('document.export');
+    await app.execute('file.new');
+    check((await app.inspect()).bodies.length === 0, 'new design is empty');
+    check((await app.request('document.import', {text: kept.text})).errors === 0, 'saved design opens without feature errors');
+    const opened = await app.inspect({measure: true});
+    check(opened.bodies.length === 1, 'opened design has one body');
+    check(Math.abs(opened.bodies[0].volume_mm3 - 6000) < 0.001, 'opened box volume is 6000 mm³');
+    const ui = await app.request('ui.inspect');
+    check(ui.home === false && ui.viewport[2] > 600 && ui.viewport[3] > 200, 'model viewport is visible');
+    return 'opened a saved 30 × 20 × 10 mm box; volume 6000 mm³';
+})()"#;
+
+/// The drawing milestone's plate (#4894 W23, acceptance case 84) made and checked by commands
+/// alone in a tab of its own, so the steps before leave nothing in it. Kept as a host keeps a
+/// design (`document.export`), the app started again in that tab and the design put back
+/// (`document.import`), its drawing reads the same, its SVG is the same byte for byte, and its PNG
+/// (written to a file, #19897) has the same size in bytes and pixels.
+fn drawing_test(browser: &Chrome, port: u16) -> Result<String, String> {
+    let mut tab = browser.new_tab()?;
+    tab.call("Page.bringToFront", json!({}))?;
+    tab.call("Emulation.setFocusEmulationEnabled", json!({"enabled": true}))?;
+    let made = start_and_run(&mut tab, port, "made", &Value::Null)?;
+    let kept = json!({"text": made["text"], "drawing": made["drawing"], "dimensions": made["dimensions"]});
+    let opened = start_and_run(&mut tab, port, "opened", &kept)?;
+    if let Some(key) = ["read", "svg", "png"].into_iter().find(|&key| opened[key] != made[key]) {
+        return Err(format!("web-api-test: the plate's drawing changed once the app started again: its {key}"));
+    }
+    Ok("the M2 plate's drawing made by commands, and the same SVG, PNG size and dimensions after the app started again".into())
+}
+
+/// The app started afresh at `?drawing={step}`, then [`DRAWING_TEST`] run in it with `kept`.
+fn start_and_run(tab: &mut Cdp, port: u16, step: &str, kept: &Value) -> Result<Value, String> {
+    tab.call("Page.navigate", json!({"url": format!("http://127.0.0.1:{port}{PREFIX}?drawing={step}")}))?;
+    let ready = format!("location.search === '?drawing={step}' && !!window.solidcraft && !document.getElementById('solidcraft_loading')");
+    wait_for(tab, &ready, &format!("the app starts ({step})"), |v| v == true)?;
+    tab.eval(&format!("{DRAWING_TEST}({PLATE}, {kept})"))
+}
+
+/// The script that models the plate and puts a top view at 1:2 on its A3 sheet.
+const PLATE: &str = include_str!("../../examples/acceptance/drawing_m2.json");
+
+/// With `kept` null: the plate made from [`PLATE`], the views projected below and right of its top
+/// view, and its length, width and first bore dimensioned. Else the design `kept.text` put back and
+/// its drawing `kept.drawing` opened. Then, as the engine's checkpoint test checks it
+/// (`drawing_export_tests.rs`): each dimension reads as the sheet shows it, and Sheet 1 exports as
+/// A3, 420 x 297 mm in SVG and 2481 x 1754 pixels in PNG at 150 dpi, with every view drawn and
+/// nothing out of date. Last the host keeps the design and says it saved it, so the next start
+/// has nothing to recover. Wasm aborts reject at once instead of leaving the reply unsettled.
+const DRAWING_TEST: &str = r#"(async (plate, kept) => {
+    const app = window.solidcraft;
+    const check = (condition, message) => { if (!condition) throw new Error(message); };
+    const crashed = new Promise((_, reject) => {
+        window.addEventListener('error', event => reject(event.error || new Error(event.message)), {once: true});
+    });
+    const run = (command, params) => Promise.race([app.execute(command, params), crashed]);
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    // Work left unsaved in another tab is kept for later, not recovered here.
+    if ((await app.request('ui.recover')).dialog) await app.request('ui.recover', {action: 'later'});
+    await app.request('ui.home', {open: false});
+    let drawing, dimensions;
+    if (kept === null) {
+        const made = await Promise.race([app.request('engine.script', plate), crashed]);
+        // The drawing the script left open, by its own list rather than by the script's order.
+        const open = (await run('drawing.list')).drawings.filter(d => d.open);
+        check(open.length === 1, 'the plate script leaves one drawing open, not ' + open.length);
+        drawing = open[0].id;
+        const top = made[made.length - 1];
+        const below = await run('drawing.view.projected', {parent: top.view, side: 'below'});
+        const right = await run('drawing.view.projected', {parent: top.view, side: 'right'});
+        // At 1:2, in sheet mm: length by width, length by thickness, thickness by width.
+        const views = [[top, [50, 40]], [below, [50, 10]], [right, [10, 40]]];
+        for (const [view, size] of views) {
+            const box = view.boundary_mm;
+            check(Math.abs(box.max[0] - box.min[0] - size[0]) < 1e-6 && Math.abs(box.max[1] - box.min[1] - size[1]) < 1e-6,
+                'view ' + view.view + ' is ' + JSON.stringify(box) + ', not ' + size);
+        }
+        dimensions = [];
+        for (const [kind, value] of [[{length: {edge: [50, 0, 20]}}, 100], [{length: {edge: [0, 40, 20]}}, 80], [{radial: {edge: [25, 20, 20]}}, 10]]) {
+            const added = await run('drawing.dimension.add', {view: top.view, kind});
+            check(Math.abs(added.value - value) < 1e-9, 'a dimension reads ' + added.value + ', not ' + value);
+            dimensions.push(added.dimension);
+        }
+    } else {
+        check((await app.request('document.import', {text: kept.text})).errors === 0, 'the kept design evaluates');
+        const listed = (await run('drawing.list')).drawings;
+        check(listed.some(d => d.id === kept.drawing && !d.open), 'the drawing comes back with its design, closed');
+        await run('drawing.open', {drawing: kept.drawing});
+        ({drawing, dimensions} = kept);
+    }
+    const read = [];
+    for (const dimension of dimensions) read.push((await run('drawing.dimension.inspect', {dimension})).text);
+    check(same(read, ['100.00', '80.00', 'Ø10.00']), 'the dimensions read ' + JSON.stringify(read));
+    // The text each dimension's group sets in the scene every export writes. Groups name their
+    // objects by number, past what a JavaScript number holds exactly, so they are matched as a set.
+    const groups = (await run('drawing.scene', {sheet: 'Sheet 1'})).scene.groups.filter(g => g.kind === 'dimension');
+    const shown = groups.map(g => g.items.filter(item => item.kind === 'text').map(item => item.text).join(''));
+    check(same([...shown].sort(), [...read].sort()), 'the sheet shows ' + JSON.stringify(shown));
+    const svg = await run('drawing.export', {sheet: 'Sheet 1'});
+    // A PNG is written to a file (#19897), here in the browser's file storage.
+    const pngPath = '/upload/plate-sheet-1.png';
+    const png = await run('drawing.export', {sheet: 'Sheet 1', format: 'png', dpi: 150, path: pngPath});
+    check(svg.svg.includes('width="420mm" height="297mm"'), 'the SVG is A3');
+    check(png.path === pngPath && png.bytes > 0, 'the PNG is written to ' + pngPath + ', not ' + JSON.stringify(png.path));
+    check(same(png.report.pixels, [2481, 1754]), 'the PNG is ' + JSON.stringify(png.report.pixels) + ' pixels');
+    // An export leaves out_of_date out of its reply when nothing is out of date.
+    check([svg, png].every(e => (e.out_of_date || []).length === 0 && e.views.length === 3 && e.views.every(v => v.status === 'drawn')),
+        'every view is drawn and nothing is out of date');
+    const exported = await app.request('document.export');
+    await app.request('document.saved', {revision: exported.revision});
+    return {drawing, dimensions, text: exported.text, read, svg: svg.svg, png: {bytes: png.bytes, pixels: png.report.pixels}};
+})"#;
+
 /// The app's mouse buttons follow the browser's: a chord leaves none held (a second button
 /// pressed while one is held fires `pointermove`, not `pointerdown`), and so do a drag let go
-/// outside the window, a release the page never heard of and the window losing focus.
+/// outside the window, a release the page never heard of and the window losing focus. The focus
+/// moving inside the page lets go of none (#16209).
 fn mouse_test(cdp: &mut Cdp) -> Result<String, String> {
     // The model viewport, not the start page, under the pointer.
     let ui = cdp.eval("window.solidcraft.request('ui.home', {open: false}).then(() => window.solidcraft.request('ui.inspect'))")?;
@@ -175,6 +390,26 @@ fn mouse_test(cdp: &mut Cdp) -> Result<String, String> {
     mouse(cdp, "mouseMoved", (x + 10.0, y), "none", 0)?;
     expect(cdp, 0, "a move with no buttons after a lost release")?;
     mouse(cdp, "mouseReleased", (x + 10.0, y), "right", 0)?;
+    // The focus moves inside the page with a button held, as when a value box takes the keyboard
+    // while its manipulator is dragged (#16209): eframe gives it to its hidden text input, the
+    // canvas's next sibling, and back to the canvas, and the window hears each blur too.
+    let focus = |cdp: &mut Cdp, to: &str| -> Result<(), String> {
+        let js = format!(
+            "(() => {{ const c = document.getElementById('solidcraft_canvas'), t = c && c.nextElementSibling; if (!t || t.tagName !== 'INPUT') return 'no hidden text input after the canvas'; const e = {to}; e.focus(); return document.activeElement === e ? 'ok' : 'the focus did not move to ' + e.tagName; }})()"
+        );
+        match cdp.eval(&js)? {
+            Value::String(s) if s == "ok" => Ok(()),
+            v => Err(format!("web-api-test: {v}")),
+        }
+    };
+    focus(cdp, "c")?;
+    mouse(cdp, "mousePressed", c, "middle", 4)?;
+    focus(cdp, "t")?;
+    expect(cdp, 4, "the focus moved to the hidden text input")?;
+    focus(cdp, "c")?;
+    expect(cdp, 4, "the focus came back to the canvas")?;
+    mouse(cdp, "mouseReleased", c, "middle", 0)?;
+    expect(cdp, 0, "let go after the focus moved inside the page")?;
     // The window loses focus with a button held.
     mouse(cdp, "mousePressed", c, "middle", 4)?;
     cdp.eval("window.dispatchEvent(new Event('blur'))")?;
@@ -182,7 +417,7 @@ fn mouse_test(cdp: &mut Cdp) -> Result<String, String> {
     mouse(cdp, "mouseReleased", c, "middle", 0)?;
     cdp.call("Input.dispatchKeyEvent", json!({"type": "keyDown", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}))?;
     cdp.call("Input.dispatchKeyEvent", json!({"type": "keyUp", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}))?;
-    Ok("chords, a drag let go outside, a lost release and blur leave none held".into())
+    Ok("chords, a drag let go outside, a lost release and blur leave none held; focus moving inside the page lets go of none".into())
 }
 
 /// The browser's own tab switching keys reach it while the app has the keyboard (#5227): their
@@ -206,6 +441,12 @@ const KEYS_TEST: &str = r#"(async () => {
 const API_TEST: &str = r#"(async () => {
     const app = window.solidcraft;
     const check = (condition, message) => { if (!condition) throw new Error(message); };
+    const waitForUi = async (ready, message) => {
+        const deadline = performance.now() + 120_000;
+        while (!ready(await app.request('ui.inspect'))) {
+            check(performance.now() < deadline, message);
+        }
+    };
     const rejects = async (call, message) => {
         try { await call(); } catch (error) {
             check(error instanceof Error, 'rejections must be Error objects');
@@ -274,11 +515,67 @@ const API_TEST: &str = r#"(async () => {
     await app.request('ui.inspect');
     const [x, y] = await app.request('ui.at', {handle: 'dialog:Export DXF…'});
     await app.request('ui.click', {x, y});
+    // The click is queued for a later frame. Keep this design until the export has finished.
+    await waitForUi(ui => !ui.dialog && !ui.file_picker_busy && !ui.file_busy, 'view export finishes');
+    // An export to the same explicit path can publish newer virtual bytes while Save is waiting.
+    {
+        const handle = FileSystemFileHandle.prototype;
+        const createWritable = handle.createWritable;
+        const sharedPath = '/opfs/concurrent-write.sc';
+        let opened, finish;
+        const opening = new Promise(resolve => { opened = resolve; });
+        const allowWrite = new Promise(resolve => { finish = resolve; });
+        handle.createWritable = function (...args) {
+            if (this.name !== 'concurrent-write.sc') return createWritable.apply(this, args);
+            opened();
+            return allowWrite.then(() => createWritable.apply(this, args));
+        };
+        await app.execute('parameters.add', {name: 'newer_value', expression: '5 mm'});
+        const saving = app.execute('file.save_as', {path: sharedPath});
+        try {
+            await Promise.race([opening, saving.then(() => { throw new Error('save completed before storage opened'); })]);
+            await app.execute('parameters.export', {path: sharedPath, format: 'json'});
+            finish();
+            await saving;
+        } finally {
+            finish();
+            handle.createWritable = createWritable;
+        }
+        await app.execute('parameters.delete', {name: 'newer_value'});
+        const imported = await app.execute('parameters.import', {path: sharedPath});
+        check(imported.imported.includes('newer_value'), 'save completion preserves the newer virtual file');
+    }
     // Browser files exist only in the VFS: native filesystem metadata cannot find them.
     await app.execute('file.save', {path: '/upload/linked-part.sc'});
     await app.execute('file.new');
     const linked = await app.execute('component.insert_design', {path: '/upload/linked-part.sc'});
+    // The browser's persistence promise controls when Save can acknowledge this revision.
+    const handle = FileSystemFileHandle.prototype;
+    const createWritable = handle.createWritable;
+    let reached, release;
+    const writing = new Promise(resolve => { reached = resolve; });
+    const fail = new Promise(resolve => { release = resolve; });
+    handle.createWritable = function (...args) {
+        if (this.name !== 'linked-assembly.sc') return createWritable.apply(this, args);
+        reached();
+        return fail.then(() => { throw new Error('test OPFS write failed'); });
+    };
+    try {
+        const saving = rejects(() => app.execute('file.save', {path: '/opfs/linked-assembly.sc'}), 'test OPFS write failed');
+        await writing;
+        check((await app.request('document.export')).dirty, 'pending OPFS save leaves the design unsaved');
+        release();
+        await saving;
+        check((await app.request('document.export')).dirty, 'failed OPFS save leaves the design unsaved');
+    } finally {
+        release();
+        handle.createWritable = createWritable;
+    }
     await app.execute('file.save', {path: '/opfs/linked-assembly.sc'});
+    const dir = await navigator.storage.getDirectory();
+    const savedHandle = await dir.getFileHandle('linked-assembly.sc');
+    check((await savedHandle.getFile()).size > 0, 'successful save is already readable in OPFS');
+    check(!(await app.request('document.export')).dirty, 'successful OPFS save acknowledges its design');
     const links = await app.execute('component.links');
     check(links.links[0].found === true, 'linked part is found in browser storage');
     check(links.links[0].path === '../upload/linked-part.sc', 'assembly stores a relative link');
@@ -291,6 +588,8 @@ const API_TEST: &str = r#"(async () => {
     }
     check(menu.items?.some(item => item.id === 'ui.openLinkedDesign'), 'occurrence menu offers the source design');
     await app.request('ui.menuPick', {item: 'ui.openLinkedDesign'});
+    // The menu starts a staged file load; its reply does not mean the source tab is ready.
+    await waitForUi(ui => !ui.file_busy, 'linked source finishes loading');
     const tabs = await app.request('ui.documents');
     check(tabs.documents.length === 2 && tabs.active === 1, 'linked source opens in another tab');
     check((await app.inspect()).bodies[0].name === 'Browser API box', 'source design is active');
@@ -1174,7 +1473,13 @@ impl Cdp {
         let mut message = Vec::new();
         loop {
             let mut h = [0u8; 2];
-            self.stream.read_exact(&mut h).map_err(|e| format!("DevTools: {e}"))?;
+            self.stream.read_exact(&mut h).map_err(|e| match e.kind() {
+                // The read timeout ran out: Linux reports it as EAGAIN, which reads as a socket fault.
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
+                    format!("DevTools: the page sent no reply within {LAUNCH_TIMEOUT:?}; the app may have stopped (a wasm panic shows in the browser console)")
+                }
+                _ => format!("DevTools: {e}"),
+            })?;
             let (fin, opcode) = (h[0] & 0x80 != 0, h[0] & 0x0f);
             let len = match h[1] & 0x7f {
                 126 => {

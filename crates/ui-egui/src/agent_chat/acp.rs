@@ -176,27 +176,46 @@ pub fn is_bridge_tool(title: &str, kind: Option<&str>) -> bool {
 /// The MCP server the agent starts to reach the design: `solidcraft-cli mcp --connect` bridged to
 /// this app's control port. The server finds the port's token in the token file the app wrote
 /// (docs/control-protocol.md), so the token never travels through the agent, and it keeps its
-/// default folder limits (docs/mcp.md): no `--allow-any-path`.
+/// folder limits (docs/mcp.md): only folders the user explicitly allowed in `allow_paths`, never
+/// `--allow-any-path`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct McpBridge {
     pub cli: std::path::PathBuf,
     pub port: u16,
+    pub allow_paths: Vec<std::path::PathBuf>,
+}
+
+fn absolute_path(path: std::path::PathBuf) -> Option<std::path::PathBuf> {
+    if path.is_absolute() { Some(path) } else { std::env::current_dir().ok().map(|cwd| cwd.join(path)) }
 }
 
 impl McpBridge {
     pub fn to_json(&self) -> Value {
+        let control_dir = solidcraft_engine::control_auth::APP
+            .token_path(self.port)
+            .and_then(|path| path.parent().map(std::path::Path::to_path_buf))
+            .and_then(absolute_path);
+        let mut args = vec!["mcp".to_string(), "--connect".to_string(), format!("127.0.0.1:{}", self.port)];
+        for dir in &self.allow_paths {
+            let text = dir.to_string_lossy();
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                args.push("--allow-path".to_string());
+                args.push(trimmed.to_string());
+            }
+        }
         json!({
             "name": BRIDGE_NAME,
             "command": self.cli.to_string_lossy(),
-            "args": ["mcp", "--connect", format!("127.0.0.1:{}", self.port)],
-            "env": [],
+            "args": args,
+            "env": bridge_env(std::env::var_os("XDG_DATA_HOME"), control_dir),
         })
     }
-
     /// The same bridge for an agent inside WSL: the CLI as WSL sees it. It still runs on the
-    /// Windows side (WSL starts Windows programs itself), so the port is the same.
+    /// Windows side (WSL starts Windows programs itself), so the port and `--allow-path` folders
+    /// stay as Windows paths.
     pub fn in_wsl(&self) -> McpBridge {
-        McpBridge { cli: wsl_path(&self.cli), port: self.port }
+        McpBridge { cli: wsl_path(&self.cli), port: self.port, allow_paths: self.allow_paths.clone() }
     }
 }
 
@@ -224,6 +243,20 @@ pub fn wsl_path(path: &std::path::Path) -> std::path::PathBuf {
     }
 }
 
+/// Pass the app's effective token folder directly to its MCP child. XDG_DATA_HOME is also
+/// forwarded for other SolidCraft data lookups, but SOLIDCRAFT_CONTROL_DIR takes precedence in
+/// control_auth and therefore keeps authentication aligned with the exact token_path for this port.
+fn bridge_env(xdg_data_home: Option<std::ffi::OsString>, control_dir: Option<std::path::PathBuf>) -> Value {
+    let mut env = Vec::with_capacity(2);
+    if let Some(value) = xdg_data_home.as_deref().and_then(|value| value.to_str()) {
+        env.push(json!({"name": "XDG_DATA_HOME", "value": value}));
+    }
+    if let Some(value) = control_dir.as_deref().and_then(|value| value.to_str()) {
+        env.push(json!({"name": "SOLIDCRAFT_CONTROL_DIR", "value": value}));
+    }
+    Value::Array(env)
+}
+
 /// What every session is told about where it is. An agent with no route for it in
 /// [`session_new_params`] doesn't get it.
 pub const SYSTEM_NOTE: &str = "You are running inside SolidCraft, a parametric 3D CAD application, as the user's assistant. \
@@ -233,7 +266,10 @@ measure or inspect_design. Before building anything beyond one primitive, read `
 SKILL.md has the workflow, its reference.md the command shapes and this version's traps), work the numbers out first, and after \
 each stage compare `measure` with them. Prefer one `batch` over many small calls. Saving, opening or exporting files waits for the user's approval in \
 the chat, and each message allows a limited number of changes. Don't use shell or file tools: work through the SolidCraft tools. \
-Keep answers short.";
+On a drawing, make section views and their section lines with `drawing.view.section`, and dimensions with \
+`drawing.dimension.add` or `drawing.dimension.from_model`, never with free sketch lines or text notes: those do not move with their \
+view, cannot be selected as section lines or dimensions, and do not update the model. If a drawing object has no command, say so \
+and explain the limitation instead of drawing an imitation. Keep answers short.";
 
 /// The most of the user's custom instructions (#8220) a session gets, in characters: the
 /// Preferences field takes no more, and a longer text from an edited settings file is cut here.
@@ -255,6 +291,13 @@ pub fn system_note(instructions: &str) -> String {
 pub const CLAUDE_DISALLOWED_TOOLS: &[&str] =
     &["Bash", "BashOutput", "KillShell", "Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep", "WebFetch", "WebSearch", "Task"];
 
+/// The Claude Code adapter's built-in tools the session has (`_meta.claudeCode.options.tools`):
+/// only these, so a tool a later Claude Code adds (or one the list above doesn't name, such as its
+/// schedulers and message senders) stays off (#19554). `ExitPlanMode` is how the agent leaves the
+/// plan mode the panel's mode picker offers; it only asks. [`CLAUDE_DISALLOWED_TOOLS`] stays as a
+/// second guard.
+pub const CLAUDE_TOOLS: &[&str] = &["ExitPlanMode"];
+
 /// The `session/new` parameters. `init` is the agent's `initialize` reply: agents read the system
 /// note from different places (#9811), and the standard field may only go to an agent offering it.
 /// `note` is the system note ([`system_note`]).
@@ -266,7 +309,14 @@ pub fn session_new_params(cwd: &std::path::Path, bridge: Option<&McpBridge>, ini
         // Hosts may opt a session out of "bypass permissions" (the Claude adapter reads it):
         // every tool call the agent asks about reaches the panel.
         // Its own shell and file tools are off: the agent works through SolidCraft's tools.
-        "claudeCode": {"options": {"allowDangerouslySkipPermissions": false, "disallowedTools": CLAUDE_DISALLOWED_TOOLS}},
+        // Only the MCP servers given here (`strictMcpConfig`): not the user's claude.ai
+        // connectors, nor the servers in their own Claude Code configuration (#19554).
+        "claudeCode": {"options": {
+            "allowDangerouslySkipPermissions": false,
+            "disallowedTools": CLAUDE_DISALLOWED_TOOLS,
+            "tools": CLAUDE_TOOLS,
+            "strictMcpConfig": true,
+        }},
     });
     if takes_antigravity_note(init)
         && let Some(meta) = meta.as_object_mut()
@@ -742,6 +792,17 @@ mod tests {
         assert!(is_bridge_tool(&format!("mcp__{BRIDGE_NAME}__batch"), Some("other")));
     }
 
+    /// #20731: the note sends drawing work to the real commands and says to explain a limitation
+    /// rather than imitate a section line or a dimension with free lines or text.
+    #[test]
+    fn the_note_names_the_drawing_commands_and_forbids_imitations() {
+        for name in ["drawing.view.section", "drawing.dimension.add", "drawing.dimension.from_model"] {
+            assert!(SYSTEM_NOTE.contains(name), "{name}");
+        }
+        assert!(SYSTEM_NOTE.contains("never with free sketch lines or text notes"));
+        assert!(SYSTEM_NOTE.contains("explain the limitation instead of drawing an imitation"));
+    }
+
     /// Only the whole name of a tool of the chat's own server counts, whatever else a title holds.
     #[test]
     fn only_the_bridges_exact_tool_names_are_its_tools() {
@@ -785,15 +846,54 @@ mod tests {
 
     #[test]
     fn the_session_gets_the_bridged_mcp_server_without_a_token_or_any_path() {
-        let b = McpBridge { cli: "/opt/solidcraft/solidcraft-cli".into(), port: 41234 };
+        let b = McpBridge { cli: "/opt/solidcraft/solidcraft-cli".into(), port: 41234, allow_paths: Vec::new() };
         let p = session_new_params(std::path::Path::new("/home/u/designs"), Some(&b), &json!({}), SYSTEM_NOTE);
         let s = &p["mcpServers"][0];
         assert_eq!(s["name"], BRIDGE_NAME);
         assert_eq!(s["args"], json!(["mcp", "--connect", "127.0.0.1:41234"]));
+        assert!(s.get("token").is_none(), "{s}");
+        assert!(s.get("path").is_none(), "{s}");
+        assert!(s.get("allow-any-path").is_none(), "{s}");
+        // The env carries folders only, never a token or a token file.
+        for e in s["env"].as_array().into_iter().flatten() {
+            assert!(matches!(e["name"].as_str(), Some("XDG_DATA_HOME" | "SOLIDCRAFT_CONTROL_DIR")), "{e}");
+            assert!(!e["value"].as_str().unwrap_or_default().ends_with(".token"), "{e}");
+        }
         let text = p.to_string();
-        assert!(!text.contains("allow-any-path") && !text.contains("TOKEN") && !text.contains("token"), "{text}");
+        assert!(!text.contains("allow-any-path") && !text.contains("TOKEN"), "{text}");
         assert!(p["_meta"]["claudeCode"]["options"]["disallowedTools"].as_array().is_some_and(|t| t.iter().any(|x| x == "Bash")));
         assert_eq!(session_new_params(std::path::Path::new("/tmp"), None, &json!({}), SYSTEM_NOTE)["mcpServers"], json!([]));
+    }
+
+    #[test]
+    fn the_bridged_mcp_server_forwards_configured_allow_paths() {
+        let b = McpBridge {
+            cli: "/opt/solidcraft/solidcraft-cli".into(),
+            port: 41234,
+            allow_paths: vec![" /work/cad ".into(), "".into(), "/work/shared".into()],
+        };
+        let p = session_new_params(std::path::Path::new("/home/u/designs"), Some(&b), &json!({}), SYSTEM_NOTE);
+        assert_eq!(
+            p["mcpServers"][0]["args"],
+            json!(["mcp", "--connect", "127.0.0.1:41234", "--allow-path", "/work/cad", "--allow-path", "/work/shared"])
+        );
+        assert!(!p.to_string().contains("allow-any-path"));
+    }
+
+    /// #19554: Claude Code gets only the chat's MCP server, none of the user's claude.ai connectors
+    /// or own servers (`strictMcpConfig`), and only the built-in tools the chat names (`tools`),
+    /// none of which the disallowed list turns off.
+    #[test]
+    fn claude_code_gets_only_the_chats_server_and_named_tools() {
+        let b = McpBridge { cli: "/opt/solidcraft/solidcraft-cli".into(), port: 41234, allow_paths: Vec::new() };
+        for bridge in [Some(&b), None] {
+            let p = session_new_params(std::path::Path::new("/tmp"), bridge, &json!({}), SYSTEM_NOTE);
+            let options = &p["_meta"]["claudeCode"]["options"];
+            assert_eq!(options["strictMcpConfig"], json!(true), "{p}");
+            assert_eq!(options["tools"], json!(["ExitPlanMode"]), "{p}");
+            assert!(CLAUDE_TOOLS.iter().all(|t| !CLAUDE_DISALLOWED_TOOLS.contains(t)));
+            assert_eq!(p["mcpServers"].as_array().map(Vec::len), Some(usize::from(bridge.is_some())));
+        }
     }
 
     /// #9811: the note goes by the routes an agent's `initialize` reply offers, and the standard
@@ -863,11 +963,56 @@ mod tests {
         assert_eq!(wsl("/home/u/designs"), "/home/u/designs");
         assert_eq!(wsl(r"\\server\share\x"), r"\\server\share\x");
 
-        let b = McpBridge { cli: r"C:\Program Files\SolidCraft\solidcraft-cli.exe".into(), port: 41234 };
+        let b =
+            McpBridge { cli: r"C:\Program Files\SolidCraft\solidcraft-cli.exe".into(), port: 41234, allow_paths: vec![r"D:\Projects\CAD".into()] };
         let p = session_new_params(&wsl_path(std::path::Path::new(r"C:\Users\u\work")), Some(&b.in_wsl()), &json!({}), SYSTEM_NOTE);
         assert_eq!(p["cwd"], "/mnt/c/Users/u/work");
         assert_eq!(p["mcpServers"][0]["command"], "/mnt/c/Program Files/SolidCraft/solidcraft-cli.exe");
-        assert_eq!(p["mcpServers"][0]["args"], json!(["mcp", "--connect", "127.0.0.1:41234"]));
+        assert_eq!(p["mcpServers"][0]["args"], json!(["mcp", "--connect", "127.0.0.1:41234", "--allow-path", r"D:\Projects\CAD"]));
+    }
+
+    #[test]
+    fn absolute_path_preserves_absolute_paths() {
+        let path = std::path::PathBuf::from("/tmp/solidcraft/control");
+        assert_eq!(absolute_path(path.clone()), Some(path));
+    }
+
+    #[test]
+    fn absolute_path_resolves_relative_paths() {
+        let path = std::path::PathBuf::from("solidcraft/control");
+        let result = absolute_path(path).unwrap();
+
+        assert!(result.is_absolute());
+        assert!(result.ends_with("solidcraft/control"));
+    }
+
+    #[test]
+    fn bridge_environment_passes_data_root_and_effective_control_folder_without_secrets() {
+        let env = bridge_env(Some(std::ffi::OsString::from("/flatpak/data")), Some(std::path::PathBuf::from("/flatpak/data/solidcraft/control")));
+        assert_eq!(
+            env,
+            json!([
+                {"name": "XDG_DATA_HOME", "value": "/flatpak/data"},
+                {"name": "SOLIDCRAFT_CONTROL_DIR", "value": "/flatpak/data/solidcraft/control"},
+            ])
+        );
+        assert_eq!(bridge_env(None, None), json!([]));
+        assert!(env.to_string().find("token").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bridge_environment_omits_non_utf8_paths_and_preserves_valid_entries() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let invalid = std::ffi::OsString::from_vec(vec![b'/', 0xff]);
+
+        assert_eq!(
+            bridge_env(Some(invalid.clone()), Some("/valid/control".into())),
+            json!([{"name": "SOLIDCRAFT_CONTROL_DIR", "value": "/valid/control"}])
+        );
+
+        assert_eq!(bridge_env(Some("/valid/data".into()), Some(invalid.into())), json!([{"name": "XDG_DATA_HOME", "value": "/valid/data"}]));
     }
 
     #[test]

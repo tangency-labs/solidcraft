@@ -1,0 +1,34 @@
+{
+  "en": {
+    "ui.browser_save_in_progress": "A save is already in progress for this design.",
+    "ui.browser_saved_earlier": "Saved {path}. Newer changes are still unsaved."
+  },
+  "ja": {
+    "ui.browser_save_in_progress": "このデザインは現在保存中です。",
+    "ui.browser_saved_earlier": "{path} に保存しました。保存開始後の変更はまだ保存されていません。"
+  },
+  "ar": {
+    "ui.browser_save_in_progress": "يجري حفظ هذا التصميم بالفعل.",
+    "ui.browser_saved_earlier": "تم الحفظ في {path}. التغييرات الأحدث لم تُحفظ بعد."
+  },
+  "de": {
+    "ui.browser_save_in_progress": "Dieser Entwurf wird bereits gespeichert.",
+    "ui.browser_saved_earlier": "Unter {path} gespeichert. Spätere Änderungen sind noch nicht gespeichert."
+  },
+  "he": {
+    "ui.browser_save_in_progress": "שמירת התכן הזה כבר מתבצעת.",
+    "ui.browser_saved_earlier": "נשמר ב־{path}. השינויים החדשים יותר עדיין לא נשמרו."
+  },
+  "ko": {
+    "ui.browser_save_in_progress": "이 디자인은 이미 저장 중입니다.",
+    "ui.browser_saved_earlier": "{path}에 저장했습니다. 이후 변경 사항은 아직 저장되지 않았습니다."
+  },
+  "vi": {
+    "ui.browser_save_in_progress": "Thiết kế này đang được lưu.",
+    "ui.browser_saved_earlier": "Đã lưu vào {path}. Các thay đổi mới hơn vẫn chưa được lưu."
+  },
+  "zh": {
+    "ui.browser_save_in_progress": "此设计正在保存。",
+    "ui.browser_saved_earlier": "已保存到 {path}。后续更改尚未保存。"
+  }
+}

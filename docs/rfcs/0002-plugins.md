@@ -129,9 +129,116 @@ Plugins will mostly be written by agents working from a spec, docs and the API, 
 2. **A plugin skill file.** A `skills/<name>/SKILL.md` written for agents, covering the API, the manifest, permissions, packaging and how to test. It links to the generated reference instead of repeating it.
 3. **A headless test harness.** `solidcraft-cli plugin test <dir>` runs a plugin against a design with no UI and prints machine-readable pass or fail per entry (JSON), with the resulting design and journal available for assertions. An agent can edit, run and iterate without a person.
 4. **Typed, actionable errors.** Every host failure names its cause as data: the permission that was missing, the command that failed and why, the limit that was hit (fuel, memory, size), and the manifest field at fault. A trap or a denial never comes back as a bare string.
-5. **Language is secondary.** Any language that compiles to a WebAssembly component works. The guide recommends what agents target most reliably: Rust first, TypeScript next.
+5. **Rust and TypeScript are first-class.** Any language that compiles to a WebAssembly component works, but these two are supported and documented.
+   - TypeScript is built with ComponentizeJS (`jco componentize`), which compiles a TS or JS plugin into a component with the JS engine inside the plugin. SolidCraft embeds no JS engine, and the same sandbox, limits and permissions apply.
+   - Typed bindings for both come from the same WIT (`jco types` for TypeScript, `wit-bindgen` for Rust), so they never drift.
+   - The skill file has a TypeScript quickstart and a Rust quickstart. A tiny example plugin in each language lives in the plugins repo, not in SolidCraft.
+   - `plugin test` works the same for both.
 
 Plugin inputs are schemas (section 2), so the app draws the values and variables editor through the design-forms work in #15100. A user changes numbers without touching code.
+
+## 6c. Plugins as agent tools
+
+An installed plugin should be usable from the assistant chat and over MCP without opening it first: install a converter, then say "convert my file". Today `tools/list` is built from a fixed set of definitions (`crates/mcp/src/server.rs`, `tool_definitions_with`), and a plugin entry can only be reached through generic commands such as `plugin.run` or `doc.open`, so an agent can't discover what a plugin offers.
+
+1. **Every enabled plugin's entries are named tools.** Each entry appears in `tools/list` and in the assistant's tool list as `<plugin>.<entry>`, with the manifest's description and the entry's input schema (section 2), so the same strict argument checks apply as for engine commands. A disabled or uninstalled plugin's tools disappear from the next listing.
+2. **Importers and exporters get generated tools.** An importer slot appears as, for example, "Open .f3d files with Dutchman", taking a path and the slot's options; an exporter slot as "Save the design as .<ext> with <plugin>". The schema comes from the slot's declaration (RFC 0015 section 4).
+3. **Headless, under existing grants.** A tool call runs with none of the plugin's own dialogs, under the grants the plugin already has, and is journaled and undoable like any command (one call, one undo step). A `read` entry stays read-only in every way: the host refuses it both edit commands and the file-writing host imports (`write-file` and any later import that changes something outside the design), whatever folder grants the plugin holds, and the refusal is a structured error naming the import. The same check applies when a person runs the entry, so a tool call can't do more than the entry's declared effect.
+4. **The assistant's approval still applies.** When the in-app assistant calls a plugin tool, the call goes through the same chat approval gate as any other assistant tool call, at the confirmation level of the entry's effect: `edit` and above ask first. "Headless" means only that the plugin opens no dialog of its own; a plugin tool can never skip the assistant's approval.
+5. **A missing grant is an error, never a prompt.** If a call needs a grant the plugin doesn't have (a file outside its granted folders, a memory request above the approved limit), the tool returns a structured error naming the plugin, the grant and how to approve it (the app's approval screen, or `plugin.install --approve` / the stored-grant commands headlessly). Nothing waits for a hidden dialog.
+6. **The listing stays honest.** Plugin tools are marked as plugin tools (name prefix and a `plugin` field), so an agent and a person can tell them from built-in commands, and their descriptions reach agents as plugin text, as for panels in RFC 0015.
+
+## 6d. Background plugins
+
+A converter should keep its compiled component and parsing caches between conversions.
+A CAM plugin should keep analysis and toolpath caches while the user works.
+An optional background role gives both a warm instance, without permission to edit on its own.
+This extends the tools in section 6c and their declarations
+([#18741](https://github.com/tangency-labs/solidcraft/pull/18741)).
+
+1. **Declare one lifetime in the manifest.** `background.scope` is either `design` or `app`.
+   The host keeps one instance per plugin per open design session, or one per plugin per app.
+   Design scope suits CAM caches; app scope lets an importer serve successive new designs.
+   An omitted role keeps ordinary entries unchanged. An unknown scope returns
+   `InvalidManifest { field, reason }`, naming `background.scope`.
+
+2. **Start only after approval; stop with the owner.** An enabled, approved role starts
+   when its design session or app starts, or after install approval if that session already exists.
+   Closing a design stops its design-scoped instance; app quit, disable or uninstall stops either scope.
+   Design close also cancels that session's calls and pending events in an app-scoped instance.
+   Preferences > Plugins shows the scope and Running, Stopped or Trapped, with Stop and Start/Restart.
+   Stop cancels active calls, drops queued events and frees the instance without waiting for plugin code.
+   Calls cancelled this way return `Cancelled`; calls to a stopped or closed instance return the proposed
+   typed `BackgroundUnavailable { state: stopped | trapped | closed }`. A tool call never undoes Stop.
+
+3. **Reuse the instance, never the authority of a previous call.** The existing declared
+   tools reach this instance, with the same names, schemas, effects and approval gates as section 6c.
+   Events and tools run serially on a worker, away from the window thread, with no nested calls.
+   Own memory survives successful calls; it is volatile and is lost on stop, restart or trap.
+   Every event or call concerning a design carries its session and revision. App scope gets only
+   the current call's design access, never ambient access to all open designs.
+   An importer creating a design runs with no design context until the host adopts its result.
+   Design-dependent cached results must match that session and revision before use; outdated results
+   return `stale` as in RFC 0015. Design-independent results, such as an importer's parse of a source
+   file, are keyed by the source's content digest and the approval hash instead, so they can serve any
+   new design and are never matched against a session or revision. A trap returns `Trap { reason }`, rolls back the call and marks the instance Trapped.
+   Explicit Restart creates a clean instance under the existing approval, with no automatic retry.
+   This lifetime replaces sections 2 and 3's fresh-instance rule only for the background role.
+
+4. **Subscribe to declared host events.** `background.events` lists `design.changed`,
+   `selection.changed`, `file.opened` or `file.saved`, each naming a read-only manifest entry.
+   Events let a plugin invalidate caches or refresh its own panel without polling.
+   `design.changed` reuses RFC 0015 section 1's phase 3 signal
+   ([#18727](https://github.com/tangency-labs/solidcraft/pull/18727)); it adds no per-feature hooks.
+   These subscriptions work with panels closed. Ordinary panel listeners keep their open-panel lifetime.
+   Successful file events carry session and revision, not file contents or a new folder grant.
+   Delivery follows finished host actions, coalesced at the design-changed rate (at most 10 a second).
+   Keep at most one pending event per kind per session; another change replaces its revision.
+   No replay is promised: a handler reads the latest snapshot. A listener failure appears in
+   Preferences > Plugins and never fails the action that triggered it. Unknown events return
+   `InvalidManifest { field, reason }`; missing grants return `PermissionDenied { permission }`.
+
+5. **Budget each event and each tool call separately.** The manifest declares fuel,
+   memory and deadline budgets for events and tools, within the existing approved host ceilings.
+   Startup and any lifecycle callback use the event budget; forced stop needs no callback.
+   Reset fuel and the deadline for each invocation; memory limits include retained memory and host buffers,
+   rather than granting fresh extra memory on every call. Background idle memory has its own declared
+   ceiling within the approved memory ceiling. If retained memory exceeds it when a call ends,
+   stop the instance and discard that call's staged result. No plugin code runs while idle.
+   Requests above ceilings return `OverCeiling { limit, requested, allowed }` before execution;
+   a spent budget returns `Exhausted { limit, allowed }` and stops the instance, with no edit adopted.
+   The limit identifies event or tool fuel, memory or deadline, or idle memory.
+
+6. **No timers in the first background phase.** There is no tick, sleep callback or
+   self-scheduled work. Host events and explicit tool calls are enough for cache invalidation
+   and conversions, and avoid a permanent stream of work from an idle plugin.
+   Busy loops exhaust the current invocation's fuel or deadline. A manifest asking for timers
+   returns `UnsupportedCapability { capability, reason }`; the host never silently adds a timer.
+
+7. **Background adds no grant.** The same sandbox, folder grants and no-network rule apply.
+   The existing approval hash covers the component and manifest, including the role, scope,
+   events, tools and budgets. A change stops the instance until the user approves again.
+   Unapproved starts return `PermissionDenied { permission }`, naming the changed approval.
+   Missing grants are errors through the same headless path as section 6c, never hidden prompts.
+
+8. **Only an explicit tool call may edit.** Startup, shutdown and event callbacks may
+   query granted data, keep private memory and update their own declared panel data.
+   They may not edit the design, plugin storage or files, or start another tool or job to do so.
+   The host refuses write imports and edit commands with `PermissionDenied { permission }`,
+   naming the forbidden import or command, even when the plugin holds a write grant.
+   A tool call made by the user or the assistant gets only its declared effect and existing grants;
+   the assistant's approval still applies. Each successful editing call is one Undo step.
+   A file a background call writes is staged: the host writes it beside the target and renames it into
+   place only when the call succeeds, so a call that fails, traps, runs out of budget or is stopped
+   leaves existing files as they were and no partial output.
+   CAM can refresh an analysis cache on a change; saving a toolpath needs an explicit editing call.
+
+9. **Ship after phase 2, separately from parametric features.** Phase 2a below is the first
+   background phase. Design-changed subscriptions additionally wait for RFC 0015 phase 3;
+   requesting an event unavailable in the host returns `UnsupportedCapability { capability, reason }`.
+   It does not bring timers, network or automatic edits forward. Stop, trap and budget failures
+   leave the design, the undo stack and files untouched; typed errors identify the plugin and event or tool,
+   plus the denied grant or exhausted budget. This amendment specifies behaviour only, not an implementation.
 
 ## 6b. Shared across Craft apps
 
@@ -161,6 +268,7 @@ Phase 1 therefore builds the host as `craft-plugin` plus `craft-plugin-wasm` aga
 |---|---|---|
 | 1 | WIT `craft:plugin@0.1.0`, a wasmtime host with fuel and memory limits, `execute`, permissions in the manifest, no network in the linker, a manifest asking for `net` refused, tests: no file access without a grant, a runaway loop is stopped, a crash leaves the model untouched, undo works | Builds on [#8987](https://github.com/tangency-labs/solidcraft/pull/8987) |
 | 2 | Importers and exporters, author guide, `plugin check` and `plugin test`. Measurements (component size, compile memory, binary growth) go in a #1221 comment. | After the phase 1 design review |
+| 2a | Optional background role: one approved instance per design session or app, declared events and tools on that instance, invocation and idle budgets, Stop and Restart (section 6d). Design-changed events also require RFC 0015 phase 3. | After phase 2; independent of parametric features |
 | 3 | `FeatureKind::Plugin`, `evaluate`, recorded fallbacks, generic timeline row | |
 | 4 | Install from file or GitHub, Add-on Manager, plugin dialogs drawn from input schemas through [#15100](https://github.com/tangency-labs/solidcraft/issues/15100) | [#5586](https://github.com/tangency-labs/solidcraft/pull/5586), [#4933](https://github.com/tangency-labs/solidcraft/pull/4933) |
 | 5 | Web host on the same WIT | |

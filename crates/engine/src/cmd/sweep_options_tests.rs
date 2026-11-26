@@ -76,6 +76,27 @@ fn scaled_sweep_is_a_frustum() {
     assert!((again.volume - m.volume).abs() < 1e-9 * volume);
 }
 
+/// A path across two sketches (#16168): the sweep's path continues from the XZ sketch's line
+/// into a sketch on YZ, in the order picked (the entry naming the sketch first). Each entry is
+/// saved with its sketch, and the solid is the same when reopened.
+#[test]
+fn sweep_path_across_sketches() {
+    let mut s = setup();
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "S2"}));
+    // The YZ sketch's y runs along world Z: the line joins `up`'s end at world Z 40 and runs on
+    // to 60, so the volume needs both sketches' curves.
+    run(&mut s, "sketch.line", json!({"points": [[0, 40], [0, 60]], "ids": ["seg2"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let volume = 60.0 * 100.0 * PI;
+    sweep(&mut s, "C", "Across", json!({"path": [{"sketch": "S2", "curve": "seg2"}, "up"]})).unwrap();
+    let m = measure(&s, "Across");
+    assert!((m.volume - volume).abs() < 2e-3 * volume, "volume {} vs {volume}", m.volume);
+    let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    let reopened = Session::new(doc);
+    let again = measure(&reopened, "Across");
+    assert!((again.volume - volume).abs() < 2e-3 * volume, "volume {} vs {volume}", again.volume);
+}
+
 /// A twisted square keeps its faces' names (each wall after its profile curve), and the twist is
 /// a parameter: editing it changes the solid, a plain sweep has the same names.
 #[test]
@@ -160,6 +181,81 @@ fn hostile_sweep_options_are_refused() {
         assert!(s.execute("surface.sweep", &p).is_err(), "surface {bad}");
         assert_eq!(s.doc.features.len(), before, "{bad}");
     }
+}
+
+/// #14456: a sweep's profile can be a planar face of a body, as in Extrude and Revolve. The
+/// face's edges are projected into a sketch on it, and the sweep runs from that face along the
+/// path: a 10 mm square face swept up a 40 mm line is a 10 x 10 x 40 column standing on it.
+#[test]
+fn a_sweep_from_a_body_face_sweeps_the_face() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [-5, -5, 0], "length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "P"}));
+    // The XZ sketch's y runs down world Z: the line starts at the top face's centre.
+    run(&mut s, "sketch.line", json!({"points": [[0, -10], [0, -50]], "ids": ["up"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.sweep",
+        json!({"face": [0, 0, 10], "face_body": "Block", "path_sketch": "P", "path": ["up"], "operation": "new", "body_name": "Column"}),
+    );
+    let m = measure(&s, "Column");
+    assert!((m.volume - 4000.0).abs() < 2e-3 * 4000.0, "volume {}", m.volume);
+    // The column stands on the face it was swept from and ends at the path's end.
+    assert!((m.bbox.min.z - 10.0).abs() < 1e-6, "{:?}", m.bbox);
+    assert!((m.bbox.max.z - 50.0).abs() < 1e-6, "{:?}", m.bbox);
+    assert!((m.bbox.min.x + 5.0).abs() < 1e-6 && (m.bbox.max.x - 5.0).abs() < 1e-6, "{:?}", m.bbox);
+    // The face's sketch is in the timeline, and the sweep names it as its profile.
+    let kind = s.doc.features.last().unwrap().kind.clone();
+    let solidcraft_doc::FeatureKind::Sweep { sketch, .. } = kind else { panic!("the last feature is not a sweep") };
+    assert!(
+        s.doc.feature(sketch.0).is_some_and(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Sketch { .. })),
+        "the face's sketch is in the timeline"
+    );
+}
+
+/// A face that is not a body's, a curved one, or a face given with a sketch is refused, and the
+/// design is left as it was.
+#[test]
+fn a_sweep_refuses_a_face_it_cannot_sweep() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [-5, -5, 0], "length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "P"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, -10], [0, -50]], "ids": ["up"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let before = s.doc.features.len();
+    let sweep_with = |s: &mut Session, extra: Value| {
+        let mut p = json!({"path_sketch": "P", "path": ["up"], "operation": "new"});
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        s.execute("solid.sweep", &p).map_err(|e| e.to_string())
+    };
+    // No body face at the point.
+    assert!(sweep_with(&mut s, json!({"face": [0, 0, 50]})).is_err());
+    // A face that is not a point.
+    assert!(sweep_with(&mut s, json!({"face": [0, 0]})).is_err());
+    // A face of another body than the one named.
+    assert!(sweep_with(&mut s, json!({"face": [0, 0, 10], "face_body": "Other"})).is_err());
+    // A face and a sketch profile at once.
+    assert!(sweep_with(&mut s, json!({"face": [0, 0, 10], "face_body": "Block", "sketch": "P"})).is_err());
+    assert_eq!(s.doc.features.len(), before);
+}
+
+/// The face's boundary is the profile: it stays profile geometry even when the design
+/// projects references as construction, or the sketch would have no profile to sweep.
+#[test]
+fn a_sweep_from_a_body_face_works_with_construction_projections() {
+    let mut s = Session { project_construction: true, ..Session::default() };
+    run(&mut s, "solid.box", json!({"corner": [-5, -5, 0], "length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "P"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, -10], [0, -50]], "ids": ["up"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.sweep",
+        json!({"face": [0, 0, 10], "face_body": "Block", "path_sketch": "P", "path": ["up"], "operation": "new", "body_name": "Column"}),
+    );
+    let m = measure(&s, "Column");
+    assert!((m.volume - 4000.0).abs() < 2e-3 * 4000.0, "volume {}", m.volume);
 }
 
 /// #3345: a 4 x 3 profile drawn at the middle of the bottom line of a closed rounded rectangle
@@ -273,4 +369,81 @@ fn a_path_turns_a_spline_of_several_pieces_round_whole() {
     for (got, want) in [(m.bbox.min.x, -15.0), (m.bbox.max.x, 20.0), (m.bbox.min.y, -1.0), (m.bbox.max.y, 1.0)] {
         assert!((got - want).abs() < 0.04, "{:?}", m.bbox);
     }
+}
+
+/// #17386: renaming the body a sweep's path runs along renames it in the sweep too, so the
+/// sweep and what follows it keep working.
+#[test]
+fn renaming_the_path_body_keeps_a_sweep_along_its_edges() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [30, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "distance": 10, "operation": "new", "body_name": "Slab"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [-30, -20, 10], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "Prof"}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [2, 1.5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let swept = run(
+        &mut s,
+        "solid.sweep",
+        json!({"sketch": "Prof", "path_body": "Slab", "path_edges": [[0, -20, 10]], "operation": "new", "body_name": "Rib"}),
+    );
+    let id = swept["feature"].as_u64().unwrap();
+    let before = measure(&s, "Rib").volume;
+    run(&mut s, "body.rename", json!({"body": "Slab", "name": "Plate"}));
+    let feature = run(&mut s, "timeline.inspect", json!({"feature": id}));
+    assert_eq!(feature["definition"]["path_body"], "Plate");
+    assert!(feature["error"].is_null(), "{}", feature["error"]);
+    assert!((measure(&s, "Rib").volume - before).abs() < 1e-6 * before);
+}
+
+/// #17828: a design saved by 0.43.0, a line swept along a closed 3D spline (eight fit points round
+/// a circle of radius 25, up and down by 4 in turn) and a surface offset of one face of it. 0.43.0
+/// swept the line along the spline's 192 sample lines, a face along each, and saved the offset's
+/// pick on the 38th of them. Opened now, the saved sweep keeps those faces (the format step marks
+/// it), so the offset still finds its face and builds the same strip; saved and reopened, it
+/// stays so. A new sweep along the same spline is one face along the spline itself.
+#[test]
+fn an_older_sweep_along_a_3d_spline_keeps_its_faces_for_what_refers_to_them() {
+    let fit: Vec<[f64; 3]> = (0..=8)
+        .map(|i| {
+            let t = PI + std::f64::consts::TAU * f64::from(i % 8) / 8.0;
+            [25.0 * t.cos(), 25.0 * t.sin(), if i % 2 == 0 { 10.0 } else { 6.0 }]
+        })
+        .collect();
+    let on_plane = json!({"feature": 1, "type": "construction"});
+    let saved = json!({
+        "format": "solidcraft/57",
+        "name": "Old",
+        "units": "mm",
+        "params": [],
+        "next_id": 6,
+        "features": [
+            {"id": 1, "name": "Plane1", "plane": {"base": {"name": "XY", "type": "origin"}, "distance": "10.00 mm", "type": "offset"}, "type": "construction_plane"},
+            {"id": 2, "name": "Sketch1", "plane": on_plane, "type": "sketch", "sketch": {
+                "constraints": [], "counters": {"w": 1}, "curves": [], "points": [{"fixed": true, "id": "origin", "pos": [0.0, 0.0]}], "view": {"three_d": true},
+                "wires": [{"fit": fit, "id": "w1", "pts": fit, "space": "component"}]}},
+            {"id": 3, "name": "Sketch2", "plane": on_plane, "type": "sketch", "sketch": {
+                "constraints": [], "counters": {"l": 1, "p": 2}, "curves": [{"a": 1, "b": 2, "id": "l1", "type": "line"}],
+                "points": [{"fixed": true, "id": "origin", "pos": [0.0, 0.0]}, {"fixed": true, "id": "p1", "pos": [-25.0, 0.0]}, {"fixed": true, "id": "p2", "pos": [-31.0, 0.0]}]}},
+            {"id": 4, "name": "SurfaceSweep1", "type": "surface_sweep", "body_names": ["Body1"], "curves": ["l1"], "path": ["w1"], "path_sketch": 2, "sketch": 3},
+            {"id": 5, "name": "OffsetSurface1", "type": "surface_offset", "body": "Body1", "body_names": ["Skin"], "distance": "1 mm", "face_names": [""],
+                "faces": [[-9.29397203630335, -26.191947234484033, 8.372395833333334]], "param_names": ["d2"]}
+        ]
+    });
+    let mut s = Session::new(solidcraft_doc::format::read(&saved.to_string()).unwrap());
+    let check = |s: &Session| {
+        let errors: Vec<(&str, &str)> = s.model.results.iter().filter_map(|r| Some((r.name.as_str(), r.error.as_deref()?))).collect();
+        assert!(errors.is_empty(), "{errors:?}");
+        let state = s.model.state();
+        assert_eq!((state.body("Body1").unwrap().body.face_count(), state.body("Skin").unwrap().body.face_count()), (192, 1));
+        // The offset is of the one strip the pick lies on, as 0.43.0 built it.
+        let strip = measure(s, "Skin").area;
+        assert!(strip < measure(s, "Body1").area / 100.0, "offset {strip}");
+    };
+    check(&s);
+    check(&Session::new(solidcraft_doc::format::read(&s.doc.to_json()).unwrap()));
+    // A new sweep along the spline follows it: one face.
+    run(&mut s, "surface.sweep", json!({"sketch": "Sketch2", "curves": ["l1"], "path_sketch": "Sketch1", "path": ["w1"], "body_name": "New"}));
+    assert_eq!(s.model.state().body("New").unwrap().body.face_count(), 1);
 }

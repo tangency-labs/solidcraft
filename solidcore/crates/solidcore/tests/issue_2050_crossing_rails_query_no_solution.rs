@@ -2,7 +2,7 @@
 //! failed a sound round when a closest-point query on the other round's edge had no
 //! solution (`edge_closest_point`'s 1001): a query with no solution finds no crossing
 //! there, so it no longer fails the fillet. That check is retired; the band test that
-//! replaces it (`fixes.fillet_refuse_overlapping_bands`, WR-542) builds the round too.
+//! replaces it (WR-542, no longer a flag) builds the round too.
 //!
 //! The body (`data/issue_2050_two_radii_y.smd`, written by `write_brep_to_file`) is a
 //! 50 x 40 x 30 box with its vertical edges rounded R8. Its top loop, in the issue's edge
@@ -13,7 +13,6 @@ use std::f64::consts::PI;
 
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::object::ObjectRef;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p3::brep_copy;
@@ -21,7 +20,7 @@ use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{edge, vertex, EdgeId};
-use solidcore::{Brep, EntityRef, Kernel, Result};
+use solidcore::{Brep, Kernel, Result};
 
 /// The top loop's edges, in the order the issue passes them.
 const TOP_LOOP: [u32; 8] = [20, 15, 1, 21, 23, 11, 7, 22];
@@ -32,10 +31,7 @@ fn body(k: &mut Kernel) -> Brep {
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,
@@ -57,10 +53,9 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
     brep_volume(k, b, 1e-9, &attrs).unwrap()
 }
 
-/// Round the top loop R4 with the band test as given; the copy and the fillet's result.
-fn round(refuse_overlapping_bands: bool) -> (Kernel, Brep, Result<()>) {
+/// Round the top loop R4; the copy and the fillet's result.
+fn round() -> (Kernel, Brep, Result<()>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_overlapping_bands = refuse_overlapping_bands;
     let read = body(&mut k);
     let mut b = brep_copy(&mut k, &read).unwrap();
     let ids: Vec<EdgeId> = TOP_LOOP.iter().map(|&i| EdgeId::from_index(i)).collect();
@@ -93,23 +88,11 @@ fn expected() -> f64 {
 
 #[test]
 fn issue_2050_round_with_band_check_builds() {
-    let (k, mut b, result) = round(true);
+    let (k, mut b, result) = round();
     result.unwrap();
     let v = volume(&k, &mut b);
     let want = expected();
     assert!((want - 57800.239724).abs() < 1e-6, "closed form {want}");
-    assert!(
-        (v - want).abs() <= 1e-9 * want.abs(),
-        "volume {v}, expected {want}"
-    );
-}
-
-#[test]
-fn issue_2050_round_without_check_builds() {
-    let (k, mut b, result) = round(false);
-    result.unwrap();
-    let v = volume(&k, &mut b);
-    let want = expected();
     assert!(
         (v - want).abs() <= 1e-9 * want.abs(),
         "volume {v}, expected {want}"

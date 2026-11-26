@@ -3,12 +3,15 @@ use std::collections::BTreeMap;
 use egui::{
     Context, LayerId, Rect, Ui,
     epaint::{ClippedShape, Shape},
-    layers::ShapeIdx,
+    layers::{PaintList, ShapeIdx},
 };
-use solidcraft_engine::panels::{Destination, InstanceId};
+use solidcraft_panel_layout::{Destination, Direction, InstanceId, Zone};
 use solidcraft_theme::Tokens;
+use solidcraft_ui_kit as ui_kit;
 
-use super::{HostLayout, HostPreview, egui_rect};
+use super::interaction::HostPreview;
+use super::layout::{HostLayout, HostSection};
+use super::workspace::egui_rect;
 
 /// The draw range of a real panel from this egui pass. Widget input and the
 /// runtime's published geometry retain their committed identities.
@@ -115,36 +118,77 @@ impl DragPaint {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+/// A copy of a panel's body paint from this pass, for the desktop window a
+/// drag would open it in. Like the in-app preview, it runs no second body.
+pub(crate) struct WindowCard {
+    bounds: Rect,
+    shapes: Vec<ClippedShape>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl WindowCard {
+    /// `body` is the part of the card below its header.
+    pub(super) fn copy(ctx: &Context, card: &CardPaint, body: Rect) -> Self {
+        let shapes = ctx.graphics(|graphics| graphics.get(card.layer).map_or_else(Vec::new, |list| card_entries(list, card).cloned().collect()));
+        Self { bounds: body, shapes }
+    }
+
+    /// Paint the panel's body at `bounds` on `ui`'s layer.
+    pub(crate) fn paint(&self, ui: &Ui, bounds: Rect) {
+        let clip = ui.clip_rect();
+        ui.ctx().graphics_mut(|graphics| {
+            let list = graphics.entry(ui.layer_id());
+            for (clip, shape) in relocated(self.shapes.iter().cloned(), self.bounds, bounds, clip, 1.0) {
+                list.add(clip, shape);
+            }
+        });
+    }
+}
+
+fn card_entries<'a>(list: &'a PaintList, card: &CardPaint) -> impl Iterator<Item = &'a ClippedShape> {
+    list.all_entries().skip(card.start).take(card.end.saturating_sub(card.start))
+}
+
 fn replace_shapes(ctx: &Context, card: &CardPaint, bounds: Option<Rect>, clip: Rect, opacity: f32) {
     ctx.graphics_mut(|graphics| {
         let Some(list) = graphics.get_mut(card.layer) else { return };
-        let shapes: Vec<_> =
-            if bounds.is_some() { list.all_entries().skip(card.start).take(card.end - card.start).cloned().collect() } else { Vec::new() };
+        let shapes: Vec<_> = if bounds.is_some() { card_entries(list, card).cloned().collect() } else { Vec::new() };
         for index in card.start..card.end {
             list.set(ShapeIdx(index), Rect::NOTHING, Shape::Noop);
         }
         let Some(bounds) = bounds else { return };
-        let visible = bounds.intersect(clip);
-        if !visible.is_positive() {
-            return;
-        }
-        let offset = bounds.min - card.bounds.min;
-        for ClippedShape { clip_rect, mut shape, .. } in shapes {
-            let old = clip_rect.intersect(card.bounds);
-            let translated = if relocate_shape(&mut shape, card.bounds, bounds) { visible } else { old.translate(offset).intersect(visible) };
-            if !translated.is_positive() {
-                continue;
-            }
-            if opacity < 1.0 {
-                egui::epaint::shape_transform::adjust_colors(&mut shape, move |color| {
-                    if *color != egui::Color32::PLACEHOLDER {
-                        *color = color.gamma_multiply(opacity);
-                    }
-                });
-            }
-            list.add(translated, shape);
+        for (clip, shape) in relocated(shapes, card.bounds, bounds, clip, opacity) {
+            list.add(clip, shape);
         }
     });
+}
+
+/// `shapes` painted inside `original`, moved to `bounds` and clipped to `clip`.
+fn relocated(
+    shapes: impl IntoIterator<Item = ClippedShape>,
+    original: Rect,
+    bounds: Rect,
+    clip: Rect,
+    opacity: f32,
+) -> impl Iterator<Item = (Rect, Shape)> {
+    let visible = bounds.intersect(clip);
+    let offset = bounds.min - original.min;
+    shapes.into_iter().filter(move |_| visible.is_positive()).filter_map(move |ClippedShape { clip_rect, mut shape, .. }| {
+        let old = clip_rect.intersect(original);
+        let translated = if relocate_shape(&mut shape, original, bounds) { visible } else { old.translate(offset).intersect(visible) };
+        if !translated.is_positive() {
+            return None;
+        }
+        if opacity < 1.0 {
+            egui::epaint::shape_transform::adjust_colors(&mut shape, move |color| {
+                if *color != egui::Color32::PLACEHOLDER {
+                    *color = color.gamma_multiply(opacity);
+                }
+            });
+        }
+        Some((translated, shape))
+    })
 }
 
 // The captured frame already carries the correct fill, stroke, radius
@@ -165,7 +209,7 @@ fn relocate_shape(shape: &mut Shape, original: Rect, bounds: Rect) -> bool {
     false
 }
 
-pub(super) fn paint_unmounted(ui: &Ui, layout: &HostLayout, section: &super::HostSection, title: &str, dragged: bool) {
+pub(super) fn paint_unmounted(ui: &Ui, layout: &HostLayout, section: &HostSection, title: &str, dragged: bool) {
     let bounds = egui_rect(section.outer);
     let clip = bounds.intersect(egui_rect(layout.capacity)).intersect(ui.clip_rect());
     if !clip.is_positive() {
@@ -176,14 +220,10 @@ pub(super) fn paint_unmounted(ui: &Ui, layout: &HostLayout, section: &super::Hos
         painter.multiply_opacity(0.68);
     }
     let tokens = Tokens::get();
-    let frame = crate::ui_kit::panel_host_frame(ui.ctx(), section.zone == solidcraft_engine::panels::Zone::Floating);
-    crate::ui_kit::Container::paint_frame(&painter, frame, bounds);
+    let frame = ui_kit::panel_host_frame(ui.ctx(), section.zone == Zone::Floating);
+    ui_kit::Container::paint_frame(&painter, frame, bounds);
     let header = egui_rect(section.header);
     let title = painter.layout_no_wrap(title.to_owned(), egui::FontId::proportional(tokens.font_heading), tokens.form_ink);
-    let x = if layout.direction == solidcraft_engine::panels::Direction::Rtl {
-        header.right() - tokens.space_8 - title.size().x
-    } else {
-        header.left() + tokens.space_8
-    };
+    let x = if layout.direction == Direction::Rtl { header.right() - tokens.space_8 - title.size().x } else { header.left() + tokens.space_8 };
     painter.with_clip_rect(header.intersect(clip)).galley(egui::pos2(x, header.center().y - title.size().y / 2.0), title, tokens.form_ink);
 }

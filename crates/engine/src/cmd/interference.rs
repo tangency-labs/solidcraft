@@ -39,6 +39,12 @@ struct Job {
     names: (String, String),
     /// Faces of one times faces of the other: the slowest pairs start first.
     cost: usize,
+    /// The size a shared volume is measured against: the first body's, or the smaller one's
+    /// when one is an envelope, so a large envelope does not pass a small overlap as clear.
+    size: f64,
+    /// One of the pair is an envelope: a shared volume too small to count is listed as not
+    /// checked rather than cleared, as the parts inside may be smaller than the size it allows.
+    envelope: bool,
 }
 
 /// What an exact check of one pair came to.
@@ -67,14 +73,20 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let budget = std::time::Duration::from_secs_f64(budget_s);
     let want = string_list(cmd, p, "bodies")?;
+    let use_envelopes = super::envelopes::use_envelopes(p, cmd)?;
     let st = s.world_state()?;
     // A name that is no body is refused, as inspect.clearance refuses it. Dropped, a misspelled
     // body was never checked and the answer read as no interference (#9740).
     if let Some(n) = want.iter().find(|n| st.body(n).is_none()) {
         return Err(bad(cmd, super::no_body(n, st.bodies.iter().map(|b| b.name.as_str()))));
     }
+    // Component envelopes are left out unless named; with `envelopes`, each stands in for the
+    // bodies inside it, a body named inside one meaning it.
+    let envelopes = super::envelopes::Envelopes::of(s, &st);
+    let want: Vec<String> = if use_envelopes { want.iter().map(|n| envelopes.standing_in(n).to_string()).collect() } else { want };
+    let taken = |name: &String| if want.is_empty() { envelopes.by_default(name, use_envelopes) } else { want.contains(name) };
     let (meshes_left, bodies): (Vec<&solidcraft_doc::ModelBody>, Vec<&solidcraft_doc::ModelBody>) =
-        st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).partition(|b| b.body.is_mesh());
+        st.bodies.iter().filter(|b| taken(&b.name)).partition(|b| b.body.is_mesh());
 
     // Prune by bounding boxes first (sort and sweep), so the cost follows the pairs that can
     // touch rather than the square of the body count.
@@ -85,13 +97,16 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
     let paths: HashMap<String, Vec<u64>> = s.doc.body_frames(&s.model.state()).into_iter().map(|(name, _, path, _)| (name, path)).collect();
     let path_of = |name: &str| paths.get(name).map_or(&[][..], Vec::as_slice);
     let excluded = excluded_pairs(s, p, &st, cmd)?;
+    // With `envelopes`, a body named in a pair means the envelope standing in for it.
     let matches = |side: &Side, name: &str| match side {
-        Side::Body(n) => n == name,
+        Side::Body(n) => n == name || (use_envelopes && envelopes.standing_in(n) == name),
         Side::Occurrence(o) => path_of(name).contains(o),
     };
     let left_out = |i: usize, j: usize| {
         let (Some(a), Some(b)) = (bodies.get(i), bodies.get(j)) else { return false };
-        excluded.iter().any(|(x, y)| (matches(x, &a.name) && matches(y, &b.name)) || (matches(x, &b.name) && matches(y, &a.name)))
+        // An envelope around the other body is no finding.
+        envelopes.encloses(&a.name, &b.name)
+            || excluded.iter().any(|(x, y)| (matches(x, &a.name) && matches(y, &b.name)) || (matches(x, &b.name) && matches(y, &a.name)))
     };
     let before = pairs.len();
     let pairs: Vec<(usize, usize)> = pairs.into_iter().filter(|&(i, j)| !left_out(i, j)).collect();
@@ -118,12 +133,15 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
             continue;
         }
         let (Some(a), Some(b)) = (bodies.get(i), bodies.get(j)) else { continue };
+        let envelope = envelopes.is_envelope(&a.name) || envelopes.is_envelope(&b.name);
         jobs.push(Job {
             pair: k,
             a: a.body.clone(),
             b: b.body.clone(),
             names: (a.name.clone(), b.name.clone()),
             cost: a.body.face_count().saturating_mul(b.body.face_count()),
+            size: if envelope { a.body.size().min(b.body.size()) } else { a.body.size() },
+            envelope,
         });
     }
     let intersected = jobs.len();
@@ -135,14 +153,22 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
     let waited_ms = waited.elapsed().as_secs_f64() * 1000.0;
 
     // Mesh bodies are not intersected: say so, rather than let `count: 0` read as "no overlap".
-    let mut unchecked: Vec<PlacedUnchecked> =
-        meshes_left.iter().map(|b| placed(Unchecked { a: b.name.clone(), b: None, reason: MESH_NOT_CHECKED.to_string() })).collect();
+    let mut unchecked: Vec<PlacedUnchecked> = meshes_left
+        .iter()
+        .map(|b| placed(Unchecked { a: b.name.clone(), b: None, reason: MESH_NOT_CHECKED.to_string(), distance_mm: None, exact: None }))
+        .collect();
     let (mut hits, mut timed) = (Vec::new(), Vec::new());
     let (mut not_checked, mut boolean_ms, mut tessellate_ms) = (0usize, 0.0, 0.0);
     for ((a, b), d) in done {
         let Some(d) = d else {
             not_checked += 1;
-            unchecked.push(placed(Unchecked { a, b: Some(b), reason: format!("not checked: the time budget of {budget_s} s ran out (budget_s)") }));
+            unchecked.push(placed(Unchecked {
+                a,
+                b: Some(b),
+                reason: format!("not checked: the time budget of {budget_s} s ran out (budget_s)"),
+                distance_mm: None,
+                exact: None,
+            }));
             continue;
         };
         boolean_ms += d.kernel.boolean_ms;
@@ -158,7 +184,7 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
         match d.outcome {
             Outcome::Hit(overlap) => hits.push(PlacedOverlap { a_part: place(&overlap.a), b_part: place(&overlap.b), overlap }),
             Outcome::Clear => {}
-            Outcome::Unchecked(reason) => unchecked.push(placed(Unchecked { a, b: Some(b), reason })),
+            Outcome::Unchecked(reason) => unchecked.push(placed(Unchecked { a, b: Some(b), reason, distance_mm: None, exact: None })),
         }
     }
     // A timing profile of the command (`--profile`) counts the kernel time the workers spent,
@@ -201,14 +227,19 @@ fn round_ms(ms: f64) -> f64 {
 /// The exact check of one pair: the bodies' intersection, measured.
 fn check(job: &Job) -> Done {
     let started = web_time::Instant::now();
-    let (outcome, kernel) = solidcraft_kernel::profile::capture(|| check_pair(&job.a, &job.b, &job.names));
+    let (outcome, kernel) = solidcraft_kernel::profile::capture(|| check_pair(&job.a, &job.b, &job.names, job.size, job.envelope));
     Done { outcome, ms: started.elapsed().as_secs_f64() * 1000.0, kernel }
 }
 
-fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String)) -> Outcome {
-    let threshold = 1e-9 * a.size().max(1.0).powi(3);
-    // A pair whose shared part can't be worked out is reported, not passed as clear.
-    let shared = match solidcraft_kernel::boolean(a, b, solidcraft_kernel::BoolOp::Intersect) {
+fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String), size: f64, envelope: bool) -> Outcome {
+    let threshold = 1e-9 * size.max(1.0).powi(3);
+    // A pair whose shared part can't be worked out is reported, not passed as clear. SMLib's
+    // check of the shared part runs here: a part it refuses is reported, not measured.
+    let shared = match solidcraft_kernel::validating(solidcraft_kernel::Validation::EachStep, || {
+        solidcraft_kernel::boolean(a, b, solidcraft_kernel::BoolOp::Intersect)
+    })
+    .0
+    {
         Ok(Some(o)) => o,
         Ok(None) => return Outcome::Clear,
         Err(e) => return Outcome::Unchecked(e.to_string()),
@@ -218,6 +249,9 @@ fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String)) -> Outcome {
         Err(e) => return Outcome::Unchecked(e.to_string()),
     };
     if m.volume > threshold {
+        if let Some(why) = impossible_overlap(m.volume, &m.bbox, a, b) {
+            return Outcome::Unchecked(why);
+        }
         return Outcome::Hit(Overlap {
             a: na.clone(),
             b: nb.clone(),
@@ -227,7 +261,46 @@ fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String)) -> Outcome {
             center: m.centroid.into(),
         });
     }
+    // Under the size's noise floor, but an envelope's parts may be far smaller than the envelope:
+    // their overlap could count where the envelopes' does not.
+    if envelope && m.volume > 0.0 {
+        return Outcome::Unchecked(format!(
+            "not checked: the envelopes share {:.3e} mm³, too little to tell from a contact at their size; check the parts inside (envelopes: false)",
+            m.volume
+        ));
+    }
     Outcome::Clear
+}
+
+/// Why a shared part of `a` and `b` measured as `volume` within `bbox` can't be theirs: a part
+/// shared by two bodies is no bigger than the smaller one and lies inside both of their boxes.
+/// A boolean that misreads a pin seated in its bore can hand back the whole larger body (#21553);
+/// that is reported as not checked, never as an overlap. `None`: the part fits (or a body can't
+/// be measured, and the overlap stands as measured).
+pub(crate) fn impossible_overlap(volume: f64, bbox: &Aabb3, a: &Body, b: &Body) -> Option<String> {
+    let (ma, mb) = (solidcraft_kernel::measure_mass(a).ok()?, solidcraft_kernel::measure_mass(b).ok()?);
+    overlap_out_of_bounds(volume, bbox, (ma.volume, &ma.bbox), (mb.volume, &mb.bbox))
+}
+
+/// [`impossible_overlap`] on the measured numbers.
+fn overlap_out_of_bounds(volume: f64, bbox: &Aabb3, (va, ba): (f64, &Aabb3), (vb, bb): (f64, &Aabb3)) -> Option<String> {
+    let smaller = va.abs().min(vb.abs());
+    let size = ba.diagonal().max(bb.diagonal()).max(1.0);
+    if volume > smaller * (1.0 + 1e-6) + 1e-9 * size.powi(3) {
+        return Some(format!(
+            "not checked: the shared part measured {volume:.3} mm³, more than the smaller body's {smaller:.3} mm³; the boolean misread this pair"
+        ));
+    }
+    let tol = 1e-6 * size;
+    let axes = [
+        (bbox.min.x, bbox.max.x, ba.min.x.max(bb.min.x), ba.max.x.min(bb.max.x)),
+        (bbox.min.y, bbox.max.y, ba.min.y.max(bb.min.y), ba.max.y.min(bb.max.y)),
+        (bbox.min.z, bbox.max.z, ba.min.z.max(bb.min.z), ba.max.z.min(bb.max.z)),
+    ];
+    if !axes.iter().all(|&(min, max, low, high)| min >= low - tol && max <= high + tol) {
+        return Some("not checked: the shared part reaches outside where the two bodies' boxes overlap; the boolean misread this pair".into());
+    }
+    None
 }
 
 /// Each job's answer (in pair order, with the pair's names; `None`: not finished within

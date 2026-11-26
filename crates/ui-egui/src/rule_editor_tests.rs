@@ -5,9 +5,11 @@ use solidcraft_theme::Tokens;
 
 const SHEET_ROWS: &[&str] = &[
     "Rule",
+    "Material",
     "Thickness",
     "K Factor",
     "Bend Radius",
+    "Bend Relief Shape",
     "Relief Width",
     "Relief Depth",
     "Corner Relief Shape",
@@ -37,7 +39,7 @@ fn frame(app: &mut SolveApp, ctx: &egui::Context, kind: &mut Kind, labels: &[&st
     scenario::clear_handles();
     let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
         crate::ui_kit::scope(ui, |ui| match kind {
-            Kind::Sheet(k) => assert!(!crate::dialogs_sheet::rows(app, ui, k, &mut [])),
+            Kind::Sheet(k) => assert!(!crate::dialogs_sheet::rows(app, ui, k, &mut Vec::new())),
             Kind::Plastic(k) => assert!(!crate::dialogs_plastic::rows(app, ui, k, &[])),
             _ => panic!("rule dialog"),
         });
@@ -67,7 +69,7 @@ fn sheet_rule_editor_contract() {
     let (mut kind, _) = crate::dialogs_sheet::start(&app, "sheet.manage_rules").unwrap();
     frame(&mut app, &ctx, &mut kind, SHEET_ROWS);
     let mut expected = json!({"name":"Steel (mm)","active":true,"corner_relief_shape":"notch","thickness":"2.5 mm","k_factor":"0.44",
-        "bend_radius":"Thickness","relief_width":"Thickness","relief_depth":"Thickness * 0.5","corner_relief":"Thickness * 4.0","hem_gap":"0.01 mm","gap":"Thickness","angle_display":"bend"});
+        "bend_radius":"Thickness","relief_width":"Thickness","relief_depth":"Thickness * 0.5","bend_relief_shape":"rectangular","corner_relief":"Thickness * 4.0","hem_gap":"0.01 mm","gap":"Thickness","angle_display":"bend"});
     assert_eq!(commands(&app, &kind), vec![("sheet.manage_rules".into(), expected.clone())]);
     let Kind::Sheet(Sm::Rules { pick, values, relief, .. }) = &mut kind else { panic!() };
     *pick = 1;

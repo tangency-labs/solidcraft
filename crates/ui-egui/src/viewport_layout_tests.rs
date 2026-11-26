@@ -400,7 +400,7 @@ fn host_fit_uses_the_actual_contour_and_model_extent_with_the_full_projection() 
     ];
     let usable = resolve_usable_region(logical_rect(viewport), &obstacles.map(logical_rect)).unwrap();
     assert!(usable.free.iter().any(|piece| egui_rect(*piece).contains(pos2(100.0, 700.0))), "the short-panel gap is part of the retained contour");
-    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Cube] {
+    for style in [crate::prefs::NavigatorStyle::Axes] {
         let navigation = bar_rect(viewport);
         let layout = Layout::host(viewport, &usable, style, egui::Vec2::ZERO, navigation);
         assert_eq!(layout.viewport, viewport);
@@ -446,6 +446,102 @@ fn host_fit_uses_the_actual_contour_and_model_extent_with_the_full_projection() 
             }
         }
     }
+}
+
+#[test]
+fn host_fit_keeps_narrow_parts_centred_across_window_sizes() {
+    use crate::panel_runtime::{egui_rect, logical_rect, resolve_usable_region};
+    use solidcraft_engine::panels::{Point, Size};
+    let bounds = Aabb3 { min: Vec3::new(-8.5, -8.5, 0.0), max: Vec3::new(8.5, 8.5, 40.0) };
+    for size in [vec2(1000.0, 720.0), vec2(1280.0, 720.0), vec2(1474.0, 1009.0), vec2(1896.0, 1030.0)] {
+        let viewport = Rect::from_min_max(pos2(0.0, crate::toolbar::APP_BAR_HEIGHT), pos2(size.x, size.y));
+        for (panels, middle) in [
+            (vec![], viewport.center()),
+            (vec![Rect::from_min_size(viewport.min, vec2(260.0, viewport.height()))], pos2((260.0 + size.x) * 0.5, viewport.center().y)),
+            (
+                vec![
+                    Rect::from_min_max(viewport.min, pos2(size.x, 130.0)),
+                    Rect::from_min_size(pos2(0.0, 130.0), vec2(260.0, 220.0)),
+                    Rect::from_min_max(pos2(0.0, size.y - 50.0), viewport.max),
+                ],
+                // The room beside a short Browser spans two free sweep pieces.
+                pos2((260.0 + size.x) * 0.5, (130.0 + size.y - 50.0) * 0.5),
+            ),
+            (
+                // The same left dock split into enough panels to use the bounded search fallback.
+                (0..18)
+                    .map(|i| {
+                        Rect::from_min_max(
+                            pos2(0.0, viewport.top() + viewport.height() * i as f32 / 18.0),
+                            pos2(260.0, viewport.top() + viewport.height() * (i + 1) as f32 / 18.0),
+                        )
+                    })
+                    .collect(),
+                pos2((260.0 + size.x) * 0.5, viewport.center().y),
+            ),
+        ] {
+            let usable = resolve_usable_region(logical_rect(viewport), &panels.iter().copied().map(logical_rect).collect::<Vec<_>>()).unwrap();
+            let bar = bar_rect(viewport);
+            let navigation = usable
+                .place_footprint(
+                    Size { width: bar.width(), height: bar.height() },
+                    Point { x: bar.center().x, y: bar.center().y },
+                    solidcraft_theme::Tokens::get().space_4,
+                )
+                .unwrap();
+            let layout = Layout::host(viewport, &usable, crate::prefs::NavigatorStyle::Axes, egui::Vec2::ZERO, egui_rect(navigation));
+            assert!(layout.navigation.is_positive() && layout.axis_view.is_positive());
+            for view in [StandardView::Front, StandardView::Iso] {
+                for fov in [0.0, 0.6] {
+                    let mut camera = Camera::default();
+                    camera.set_view(view);
+                    let fitted = fit_host_bounds(camera, &bounds, &layout, &usable, fov, 1.0).unwrap();
+                    let effective = Camera { fov, ..fitted };
+                    let radius = (bounds.diagonal() + bounds.center().dist(fitted.target)).max(effective.half_height() * 2.0).max(10.0);
+                    let project = |point| {
+                        let (x, y, _) = effective.to_screen(point, f64::from(viewport.width()), f64::from(viewport.height()), radius).unwrap();
+                        pos2(viewport.left() + x as f32, viewport.top() + y as f32)
+                    };
+                    let centre = project(bounds.center());
+                    assert!(centre.distance(middle) < 0.01, "{size:?}, panels={panels:?}, {view:?}, fov={fov}: {centre:?} vs {middle:?}");
+                    assert!(framing_centre(camera, &bounds, &layout).unwrap().distance(centre) < 0.01, "Fit and navigation use the same centre");
+                    let projection = host_projection_layout(&layout, &usable, viewport).unwrap();
+                    assert_eq!(
+                        fit_host_bounds(camera, &bounds, &projection, projection.usable.as_ref().unwrap(), fov, 1.0).unwrap(),
+                        fitted,
+                        "baking controls into the projection must retain the panel-only centre"
+                    );
+                    let mut footprint = Rect::NOTHING;
+                    for x in [bounds.min.x, bounds.max.x] {
+                        for y in [bounds.min.y, bounds.max.y] {
+                            for z in [bounds.min.z, bounds.max.z] {
+                                footprint.extend_with(project(Vec3::new(x, y, z)));
+                            }
+                        }
+                    }
+                    assert!(
+                        layout.usable.as_ref().unwrap().contains_rect(logical_rect(footprint.expand(solidcraft_theme::Tokens::get().space_8 - 0.01)))
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn host_fit_finds_other_room_when_a_control_covers_the_panel_centre() {
+    use crate::panel_runtime::{logical_rect, resolve_usable_region};
+    let viewport = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 720.0));
+    let usable = resolve_usable_region(logical_rect(viewport), &[]).unwrap();
+    let confirm = Rect::from_center_size(viewport.center(), vec2(120.0, 80.0));
+    let layout = Layout::host_with_retained_confirm(viewport, &usable, crate::prefs::NavigatorStyle::Axes, confirm, Rect::NOTHING, false);
+    let bounds = Aabb3 { min: Vec3::new(-8.5, -8.5, 0.0), max: Vec3::new(8.5, 8.5, 40.0) };
+    let mut camera = Camera::default();
+    camera.set_view(StandardView::Front);
+    let room = host_framing_room(camera, &bounds, &layout, &usable).expect("a covered centre still leaves fitting room elsewhere");
+    assert!(layout.usable.as_ref().unwrap().contains_rect(logical_rect(room.expand(solidcraft_theme::Tokens::get().space_8 - 0.01))));
+    assert!(!confirm.contains(room.center()));
+    assert!(fit_host_bounds(camera, &bounds, &layout, &usable, 0.0, 1.0).is_some());
 }
 
 #[test]
@@ -690,7 +786,7 @@ fn fit_home_animation_and_manual_takeover_use_one_layout_solution() {
 #[test]
 fn measured_navigator_targets_home_and_drag_work_beside_the_palette_at_hidpi() {
     for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
-        for style in crate::prefs::NavigatorStyle::ALL {
+        for style in [crate::prefs::NavigatorStyle::Axes] {
             for (scale, width, height) in [(1.0, 900.0, 720.0), (2.0, 700.0, 475.0), (2.0, 700.0, 385.0)] {
                 let mut h = Harness::new();
                 h.call("ui.set", json!({"layout":mode}));
@@ -723,25 +819,13 @@ fn measured_navigator_targets_home_and_drag_work_beside_the_palette_at_hidpi() {
                 let usable = crate::shell::host_usable(&h.app).unwrap();
                 assert!(usable.contains_rect(crate::panel_runtime::logical_rect(outer)));
                 assert!(!layout.navigation.intersect(outer).is_positive());
-                // Custom without a body draws the cube.
-                if style != crate::prefs::NavigatorStyle::Axes {
-                    let front = crate::scenario::handle_at("navigation_cube:front").unwrap();
-                    assert!(outer.contains(front));
-                    let up = crate::scenario::handle_at("navigation_cube:control:up").unwrap();
-                    h.call("ui.click", json!({"x":up.x,"y":up.y}));
-                    assert!(h.app.cam.back().dist(Vec3::Z) < 1e-5);
-                    let top = crate::scenario::handle_at("navigation_cube:top").unwrap();
-                    h.call("ui.click", json!({"x":top.x,"y":top.y}));
-                    assert!(h.app.cam.back().dist(Vec3::Z) < 1e-5);
-                } else {
-                    let z = crate::scenario::handle_at("axis_view:z").unwrap();
-                    assert!(outer.contains(z));
-                    h.call("ui.click", json!({"x":z.x,"y":z.y}));
-                    assert!(h.app.cam.back().dist(Vec3::Z) < 1e-5);
-                    let z = crate::scenario::handle_at("axis_view:z").unwrap();
-                    h.call("ui.click", json!({"x":z.x,"y":z.y}));
-                    assert!(h.app.cam.back().dist(-Vec3::Z) < 1e-5);
-                }
+                let z = crate::scenario::handle_at("axis_view:z").unwrap();
+                assert!(outer.contains(z));
+                h.call("ui.click", json!({"x":z.x,"y":z.y}));
+                assert!(h.app.cam.back().dist(Vec3::Z) < 1e-5);
+                let z = crate::scenario::handle_at("axis_view:z").unwrap();
+                h.call("ui.click", json!({"x":z.x,"y":z.y}));
+                assert!(h.app.cam.back().dist(-Vec3::Z) < 1e-5);
                 h.call("ui.view", json!({"view":"front"}));
                 h.app.viewport.nav = Some(crate::viewport::NavMode::Pan);
                 let before = h.app.cam;
@@ -762,6 +846,138 @@ fn measured_navigator_targets_home_and_drag_work_beside_the_palette_at_hidpi() {
                 assert_eq!(h.app.session.undo.len(), undo);
                 assert!(h.app.session.selection.is_empty());
             }
+        }
+    }
+}
+
+#[test]
+fn turn_around_button_reverses_the_view_and_can_restore_the_old_navigator() {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
+        for (width, height, scale) in [(1280, 720, 1.0), (720, 480, 1.0), (1000, 720, 1.5)] {
+            let mut h = Harness::new();
+            h.call("ui.set", json!({"layout":mode}));
+            h.call("ui.resize", json!({"width":width,"height":height}));
+            h.call("ui.prefs", json!({"navigator_style":"axes","navigator_fit":false,"look_at_anim":false,"ui_scale":scale}));
+            let before = Camera { yaw: 0.8, pitch: 0.6, roll: 0.4, distance: 123.0, target: Vec3::new(4.0, 5.0, 6.0), ..Default::default() };
+            h.app.cam = before;
+            h.frames(2);
+            let document = h.app.session.doc.to_json();
+            let undo = h.app.session.undo.len();
+            let turn = crate::scenario::rect_of("axis_view:turn_around").unwrap();
+            let outer = crate::scenario::rect_of("axis_view:outer").unwrap();
+            let home = crate::scenario::rect_of("axis_view:home").unwrap();
+            assert!(outer.contains_rect(turn) && !turn.intersects(home));
+            h.call("ui.move", json!({"x":turn.center().x,"y":turn.center().y}));
+            assert_eq!(h.output.cursor_icon, egui::CursorIcon::PointingHand);
+            h.call("ui.click", json!({"x":turn.center().x,"y":turn.center().y}));
+            assert!(h.app.cam.back().dist(-before.back()) < 1e-9);
+            assert!(h.app.cam.basis().1.dist(before.basis().1) < 1e-9);
+            assert_eq!((h.app.cam.target, h.app.cam.distance, h.app.cam.fov), (before.target, before.distance, before.fov));
+            h.call("ui.click", json!({"x":turn.center().x,"y":turn.center().y}));
+            assert!(h.app.cam.back().dist(before.back()) < 1e-9 && h.app.cam.basis().0.dist(before.basis().0) < 1e-9);
+            assert_eq!(h.app.session.doc.to_json(), document);
+            assert_eq!(h.app.session.undo.len(), undo);
+            assert!(h.app.session.selection.is_empty());
+            h.call("ui.prefs", json!({"navigator_turn_around":false}));
+            assert!(crate::scenario::rect_of("axis_view:turn_around").is_none());
+            assert_eq!(crate::scenario::rect_of("axis_view:home"), Some(home), "hiding the new button restores the old layout");
+        }
+    }
+}
+
+#[test]
+fn turn_around_clicks_compose_with_the_animation_target_and_keep_fitting_and_locks() {
+    let mut h = Harness::new();
+    h.call("ui.prefs", json!({"navigator_fit":false,"look_at_anim":true}));
+    let before = Camera { yaw: 0.8, pitch: 0.6, roll: 0.4, distance: 123.0, ..Default::default() };
+    h.app.cam = before;
+    h.frames(2);
+    let at = crate::scenario::handle_at("axis_view:turn_around").unwrap();
+    let tap = |h: &mut Harness| {
+        for pressed in [true, false] {
+            h.frame_with(crate::test_support::pointer(at, pressed));
+        }
+    };
+    tap(&mut h);
+    let first = h.app.cam_anim.unwrap();
+    assert!(first.is_screen_up_turn() && first.to.back().dist(-before.back()) < 1e-9);
+    tap(&mut h);
+    let second = h.app.cam_anim.unwrap();
+    assert!(second.is_screen_up_turn() && second.to.back().dist(before.back()) < 1e-9, "a second quick click reverses the pending view");
+    h.settle();
+    assert!(h.app.cam.back().dist(before.back()) < 1e-9);
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    h.app.preferences.navigator_fit = true;
+    h.app.run("view.navigate", json!({"camera":before,"action":"turn_around","fit":true})).unwrap();
+    assert!(h.app.pending_fit.is_some());
+    h.frame();
+    assert!(h.app.pending_fit.is_none());
+    assert!(h.app.cam_anim.unwrap().is_screen_up_turn(), "the measured fit retains the turn's interpolation");
+    h.settle();
+    assert_navigator_shared_zoom(&h.app, h.app.cam);
+    h.app.ui.view_angles_lock_yaw = true;
+    h.app.ui.view_angles_lock_pitch = true;
+    h.app.ui.view_angles_lock_roll = true;
+    let locked = h.app.cam;
+    h.app.run("view.navigate", json!({"camera":locked,"action":"turn_around"})).unwrap();
+    h.settle();
+    assert!(h.app.cam.back().dist(locked.back()) < 1e-9 && h.app.cam.basis().1.dist(locked.basis().1) < 1e-9);
+}
+
+#[test]
+fn turn_around_is_only_offered_to_the_focused_tiled_view() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width":1600,"height":1100}));
+    h.call("ui.prefs", json!({"navigator_style":"axes","navigator_turn_around":true,"navigator_fit":false,"look_at_anim":true}));
+    let first = h.app.docs.views.active().id;
+    assert_eq!(crate::documents::view_layout(&mut h.app, solidcraft_views::Preset::SideBySide), 2);
+    let other = h.app.docs.views.tiles().unwrap().views().into_iter().find(|id| *id != first).unwrap();
+    for focused in [first, other] {
+        if h.app.docs.views.active().id != focused {
+            assert!(crate::documents::focus_view(&mut h.app, focused));
+        }
+        h.frames(2);
+        assert_eq!(h.app.viewport.cards.len(), 1);
+        assert_eq!(crate::scenario::handles("axis_view:home").len(), 2, "both views draw their compass");
+        let chips = crate::scenario::handles("axis_view:turn_around");
+        assert_eq!(chips.len(), 1, "only the focused view offers the animated turn");
+        let at = chips[0].1;
+        assert!(h.app.viewport.rect.unwrap().contains(at));
+        assert!(h.app.viewport.cards.iter().all(|(_, rect)| !rect.contains(at)));
+        let unfocused = if focused == first { other } else { first };
+        let untouched = h.app.docs.views.get(unfocused).unwrap().spec.unwrap().camera;
+        let before = h.app.cam;
+        for pressed in [true, false] {
+            h.frame_with(crate::test_support::pointer(at, pressed));
+        }
+        let animation = h.app.cam_anim.expect("the focused view retains its turn animation");
+        assert!(animation.is_screen_up_turn());
+        assert!(animation.to.back().dist(-before.back()) < 1e-9);
+        h.settle();
+        assert!(h.app.cam.back().dist(-before.back()) < 1e-9);
+        assert!(h.app.cam.basis().1.dist(before.basis().1) < 1e-9);
+        assert_eq!(h.app.docs.views.get(unfocused).unwrap().spec.unwrap().camera, untouched);
+    }
+}
+
+#[test]
+fn screen_up_policy_leaves_other_view_animations_unchanged() {
+    use crate::SolveApp;
+    use solidcraft_viewport::{CameraAnim, ease_in_out};
+    let from = Camera { roll: 0.4, ..Default::default() };
+    let mut to = from;
+    to.rotate_in_view(Vec3::new(0.0, 0.8, 0.0));
+    let generic = CameraAnim::new(from, to, 0.0);
+    assert!(!generic.is_screen_up_turn());
+    for fraction in [0.0, 0.2, 0.5, 0.8] {
+        assert_eq!(generic.sample(generic.duration * fraction).0, Camera::interpolate(&from, &to, ease_in_out(fraction)));
+    }
+    for to in [Camera { up: solidcraft_viewport::UpAxis::Y, ..to }, Camera { roll: to.roll + 0.3, ..to }, Camera { yaw: f64::NAN, ..to }] {
+        let fallback = SolveApp::screen_up_turn(CameraAnim::new(from, to, 0.0));
+        assert!(!fallback.is_screen_up_turn(), "different or invalid screen-up directions keep the ordinary path");
+        if to.is_valid() {
+            assert_eq!(fallback.sample(fallback.duration * 0.4).0, Camera::interpolate(&from, &to, ease_in_out(0.4)));
         }
     }
 }
@@ -854,12 +1070,12 @@ fn opening_different_command_dialogs_keeps_measured_navigation_usable() {
 }
 
 /// OK and Cancel in the view's corner (#6709): the pair holds the content's top right corner and
-/// the axis view or cube moves down below it, clear of the pair and the navigation bar; without
+/// the axis view moves down below it, clear of the pair and the navigation bar; without
 /// the pair (or without room for it) nothing moves.
 #[test]
 fn the_corner_pair_takes_the_top_right_and_the_view_navigator_moves_below_it() {
     let corner = vec2(92.0, 48.0);
-    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Cube] {
+    for style in [crate::prefs::NavigatorStyle::Axes] {
         for (width, height) in [(1400.0, 900.0), (700.0, 450.0), (310.0, 240.0), (160.0, 160.0), (90.0, 50.0)] {
             let vp = Rect::from_min_size(pos2(20.0, 30.0), vec2(width, height));
             let content = Rect::from_min_max(pos2(vp.left() + width * 0.25, vp.top()), vp.max);
@@ -1071,7 +1287,7 @@ fn a_fit_centres_the_model_in_the_view_and_is_moved_only_by_panels() {
         let (x, y, _) = cam.to_screen(p, f64::from(viewport.width()), f64::from(viewport.height()), radius).unwrap();
         pos2(viewport.left() + x as f32, viewport.top() + y as f32)
     };
-    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Cube] {
+    for style in [crate::prefs::NavigatorStyle::Axes] {
         // The compass and the navigation bar, and nothing else.
         let bare = layout(viewport, &[], 1.0, style, true);
         let cam = fit_bounds(Camera::default(), &bounds, &bare, 0.0).expect("framed");

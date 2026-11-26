@@ -38,7 +38,7 @@ path lighting can carry BSDF-sampled diffuse emission, without mesh-emitter
 next-event sampling. The primary background
 retains its original display color.
 
-At most 32 emitter slots and 256 bytes per exact body name are admitted, including
+At most 32 emitter slots and 512 bytes per exact body name (`MAX_BODY_NAME_BYTES`) are admitted, including
 original capacities. The host Record owns a request-metadata lease in the existing
 512 MiB pool independently of PNG retention. Task copies and prepared terms enter
 the checked combined 384 MiB job limit before reservations. Per-hit binding checks

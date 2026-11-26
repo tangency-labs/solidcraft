@@ -17,7 +17,7 @@
 //! ([`keeps_contract`]); one outside it is a harness error.
 //!
 //! **`GetPointsInFace` with more than one point** draws its V dither from
-//! `srand(time(NULL))` / `rand()` upstream and from `kernel.rng` in the port
+//! `srand(time(NULL))` / `rand()` upstream and from the call's own seeded generator in the port
 //! (`plan/findings.md`); such cases record what does not depend on the draw: the
 //! point count, the U values and, on a rectangular face, each V's grid slot
 //! (`round(v / dVInc)`, the dither being under half a slot).
@@ -1491,7 +1491,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     if !keeps_contract(Op::Export, &path, &block, None) {
         return Err(harness(format!("export: {CONTRACT}")));
     }
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let (mut b, c) = match own_brep(&mut k, brep, &path, i.validate_only, i.init_gaps)? {
         Ok(x) => x,
         Err(o) => return Ok(o),
@@ -1533,7 +1533,7 @@ fn fix_returns_early(dist: f64, dom: &Extent2d) -> bool {
 #[allow(clippy::too_many_lines)]
 fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
     use solidcore::topology::edgeuse::p1 as eu1;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let fid = |x: i64| FaceId::from_index(x as u32);
     let eid = |x: i64| EdgeuseId::from_index(x as u32);
     let mut o = Vec::new();
@@ -1734,6 +1734,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
                 Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => return Ok(vec![NULL_DEREF]),
                 Err(e) => o.extend([status_of(e)?, 0.0]),
             }
+            crate::dump::body(&k, "uv_trims", b);
             put_curve(&mut o, uv_of(b, Some(cur))?.as_ref())?;
             put_curve(&mut o, uv_of(b, Some(p))?.as_ref())?;
         }
@@ -1847,9 +1848,7 @@ fn run_rust_geom(op: &OpIn) -> Result<Vec<f64>, Fail> {
         } => {
             let mut a = Point2::new(uv1[0], uv1[1]);
             let mut s = Vec2::new(shift[0], shift[1]);
-            let k = Kernel::default();
             let r = fp2::check_seam_crossing(
-                &k,
                 &mut a,
                 Point2::new(uv2[0], uv2[1]),
                 &Extent2d::from_bounds(dom[0], dom[1], dom[2], dom[3]),
@@ -1880,7 +1879,7 @@ fn run_rust_geom(op: &OpIn) -> Result<Vec<f64>, Fail> {
             }
             let s = rust_surface(surface)?;
             let l = fp2::PrecisePropertyLayout::new(*flags);
-            let k = Kernel::default();
+            let k = crate::runner_kernel();
             let e = fp2::OdeIsoCurveLength::new(&k, &s, *u, Vec3::new(origin[0], origin[1], origin[2]), *thickness, &l);
             let mut d = vec![7.0; *n];
             let r = e.evaluate(*t, &mut d);
@@ -1906,7 +1905,7 @@ fn run_rust_geom(op: &OpIn) -> Result<Vec<f64>, Fail> {
             let s = rust_surface(surface)?;
             let c = rust_curve(curve)?;
             let l = fp2::PrecisePropertyLayout::new(*flags);
-            let k = Kernel::default();
+            let k = crate::runner_kernel();
             let e = fp2::OdeArea {
                 kernel: &k,
                 surface: &s,
@@ -2175,7 +2174,7 @@ fn lacks_kind(i: &Inputs) -> bool {
     let (Some(brep), Ok(path)) = (&i.brep, path_of(i)) else {
         return false;
     };
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     own_brep(&mut k, brep, &path, i.validate_only, i.init_gaps)
         .is_ok_and(|b| b.is_ok_and(|(_, c)| resolve(&i.op, &counts_of(c)).is_err()))
 }
@@ -2214,6 +2213,62 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
 
+    /// The pole point on `sphere.smb` that `topology.face_p2` (`state[4..7]`) and
+    /// `topology.brep_p4` (`faces_values[9..12]`) record lies on the file's sphere (radius 5
+    /// about the origin) to `2.7e-15`, enclosed: `||p| - 5| = (|p|^2 - 25) / (|p| + 5)`, the
+    /// numerator summed exactly from exact squares, the rest in interval arithmetic. The
+    /// pole normal (`state[7..10]`) is the radial direction `p / |p|`, each component within
+    /// `gamma_5` (its rounding, at most 1 in magnitude).
+    #[test]
+    fn sphere_pole_points_lie_on_the_sphere() {
+        use crate::case::regression_case;
+        use crate::interval::{exact_sum, gamma_up, two_prod, Iv};
+        let off_sphere = |p: [f64; 3]| {
+            let mut terms: Vec<f64> = p
+                .iter()
+                .flat_map(|&c| <[f64; 2]>::from(two_prod(c, c)))
+                .collect();
+            terms.push(-25.0);
+            let [x, y, z] = p.map(Iv::exact);
+            let r = x.mul(x).add(y.mul(y)).add(z.mul(z)).sqrt();
+            exact_sum(&terms).div(r.add(Iv::exact(5.0))).mag()
+        };
+        let run = |runner: &dyn UnitDiff, case: &str| {
+            let out = runner
+                .run_rust(&regression_case(runner, case))
+                .expect("the run");
+            assert!(out.error.is_none(), "{case}: {:?}", out.error);
+            out
+        };
+        let mut points = Vec::new();
+        for case in [
+            "extra01050",
+            "points_file_sphere.smb_0",
+            "points_file_sphere.smb_1",
+            "points_file_sphere.smb_2",
+        ] {
+            let state = &run(&Runner, case).values["state"];
+            let p = [state[4], state[5], state[6]];
+            points.push((case, p));
+            let r = (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt();
+            for i in 0..3 {
+                let (n, radial) = (state[7 + i], p[i] / r);
+                assert!(
+                    (n - radial).abs() <= gamma_up(5),
+                    "{case}: normal[{i}] {n:e} against the radial {radial:e}"
+                );
+            }
+        }
+        for case in ["gen0000", "gen0009", "gen0042", "gen0043", "gen0142"] {
+            let faces = &run(&crate::units::topology_brep_p4::Runner, case).values["faces_values"];
+            points.push((case, [faces[9], faces[10], faces[11]]));
+        }
+        for (case, p) in points {
+            let off = off_sphere(p);
+            assert!(off < 2.7e-15, "{case}: {p:?} is {off:e} off the sphere");
+        }
+    }
+
     /// Nightly fuzz case `topology.face_p2/fuzz00020` (run 41040730716): a non-rational face
     /// surface (weights the marker `-f64::MAX`) with one weight set to 1, under a `best_uv`
     /// op, is refused instead of building the face on those weights.
@@ -2222,6 +2277,257 @@ mod tests {
         let i: Inputs = serde_json::from_str(FUZZ00020).unwrap();
         let rust = run_rust(&i).unwrap_err().to_string();
         assert_eq!(rust, format!("export: {CONTRACT}"));
+    }
+
+    /// The 130 `GetPointsInFace` rows the WR-86 fix moved (the expectations commit of
+    /// the flag's retirement).
+    const POINTS_MOVED: [&str; 130] = [
+    "extra00023", "extra00034", "extra00056", "extra00073", "extra00094", "extra00103",
+    "extra00115", "extra00128", "extra00135", "extra00138", "extra00156", "extra00170",
+    "extra00207", "extra00224", "extra00242", "extra00250", "extra00295", "extra00387",
+    "extra00416", "extra00449", "extra00471", "extra00496", "extra00529", "extra00541",
+    "extra00548", "extra00557", "extra00601", "extra00634", "extra00641", "extra00666",
+    "extra00688", "extra00710", "extra00734", "extra00755", "extra00775", "extra00776",
+    "extra00798", "extra00815", "extra00875", "extra00879", "extra00919", "extra00944",
+    "extra00950", "extra00951", "extra00954", "extra00978", "extra00993", "extra01014",
+    "extra01018", "extra01019", "extra01050", "extra01062", "extra01129", "extra01136",
+    "extra01139", "extra01141", "extra01145", "extra01170", "extra01190", "extra01211",
+    "extra01219", "extra01252", "extra01260", "extra01287", "extra01299", "extra01360",
+    "extra01386", "extra01404", "extra01439", "extra01452", "gen0010", "points_bss_1",
+    "points_bss_2", "points_bss_5", "points_bss_huge_1", "points_bss_huge_2", "points_bss_huge_5",
+    "points_bss_pinched_1", "points_bss_pinched_2", "points_bss_pinched_5", "points_bss_sub_1",
+    "points_bss_sub_100", "points_bss_sub_2", "points_bss_sub_30", "points_bss_sub_31",
+    "points_bss_sub_5", "points_bss_tiny_1", "points_bss_tiny_2", "points_bss_tiny_5",
+    "points_dom_above_eff_zero_1", "points_dom_above_eff_zero_4", "points_dom_huge_1",
+    "points_dom_huge_4", "points_dom_negative_1", "points_dom_negative_4", "points_dom_offset_1",
+    "points_dom_offset_4", "points_file_cone.smb_0", "points_file_cone.smb_1",
+    "points_file_cone.smb_2", "points_file_plane_square.smb_0", "points_file_plane_square.smb_1",
+    "points_file_plane_square.smb_2", "points_file_sphere.smb_0", "points_file_sphere.smb_1",
+    "points_file_sphere.smb_2", "points_file_torus.smb_0", "points_file_torus.smb_1",
+    "points_file_torus.smb_2", "points_file_toruswvy.smb_0", "points_file_toruswvy.smb_1",
+    "points_file_toruswvy.smb_2", "points_file_vase_rev.smb_0", "points_file_vase_rev.smb_1",
+    "points_file_vase_rev.smb_2", "points_plane_1", "points_plane_100", "points_plane_2",
+    "points_plane_30", "points_plane_31", "points_plane_5", "points_plane_box_side_1",
+    "points_plane_box_side_2", "points_plane_box_side_5", "points_plane_tilted_1",
+    "points_plane_tilted_100", "points_plane_tilted_2", "points_plane_tilted_30",
+    "points_plane_tilted_31", "points_plane_tilted_5",
+    ];
+
+    /// The `GetPointsInFace` cases on a rectangularly trimmed face that sample (status 0,
+    /// a positive count): every one of them is certified below.
+    const POINTS_RECTANGULAR: usize = 171;
+
+    /// glibc's `RAND_MAX`, as `topology::face::p2`'s `rand_dither` draws against it.
+    const RAND_MAX: f64 = 2_147_483_647.0;
+
+    /// Certificate for the `GetPointsInFace` rows on rectangularly trimmed faces (WR-86):
+    /// every such case of the unit (fixtures and the generated extras) is rebuilt as
+    /// [`run_rust`] builds it, sampled again on the same default kernel, and each point is
+    /// checked against the closed-form grid: column `c` of `n' = min(count, 30)` at
+    /// `u = umin + (c + 1) L_u / (n' + 1)`, row `j` of `J` at `v = vmin + (j + 1) L_v /
+    /// (J + 1)` plus a dither of at most `(RAND_MAX - floor(RAND_MAX / 2)) / (1.2
+    /// RAND_MAX)` of a row (none for one point), each to its rounding, so every point lies
+    /// strictly inside the face's UV domain. The case's recorded row must be this sample's
+    /// projection, its 3D points and normals the surface's there. The certified cases must
+    /// be exactly the [`POINTS_RECTANGULAR`] such cases, each with a committed golden row,
+    /// and include every row of [`POINTS_MOVED`].
+    #[test]
+    fn rectangular_face_points_are_the_domain_grid() {
+        use solidcore::nurbs::knots::Side;
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        let golden = std::fs::read_to_string(
+            crate::case::repo_root().join("crates/goldens/expected/topology.face_p2.jsonl"),
+        )
+        .unwrap();
+        let golden: std::collections::BTreeSet<String> = golden
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter_map(|v| v.get("case")?.as_str().map(str::to_string))
+            .collect();
+        // the dither's largest size in rows, and its rounding (the draw's floor is exact;
+        // the subtraction, the product and the quotient round)
+        let half = (RAND_MAX / 2.0).floor();
+        let dither = (RAND_MAX - half).max(half) / (1.2 * RAND_MAX) * (1.0 + 4.0 * f64::EPSILON);
+        let mut covered = std::collections::BTreeSet::new();
+        for case in &cases {
+            let name = &case.name;
+            let i: Inputs = case.parse().unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            let OpIn::Points { .. } = &i.op else {
+                continue;
+            };
+            let out = run_rust(&i).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            // a refused sample (a status, no state) has no grid to check
+            let Some(row) = out.values.get("state").cloned() else {
+                continue;
+            };
+            let mut k = crate::runner_kernel();
+            let brep = i.brep.as_ref().unwrap();
+            let path = path_of(&i).unwrap();
+            let (mut b, c) = own_brep(&mut k, brep, &path, i.validate_only, i.init_gaps)
+                .unwrap()
+                .unwrap_or_else(|_| panic!("{name}: the B-rep run_rust built is refused"));
+            let Ok(OpIn::Points { f, count, dom }) = resolve(&i.op, &counts_of(c)) else {
+                panic!("{name}: the op run_rust resolved is refused");
+            };
+            let fid = FaceId::from_index(f as u32);
+            if let Some(d) = dom {
+                fp2::set_uv_domain(&mut b, fid, &Extent2d::from_bounds(d[0], d[1], d[2], d[3]))
+                    .unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            }
+            let face = b.face(fid).unwrap().clone();
+            // deliberate skips: another face (the unchanged trimmed branch), a status, or
+            // nothing to sample
+            if face.rectangular_trim != 1 || row.first().copied() != Some(0.0) || count == 0 {
+                continue;
+            }
+            let mut k = crate::runner_kernel();
+            let r = fp2::points_in_face(&mut k, &mut b, fid, count).unwrap();
+            assert_eq!(r.uv.len() as u64, count, "{name}: point count");
+            let (u_ivl, v_ivl) = (face.uv_domain.u_interval(), face.uv_domain.v_interval());
+            let (umin, vmin, lu, lv) = (u_ivl.min(), v_ivl.min(), u_ivl.length(), v_ivl.length());
+            let cols = count.min(30);
+            let rows = count.div_ceil(cols);
+            let du = lu / (cols + 1) as f64;
+            let dv = lv / (rows + 1) as f64;
+            let eps = f64::EPSILON;
+            for (p, uv) in r.uv.iter().enumerate() {
+                let (col, j) = (p as u64 / rows, p as u64 % rows);
+                let u_want = umin + (col + 1) as f64 * du;
+                // the sampler and u_want each round once in the product and once in the
+                // sum (the shared increment's rounding cancels), each within eps of a
+                // magnitude below |umin| + L_u
+                let u_slack = 4.0 * eps * (umin.abs() + lu);
+                assert!(
+                    (uv.x - u_want).abs() <= u_slack,
+                    "{name}: point {p} u {} not {u_want}",
+                    uv.x
+                );
+                // likewise 2 roundings in the sampler's row and 2 in v_centre, plus the
+                // dither's product and its addition
+                let v_centre = vmin + (j + 1) as f64 * dv;
+                let v_slack = if count > 1 { dither * dv } else { 0.0 }
+                    + 6.0 * eps * (vmin.abs() + lv);
+                assert!(
+                    (uv.y - v_centre).abs() <= v_slack,
+                    "{name}: point {p} v {} not within {v_slack} of {v_centre}",
+                    uv.y
+                );
+                assert!(
+                    uv.x > umin && uv.x < umin + lu && uv.y > vmin && uv.y < vmin + lv,
+                    "{name}: point {p} {uv:?} outside the domain"
+                );
+            }
+            // the recorded row is this sample (its projection for more than one point)
+            let mut body = vec![0.0, r.uv.len() as f64];
+            body.extend(r.uv.iter().flat_map(|p| [p.x, p.y]));
+            body.extend(r.pv.iter().flat_map(|p| [p.x, p.y, p.z]));
+            assert_eq!(project_points(&body, count, &face, dom), row, "{name}: row");
+            // its 3D points and normals are the surface's at those UVs
+            let surf = face.surface.as_ref().unwrap();
+            for (p, uv) in r.uv.iter().enumerate() {
+                let pnt = surf
+                    .evaluate_point(&k, *uv)
+                    .unwrap_or_else(|e| panic!("{name}: point {p}: {e:?}"));
+                assert_eq!(r.pv[2 * p], pnt, "{name}: point {p}");
+                let nrm = surf
+                    .evaluate_normal(&k, *uv, Side::Left, Side::Left)
+                    .unwrap_or_else(|e| panic!("{name}: normal {p}: {e:?}"));
+                assert_eq!(r.pv[2 * p + 1], nrm, "{name}: normal {p}");
+            }
+            assert!(golden.contains(name), "{name}: no committed golden row");
+            covered.insert(name.clone());
+        }
+        println!("POINTS_GRID covered {}: {covered:?}", covered.len());
+        assert_eq!(covered.len(), POINTS_RECTANGULAR);
+        for name in POINTS_MOVED {
+            assert!(covered.contains(name), "{name}: a moved row is not certified");
+        }
+    }
+
+    /// extra00702 (WR-455's contact move, tangency-labs/solidcraft#17404): the internal
+    /// point of a rectangular-trimmed B-spline face over `[0, 1]^2` moves from the face's
+    /// constant-V line `v = 8/21` to its first one, `v = 1/21`: main's lines 1 to 7 met
+    /// the face's interior in no interval, the new row's first line does. PROVEN for both
+    /// points: the surface's `x` depends on `u` alone, strictly increasing (the net's `x`
+    /// is `0.001 i`, so every derivative control point is positive), and its `y` is
+    /// `(1 - N_0(u)) Y(v)` with `Y` strictly increasing (row 0 of the net is the origin,
+    /// the others have `y = 0.001 j`), so at a fixed `u > 0` strictly increasing in `v`;
+    /// bisection finds the `u` with the point's `x`, then the `v` with its `y` there,
+    /// and the surface point there is within 1e-15 of the point (far below the face's
+    /// 1e-5 tolerance), at a `(u, v)` strictly inside the face, at least 0.01 from its
+    /// boundary. Class: equal (both are internal points; the new one is on the first line
+    /// `CalculateAnInternalPoint` tries).
+    #[test]
+    fn wr455_extra00702_internal_point_is_inside_the_face() {
+        let case = crate::case::regression_case(&Runner, "extra00702");
+        let i: Inputs = case.parse().unwrap();
+        let state = run_rust(&i).unwrap().values["state"].clone();
+        let now = Vec3::new(state[1], state[2], state[3]);
+        assert_eq!(state[0], 0.0);
+        assert_eq!(
+            [now.x, now.y, now.z],
+            [5.997_856_171_225_904e-5, 5.011_072_986_310_686e-5, 6.674_095_540_413_089e-5]
+        );
+        let main = Vec3::new(8.501_171_443_409_645e-5, 1.955_087_294_908_429e-4, -2.533_443_274_855_833e-4);
+
+        let mut k = crate::runner_kernel();
+        let path = path_of(&i).unwrap();
+        let (b, _) = own_brep(&mut k, i.brep.as_ref().unwrap(), &path, i.validate_only, i.init_gaps)
+            .unwrap()
+            .unwrap_or_else(|_| panic!("extra00702: no brep"));
+        let faces = solidcore::topology::brep::p1::faces(&b, None).unwrap();
+        assert_eq!(faces.len(), 1);
+        let f = b.face(faces[0]).unwrap();
+        assert_eq!(f.rectangular_trim, 1);
+        assert_eq!(
+            [f.uv_domain.min().x, f.uv_domain.min().y, f.uv_domain.max().x, f.uv_domain.max().y],
+            [0.0, 0.0, 1.0, 1.0]
+        );
+        assert_eq!(f.tolerance, 1e-5);
+        let s = f.surface.as_ref().unwrap();
+
+        // the net: x = 0.001 i; y = 0.001 j, but 0 on row 0 (the degenerate edge)
+        let net = case.inputs["brep"]["surface"]["bspline"]["net"].as_array().unwrap();
+        assert_eq!(net.len(), 4);
+        for (r, row) in net.iter().enumerate() {
+            let row = row.as_array().unwrap();
+            assert_eq!(row.len(), 5);
+            for (c, p) in row.iter().enumerate() {
+                let xyw = [p[0].as_f64().unwrap(), p[1].as_f64().unwrap(), p[3].as_f64().unwrap()];
+                // non-rational (the weight is the `NOW` marker); row 0 is one point, the
+                // origin (the face's `u = 0` edge is degenerate)
+                let y = if r == 0 { 0.0 } else { 0.001 * c as f64 };
+                assert_eq!(xyw, [0.001 * r as f64, y, -f64::MAX], "net ({r}, {c})");
+            }
+        }
+        // the parameter at which the strictly increasing `f` reaches `target`
+        let solve = |f: &dyn Fn(f64) -> f64, target: f64| {
+            let (mut lo, mut hi) = (0.0_f64, 1.0_f64);
+            assert!(f(lo) < target && target < f(hi));
+            for _ in 0..200 {
+                let mid = 0.5 * (lo + hi);
+                if f(mid) < target {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            0.5 * (lo + hi)
+        };
+        let at = |u: f64, v: f64| s.evaluate_point(&k, Point2::new(u, v)).unwrap();
+        for (name, p, line) in [("new", now, 1.0 / 21.0), ("main", main, 8.0 / 21.0)] {
+            let u = solve(&|u| at(u, 0.5).x, p.x);
+            let v = solve(&|v| at(u, v).y, p.y);
+            let d = at(u, v).distance(p);
+            assert!(d <= 1e-15, "{name}: {d:e} from the surface point at ({u}, {v})");
+            let margin = u.min(v).min(1.0 - u).min(1.0 - v);
+            assert!(margin >= 0.01, "{name}: ({u}, {v}) is {margin} from the boundary");
+            assert!((v - line).abs() <= 1e-12, "{name}: v {v} is not the line {line}");
+        }
     }
 
     /// The inputs of nightly fuzz case `topology.face_p2/fuzz00020`.

@@ -13,9 +13,28 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<InsertDesignParams>(), &["name", "parent", "path", "reuse", "translate"]);
-    assert_keys(input_schema_for::<UpdateLinksParams>(), &["component", "components"]);
-    assert_keys(input_schema_for::<RelinkParams>(), &["component", "occurrence", "path"]);
+    assert_keys(
+        input_schema_for::<InsertDesignParams>(),
+        &[
+            "angle",
+            "axis",
+            "configuration",
+            "document",
+            "format",
+            "matrix",
+            "name",
+            "options",
+            "origin",
+            "parent",
+            "path",
+            "reuse",
+            "to_matrix",
+            "tolerance",
+            "translate",
+        ],
+    );
+    assert_keys(input_schema_for::<UpdateLinksParams>(), &["component", "components", "linked_bodies"]);
+    assert_keys(input_schema_for::<RelinkParams>(), &["component", "configuration", "names", "occurrence", "path"]);
     assert_keys(input_schema_for::<BreakLinkParams>(), &["component"]);
     assert_keys(input_schema_for::<LinksParams>(), &[]);
     assert_keys(input_schema_for::<ExtractParams>(), &["component", "path"]);
@@ -32,6 +51,8 @@ fn strict_keeps_todays_errors() {
         ("component.insert_design", json!({"path": 5})),
         ("component.insert_design", json!({"path": null})),
         ("component.insert_design", json!({"path": "x".repeat(4096)})),
+        ("component.insert_design", json!({"document": 5})),
+        ("component.insert_design", json!({"document": ""})),
         ("component.insert_design", json!({"path": "plate.solidcraft", "translate": [1, 2]})),
         ("component.insert_design", json!({"path": "plate.solidcraft", "translate": null})),
         ("component.insert_design", json!({"path": "plate.solidcraft", "translate": [1e9, 0, 0]})),
@@ -85,8 +106,13 @@ fn the_schemas_take_what_the_handlers_read() {
         input_schema_for::<InsertDesignParams>(),
         &[
             (json!({"path": "plate.solidcraft"}), true),
+            (json!({"document": "{\"format\":65}"}), true),
+            (json!({"document": ""}), false),
             (json!({"path": "plate.solidcraft", "name": "P", "parent": "Arm", "translate": [1, 2, 3], "reuse": true}), true),
             (json!({"path": "plate.solidcraft", "parent": 4, "translate": {"x": 1, "y": 2, "z": 3}}), true),
+            (json!({"path": "plate.solidcraft", "axis": [0, 0, 1], "angle": "90 deg"}), true),
+            (json!({"path": "plate.solidcraft", "to_matrix": [1, 0, 0, 10, 0, 1, 0, 20, 0, 0, 1, 30]}), true),
+            (json!({"path": "plate.solidcraft", "matrix": [1, 0, 0, "10 mm", 0, 1, 0, 0, 0, 0, 1, 0]}), true),
             (json!({}), false),
             (json!({"path": "plate.solidcraft", "parent": true}), false),
             (json!({"path": "plate.solidcraft", "translate": [1, 2]}), false),
@@ -108,6 +134,9 @@ fn the_schemas_take_what_the_handlers_read() {
         &[
             (json!({"component": "Plate", "path": "b.solidcraft"}), true),
             (json!({"component": "Plate", "path": "b.solidcraft", "occurrence": 4}), true),
+            (json!({"component": "Plate", "path": "b.solidcraft", "names": "sync"}), true),
+            (json!({"component": "Plate", "path": "b.solidcraft", "names": "keep"}), true),
+            (json!({"component": "Plate", "path": "b.solidcraft", "names": "both"}), false),
             (json!({"component": "Plate", "path": "b.solidcraft", "occurrence": "Plate:2"}), false),
             (json!({"component": "Plate"}), false),
             (json!({"path": "b.solidcraft"}), false),
@@ -131,6 +160,40 @@ fn the_schemas_take_what_the_handlers_read() {
     );
 }
 
+#[test]
+fn configuration_selectors_accept_names_ids_and_null() {
+    for (command, schema, base) in [
+        ("component.insert_design", input_schema_for::<InsertDesignParams>(), json!({"path": "bolt.sc"})),
+        ("component.relink", input_schema_for::<RelinkParams>(), json!({"component": 1, "path": "bolt.sc"})),
+    ] {
+        for (selection, accepted) in [
+            (json!("M6x20"), true),
+            (json!("17"), true),
+            (json!(17), true),
+            (Value::Null, true),
+            (json!(-1), false),
+            (json!(1.5), false),
+            (json!(true), false),
+            (json!([]), false),
+            (json!({}), false),
+        ] {
+            let mut params = base.clone();
+            params["configuration"] = selection;
+            let schema = schema.as_value();
+            assert_eq!(conforms(schema, schema, &params), accepted, "{command}: {params}");
+            let issues = crate::schema::issues(command, &params);
+            assert_eq!(issues.is_empty(), accepted, "{command}: {params}");
+            if !accepted {
+                assert_eq!(issues[0].message, "`configuration` must be a row name, id, or null");
+            }
+        }
+    }
+    let name: InsertDesignParams = serde_json::from_value(json!({"path": "bolt.sc", "configuration": "17"})).unwrap();
+    let id: RelinkParams = serde_json::from_value(json!({"component": 1, "path": "bolt.sc", "configuration": 17})).unwrap();
+    assert_eq!(name.configuration, Some(super::RowRef::Name("17".into())));
+    assert_eq!(id.configuration, Some(super::RowRef::Id(17)));
+}
+
 /// The warning for what a key gets wrong, and the check that a list of components takes only
 /// what the handlers read.
 #[test]
@@ -138,6 +201,17 @@ fn the_check_names_what_is_wrong_with_a_key() {
     let issues = |id: &str, p: Value| crate::schema::issues(id, &p).into_iter().map(|i| i.message).collect::<Vec<_>>();
     assert_eq!(issues("component.insert_design", json!({"path": "p.solidcraft", "translate": [1]})), ["`translate` must be [x, y, z] in mm"]);
     assert_eq!(issues("component.insert_design", json!({"path": "p.solidcraft", "parent": true})), ["`parent` must be a component id or name"]);
+    assert_eq!(
+        issues("component.insert_design", json!({"path": "p.solidcraft", "to_matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0], "translate": [1, 0, 0]})),
+        ["give either to_matrix or translate, not both"]
+    );
+    assert_eq!(
+        issues(
+            "component.insert_design",
+            json!({"path": "p.solidcraft", "matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0], "to_matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]})
+        ),
+        ["give either to_matrix or matrix, not both"]
+    );
     assert_eq!(issues("component.update_links", json!({"component": 1, "components": [1]})), ["give `component` or `components`, not both"]);
     assert_eq!(issues("component.update_links", json!({"components": [true]})), ["`component` must be a component id or name"]);
     assert_eq!(issues("component.replace_with_link", json!({"component": 1})), Vec::<String>::new());

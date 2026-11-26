@@ -184,7 +184,12 @@ fn invalid_sizes_indices_opacity_and_large_work_lists_fail_without_a_frame() {
     }
     let mut body = body;
     Arc::make_mut(&mut body.mesh).triangles.resize(MAX_TRIANGLES as usize + 1, [0, 1, 2]);
-    assert_eq!(ImageTask::new(scene(vec![body]), request(), CancelToken::default()).err().unwrap().code, ErrorCode::LimitExceeded);
+    let error = ImageTask::new(scene(vec![body]), request(), CancelToken::default()).err().unwrap();
+    assert_eq!(error.code, ErrorCode::LimitExceeded);
+    // The message names what is over, how many, the cap and the setting that raises it (#16623).
+    for part in [format!("at least {} triangles", MAX_TRIANGLES + 1), format!("cap of {MAX_TRIANGLES}"), "CPU profile".into()] {
+        assert!(error.message.contains(&part), "{part:?} in {:?}", error.message);
+    }
     assert_eq!(std::mem::size_of::<Draw>(), 16, "admission accounts for each of the three lists");
 }
 

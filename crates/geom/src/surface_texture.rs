@@ -207,7 +207,7 @@ impl Indication {
             // Reject controls, format controls/bidi overrides and non-ASCII whitespace; never trim
             // or normalize the user's process into a different instruction.
             require(
-                process.trim() == process && crate::plain_text::is_plain_line(process),
+                process.trim() == process && crate::plain_text::is_visible_line(process),
                 "process must be plain single-line text without controls or surrounding whitespace",
             )?;
         }
@@ -264,7 +264,9 @@ impl Indication {
                 require(
                     !text.is_empty()
                         && text.len() <= 128
-                        && text.split('\u{202f}').all(|piece| !piece.is_empty() && piece.trim() == piece && crate::plain_text::is_plain_line(piece)),
+                        && text
+                            .split('\u{202f}')
+                            .all(|piece| !piece.is_empty() && piece.trim() == piece && crate::plain_text::is_visible_line(piece)),
                     "formatted limit must be bounded single-line text",
                 )?;
             }

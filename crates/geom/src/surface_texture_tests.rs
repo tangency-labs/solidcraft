@@ -573,11 +573,11 @@ fn preview_refuses_zero_rounded_or_unbounded_limits_without_rejecting_record() {
 #[test]
 fn plain_annotation_policy_rejects_invisible_controls_and_preserves_unicode() {
     for text in ["x\u{200f}y", "x\u{feff}y", "x\u{202e}y", "x\ny"] {
-        assert!(!crate::plain_text::is_plain_line(text));
+        assert!(!crate::plain_text::is_visible_line(text));
         assert!(Indication { process: Some(text.into()), ..iso() }.validate().is_err());
     }
     for text in ["磨削 café", "polissage α", "溶接"] {
-        assert!(crate::plain_text::is_plain_line(text));
+        assert!(crate::plain_text::is_visible_line(text));
         Indication { process: Some(text.into()), ..iso() }.validate().unwrap();
     }
 }
@@ -611,12 +611,12 @@ fn plain_annotation_policy_rejects_text_that_draws_nothing() {
         "\u{0301}a",
         "a\u{fe0f}",
     ] {
-        assert!(!crate::plain_text::is_plain_line(text), "{text:?}");
+        assert!(!crate::plain_text::is_visible_line(text), "{text:?}");
     }
     assert!(Indication { process: Some("\u{3164}".into()), ..iso() }.validate().is_err());
     assert!(Indication { process: Some("\u{3164}drill\u{3164}".into()), ..iso() }.validate().is_err());
     for text in ["e\u{0301}", "क्षत्र", "Ø12 ± 0,1 µm", "№ 5", "磨削 café"] {
-        assert!(crate::plain_text::is_plain_line(text), "{text:?}");
+        assert!(crate::plain_text::is_visible_line(text), "{text:?}");
     }
 }
 

@@ -34,21 +34,14 @@
 //! - **Poles.** `SmSurface::GetSingularities` (unit `surface.surface_p3`) is only
 //!   reached when the point lies on a side of the surface's natural domain and an edge
 //!   use end of the loop does too.
-//! - **Ignored statuses.** Upstream ignores the status of `EvaluatePoint` /
+//! - **Ignored statuses (WR-663).** Upstream ignores the status of `EvaluatePoint` /
 //!   `Evaluate` of the surface and the trim curves and then reads the outputs they did
-//!   not write. For the trim curves (B-splines, whose failed evaluation writes
-//!   nothing) the port does the same: a failed `EvaluatePoint` of the last edge use's
-//!   trim leaves `sLastEndUV` at its `SM_UNDEF_DOUBLE` default, and a failed
-//!   `Evaluate(.., 1, ..)` leaves `sPtDer` as it was (its `SM_UNDEF_DOUBLE` defaults
-//!   for the edge use's first evaluation, else the previous evaluation's point and
-//!   derivative). A trim curve whose basis fails to evaluate (degree 3 with 2 control
-//!   points, from a STEP cylinder band) reaches it. A failed surface `EvaluatePoint`
-//!   still returns its error (no input reaches it). With the opt-in
-//!   `Kernel::fixes.query_statuses_pass_on` (WR-663) a failed evaluation or local solve
-//!   answers `SM_POC_UNKNOWN`, as the fork (tangency-labs/smlib 7a35f33).
-//!   `DropPoint` and `LocalPointSolve` failures are "no answer" (both reset their
-//!   success flag first upstream). [`SolidError::Unported`] from any callee is
-//!   returned.
+//!   not write (`sLastEndUV` at its `SM_UNDEF_DOUBLE` default, `sPtDer` as it was). The
+//!   port answers as the fork does (tangency-labs/smlib 7a35f33): a failed surface or
+//!   trim evaluation or local solve answers `SM_POC_UNKNOWN`. A trim curve whose basis
+//!   fails to evaluate (degree 3 with 2 control points, from a STEP cylinder band)
+//!   reaches it. `DropPoint` failures are "no answer" (it resets its success flag first
+//!   upstream). [`SolidError::Unported`] from any callee is returned.
 //! - `dTol3d` is unused upstream and is kept as `_tol_3d`.
 //! - **Winding hulls.** Not upstream: `WindingHull` bounds every UV point the walk can
 //!   evaluate on a loop, so a caller that only asks whether a point is inside can leave
@@ -158,17 +151,20 @@ fn drop_on_edge(
         SolverOperation::Intersect,
     ) {
         Ok(d) => Ok(d.success.then_some(d.parameter)),
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => Err(e),
         Err(_) => Ok(None),
     }
 }
 
-/// The value of a call whose failure the port returns, or `None` when, with the opt-in
-/// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`], the point is not classified
+/// The value of a call, or `None` when it failed and the point is not classified
 /// (`SM_POC_UNKNOWN`, tangency-labs/smlib 7a35f33). [`SolidError::Unported`] propagates.
-fn or_unknown<T>(k: &Kernel, r: Result<T>) -> Result<Option<T>> {
+fn or_unknown<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
-        Err(e) if k.fixes.query_statuses_pass_on && !e.is_unported_or_cancelled() => Ok(None),
+        Err(e) if !e.is_unported_or_cancelled() => Ok(None),
         r => r.map(Some),
     }
 }
@@ -248,10 +244,9 @@ fn curve_box_reaches(
 }
 
 /// `LocalPointSolve(SM_SO_MINIMIZE)` of the test point on a UV trim curve: whether it
-/// converged and the solution. A failing solve has not converged (its status is
-/// ignored upstream and the flag is reset first); with the opt-in
-/// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`] it classifies nothing
-/// (`Err(())`, the fork's `SM_POC_UNKNOWN`).
+/// converged and the solution. A failing solve classifies nothing (`Err(())`, the
+/// fork's `SM_POC_UNKNOWN`, tangency-labs/smlib 7a35f33; upstream ignores its status
+/// and reads the success flag it resets first).
 fn local_minimize(
     k: &Kernel,
     trim: &Curve,
@@ -267,16 +262,20 @@ fn local_minimize(
     match trim.local_point_solve::<()>(k, interval, SolverOperation::Minimize, point, &opts, guess)
     {
         Ok((true, sol)) => Ok(Ok(Some(sol))),
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
-        Err(_) if k.fixes.query_statuses_pass_on => Ok(Err(())),
-        Ok((false, _)) | Err(_) => Ok(Ok(None)),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => Err(e),
+        Err(_) => Ok(Err(())),
+        Ok((false, _)) => Ok(Ok(None)),
     }
 }
 
 /// The point and unit tangent (in the edge use's direction) of a trim curve at `t`,
 /// with the tangent's length (`1` when below `SM_EFF_ZERO`), evaluated into `pt_der`
-/// (upstream `sPtDer`). A failed evaluation leaves `pt_der` as it was, as upstream
-/// ignores the status of `Evaluate`; with `query_statuses_pass_on` it is the error.
+/// (upstream `sPtDer`). A failed evaluation is the error (upstream ignores the status
+/// of `Evaluate`; the fork passes it on, tangency-labs/smlib 7a35f33).
 fn eval_with_tangent(
     k: &Kernel,
     trim: &Curve,
@@ -284,15 +283,9 @@ fn eval_with_tangent(
     orient: OrientType,
     pt_der: &mut [Vec3; 2],
 ) -> Result<(Point3, Vec3, f64)> {
-    match trim.evaluate(k, t, 1, false, true) {
-        Ok(der) => {
-            for (slot, v) in pt_der.iter_mut().zip(der) {
-                *slot = v;
-            }
-        }
-        Err(e) if e.is_unported_or_cancelled() || k.fixes.query_statuses_pass_on => return Err(e),
-        // status ignored upstream: sPtDer keeps its values
-        Err(_) => {}
+    let der = trim.evaluate(k, t, 1, false, true)?;
+    for (slot, v) in pt_der.iter_mut().zip(der) {
+        *slot = v;
     }
     let [pt, mut tan] = *pt_der;
     if orient == OrientType::Opposite {
@@ -396,7 +389,7 @@ pub(crate) fn contains_uv_point_with_topology(
     let zone_tol = face_rec.tolerance;
 
     let srf_uv_domain = surface.natural_uv_domain_with_nurb(k)?;
-    let Some(point_3d) = or_unknown(k, surface.evaluate_point(k, uv))? else {
+    let Some(point_3d) = or_unknown(surface.evaluate_point(k, uv))? else {
         return Ok(UvContainment::of(PointContainment::Unknown));
     };
     let uv_pt = Point3::new(uv.x, uv.y, 0.0);
@@ -483,14 +476,12 @@ pub(crate) fn contains_uv_point_with_topology(
         let last_trim = eu1::uv_trim_curve(b, last_eu)?
             .0
             .ok_or_else(|| null("ContainsUVPoint: edge use without UV trim curve"))?;
-        // (status ignored upstream: a failed evaluation leaves sLastEndUV undefined)
+        // (status ignored upstream, leaving sLastEndUV undefined; the fork answers
+        // SM_POC_UNKNOWN, tangency-labs/smlib 7a35f33)
         match last_trim.evaluate_point(k, last_end_param) {
             Ok(p) => p,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) if k.fixes.query_statuses_pass_on => {
-                return Ok(UvContainment::of(PointContainment::Unknown));
-            }
-            Err(_) => Vec3::UNDEF,
+            Err(_) => return Ok(UvContainment::of(PointContainment::Unknown)),
         }
     };
     let mut last_end_quad_num = calc_quad_num(uv_pt, last_end_uv);
@@ -554,10 +545,8 @@ pub(crate) fn contains_uv_point_with_topology(
 
         // Eval info for start point of this EU.
         let mut pt_der = [Vec3::UNDEF; 2];
-        let Some((mut prev_uv, mut prev_uv_tan, mut prev_uv_tan_len)) = or_unknown(
-            k,
-            eval_with_tangent(k, trim, prev_param, orient, &mut pt_der),
-        )?
+        let Some((mut prev_uv, mut prev_uv_tan, mut prev_uv_tan_len)) =
+            or_unknown(eval_with_tangent(k, trim, prev_param, orient, &mut pt_der))?
         else {
             return Ok(UvContainment::of(PointContainment::Unknown));
         };
@@ -677,10 +666,8 @@ pub(crate) fn contains_uv_point_with_topology(
                     return Ok(UvContainment::of(PointContainment::Unknown));
                 }
 
-                let Some((uv_at, this_uv_tan, this_uv_tan_len)) = or_unknown(
-                    k,
-                    eval_with_tangent(k, trim, this_param, orient, &mut pt_der),
-                )?
+                let Some((uv_at, this_uv_tan, this_uv_tan_len)) =
+                    or_unknown(eval_with_tangent(k, trim, this_param, orient, &mut pt_der))?
                 else {
                     return Ok(UvContainment::of(PointContainment::Unknown));
                 };
@@ -1298,27 +1285,12 @@ mod tests {
     }
 
     #[test]
-    fn failed_trim_evaluation_keeps_the_previous_derivatives() {
+    fn failed_trim_evaluation_is_returned() {
         let k = Kernel::default();
         let trim = bad_trim();
         assert!(trim.evaluate(&k, 0.0, 1, false, true).is_err());
-        // first evaluation of an edge use: the SM_UNDEF_DOUBLE defaults
-        let mut pt_der = [Vec3::UNDEF; 2];
-        let (pt, tan, len) =
-            eval_with_tangent(&k, &trim, 0.0, OrientType::Same, &mut pt_der).unwrap();
-        assert_eq!(pt, Vec3::UNDEF);
-        assert_eq!(tan, Vec3::UNDEF);
-        assert_eq!(len, 1.0);
-        // a later evaluation: the previous point and derivative
+        // the failure is returned (SM_POC_UNKNOWN at the caller)
         let mut pt_der = [Vec3::new(1.0, 2.0, 0.0), Vec3::new(0.0, 2.0, 0.0)];
-        let (pt, tan, len) =
-            eval_with_tangent(&k, &trim, 0.5, OrientType::Opposite, &mut pt_der).unwrap();
-        assert_eq!(pt, Vec3::new(1.0, 2.0, 0.0));
-        assert_eq!(tan, Vec3::new(0.0, -1.0, 0.0));
-        assert_eq!(len, 2.0);
-        // with the opt-in the failure is returned (SM_POC_UNKNOWN at the caller)
-        let mut k = Kernel::default();
-        k.fixes.query_statuses_pass_on = true;
         assert!(eval_with_tangent(&k, &trim, 0.0, OrientType::Same, &mut pt_der).is_err());
     }
 
@@ -1440,16 +1412,13 @@ mod tests {
     #[test]
     fn issue_2009_unevaluable_trim_is_unknown() {
         // tangency-labs/smlib 7a35f33 (SmLoop::ContainsUVPoint): a trim point that
-        // cannot be evaluated is not classified (SM_POC_UNKNOWN); without the flag the
-        // port ignores the failed evaluation as upstream does (its outputs keep their
-        // values) and classifies on.
+        // cannot be evaluated is not classified (SM_POC_UNKNOWN), where upstream ignores
+        // the failed evaluation (its outputs keep their values) and classifies on.
         let mut b = square(plane(), true, &[]);
         b.edgeuse_mut(EdgeuseId::from_index(3))
             .unwrap()
             .uv_trim_curve = Some(Curve::from(BSplineCurve::new(2)));
-        assert!(contains(&mut b.clone_standing_for_self().unwrap(), [0.0, 0.0]).is_ok());
-        let mut k = Kernel::default();
-        k.fixes.query_statuses_pass_on = true;
+        let k = Kernel::default();
         let r = contains_uv_point(
             &k,
             &mut b,

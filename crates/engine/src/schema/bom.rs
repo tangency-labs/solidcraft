@@ -146,9 +146,13 @@ pub struct ComponentMetadataResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bom_type: Option<String>,
     /// Its static material (what its bill of materials rows say it is made of), or null when it
-    /// has none. Not given for the design.
+    /// has none. The design's own too: a single part holds its material itself.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub material: Option<Option<String>>,
+    /// Its finish, free text ("powder coat, RAL 9005, matt"), or null when it has none. The
+    /// design's own too.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finish: Option<Option<String>>,
     /// What one placement means in a bill of materials, as an expression, or null when it has
     /// none (one piece). Not given for the design.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -239,6 +243,12 @@ pub struct ComponentMetadataSetParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "text_or_null_schema")]
     pub material: Option<Value>,
+    /// The finish, free text of at most 4096 bytes: the coating or treatment with its colour or
+    /// grade ("powder coat, RAL 9005, matt", "zinc plate, clear", "#4 brushed"). It is shown in a
+    /// drawing's title block and parts list and in bills of materials. Empty text or null removes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "text_or_null_schema")]
+    pub finish: Option<Value>,
     /// What one placement means in a bill of materials, as an expression: a number of pieces
     /// (`4`) or a length (`2.5 m`), above 0. Empty text or null removes it (one piece).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -284,6 +294,7 @@ fn set_form(p: &Map<String, Value>) -> Result<ComponentMetadataSetParams, serde_
         revision: None,
         bom_type: None,
         material: None,
+        finish: None,
         bom_quantity: None,
         r#virtual: None,
         values: None,
@@ -298,6 +309,7 @@ fn set_form(p: &Map<String, Value>) -> Result<ComponentMetadataSetParams, serde_
     form.revision = p.get("revision").cloned();
     form.bom_type = p.get("bom_type").cloned();
     form.material = p.get("material").cloned();
+    form.finish = p.get("finish").cloned();
     form.bom_quantity = p.get("bom_quantity").cloned();
     form.r#virtual = p.get("virtual").cloned();
     form.properties = key_with(p, "properties", free_properties)?;
@@ -508,6 +520,9 @@ pub struct BomRow {
     pub definition: String,
     /// The physical materials of the definitions' own bodies, `; ` between them.
     pub material: String,
+    /// The part's finish: its finish property, else a free property named `finish`; empty when it
+    /// has none.
+    pub finish: String,
     /// Under another row: how many are in one of that row's component.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub each: Option<u64>,

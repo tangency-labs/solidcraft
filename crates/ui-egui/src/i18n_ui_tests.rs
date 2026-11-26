@@ -4,6 +4,22 @@ use crate::scenario::{self, Harness};
 use serde_json::json;
 
 #[test]
+fn direct_mesh_reduce_status_uses_saved_language() {
+    let mut h = Harness::new();
+    let path = h.dir.join("reduce-language.obj");
+    std::fs::write(&path, "v 0 0 0\nv 2 0 0\nv 2 2 0\nv 0 2 0\nv 1 1 0\nf 1 2 5\nf 2 3 5\nf 3 4 5\nf 4 1 5\n").unwrap();
+    h.app.run("file.insert_mesh", json!({"path":path})).unwrap();
+    let body = h.app.session.model.state().bodies[0].name.clone();
+    h.app.preferences.language = "ja".into();
+    assert_eq!(solidcraft_ui_text::tr("ui.preferences"), "Preferences");
+    let result = h.app.run("mesh.reduce", json!({"body":body,"triangle_count":1})).unwrap();
+    assert_eq!(result["achieved_triangles"], 2);
+    let (status, _, is_error) = h.app.status.as_ref().unwrap();
+    assert_eq!(status, "メッシュを削減: 元の三角形数 4、目標 1、結果 2。今回の処理では目標に達しませんでした。");
+    assert!(!is_error);
+}
+
+#[test]
 fn japanese_dialog_keeps_english_scenario_handles() {
     let mut h = Harness::new();
     h.app.preferences.language = "ja".into();
@@ -102,12 +118,23 @@ fn window_chrome_renders_in_the_active_language() {
         let mut h = Harness::new();
         h.app.preferences.language = lang.into();
         h.app.home.open = false;
+        // This translation check needs stable script-font metrics while its pointer events run.
+        crate::fonts::setup_fonts_for(&h.ctx, lang, &h.app.preferences.ui_font);
         h.frames(2);
         // The browser heading is on screen from the start; the selection filter lives in the
         // SELECT panel, which is not the one shown by default.
         assert!(h.widget(browser).is_some(), "{lang}: the browser heading must show {browser:?}");
         h.step(&json!({"click":{"handle":"tab:VIEW"}})).unwrap();
-        let select = scenario::handle_at("panel:VIEW:SELECT").expect("the selection filter is on VIEW");
+        let select = scenario::handle_at("panel:VIEW:SELECT").unwrap_or_else(|| {
+            panic!(
+                "the selection filter is on VIEW; lang={lang}, tab={}, folded={}, overflow={:?}, fonts_ready={}, fonts_applied={}",
+                h.app.ui.tab,
+                h.app.preferences.ribbon_tabs_only,
+                scenario::count_of("toolbar_more"),
+                crate::fonts::system_fonts_ready(),
+                h.app.applied_system_fonts,
+            )
+        });
         h.step(&json!({"click": [select.x, select.y]})).unwrap();
         h.frames(2);
         assert!(h.widget(filter).is_some(), "{lang}: the selection filter must show {filter:?}");

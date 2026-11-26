@@ -1,8 +1,10 @@
 //! tangency-labs/solidcore#1453 (the cylinder form of #1130): a cylinder r5, h10
 //! shelled 1 inward with its top cap open. `MateEdges` intersects the offset faces'
 //! tangent (G1R) B-spline extensions, so every new inner edge between two analytic
-//! faces is marched: the floor circle and the seam line are B-splines, the rim is split
-//! at an extra vertex, and the volume is 3.5e-7 over the closed form.
+//! faces is marched: the floor circle and the seam line are B-splines, the rim was split
+//! at an extra vertex while the marched edges' tolerances were doubled (#18162), and the
+//! volume is 3.5e-7 over the closed form. The exact analytic mate (WR-495) is the only
+//! path: the floor and rim are the exact circles.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -66,9 +68,24 @@ fn inner_edges(k: &Kernel, b: &Brep, on: impl Fn(Point3) -> f64) -> (usize, usiz
     (count, exact, worst)
 }
 
+/// The largest edge tolerance of `b`; each must be finite and nonnegative (`f64::max`
+/// would skip a NaN).
+fn largest_tolerance(b: &Brep) -> f64 {
+    p1::edges(b, None)
+        .unwrap()
+        .into_iter()
+        .map(|e| {
+            let t = b.edge(e).unwrap().tolerance;
+            assert!(t.is_finite() && t >= 0.0, "edge {e:?}: tolerance {t:e}");
+            t
+        })
+        .fold(0.0, f64::max)
+}
+
 struct Shelled {
     edges: usize,
     vertices: usize,
+    largest_tolerance: f64,
     inner: usize,
     exact: usize,
     worst: f64,
@@ -79,7 +96,6 @@ struct Shelled {
 /// volume only when `want` is given: integrating a marched cone takes minutes).
 fn shelled(
     label: &str,
-    fixed: bool,
     part: impl Fn(&mut Kernel) -> Brep,
     open_z: f64,
     distance: f64,
@@ -87,7 +103,6 @@ fn shelled(
     want: Option<f64>,
 ) -> Shelled {
     let mut k = Kernel::default();
-    k.fixes.offset_analytic_mate_edges = fixed;
     let part = part(&mut k);
     let open = planar_faces_at(&k, &part, 2, open_z);
     assert_eq!(open.len(), 1, "one open face");
@@ -98,15 +113,17 @@ fn shelled(
     let r = Shelled {
         edges: b.edge_list().len(),
         vertices: b.vertex_list().len(),
+        largest_tolerance: largest_tolerance(&b),
         inner,
         exact,
         worst,
         volume,
     };
     eprintln!(
-        "PROBE {label} fixed={fixed}: edges={} vertices={} inner={inner} exact={exact} worst={worst:e} volume={volume:?} want={want:?}",
+        "PROBE {label}: edges={} vertices={} inner={inner} exact={exact} worst={worst:e} volume={volume:?} want={want:?} largest tolerance={:e}",
         r.edges,
-        r.vertices
+        r.vertices,
+        r.largest_tolerance
     );
     r
 }
@@ -119,34 +136,16 @@ fn on_cylinder(p: Point3) -> f64 {
     p.x.hypot(p.y) - 4.0
 }
 
-/// The issue's case: a cylinder r5, h10 shelled 1 inward, its top open. By default
-/// (upstream) the new inner edges are marched: 7 edges and 5 vertices (the rim split
-/// at an extra vertex), the volume 3.5e-7 over. With the fix: the floor and rim are
-/// exact circles, 6 edges and 4 vertices, and the volume is pi 25 10 - pi 16 9 to
-/// 1e-9.
+/// The issue's case: a cylinder r5, h10 shelled 1 inward, its top open. Upstream marched
+/// the new inner edges and split the rim at an extra vertex (7 edges and 5 vertices). The
+/// floor and rim are exact circles, 6 edges and 4 vertices (the minimal topology of the
+/// shelled cylinder), no edge's tolerance is above upstream's 2e-5, and the volume is
+/// pi 25 10 - pi 16 9 to 1e-9.
 #[test]
 fn issue_1453_shelled_cylinder_edges_are_exact() {
     let want = PI * 25.0 * 10.0 - PI * 16.0 * 9.0;
-    let stock = shelled(
-        "issue_1453 cylinder",
-        false,
-        cylinder,
-        10.0,
-        -1.0,
-        on_cylinder,
-        Some(want),
-    );
-    assert_eq!(
-        (stock.edges, stock.vertices),
-        (7, 5),
-        "upstream's marched rim"
-    );
-    assert!(stock.exact < stock.inner, "a marched inner edge");
-    let over = stock.volume.unwrap() - want;
-    assert!(over > 1e-7 * want, "upstream's volume 3.5e-7 over: {over}");
     let fixed = shelled(
         "issue_1453 cylinder",
-        true,
         cylinder,
         10.0,
         -1.0,
@@ -154,6 +153,11 @@ fn issue_1453_shelled_cylinder_edges_are_exact() {
         Some(want),
     );
     assert_eq!((fixed.edges, fixed.vertices), (6, 4), "no extra rim vertex");
+    assert!(
+        fixed.largest_tolerance <= 2e-5,
+        "no edge looser than upstream's doubled 2e-5: {}",
+        fixed.largest_tolerance
+    );
     assert_eq!(fixed.inner, 3, "floor circle, seam, rim circle");
     // The floor and rim circles are exact. The seam, where the inner wall meets
     // itself, has no exact intersection of two analytic copies (one cylinder twice),
@@ -177,29 +181,11 @@ fn on_frustum(p: Point3) -> f64 {
     p.x.hypot(p.y) - frustum_inner_radius(p.z)
 }
 
-/// A frustum r5 to r3 over h10 shelled 1 inward, its top open. By default its floor
-/// and rim are marched; with the fix they are exact circles on the inner cone.
+/// A frustum r5 to r3 over h10 shelled 1 inward, its top open. Upstream marched its floor
+/// and rim; they are exact circles on the inner cone.
 #[test]
 fn issue_1453_shelled_cone_edges_are_exact() {
-    let stock = shelled(
-        "issue_1453 cone",
-        false,
-        frustum,
-        10.0,
-        -1.0,
-        on_frustum,
-        None,
-    );
-    assert_eq!(stock.exact, 0, "upstream's marched floor and rim");
-    let fixed = shelled(
-        "issue_1453 cone",
-        true,
-        frustum,
-        10.0,
-        -1.0,
-        on_frustum,
-        None,
-    );
+    let fixed = shelled("issue_1453 cone", frustum, 10.0, -1.0, on_frustum, None);
     assert_eq!((fixed.edges, fixed.vertices), (6, 4));
     assert_eq!(fixed.exact, 2, "floor and rim are circles");
     assert!(
@@ -209,7 +195,7 @@ fn issue_1453_shelled_cone_edges_are_exact() {
     );
 }
 
-/// The fixed frustum shell's volume is the closed form to 1e-9 (2.2e-14 measured;
+/// The frustum shell's volume is the closed form to 1e-9 (2.2e-14 measured;
 /// upstream's is 1.9e-7 over). Ignored by default: integrating the cone faces takes
 /// about four minutes.
 #[test]
@@ -220,7 +206,6 @@ fn issue_1453_shelled_cone_volume_is_exact() {
     let want = outer - PI * 9.0 / 3.0 * (r1 * r1 + r1 * r2 + r2 * r2);
     let fixed = shelled(
         "issue_1453 cone",
-        true,
         frustum,
         10.0,
         -1.0,
@@ -232,9 +217,9 @@ fn issue_1453_shelled_cone_volume_is_exact() {
 }
 
 /// #1130's dome (a sphere r20 above z = 0) shelled 2 inward, its base open: the rim
-/// between the inner sphere and the base plane is the circle r18 with or without the
-/// fix (the port does not march it, plan/findings/offset.offset_geometry_creation--issue-1130-not-reproduced-in-port.md);
-/// the fix keeps it so.
+/// between the inner sphere and the base plane is the circle r18 (the port never marched
+/// it, plan/findings/offset.offset_geometry_creation--issue-1130-not-reproduced-in-port.md),
+/// and the exact analytic mate keeps it so.
 #[test]
 fn issue_1453_shelled_dome_rim_stays_exact() {
     let dome = |k: &mut Kernel| {
@@ -243,12 +228,185 @@ fn issue_1453_shelled_dome_rim_stays_exact() {
         boolean_difference(k, ball, below).unwrap()
     };
     let on = |p: Point3| (p.distance(Point3::new(0.0, 0.0, 0.0)) - 18.0).abs() + p.z.abs();
-    let stock = shelled("issue_1453 dome", false, dome, 0.0, -2.0, on, None);
-    let fixed = shelled("issue_1453 dome", true, dome, 0.0, -2.0, on, None);
+    let fixed = shelled("issue_1453 dome", dome, 0.0, -2.0, on, None);
     assert!(
         fixed.inner >= 1 && fixed.exact == fixed.inner,
         "the rim a circle"
     );
     assert!(fixed.worst <= 1e-12, "rim on r 18: {}", fixed.worst);
-    assert_eq!((fixed.edges, fixed.vertices), (stock.edges, stock.vertices));
+}
+
+/// WR-671 on the issue's cylinder with its B-rep tolerance set to 1e-6 under its edges'
+/// and vertices' own 1e-5 (golden `api_shell_cylinder_r5_top_open_tol_1e6`). The offset
+/// edges and vertices keep the cylinder's own tolerances rather than the B-rep's 1e-6,
+/// so the shell is the one the cylinder at its default B-rep tolerance gives
+/// ([`issue_1453_shelled_cylinder_edges_are_exact`]): the floor and rim exact circles, 6
+/// edges and 4 vertices (upstream's marched rim was split at an extra vertex: 7 and 5).
+/// 6 and 4 is the minimal topology of the shelled cylinder: the outer rim and floor, the
+/// inner rim and floor, each a closed edge on one vertex, and the outer and inner seams
+/// (the same count `issue_1453_shelled_cylinder_edges_are_exact` holds). It checks clean at level 2, no edge or
+/// vertex is tighter than the cylinder's, and its volume is pi 25 10 - pi 16 9 to 1e-9.
+#[test]
+fn wr_671_shell_at_a_tighter_brep_tolerance_keeps_the_cylinders_tolerances() {
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+    let want = PI * 25.0 * 10.0 - PI * 16.0 * 9.0;
+    let mut k = Kernel::default();
+    let mut part = cylinder(&mut k);
+    part.set_tolerance(1e-6);
+    let source = p1::edges(&part, None)
+        .unwrap()
+        .into_iter()
+        .map(|e| part.edge(e).unwrap().tolerance)
+        .chain(
+            p1::vertices(&part, None)
+                .unwrap()
+                .into_iter()
+                .map(|v| part.vertex(v).unwrap().tolerance),
+        )
+        .fold(f64::INFINITY, f64::min);
+    assert_eq!(source, 1e-5, "the cylinder's own tolerances");
+    let open = planar_faces_at(&k, &part, 2, 10.0);
+    let mut b = shell(&mut k, part, -1.0, &open).unwrap();
+    assert_eq!((b.edge_list().len(), b.vertex_list().len()), (6, 4));
+    for e in p1::edges(&b, None).unwrap() {
+        let t = b.edge(e).unwrap().tolerance;
+        assert!(t >= source, "edge {e:?} tolerance {t}");
+    }
+    for v in p1::vertices(&b, None).unwrap() {
+        let t = b.vertex(v).unwrap().tolerance;
+        assert!(t >= source, "vertex {v:?} tolerance {t}");
+    }
+    let c = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+    assert_eq!(c.assert_valid, Some(true), "{:?}", c.lines());
+    assert_eq!(c.failures().count(), 0, "{:?}", c.lines());
+    let got = volume_at(&k, &mut b, 1e-12).unwrap();
+    assert!((got - want).abs() <= 1e-9 * want, "{got} vs {want}");
+}
+
+/// The volume of a hole of radius `r` drilled along a radius of a cylinder of radius `big`
+/// about Z, from `depth` off the axis out through the cylinder's side: over the hole's
+/// disk, `y = r sin t`, the length from `depth` to the side `sqrt(big² - y²)`; Gauss-free
+/// midpoint quadrature in `t`, whose integrand is smooth and periodic, so 4096 points give
+/// it to rounding.
+fn radial_hole(big: f64, r: f64, depth: f64) -> f64 {
+    let n = 4096;
+    let h = PI / f64::from(n);
+    (0..n)
+        .map(|i| {
+            let t = -0.5 * PI + (f64::from(i) + 0.5) * h;
+            let y = r * t.sin();
+            2.0 * r * r * t.cos() * t.cos() * ((big * big - y * y).sqrt() - depth)
+        })
+        .sum::<f64>()
+        * h
+}
+
+/// The angle of `p` about Z, in degrees in `[0, 360)`.
+fn angle_deg(p: Point3) -> f64 {
+    p.y.atan2(p.x).to_degrees().rem_euclid(360.0)
+}
+
+/// The seam angles (degrees) of the faces of `b` on the cylinder of radius `radius` about Z:
+/// the angle of each seam edge's start vertex.
+fn seam_angles(k: &Kernel, b: &mut Brep, radius: f64) -> Vec<f64> {
+    use solidcore::surface::surface::{Surface, SurfaceKind};
+    use solidcore::topology::edge;
+    let mut out = Vec::new();
+    for f in b.face_list().to_vec() {
+        let on = matches!(
+            b.face(f).unwrap().surface.as_ref().map(Surface::kind),
+            Some(SurfaceKind::Cone(c)) if c.is_cylinder() && (c.radius(0.0) - radius).abs() < 1e-9
+        );
+        if !on {
+            continue;
+        }
+        for e in solidcore::topology::face::p4::edges(b, f, None, false, None).unwrap() {
+            if edge::faces(b, e, None).unwrap().as_slice() == [f] && edge::is_seam(k, b, e).unwrap()
+            {
+                let v = edge::start_end_vertices(b, e).unwrap().0.unwrap();
+                out.push(angle_deg(b.vertex(v).unwrap().point));
+            }
+        }
+    }
+    out
+}
+
+/// solidcore#3353 (acid-8 stage 5): a Ø100 × 120 drum with one Ø6 radial blind hole 20 deep
+/// at Z = 20, its axis 5° round from the drum's seam, closed-shelled 2 inward. The hole's
+/// rim covers 3.44° either side of its axis, clear of the seam; inset by 2 the hole is r 5 in
+/// a drum of r 48, so its offset covers asin(5 / 48) = 5.98° either side and crosses the seam
+/// its rim did not reach. The offset faces keep the input's loops, so that offset rim was
+/// refused ("an offset edge could not be split where a loop gap or a step corner needs it").
+/// The seam is the cylinder's parameterisation only: turned clear of the hole for the shell,
+/// the shell builds, and the drum's outside gets its seam back where it was.
+///
+/// Closed form: the drum less its hole, less the cavity, the drum r 48 from Z = 2 to 118 less
+/// the hole's offset (r 5, from 28 off the axis out through the cavity's side), the holes'
+/// volumes by [`radial_hole`]: 103844.0029879396.
+#[test]
+fn a_closed_shell_whose_hole_offset_crosses_the_seam_builds() {
+    use solidcore::offset::offset_executive::p2::{
+        shell_brep_simple_reporting, OffsetOptions, ShellOptions,
+    };
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+    use solidcore::topology::proto_topology::p1::api_transform::{api_rotate, TransformObject};
+    let mut k = Kernel::default();
+    let drum = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 50.0, 120.0).unwrap();
+    let mut probe = drum.clone_standing_for_self().unwrap();
+    let seam = seam_angles(&k, &mut probe, 50.0);
+    assert_eq!(seam.len(), 1, "one seam on the drum's side: {seam:?}");
+    // the drill along +X from 30 off the axis out past the side, turned 5° past the seam
+    let mut drill = create_cylinder(&mut k, Point3::new(30.0, 0.0, 20.0), 3.0, 25.0).unwrap();
+    let z = solidcore::math::Vec3::new(0.0, 0.0, 1.0);
+    let y = solidcore::math::Vec3::new(0.0, 1.0, 0.0);
+    api_rotate(
+        &mut k,
+        Some(TransformObject::Brep(&mut drill)),
+        Point3::new(30.0, 0.0, 20.0),
+        y,
+        90.0,
+    )
+    .unwrap();
+    api_rotate(
+        &mut k,
+        Some(TransformObject::Brep(&mut drill)),
+        Point3::new(0.0, 0.0, 0.0),
+        z,
+        seam[0] + 5.0,
+    )
+    .unwrap();
+    let mut part = boolean_difference(&mut k, drum, drill).unwrap();
+    part.refresh_cached_topology();
+    let options = ShellOptions {
+        offset: OffsetOptions {
+            distance: -2.0,
+            extend_convex_edges: true,
+            merge_results: true,
+        },
+        create_offset_solid: true,
+        merge_sheet_side_walls: true,
+    };
+    let made = shell_brep_simple_reporting(&mut k, &part, options, &[]).unwrap();
+    // every seam turned and turned back: no turn failed
+    assert!(
+        made.seams.not_cleared.is_empty() && made.seams.not_restored.is_empty(),
+        "{:?}",
+        made.seams
+    );
+    let mut b = made.shell;
+    let c = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+    assert!(c.is_valid(), "{:?}", c.lines());
+    // the drum's two sides, its two caps, the hole's and its offset's walls and ends
+    assert_eq!(b.face_list().len(), 10);
+    let want = PI * 50.0 * 50.0 * 120.0
+        - radial_hole(50.0, 3.0, 30.0)
+        - (PI * 48.0 * 48.0 * 116.0 - radial_hole(48.0, 5.0, 28.0));
+    assert!((want - 103_844.002_987_939_6).abs() < 1e-6, "{want}");
+    let got = volume_at(&k, &mut b, 1e-9).unwrap();
+    assert!((got - want).abs() <= 1e-7 * want, "{got} vs {want}");
+    // the outside's seam is the input's
+    let outside = seam_angles(&k, &mut b, 50.0);
+    assert_eq!(outside.len(), 1, "{outside:?}");
+    let off = (outside[0] - seam[0]).rem_euclid(360.0);
+    assert!(off.min(360.0 - off) < 1e-9, "{outside:?} vs {seam:?}");
 }

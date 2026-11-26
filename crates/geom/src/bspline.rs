@@ -11,7 +11,7 @@
 //! Input is hostile: every constructor checks finiteness and sizes and returns
 //! [`SplineError`] instead of panicking; no function here indexes with an unchecked number.
 
-pub use solidcore::eval::plan::basis::{Side, basis_derivatives, binomial, local_basis, local_basis_array};
+pub use solidcore_tess::eval::basis::{Side, basis_derivatives, binomial, local_basis, local_basis_array};
 use std::ops::{Add, AddAssign, Mul, Sub};
 
 use solidcore_record::Vec3;
@@ -961,8 +961,8 @@ impl<const N: usize> CurveN<N> {
         // N · P = Q, dense with partial pivoting (the matrix is banded; m is small here).
         let mut a = vec![vec![0.0f64; m]; m];
         for (row, &t) in a.iter_mut().zip(params) {
-            let span = solidcore::eval::plan::span_of(&knots, degree, m, t);
-            let Some(b) = solidcore::eval::plan::basis_ders(&knots, span, degree, t) else { return invalid("basis") };
+            let span = solidcore_tess::eval::span_of(&knots, degree, m, t);
+            let Some(b) = solidcore_tess::eval::basis_ders(&knots, span, degree, t) else { return invalid("basis") };
             for (x, n) in row.iter_mut().skip(span - degree).zip(&b[0][..=degree]) {
                 *x = *n;
             }
@@ -1011,8 +1011,8 @@ impl<const N: usize> CurveN<N> {
             return None;
         }
         let t = t.clamp(*self.knots.get(p)?, *self.knots.get(n)?);
-        let span = solidcore::eval::plan::span_of(&self.knots, p, n, t);
-        let b = solidcore::eval::plan::basis_ders(&self.knots, span, p, t)?;
+        let span = solidcore_tess::eval::span_of(&self.knots, p, n, t);
+        let b = solidcore_tess::eval::basis_ders(&self.knots, span, p, t)?;
         let (mut x, mut dx) = ([0.0; N], [0.0; N]);
         let ctrl = self.ctrl.get(span - p..=span)?;
         for ((c, n), dn) in ctrl.iter().zip(&b[0]).zip(&b[1]) {

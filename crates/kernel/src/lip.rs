@@ -3,6 +3,7 @@
 //! directly on the body's schema 4 record (the band's walls continue the walls below, which a
 //! boolean union can't join: their faces would coincide).
 
+use solidcore_ops::prism::{LoopPlacement, loop_placement};
 use solidcore_record::brep::{Brep, Curve, Frame, Surface};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec3};
 use solidcraft_geom::Ring;
@@ -165,7 +166,10 @@ fn pieces(asm: &Assembly, lp: &[AUse], n: Vec3) -> Result<Vec<Piece>> {
                     let sweep = (t1 - t0) * along * z.dot(n).signum();
                     Ok(Piece { a, b, arc: Some(Arc { centre: Vec3::from(frame.origin), sweep }) })
                 }
-                _ => Err(fail("edges must be lines or arcs")),
+                Curve::Ellipse { .. } => Err(LipRefusal::RimCurve("an ellipse").into()),
+                Curve::Polyline { .. } => Err(LipRefusal::RimCurve("a polyline").into()),
+                Curve::Spline { .. } | Curve::RationalSpline { .. } => Err(LipRefusal::RimCurve("a spline").into()),
+                Curve::SurfaceIntersection { .. } => Err(LipRefusal::RimCurve("a curve where two surfaces meet").into()),
             }
         })
         .collect()
@@ -248,6 +252,20 @@ pub fn rim_band(body: &Body, at: Vec3, width: f64, free: f64, outside: bool) -> 
     })
 }
 
+/// Why a band cannot be raised where it would leave no sound face beside it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum LipRefusal {
+    /// The band is as wide as the rim (to within the model's tolerance): no face would be left.
+    #[error("the band is as wide as the rim, so no face is left beside it")]
+    BandFillsRim,
+    /// The band's far edge crosses the rim's other edge in some places only.
+    #[error("the band's far edge crosses the rim's other edge in part, so the face left beside it has no single side")]
+    BandCrossesRim,
+    /// A rim edge of a curve the band cannot follow, such as the ellipse a tilted cut leaves.
+    #[error("not supported yet: a rim edge that is {0}; a lip follows only lines and arcs")]
+    RimCurve(&'static str),
+}
+
 /// An edge from vertex `a` to vertex `b` along `p` (a line, or an arc of its circle about `n`):
 /// the use that runs from `a` to `b`.
 fn piece_edge(asm: &mut Assembly, a: u32, b: u32, p: &Piece, n: Vec3) -> Result<AUse> {
@@ -315,6 +333,19 @@ pub fn raise_band(body: &Body, at: Vec3, width: f64, height: f64, outside: bool)
         let face = asm.faces.get_mut(fi).and_then(Option::take).ok_or_else(|| fail("face"))?;
         let below = pieces(&asm, &along, n)?;
         let moved = offset_loop(&below, n, width, tol)?;
+        // Where the band's far edge lies against the face's other loop, decided by the kernel from
+        // the two loops' exact lines and arcs, loops within `tol` (from the body's size) meeting.
+        let plane = Plane::from_normal(at, n).ok_or_else(|| fail("rim plane"))?;
+        let (far, other_loop) = (profile(&moved, &plane)?, profile(&pieces(&asm, &other, n)?, &plane)?);
+        let placed = loop_placement(&far, &other_loop, tol).ok_or_else(|| fail("where the band's far edge lies"))?;
+        // The band's edge follows the outer loop (the other is the hole) or the hole (the other is
+        // the outer loop): it clears the other loop on the face's side, or reaches past it.
+        let past = match placed {
+            LoopPlacement::Coincident => return Err(LipRefusal::BandFillsRim.into()),
+            LoopPlacement::Crossing => return Err(LipRefusal::BandCrossesRim.into()),
+            LoopPlacement::Inside => outside,
+            LoopPlacement::Outside => !outside,
+        };
         let k = moved.len();
         let up = n * height;
         // The band's other edge, on the face, and the band's top edges above both.
@@ -340,12 +371,13 @@ pub fn raise_band(body: &Body, at: Vec3, width: f64, height: f64, outside: bool)
         }
         // The rest of the face: its other loop, and the band's edge as a loop of its own.
         // (The band's edge runs the face's way round: a hole when the band follows the inner
-        // loop, the outer loop when it follows the outer.)
-        let rest_loops = if outside { vec![cedges.clone(), other] } else { vec![other, cedges.clone()] };
+        // loop, the outer loop when it follows the outer.) A band that reaches past the other
+        // loop leaves the underside of its overhang: facing the other way, the other loop outside.
+        let rest_loops = if outside != past { vec![cedges.clone(), other] } else { vec![other, cedges.clone()] };
         let rest = AFace {
             surface: face.surface.clone(),
             nurbs: face.nurbs.clone(),
-            natural_out: face.natural_out,
+            natural_out: face.natural_out != past,
             loops: rest_loops,
             shell: face.shell,
             domain: face.domain,

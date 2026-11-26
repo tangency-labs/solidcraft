@@ -947,10 +947,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
             let r = if *mode == 0 {
                 f.max_gap_sample(&k, *stop).map(|_| ())
             } else {
-                match f.build_sample_set(&k, *stop) {
-                    Err(e) if e.is_unported() => Err(e),
-                    _ => Ok(()),
-                }
+                f.build_sample_set(&k, *stop)
             };
             match r {
                 Ok(()) => o.push(0.0),
@@ -1588,6 +1585,36 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
 
+    #[test]
+    fn both_gap_sample_modes_report_a_zero_sample_count() {
+        for mode in [0, 1] {
+            let input = Inputs::Gf {
+                gf: GfIn {
+                    tol: 1.0,
+                    this: ThisIn::Curve {
+                        curve: CurveIn::Line {
+                            p: [0.0, 0.0, 0.0],
+                            v: [1.0, 0.0, 0.0],
+                            domain: [0.0, 1.0],
+                            scale: 1.0,
+                            inside_out: false,
+                        },
+                        ivl: [0.0, 1.0],
+                    },
+                    other: OtherIn::Point([0.0, 0.0, 0.0]),
+                    cnt_u: 0,
+                    cnt_v: 1,
+                },
+                set_cnt: None,
+                set_tol: None,
+                stop: false,
+                mode,
+            };
+            let error = run_rust(&input).unwrap_err().to_string();
+            assert!(error.contains("zero sample count"), "mode {mode}: {error}");
+        }
+    }
+
     /// HANG-29: fuzz14876, a topology op on a face whose B-spline surface has a control
     /// point of `-1e300` (no native result in 60 s). The block contract refuses it through
     /// the `topology.vertexuse` block's HANG-29 bound (`1e150`). It cannot be a fixture (a
@@ -1637,6 +1664,79 @@ mod tests {
             assert_eq!(state.last(), Some(&expected), "{}", case.name);
         }
     }
+    /// WR-56 (#17467), the rows the drop change moved (`gen0013`, `gen0056`, `gen0178`,
+    /// `gen0398`): a gap function from a curve to a surface, whose samples drop the curve's
+    /// points onto the surface. Each sample's foot is certified the nearest point of the
+    /// surface: the distance is enclosed ([`crate::certify::nearest`]) between a certified
+    /// lower bound and the foot's distance, to a millionth of the distance. The foot recorded
+    /// is the surface's point at the parameters recorded, to the evaluation's rounding.
+    ///
+    /// `gen0398` is the guessed drop of #17773: its samples 26 to 31 each kept a local
+    /// result the global solve beats (sample 26 a local minimum along the `v = 0` side
+    /// 6.9e-6 farther than the nearest point when a result nearer than its guess was taken;
+    /// samples 27 to 31 already on main, which took a result farther than its guess).
+    /// Samples 26, 30 and 31 are certified now that a moved local result is kept only when
+    /// the global solve finds nothing as near. Samples 27 to 29 keep main's feet, which are
+    /// not the nearest points (their enclosures are 2.4e-4 to 2.7e-4 wide); they are asserted
+    /// not certified, so a fix of #17773's remaining case shows here.
+    #[test]
+    fn wr56_gap_samples_drop_to_the_nearest_point() {
+        use crate::certify::{evaluation_slack, nearest};
+        const SAMPLE: usize = 16;
+        // (row, sample) not certified: main's feet, still kept (#17773)
+        const NOT_NEAREST: [(&str, usize); 3] = [("gen0398", 27), ("gen0398", 28), ("gen0398", 29)];
+        let mut failures = Vec::new();
+        for name in ["gen0013", "gen0056", "gen0178", "gen0398"] {
+            let case = crate::case::regression_case(&Runner, name);
+            let inputs: Inputs = case.parse().expect("inputs");
+            let Inputs::Gf { gf, .. } = &inputs else {
+                panic!("{name}: not a gap function case");
+            };
+            let k = Kernel::default();
+            let s = shapes(&k, gf).expect("shapes");
+            let Shape::Surface(surface) = &s.other else {
+                panic!("{name}: not a gap to a surface");
+            };
+            let state = run_rust(&inputs).expect("rust").values["state"].clone();
+            assert_eq!(state[0], 0.0, "{name}: status");
+            let n = state[11] as usize;
+            assert_eq!(state.len(), 12 + n * SAMPLE, "{name}: layout");
+            let slack = evaluation_slack(&k, surface);
+            let mut widest = 0.0_f64;
+            for i in 0..n {
+                let r = &state[12 + i * SAMPLE..12 + (i + 1) * SAMPLE];
+                let p = Vec3::new(r[1], r[2], r[3]);
+                let q = Vec3::new(r[4], r[5], r[6]);
+                let uv = Point2::new(r[12], r[13]);
+                let at = surface.evaluate_point(&k, uv).expect("foot");
+                assert!(at.distance(q) <= slack, "{name} sample {i}: foot {q:?} vs {at:?}");
+                let d = p.distance(q);
+                let e = nearest(&k, surface, None, p, uv);
+                eprintln!(
+                    "{name} sample {i}: drop {} distance {d} in [{}, {}] width {:e}",
+                    r[0],
+                    e.lo,
+                    e.hi,
+                    e.width()
+                );
+                assert!(e.holds(d), "{name} sample {i}: {d} outside {e:?}");
+                let certified = e.width() <= 1e-6 * d + slack;
+                if NOT_NEAREST.contains(&(name, i)) {
+                    if certified {
+                        failures.push(format!("{name} sample {i}: certified now (#17773)"));
+                    }
+                    continue;
+                }
+                if !certified {
+                    failures.push(format!("{name} sample {i}: distance {d} {e:?}"));
+                }
+                widest = widest.max(e.width() / d.max(f64::MIN_POSITIVE));
+            }
+            eprintln!("{name}: widest relative width {widest:e}");
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
     #[test]
     fn raw_trim_gap_records_hold_at_close_knot_parameters() {
         let cases = raw_trim_gap_cases().expect("cases");

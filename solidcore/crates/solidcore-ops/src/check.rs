@@ -4,7 +4,10 @@
 use std::fmt::Write as _;
 
 use solidcore::geom::assert_array::{obj_type_string, AssertArray, AssertReport};
-use solidcore::topology::brep::validation::{check_brep, CheckLevel as KernelCheckLevel};
+use solidcore::topology::brep::validation::{check_brep_scoped, CheckLevel as KernelCheckLevel};
+
+/// What a check holds the tolerance pass to: [`ValidityScope::Stitched`] for a body a stitch produced.
+pub use solidcore::topology::brep::validation::ValidityScope;
 use solidcore::topology::NamingScheme;
 use solidcore::SolidError;
 
@@ -65,9 +68,6 @@ impl std::fmt::Display for CheckReport {
     }
 }
 
-/// SMLib's `SM_SUCCESS`, the status `SmBrep::ValidatePointers` returns when it finds nothing.
-const SM_SUCCESS: i32 = 1000;
-
 /// Why [`Body::check`] could not run.
 enum Refusal {
     /// A test the kernel has not ported (its [`SolidError::Unported`]).
@@ -90,8 +90,8 @@ impl Refusal {
 impl crate::session::Answer
     for std::result::Result<solidcore::topology::brep::validation::BrepCheck, Refusal>
 {
-    fn refusal(&self) -> Option<String> {
-        self.as_ref().err().map(|r| r.error().to_string())
+    fn refusal(&self) -> Option<Error> {
+        self.as_ref().err().map(Refusal::error)
     }
 }
 
@@ -106,18 +106,36 @@ impl Body {
     /// [`Error::Exception`] if the kernel skipped the topology test after a clean pointer check;
     /// those of the session's call.
     pub fn check(&self, level: CheckLevel) -> Result<CheckReport> {
+        self.check_scoped(level, ValidityScope::Body)
+    }
+
+    /// [`Body::check`] with the tolerance pass held to `scope`: [`ValidityScope::Body`] is
+    /// [`Body::check`]; [`ValidityScope::Stitched`] for a body a stitch produced, whose edges'
+    /// tolerances the stitch set.
+    ///
+    /// # Errors
+    /// Those of [`Body::check`].
+    pub fn check_scoped(&self, level: CheckLevel, scope: ValidityScope) -> Result<CheckReport> {
         let lv = match level {
             CheckLevel::Basic => KernelCheckLevel::Level0,
             CheckLevel::Geometry => KernelCheckLevel::Level1,
             CheckLevel::All => KernelCheckLevel::Level2,
         };
+        // the body's own naming scheme: the copy the check runs on is named afresh
+        let unknown = self.lock().naming() == NamingScheme::Unknown;
         let c = match measure_body("check", self, |k, b| {
-            let naming = b.naming();
-            if naming == NamingScheme::Unknown {
+            if unknown {
                 return Ok(Err(Refusal::Naming));
             }
-            match check_brep(k, b, lv) {
-                Err(SolidError::Unported { upstream, .. }) => Ok(Err(Refusal::Unported(upstream))),
+            match check_brep_scoped(k, b, lv, scope) {
+                Err(e @ SolidError::Unported { upstream, .. }) => {
+                    // the refusal keeps the kernel's code ([`crate::session::noted`])
+                    drop(crate::session::noted(
+                        &e,
+                        Refusal::Unported(upstream).error(),
+                    ));
+                    Ok(Err(Refusal::Unported(upstream)))
+                }
                 r => r.map(Ok),
             }
         })? {
@@ -127,18 +145,14 @@ impl Body {
         let mut text = String::new();
         let mut failures = 0usize;
         collect(&c.pointer_reports, &mut text, &mut failures);
-        if c.pointers_status != SM_SUCCESS && failures == 0 {
+        if !c.pointers.is_passed() && failures == 0 {
             failures += 1;
-            let _ = writeln!(
-                text,
-                "SmBrep::ValidatePointers failed with status {}",
-                c.pointers_status
-            );
+            let _ = writeln!(text, "SmBrep::ValidatePointers failed without a report");
         }
         if failures > 0 {
-            // The capi does not run AssertValid after a failed pointer check. check_brep runs it when
-            // the status failed without a report; that result is dropped here, as the capi never
-            // computes it.
+            // The capi does not run AssertValid after a failed pointer check. check_brep runs it
+            // when the pointer check failed without a report; that result is dropped here, as the
+            // capi never computes it.
             text.push_str("AssertValid skipped: ValidatePointers failed\n");
         } else {
             let Some(ok) = c.assert_valid else {

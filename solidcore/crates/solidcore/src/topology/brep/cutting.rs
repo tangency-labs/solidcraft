@@ -47,7 +47,10 @@ use std::collections::BTreeSet;
 
 use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::CurvePropertyType;
-use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{
+    ignore_status, ignored, EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER,
+};
 use crate::geom::attribute::{ids, Attribute, Behavior};
 use crate::geom::context::{MarkLock, ALL_MARKS};
 use crate::geom::extent3d::Extent3d;
@@ -75,6 +78,18 @@ use crate::topology::{vertex, Brep, EdgeId, FaceId, VertexId};
 const OP_MERGE: &str = "topology::brep::cutting::PlaneCutter::merge_intersection";
 const OP_CLASSIFY: &str = "topology::brep::cutting::PlaneCutter::classification";
 const OP_CUT: &str = "topology::brep::cutting::cut";
+
+/// A defect of the B-rep's own links ([`TopologyFailure::Defect`]) in `op`, with the status
+/// `SM_ERR_NULL_POINTER` of the `NER` it replaces.
+fn broken_link(op: &'static str, why: &'static str) -> SolidError {
+    Failure::new(op, TopologyFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// Why an edge has no vertex at an end.
+const EDGE_NO_VERTEX: &str = "an edge has no vertex at an end, though the kernel makes every \
+                              edge with its two edge uses and their vertex uses";
 
 /// `SmPlaneCutter`: the infinite plane through [`PlaneCutter::plane_point`] with unit
 /// normal [`PlaneCutter::plane_normal`]; the part of a B-rep on the normal's side is
@@ -157,7 +172,7 @@ impl PlaneCutter {
         for f in faces {
             // locals for plane/surface intersections
             let surface = face2::surface(b, f)?
-                .ok_or_else(|| SolidError::topology_missing(OP_MERGE, "the face's surface"))?
+                .ok_or_else(|| SolidError::topology(OP_MERGE, TopologyFailure::FaceWithoutSurface))?
                 .clone_for_evaluation()?;
             let uv_domain = face2::uv_domain(b, f)?;
 
@@ -237,7 +252,7 @@ impl PlaneCutter {
             let solutions = {
                 let e = b.edge(wire_edge)?;
                 let curve = e.curve.as_ref().ok_or_else(|| {
-                    SolidError::topology_missing(OP_MERGE, "the wire edge's curve")
+                    SolidError::topology(OP_MERGE, TopologyFailure::EdgeWithoutCurve)
                 })?;
                 // find wire/plane intersection points
                 curve
@@ -259,19 +274,19 @@ impl PlaneCutter {
             // For every solution - merge points not on the cutplane into TgtBrep
             for sol in solutions.as_slice() {
                 let param = sol.start.param(0)?;
-                let v1 = edge::vertex(b, wire_edge)?.ok_or_else(|| {
-                    SolidError::topology_missing(OP_MERGE, "the wire edge's first vertex")
-                })?;
-                let v2 = edge::other_vertex(b, wire_edge, Some(v1))?.ok_or_else(|| {
-                    SolidError::topology_missing(OP_MERGE, "the wire edge's second vertex")
-                })?;
+                let v1 = edge::vertex(b, wire_edge)?
+                    .ok_or_else(|| broken_link(OP_MERGE, EDGE_NO_VERTEX))?;
+                let v2 = edge::other_vertex(b, wire_edge, Some(v1))?
+                    .ok_or_else(|| broken_link(OP_MERGE, EDGE_NO_VERTEX))?;
 
                 // get edge endPoints, Curve, and SolutionPoint
                 let new_v_pnt = b
                     .edge(wire_edge)?
                     .curve
                     .as_ref()
-                    .ok_or_else(|| SolidError::topology_missing(OP_MERGE, "the wire edge's curve"))?
+                    .ok_or_else(|| {
+                        SolidError::topology(OP_MERGE, TopologyFailure::EdgeWithoutCurve)
+                    })?
                     .evaluate_point(k, param)?;
 
                 // when solutionPoint is not close to endPoints
@@ -283,15 +298,16 @@ impl PlaneCutter {
                     // split the wire edge with the solutionPoint
                     let split = p9::make_vertex_split_edge(k, b, wire_edge, param, env, curve_ref)?;
                     if !split.split {
-                        return Err(SolidError::topology_failed(
+                        return Err(SolidError::topology(
                             OP_MERGE,
-                            "the wire edge could not be split at the plane",
+                            TopologyFailure::EdgeNotSplit,
                         ));
                     }
                     let (Some([_new_e1, new_e2]), Some(new_v)) = (split.edges, split.vertex) else {
-                        return Err(SolidError::topology_missing(
+                        return Err(broken_link(
                             OP_MERGE,
-                            "the split's new edge or vertex",
+                            "the split reports an edge split without its new edges or vertex, \
+                             though it makes them when it splits",
                         ));
                     };
                     // SM_OLDTOL_LINE pNewV->SetTolerance(SM_XSECT_TO_ZONETOL3D(dXSectTol3d))
@@ -428,7 +444,9 @@ impl PlaneCutter {
                 b.edge(e)?
                     .curve
                     .as_ref()
-                    .ok_or_else(|| SolidError::topology_missing(OP_CLASSIFY, "the edge's curve"))?
+                    .ok_or_else(|| {
+                        SolidError::topology(OP_CLASSIFY, TopologyFailure::EdgeWithoutCurve)
+                    })?
                     .evaluate_point(k, ivl.evaluate(t))
             };
             let mut signed_dist = (point_at(0.45678)? - self.plane_point).dot(self.plane_normal);
@@ -492,12 +510,20 @@ impl PlaneCutter {
 
             // for every edgeuse on the face's upward faceuse
             let fu = face2::upward_faceuse(b, f)?.ok_or_else(|| {
-                SolidError::topology_missing(OP_CLASSIFY, "the face's upward face use")
+                broken_link(
+                    OP_CLASSIFY,
+                    "the face has no upward face use, though the kernel makes every face with \
+                     its two face uses",
+                )
             })?;
             for eu in eu1::faceuse_edgeuses(b, fu, false, None)? {
                 // get edgeuse midPoint binormal vector
                 let e = eu1::edge(b, eu)?.ok_or_else(|| {
-                    SolidError::topology_missing(OP_CLASSIFY, "the edge use's edge")
+                    broken_link(
+                        OP_CLASSIFY,
+                        "an edge use has no edge, though the kernel links every edge use to its \
+                         edge",
+                    )
                 })?;
                 let mid = edge::interval(b, e)?.evaluate(0.5);
                 let binormal =
@@ -539,8 +565,12 @@ impl PlaneCutter {
 /// # Errors
 ///
 /// Those of [`PlaneCutter::merge_intersection`] and
-/// [`PlaneCutter::classification`]; [`SolidError::Unported`] from the deletions and the
-/// stitching (whose other statuses are ignored, as upstream).
+/// [`PlaneCutter::classification`]; [`SolidError::Unported`] from the deletions (whose
+/// other statuses are ignored, as upstream); those of the stitching and orientation
+/// ([`p5::stitch_and_orient`]). Upstream ignores the stitch's status too; the port's
+/// stitch passes a failed first pass on before the second pass and the orientation
+/// (WR-658), so a cut that went on would hand back an unstitched, unoriented body.
+/// `b` may be partly edited (cut but not stitched or oriented) when this returns `Err`.
 #[allow(clippy::too_many_arguments)]
 pub fn do_cut(
     k: &mut Kernel,
@@ -551,6 +581,38 @@ pub fn do_cut(
     tolerance_3d: f64,
     remove_cut_portions: bool,
     subset_faces: Option<&[FaceId]>,
+) -> Result<()> {
+    do_cut_with(
+        k,
+        b,
+        env,
+        curve_ref,
+        cutter,
+        tolerance_3d,
+        remove_cut_portions,
+        subset_faces,
+        stitch_cut,
+    )
+}
+
+/// [`do_cut`] with the closing stitch and orientation `stitch` (a test seam: production
+/// passes [`stitch_cut`]).
+#[allow(clippy::too_many_arguments)]
+fn do_cut_with(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    curve_ref: &dyn Fn(EdgeId, i64) -> ObjectRef,
+    cutter: &mut PlaneCutter,
+    tolerance_3d: f64,
+    remove_cut_portions: bool,
+    subset_faces: Option<&[FaceId]>,
+    stitch: impl FnOnce(
+        &mut Kernel,
+        &mut Brep,
+        &mut NotifyEnv<'_>,
+        &dyn Fn(EdgeId, i64) -> ObjectRef,
+    ) -> Result<()>,
 ) -> Result<()> {
     // set m_pBrepToCut EditingEnabled flag to TRUE for upcoming boolean
     let editing = b.editing_enabled();
@@ -566,6 +628,7 @@ pub fn do_cut(
         tolerance_3d,
         remove_cut_portions,
         subset_faces,
+        stitch,
     );
     k.context.set_doing_boolean(doing_boolean);
     b.set_editing_enabled(editing);
@@ -583,6 +646,12 @@ fn do_cut_body(
     tolerance_3d: f64,
     remove_cut_portions: bool,
     subset_faces: Option<&[FaceId]>,
+    stitch: impl FnOnce(
+        &mut Kernel,
+        &mut Brep,
+        &mut NotifyEnv<'_>,
+        &dyn Fn(EdgeId, i64) -> ObjectRef,
+    ) -> Result<()>,
 ) -> Result<()> {
     // Do intersection of cutter with brep
     cutter.merge_intersection(k, b, env, curve_ref, tolerance_3d, subset_faces)?;
@@ -633,26 +702,33 @@ fn do_cut_body(
         ignore_status(bp4::delete_vertex(k, b, &mut d, v))?;
     }
 
-    // Inside an edit that has lent the kernel context's callbacks (a caller under
-    // `with_kernel_callbacks`), `StitchAndOrient`'s own edits would be refused as nested,
-    // and the refusal ignored with the status: it stitches and orients through this
-    // cut's environment there, naming new curves by `curve_ref`.
+    // (not upstream, which ignores the status) a failed stitch or orientation is the
+    // cut's failure: the stitch returns at a failed first pass, before its second pass
+    // and the orientation, so the body is not one to hand back as cut.
+    stitch(k, b, env, curve_ref)
+}
+
+/// The cut's closing `StitchAndOrient`. Inside an edit that has lent the kernel context's
+/// callbacks (a caller under `with_kernel_callbacks`), `StitchAndOrient`'s own edits
+/// would be refused as nested: it stitches and orients through this cut's environment
+/// there, naming new curves by `curve_ref`.
+fn stitch_cut(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    curve_ref: &dyn Fn(EdgeId, i64) -> ObjectRef,
+) -> Result<()> {
     if k.context.notify_lent() {
-        ignore_status(p5::stitch_and_orient_notified(
+        p5::stitch_and_orient_notified(
             k,
             b,
             &StitchAndOrientOptions::default(),
             env,
             p9::CurveIdentity::Legacy(curve_ref),
-        ))?;
+        )
     } else {
-        ignore_status(p5::stitch_and_orient(
-            k,
-            b,
-            &StitchAndOrientOptions::default(),
-        ))?;
+        p5::stitch_and_orient(k, b, &StitchAndOrientOptions::default())
     }
-    Ok(())
 }
 
 /// `SmApiCut(pBrep, rPlanePt, rPlaneNormal)` under the caller's notification
@@ -663,7 +739,8 @@ fn do_cut_body(
 /// # Errors
 ///
 /// `SM_ERR_INVALID_INPUT` (a [`TopologyFailure`](crate::error::topology::TopologyFailure)) for a normal `Unitize` rejects,
-/// before `b` is touched; those of [`do_cut`].
+/// before `b` is touched; those of [`do_cut`]. `b` may be partly edited (cut but not
+/// stitched or oriented) when this returns `Err`.
 pub fn cut_notified(
     k: &mut Kernel,
     b: &mut Brep,
@@ -673,9 +750,9 @@ pub fn cut_notified(
     plane_normal: Vec3,
 ) -> Result<()> {
     let Ok(normal) = plane_normal.unitize() else {
-        return Err(SolidError::topology_invalid_value(
+        return Err(SolidError::topology(
             OP_CUT,
-            "the plane normal has zero length",
+            TopologyFailure::ZeroLengthVector,
         ));
     };
     let mut cutter = PlaneCutter::new(plane_point, normal);
@@ -695,4 +772,80 @@ pub fn cut(k: &mut Kernel, b: &mut Brep, plane_point: Point3, plane_normal: Vec3
     let curve_ref =
         |e: EdgeId, _type_code: i64| crate::topology::loopuse::notify_ref(EntityRef::Edge(e));
     cut_notified(k, b, &mut env, &curve_ref, plane_point, plane_normal)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geom::extent2d::Extent2d;
+    use crate::math::Point2;
+    use crate::surface::plane::Plane;
+    use crate::surface::surface::Surface;
+    use crate::topology::brep::p3::new_brep;
+    use crate::topology::brep::p8::{create_face_from_surface, FaceBuildEnv};
+    use crate::topology::brep_cache::{arena_identity, CacheObject};
+
+    /// The six faces of the cube -5..5, each a separate face with edges and vertices of
+    /// its own (nothing stitched), as `tests/cut_stitch_under_kernel_callbacks.rs` builds.
+    fn loose_cube(k: &mut Kernel) -> Brep {
+        let mut b = new_brep(k, tol::USE_DEFAULT, tol::USE_DEFAULT).unwrap();
+        let h = 5.0;
+        for a in [Vec3::X, Vec3::Y, Vec3::Z] {
+            for s in [1.0, -1.0] {
+                let n = a * s;
+                let surface = Surface::from(Plane::from_normal(n * h, n));
+                let mut state = ArenaNotifyState::new(&b);
+                let mut env = state.env(None);
+                let mut marks = Marks::default();
+                let this_face = |face| arena_identity(CacheObject::Face(face));
+                let mut fenv = FaceBuildEnv {
+                    env: &mut env,
+                    marks: &mut marks,
+                    this_face: &this_face,
+                };
+                let domain = Extent2d::from_points(Point2::new(-h, -h), Point2::new(h, h));
+                create_face_from_surface(k, &mut b, Some(surface), &domain, &mut fenv).unwrap();
+            }
+        }
+        b
+    }
+
+    /// A failed closing stitch is the cut's failure (review of #16956): the port's
+    /// `StitchAndOrient` returns at a failed first pass, before its second pass and the
+    /// orientation, so a cut that dropped the status (as upstream does) handed back an
+    /// unstitched, unoriented body as success. The flags the cut sets are restored.
+    #[test]
+    fn a_failed_stitch_fails_the_cut() {
+        let mut k = Kernel::default();
+        let mut b = loose_cube(&mut k);
+        let editing = b.editing_enabled();
+        let mut state = ArenaNotifyState::new(&b);
+        let mut env = state.env(None);
+        let curve_ref =
+            |e: EdgeId, _type_code: i64| crate::topology::loopuse::notify_ref(EntityRef::Edge(e));
+        let mut cutter = PlaneCutter::new(Point3::new(0.0, 0.0, 1.0), Vec3::Z);
+        let tolerance = b.tolerance();
+        let mut stitched = false;
+        let r = do_cut_with(
+            &mut k,
+            &mut b,
+            &mut env,
+            &curve_ref,
+            &mut cutter,
+            tolerance,
+            true,
+            None,
+            |_, _, _, _| {
+                stitched = true;
+                Err(SolidError::sm_err("test::stitch"))
+            },
+        );
+        assert!(stitched, "the cut reached its stitch");
+        assert!(
+            matches!(&r, Err(e) if e.to_string().contains("test::stitch")),
+            "{r:?}"
+        );
+        assert!(!k.context.doing_boolean());
+        assert_eq!(b.editing_enabled(), editing);
+    }
 }

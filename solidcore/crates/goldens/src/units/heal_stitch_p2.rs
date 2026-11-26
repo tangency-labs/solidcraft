@@ -561,13 +561,17 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
 
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     // one context for the build and the op, as the shim's
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let (mut b, op) = match prepare_rust(&mut k, i)? {
         Ok(r) => r,
         Err(o) => return Ok(o),
     };
     match run_rust_op(&mut k, &mut b, &op) {
-        Ok(o) => Ok(guarded_output(o)),
+        Ok(o) => {
+            #[cfg(test)]
+            crate::certify::keep(&b);
+            Ok(guarded_output(o))
+        }
         Err(e) => match Output::unported(&e) {
             Some(o) => Ok(o),
             None => Err(harness(format!("rust: {e}"))),

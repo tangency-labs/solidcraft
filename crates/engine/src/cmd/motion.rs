@@ -14,7 +14,7 @@ use solidcraft_kernel::Body;
 
 use super::CommandSpec;
 use super::joints::{cannot_move, effective_values, joint_id, occurrence_id, place_holding, value};
-use crate::params::{bad, bool_, str_, vec3};
+use crate::params::{bad, bool_, str_, unique_reference, vec3};
 use crate::schema::motion::{
     ContactCheck, ContactCollision, ContactCreateParams, ContactEditParams, ContactEnableParams, ContactNoParams, ContactSetChange,
     ContactSetCreated, ContactSetEdited, ContactSetInfo, ContactSets, ContactSwitch, ExplodeCreateParams, ExplodeCreated, ExplodeDeleteParams,
@@ -105,6 +105,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("contact.list", "List Contact Sets", crate::checked!("contact.list", list_sets))
         .icon("list")
         .noundo()
+        .read_only()
         .doc_only()
         .contract(&CONTACT_NONE_CONTRACT)
         .output(output_schema_for::<ContactSets>)
@@ -212,6 +213,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("motion.list", "List Motion Studies", crate::checked!("motion.list", list_studies))
         .icon("list")
         .noundo()
+        .read_only()
         .contract(&STUDY_LIST_CONTRACT)
         .output(output_schema_for::<MotionStudies>),
     CommandSpec::new("motion.delete", "Delete Motion Study", crate::checked!("motion.delete", delete_study))
@@ -238,6 +240,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("explode.list", "List Exploded Views", crate::checked!("explode.list", explode_list))
         .icon("list")
         .noundo()
+        .read_only()
         .contract(&EXPLODE_LIST_CONTRACT)
         .output(output_schema_for::<ExplodeViews>),
     CommandSpec::new("explode.delete", "Delete Exploded View", crate::checked!("explode.delete", explode_delete))
@@ -883,12 +886,20 @@ fn set_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
         Some(Value::String(x)) => x.clone(),
         _ => return Err(bad(cmd, "`set` must be an id or a name")),
     };
-    s.doc
-        .assembly
-        .contact_sets
-        .iter()
-        .position(|c| c.id.to_string() == key || c.name == key)
-        .ok_or_else(|| bad(cmd, format!("no contact set `{key}`")))
+    let numeric = p.get("set").is_some_and(Value::is_number);
+    unique_reference(
+        cmd,
+        "contact set",
+        &key,
+        s.doc
+            .assembly
+            .contact_sets
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.id.to_string() == key || (!numeric && c.name == key))
+            .map(|(i, c)| (c.id, i)),
+    )?
+    .ok_or_else(|| bad(cmd, format!("no contact set `{key}`")))
 }
 
 fn edit_set(s: &mut Session, p: &Value) -> Result<Value> {
@@ -938,8 +949,12 @@ pub(crate) fn study_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
         _ => return Err(bad(cmd, "`study` must be an id or a name")),
     };
     let studies = &s.doc.assembly.studies;
-    let (by_id, by_name) = (studies.iter().position(|m| m.id.to_string() == key), studies.iter().position(|m| m.name == key));
-    if id_first { by_id.or(by_name) } else { by_name.or(by_id) }.ok_or_else(|| bad(cmd, format!("no motion study `{key}`")))
+    let by_id = studies.iter().position(|m| m.id.to_string() == key);
+    if id_first && let Some(i) = by_id {
+        return Ok(i);
+    }
+    let by_name = unique_reference(cmd, "motion study", &key, studies.iter().enumerate().filter(|(_, m)| m.name == key).map(|(i, m)| (m.id, i)))?;
+    by_name.or(by_id).ok_or_else(|| bad(cmd, format!("no motion study `{key}`")))
 }
 
 fn study(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1075,8 +1090,39 @@ fn play(s: &mut Session, p: &Value) -> Result<Value> {
     let m = s.doc.assembly.studies.get(i).cloned().ok_or_else(|| bad(cmd, "study"))?;
     let step = p.get("step").and_then(Value::as_f64).filter(|x| x.is_finite()).ok_or_else(|| bad(cmd, "`step` must be a number"))?;
     let want = values_at(s, &m, step.clamp(0.0, f64::from(m.steps)));
+    let given = keyed(&m);
+    let before_vals: Vec<(u64, Vec<f64>, Vec<Option<String>>)> = s
+        .doc
+        .assembly
+        .joints
+        .iter()
+        .filter(|j| j.kind != JointKind::Rigid && (j.captured.is_none() || j.base_values.is_none()))
+        .map(|j| (j.id, j.values.clone(), crate::normalize_joint_exprs(&j.exprs.values, j.kind.dofs().len())))
+        .collect();
     let before = positions(s);
-    let (out, sol) = drive_with_contact(s, &want, &keyed(&m))?;
+    let driven_exprs: Vec<(u64, usize)> = given.iter().copied().filter(|(id, idx)| want.iter().any(|(w, q)| *w == *id && *idx < q.len())).collect();
+    if !driven_exprs.is_empty()
+        && s.doc.assembly.joints.iter().any(|j| driven_exprs.iter().any(|&(id, idx)| id == j.id && j.exprs.value(idx).is_some()))
+    {
+        let doc = s.doc_mut();
+        for (id, idx) in driven_exprs {
+            if let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == id) {
+                j.exprs.set_value(idx, None);
+            }
+        }
+    }
+    let (out, sol) = drive_with_contact(s, &want, &given)?;
+    let mut pending = std::mem::take(&mut s.pending_joint_bases);
+    for (jid, old_vals, old_exprs) in before_vals {
+        if let Some(j) = s.doc.assembly.joints.iter().find(|j| j.id == jid) {
+            let dofs = j.kind.dofs().len();
+            let cur_exprs = crate::normalize_joint_exprs(&j.exprs.values, dofs);
+            if j.values != old_vals || cur_exprs != old_exprs {
+                pending.entry(jid).or_insert((old_vals, old_exprs));
+            }
+        }
+    }
+    s.pending_joint_bases = pending;
     let drive = drive_report(cmd, out)?;
     let after = positions(s);
     let moved: Vec<&(String, Mat)> = moved(&before, &after).collect();
@@ -1188,7 +1234,7 @@ fn traced_point(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<u64>, Vec3)> {
     };
     let at = p.get("point").and_then(vec3).filter(|v| v.len() < 1e7).ok_or_else(|| bad(cmd, "`point` must be [x, y, z], a world point"))?;
     let mut t = s.scratch();
-    t.pending_moves.clear();
+    t.clear_pending_moves();
     let local = solidcraft_doc::mat_inverse(&path_world(&t, &path, cmd)?)
         .map(|m| solidcraft_doc::apply_point(&m, at))
         .ok_or_else(|| bad(cmd, "the occurrence's placement is not invertible"))?;
@@ -1209,7 +1255,7 @@ fn sample_trace(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<Vec3>, TraceRu
     let mut t = s.scratch();
     // Traced from where the parts are placed: moves only shown (an exploded view, a move not
     // captured yet) are not where the joints are solved.
-    t.pending_moves.clear();
+    t.clear_pending_moves();
     let world = |t: &Session| path_world(t, &path, cmd);
     let (default, given, plan) = motion_plan(s, p, cmd)?;
     let n = sample_count(p, default.min(MAX_TRACE), MAX_TRACE, cmd)?;
@@ -1338,17 +1384,17 @@ fn keep_sampled_trace(
     };
     let pts: Vec<Value> = points.iter().map(|v| json!([v.x, v.y, v.z])).collect();
     // Made in the root, whatever is being edited, which is then as it was (also on an error).
-    let before = (s.active_sketch, s.active_component, s.active_occurrence_path.take());
+    let before = (s.active_sketch, s.sketching_view, s.active_component, s.active_occurrence_path.take());
     s.active_component = 0;
     let made = (|| {
-        let run = |s: &mut Session, id: &str, q: Value| super::find_command(id).ok_or_else(|| bad(cmd, id.to_string()))?.run_nested(s, &q);
+        let run = |s: &mut Session, id: &str, q: Value| super::find_command(id).ok_or_else(|| bad(cmd, id.to_string()))?.run_nested_continuing(s, &q);
         let made = run(s, "sketch.create", json!({"plane": "XY", "project_edges": false, "name": name}))?;
         let sketch = made.get("sketch").cloned().unwrap_or(Value::Null);
         run(s, "sketch.options", json!({"sketch": sketch, "sketch_3d": true}))?;
         let spline = run(s, "sketch.spline3d", json!({"sketch": sketch, "points": pts}))?;
         Ok::<_, EngineError>((made, spline))
     })();
-    (s.active_sketch, s.active_component, s.active_occurrence_path) = before;
+    (s.active_sketch, s.sketching_view, s.active_component, s.active_occurrence_path) = before;
     s.revision += 1;
     let (made, spline) = made?;
     let sketch = made.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "trace sketch is missing"))?;
@@ -1416,7 +1462,14 @@ fn view_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
         Some(Value::String(x)) => x.clone(),
         _ => return Err(bad(cmd, "`view` must be an id or a name")),
     };
-    s.doc.assembly.exploded.iter().position(|e| e.id.to_string() == key || e.name == key).ok_or_else(|| bad(cmd, format!("no exploded view `{key}`")))
+    let numeric = p.get("view").is_some_and(Value::is_number);
+    unique_reference(
+        cmd,
+        "exploded view",
+        &key,
+        s.doc.assembly.exploded.iter().enumerate().filter(|(_, e)| e.id.to_string() == key || (!numeric && e.name == key)).map(|(i, e)| (e.id, i)),
+    )?
+    .ok_or_else(|| bad(cmd, format!("no exploded view `{key}`")))
 }
 
 /// World centre of each top-level occurrence's bodies.
@@ -1484,7 +1537,7 @@ fn explode_create(s: &mut Session, p: &Value) -> Result<Value> {
 fn explode_show(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "explode.show";
     if p.get("view").is_none_or(|v| v.is_null() || v.as_str().is_some_and(|x| x.eq_ignore_ascii_case("none"))) {
-        s.pending_moves.clear();
+        s.clear_pending_moves();
         s.exploded.clear();
         s.revision += 1;
         return typed_reply(cmd, ExplodeShown { view: None, name: None, param_warnings: Vec::new() });
@@ -1498,6 +1551,7 @@ fn explode_show(s: &mut Session, p: &Value) -> Result<Value> {
     // Shown only: `exploded` marks these as the view's, so the design's placements leave them out.
     s.exploded.clone_from(&moves);
     s.pending_moves = moves;
+    s.pending_move_records.clear();
     s.revision += 1;
     typed_reply(cmd, ExplodeShown { view: Some(v.id), name: Some(v.name), param_warnings: Vec::new() })
 }

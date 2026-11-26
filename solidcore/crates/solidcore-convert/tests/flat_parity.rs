@@ -18,6 +18,9 @@
     clippy::print_stderr
 )] // test
 
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::io::Read as _;
@@ -65,7 +68,7 @@ struct Tally {
     rounding_places: usize,
     rounding_largest: f64,
     refused_in: Vec<String>,
-    /// Sheets with a face used on its reverse side (every difference follows from that).
+    /// Sheets with a face used on its reverse side (every difference follows from its turn).
     sheet_side: Vec<String>,
     refused_out: Vec<String>,
     classes: BTreeMap<String, Class>,
@@ -73,7 +76,8 @@ struct Tally {
     per_body: BTreeMap<String, BTreeSet<String>>,
     /// Bodies whose `.tolerance` moved other than down to the least of the record's.
     tolerance_wrong: Vec<String>,
-    /// Sheet-side bodies whose geometry differs as multisets (not only renumbered).
+    /// Sheet-side bodies whose vertices or edges moved or were renumbered, or that came back with
+    /// a face of an open shell used backward.
     sheet_geometry: Vec<String>,
     /// (body, face, the record's kind, the kind that came back, trusted)
     relabelled: Vec<(String, usize, String, String, bool)>,
@@ -162,30 +166,22 @@ fn walk(
 
 /// A record's geometry as multisets, its numbering dropped: the vertex points, each edge's
 /// curve (a line's two ends unordered), each face's surface and NURBS form.
-fn geometry(r: &Value) -> [Vec<String>; 3] {
-    let list = |key: &str, f: &dyn Fn(&Value) -> String| -> Vec<String> {
-        let mut v: Vec<String> = r[key]
-            .as_array()
-            .map(|a| a.iter().map(f).collect())
-            .unwrap_or_default();
-        v.sort();
-        v
-    };
-    let curve = |e: &Value| {
-        let c = &e["curve"];
-        if c["kind"] == "line" {
-            let mut ends = [c["start"].to_string(), c["end"].to_string()];
-            ends.sort();
-            format!("line {ends:?}")
-        } else {
-            c.to_string()
-        }
-    };
-    [
-        list("vertices", &|v| v["point"].to_string()),
-        list("edges", &curve),
-        list("faces", &|f| format!("{} {}", f["surface"], f["nurbs"])),
-    ]
+/// Each edge's curve, interval and ends, in the record's order.
+fn edge_geometry(r: &Value) -> Vec<[Value; 3]> {
+    r["edges"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .map(|e| {
+                    [
+                        e["curve"].clone(),
+                        e["interval"].clone(),
+                        e["vertices"].clone(),
+                    ]
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn kind(face: &Value) -> String {
@@ -194,9 +190,10 @@ fn kind(face: &Value) -> String {
 
 fn one(name: &str, record: &Record, trusted: bool, fixes: &UpstreamFixes, t: &mut Tally) {
     t.bodies += 1;
-    // a sheet face used on its reverse side: the kernel keeps both uses of a sheet's face and
-    // the record comes back with the `same` one, as SolidCraft's flat export wrote it
-    // (a sheet's shell is listed by one region; a closed shell by the two it separates)
+    // a sheet face used on its reverse side: the kernel uses each face of a sheet forward and
+    // turns that face's surface over instead (#13640), so the record comes back with the face
+    // used forward on its turned surface (a sheet's shell is listed by one region; a closed
+    // shell by the two it separates)
     let listed = |i: usize| {
         record
             .regions
@@ -283,7 +280,14 @@ fn one(name: &str, record: &Record, trusted: bool, fixes: &UpstreamFixes, t: &mu
         }
     }
     t.per_body.insert(name.to_owned(), classes);
-    if sheet_side && geometry(&a) != geometry(&z) {
+    // the turn keeps every vertex and edge where it was, numbered as before; every face of an
+    // open shell comes back used forward
+    let forward_back = back.shells.iter().all(|s| match s {
+        solidcore_record::brep::Shell::Faces { faces, .. } => faces.iter().all(|f| f.forward),
+        _ => true,
+    });
+    let unmoved = |r: &Value| (r["vertices"].clone(), edge_geometry(r));
+    if sheet_side && (unmoved(&a) != unmoved(&z) || !forward_back) {
         t.sheet_geometry.push(name.to_owned());
     }
     if sheet_side {
@@ -306,14 +310,7 @@ fn one(name: &str, record: &Record, trusted: bool, fixes: &UpstreamFixes, t: &mu
 }
 
 fn fixes() -> UpstreamFixes {
-    let fixes_json: Value =
-        serde_json::from_str(&std::fs::read_to_string(corpus().join("fixes.json")).unwrap())
-            .unwrap();
-    let mut fixes = UpstreamFixes::default();
-    for flag in fixes_json.as_array().unwrap() {
-        *fixes.flag_mut(flag.as_str().unwrap()).unwrap() = true;
-    }
-    fixes
+    solidcraft_fixes::solidcraft_fixes()
 }
 
 const LABEL: [&str; 6] = [
@@ -401,15 +398,6 @@ fn pinned() -> BTreeMap<String, BTreeSet<String>> {
                 "fillets/2903-original-rim-round.json:b0",
             ],
         ),
-        // a torus label whose frame is off its form's own first sweep row past the rounding
-        // `evaluates_as` derives (margin 1.69, tests/issue_3185_label_margins.rs)
-        (
-            label(
-                "torus -> rational_spline",
-                &["major_radius", "minor_radius"],
-            ),
-            &["sweeps/4280-circular-pattern-of-sweep-cut-groove-on-hub.json:b46"],
-        ),
         // an extruded circle the flat hop left a spline, proved a cylinder
         (
             label("rational_spline -> cylinder", &["radius"]),
@@ -431,28 +419,32 @@ fn pinned() -> BTreeMap<String, BTreeSet<String>> {
             out.insert((*b).to_owned(), classes.clone());
         }
     }
-    // a sheet face used on its reverse side: the kernel keeps both uses of a sheet's face and
-    // the record comes back with the `same` one, as the flat export's rule says; every
-    // difference is the renumbering that follows (checked: the same vertex points, edge curves
-    // and face surfaces, as multisets), and two of them also lower `.tolerance`
-    let renumbered = [
+    // a sheet face used on its reverse side: the kernel uses it forward on its surface turned
+    // over (`SmFace::SwapUV`, #13640), its vertices and edges as they were (checked: the same
+    // points and curves, numbered alike). Every difference follows from the turn: the face used
+    // forward; its surface's u and v swapped (a spline's net transposed, so its lengths swap; a
+    // plane's axes swapped, and with them its domain); its loops walked the other way about the
+    // turned normal (each use's edge, direction and mirrored pcurve), so each edge use's place
+    // and side in its walk; and two of them also lower `.tolerance`, as before
+    let turned = [
         ".edges[*].uses[*].position",
+        ".edges[*].uses[*].upper",
         ".faces[*].loops[*].edges[*].edge",
         ".shells[*].faces[*].forward",
-        ".vertices[*].point[*]",
     ];
-    let match_sheet = [
-        ".edges[*].curve.knots: length",
-        ".edges[*].curve.points: length",
-        ".edges[*].uses[*].upper",
+    let spline = [
+        ".faces[*].surface.points: length",
+        ".faces[*].surface.u_knots: length",
+        ".faces[*].surface.v_knots: length",
     ];
-    let reverse = [
-        ".edges[*].curve.end[*]",
-        ".edges[*].curve.start[*]",
-        ".edges[*].vertices[*]",
+    let plane = [
+        ".faces[*].loops[*].edges[*].forward",
+        ".faces[*].loops[*].edges[*].pcurve.points[*][*]",
+        ".faces[*].surface.u_axis[*]",
+        ".faces[*].surface.v_axis[*]",
     ];
     let with = |extra: &[&[&str]]| {
-        let mut c = set(&renumbered);
+        let mut c = set(&turned);
         for e in extra {
             c.extend(set(e));
         }
@@ -461,23 +453,23 @@ fn pinned() -> BTreeMap<String, BTreeSet<String>> {
     for (b, classes) in [
         (
             "surfaces/cov-match-coplanar-sheet-onto-the-near-edge.json:b1",
-            with(&[&match_sheet]),
+            with(&[&spline]),
         ),
         (
             "surfaces/cov-match-raised-sheet-down-onto-the-edge-g1.json:b1",
-            with(&[&match_sheet, &[".tolerance"]]),
+            with(&[&spline, &[".tolerance"]]),
         ),
         (
             "surfaces/cov-match-raised-sheet-down-onto-the-edge-g3.json:b1",
-            with(&[&match_sheet, &[".tolerance"]]),
+            with(&[&spline, &[".tolerance"]]),
         ),
         (
             "surfaces/cov-reverse-normal-l-sheet-swaps-the-thicken-side.json:b2",
-            with(&[&reverse, &[".edges[*].uses: length"]]),
+            with(&[&plane, &[".faces[*].domain[*][*]"]]),
         ),
         (
             "surfaces/cov-reverse-normal-then-thicken-goes-down.json:b1",
-            with(&[&reverse]),
+            with(&[&plane]),
         ),
     ] {
         out.insert(b.to_owned(), classes);
@@ -582,7 +574,7 @@ fn parity(stride: usize) {
         // differs is pinned above, and the rest must be identical or within rounding.
         assert_eq!(
             (t.bodies - t.identical - t.rounding_only, t.rounding_only),
-            (pinned.len(), 36),
+            (pinned.len(), 37), // 37 with fillets/15437's block (within rounding)
             "bodies that differ, bodies within rounding"
         );
         // the largest rounding difference, relative (#3137: 4.885e-16)

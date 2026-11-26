@@ -7,7 +7,7 @@ use std::f64::consts::PI;
 use solidcore_record::brep as b;
 
 use super::boolean::boolean;
-use super::{Body, from_arrays, make_box, make_cone, make_cylinder, make_sphere, make_torus, to_arrays, volume};
+use super::{Body, counts, from_arrays, make_box, make_cone, make_cylinder, make_sphere, make_torus, to_arrays, volume};
 use crate::BooleanOp;
 use crate::export::native;
 use crate::import::{self, Arrays};
@@ -179,7 +179,7 @@ fn tolerances_cross_the_arrays_per_entity() {
     a.reals.get_mut(&TOLERANCE).unwrap()[0] = 8.0 * base;
     for round in 0..3 {
         let body = from_arrays(&a).unwrap();
-        assert_eq!(body.0.lock().unwrap().tolerance(), base / 2.0, "round {round}");
+        assert_eq!(body.kernel().tolerance(), base / 2.0, "round {round}");
         a = to_arrays(&body).unwrap();
         assert_eq!(a.reals[&TOLERANCE], [base], "round {round}");
         let edges = &a.reals[&EDGE_TOLERANCE];
@@ -272,6 +272,17 @@ fn a_sealed_void_crosses_the_arrays_outer_shell_first() {
     assert!(rel(v, SEALED_VOID_VOLUME) < 1e-9, "round trip: {v}");
 }
 
+#[test]
+fn an_import_with_a_sealed_void_reuses_its_proven_shell_order() {
+    let unordered = shells_reversed(&to_arrays(&sealed_void()).unwrap());
+    let imported = crate::Brep::from_arrays(&unordered).unwrap();
+    let (record, _, prepared, _) = imported.to_native_prepared().unwrap();
+    let prepared = prepared.expect("the exact containment test established the outer shell");
+    let rebuilt = crate::Brep::from_record(&record, true).unwrap();
+    assert_eq!(prepared.to_native_ordered().unwrap().0, rebuilt.to_native_ordered().unwrap().0);
+    assert!(rel(prepared.volume(1e-9).unwrap(), SEALED_VOID_VOLUME) < 1e-9);
+}
+
 /// Arrays listing the solid region's void shell before the box around it import with the box
 /// first (SMLib takes a region's first shell as its enclosing one), the volume unchanged.
 #[test]
@@ -362,4 +373,169 @@ fn nurbs_weights_far_from_the_origin_compare_within_their_rounding() {
     assert!(super::convert::same_nurbs(s.gw_nurb().unwrap(), make(&w).gw_nurb().unwrap(), 0.01));
     w[1] += 1e-9;
     assert!(!super::convert::same_nurbs(s.gw_nurb().unwrap(), make(&w).gw_nurb().unwrap(), 0.01));
+}
+
+/// A Ø1 × 1000 cylinder 1600 below the origin drafted 0.02° in about its base: its top circle (r
+/// 0.15 at z = -600) is written as a circle whose NURBS lies about 3e-10 off it, rounding of the
+/// coordinates' size that the export's own check allows. The import reads it back with the same
+/// allowance instead of refusing "a conic NURBS off its conic", and the frustum keeps its volume.
+#[test]
+fn a_drafted_circle_far_from_the_origin_comes_back_as_written() {
+    let (big, h, angle) = (0.5, 1000.0, 0.02f64.to_radians());
+    let small = big - h * angle.tan();
+    let cyl = make_cylinder([0.0, 0.0, -1600.0], big, h).unwrap();
+    let drafted = super::offset::draft(&cyl, &[[big, 0.0, -1100.0]], 1e-5, [0.0, 0.0, -1600.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], angle).unwrap();
+    let back = from_arrays(&to_arrays(&drafted).unwrap()).unwrap();
+    let want = PI * h * (big * big + big * small + small * small) / 3.0;
+    let v = volume(&back, 1e-9).unwrap();
+    assert!(rel(v, want) < 1e-7, "{v} vs {want}");
+}
+
+/// A Ø3800 × Ø800 torus with a Ø96 hole cut 200 deep into its outer equator, the hole's rim
+/// 0.005 across the torus's 0° seam (#19254). The rim meets the equator (radius 1900) at
+/// -3.8e-5°, so the equator's piece up to the seam is an arc 1.27e-3 long, under 1e-6 of its
+/// radius. The body comes back from its arrays with the same faces, edges, vertices and volume,
+/// and so does the join of an 80 × 80 × 160 block wholly inside the tube, which leaves it as it is.
+/// The equator's other piece, 96 long, is still written as a circle of radius 1900.
+#[test]
+fn a_hole_cut_a_hair_across_a_torus_seam_comes_back() {
+    use crate::flat::{CURVE_CIRCLE, EDGE_CIRCLE_RADIUS, EDGE_CURVE_TYPE};
+    let torus = make_torus([0.0; 3], 1500.0, 400.0).unwrap();
+    let hole = make_cylinder([1899.3937162045017, 47.9949043425656, -200.0], 48.0, 200.0).unwrap();
+    let cut = boolean(&torus, &hole, BooleanOp::Subtract).unwrap().unwrap();
+    let want = volume(&cut, 1e-9).unwrap();
+    let arrays = to_arrays(&cut).unwrap();
+    let circles = arrays.ints[&EDGE_CURVE_TYPE].iter().filter(|&&t| t == i64::from(CURVE_CIRCLE)).count();
+    let radii = &arrays.reals[&EDGE_CIRCLE_RADIUS];
+    assert_eq!(radii.len(), circles);
+    assert!(radii.iter().any(|r| (r - 1900.0).abs() <= 1e-9 * 1900.0), "no circle of radius 1900 among {radii:?}");
+    let back = from_arrays(&arrays).unwrap();
+    assert_eq!(counts(&back).unwrap(), counts(&cut).unwrap());
+    let v = volume(&back, 1e-9).unwrap();
+    assert!(rel(v, want) < 1e-9, "round trip: {v} vs {want}");
+
+    let block = make_box([1460.0, 80.0, -160.0], [80.0, 80.0, 160.0]).unwrap();
+    let joined = boolean(&back, &block, BooleanOp::Union).unwrap().unwrap();
+    let again = from_arrays(&to_arrays(&joined).unwrap()).unwrap();
+    assert_eq!(counts(&again).unwrap(), counts(&cut).unwrap());
+    let v = volume(&again, 1e-9).unwrap();
+    assert!(rel(v, want) < 1e-9, "joined: {v} vs {want}");
+}
+
+/// What the record of `body` writes for each face on an implicit offset surface, which it cannot
+/// hold (#21926).
+#[derive(Debug)]
+struct StandIn {
+    /// The face's index.
+    face: usize,
+    /// The tolerance the record states for the face: the face's tolerance on its import.
+    stated: f64,
+    /// The farthest the written spline lies from the face's surface at the same parameters, on a
+    /// 61 x 61 grid over the face's parameter box (at least its distance from the face there).
+    sampled: f64,
+    /// The certified bound of the distance from the offset of the kernel's certified net of it
+    /// within half the stated tolerance, at every parameter; `None` unless that net is the
+    /// spline written, coordinate for coordinate.
+    certified: Option<f64>,
+}
+
+/// Each offset face of `body` and its spline in `body`'s record, read back as the app reads a
+/// record ([`import::arrays`]).
+fn offset_stand_ins(body: &Body) -> Vec<StandIn> {
+    let rec = record(&to_arrays(body).unwrap());
+    let back = from_arrays(&import::arrays(&rec, true).unwrap()).unwrap();
+    let stated: Vec<f64> = super::with_body("face tolerances", &back, |_, b| {
+        let mut t = Vec::new();
+        for &f in b.face_list() {
+            t.push(b.face(f)?.tolerance);
+        }
+        Ok(Some(t))
+    })
+    .unwrap()
+    .unwrap();
+    // each offset face's index, its certified net and bound, and its points on the grid
+    let offsets = super::with_body("offset faces", body, |k, b| {
+        let mut out = Vec::new();
+        for (i, &f) in b.face_list().iter().enumerate() {
+            let face = b.face(f)?;
+            let (Some(s), Some(&t)) = (face.surface.as_ref(), stated.get(i)) else { continue };
+            let Some((net, bound)) = solidcore_ops::offset::certified_offset_net(k, s, t / 2.0)? else { continue };
+            let d = face.uv_domain;
+            let mut grid = Vec::new();
+            for a in 0..=60 {
+                for c in 0..=60 {
+                    let at = |lo: f64, hi: f64, n: i32| lo + (hi - lo) * f64::from(n) / 60.0;
+                    let uv = solidcore::Point2::new(at(d.u_min(), d.u_max(), a), at(d.v_min(), d.v_max(), c));
+                    grid.push((uv, s.evaluate_point(k, uv)?));
+                }
+            }
+            out.push((i, net, bound, grid));
+        }
+        Ok(Some(out))
+    })
+    .unwrap()
+    .unwrap();
+    super::with_body("stand-ins", &back, |k, b| {
+        let mut out = Vec::new();
+        for (i, net, bound, grid) in &offsets {
+            let written = b.face(b.face_list()[*i])?.surface.clone().unwrap();
+            let mut sampled: f64 = 0.0;
+            for (uv, p) in grid {
+                sampled = sampled.max((written.evaluate_point(k, *uv)? - *p).length());
+            }
+            let nurb = |s| super::convert::bspline_surface_part(k, s).unwrap().and_then(|p| p.gw_nurb().cloned()).unwrap();
+            let same = super::convert::same_nurbs(&nurb(&written), &nurb(net), 0.0);
+            out.push(StandIn { face: *i, stated: stated[*i], sampled, certified: same.then_some(*bound) });
+        }
+        Ok(Some(out))
+    })
+    .unwrap()
+    .unwrap()
+}
+
+/// The largest edge tolerance `body`'s record writes (EDGE_TOLERANCE is twice the tolerance).
+fn largest_edge_tolerance(body: &Body) -> f64 {
+    to_arrays(body).unwrap().reals[&crate::flat::EDGE_TOLERANCE].iter().fold(0.0, |m: f64, &t| m.max(t / 2.0))
+}
+
+/// #21926: the fin of `examples/regressions/fins_joined_into_their_hub.json` without its trim, a
+/// sheet lofted between two straight sections that twist, thickened 1.2 about itself: six faces,
+/// one of them on an implicit offset surface (the sheet moved back 0.6), every tolerance 1e-5. A
+/// closed shell 0.2 inward (the kernel's, not through the record) keeps that face on it, with its
+/// tolerance of 1e-5, and raises edge tolerances to about 3.2e-5. The record's spline for the
+/// face was fitted to half the largest tolerance and came 1.56e-5 off the face. It is now the
+/// kernel's net of the offset certified within half the face's own tolerance: within the 1e-5 the
+/// record states for the face at every parameter, and so at every point sampled. The thickened
+/// body, whose spline was within its face's tolerance before (1.8e-6 sampled), is the control.
+#[test]
+fn an_offset_face_is_written_within_the_tolerance_its_record_states() {
+    use crate::sweeps::Curve;
+    let line = |start: [f64; 3], end: [f64; 3]| vec![Curve::Line { start, end }];
+    let sheet = super::sweep::loft(
+        &[
+            line([-9.641814145318946, 0.0, -16.68578720333266], [9.641814145300943, 0.0, 6.29554609021679]),
+            line([-12.990381056768296, 30.0, -12.5], [12.9903810567683, 30.0, 2.5]),
+        ],
+        1,
+        false,
+    )
+    .unwrap();
+    let fin = super::offset::thicken(&sheet, 1.2, true).unwrap();
+    let shelled = Body::from_kernel(super::run("shell_brep", |k| super::offset::shell_brep_full(k, &fin.kernel(), -0.2, &[])).unwrap());
+    let mut written = Vec::new();
+    for (name, body, faces) in [("thickened", &fin, [6, 12, 8]), ("shelled", &shelled, [12, 24, 16])] {
+        assert_eq!(counts(body).unwrap(), faces, "{name}");
+        let stand_ins = offset_stand_ins(body);
+        let [s] = stand_ins.as_slice() else { panic!("{name}: one offset face, not {stand_ins:?}") };
+        assert_eq!((s.face, s.stated), (5, 1e-5), "{name}: {s:?}");
+        assert!(s.sampled <= s.stated, "{name}: the spline is outside the face's tolerance: {s:?}");
+        written.extend(stand_ins.into_iter().map(|s| (name, s)));
+    }
+    for (name, s) in written {
+        let bound = s.certified.unwrap_or_else(|| panic!("{name}: the written spline is not the certified net: {s:?}"));
+        assert!(bound <= s.stated / 2.0, "{name}: {s:?}");
+    }
+    // the shell raised edge tolerances past twice the face's: half the largest is past the face's
+    let largest = largest_edge_tolerance(&shelled);
+    assert!(largest > 2.0 * 1e-5 && largest_edge_tolerance(&fin) == 1e-5, "{largest}");
 }
