@@ -538,6 +538,7 @@ fn handshake_and_tools_list() {
         "version",
         "list_commands",
         "describe_command",
+        "search",
         "execute",
         "batch",
         "inspect_design",
@@ -4059,6 +4060,7 @@ fn tool_annotations_tell_the_whole_truth() {
         "version",
         "list_commands",
         "describe_command",
+        "search",
         "inspect_design",
         "measure",
         "body_topology",
@@ -4076,6 +4078,39 @@ fn tool_annotations_tell_the_whole_truth() {
         assert_eq!(hints(name), (false, false, false), "{name}");
     }
     assert!(tools.iter().all(|t| t["annotations"]["readOnlyHint"].is_boolean()), "every tool is annotated");
+}
+
+#[test]
+fn search_tool_finds_commands_design_entities_and_standard_parts_with_typo_safety() {
+    let mut s = server();
+    tool(&mut s, "set_parameter", json!({"name": "flange_od", "value": "80 mm", "comment": "outer diameter"}));
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 40, "width": 30, "height": 10, "body_name": "FlangeBody"}}));
+
+    let global = tool(&mut s, "search", json!({"query": "flange"}));
+    assert_eq!(global["near_matches"], false);
+    assert_eq!(global["sources_failed"], json!([]));
+    let hits = global["hits"].as_array().expect("hits array");
+    assert!(hits.iter().any(|h| h["kind"] == "body" && h["title"] == "FlangeBody"), "{global}");
+    assert!(hits.iter().any(|h| h["kind"] == "parameter" && h["title"] == "flange_od"), "{global}");
+    assert!(hits.iter().any(|h| h["kind"] == "command"), "{global}");
+
+    // Scope filtering narrows to requested scope only.
+    let scoped = tool(&mut s, "search", json!({"query": "M5x12 SHCS", "scopes": ["parts"], "limit": 5}));
+    assert_eq!(scoped["sources_searched"], json!(["parts"]));
+    assert!(scoped["hits"].as_array().unwrap().iter().any(|h| h["id"] == "socket_head_cap_screw:M5x12"), "{scoped}");
+
+    // Typo fallback surfaces near matches when nothing matches cleanly.
+    let typo = tool(&mut s, "search", json!({"query": "exturde", "scopes": ["commands"]}));
+    assert_eq!(typo["near_matches"], true, "{typo}");
+    assert!(typo["hits"].as_array().unwrap().iter().any(|h| h["id"] == "solid.extrude" && h["confidence"] == "possible"), "{typo}");
+
+    // Digit-bearing tokens never trigger typo matching onto another size.
+    let digit = tool(&mut s, "search", json!({"query": "M99x12 SHCS", "scopes": ["parts"]}));
+    assert_eq!(digit["total"], 0, "{digit}");
+
+    // Usable as a batch step too.
+    let batched = tool(&mut s, "batch", json!({"commands": [{"command": "search", "params": {"query": "FlangeBody", "scopes": ["bodies"]}}]}));
+    assert_eq!(batched["results"][0]["hits"][0]["title"], "FlangeBody", "{batched}");
 }
 
 /// `measure` with `items` (#1392): a sketch circle's diameter and radius, and two circles'

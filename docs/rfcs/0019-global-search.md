@@ -176,6 +176,9 @@ Rows for generators and Workshop items show the item's provenance badge: **Check
 
 1. **Global search over installed things** (no manifest change): the registry, the built-in sources,
    ranking, `sources_failed`, panel searches moved onto it. Useful on its own.
+   *(In progress — core `SearchSource` registry, case-/accent-folded typo-safe matcher, built-in
+   sources for commands, design items, standard parts, samples and installed plugins, `engine.search`
+   with I/O schemas, MCP `search` tool, and shared palette matcher landed in `crates/engine/src/search/`.)*
 2. **Declarations** in manifests (labels, keywords, generator patterns) with the validator and example
    runner; installed generators answer codes in the parts browser and global search.
 3. **Workshop items**: the signed match-table snapshot, Install-to-use rows, conflict checks at index build.

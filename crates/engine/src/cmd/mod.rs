@@ -205,7 +205,7 @@ mod model_selection;
 pub(crate) mod motion;
 mod motion_simulate;
 mod notes;
-mod parts;
+pub(crate) mod parts;
 mod plugin;
 #[cfg(test)]
 pub(crate) use plugin::shared_corners as plugin_shared_corners;
@@ -216,6 +216,7 @@ mod pulleys;
 #[cfg(test)]
 mod pulleys_tests;
 mod script;
+mod search;
 mod section;
 mod selection;
 pub mod settings;
@@ -707,6 +708,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(print_face::COMMANDS.iter());
     v.extend(metadata::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
+    v.extend(search::COMMANDS.iter());
     v.extend(compare::COMMANDS.iter());
     v.extend(compare_picture::COMMANDS.iter());
     v.extend(silhouette::COMMANDS.iter());

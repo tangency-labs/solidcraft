@@ -1112,6 +1112,77 @@ fn build(s: &mut Session, family: &str, sh: &Shape, mode: ThreadMode, body_name:
     Ok(())
 }
 
+/// Compact catalog summary of one standard part family, shared with global search (`crate::search`).
+pub(crate) struct PartFamilySummary {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub standard: &'static str,
+    pub system: &'static str,
+    pub aliases: &'static str,
+    pub sizes: Vec<String>,
+    pub has_length: bool,
+}
+
+/// Every built-in standard part family with its sizes and common shorthand keywords.
+pub(crate) fn catalog_families() -> Vec<PartFamilySummary> {
+    FAMILIES
+        .iter()
+        .map(|&(id, name, standard)| {
+            let sizes: Vec<String> = match id {
+                "socket_head_cap_screw" => SHCS.iter().map(|r| r.0.to_string()).collect(),
+                "button_head_cap_screw" => BHCS.iter().map(|r| r.0.to_string()).collect(),
+                "countersunk_socket_screw" => CSK.iter().map(|r| r.0.to_string()).collect(),
+                "hex_bolt" => HEX_BOLT.iter().map(|r| r.0.to_string()).collect(),
+                "hex_nut" => HEX_NUT.iter().map(|r| r.0.to_string()).collect(),
+                "washer" => WASHER.iter().map(|r| r.0.to_string()).collect(),
+                "set_screw" => SET_SCREW.iter().map(|r| r.0.to_string()).collect(),
+                "dowel_pin" => DOWEL.iter().map(|d| format!("{d}")).collect(),
+                "bearing" => BEARINGS.iter().map(|r| r.0.to_string()).collect(),
+                "hex_bolt_gost" => GOST_HEX.iter().filter(|r| r.4.is_some()).map(|r| r.0.to_string()).collect(),
+                "socket_head_cap_screw_gost" => GOST_SHCS.iter().map(|r| r.0.to_string()).collect(),
+                "set_screw_gost" => GOST_SET_SCREW.iter().map(|r| r.0.to_string()).collect(),
+                "hex_nut_gost" => GOST_HEX.iter().map(|r| r.0.to_string()).collect(),
+                "hex_nut_thin_gost" => GOST_THIN_NUT.iter().map(|r| r.0.to_string()).collect(),
+                "washer_gost" => GOST_WASHER.iter().map(|r| r.0.to_string()).collect(),
+                "washer_large_gost" => GOST_LARGE_WASHER.iter().map(|r| r.0.to_string()).collect(),
+                "dowel_pin_gost" => GOST_PIN.iter().map(|d| format!("{d}")).collect(),
+                "hex_cap_screw_inch" => INCH_HEX_CAP.iter().flat_map(|r| unified_sizes(r.0).into_iter().map(|t| t.designation)).collect(),
+                "hex_nut_inch" => INCH_HEX_NUT.iter().flat_map(|r| unified_sizes(r.0).into_iter().map(|t| t.designation)).collect(),
+                "washer_sae" => WASHER_SAE.iter().map(|r| r.0.to_string()).collect(),
+                "washer_uss" => WASHER_USS.iter().map(|r| r.0.to_string()).collect(),
+                _ => Vec::new(),
+            };
+            let aliases = match id {
+                "socket_head_cap_screw" | "socket_head_cap_screw_gost" => "shcs socket cap screw bolt fastener allen",
+                "button_head_cap_screw" => "bhcs button head screw fastener allen",
+                "countersunk_socket_screw" => "csk fhcs flat head countersunk screw fastener",
+                "hex_bolt" | "hex_bolt_gost" | "hex_cap_screw_inch" => "bolt hex screw fastener",
+                "hex_nut" | "hex_nut_gost" | "hex_nut_thin_gost" | "hex_nut_inch" => "nut hex fastener",
+                "washer" | "washer_gost" | "washer_large_gost" | "washer_sae" | "washer_uss" => "washer plain flat fastener",
+                "set_screw" | "set_screw_gost" => "grub set screw fastener",
+                "dowel_pin" | "dowel_pin_gost" => "dowel pin parallel fastener",
+                "bearing" => "bearing ball deep groove roller",
+                _ => "fastener part",
+            };
+            let has_length = matches!(
+                id,
+                "socket_head_cap_screw"
+                    | "button_head_cap_screw"
+                    | "countersunk_socket_screw"
+                    | "hex_bolt"
+                    | "set_screw"
+                    | "dowel_pin"
+                    | "hex_bolt_gost"
+                    | "socket_head_cap_screw_gost"
+                    | "set_screw_gost"
+                    | "dowel_pin_gost"
+                    | "hex_cap_screw_inch"
+            );
+            PartFamilySummary { id, name, standard, system: if is_inch(id) { "inch" } else { "metric" }, aliases, sizes, has_length }
+        })
+        .collect()
+}
+
 /// `parts.library`: the families, or with `family` one family's sizes (the rows of its table, in
 /// mm) and its standard lengths.
 fn library(_s: &mut Session, p: &Value) -> Result<Value> {

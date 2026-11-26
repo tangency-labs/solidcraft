@@ -155,6 +155,7 @@ fn reads_only(id: &str) -> bool {
                 | "render.settings.get"
                 | "file.slicers"
                 | "engine.describe"
+                | "engine.search"
                 | "plugin.check"
                 | "plugin.tools"
                 | "doc.info"

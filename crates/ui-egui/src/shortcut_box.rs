@@ -133,63 +133,15 @@ impl ShortcutBox {
     }
 }
 
-/// How well `q` matches `s` (0 = not at all): a prefix beats a word start beats a substring
-/// beats the letters in order with gaps.
+/// How well `q` matches `s` (0 = not at all): delegates to the shared engine search matcher
+/// (exact > prefix > word start > substring > letters in order with gaps, case- and accent-folded).
 pub fn score(q: &str, s: &str) -> u32 {
-    if q.is_empty() {
-        return 1;
-    }
-    let s = s.to_lowercase();
-    if s.starts_with(q) {
-        return 1000 - s.len().min(500) as u32;
-    }
-    if s.split(|c: char| !c.is_alphanumeric()).any(|w| w.starts_with(q)) {
-        return 800;
-    }
-    if s.contains(q) {
-        return 600;
-    }
-    // Letters in order: fewer gaps score higher.
-    let mut gaps = 0u32;
-    let mut it = s.chars();
-    let mut last_hit = true;
-    for qc in q.chars() {
-        let mut found = false;
-        for c in it.by_ref() {
-            if c == qc {
-                found = true;
-                break;
-            }
-            if last_hit {
-                gaps += 1;
-            }
-            last_hit = false;
-        }
-        if !found {
-            return 0;
-        }
-        last_hit = true;
-    }
-    300u32.saturating_sub(gaps * 20).max(10)
+    solidcraft_engine::search::matcher::score_text(q, s)
 }
 
 /// Words people look for a command by that its name doesn't hold (file formats, what it is for).
 fn keywords(id: &str) -> &'static str {
-    match id {
-        "file.save_mesh" => "export stl 3mf mesh 3d print printing slicer",
-        "file.export" => "export stl 3mf obj step urdf sdf gazebo mjcf mujoco mesh 3d print",
-        "file.export_step" => "stp cad",
-        "file.export_stl" | "file.export_3mf" => "mesh 3d print printing",
-        "file.export_obj" => "mesh",
-        "file.export_urdf" | "file.export_urdf_options" => "robot ros simulation",
-        "file.export_sdf" => "gazebo model simulation world texture",
-        "file.export_mjcf" => "mujoco robot simulation",
-        "sketch.constraint.tangent" => "g1 tangency continuity smooth",
-        "sketch.constraint.curvature" => "g2 curvature continuity smooth",
-        "sketch.blend_curve" => "g1 g2 g3 g4 continuity tangent curvature bridge",
-        "solid.fillet" => "g1 g2 continuity curvature blend round",
-        _ => "",
-    }
+    solidcraft_engine::search::command_keywords(id)
 }
 
 /// How well `q` matches a command's `keywords`: every word of the query starts a keyword.
@@ -409,26 +361,13 @@ fn typed(line: &str) -> Option<(&str, Result<Value, String>)> {
     Some((id, result))
 }
 
-/// Bounded Levenshtein distance also handles transposed/missing letters in a no-match query.
+/// Bounded Damerau-Levenshtein distance also handles transposed/missing letters in a no-match query.
 fn closest(query: &str) -> Option<&'static str> {
-    let q: Vec<_> = query.trim().to_lowercase().chars().take(128).collect();
     command_specs()
         .into_iter()
         .map(|c| {
             let label = solidcraft_ui_text::tr_command(c.id, c.label);
-            let mut prev: Vec<_> = (0..=q.len()).collect();
-            for (j, ch) in label.to_lowercase().chars().take(128).enumerate() {
-                let mut next = vec![j + 1];
-                for (i, qc) in q.iter().enumerate() {
-                    next.push(
-                        (prev.get(i).copied().unwrap_or(128) + usize::from(ch != *qc))
-                            .min(prev.get(i + 1).copied().unwrap_or(128) + 1)
-                            .min(next.last().copied().unwrap_or(128) + 1),
-                    );
-                }
-                prev = next;
-            }
-            (prev.last().copied().unwrap_or(128), label)
+            (solidcraft_engine::search::matcher::suggestion_distance(query, label), label)
         })
         .min()
         .map(|(_, label)| label)
