@@ -129,6 +129,8 @@ const FILE_EXTENSIONS: &[&str] = &[
     "jpeg",
     "urdf",
     "sdf",
+    "mjcf",
+    "xml",
     "txt",
     "py",
     "toml",
@@ -140,7 +142,7 @@ fn reads_only(id: &str) -> bool {
     // The engine finds a command ignoring case, so the plugin readers are matched the same way.
     id.eq_ignore_ascii_case("plugin.inspect")
         || id.eq_ignore_ascii_case("plugin.check")
-        || (id.starts_with("inspect.") && id != "inspect.section")
+        || (id.starts_with("inspect.") && !id.starts_with("inspect.section"))
         || id.starts_with("model.")
         || id.ends_with(".inspect")
         || id.ends_with(".list")
@@ -155,6 +157,7 @@ fn reads_only(id: &str) -> bool {
                 | "engine.describe"
                 | "plugin.check"
                 | "plugin.tools"
+                | "doc.info"
         )
 }
 
@@ -388,6 +391,7 @@ mod tests {
         assert_eq!(exec("selection.get", json!({})), Verdict::Run { change: false });
         assert_eq!(request("document.inspect", &json!({}), 0), Verdict::Run { change: false });
         assert_eq!(exec("engine.describe", json!({"command": "solid.box"})), Verdict::Run { change: false });
+        assert_eq!(exec("doc.info", json!({})), Verdict::Run { change: false });
     }
 
     #[test]

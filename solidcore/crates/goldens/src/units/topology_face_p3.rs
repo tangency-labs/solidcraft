@@ -927,24 +927,6 @@ fn analytic_face(
     Ok((s, [d0[0], d0[1], d1[0], d1[1]]))
 }
 
-/// The case's B-rep as [`run_rust_case`] builds it before the operation, and the face the
-/// operation is on (`None`: the build or the face selection fails). For tests that check
-/// a premise on the model a golden row was computed from (#18325).
-///
-/// # Errors
-///
-/// A case that does not parse, or the build's harness error.
-pub fn scene(case: &Case) -> Result<Option<(Brep, FaceId)>, HarnessError> {
-    let i = case.parse::<Inputs>()?;
-    let Ok((b, counts)) = own_brep(&i)? else {
-        return Ok(None);
-    };
-    let Some(a) = args(&i.op, counts, |f| first_loop(&b, f)) else {
-        return Ok(None);
-    };
-    Ok(Some((b, FaceId::from_index(a[0] as u32))))
-}
-
 #[allow(clippy::too_many_lines)] // one arm per op
 fn run_rust_case(i: &Inputs) -> Result<Output, HarnessError> {
     // a B-rep value above 1e150 is refused (HANG-29, fuzz case fuzz00127): building a face on such a
@@ -1118,6 +1100,7 @@ fn run_rust_case(i: &Inputs) -> Result<Output, HarnessError> {
                     out.extend([0.0; 6]);
                 }
             }
+            crate::dump::body(&k, "uv_trims", &b);
             put_tols(&b, &mut out);
             put_use_states(&b, &mut out);
             for (_, eu) in b.edgeuses().iter() {
@@ -1725,14 +1708,13 @@ mod tests {
     use super::*;
     use solidcore::curve::line::Line;
     use solidcore::geom::extent1d::Extent1d;
-    use solidcore::kernel::Kernel;
     use solidcore::math::{Point3, Vec3};
     use solidcore::nurbs::b_spline_curve::BSplineCurve;
     use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
 
     #[test]
     fn own_uv_trim_copy_slices_line_to_its_b_spline_base() {
-        let k = Kernel::default();
+        let k = crate::runner_kernel();
         let mut nurb = allocate_nurb_curve(1, 1, 3).unwrap();
         for (point, x) in nurb.cpts_mut().iter_mut().zip([-5.0, 5.0]) {
             point.x = x;

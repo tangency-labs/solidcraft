@@ -274,8 +274,8 @@ fn main() -> ExitCode {
         (Ok(()), Some(Err(e))) => Err(e),
         (r, _) => r,
     };
-    // The device that drew this run's pictures closes before the process exits: with it open,
-    // NVIDIA's Linux driver can crash in its exit handler after the work is done (#19431).
+    // The device that drew this run's pictures closes before the process exits: with it open, a
+    // driver's exit handler can crash after the work is done (#19431).
     solidcraft_viewport_gpu::capture::close_shared_before_exit();
     match r {
         Ok(()) => ExitCode::SUCCESS,
@@ -533,16 +533,30 @@ fn warn_if_open_elsewhere(path: &str) {
     }
 }
 
+fn print_file_warnings(path: &str, reply: &Value) {
+    for warning in reply.get("warnings").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
+        solidcraft_engine::note!("{path}: warning: {warning}");
+    }
+}
+
 /// Run `script`, read from `path`, on `s`. At the warn level each step's `param_warnings` go to
 /// stderr as the step completes, even when a later step fails (stdout stays the caller's).
 fn run_script_warning(s: &mut Session, path: &str, script: &Value) -> Result<Vec<Value>, String> {
     s.run_script_each(script, &mut |step, r| print_param_warnings(path, step, r)).map_err(|e| e.to_string())
 }
 
-/// Step `step`'s `param_warnings` on stderr, one per line, named after the script at `path`.
+/// Step `step`'s `param_warnings` and plugin warnings on stderr, one per line, named after the script at `path`.
 fn print_param_warnings(path: &str, step: usize, r: &Value) {
     for w in r.get("param_warnings").and_then(Value::as_array).into_iter().flatten() {
         solidcraft_engine::note!("{path}: step {}: {}", step + 1, w.as_str().unwrap_or_default());
+    }
+    for m in r.get("messages").and_then(Value::as_array).into_iter().flatten() {
+        let level = m.get("level").and_then(Value::as_str).unwrap_or("info");
+        let msg = m.get("message").and_then(Value::as_str).unwrap_or_default();
+        if level == "warn" || level == "error" {
+            let step_num = step + 1;
+            solidcraft_engine::note!("{path}: step {step_num}: {level}: {msg}");
+        }
     }
 }
 
@@ -743,7 +757,8 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
     }
     if let Some(p) = flag(args, "--save") {
         warn_if_open_elsewhere(p);
-        s.execute("file.save_as", &json!({"path": p})).map_err(|e| e.to_string())?;
+        let reply = s.execute("file.save_as", &json!({"path": p})).map_err(|e| e.to_string())?;
+        print_file_warnings(p, &reply);
     }
     if let Some(results) = results {
         print_json(&results, json_out)?;

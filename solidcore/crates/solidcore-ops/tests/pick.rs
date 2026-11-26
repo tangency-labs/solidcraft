@@ -93,3 +93,106 @@ fn a_pick_grows_across_a_split_line_but_not_a_kept_one() {
     );
     assert!(b.faces_on_one_surface(&o, &[99], &[]).is_err());
 }
+
+/// Each face centre of a box picks its own face, six in all; a point on an edge is as near two
+/// faces and ambiguous; a point farther than the tolerance from every face picks none.
+#[test]
+fn a_box_face_picks_by_point() {
+    all_fixes();
+    let b = make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap();
+    let centres = [
+        [0.0, 1.0, 1.5],
+        [1.0, 1.0, 1.5],
+        [0.5, 0.0, 1.5],
+        [0.5, 2.0, 1.5],
+        [0.5, 1.0, 0.0],
+        [0.5, 1.0, 3.0],
+    ];
+    let picked = solidcore_ops::pick::faces(&b, &centres, 1e-6)
+        .unwrap()
+        .unwrap();
+    let mut distinct = picked.clone();
+    distinct.sort_unstable();
+    distinct.dedup();
+    assert_eq!((picked.len(), distinct.len()), (6, 6), "{picked:?}");
+    assert!(distinct.iter().all(|&f| f < 6));
+    assert_eq!(
+        solidcore_ops::pick::faces(&b, &[[0.0, 0.0, 1.5]], 1e-6).unwrap(),
+        Err(solidcore_ops::pick::Miss::Ambiguous(0))
+    );
+    assert_eq!(
+        solidcore_ops::pick::faces(&b, &[[0.5, 1.0, 3.0], [9.0, 9.0, 9.0]], 1e-6).unwrap(),
+        Err(solidcore_ops::pick::Miss::None(1))
+    );
+    assert!(solidcore_ops::pick::faces(&b, &[[f64::NAN, 0.0, 0.0]], 1e-6).is_err());
+}
+
+/// A box's faces each have one loop of four distinct corners: no outline touches itself.
+#[test]
+fn a_box_outline_touches_nowhere() {
+    all_fixes();
+    let b = make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap();
+    assert_eq!(b.outline_touch().unwrap(), None);
+}
+
+/// A sphere inside a box cuts it into the ball and the rest: a closed tool's sheet is a closed
+/// shell, split by intersection and difference.
+#[test]
+fn a_box_splits_by_a_sphere_into_the_ball_and_the_rest() {
+    all_fixes();
+    let b = make_box([0.0; 3], [10.0; 3]).unwrap();
+    let tool = Tool {
+        surface: Surface::Sphere {
+            frame: solidcore_record::brep::Frame {
+                origin: [5.0, 5.0, 5.0],
+                x_axis: [1.0, 0.0, 0.0],
+                y_axis: [0.0, 1.0, 0.0],
+            },
+            radius: 3.0,
+        },
+        domain: [
+            [0.0, std::f64::consts::TAU],
+            [-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2],
+        ],
+    };
+    let (inside, outside) = solidcore_ops::split::split_body(&b, &tool)
+        .unwrap()
+        .unwrap();
+    let ball = 4.0 / 3.0 * std::f64::consts::PI * 27.0;
+    let rel = |a: f64, e: f64| (a - e).abs() / e;
+    assert!(rel(inside.volume(1e-8).unwrap(), ball) < 1e-6);
+    assert!(rel(outside.volume(1e-8).unwrap(), 1000.0 - ball) < 1e-6);
+}
+
+/// A plane strip that runs into a box's top face and ends half way across it cuts nothing off:
+/// the split is refused as stopping short.
+#[test]
+fn a_tool_that_ends_inside_a_face_stops_short() {
+    all_fixes();
+    let b = make_box([0.0; 3], [10.0; 3]).unwrap();
+    let (record, order) = b.to_record().unwrap();
+    let top = record
+        .faces
+        .iter()
+        .position(|f| match &f.surface {
+            Surface::Plane {
+                origin,
+                u_axis,
+                v_axis,
+            } => origin[2] == 10.0 && u_axis[2] == 0.0 && v_axis[2] == 0.0,
+            _ => false,
+        })
+        .unwrap();
+    let strip = Tool {
+        surface: Surface::Plane {
+            origin: [5.0, 0.0, 0.0],
+            u_axis: [0.0, 1.0, 0.0],
+            v_axis: [0.0, 0.0, 1.0],
+        },
+        domain: [[-1.0, 5.0], [-1.0, 11.0]],
+    };
+    assert_eq!(
+        split_faces(&b, &order, &[top], &[strip]).err(),
+        Some(solidcore_ops::Error::ToolStopsShort)
+    );
+}

@@ -1,0 +1,10 @@
+{
+  "en": { "ui.drawing_dimension_tool.curve": "This curve can't be dimensioned: pick a straight edge, or a circle or arc seen face on." },
+  "ar": { "ui.drawing_dimension_tool.curve": "لا يمكن وضع بُعد لهذا المنحنى: اختر حافة مستقيمة، أو دائرة أو قوسًا يُرى بنظرة عمودية عليه." },
+  "he": { "ui.drawing_dimension_tool.curve": "אי אפשר להוסיף מידה לעקומה הזו: בחרו קצה ישר, או מעגל או קשת שנראים במבט ניצב." },
+  "ja": { "ui.drawing_dimension_tool.curve": "この曲線には寸法を付けられません。直線のエッジか、正対して見た円または円弧を選んでください。" },
+  "vi": { "ui.drawing_dimension_tool.curve": "Không thể ghi kích thước cho đường cong này: hãy chọn một cạnh thẳng, hoặc một đường tròn hay cung tròn nhìn thẳng mặt." },
+  "zh": { "ui.drawing_dimension_tool.curve": "无法为此曲线标注尺寸：请选择直边，或正对视图的圆或圆弧。" },
+  "de": { "ui.drawing_dimension_tool.curve": "Diese Kurve lässt sich nicht bemaßen: Wählen Sie eine gerade Kante oder einen Kreis oder Kreisbogen, auf den die Ansicht senkrecht blickt." },
+  "ko": { "ui.drawing_dimension_tool.curve": "이 곡선에는 치수를 붙일 수 없습니다. 직선 모서리나 수직으로 바라본 원 또는 호를 선택하세요." }
+}

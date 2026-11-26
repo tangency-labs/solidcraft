@@ -31,6 +31,29 @@ fn check(s: &mut Session, want: f64, hole: bool, height: f64) {
     }
 }
 #[test]
+fn extrude_refuses_a_malformed_face_instead_of_using_the_last_sketch() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20,"name":"Base"}));
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[50,0],"p1":[60,10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let before = s.doc.to_json();
+
+    for mode in crate::schema::ParamCheck::ALL {
+        s.param_check = mode;
+        for face in [json!("F1:+z#[F1:+x]"), json!([5, 5]), json!([5, 5, "20"]), json!({"x": 5, "y": 5}), Value::Null] {
+            let error = s.execute("solid.extrude", &json!({"face":face,"distance":5,"operation":"new"})).unwrap_err();
+            assert!(matches!(&error, crate::EngineError::BadParams { cmd, msg } if cmd == "solid.extrude" && msg.contains("face")), "{error}");
+            assert_eq!(s.doc.to_json(), before, "a refused face must leave the design unchanged");
+        }
+    }
+    s.param_check = crate::schema::ParamCheck::Off;
+    let features = s.doc.features.len();
+    run(&mut s, "solid.extrude", json!({"distance":5,"operation":"new"}));
+    assert_eq!(s.doc.features.len(), features + 1);
+}
+
+#[test]
 fn generated_face_profiles_keep_exact_links_live_after_edit_and_reopen() {
     for hole in [false, true] {
         let mut s = Session::default();
@@ -305,21 +328,23 @@ fn internal_capture_in_another_component_anchors_an_offset_face_by_its_history_n
 }
 
 /// Extrude from a face in another component whose occurrence has an uncaptured move, where the
-/// face has neither a construction certificate nor an exact history name: a half of a box's top
-/// that Split Face divided. The face profile would take the legacy path, which can't capture the
-/// source's pending position, so the extrude is refused and changes nothing.
+/// face has neither a construction certificate nor an exact history name: one of two arms of a
+/// notched box's top that Split Face cut off on the same side of its plane, told apart only by
+/// place. The face profile would take the legacy path, which can't capture the source's pending
+/// position, so the extrude is refused and changes nothing.
 #[test]
 fn face_extrude_of_a_split_face_in_another_component_refuses_an_uncaptured_source() {
     let mut s = Session::default();
     let component = run(&mut s, "component.create", json!({"name":"Source","grounded":false}));
     let occurrence = component["occurrence"].as_u64().unwrap();
     run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Stock"}));
-    run(&mut s, "solid.split_face", json!({"faces":[[10,15,20]],"plane":{"origin":[20,0,0],"normal":[1,0,0]}}));
+    run(&mut s, "solid.box", json!({"length":24,"width":10,"height":5,"corner":[16,10,15],"operation":"cut","targets":["Stock"]}));
+    run(&mut s, "solid.split_face", json!({"faces":[[5,15,20]],"plane":{"origin":[28,0,0],"normal":[1,0,0]}}));
     run(&mut s, "component.activate", json!({"component":0}));
     run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[30,0,0],"capture":false}));
     let before = s.doc.to_json();
     let pending = s.pending_moves.clone();
-    let error = s.execute("solid.extrude", &json!({"face":[40,15,20],"distance":5,"operation":"new"})).unwrap_err();
+    let error = s.execute("solid.extrude", &json!({"face":[64,5,20],"distance":5,"operation":"new"})).unwrap_err();
     assert!(error.to_string().contains("capture the source occurrence position"), "{error}");
     assert_eq!(s.doc.to_json(), before);
     assert_eq!(s.pending_moves, pending);
