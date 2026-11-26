@@ -2563,7 +2563,7 @@
   "help.solid.shell": "Khoét rỗng khối đặc, để lại thành mỏng theo độ dày thiết lập, và có thể mở các mặt bạn chọn. Dùng cho hộp, nắp che và các chi tiết thành mỏng.",
   "help.solid.sphere": "Tạo khối cầu theo bán kính hoặc đường kính quanh một điểm tâm. Dùng cho bi, núm và đầu bo tròn.",
   "help.solid.split_body": "Tách một khối thành các khối riêng bằng một mặt phẳng, mặt của khối khác hoặc một đường thẳng trong bản phác thảo. Dùng để tạo các chi tiết được in, gia công hoặc tô màu riêng.",
-  "help.solid.split_face": "Chia các mặt đã chọn theo một mặt phẳng, mặt của khối khác hoặc các đường cong phác thảo, mà không tách khối. Dùng để cho một phần của mặt có độ nghiêng, màu hoặc độ dịch riêng.",
+  "help.solid.split_face": "Chia các mặt đã chọn theo một mặt phẳng, mặt của khối khác, các đường cong phác thảo hoặc các đường cong 3D, mà không tách khối. Dùng để cho một phần của mặt có độ nghiêng, màu hoặc độ dịch riêng.",
   "help.solid.sweep": "Quét một biên dạng phác thảo dọc theo đường dẫn để tạo khối đặc. Dùng cho đường ống, thanh ray, tay vịn và bất kỳ chi tiết nào có tiết diện không đổi chạy dọc theo đường cong.",
   "help.solid.thread": "Thêm ren hệ mét ISO lên mặt trụ, dưới dạng ren biểu diễn hoặc cắt vào thân khối. Dùng cho bu lông, lỗ ren và các chi tiết ren được in.",
   "help.solid.torus": "Tạo khối vòng từ bán kính lớn quanh trục và bán kính nhỏ của tiết diện tròn. Dùng cho vòng đệm kín, tay cầm và gờ tròn dạng vòng.",

@@ -76,7 +76,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_surface::Surf::Ruled { .. } => "surface.ruled",
             crate::dialogs_surface::Surf::Trim { .. } => "surface.trim",
             crate::dialogs_surface::Surf::Untrim { .. } => "surface.untrim",
-            crate::dialogs_surface::Surf::SplitFace => "solid.split_face",
+            crate::dialogs_surface::Surf::SplitFace { .. } => "solid.split_face",
             _ => k.simple_metadata().map_or("", |(command, _)| command),
         }),
         Kind::Sheet(k) => match k {

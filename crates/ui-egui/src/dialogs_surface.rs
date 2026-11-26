@@ -124,7 +124,13 @@ crate::dialog_descriptor::dialog_descriptors! {
                 outer: bool,
                 in_place: bool,
             },
-            SplitFace,
+            /// `direction`: the stored sweep direction of the sketch's curves, one no pick stands
+            /// for (Edit Feature); `keep_direction`: it is used while no direction is picked
+            /// (unticked: the default, the sketch's normal or the faces' normal at each 3D curve).
+            SplitFace {
+                direction: Option<Vec3>,
+                keep_direction: bool,
+            },
         }
     }
 }
@@ -144,7 +150,7 @@ impl Surf {
             Surf::Ruled { .. } => "RULED SURFACE",
             Surf::Trim { .. } => "TRIM",
             Surf::Untrim { .. } => "UNTRIM",
-            Surf::SplitFace => "SPLIT FACE",
+            Surf::SplitFace { .. } => "SPLIT FACE",
             _ => self.simple_metadata().map_or("", |(_, title)| title),
         }
     }
@@ -288,10 +294,14 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
             SelInput::new("Keep of the other surface", FACES, true).places(),
         ],
         Surf::Untrim { .. } => vec![SelInput::new("Face", FACES, false), SelInput::new("Holes (edges on them)", EDGES, true)],
-        Surf::SplitFace => vec![
+        Surf::SplitFace { .. } => vec![
             SelInput::new("Faces to split", FACES, true),
-            // A sketch's curves divide the faces, as the command does (#17555).
-            SelInput::new("Splitting tool", PLANES | FACES | SKETCH_LINES, false),
+            // A sketch's curves divide the faces, as the command does (#17555), and so do 3D
+            // curves, each one picked (#22414). Several picks are 3D curves of one sketch: a
+            // plane or face picked replaces the others ([`tidy_split_tool`]).
+            SelInput::new("Splitting tool", PLANES | FACES | SKETCH_LINES, true).tip("ui.split_face_tool_tip"),
+            // The direction the sketch's curves are swept along (optional).
+            SelInput::new("Direction", AXES | EDGES, false).tip("ui.split_face_direction_tip"),
         ],
         _ => k.simple_inputs(),
     }
@@ -320,7 +330,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         }
         "surface.trim" => Surf::Trim { extend: false, stitch: false, direction: None, face_normal: false },
         "surface.untrim" => Surf::Untrim { holes: 0, outer: false, in_place: false },
-        "solid.split_face" => Surf::SplitFace,
+        "solid.split_face" => Surf::SplitFace { direction: None, keep_direction: false },
         _ => Surf::simple_start(id)?.0,
     };
     let i = inputs(&k);
@@ -463,9 +473,75 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf, inputs: &mut Vec<SelInput>, active:
         }
         Surf::Sweep(opts) => enter |= crate::dialogs_sweep::rows(ui, opts, "ss"),
         Surf::Loft { rail_fit } => crate::dialogs_sweep::rail_fit_row(ui, "sl", rail_fit),
-        Surf::SplitFace | Surf::Unstitch | Surf::ReverseNormal => {}
+        Surf::SplitFace { direction, keep_direction } => {
+            if let Some(tool) = inputs.get_mut(SPLIT_TOOL) {
+                tidy_split_tool(&mut tool.items);
+            }
+            // A saved direction no pick stands for: kept until one is picked, or unticked.
+            if let Some(d) = direction
+                && items(inputs, SPLIT_DIRECTION).is_empty()
+            {
+                form_row(ui, "ui.split_face_saved_direction", |ui| {
+                    ui.label(format!("{}, {}, {}", d.x, d.y, d.z));
+                });
+                ui_kit::options(ui, "split_face_options", &mut [("ui.split_face_keep_direction", keep_direction)]);
+            }
+        }
+        Surf::Unstitch | Surf::ReverseNormal => {}
     }
     enter
+}
+
+/// Split Face's inputs: the faces, the splitting tool and the direction.
+const SPLIT_TOOL: usize = 1;
+const SPLIT_DIRECTION: usize = 2;
+
+/// The sketch a curve pick names: its own, or the active sketch's (`None`).
+fn pick_sketch(sel: &Sel) -> Option<Option<u64>> {
+    match sel {
+        Sel::ExternalSketchCurve { sketch, .. } => Some(Some(*sketch)),
+        Sel::SketchCurve { sketch, .. } => Some(*sketch),
+        _ => None,
+    }
+}
+
+/// Split Face's tool picks after a pick: a plane or face is the whole tool, and curves are of one
+/// sketch, so the last pick replaces a plane, a face or curves of another sketch.
+pub(crate) fn tidy_split_tool(picks: &mut Vec<Sel>) {
+    let Some(last) = picks.last().cloned() else { return };
+    match pick_sketch(&last) {
+        Some(sketch) => picks.retain(|x| pick_sketch(x) == Some(sketch)),
+        None => *picks = vec![last],
+    }
+}
+
+/// Whether `a` and `b` hold the same ids, in any order.
+fn same_set(a: &[String], b: &[String]) -> bool {
+    a.len() == b.len() && a.iter().all(|x| b.contains(x)) && b.iter().all(|x| a.contains(x))
+}
+
+/// The ids of the picks that are 3D curves of `sketch`, in pick order.
+fn split_wires(app: &SolveApp, sketch: u64, picks: &[Sel]) -> Vec<String> {
+    let st = crate::open_meshing::session_world(&app.session);
+    let Some(ss) = st.sketch(sketch) else { return Vec::new() };
+    picks
+        .iter()
+        .filter_map(|x| match x {
+            Sel::ExternalSketchCurve { id, .. } | Sel::SketchCurve { id, .. } => Some(id.clone()),
+            _ => None,
+        })
+        .filter(|id| ss.sketch.wire_index(id).is_some())
+        .collect()
+}
+
+/// The ids of every 3D curve of `sketch` when it splits with them all for want of planar curves,
+/// as `solid.split_face` does with no 3D curves named (construction geometry aside).
+fn every_split_wire(app: &SolveApp, sketch: u64) -> Vec<String> {
+    let st = crate::open_meshing::session_world(&app.session);
+    match st.sketch(sketch) {
+        Some(ss) if ss.sketch.curves.iter().all(|c| c.construction) => ss.sketch.wires.iter().map(|w| w.id.clone()).collect(),
+        _ => Vec::new(),
+    }
 }
 
 /// One body and points on the picked faces of it (none: a whole body picked).
@@ -1045,23 +1121,56 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             }
             ("surface.untrim", p)
         }
-        Surf::SplitFace => {
+        Surf::SplitFace { direction, keep_direction } => {
             need(0, "the faces to split")?;
-            need(1, "the splitting tool")?;
+            need(SPLIT_TOOL, "the splitting tool")?;
             let faces: Vec<Value> = items(inputs, 0).face_points().into_iter().map(pt).collect();
             let body = items(inputs, 0).iter().find_map(|x| if let Sel::Face { body, .. } = x { Some(body.clone()) } else { None });
             let mut p = json!({"faces": faces, "body": body});
-            // A sketch: its curves divide the faces (#17555).
-            match tool_sketch(app, items(inputs, 1)) {
+            let picks = items(inputs, SPLIT_TOOL);
+            // The direction picked, else the saved one while it is kept (Edit Feature).
+            let along = match items(inputs, SPLIT_DIRECTION).first() {
+                Some(x) => Some(crate::dialogs::axis_of(app, x).ok_or_else(|| app.tr("ui.split_face_direction_pick").to_string())?.1),
+                None => direction.filter(|_| *keep_direction),
+            };
+            // A sketch: its curves divide the faces (#17555), or the 3D curves picked (#22414).
+            match tool_sketch(app, picks) {
                 Some(sketch) => {
+                    // Curves of one sketch, and nothing else.
+                    let first = picks.first().and_then(pick_sketch);
+                    if first.is_none() || picks.iter().any(|x| pick_sketch(x) != first) {
+                        return Err(app.tr("ui.split_face_one_tool").to_string());
+                    }
                     p["sketch"] = json!(sketch);
-                    // A split that is edited keeps the `loops` it was made with.
-                    if !extra.contains_key("loops") {
-                        p["loops"] = json!(true);
+                    let wires = split_wires(app, sketch, picks);
+                    if wires.is_empty() {
+                        // A split that is edited keeps the `loops` it was made with.
+                        if !extra.contains_key("loops") {
+                            p["loops"] = json!(true);
+                        }
+                    } else if wires.len() != picks.len() {
+                        return Err(app.tr("ui.split_face_mixed_curves").to_string());
+                    } else {
+                        // A split saved with every 3D curve of its sketch (none named) keeps
+                        // that while the picks are those curves.
+                        let every = extra.get("wires").is_some_and(|w| w.as_array().is_some_and(Vec::is_empty));
+                        if !(every && same_set(&wires, &every_split_wire(app, sketch))) {
+                            p["wires"] = json!(wires);
+                        }
+                    }
+                    if let Some(d) = along {
+                        p["direction"] = pt(d);
                     }
                 }
                 None => {
-                    let (key, t) = tool(app, items(inputs, 1).first())?;
+                    if picks.len() > 1 {
+                        return Err(app.tr("ui.split_face_one_tool").to_string());
+                    }
+                    // A plane or a face cuts along itself: a direction picked has nothing to sweep.
+                    if !items(inputs, SPLIT_DIRECTION).is_empty() {
+                        return Err(app.tr("ui.split_face_direction_needs_curves").to_string());
+                    }
+                    let (key, t) = tool(app, picks.first())?;
                     p[key] = t;
                 }
             }
@@ -1461,22 +1570,44 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                 vec![crate::dialogs::face_sel(s, face.point.0).into_iter().collect(), picked],
             )
         }
-        FeatureKind::SplitFace { faces, plane, tool, sketch, loops, .. } => {
-            // The splitting tool: a plane, a face, or the sketch whose curves divide the face
-            // (#17555). A sketch that is gone keeps its place in the kept values, as before.
-            let tool_pick = sketch.and_then(|sketch| sketch_tool(app, sketch.0));
+        FeatureKind::SplitFace { faces, plane, tool, sketch, loops, wires, direction, .. } => {
+            // The splitting tool: a plane, a face, the sketch whose curves divide the face
+            // (#17555), or the sketch's 3D curves that do, each picked (#22414). A sketch that is
+            // gone keeps its place in the kept values, as before.
+            let tool_picks: Vec<Sel> = match sketch {
+                Some(sk) => {
+                    let named = if wires.is_empty() {
+                        let every = every_split_wire(app, sk.0);
+                        if !every.is_empty() {
+                            // Saved with every 3D curve (none named): kept so while they stay picked.
+                            kept.insert("wires".into(), json!([]));
+                        }
+                        every
+                    } else {
+                        wires.clone()
+                    };
+                    if named.is_empty() {
+                        sketch_tool(app, sk.0).into_iter().collect()
+                    } else {
+                        named.into_iter().map(|id| Sel::ExternalSketchCurve { sketch: sk.0, id }).collect()
+                    }
+                }
+                None => Vec::new(),
+            };
             if let Some(sketch) = sketch {
                 // A split that is edited keeps the `loops` it was made with.
                 kept.insert("loops".into(), json!(*loops));
-                if tool_pick.is_none() {
+                if tool_picks.is_empty() {
                     kept.insert("sketch".into(), json!(sketch.0));
                 }
             }
-            let tool_items: Vec<Sel> = match tool_pick {
-                Some(sel) => vec![sel],
-                None => tool_sel(app, plane, tool.as_ref()).into_iter().collect(),
-            };
-            (Surf::SplitFace, vec![faces.iter().filter_map(|p| crate::dialogs::face_sel(s, p.0)).collect(), tool_items])
+            let tool_items: Vec<Sel> = if tool_picks.is_empty() { tool_sel(app, plane, tool.as_ref()).into_iter().collect() } else { tool_picks };
+            // A direction along an origin axis is that axis picked; any other stays as saved.
+            let axis = direction.and_then(|d| [("X", Vec3::X), ("Y", Vec3::Y), ("Z", Vec3::Z)].into_iter().find(|(_, a)| *a == d.0));
+            let saved = direction.map(|d| d.0).filter(|_| axis.is_none());
+            let k = Surf::SplitFace { direction: saved, keep_direction: saved.is_some() };
+            let along: Vec<Sel> = axis.map(|(name, _)| Sel::Axis { name: name.into() }).into_iter().collect();
+            (k, vec![faces.iter().filter_map(|p| crate::dialogs::face_sel(s, p.0)).collect(), tool_items, along])
         }
         _ => return None,
     };

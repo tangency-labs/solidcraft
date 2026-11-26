@@ -252,6 +252,8 @@ mod file_load_ui_tests;
 mod fillet_spline_handle_tests;
 pub(crate) mod import_report;
 pub mod mouse_gesture;
+#[cfg(test)]
+mod split_face_dialog_tests;
 use solidcraft_ui_kit::nav_bar;
 pub(crate) mod navigation;
 pub use solidcraft_ui_kit::navigation_bar;

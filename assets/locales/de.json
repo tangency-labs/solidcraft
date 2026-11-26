@@ -2279,7 +2279,7 @@
   "help.solid.shell": "Höhlt einen Körper aus, lässt Wände in der eingestellten Dicke stehen und kann gewählte Flächen öffnen. Für Kästen, Deckel und andere dünnwandige Teile.",
   "help.solid.sphere": "Erzeugt eine Kugel aus Radius oder Durchmesser um einen Mittelpunkt. Für Kugeln, Knäufe und abgerundete Enden.",
   "help.solid.split_body": "Teilt einen Körper mithilfe einer Ebene, der Fläche eines anderen Körpers oder einer Skizzenlinie in mehrere getrennte Körper. So können Sie Bauteile erstellen, die einzeln gedruckt, bearbeitet oder eingefärbt werden können.",
-  "help.solid.split_face": "Teilt die ausgewählten Flächen entlang einer Ebene, der Fläche eines anderen Körpers oder von Skizzenkurven, ohne den Körper selbst zu teilen. So können Sie Teilbereiche einer Fläche mit einer eigenen Formschräge, Farbe oder einem Versatz versehen.",
+  "help.solid.split_face": "Teilt die ausgewählten Flächen entlang einer Ebene, der Fläche eines anderen Körpers, von Skizzenkurven oder von 3D-Kurven, ohne den Körper selbst zu teilen. So können Sie Teilbereiche einer Fläche mit einer eigenen Formschräge, Farbe oder einem Versatz versehen.",
   "help.solid.sweep": "Führt ein Skizzenprofil entlang eines Pfads und erzeugt so einen Körper. Für Rohre, Schienen, Griffe und alle Teile mit gleichbleibendem Querschnitt entlang einer Kurve.",
   "help.solid.thread": "Versieht eine zylindrische Fläche mit einem metrischen ISO-Gewinde, als kosmetisches Gewinde oder in den Körper geschnitten. Für Schrauben, Gewindebohrungen und gedruckte Schraubteile.",
   "help.solid.torus": "Erzeugt einen Ring aus einem großen Radius um seine Achse und einem kleinen Radius für seinen runden Querschnitt. Für O-Ringe, Griffe und runde Wülste.",

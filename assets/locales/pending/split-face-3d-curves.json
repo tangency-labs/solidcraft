@@ -1,0 +1,82 @@
+{
+  "ar": {
+    "ui.split_face_direction_needs_curves": "الاتجاه يخص منحنيات الرسم فقط: امسحه للتقسيم على مستوٍ أو وجه",
+    "ui.split_face_direction_pick": "اختر للاتجاه محورًا أو خط رسم مستقيمًا أو حافة",
+    "ui.split_face_direction_tip": "اختياري: الاتجاه الذي تُسحب فيه منحنيات الرسم لتقطع الأوجه. فارغ: عمودي الرسم للمنحنيات المستوية، وعمودي الأوجه عند كل منحنى ثلاثي الأبعاد",
+    "ui.split_face_keep_direction": "الإبقاء على الاتجاه المحفوظ",
+    "ui.split_face_mixed_curves": "اختر إما منحنيات ثلاثية الأبعاد وإما منحنى من رسم مستوٍ أداةً للتقسيم، لا الاثنين معًا",
+    "ui.split_face_one_tool": "اختر مستوى واحدًا أو وجهًا واحدًا أداةً للتقسيم، أو منحنيات من رسم واحد",
+    "ui.split_face_saved_direction": "الاتجاه المحفوظ",
+    "ui.split_face_tool_tip": "مستوٍ، أو وجه (يُمدّ سطحه)، أو منحنى من رسم مستوٍ (تقسم كل منحنياته)، أو منحنيات ثلاثية الأبعاد من رسم واحد (يقسم كل منحنى مختار)"
+  },
+  "de": {
+    "ui.split_face_direction_needs_curves": "Eine Richtung gilt nur für Skizzenkurven: Leeren Sie sie, um an einer Ebene oder Fläche zu trennen",
+    "ui.split_face_direction_pick": "Wählen Sie als Richtung eine Achse, eine gerade Skizzenlinie oder eine Kante",
+    "ui.split_face_direction_tip": "Optional: die Richtung, in der die Skizzenkurven gezogen werden, um die Flächen zu schneiden. Leer: die Normale der Skizze bei ebenen Kurven, die Normale der Flächen an jeder 3D-Kurve",
+    "ui.split_face_keep_direction": "Gespeicherte Richtung beibehalten",
+    "ui.split_face_mixed_curves": "Wählen Sie als Trennwerkzeug entweder 3D-Kurven oder eine Kurve einer ebenen Skizze, nicht beides",
+    "ui.split_face_one_tool": "Wählen Sie eine Ebene oder eine Fläche als Trennwerkzeug, oder Kurven einer Skizze",
+    "ui.split_face_saved_direction": "Gespeicherte Richtung",
+    "ui.split_face_tool_tip": "Eine Ebene, eine Fläche (ihre Oberfläche verlängert), eine Kurve einer ebenen Skizze (alle ihre Kurven trennen) oder 3D-Kurven einer Skizze (jede gewählte trennt)"
+  },
+  "en": {
+    "ui.split_face_direction_needs_curves": "A direction applies to sketch curves only: clear it to split along a plane or face",
+    "ui.split_face_direction_pick": "Pick an axis, a straight sketch line or an edge for the direction",
+    "ui.split_face_direction_tip": "Optional: the direction the sketch's curves are swept along to cut the faces. Empty: the sketch's normal for planar curves, the faces' normal at each 3D curve",
+    "ui.split_face_keep_direction": "Keep the saved direction",
+    "ui.split_face_mixed_curves": "Pick either 3D curves or a curve of a planar sketch as the splitting tool, not both",
+    "ui.split_face_one_tool": "Pick one plane or face as the splitting tool, or curves of one sketch",
+    "ui.split_face_saved_direction": "Saved direction",
+    "ui.split_face_tool_tip": "A plane, a face (its surface extended), a curve of a planar sketch (all its curves split) or 3D curves of one sketch (each one picked splits)"
+  },
+  "he": {
+    "ui.split_face_direction_needs_curves": "כיוון חל רק על עקומות סקיצה: נקו אותו כדי לפצל לאורך מישור או פאה",
+    "ui.split_face_direction_pick": "בחרו לכיוון ציר, קו סקיצה ישר או קצה",
+    "ui.split_face_direction_tip": "אופציונלי: הכיוון שבו עקומות הסקיצה נמשכות כדי לחתוך את הפאות. ריק: הנורמל של הסקיצה לעקומות מישוריות, הנורמל של הפאות בכל עקומה תלת־ממדית",
+    "ui.split_face_keep_direction": "שמירת הכיוון השמור",
+    "ui.split_face_mixed_curves": "בחרו ככלי הפיצול עקומות תלת־ממדיות או עקומה של סקיצה מישורית, לא את שתיהן",
+    "ui.split_face_one_tool": "בחרו מישור אחד או פאה אחת ככלי הפיצול, או עקומות של סקיצה אחת",
+    "ui.split_face_saved_direction": "כיוון שמור",
+    "ui.split_face_tool_tip": "מישור, פאה (המשטח שלה מורחב), עקומה של סקיצה מישורית (כל העקומות שלה מפצלות) או עקומות תלת־ממדיות של סקיצה אחת (כל אחת שנבחרה מפצלת)"
+  },
+  "ja": {
+    "ui.split_face_direction_needs_curves": "方向はスケッチ曲線にのみ使われます。平面または面で分割するには方向を消去してください",
+    "ui.split_face_direction_pick": "方向には軸、直線のスケッチ線、またはエッジを選択してください",
+    "ui.split_face_direction_tip": "省略可: 面を切るためにスケッチ曲線を掃引する方向。空欄: 平面曲線はスケッチの法線、3D 曲線はその位置での面の法線",
+    "ui.split_face_keep_direction": "保存された方向を維持",
+    "ui.split_face_mixed_curves": "分割ツールには 3D 曲線か平面スケッチの曲線のどちらかを選択してください (両方は不可)",
+    "ui.split_face_one_tool": "分割ツールとして平面または面を 1 つ、または 1 つのスケッチの曲線を選択してください",
+    "ui.split_face_saved_direction": "保存された方向",
+    "ui.split_face_tool_tip": "平面、面 (その曲面を延長)、平面スケッチの曲線 (そのすべての曲線で分割)、または 1 つのスケッチの 3D 曲線 (選択した各曲線で分割)"
+  },
+  "ko": {
+    "ui.split_face_direction_needs_curves": "방향은 스케치 곡선에만 적용됩니다. 평면이나 면으로 분할하려면 방향을 지우세요",
+    "ui.split_face_direction_pick": "방향으로 축, 직선 스케치 선 또는 모서리를 선택하세요",
+    "ui.split_face_direction_tip": "선택 사항: 면을 자르기 위해 스케치 곡선을 스윕하는 방향. 비워 두면: 평면 곡선은 스케치의 법선, 3D 곡선은 그 위치에서 면의 법선",
+    "ui.split_face_keep_direction": "저장된 방향 유지",
+    "ui.split_face_mixed_curves": "분할 도구로 3D 곡선 또는 평면 스케치의 곡선 중 하나만 선택하세요",
+    "ui.split_face_one_tool": "분할 도구로 평면이나 면 하나, 또는 한 스케치의 곡선을 선택하세요",
+    "ui.split_face_saved_direction": "저장된 방향",
+    "ui.split_face_tool_tip": "평면, 면(곡면을 연장), 평면 스케치의 곡선(모든 곡선으로 분할) 또는 한 스케치의 3D 곡선(선택한 각 곡선으로 분할)"
+  },
+  "vi": {
+    "ui.split_face_direction_needs_curves": "Hướng chỉ áp dụng cho đường cong phác thảo: hãy xóa nó để chia theo mặt phẳng hoặc mặt",
+    "ui.split_face_direction_pick": "Chọn một trục, một đường phác thảo thẳng hoặc một cạnh làm hướng",
+    "ui.split_face_direction_tip": "Tùy chọn: hướng quét các đường cong phác thảo để cắt các mặt. Để trống: pháp tuyến của phác thảo với đường cong phẳng, pháp tuyến của các mặt tại mỗi đường cong 3D",
+    "ui.split_face_keep_direction": "Giữ hướng đã lưu",
+    "ui.split_face_mixed_curves": "Chọn làm công cụ chia hoặc các đường cong 3D, hoặc một đường cong của phác thảo phẳng, không chọn cả hai",
+    "ui.split_face_one_tool": "Chọn một mặt phẳng hoặc một mặt làm công cụ chia, hoặc các đường cong của một phác thảo",
+    "ui.split_face_saved_direction": "Hướng đã lưu",
+    "ui.split_face_tool_tip": "Một mặt phẳng, một mặt (bề mặt của nó được kéo dài), một đường cong của phác thảo phẳng (mọi đường cong của nó đều chia) hoặc các đường cong 3D của một phác thảo (mỗi đường được chọn đều chia)"
+  },
+  "zh": {
+    "ui.split_face_direction_needs_curves": "方向仅适用于草图曲线：要沿平面或面分割，请清除方向",
+    "ui.split_face_direction_pick": "请选择轴、直的草图线或边作为方向",
+    "ui.split_face_direction_tip": "可选：草图曲线为切割面而扫掠的方向。留空：平面曲线沿草图法向，3D 曲线沿其所在处面的法向",
+    "ui.split_face_keep_direction": "保留已保存的方向",
+    "ui.split_face_mixed_curves": "分割工具请选择 3D 曲线或平面草图的曲线之一，不能两者都选",
+    "ui.split_face_one_tool": "请选择一个平面或一个面作为分割工具，或一个草图的曲线",
+    "ui.split_face_saved_direction": "已保存的方向",
+    "ui.split_face_tool_tip": "平面、面（延伸其曲面）、平面草图的曲线（其所有曲线都分割）或一个草图的 3D 曲线（每条选中的曲线都分割）"
+  }
+}

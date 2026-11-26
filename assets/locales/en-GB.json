@@ -118,7 +118,7 @@
   "help.solid.rib": "Adds a thin wall along an open sketch curve, filled out to the next faces of the body. Use it to stiffen walls and corners, for example in moulded or printed parts.",
   "help.solid.sphere": "Creates a sphere from a radius or diameter around a centre point. Use it for balls, knobs and rounded ends.",
   "help.solid.split_body": "Cuts a body into separate bodies with a plane, the face of another body or a sketch line. Use it to make parts that are printed, machined or coloured on their own.",
-  "help.solid.split_face": "Divides the selected faces along a plane, the face of another body or sketch curves, without cutting the body. Use it to give part of a face its own draft, colour or offset.",
+  "help.solid.split_face": "Divides the selected faces along a plane, the face of another body, sketch curves or 3D curves, without cutting the body. Use it to give part of a face its own draft, colour or offset.",
   "help.third_party": "Third-party licences",
   "help.view.grid": "Shows or hides the grid in the viewport. Use it as a size and orientation guide while modelling.",
   "home.new_mm_hint": "Millimetres · opens in Design",
