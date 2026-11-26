@@ -1309,3 +1309,136 @@ fn a_leg_below_the_body_s_resolution_is_refused_naming_the_edge() {
     assert_eq!(beads.len(), 1);
     assert!(smb(&k, &b) == before, "the corner changed");
 }
+
+// ---- joints as other CAD systems export them (T81) ----
+//
+// An imported part can carry a straight joint split into two edges by a vertex, or a straight
+// edge written as a B-spline curve (CATIA V5 writes both). The bead takes each piece, and a
+// B-spline proved straight, as it takes a line.
+
+/// The square corner with its edge split at the middle by a vertex, and the two pieces.
+fn split_corner(k: &mut Kernel) -> (Brep, [EdgeId; 2]) {
+    use solidcore::geom::object::ObjectRef;
+    use solidcore::topology::brep::p9;
+    use solidcore::topology::loopuse::notify_ref;
+    let (mut b, at) = corner(k, FRAC_PI_2);
+    let e = pick(k, &b, at);
+    b.set_editing_enabled(true);
+    let pieces = {
+        let mut state = ArenaNotifyState::new(&b);
+        p9::make_vertex_split_edge(k, &mut b, e, 0.5, &mut state.env(None), &|edge, kind| {
+            ObjectRef {
+                key: notify_ref(EntityRef::Edge(edge)).key,
+                type_code: kind,
+            }
+        })
+        .unwrap()
+        .edges
+        .unwrap()
+    };
+    b.set_editing_enabled(false);
+    b.refresh_cached_topology();
+    (b, pieces)
+}
+
+/// A straight joint split by a vertex: both pieces lie between the same two planes, so their
+/// beads are built, one body each, flush at the vertex; together they are the section along
+/// the whole edge, and the corner keeps its faces, edges and volume.
+#[test]
+fn a_joint_split_by_a_vertex_gets_a_bead_on_each_piece() {
+    for h in [0.0, 1.0, -1.0] {
+        let mut k = kernel();
+        let (mut b, pieces) = split_corner(&mut k);
+        let (faces, edges) = (b.face_list().len(), b.edge_list().len());
+        let before = volume(&k, &mut b);
+        let size = ChamferSize::Distances([SETBACK; 2]);
+        let beads = beads_apart(&mut k, &mut b, &pieces, &[size; 2], h, &[]).unwrap();
+        // the split left its pieces' uses without trim curves, which the bead's evaluations
+        // may cache (as `beads_apart` says): the corner's shape is compared, not its file
+        assert_eq!(
+            (b.face_list().len(), b.edge_list().len()),
+            (faces, edges),
+            "h {h}"
+        );
+        assert!(
+            (volume(&k, &mut b) - before).abs() <= 1e-9 * before,
+            "h {h}"
+        );
+        assert_eq!(beads.len(), 2, "h {h}");
+        let want = bead_section(FRAC_PI_2, h, 0.0).0.section_area() * LENGTH / 2.0;
+        for mut one in beads {
+            let got = volume(&k, &mut one);
+            assert!(
+                ((got - want) / want).abs() <= 1e-6,
+                "h {h}: {got} against {want}"
+            );
+            assert_eq!(one.face_list().len(), 5, "h {h}");
+            assert_sound(&mut k, &mut one, "a piece's bead");
+        }
+    }
+}
+
+/// The square corner with its edge's line replaced by `curve(a, z)`, a B-spline from the
+/// edge's start `a` to its end `z`, reparameterized onto the edge's interval so the edge's
+/// parameters (and its uses' trim curves) keep their meaning; and the edge.
+fn corner_with_edge_curve(
+    k: &mut Kernel,
+    curve: impl Fn(Point3, Point3) -> solidcore::nurbs::b_spline_curve::BSplineCurve,
+) -> (Brep, EdgeId) {
+    let (mut b, at) = corner(k, FRAC_PI_2);
+    let e = pick(k, &b, at);
+    let interval = edge::interval(&b, e).unwrap();
+    let old = b.edge(e).unwrap().curve.as_ref().unwrap();
+    let a = old.evaluate_point(k, interval.min()).unwrap();
+    let z = old.evaluate_point(k, interval.max()).unwrap();
+    let owner = old.owner();
+    let mut spline = curve(a, z);
+    spline.edit_parameterization(&interval).unwrap();
+    let mut new = Curve::from(spline);
+    new.set_owner(owner, Some(solidcore::topology::brep::p2::brep_ref(&b)));
+    b.edge_mut(e).unwrap().curve = Some(new);
+    (b, e)
+}
+
+/// A straight edge written as a cubic B-spline (a line segment raised to degree 3: four
+/// collinear control points) gets the bead a line gets; a B-spline bowed 0.125 off the line
+/// (an arc of a circle of radius about 10000 through the edge's ends) is refused as a joint
+/// not straight, naming the edge. The corner's file is the same after either.
+#[test]
+fn a_straight_edge_written_as_a_b_spline_gets_its_bead() {
+    use solidcore::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
+    let size = ChamferSize::Distances([SETBACK; 2]);
+    for h in [0.0, 1.0] {
+        let mut k = kernel();
+        let (mut b, e) = corner_with_edge_curve(&mut k, |a, z| {
+            let mut c = BSplineCurve::create_line_segment(3, a, z).unwrap();
+            c.degree_elevate(3).unwrap();
+            c
+        });
+        let before = smb(&k, &b);
+        let mut bead = beads_apart(&mut k, &mut b, &[e], &[size], h, &[])
+            .unwrap()
+            .remove(0);
+        assert!(smb(&k, &b) == before, "h {h}: the corner changed");
+        let want = bead_section(FRAC_PI_2, h, 0.0).0.section_area() * LENGTH;
+        let got = volume(&k, &mut bead);
+        assert!(
+            ((got - want) / want).abs() <= 1e-6,
+            "h {h}: {got} against {want}"
+        );
+        assert_sound(&mut k, &mut bead, "the bead on a B-spline edge");
+    }
+    let mut k = kernel();
+    let (mut b, e) = corner_with_edge_curve(&mut k, |a, z| {
+        // the circle through both ends with its centre 10000 off the edge's middle, in the
+        // plane x = y (into the air between the faces): it bows 0.125 off the line
+        let mid = (a + z) * 0.5;
+        let off = Vec3::new(-1.0, -1.0, 0.0) * (10000.0 / 2f64.sqrt());
+        BSplineCurve::create_arc_from_points(mid + off, a, z, NurbCircleParam::Quadratic).unwrap()
+    });
+    let before = smb(&k, &b);
+    let err = beads_apart(&mut k, &mut b, &[e], &[size], 1.0, &[]).unwrap_err();
+    assert_not_built(&err, WeldGap::CurvedJoint);
+    assert_eq!(named_edge(&err), Some(e), "{err:?}");
+    assert!(smb(&k, &b) == before, "the corner changed");
+}
