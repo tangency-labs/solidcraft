@@ -527,6 +527,23 @@ fn surface_replica_is_its_parent_moved() {
     at_surface(&s, 0.0, 0.0, [25.0, 0.0, 0.0]);
 }
 
+/// An operator that leaves `axis1` out takes +X for it (+Y when `axis3` is along X), as
+/// ISO 10303-42 `first_proj_axis` does, so `axis3` = -Z with no `axis1` turns the parent half a
+/// turn about X (x' = +X, y' = -Y, z' = -Z) instead of failing, and `axis3` = +Z still keeps it.
+#[test]
+fn surface_replica_without_axis1_takes_the_standard_x_whichever_way_z_points() {
+    let moved = |z: &str| {
+        format!("#7=DIRECTION('',(0.,0.,-1.));#20=CARTESIAN_POINT('',(5.,0.,0.));#21=CARTESIAN_TRANSFORMATION_OPERATOR_3D('',$,$,#20,1.,{z});")
+    };
+    for (z, sign) in [("#2", 1.0), ("#7", -1.0)] {
+        let p = surface(&format!("{}#10=PLANE('',#4);#11=SURFACE_REPLICA('',#10,#21);", moved(z)), 11, MM);
+        at_surface(&p, 1.0, 2.0, [6.0, 2.0 * sign, 0.0]);
+        let c = surface(&format!("{}#10=CYLINDRICAL_SURFACE('',#4,10.);#11=SURFACE_REPLICA('',#10,#21);", moved(z)), 11, MM);
+        at_surface(&c, 0.0, 3.0, [15.0, 0.0, 3.0 * sign]);
+        at_surface(&c, FRAC_PI_2, 3.0, [5.0, 10.0 * sign, 3.0 * sign]);
+    }
+}
+
 /// A scale stretches a plane's or a cylinder's length parameters, so the pcurves on it would no
 /// longer fit, and a mirror turns a surface over: both are refused, never read as a wrong surface.
 #[test]
