@@ -4870,6 +4870,145 @@ fn joint_dynamics_refuses_hostile_values() {
     assert!(s.doc.assembly.joints[0].dynamics.iter().all(Option::is_none));
 }
 
+/// A joint origin snapped to a sketch circle's centre (`sketch` + `point` or `curve`) stores a
+/// persistent `Snap::SketchPoint` reference, reports it in `joint.inspect`, survives save/open,
+/// and follows parameter changes (#21815).
+#[test]
+fn joint_origin_on_sketch_circle_follows_parameter_change() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "100", "unit": "mm"}));
+    run(&mut s, "component.create", json!({"name": "Post", "parent": "root", "activate": true, "grounded": true}));
+    run(
+        &mut s,
+        "solid.box",
+        json!({"length": 20, "width": 20, "height": "h", "corner": [0, 0, 0], "operation": "new", "body_name": "PostBody", "name": "PostBox"}),
+    );
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "offset": 20, "name": "HoleSketch"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [10, 90], "radius": 3}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["c1"], "type": "diameter", "value": "6"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "c1.center"], "type": "horizontal", "value": "10"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "c1.center"], "type": "vertical", "value": "h - 10"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "component.create", json!({"name": "Beam", "parent": "root", "activate": true, "grounded": false}));
+    run(
+        &mut s,
+        "solid.box",
+        json!({"length": 50, "width": 20, "height": 20, "corner": [20, 0, 80], "operation": "new", "body_name": "BeamBody", "name": "BeamBox"}),
+    );
+    run(&mut s, "component.activate", json!({"component": 0}));
+
+    // Named origin via `curve` shorthand also works.
+    let named = run(&mut s, "joint.origin", json!({"name": "HoleCenter", "sketch": "HoleSketch", "curve": "c1"}));
+    assert_eq!(named["origin"], "HoleCenter");
+
+    run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "rigid",
+            "name": "PostToBeam",
+            "flip": false,
+            "a": {"occurrence": "Post:1", "sketch": "HoleSketch", "point": "c1.center"},
+            "b": {"occurrence": "Beam:1", "face": [20, 10, 90]}
+        }),
+    );
+
+    // Inspect reports the persistent sketch_point snap and reference.
+    let insp = run(&mut s, "joint.inspect", json!({"joint": "PostToBeam"}));
+    let a = &insp["joints"][0]["a"];
+    assert_eq!(a["snap"]["type"], "sketch_point", "{insp}");
+    assert_eq!(a["snap"]["point"], "c1.center", "{insp}");
+    assert_eq!(a["references"][0]["role"], "sketch_point", "{insp}");
+    assert_eq!(a["references"][0]["sketch_name"], "HoleSketch", "{insp}");
+    assert_eq!(a["references"][0]["point"], "c1.center", "{insp}");
+
+    // Change h from 100 mm to 60 mm: c1.center moves to [20, 10, 50] and Beam:1 follows it.
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "60"}));
+    let com = place(&s, "Beam", Vec3::new(45.0, 10.0, 90.0));
+    assert!(near(com, Vec3::new(45.0, 10.0, 50.0)), "Beam:1 COM should move to [45, 10, 50]: {com:?}");
+    let mut bmin = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+    let mut bmax = Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for x in [20.0, 70.0] {
+        for y in [0.0, 20.0] {
+            for z in [80.0, 100.0] {
+                let p = place(&s, "Beam", Vec3::new(x, y, z));
+                bmin = Vec3::new(bmin.x.min(p.x), bmin.y.min(p.y), bmin.z.min(p.z));
+                bmax = Vec3::new(bmax.x.max(p.x), bmax.y.max(p.y), bmax.z.max(p.z));
+            }
+        }
+    }
+    assert!(near(bmin, Vec3::new(20.0, 0.0, 40.0)) && near(bmax, Vec3::new(70.0, 20.0, 60.0)), "bbox {bmin:?} -> {bmax:?}");
+
+    // Save and reopen preserves the persistent sketch-point snap and continues following edits.
+    let (dir, path) = temp_design("joint-sketch-point", "solidcraft");
+    run(&mut s, "file.save", json!({"path": path}));
+    run(&mut s, "file.new", json!({}));
+    run(&mut s, "doc.open", json!({"path": path}));
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "80"}));
+    let com2 = place(&s, "Beam", Vec3::new(45.0, 10.0, 90.0));
+    assert!(near(com2, Vec3::new(45.0, 10.0, 70.0)), "after reopen Beam:1 COM should move to [45, 10, 70]: {com2:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // Invalid sketch origins are refused cleanly.
+    for bad in [
+        json!({"occurrence": "Beam:1", "sketch": "HoleSketch", "point": "c1.center"}),
+        json!({"occurrence": "Post:1", "sketch": "HoleSketch", "point": "nonexistent"}),
+        json!({"occurrence": "Post:1", "sketch": "HoleSketch", "point": "c1.center", "curve": "c1"}),
+        json!({"occurrence": "Post:1", "sketch": "HoleSketch"}),
+        json!({"occurrence": "Post:1", "sketch": "PostBox", "point": "origin"}),
+    ] {
+        assert!(s.execute("joint.origin", &bad).is_err(), "{bad}");
+    }
+
+    // Strict schema check accepts sketch-point origins on joint.create and joint.as_built,
+    // and clearing a_alignment with null clears a stored x reference without adding one when absent.
+    s.param_check = crate::schema::ParamCheck::Strict;
+    run(&mut s, "joint.delete", json!({"joint": "PostToBeam"}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "rigid",
+            "name": "PostToBeamStrict",
+            "flip": false,
+            "a": {"occurrence": "Post:1", "sketch": "HoleSketch", "curve": "c1"},
+            "b": {"occurrence": "Beam:1", "face": [20, 10, 70]}
+        }),
+    );
+    // Unaligned sketch-point origin stays x: None when cleared with a_alignment: null.
+    run(&mut s, "joint.edit", json!({"joint": "PostToBeamStrict", "a_alignment": null}));
+    assert!(
+        matches!(&s.doc.assembly.joints[0].a.snap, solidcraft_doc::joints::Snap::SketchPoint { x: None, .. }),
+        "{:?}",
+        s.doc.assembly.joints[0].a.snap
+    );
+    // A sketch-point origin with a stored x reference clears that reference when a_alignment is null.
+    if let solidcraft_doc::joints::Snap::SketchPoint { x, .. } = &mut s.doc_mut().assembly.joints[0].a.snap {
+        *x = Some(solidcraft_doc::joints::XRef::Reference {
+            reference: solidcraft_doc::joints::AlignmentRef::OriginAxis { axis: "Y".into() },
+            reverse: false,
+        });
+    }
+    run(&mut s, "joint.edit", json!({"joint": "PostToBeamStrict", "a_alignment": null}));
+    assert!(
+        matches!(&s.doc.assembly.joints[0].a.snap, solidcraft_doc::joints::Snap::SketchPoint { x: Some(solidcraft_doc::joints::XRef::Dir(_)), .. }),
+        "{:?}",
+        s.doc.assembly.joints[0].a.snap
+    );
+    // joint.as_built also accepts a sketch-point `at` under Strict parameter checking.
+    run(&mut s, "joint.delete", json!({"joint": "PostToBeamStrict"}));
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"type": "revolute", "a": "Post:1", "b": "Beam:1", "at": {"occurrence": "Post:1", "sketch": "HoleSketch", "point": "c1.center"}}),
+    );
+    assert!(
+        matches!(&s.doc.assembly.joints[0].a.snap, solidcraft_doc::joints::Snap::SketchPoint { point, .. } if point == "c1.center"),
+        "{:?}",
+        s.doc.assembly.joints[0].a.snap
+    );
+}
+
 #[test]
 fn capture_position_timeline_joint_snapshot_suppress_rollback_and_parameter_change() {
     let mut s = two_cubes();

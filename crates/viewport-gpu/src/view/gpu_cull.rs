@@ -1036,4 +1036,110 @@ fn fs() -> @builtin(frag_depth) f32 {
             assert_eq!(culled(&mut batches, &device, &queue, &vp, size, Some((&pyramid, false))).0, 1, "{name} keeps the placement drawn");
         }
     }
+
+    /// Falling back from GPU culling to CPU culling for a frame with motions keeps the triangles'
+    /// indirect draw arguments separate from the edges' draw arguments: `Edges::write` must not
+    /// overwrite `Indirect`'s shared GPU-cull argument buffer at offset 0.
+    #[test]
+    fn cpu_fallback_during_motion_keeps_triangle_and_edge_args_separate() {
+        use super::super::{
+            Batches, GpuScene, GpuTarget, InstanceLook, InstancedMesh, Motions, PaletteIndex, Renderer, SceneSlot, SharedEdges, SharedTris,
+        };
+        use solidcore_record::Vec3;
+        use std::sync::{Arc, Mutex};
+        let (_, device, queue) = match crate::open_headless(crate::test_env::policy()) {
+            Ok(opened) => opened,
+            Err(error) if crate::test_env::skip_unless_required(crate::test_env::required(), &error) => return,
+            Err(error) => panic!("required GPU unavailable: {error}"),
+        };
+        if !super::supported(&device) {
+            return;
+        }
+        let target = GpuTarget { format: wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false, edges: true };
+        let r = Renderer::new(&device, target, None);
+        let mesh = solidcore_tess::Mesh {
+            positions: vec![Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, 0.0, 10.0)],
+            normals: vec![Vec3::Z; 4],
+            triangles: vec![[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]],
+            tri_face: vec![0; 4],
+            edges: vec![vec![Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0)], vec![Vec3::ZERO, Vec3::new(0.0, 0.0, 10.0)]],
+            edge_faces: vec![vec![0], vec![0]],
+            ..Default::default()
+        };
+        let scene = || {
+            let mut parts = Vec::new();
+            for key in [1u64, 2u64] {
+                let mut m = InstancedMesh {
+                    key,
+                    tris: Arc::new(SharedTris::new(&mesh)),
+                    instances: Vec::new(),
+                    look: InstanceLook::Opaque,
+                    levels: Vec::new(),
+                    closed: true,
+                    edges: Some(Arc::new(SharedEdges::new(&mesh, |_| true, Vec::new()))),
+                };
+                let rows = [[1.0, 0.0, 0.0, key as f32 * 20.0 - 30.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, -60.0]];
+                m.place_edged(rows, PaletteIndex(key as u32), PaletteIndex(1), PaletteIndex(2));
+                parts.push(m);
+            }
+            GpuScene { instanced: parts, ..GpuScene::default() }
+        };
+        let take = |cpu: bool| {
+            let mut b = Batches { cull_kernel_failed: cpu, ..Batches::default() };
+            let slot: SceneSlot = Arc::new(Mutex::new(Some(scene())));
+            b.take(&device, &queue, &r.uniform, &r.uniform_bgl, 1, &slot, None, false).unwrap();
+            b
+        };
+        let (mut gpu, mut cpu) = (take(false), take(true));
+        let vp = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, -1.0, -1.0], [0.0, 0.0, -1.0, 0.0]];
+        let size = [800.0, 600.0];
+        let rest = Motions::default();
+        // Frame 1: at rest, GPU cull takes over both `indirect` and `edges` with a shared args buffer.
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        gpu.cull(&device, &queue, &mut encoder, &vp, size, &rest, crate::view::EDGE_PX, None, None);
+        cpu.cull(&device, &queue, &mut encoder, &vp, size, &rest, crate::view::EDGE_PX, None, None);
+        queue.submit([encoder.finish()]);
+        assert!(gpu.gpu_cull.is_some(), "GPU cull takes over at rest");
+        // Frame 2: dragging a joint brings motions, dropping GPU cull and falling back to CPU culling.
+        let shift = [[1.0, 0.0, 0.0, 5.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
+        let moving = Motions::new([(1, shift)]);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        gpu.cull(&device, &queue, &mut encoder, &vp, size, &moving, crate::view::EDGE_PX, None, None);
+        cpu.cull(&device, &queue, &mut encoder, &vp, size, &moving, crate::view::EDGE_PX, None, None);
+        queue.submit([encoder.finish()]);
+        assert!(gpu.gpu_cull.is_none(), "motion frame falls back to CPU culling");
+        let read = |buffer: &wgpu::Buffer, len: u64| -> Vec<u8> {
+            let staging = device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: len,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            encoder.copy_buffer_to_buffer(buffer, 0, &staging, 0, len);
+            queue.submit([encoder.finish()]);
+            staging.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            staging.slice(..).get_mapped_range().unwrap().to_vec()
+        };
+        let tri_bytes = (gpu.indirect.as_ref().unwrap().entry_list().len() * super::TRI_ARGS_WORDS * 4) as u64;
+        let edge_bytes = (gpu.edges.as_ref().unwrap().entry_list().len() * super::EDGE_ARGS_WORDS * 4) as u64;
+        let gpu_tri = read(&gpu.indirect.as_ref().unwrap().args().unwrap(), tri_bytes);
+        let cpu_tri = read(&cpu.indirect.as_ref().unwrap().args().unwrap(), tri_bytes);
+        let gpu_edge = read(&gpu.edges.as_ref().unwrap().args().unwrap(), edge_bytes);
+        let cpu_edge = read(&cpu.edges.as_ref().unwrap().args().unwrap(), edge_bytes);
+        assert_eq!(gpu_tri, cpu_tri, "triangle indirect args must match CPU cull without being overwritten by edges");
+        assert_eq!(gpu_edge, cpu_edge, "edge indirect args must match CPU cull");
+        // If either argument buffer was refused on an earlier frame, the next frame retries even
+        // when the shown placements did not change.
+        gpu.indirect.as_mut().unwrap().clear_args();
+        gpu.edges.as_mut().unwrap().clear_args();
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        gpu.cull(&device, &queue, &mut encoder, &vp, size, &moving, crate::view::EDGE_PX, None, None);
+        queue.submit([encoder.finish()]);
+        let retried_tri = read(&gpu.indirect.as_ref().unwrap().args().unwrap(), tri_bytes);
+        let retried_edge = read(&gpu.edges.as_ref().unwrap().args().unwrap(), edge_bytes);
+        assert_eq!(retried_tri, cpu_tri, "triangle indirect args are retried when missing");
+        assert_eq!(retried_edge, cpu_edge, "edge indirect args are retried when missing");
+    }
 }

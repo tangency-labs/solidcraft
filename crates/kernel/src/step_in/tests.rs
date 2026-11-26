@@ -7276,6 +7276,24 @@ fn one_solid_mapped_several_times_in_a_part_comes_in_at_each_placement() {
     }
 }
 
+/// #2340: some writers leave a CARTESIAN_TRANSFORMATION_OPERATOR_3D's description out. A mapped
+/// item placed by an operator comes in at the operator's origin, whichever way it is written
+/// (the cube at x = 60, the one placement the row does not repeat).
+#[test]
+fn a_mapped_item_placed_by_an_operator_without_its_description_comes_in() {
+    for op in ["('','',$,$,#5020,1.,$)", "('',$,$,#5020,1.,$)", "('','',#5090,$,#5020,1.,$)", "('',#5090,$,#5020,1.,$)"] {
+        let text = mapped_cube_row("#5090=DIRECTION('',(1.,0.,0.));\n")
+            .replace("#5021=AXIS2_PLACEMENT_3D('',#5020,$,$)", &format!("#5021=CARTESIAN_TRANSFORMATION_OPERATOR_3D{op}"));
+        let imp = step_import(&text).unwrap();
+        let mut xs: Vec<f64> = imp.bodies.iter().map(|b| measure(&b.body).unwrap().bbox.min.x).collect();
+        xs.sort_by(f64::total_cmp);
+        assert_eq!(xs.len(), 3, "{op}: {xs:?} {:?}", imp.warnings);
+        for (x, want) in xs.iter().zip([0.0, 30.0, 60.0]) {
+            assert!((x - want).abs() < 1e-6, "{op}: {xs:?}");
+        }
+    }
+}
+
 // A second product owns the mapped shape. It is the source of the copies in "row".
 const MAPPED_CUBE_PRODUCT: &str = "\
 #91=PRODUCT('cube','cube','',(#80));\n\

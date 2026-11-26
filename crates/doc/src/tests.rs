@@ -131,6 +131,9 @@ fn plate_doc() -> (Document, u64) {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                through_all2: false,
+                to2: None,
+                to_offset2: None,
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
@@ -241,6 +244,9 @@ fn an_outline_closed_by_point_on_curve_tangent_joints_extrudes() {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                through_all2: false,
+                to2: None,
+                to_offset2: None,
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
@@ -1751,6 +1757,9 @@ fn box_fillet_cut_timeline() {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                through_all2: false,
+                to2: None,
+                to_offset2: None,
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
@@ -2616,6 +2625,9 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                through_all2: false,
+                to2: None,
+                to_offset2: None,
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
@@ -3125,6 +3137,9 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
             to_offset: None,
             from: None,
             to_body_apart: false,
+            through_all2: false,
+            to2: None,
+            to_offset2: None,
             from_level: false,
             picked_placements: Vec::new(),
             one_sided_direction: None,
@@ -3220,6 +3235,168 @@ fn a_sketch_on_the_construction_plane_of_another_component_lies_on_it() {
     close(crate::apply_vector(&m, solved.plane.normal()), want.normal(), "normal");
     let end = solved.plane.origin + solved.plane.x * 10.0 + solved.plane.y * 5.0;
     close(crate::apply_point(&m, end), want.origin + want.x * 10.0 + want.y * 5.0, "line end");
+}
+
+/// Freeze the persisted v6 face-role encoding independently of display-mesh fields and serde layout.
+#[test]
+fn reconstructed_mesh_roles_keep_the_versioned_binary_identity() {
+    let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(1., 1., 1.)).unwrap();
+    let positions = [Vec3::new(0., -0., 0.), Vec3::X, Vec3::Y];
+    use solidcraft_kernel::services::mesh::ReconstructionKind::{Analytic, Faceted};
+    for (kind, digest) in [
+        (Analytic, "2b85ddcdb826582a9d392dd981499209eb69c06ae3f6ebacaca0c02a4e29a278"),
+        (Faceted, "3cbe2d7ca4e75f8b65845f9d84844cfe94e5236c8235692f6badf053aa649856"),
+    ] {
+        let traced = crate::lineage::reconstructed_tool(body.clone(), &positions, &[[0, 1, 2]], 0.01, kind);
+        let lineage = traced.lineage.unwrap();
+        let crate::lineage::Operand::Made(roles) = lineage.operands[0].as_ref() else { panic!("made faces") };
+        assert_eq!(roles.len(), 6);
+        for (face, names) in roles.iter().enumerate() {
+            assert_eq!(names, &[format!("mesh:{digest}:face:{face}")]);
+        }
+    }
+}
+
+/// Old conversion metadata is readable, but every saved design replays the same converter.
+#[test]
+fn saved_mesh_conversion_modes_replay_the_current_converter() {
+    let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
+    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
+    let mut doc = Document::new("saved conversion");
+    doc.add_feature(
+        FeatureKind::MeshImport {
+            file: "box.stl".into(),
+            meshes: vec![MeshData {
+                name: "Mesh".into(),
+                positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
+                triangles: mesh.triangles.iter().flatten().copied().collect(),
+                color: None,
+                corner_normals: Default::default(),
+            }],
+        },
+        None,
+    )
+    .unwrap();
+    let conversion = doc.add_feature(FeatureKind::MeshConvert { body: "Mesh".into(), tolerance: "0.01 mm".into() }, None).unwrap();
+    let mut expected = None;
+    for obsolete in [
+        serde_json::json!({}),
+        serde_json::json!({"reconstruction":"legacy_prism"}),
+        serde_json::json!({"reconstruction":"analytic_v1"}),
+        serde_json::json!({"reconstruction":"analytic_v1_geometry_names"}),
+        serde_json::json!({"source_bound_names":false}),
+        serde_json::json!({"source_bound_names":true}),
+    ] {
+        let mut saved = serde_json::json!({"type":"mesh_convert","body":"Mesh","tolerance":"0.01 mm"});
+        saved.as_object_mut().unwrap().extend(obsolete.as_object().unwrap().clone());
+        doc.feature_mut(conversion).unwrap().kind = serde_json::from_value(saved).unwrap();
+        let canonical = serde_json::to_value(&doc.feature(conversion).unwrap().kind).unwrap();
+        assert!(canonical.get("reconstruction").is_none() && canonical.get("source_bound_names").is_none());
+        for replay in [&doc, &Document::from_json(&doc.to_json()).unwrap()] {
+            let mut model = Model::new();
+            model.evaluate(replay);
+            assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+            let state = model.state();
+            let body = state.body("Mesh").unwrap();
+            assert!((measure(&body.body).unwrap().volume - 6000.).abs() < 1e-6);
+            assert_eq!(body.feature, conversion);
+            let faces = crate::naming::face_names(body).as_ref().clone();
+            assert!(faces.iter().all(|name| name.contains(":mesh:")));
+            let names = (faces, crate::naming::edge_names(body));
+            if let Some(expected) = &expected {
+                assert_eq!(&names, expected);
+            } else {
+                expected = Some(names);
+            }
+        }
+    }
+}
+
+/// A saved conversion uses the current analytic geometry; an obsolete wall attachment reports a normal broken reference.
+#[test]
+fn saved_partial_arc_conversion_rebuilds_and_reports_obsolete_wall_references() {
+    use solidcraft_geom::prelude::*;
+    let root3 = 3f64.sqrt();
+    let outline = [
+        Vec2::new(-4., -3.),
+        Vec2::new(4., -3.),
+        Vec2::new(4., 3.),
+        Vec2::new(2., 3.),
+        Vec2::new(root3, 2.),
+        Vec2::new(1., 3. - root3),
+        Vec2::new(0., 1.),
+        Vec2::new(-1., 3. - root3),
+        Vec2::new(-root3, 2.),
+        Vec2::new(-2., 3.),
+        Vec2::new(-4., 3.),
+    ];
+    let source = solidcraft_kernel::extrude_planar_regions(
+        &solidcore_record::Plane::XY,
+        &[solidcore_record::Region2 { outer: solidcore_record::Loop2::polygon(&outline), holes: vec![] }],
+        0.,
+        5.,
+    )
+    .unwrap();
+    let mesh = source.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
+    let mut doc = Document::new("legacy polygon notch");
+    doc.add_feature(
+        FeatureKind::MeshImport {
+            file: "polygon-notch.stl".into(),
+            meshes: vec![MeshData {
+                name: "Mesh".into(),
+                positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
+                triangles: mesh.triangles.iter().flatten().copied().collect(),
+                color: None,
+                corner_normals: Default::default(),
+            }],
+        },
+        None,
+    )
+    .unwrap();
+    let conversion = doc
+        .add_feature(serde_json::from_value(serde_json::json!({"type":"mesh_convert","body":"Mesh","tolerance":"0.1 mm"})).unwrap(), None)
+        .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    {
+        let st = model.state();
+        let body = st.body("Mesh").unwrap();
+        assert_eq!(body.body.face_count(), 8);
+        assert_eq!(measure(&body.body).unwrap().merged.face_types.get("cylinder"), Some(&1));
+        assert!((measure(&body.body).unwrap().volume - (240. - 10. * std::f64::consts::PI)).abs() < 1e-6);
+        assert!(crate::naming::face_names(body).iter().all(|name| name.contains(":mesh:")));
+    }
+    // The former polygon converter used these planar walls. This stored planar face no longer
+    // exists on the reconstructed cylinder, so replay must report the ordinary reference error.
+    let old = ModelBody::new("Mesh".into(), source, conversion);
+    let faces = crate::naming::face_names(&old);
+    let (face, spot) = crate::naming::face_spots(&old)
+        .into_iter()
+        .enumerate()
+        .find_map(|(i, spot)| {
+            let spot = spot?;
+            let solidcraft_kernel::FaceSurface::Plane { normal, .. } = spot.surface? else { return None };
+            (normal.z.abs() < 1e-8 && spot.point.x.abs() < 1.99 && spot.point.y > 0.9 && spot.point.y < 2.99).then_some((i, spot))
+        })
+        .unwrap();
+    let solidcraft_kernel::FaceSurface::Plane { normal, .. } = spot.surface.unwrap() else { panic!("planar wall") };
+    let plane = solidcore_record::Plane::from_normal(spot.point, normal.vec()).unwrap();
+    let sketch = doc
+        .add_feature(
+            FeatureKind::Sketch {
+                plane: PlaneRef::Face { plane, at: spot.point, name: Some(faces[face].clone()), anchor: None },
+                sketch: Sketch::new(),
+            },
+            None,
+        )
+        .unwrap();
+    for replay in [&doc, &Document::from_json(&doc.to_json()).unwrap()] {
+        let mut cold = Model::new();
+        cold.evaluate(replay);
+        assert!(cold.result(conversion).unwrap().error.is_none());
+        assert!(cold.result(sketch).unwrap().error.is_some(), "obsolete polygon wall must request reattachment");
+    }
 }
 
 #[test]
@@ -3365,6 +3542,32 @@ fn a_closed_control_spline_design_saves_and_reopens_unchanged() {
     let mut model = Model::new();
     model.evaluate(&reopened);
     assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+}
+
+/// #17752: a Hole may name the press-in hardware it is the mounting hole of. It is saved only when
+/// set (a hole without it saves as before), with the kind as its name, and an older design reads
+/// with none. The hardware's length is an expression a parameter rename follows.
+#[test]
+fn a_hole_saves_its_press_in_hardware_only_when_set() {
+    let plain = serde_json::json!({"type": "hole", "position": [0, 0, 0], "direction": [0, 0, 1], "diameter": "4.25 mm", "hole": {"type": "simple"}});
+    let kind: FeatureKind = serde_json::from_value(plain.clone()).unwrap();
+    let FeatureKind::Hole { hardware, .. } = &kind else { panic!("not a hole") };
+    assert_eq!(*hardware, None);
+    assert!(serde_json::to_value(&kind).unwrap().get("hardware").is_none(), "a hole without hardware saves no key");
+
+    let mut with = plain;
+    with["hardware"] = serde_json::json!({"kind": "flush_nut", "thread": "M4", "part": "flush-nut.m4"});
+    let kind: FeatureKind = serde_json::from_value(with.clone()).unwrap();
+    let FeatureKind::Hole { hardware: Some(h), .. } = &kind else { panic!("hardware lost") };
+    assert_eq!((h.kind, h.thread.as_str(), h.part.as_str()), (crate::hardware_catalog::HardwareKind::FlushNut, "M4", "flush-nut.m4"));
+    assert!(h.length.is_none());
+    // Saved as it was read: the hardware object is the same, and has no length key when it has none.
+    assert_eq!(serde_json::to_value(&kind).unwrap()["hardware"], with["hardware"]);
+
+    // A stud's length is an expression: the feature's inputs name it, so a parameter rename reaches it.
+    with["hardware"] = serde_json::json!({"kind": "stud", "thread": "M3", "length": "pin_len", "part": "stud.m3"});
+    let kind: FeatureKind = serde_json::from_value(with).unwrap();
+    assert!(kind.inputs().iter().any(|(label, e, _)| *label == "Hardware length" && e == "pin_len"), "{:?}", kind.inputs());
 }
 
 fn mat_close(a: &Mat, b: &Mat, tol: f64) -> bool {
@@ -4633,6 +4836,9 @@ fn capture_position_20644_isolation_for_to_object_mirror_pattern_plane_and_joint
                     from: None,
                     from_level: false,
                     to_body_apart: true,
+                    through_all2: false,
+                    to2: None,
+                    to_offset2: None,
                     picked_placements: Vec::new(),
                     one_sided_direction: None,
                 },
@@ -4687,6 +4893,7 @@ fn capture_position_20644_isolation_for_to_object_mirror_pattern_plane_and_joint
                 placements: vec![vec![occ_b]],
                 components: Vec::new(),
                 occurrences: Vec::new(),
+                join: false,
             },
             Some("PatternPre"),
         )
@@ -4968,6 +5175,9 @@ fn extrude_start_offset_caps_are_named_consistently_across_rotations() {
                         to_offset: None,
                         from: None,
                         to_body_apart: false,
+                        through_all2: false,
+                        to2: None,
+                        to_offset2: None,
                         from_level: false,
                         picked_placements: Vec::new(),
                         one_sided_direction: None,
