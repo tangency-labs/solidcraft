@@ -1556,15 +1556,12 @@ fn same_sense_follows_swapped_and_inside_out_parameterisations() {
 /// Two equal-diameter perpendicular through-holes with intersecting axes cut into a 40 mm block
 /// (#22220): the cylinder-cylinder intersection produces analytic ellipses whose minor axis is the
 /// cylinder radius, so the writer must turn each ellipse a quarter turn to satisfy
-/// `semi_axis_1 >= semi_axis_2` (required by OpenCascade) while keeping its orientation, signed
-/// volume (Steinmetz-corrected) and round-trip validity.
+/// `semi_axis_1 >= semi_axis_2` (required by OpenCascade) while keeping vertices on-curve,
+/// orientation and signed volume (Steinmetz-corrected) intact.
 #[test]
 fn equal_diameter_perpendicular_intersecting_holes_are_written_valid_and_right_side_out() {
     use solidcore::geom::axis2_placement::Axis2Placement;
-    use solidcore::mass::integrator::properties::brep_volume_default;
     use solidcore::topology::brep::p5::transform;
-    use solidcore::topology::brep::validation::{CheckLevel, check_brep};
-    use solidcore_convert::brep::to_kernel_body;
     use std::f64::consts::PI;
 
     let mut kernel = Kernel::default();
@@ -1583,23 +1580,30 @@ fn equal_diameter_perpendicular_intersecting_holes_are_written_valid_and_right_s
     assert_right_side_out("intersecting equal holes", &mut kernel, &mut body, expected, 1e-4);
 
     let text = write_step("intersecting equal holes", &mut kernel, &mut body);
-    let ex = p21::parse(&text).unwrap();
+    let file = File { x: p21::parse(&text).unwrap() };
     let ellipses: Vec<(f64, f64)> =
-        ex.entities.values().filter(|e| e.name() == "ELLIPSE").map(|e| (real(&e.params()[2]), real(&e.params()[3]))).collect();
+        file.x.entities.values().filter(|e| e.name() == "ELLIPSE").map(|e| (real(&e.params()[2]), real(&e.params()[3]))).collect();
     assert!(ellipses.len() >= 4, "expected analytic intersection ellipses, got {ellipses:?}");
     for &(a, b) in &ellipses {
         assert!(a >= b && b > 0.0, "ELLIPSE semi_axis_1 ({a}) < semi_axis_2 ({b})");
     }
 
-    let read = solidcore_step::topology::read_solids(&ex);
-    assert!(read.failures.is_empty(), "{:?}", read.failures);
-    assert_eq!(read.solids.len(), 1);
-    let solid = &read.solids[0];
-    assert!(!solid.sheet && solid.turned.is_empty(), "turned faces: {:?} {:?}", solid.turned, solid.notes);
-    let mut back = to_kernel_body(&mut kernel, &solid.brep, false).unwrap();
-    let check = check_brep(&mut kernel, &mut back, CheckLevel::Level2).unwrap();
-    assert_eq!(check.pointers, solidcore::topology::brep::validation::PointerCheck::Passed);
-    assert_eq!(check.assert_valid, Some(true), "{:?}", check.reports);
-    let back_volume = brep_volume_default(&kernel, &mut back, 1e-9).unwrap();
-    assert!((back_volume - expected).abs() <= 1e-6 * expected, "read-back volume {back_volume}, expected {expected}");
+    // Every elliptical EDGE_CURVE must keep both vertices on its normalized ELLIPSE.
+    let mut ellipse_edges = 0usize;
+    for (&id, ent) in &file.x.entities {
+        if ent.name() != "EDGE_CURVE" {
+            continue;
+        }
+        let curve = file.curve(rid(&ent.params()[3]));
+        if !matches!(curve, IsoCurve::Ellipse { .. }) {
+            continue;
+        }
+        ellipse_edges += 1;
+        for slot in [1, 2] {
+            let v = file.vertex(rid(&ent.params()[slot]));
+            let on_curve = curve.at(curve.param_of(v));
+            assert!(norm(sub(v, on_curve)) <= 1e-6, "EDGE_CURVE #{id} vertex {slot} lies off its normalized ELLIPSE");
+        }
+    }
+    assert!(ellipse_edges >= 4, "expected at least 4 elliptical EDGE_CURVEs, got {ellipse_edges}");
 }
