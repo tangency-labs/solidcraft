@@ -2475,7 +2475,7 @@ fn mesh_export_from_a_selected_browser_body_takes_the_selected_bodies() {
 }
 
 #[test]
-fn component_export_offers_the_component_name_and_keeps_body_templates() {
+fn component_export_names_are_opt_in_and_keep_existing_defaults() {
     let mut h = crate::scenario::Harness::new();
     h.app.session.doc_mut().name = "Assembly".into();
     h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "RootBody"})).unwrap();
@@ -2501,7 +2501,18 @@ fn component_export_offers_the_component_name_and_keeps_body_templates() {
         h.frames(3);
         h.settle();
     }
-    assert_eq!(*seen.borrow(), ["Bracket.step", "Bracket.step", "PartBody.step", "Assembly.step"]);
+    let defaults = seen.borrow().clone();
+    assert_eq!(defaults[0], "PartBody.step");
+    assert_eq!(defaults[1], defaults[0]);
+    assert_eq!(defaults[2], defaults[0]);
+    h.app.preferences.export_name = "{component}".into();
+    seen.borrow_mut().clear();
+    for target in &targets {
+        act(&mut h.app, target, "Export…");
+        h.frames(3);
+        h.settle();
+    }
+    assert_eq!(*seen.borrow(), ["Bracket.step", "Bracket.step", defaults[2].as_str(), defaults[3].as_str()]);
     h.app.preferences.export_name = "{body}".into();
     act(&mut h.app, &targets[0], "Export…");
     h.frames(3);

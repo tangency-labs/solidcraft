@@ -1623,8 +1623,11 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         own.push(act("ui.relinkSource", "Relink Source (All Instances)…", "update").with(json!({"component": id})));
         own.push(cmd(app, "component.break_link", "Break Link").with(json!({ "component": id })));
         own.push(act("ui.relinkSourceNames", "Relink Source and Use Its Names…", "update").with(json!({"component": id})));
-    } else if id != 0 && app.session.can_extract(id) {
-        own.push(act("ui.extractComponent", "Extract to File…", "export").with(json!({"component": id})));
+    } else if id != 0 {
+        // Offered even when the component can't go, greyed out with the reason (#18623).
+        own.push(
+            act("ui.extractComponent", "Extract to File…", "export").with(json!({"component": id})).off_because(app.session.extract_refusal(id)),
+        );
     }
     own.push(Item::sep());
     own.push(
@@ -2398,8 +2401,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.insertBrowse" => app.pick_design_to_insert(),
         "ui.export" => {
             let body = bodies.first().map(String::as_str);
-            let default_name = crate::export_name::default_for_component_export(app, id_of(&p, "component"), &bodies);
-            let name = crate::export_name::offered(app, body, &default_name);
+            let default_name = crate::export_name::default_for_bodies(app, &bodies);
+            let name = crate::export_name::offered_for_component(app, body, id_of(&p, "component"), &default_name);
             // cadmpeg's Rhino writer needs a temporary file, which the browser has not.
             let formats: Vec<&str> = ["step", "stp", "igs", "stl", "3mf", "obj", "glb", "usd", "usda", "usdc", "usdz", "3dm"]
                 .into_iter()
