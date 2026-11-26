@@ -1,0 +1,34 @@
+{
+  "en": {
+    "ui.insert_simplify": "Simplify",
+    "ui.insert_simplify_tip": "Removes edges the drawing can follow within this distance, so a dense drawing comes in with fewer curves. Arcs, circles, splines and text stay as drawn."
+  },
+  "ar": {
+    "ui.insert_simplify": "تبسيط",
+    "ui.insert_simplify_tip": "يزيل الحواف التي يمكن للرسم متابعتها ضمن هذه المسافة، فيأتي الرسم الكثيف بمنحنيات أقل. تبقى الأقواس والدوائر والخطوط المنحنية والنص كما رُسمت."
+  },
+  "de": {
+    "ui.insert_simplify": "Vereinfachen",
+    "ui.insert_simplify_tip": "Entfernt Kanten, denen die Zeichnung in diesem Abstand folgen kann, sodass eine dichte Zeichnung mit weniger Kurven ankommt. Bögen, Kreise, Splines und Text bleiben wie gezeichnet."
+  },
+  "he": {
+    "ui.insert_simplify": "פישוט",
+    "ui.insert_simplify_tip": "מסיר קצוות שהשרטוט יכול לעקוב אחריהם בתוך המרחק הזה, כך ששרטוט צפוף מגיע עם פחות עקומות. קשתות, מעגלים, ספליינים וטקסט נשארים כפי שצוירו."
+  },
+  "ja": {
+    "ui.insert_simplify": "簡略化",
+    "ui.insert_simplify_tip": "この距離以内で図形がたどれる辺を削除し、密な図形をより少ない曲線で取り込みます。円弧・円・スプライン・文字は描かれたまま残ります。"
+  },
+  "ko": {
+    "ui.insert_simplify": "단순화",
+    "ui.insert_simplify_tip": "이 거리 안에서 도면이 따라갈 수 있는 모서리를 제거하여 밀집한 도면을 더 적은 곡선으로 가져옵니다. 호, 원, 스플라인, 텍스트는 그린 그대로 남습니다."
+  },
+  "vi": {
+    "ui.insert_simplify": "Đơn giản hóa",
+    "ui.insert_simplify_tip": "Bỏ các cạnh mà hình vẽ có thể đi theo trong khoảng cách này, để hình dày đặc vào với ít đường cong hơn. Cung, đường tròn, đường spline và chữ giữ nguyên như đã vẽ."
+  },
+  "zh": {
+    "ui.insert_simplify": "简化",
+    "ui.insert_simplify_tip": "移除图形在此距离内可以沿循的边，使密集图形以更少的曲线导入。圆弧、圆、样条和文字保持原样。"
+  }
+}

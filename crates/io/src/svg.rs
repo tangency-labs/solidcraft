@@ -230,7 +230,9 @@ pub struct SvgDrawing {
 impl Out {
     fn push(&mut self, g: Geom2) -> Result<()> {
         if self.g.len() >= MAX_ENTITIES {
-            return Err(IoError::Invalid("too many SVG elements".into()));
+            return Err(IoError::Invalid(format!(
+                "the drawing has more than {MAX_ENTITIES} elements (lines, arcs, shapes and texts): simplify it in its own program, or split it across files"
+            )));
         }
         if !geom_is_finite(&g) {
             return Err(IoError::Invalid(OUT_OF_RANGE.into()));
