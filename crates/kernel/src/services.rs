@@ -1,6 +1,6 @@
-//! solidcore's services that the application uses beside the body-making operations: 2D and
-//! curve helpers, line-family clipping, affine maps, sheet development and the
-//! display plan. They read records and data; none
+//! solidcore's services that the application still uses beside the kernel interface's families
+//! (`crate::route`), until each moves behind it: helpers and the display plan.
+//! They read records and data; none
 //! makes a body, so none is routed (`docs/design/kernel-layer.md` §2).
 //!
 //! The rest of SolidCraft takes them from here, never from solidcore's crates directly: this
@@ -16,8 +16,6 @@ pub use solidcore_ops::ClassifiedPoint;
 pub use solidcore_ops::Error;
 pub use solidcore_ops::FailureCode;
 pub use solidcore_ops::PointNormalFace;
-pub use solidcore_ops::SquareFaceLevel;
-pub use solidcore_ops::affine;
 pub use solidcore_ops::cancel;
 pub use solidcore_ops::centroid_and_mean_radius;
 pub use solidcore_ops::constraint;
@@ -38,7 +36,6 @@ pub use solidcore_ops::pick;
 pub use solidcore_ops::point_displacement;
 pub use solidcore_ops::point_distance;
 pub use solidcore_ops::point_identity;
-pub use solidcore_ops::prism;
 pub use solidcore_ops::profile;
 pub use solidcore_ops::query;
 pub use solidcore_ops::section_corners;
