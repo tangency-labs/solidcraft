@@ -29,11 +29,13 @@
 //! | [`nurbs::NurbsFailure`], [`nurbs::BSplineFailure`] | NLib error flag + `NL_ERROR.eno` (`N_ErrSet`): the `NL_*_ERR` numbers, in solidcore's terms |
 //! | [`defeature::DefeatureFailure`] | none: why a defeature keeps a feature (#3218) |
 //! | [`sweep::SweepFailure`]     | none: why a sweep or loft refuses, and the sweep routines' failures |
+//! | [`teeth::TeethFailure`], [`teeth::Why`], [`teeth::PlanRefusal`], [`teeth::ProfileWhy`], [`teeth::SplineQuantity`], [`teeth::RequiredUnit`] | none: why numbers give no teeth, and the shaft-spline planner's refusals with the number each is about |
 //! | [`curve::CurveFailure`]     | none: why a curve query refuses, and the curve routines' failures |
 //! | [`query::QueryFailure`]     | none: the query routines' failures               |
 //! | [`topology::TopologyFailure`] | none: the topology routines' failures          |
 //! | [`surface::SurfaceFailure`] | none: the surface routines' failures             |
 //! | [`blend::BlendFailure`]     | none: the blend routines' failures               |
+//! | [`fill::FillFailure`]       | none: why a channel fill is refused (not upstream, #18500) |
 //!
 //! NLib routines (`NL_*.cpp`) report failure by returning an error flag and storing an
 //! error number in the process-wide `NL_ERROR` record; solidcore returns a
@@ -94,6 +96,7 @@ pub mod blend;
 pub mod boolean;
 pub mod curve;
 pub mod defeature;
+pub mod fill;
 pub mod geom;
 pub mod heal;
 pub mod intersect;
@@ -110,6 +113,7 @@ mod site_scan;
 mod stage_sites;
 pub mod surface;
 pub mod sweep;
+pub mod teeth;
 pub mod topology;
 
 use crate::math::Point3;
@@ -454,7 +458,7 @@ pub enum SolidError {
 // The one definition of every `SmStatus` number; other modules re-export or `use` these.
 // The values are pinned against `SmMessages.h` by `tests::status_codes_match_upstream`.
 
-/// Upstream `SmStatus` value `SM_SUCCESS` (`1000L`, `SmMessages.h`): success: the status every `SE`/`SER` macro tests against. No [`SolidError`] carries it; it is the value of status fields such as `BrepCheck::pointers_status` on success.
+/// Upstream `SmStatus` value `SM_SUCCESS` (`1000L`, `SmMessages.h`): success: the status every `SE`/`SER` macro tests against. No [`SolidError`] carries it; it is the value of status fields such as `DropCurveFail::fail_status` on success.
 pub const SM_SUCCESS: i32 = 1000;
 
 /// Upstream `SmStatus` value `SM_ERR` (`1001L`, `SmMessages.h`): generic failure.
@@ -1109,6 +1113,10 @@ pub enum Reason {
     Surface(surface::SurfaceFailure),
     /// A blend routine failed.
     Blend(blend::BlendFailure),
+    /// A channel fill cannot be built as asked (`prism::fill`; not upstream, #18500).
+    Fill(fill::FillFailure),
+    /// A tooth outline, fit or shaft-spline plan refused (`crate::teeth`).
+    Teeth(teeth::TeethFailure),
     /// A blend certificate's feet box runs past a support's net in a direction the
     /// support's kind does not continue (not upstream, tangency-labs/solidcraft#14284):
     /// support `support` (0 or 1) over the leader's piece `s`, the box `uv` against the net's
@@ -1145,6 +1153,7 @@ impl Reason {
             Self::Failed(_)
             | Self::Nurbs(_)
             | Self::Defeature(_)
+            | Self::Fill(_)
             | Self::Intersect(_)
             | Self::Primitive(_)
             | Self::Sweep(_)
@@ -1155,6 +1164,7 @@ impl Reason {
             | Self::Query(_)
             | Self::Topology(_)
             | Self::Surface(_)
+            | Self::Teeth(_)
             | Self::FootPastDomainEnd { .. }
             | Self::EdgeOffItsFaces { .. } => None,
             Self::Blend(b) => b.entity(),
@@ -1185,6 +1195,8 @@ impl Reason {
             Self::Topology(t) => t.comparison_status(),
             Self::Surface(s) => s.comparison_status(),
             Self::Blend(b) => b.comparison_status(),
+            Self::Fill(w) => w.comparison_status(),
+            Self::Teeth(t) => t.comparison_status(),
         }
     }
 
@@ -1210,6 +1222,8 @@ impl Reason {
             Self::Topology(t) => t.kind(),
             Self::Surface(s) => s.kind(),
             Self::Blend(b) => b.class(),
+            Self::Fill(w) => w.kind(),
+            Self::Teeth(t) => t.kind(),
         }
     }
 }
@@ -1241,6 +1255,8 @@ impl core::fmt::Display for Reason {
             Self::Topology(t) => t.fmt(f),
             Self::Surface(s) => s.fmt(f),
             Self::Blend(b) => b.fmt(f),
+            Self::Fill(w) => w.fmt(f),
+            Self::Teeth(t) => t.fmt(f),
             Self::FootPastDomainEnd {
                 support,
                 s,
@@ -1264,6 +1280,12 @@ impl From<boolean::BooleanFailure> for Reason {
 impl From<nurbs::NurbsFailure> for Reason {
     fn from(n: nurbs::NurbsFailure) -> Self {
         Self::Nurbs(n)
+    }
+}
+
+impl From<fill::FillFailure> for Reason {
+    fn from(w: fill::FillFailure) -> Self {
+        Self::Fill(w)
     }
 }
 
@@ -1342,6 +1364,12 @@ impl From<surface::SurfaceFailure> for Reason {
 impl From<blend::BlendFailure> for Reason {
     fn from(b: blend::BlendFailure) -> Self {
         Self::Blend(b)
+    }
+}
+
+impl From<teeth::TeethFailure> for Reason {
+    fn from(t: teeth::TeethFailure) -> Self {
+        Self::Teeth(t)
     }
 }
 

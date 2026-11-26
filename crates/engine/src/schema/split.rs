@@ -42,6 +42,10 @@ pub struct SplitBodyParams {
     /// With `tool_sheet` `faces`: a point on each other face of the tool body that cuts.
     #[serde(default)]
     pub tool_faces: Option<Vec<Point3>>,
+    /// With `tool_sheet` `body`: more surface bodies, by name, that cut with the tool's body,
+    /// each whole and exactly as it is. Each cuts the pieces it crosses through and must cut one.
+    #[serde(default)]
+    pub tool_bodies: Option<Vec<String>>,
     /// With `line`: the sketch, by feature id (not its name), whose line splits the body.
     #[serde(default)]
     pub sketch: Option<SketchFeatureId>,

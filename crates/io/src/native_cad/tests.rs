@@ -995,7 +995,7 @@ fn a_step_header_read_alone_is_the_whole_files() {
     assert!(files.len() > 30, "{} files", files.len());
     for p in files {
         let bytes = std::fs::read(&p).unwrap();
-        let Ok(ex) = solidcraft_kernel::services::step::p21::parse(&crate::step_text(&bytes)) else { continue };
+        let Ok(ex) = solidcore_record::step::p21::parse(&crate::step_text(&bytes)) else { continue };
         let got = super::step_producer(&bytes);
         assert_eq!((got.system, got.preprocessor, got.description), (ex.originating_system, ex.preprocessor, ex.description), "{}", p.display());
     }
@@ -1852,4 +1852,104 @@ fn single_precision_is_said_for_a_mesh_alone_that_it_moves() {
     assert!(export::mesh_only_rounds(&with(triangle(1e9, Some("test:model:body#0")), Some(body("test:model:body#0", Vec::new())))));
     // Beside an exact B-rep, the B-rep keeps double precision.
     assert!(!export::mesh_only_rounds(&with(triangle(1e9, Some("test:model:body#0")), Some(body("test:model:body#0", vec![region])))));
+}
+
+/// `box_step` with its `FILE_SCHEMA(...);` statement replaced by `file_schema_stmt`.
+fn box_step_with_schema(file_schema_stmt: &str) -> String {
+    let text = box_step("Part", "Example CAD", "Example CAD");
+    let start = text.find("FILE_SCHEMA(").unwrap();
+    let end = start + text[start..].find("));").unwrap() + "));".len();
+    format!("{}{file_schema_stmt}{}", &text[..start], &text[end..])
+}
+
+/// cadmpeg's STEP reader accepts STEP files whose `FILE_SCHEMA` header carries a non-OID `{...}`
+/// suffix such as `{UNKNOWN IMPLEMENTATION LEVEL}`, matching SolidCraft's own STEP reader: single
+/// entries (`AUTOMOTIVE_DESIGN`, `CONFIG_CONTROL_DESIGN`), multiple entries, lowercase keywords,
+/// comments and multiline headers.
+#[test]
+fn cadmpeg_step_accepts_non_oid_file_schema_suffixes() {
+    let cases = [
+        "FILE_SCHEMA(('AUTOMOTIVE_DESIGN {UNKNOWN IMPLEMENTATION LEVEL}'));",
+        "FILE_SCHEMA(('CONFIG_CONTROL_DESIGN {UNKNOWN IMPLEMENTATION LEVEL}'));",
+        "/* schema */\nfile_schema (\n  (\n    'AUTOMOTIVE_DESIGN\n {UNKNOWN IMPLEMENTATION LEVEL}'\n  )\n);",
+        "FILE_SCHEMA(('AUTOMOTIVE_DESIGN {UNKNOWN IMPLEMENTATION LEVEL}', 'CONFIG_CONTROL_DESIGN {UNKNOWN IMPLEMENTATION LEVEL}'));",
+    ];
+    for stmt in cases {
+        let text = box_step_with_schema(stmt);
+        let read_rec = cadmpeg_step_records(text.as_bytes(), "box.step").unwrap_or_else(|e| panic!("{stmt}: {e}"));
+        assert_eq!(read_rec.records.bodies.len(), 1, "{stmt}");
+        let imp = solidcraft_kernel::records_import(&read_rec.records).unwrap_or_else(|e| panic!("{stmt}: {e}"));
+        assert_eq!(imp.bodies.len(), 1, "{stmt}");
+        let v = solidcraft_kernel::measure(&imp.bodies[0].body).unwrap().volume;
+        assert!((v - 6000.0).abs() < 1e-6, "{stmt}: volume {v}");
+        for reader in READERS {
+            let sf = read(text.as_bytes(), "box.step", reader);
+            assert_eq!(sf.import.bodies.len(), 1, "{stmt} ({reader:?})");
+        }
+    }
+}
+
+/// Normal `FILE_SCHEMA` headers (valid OID suffixes and bare schema names) are untouched with no
+/// allocation, and literal `FILE_SCHEMA` / `{UNKNOWN IMPLEMENTATION LEVEL}` text in `DATA;` or in
+/// other header strings is never altered.
+#[test]
+fn step_file_schema_normalization_leaves_valid_headers_and_data_untouched() {
+    for valid_stmt in [
+        "FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));",
+        "FILE_SCHEMA(('AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF { 1 0 10303 442 1 1 4 }'));",
+        "FILE_SCHEMA(('AUTOMOTIVE_DESIGN { iso standard 10303 part(214) version(1) }'));",
+        "FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));",
+    ] {
+        let text = box_step_with_schema(valid_stmt);
+        let normalized = super::normalize_step_file_schema(text.as_bytes());
+        assert!(matches!(normalized, std::borrow::Cow::Borrowed(_)), "{valid_stmt}: should stay borrowed");
+        assert_eq!(normalized.as_ref(), text.as_bytes(), "{valid_stmt}");
+        let read_rec = cadmpeg_step_records(text.as_bytes(), "box.step").unwrap_or_else(|e| panic!("{valid_stmt}: {e}"));
+        assert_eq!(read_rec.records.bodies.len(), 1, "{valid_stmt}");
+    }
+
+    // `FILE_DESCRIPTION` containing literal `FILE_SCHEMA` text inside a string is untouched.
+    let desc_with_schema = box_step("FILE_SCHEMA((''AUTOMOTIVE_DESIGN {UNKNOWN IMPLEMENTATION LEVEL}''))", "Example CAD", "Example CAD");
+    assert!(matches!(super::normalize_step_file_schema(desc_with_schema.as_bytes()), std::borrow::Cow::Borrowed(_)));
+
+    // `DATA;` containing literal `FILE_SCHEMA` and `{UNKNOWN IMPLEMENTATION LEVEL}` is untouched
+    // both when the header is valid and when the header itself is normalized.
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let washer = std::fs::read_to_string(dir.join("washer.step")).unwrap();
+    let sentinel = "FILE_SCHEMA((''AUTOMOTIVE_DESIGN {UNKNOWN IMPLEMENTATION LEVEL}'')) {UNKNOWN IMPLEMENTATION LEVEL}";
+    let washer_with_data_sentinel = washer.replacen("PRODUCT('washer','washer',''", &format!("PRODUCT('washer','washer','{sentinel}'"), 1);
+    assert!(washer_with_data_sentinel.contains(sentinel));
+
+    // Valid header + sentinel in DATA;: completely untouched (Borrowed).
+    let untouched = super::normalize_step_file_schema(washer_with_data_sentinel.as_bytes());
+    assert!(matches!(untouched, std::borrow::Cow::Borrowed(_)));
+    assert_eq!(untouched.as_ref(), washer_with_data_sentinel.as_bytes());
+
+    // Non-OID header + sentinel in DATA;: header normalized, DATA; byte-for-byte identical.
+    let bad_header = washer_with_data_sentinel.replacen(
+        "FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));",
+        "FILE_SCHEMA(('AUTOMOTIVE_DESIGN {UNKNOWN IMPLEMENTATION LEVEL}'));",
+        1,
+    );
+    let normalized = super::normalize_step_file_schema(bad_header.as_bytes());
+    assert!(matches!(normalized, std::borrow::Cow::Owned(_)));
+    let normalized_text = std::str::from_utf8(normalized.as_ref()).unwrap();
+    assert!(normalized_text.contains("FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));"), "{normalized_text}");
+    let orig_data = bad_header.split_once("DATA;").unwrap().1;
+    let norm_data = normalized_text.split_once("DATA;").unwrap().1;
+    assert_eq!(norm_data, orig_data, "DATA; section must be untouched byte-for-byte");
+    assert!(norm_data.contains(sentinel), "sentinel in DATA; must be preserved");
+    let read_rec = cadmpeg_step_records(bad_header.as_bytes(), "washer.step").unwrap();
+    assert_eq!(read_rec.records.bodies.len(), 1);
+
+    // Hostile or non-STEP inputs never panic and stay untouched.
+    for hostile in [
+        b"".as_slice(),
+        b"not a step file",
+        b"ISO-10303-21;\nHEADER;\n/* unterminated comment",
+        b"ISO-10303-21;\nHEADER;\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN {UNKNOWN",
+        b"ISO-10303-21;\nHEADER;\nDATA;\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN {UNKNOWN IMPLEMENTATION LEVEL}'));\n",
+    ] {
+        assert!(matches!(super::normalize_step_file_schema(hostile), std::borrow::Cow::Borrowed(_)));
+    }
 }

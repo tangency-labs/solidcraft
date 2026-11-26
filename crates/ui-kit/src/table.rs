@@ -272,7 +272,8 @@ fn column_widths(ui: &Ui, columns: &[Column<'_>], available: f32) -> Vec<f32> {
         })
         .collect();
     let fixed: f32 = columns.iter().zip(&widths).filter(|(c, _)| !c.shares()).map(|(_, w)| *w).sum();
-    let mut remaining = (available - fixed - t.space_8 * (columns.len().saturating_sub(1) + 2) as f32 - t.space_4 * 2.0).max(0.0);
+    let gaps = t.space_8 * (columns.len().saturating_sub(1) + 2) as f32 + t.space_4 * 2.0;
+    let mut remaining = (available - fixed - gaps).max(0.0);
     let mut sharing: Vec<_> = columns.iter().map(|c| c.shares() && dimension(c.width) > 0.0).collect();
     // Freeze columns at their control minimum before sharing the remaining width. The bounded
     // passes also keep a hostile design with many columns from creating an unbounded loop.
@@ -300,13 +301,19 @@ fn column_widths(ui: &Ui, columns: &[Column<'_>], available: f32) -> Vec<f32> {
         }
     }
     // Round cumulative column edges, not each width independently: independent rounding
-    // can add a pixel to an otherwise exactly fitting grid and create a scrollbar.
+    // can add a pixel to an otherwise exactly fitting grid and create a scrollbar. The gaps need
+    // not be whole pixels (8 points is 7.5 px at 0.9375), so a fitting grid's last edge could
+    // round half a pixel past `available`; it then ends exactly where the gaps leave off (#22382).
     let ppp = ui.ctx().pixels_per_point().max(0.5);
+    let last = widths.len().saturating_sub(1);
     let mut edge = 0.0;
     let mut rounded_edge = 0.0;
-    for width in &mut widths {
+    for (index, width) in widths.iter_mut().enumerate() {
         edge += *width;
-        let next = (edge * ppp).round() / ppp;
+        let mut next = (edge * ppp).round() / ppp;
+        if index == last && next + gaps > available && edge + gaps <= available + 0.01 {
+            next = available - gaps;
+        }
         *width = next - rounded_edge;
         rounded_edge = next;
     }

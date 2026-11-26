@@ -97,6 +97,20 @@ pub struct RepairParams {
     pub pick: PickParam,
 }
 
+/// What `drawing.balloon.delete` takes.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct DeleteParams {
+    pub balloon: BalloonIdParam,
+}
+
+/// What `drawing.balloon.delete` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DeleteResult {
+    pub balloon: String,
+}
+
 /// What `drawing.balloon.edit` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct EditResult {

@@ -268,7 +268,7 @@ fn units_hint() -> String {
 
 /// The changed files, relative to the repository root: the commits since the merge base with
 /// `base`, uncommitted changes and untracked files.
-fn changed_paths(root: &Path, base: Option<&str>) -> Result<Vec<String>, String> {
+pub(crate) fn changed_paths(root: &Path, base: Option<&str>) -> Result<Vec<String>, String> {
     let git = |args: &[&str]| -> Result<Vec<u8>, String> {
         let out = Command::new("git").args(args).current_dir(root).output().map_err(|e| format!("git: {e}"))?;
         if out.status.success() { Ok(out.stdout) } else { Err(format!("git {}: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim())) }

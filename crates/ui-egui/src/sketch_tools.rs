@@ -106,9 +106,10 @@ thread_local! {
     static COMB_OPTIONS: Cell<CombOptions> = const { Cell::new(CombOptions::DEFAULT) };
     /// The points that snap lined the cursor up with, and where it went (#7828).
     static LINED: RefCell<Option<(Vec2, Vec<Lined>)>> = const { RefCell::new(None) };
-    /// The drawing tool's points so far and whether it is the Line tool, from the last hover: a
-    /// click takes the tool out of the app while it runs, and must place what the hover showed.
-    static TOOL: RefCell<(Vec<Vec2>, bool)> = const { RefCell::new((Vec::new(), true)) };
+    /// The drawing tool's points so far, whether it is the Line tool, and whether it is the
+    /// 3-Point Arc waiting for its third point, from the last hover: a click takes the tool out of
+    /// the app while it runs, and must place what the hover showed.
+    static TOOL: RefCell<(Vec<Vec2>, bool, bool)> = const { RefCell::new((Vec::new(), true, false)) };
     /// The image file a Canvas or Decal tool places.
     static IMAGE: RefCell<Option<String>> = const { RefCell::new(None) };
     /// The link the Repair Link tool gives a new source.
@@ -793,16 +794,19 @@ pub fn refine_snap(
     let tol = 7.0 * px;
     // The tool's points and kind (a click takes the tool out of the app while it runs, so the
     // last hover's are kept: a rectangle's click takes no Line tool inference its hover didn't).
-    let (own, line_tool) = match app.tool.as_ref() {
+    let (own, line_tool, arc_tool) = match app.tool.as_ref() {
         Some(t) => {
-            let own: (Vec<Vec2>, bool) = (t.pts.iter().map(|p| p.0).collect(), t.cmd == "sketch.line");
+            let own: (Vec<Vec2>, bool, bool) = (t.pts.iter().map(|p| p.0).collect(), t.cmd == "sketch.line", t.cmd == "sketch.arc.three_point");
             TOOL.with(|c| *c.borrow_mut() = own.clone());
             own
         }
         None => TOOL.with(|c| c.borrow().clone()),
     };
     // With `sketch_align_points` off, a click takes the Line tool's inferences, as before.
+    // The 3-Point Arc takes none of them, on hover or on click, when its tangent snap is on (#20719).
+    let arc_snap = arc_tool && app.preferences.sketch_arc_tangent_snap;
     let line_tool = if app.preferences.sketch_align_points { line_tool } else { app.tool.as_ref().is_none_or(|t| t.cmd == "sketch.line") };
+    let line_tool = line_tool && !arc_snap;
     let prev = own.last().copied();
     let mid_only = crate::tool_modifiers::target_midpoint();
     // Shift midpoint mode: widen the midpoint capture a little and skip other inferences.
@@ -909,6 +913,30 @@ pub fn refine_snap(
             }
         }
     }
+    // 3-Point Arc: the third point that makes the arc tangent to a line or arc it starts or ends
+    // on (#20719), exact: the point of that tangent circle nearest the cursor. It and the centre
+    // snap below win over an earlier snap when their point is nearer the cursor.
+    let mut arc_locked = false;
+    if !mid_only
+        && arc_snap
+        && let [start, end] = own[..]
+        && let Some(i) = crate::inference::arc_tangent(sk, start, end, lp, tol)
+        && locked.as_ref().is_none_or(|l| i.at.dist(lp) < l.0.dist(lp))
+    {
+        locked = Some((i.at, i.label(), None, Vec::new(), None));
+        arc_locked = true;
+    }
+    // 3-Point Arc: the centre lands on a sketch point (#20719); the click keeps it there.
+    if !mid_only
+        && arc_snap
+        && !(arc_locked && locked.as_ref().is_some_and(|l| l.1 == "T"))
+        && let [start, end] = own[..]
+        && let Some(i) = crate::inference::arc_centre(sk, start, end, lp, tol)
+        && locked.as_ref().is_none_or(|l| i.at.dist(lp) < l.0.dist(lp))
+    {
+        locked = Some((i.at, i.label(), None, Vec::new(), None));
+        arc_locked = true;
+    }
     if let Some((p, label, arg, lock_targets, inf)) = locked {
         let mut state = SnapState::new(p);
         state.push_label(label);
@@ -941,7 +969,18 @@ pub fn refine_snap(
             }
         }
         let allow_lined = !matches!(label, "End" | "Pt");
-        add_constraints_at_point(sk, prev, &targets, line_tool, mid_only, align_points && !has_crossing, allow_lined, p, &mut state, &mut lined);
+        add_constraints_at_point(
+            sk,
+            prev,
+            &targets,
+            line_tool,
+            mid_only,
+            align_points && !has_crossing && !arc_locked,
+            allow_lined,
+            p,
+            &mut state,
+            &mut lined,
+        );
         return finish(state, lined, arg);
     }
 
@@ -1259,8 +1298,8 @@ pub fn glyph_at(pos: Pos2) -> Option<String> {
 
 /// The glyph within `reach` of `pos` whose centre is nearest (its id and centre). Large glyphs'
 /// hit regions overlap, so the first one in reach could be a neighbour of the one under the
-/// pointer (#10794); hover and click both pick with this rule.
-fn nearest_glyph<'a>(glyphs: impl IntoIterator<Item = (&'a str, Pos2)>, pos: Pos2, reach: f32) -> Option<(&'a str, Pos2)> {
+/// pointer (#10794); hover and click both pick with this rule, and so do the plane handles.
+pub(crate) fn nearest_glyph<K>(glyphs: impl IntoIterator<Item = (K, Pos2)>, pos: Pos2, reach: f32) -> Option<(K, Pos2)> {
     glyphs.into_iter().filter(|(_, c)| c.distance(pos) <= reach).min_by(|a, b| a.1.distance(pos).total_cmp(&b.1.distance(pos)))
 }
 
@@ -1370,6 +1409,7 @@ pub fn tool_for(id: &str) -> Option<Tool> {
         chain: Default::default(),
         line_type: crate::sketch_construction::last_line_type(),
         classic: false,
+        arc_modes: false,
         preselected: false,
         finished: false,
     })

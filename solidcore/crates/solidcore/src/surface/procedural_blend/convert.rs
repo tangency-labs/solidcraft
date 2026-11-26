@@ -15,13 +15,13 @@ use super::chamfer::{ChamferDefinition, ChamferSize};
 use super::corner::{CornerDefinition, SetbackFill};
 use super::exact::{ExactClass, ExactRound};
 use super::record::{
-    BezierCurveRecord, BlendDefinitionRecord, ChamferRecord, ChamferSizeRecord, ClassInputsRecord,
-    CornerRecord, DraftRecord, EndCornerRecord, ExactClassRecord, ExactNetKindRecord,
-    ExactNetRecord, ExactRoundDefinition, ExactRoundRecord, FaceDefinition, LeaderMapRecord,
-    MixedCornerRecord, MixedSideRecord, NurbsCurveRecord, NurbsSurfaceRecord, ParameterMapRecord,
-    PlaneRecord, ProceduralBlendRecord, QuadricKindRecord, QuadricRecord, RadiusRecord,
-    RevolutionRecord, SetbackCornerRecord, SetbackRoundRecord, SupportKindRecord, SupportRecord,
-    SweptCornerRecord,
+    BezierCurveRecord, BlendDefinitionRecord, ChamferKindRecord, ChamferRecord, ChamferSizeRecord,
+    ClassInputsRecord, CornerRecord, DraftRecord, EndCornerRecord, ExactClassRecord,
+    ExactNetKindRecord, ExactNetRecord, ExactRoundDefinition, ExactRoundRecord, FaceDefinition,
+    LeaderMapRecord, MixedCornerRecord, MixedSideRecord, NurbsCurveRecord, NurbsSurfaceRecord,
+    ParameterMapRecord, PlaneRecord, ProceduralBlendRecord, QuadricKindRecord, QuadricRecord,
+    RadiusRecord, RevolutionRecord, SetbackCornerRecord, SetbackRoundRecord, SupportKindRecord,
+    SupportRecord, SweptCornerRecord,
 };
 use super::record::{EndOrderRecord, MotionRecord, SectionBlendRecord, SectionFrameRecord};
 use super::{BlendDefinitionInput, BlendRef, ProceduralBlend, BLEND_MAX_DEPTH};
@@ -417,6 +417,11 @@ fn from_record_at(k: &Kernel, rec: &ProceduralBlendRecord, depth: u32) -> Result
         ));
     }
     let d = &rec.definition;
+    // a chamfer of setbacks, before any of its supports is made (a corner's or a support's
+    // nested blend comes here too)
+    if matches!(d.radius, RadiusRecord::Edge) || d.chamfer.is_some_and(|c| c.is_setbacks()) {
+        return Err(setbacks_not_built());
+    }
     let support_of = |i: usize, s: &SupportRecord| -> Result<Surface> {
         Ok(match s {
             SupportRecord::Nurbs {
@@ -445,6 +450,7 @@ fn from_record_at(k: &Kernel, rec: &ProceduralBlendRecord, depth: u32) -> Result
     let (law, offsets) = match &d.radius {
         RadiusRecord::Constant { offsets } => (None, *offsets),
         RadiusRecord::Law(law) => (Some(curve_of(law)?), [0.0, 0.0]),
+        RadiusRecord::Edge => return Err(setbacks_not_built()),
         RadiusRecord::EqualSetback => {
             let sizes = chamfer
                 .ok_or_else(|| {
@@ -1049,11 +1055,32 @@ fn chamfer_record(c: ChamferDefinition) -> ChamferRecord {
             ChamferSize::Chord(l) => ChamferSizeRecord::Chord(l),
         },
         wedge: c.wedge,
+        kind: ChamferKindRecord::Offsets,
     }
 }
 
-/// The chamfer's sizes a record holds, checked ([`ChamferDefinition::new`]).
-fn chamfer_of(c: &ChamferRecord) -> Result<ChamferDefinition> {
+/// The refusal of a chamfer whose setbacks hold at every station
+/// ([`ChamferKindRecord::Setbacks`], [`RadiusRecord::Edge`]): its record is defined, its
+/// construction and certificate not yet, and reading it as offsets would build another body.
+fn setbacks_not_built() -> SolidError {
+    SolidError::Unsupported {
+        operation: OP_CHAMFER_OF,
+        reason: "a chamfer whose setbacks hold at every station is not built yet",
+    }
+}
+
+const OP_CHAMFER_OF: &str = "surface::procedural_blend::convert::chamfer_of";
+
+/// The chamfer's sizes a record holds, checked ([`ChamferDefinition::new`]); a chamfer of
+/// setbacks is refused ([`setbacks_not_built`]).
+///
+/// # Errors
+///
+/// `Unsupported` for a chamfer of setbacks; those of [`ChamferDefinition::new`].
+pub(crate) fn chamfer_of(c: &ChamferRecord) -> Result<ChamferDefinition> {
+    if c.is_setbacks() {
+        return Err(setbacks_not_built());
+    }
     ChamferDefinition::new(
         match c.size {
             ChamferSizeRecord::Distances(x) => ChamferSize::Distances(x),

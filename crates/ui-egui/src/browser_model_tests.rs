@@ -3,6 +3,7 @@ use std::sync::Arc;
 use serde_json::json;
 use solidcraft_engine::Sel;
 
+use crate::scenario::Harness;
 use crate::test_support::{click, component_box as fixture};
 
 #[test]
@@ -347,8 +348,9 @@ fn hovering_a_collapsed_nested_placement_walks_its_subtree_once() {
     assert_eq!(h.app.viewport.hover_bodies.len(), 7);
 }
 
-/// An open curve turned round is a surface body and the Bodies folder shows it as one; a closed
-/// profile turned all the way round, and a box, are solids.
+/// An open curve turned round is a surface body and the Bodies folder shows it as one, and so is
+/// a closed profile turned all the way round (#21969: a surface operation's result is a surface,
+/// closed or not); a box is a solid.
 #[test]
 fn bodies_folder_tells_surfaces_from_solids() {
     let mut h = crate::scenario::Harness::new();
@@ -365,7 +367,7 @@ fn bodies_folder_tells_surfaces_from_solids() {
     super::prepare_model(&mut h.app);
     let icons: Vec<(String, &str)> = super::entries(&h.app, 0, "bodies").into_iter().map(|e| (e.key, e.icon)).collect();
     assert_eq!(icons.len(), 3, "{icons:?}");
-    assert_eq!(icons[..2], [("Tube".to_string(), "surface"), ("Ring".to_string(), "body")]);
+    assert_eq!(icons[..2], [("Tube".to_string(), "surface"), ("Ring".to_string(), "surface")]);
     assert_eq!(icons[2].1, "body", "the box is a solid");
 }
 
@@ -804,6 +806,67 @@ fn a_body_keeps_a_faint_bar_while_one_of_its_faces_is_selected() {
     h.app.run("select.clear", json!({})).unwrap();
     assert_eq!(row(&mut h.app), (false, super::Mark::None), "nothing selected");
     assert_eq!(placement(&mut h.app), super::Mark::None, "and its placement is clear");
+}
+
+/// #19153: hovering a body, feature, construction item, or origin plane highlights its
+/// ancestor folders (and placement/component) with the faint branch bar on the left.
+#[test]
+fn browser_hovering_item_highlights_ancestor_branch() {
+    let mut h = Harness::new();
+    let box_res = h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Cube"})).unwrap();
+    let feature_id = box_res["feature"].as_u64().unwrap();
+    let plane_res = h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 10, "name": "OffsetPlane"})).unwrap();
+    let plane_id = plane_res["feature"].as_u64().unwrap();
+    let axis_res = h.app.run("construct.axis.two_points", json!({"a": {"vertex": [0, 0, 0]}, "b": {"vertex": [0, 0, 20]}, "name": "ZAxis"})).unwrap();
+    let axis_id = axis_res["feature"].as_u64().unwrap();
+    let point_res = h.app.run("construct.point.vertex", json!({"point": {"vertex": [20, 20, 20]}, "name": "CornerPoint"})).unwrap();
+    let point_id = point_res["feature"].as_u64().unwrap();
+
+    // 1. Hovering a body via app.viewport.hover_bodies:
+    h.app.viewport.hover_bodies = vec!["Cube".into()];
+    let lit = super::Lit::of(&mut h.app);
+    assert!(lit.any(), "lit.any() is true when hover_bodies is populated");
+    let bodies = super::entries(&h.app, 0, "bodies");
+    assert_eq!(lit.branch(&h.app, &bodies), super::Mark::Branch, "Bodies folder gets Mark::Branch when body is hovered");
+    assert_eq!(lit.thing(&super::Thing::Body("Cube".into())), (false, true), "single body is lit as hovered");
+
+    // Hovering multiple bodies (e.g. hovering a component row in the Browser) does not treat
+    // the first body as specifically hovered, avoiding false lighting of the first body row:
+    h.app.viewport.hover_bodies = vec!["Cube".into(), "Cube2".into()];
+    let lit_multi = super::Lit::of(&mut h.app);
+    assert_eq!(lit_multi.thing(&super::Thing::Body("Cube".into())), (false, false), "first body row is not lit when multiple bodies are hovered");
+
+    h.app.viewport.hover_bodies.clear();
+
+    // 2. Hovering an origin plane via app.viewport.hover_plane:
+    h.app.viewport.hover_plane = Some("XY".into());
+    let lit = super::Lit::of(&mut h.app);
+    assert!(lit.any(), "lit.any() is true when hover_plane is populated");
+    assert_eq!(lit.thing(&super::Thing::Plane("XY".into())), (false, true), "XY plane is hovered");
+    h.app.viewport.hover_plane = None;
+
+    // 3. Hovering a non-sketch feature (e.g. solid.box) via app.viewport.hover_feature:
+    h.app.viewport.hover_feature = Some(feature_id);
+    let lit = super::Lit::of(&mut h.app);
+    assert!(lit.any(), "lit.any() is true when hover_feature is populated");
+    assert_eq!(lit.thing(&super::Thing::Feature(feature_id)), (false, true), "solid feature is hovered as Thing::Feature");
+    assert!(lit.components.contains(&0), "root component is in lit.components");
+    h.app.viewport.hover_feature = None;
+
+    // 4. Hovering a construction plane/axis/point via app.viewport.hover_feature:
+    for (id, thing) in [
+        (plane_id, super::Thing::Plane("OffsetPlane".into())),
+        (axis_id, super::Thing::Axis("ZAxis".into())),
+        (point_id, super::Thing::Point("CornerPoint".into())),
+    ] {
+        h.app.viewport.hover_feature = Some(id);
+        let lit = super::Lit::of(&mut h.app);
+        assert!(lit.any(), "lit.any() is true for construction feature {id}");
+        assert_eq!(lit.thing(&thing), (false, true), "construction thing is hovered for feature {id}");
+        let construction = super::entries(&h.app, 0, "construction");
+        assert_eq!(lit.branch(&h.app, &construction), super::Mark::Branch, "Construction folder gets Mark::Branch for {id}");
+        h.app.viewport.hover_feature = None;
+    }
 }
 
 /// A design small enough to name in a frame names its placements in that frame, and names them
