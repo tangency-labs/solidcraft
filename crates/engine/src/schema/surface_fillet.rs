@@ -44,9 +44,37 @@ pub struct SurfaceFilletParams {
     pub b: FilletFace,
     /// The radius of the rolling ball.
     pub radius: LengthExpr,
+    /// What is left of the two surfaces. `both` (the default): each is cut back to the round and
+    /// sewn to it, one body. `first`: only `a` is cut back and sewn to the round; `b` is left as
+    /// it was. `none`: neither changes, and the round alone is a new surface body.
+    #[serde(default)]
+    pub trim: Option<FilletTrimParam>,
     /// Extend a surface that stops short of the other to meet it. Default: false.
     #[serde(default)]
     pub extend: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
+}
+
+/// What Surface Fillet leaves of the two surfaces, as the handler spells it (any case).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FilletTrimParam {
+    Both,
+    First,
+    None,
+}
+
+impl<'de> Deserialize<'de> for FilletTrimParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(s) => match s.to_ascii_lowercase().as_str() {
+                "both" => Ok(FilletTrimParam::Both),
+                "first" => Ok(FilletTrimParam::First),
+                "none" => Ok(FilletTrimParam::None),
+                _ => Err(D::Error::custom(whole("`trim` must be both, first or none"))),
+            },
+            _ => Err(D::Error::custom(whole("`trim` must be both, first or none"))),
+        }
+    }
 }

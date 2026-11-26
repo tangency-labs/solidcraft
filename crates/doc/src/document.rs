@@ -348,6 +348,25 @@ impl RuledMode {
     }
 }
 
+/// What a Surface Fillet does with the two surfaces it rounds between (#769).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FilletTrim {
+    /// Both are cut back to the round and sewn to it: one body.
+    #[default]
+    Both,
+    /// The first is cut back and sewn to the round; the second is left as it was.
+    First,
+    /// Neither is changed: the round alone is made, a new surface body.
+    None,
+}
+
+impl FilletTrim {
+    pub fn is_default(&self) -> bool {
+        *self == FilletTrim::Both
+    }
+}
+
 /// How a ruled surface's strips meet at sharp corners of its edge chain.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -2781,12 +2800,15 @@ pub enum FeatureKind {
     /// of a surface body, by a point on it; the two bodies cut each other where their surfaces
     /// meet, each keeping the side its point is on (`extend` extends one that stops short of the
     /// other to meet it), are sewn into `a.body` (`b.body` is then gone), and the seam between
-    /// them is rounded with a fillet of `radius`.
+    /// them is rounded with a fillet of `radius`. `trim` says what is left of the two surfaces: both
+    /// cut back and sewn (the default), only `a`, or neither (the round alone, a new body).
     SurfaceFillet {
         a: FaceAt,
         b: FaceAt,
         #[walk(length = "Radius")]
         radius: Expr,
+        #[serde(default, skip_serializing_if = "FilletTrim::is_default")]
+        trim: FilletTrim,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         extend: bool,
     },

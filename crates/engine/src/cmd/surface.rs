@@ -3,8 +3,8 @@
 
 use serde_json::Value;
 use solidcraft_doc::{
-    BlendSide, EdgeContinuity, Expr, ExtendMode, ExtendTo, FaceAt, FeatureKind, PatchContinuity, PlaneRef, ProfileSel, RuledCorners, RuledMode,
-    TrimCurves, expr::Kind,
+    BlendSide, EdgeContinuity, Expr, ExtendMode, ExtendTo, FaceAt, FeatureKind, FilletTrim, PatchContinuity, PlaneRef, ProfileSel, RuledCorners,
+    RuledMode, TrimCurves, expr::Kind,
 };
 use solidcraft_doc::{BodyName, SketchId};
 use solidcraft_doc::{Dir, FacePick, Position};
@@ -164,7 +164,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("surface_fillet")
         .contract(&SURFACE_FILLET_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("a, b: {body, point} (two surface bodies of one face each, a point on each face; the points pick the side of the other surface that is kept: the side the rolling ball stays on); radius: expr; extend?: bool (default false: a surface that stops short of the other is extended to meet it). Each surface is cut where the other meets it, the kept pieces are sewn into a's body (b's is gone) and the seam is rounded with an exact fillet. A new surface body per undo step; nothing is made if the surfaces don't meet, or the ball does not fit"),
+        .params("a, b: {body, point} (two surface bodies of one face each, a point on each face; the points pick the side of the other surface that is kept: the side the rolling ball stays on); radius: expr; trim?: both|first|none (default both: each surface is cut back to the round and sewn to it, one body; first: only a is cut back and sewn to the round, b is left as it was; none: neither changes and the round alone is a new surface body); extend?: bool (default false: a surface that stops short of the other is extended to meet it). Each surface is cut where the other meets it, the kept pieces are sewn into a's body (b's is gone, with trim both) and the seam is rounded with an exact fillet. A new surface body per undo step; nothing is made if the surfaces don't meet, or the ball does not fit"),
 ];
 
 fn patch(s: &mut Session, p: &Value) -> Result<Value> {
@@ -856,7 +856,13 @@ fn surface_fillet(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let radius = expr(p, "radius").ok_or_else(|| bad(cmd, "`radius` is required"))?;
     check_expr(s, &radius, Kind::Length, cmd, "radius")?;
-    add_feature(s, p, FeatureKind::SurfaceFillet { a, b, radius, extend: bool_(p, "extend").unwrap_or(false) })
+    let trim = match str_(p, "trim").map(str::to_ascii_lowercase).as_deref() {
+        None | Some("both") => FilletTrim::Both,
+        Some("first") => FilletTrim::First,
+        Some("none") => FilletTrim::None,
+        Some(o) => return Err(bad(cmd, format!("unknown trim `{o}` (both, first or none)"))),
+    };
+    add_feature(s, p, FeatureKind::SurfaceFillet { a, b, radius, trim, extend: bool_(p, "extend").unwrap_or(false) })
 }
 
 fn ruled(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1240,6 +1246,43 @@ mod tests {
         assert!((area(&s, "A") - got).abs() < 1e-9);
         let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
         assert!((area(&cold, "A") - got).abs() < 1e-6);
+    }
+
+    /// Surface Fillet's `trim`: `first` cuts back and sews only the first surface, `none` leaves
+    /// both as they were and makes the round alone.
+    #[test]
+    fn surface_fillet_trim_first_and_none_leave_the_other_surfaces_alone() {
+        let round = std::f64::consts::FRAC_PI_2 * 2.0 * 20.0;
+        let mk = |trim: &str| {
+            let mut s = Session::default();
+            sheet(&mut s, "XY", "A", [-10.0, -10.0], [10.0, 10.0]);
+            sheet(&mut s, "XZ", "B", [-10.0, -10.0], [10.0, 10.0]);
+            let p = json!({"a": {"body": "A", "point": [0, 5, 0]}, "b": {"body": "B", "point": [0, 0, 5]}, "radius": 2, "trim": trim});
+            run(&mut s, "surface.fillet", p);
+            s
+        };
+        // First: A is cut back to the round (2 flats of 20 x 8 less one) and sewn to it; B whole.
+        let s = mk("first");
+        assert!((area(&s, "A") - (160.0 + round)).abs() < 0.01 * (160.0 + round), "{}", area(&s, "A"));
+        assert!((area(&s, "B") - 400.0).abs() < 1e-6, "{}", area(&s, "B"));
+        // None: both whole, and the round alone a new surface body.
+        let s = mk("none");
+        assert!((area(&s, "A") - 400.0).abs() < 1e-6 && (area(&s, "B") - 400.0).abs() < 1e-6);
+        let st = s.world_state().unwrap();
+        let made: Vec<_> = st.bodies.iter().filter(|b| b.name != "A" && b.name != "B").collect();
+        assert_eq!(made.len(), 1);
+        assert!(made.iter().all(|b| b.body.is_surface() && b.body.face_count() == 1));
+        let name = made.iter().map(|b| b.name.clone()).next().unwrap();
+        assert!((area(&s, &name) - round).abs() < 0.01 * round, "{}", area(&s, &name));
+        // Anything else is refused.
+        let mut s = Session::default();
+        sheet(&mut s, "XY", "A", [-10.0, -10.0], [10.0, 10.0]);
+        sheet(&mut s, "XZ", "B", [-10.0, -10.0], [10.0, 10.0]);
+        let bad = json!({"a": {"body": "A", "point": [0, 5, 0]}, "b": {"body": "B", "point": [0, 0, 5]}, "radius": 2, "trim": "second"});
+        assert!(s.execute("surface.fillet", &bad).is_err());
+        // A point inside the round's reach (1 mm from the seam, radius 2) can't tell the surface from the round.
+        let near = json!({"a": {"body": "A", "point": [0, 1, 0]}, "b": {"body": "B", "point": [0, 0, 5]}, "radius": 2, "trim": "none"});
+        assert!(s.execute("surface.fillet", &near).is_err());
     }
 
     /// Surface Fillet refuses what it cannot round, without changing the design.

@@ -3,7 +3,7 @@
 //! `surface_offset`, `surface_ruled`, `surface_untrim`).
 
 use super::*;
-use crate::{FaceAt, RuledCorners, RuledMode, SheetSection};
+use crate::{FaceAt, FilletTrim, RuledCorners, RuledMode, SheetSection};
 use solidcore_record::Seg2;
 
 pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
@@ -85,12 +85,12 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             apply_traced(doc, st, f, tools, *operation, &crate::plain(targets))
         }
-        FeatureKind::SurfaceFillet { a, b, radius, extend } => {
+        FeatureKind::SurfaceFillet { a, b, radius, trim, extend } => {
             let r = val(vals, radius, Kind::Length)?;
             if !(r.is_finite() && r > 0.0) {
                 return Err(DocError::Invalid("Surface Fillet: the radius must be positive".into()));
             }
-            fillet_surfaces(st, a, b, r, *extend)
+            fillet_surfaces(st, f, a, b, r, *trim, *extend)
         }
         FeatureKind::SurfaceTrim { body, plane, tool, tool_body, keep, keep_more, curves, with, keep_with, stitch, extend } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
@@ -1049,10 +1049,13 @@ fn boundary_frames(
 }
 
 /// Surface Fillet: the two surfaces of `a` and `b` cut each other (each keeping the side its point
-/// is on) and sewn into one body, the seam between them rounded by `r`. The result takes the place
-/// of `a`'s body, and `b`'s is gone.
-fn fillet_surfaces(st: &mut ModelState, a: &FaceAt, b: &FaceAt, r: f64, extend: bool) -> Result<()> {
+/// is on) and sewn into one body, the seam between them rounded by `r`. With `trim` both, the
+/// result takes the place of `a`'s body and `b`'s is gone. With `first`, `a`'s body is the cut-back
+/// `a` sewn to the round and `b`'s is as it was; with `none`, both are as they were and the round
+/// alone is a new surface body.
+fn fillet_surfaces(st: &mut ModelState, f: &Feature, a: &FaceAt, b: &FaceAt, r: f64, trim: FilletTrim, extend: bool) -> Result<()> {
     let i = st.bodies.iter().position(|x| x.name == a.body.0).ok_or_else(|| DocError::Unknown(format!("body `{}`", a.body)))?;
+    let before = (trim != FilletTrim::Both).then(|| st.clone());
     mutual_trim(st, i, &b.body.0, kernel::TrimKeep::Side(a.point.0), &[b.point.0], true, extend)?;
     let Some(sewn) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
     // Each surface is one face and they are sewn along their seam: the edges two faces share.
@@ -1070,8 +1073,26 @@ fn fillet_surfaces(st: &mut ModelState, a: &FaceAt, b: &FaceAt, r: f64, extend: 
     // The round blends an edge this feature made (the seam), so the sewn body is a stage of the
     // feature: its faces and edges are named first, and the round is named after the faces beside it.
     let rounded = sewn.traced().then(rounded.with_preserved_planar_sources(&sewn.body)?);
-    if let Some(slot) = st.bodies.get_mut(i) {
-        *slot = ModelBody::traced_new(sewn.name, rounded, sewn.feature);
+    let Some(before) = before else {
+        if let Some(slot) = st.bodies.get_mut(i) {
+            *slot = ModelBody::traced_new(sewn.name, rounded, sewn.feature);
+        }
+        return Ok(());
+    };
+    // `first` and `none`: the pieces of the result, put back on the model as it was.
+    let [piece_a, _piece_b, round] = kernel::rounded_parts(&rounded.body, a.point.0, b.point.0)?;
+    let (piece_a, round) = (rounded.then(piece_a), rounded.then(round));
+    *st = before;
+    if trim == FilletTrim::First {
+        let sewn = kernel::stitch(&[&piece_a.body, &round.body], 0.0)?;
+        let sewn = Traced::step(sewn, &[&piece_a, &round]);
+        let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+        if let Some(slot) = st.bodies.get_mut(i) {
+            *slot = ModelBody::traced_new(mb.name, sewn, mb.feature);
+        }
+    } else {
+        let name = new_name(st, f, 0);
+        st.bodies.push(ModelBody::traced_new(name, round, f.id));
     }
     Ok(())
 }
