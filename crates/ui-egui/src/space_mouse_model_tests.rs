@@ -325,6 +325,20 @@ fn left_viewport_moves_right_of_a_browser_grown_down_over_its_corner() {
     assert!(view.contains_rect(corner_rect(view, LeftViewport, &[], &[wide])));
 }
 
+/// A bar that moves the Left Viewport picture up can bring it under a short Browser that was clear
+/// of the corner: it then moves right of the Browser too, and stays clear of the bar.
+#[test]
+fn a_bar_that_lifts_the_picture_under_a_short_browser_moves_it_right_of_it() {
+    use crate::prefs::SpaceMouseGhost::LeftViewport;
+    let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 556.0));
+    let short = egui::Rect::from_min_max(egui::pos2(8.0, 8.0), egui::pos2(260.0, 300.0));
+    let notice = egui::Rect::from_min_max(egui::pos2(0.0, 300.0), egui::pos2(300.0, 556.0));
+    let rect = corner_rect(view, LeftViewport, &[notice], &[short]);
+    assert_eq!(rect.left_bottom(), egui::pos2(272.0, 288.0), "12 right of the Browser, 12 above the bar");
+    assert!(!rect.intersects(short) && !rect.intersects(notice));
+    assert!(view.contains_rect(rect));
+}
+
 #[test]
 fn stacked_bars_in_a_short_view_do_not_push_the_picture_out_of_it() {
     use crate::prefs::SpaceMouseGhost::{LeftViewport, LeftWindow, RightViewport};
