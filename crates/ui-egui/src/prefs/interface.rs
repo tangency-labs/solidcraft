@@ -528,6 +528,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             );
             layout_check(
                 ui,
+                app.tr("prefs.keep_navigator_clear"),
+                app.tr("prefs.keep_navigator_clear_help"),
+                &mut app.preferences.keep_navigator_clear,
+                "keep_navigator_clear",
+            );
+            layout_check(
+                ui,
                 app.tr("prefs.history_in_browser"),
                 app.tr("prefs.history_in_browser_note"),
                 &mut app.preferences.history_in_browser,

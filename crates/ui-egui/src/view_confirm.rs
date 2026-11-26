@@ -40,6 +40,11 @@ pub(crate) fn size(app: &SolveApp) -> egui::Vec2 {
     if answers(app).is_none() {
         return egui::Vec2::ZERO;
     }
+    shown_size()
+}
+
+/// The pair's size whenever it shows.
+pub(crate) fn shown_size() -> egui::Vec2 {
     let t = Tokens::get();
     vec2(TARGET * 2.0 + t.space_4 * 3.0, TARGET + t.space_4 * 2.0)
 }

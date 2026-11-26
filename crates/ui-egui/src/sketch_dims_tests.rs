@@ -636,14 +636,18 @@ fn rectangle_boxes_sit_beside_it_between_the_panels_too() {
     h.call("ui.view", json!({"view":"top"}));
     h.settle();
     let layout = h.app.viewport.layout.clone().unwrap();
+    let open = |rect: egui::Rect| layout.usable.as_ref().is_some_and(|u| u.contains_rect(crate::panel_runtime::logical_rect(rect.expand(30.0))));
+    let at_top = |top: f32| egui::Rect::from_two_pos(egui::pos2(400.0, top), egui::pos2(900.0, top + 200.0));
+    // One rectangle inside `drawable` and one in the open view outside it, wherever the
+    // panels leave those (the Sketch Options column starts below the navigator).
+    let inside = (0..60).map(|i| 100.0 + i as f32 * 10.0).find(|top| open(at_top(*top)) && layout.drawable.contains_rect(at_top(*top)));
+    // Well inside the open view, so a box beside it is never pushed back by the view's edge.
+    let roomy = |rect: egui::Rect| layout.usable.as_ref().is_some_and(|u| u.contains_rect(crate::panel_runtime::logical_rect(rect.expand(90.0))));
+    let outside = (0..60).map(|i| 100.0 + i as f32 * 10.0).find(|top| roomy(at_top(*top)) && !layout.drawable.contains_rect(at_top(*top)));
+    let (inside, outside) = (inside.expect("a rectangle inside drawable"), outside.expect("a rectangle in the open view outside drawable"));
     let mut offsets = Vec::new();
-    for top in [250.0f32, 650.0] {
+    for top in [outside, inside] {
         let (a, b) = (egui::pos2(400.0, top), egui::pos2(900.0, top + 200.0));
-        let rect = egui::Rect::from_two_pos(a, b);
-        // Both are in the open view; only the lower one is inside `drawable`.
-        let open = layout.usable.as_ref().is_some_and(|u| u.contains_rect(crate::panel_runtime::logical_rect(rect.expand(30.0))));
-        assert!(open, "{rect:?} is in the open view");
-        assert_eq!(layout.drawable.contains_rect(rect), top > 600.0, "{rect:?} against {:?}", layout.drawable);
         h.step(&json!({"start":"sketch.rectangle.two_point"})).unwrap();
         h.step(&json!({"click": [a.x, a.y]})).unwrap();
         h.step(&json!({"move": [b.x, b.y]})).unwrap();

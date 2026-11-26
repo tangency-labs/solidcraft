@@ -439,6 +439,18 @@ impl WorkspacePanelHost {
         }
     }
 
+    /// `keep_clear`: where side columns start below and floats stay clear of, the
+    /// axis navigator's places. `navigator`: its own place, the only one a drop covers.
+    pub fn set_keep_clear(&mut self, keep_clear: Option<LogicalRect>, navigator: Option<LogicalRect>) {
+        let keep_clear = keep_clear.filter(|bounds| bounds.validate().is_ok());
+        let navigator = navigator.filter(|bounds| bounds.validate().is_ok()).filter(|_| keep_clear.is_some());
+        if self.options.geometry.keep_clear != keep_clear || self.options.geometry.navigator != navigator {
+            self.invalidate_geometry();
+            self.options.geometry.keep_clear = keep_clear;
+            self.options.geometry.navigator = navigator;
+        }
+    }
+
     pub fn set_float_on_empty_drop(&mut self, enabled: bool) {
         self.float_on_empty_drop = enabled;
         self.interaction.set_float_on_empty_drop(enabled);

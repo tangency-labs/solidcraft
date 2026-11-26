@@ -7436,6 +7436,7 @@ mod tests {
             ("layout", json!("compact"), PAGE_LAYOUT),
             ("live_panel_drag_preview", json!(false), PAGE_LAYOUT),
             ("float_panel_on_empty_drop", json!(false), PAGE_LAYOUT),
+            ("keep_navigator_clear", json!(false), PAGE_LAYOUT),
             ("ribbon_labels", json!(false), PAGE_LAYOUT),
             ("persistent_ribbon_pressed", json!(false), PAGE_LAYOUT),
             ("viewport_analysis_status", json!(false), PAGE_GRAPHICS),

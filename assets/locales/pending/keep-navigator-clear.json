@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.keep_navigator_clear": "Keep the view navigator clear of panels",
+    "prefs.keep_navigator_clear_help": "Panels docked on the navigator's side and panels let go near it go below it, and it glides aside only when a panel is let go right on it. Off: panels push it aside."
+  },
+  "de": {
+    "prefs.keep_navigator_clear": "Ansichtsnavigator von Bereichen freihalten",
+    "prefs.keep_navigator_clear_help": "Bereiche, die auf der Seite des Navigators angedockt oder in seiner Nähe losgelassen werden, kommen unter ihn; er weicht nur aus, wenn ein Bereich direkt auf ihm losgelassen wird. Aus: Bereiche schieben ihn beiseite."
+  },
+  "ko": {
+    "prefs.keep_navigator_clear": "보기 내비게이터를 패널과 겹치지 않게 유지",
+    "prefs.keep_navigator_clear_help": "내비게이터 쪽에 도킹하거나 그 근처에 놓은 패널은 내비게이터 아래로 가며, 패널을 내비게이터 바로 위에 놓을 때만 내비게이터가 옆으로 비켜납니다. 끄기: 패널이 내비게이터를 밀어냅니다."
+  },
+  "ar": {
+    "prefs.keep_navigator_clear": "إبقاء متصفح العرض خاليًا من اللوحات",
+    "prefs.keep_navigator_clear_help": "تنتقل اللوحات المثبتة على جانب المتصفح والمُفلتة بالقرب منه إلى أسفله، ولا يتنحى جانبًا إلا عند إفلات لوحة فوقه مباشرةً. عند الإيقاف: تدفعه اللوحات جانبًا."
+  },
+  "he": {
+    "prefs.keep_navigator_clear": "שמירה על נווט התצוגה פנוי מחלוניות",
+    "prefs.keep_navigator_clear_help": "חלוניות שמעוגנות בצד של הנווט או משוחררות בקרבתו עוברות מתחתיו, והוא זז הצידה רק כשחלונית משוחררת ישירות עליו. כבוי: חלוניות דוחפות אותו הצידה."
+  },
+  "ja": {
+    "prefs.keep_navigator_clear": "ビューナビゲーターにパネルを重ねない",
+    "prefs.keep_navigator_clear_help": "ナビゲーター側にドッキングしたパネルや、その近くで離したパネルはナビゲーターの下に配置され、パネルをナビゲーターの真上で離したときだけナビゲーターが横に移動します。オフにすると、パネルがナビゲーターを押しのけます。"
+  },
+  "vi": {
+    "prefs.keep_navigator_clear": "Giữ bộ điều hướng khung nhìn không bị bảng che",
+    "prefs.keep_navigator_clear_help": "Bảng neo ở phía bộ điều hướng hoặc thả gần nó sẽ nằm bên dưới nó, và nó chỉ dịch sang bên khi một bảng được thả ngay trên nó. Khi tắt: bảng đẩy nó sang bên."
+  },
+  "zh": {
+    "prefs.keep_navigator_clear": "使视图导航器不被面板遮挡",
+    "prefs.keep_navigator_clear_help": "停靠在导航器一侧或在其附近松开的面板会位于其下方，只有将面板正好松开在导航器上时它才会移开。关闭时：面板会把导航器推到一旁。"
+  }
+}

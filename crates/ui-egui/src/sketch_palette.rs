@@ -886,7 +886,22 @@ mod tests {
             h.call("ui.resize", json!({"width":1400,"height":height}));
             h.call("ui.prefs", json!({"ui_scale":scale}));
             h.settle();
+            // Below the navigator the column is shorter: scroll the fold out from under the pinned
+            // footer first, as a person would.
+            for _ in 0..8 {
+                let fold = crate::scenario::handle_at("sketch_palette:options_fold").unwrap();
+                let footer_top = crate::scenario::rect_of("sketch_palette:finish").unwrap().top();
+                if fold.y < footer_top - 4.0 {
+                    break;
+                }
+                h.call("ui.scroll", json!({"x":fold.x,"y":fold.y.min(footer_top - 20.0),"delta":-120}));
+                h.settle();
+            }
             let at = crate::scenario::handle_at("sketch_palette:options_fold").unwrap();
+            assert!(
+                at.y < crate::scenario::rect_of("sketch_palette:finish").unwrap().top(),
+                "scale{scale} height{height}: the fold scrolls into view"
+            );
             h.call("ui.click", json!({"x":at.x,"y":at.y}));
             let baseline = h.app.session.doc.to_json();
             let undo = h.app.session.undo.len();

@@ -605,6 +605,11 @@ pub struct HostGeometryPolicy {
     pub scroll: Point,
     pub measure: Option<std::sync::Arc<dyn HostContentMetrics>>,
     pub identity_reservations: HostIdentityReservations,
+    /// The view's axis navigator where it sits with no panel in the way. Side
+    /// columns start below it, and a float only covers it when let go on it.
+    pub keep_clear: Option<LogicalRect>,
+    /// The navigator's own place inside `keep_clear`: only a float let go on it covers it.
+    pub navigator: Option<LogicalRect>,
 }
 
 impl PartialEq for HostGeometryPolicy {
@@ -623,6 +628,8 @@ impl PartialEq for HostGeometryPolicy {
             && self.content == other.content
             && self.content_revision == other.content_revision
             && self.scroll == other.scroll
+            && self.keep_clear == other.keep_clear
+            && self.navigator == other.navigator
             && match (&self.measure, &other.measure) {
                 (None, None) => true,
                 (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b) && a.revision() == b.revision(),
@@ -649,6 +656,8 @@ impl Default for HostGeometryPolicy {
             scroll: Point { x: 0.0, y: 0.0 },
             measure: None,
             identity_reservations: HostIdentityReservations::default(),
+            keep_clear: None,
+            navigator: None,
         }
     }
 }
@@ -1018,6 +1027,8 @@ fn allocation_environment(
             .collect(),
         content: policy.content.clone(),
         content_revision: policy.content_revision,
+        keep_clear: policy.keep_clear,
+        navigator: policy.navigator,
     };
     env.validate()?;
     if policy.measure.as_ref().is_some_and(|provider| provider.revision() != env.content_revision) {

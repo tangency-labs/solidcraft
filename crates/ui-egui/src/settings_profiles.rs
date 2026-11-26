@@ -71,6 +71,7 @@ const PROFILE_KEYS: &[&str] = &[
     "home_fit_size",
     "invert_navigator_arrows",
     "keep_hover_while_navigating",
+    "keep_navigator_clear",
     "keep_work_on_tab_switch",
     "language",
     "layout",

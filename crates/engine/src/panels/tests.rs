@@ -4634,6 +4634,8 @@ fn allocated_pair_environment(service: &LayoutService, height: f32) -> Allocatio
         available: service.layout().instances.iter().map(|p| p.id.clone()).collect(),
         content: Vec::new(),
         content_revision: 0,
+        keep_clear: None,
+        navigator: None,
     }
 }
 
