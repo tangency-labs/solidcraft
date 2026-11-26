@@ -14,6 +14,7 @@ mod common;
 use std::f64::consts::PI;
 
 use common::{all_fixes, kernel_copy, volume};
+use solidcore::boolean::api_brep::boolean_difference;
 use solidcore_ops::boolean::boolean;
 use solidcore_ops::{blend, make_box, make_cylinder, Blend, Body, BooleanOp, CheckLevel, Corners};
 
@@ -113,5 +114,29 @@ fn issue_22467_cut_on_far_origin_rounded_box_matches_origin() {
     assert!(
         (v_second - expected_two).abs() < 1e-4,
         "second far volume {v_second} vs expected {expected_two}"
+    );
+
+    // Deterministic work-counter check: the origin cut triggers no shift (`0` move-trim
+    // bisection pieces), while the far-origin cut exercises `cover_moved_trims` across both
+    // shifts without regressing to `MAX_PIECES` (32,768) bisections on the 8 corner-ball pole
+    // trims (> 500,000 pieces before #22467).
+    let (mut k_origin, origin_box) = kernel_copy(&rounded_box_at(0.0));
+    let (_, origin_cyl) = kernel_copy(&make_cylinder([15.0, 20.0, -5.0], 2.5, 30.0).unwrap());
+    k_origin.work_counters.reset();
+    let _ = boolean_difference(&mut k_origin, origin_box, origin_cyl).unwrap();
+    assert_eq!(
+        k_origin.work_counters.move_trim_bisection_pieces(),
+        0,
+        "origin cut should not trigger rigid-move trim coverage"
+    );
+
+    let (mut k_far, far_box) = kernel_copy(&rounded_box_at(2000.0));
+    let (_, far_cyl) = kernel_copy(&make_cylinder([2015.0, 20.0, -5.0], 2.5, 30.0).unwrap());
+    k_far.work_counters.reset();
+    let _ = boolean_difference(&mut k_far, far_box, far_cyl).unwrap();
+    let far_pieces = k_far.work_counters.move_trim_bisection_pieces();
+    assert!(
+        far_pieces > 0 && far_pieces < 50_000,
+        "far-origin cut evaluated {far_pieces} move-trim bisection pieces (expected in 1..50000)"
     );
 }

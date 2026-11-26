@@ -140,9 +140,10 @@ pub struct Caches {
     /// is not solved again. A [`RefCell`] so the check can fill it through the `&Kernel`
     /// it takes (the kernel stays `Send`; it is not shared between threads).
     pub(crate) curve_analysis: RefCell<crate::nurbs::b_spline_curve::analysis::AnalysisMemo>,
-    /// Not upstream (#22467): proved upper bounds on trim-image gaps (`sup |C(ψ(s)) - S(W(s))|`),
-    /// keyed by the exact content of the pair's data (`query::curve_surface_gap::TrimBoundMemo`),
-    /// so repeated rigid moves reuse and propagate proved bounds instead of re-proving them.
+    /// Not upstream (#22467): exact-input memo of trim-image gap outcomes
+    /// (`query::curve_surface_gap::TrimBoundMemo`), keyed by the pair's data and bound
+    /// parameters bit for bit. Off when [`Kernel::memoize_curve_caches`] is false; clearing it
+    /// changes no result, only speed.
     pub(crate) trim_move_bounds: RefCell<crate::query::curve_surface_gap::TrimBoundMemo>,
     /// Not upstream (#18166): whether a lazily built UV trim raises its edge's tolerance by
     /// the trim's proved distance from the edge (`topology::edgeuse::p3::trim_raise_distance`),
@@ -253,6 +254,7 @@ pub struct WorkCounters {
     band_face_solves: Cell<u64>,
     band_edge_solves: Cell<u64>,
     shells: Cell<u64>,
+    move_trim_bisection_pieces: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -672,6 +674,15 @@ impl WorkCounters {
         self.shells.get()
     }
 
+    /// Bisection pieces evaluated while certifying trim-image gaps across rigid moves
+    /// (`topology::edgeuse::p3::cover_moved_trims`, through `query::curve_surface_gap`),
+    /// so a far-origin boolean test can catch regressions back to `MAX_PIECES` pole-trim
+    /// bisections or repeated `reparametrisation` work (#22467). Not the fork's.
+    #[must_use]
+    pub fn move_trim_bisection_pieces(&self) -> u64 {
+        self.move_trim_bisection_pieces.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -724,6 +735,13 @@ impl WorkCounters {
         self.band_face_solves.set(0);
         self.band_edge_solves.set(0);
         self.shells.set(0);
+        self.move_trim_bisection_pieces.set(0);
+    }
+
+    /// Counts `pieces` bisection pieces evaluated while certifying a moved trim's gap.
+    pub(crate) fn add_move_trim_bisection_pieces(&self, pieces: u64) {
+        self.move_trim_bisection_pieces
+            .set(self.move_trim_bisection_pieces.get().saturating_add(pieces));
     }
 
     /// Counts one intersection of a blend's section with a face.

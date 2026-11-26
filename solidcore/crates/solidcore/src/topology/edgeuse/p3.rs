@@ -2239,7 +2239,9 @@ fn cover_moved_edge(
     limit: f64,
 ) -> Result<()> {
     use crate::blend::fillet_section::interval::Ivl;
-    use crate::query::curve_surface_gap::{moved_pair_data, trim_image_gap_bound_within};
+    use crate::query::curve_surface_gap::{
+        moved_pair_data, trim_image_gap_bound_for_move, TrimBoundOutcome,
+    };
 
     // (each of a sum's or product's roundings is at most one `EPSILON` relative: `4 EPSILON`
     // rounds the few here up)
@@ -2291,24 +2293,6 @@ fn cover_moved_edge(
             if covered >= tol {
                 continue;
             }
-            let after_key = moved.after_key();
-            // (#22467: a proved upper bound already recorded for the pre-move pair that lies
-            // within `covered` proves the moved trim within `T` without re-bisecting, and
-            // propagates `‖A‖ B0 + room` to the moved pair for subsequent moves.)
-            if let Some(before_key) = moved.before_key(&t.surface) {
-                let cached = k.caches.trim_move_bounds.borrow().get(&before_key);
-                if let Some(cached) = cached.filter(|&b0| b0 <= covered) {
-                    if let Some(after_key) = after_key {
-                        let propagated =
-                            up((Ivl::from(norm) * Ivl::from(cached) + Ivl::from(room)).hi);
-                        k.caches
-                            .trim_move_bounds
-                            .borrow_mut()
-                            .insert(after_key, propagated);
-                    }
-                    continue;
-                }
-            }
             // (the raise `‖A‖ B0 + room` is wanted to [`TRIM_BOUND_FLOOR`] of itself, not
             // of `T`: where `room` passes `T`, a `B0` cut finer than a thousandth of
             // `room` changes the raise by less, and a floor of `T` cuts each piece of a
@@ -2328,17 +2312,41 @@ fn cover_moved_edge(
                 [covered.max(floor), tol],
                 budget,
             )? {
-                Some(b0) if b0.is_finite() => b0,
-                _ => continue,
+                TrimBoundOutcome::Proved(b0) if b0.is_finite() => b0,
+                TrimBoundOutcome::BudgetStopped => {
+                    // (#22467: the capped pre-move bisection stopped while every evaluated
+                    // endpoint stayed within `covered`, so the trim may have been covered
+                    // before the move (`dist_before <= tol`). A covered trim moves to at most
+                    // `‖A‖ tol + room`: try proving the moved trim within `tol` under the
+                    // same cap and otherwise raise conservatively to `‖A‖ tol + room`, so no
+                    // covered trim is left uncovered by the cap.)
+                    let conservative = up((Ivl::from(norm) * Ivl::from(tol) + Ivl::from(room)).hi);
+                    if conservative.is_finite() && conservative > tol {
+                        let direct_floor = (conservative - tol).min(TRIM_BOUND_FLOOR * tol);
+                        match moved.bound_after(
+                            k,
+                            &surface,
+                            &curve,
+                            &trim,
+                            direct_floor,
+                            [tol, conservative],
+                            budget,
+                        )? {
+                            TrimBoundOutcome::Proved(b1) if b1.is_finite() && b1 <= tol => {}
+                            TrimBoundOutcome::Proved(b1) if b1.is_finite() => {
+                                need = need.max(b1.min(conservative));
+                            }
+                            _ => need = need.max(conservative),
+                        }
+                    }
+                    continue;
+                }
+                TrimBoundOutcome::ExceedsOver
+                | TrimBoundOutcome::Unproved
+                | TrimBoundOutcome::Proved(_) => continue,
             };
             let raise = up((Ivl::from(norm) * Ivl::from(b0) + Ivl::from(room)).hi);
             if b0 <= covered || !(raise.is_finite() && raise > tol) {
-                if let Some(after_key) = after_key {
-                    k.caches
-                        .trim_move_bounds
-                        .borrow_mut()
-                        .insert(after_key, raise);
-                }
                 continue;
             }
             // (`‖A‖ B0 + room` encloses the distance after the move from the one before it,
@@ -2355,26 +2363,16 @@ fn cover_moved_edge(
             let direct_floor = (raise - tol).min(TRIM_BOUND_FLOOR * tol);
             let direct =
                 moved.bound_after(k, &surface, &curve, &trim, direct_floor, [tol, raise], None)?;
-            let after_bound = match direct {
-                Some(b1) if b1.is_finite() => b1.min(raise),
-                _ => raise,
-            };
-            if let Some(after_key) = after_key {
-                k.caches
-                    .trim_move_bounds
-                    .borrow_mut()
-                    .insert(after_key, after_bound);
-            }
             match direct {
-                Some(b1) if b1.is_finite() && b1 <= tol => {}
-                Some(b1) if b1.is_finite() => need = need.max(b1.min(raise)),
+                TrimBoundOutcome::Proved(b1) if b1.is_finite() && b1 <= tol => {}
+                TrimBoundOutcome::Proved(b1) if b1.is_finite() => need = need.max(b1.min(raise)),
                 _ => need = need.max(raise),
             }
             continue;
         }
         // (the structure changed: the distance after the move is proved directly, for a
         // trim covered before it)
-        let covered_before = trim_image_gap_bound_within(
+        let covered_before = trim_image_gap_bound_for_move(
             k,
             &t.surface,
             &edge.curve,
@@ -2387,7 +2385,7 @@ fn cover_moved_edge(
         if !matches!(covered_before, Some(b0) if b0.is_finite()) {
             continue;
         }
-        let b1 = trim_image_gap_bound_within(
+        let b1 = trim_image_gap_bound_for_move(
             k,
             &surface,
             &curve,
@@ -4591,42 +4589,87 @@ mod tests {
         }
     }
 
-    /// #22467: a pure translation has exact linear norm `1.0`, populates `trim_move_bounds`
-    /// with proved bounds before and after the move, and reuses those propagated bounds on
-    /// the return translation without changing any covered edge tolerance.
+    /// #22467: a pure translation has exact linear norm `1.0`, leaves covered edge tolerances
+    /// bit-for-bit invariant across `Caches::clear()` and `memoize_curve_caches = false`, and
+    /// reuses exact-input memo entries on repeated identical moves without re-bisecting.
     #[test]
     fn a_round_trip_translation_reuses_cached_trim_bounds() {
         use crate::query::curve_surface_gap::affine_linear_norm_upper;
-        let (mut k, mut b, edges) = sphere_edges(Point3::new(2000.0, 0.0, 0.0));
-        assert!(!edges.is_empty());
-        k.caches.clear();
-        assert_eq!(k.caches.trim_move_bounds.borrow().len(), 0);
-        let before_tols: Vec<(EdgeId, f64)> = b
-            .edges()
-            .iter()
-            .map(|(e, rec)| (e, rec.tolerance))
-            .collect();
 
         let mut to_origin = Axis2Placement::IDENTITY;
         to_origin.translate(Vec3::new(-2000.3, 0.1, -0.2));
         assert_eq!(affine_linear_norm_upper(to_origin.matrix()), Some(1.0));
-        crate::topology::brep::p5::transform(&mut k, &mut b, &to_origin, None, false).unwrap();
-        let after_first = k.caches.trim_move_bounds.borrow().len();
-        assert!(after_first > 0, "first move did not cache proved bounds");
-
         let mut back = Axis2Placement::IDENTITY;
         back.translate(Vec3::new(2000.3, -0.1, 0.2));
         assert_eq!(affine_linear_norm_upper(back.matrix()), Some(1.0));
-        crate::topology::brep::p5::transform(&mut k, &mut b, &back, None, false).unwrap();
 
-        for (e, was) in before_tols {
-            let now = b.edge(e).unwrap().tolerance;
+        let run = |clear_between: bool, memoize: bool| -> Vec<(EdgeId, f64)> {
+            let (mut k, mut b, edges) = sphere_edges(Point3::new(2000.0, 0.0, 0.0));
+            assert!(!edges.is_empty());
+            k.memoize_curve_caches = memoize;
+            k.caches.clear();
+            crate::topology::brep::p5::transform(&mut k, &mut b, &to_origin, None, false).unwrap();
+            if clear_between {
+                k.caches.clear();
+            }
+            crate::topology::brep::p5::transform(&mut k, &mut b, &back, None, false).unwrap();
+            b.edges()
+                .iter()
+                .map(|(e, rec)| (e, rec.tolerance))
+                .collect()
+        };
+
+        let (_, base, _) = sphere_edges(Point3::new(2000.0, 0.0, 0.0));
+        let before_tols: Vec<(EdgeId, f64)> = base
+            .edges()
+            .iter()
+            .map(|(e, rec)| (e, rec.tolerance))
+            .collect();
+        let warm = run(false, true);
+        let cleared = run(true, true);
+        let uncached = run(false, false);
+
+        assert_eq!(warm.len(), before_tols.len());
+        for (((e, was), (e_w, w)), ((e_c, c), (e_u, u))) in before_tols
+            .iter()
+            .zip(&warm)
+            .zip(cleared.iter().zip(&uncached))
+        {
+            assert_eq!(e, e_w);
+            assert_eq!(e, e_c);
+            assert_eq!(e, e_u);
             assert_eq!(
-                now.to_bits(),
+                w.to_bits(),
                 was.to_bits(),
-                "edge {e:?} tolerance shifted from {was:e} to {now:e}"
+                "edge {e:?} tolerance shifted from {was:e} to {w:e}"
+            );
+            assert_eq!(
+                w.to_bits(),
+                c.to_bits(),
+                "edge {e:?} tolerance changed after Caches::clear(): {w:e} vs {c:e}"
+            );
+            assert_eq!(
+                w.to_bits(),
+                u.to_bits(),
+                "edge {e:?} tolerance changed with memoize_curve_caches = false: {w:e} vs {u:e}"
             );
         }
+
+        // Running the exact same move twice on identical geometry reuses `TrimBoundMemo` with
+        // zero additional move bisection pieces on the second pass.
+        let (mut k, mut b1, _) = sphere_edges(Point3::new(2000.0, 0.0, 0.0));
+        let (_, mut b2, _) = sphere_edges(Point3::new(2000.0, 0.0, 0.0));
+        k.caches.clear();
+        k.work_counters.reset();
+        crate::topology::brep::p5::transform(&mut k, &mut b1, &to_origin, None, false).unwrap();
+        let first_pieces = k.work_counters.move_trim_bisection_pieces();
+        k.work_counters.reset();
+        crate::topology::brep::p5::transform(&mut k, &mut b2, &to_origin, None, false).unwrap();
+        let second_pieces = k.work_counters.move_trim_bisection_pieces();
+        assert_eq!(
+            second_pieces, 0,
+            "second identical move evaluated {second_pieces} pieces (first: {first_pieces})"
+        );
     }
 
     #[test]
