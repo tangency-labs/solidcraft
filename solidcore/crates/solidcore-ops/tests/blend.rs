@@ -6763,7 +6763,9 @@ fn a_round_where_a_sphere_meets_a_face_through_its_poles_builds() {
 /// round failed ("the trim leaks"); on the mirrored part, whose edge ends away from the seam,
 /// it built. Every edge's round now builds a valid solid and adds or takes off its share of the
 /// whole rim's ring, the ring's closed form times the edge's share of the circle (counted at
-/// every half degree, none on a split), with the command's turn (`Turn::Auto`).
+/// every half degree, none on a split), with the command's turn (`Turn::Auto`). The rim of
+/// #21941's part (face square to y, plate on its positive side, a nub) must be split at the
+/// seam, so that the test holds an edge ending there.
 #[test]
 fn one_edge_of_a_rim_through_a_spheres_poles_rounds_alone() {
     use solidcore_ops::BooleanOp;
@@ -6777,6 +6779,8 @@ fn one_edge_of_a_rim_through_a_spheres_poles_rounds_alone() {
         (0, -1.0, BooleanOp::Union),
         (1, 1.0, BooleanOp::Subtract),
         (1, -1.0, BooleanOp::Subtract),
+        (0, 1.0, BooleanOp::Subtract),
+        (0, -1.0, BooleanOp::Subtract),
     ] {
         let b = sphere_on_plate(r, axis, side, &[], op);
         // each rim edge with the number of half-degree samples of the circle on it
@@ -6809,6 +6813,15 @@ fn one_edge_of_a_rim_through_a_spheres_poles_rounds_alone() {
             shares.len() >= 2,
             "axis {axis}, side {side}, {op:?}: {shares:?}"
         );
+        // #21941's part: the rim is split at the poles and at the seam, (r, 0, 0), so two of
+        // its edges end on the seam
+        if (axis, side, op) == (1, 1.0, BooleanOp::Union) {
+            assert_eq!(
+                shares.len(),
+                3,
+                "the rim is not split at the seam: {shares:?}"
+            );
+        }
         for (edge, n) in shares {
             let case =
                 format!("axis {axis}, plate on {side}, {op:?}, rim edge {edge} ({n} of 360)");
