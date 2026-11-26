@@ -241,6 +241,7 @@ pub use body::PlanStats;
 pub use body::PointClass;
 pub use body::RayPick;
 pub use body::Refusal;
+pub use body::SketchPlane;
 pub use body::SurfaceKind;
 pub use body::colour_name;
 pub use body::display_tolerance;

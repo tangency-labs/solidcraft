@@ -1513,6 +1513,7 @@ impl Dialog {
             }
             // Planar-only inputs take planar faces only.
             let planar_ok = match sel {
+                Sel::Face { body, index, .. } if matches!(d.kind, Kind::Sketch) => sketch_plane_face(s, body, *index).is_some(),
                 Sel::Face { body, index, .. } => planar_face(s, body, *index).is_some(),
                 _ => true,
             };
@@ -2038,8 +2039,10 @@ impl Dialog {
             return Some(Sel::Vertex { body: body.clone(), point: *point });
         }
         // The snap looked the face under the cursor up already, planar or not.
+        let sketch = matches!(self.kind, Kind::Sketch);
         let sel = inp.accepts(h, s.active_sketch, |body, face| {
-            snap.and_then(|f| f.planar(body, face)).unwrap_or_else(|| planar_face(s, body, face).is_some())
+            snap.and_then(|f| f.planar(body, face))
+                .unwrap_or_else(|| if sketch { sketch_plane_face(s, body, face) } else { planar_face(s, body, face) }.is_some())
         })?;
         if inp.rejects(&sel) {
             return None;
@@ -3002,6 +3005,69 @@ mod face_snap_tests {
         }
     }
 
+    /// Hovering a cone and blends for New Sketch must not mesh the body (a whole-body mesh froze
+    /// the window on large parts), and each face is planar exactly when the mesh says so.
+    #[test]
+    fn hovering_cones_and_blends_for_a_sketch_plane_meshes_nothing() {
+        use solidcore_record::brep::Surface;
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.cylinder", json!({"base": [0, 0, 0], "radius": 10, "height": 20, "body_name": "C"})).unwrap();
+        h.app.run("solid.chamfer", json!({"body": "C", "edges": [[10, 0, 20]], "distance": 2})).unwrap();
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "corner": [30, 30, 0], "body_name": "B"})).unwrap();
+        h.app.run("solid.fillet", json!({"body": "B", "edges": [[70, 45, 20], [50, 60, 20], [70, 60, 10]], "radius": 3})).unwrap();
+
+        let kinds = |name: &str| -> Vec<&'static str> {
+            let st = h.app.session.world_state().unwrap();
+            let b = st.body(name).unwrap();
+            b.body
+                .record()
+                .faces
+                .iter()
+                .map(|f| match f.surface {
+                    Surface::Cone { .. } => "cone",
+                    Surface::Blend { .. } => "blend",
+                    Surface::BallPatch { .. } => "ball",
+                    Surface::PlacedRevolution { .. } => "revolution",
+                    _ => "other",
+                })
+                .collect()
+        };
+        assert!(kinds("C").contains(&"cone"), "the chamfer is a cone: {:?}", kinds("C"));
+        let corner = kinds("B");
+        assert!(corner.iter().any(|k| matches!(*k, "blend" | "ball")), "the rounded corner has a blend: {corner:?}");
+
+        h.app.start("sketch.create");
+        take_snap_work();
+        let d = h.app.dialog.as_ref().unwrap();
+        let mut seen = Vec::new();
+        for name in ["C", "B"] {
+            let faces = h.app.session.world_state().unwrap().body(name).unwrap().body.faces(1e-3).unwrap();
+            // The second pass reads the planar face cache.
+            for _ in 0..2 {
+                for f in faces.iter() {
+                    let hit = Hit::Face { body: name.into(), index: f.index, point: f.centroid };
+                    let picked = d.candidate_on(&h.app.session, &hit, None);
+                    assert_eq!(picked.is_some(), f.plane_normal.is_some(), "{name} face {} ({:?})", f.index, f.centroid);
+                }
+            }
+            seen.push((name, faces));
+        }
+        assert_eq!(take_snap_work().0, 0, "a B-rep face is decided by its exact surface: nothing is meshed");
+
+        for (name, faces) in &seen {
+            for f in faces.iter() {
+                match (f.plane_normal, sketch_plane_face(&h.app.session, name, f.index)) {
+                    (Some(mesh), Some((origin, normal))) => {
+                        assert!(normal.dot(mesh) > 1.0 - 1e-9, "{name} face {}: {normal:?} vs the mesh's {mesh:?}", f.index);
+                        assert!((f.centroid - origin).dot(normal).abs() < 1e-6, "{name} face {}: the centroid is on its plane", f.index);
+                    }
+                    (None, None) => {}
+                    (mesh, exact) => panic!("{name} face {}: the mesh says {mesh:?}, the lookup {exact:?}", f.index),
+                }
+            }
+        }
+    }
+
     #[test]
     fn a_point_more_than_a_micrometre_off_a_sliver_is_off_the_face() {
         // A triangle with half-micrometre legs. Points 2 µm below its lower side and 1.6 µm past
@@ -3158,6 +3224,46 @@ fn face_plane(b: &solidcraft_engine::doc::ModelBody, face: usize) -> Option<(Vec
     }
 }
 
+/// The plane of face `face` of `body` for a New Sketch plane: [`planar_face`], except that a
+/// blend or a revolution is flat when the kernel finds it so ([`Body::sketch_plane_of_face`]).
+/// Only New Sketch's picker asks this; the other inputs keep [`planar_face`]. A stop or re-entry
+/// of the kernel is not kept.
+///
+/// [`Body::sketch_plane_of_face`]: solidcraft_engine::kernel::Body::sketch_plane_of_face
+pub(crate) fn sketch_plane_face(s: &Session, body: &str, face: usize) -> Option<(Vec3, Vec3)> {
+    let st = crate::open_meshing::session_world(s);
+    let key = (body.to_string(), face);
+    let known = SKETCH_PLANES.with(|c| {
+        let c = c.borrow();
+        c.0.as_ref().filter(|k| std::sync::Arc::ptr_eq(k, &st)).and_then(|_| c.1.get(&key).copied())
+    });
+    if let Some(found) = known {
+        return found;
+    }
+    // Undecided (the kernel was stopped or re-entered): answer None without keeping it.
+    let found = st.body(body).map_or(Some(None), |b| sketch_plane(b, face))?;
+    SKETCH_PLANES.with(|c| {
+        let mut c = c.borrow_mut();
+        if !c.0.as_ref().is_some_and(|k| std::sync::Arc::ptr_eq(k, &st)) {
+            *c = (Some(st.clone()), std::collections::HashMap::new());
+        }
+        c.1.insert(key, found);
+    });
+    found
+}
+
+/// [`sketch_plane_face`] of one body, without the cache. The outer `None` is an undecided answer.
+fn sketch_plane(b: &solidcraft_engine::doc::ModelBody, face: usize) -> Option<Option<(Vec3, Vec3)>> {
+    if b.body.is_mesh() {
+        return Some(face_plane(b, face));
+    }
+    match b.body.sketch_plane_of_face(face) {
+        solidcraft_engine::kernel::SketchPlane::Flat(plane) => Some(Some((plane.origin, plane.normal()))),
+        solidcraft_engine::kernel::SketchPlane::NotFlat => Some(None),
+        solidcraft_engine::kernel::SketchPlane::Undecided => None,
+    }
+}
+
 /// The fillet or chamfer feature whose blend a body face is (a piece or copy of one too).
 pub fn blend_feature(s: &Session, body: &str, face: usize) -> Option<u64> {
     use solidcraft_engine::doc::persistent_name;
@@ -3175,6 +3281,13 @@ thread_local! {
     /// face asks for its plane several times a frame.
     #[allow(clippy::type_complexity)]
     static FACE_PLANES: std::cell::RefCell<(
+        Option<std::sync::Arc<solidcraft_engine::doc::ModelState>>,
+        std::collections::HashMap<(String, usize), Option<(Vec3, Vec3)>>,
+    )> = std::cell::RefCell::new((None, std::collections::HashMap::new()));
+    /// [`sketch_plane_face`]'s faces, kept apart from [`FACE_PLANES`]: the two answer a blend or
+    /// revolution differently.
+    #[allow(clippy::type_complexity)]
+    static SKETCH_PLANES: std::cell::RefCell<(
         Option<std::sync::Arc<solidcraft_engine::doc::ModelState>>,
         std::collections::HashMap<(String, usize), Option<(Vec3, Vec3)>>,
     )> = std::cell::RefCell::new((None, std::collections::HashMap::new()));
