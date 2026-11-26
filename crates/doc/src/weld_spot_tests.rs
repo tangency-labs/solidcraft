@@ -328,7 +328,7 @@ fn finite_sizes_the_model_cannot_hold_are_refused() {
         }
     }
     // far from the origin: the spot passes the limit though each piece is small
-    refused(&SpotWeld { at: [2.0 * sweep::MAX_COORD, 0.0, 0.0], ..spot(STYLES[0]) });
+    refused(&SpotWeld { at: [2.0 * solidcraft_kernel::profiles::MAX_COORD, 0.0, 0.0], ..spot(STYLES[0]) });
 }
 
 /// The proposed diameter is `5 √t` of the thinnest sheet; fewer than two sheets, or a thickness
