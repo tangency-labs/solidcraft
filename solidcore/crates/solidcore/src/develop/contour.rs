@@ -577,8 +577,7 @@ mod tests {
         let begin = 1.875f64.atan2(1.0);
         assert_eq!((center, radius), (Vec2::ZERO, 2.125));
         assert!(
-            (start - begin).abs() < 1e-12
-                && (sweep - (1.875f64.atan2(-1.0) - begin)).abs() < 1e-12,
+            (start - begin).abs() < 1e-12 && (sweep - (1.875f64.atan2(-1.0) - begin)).abs() < 1e-12,
             "{start} {sweep}"
         );
         assert!(
