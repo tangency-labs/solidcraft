@@ -72,6 +72,10 @@ impl Planar for Solidcore {
         board_drill::hole_reaches_loops(center, size, angle, loops)
     }
 
+    fn side_on_hole_wall(&self, center: [f64; 2], size: [f64; 2], angle: f64, points: &[[f64; 2]], chord: f64) -> bool {
+        board_drill::side_on_hole_wall(center, size, angle, points, chord)
+    }
+
     fn circle_points(&self, c: Vec3, x: Vec3, y: Vec3, radius: f64, from: f64) -> [Vec3; 3] {
         constraint::circle_points(c, x, y, radius, from)
     }

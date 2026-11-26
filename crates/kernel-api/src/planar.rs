@@ -62,6 +62,11 @@ pub trait Planar: Backend {
     /// `center`, `size[0]` wide along `angle` (radians anticlockwise from +X) and `size[1]`
     /// across; a non-finite or negative input reaches nothing.
     fn hole_reaches_loops(&self, center: [f64; 2], size: [f64; 2], angle: f64, loops: &[Vec<[f64; 2]>]) -> bool;
+    /// Whether a side of a board's outline lies on the wall of the drilled hole of
+    /// `hole_reaches_loops`: every one of `points` is, within `chord` (the sag of a wall drawn as
+    /// chords) or 0.6 % of the hole's radius, whichever is larger. No points, or a non-finite or
+    /// negative input, is on no wall.
+    fn side_on_hole_wall(&self, center: [f64; 2], size: [f64; 2], angle: f64, points: &[[f64; 2]], chord: f64) -> bool;
     /// The three points a sketch solver holds a circle by, in the orthonormal frame `x`, `y` about
     /// `c`, at `radius` and starting `from` radians.
     fn circle_points(&self, c: Vec3, x: Vec3, y: Vec3, radius: f64, from: f64) -> [Vec3; 3];

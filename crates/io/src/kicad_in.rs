@@ -1554,7 +1554,7 @@ fn board_bodies(board: &KicadBoard, thickness: f64, plating: bool) -> Result<(Ve
 /// kernel's test allows for that.
 fn on_drill_wall(drill: &KicadDrill, segment: &Seg2) -> bool {
     let points = [segment.start(), segment.mid(), segment.end()].map(|p| [p.x, p.y]);
-    solidcraft_kernel::services::board_drill::side_on_hole_wall(drill.center, drill.size, drill.angle, &points, CURVE_TOLERANCE)
+    solidcraft_kernel::planar::side_on_hole_wall(drill.center, drill.size, drill.angle, &points, CURVE_TOLERANCE)
 }
 
 /// The board substrate as exact solids, exported as a STEP file: the engine adds it as an Import
