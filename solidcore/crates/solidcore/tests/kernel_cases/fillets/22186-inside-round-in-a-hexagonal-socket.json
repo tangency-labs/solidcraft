@@ -1,0 +1,84 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b0": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b0"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  31.381197846482994,
+                  -1.2246467991473532e-16,
+                  -5.329070518200751e-15
+                ],
+                [
+                  31.381197846482994,
+                  0.0,
+                  31.0
+                ]
+              ],
+              "index": 79
+            }
+          ],
+          "points": [
+            [
+              31.381197846482994,
+              -6.123233995736766e-17,
+              15.499999999999998
+            ]
+          ],
+          "tolerance": 5.1233326337245755
+        },
+        "kind": "round",
+        "sizes": [
+          2.0
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "case": "22186-inside-round-in-a-hexagonal-socket",
+  "expected": {
+    "body_count": 1,
+    "method": "The 36 mm side hexagonal prism, 40 mm tall, rounded everywhere by R=4, is the radius-R offset of a hexagonal prism of side b=36-R/cos(pi/6) and height h=32. With A=3*sqrt(3)*b^2/2 its volume is A*h+R*(2*A+6*b*h)+pi*R^2*(3*b+h)+4*pi*R^3/3 (face slabs, circular edge sectors and spherical vertex sectors). Subtract A*31 for the 31 mm deep socket. For a 120 degree inside corner the R2 restores 31*2^2*(cot(pi/3)-pi/6) cubic millimetres.",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#22186"
+    ],
+    "tolerance": {
+      "abs_mm": 0.001
+    },
+    "volume_mm3": 53742.96785439073,
+    "what": "A single R2 at the 120 degree inside corner of a regular hexagonal socket in a rounded hexagonal prism."
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "records": "22186-inside-round-in-a-hexagonal-socket.bodies.json.gz",
+  "result": [
+    {
+      "made": "b1"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcraft#22186"
+  ],
+  "ungraded": [],
+  "what": "A single R2 at the 120 degree inside corner of a regular hexagonal socket in a rounded hexagonal prism.",
+  "why_not": []
+}
