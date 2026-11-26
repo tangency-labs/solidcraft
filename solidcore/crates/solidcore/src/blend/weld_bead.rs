@@ -16,11 +16,13 @@
 //! ([`crate::surface::procedural_blend::convert::exact_to_record`] refuses one).
 //!
 //! A straight edge is a line, or a B-spline whose control points all lie within the edge's
-//! tolerance of the line through its ends (some exporters write every edge as a B-spline: a
-//! curve lies in its control points' hull, so the whole edge is that close to the line). Two
-//! edges that run on, end to end, between the same two faces (one straight joint split by a
-//! vertex, as some exporters write it) get one bead each, their square ends meeting flush:
-//! two planes meet in one line, so there is no corner between them.
+//! tolerance, at least the body's, of the line through its ends (some exporters write every
+//! edge as a B-spline: a curve lies in its control points' hull, so the whole edge is that
+//! close to the line). Two edges that run on, end to end, between the same two faces (one
+//! straight joint split by a vertex, as some exporters write it) get one bead each, square at
+//! their shared vertex: two planes meet in one line, so there is no corner between them. The
+//! two beads meet flush when their sections match: the same size, its first distance along
+//! the same face.
 //!
 //! Refused before anything is built, the part left as it was, as
 //! [`BlendFailure::WeldNotBuilt`] (class `Unsupported`) naming the edge or vertex: a joint
@@ -443,7 +445,9 @@ fn frame(
     };
     let start = at(0.0)?;
     let end = at(1.0)?;
-    if !straight(&curve, start, end, edge::tolerance(target, edge_id)?)? {
+    // a new or split edge's own tolerance may be 0: at least the body's, as elsewhere
+    let tol = edge::tolerance(target, edge_id)?.max(target.tolerance());
+    if !straight(&curve, start, end, tol)? {
         return Err(not_built(WeldGap::CurvedJoint, at_edge));
     }
     let run = end - start;
@@ -584,7 +588,7 @@ fn frame(
 /// Whether `curve` is proved to lie within `tol` of the line through `start` and `end` (its
 /// edge's ends): a line, or a B-spline with positive weights whose control points all lie
 /// that close to the line. A B-spline lies in its control points' convex hull, so the whole
-/// curve does; the bead is then built along the line, within the edge's tolerance of it.
+/// curve does; the bead is then built along the line, within `tol` of it.
 /// Ends closer than `tol` prove nothing.
 ///
 /// # Errors
@@ -700,9 +704,11 @@ impl Frame {
 /// The weld beads along `edges` of `target`, each as a body of its own built from its own
 /// faces, in the order of `edges`; `target` is left as it was, whether the beads are built or
 /// refused. Each edge is straight between two planes in an inside corner (a line, or a
-/// B-spline whose control points lie within the edge's tolerance of the line through its
-/// ends); two edges that meet end to end between the same two faces get a bead each, flush
-/// at their shared vertex; `sizes` are one per
+/// B-spline whose control points lie within the edge's tolerance, at least the body's, of the
+/// line through its ends); two edges that meet end to end between the same two faces get a
+/// bead each, square at their shared vertex and flush there when their sections match (the
+/// same size, its first distance along the same face: name it in `along`, as each edge's
+/// first face, the default, may differ); `sizes` are one per
 /// edge (the chamfer's setbacks, the bead's toes), `sagitta` is the arc's height over the
 /// chord (`> 0` convex, `< 0` concave, `0` flat, [`BeadDefinition`]), and the first distance of
 /// edge i's size runs along face `along[i]` when given (one of that edge's two faces; `along`
@@ -751,7 +757,8 @@ pub fn beads_apart(
     }
     // beads meeting at a vertex need a corner piece, unless both edges lie between the same
     // two faces: two planes meet in one line, so the edges run on along it (the frames refuse
-    // faces that are not planes) and their beads meet flush
+    // faces that are not planes) and their beads end square there, flush when their sections
+    // match
     let mut seen: std::collections::BTreeMap<VertexId, EdgeId> = std::collections::BTreeMap::new();
     for &e in edges {
         let (start, end) = edge::start_end_vertices(target, e)?;
