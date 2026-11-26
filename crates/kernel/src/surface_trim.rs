@@ -1,7 +1,7 @@
-//! Trim: a surface body cut where a tool meets it (a plane, another body's face, or sketch
-//! curves swept onto it or dropped square onto it), keeping the side of a point or the regions
-//! points pick; and Mutual Trim: two surfaces cut by each other, each keeping its picked side,
-//! extended to meet first when one stops short of the other.
+//! Trim: a surface body cut where a tool meets it (a plane, another body's face or complete
+//! bounded sheet, or sketch curves swept onto it or dropped square onto it), keeping the side
+//! of a point or the regions points pick; and Mutual Trim: two surfaces cut by each other, each
+//! keeping its picked side, extended to meet first when one stops short of the other.
 
 use solidcore_record::{Plane, Seg2, Vec3};
 use solidcraft_geom::brep::eval::CurveEval;
@@ -55,6 +55,30 @@ pub fn trim(body: &Body, tool: &SplitTool, keep: Vec3) -> Result<Body> {
     trim_keep(body, tool, TrimKeep::Side(keep))
 }
 
+/// Trim by the complete bounded cutting sheet, keeping the connected regions picked by
+/// `keep`. A multi-face sheet has no single global side: `Side` picks its connected region,
+/// as it does for a tool of several sketch curves. The result's history is over `[body]`.
+pub fn trim_sheet_keep(body: &Body, sheet: &Body, keep: TrimKeep) -> Result<Body> {
+    body.require_brep("trim")?;
+    sheet.require_brep("a trim tool")?;
+    keep.check()?;
+    if std::ptr::eq(body, sheet) {
+        return Err(KernelError::Invalid("a surface cannot trim itself".into()));
+    }
+    if !body.is_surface() || !sheet.is_surface() {
+        return Err(KernelError::Invalid("a whole-sheet trim takes two surface bodies".into()));
+    }
+    crate::guard("trim sheet", || {
+        let (target, order) = crate::splitface::tagged("trim sheet", body)?;
+        let tool = crate::native::smlib_body(sheet)?;
+        let points: Vec<[f64; 3]> = keep.points().iter().map(|p| [p.x, p.y, p.z]).collect();
+        let result = target.trim_sheet(&tool, &points).map_err(|e| KernelError::smlib("trim sheet", e))?;
+        let (mut out, history) = crate::splitface::brought_back("trim sheet", body, &order, &result)?;
+        out.regularization_protected = true;
+        Ok(out.with_checked_history(Some(history), &crate::record::counts(&[body])))
+    })
+}
+
 /// A surface body trimmed by a tool, keeping what `keep` says. Each kept face is the face it is
 /// a piece of (its history is over `[body]`).
 ///
@@ -94,6 +118,92 @@ pub fn trim_keep(body: &Body, tool: &SplitTool, keep: TrimKeep) -> Result<Body> 
     let trimmed = if dropped.is_empty() { split.clone() } else { crate::remove_faces(&split, &dropped)? };
     // The kept pieces are the split's own; its history carries them back to `body`.
     Ok(crate::record::after(trimmed, &split, &crate::record::counts(&[body])))
+}
+
+/// The walls of a surface extrude (`walls`, swept along `along`) cut where they first run into
+/// `bodies`, as solidcore-ops does it ([`solidcore_ops::stop::stop_at_bodies`]): each body's
+/// faces exactly as they are, bounded where they end and never extended, imprinted on the walls
+/// in turn. The pieces kept are those joined to the walls' start, without crossing an edge a
+/// body cut: `starts` are corners of the walls at their start, one on each chain. Mesh bodies
+/// and bodies apart from the walls cut nothing.
+///
+/// Each kept piece must lie on the start side of every cut edge that bounds it, so it stops
+/// where it first meets a body all along. A piece that runs on past a body beside it (a body
+/// covering only part of a wall, the wall running past its side) is refused: keeping it would
+/// keep wall above that body.
+///
+/// The second value is whether any body cut the walls; where none did they come back whole.
+/// Each kept face is the face of `walls` it is a piece of: the history is over `[walls]`, as
+/// [`trim_keep`]'s.
+pub fn stop_at_bodies(walls: &Body, bodies: &[&Body], starts: &[Vec3], along: Vec3) -> Result<(Body, bool)> {
+    const NAME: &str = "the imprint of the bodies in the walls' way";
+    let _span = solidcraft_profile::span("kernel", "stop_at_bodies");
+    walls.require_brep("trim")?;
+    TrimKeep::Regions(starts).check()?;
+    let no_form = || KernelError::Failed(format!("{NAME}: a body has no solidcore form"));
+    let form = walls.ops_body().ok_or_else(no_form)?;
+    let (ops, order) = (&form.0, &form.1);
+    let mut forms = Vec::new();
+    for b in bodies {
+        if b.is_mesh() || crate::apart(walls, b)? {
+            continue;
+        }
+        forms.push(b.ops_body().ok_or_else(no_form)?);
+    }
+    let tools: Vec<&solidcore_ops::Body> = forms.iter().map(|f| &f.0).collect();
+    if tools.is_empty() {
+        return Ok((walls.clone(), false));
+    }
+    let starts: Vec<[f64; 3]> = starts.iter().map(|s| [s.x, s.y, s.z]).collect();
+    let stopped = stopped(NAME, || solidcore_ops::stop::stop_at_bodies(ops, order, &tools, &starts, [along.x, along.y, along.z]))?;
+    match stopped {
+        Some(stopped) => Ok((pieces(stopped, walls)?, true)),
+        None => Ok((walls.clone(), false)),
+    }
+}
+
+/// `long`, the surface body `original` extended past some of its edges, cut where it first runs
+/// into `target`, as solidcore-ops does it ([`solidcore_ops::stop::stop_extension`]): the target's
+/// faces exactly as they are, never extended. The pieces kept are those joined to `inside`, points
+/// inside the original's faces. An extension part of which never meets the target, or that runs on
+/// past a side of it, is refused. The history is over `[long]`, as [`stop_at_bodies`]'s.
+pub(crate) fn stop_extension(long: &Body, original: &Body, inside: &[Vec3], target: &Body) -> Result<Body> {
+    const NAME: &str = "the imprint of the body the surface extends up to";
+    let _span = solidcraft_profile::span("kernel", "stop_extension");
+    if target.is_mesh() {
+        return Err(KernelError::Invalid("not supported yet: extending a surface up to a mesh body (pick a solid or surface body)".into()));
+    }
+    let missed = || KernelError::Invalid("part of the extension never meets the body it would extend up to".into());
+    if crate::apart(long, target)? {
+        return Err(missed());
+    }
+    let no_form = || KernelError::Failed(format!("{NAME}: a body has no solidcore form"));
+    let (form, before, tool) =
+        (long.ops_body().ok_or_else(no_form)?, original.ops_body().ok_or_else(no_form)?, target.ops_body().ok_or_else(no_form)?);
+    let inside: Vec<[f64; 3]> = inside.iter().map(|p| [p.x, p.y, p.z]).collect();
+    let stopped = stopped(NAME, || solidcore_ops::stop::stop_extension(&form.0, &form.1, &before.0, &inside, &tool.0))?;
+    pieces(stopped.ok_or_else(missed)?, long)
+}
+
+/// A solidcore-ops stop run under this call's cancellation, its errors as this crate's.
+fn stopped<T>(name: &str, stop: impl FnOnce() -> solidcore_ops::Result<T>) -> Result<T> {
+    match solidcraft_smlib::stop::token() {
+        Some(token) => solidcore_ops::cancel::within(&token, stop),
+        None => stop(),
+    }
+    .map_err(|e| match e {
+        solidcore_ops::Error::Unsupported(_) | solidcore_ops::Error::Argument => KernelError::Invalid(e.to_string()),
+        // a panic the session caught stays the kernel's internal error, as SMLib's do
+        solidcore_ops::Error::Internal(m) => KernelError::Internal(format!("{name}: {m}")),
+        e => KernelError::Failed(format!("{name}: {e}")),
+    })
+}
+
+/// What a stop kept of `walls`: each face the face of `walls` it is a piece of.
+fn pieces(stopped: solidcore_ops::stop::Stopped, walls: &Body) -> Result<Body> {
+    let kept = Body::from_record(stopped.record)?.with_color(walls.color());
+    let faces = stopped.from.iter().map(|f| crate::record::from_face(0, *f, crate::history::Change::Kept)).collect();
+    Ok(crate::record::attach(kept, &crate::record::counts(&[walls]), Some(faces), &[]))
 }
 
 /// A surface body trimmed along sketch curves (chains of segments in `plane`) dropped square
@@ -151,15 +261,8 @@ fn dropped_refusal(e: solidcraft_smlib::Error) -> KernelError {
 /// `CalculateAnInternalPoint`). Once the tool has cut the body each piece lies on one side, so
 /// one such point says which.
 fn face_sides(body: &Body, side: &ToolSide) -> Result<Vec<f64>> {
-    let (sm, order) = crate::native::smlib_body_ordered(body)?;
-    let order = order.ok_or_else(|| KernelError::Failed("trim: SMLib numbers the pieces' faces differently from their record".into()))?;
-    let points = sm.face_points().map_err(|e| KernelError::smlib("SMLib trim: a point inside each piece", e))?;
-    let mut sides = vec![f64::NAN; points.len()];
-    for (i, p) in points.iter().enumerate() {
-        let face = if order.faces.is_empty() { i } else { order.faces.get(i).copied().unwrap_or(usize::MAX) };
-        let slot = sides.get_mut(face).ok_or_else(|| KernelError::Failed("trim: a piece's face lies outside the body".into()))?;
-        *slot = side.at(Vec3::new(p[0], p[1], p[2]));
-    }
+    let points = crate::splitface::inner_points(body)?;
+    let sides: Vec<f64> = points.iter().map(|p| p.map_or(f64::NAN, |p| side.at(p))).collect();
     if sides.iter().any(|x| !x.is_finite()) {
         return Err(KernelError::Failed("trim: the side of a piece can't be told".into()));
     }
@@ -260,6 +363,7 @@ fn nearest_boundary_edge(x: &Body, side: &ToolSide) -> Result<Vec3> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::PointClass::{OnBoundary, Outside};
     use crate::history::{Change, FaceOrigin};
     use crate::{extrude_sheet, measure, patch_region, stitch};
     use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
@@ -306,6 +410,86 @@ mod tests {
             h.faces.iter().all(|f| f.change == Change::Modified && matches!(f.origins.as_slice(), [FaceOrigin::Face { operand: 0, .. }])),
             "{h:?}"
         );
+    }
+
+    /// A bent cutter crosses the square along y=3 for x=0..5 and y=3+0.4(x-5)
+    /// for x=5..10. Its lower region is 5*3 + 5*(3+5)/2 = 35, upper 65.
+    #[test]
+    fn whole_sheet_trim_uses_every_face_with_its_boundaries() {
+        let square = rect(&Plane::XY, 0.0, 0.0, 10.0, 10.0);
+        let chain =
+            vec![Seg2::Line { a: Vec2::new(-5.0, 3.0), b: Vec2::new(5.0, 3.0) }, Seg2::Line { a: Vec2::new(5.0, 3.0), b: Vec2::new(15.0, 7.0) }];
+        let cutter = extrude_sheet(&Plane::XY, &[chain], -5.0, 5.0).unwrap();
+        assert_eq!(cutter.face_count(), 2);
+        for (point, expected) in [(Vec3::new(2.0, 1.0, 0.0), 35.0), (Vec3::new(2.0, 9.0, 0.0), 65.0)] {
+            let trimmed = trim_sheet_keep(&square, &cutter, TrimKeep::Side(point)).unwrap();
+            assert!(rel(area(&trimmed), expected) < 1e-9, "{} vs {expected}", area(&trimmed));
+            let history = trimmed.history().unwrap();
+            assert_eq!(history.operands, 1);
+            assert!(history.faces.iter().all(|f| matches!(f.origins.as_slice(), [FaceOrigin::Face { operand: 0, face: 0 }])));
+        }
+        // In reverse, the original join remains traversable above the horizontal cut.
+        let across = rect(&Plane::XY, -10.0, -10.0, 20.0, 20.0);
+        let top = trim_sheet_keep(&cutter, &across, TrimKeep::Side(Vec3::new(2.0, 3.0, 2.0))).unwrap();
+        assert_eq!(top.face_count(), 2);
+        let expected = 5.0 * (10.0 + 116.0_f64.sqrt());
+        assert!(rel(area(&top), expected) < 1e-9, "{} vs {expected}", area(&top));
+    }
+
+    /// A roof of two faces cuts the four walls of a closed square extrusion. Its height
+    /// is 5 for x=0..5 and 5+0.2(x-5) for x=5..10. The two y walls contribute
+    /// 2*(5*5+5*(5+6)/2), the x walls 10*5+10*6: lower area 215, upper 400-215=185.
+    #[test]
+    fn whole_sheet_trim_keeps_regions_across_a_closed_targets_seams() {
+        let outline = Loop2::polygon(&[Vec2::ZERO, Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0), Vec2::new(0.0, 10.0)]);
+        let walls = extrude_sheet(&Plane::XY, &[outline.segs], 0.0, 10.0).unwrap();
+        let xz = Plane::new(Vec3::ZERO, Vec3::X, Vec3::Z).unwrap();
+        let roof =
+            vec![Seg2::Line { a: Vec2::new(-5.0, 5.0), b: Vec2::new(5.0, 5.0) }, Seg2::Line { a: Vec2::new(5.0, 5.0), b: Vec2::new(15.0, 7.0) }];
+        let cutter = extrude_sheet(&xz, &[roof], -15.0, 5.0).unwrap();
+        assert_eq!((walls.face_count(), cutter.face_count()), (4, 2));
+        for (point, expected) in [(Vec3::new(0.0, 5.0, 2.0), 215.0), (Vec3::new(0.0, 5.0, 8.0), 185.0)] {
+            let trimmed = trim_sheet_keep(&walls, &cutter, TrimKeep::Side(point)).unwrap();
+            assert_eq!(trimmed.face_count(), 4);
+            assert!(rel(area(&trimmed), expected) < 1e-9, "{} vs {expected}", area(&trimmed));
+        }
+    }
+
+    /// The cubic continuation has x=4+12u, y=3+12u²-8u³ and is tangent to the line.
+    /// At x=10, u=1/2, so the lower area is 4*3 +
+    /// 12*[3u+4u³-2u⁴] from 0 to 1/2 = 34.5; the complement is 65.5.
+    #[test]
+    fn whole_sheet_trim_follows_a_spline_and_its_tangent_line() {
+        let square = rect(&Plane::XY, 0.0, 0.0, 10.0, 10.0);
+        let chain = vec![
+            Seg2::Line { a: Vec2::new(-5.0, 3.0), b: Vec2::new(4.0, 3.0) },
+            Seg2::Cubic { p0: Vec2::new(4.0, 3.0), p1: Vec2::new(8.0, 3.0), p2: Vec2::new(12.0, 7.0), p3: Vec2::new(16.0, 7.0) },
+        ];
+        let cutter = extrude_sheet(&Plane::XY, &[chain], -5.0, 5.0).unwrap();
+        assert_eq!(cutter.face_count(), 2);
+        // area() exposes an estimated quadrature accuracy, not a certified error bound.
+        // Instead, certify the retained trim against polynomial points at u=1/8,1/4,3/8
+        // and points on each side at x=7, where the exact boundary is y=3.625.
+        let boundary = [Vec3::new(5.5, 3.171875, 0.0), Vec3::new(7.0, 3.625, 0.0), Vec3::new(8.5, 4.265625, 0.0)];
+        let sides = [Vec3::new(7.0, 3.5, 0.0), Vec3::new(7.0, 3.75, 0.0)];
+        for (point, expected) in [(Vec3::new(2.0, 1.0, 0.0), [OnBoundary, Outside]), (Vec3::new(2.0, 9.0, 0.0), [Outside, OnBoundary])] {
+            let trimmed = trim_sheet_keep(&square, &cutter, TrimKeep::Side(point)).unwrap();
+            assert_eq!(trimmed.face_count(), 1);
+            assert_eq!(trimmed.classify_points(&boundary).unwrap(), [OnBoundary; 3]);
+            assert_eq!(trimmed.classify_points(&sides).unwrap(), expected);
+        }
+        // In reverse, z=0 halves the straight extrusion: the same generatrix length L
+        // gives original area 10L and kept area 5L, exactly half, with both faces retained.
+        let across = rect(&Plane::XY, -10.0, -10.0, 20.0, 20.0);
+        let top = trim_sheet_keep(&cutter, &across, TrimKeep::Side(Vec3::new(0.0, 3.0, 2.0))).unwrap();
+        assert_eq!(top.face_count(), 2);
+        for (x, y) in [(0.0, 3.0), (7.0, 3.625)] {
+            let points = [Vec3::new(x, y, -2.0), Vec3::new(x, y, 0.0), Vec3::new(x, y, 2.0), Vec3::new(x, y, 5.0)];
+            assert_eq!(top.classify_points(&points).unwrap(), [Outside, OnBoundary, OnBoundary, OnBoundary]);
+        }
+        let (lo, hi) = top.ops_body().unwrap().0.bounds().unwrap();
+        let tolerance = top.record().tolerance;
+        assert!(lo[2].abs() <= tolerance && (hi[2] - 5.0).abs() <= tolerance, "{lo:?}..{hi:?}");
     }
 
     /// A spline tool face (an extruded cubic: its surface ends where the face does, so there is
@@ -547,6 +731,52 @@ mod tests {
         let two = extrude_sheet(&Plane::XY, &[chain], 0.0, 5.0).unwrap();
         let e = mutual_trim(&a, &two, TrimKeep::Side(Vec3::ZERO), TrimKeep::Side(Vec3::ZERO), true).unwrap_err().to_string();
         assert!(e.contains("not supported yet"), "{e}");
+    }
+
+    /// A wall at y = 0 from x = 0 to 10, swept from z = 0 to 50, stops where it first runs into
+    /// a body, each body's faces as they are (#16537, Surface Extrude To Next). The areas are
+    /// worked out from the shapes: 10 wide, up to the first body's underside.
+    #[test]
+    fn walls_stop_at_the_first_body_in_their_way() {
+        let line = || vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(10.0, 0.0) }];
+        let wall = extrude_sheet(&Plane::XY, &[line()], 0.0, 50.0).unwrap();
+        let starts = [Vec3::ZERO];
+        let up = Vec3::new(0.0, 0.0, 1.0);
+        let top = |b: &Body| b.exact_bounds().unwrap().max.z;
+        // A slab across the wall from z = 20 to 22: 10 x 20 is left, ending at z = 20.
+        let slab = crate::box_solid(Vec3::new(-1.0, -1.0, 20.0), Vec3::new(11.0, 1.0, 22.0)).unwrap();
+        let (kept, met) = stop_at_bodies(&wall, &[&slab], &starts, up).unwrap();
+        assert!(met && rel(area(&kept), 200.0) < 1e-9 && (top(&kept) - 20.0).abs() < 1e-9, "{} {}", area(&kept), top(&kept));
+        // Each kept face is a piece of the wall's one face.
+        let h = kept.history().unwrap();
+        assert!(h.faces.iter().all(|f| f.origins == [FaceOrigin::Face { operand: 0, face: 0 }]), "{h:?}");
+        // A surface body across it at z = 8 is nearer, whichever body comes first: 10 x 8.
+        let sheet = rect(&Plane { origin: Vec3::new(0.0, 0.0, 8.0), ..Plane::XY }, -1.0, -1.0, 11.0, 1.0);
+        for bodies in [[&slab, &sheet], [&sheet, &slab]] {
+            let (kept, met) = stop_at_bodies(&wall, &bodies, &starts, up).unwrap();
+            assert!(met && rel(area(&kept), 80.0) < 1e-9 && (top(&kept) - 8.0).abs() < 1e-9, "{}", area(&kept));
+        }
+        // Swept the other way, down to z = -50, the slab and the sheet are behind it: a slab
+        // from z = -32 to -30 stops it at z = -30, 10 x 30.
+        let down = extrude_sheet(&Plane::XY, &[line()], -50.0, 0.0).unwrap();
+        let under = crate::box_solid(Vec3::new(-1.0, -1.0, -32.0), Vec3::new(11.0, 1.0, -30.0)).unwrap();
+        let (kept, met) = stop_at_bodies(&down, &[&slab, &sheet, &under], &starts, up * -1.0).unwrap();
+        assert!(met && rel(area(&kept), 300.0) < 1e-9, "{}", area(&kept));
+        // A body out of the way cuts nothing: the walls come back whole.
+        let aside = crate::box_solid(Vec3::new(40.0, 40.0, 0.0), Vec3::new(50.0, 50.0, 10.0)).unwrap();
+        let (kept, met) = stop_at_bodies(&wall, &[&aside], &starts, up).unwrap();
+        assert!(!met && rel(area(&kept), 500.0) < 1e-9);
+        // A block over the left half only, from z = 20 to 22, under a sheet across at z = 30:
+        // the left half would stop at z = 20, but the piece beside the block also runs on over
+        // it up to z = 30. That is refused, never kept.
+        let half = crate::box_solid(Vec3::new(-1.0, -1.0, 20.0), Vec3::new(5.0, 1.0, 22.0)).unwrap();
+        let high = rect(&Plane { origin: Vec3::new(0.0, 0.0, 30.0), ..Plane::XY }, -1.0, -1.0, 11.0, 1.0);
+        let e = stop_at_bodies(&wall, &[&half, &high], &starts, up).unwrap_err().to_string();
+        assert!(e.contains("not supported yet"), "{e}");
+        // Hostile input is refused, not a crash.
+        assert!(stop_at_bodies(&wall, &[&slab], &[], up).is_err());
+        assert!(stop_at_bodies(&wall, &[&slab], &starts, Vec3::ZERO).is_err());
+        assert!(stop_at_bodies(&wall, &[&slab], &[Vec3::new(f64::NAN, 0.0, 0.0)], up).is_err());
     }
 
     /// The normal of each face of `b`, from its display triangles' winding (each face is flat).

@@ -1061,6 +1061,7 @@ fn inspect_lists_each_sheets_views_in_order() {
         place: ViewPlace::Aligned(50.0),
         settings: Default::default(),
         reference_shown_percent: 0.0,
+        centre_marks: None,
         label: None,
     })]);
     // Inspect only lists it, so the part it numbers needn't be in the design.
@@ -1201,6 +1202,7 @@ fn inspect_lists_every_view_of_a_deep_or_large_drawing() {
         place: ViewPlace::At([100.0, 100.0]),
         settings: scale(),
         reference_shown_percent: 0.0,
+        centre_marks: None,
         label: None,
     })]);
     for _ in 1..MAX_VIEW_DEPTH {
@@ -1214,6 +1216,7 @@ fn inspect_lists_every_view_of_a_deep_or_large_drawing() {
             place: ViewPlace::At([100.0, 100.0]),
             settings: ViewOverrides::default(),
             reference_shown_percent: 0.0,
+            centre_marks: None,
             label: None,
         })]);
         made.push(id);
@@ -1233,6 +1236,7 @@ fn inspect_lists_every_view_of_a_deep_or_large_drawing() {
         place: ViewPlace::At([100.0, 100.0]),
         settings: scale(),
         reference_shown_percent: 0.0,
+        centre_marks: None,
         label: None,
     };
     let more: Vec<Arc<View>> = (d.views.len()..MAX_VIEWS).map(|_| Arc::new(base(d.allocate_id(&mut source).unwrap()))).collect();
@@ -1660,6 +1664,41 @@ fn focusing_another_drawing_preserves_the_sheet_edit_and_its_receiver() {
     assert_eq!(s.evaluations, evaluations);
 }
 
+/// #19860: while the model has the focus (Design or Render), where the shared sketch tools work on
+/// the model's sketch, starting or entering a sheet sketch is refused, naming the Drawing workspace,
+/// and changes nothing: no empty sketch is left open out of reach. With the drawing focused both
+/// work, and the sketch tools draw into the sheet sketch.
+#[test]
+fn a_sheet_sketch_is_started_and_entered_only_with_the_drawing_focused() {
+    let (mut s, _, _, made) = sheet_editor();
+    run(&mut s, "sketch.finish", json!({}));
+    s.model_focus = true;
+    let before = (s.doc.to_json(), s.undo.len());
+    for (command, params) in [("drawing.sketch.create", json!({"owner": made["sheet"]})), ("drawing.sketch.edit", json!({"sketch": made["sketch"]}))]
+    {
+        let why = refused(&mut s, command, params);
+        assert!(why.contains("not available right now") && why.contains("edited in the Drawing workspace"), "{command}: {why}");
+        assert!(find_command(command).unwrap().allowed(&s).is_err(), "{command} is not offered");
+    }
+    assert!(s.active_sheet_sketch.is_none());
+    assert_eq!((s.doc.to_json(), s.undo.len()), before);
+    // A model sketch open in Design stays open: the refusal comes before it would be finished.
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [5, 5]], "infer": false}));
+    let open = (s.active_sketch, s.doc.to_json(), s.undo.len());
+    assert!(open.0.is_some());
+    for (command, params) in [("drawing.sketch.create", json!({"owner": made["sheet"]})), ("drawing.sketch.edit", json!({"sketch": made["sketch"]}))]
+    {
+        refused(&mut s, command, params);
+        assert_eq!((s.active_sketch, s.doc.to_json(), s.undo.len()), open, "{command} left the model's sketch open");
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    s.model_focus = false;
+    run(&mut s, "drawing.sketch.edit", json!({"sketch": made["sketch"]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "infer": false}));
+    assert_eq!(run(&mut s, "drawing.sketch.inspect", json!({}))["curves"].as_array().map(Vec::len), Some(1));
+}
+
 #[test]
 fn sheet_sketch_targets_reject_invalid_or_mismatched_views_at_every_check_level() {
     for level in crate::schema::ParamCheck::ALL {
@@ -2015,6 +2054,7 @@ fn sheet_fill_profiles_refuse_equation_metadata_without_disabling_sketch_inspect
         end: "1".into(),
         variable_unit: solidcraft_sketch::VariableUnit::Number,
         tolerance: 0.01,
+        radians_trig: false,
     });
     let before = s.doc.clone();
     let history = (s.undo.len(), s.redo.len(), s.evaluations);

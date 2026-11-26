@@ -2066,6 +2066,8 @@ mod tests {
             #[cfg(target_os = "windows")]
             window_move: crate::native_frame::WindowMove::default(),
             clear_stored_background: false,
+            #[cfg(target_os = "windows")]
+            wheel_gestures: solidcraft_ui_egui::WebWheelGestures::every_point_swipes(),
         };
         let mut frame = eframe::Frame::_new_kittest();
         let input = egui::RawInput::default();

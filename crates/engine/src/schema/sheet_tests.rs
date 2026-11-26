@@ -4,8 +4,9 @@ use serde_json::{Value, json};
 use super::{
     BendTableFormatParam, BendTableParams, BendTableResult, ConvertParams, DxfCurvesParam, DxfLayersParam, DxfNoteHeight, DxfTextParam,
     ExportDxfParams, ExportDxfResult, FixedPoint, FlangeEdges, FlangeParams, FlangePosition, FlangeTypeParam, FlatPatternParams, FlatPatternResult,
-    FoldParams, FoldPoints, FoldPosition, FoldStays, HeightFromParam, HemParams, MaterialSide, MeasureBodyParams, PathFlangeParams, PerforateParams,
-    PerforationPattern, RecognizeParams, ReliefShapeParam, SheetEdgePoint, SheetPoints, TabParams, ThenSteps, UnfoldParams,
+    FoldParams, FoldPoints, FoldPosition, FoldStays, HardwareParams, HardwareResult, HeightFromParam, HemParams, MaterialSide, MeasureBodyParams,
+    PathFlangeParams, PerforateParams, PerforationPattern, RecognizeParams, ReliefShapeParam, SheetEdgePoint, SheetPoints, TabParams, ThenSteps,
+    UnfoldParams,
 };
 use crate::Session;
 use crate::schema::features::FeatureResult;
@@ -47,6 +48,7 @@ fn schemas_and_the_key_check_agree() {
         input_schema_for::<FlangeParams>(),
         &keys(&[
             "angle",
+            "bend_relief_shape",
             "body",
             "corner_relief",
             "corner_relief_shape",
@@ -56,6 +58,7 @@ fn schemas_and_the_key_check_agree() {
             "flip",
             "height",
             "height_from",
+            "orientation",
             "position",
             "profiles",
             "radius",
@@ -63,11 +66,16 @@ fn schemas_and_the_key_check_agree() {
             "rule",
             "segments",
             "sketch",
+            "symmetric",
             "then",
             "type",
         ]),
     );
     assert_keys(input_schema_for::<PerforateParams>(), &keys(&["body", "diameter", "margin", "pattern", "pitch", "profiles", "sketch"]));
+    assert_keys(
+        input_schema_for::<HardwareParams>(),
+        &keys(&["diameter", "direction", "flip", "kind", "length", "points", "position", "single", "sketch", "targets", "thread"]),
+    );
     assert_keys(input_schema_for::<HemParams>(), &keys(&["body", "edges", "flip", "gap", "length"]));
     assert_keys(
         input_schema_for::<FoldParams>(),
@@ -82,7 +90,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<BendTableParams>(), &["body", "format", "path"]);
     assert_keys(
         input_schema_for::<ExportDxfParams>(),
-        &["bend_lines", "bend_notes", "body", "curves", "layers", "note_height", "path", "per_body", "profile", "text"],
+        &["bend_lines", "bend_notes", "body", "curves", "hardware_notes", "layers", "note_height", "path", "per_body", "profile", "text"],
     );
 }
 
@@ -482,6 +490,7 @@ fn rule_contract_keys_and_readers_match() {
             "angle_display",
             "bend_method",
             "bend_radius",
+            "bend_relief_shape",
             "corner_relief",
             "corner_relief_shape",
             "delete",
@@ -515,6 +524,7 @@ fn rule_contract_keys_and_readers_match() {
         ("sheet.manage_rules", json!({"name": "R", "angle_display": "outer"})),
         ("sheet.manage_rules", json!({"name": "R", "angle_display": 5})),
         ("sheet.manage_rules", json!({"name": "R", "corner_relief_shape": "oval"})),
+        ("sheet.manage_rules", json!({"name": "R", "bend_relief_shape": "round"})),
         ("sheet.manage_rules", json!({"name": "R", "thickness": -1})),
         ("sheet.manage_rules", json!({"name": "R", "k_factor": 2})),
         ("sheet.manage_rules", json!({"name": "Missing", "delete": true})),
@@ -533,20 +543,20 @@ fn rule_replies_match_the_output_schemas_without_warnings() {
             "sheet.manage_rules",
             json!({"name": "  Metric  ", "thickness": 2, "k_factor": "0.4", "bend_radius": "Thickness / 2",
             "relief_width": 1, "relief_depth": "Thickness", "corner_relief": 3, "corner_relief_shape": " Round ",
-            "hem_gap": 0.1, "gap": "Thickness / 2", "angle_display": " INCLUDED ", "active": true}),
+            "bend_relief_shape": " Obround ", "hem_gap": 0.1, "gap": "Thickness / 2", "angle_display": " INCLUDED ", "active": true}),
         ),
         (
             "sheet.manage_rules",
             json!({"name": "Metric", "thickness": "3 mm", "k_factor": 0.5, "bend_radius": 1,
             "relief_width": "1 mm", "relief_depth": 2, "corner_relief": "3 mm", "corner_relief_shape": "tear",
-            "hem_gap": "0.2 mm", "gap": 2, "angle_display": "BeNd", "active": false, "delete": false}),
+            "bend_relief_shape": "TEAR", "hem_gap": "0.2 mm", "gap": 2, "angle_display": "BeNd", "active": false, "delete": false}),
         ),
         ("sheet.manage_rules", json!({"name": "Other"})),
         (
             "sheet.manage_rules",
             json!({"name": "Other", "thickness": null, "k_factor": null, "bend_radius": null,
             "relief_width": null, "relief_depth": null, "corner_relief": null, "corner_relief_shape": null,
-            "hem_gap": null, "gap": null, "angle_display": null, "active": null, "delete": null}),
+            "bend_relief_shape": null, "hem_gap": null, "gap": null, "angle_display": null, "active": null, "delete": null}),
         ),
         ("sheet.rules", json!({})),
         ("sheet.manage_rules", json!({"name": "Other", "active": true})),
@@ -821,6 +831,27 @@ fn export_dxf_replies_match_the_output_schema() {
     let r = s.execute("sheet.export_dxf", &json!({"cures": "arcs"})).unwrap_or_else(|e| panic!("{e}"));
     assert!(r.get("param_warnings").is_some(), "{r}");
     assert!(conforms(schema, schema, &r), "{r}");
+}
+
+#[test]
+fn hardware_replies_match_the_output_schema() {
+    let schema = output_schema_for::<HardwareResult>();
+    let schema = schema.as_value();
+    let mut s = sheet();
+    let r = quiet(&mut s, "sheet.hardware", json!({"kind": "stud", "thread": "M4", "length": "10 mm", "position": [50, 30, 2.5]}));
+    assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    assert_eq!((&r["hardware"]["kind"], &r["hardware"]["part"], &r["hardware"]["length"]), (&json!("stud"), &json!("stud.m4"), &json!(10.0)), "{r}");
+    // A nut has no length: the key is null, and the feature's own keys are there too.
+    let r = quiet(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [20, 30, 2.5]}));
+    assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    assert_eq!(r["hardware"]["length"], Value::Null);
+    assert!(r["feature"].is_u64() && r["bodies"].is_array(), "{r}");
+    // The flat pattern lists both, and its reply still matches its own schema.
+    let schema = output_schema_for::<FlatPatternResult>();
+    let schema = schema.as_value();
+    let r = quiet(&mut s, "sheet.flat_pattern", json!({}));
+    assert_eq!(r["hardware"].as_array().map(Vec::len), Some(2), "{r}");
+    assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
 }
 
 // ---- Tab (#8325) ----

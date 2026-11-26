@@ -159,6 +159,7 @@ use crate::nurbs::b_spline_curve::{BSplineCurve, ProjectionType};
 use crate::nurbs::crv_basic::Curve as NurbCurve;
 use crate::nurbs::math::{gamma, NOZ};
 use crate::nurbs::nurbs_crv::{crv_accel_bound, crv_point_error, crv_speed_bound};
+use crate::profile::profile_scope;
 
 const OP_GCI: &str = "curve::curve::p8::Curve::global_curve_intersect";
 
@@ -875,6 +876,60 @@ impl Curve {
         )
     }
 
+    /// Not upstream (#15049): [`Curve::global_curve_intersect`] with a contact tolerance:
+    /// coplanar circles, or a circle and a line in its plane, overlapping past touching by
+    /// less than `contact_tol` touch at one point ([`analytic_curve_intersect`]), as in
+    /// [`Curve::global_curve_intersect_cached_with_zone_tols`]; zero is
+    /// [`Curve::global_curve_intersect`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Curve::global_curve_intersect`].
+    pub(crate) fn global_curve_intersect_in_contact<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+        other: &Self,
+        other_interval: &Extent1d,
+        dist_tol: f64,
+        opts: &CurveIntersectOptions<O>,
+        contact_tol: f64,
+    ) -> Result<SolutionArray<O>> {
+        if opts.handles == [None, None] && opts.analytic_handles == [None, None] {
+            let own = operand_handles(self, other);
+            let inner = CurveIntersectOptions {
+                skip_global_coincidence_check: opts.skip_global_coincidence_check,
+                handles: [Some(own[0]), Some(own[1])],
+                analytic_handles: [Some(own[2]), Some(own[3])],
+            };
+            return Ok(self
+                .global_curve_intersect_in_contact(
+                    k,
+                    interval,
+                    other,
+                    other_interval,
+                    dist_tol,
+                    &inner,
+                    contact_tol,
+                )?
+                .without_objects());
+        }
+        self.global_curve_intersect_body(
+            k,
+            interval,
+            other,
+            other_interval,
+            dist_tol,
+            opts,
+            &mut None,
+            &mut None,
+            [None, None],
+            contact_tol,
+            true,
+            [false; 2],
+        )
+    }
+
     /// [`Curve::global_curve_intersect`] keeping the curves' caches in `cache1` (this
     /// curve's) and `cache2` (the other curve's; unused when `other` is this curve)
     /// across calls, as upstream keeps them on the curves (`GetOrCreateObjectCache`):
@@ -1120,6 +1175,7 @@ impl Curve {
         // get target curves' caches (kept in the caller's slots, see
         // `global_curve_intersect_cached`), each at its owner's zone tolerance when the
         // caller resolved one
+        profile_scope!(k, "curve::global_curve_intersect::cached");
         let cache1 = match cache1_slot {
             Some(c) => c,
             slot @ None => slot.insert(build_cache(k, self, h_this, zone_tols[0])?),
