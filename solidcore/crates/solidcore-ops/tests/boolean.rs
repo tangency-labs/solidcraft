@@ -402,8 +402,20 @@ fn a_join_of_pocketed_plates_proves_its_carried_trims_without_bisecting_them() {
 /// top edges, 4 short top edges (from a corner to the cylinder at each end), the 2 lines where
 /// the cylinder meets the top, the 2 half circles each in 2 arcs either side of the seam, and
 /// the seam: 21 (`14 − 21 + 9 = 2`).
+///
+/// The four split arcs' trims. After the join, each of the four arcs (in the end planes
+/// `y = ±100`, from where the circle meets the top, `z = 3`, to the seam's end above it) has
+/// a trim on the cylinder's side, and each is asked the gate's question again on its own
+/// (`trim_same_parameter_gap_bound_within` over the edge's interval, at the edge's tolerance,
+/// the floor a thousandth of it): each is proved within the tolerance with no bisection, so
+/// the union's zero bisections are not those trims going ungated.
 #[test]
+#[allow(clippy::disallowed_methods)] // the test's check of its trims, not ops computing geometry
 fn a_slat_joined_with_a_cylinder_along_its_top_proves_the_split_circles_trims_without_bisecting() {
+    use solidcore::query::curve_surface_gap::trim_same_parameter_gap_bound_within;
+    use solidcore::surface::surface::SurfaceKind;
+    use solidcore::topology::edgeuse;
+
     all_fixes();
     let slat = || make_box([-4.5, -100.0, 0.0], [9.0, 200.0, 3.0]).unwrap();
     let knuckle = || {
@@ -438,7 +450,7 @@ fn a_slat_joined_with_a_cylinder_along_its_top_proves_the_split_circles_trims_wi
     };
     let (a, b) = (held(slat()), held(knuckle()));
     k.work_counters.reset();
-    solidcore::boolean::api_brep::boolean_union(&mut k, a, b).unwrap();
+    let joined = solidcore::boolean::api_brep::boolean_union(&mut k, a, b).unwrap();
     assert!(
         k.work_counters.trim_deviation_bounds() > 0,
         "no carried trim was gated"
@@ -449,6 +461,64 @@ fn a_slat_joined_with_a_cylinder_along_its_top_proves_the_split_circles_trims_wi
         "of {} carried trims gated",
         k.work_counters.trim_deviation_bounds()
     );
+
+    // (the four split arcs' trims on the cylinder's side, each bounded on its own)
+    let (mut arcs, mut held_by) = (0, Vec::new());
+    for &e in joined.edge_list() {
+        let rec = joined.edge(e).unwrap();
+        let Some(curve) = rec.curve.as_ref() else {
+            continue;
+        };
+        let (tol, ivl) = (rec.tolerance, rec.interval);
+        let range = [ivl.min(), ivl.max()];
+        let ends = range.map(|t| curve.evaluate_point(&k, t).unwrap());
+        let in_an_end_plane = ends.iter().all(|p| (p.y.abs() - 100.0).abs() <= 1e-9);
+        let (low, high) = (ends[0].z.min(ends[1].z), ends[0].z.max(ends[1].z));
+        if !(in_an_end_plane && (low - 3.0).abs() <= 1e-9 && high > 3.1) {
+            continue;
+        }
+        for &eu in &rec.edgeuses {
+            let Some(f) = edgeuse::p1::face(&joined, eu).unwrap() else {
+                continue;
+            };
+            let surface = joined.face(f).unwrap().surface.as_ref().unwrap();
+            if matches!(surface.kind(), SurfaceKind::Plane(_)) {
+                continue;
+            }
+            // (each trim once: an edge use without its own reads its mate's)
+            let (Some(trim), Some(holder)) = edgeuse::p1::uv_trim_curve(&joined, eu).unwrap()
+            else {
+                continue;
+            };
+            if held_by.contains(&holder) {
+                continue;
+            }
+            held_by.push(holder);
+            let before = k.work_counters.same_parameter_bisections();
+            let gap = trim_same_parameter_gap_bound_within(
+                &k,
+                surface,
+                curve,
+                trim,
+                range,
+                1e-3 * tol,
+                [tol, tol],
+                None,
+            )
+            .unwrap();
+            assert_eq!(
+                k.work_counters.same_parameter_bisections(),
+                before,
+                "edge {e:?}: the split arc's trim was bisected"
+            );
+            assert!(
+                gap.is_some_and(|g| g <= tol),
+                "edge {e:?}: {gap:?} at tolerance {tol}"
+            );
+            arcs += 1;
+        }
+    }
+    assert_eq!(arcs, 4, "the split arcs' trims on the cylinder's side");
 
     let u = boolean(slat(), knuckle(), BooleanOp::Union)
         .unwrap()
