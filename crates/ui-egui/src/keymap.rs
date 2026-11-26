@@ -655,8 +655,14 @@ pub fn bind_at(app: &mut SolveApp, id: &str, slot: Option<usize>, key: &str, rep
 /// Keep a command's keys, as a change only when they aren't the ones it has without the user's
 /// (the keyboard profile's, or its registered keys).
 fn set_keys(app: &mut SolveApp, id: &str, keys: Vec<String>) {
-    // A command's base keys never depend on its own saved keys (`user_key_holder` skips it).
-    if keys.iter().map(String::as_str).eq(base_keys(app, id)) {
+    // Against the profile's whole list, not `base_keys`: that one leaves out keys other commands'
+    // own keys hold now, and a key chosen to match it would be lost when they change.
+    let registered = || default_keys(id, solidcraft_engine::find_command(id).and_then(|c| c.shortcut));
+    let stable: Vec<&str> = match crate::keyboard_profiles::chosen(app).and_then(|p| p.base.get(id)) {
+        Some(list) => list.iter().map(String::as_str).collect(),
+        None => registered(),
+    };
+    if keys.iter().map(String::as_str).eq(stable) {
         app.keymap.custom.remove(id);
     } else {
         app.keymap.custom.insert(id.to_string(), keys);
@@ -2548,6 +2554,16 @@ mod tests {
         assert_eq!(a.preferences.keyboard_profile, "solidworks");
         assert_eq!(keys(&a, "view.fit"), ["F", "End"]);
         assert!(keys(&a, "solid.fillet").is_empty(), "Fit took F from Fillet");
+        // A key chosen while another command's own key thins the profile's list is still the
+        // user's: here Fillet's F leaves Fit only End, and Fit's End must outlive a switch.
+        bind(&mut a, "view.fit", "F9", false).unwrap();
+        bind(&mut a, "solid.fillet", "F", false).unwrap();
+        bind(&mut a, "view.fit", "End", false).unwrap();
+        assert_eq!(a.keymap.custom.get("view.fit").map(Vec::as_slice), Some(&["End".to_string()][..]));
+        a.preferences.keyboard_profile = "nx".into();
+        assert_eq!(keys(&a, "view.fit"), ["End"], "the user's End, not NX's Ctrl+F");
+        a.preferences.keyboard_profile = "solidworks".into();
+        reset(&mut a, None);
         assert!(crate::toolbar_custom::import(&mut a, &json!({"format": "solidcraft-shortcuts/1", "keyboard_profile": 7})).is_err());
         let long = "x".repeat(65);
         assert!(crate::toolbar_custom::import(&mut a, &json!({"format": "solidcraft-shortcuts/1", "keyboard_profile": long})).is_err());
