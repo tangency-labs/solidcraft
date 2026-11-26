@@ -260,7 +260,13 @@ impl DesktopNativeAdapter {
     /// The window a drag shows at `outer` for `instance`: the same window it
     /// will open in, but passed through by the pointer, above other windows and
     /// not activated while the drag lasts.
-    pub fn drop_window(&self, instance: &InstanceId, title: String, outer: egui::Rect) -> (egui::ViewportId, egui::ViewportBuilder) {
+    pub fn drop_window(
+        &self,
+        ctx: &egui::Context,
+        instance: &InstanceId,
+        title: String,
+        outer: egui::Rect,
+    ) -> (egui::ViewportId, egui::ViewportBuilder) {
         let mut state = self.0.borrow_mut();
         let viewport = match &state.drop {
             Some((shown, viewport)) if shown == instance => *viewport,
@@ -270,7 +276,12 @@ impl DesktopNativeAdapter {
             }
         };
         state.drop = Some((instance.clone(), viewport));
-        let builder = egui::ViewportBuilder::default()
+        let builder = egui::ViewportBuilder::default();
+        // macOS: the drag's window has the panel window's owner from the start, so it stays the
+        // panel's window on release (a window keeps the owner it was created with). Without it
+        // the panel got a new window on release there, which opened behind the other windows.
+        let builder = if cfg!(target_os = "macos") { crate::window_chrome::popout_viewport(builder, ctx.viewport_id()) } else { builder };
+        let builder = builder
             .with_title(title)
             .with_position(outer.min)
             .with_inner_size(outer.size() - state.decoration(instance))

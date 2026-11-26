@@ -80,6 +80,12 @@ pub struct InsertDrawingKeys {
     /// height). Default: geometry. "viewbox" is for SVG drawings that have a sheet; a DXF has none.
     #[serde(default)]
     pub size_from: Option<DrawingSizeFrom>,
+    /// The dots per inch an SVG's pixels (its user units, and lengths without a unit) are read at,
+    /// 1 to 10000: a file drawn at 72 dpi comes in at the size it was drawn at with 72. Lengths
+    /// with their own unit (`mm`, `in`, `pt`) keep it. Default: 96, as CSS has it. For SVG
+    /// drawings; a DXF has no pixels.
+    #[serde(default)]
+    pub dpi: Option<f64>,
     /// The distance in mm within which ends join into one point, 1e-9 to 10 (a value outside is
     /// brought inside; one that is not above 0 reads as the default). Default: 0.0001.
     #[serde(default)]
@@ -815,6 +821,10 @@ pub struct DrawingBoundsParams {
     #[serde(default, deserialize_with = "drawing_format", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "drawing_format_schema")]
     pub format: Option<String>,
+    /// The dots per inch an SVG's pixels are read at, 1 to 10000, as `sketch.insert_svg`'s
+    /// `dpi`. Default: 96. For SVG drawings; a DXF has no pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dpi: Option<f64>,
 }
 
 /// The `anyOf` saying a drawing must come from `text` or from a `path` the handler reads.
@@ -823,7 +833,7 @@ fn source_any_of() -> Value {
     serde_json::json!([{"required": ["text"]}, {"required": ["path"], "properties": {"path": read_path}}])
 }
 
-/// `sketch.drawing_bounds` reads no key but these three, so only the source rule applies.
+/// `sketch.drawing_bounds` has no rule across its keys but the source one.
 fn bounds_source_required(schema: &mut Schema) {
     schema.insert("anyOf".into(), source_any_of());
 }

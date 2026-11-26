@@ -1390,11 +1390,17 @@ impl Surface {
 
     /// This surface's definition carried onto `piece`, a piece, extension or copy of it
     /// (#2485, #2488). A sweep's (#2572) is read point for point on its B-spline net: a
-    /// piece of another kind keeps none.
+    /// piece of another kind keeps none, but keeps that its net is fitted, as an evaluation
+    /// copy does: it is made from the fitted net, not from the sweep. What an evaluation copy
+    /// keeps of a definition it dropped, that its net is fitted ([`Surface::net_is_fitted`]),
+    /// is carried too: a copy or piece of such a copy is still a fitted net.
     fn carry_definition(&self, mut piece: Self) -> Self {
+        piece.fitted_net = self.fitted_net;
         let sweep = matches!(self.definition.as_deref(), Some(KeptDefinition::Sweep(_)));
         if sweep && !matches!(piece.kind(), SurfaceKind::BSpline(_)) {
             piece.definition = None;
+            // (the definition goes, what it says of the net stays)
+            piece.fitted_net = self.net_is_fitted();
             return piece;
         }
         piece.definition.clone_from(&self.definition);
