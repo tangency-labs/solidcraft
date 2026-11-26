@@ -1264,3 +1264,93 @@ fn concentric_arcs_read_with_centres_apart_keep_their_ids() {
     let CurveKind::Arc { c, .. } = sk.curves[sk.curve_index(&ids[2]).unwrap()].kind else { panic!("the inner rim is an arc") };
     assert!(sk.points[c].pos.dist(Vec2::new(0., 5e-7)) < 1e-12, "the inner arc keeps its own centre");
 }
+
+/// The floor and the roof of a channel layer, cut square to its axis: two circles a section
+/// sketch holds an arc on each. Where the layer's faces are cylinders, cones and tori the fit
+/// puts both about one point; where they are splines, about centres some 1e-5 apart.
+fn layer_section(sk: &mut Sketch, geom: &[LinkGeom]) -> (String, [String; 2]) {
+    let link = sk.add_link(LinkKind::Intersect, LinkSource::Body { body: "Layer".into() }, geom).unwrap();
+    let circles = sk.link_curves(&link);
+    assert_eq!(circles.len(), 2);
+    let mut ids = Vec::new();
+    for (k, c) in circles.into_iter().enumerate() {
+        sk.curves[c].construction = true;
+        let CurveKind::Circle { r, .. } = sk.curves[c].kind else { panic!("{:?}", sk.curves[c].kind) };
+        let arc = sk.add_arc(Vec2::ZERO, Vec2::new(0.6, r), Vec2::new(-0.6, r), [None; 3], Some(["on_first", "on_second"][k])).unwrap();
+        sk.add_constraint(ConstraintKind::Concentric { a: c, b: arc }, None).unwrap();
+        sk.add_constraint(ConstraintKind::Equal { a: c, b: arc }, None).unwrap();
+        ids.push(sk.curves[c].id.clone());
+    }
+    (link, [ids[0].clone(), ids[1].clone()])
+}
+
+/// Each of the link's two circles, by its id, with the radius given, still a construction
+/// curve, still holding the arc drawn on it (concentric and equal), and nothing else of the link.
+fn assert_layer_section(sk: &Sketch, link: &str, ids: &[String; 2], radii: [f64; 2]) {
+    assert_eq!(sk.link_curves(link).len(), 2, "{:?}", sk.curves);
+    assert_eq!(sk.constraints.len(), 4, "{:?}", sk.constraints);
+    for ((id, radius), arc) in ids.iter().zip(radii).zip(["on_first", "on_second"]) {
+        let c = sk.curve_index(id).unwrap_or_else(|| panic!("{id} is gone: {:?}", sk.curves));
+        assert!(matches!(sk.curves[c].kind, CurveKind::Circle { r, .. } if r == radius), "{id}: {:?}", sk.curves[c].kind);
+        assert!(sk.curves[c].construction, "{id} must stay out of the profiles");
+        let arc = sk.curve_index(arc).unwrap();
+        for kind in [ConstraintKind::Concentric { a: c, b: arc }, ConstraintKind::Equal { a: c, b: arc }] {
+            assert!(sk.constraints.iter().any(|k| k.kind == kind), "{id}: {kind:?} is gone: {:?}", sk.constraints);
+        }
+    }
+}
+
+#[test]
+fn concentric_section_circles_keep_their_identity_when_their_centres_split() {
+    let mut sk = Sketch::new();
+    let (link, ids) = layer_section(&mut sk, &[LinkGeom::Circle(Vec2::ZERO, 19.0), LinkGeom::Circle(Vec2::ZERO, 17.5)]);
+    // The section moved onto a spline face: other radii, centres 1e-5 apart, the other order.
+    let split = [LinkGeom::Circle(Vec2::new(3.7e-6, 7.0e-8), 17.54), LinkGeom::Circle(Vec2::new(1.4e-5, 1.5e-7), 18.94)];
+    sk.update_link(&link, &split).unwrap();
+    assert_layer_section(&sk, &link, &ids, [18.94, 17.54]);
+}
+
+#[test]
+fn concentric_section_circles_keep_their_identity_when_their_centres_merge() {
+    let mut sk = Sketch::new();
+    let apart = [LinkGeom::Circle(Vec2::new(1.4e-5, 1.5e-7), 18.94), LinkGeom::Circle(Vec2::new(3.7e-6, 7.0e-8), 17.54)];
+    let (link, ids) = layer_section(&mut sk, &apart);
+    // The section moved onto a torus: both circles about the axis exactly.
+    sk.update_link(&link, &[LinkGeom::Circle(Vec2::ZERO, 17.5), LinkGeom::Circle(Vec2::ZERO, 19.0)]).unwrap();
+    assert_layer_section(&sk, &link, &ids, [19.0, 17.5]);
+}
+
+/// Both circles shrink by more than half the distance between them: the floor's new radius is
+/// nearer the roof's old one than the roof's new radius is. The inner circle is still the floor.
+#[test]
+fn concentric_section_circles_keep_their_order_when_both_resize_past_each_other() {
+    let mut sk = Sketch::new();
+    let before = [LinkGeom::Circle(Vec2::new(1.4e-5, 1.5e-7), 28.35), LinkGeom::Circle(Vec2::new(3.7e-6, 7.0e-8), 26.69)];
+    let (link, ids) = layer_section(&mut sk, &before);
+    let after = [LinkGeom::Circle(Vec2::new(1.0e-5, 0.0), 27.09), LinkGeom::Circle(Vec2::new(5.0e-6, 0.0), 25.51)];
+    sk.update_link(&link, &after).unwrap();
+    assert_layer_section(&sk, &link, &ids, [27.09, 25.51]);
+    // And on one shared centre, grown the other way.
+    sk.update_link(&link, &[LinkGeom::Circle(Vec2::ZERO, 26.0), LinkGeom::Circle(Vec2::ZERO, 28.5)]).unwrap();
+    assert_layer_section(&sk, &link, &ids, [28.5, 26.0]);
+}
+
+/// One of two concentric circles is gone (the plane left the roof's face): the one that is left
+/// is the old circle nearest to it, and what the sketch held on the other goes with it.
+#[test]
+fn the_concentric_circle_left_is_the_nearest_old_one() {
+    let mut sk = Sketch::new();
+    let (link, ids) = layer_section(&mut sk, &[LinkGeom::Circle(Vec2::ZERO, 19.0), LinkGeom::Circle(Vec2::ZERO, 17.5)]);
+    sk.update_link(&link, &[LinkGeom::Circle(Vec2::new(3.7e-6, 7.0e-8), 17.54)]).unwrap();
+    assert_eq!(sk.link_curves(&link).len(), 1);
+    let floor = sk.curve_index(&ids[1]).expect("the floor keeps its id");
+    assert!(matches!(sk.curves[floor].kind, CurveKind::Circle { r, .. } if r == 17.54));
+    assert!(sk.curve_index(&ids[0]).is_none(), "the roof's circle is gone");
+    let arc = sk.curve_index("on_second").unwrap();
+    assert_eq!(sk.constraints.len(), 2, "{:?}", sk.constraints);
+    assert!(
+        sk.constraints
+            .iter()
+            .all(|k| matches!(k.kind, ConstraintKind::Concentric { a, b } | ConstraintKind::Equal { a, b } if a == floor && b == arc))
+    );
+}
