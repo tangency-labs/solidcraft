@@ -118,6 +118,17 @@ pub fn start(app: &mut SolveApp, command: &str, path: String) {
         if worker.is_ok() {
             let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.clone());
             let (sketch, session) = (crate::workspace::focused_sketch(app), app.session.uid);
+            // A second pick replaces the read still under way: it never opens a window, so it is
+            // taken and recorded as cancelled before its row goes, like a cancelled one.
+            if let Some(mut old) = app.insert_read.take() {
+                old.cancel();
+                crate::operations::record_ended(
+                    app,
+                    &format!("insert_read:{}", old.serial),
+                    reading_label(&old.name),
+                    crate::operations::Outcome::Cancelled,
+                );
+            }
             app.insert_read = Some(InsertRead {
                 name,
                 serial: crate::operations::serial(),
@@ -571,6 +582,27 @@ mod tests {
         // dropped rather than opening the window.
         assert!(h.app.insert_read.is_none(), "the read finished and left");
         assert!(h.app.dialog.is_none(), "a cancelled read opens no window");
+    }
+
+    /// A second pick replaces the read still under way: the first is recorded as cancelled and
+    /// only the second opens a window.
+    #[test]
+    fn a_second_pick_records_the_first_read_as_cancelled() {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        start(&mut h.app, "sketch.insert_svg", dense_arc_svg("first-pick.svg"));
+        let first = format!("insert_read:{}", h.app.insert_read.as_ref().expect("under way").serial);
+        start(&mut h.app, "sketch.insert_svg", dense_arc_svg("second-pick.svg"));
+        let reply = h.call("ui.operations", json!({}));
+        let finished = reply["result"]["finished"].as_array().cloned().unwrap_or_default();
+        let ended: Vec<(String, String)> = finished
+            .iter()
+            .map(|f| (f["key"].as_str().unwrap_or_default().to_string(), f["outcome"].as_str().unwrap_or_default().to_string()))
+            .collect();
+        assert!(ended.iter().any(|(key, outcome)| *key == first && outcome == "cancelled"), "the replaced read says it ended: {finished:?}");
+        let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("the second pick opens a window") };
+        assert_eq!(p.path, svg_file("second-pick.svg"), "the window is the second pick's");
     }
 
     /// A read whose sketch was finished meanwhile opens nothing: the answer arrives after the
