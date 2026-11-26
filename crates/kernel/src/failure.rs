@@ -22,7 +22,15 @@ pub struct ErrorCode {
     pub call: String,
     pub kind: u16,
     pub operation: String,
+    /// A code saved before the class was kept (#22148) has none: it reads as `unclassed`, the
+    /// class that claims nothing, so a report or result saved then still opens.
+    #[serde(default = "unclassed")]
     pub class: String,
+}
+
+/// The class of a code saved without one: `unclassed`.
+pub(crate) fn unclassed() -> String {
+    "unclassed".to_owned()
 }
 
 impl From<solidcraft_smlib::failure::FailureCode> for ErrorCode {
@@ -77,5 +85,13 @@ mod tests {
             assert_eq!(code, ErrorCode { call: "blend".into(), kind: 6, operation: "blend::op".into(), class: name.into() });
             assert_eq!(serde_json::to_value(&code).unwrap()["class"], name);
         }
+    }
+
+    /// A code saved before #22148 has no `class`: it still reads, as `unclassed`.
+    #[test]
+    fn a_code_saved_before_the_class_still_reads_as_unclassed() {
+        let saved = r#"{"call":"blend","kind":7,"operation":"smlib::blend::rolling"}"#;
+        let code: ErrorCode = serde_json::from_str(saved).expect("an old code reads");
+        assert_eq!(code, ErrorCode { call: "blend".into(), kind: 7, operation: "smlib::blend::rolling".into(), class: "unclassed".into() });
     }
 }
