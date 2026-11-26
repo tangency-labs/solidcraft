@@ -1009,7 +1009,7 @@ mod imp {
                 .flat_map(|s| (0..=CROSSING_SAMPLES).map(move |i| seg_at(s, i as f64 / CROSSING_SAMPLES as f64).map(|(_, t)| t)))
                 .collect::<Option<Vec<Vec3>>>()
                 .ok_or_else(bad)?;
-            crate::sweep_path::crossing_check(plane, &tangents)?;
+            crate::sweep_path::crossing_check(plane, &tangents, false)?;
         } else {
             turning_check(plane, path)?;
         }
@@ -1034,12 +1034,12 @@ mod imp {
         with_history(body, &roles, pieces)
     }
 
-    /// [`crate::sweep_path::turning_crossing_check`] of the profile on `plane`, already where the
+    /// [`crate::sweep_path::crossing_check`] with `turning` of the profile on `plane`, already where the
     /// sweep starts, against the path's direction there.
     fn turning_check(plane: &Plane, path: &[crate::PathSeg]) -> Result<()> {
         let (t0, _) =
             path.first().and_then(crate::PathSeg::tangents).ok_or_else(|| KernelError::Invalid("a path segment has no direction".into()))?;
-        crate::sweep_path::turning_crossing_check(plane, t0)
+        crate::sweep_path::crossing_check(plane, &[t0], true)
     }
 
     /// The sweep of the profile on `plane` along `path`, with the rigid motions SMLib reports
