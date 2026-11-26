@@ -224,6 +224,7 @@ pub const DOCUMENTED: &[&str] = &[
     "sketch.copy",
     "sketch.create",
     "sketch.create3d",
+    "sketch.crosshairs",
     "sketch.cut",
     "sketch.dimension",
     "sketch.edit",
