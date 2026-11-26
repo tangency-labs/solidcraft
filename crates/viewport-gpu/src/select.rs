@@ -280,6 +280,44 @@ pub fn pick(policy: Policy) -> Option<(wgpu::Adapter, AdapterReport)> {
     pick_among(adapters(&instance()).0, policy)
 }
 
+/// Open the first device that works, in the existing adapter preference order.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn open_headless_device(policy: Policy) -> crate::Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
+    let found = adapters(&instance()).0.into_iter().map(|adapter| {
+        let report = report(&adapter.get_info());
+        (adapter, report)
+    });
+    let (adapter, (device, queue)) = open_first(policy, found, crate::open_device)?;
+    Ok((adapter, device, queue))
+}
+
+#[cfg(any(not(target_arch = "wasm32"), test))]
+fn open_first<T, U>(
+    policy: Policy,
+    found: impl IntoIterator<Item = (T, AdapterReport)>,
+    mut open: impl FnMut(&T) -> crate::Result<U>,
+) -> crate::Result<(T, U)> {
+    let mut failures = Vec::new();
+    for (adapter, info) in found {
+        if !policy.admits(info.tier) {
+            continue;
+        }
+        match open(&adapter) {
+            Ok(device) => return Ok((adapter, device)),
+            Err(error) => {
+                let failure = format!("{} ({}): {error}", info.name, info.backend);
+                log::warn!("Headless adapter failed: {failure}");
+                failures.push(failure);
+            }
+        }
+    }
+    if failures.is_empty() {
+        Err(crate::GpuError::NoAdapter(policy.name()))
+    } else {
+        Err(crate::GpuError::Device(format!("under the '{}' policy: {}", policy.name(), failures.join("; "))))
+    }
+}
+
 /// The adapter `policy` picks among `found`, as [`pick`] picks among the native backends' (best
 /// first, the first whose tier the policy admits), with its report; `None` when none qualifies.
 /// For a caller with an instance of its own, such as the UI's offscreen tests.
@@ -297,6 +335,43 @@ pub fn pick_among(mut found: Vec<wgpu::Adapter>, policy: Policy) -> Option<(wgpu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn candidate(name: &'static str, tier: Tier) -> (&'static str, AdapterReport) {
+        (name, AdapterReport { name: name.into(), backend: "Vulkan".into(), device_type: String::new(), driver: String::new(), tier })
+    }
+
+    #[test]
+    fn auto_tries_software_after_hardware_device_failure() {
+        let found = [candidate("hardware", Tier::Hardware), candidate("software", Tier::Software)];
+        let mut attempted = Vec::new();
+        let opened = open_first(Policy::Auto, found, |name| {
+            attempted.push(*name);
+            if *name == "hardware" {
+                Err(crate::GpuError::Device("out of memory".into()))
+            } else {
+                Ok(42)
+            }
+        });
+        assert_eq!(attempted, ["hardware", "software"]);
+        assert_eq!(opened.unwrap(), ("software", 42));
+    }
+
+    #[test]
+    fn device_failures_respect_policy_and_report_each_eligible_adapter() {
+        let found = [candidate("first", Tier::Hardware), candidate("second", Tier::Hardware), candidate("software", Tier::Software)];
+        let mut attempted = Vec::new();
+        let result: crate::Result<(&str, ())> = open_first(Policy::Hardware, found, |name| {
+            attempted.push(*name);
+            Err(crate::GpuError::Device("out of memory".into()))
+        });
+        assert_eq!(attempted, ["first", "second"]);
+        let message = result.unwrap_err().to_string();
+        assert!(message.contains("hardware") && message.contains("first") && message.contains("second") && message.contains("out of memory"));
+        assert!(!message.contains("software"));
+
+        let result = open_first(Policy::Cpu, [candidate("hardware", Tier::Hardware)], |_| Ok(()));
+        assert!(matches!(result, Err(crate::GpuError::NoAdapter("cpu"))));
+    }
 
     #[test]
     fn policies_parse_and_admit_their_tiers() {
