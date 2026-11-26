@@ -2155,7 +2155,7 @@ impl OffsetExecutive {
                 if record.is_marked(&kernel.context, mark_type) {
                     continue;
                 }
-                if self.closing_faces().contains(&id) {
+                if self.closing_faces().contains(&id) || self.is_kept_offset_face(id) {
                     continue;
                 }
                 record.mark(Some(&kernel.context), mark_type);
@@ -5304,6 +5304,61 @@ mod tests {
             .downcast_ref::<NotificationLog>()
             .unwrap();
         assert!(log.0.is_empty());
+    }
+
+    /// #22806: in a local operation, an offset face whose original face keeps its surface
+    /// and every edge and vertex unchanged already holds its exact surface and kept UV
+    /// trims, so `extend_result_faces_prefix` must skip it without replacing its surface
+    /// or re-dropping its trims.
+    #[test]
+    fn extended_faces_skip_kept_faces_of_a_local_operation() {
+        let mut kernel = Kernel::default();
+        kernel
+            .context
+            .set_user_notify_callback(Some(Box::<NotificationLog>::default()));
+        let (mut result, face_id) = one_face(true);
+        let key = result_key(EntityRef::Face(face_id));
+        result.set_key(result_key(EntityRef::Brep(BrepId::from_index(0))).key);
+        result.face_mut(face_id).unwrap().rectangular_trim = 1;
+        let original_domain = result.face(face_id).unwrap().uv_domain;
+        let mut fixture = NotificationFixture::new(&source_brep());
+        let mut exec = OffsetExecutive::new(OffsetOperation::LocalOperation, 0.0, 1.0e-6);
+        let source_fu = FaceuseId::from_index(0);
+        exec.relate_faceuse(source_fu, face_id);
+        exec.kept_faceuses.insert(source_fu);
+        exec.insert_extended_surface(
+            key.key.0,
+            Surface::from(Plane::from_normal(Vec3::Z, Vec3::Z)),
+        );
+        exec.set_offset_brep(result);
+        assert_eq!(
+            exec.extend_result_faces_prefix(&mut kernel, MarkType::Mark, &mut fixture.context()),
+            Ok(())
+        );
+        let kept = exec.offset_brep().unwrap();
+        assert_eq!(kept.face(face_id).unwrap().rectangular_trim, 1);
+        assert_eq!(kept.face(face_id).unwrap().uv_domain, original_domain);
+        let log = kernel
+            .context
+            .user_notify_callback()
+            .unwrap()
+            .as_any()
+            .unwrap()
+            .downcast_ref::<NotificationLog>()
+            .unwrap();
+        assert!(log.0.is_empty());
+
+        // Once the face is no longer kept (e.g. its loop inverted), extension runs normally.
+        exec.inverted_faces.insert(face_id);
+        assert_eq!(
+            exec.extend_result_faces_prefix(&mut kernel, MarkType::Mark, &mut fixture.context()),
+            Ok(())
+        );
+        let after = exec.offset_brep().unwrap();
+        assert_eq!(
+            after.face(face_id).unwrap().rectangular_trim,
+            crate::topology::face::p2::UNSURE
+        );
     }
 
     #[test]
