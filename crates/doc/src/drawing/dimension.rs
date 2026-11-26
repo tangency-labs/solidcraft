@@ -1,5 +1,5 @@
 //! A drawing's dimensions (W19b, #4896): each the distance or angle between named parts of its
-//! view's model, measured as the view shows it ([`solidcraft_geom::drawing_measure`]). A dimension
+//! view's model, measured as the view shows it ([`super::measure`]). A dimension
 //! saves what it measures by name, never a picked point, so when the model changes it follows the
 //! model or says what it lost: it never moves to other geometry. Its value and status come from
 //! the model each time. The one thing worked out that is saved is its last good value, what it last
@@ -15,6 +15,10 @@
 //!   on, read exactly from the body.
 //! - **Chain** (W20c): from each of its points to the next along one line, as the view shows them,
 //!   the members adding up to the overall from the first point to the last.
+//! - **Baseline** (W41, #13052): from one origin to each of its targets along one line, as the view
+//!   shows them, each dimension stacked above the last on paper, nearest first.
+//! - **Ordinate** (W41, #13052): the same distances, each shown as a number at the end of a leader
+//!   from its target, the origin's as 0, with no dimension lines.
 //! - **Cylinder** (W20b): a whole cylinder's diameter between its two silhouettes, on a view that
 //!   doesn't look along its axis (a face, [`ModelFace`]).
 //! - **Sphere** (R2b): a sphere's size on any view (a face, [`ModelFace`]): SØ, its diameter, when
@@ -37,7 +41,8 @@
 //! The rules, beside the record's: a dimension is on one of the drawing's views; a reference names
 //! a body and its feature, and 1 to [`MAX_REFERENCE_NAME_BYTES`] bytes in each name, without control
 //! characters; a corner names 2 to [`MAX_VERTEX_EDGES`] edges, a centre one; a chain has 3 to
-//! [`MAX_CHAIN_POINTS`] points and shows its members' numbers, never a text instead; an occurrence
+//! [`MAX_CHAIN_POINTS`] points, a baseline set 2 to [`MAX_SET_TARGETS`] targets and an ordinate set 1
+//! to [`MAX_SET_TARGETS`], and each shows its members' numbers, never a text instead; an occurrence
 //! path is at most [`MAX_PLACEMENT_DEPTH`] ids, none 0; a true length is measured aligned; a
 //! direction to measure along isn't zero, and is at most [`MAX_REAL`] each way, as every number a
 //! drawing saves (a whole number past it reads, then saves as one the file's check refuses); the
@@ -63,10 +68,10 @@ use std::collections::BTreeMap;
 use std::f64::consts::{PI, TAU};
 use std::sync::Arc;
 
+use super::measure::{self, AngleFrom, Cone, Cylinder, LinearDirection, Measured, Reading, SilhouetteSide, Sphere};
 use serde::{Deserialize, Serialize};
 use solidcore_record::brep::{Curve, Frame, Loop};
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
-use solidcraft_geom::drawing_measure::{self, AngleFrom, Cone, Cylinder, LinearDirection, Measured, Reading, SilhouetteSide, Sphere};
 use solidcraft_geom::drawing_view::{Invalid, is_paper_coordinate};
 use solidcraft_geom::paper::MAX_SIDE_MM;
 use solidcraft_geom::prelude::*;
@@ -197,6 +202,8 @@ pub const MAX_TEXT_BYTES: usize = 1024;
 pub const MAX_CHAIN_POINTS: usize = 64;
 /// The longest constraint id or parameter label a model dimension names, in bytes.
 pub const MAX_MODEL_NAME_BYTES: usize = 256;
+/// The most targets a set of dimensions from one origin measures.
+pub const MAX_SET_TARGETS: usize = 64;
 /// What a diameter's number follows: Ø (U+00D8), as tolerance texts write it. The diameter sign
 /// U+2300 isn't in the bundled fonts, so it would print as a missing glyph.
 const DIAMETER_SIGN: &str = "Ø";
@@ -275,6 +282,11 @@ pub enum DimensionKind {
     },
     /// The distances from each point to the next, in order along one line as the view shows them.
     Chain { points: Vec<ModelPoint>, direction: LinearDirection },
+    /// The distances from `origin` to each of `targets`, in any order, along one line as the view
+    /// shows them: a dimension each, stacked on paper.
+    Baseline { origin: ModelPoint, targets: Vec<ModelPoint>, direction: LinearDirection },
+    /// The same distances as a baseline set's, each shown at the end of a leader from its target.
+    Ordinate { origin: ModelPoint, targets: Vec<ModelPoint>, direction: LinearDirection },
     /// A whole cylinder's diameter between its two silhouettes, on a view that doesn't look along
     /// its axis: the cylinder a face of it lies on.
     Cylinder { face: ModelFace },
@@ -300,6 +312,9 @@ impl DimensionKind {
             DimensionKind::Length { edge, .. } | DimensionKind::Radial { edge, .. } => vec![Reference::Edge(edge)],
             DimensionKind::Angle { a, b, .. } => vec![Reference::Edge(a), Reference::Edge(b)],
             DimensionKind::Chain { points, .. } => points.iter().map(Reference::Point).collect(),
+            DimensionKind::Baseline { origin, targets, .. } | DimensionKind::Ordinate { origin, targets, .. } => {
+                std::iter::once(origin).chain(targets).map(Reference::Point).collect()
+            }
             DimensionKind::Cylinder { face } | DimensionKind::Sphere { face } | DimensionKind::Cone { face } => vec![Reference::Face(face)],
             DimensionKind::Silhouettes { a, b, .. } => vec![Reference::Face(&a.face), Reference::Face(&b.face)],
             DimensionKind::Faces { a, b, .. } => vec![Reference::Face(a), Reference::Face(b)],
@@ -449,6 +464,13 @@ impl Drawing {
                 let instead = || "a chain shows its members' numbers, never a text instead".into();
                 require(d.override_text.is_none(), instead)?;
             }
+            DimensionKind::Baseline { origin, targets, direction } | DimensionKind::Ordinate { origin, targets, direction } => {
+                d.kind.set().map_or(Ok(()), |set| check_set_targets(set, targets.len()))?;
+                std::iter::once(origin).chain(targets).try_for_each(check_point)?;
+                check_direction(*direction, Reading::Projected)?;
+                let instead = || "a set shows each target's number, never a text instead".into();
+                require(d.override_text.is_none(), instead)?;
+            }
             DimensionKind::Cylinder { face } | DimensionKind::Sphere { face } | DimensionKind::Cone { face } => check_face(face)?,
             DimensionKind::Silhouettes { a, b, direction } => {
                 check_face(&a.face)?;
@@ -493,6 +515,34 @@ pub fn check_chain_length(points: usize) -> Result<()> {
     require((3..=MAX_CHAIN_POINTS).contains(&points), || format!("a chain has 3 to {MAX_CHAIN_POINTS} points"))
 }
 
+/// The two kinds of dimension set, each measured from one origin to each of its targets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SetKind {
+    Baseline,
+    Ordinate,
+}
+
+impl DimensionKind {
+    /// The kind of set it is, if it is one.
+    pub fn set(&self) -> Option<SetKind> {
+        match self {
+            DimensionKind::Baseline { .. } => Some(SetKind::Baseline),
+            DimensionKind::Ordinate { .. } => Some(SetKind::Ordinate),
+            _ => None,
+        }
+    }
+}
+
+/// A set's number of targets: a baseline set's 2 (one makes a linear dimension) to
+/// [`MAX_SET_TARGETS`], an ordinate set's 1 (beside its origin's 0) to it.
+pub fn check_set_targets(set: SetKind, targets: usize) -> Result<()> {
+    let (named, least) = match set {
+        SetKind::Baseline => ("a baseline set", 2),
+        SetKind::Ordinate => ("an ordinate set", 1),
+    };
+    require((least..=MAX_SET_TARGETS).contains(&targets), || format!("{named} has {least} to {MAX_SET_TARGETS} targets"))
+}
+
 /// An edge reference's rules (a balloon's edge keeps them too).
 pub(super) fn check_edge(edge: &ModelEdge) -> Result<()> {
     check_body(&edge.body, edge.origin_feature, &edge.path)?;
@@ -532,7 +582,7 @@ fn check_reference_name(name: &str) -> Result<()> {
 }
 
 /// A linear dimension's direction and reading: a true length is the segment's own, so it is
-/// measured aligned (as [`solidcraft_geom::drawing_measure::linear`] reads it), and a direction to
+/// measured aligned (as [`measure::linear`] reads it), and a direction to
 /// measure along isn't zero.
 fn check_direction(direction: LinearDirection, reading: Reading) -> Result<()> {
     if let LinearDirection::Along(along) = direction {
@@ -560,15 +610,17 @@ pub struct Resolved {
     /// What its number is, whenever it was measured, a chain's members aside: a sphere's says
     /// whether it is drawn as a diameter or a radius.
     pub label: Option<LabelKind>,
-    /// A chain's members, from its first point to its last, each as it reads and its text: empty
-    /// unless measured, and for other kinds. `measured` is then the chain's overall.
+    /// A chain's members, from its first point to its last, or a set's, one for each target in its
+    /// order, each as it reads and its text: empty unless measured, and for other kinds. `measured`
+    /// is then the chain's overall, or the set's farthest target.
     pub members: Vec<Member>,
     /// Every name it measures was found by exact history, each as one edge.
     pub exact: bool,
     /// What it measures, in the design's frame: a linear dimension's two points, an angle's two
     /// lines (four points, each line from its first to its second), a radial dimension's
     /// centre and its arc's start, middle and end (a sphere's: the arc of its contour on its faces,
-    /// or the whole contour from one point round to it again), a chain's points, or the ends of
+    /// or the whole contour from one point round to it again), a chain's points, a set's origin then
+    /// its targets, or the ends of
     /// each silhouette measured (a cylinder's two, from its faces' one end along its axis to the
     /// other). Empty unless measured.
     pub points: Vec<Vec3>,
@@ -1061,7 +1113,7 @@ impl<'a> Lookup<'a> {
             DimensionKind::Linear { a, b, direction, reading } => {
                 let (a, exact_a) = self.corner(a)?;
                 let (b, exact_b) = self.corner(b)?;
-                let measured = drawing_measure::linear(basis, a, b, *direction, *reading).map_err(unmeasurable)?;
+                let measured = measure::linear(basis, a, b, *direction, *reading).map_err(unmeasurable)?;
                 Ok(Found::new(measured, vec![a, b], exact_a && exact_b))
             }
             DimensionKind::Length { edge, direction, reading } => {
@@ -1072,13 +1124,13 @@ impl<'a> Lookup<'a> {
                 }
                 let ends = found.pieces.first().and_then(|(_, line)| straight(line)).or_else(|| self.edge_on(&found, basis));
                 let [a, b] = ends.ok_or_else(|| Status::Unmeasurable(format!("edge `{}` isn't straight", edge.name)))?;
-                let measured = drawing_measure::linear(basis, a, b, *direction, *reading).map_err(unmeasurable)?;
+                let measured = measure::linear(basis, a, b, *direction, *reading).map_err(unmeasurable)?;
                 Ok(Found::new(measured, vec![a, b], found.exact))
             }
             DimensionKind::Angle { a, b, reading, other_side } => {
                 let (a, exact_a) = self.line(a)?;
                 let (b, exact_b) = self.line(b)?;
-                let between = drawing_measure::angle(basis, (a[0], a[1]), AngleFrom::Edge(b[0], b[1]), *reading).map_err(unmeasurable)?;
+                let between = measure::angle(basis, (a[0], a[1]), AngleFrom::Edge(b[0], b[1]), *reading).map_err(unmeasurable)?;
                 let value = between_lines(between.value, *other_side);
                 let points = vec![a[0], a[1], b[0], b[1]];
                 Ok(Found::new(Measured { value, ..between }, points, exact_a && exact_b))
@@ -1093,8 +1145,21 @@ impl<'a> Lookup<'a> {
                 let found = points.iter().map(|p| self.corner(p)).collect::<std::result::Result<Vec<_>, _>>()?;
                 let exact = found.iter().all(|(_, exact)| *exact);
                 let points: Vec<Vec3> = found.into_iter().map(|(p, _)| p).collect();
-                let chain = drawing_measure::chain(basis, &points, *direction).map_err(unmeasurable)?;
+                let chain = measure::chain(basis, &points, *direction).map_err(unmeasurable)?;
                 Ok(Found { members: chain.members, ..Found::new(chain.overall, points, exact) })
+            }
+            DimensionKind::Baseline { origin, targets, direction } | DimensionKind::Ordinate { origin, targets, direction } => {
+                let found = std::iter::once(origin).chain(targets).map(|p| self.corner(p)).collect::<std::result::Result<Vec<_>, _>>()?;
+                let exact = found.iter().all(|(_, exact)| *exact);
+                let points: Vec<Vec3> = found.into_iter().map(|(p, _)| p).collect();
+                let (origin, targets) = points.split_first().ok_or_else(|| Status::Unmeasurable("a set has no origin".into()))?;
+                let set = measure::from_origin(basis, *origin, targets, *direction).map_err(unmeasurable)?;
+                // An ordinate shows a target in line with its origin as 0; a baseline set has no line for it.
+                let baseline = matches!(d.kind, DimensionKind::Baseline { .. });
+                if baseline && set.members.iter().any(|m| m.value <= solidcraft_geom::EPS) {
+                    return Err(Status::Unmeasurable("a target in line with its origin has no distance to dimension".into()));
+                }
+                Ok(Found { members: set.members, ..Found::new(set.farthest, points, exact) })
             }
             DimensionKind::Cylinder { face } => self.cylinder(face, basis),
             DimensionKind::Sphere { face } => self.sphere(face, basis),
@@ -1198,7 +1263,7 @@ impl<'a> Lookup<'a> {
     /// The pieces of a split edge on one circle are still that circle, as [`Lookup::line`] keeps a
     /// line: read from the longest, so its points lie on what is left of it. Pieces on several
     /// circles are listed, and none is chosen.
-    fn whole_arc(&mut self, edge: &ModelEdge, basis: &Plane) -> std::result::Result<(f64, [Vec3; 4], bool), Status> {
+    pub(super) fn whole_arc(&mut self, edge: &ModelEdge, basis: &Plane) -> std::result::Result<(f64, [Vec3; 4], bool), Status> {
         let found = self.edges(edge)?;
         if !found.whole && one_circle(&found.pieces).is_none() {
             return Err(Status::Ambiguous(edge_candidates(&edge.body, &found)));
@@ -1413,7 +1478,7 @@ impl<'a> Lookup<'a> {
     /// round is refused. Its points are the silhouettes' ends.
     fn cylinder(&mut self, face: &ModelFace, basis: &Plane) -> std::result::Result<Found, Status> {
         let on = self.on_cylinder(face)?;
-        let side = drawing_measure::silhouette_side(basis, on.cylinder.axis).map_err(|e| Status::Unmeasurable(e.0.to_string()))?;
+        let side = measure::silhouette_side(basis, on.cylinder.axis).map_err(|e| Status::Unmeasurable(e.0.to_string()))?;
         if !(on.covers(side) && on.covers(-side)) {
             return Err(Status::Unmeasurable(format!(
                 "face `{}` isn't a whole cylinder in this view: one of its silhouettes isn't on it (give an arc's radius)",
@@ -1428,7 +1493,7 @@ impl<'a> Lookup<'a> {
     /// cylinder's faces. Its points are the two silhouettes' ends, `a`'s first.
     fn silhouettes(&mut self, a: &Silhouette, b: &Silhouette, direction: LinearDirection, basis: &Plane) -> std::result::Result<Found, Status> {
         let (on_a, on_b) = (self.on_cylinder(&a.face)?, self.on_cylinder(&b.face)?);
-        let between = drawing_measure::between_silhouettes(basis, &on_a.cylinder, a.side, &on_b.cylinder, b.side, direction);
+        let between = measure::between_silhouettes(basis, &on_a.cylinder, a.side, &on_b.cylinder, b.side, direction);
         let (measured, [way_a, way_b]) = between.map_err(|e| Status::Unmeasurable(e.0.to_string()))?;
         for (on, way, s) in [(&on_a, way_a, a), (&on_b, way_b, b)] {
             if !on.covers(way) {
@@ -1460,7 +1525,7 @@ impl<'a> Lookup<'a> {
     /// face's ends on the view, `a`'s first.
     fn faces(&mut self, a: &ModelFace, b: &ModelFace, direction: LinearDirection, basis: &Plane) -> std::result::Result<Found, Status> {
         let (on_a, on_b) = (self.on_plane(a)?, self.on_plane(b)?);
-        let between = drawing_measure::between_faces(basis, (on_a.origin, on_a.normal), (on_b.origin, on_b.normal), direction);
+        let between = measure::between_faces(basis, (on_a.origin, on_a.normal), (on_b.origin, on_b.normal), direction);
         let measured = between.map_err(|e| Status::Unmeasurable(e.0.to_string()))?;
         let ends = |on: &OnPlane, face: &ModelFace| on.ends(basis).ok_or_else(|| Status::Unmeasurable(format!("face `{}` has no mesh", face.name)));
         let points = [ends(&on_a, a)?, ends(&on_b, b)?].concat();
@@ -1636,7 +1701,7 @@ fn label_of(kind: &DimensionKind) -> Option<LabelKind> {
         DimensionKind::Angle { .. } | DimensionKind::Cone { .. } => Some(LabelKind::Angle),
         DimensionKind::Radial { diameter: false, .. } => Some(LabelKind::Radius),
         DimensionKind::Radial { diameter: true, .. } | DimensionKind::Cylinder { .. } => Some(LabelKind::Diameter),
-        DimensionKind::Chain { .. } | DimensionKind::Sphere { .. } => None,
+        DimensionKind::Chain { .. } | DimensionKind::Baseline { .. } | DimensionKind::Ordinate { .. } | DimensionKind::Sphere { .. } => None,
         DimensionKind::Linear { .. } | DimensionKind::Length { .. } | DimensionKind::Silhouettes { .. } | DimensionKind::Faces { .. } => {
             Some(LabelKind::Length)
         }

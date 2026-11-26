@@ -1,5 +1,6 @@
-// Every moved entry of `ROWS` with its class against the certified enclosure.
-static EXPECTED: [(&str, usize, Side); 126] = [
+// Every moved entry of `ROWS` with its class against the certified enclosure. Entry 0 of the
+// six rows that keep the read's classified trims moves with WR-732's retirement (#18934).
+static EXPECTED: [(&str, usize, Side); 132] = [
     ("source-file-box_w_slot-all-edges", 0, Side::Equal),
     ("source-file-box_w_slot-all-edges", 1, Side::Equal),
     ("source-file-box_w_slot-all-edges", 2, Side::Equal),
@@ -36,6 +37,7 @@ static EXPECTED: [(&str, usize, Side); 126] = [
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 9, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 10, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 11, Side::Equal),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 0, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 1, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 2, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 3, Side::Equal),
@@ -71,6 +73,7 @@ static EXPECTED: [(&str, usize, Side); 126] = [
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 9, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 10, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 11, Side::Equal),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 0, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 1, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 2, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 3, Side::Equal),
@@ -82,6 +85,7 @@ static EXPECTED: [(&str, usize, Side); 126] = [
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 9, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 10, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 11, Side::Equal),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 0, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 1, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 2, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 3, Side::Equal),
@@ -93,6 +97,7 @@ static EXPECTED: [(&str, usize, Side); 126] = [
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 9, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 10, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 11, Side::Equal),
+    ("sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1", 0, Side::Equal),
     ("sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1", 1, Side::Equal),
     ("sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1", 2, Side::Equal),
     ("sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1", 3, Side::Equal),
@@ -104,6 +109,7 @@ static EXPECTED: [(&str, usize, Side); 126] = [
     ("sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1", 9, Side::Equal),
     ("sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1", 10, Side::Equal),
     ("sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1", 11, Side::Equal),
+    ("sweep4-sphere_diff_3cylinders-all-r0.1", 0, Side::Equal),
     ("sweep4-sphere_diff_3cylinders-all-r0.1", 1, Side::Equal),
     ("sweep4-sphere_diff_3cylinders-all-r0.1", 2, Side::Equal),
     ("sweep4-sphere_diff_3cylinders-all-r0.1", 3, Side::Equal),
@@ -115,6 +121,7 @@ static EXPECTED: [(&str, usize, Side); 126] = [
     ("sweep4-sphere_diff_3cylinders-all-r0.1", 9, Side::Equal),
     ("sweep4-sphere_diff_3cylinders-all-r0.1", 10, Side::Equal),
     ("sweep4-sphere_diff_3cylinders-all-r0.1", 11, Side::Equal),
+    ("sweep5-sphere_diff_3cylinders-e29-r1.0", 0, Side::Equal),
     ("sweep5-sphere_diff_3cylinders-e29-r1.0", 1, Side::Equal),
     ("sweep5-sphere_diff_3cylinders-e29-r1.0", 2, Side::Equal),
     ("sweep5-sphere_diff_3cylinders-e29-r1.0", 3, Side::Equal),

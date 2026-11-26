@@ -197,6 +197,11 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "names_only": {"type": "boolean", "description": "Only each body's name (assembly occurrences included) and its definition's, without measuring (default false)"},
                     "items": {"type": "array", "items": {"type": "object"}, "description": "One or two selections to measure instead of bodies, e.g. {\"type\": \"face\", \"body\": \"Body1\", \"index\": 3, \"point\": [x,y,z]}"},
                     "summary": {"type": "boolean", "description": "Per body only name, volume_mm3, bbox {min, max}, faces and closed, and total.volume_mm3 (default false: the full reply)"},
+                    "within": {"type": "object", "properties": {
+                        "min": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                        "max": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}
+                    }, "required": ["min", "max"], "additionalProperties": false, "description": "Filter bodies by their world-coordinate bounding box (mm)"},
+                    "mode": {"type": "string", "enum": ["intersects", "inside"], "description": "With within: include boxes that touch or overlap (intersects, default), or only boxes fully inside"},
                 }),
                 &[],
             ),
@@ -1008,9 +1013,17 @@ fn str_arg<'a>(a: &'a Map<String, Value>, k: &str) -> Option<&'a str> {
     a.get(k).and_then(Value::as_str)
 }
 
+/// Preserve present region keys, even null, for validation by the engine.
+fn measure_region_params(a: &Map<String, Value>) -> Value {
+    Value::Object(["within", "mode"].iter().filter_map(|k| a.get(*k).map(|v| (k.to_string(), v.clone()))).collect())
+}
+
 /// `measure`'s arguments (without `items`) as `inspect.measure` takes them.
 fn measure_params(a: &Map<String, Value>) -> Value {
-    let mut p = pick(a, &["names_only"]);
+    let mut p = measure_region_params(a);
+    if let Some(v) = a.get("names_only").filter(|v| !v.is_null()) {
+        p["names_only"] = v.clone();
+    }
     if let Some(body) = str_arg(a, "body") {
         p["bodies"] = json!([body]);
     }
@@ -1078,7 +1091,9 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         "pending" => pending(b),
         "measure" => {
             if let Some(items) = a.get("items") {
-                return exec(b, "inspect.measure", json!({ "items": items }));
+                let mut p = measure_region_params(a);
+                p["items"] = items.clone();
+                return exec(b, "inspect.measure", p);
             }
             let m = exec(b, "inspect.measure", measure_params(a))?;
             Ok(if measure_summary_wanted(a) { measure_summary(m) } else { m })
@@ -1377,7 +1392,11 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
             mapped(inner, a.get("params").cloned().filter(Value::is_object).unwrap_or(json!({})))
         }
         "measure" => match a.get("items") {
-            Some(items) => mapped("inspect.measure", json!({"items": items})),
+            Some(items) => {
+                let mut p = measure_region_params(a);
+                p["items"] = items.clone();
+                mapped("inspect.measure", p)
+            }
             None => Ok(("inspect.measure".into(), measure_params(a), measure_summary_wanted(a).then_some(Narrow::MeasureSummary))),
         },
         // A batch step gets the numbers; the overlay picture is the `compare_picture` tool's.
@@ -1903,6 +1922,8 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
             Err(e) if e.starts_with(crate::backend::NOT_RUNNING) || e.starts_with(STILL_RUNNING) || e.contains(crate::backend::REFUSED_UNRUN) => {
                 return (Value::String(e), true);
             }
+            // The app said it ran nothing (the user declined the call): not "it may have run".
+            Err(e) if e.starts_with(solidcraft_control::NOT_RUN) => return (Value::String(e), true),
             // The app may have run it: sending the steps again would apply them twice.
             Err(e) => {
                 let msg = format!("the app did not answer engine.batch ({e}); it may have run: inspect the design before sending it again");

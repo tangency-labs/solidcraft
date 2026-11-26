@@ -29,7 +29,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::super::ERROR;
+use super::super::PointerCheck;
 use super::{base, brep_object, class, edge, face, loops, seams, shell, vertex, Cx, Rep, Test};
 use crate::error::{EntityRef, Result};
 use crate::geom::tol;
@@ -63,7 +63,7 @@ pub(super) fn brep(
     }
 
     // Old style checks: ValidatePointers() and ValidateAndUpdateTolerances().
-    let (status, exclusion_failed) = if pointers {
+    let (pointer_check, exclusion_failed) = if pointers {
         super::validate_pointers_excluding(
             k,
             b,
@@ -74,9 +74,9 @@ pub(super) fn brep(
             false,
         )?
     } else {
-        (super::SUCCESS, false)
+        (PointerCheck::Passed, false)
     };
-    if status != super::SUCCESS {
+    if !pointer_check.is_passed() {
         return Ok(false);
     }
     // Test #82 refused a vertex whose ball reaches other topology: reported above, and the
@@ -84,10 +84,10 @@ pub(super) fn brep(
     rtn &= !exclusion_failed;
 
     // old style ValidateAndUpdateTolerances check (no updating is done)
-    let status = tolerances(k, b, cx)?;
+    let tolerances_ok = tolerances(k, b, cx)?;
 
     // new style - remember failures and keep checking
-    rtn &= status == super::SUCCESS;
+    rtn &= tolerances_ok;
 
     // Walk the Topology graph checks.
     let regions = p1::regions(b, None)?;
@@ -251,10 +251,10 @@ pub(super) fn brep(
 /// (list 2 of `SmBrep`, about each edge use) the vertex/edge and vertex/face gaps at
 /// both ends of every face's upward-faceuse edge use that exceed half the vertex
 /// tolerance (tests 0-3) and its edge/face gap over the edge tolerance (test 4); an
-/// edge use and its mate are checked once. Returns the native status (`SM_ERR` for an
-/// end without vertex).
-fn tolerances(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>) -> Result<i32> {
-    validate_and_update(k, b, &mut cx.rep, true).map(|(status, _)| status)
+/// edge use and its mate are checked once. Returns false for an end without vertex
+/// (upstream's `SM_ERR`), true otherwise.
+fn tolerances(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>) -> Result<bool> {
+    validate_and_update(k, b, &mut cx.rep, true).map(|(ok, _)| ok)
 }
 
 /// The outputs of `SmBrep::ValidateAndUpdateTolerances` (see
@@ -274,8 +274,8 @@ pub struct ToleranceGaps {
     pub max_vertex_face_use: Option<VertexuseId>,
 }
 
-/// `SmBrep::ValidateAndUpdateTolerances(bValidateOnly, ...)` reporting into `rep`: the
-/// native status and the outputs. Unless `validate_only`, a vertex with a bad
+/// `SmBrep::ValidateAndUpdateTolerances(bValidateOnly, ...)` reporting into `rep`: whether
+/// it succeeded (false for an end without vertex, upstream's `SM_ERR`) and the outputs. Unless `validate_only`, a vertex with a bad
 /// vertex/edge or vertex/face gap (over half its tolerance, WR-679; upstream: over the
 /// whole of it) grows to twice its larger gap, and an edge with an edge/face gap over its
 /// tolerance grows to twice the gap when the gap is under the B-rep's box diagonal / 800,
@@ -285,7 +285,7 @@ pub(super) fn validate_and_update(
     b: &mut Brep,
     rep: &mut Rep<'_>,
     validate_only: bool,
-) -> Result<(i32, ToleranceGaps)> {
+) -> Result<(bool, ToleranceGaps)> {
     // Don't change the brep if we are just validating. Not upstream (#21105): upstream sets
     // `m_bValidateOnly` on the B-rep for the pass and restores it after, so that a UV trim
     // built during the pass raises no tolerance; here the pass's argument holds the raise on
@@ -304,7 +304,7 @@ fn validate_and_update_body(
     b: &mut Brep,
     rep: &mut Rep<'_>,
     validate_only: bool,
-) -> Result<(i32, ToleranceGaps)> {
+) -> Result<(bool, ToleranceGaps)> {
     // init outputs
     let mut out = ToleranceGaps::default();
 
@@ -366,11 +366,11 @@ fn validate_and_update_body(
 
             let start_vu = super::super::required(eu1::vertexuse(b, eu)?)?;
             let Some(start_v) = tvu::vertex(b, start_vu)? else {
-                return Ok((ERROR, out));
+                return Ok((false, out));
             };
             let end_vu = super::super::required(eu1::vertexuse(b, mate)?)?;
             let Some(end_v) = tvu::vertex(b, end_vu)? else {
-                return Ok((ERROR, out));
+                return Ok((false, out));
             };
 
             // get all edgeuse start/end vertex gaps: upstream keeps pointers into the
@@ -511,7 +511,7 @@ fn validate_and_update_body(
     }
 
     // all done
-    Ok((super::SUCCESS, out))
+    Ok((true, out))
 }
 
 /// A `SM_ASSERT_OBJ_VALUE_REPORT(this, SM_LIST_2, index, ...)` of the tolerance pass.

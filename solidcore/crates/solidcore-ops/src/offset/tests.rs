@@ -312,6 +312,64 @@ fn an_inset_by_the_rounds_radius_mates_across_rounds_that_meet_at_a_corner() {
     );
 }
 
+/// A frustum on the z axis, r 10 at z = 0 to r 4 at z = 20 (its side falls 0.3 per mm), with
+/// everything at y > 6.8 cut away from below up to z = 10: a slot whose wall, the plane
+/// y = 6.8, runs along the frustum's side. The slot's ceiling, z = 10, is a lens of two edges
+/// between the wall's line and the side's circle (r 7 there): 0.2 across at x = 0, its two
+/// vertices the only places the side, the wall and the ceiling meet. The side meets the wall
+/// along a hyperbola.
+fn slotted_frustum() -> Body {
+    let frustum = crate::make_cone([0.0; 3], 10.0, 4.0, 20.0).unwrap();
+    let slot = make_box([-20.0, 6.8, -1.0], [40.0, 20.0, 11.0]).unwrap();
+    crate::boolean::boolean(frustum, slot, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap()
+}
+
+/// acid-1's notch ceiling where it breaks out through the torus, on a frustum: the slotted
+/// frustum shelled closed. The void is the core: the frustum with its side moved in t along
+/// its normal (its radius at z is 10 - 0.3 z - t sqrt(1.09)) between z = t and 20 - t, less the
+/// slot grown by t (its wall at y = 6.8 - t, its ceiling at 10 + t). At t = 1 the side and the
+/// wall no longer meet on the ceiling's plane, z = 11 (the side is there at 10 - 3.3 - 1.044 =
+/// 5.656, the wall at 5.8): the lens's offset is empty (the offset eliminates it), and the
+/// wall meets the side directly up to z* = (10 - 1.044 - 5.8) / 0.3 = 10.52, where they part.
+/// At t = 0.1 the lens's offset is still there (the wall at 6.7 against the side at 6.866 on
+/// z = 10.1). The shell is the body less the core, each a frustum less its slot: at each
+/// height z the slot takes the disc's segment beyond the wall (`disc_segment`), up to the
+/// ceiling or to where the side and the wall part, whichever comes first.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_lens_whose_offset_is_empty_leaves_the_shell() {
+    crate::test_corpus::rig_fixes();
+    // the frustum moved in by `t` less its slot moved out by `t`
+    let core = |t: f64| {
+        let radius = |z: f64| 10.0 - 0.3 * z - t * 1.09_f64.sqrt();
+        let (bottom, top) = (radius(t), radius(20.0 - t));
+        let wall = 6.8 - t;
+        let parts = (10.0 - t * 1.09_f64.sqrt() - wall) / 0.3;
+        PI / 3.0 * (20.0 - 2.0 * t) * (bottom * bottom + bottom * top + top * top)
+            - integral(t, (10.0 + t).min(parts), |z| disc_segment(radius(z), wall))
+    };
+    let body_volume = core(0.0);
+    for t in [1.0, 0.1] {
+        let body = slotted_frustum();
+        assert!(
+            rel(volume(&body), body_volume) < 1e-9,
+            "body {}",
+            volume(&body)
+        );
+        shell(&body, &order(&body), &[], -t).unwrap_or_else(|e| panic!("t {t}: {e:?}"));
+        let report = body.check(crate::CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "t {t}: {}", report.text);
+        let want = body_volume - core(t);
+        let actual = volume(&body);
+        assert!(
+            rel(actual, want) < 1e-9,
+            "t {t}: shell volume {actual:.17}, want {want:.17}"
+        );
+    }
+}
+
 /// The same incidence graph before the seam disappears: the outer rim is
 /// 37.99 and the grown drill reaches 37.96, so their meridian still survives.
 #[test]

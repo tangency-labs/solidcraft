@@ -149,7 +149,7 @@ const DECAL_LIFT_MM: f64 = 0.2;
 /// whichever way the face does) and its texture coordinates (the image's bottom-left at (0, 0),
 /// its top-right at (1, 1)). `None` when the corners give no plane.
 pub(super) fn decal_quad(corners: [[f64; 3]; 4]) -> Option<(Vec<[f64; 3]>, Vec<[f64; 3]>, Vec<[u32; 3]>, TextureCoordinates)> {
-    let (normal, front, back) = solidcore_ops::affine::lifted_quad(corners, DECAL_LIFT_MM)?;
+    let (normal, front, back) = solidcraft_kernel::services::affine::offset_quad(corners, DECAL_LIFT_MM)?;
     let points: Vec<[f64; 3]> = front.into_iter().chain(back).collect();
     let flipped = normal.map(|x| -x);
     let normals: Vec<[f64; 3]> = std::iter::repeat_n(normal, 4).chain(std::iter::repeat_n(flipped, 4)).collect();

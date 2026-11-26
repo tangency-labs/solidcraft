@@ -167,7 +167,11 @@ fn nurbs_record(k: &Kernel, s: &Surface, depth: u32, proved: bool) -> Result<Sup
     let reads_back = |kind: SupportKind| -> Result<bool> {
         match labelled(k, kind, stored_form.copy()) {
             Ok(_) => Ok(true),
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => Err(e),
             Err(_) => Ok(false),
         }
     };

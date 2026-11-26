@@ -9,7 +9,16 @@ use crate::profiles3d::find_planar_3d_profiles;
 use crate::wire::WireSpace;
 
 fn wire(id: &str, pts: &[Vec3]) -> crate::wire::Wire {
-    crate::wire::Wire { id: id.into(), pts: pts.to_vec(), space: WireSpace::Component, link: None, fit: Vec::new(), arc: None, exact: Vec::new() }
+    crate::wire::Wire {
+        id: id.into(),
+        pts: pts.to_vec(),
+        space: WireSpace::Component,
+        link: None,
+        fit: Vec::new(),
+        arc: None,
+        control: None,
+        exact: Vec::new(),
+    }
 }
 
 /// The issue's pyramid: a 20×20 square on XY, 3D lines from its corners to an apex at (0,0,15).

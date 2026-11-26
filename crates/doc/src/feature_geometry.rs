@@ -15,9 +15,9 @@ pub fn restored_thread_pick(saved: Vec3, resolved: Vec3) -> Vec3 {
     let saved_coords = [saved.x, saved.y, saved.z];
     let resolved_coords = [resolved.x, resolved.y, resolved.z];
     let (Ok(change), Ok(saved_scale), Ok(resolved_scale)) = (
-        solidcore_ops::point_distance(saved_coords, resolved_coords),
-        solidcore_ops::point_distance(saved_coords, [0.0; 3]),
-        solidcore_ops::point_distance(resolved_coords, [0.0; 3]),
+        solidcraft_kernel::services::point_distance(saved_coords, resolved_coords),
+        solidcraft_kernel::services::point_distance(saved_coords, [0.0; 3]),
+        solidcraft_kernel::services::point_distance(resolved_coords, [0.0; 3]),
     ) else {
         return resolved;
     };
@@ -94,7 +94,7 @@ impl FeatureKind {
             FeatureKind::SheetConvert { .. } | FeatureKind::Lip { .. } | FeatureKind::SurfaceUntrim { .. } | FeatureKind::SurfaceRuled { .. } => {
                 &["face"]
             }
-            FeatureKind::Emboss { .. } => &["face"],
+            FeatureKind::Emboss { .. } | FeatureKind::Dome { .. } => &["face"],
             FeatureKind::Revolve { .. } => &["to"],
             FeatureKind::Extrude { .. } | FeatureKind::SurfaceExtrude { .. } => &["extent.to", "extent.from"],
             FeatureKind::SurfaceExtend { .. } => &["up_to"],
@@ -109,6 +109,7 @@ impl FeatureKind {
     pub fn face_body(&self) -> Option<&str> {
         match self {
             FeatureKind::Shell { body, .. }
+            | FeatureKind::Dome { body, .. }
             | FeatureKind::Draft { body, .. }
             | FeatureKind::SplitFace { body, .. }
             | FeatureKind::OffsetFace { body, .. }

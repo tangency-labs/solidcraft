@@ -12,6 +12,7 @@
 //! | [`intersect_surfaces_within`]                         | (not upstream)                 |
 //! | `refuse_points_where_a_plane_crosses` (private)       | (not upstream)                 |
 //! | [`intersect_faces`], [`FaceBodies`], [`Intersections`] | `SmApiIntersectFaces`         |
+//! | [`intersect_faces_read_only`]                         | (not upstream)                 |
 //! | [`intersect_breps`], [`BrepOperands`]                 | `SmApiIntersectBreps`          |
 //! | [`intersect_curve_surface`], [`CurveHits`]            | `SmApiIntersectCurveSurface`   |
 //! | [`intersect_curve_face`]                              | `SmApiIntersectCurveFace`      |
@@ -50,10 +51,15 @@
 //! the caller's tolerance of [`intersect_surfaces_within`], when larger),
 //! between a plane and a surface the plane crosses
 //! ([`IntersectFailure::PointsWhereAPlaneCrosses`]); upstream returns the points.
+//! Not upstream (#15130): [`intersect_faces_read_only`] is [`intersect_faces`] on trial
+//! copies of the B-reps (`Brep::clone_for_trial_keeping_definitions`), because the face
+//! intersection edits the B-reps it classifies on (their faces' UV trim curves, gap caches
+//! and trimmed surface caches, a raised edge tolerance) and a caller that only reads a part,
+//! as a weld between two parts does, must find it as it was.
 
 use crate::curve::curve::Curve;
 use crate::error::intersect::IntersectFailure;
-use crate::error::{ignored, EntityRef, Failure, Result, SolidError, SM_ERR};
+use crate::error::{ignored, Failure, Result, SolidError, SM_ERR};
 use crate::eval::Frame;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -73,13 +79,11 @@ use crate::query::brep::{BrepFaceServices, CurveFaceObject, CurveFaceServices};
 use crate::surface::plane::Plane;
 use crate::surface::surface::{Surface, SurfaceIntersection, SurfaceKind, TsectCurveType};
 use crate::surface::surface_cache::face_context::FaceQueries;
-use crate::topology::brep::p3::brep_copy_mapped;
 use crate::topology::brep::planar_section::{
     create_planar_section_curves, PlanarSectionOptions, SectionOutputs,
 };
 use crate::topology::brep_cache::CacheObject;
 use crate::topology::face::p3::{face_intersect_breps, FaceBreps, FaceIntersectOptions};
-use crate::topology::proto_topology::p1::CopyBrepMap;
 use crate::topology::Brep;
 use crate::topology::FaceId;
 
@@ -550,37 +554,39 @@ pub fn intersect_faces(
     })
 }
 
-/// [`intersect_faces`] of `face1` of `brep1` and `face2` of `brep2`, two B-reps it only
-/// reads: it meets the faces on copies of both ([`brep_copy_mapped`]), so neither B-rep
-/// changes, not even the caches and trim curves the intersection would make on it.
+/// [`intersect_faces`] of `face1` of `brep1` and `face2` of `brep2`, B-reps it only reads:
+/// it intersects the faces on trial copies of them
+/// (`Brep::clone_for_trial_keeping_definitions`: the same ids, owners and geometry, each
+/// face surface with a cache slot of its own), so the UV trim curves, gap caches, trimmed
+/// surface caches and tolerances the intersection makes or raises stay on the copies. The
+/// same B-rep passed twice ([`core::ptr::eq`]) is one copy ([`FaceBodies::One`]), as
+/// [`intersect_faces`] takes it. What the copies share with the B-reps is only caches of
+/// values they give alike: the edge curves' memos, the cache slots of nested surfaces (an
+/// offset's or a STEP surface's base) and of edge curves' surfaces.
 ///
 /// # Errors
 ///
-/// Those of [`brep_copy_mapped`]; [`SolidError::InvalidInput`] for a face not of its
-/// B-rep; those of [`intersect_faces`].
+/// Those of `Brep::clone_for_trial_keeping_definitions` (a trimmed surface cache in use,
+/// geometry nested too deeply); those of [`intersect_faces`] on the copies, as on the
+/// B-reps (a face not of its B-rep: `NotFound`).
 pub fn intersect_faces_read_only(
-    k: &mut Kernel,
+    k: &Kernel,
     brep1: &Brep,
     face1: FaceId,
     brep2: &Brep,
     face2: FaceId,
     want_points: bool,
 ) -> Result<Intersections> {
-    let (mut copy1, map1) = brep_copy_mapped(k, brep1)?;
-    let (mut copy2, map2) = brep_copy_mapped(k, brep2)?;
-    let face_of = |map: &CopyBrepMap<EntityRef>, f| match map.get_at(Some(EntityRef::Face(f))) {
-        Ok(Some(EntityRef::Face(c))) => Ok(c),
-        _ => Err(SolidError::invalid_input(
-            "intersect_faces_read_only",
-            "a face not of its B-rep",
-        )),
-    };
-    let (f1, f2) = (face_of(&map1, face1)?, face_of(&map2, face2)?);
+    let mut copy1 = brep1.clone_for_trial_keeping_definitions()?;
+    if core::ptr::eq(brep1, brep2) {
+        return intersect_faces(k, FaceBodies::One(&mut copy1), face1, face2, want_points);
+    }
+    let mut copy2 = brep2.clone_for_trial_keeping_definitions()?;
     intersect_faces(
         k,
         FaceBodies::Two(&mut copy1, &mut copy2),
-        f1,
-        f2,
+        face1,
+        face2,
         want_points,
     )
 }

@@ -955,7 +955,10 @@ impl crate::SolidError {
     /// `.map_err(SolidError::nurbs_routine(OP))`.
     pub(crate) fn nurbs_routine(operation: &'static str) -> impl Fn(Self) -> Self {
         move |e| match e {
-            Self::Unported { .. } | Self::Cancelled { .. } | Self::PreparationRequired { .. } => e,
+            Self::Unported { .. }
+            | Self::Cancelled { .. }
+            | Self::OutOfFuel { .. }
+            | Self::PreparationRequired { .. } => e,
             e if e.is_not_certified() => e,
             _ => Failure::new(
                 operation,

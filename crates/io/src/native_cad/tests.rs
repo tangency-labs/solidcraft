@@ -995,7 +995,7 @@ fn a_step_header_read_alone_is_the_whole_files() {
     assert!(files.len() > 30, "{} files", files.len());
     for p in files {
         let bytes = std::fs::read(&p).unwrap();
-        let Ok(ex) = solidcore_record::step::p21::parse(&crate::step_text(&bytes)) else { continue };
+        let Ok(ex) = solidcraft_kernel::services::step::p21::parse(&crate::step_text(&bytes)) else { continue };
         let got = super::step_producer(&bytes);
         assert_eq!((got.system, got.preprocessor, got.description), (ex.originating_system, ex.preprocessor, ex.description), "{}", p.display());
     }

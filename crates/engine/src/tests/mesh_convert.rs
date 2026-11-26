@@ -926,3 +926,66 @@ fn open_names_an_unsupported_file_instead_of_the_design_readers_complaint() {
     assert!(s.execute("doc.open", &json!({"path": copy.to_string_lossy()})).is_ok());
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// The imported 10 x 20 x 30 mm mesh box with the solid `Block` beside it, x 20..40, and a
+/// rectangle from `p0` to `p1` sketched at z = 20, to cut 15 mm down (to z = 5).
+fn mesh_beside_block(p0: [f64; 2], p1: [f64; 2]) -> Session {
+    let mut s = imported_box();
+    run(&mut s, "solid.box", json!({"corner": [20, 0, 0], "length": 20, "width": 20, "height": 10, "operation": "new_body", "body_name": "Block"}));
+    cut_sketch(&mut s, p0, p1);
+    s
+}
+
+fn cut_sketch(s: &mut Session, p0: [f64; 2], p1: [f64; 2]) {
+    run(s, "sketch.create", json!({"plane": {"origin": [0, 0, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Cut"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": p0, "p1": p1}));
+    run(s, "sketch.finish", json!({}));
+}
+
+fn body_volume(s: &mut Session, name: &str) -> f64 {
+    run(s, "inspect.measure", json!({"bodies": [name]}))["total"]["volume_mm3"].as_f64().unwrap()
+}
+
+/// A cut that names no body skips a mesh body in its path and cuts the solids (#615).
+#[test]
+fn automatic_cut_over_a_solid_and_a_mesh_cuts_the_solid_and_keeps_the_mesh() {
+    let mut s = mesh_beside_block([5.0, 5.0], [30.0, 15.0]);
+    run(&mut s, "solid.extrude", json!({"sketch": "Cut", "distance": "-15 mm", "operation": "cut"}));
+    assert!(rel(body_volume(&mut s, "Block"), 4000.0 - 10.0 * 10.0 * 5.0) < 1e-6);
+    assert!(rel(body_volume(&mut s, "Mesh"), 6000.0) < 1e-6);
+    assert!(s.model.state().body("Mesh").unwrap().body.is_mesh());
+}
+
+/// A mesh body elsewhere in the design does not stop a cut that never meets it (#615).
+#[test]
+fn automatic_cut_clear_of_a_mesh_cuts_the_solid() {
+    let mut s = mesh_beside_block([25.0, 5.0], [35.0, 15.0]);
+    run(&mut s, "solid.extrude", json!({"sketch": "Cut", "distance": "-15 mm", "operation": "cut"}));
+    assert!(rel(body_volume(&mut s, "Block"), 4000.0 - 10.0 * 10.0 * 5.0) < 1e-6);
+    assert!(rel(body_volume(&mut s, "Mesh"), 6000.0) < 1e-6);
+}
+
+/// With only a mesh body to cut, the cut is refused with the way out: Convert Mesh (#615).
+#[test]
+fn automatic_cut_of_only_a_mesh_is_refused_naming_convert_mesh() {
+    let mut s = imported_box();
+    cut_sketch(&mut s, [2.0, 2.0], [8.0, 8.0]);
+    let before = s.doc.to_json();
+    let error = s.execute("solid.extrude", &json!({"sketch": "Cut", "distance": "-15 mm", "operation": "cut"})).unwrap_err().to_string();
+    assert!(error.contains("Convert Mesh"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
+    assert!(s.model.state().body("Mesh").unwrap().body.is_mesh());
+}
+
+/// A cut that names a mesh body is refused with the way out: Convert Mesh (#615).
+#[test]
+fn cut_naming_a_mesh_is_refused_naming_convert_mesh() {
+    let mut s = mesh_beside_block([5.0, 5.0], [30.0, 15.0]);
+    let before = s.doc.to_json();
+    let error = s
+        .execute("solid.extrude", &json!({"sketch": "Cut", "distance": "-15 mm", "operation": "cut", "targets": ["Block", "Mesh"]}))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("Convert Mesh"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
+}

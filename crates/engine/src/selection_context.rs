@@ -398,7 +398,8 @@ pub fn current_sels(session: &Session, entry: &Entry, names: &mut NameCache) -> 
 
 /// Describe what the session has selected, as what was clicked: see [`clicked`].
 pub fn describe_selection(session: &mut Session) -> Context {
-    let groups = clicked(session, &session.selection.clone());
+    // A whole-body selection (Select All) is described as the bodies it covers.
+    let groups = clicked(session, &session.selected_items().unwrap_or_default());
     describe_groups(session, &groups)
 }
 
@@ -663,7 +664,7 @@ fn capitalised(s: &str) -> String {
 /// What the session has selected, as the block of text a tool reply carries ([`Context::reply_block`]);
 /// `None` when nothing is selected, so a reply stays small.
 pub fn selection_reply(session: &mut Session) -> Option<String> {
-    if session.selection.is_empty() {
+    if !session.has_selection() {
         return None;
     }
     let block = describe_selection(session).reply_block();

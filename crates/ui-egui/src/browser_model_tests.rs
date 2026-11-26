@@ -347,8 +347,9 @@ fn hovering_a_collapsed_nested_placement_walks_its_subtree_once() {
     assert_eq!(h.app.viewport.hover_bodies.len(), 7);
 }
 
-/// An open curve turned round is a surface body and the Bodies folder shows it as one; a closed
-/// profile turned all the way round, and a box, are solids.
+/// An open curve turned round is a surface body and the Bodies folder shows it as one, and so is
+/// a closed profile turned all the way round (#21969: a surface operation's result is a surface,
+/// closed or not); a box is a solid.
 #[test]
 fn bodies_folder_tells_surfaces_from_solids() {
     let mut h = crate::scenario::Harness::new();
@@ -365,7 +366,7 @@ fn bodies_folder_tells_surfaces_from_solids() {
     super::prepare_model(&mut h.app);
     let icons: Vec<(String, &str)> = super::entries(&h.app, 0, "bodies").into_iter().map(|e| (e.key, e.icon)).collect();
     assert_eq!(icons.len(), 3, "{icons:?}");
-    assert_eq!(icons[..2], [("Tube".to_string(), "surface"), ("Ring".to_string(), "body")]);
+    assert_eq!(icons[..2], [("Tube".to_string(), "surface"), ("Ring".to_string(), "surface")]);
     assert_eq!(icons[2].1, "body", "the box is a solid");
 }
 

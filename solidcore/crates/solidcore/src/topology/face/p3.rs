@@ -2749,6 +2749,14 @@ pub fn face_intersect_breps_cached(
     // (not upstream) the curves are the faces' own edge curves, known to their tolerance;
     // an intersection curve is known as far as the two surfaces' angle fixes it
     let curves_are_edges = have_curves;
+    let [this_native_support, other_native_support] = if curves_are_edges {
+        [None, None]
+    } else {
+        [
+            crate::surface::implicit::AnalyticSupport::of(surface_of(b, f)?),
+            crate::surface::implicit::AnalyticSupport::of(surface_of(ob, other)?),
+        ]
+    };
     // (not upstream, #18705) whether each face has a seam edge, read once from the kept
     // caches (scanned once for each face while its B-rep is unchanged) and again only
     // after an edit of the B-reps
@@ -2919,6 +2927,20 @@ pub fn face_intersect_breps_cached(
         }
         let face_seams = seams.unwrap_or([None, None]);
         if !curves_are_edges {
+            if let Some(support) = other_native_support {
+                cc1.set_native_foreign_support(
+                    IntersectObject::Topology(EntityRef::Face(f), false),
+                    support,
+                    other_zone_tol,
+                );
+            }
+            if let Some(support) = this_native_support {
+                cc2.set_native_foreign_support(
+                    IntersectObject::Topology(EntityRef::Face(other), other_side),
+                    support,
+                    this_zone_tol,
+                );
+            }
             let reach = intersection_curve_reach(
                 k,
                 [

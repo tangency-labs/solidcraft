@@ -1379,6 +1379,21 @@ impl CreatorExecutive<Handle> for Executive<'_> {
         }
     }
 
+    fn note_unreached_edgeuse(&mut self, original: Handle) {
+        if let Object::Topology(Arena::Original, EntityRef::Edgeuse(u)) = original.object {
+            self.inner.unreached_edgeuses.insert(u);
+        }
+    }
+
+    fn is_eliminated_face(&self, face: Handle) -> bool {
+        match face.object {
+            Object::Topology(Arena::Original, EntityRef::Face(f)) => {
+                self.inner.eliminated_lenses.contains(&f)
+            }
+            _ => false,
+        }
+    }
+
     /// The face's recorded margin, as its extension's (the derived reach, at least the
     /// body's tolerance in a local operation; the reach and the offset otherwise): not
     /// upstream's five offset distances, which in a local operation (whose offset distance

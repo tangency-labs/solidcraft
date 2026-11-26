@@ -478,3 +478,115 @@ fn a_thickened_sheet_with_crossing_loops_unmerged_is_refused() {
         "volume {got}, closed form {want}"
     );
 }
+
+/// solidcraft#18278: a Ø10 x 10 cylinder with three Ø1 x 4 blind holes in its top on a circle
+/// of radius 1.5, shelled closed with a 0.95 wall. The holes' offsets (r 1.45) overlap their
+/// neighbours but do not reach the middle (1.45 < 1.5), so on the void's ceiling (z = 9.05)
+/// the stretches of the three offsets facing the middle close round an island. That loop
+/// was made a hole of the face around the ring, wound the outer way: the shell was built
+/// and refused by the check ("Face Loop has bad orientation"). The island is a face of its
+/// own, and the result a valid solid of the closed form.
+///
+/// Closed form: the body less the void, a cylinder r 4.05 from z = 0.95 to 9.05 less the
+/// three offset discs (pairwise lenses only: none covers the middle) from z = 5.05 up.
+#[test]
+fn a_ring_of_holes_whose_offsets_close_round_an_island_shells_closed() {
+    let mut k = Kernel::default();
+    let mut b = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 5.0, 10.0).unwrap();
+    let centres = [
+        (1.5, 0.0),
+        (-0.75, 1.299_038_105_676_658),
+        (-0.75, -1.299_038_105_676_658),
+    ];
+    for (x, y) in centres {
+        let hole = create_cylinder(&mut k, Point3::new(x, y, 6.0), 0.5, 4.5).unwrap();
+        b = boolean_difference(&mut k, b, hole).unwrap();
+    }
+    let options = ShellOptions {
+        offset: OffsetOptions {
+            distance: -0.95,
+            extend_convex_edges: true,
+            merge_results: true,
+        },
+        create_offset_solid: true,
+        merge_sheet_side_walls: true,
+    };
+    let mut result =
+        solidcore::offset::thin_features::shell_brep(&mut k, &b, options, &[]).unwrap();
+    result.refresh_cached_topology();
+    result.use_arena_naming().unwrap();
+    let lines = check_brep(&mut k, &mut result, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    assert!(brep_is_manifold_solid(&result).unwrap());
+    let r: f64 = 1.45;
+    let d = 1.5 * 3.0_f64.sqrt(); // between two hole centres
+    let lens = 2.0 * r * r * (d / (2.0 * r)).acos() - 0.5 * d * (4.0 * r * r - d * d).sqrt();
+    let discs = 3.0 * PI * r * r - 3.0 * lens;
+    let void = PI * 4.05 * 4.05 * 8.1 - discs * 4.0;
+    let body = PI * 25.0 * 10.0 - 3.0 * PI * 0.25 * 4.0;
+    let want = body - void;
+    let got = volume(&k, &mut result).unwrap();
+    assert!(
+        (got - want).abs() <= 1e-6 * want,
+        "volume {got}, closed form {want}"
+    );
+}
+
+/// [`a_ring_of_holes_whose_offsets_close_round_an_island_shells_closed`] on a Ø4.3 cylinder:
+/// the holes' offsets (r 1.45) now cover the whole of the ceiling's outer loop (r 1.2), so no
+/// stretch of it is left, and only the island stands. It was not built (no face round it to
+/// hold it), and the shell was refused as not a manifold solid. The island is a face of its
+/// own all the same.
+///
+/// Closed form: the body less the void, a cylinder r 1.2 from z = 0.95 to 5.05 and, from there
+/// to 9.05, the island: the triangle of the three offsets' inner crossings less the segment
+/// each offset cuts off it.
+#[test]
+fn a_ring_of_holes_whose_offsets_cover_the_outer_loop_keeps_the_island() {
+    let mut k = Kernel::default();
+    let mut b = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 2.15, 10.0).unwrap();
+    let centres = [
+        (1.5, 0.0),
+        (-0.75, 1.299_038_105_676_658),
+        (-0.75, -1.299_038_105_676_658),
+    ];
+    for (x, y) in centres {
+        let hole = create_cylinder(&mut k, Point3::new(x, y, 6.0), 0.5, 4.5).unwrap();
+        b = boolean_difference(&mut k, b, hole).unwrap();
+    }
+    let options = ShellOptions {
+        offset: OffsetOptions {
+            distance: -0.95,
+            extend_convex_edges: true,
+            merge_results: true,
+        },
+        create_offset_solid: true,
+        merge_sheet_side_walls: true,
+    };
+    let mut result =
+        solidcore::offset::thin_features::shell_brep(&mut k, &b, options, &[]).unwrap();
+    result.refresh_cached_topology();
+    result.use_arena_naming().unwrap();
+    let lines = check_brep(&mut k, &mut result, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    assert!(brep_is_manifold_solid(&result).unwrap());
+    let r: f64 = 1.45;
+    let d = 1.5 * 3.0_f64.sqrt(); // between two hole centres
+                                  // the inner crossing of two offsets, from the axis, and the side between two crossings
+    let tip = 0.75 - (r * r - 0.25 * d * d).sqrt();
+    let side = tip * 3.0_f64.sqrt();
+    let angle = 2.0 * (0.5 * side / r).asin();
+    let island = 0.25 * 3.0_f64.sqrt() * side * side - 1.5 * r * r * (angle - angle.sin());
+    let void = PI * 1.2 * 1.2 * 4.1 + island * 4.0;
+    let body = PI * 2.15 * 2.15 * 10.0 - 3.0 * PI * 0.25 * 4.0;
+    let want = body - void;
+    let got = volume(&k, &mut result).unwrap();
+    assert!(
+        (got - want).abs() <= 1e-6 * want,
+        "volume {got}, closed form {want}"
+    );
+}

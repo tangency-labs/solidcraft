@@ -603,7 +603,7 @@ pub(crate) fn put_back_main_lines(
             .get(case)
             .ok_or_else(|| format!("{unit_id}: no case {case}"))?;
         let seam = ReplaySeam::loop_normal(Box::new(|k, curves, own| main_normal(k, curves, &own)));
-        let replayed = crate::wr57_replay::with_installed(seam, || unit.run_rust(c))
+        let replayed = crate::replay_seam::with_installed(seam, || unit.run_rust(c))
             .map_err(|e| format!("{unit_id} {case}: {e:?}"))?;
         let replayed = encode(case, &replayed);
         if hash(&replayed) != main_hash {
@@ -674,7 +674,7 @@ fn every_moved_row_moved_only_through_the_loop_normal() {
                 *c.lock().unwrap() += 1;
                 main
             }));
-            let replayed = crate::wr57_replay::with_installed(seam, || unit.run_rust(case));
+            let replayed = crate::replay_seam::with_installed(seam, || unit.run_rust(case));
             let replayed = encode(name, &replayed.unwrap());
             assert!(
                 *calls.lock().unwrap() > 0,

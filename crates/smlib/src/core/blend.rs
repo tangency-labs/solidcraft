@@ -26,7 +26,7 @@ use solidcore::topology::brep::p1 as brep_p1;
 use solidcore::topology::brep::p2 as brep_p2;
 use solidcore::topology::brep::p3::brep_copy;
 use solidcore::topology::brep::validation::{CheckLevel, validate_and_update_tolerances};
-use solidcore::topology::{Brep, EdgeId, VertexId};
+use solidcore::topology::{Brep, EdgeId};
 
 use super::{Body, answer};
 use crate::{Blend, ChamferSecond, Error, Hole, HoleEdge, MAX_POINTS, Result, Turn};
@@ -183,12 +183,6 @@ pub(super) fn pick_edges(
     pick(&all, points, tol, b.tolerance(), |e, p| Ok(answer(edge_closest_point(k, b, e, p))?.map(|c| c.closest.distance)))
 }
 
-/// `pick_vertices` (`vertex_distance`).
-pub(super) fn pick_vertices(b: &Brep, points: &[[f64; 3]], tol: f64) -> solidcore::Result<std::result::Result<(Vec<VertexId>, Vec<usize>), Miss>> {
-    let all = brep_p1::vertices(b, None)?;
-    pick(&all, points, tol, b.tolerance(), |v, p| Ok(Some((b.vertex(v)?.point - p).length())))
-}
-
 /// An edge pick's failure as `pick_error` (ops.rs) reads it.
 pub(super) fn edge_miss(m: Miss) -> Error {
     match m {
@@ -231,7 +225,7 @@ fn failed(call: &'static str, body: &Body, e: Error) -> Error {
 /// too short, a swept turn not built, a corner no blend handles), the kernel's statuses as the
 /// status, the blend refusals and failures ops types carried as they are ([`Error::Refused`]),
 /// and every other error as any solidcore-ops call's ([`super::call::error`]).
-fn refused(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) -> Error {
+pub(super) fn refused(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) -> Error {
     use solidcore_ops::Error as Ops;
     match e {
         Ops::Status(code) => Error::Status(code),
@@ -447,6 +441,7 @@ fn blend_call(
         turn: match turn {
             Turn::Mitre => solidcore_ops::Turn::Mitre,
             Turn::Swept => solidcore_ops::Turn::Swept,
+            Turn::Auto => solidcore_ops::Turn::Auto,
         },
         ..solidcore_ops::BlendOptions::default()
     };
@@ -682,8 +677,9 @@ mod tests {
         assert!(matches!(status(topology(TopologyFailure::InvalidValue("a zero normal"))), Error::Status(1007)));
         assert!(matches!(status(topology(TopologyFailure::Inconsistent("two outer loops"))), Error::Status(1005)));
         assert!(matches!(status(topology(TopologyFailure::DropFailed { status: 1010 })), Error::Status(1010)));
-        let at =
-            Failure::new("topology::vertexuse", TopologyFailure::Failed("x")).at(solidcore::EntityRef::Vertex(VertexId::from_index(2))).into_error();
+        let at = Failure::new("topology::vertexuse", TopologyFailure::Failed("x"))
+            .at(solidcore::EntityRef::Vertex(solidcore::topology::VertexId::from_index(2)))
+            .into_error();
         assert!(matches!(status(at), Error::Status(1001)));
     }
 

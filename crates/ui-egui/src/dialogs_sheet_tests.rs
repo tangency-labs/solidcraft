@@ -92,6 +92,67 @@ fn a_click_on_the_bottom_edge_makes_an_edge_flange() {
     assert_eq!(c[0].1["type"], "edge", "{:?}", c[0].1);
 }
 
+#[test]
+fn contour_flange_options_round_trip_through_feature_editing() {
+    let mut app = plate(crate::ui_kit::LayoutMode::Docked);
+    app.run("sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, -1]}, "name": "Contour"})).unwrap();
+    app.run("sketch.line", json!({"points": [[0, 0], [40, 0], [40, -30]], "ids": ["l1", "l2"]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run(
+        "sheet.flange",
+        json!({
+            "type": "contour",
+            "sketch": "Contour",
+            "curves": ["l1", "l2"],
+            "distance": "20 mm",
+            "radius": "1.5 mm",
+            "orientation": "side2",
+            "symmetric": true
+        }),
+    )
+    .unwrap();
+
+    let feature = app.session.doc.features.last().unwrap().clone();
+    let edit = edit_dialog(&app, feature.id, None).unwrap();
+    assert!(matches!(
+        &edit.kind,
+        Kind::Sheet(Sm::Flange { ty: 2, radius, orientation: 2, symmetric: true, .. }) if radius == "1.5 mm"
+    ));
+    let commands = apply_commands(&app, &edit).unwrap();
+    assert_eq!(commands[0].0, "timeline.redefine");
+    assert_eq!(commands[0].1["params"]["orientation"], "side2");
+    assert_eq!(commands[0].1["params"]["symmetric"], true);
+    assert_eq!(commands[0].1["params"]["radius"], "1.5 mm");
+}
+
+/// A contour flange saved before it had an orientation, with Other side ticked: Edit Feature
+/// shows Other side ticked and Flip as saved, and applying the dialog unchanged leaves the
+/// flange where it was, its width still on the other side of the sketch plane.
+#[test]
+fn an_older_other_side_contour_flange_stays_put_through_editing() {
+    let mut app = plate(crate::ui_kit::LayoutMode::Docked);
+    app.run("sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, -1]}, "name": "Contour"})).unwrap();
+    app.run("sketch.line", json!({"points": [[0, 0], [40, 0], [40, -30]], "ids": ["l1", "l2"]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("sheet.flange", json!({"type": "contour", "sketch": "Contour", "curves": ["l1", "l2"], "distance": "20 mm", "reverse": true})).unwrap();
+    let feature = app.session.doc.features.last().unwrap().clone();
+    assert!(matches!(&feature.kind, solidcraft_engine::doc::FeatureKind::SheetContour { orientation: None, reverse: true, flip: false, .. }));
+    let bounds = |app: &SolveApp| {
+        let body = app.session.model.state().bodies.last().map(|b| b.body.clone()).unwrap();
+        solidcraft_engine::kernel::measure(&body).unwrap().bbox
+    };
+    let before = bounds(&app);
+
+    let edit = edit_dialog(&app, feature.id, None).unwrap();
+    assert!(matches!(&edit.kind, Kind::Sheet(Sm::Flange { ty: 2, reverse: true, flip: false, orientation: 1, symmetric: false, .. })));
+    let commands = apply_commands(&app, &edit).unwrap();
+    assert_eq!(commands[0].1["params"]["reverse"], true);
+    assert_eq!(commands[0].1["params"]["flip"], false);
+    run_all(&mut app, commands);
+    let after = bounds(&app);
+    assert!(before.min.dist(after.min) < 1e-9 && before.max.dist(after.max) < 1e-9, "{before:?} became {after:?}");
+}
+
 /// Hem takes edges and an optional gap; rules make and pick a rule with its expressions.
 #[test]
 fn hem_and_rules() {

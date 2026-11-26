@@ -1564,8 +1564,8 @@ pub struct TabStrip<'a> {
     pub shown_selected: Option<usize>,
     /// Only this design's view controls appear in a pop-out's strip.
     pub pop_out: bool,
-    /// The tabs are part of the window's title bar: dragging the only tab, or one mostly up or
-    /// down, moves the window, and a double click maximizes it (unless it renames).
+    /// The tabs are part of the window's title bar: a double click maximizes it (unless it
+    /// renames). Dragging a tab never moves the window; only empty bar space does.
     pub title_bar: bool,
     /// A double click on the selected tab renames it.
     pub double_click_renames: bool,
@@ -2154,64 +2154,6 @@ pub fn paint_view_glyph(p: &Painter, r: Rect, icon: &str, ink: egui::Color32) {
     for line in glyph_lines(icon) {
         p.add(egui::Shape::line(line.iter().map(|&point| at(point)).collect(), stroke));
     }
-}
-
-/// Draw the common sketch-mode title, original pencil glyph and Editing chip.
-/// The caller supplies a rectangle excluding its menu and window controls.
-pub fn paint_sketch_header(painter: &Painter, rect: Rect, name: &str, editing: &str) {
-    if !rect.is_finite() || !rect.is_positive() {
-        return;
-    }
-    let t = Tokens::get();
-    let painter = painter.with_clip_rect(rect);
-    painter.rect_filled(rect, 0, t.sketch_soft);
-    let chip = painter.layout_no_wrap(editing.to_owned(), crate::type_face::semibold(t.font_small), t.text);
-    let chip_width = (chip.size().x + 16.0).min(rect.width());
-    let leading = (rect.width() - chip_width - 6.0).max(0.0);
-    let glyph_width = if leading >= 23.0 { 23.0 } else { 0.0 };
-    if glyph_width > 0.0 {
-        paint_view_glyph(&painter, Rect::from_center_size(pos2(rect.left() + 7.5, rect.center().y), vec2(15.0, 15.0)), "rename", t.sketch_accent);
-    }
-    let name_x = rect.left() + glyph_width;
-    let name_width = (leading - glyph_width).max(0.0);
-    let mut after = name_x;
-    if name_width > 0.0 {
-        let mut job = egui::text::LayoutJob::simple_singleline(name.to_owned(), crate::type_face::semibold(t.font_body), t.sketch_ink);
-        job.wrap = egui::text::TextWrapping { max_width: name_width, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
-        let name = painter.layout_job(job);
-        after += name.size().x.min(name_width);
-        painter.galley(pos2(name_x, rect.center().y - name.size().y / 2.0), name, t.sketch_ink);
-    }
-    let chip_x = (after + 6.0).min(rect.right() - chip_width);
-    let chip_rect = Rect::from_min_size(pos2(chip_x, rect.center().y - 9.0), vec2(chip_width, 18.0));
-    painter.rect_filled(chip_rect, 9, t.chip);
-    let padding = 8.0_f32.min(chip_width / 2.0);
-    let text_width = (chip_width - 2.0 * padding).max(0.0);
-    if text_width > 0.0 {
-        let mut job = egui::text::LayoutJob::simple_singleline(editing.to_owned(), crate::type_face::semibold(t.font_small), t.text);
-        job.wrap = egui::text::TextWrapping { max_width: text_width, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
-        let chip = painter.layout_job(job);
-        painter.with_clip_rect(chip_rect).galley(chip_rect.left_center() + vec2(padding, -chip.size().y / 2.0), chip, t.text);
-    }
-}
-
-/// The same sketch header with a separate, translated sheet/drawing-view owner chip.
-pub fn paint_sketch_header_owner(painter: &Painter, rect: Rect, name: &str, editing: &str, owner: Option<&str>) {
-    let Some(owner) = owner else {
-        paint_sketch_header(painter, rect, name, editing);
-        return;
-    };
-    if !rect.is_finite() || !rect.is_positive() {
-        return;
-    }
-    let t = Tokens::get();
-    let text = painter.layout_no_wrap(owner.to_owned(), crate::type_face::semibold(t.font_small), t.text);
-    let width = (text.size().x + 16.0).min(rect.width() * 0.45);
-    let left = Rect::from_min_max(rect.min, pos2((rect.right() - width - 6.0).max(rect.left()), rect.bottom()));
-    paint_sketch_header(painter, left, name, editing);
-    let chip = Rect::from_min_size(pos2(rect.right() - width, rect.center().y - 9.0), vec2(width, 18.0));
-    painter.with_clip_rect(rect).rect_filled(chip, 9, t.chip);
-    painter.with_clip_rect(chip.shrink2(vec2(8.0, 0.0))).galley(chip.left_center() + vec2(8.0, -text.size().y / 2.0), text, t.text);
 }
 
 /// Quiet, right-aligned metadata chips in a view header. Returns the width they occupy.
@@ -3568,21 +3510,19 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
         let hit = if plain { tr } else { Rect::from_min_size(tr.min, vec2((13.0 + dot + name_w + 10.0).min(tr.width()), tr.height())) };
         let active = strip.shown_selected == Some(i);
         let resp = ui.interact(hit, ui.scope_id().with(("doc_tab", i)), Sense::click_and_drag());
-        if (n > 1 || strip.title_bar) && !(active && strip.rename.is_some()) && resp.hovered() {
+        if n > 1 && !(active && strip.rename.is_some()) && resp.hovered() {
             ui.ctx().set_cursor_icon(drag_cursor(resp.is_pointer_button_down_on()));
         }
         solidcraft_ui_registry::publish_target(&format!("{}{i}", h.tab), hit);
-        // Dragging a tab along the strip moves it. The tabs are also part of the title bar:
-        // dragging the only tab, or one mostly up or down, moves the window. A double click
-        // renames the tab (the first click selected it), or maximizes the window as the bar's
-        // empty space does.
+        // Dragging a tab along the strip moves it. A double click renames the tab (the first
+        // click selected it), or maximizes the window as the bar's empty space does.
         if resp.drag_started_by(egui::PointerButton::Primary) {
             let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or(tr.center());
             let moved = pointer.unwrap_or(origin) - origin;
+            // A drag that starts on a tab never moves the window (only empty bar space does,
+            // `window_chrome::drag_area`), whatever its direction and however many tabs there are.
             if n > 1 && (!strip.title_bar || moved.x.abs() >= moved.y.abs()) {
                 drag = Some(TabDrag { from: i, grab: origin.x - tr.left() });
-            } else if strip.title_bar {
-                crate::window_chrome::hand_press_to_os(ui.ctx(), egui::ViewportCommand::StartDrag);
             }
         } else if resp.double_clicked() {
             if strip.double_click_renames {
@@ -3860,7 +3800,7 @@ fn file_rows(ui: &mut egui::Ui, rows: &[FileRow], chosen: &mut Option<String>, i
                 crate::Menu::button(ui, label, |ui| file_rows(ui, rows, chosen, true));
             }
             FileRow::Separator => {
-                ui.separator();
+                crate::Menu::separator(ui);
             }
         }
     }

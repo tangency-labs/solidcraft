@@ -1322,6 +1322,7 @@ fn hostile_params_never_panic() {
         "reference_style",
         "references",
         "refs",
+        "reverse",
         "rho",
         "scale",
         "seam",
@@ -4141,6 +4142,42 @@ fn split_body_of_a_body_of_two_pieces_splits_both() {
     }
 }
 
+/// A cap: a plate, a skirt round its edge and a tube through a hole in the plate.
+fn cap(s: &mut Session) {
+    run(s, "solid.cylinder", json!({"radius": 50, "height": 15, "base": [0, 0, 0], "body_name": "Cap"}));
+    run(s, "solid.cylinder", json!({"radius": 46, "height": 20, "base": [0, 0, 2], "operation": "cut", "targets": ["Cap"]}));
+    run(s, "solid.box", json!({"length": 20, "width": 20, "height": 40, "corner": [-10, -10, 0], "operation": "join", "targets": ["Cap"]}));
+    run(s, "solid.box", json!({"length": 16, "width": 16, "height": 60, "corner": [-8, -8, -10], "operation": "cut", "targets": ["Cap"]}));
+}
+
+/// Split Body at the plate's inner face (#6762): the skirt and the tube above it do not touch, so
+/// they are two bodies, not one body of two pieces. The plate keeps the name it had, `Cap (1)`;
+/// the pieces' volumes are the analytic ones and add up to the cap's (a slab would add 3.5e-4 of
+/// it). The same with the plane the dialog sends for the picked face, tilted about 2e-15 by
+/// rounding: no slab is left under the face to join the skirt and the tube.
+#[test]
+fn split_body_makes_each_piece_that_does_not_touch_a_body() {
+    let picked = json!({"origin": [-27.14101384226774, -19.861536909343386, 1.9999999999997158], "normal": [-2.164854201260163e-15, -3.46457633831685e-16, 1]});
+    for plane in [json!({"origin": [0, 0, 2], "normal": [0, 0, 1]}), picked] {
+        let mut s = Session::default();
+        cap(&mut s);
+        let whole = solidcraft_kernel::measure(&s.world_state().unwrap().body("Cap").unwrap().body).unwrap().volume;
+        run(&mut s, "solid.split_body", json!({"body": "Cap", "plane": plane}));
+        let st = s.world_state().unwrap();
+        let volume = |n: &str| solidcraft_kernel::measure(&st.body(n).unwrap().body).unwrap().volume;
+        let names: Vec<&str> = st.bodies.iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(names, ["Cap", "Cap (1)", "Cap (2)"], "{plane}");
+        assert!(st.bodies.iter().all(|b| b.body.lumps().unwrap().len() == 1), "{plane}");
+        let (plate, skirt, tube) = (PI * 2500.0 * 2.0 - 16.0 * 16.0 * 2.0, PI * (2500.0 - 2116.0) * 13.0, (400.0 - 256.0) * 38.0);
+        assert!(rel(volume("Cap (1)"), plate) < 1e-3, "{plane}: {}", volume("Cap (1)"));
+        let mut upper = [volume("Cap"), volume("Cap (2)")];
+        upper.sort_by(f64::total_cmp);
+        assert!(rel(upper[0], tube) < 1e-3 && rel(upper[1], skirt) < 1e-3, "{plane}: {upper:?}");
+        let total: f64 = names.iter().map(|n| volume(n)).sum();
+        assert!(rel(total, whole) < 1e-5, "{plane}: {total} vs {whole}");
+    }
+}
+
 /// Fillet types: chord length (radius from the face angle) and a radius varying along the
 /// edge; volumes from the removed material.
 #[test]
@@ -6181,6 +6218,65 @@ fn boundary_fill_cells() {
     let m = run(&mut s, "inspect.measure", json!({}));
     assert!(rel(m["total"]["volume_mm3"].as_f64().unwrap_or(0.0), 2.0 * 10.0 * 20.0 * 20.0) < 1e-9, "{m}");
     assert!(s.execute("solid.boundary_fill", &json!({"tools": ["A"], "cells": [[100, 100, 100]]})).is_err());
+}
+
+/// A cup: a cylinder of radius 10 and height 40 with a blind bore of radius 6 from height 10 up,
+/// open at the top, and a plane `Cap` across the bore at the height of the parameter `cap_z`.
+fn plane_fill_cup(s: &mut Session) {
+    run(s, "parameters.add", json!({"name": "cap_z", "expression": "30 mm"}));
+    run(s, "solid.cylinder", json!({"radius": 10, "height": 40, "base": [0, 0, 0], "body_name": "Cup"}));
+    run(s, "solid.cylinder", json!({"radius": 6, "height": 30, "base": [0, 0, 10], "operation": "cut", "targets": ["Cup"]}));
+    run(s, "construct.plane.offset", json!({"base": "XY", "offset": "cap_z", "name": "Cap"}));
+}
+
+/// Boundary Fill takes planes as tools (#20679): a plane across the open end of a cup closes the
+/// bore, so the bore is a cell that exists only with the plane. Its volume follows the plane.
+#[test]
+fn boundary_fill_plane_closes_an_open_cup() {
+    use std::f64::consts::PI;
+    let mut s = Session::default();
+    plane_fill_cup(&mut s);
+    let cup = (100.0 * 40.0 - 36.0 * 30.0) * PI;
+    assert!(rel(body_volume(&s.model.state()), cup) < 1e-6, "the cup alone");
+    // The bore is outside the cup: without the plane there is no cell there.
+    assert!(s.execute("solid.boundary_fill", &json!({"tools": ["Cup"], "cells": [[0, 0, 20]]})).is_err());
+    run(&mut s, "solid.boundary_fill", json!({"tools": ["Cup"], "planes": ["Cap"], "cells": [[0, 0, 20]]}));
+    // The bore between its floor (height 10) and the plane (height 30): pi * 6^2 * 20.
+    assert!(rel(body_volume(&s.model.state()), cup + 36.0 * 20.0 * PI) < 1e-6, "{}", body_volume(&s.model.state()));
+    // Moving the plane changes the filled volume: the saved feature follows it.
+    run(&mut s, "parameters.change", json!({"name": "cap_z", "expression": "25 mm"}));
+    assert!(rel(body_volume(&s.model.state()), cup + 36.0 * 15.0 * PI) < 1e-6, "{}", body_volume(&s.model.state()));
+}
+
+/// A plane that leaves the region open (the cup's bore, cut off below its mouth) closes no cell.
+#[test]
+fn boundary_fill_refuses_a_region_the_planes_leave_open() {
+    let mut s = Session::default();
+    plane_fill_cup(&mut s);
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "5 mm", "name": "Low"}));
+    let before = s.model.state().bodies.len();
+    // Above the low plane the bore is open at the top.
+    let error = s.execute("solid.boundary_fill", &json!({"tools": ["Cup"], "planes": ["Low"], "cells": [[0, 0, 20]]})).unwrap_err().to_string();
+    assert!(error.contains("leave open"), "{error}");
+    assert_eq!(s.model.state().bodies.len(), before);
+    // A name that is no plane is refused.
+    assert!(s.execute("solid.boundary_fill", &json!({"tools": ["Cup"], "planes": ["Nope"], "cells": [[0, 0, 20]]})).is_err());
+    // A cell point on a plane is refused.
+    assert!(s.execute("solid.boundary_fill", &json!({"tools": ["Cup"], "planes": ["Cap"], "cells": [[0, 0, 30]]})).is_err());
+}
+
+/// Bodies and planes mix: the half of a box on one side of a plane.
+#[test]
+fn boundary_fill_mixes_a_body_and_a_plane() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "A"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": "10 mm", "name": "Mid"}));
+    run(&mut s, "solid.boundary_fill", json!({"tools": ["A"], "planes": ["Mid"], "cells": [[15, 10, 10]]}));
+    assert!(rel(body_volume(&s.model.state()), 8000.0 + 10.0 * 20.0 * 20.0) < 1e-9, "{}", body_volume(&s.model.state()));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "solid.boundary_fill", json!({"tools": ["A"], "planes": ["Mid"], "cells": [[5, 10, 10], [15, 10, 10]], "remove_tools": true}));
+    assert!(rel(body_volume(&s.model.state()), 8000.0) < 1e-9, "{}", body_volume(&s.model.state()));
+    assert_eq!(s.model.state().bodies.len(), 2);
 }
 
 /// An open square tube crossing two cylinders cannot be treated as a solid operand.

@@ -8,6 +8,9 @@ $ErrorActionPreference = 'Stop'
 
 $cases = @(
     @{ Name = 'default order'; Graphics = $null; Env = @{}; Args = @(); Expect = 'graphics: Dx12' },
+    @{ Name = 'legacy startup'; Graphics = $null; Env = @{ SOLIDCRAFT_GPU_STARTUP = 'legacy' }; Args = @(); Expect = 'graphics: legacy startup' },
+    # The default again, after a warm start, to compare with the legacy one's time.
+    @{ Name = 'standard startup'; Graphics = $null; Env = @{ SOLIDCRAFT_GPU_STARTUP = 'standard' }; Args = @(); Expect = 'graphics: standard startup' },
     @{ Name = 'saved 8x anti-aliasing'; Graphics = '{"msaa":8}'; Env = @{}; Args = @(); Expect = '(requested 8x)' },
     @{ Name = 'saved 2x, backend preference dx12'; Graphics = '{"msaa":2,"backend":"dx12"}'; Env = @{}; Args = @(); Expect = '(requested 2x)' },
     @{ Name = 'damaged graphics.json'; Graphics = '{"msaa":'; Env = @{}; Args = @(); Expect = 'graphics: Dx12' },
@@ -42,8 +45,10 @@ foreach ($case in $cases) {
     $psi.Environment['SOLIDCRAFT_CONTROL_TOKEN'] = $token
     $psi.Environment.Remove('WGPU_BACKEND') | Out-Null
     $psi.Environment.Remove('WGPU_DX12_COMPILER') | Out-Null
+    $psi.Environment.Remove('SOLIDCRAFT_GPU_STARTUP') | Out-Null
     foreach ($k in $case.Env.Keys) { $psi.Environment[$k] = $case.Env[$k] }
     Write-Host "=== $($case.Name)"
+    $clock = [System.Diagnostics.Stopwatch]::StartNew()
     $p = [System.Diagnostics.Process]::Start($psi)
     $stderr = $p.StandardError.ReadToEndAsync()
     $stdout = $p.StandardOutput.ReadToEndAsync()
@@ -67,6 +72,8 @@ foreach ($case in $cases) {
         $reply = $reader.ReadLine()
         Write-Host "screenshot: $reply"
         if (-not ($reply -like '*"ok":true*') -or -not (Test-Path $shot)) { throw "no frame drawn: $reply" }
+        # Start to the first frame on screen, for comparing startups (control channel up, then a screenshot).
+        Write-Host ("startup to first frame: {0} ms" -f $clock.ElapsedMilliseconds)
         $writer.WriteLine((@{ id = 2; method = 'app.quit'; params = @{ force = $true } } | ConvertTo-Json -Compress))
         Write-Host "quit: $($reader.ReadLine())"
         $client.Close()

@@ -822,6 +822,10 @@ fn on_circle(b: &crate::geom::BSplineCurve, weights: &[f64], centre: Vec3, axis:
         knots.extend(std::iter::repeat_n(*k, *m));
     }
     let homogeneous = b.points.iter().zip(weights).map(|(p, w)| [p[0] * w, p[1] * w, p[2] * w, *w]).collect();
+    // The certificate takes clamped knots: an unclamped spline (a circle written periodically,
+    // its end knots single) is the same spline over its domain clamped there, exactly
+    // (tangency-labs/solidcore#3401).
+    let Ok((knots, homogeneous)) = crate::assembly::clamped(b.degree, knots, homogeneous) else { return false };
     let curve = solidcore::eval::Curve::RationalSpline { knots, homogeneous };
     let within = reach + gamma(3) * far * (w_hi / w_lo);
     let rel_tol = within / radius * (w_lo / w_hi) * (w_lo / w_hi);

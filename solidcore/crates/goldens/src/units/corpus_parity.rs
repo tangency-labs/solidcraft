@@ -311,7 +311,7 @@ fn measure_rust(path: &Path, accuracy: f64) -> Measured {
         Ok(b) => b,
         Err(e) => return Measured::Broken(format!("read {}: {e}", path.display())),
     };
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut read = match read_breps(&mut k, bytes) {
         Ok(r) => r,
         Err(e) => return stopped(Vec::new(), "read", e),
@@ -336,7 +336,7 @@ fn measure_rust_roundtrip(path: &Path, accuracy: f64) -> Measured {
         Ok(b) => b,
         Err(e) => return Measured::Broken(format!("read {}: {e}", path.display())),
     };
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let read = match read_breps(&mut k, bytes) {
         Ok(r) => r,
         Err(e) => return stopped(Vec::new(), "read", e),

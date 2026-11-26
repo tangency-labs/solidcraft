@@ -356,9 +356,17 @@ points up (+Z), a positive angle lowers the leading edge: the usual washout at t
 Opening a design from your file manager, or with `solidcraft part.sc`, while SolidCraft is already
 running opens it in that window, as File > Open does, and no second app starts. The two launches
 talk through a socket in your settings folder (a named pipe on Windows) that only you can reach;
-nothing listens on the network, and only file paths are sent. If the running window does not answer
-within a moment, the new launch starts normally. `solidcraft --new-instance part.sc` always starts
-a separate app.
+nothing listens on the network, and only file paths are sent, with whether they open read-only.
+If the running window does not answer within a moment, the new launch starts normally.
+`solidcraft --new-instance part.sc` always starts a separate app.
+
+`solidcraft --read-only part.sc` opens the design read-only, as **Open Read-Only** does (see
+[Designs in shared or synced folders](#designs-in-shared-or-synced-folders)): you can change it,
+and Save asks for a new file. It covers every file named on that command line, in a new window or
+in the running one. A design that another SolidCraft has open opens without asking. A SolidCraft
+from before this option doesn't take read-only files from a new launch; that launch opens them in
+a window of its own. STEP, mesh and other imported files always open as new, unsaved designs, so
+the option changes nothing for them. Without a file it does nothing.
 
 ## Large files
 
@@ -405,6 +413,7 @@ placeholder in it is replaced:
 |---|---|
 | `{design}` | The design's name |
 | `{body}` | The exported body's name. When an export holds several bodies, the first one |
+| `{source}` | The name, without folder or extension, of the file the exported body was imported from; for a body a later feature made, the design's first import. Without an import, the design's name |
 | `{project}`, `{part_number}`, `{revision}`, `{author}`, `{organization}`, `{description}`, `{license}` | That [design property](#design-properties) |
 
 The help icon next to the setting lists the same placeholders. A design property that is not set
@@ -439,7 +448,8 @@ browser, so it has no folder settings. The control channel sets them with
 
 **File → Design Properties…** (also under **Document Settings** in the Browser, and on the
 top component's right-click menu, under **Design**) records who made a design and what it is: project, part
-number, revision, author, organization, description and licence. **OK** applies the changes as
+number, revision, author, organization, description, material, finish (with a list of common
+finishes to pick from; a design that is one part carries them itself) and licence. **OK** applies the changes as
 one undo step. Scripts and agents use the same commands: `document.metadata` reads them,
 `document.metadata.set` (`key` and `value`, or `values: {key: value, …}`) and
 `document.metadata.remove` (`key` or `keys`) change them. `document.inspect` and the MCP

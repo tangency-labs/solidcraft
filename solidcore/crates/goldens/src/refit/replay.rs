@@ -14,19 +14,23 @@
 //! So each committed row is this branch's output, and it differs from main's only through
 //! the NURB the found spheres keep.
 //!
-//! #20179 (the point test asks the face whether to test) adds five UV trims to the result
-//! body of six `sphere_diff_3cylinders` rows; step 1 hashes those rows without them
-//! ([`run_without_classified_trims`]: the five edges' trim counts lowered, which
-//! `wr493_rows`' `sphere_diff_3cylinders_rows_move_only_by_the_classified_trims` proves is
-//! the body's record without those trims, each certified on its edge). `corpus.parity` runs its two sides in this process
-//! (`run_in_process`) so the seam sees their reads.
+//! #20179 (the point test asks the face whether to test) adds five UV trims to the read of
+//! `Fillet/sphere_diff_3cylinders.smb` (made by the implant while the cone face is edited
+//! since #18934), and six `sphere_diff_3cylinders` rows keep them in their result body;
+//! step 1 runs every row on main's read of that file ([`run_without_classified_trims`]:
+//! `tolsub::state::strip_classified_trims`; `wr493_rows`'
+//! `sphere_diff_3cylinders_rows_move_only_by_the_classified_trims` certifies each trim on
+//! its edge). `corpus.parity` runs its two sides in this process (`run_in_process`) so the
+//! seam sees their reads.
 //!
 //! [`DATA`] was made by [`record`] from main's expected rows (`REFIT_OLD`, its `expected`
 //! directory): every case whose committed row differs from main's. A row the retirement
 //! moves by less than the goldens' comparator keeps main's committed line, so it is not
 //! listed (its run is not that line to the bit). Of `blend.fillet_executive_p3`'s moved rows
-//! the ten `sphere_diff_3cylinders` rows and `stubs4-sphere_plane-e3-r0.5` are listed
-//! (`REFIT_UNITS` that unit alone, these rows kept). Its other moved row,
+//! the ten `sphere_diff_3cylinders` rows and `stubs4-sphere_plane-e3-r0.5` were listed
+//! (`REFIT_UNITS` that unit alone, these rows kept); WR-459's retirement took out the four
+//! `e1`/`e4` rows (see [`DATA`]), leaving seven (#18934 moves their mass as well, apart
+//! from the refit). Its other moved row,
 //! `source-file-box_w_slot-all-edges`, is not listed: there the seam rebuilds main's run of
 //! the case bit for bit (measured on main at 0b321cbaa4), but main's committed line is not
 //! main's own run to the bit (`mass_properties` up to 1.7e-10 relative off, within the
@@ -98,12 +102,11 @@ fn output(u: &dyn UnitDiff, case: &Case) -> Output {
     out.unwrap_or_else(|e| panic!("{}: {e:?}", case.name))
 }
 
-/// [`run`] without the UV trims #20179's face classification adds to a row's result body
-/// (`wr493_rows::without_classified_trims`, which proves them; other rows as [`run`]): the
-/// row main's run gives, for the runs held to main's.
+/// [`run`] on main's read of `Fillet/sphere_diff_3cylinders.smb`, without the UV trims the
+/// read makes on its cone face (`tolsub::state::strip_classified_trims`; rows of other files
+/// as [`run`]): the row main's run gives, for the runs held to main's.
 pub(crate) fn run_without_classified_trims(u: &dyn UnitDiff, case: &Case) -> Value {
-    let mut out = output(u, case);
-    crate::wr493_rows::without_classified_trims(u.id(), &case.name, &mut out);
+    let out = crate::tolsub::state::strip_classified_trims(|| output(u, case)).0;
     encode(&case.name, &out)
 }
 
@@ -131,7 +134,10 @@ fn replay(unit_id: &str) -> usize {
         let case = all
             .get(name)
             .unwrap_or_else(|| panic!("{unit_id}: no case {name}"));
-        let (line, refit) = run_refit(u.as_ref(), case);
+        // (a row the WR-450 retirement moves too: main's run had main's choices at its seams)
+        let (line, refit) = crate::wr450_rows::with_mains_choices_for(unit_id, name, || {
+            run_refit(u.as_ref(), case)
+        });
         if refit.reads == 0 || refit.replaced == 0 || !refit.failures.is_empty() {
             failures.push(format!("{name}: {refit:?}"));
         }
@@ -174,7 +180,7 @@ replay_tests! {
     edgeuse_p2_rows_move_only_through_the_kept_nurb: "topology.edgeuse_p2", 8;
     vertex_rows_move_only_through_the_kept_nurb: "topology.vertex", 1;
     standard_solver_p1_rows_move_only_through_the_kept_nurb: "blend.fillet_standard_solver_p1", 1;
-    fillet_executive_p3_rows_move_only_through_the_kept_nurb: "blend.fillet_executive_p3", 11;
+    fillet_executive_p3_rows_move_only_through_the_kept_nurb: "blend.fillet_executive_p3", 7;
 }
 
 /// `topology.vertex` `surf_sphere150_rebuild_v3_gaps` (`max_up_dim_gap_3d` with its list):

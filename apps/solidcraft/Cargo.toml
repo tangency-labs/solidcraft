@@ -104,6 +104,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Threading",
     "Win32_UI_Controls",
     "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
@@ -123,6 +124,8 @@ hidapi = { version = "2.6.7", default-features = false, features = ["macos-share
 # Files opened from Finder and the Dock (src/open_documents.rs), and the full-screen title bar's
 # window (src/main.rs); all already come with eframe and rfd.
 objc2 = "0.6"
+# The main window's view for src/native_titlebar_macos.rs (already in the tree through eframe and winit).
+raw-window-handle = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAccessibility", "NSApplication", "NSButton", "NSControl", "NSResponder", "NSView", "NSWindow", "NSWorkspace"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "NSArray", "NSNotification", "NSOperation", "NSProcessInfo", "NSString", "NSURL"] }
 block2 = "0.6"

@@ -221,6 +221,28 @@ fn orbit(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             let response = setting::free_orbit_upright(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.free_orbit_upright.help"));
             crate::scenario::publish_target("prefs:free_orbit_upright", response.rect);
         });
+        let label = app.tr("nav.free_orbit_key.label");
+        let width = ui_kit::ContentWidth::label(ui, label) + t.space_16 + t.space_4;
+        ui_kit::settings_form(ui, width, |ui| {
+            ui_kit::settings_row_help(ui, label, app.tr("nav.free_orbit_key.help"), |ui| {
+                let current = FreeOrbitKey::of(app);
+                let name = |key: FreeOrbitKey| match key {
+                    FreeOrbitKey::Off => solidcraft_ui_text::tr("nav.buttons.no_key"),
+                    FreeOrbitKey::Alt => "Alt/Option",
+                    FreeOrbitKey::Ctrl => "Ctrl/Cmd",
+                };
+                ui_kit::settings_control_width(ui, t.space_24 * 4.0, |ui| {
+                    let response = ui_kit::dropdown_menu(ui, "pref_free_orbit_key", name(current), |ui| {
+                        for &(key, id) in FreeOrbitKey::ALL {
+                            if ui_kit::list_picker(ui, id, name(key), current == key).clicked() {
+                                app.preferences.free_orbit_key = id.into();
+                            }
+                        }
+                    });
+                    crate::scenario::publish_target("prefs:free_orbit_key", response.rect);
+                });
+            });
+        });
     });
 }
 
@@ -351,6 +373,9 @@ fn view(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         {
             crate::scenario::publish_target("prefs:navigator", all);
         }
+        if app.preferences.navigator_style == NavigatorStyle::Custom && app.view_gizmo.shape.is_none() {
+            ui_kit::text(ui, app.tr("view_gizmo.pick_body_hint"), ui_kit::Text::Note("navigator_body_hint"));
+        }
         setting::look_at_anim(app, ui);
         let width =
             ["ui.animation_speed", "prefs.home_fit_size"].into_iter().map(|id| ui_kit::ContentWidth::label(ui, app.tr(id))).fold(0.0, f32::max);
@@ -371,6 +396,9 @@ fn view(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         let (label, note) = (app.tr("prefs.navigator_fit").to_owned(), app.tr("prefs.navigator_fit_note").to_owned());
         let response = ui_kit::checkbox(ui, &label, &mut app.preferences.navigator_fit).backing_on_hover_text(note);
         crate::scenario::publish_target("prefs:navigator_fit", response.rect);
+        let (label, help) = (app.tr("prefs.navigator_turn_around").to_owned(), app.tr("prefs.navigator_turn_around_help").to_owned());
+        let response = ui_kit::checkbox(ui, &label, &mut app.preferences.navigator_turn_around).backing_on_hover_text(help);
+        crate::scenario::publish_target("prefs:navigator_turn_around", response.rect);
         let (label, note) = (app.tr("prefs.keep_hover_while_navigating").to_owned(), app.tr("prefs.keep_hover_while_navigating_note").to_owned());
         let response = ui_kit::checkbox(ui, &label, &mut app.preferences.keep_hover_while_navigating).backing_on_hover_text(note);
         crate::scenario::publish_target("prefs:keep_hover_while_navigating", response.rect);

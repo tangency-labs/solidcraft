@@ -61,7 +61,9 @@
 // A comparison that is not true takes the refusing branch, so a NaN is refused too.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
+mod bead;
 mod chart;
+mod contour;
 mod flat;
 mod fold;
 pub mod hermite;
@@ -72,6 +74,13 @@ mod rigid;
 mod seg;
 mod sheet;
 
+pub use bead::{
+    bead_against, bead_flank_angle, bead_footprint, bead_form, bead_note, bead_outline,
+    line_in_chart, segment_in_region, Bead, BeadAgainst, BeadFace, BeadForm, BeadOutline, BeadPart,
+    BeadRefusal, BeadSection, FormEdge, FormFace, FormSurface, CREASE_TOL, MIN_BEAD_RADIUS,
+    MIN_BEND_RISE,
+};
+pub use contour::{offset_contour, ContourRefusal};
 pub use flat::{Development, EdgeFrom, FlatPanel, Mismatch, Trim, Zone};
 pub use fold::{fold, Bent, Fold};
 pub use layout::{crossings, curve_through, develop};

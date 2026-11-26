@@ -3373,7 +3373,7 @@ pub use reach::ball_values_from_rotation_vector;
 
 #[path = "joints_face.rs"]
 mod face;
-pub use face::{end_faces, face_name_at, named_face_spot, pin_end, round_end_at};
+pub use face::{end_faces, face_is_round, face_name_at, named_face_spot, pin_end, round_end_at};
 #[path = "joints_relations.rs"]
 mod relations;
 pub use reach::{FrameCarry, REACH_TOL, Reach, Reached, reach, reach_frame};

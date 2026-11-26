@@ -18,8 +18,8 @@ use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use solidcore_ops::prism::tapered_flange_ends;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcraft_kernel::services::prism::tapered_flange_ends;
 
 use crate::expr::Kind;
 use crate::{DocError, Expr, Result};
@@ -35,12 +35,18 @@ pub mod sizes;
 pub const MAX_MEMBERS: usize = 1000;
 /// The largest profile dimension (mm).
 pub const MAX_PROFILE_SIZE: f64 = 10_000.0;
+
+/// Is `v` a finite length within [`MAX_PROFILE_SIZE`] either way: a coordinate of a member's
+/// `locate`, or an offset from its anchor, the engine takes.
+pub fn within_profile_size(v: f64) -> bool {
+    v.is_finite() && v.abs() <= MAX_PROFILE_SIZE
+}
 /// The smallest profile dimension (mm): walls and sides thinner than this are refused, and so
 /// are radii smaller than this but not 0.
 pub const MIN_PROFILE_DIMENSION: f64 = 0.01;
 /// How far from vertical (radians) a member's line may lean and still count as vertical for its
 /// orientation ([`member_axes`]).
-pub const VERTICAL_TOLERANCE: f64 = solidcore_ops::frame_member::VERTICAL_TOLERANCE;
+pub const VERTICAL_TOLERANCE: f64 = solidcraft_kernel::services::frame_member::VERTICAL_TOLERANCE;
 
 /// A built-in profile and its dimensions (mm). `Option` dimensions take a default worked out from
 /// the profile's size ([`Profile::filled`] says which).
@@ -350,8 +356,8 @@ impl crate::walk::Walk for ProfileSpec {
 
 pub use crate::eval::frame_member::{
     LaterPieces, SectionView, corner_at_point, corner_point, default_order, default_orders, group_member_names, is_crossing, is_member_line,
-    is_member_wire, member_line_ids, member_names, member_of_body, member_parts, member_segments, member_turns, members_cross, members_of_bodies,
-    overlap_parent, section_view,
+    is_member_wire, located_point, member_line_ids, member_names, member_of_body, member_parts, member_segments, member_turns, members_cross,
+    members_of_bodies, overlap_parent, section_view,
 };
 pub use crate::frame_corners::{CornerOverride, CornerType, MAX_GAP, MemberRef, checked_gap, read_coped};
 pub use crate::frame_plate::{PlateHoles, PlateMember, PlateShape, plate_member, plate_region};
@@ -997,7 +1003,7 @@ pub fn mirrored(region: &Region2) -> Region2 {
 /// profile counter-clockwise about the line, seen looking back from its end. `None` for a
 /// direction of no length.
 pub fn member_axes(d: Vec3, angle: f64) -> Option<(Vec3, Vec3)> {
-    solidcore_ops::frame_member::member_axes(d, angle).ok().flatten()
+    solidcraft_kernel::services::frame_member::member_axes(d, angle).ok().flatten()
 }
 
 /// [`member_axes`] for a member running along `dir` with its `up` given (#4003 Auto's lined-up sections): the

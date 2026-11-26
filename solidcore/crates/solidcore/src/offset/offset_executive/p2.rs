@@ -479,6 +479,15 @@ fn refuse_meeting_planar_insets(
     }
 }
 
+/// Whether `e` is a rounded offset's tube refusal (#13685), which the solid offset passes on
+/// where upstream drops a mapped edge's status.
+fn is_tube_refusal(e: &SolidError) -> bool {
+    matches!(
+        e.offset_failure(),
+        Some(OffsetFailure::TubeFolds { .. } | OffsetFailure::TubeNotCertified { .. })
+    )
+}
+
 /// Not upstream (WR-346): a radius of curvature that collapsed face `face` attains on the
 /// side the offset moves it to, for [`OffsetFailure::Collapses`]: the one
 /// [`crate::offset::construction::sheets::proved_singular`] finds over the face's parameter
@@ -875,8 +884,9 @@ impl OffsetExecutive {
                             continue;
                         }
                     }
-                    // SE upstream: propagate Unported, ignore other errors but a defect.
-                    super::p1::ignored_unless_defect(self.mapped_edge_prefix(
+                    // SE upstream: propagate Unported, ignore other errors but a defect. Not
+                    // upstream (#13685): a folding tube's refusal is passed on, never dropped.
+                    let status = self.mapped_edge_prefix(
                         kernel,
                         original,
                         edgeuse,
@@ -884,7 +894,13 @@ impl OffsetExecutive {
                         mark_type,
                         &marked,
                         notifications,
-                    ))?;
+                    );
+                    if let Err(e) = status {
+                        if is_tube_refusal(&e) {
+                            return Err(e);
+                        }
+                        super::p1::ignored_unless_defect(Err::<(), _>(e))?;
+                    }
                 }
                 Ok(())
             })??;
@@ -1239,6 +1255,10 @@ impl OffsetExecutive {
                     .into_error());
                 }
             }
+
+            // (not upstream) a face of two edges whose offset is empty is taken out, its
+            // neighbours' offsets mated across it (the offset eliminates it)
+            self.eliminate_empty_lenses(kernel, original, mark_type, &marked, notifications)?;
 
             // (not upstream, the executor's own split flags are the only path since
             // #2981: fork tangency-labs/smlib 5d428ae, 7ff0a94, 2e1bb8c): close the

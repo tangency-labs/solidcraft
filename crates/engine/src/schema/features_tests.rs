@@ -140,7 +140,7 @@ fn schemas_and_the_key_check_agree() {
         input_schema_for::<BoundingSolidParams>(),
         &["bodies", "body_name", "body_names", "component", "margin", "margins", "name", "participants"],
     );
-    assert_keys(input_schema_for::<ScaleParams>(), &["bodies", "factor", "factors", "name", "origin", "participants"]);
+    assert_keys(input_schema_for::<ScaleParams>(), &["about", "bodies", "factor", "factors", "name", "origin", "participants"]);
     assert_keys(input_schema_for::<OffsetPlaneParams>(), &["base", "name", "offset", "participants", "through"]);
     assert_keys(input_schema_for::<PlaneAtAngleParams>(), &["angle", "axis", "base", "direction_only", "name", "participants", "pivot"]);
     assert_keys(
@@ -455,6 +455,7 @@ fn sweep_schemas_and_the_key_check_agree() {
         "path_sketch",
         "profiles",
         "sketch",
+        "stays_surface",
     ];
     surface.extend(shape);
     surface.sort_unstable();

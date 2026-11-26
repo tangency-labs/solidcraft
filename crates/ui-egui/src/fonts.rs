@@ -6,6 +6,9 @@
 
 use std::sync::Arc;
 
+#[cfg(not(target_arch = "wasm32"))]
+mod system_fallback;
+
 use egui::{FontDefinitions, FontFamily};
 #[cfg(not(target_arch = "wasm32"))]
 use solidcraft_engine::sketch::fallback;
@@ -534,6 +537,16 @@ fn system_fallbacks() -> &'static SystemFonts {
 pub fn system_fonts_ready() -> bool {
     SYSTEM_FONTS.get().is_some()
 }
+
+/// Draws a character none of the faces has with an installed font that has it (#20005), the
+/// installed fonts listed on a thread of their own. Once per context.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn add_system_font_fallback(ctx: &egui::Context) {
+    system_fallback::install(ctx);
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn add_system_font_fallback(_ctx: &egui::Context) {}
 
 /// Search for the system fallback faces on a thread and repaint when they are found.
 #[cfg(not(target_arch = "wasm32"))]

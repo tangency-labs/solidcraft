@@ -1,24 +1,19 @@
 //! A test-only seam (feature `wr57-replay`, off by default and never on in `cargo build`,
-//! a release or a wasm build) at the two WR-57 entry points:
-//! [`Surface::find_degen_param_for_direction`] and the singular point inversion
-//! ([`Surface::invert_point_near_singularity`]), and at the loop normal
-//! ([`crate::curve::curve::p3::compute_crvs_normal`]: [`LoopNormalHook`], the WR-587
-//! retirement's replay, #18931), and at the global surface point solve's target bound
-//! ([`TargetBoundHook`], #20438).
+//! a release or a wasm build) at WR-450's three choices ([`Seam::AnalyticCopy`],
+//! [`Seam::SplitTrims`], [`Seam::CarryGate`]) for the goldens' `wr450_rows` replay, at the
+//! loop normal ([`crate::curve::curve::p3::compute_crvs_normal`]: [`LoopNormalHook`], the
+//! WR-587 retirement's replay, #18931), and at the global surface point solve's target
+//! bound ([`TargetBoundHook`], #20438). (The feature is named after the WR-57 substitution
+//! replay, #17856, which first used the seam and has since been retired.)
 //!
-//! The goldens crate's substitution replay (`wr57_replay`, #17856) gives a kernel a
-//! [`ReplaySeam`] ([`Kernel::replay`]): a hook that sees each outermost call's inputs,
-//! surface and answer, and may put another answer in its place: main's, from a committed
-//! tape. A golden row that then equals main's row bit for bit moved only through those
-//! answers.
+//! A test gives a kernel a [`ReplaySeam`] ([`Kernel::replay`]): a hook that sees each
+//! outermost call's inputs, surface and answer, and may put another answer in its place.
 //!
 //! The seam's state lives on the [`Kernel`] (no global or thread local state): a kernel
 //! made with [`Kernel::new`] has no hook, and [`wrap`] then only calls the function. The
 //! kernel copies an operation makes for its caches share the caller's seam, as they share
 //! its profiler.
 //!
-//! [`Surface::find_degen_param_for_direction`]: super::Surface::find_degen_param_for_direction
-//! [`Surface::invert_point_near_singularity`]: super::Surface::invert_point_near_singularity
 //! [`Kernel`]: crate::Kernel
 //! [`Kernel::new`]: crate::Kernel::new
 //! [`Kernel::replay`]: crate::Kernel::replay
@@ -26,25 +21,31 @@
 use core::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-use super::p7::DegenParam;
-use super::p8::SingularityInversion;
 use super::Surface;
 use crate::curve::curve::p2::Curve;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::SolverOperation;
-use crate::geom::local_solve_nd::TerminationReason;
-use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::Vec3;
 use crate::Kernel;
 
-/// Which entry point a call went through.
+/// Which choice a call went through.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Seam {
-    /// [`super::Surface::find_degen_param_for_direction`].
-    Degen,
-    /// The singular point inversion (closest point or maximize).
-    Invert,
+    /// WR-450: whether `BSplineSurface::copy_and_add_analytics` keeps an exact copy (`[1]`)
+    /// or the recognised analytic (`[0]`, upstream's choice); the call's surface is the
+    /// analytic, its input empty.
+    AnalyticCopy,
+    /// WR-450: whether `MakeEdgeInFaceWithVU` drops the UV trims of the new face's edge
+    /// uses (`[1]`) once its surface is the copy of the split face's, as main did before
+    /// the retirement where the copy is of another kind (input `[1]`); never now (`[0]`).
+    /// The call's surface is the split face's.
+    SplitTrims,
+    /// WR-450: whether `copy_uv_trim_curves_of_other_face` turns away the other operand's
+    /// trim of an edge `MergeEdge` copied (`[1]`: its same-parameter gap is not proved within
+    /// the edge's tolerance) or carries it (`[0]`, as before that gate, whatever its gap).
+    /// The call's surface is the new face's, its input empty.
+    CarryGate,
 }
 
 /// A call's answer: its value as bits, or its error.
@@ -54,15 +55,12 @@ pub type Answer = std::result::Result<Vec<u64>, SolidError>;
 pub struct Call<'a> {
     /// The entry point.
     pub seam: Seam,
-    /// The call's inputs as bits ([`degen_input`], [`invert_input`]).
+    /// The call's inputs as bits.
     pub input: &'a [u64],
     /// The surface the call was made on.
     pub surface: &'a Surface,
     /// The kernel the call was made with.
     pub kernel: &'a Kernel,
-    /// For [`Seam::Invert`]: whether the inversion maximizes the distance (`false` for a
-    /// closest point, and for [`Seam::Degen`]).
-    pub farthest: bool,
     /// The function's own answer.
     pub own: Answer,
 }
@@ -168,53 +166,34 @@ pub trait Bits: Sized {
     fn from_bits(bits: &[u64]) -> Option<Self>;
 }
 
-impl Bits for DegenParam {
+impl Bits for bool {
     fn to_bits(&self) -> Vec<u64> {
-        vec![
-            self.uv.x.to_bits(),
-            self.uv.y.to_bits(),
-            u64::from(self.converged),
-        ]
+        vec![u64::from(*self)]
     }
     fn from_bits(bits: &[u64]) -> Option<Self> {
         match *bits {
-            [x, y, c] if c <= 1 => Some(Self {
-                uv: Point2::new(f64::from_bits(x), f64::from_bits(y)),
-                converged: c == 1,
-            }),
+            [0] => Some(false),
+            [1] => Some(true),
             _ => None,
         }
     }
 }
 
-impl Bits for SingularityInversion {
-    fn to_bits(&self) -> Vec<u64> {
-        vec![
-            self.uv.x.to_bits(),
-            self.uv.y.to_bits(),
-            u64::from(self.reason.code().unsigned_abs()),
-        ]
-    }
-    fn from_bits(bits: &[u64]) -> Option<Self> {
-        let [x, y, r] = *bits else {
-            return None;
-        };
-        let reason = [
-            TerminationReason::Undefined,
-            TerminationReason::FoundAnswerConverged,
-            TerminationReason::FoundAnswerClose,
-            TerminationReason::OutOfBounds,
-            TerminationReason::BadJacobian,
-            TerminationReason::UnableToConverge,
-            TerminationReason::StillIterating,
-        ]
-        .into_iter()
-        .find(|t| u64::from(t.code().unsigned_abs()) == r)?;
-        Some(Self {
-            uv: Point2::new(f64::from_bits(x), f64::from_bits(y)),
-            reason,
-        })
-    }
+/// The choice `own` of `seam` ([`Seam::AnalyticCopy`], [`Seam::SplitTrims`],
+/// [`Seam::CarryGate`]) on
+/// `surface` with `input`, through `k`'s hook ([`wrap`]).
+///
+/// # Errors
+///
+/// As [`wrap`].
+pub(crate) fn choose(
+    k: &Kernel,
+    surface: &Surface,
+    seam: Seam,
+    input: &[u64],
+    own: bool,
+) -> Result<bool> {
+    wrap(k, surface, seam, input, || Ok(own))
 }
 
 /// Runs `f`, a call of `seam` on `surface` with `input`, through `k`'s hook. With no hook,
@@ -229,7 +208,6 @@ pub(crate) fn wrap<T: Bits>(
     surface: &Surface,
     seam: Seam,
     input: &[u64],
-    farthest: bool,
     f: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
     let seam_state = &k.replay;
@@ -247,7 +225,6 @@ pub(crate) fn wrap<T: Bits>(
             input,
             surface,
             kernel: k,
-            farthest,
             own,
         }),
         Err(_) => Err(SolidError::InvalidInput {
@@ -328,56 +305,4 @@ pub(crate) fn wrap_target_bound(bound: TargetBound<'_>) -> bool {
     };
     seam_state.depth.fetch_sub(1, Ordering::Relaxed);
     drop
-}
-
-/// The error a surface routine `operation` answers when it fails as `reason` says, built
-/// as the routine builds it (a taped answer of main's).
-#[must_use]
-pub fn surface_failed(operation: &'static str, reason: &'static str) -> SolidError {
-    SolidError::surface(
-        operation,
-        crate::error::surface::SurfaceFailure::Failed(reason),
-    )
-}
-
-/// [`Seam::Degen`]'s inputs as bits.
-pub(crate) fn degen_input(
-    uv: Point2,
-    dir: Vec3,
-    dir_from_pole: bool,
-    singular_dir: crate::nurbs::b_spline_surface::p1::SurfParamType,
-    tol: f64,
-) -> Vec<u64> {
-    vec![
-        uv.x.to_bits(),
-        uv.y.to_bits(),
-        dir.x.to_bits(),
-        dir.y.to_bits(),
-        dir.z.to_bits(),
-        u64::from(dir_from_pole),
-        u64::from(singular_dir == crate::nurbs::b_spline_surface::p1::SurfParamType::U),
-        tol.to_bits(),
-    ]
-}
-
-/// [`Seam::Invert`]'s inputs as bits.
-pub(crate) fn invert_input(
-    test_pt: Vec3,
-    uv_domain: &Extent2d,
-    uv_guess: Point2,
-    tol: f64,
-) -> Vec<u64> {
-    let (lo, hi) = (uv_domain.min, uv_domain.max);
-    vec![
-        test_pt.x.to_bits(),
-        test_pt.y.to_bits(),
-        test_pt.z.to_bits(),
-        lo.x.to_bits(),
-        lo.y.to_bits(),
-        hi.x.to_bits(),
-        hi.y.to_bits(),
-        uv_guess.x.to_bits(),
-        uv_guess.y.to_bits(),
-        tol.to_bits(),
-    ]
 }

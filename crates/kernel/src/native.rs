@@ -110,6 +110,22 @@ pub(crate) fn smlib_body_ordered(body: &Body) -> Result<(solidcraft_smlib::Brep,
     Ok((brep.try_clone().map_err(|e| KernelError::smlib("SMLib", e))?, numbering(record, &brep)))
 }
 
+/// `body`'s form in SMLib itself, shared, not a copy, with its numbering as
+/// [`smlib_body_ordered`] gives it: for a boolean or a union, which tag their operands
+/// ([`solidcraft_smlib::Brep::boolean_tagged`]: tagging reads the body and makes the copy the
+/// operation consumes) and nothing else. Their operand was a copy of a copy of the body's form,
+/// and the tagged copy was copied again: four copies of a body of many faces for each operand of
+/// each boolean (solidcore#3359). Nothing may check or change the form returned: a check (and an
+/// export) edits the body it is given, so the numbering's export is of a copy of its own, as
+/// [`smlib_body_ordered`]'s is, and an operand a failed boolean checks is a copy too.
+pub(crate) fn smlib_operand_ordered(body: &Body) -> Result<(std::sync::Arc<solidcraft_smlib::Brep>, Option<solidcraft_smlib::history::Order>)> {
+    let brep = body.smlib()?;
+    let _span = solidcraft_profile::span("kernel", "smlib_body");
+    let probe = brep.try_clone().map_err(|e| KernelError::smlib("SMLib", e))?;
+    let order = numbering(body.record(), &probe);
+    Ok((brep, order))
+}
+
 /// `body` in SMLib as a boolean's operand with the solids it keeps apart where they touch along
 /// an edge sharing that edge again. Its numbering comes from the export, which maps each shared
 /// edge to its record pieces. The record keeps one copy of such an edge and its vertices per
@@ -408,7 +424,12 @@ mod tests {
             std::fs::write(path, serde_json::to_string_pretty(&actual).unwrap() + "\n").unwrap();
         }
         let expected: Value = serde_json::from_str(include_str!("native/fixtures/box-fillet-v5.json")).unwrap();
-        compare_wire(&expected, &actual);
+        // On a mismatch the records made are printed, so a change can be read (and blessed) from
+        // the test's log without a local build.
+        if let Err(e) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| compare_wire(&expected, &actual))) {
+            eprintln!("WIRE_RECORDS_BEGIN\n{actual}\nWIRE_RECORDS_END");
+            std::panic::resume_unwind(e);
+        }
     }
 
     fn compare_wire(expected: &Value, actual: &Value) {

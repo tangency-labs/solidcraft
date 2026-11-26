@@ -7,7 +7,7 @@
     "ui.frame_trim.more_targets": "أهداف إضافية: {count}",
     "ui.frame_trim.nearer_end": "الطرف الأقرب",
     "ui.frame_trim.pick_members": "اختر العناصر الهيكلية لقصّها.",
-    "ui.frame_trim.pick_members_first": "اختر العناصر الهيكلية التي تريد قصّها أولاً.",
+    "ui.frame_trim.pick_members_first": "اختر العناصر الهيكلية التي تريد قصّها أولًا.",
     "ui.frame_trim.pick_targets": "اختر ما تريد قصّ العناصر إليه.",
     "ui.frame_trim.start": "البداية",
     "ui.frame_trim.target_kinds": "يمكن القص إلى عناصر هيكلية أو أوجه مستوية أو مستويات.",

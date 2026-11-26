@@ -252,7 +252,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                     1 => {
                         let result = stepper.find_next_step(&k, &mut previous)?;
                         if let Some(status) = out.first_mut() {
-                            *status = f64::from(result.status);
+                            *status = f64::from(crate::output::next_step_status(result));
                         }
                         out.push(f64::from(result.reason.code()));
                     }

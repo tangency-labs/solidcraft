@@ -30,7 +30,9 @@ use solidcore_ops::sweep::{
     sweep_placed, sweep_stations, Affine, CornerRefusal, Curve, DraftCorner, Ends, Join, PathCheck,
     SweepFrame, SweepRoute, Verdict,
 };
-use solidcore_ops::sweep::{loft_with_ends, LoftEnd};
+use solidcore_ops::sweep::{
+    loft_with_ends, screw_sweep_with, LoftEnd, ScrewSweepOptions, ScrewWalls,
+};
 use solidcore_ops::{make_box, Body, CheckLevel, Error};
 
 const Z: [f64; 3] = [0.0, 0.0, 1.0];
@@ -557,6 +559,35 @@ fn check(name: &str) {
         }
         (want, got) => panic!("{name}: want {want:?}, got {got:?}"),
     }
+}
+
+/// A square thread with joined walls: its two flanks one face each across the half turns its
+/// cylinder walls come in, the same solid as its pieces (the same volume, every cylinder piece),
+/// and `screw_sweep` is the pieces.
+#[test]
+fn screw_sweep_joined_walls_are_the_pieces_solid() {
+    let thread = polygon(&[
+        [5.0, 0.0, 0.0],
+        [6.0, 0.0, 0.0],
+        [6.0, 0.0, 1.0],
+        [5.0, 0.0, 1.0],
+    ]);
+    let made = |walls| {
+        let options = ScrewSweepOptions {
+            law: None,
+            tolerance: 1e-5,
+            walls,
+        };
+        screw_sweep_with(&thread, [0.0; 3], Z, 2.0, 2.0, &options).unwrap()
+    };
+    let (pieces, joined) = (made(ScrewWalls::Pieces), made(ScrewWalls::Joined));
+    let plain = screw_sweep(&thread, [0.0; 3], Z, 2.0, 2.0, None, 1e-5).unwrap();
+    assert_eq!(plain.counts().unwrap(), pieces.counts().unwrap());
+    // 4 half turns of 4 walls and 2 caps; then 4 of the 2 cylinders, 2 flanks and 2 caps
+    assert_eq!(pieces.counts().unwrap()[0], 18);
+    assert_eq!(joined.counts().unwrap()[0], 12);
+    let (vp, vj) = (pieces.volume(1e-8).unwrap(), joined.volume(1e-8).unwrap());
+    assert!(rel(vp, vj) < 1e-9, "pieces {vp}, joined {vj}");
 }
 
 macro_rules! cases {
@@ -1509,4 +1540,161 @@ fn loft_to_point_through_corners_of_different_weights_stitch() {
     );
     let v = b.volume(1e-8).unwrap();
     assert!(rel(v, 200.0) < 1e-9, "volume {v} vs 200");
+}
+
+/// A circle swept along a line, at a small radius and far from the origin: the record it writes
+/// opens again (tangency-labs/solidcore#3377, where a cap plane was written with axes off square
+/// by 1e-15 to 1e-14 and `from_record` refused it).
+#[test]
+fn a_swept_circle_s_record_opens_again() {
+    let (s, c) = 15f64.to_radians().sin_cos();
+    let mut failed = Vec::new();
+    for (r, start, dir) in [
+        (1.0, [0.0, 0.0, 0.0], [c, s, 0.0]),
+        (0.01, [0.0, 0.0, 0.0], [c, s, 0.0]),
+        (1.0, [10010.0, 9997.58, 10.0], [0.0, 1.0, 0.0]),
+    ] {
+        let end = [0, 1, 2].map(|i| start[i] + 10.0 * dir[i]);
+        let circle = Curve::Arc {
+            center: start,
+            axis: dir,
+            reference: [0.0, 0.0, 1.0],
+            radius: r,
+            start: 0.0,
+            end: TAU,
+        };
+        let (body, _, _) =
+            sweep_placed(&[circle], &[line(start, end)], SweepFrame::Follow, true).unwrap();
+        let (record, _) = body.to_record().unwrap();
+        let again = Body::from_record(&record, true).and_then(|(back, _)| {
+            let (second, _) = back.to_record()?;
+            Body::from_record(&second, true).map(|_| second)
+        });
+        match again {
+            Ok(second) if second == record => {}
+            Ok(_) => failed.push(format!("r {r} from {start:?}: the second record differs")),
+            Err(e) => failed.push(format!("r {r} from {start:?}: {e:?}")),
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// A swept circle saved before #21509 squared the record's plane axes: its cap planes' v axes
+/// are off square by about 1.36e-14 times their size (tangency-labs/solidcraft#21752). The
+/// record opens, as the same solid, and the record it writes again opens too.
+#[test]
+fn a_swept_circle_saved_with_its_caps_off_square_opens() {
+    use solidcore_record::brep::Surface;
+    let start = [10010.0, 9997.58, 10.0];
+    let circle = Curve::Arc {
+        center: start,
+        axis: [0.0, 1.0, 0.0],
+        reference: Z,
+        radius: 1.0,
+        start: 0.0,
+        end: TAU,
+    };
+    let end = [start[0], start[1] + 10.0, start[2]];
+    let (body, _, _) =
+        sweep_placed(&[circle], &[line(start, end)], SweepFrame::Follow, true).unwrap();
+    let (mut record, _) = body.to_record().unwrap();
+    let mut skewed = 0;
+    for face in &mut record.faces {
+        if let Surface::Plane { u_axis, v_axis, .. } = &mut face.surface {
+            let size = (0..3).map(|i| v_axis[i] * v_axis[i]).sum::<f64>().sqrt();
+            for i in 0..3 {
+                v_axis[i] += 1.36e-14 * size * u_axis[i];
+            }
+            skewed += 1;
+        }
+    }
+    assert_eq!(skewed, 2, "the two caps");
+    let (back, _) = Body::from_record(&record, true).unwrap();
+    assert!(back.check(CheckLevel::All).unwrap().is_valid());
+    let (again, _) = back.to_record().unwrap();
+    assert_eq!(
+        (again.faces.len(), again.edges.len(), again.vertices.len()),
+        (
+            record.faces.len(),
+            record.edges.len(),
+            record.vertices.len()
+        )
+    );
+    Body::from_record(&again, true).unwrap();
+    let (v, w) = (body.volume(1e-9).unwrap(), back.volume(1e-9).unwrap());
+    assert!(rel(v, w) < 1e-9, "volume {w} vs {v}");
+}
+
+/// A profile's runs of arcs on one circle are found and joined as [`join_arcs`] joins them: a
+/// circle in two halves of one frame is the full circle from its frame's start; two frames
+/// close at the middle of the longer; an open run in a loop with a line is one arc and the line
+/// stays; a profile with no such run is as given.
+#[test]
+fn the_runs_of_a_profile_join_as_join_arcs_joins_them() {
+    rig_fixes();
+    let whole = solidcore_ops::sweep::join_circle_runs(&halves(), JOIN).unwrap();
+    assert_eq!(
+        whole,
+        [join_arcs(&halves(), Join::ClosedAtFrameStart, JOIN).unwrap()]
+    );
+    let framed = solidcore_ops::sweep::join_circle_runs(&two_frames(), JOIN).unwrap();
+    assert_eq!(
+        framed,
+        [join_arcs(&two_frames(), Join::ClosedAtMiddleOfLongest, JOIN).unwrap()]
+    );
+    let d = half_disc();
+    let open = solidcore_ops::sweep::join_circle_runs(&d, JOIN).unwrap();
+    assert_eq!(
+        open,
+        [join_arcs(&d[..2], Join::Open, JOIN).unwrap(), d[2].clone()]
+    );
+    let square = [
+        line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+        line([1.0, 0.0, 0.0], [1.0, 1.0, 0.0]),
+        line([1.0, 1.0, 0.0], [0.0, 1.0, 0.0]),
+        line([0.0, 1.0, 0.0], [0.0, 0.0, 0.0]),
+    ];
+    assert_eq!(
+        solidcore_ops::sweep::join_circle_runs(&square, JOIN).unwrap(),
+        square
+    );
+    assert!(solidcore_ops::sweep::join_circle_runs(&[], JOIN).is_err());
+}
+
+/// A circle in two halves lofted to a point above its centre is a cone: the base and a ruled
+/// wall on each half, volume pi r^2 h / 3; a half disc's arc gets a ruled wall and its line a
+/// triangle.
+#[test]
+fn a_curved_section_lofts_to_a_point_as_a_cone() {
+    rig_fixes();
+    let cone = loft_to_point(&halves(), [0.0, 0.0, 10.0]).unwrap();
+    assert_eq!(faces(&cone), 3, "the base and two walls");
+    assert!(rel(cone.volume(1e-8).unwrap(), 250.0 * PI / 3.0) < 1e-7);
+    let half = loft_to_point(&half_disc(), [0.0, 0.0, 10.0]).unwrap();
+    assert_eq!(faces(&half), 4, "the base, two ruled walls and a triangle");
+    assert!(rel(half.volume(1e-8).unwrap(), 125.0 * PI / 3.0) < 1e-7);
+}
+
+/// A tapered duct of squares lofts with flat sides: six faces, every one a plane (the skin would
+/// make the sides bilinear B-spline surfaces), and the frustum's volume.
+#[test]
+fn a_loft_of_two_squares_has_planar_sides() {
+    rig_fixes();
+    let b = loft(
+        &[square(0.0, 0.0, 20.0, 0.0), square(5.0, 5.0, 10.0, 10.0)],
+        1,
+        true,
+    )
+    .unwrap();
+    assert_eq!(faces(&b), 6);
+    let (record, _) = b.to_record().unwrap();
+    assert!(
+        record.faces.iter().all(|f| matches!(
+            f.surface,
+            solidcore_record::brep::Surface::Plane { .. }
+                | solidcore_record::brep::Surface::PlaneThrough { .. }
+        )),
+        "every face a plane"
+    );
+    assert!(rel(b.volume(1e-8).unwrap(), 7000.0 / 3.0) < 1e-9);
 }

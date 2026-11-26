@@ -3240,7 +3240,7 @@ mod dump {
         let mut unproven = Vec::new();
         for &(name, main) in TARGET_BOUNDED {
             let case = crate::case::regression_case(&Runner, name);
-            let kept = crate::wr57_replay::with_installed(
+            let kept = crate::replay_seam::with_installed(
                 ReplaySeam::target_bound(Box::new(|_| false)),
                 || Runner.run_rust(&case),
             )
@@ -3250,7 +3250,7 @@ mod dump {
             assert_eq!(kept, main, "{name}: with the dropped answers kept the row is not main's");
             let certs = Arc::new(Mutex::new(Vec::<(bool, String)>::new()));
             let c = Arc::clone(&certs);
-            let row = crate::wr57_replay::with_installed(
+            let row = crate::replay_seam::with_installed(
                 ReplaySeam::target_bound(Box::new(move |b| {
                     let want = b.target.abs() + b.tol;
                     let k = Kernel::default();
