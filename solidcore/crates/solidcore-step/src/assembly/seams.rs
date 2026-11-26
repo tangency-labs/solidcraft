@@ -737,38 +737,41 @@ impl Assembly<'_> {
                 // The tube circle at `a`'s angle about the axis: centred on the ring there, angle
                 // 0 outward and π/2 up the axis, so its angle is the surface's tube angle. The
                 // seam runs from the loop the face lies above (`a`'s, running +u) up the tube to
-                // `b`: the face's side of the circle, whichever half that is.
+                // `b`: the face's side of the circle, whichever half that is. Its frame is
+                // unit and square to rounding, as the sphere's meridian's.
+                let z = ax.z.normalized().ok_or("a torus with no axis")?;
                 let da = pa - ax.origin;
-                let x = (da - ax.z * da.dot(ax.z)).normalized().ok_or("a torus seam on its axis")?;
+                let x = square_to(z, da).ok_or("a torus seam on its axis")?;
                 let centre = ax.origin + x * *major;
                 let tube = |p: Vec3| {
                     let d = p - centre;
-                    d.dot(ax.z).atan2(d.dot(x))
+                    d.dot(z).atan2(d.dot(x))
                 };
                 let (ta, tb) = (tube(pa), tube(pb));
                 let up = (tb - ta).rem_euclid(TAU);
                 if !(up > 1e-9) {
                     return Err("a seam of no length".into());
                 }
-                (BCurve::Circle { frame: Frame { origin: arr(centre), x_axis: arr(x), y_axis: arr(ax.z) }, radius: *minor }, [ta, ta + up], true)
+                (BCurve::Circle { frame: Frame { origin: arr(centre), x_axis: arr(x), y_axis: arr(z) }, radius: *minor }, [ta, ta + up], true)
             }
             Kind::TorusTube => {
                 // The circle about the axis through `a`: angle 0 at `a`, growing with the
                 // torus's u. The face lies to the left of its loops in (u, v), so from the loop
                 // running round the tube up (+v) it lies towards −u: the seam runs from `a` back
                 // round the axis to `b`, the edge from `b` to `a`.
+                let z = ax.z.normalized().ok_or("a torus with no axis")?;
                 let da = pa - ax.origin;
-                let h = da.dot(ax.z);
-                let radial = da - ax.z * h;
+                let h = da.dot(z);
+                let radial = da - z * h;
                 let r = radial.len();
-                let x = radial.normalized().ok_or("a torus seam on its axis")?;
-                let y = ax.z.cross(x);
+                let x = square_to(z, radial).ok_or("a torus seam on its axis")?;
+                let y = z.cross(x);
                 let db = pb - ax.origin;
                 let back = (-(db.dot(y).atan2(db.dot(x)))).rem_euclid(TAU);
                 if !(back > 1e-9) {
                     return Err("a seam of no length".into());
                 }
-                let centre = ax.origin + ax.z * h;
+                let centre = ax.origin + z * h;
                 (BCurve::Circle { frame: Frame { origin: arr(centre), x_axis: arr(x), y_axis: arr(y) }, radius: r }, [-back, 0.0], false)
             }
             Kind::Iso { line, dir, .. } => {
@@ -1459,7 +1462,7 @@ impl Assembly<'_> {
         let k = k.ok_or_else(|| format!("face #{step}: a loop around the axis on its pole"))?;
         let k = match ax.kind {
             Kind::Iso { start, .. } => self.seam_start(fi, li, start, ax, eval)?,
-            Kind::Ruled | Kind::Sphere(_) => self.once_start(fi, li, ax, eval)?,
+            Kind::Ruled | Kind::Sphere(_) => self.once_start(fi, li, ax)?,
             // A revolution's seam lies on a quarter line, where its form starts ([`Self::band_seam`]):
             // the one at its profile.
             Kind::Revolved(_) => self.seam_start(fi, li, 0.0, ax, eval)?,
@@ -1505,7 +1508,7 @@ impl Assembly<'_> {
     /// in the middle of the widest range of them. Where the pieces leave no angle known to be
     /// passed once (a piece whose hull reaches round the axis), the first vertex off the pole, as
     /// every cap had it before.
-    fn once_start(&mut self, fi: usize, li: usize, ax: &Axis, eval: &SurfaceEval) -> R<usize> {
+    fn once_start(&mut self, fi: usize, li: usize, ax: &Axis) -> R<usize> {
         let Some(Bound::Edges(es)) = self.faces.get(fi).and_then(|f| f.loops.get(li)) else { return Err("loop reference".into()) };
         let es = es.clone();
         let blocked = self.blocked_angles(fi, li, li, ax)?.ok_or("a cap's loop winds round its axis")?;
@@ -1527,16 +1530,32 @@ impl Assembly<'_> {
                 return Ok(k);
             }
         }
-        let (k, first) = first.ok_or("a loop around the axis on its pole")?;
+        let (k, _) = first.ok_or("a loop around the axis on its pole")?;
         let Some(middle) = blocked.widest_clear() else { return Ok(k) };
-        // The surface's angle parameter at that angle about the axis: offset from the frame's by
-        // that of a vertex of the loop (both right-handed about the axis).
-        let u_of = eval.project(self.vpoint(first)?, None, f64::INFINITY).ok_or("a vertex off its surface")?;
-        let target = middle + (u_of[0] - frame.angle(self.vpoint(first)?));
-        let (e, t, _) =
-            self.meets(&es, 0, target, ax.period, eval)?.ok_or_else(|| unsupported("a loop round a pole that misses its seam's angle"))?;
-        let v = self.split_edge(e, t)?;
-        self.use_at(fi, li, v)
+        // No blocked arc reaches that angle, so the loop passes it on one piece, whose angle runs
+        // one way and spans under half a turn: the kernel solves where it reaches the angle on
+        // the piece itself. Sampling the edge instead missed it near a pole, where the angle
+        // turns fast along the edge (a radian between samples on an edge 0.6 mm from a sphere's
+        // pole).
+        for &(e, _) in &es {
+            let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+            let Some((form, _)) = nurbs_form(&edge.curve, edge.interval) else { continue };
+            let form = CurveEval::new(&form).map_err(|m| m.to_string())?;
+            for piece in frame.pieces(&edge.curve, edge.interval, self.tol) {
+                if piece.runs.is_none() || (Blocked { arcs: vec![piece.arc] }).clear(middle) {
+                    continue;
+                }
+                let Some((true, p, x)) = ruling_crossing(&frame, &form, piece.on, middle)? else { continue };
+                let [e0, e1] = edge.vertices;
+                if let Some(v) = [e0, e1].into_iter().find(|&v| self.vpoint(v).is_ok_and(|q| q.dist(p) <= self.tol)) {
+                    return self.use_at(fi, li, v);
+                }
+                let Some(t) = self.edge_parameter(e, x, p)? else { continue };
+                let v = self.split_edge(e, t)?;
+                return self.use_at(fi, li, v);
+            }
+        }
+        Err(unsupported("a loop round a pole that misses its seam's angle"))
     }
 
     /// Vertex `vb`, which the file puts a hair off the ruling through vertex `va` (within the
@@ -1892,23 +1911,7 @@ impl Assembly<'_> {
             let vb = match at_vertex {
                 Some(x) => x,
                 None => {
-                    // A spline is its own form; a line's, circle's or ellipse's point is found on
-                    // the edge's own curve, where it is the one nearest.
-                    let t = match &edge.curve {
-                        BCurve::Spline { .. } | BCurve::RationalSpline { .. } => x,
-                        curve => {
-                            let c = CurveEval::new(curve).map_err(|m| m.to_string())?;
-                            let [lo, hi] = edge.interval;
-                            let Some(t) = crate::topology::project(&c, lo, hi, &[], p) else { continue };
-                            if !c.point(t).is_some_and(|q| q.dist(p) <= self.tol) {
-                                continue;
-                            }
-                            t
-                        }
-                    };
-                    if !(edge.interval[0] < t && t < edge.interval[1]) {
-                        continue;
-                    }
+                    let Some(t) = self.edge_parameter(e, x, p)? else { continue };
                     *splits += 1;
                     if *splits > MAX_SPLITS {
                         return Err(format!("more than {MAX_SPLITS} edges split for seams"));
@@ -1955,12 +1958,8 @@ impl Assembly<'_> {
         let d = |t: f64| {
             c.point(t).and_then(|p| eval.project(p, None, f64::INFINITY)).and_then(|q| q.get(at).copied()).map(|x| wrap_by(x - target, period))
         };
-        // A sign change between two samples (each within half a period of the target) passed
-        // the target by the short way between them, less than half a period, and the half
-        // period opposite it, the wrap, by the long way. Steps along the edge are taken to turn
-        // less than half a period, so the short way is the one it took. Near a pole an edge
-        // turns fast: one a few tenths of a millimetre from a sphere's pole turns more than a
-        // radian from one sample to the next.
+        // A jump across the half period is the wrap, not a crossing.
+        let near = period / TAU;
         let n = 64;
         let mut prev: Option<(f64, f64)> = None;
         for k in 0..=n {
@@ -1968,7 +1967,8 @@ impl Assembly<'_> {
             let Some(x) = d(t) else { continue };
             if let Some((t0, x0)) = prev
                 && x0.signum() != x.signum()
-                && (x - x0).abs() < 0.5 * period
+                && x0.abs() < near
+                && x.abs() < near
             {
                 let (mut a, mut b, mut fa) = (t0, t, x0);
                 for _ in 0..100 {
@@ -2155,6 +2155,27 @@ impl Assembly<'_> {
             }
         }
         Err(unsupported("a loop around a closed surface that never reaches the line its seam runs on"))
+    }
+
+    /// The parameter inside edge `e` of point `p`, found at parameter `x` of the edge's NURBS
+    /// form ([`nurbs_form`]). A spline is its own form; a line's, circle's or ellipse's point is
+    /// found on the edge's own curve, where it is the one nearest. `None` where that is not
+    /// within the tolerance of `p` or not inside the edge's interval.
+    fn edge_parameter(&self, e: u32, x: f64, p: Vec3) -> R<Option<f64>> {
+        let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+        let [lo, hi] = edge.interval;
+        let t = match &edge.curve {
+            BCurve::Spline { .. } | BCurve::RationalSpline { .. } => x,
+            curve => {
+                let c = CurveEval::new(curve).map_err(|m| m.to_string())?;
+                let Some(t) = crate::topology::project(&c, lo, hi, &[], p) else { return Ok(None) };
+                if !c.point(t).is_some_and(|q| q.dist(p) <= self.tol) {
+                    return Ok(None);
+                }
+                t
+            }
+        };
+        Ok((lo < t && t < hi).then_some(t))
     }
 
     /// Split edge `e` at `t` inside its interval: it keeps [min, t], a new edge takes

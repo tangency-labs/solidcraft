@@ -766,6 +766,29 @@ fn a_sphere_face_that_holds_its_frames_pole_reads_as_with_the_pole_outside() {
             let seam = 2 * usize::from(inside);
             assert_eq!((m.faces, m.edges, m.vertices, m.shells), (faces, edges + seam, 2 + seam, 1), "{case}: {:?}", imp.warnings);
             assert!(!imp.warnings.iter().any(|w| w.contains("left out") || w.contains("refused")), "{case}: {:?}", imp.warnings);
+            if inside {
+                // The seam ends on the pole, at R along the sphere's axis, and the sphere's face
+                // uses it twice, once each way.
+                let record = body.body.record();
+                let l = pole.iter().map(|c| c * c).sum::<f64>().sqrt();
+                let at = pole.map(|c| 100.0 * c / l);
+                let on_pole = |v: u32| {
+                    let p = record.vertices[v as usize].point;
+                    (0..3).map(|i| (p[i] - at[i]).powi(2)).sum::<f64>().sqrt() < 1e-9 * 100.0
+                };
+                let seams: Vec<usize> = (0..record.edges.len()).filter(|&e| record.edges[e].vertices.iter().any(|&v| on_pole(v))).collect();
+                assert_eq!(seams.len(), 1, "{case}: one edge to the pole");
+                let mut ways = Vec::new();
+                for face in &record.faces {
+                    for l in &face.loops {
+                        if let solidcore_record::brep::Loop::Edges { edges } = l {
+                            ways.extend(edges.iter().filter(|u| u.edge as usize == seams[0]).map(|u| u.forward));
+                        }
+                    }
+                }
+                ways.sort_unstable();
+                assert_eq!(ways, [false, true], "{case}: the seam's uses");
+            }
             if closed {
                 assert!(rel(m.area, area) < 1e-6, "{case}: area {} vs {area}", m.area);
                 assert!(rel(m.volume, volume) < 1e-6, "{case}: volume {} vs {volume}", m.volume);
