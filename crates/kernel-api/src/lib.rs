@@ -30,11 +30,14 @@ pub mod exchange;
 pub mod frames;
 pub mod hatch;
 pub mod hole_stacks;
+pub mod mesh;
 pub mod modelling;
 pub mod planar;
 pub mod points;
 pub mod projection;
 pub mod query;
+pub mod shaft_spline;
+pub mod tube_cope;
 
 pub use affine::{Affine, AffineRefused, AxisRefusal, Matrix, OffsetQuad, SquareFaceLevel};
 pub use cell_grid::{CellGrid, CellGridLimits};
@@ -42,11 +45,14 @@ pub use curves::{CurveRefused, CurveSample, Curves};
 pub use exchange::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWritten, Exchange};
 pub use frames::{Frames, GussetFailure, MemberRefusal, PathFailure, PathRefusal, TrimRefusal, TrimTarget};
 pub use hole_stacks::{HoleStacks, HoleStacksRefused};
+pub use mesh::{MeshRebuilt, MeshRefused, Meshes, ReconstructionKind};
 pub use modelling::{Axis2, BoolOp, ChamferSide, FilletTurn, Modelling, Primitive};
 pub use planar::{Planar, PlanarRefused};
 pub use points::{Distance, PointSetSummary, Points, PointsRefused};
 pub use projection::{ProjectionRefused, Projections};
-pub use query::{OutlineStretch, Queries, QueryRefused};
+pub use query::{OutlineStretch, Queries, QueryRefused, SurfacePoint};
+pub use shaft_spline::ShaftSplines;
+pub use tube_cope::{CopeFailed, CopeRefusal, TemplateRefusal, TubeCopes};
 
 /// A kernel's stable name: what build features, the support matrix and reports call it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -115,6 +121,12 @@ pub enum OpKind {
     Affine,
     /// Curves queried and splines fitted ([`Curves`]).
     Curves,
+    /// Source meshes rebuilt as solids ([`Meshes`]).
+    Mesh,
+    /// Round-tube copes and their templates ([`TubeCopes`]).
+    TubeCope,
+    /// Shaft splines planned, and round faces' seats and ends ([`ShaftSplines`]).
+    ShaftSpline,
 }
 
 impl OpKind {
@@ -144,6 +156,9 @@ impl OpKind {
         OpKind::Projection,
         OpKind::Affine,
         OpKind::Curves,
+        OpKind::Mesh,
+        OpKind::TubeCope,
+        OpKind::ShaftSpline,
     ];
 
     /// The operation's stable name, as the support matrix and route files spell it.
@@ -173,6 +188,9 @@ impl OpKind {
             OpKind::Projection => "projection",
             OpKind::Affine => "affine",
             OpKind::Curves => "curves",
+            OpKind::Mesh => "mesh",
+            OpKind::TubeCope => "tube_cope",
+            OpKind::ShaftSpline => "shaft_spline",
         }
     }
 
