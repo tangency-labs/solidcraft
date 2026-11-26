@@ -5522,12 +5522,117 @@ impl Document {
         st
     }
 
+    /// The seed body `body` was copied from by the active feature that created it
+    /// (`Pattern`, `Mirror` without combine, or `Move` with `copy: true`), when that
+    /// lineage is unambiguous from pinned `body_names`.
+    pub fn copy_seed_body(&self, body: &str) -> Option<&str> {
+        if body.is_empty() {
+            return None;
+        }
+        let limit = self.marker.unwrap_or(self.features.len()).min(self.features.len());
+        for f in self.features[..limit].iter().rev() {
+            if f.suppressed {
+                continue;
+            }
+            let Some(idx) = f.body_names.iter().position(|n| n == body) else {
+                continue;
+            };
+            let seed = match &f.kind {
+                FeatureKind::Pattern { bodies, components, occurrences, join, .. }
+                    if !bodies.is_empty() && components.is_empty() && occurrences.is_empty() && (!*join || bodies.len() == 1) =>
+                {
+                    if bodies.len() == 1 {
+                        Some(bodies[0].0.as_str())
+                    } else if f.body_names.len().is_multiple_of(bodies.len()) {
+                        let per = f.body_names.len() / bodies.len();
+                        bodies.get(idx / per).map(|b| b.0.as_str())
+                    } else {
+                        None
+                    }
+                }
+                FeatureKind::Mirror { bodies, combine: false, .. } if !bodies.is_empty() => bodies.get(idx).map(|b| b.0.as_str()),
+                FeatureKind::Move { bodies, copy: true, .. } if !bodies.is_empty() => bodies.get(idx).map(|b| b.0.as_str()),
+                _ => None,
+            };
+            return seed.filter(|s| *s != body);
+        }
+        None
+    }
+
+    /// The material explicitly assigned to `body` in [`Self::materials`], or inherited
+    /// from its copy-seed lineage (`Pattern`, `Mirror`, `Move` copy) when `body` has no
+    /// explicit assignment of its own.
+    ///
+    /// An explicit entry in [`Self::materials`] for `body` always takes precedence over
+    /// any seed body's material.
+    pub fn resolved_body_material(&self, body: &str) -> Option<&str> {
+        if let Some(m) = self.materials.get(body) {
+            return Some(m.as_str());
+        }
+        let mut current = body;
+        let mut visited: Vec<&str> = Vec::new();
+        for _ in 0..self.features.len() {
+            let seed = self.copy_seed_body(current)?;
+            if seed == body || visited.contains(&seed) {
+                return None;
+            }
+            if let Some(m) = self.materials.get(seed) {
+                return Some(m.as_str());
+            }
+            visited.push(seed);
+            current = seed;
+        }
+        None
+    }
+
+    /// Clear stored material entries on copy descendants of `updated` (`(seed_name, old_material)`)
+    /// whose stored material matched the seed's previous material (an inherited copy rather than a
+    /// distinct per-copy override), so those copies follow `next_material` via
+    /// [`Self::resolved_body_material`].
+    pub fn clear_inherited_copy_materials(&mut self, updated: &[(&str, String)], next_material: &str) {
+        if updated.is_empty() || self.materials.is_empty() {
+            return;
+        }
+        let limit = self.features.len();
+        let mut stale = Vec::new();
+        for body in self.materials.keys() {
+            if updated.iter().any(|(target, _)| *target == body.as_str()) {
+                continue;
+            }
+            let copy_mat = self.body_material(body);
+            let mut current = body.as_str();
+            let mut visited: Vec<&str> = Vec::new();
+            for _ in 0..limit {
+                let Some(seed) = self.copy_seed_body(current) else {
+                    break;
+                };
+                if seed == body.as_str() || visited.contains(&seed) {
+                    break;
+                }
+                if let Some((_, old_seed_mat)) = updated.iter().find(|(target, _)| *target == seed) {
+                    if *old_seed_mat != next_material && copy_mat == *old_seed_mat {
+                        stale.push(body.clone());
+                    }
+                    break;
+                }
+                if self.materials.contains_key(seed) && self.body_material(seed) != copy_mat {
+                    break;
+                }
+                visited.push(seed);
+                current = seed;
+            }
+        }
+        for body in stale {
+            self.materials.remove(&body);
+        }
+    }
+
     /// The material a body's mass is computed with, as the library or this design spells it:
-    /// its assigned material when that is known and has a usable density, else
-    /// [`DEFAULT_MATERIAL`]. The assignment as stored (`materials`) is left as it is.
+    /// its assigned material (or inherited copy-seed material) when that is known and has a
+    /// usable density, else [`DEFAULT_MATERIAL`]. The assignment as stored (`materials`) is
+    /// left as it is.
     pub fn body_material(&self, body: &str) -> String {
-        self.materials
-            .get(body)
+        self.resolved_body_material(body)
             .and_then(|m| self.material_name(m))
             .filter(|m| self.material_density(m).is_some())
             .unwrap_or_else(|| DEFAULT_MATERIAL.into())

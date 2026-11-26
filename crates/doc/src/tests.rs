@@ -1900,6 +1900,94 @@ fn a_body_reads_the_material_its_mass_is_computed_with() {
 }
 
 #[test]
+fn copy_lineage_resolves_seed_material_and_respects_overrides() {
+    let mut doc = Document::new("copy lineage");
+    let seed_id = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "10".into(),
+                width: "10".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(seed_id).unwrap().body_names = vec!["Seed".into()];
+    let pat_id = doc
+        .add_feature(
+            FeatureKind::Pattern {
+                features: Vec::new(),
+                pattern: PatternKind::Rectangular {
+                    dir1: crate::points::Dir(Vec3::X),
+                    count1: "3".into(),
+                    spacing1: "20 mm".into(),
+                    dir2: None,
+                    count2: None,
+                    spacing2: None,
+                    alignment: Default::default(),
+                    alignment2: Default::default(),
+                    reversed: false,
+                    reversed2: false,
+                    distance1: Default::default(),
+                    distance2: Default::default(),
+                    extent1: None,
+                    extent2: None,
+                    copy_at_end1: false,
+                    copy_at_end2: false,
+                },
+                bodies: vec!["Seed".into()],
+                placements: Vec::new(),
+                components: Vec::new(),
+                occurrences: Vec::new(),
+                join: false,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(pat_id).unwrap().body_names = vec!["Seed (2)".into(), "Seed (3)".into()];
+    let mir_id = doc
+        .add_feature(
+            FeatureKind::Mirror {
+                features: Vec::new(),
+                plane: PlaneRef::Origin { name: "YZ".into() },
+                bodies: vec!["Seed (2)".into()],
+                combine: false,
+                placements: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(mir_id).unwrap().body_names = vec!["Seed (2) (2)".into()];
+
+    doc.materials.insert("Seed".into(), "Steel".into());
+    assert_eq!(doc.copy_seed_body("Seed (2)"), Some("Seed"));
+    assert_eq!(doc.copy_seed_body("Seed (3)"), Some("Seed"));
+    assert_eq!(doc.copy_seed_body("Seed (2) (2)"), Some("Seed (2)"));
+    for body in ["Seed", "Seed (2)", "Seed (3)", "Seed (2) (2)"] {
+        assert_eq!(doc.body_material(body), "Steel", "{body}");
+        assert!((doc.density(body) - 7.85).abs() < 1e-9, "{body}");
+    }
+
+    // Explicit override on an intermediate copy wins for itself and its downstream copies.
+    doc.materials.insert("Seed (2)".into(), "Brass".into());
+    assert_eq!(doc.body_material("Seed (2)"), "Brass");
+    assert_eq!(doc.body_material("Seed (2) (2)"), "Brass");
+    assert_eq!(doc.body_material("Seed (3)"), "Steel");
+
+    // Clearing stale inherited copies when Seed changes preserves distinct overrides.
+    doc.materials.insert("Seed (3)".into(), "Steel".into());
+    doc.clear_inherited_copy_materials(&[("Seed", "Steel".into())], "Copper");
+    doc.materials.insert("Seed".into(), "Copper".into());
+    assert!(!doc.materials.contains_key("Seed (3)"));
+    assert_eq!(doc.body_material("Seed (3)"), "Copper");
+    assert_eq!(doc.body_material("Seed (2)"), "Brass");
+    assert_eq!(doc.body_material("Seed (2) (2)"), "Brass");
+}
+
+#[test]
 fn primitives_and_combine() {
     let mut doc = Document::new("p");
     doc.add_feature(

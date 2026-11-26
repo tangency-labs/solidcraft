@@ -1342,8 +1342,11 @@ type FaceProfile = (u64, Option<ProfileSel>, Option<String>);
 /// physical material and appearance, so it is still made of what the body was. A piece that
 /// already has its own (kept under its name from before) keeps it.
 fn carry_looks(s: &mut Session, pieces: &[(String, String)]) {
+    let inherited_material = |doc: &solidcraft_doc::Document, from: &str| {
+        doc.resolved_body_material(from).filter(|m| *m != solidcraft_doc::DEFAULT_MATERIAL).map(str::to_string)
+    };
     let needs = |piece: &str, from: &str| {
-        (!s.doc.materials.contains_key(piece) && s.doc.materials.contains_key(from))
+        (!s.doc.materials.contains_key(piece) && inherited_material(&s.doc, from).is_some())
             || (!s.doc.appearances.bodies.contains_key(piece) && s.doc.appearances.bodies.contains_key(from))
     };
     if !pieces.iter().any(|(piece, from)| needs(piece, from)) {
@@ -1352,7 +1355,7 @@ fn carry_looks(s: &mut Session, pieces: &[(String, String)]) {
     let doc = s.doc_mut();
     for (piece, from) in pieces {
         if !doc.materials.contains_key(piece)
-            && let Some(material) = doc.materials.get(from).cloned()
+            && let Some(material) = inherited_material(doc, from)
         {
             doc.materials.insert(piece.clone(), material);
         }
@@ -3339,38 +3342,57 @@ fn copy_keeps_appearance(s: &mut Session, reply: &Value, sources: &[String], cmd
     copy_keeps_appearance_for(s, id, sources, None, cmd)
 }
 
+/// Pair each copy body made by feature `id` with its seed body name in `sources`, reading the
+/// feature's own evaluation result (so later features that consume or join a copy do not break
+/// alignment) and skipping sources the pattern left out.
+pub(super) fn copy_pairs_for(s: &Session, id: u64, sources: &[String]) -> Option<Vec<(String, String)>> {
+    let state = s.model.result(id).filter(|r| r.error.is_none() && !r.skipped).map(|r| r.state.clone()).unwrap_or_else(|| s.model.state());
+    let left_out = state.pattern_left_out(id);
+    let active_sources: Vec<&String> = sources.iter().enumerate().filter(|(i, _)| !left_out.contains(i)).map(|(_, src)| src).collect();
+    let copies: Vec<String> = state.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
+    let each = copies.len().checked_div(active_sources.len()).filter(|each| *each > 0 && each * active_sources.len() == copies.len())?;
+    let mut pairs = Vec::with_capacity(copies.len());
+    for (source, group) in active_sources.into_iter().zip(copies.chunks(each)) {
+        for copy in group {
+            pairs.push((copy.clone(), source.clone()));
+        }
+    }
+    Some(pairs)
+}
+
 /// Copy each source body's body-level appearance and physical material onto its copies created by
-/// feature `id`. Bodies in `preserve` keep any explicit assignment they already have (#21245).
+/// feature `id`. When `previous_sources` maps a copy to the same source body it already came from,
+/// any explicit assignment on that copy is preserved (#21245), while unstyled copies pick up the
+/// seed's current assignment; new or re-seeded copies always take their new seed's assignment.
 pub(super) fn copy_keeps_appearance_for(
     s: &mut Session,
     id: u64,
     sources: &[String],
-    preserve: Option<&std::collections::HashSet<String>>,
+    previous_sources: Option<&std::collections::HashMap<String, String>>,
     cmd: &str,
 ) -> Result<()> {
-    let copies: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
-    let each = copies.len().checked_div(sources.len()).filter(|each| *each > 0 && each * sources.len() == copies.len());
-    let Some(each) = each else {
+    let Some(pairs) = copy_pairs_for(s, id, sources) else {
         return Err(bad(cmd, "the copy did not make the same number of bodies for each body it copied"));
     };
-    for (source, copies) in sources.iter().zip(copies.chunks(each)) {
-        for copy in copies {
-            if preserve.is_some_and(|existing| existing.contains(copy)) {
-                continue;
-            }
-            if let Some(look) = s.doc.appearances.bodies.get(source).cloned() {
+    for (copy, source) in pairs {
+        let same_source = previous_sources.and_then(|prev| prev.get(&copy)).is_some_and(|old| old == &source);
+        if !(same_source && s.doc.appearances.bodies.contains_key(&copy)) {
+            if let Some(look) = s.doc.appearances.bodies.get(&source).cloned() {
                 s.doc_mut().appearances.bodies.insert(copy.clone(), look);
-            } else {
-                s.doc_mut().appearances.bodies.remove(copy);
+            } else if !same_source {
+                s.doc_mut().appearances.bodies.remove(&copy);
             }
-            if let Some(material) = s.doc.materials.get(source).cloned() {
+        }
+        if !(same_source && s.doc.materials.contains_key(&copy)) {
+            let material = s.doc.resolved_body_material(&source).filter(|m| *m != solidcraft_doc::DEFAULT_MATERIAL).map(str::to_string);
+            if let Some(material) = material {
                 s.doc_mut().materials.insert(copy.clone(), material);
-            } else {
-                s.doc_mut().materials.remove(copy);
+            } else if !same_source {
+                s.doc_mut().materials.remove(&copy);
             }
-            if let Some(shape) = s.doc.collision_shapes.get(source).copied() {
-                s.doc_mut().collision_shapes.insert(copy.clone(), shape);
-            }
+        }
+        if !same_source && let Some(shape) = s.doc.collision_shapes.get(&source).copied() {
+            s.doc_mut().collision_shapes.insert(copy, shape);
         }
     }
     Ok(())
@@ -3868,8 +3890,11 @@ fn copies_keep_looks(s: &mut Session, reply: &Value, sources: &[String]) -> Resu
             });
         }
     }
+    let inherited_material = |doc: &solidcraft_doc::Document, from: &str| {
+        doc.resolved_body_material(from).filter(|m| *m != solidcraft_doc::DEFAULT_MATERIAL).map(str::to_string)
+    };
     let needs = |copy: &str, from: &str| {
-        (!s.doc.materials.contains_key(copy) && s.doc.materials.contains_key(from))
+        (!s.doc.materials.contains_key(copy) && inherited_material(&s.doc, from).is_some())
             || (!s.doc.appearances.bodies.contains_key(copy) && s.doc.appearances.bodies.contains_key(from))
     };
     if faces.is_empty() && !pairs.iter().any(|(copy, from)| needs(copy, from)) {
@@ -3878,7 +3903,7 @@ fn copies_keep_looks(s: &mut Session, reply: &Value, sources: &[String]) -> Resu
     let doc = s.doc_mut();
     for (copy, from) in pairs {
         if !doc.materials.contains_key(&copy)
-            && let Some(material) = doc.materials.get(&from).cloned()
+            && let Some(material) = inherited_material(doc, &from)
         {
             doc.materials.insert(copy.clone(), material);
         }

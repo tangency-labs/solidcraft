@@ -3952,3 +3952,194 @@ fn deleting_or_adding_sibling_occurrences_keeps_mirror_of_pattern_copy_working()
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn pattern_and_mirror_copies_follow_seed_material_after_creation_and_respect_overrides() {
+    let measured_material = |s: &mut Session, body: &str| -> String {
+        let m = run(s, "inspect.measure", json!({}));
+        m["bodies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|b| b["name"].as_str() == Some(body))
+            .and_then(|b| b["material"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+
+    // Case B: pattern created while seed is Default, then seed is assigned Steel.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new", "body_name": "Body1"}));
+    let pat = run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Body1"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 25}))["feature"]
+        .as_u64()
+        .unwrap();
+    run(&mut s, "material.assign", json!({"bodies": ["Body1"], "material": "Steel"}));
+    for body in ["Body1", "Body1 (2)", "Body1 (3)"] {
+        assert_eq!(s.doc.body_material(body), "Steel", "{body}");
+        assert!((s.doc.density(body) - 7.85).abs() < 1e-9, "{body}");
+        assert_eq!(measured_material(&mut s, body), "Steel", "{body}");
+    }
+    assert_eq!(s.doc.body_look("Body1 (2)", pat), s.doc.material_look("Steel"));
+
+    // Case C: timeline.edit re-sending `bodies: ["Body1"]` keeps Steel on every copy.
+    run(&mut s, "timeline.edit", json!({"feature": pat, "set": {"bodies": ["Body1"]}}));
+    for body in ["Body1 (2)", "Body1 (3)"] {
+        assert_eq!(s.doc.body_material(body), "Steel", "{body}");
+        assert_eq!(measured_material(&mut s, body), "Steel", "{body}");
+    }
+
+    // Explicit copy override takes precedence over seed material and survives seed changes.
+    run(&mut s, "material.assign", json!({"bodies": ["Body1 (2)"], "material": "Brass"}));
+    assert_eq!(s.doc.body_material("Body1 (2)"), "Brass");
+    assert_eq!(s.doc.body_material("Body1 (3)"), "Steel");
+    run(&mut s, "material.assign", json!({"bodies": ["Body1"], "material": "Aluminum"}));
+    assert_eq!(s.doc.body_material("Body1"), "Aluminum");
+    assert_eq!(s.doc.body_material("Body1 (2)"), "Brass");
+    assert_eq!(s.doc.body_material("Body1 (3)"), "Aluminum");
+    assert_eq!(measured_material(&mut s, "Body1 (2)"), "Brass");
+    assert_eq!(measured_material(&mut s, "Body1 (3)"), "Aluminum");
+
+    // Case G: editing spacing, direction, and count keeps overrides and gives new copies seed material.
+    run(&mut s, "timeline.edit", json!({"feature": pat, "set": {"pattern.spacing1": 35, "pattern.dir1": [0, 1, 0], "pattern.count1": 4}}));
+    assert_eq!(s.doc.body_material("Body1 (2)"), "Brass");
+    for copy in ["Body1 (3)", "Body1 (4)"] {
+        assert_eq!(s.doc.body_material(copy), "Aluminum", "{copy}");
+        assert_eq!(measured_material(&mut s, copy), "Aluminum", "{copy}");
+    }
+
+    // Case G directly after Case B (unstyled existing copy + new copies on count/spacing edit).
+    let mut g = Session::default();
+    run(&mut g, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new", "body_name": "Plate"}));
+    let pat_g = run(&mut g, "solid.pattern.rectangular", json!({"bodies": ["Plate"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 20}))["feature"]
+        .as_u64()
+        .unwrap();
+    run(&mut g, "material.assign", json!({"bodies": ["Plate"], "material": "Copper"}));
+    run(&mut g, "timeline.edit", json!({"feature": pat_g, "set": {"pattern.spacing1": 30, "pattern.count1": 4}}));
+    for copy in ["Plate (2)", "Plate (3)", "Plate (4)"] {
+        assert_eq!(g.doc.body_material(copy), "Copper", "{copy}");
+        assert_eq!(measured_material(&mut g, copy), "Copper", "{copy}");
+    }
+
+    // Parameter-driven count increase inherits seed material without any timeline.edit.
+    let mut param = Session::default();
+    run(&mut param, "parameters.add", json!({"name": "n", "expression": "2"}));
+    run(&mut param, "solid.box", json!({"length": 8, "width": 8, "height": 8, "center": [0, 0, 4], "operation": "new", "body_name": "Block"}));
+    run(&mut param, "solid.pattern.rectangular", json!({"bodies": ["Block"], "dir1": [1, 0, 0], "count1": "n", "spacing1": 20}));
+    run(&mut param, "material.assign", json!({"bodies": ["Block"], "material": "Titanium"}));
+    run(&mut param, "parameters.change", json!({"name": "n", "expression": "4"}));
+    for copy in ["Block (2)", "Block (3)", "Block (4)"] {
+        assert_eq!(param.doc.body_material(copy), "Titanium", "{copy}");
+        assert_eq!(measured_material(&mut param, copy), "Titanium", "{copy}");
+    }
+}
+
+#[test]
+fn pattern_edit_in_assembly_keeps_seed_materials_for_added_renamed_and_circular_copies() {
+    let mut s = Session::default();
+    let o1 = run(&mut s, "component.create", json!({"name": "PartA", "activate": true}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "operation": "new", "body_name": "PinA"}));
+    run(&mut s, "material.assign", json!({"bodies": ["PinA"], "material": "Steel"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+
+    let o2 = run(&mut s, "component.create", json!({"name": "PartB", "activate": true}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 30, 0], "operation": "new", "body_name": "PinB"}));
+    run(&mut s, "material.assign", json!({"bodies": ["PinB"], "material": "Aluminum"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+
+    let o3 = run(&mut s, "component.create", json!({"name": "PartC", "activate": true}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 60, 0], "operation": "new", "body_name": "PinC"}));
+    run(&mut s, "material.assign", json!({"bodies": ["PinC"], "material": "Brass"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+
+    // Case E: timeline.edit adding a new seed body with aligned bodies/placements/body_names.
+    let rect = run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["PinA"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 40}))["feature"]
+        .as_u64()
+        .unwrap();
+    run(&mut s, "material.assign", json!({"bodies": ["PinA (2)"], "material": "Copper"}));
+    run(
+        &mut s,
+        "timeline.edit",
+        json!({"feature": rect, "set": {"bodies": ["PinA", "PinB"], "placements": [[o1], [o2]], "body_names": ["PinA (2)", "PinB (2)"]}}),
+    );
+    assert_eq!(s.doc.body_material("PinA (2)"), "Copper", "existing explicit override survives adding a new seed body");
+    assert_eq!(s.doc.body_material("PinB (2)"), "Aluminum", "added seed body's copy inherits its seed's material");
+    let mass = run(&mut s, "assembly.mass_properties", json!({}));
+    let mass_material = |body: &str| -> Option<String> {
+        mass["occurrences"]
+            .as_array()?
+            .iter()
+            .flat_map(|o| o["bodies"].as_array().into_iter().flatten())
+            .find(|b| b["name"].as_str() == Some(body))
+            .and_then(|b| b["material"].as_str())
+            .map(str::to_string)
+    };
+    assert_eq!(mass_material("PinA (2)").as_deref(), Some("Copper"));
+    assert_eq!(mass_material("PinB (2)").as_deref(), Some("Aluminum"));
+
+    // Case F (part 1): timeline.edit adding a seed body while omitting body_names.
+    run(&mut s, "timeline.edit", json!({"feature": rect, "set": {"bodies": ["PinA", "PinB", "PinC"], "placements": [[o1], [o2], [o3]]}}));
+    assert_eq!(s.doc.body_material("PinA (2)"), "Copper");
+    assert_eq!(s.doc.body_material("PinB (2)"), "Aluminum");
+    assert_eq!(s.doc.body_material("PinC (2)"), "Brass");
+
+    // Case F (part 2): timeline.edit renaming copies via body_names.
+    run(&mut s, "timeline.edit", json!({"feature": rect, "set": {"body_names": ["CopyA", "CopyB", "CopyC"]}}));
+    assert_eq!(s.doc.body_material("CopyA"), "Steel");
+    assert_eq!(s.doc.body_material("CopyB"), "Aluminum");
+    assert_eq!(s.doc.body_material("CopyC"), "Brass");
+
+    // Circular pattern: timeline.edit adding a second seed body with aligned placements.
+    let circ = run(
+        &mut s,
+        "solid.pattern.circular",
+        json!({"bodies": ["PinA"], "axis": {"origin": [-30, 0, 0], "dir": [0, 0, 1]}, "count": 2, "angle": "90 deg"}),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+    run(&mut s, "timeline.edit", json!({"feature": circ, "set": {"bodies": ["PinA", "PinB"], "placements": [[o1], [o2]]}}));
+    let circ_copies: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == circ).map(|b| b.name.clone()).collect();
+    assert_eq!(circ_copies.len(), 2, "{circ_copies:?}");
+    assert_eq!(s.doc.body_material(&circ_copies[0]), "Steel");
+    assert_eq!(s.doc.body_material(&circ_copies[1]), "Aluminum");
+}
+
+#[test]
+fn nested_pattern_and_mirror_copies_inherit_seed_material_recursively() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "operation": "new", "body_name": "Seed"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Seed"], "dir1": [0, 1, 0], "count1": 3, "spacing1": 25}));
+    let pat2 = run(&mut s, "solid.pattern.circular", json!({"bodies": ["Seed (2)"], "axis": "Z", "count": 2, "angle": "180 deg"}));
+    let nested_copy = pat2["created_bodies"][0].as_str().unwrap().to_string();
+    let mirror = run(&mut s, "solid.mirror", json!({"bodies": [nested_copy], "plane": {"origin": [0, 0, 30], "normal": [0, 0, 1]}}));
+    let mirror_id = mirror["feature"].as_u64().unwrap();
+    let mirrored_nested = mirror["created_bodies"][0].as_str().unwrap().to_string();
+
+    // Assign Titanium to Seed AFTER all pattern and mirror features already exist.
+    run(&mut s, "material.assign", json!({"bodies": ["Seed"], "material": "Titanium"}));
+    for body in ["Seed", "Seed (2)", "Seed (3)", nested_copy.as_str(), mirrored_nested.as_str()] {
+        assert_eq!(s.doc.body_material(body), "Titanium", "{body}");
+    }
+
+    // Overriding intermediate `Seed (2)` propagates to its downstream copies but not siblings/seed.
+    run(&mut s, "material.assign", json!({"bodies": ["Seed (2)"], "material": "Brass"}));
+    assert_eq!(s.doc.body_material("Seed"), "Titanium");
+    assert_eq!(s.doc.body_material("Seed (3)"), "Titanium");
+    assert_eq!(s.doc.body_material("Seed (2)"), "Brass");
+    assert_eq!(s.doc.body_material(&nested_copy), "Brass");
+    assert_eq!(s.doc.body_material(&mirrored_nested), "Brass");
+
+    // Updating Seed afterwards updates Seed (3), while Seed (2) and its descendants keep Brass.
+    run(&mut s, "material.assign", json!({"bodies": ["Seed"], "material": "Copper"}));
+    assert_eq!(s.doc.body_material("Seed"), "Copper");
+    assert_eq!(s.doc.body_material("Seed (3)"), "Copper");
+    assert_eq!(s.doc.body_material("Seed (2)"), "Brass");
+    assert_eq!(s.doc.body_material(&nested_copy), "Brass");
+    assert_eq!(s.doc.body_material(&mirrored_nested), "Brass");
+
+    // Editing Mirror via timeline.edit to add `Seed (3)` gives the new mirrored copy Copper.
+    run(&mut s, "timeline.edit", json!({"feature": mirror_id, "set": {"bodies": [nested_copy, "Seed (3)"]}}));
+    let mirrored: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == mirror_id).map(|b| b.name.clone()).collect();
+    assert_eq!(mirrored.len(), 2, "{mirrored:?}");
+    assert_eq!(s.doc.body_material(&mirrored[0]), "Brass");
+    assert_eq!(s.doc.body_material(&mirrored[1]), "Copper");
+}

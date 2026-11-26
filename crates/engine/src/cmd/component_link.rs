@@ -1525,9 +1525,12 @@ fn inherit_properties(s: &mut Session, component: u64, sources: &[SourceProperti
         };
         let mut next = old.cloned().unwrap_or_default();
         if may_change_material {
+            let previous_material = s.doc.body_material(name);
             let material = inherit_material(s.doc_mut(), source, old_material.map(|old| old.material.as_str()), &prune_candidates)?;
             changed |= s.doc.materials.get(name).map_or(solidcraft_doc::DEFAULT_MATERIAL, String::as_str) != material;
-            s.doc_mut().materials.insert(name.clone(), material.clone());
+            let doc = s.doc_mut();
+            doc.clear_inherited_copy_materials(&[(name.as_str(), previous_material)], &material);
+            doc.materials.insert(name.clone(), material.clone());
             next.material_fingerprint = material_fingerprint(&s.doc, &material)?;
             next.material = material;
         }
