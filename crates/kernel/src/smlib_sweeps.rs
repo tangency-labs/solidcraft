@@ -2293,50 +2293,11 @@ mod imp {
         Ok(((t1 + t2).normalized().ok_or_else(|| KernelError::Invalid("path corner".into()))?, turn))
     }
 
-    /// A first derivative is one across a joint where its two sides differ by no more than this
-    /// fraction of the longer one. It is the kernel's own measure: below it the kernel's rule
-    /// for a wall's knot lines reads the wall as `C1` there (`JUMP`, its `EFF_ZERO_SQRT`, in
-    /// solidcore's `intersect/surface_drop_lib/knot_lines.rs`).
-    const ONE_DERIVATIVE: f64 = 1e-6;
-
-    /// A Bézier: its degree and its control points `[x, y, z, weight]`.
-    type Bezier = (usize, Vec<[f64; 4]>);
-
-    /// The piece as one Bézier: none for a line or an arc, and none for a piece that goes to
-    /// SMLib as its halves ([`unfolded`]).
-    fn whole_bezier(plane: &Plane, x: &Piece) -> Result<Option<Bezier>> {
-        let Curve::Nurbs { degree, points, knots } = curve(plane, &x.seg)? else { return Ok(None) };
-        let whole = degree > 0 && points.len() == degree + 1 && knots.len() == 2 * (degree + 1) && !turns_back(&points);
-        Ok(whole.then_some((degree, points)))
-    }
-
-    /// The first derivative a Bézier (`[x, y, z, weight]` points) leaves its start with and the
-    /// one it reaches its end with, each on a span of one and without the factor of its degree.
-    fn end_derivatives(points: &[[f64; 4]]) -> Option<(Vec3, Vec3)> {
-        let at = |q: &[f64; 4]| Vec3::new(q[0], q[1], q[2]);
-        let (first, second) = (points.first()?, points.get(1)?);
-        let (last, before) = (points.last()?, points.get(points.len().checked_sub(2)?)?);
-        let leaves = (at(second) - at(first)) * (second[3] / first[3]);
-        let reaches = (at(last) - at(before)) * (before[3] / last[3]);
-        (leaves.len().is_finite() && reaches.len().is_finite()).then_some((leaves, reaches))
-    }
-
-    /// Whether the Bézier `this` carries on the Bézier `prev` with one first derivative
-    /// ([`ONE_DERIVATIVE`]) when its span is `ratio` times `prev`'s: the two are of one degree,
-    /// `this` starts where `prev` ends, and on those spans it leaves with the derivative `prev`
-    /// arrives with, in direction and in length. A piece that arrives or leaves with no
-    /// derivative (a handle on its own end) carries nothing on.
-    fn carries_on(prev: &Bezier, this: &Bezier, ratio: f64) -> bool {
-        let at = |q: &[f64; 4]| Vec3::new(q[0], q[1], q[2]);
-        let (Some(end), Some(start)) = (prev.1.last().map(at), this.1.first().map(at)) else { return false };
-        let (Some((_, reaches)), Some((leaves, _))) = (end_derivatives(&prev.1), end_derivatives(&this.1)) else { return false };
-        // On spans h and ratio h the derivatives are reaches / h and leaves / (ratio h).
-        let reaches = reaches * ratio;
-        prev.0 == this.0
-            && end.dist(start) <= 1e-9 * (1.0 + start.len())
-            && leaves.len() > 0.0
-            && reaches.len() > 0.0
-            && (leaves - reaches).len() <= ONE_DERIVATIVE * leaves.len().max(reaches.len())
+    /// Whether the piece goes to SMLib as its halves ([`unfolded`]): one Bézier whose control
+    /// polygon turns back on itself.
+    fn goes_in_halves(plane: &Plane, x: &Piece) -> Result<bool> {
+        let Curve::Nurbs { degree, points, knots } = curve(plane, &x.seg)? else { return Ok(false) };
+        Ok(points.len() == degree + 1 && knots.len() == 2 * (degree + 1) && turns_back(&points))
     }
 
     /// Which pieces of a loft's `sections` go to the skin joined to the piece before them, as
@@ -2346,56 +2307,29 @@ mod imp {
     /// length. Where two pieces of a section meet tangentially at different speeds (two spans of
     /// one spline of different lengths), the wall's first derivative along the section jumps
     /// there, though the wall is smooth, and a curve drawn across the wall (a cut's edge) has to
-    /// turn a corner in the wall's parameters on that knot line (#22319). A piece is joined
-    /// where one parameter can take that jump away: where in every section it carries on the
-    /// piece before it with one first derivative ([`carries_on`]) on the spans that keep the
-    /// speed of the first section (the first in the loft's own order, which is the same
-    /// whichever end the sections were given from). Sections of one outline at different sizes
-    /// agree so; sections of different shapes, whose speeds change by different ratios at a
-    /// joint, do not, and their pieces go in as they are.
+    /// turn a corner in the wall's parameters on that knot line (#22319). The kernel says which
+    /// pieces one parameter can take that jump from (`solidcore_ops::sweep::loft_one_curve_runs`):
+    /// those that in every section carry on the piece before them with one first derivative on
+    /// the spans that keep the first section's speed, in a run with a joint where the speeds
+    /// differ. Sections of one outline at different sizes agree so, and sections of different
+    /// shapes where their pieces divide their curves alike. Where the sections do not agree, and
+    /// where the pieces already meet at one speed, the pieces go in as they are.
     ///
-    /// Only a run with a joint where the speeds differ is joined: a run whose pieces all meet
-    /// at one speed already has one first derivative on a unit each, and goes in as it is. A
-    /// closed run that in any section turns back on itself where it meets its own start is
-    /// broken half-way round, as an extrusion's is ([`broken_at_seams`]).
+    /// What is SMLib's stays here: a piece that goes in as its halves ([`unfolded`]) joins
+    /// nothing, and a closed run that in any section turns back on itself where it meets its own
+    /// start is broken half-way round, as an extrusion's is ([`broken_at_seams`]).
     fn loft_joins(sections: &[(Plane, Vec<Piece>)]) -> Result<Vec<bool>> {
-        let Some((_, lead)) = sections.first() else { return Ok(Vec::new()) };
-        let none = vec![false; lead.len()];
-        if sections.iter().any(|(_, ps)| ps.len() != lead.len()) {
-            return Ok(none);
-        }
-        let beziers: Vec<Vec<Option<Bezier>>> =
-            sections.iter().map(|(pl, ps)| ps.iter().map(|x| whole_bezier(pl, x)).collect::<Result<_>>()).collect::<Result<_>>()?;
-        let Some(led) = beziers.first() else { return Ok(none) };
-        // The span of each piece against the one before it that keeps the first section's speed
-        // through their joint, where the piece is joined.
-        let ratios: Vec<Option<f64>> = (0..lead.len())
-            .map(|i| {
-                let before = i.checked_sub(1)?;
-                let (prev, this) = (led.get(before)?.as_ref()?, led.get(i)?.as_ref()?);
-                let (reaches, leaves) = (end_derivatives(&prev.1)?.1, end_derivatives(&this.1)?.0);
-                let ratio = leaves.len() / reaches.len();
-                let agreed = ratio.is_finite()
-                    && ratio > 0.0
-                    && beziers.iter().all(|section| {
-                        matches!((section.get(before), section.get(i)), (Some(Some(p)), Some(Some(t))) if p.0 == prev.0 && carries_on(p, t, ratio))
-                    });
-                agreed.then_some(ratio)
-            })
-            .collect();
-        let mut joins: Vec<bool> = ratios.iter().map(Option::is_some).collect();
-        // A run at one speed throughout is left as it is.
-        let mut i = 0;
-        while i < joins.len() {
-            let j = i + 1 + joins.iter().skip(i + 1).take_while(|x| **x).count();
-            let differs = ratios.get(i + 1..j).is_some_and(|run| run.iter().flatten().any(|r| (r - 1.0).abs() > ONE_DERIVATIVE));
-            if !differs {
-                joins.iter_mut().take(j).skip(i + 1).for_each(|x| *x = false);
-            }
-            i = j;
-        }
+        let segs: Vec<Vec<Seg2>> = sections.iter().map(|(_, ps)| ps.iter().map(|x| x.seg).collect()).collect();
+        let mut joins = solidcore_ops::sweep::loft_one_curve_runs(&segs);
         if !joins.contains(&true) {
-            return Ok(none);
+            return Ok(joins);
+        }
+        for (plane, pieces) in sections {
+            for (i, x) in pieces.iter().enumerate() {
+                if goes_in_halves(plane, x)? {
+                    joins.iter_mut().skip(i).take(2).for_each(|joined| *joined = false);
+                }
+            }
         }
         for (plane, pieces) in sections {
             let flagged: Vec<Piece> = pieces.iter().zip(&joins).map(|(x, joined)| Piece { joins_previous: *joined, ..x.clone() }).collect();

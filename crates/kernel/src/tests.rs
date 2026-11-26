@@ -3143,23 +3143,20 @@ fn loft_rectangle_to_circle_pairs_each_span_on_its_own_parameter() {
 
 /// A loft section at `scale`: the cubic Bézier from (20, 0) to (-20, 0) with the control points
 /// (20, 30) and (-20, 30) between, closed by the line back. The curve is given whole, or divided
-/// where `cuts` say (each the fraction of what is left of its parameter, by de Casteljau's
-/// construction), so its pieces are that same curve.
+/// where `cuts` say (each the fraction of what is left of its parameter), so its pieces are that
+/// same curve.
 fn arch_section(scale: f64, cuts: &[f64]) -> Loop2 {
     let p = |x: f64, y: f64| Vec2::new(x * scale, y * scale);
-    let mut rest = [p(20.0, 0.0), p(20.0, 30.0), p(-20.0, 30.0), p(-20.0, 0.0)];
-    let start = rest[0];
+    let (start, end) = (p(20.0, 0.0), p(-20.0, 0.0));
+    let mut rest = Seg2::Cubic { p0: start, p1: p(20.0, 30.0), p2: p(-20.0, 30.0), p3: end };
     let mut segs = Vec::new();
     for &t in cuts {
-        let lerp = |a: Vec2, b: Vec2| Vec2::new(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
-        let (a, b, c) = (lerp(rest[0], rest[1]), lerp(rest[1], rest[2]), lerp(rest[2], rest[3]));
-        let (d, e) = (lerp(a, b), lerp(b, c));
-        let f = lerp(d, e);
-        segs.push(Seg2::Cubic { p0: rest[0], p1: a, p2: d, p3: f });
-        rest = [f, e, c, rest[3]];
+        let (head, tail) = rest.split_at(t);
+        segs.push(head);
+        rest = tail;
     }
-    segs.push(Seg2::Cubic { p0: rest[0], p1: rest[1], p2: rest[2], p3: rest[3] });
-    segs.push(Seg2::Line { a: rest[3], b: start });
+    segs.push(rest);
+    segs.push(Seg2::Line { a: end, b: start });
     Loop2 { segs }
 }
 

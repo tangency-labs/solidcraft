@@ -1159,6 +1159,25 @@ pub fn match_loft_sections(
     ))
 }
 
+/// For a loft's sections as its walls are built through them (each section's segments in its
+/// plane's coordinates, the same number in every section, in the order [`loft`] takes their
+/// curves), which segments the skin should take joined to the segment before them, as one curve
+/// (the kernel's `sweep::loft_sections::one_curve_runs`): `true` at `i` for segment `i` of every
+/// section. Those are the free-form segments that in every section carry on the one before them
+/// with one first derivative on the spans that keep the first section's speed, in a run with a
+/// joint where the speeds differ. A caller that hands such a run to [`loft`] as one B-spline on
+/// those spans, every section on the first section's knots, gets the same walls without a jump
+/// of their first derivative where the segments meet.
+#[must_use]
+pub fn loft_one_curve_runs(sections: &[Vec<solidcore_record::Seg2>]) -> Vec<bool> {
+    use solidcore::sweep::loft_sections as kl;
+    let given: Vec<Vec<kp::Seg2>> = sections
+        .iter()
+        .map(|s| s.iter().map(convert::seg2).collect())
+        .collect();
+    kl::one_curve_runs(&given)
+}
+
 /// A skin through `sections` (`SmApiCreateSkinPrimitive`), `degree` (1 to 3) across them.
 ///
 /// # Errors

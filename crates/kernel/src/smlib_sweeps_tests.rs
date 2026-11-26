@@ -810,32 +810,40 @@ fn fast_cylinder_supports_booleans_fillet_display_plan_and_validation() {
 
 /// A loft through sections whose spline spans are joined into one curve is the body the spans
 /// alone give (#22319): the same faces, volume, area and centre of mass, through two sections
-/// (ruled), three and four. Each section is one arch, the cubic from (20, 0) to (-20, 0) with the
-/// control points (20, 30) and (-20, 30) between, closed by the line back, at 1, 0.8, 0.6 and 0.4
-/// of its size, 30 mm apart. The arch is in two pieces, the first quarter of its parameter and the
-/// rest, which meet at speeds of 1 to 3 in every section, so the loft joins them.
+/// (ruled), three and four. Each section is one arch, a cubic from (20, 0) to (-20, 0) closed by
+/// the line back, 30 mm above the one before, in two pieces: the first quarter of its parameter
+/// and the rest, which meet at speeds of 1 to 3 whatever the arch's shape, so the loft joins
+/// them. In the first family the arch (control points (20, 30) and (-20, 30) between) is at 1,
+/// 0.8, 0.6 and 0.4 of its size: one outline at different sizes. In the second its control
+/// points lean further over from one section to the next: sections of different shapes that
+/// divide their curves alike, which the loft joins as well.
 #[test]
 fn a_loft_through_joined_spans_is_the_body_its_spans_alone_give() {
-    let arch = |k: usize| {
-        let scale = 1.0 - 0.2 * k as f64;
-        let p = |x: f64, y: f64| Vec2::new(x * scale, y * scale);
-        // The arch's control points, and those of its two pieces by de Casteljau's construction.
-        let [a, b, c, d] = [p(20.0, 0.0), p(20.0, 30.0), p(-20.0, 30.0), p(-20.0, 0.0)];
-        let lerp = |u: Vec2, v: Vec2| u + (v - u) * 0.25;
-        let (ab, bc, cd) = (lerp(a, b), lerp(b, c), lerp(c, d));
-        let (abc, bcd) = (lerp(ab, bc), lerp(bc, cd));
-        let at = lerp(abc, bcd);
-        let segs = vec![Seg2::Cubic { p0: a, p1: ab, p2: abc, p3: at }, Seg2::Cubic { p0: at, p1: bcd, p2: cd, p3: d }, Seg2::Line { a: d, b: a }];
-        (Plane::XY.offset(30.0 * k as f64), pieces_of(&region(Loop2 { segs })))
+    let section = |k: usize, arch: [Vec2; 4]| {
+        let [p0, p1, p2, p3] = arch;
+        let (head, tail) = Seg2::Cubic { p0, p1, p2, p3 }.split_at(0.25);
+        (Plane::XY.offset(30.0 * k as f64), pieces_of(&region(Loop2 { segs: vec![head, tail, Seg2::Line { a: p3, b: p0 }] })))
     };
-    for count in 2..=4 {
-        let sections: Vec<(Plane, Vec<Piece>)> = (0..count).map(arch).collect();
-        let joined = smlib_sweeps::loft(&sections, 0).unwrap();
-        let alone = smlib_sweeps::loft_piece_by_piece(&sections, 0).unwrap();
-        assert_eq!(joined.face_count(), alone.face_count(), "{count} sections");
-        let (a, b) = (crate::measure(&joined).unwrap(), crate::measure(&alone).unwrap());
-        close(a.volume, b.volume, 1e-9, &format!("volume through {count} sections"));
-        close(a.area, b.area, 1e-9, &format!("area through {count} sections"));
-        assert!(a.centroid.dist(b.centroid) < 1e-9 * 30.0, "{count} sections: {:?} against {:?}", a.centroid, b.centroid);
+    let scaled = |k: usize| {
+        let p = |x: f64, y: f64| Vec2::new(x, y) * (1.0 - 0.2 * k as f64);
+        section(k, [p(20.0, 0.0), p(20.0, 30.0), p(-20.0, 30.0), p(-20.0, 0.0)])
+    };
+    let leaning = |k: usize| {
+        let lean = 4.0 * k as f64;
+        section(k, [Vec2::new(20.0, 0.0), Vec2::new(20.0 + lean, 30.0 - lean), Vec2::new(-20.0 + lean, 30.0), Vec2::new(-20.0, 0.0)])
+    };
+    let families: [(&str, &dyn Fn(usize) -> (Plane, Vec<Piece>)); 2] = [("one outline at different sizes", &scaled), ("different shapes", &leaning)];
+    for (family, at) in families {
+        for count in 2..=4 {
+            let what = format!("{family}, {count} sections");
+            let sections: Vec<(Plane, Vec<Piece>)> = (0..count).map(at).collect();
+            let joined = smlib_sweeps::loft(&sections, 0).unwrap();
+            let alone = smlib_sweeps::loft_piece_by_piece(&sections, 0).unwrap();
+            assert_eq!(joined.face_count(), alone.face_count(), "{what}");
+            let (a, b) = (crate::measure(&joined).unwrap(), crate::measure(&alone).unwrap());
+            close(a.volume, b.volume, 1e-9, &format!("volume: {what}"));
+            close(a.area, b.area, 1e-9, &format!("area: {what}"));
+            assert!(a.centroid.dist(b.centroid) < 1e-9 * 30.0, "{what}: {:?} against {:?}", a.centroid, b.centroid);
+        }
     }
 }
