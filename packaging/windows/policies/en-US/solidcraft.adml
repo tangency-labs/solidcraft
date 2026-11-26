@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<policyDefinitionResources xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.4" schemaVersion="1.0">
+<policyDefinitionResources xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.5" schemaVersion="1.0">
   <displayName>SolidCraft</displayName>
   <description>Settings an organization sets for the people who use SolidCraft on its computers.</description>
   <resources>
@@ -149,6 +149,22 @@ Disabled: SolidCraft adds itself to no AI app and takes out the entries it added
 Not configured: each person chooses in Preferences.
 
 In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="AllowEasyPrint">Allow Open with EasyPrint</string>
+      <string id="AllowEasyPrint_Explain">Open with EasyPrint uploads the chosen bodies of a design, as a mesh, to Printables' servers and opens them there in the browser.
+
+Enabled or Not configured: people can use it, after agreeing once to the upload.
+
+Disabled: SolidCraft offers no EasyPrint and sends no model to Printables, whether a person, a script or an AI agent asks.
+
+The change applies the next time SolidCraft starts.</string>
+      <string id="AllowProblemReports">Allow problem reports</string>
+      <string id="AllowProblemReports_Explain">Report a problem sends a report to SolidCraft's ticket server (tickets.solidcraft.io), or opens a draft issue on GitHub, with the details the person chooses: a description, a screenshot, system information and, when they tick them, the design and a crash report.
+
+Enabled or Not configured: people can send reports.
+
+Disabled: no report opens or is sent, whether from the application bar, a failed operation, a crash or an AI agent. SolidCraft says that the organization turned reports off, and Help, About SolidCraft, Copy diagnostic information still copies the details for your IT team.
+
+The change applies the next time SolidCraft starts.</string>
     </stringTable>
     <presentationTable>
       <presentation id="CheckForUpdates" />
@@ -179,6 +195,8 @@ In Preferences the setting shows as set by the organization. The person's own ch
       </presentation>
       <presentation id="AiToolbarButton" />
       <presentation id="ConnectAiApps" />
+      <presentation id="AllowEasyPrint" />
+      <presentation id="AllowProblemReports" />
     </presentationTable>
   </resources>
 </policyDefinitionResources>

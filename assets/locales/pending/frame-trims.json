@@ -51,7 +51,18 @@
     "cmd.frame.trim": "Recortar/extender"
   },
   "fr": {
-    "cmd.frame.trim": "Ajuster/prolonger"
+    "cmd.frame.trim": "Ajuster/prolonger",
+    "ui.frame_trim.end": "Extrémité",
+    "ui.frame_trim.keep": "Conserver",
+    "ui.frame_trim.members": "Éléments",
+    "ui.frame_trim.more_targets": "Cibles supplémentaires : {count}",
+    "ui.frame_trim.nearer_end": "Extrémité la plus proche",
+    "ui.frame_trim.pick_members": "Sélectionnez les éléments de structure à ajuster.",
+    "ui.frame_trim.pick_members_first": "Sélectionnez d’abord les éléments à ajuster.",
+    "ui.frame_trim.pick_targets": "Sélectionnez les éléments jusqu’auxquels les ajuster.",
+    "ui.frame_trim.start": "Début",
+    "ui.frame_trim.target_kinds": "Ajuster jusqu’à des éléments, des faces planes ou des plans.",
+    "ui.frame_trim.to": "Ajuster jusqu’à"
   },
   "gl": {
     "cmd.frame.trim": "Recortar/estender"

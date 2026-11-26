@@ -803,7 +803,10 @@ fn copy_trim_cover_raises(
     b: &mut Brep,
     reverse_map: &CopyBrepMap<EntityRef>,
 ) -> Result<()> {
-    let mut record = crate::topology::TrimCoverRaises::default();
+    let mut record = crate::topology::TrimCoverRaises {
+        end_checked: src.trim_cover_raises().end_checked,
+        ..Default::default()
+    };
     for (&e, &(before, after)) in &src.trim_cover_raises().edges {
         if let Some(EntityRef::Edge(c)) = reverse_map.get_at(Some(EntityRef::Edge(e)))? {
             if b.edge(c)?.tolerance.to_bits() == after.to_bits() {
@@ -3736,8 +3739,13 @@ pub fn collapse_zero_area_two_edge_faces_among(
         if ends != edge::start_end_vertices(b, gone)? || ends.0 == ends.1 || ends.0.is_none() {
             continue;
         }
-        // the loop has no area
-        let area = crate::topology::face::p3::compute_loop_orientation(k, b, f, l, None, false);
+        // the loop has no area; a test that could not answer reads as area, except that a
+        // cancellation (or an unported status) stops the collapse, never swallowed (#21915)
+        let area =
+            match crate::topology::face::p3::compute_loop_orientation(k, b, f, l, None, false) {
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                area => area,
+            };
         if !matches!(area, Ok(OrientType::Unknown)) {
             continue;
         }
