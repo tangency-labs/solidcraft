@@ -324,8 +324,10 @@ fn cam_turned_occurrence(doc: &Document, cam: &super::Joint) -> u64 {
     }
 }
 
-/// The occurrence that slides along a slider joint (the moving side of the joint).
-fn slider_moving_occurrence(doc: &Document, j: &super::Joint) -> u64 {
+/// The occurrence that moves on joint `j` (slides along a slider, turns on a hinge): the side
+/// that is not grounded (the design itself is), else the side farther from the design through
+/// the other joints, else B.
+pub fn moving_occurrence(doc: &Document, j: &super::Joint) -> u64 {
     let a_grounded = j.a.occurrence == 0 || doc.occurrences.iter().any(|o| o.id == j.a.occurrence && o.grounded);
     let b_grounded = j.b.occurrence == 0 || doc.occurrences.iter().any(|o| o.id == j.b.occurrence && o.grounded);
     if a_grounded && !b_grounded {
@@ -356,7 +358,7 @@ fn part_slides(doc: &Document, occ: Option<u64>, comp: Option<u64>) -> bool {
         if j.suppressed || j.kind != JointKind::Slider {
             return false;
         }
-        let moving = slider_moving_occurrence(doc, j);
+        let moving = moving_occurrence(doc, j);
         if occ.is_some_and(|o| moving == o) {
             return true;
         }
@@ -374,7 +376,7 @@ fn part_slides(doc: &Document, occ: Option<u64>, comp: Option<u64>) -> bool {
             if cost == 0
                 && other_occ != o
                 && other_occ != u64::MAX
-                && doc.assembly.joints.iter().any(|j| !j.suppressed && j.kind == JointKind::Slider && slider_moving_occurrence(doc, j) == other_occ)
+                && doc.assembly.joints.iter().any(|j| !j.suppressed && j.kind == JointKind::Slider && moving_occurrence(doc, j) == other_occ)
             {
                 return true;
             }
@@ -1083,7 +1085,10 @@ mod tests {
             exprs: Default::default(),
             offset_xy: [0.0; 2],
             captured: None,
+            base_values: None,
+            base_exprs: Vec::new(),
             constraint: None,
+            dynamics: Vec::new(),
         };
         let occ = |id: u64, grounded: bool| crate::Occurrence {
             id,
@@ -1091,6 +1096,7 @@ mod tests {
             parent: 0,
             name: format!("O{id}"),
             transform: IDENTITY,
+            base_transform: None,
             grounded,
             bom_type: None,
             expressed_moves: Vec::new(),
@@ -1162,6 +1168,7 @@ mod tests {
             b: JointOrigin { occurrence: b, ..origin.clone() },
             values: Vec::new(),
             limits: Vec::new(),
+            dynamics: Vec::new(),
             flip: false,
             offset: 0.0,
             angle: 0.0,
@@ -1169,6 +1176,8 @@ mod tests {
             exprs: Default::default(),
             offset_xy: [0.0; 2],
             captured: None,
+            base_values: None,
+            base_exprs: Vec::new(),
             constraint: None,
         };
         let occ = |id: u64, grounded: bool| crate::Occurrence {
@@ -1177,6 +1186,7 @@ mod tests {
             parent: 0,
             name: format!("Occurrence{id}"),
             transform: IDENTITY,
+            base_transform: None,
             grounded,
             expressed_moves: Vec::new(),
             bom_type: None,

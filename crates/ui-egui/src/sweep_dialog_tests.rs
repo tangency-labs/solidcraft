@@ -3,10 +3,11 @@
 use crate::dialogs::Kind;
 use crate::dialogs_surface::Surf;
 use crate::scenario::Harness;
+use crate::viewport::Hit;
 use serde_json::json;
 use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
-use solidcraft_engine::doc::{FeatureKind, SweepOrientation};
+use solidcraft_engine::doc::{FeatureKind, PathEntry, SweepOrientation};
 
 /// A square `Q` on XY and a path `P` 40 up the Z axis; the square's sketch id.
 fn setup(h: &mut Harness) -> u64 {
@@ -197,4 +198,59 @@ fn a_sweep_path_edge_is_restored_on_the_body_it_was_picked_on() {
         [Sel::Edge { body, .. }] => assert_eq!(body, "A", "the path was restored on another body"),
         other => panic!("the path was not restored as an edge: {other:?}"),
     }
+}
+
+/// #17550: a sweep whose path curve was deleted from its sketch fails with "unknown path curve
+/// `l1`", and the guide curve cannot be picked again: the stale pick stays in the Path input and
+/// the sweep keeps failing. The path must be picked again, and the sweep must build.
+#[test]
+fn a_sweep_path_curve_deleted_from_its_sketch_can_be_picked_again() {
+    let mut h = Harness::new();
+    // A square `Q` on XY (the profile), a path `P` on XZ (the line `l1`) and `R` on YZ (a line
+    // `l1` as well: curve ids repeat from one sketch to the next, #3726).
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Q"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[-5,-5],"p1":[5,5]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XZ","name":"P"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[0,-40]],"ids":["l1"]})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[20,0],[20,-20]],"ids":["keep"]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"YZ","name":"R"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[0,-30]],"ids":["l1"]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let other = h.app.session.doc.find_feature("R").unwrap().id;
+    // The sweep follows P's line.
+    h.app.run("solid.sweep", json!({"sketch":"Q","path_sketch":"P","path":["l1"],"operation":"new","name":"Swept"})).unwrap();
+    let swept = h.app.session.doc.find_feature("Swept").unwrap().id;
+    assert!(h.app.session.model.result(swept).unwrap().error.is_none(), "{:?}", h.app.session.log);
+    // The line is deleted from P: the sweep cannot find its path curve any more.
+    h.app.run("sketch.edit", json!({"sketch":"P"})).unwrap();
+    h.app.run("sketch.delete", json!({"sketch":"P","entities":["l1"]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    assert_eq!(h.app.session.model.result(swept).unwrap().error.as_deref(), Some("unknown path curve `l1`"));
+    // The user opens the sweep and picks the guide curve again, in R.
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Swept"}})).unwrap();
+    h.frames(8);
+    let hit = Hit::SketchCurve { sketch: other, id: "l1".into(), straight: true, point: Vec3::ZERO };
+    let d = h.app.dialog.as_mut().unwrap();
+    d.active = 1;
+    let pick = d.candidate_on(&h.app.session, &hit, None).expect("the line of R is a valid path pick");
+    d.pick(&h.app.session, pick);
+    // The preview of the sweep is computed again, so the dialog's OK is drawn with what the
+    // picks make now.
+    h.frames(8);
+    h.settle();
+    h.step(&json!({"widget":"OK"})).unwrap();
+    h.settle();
+    // The sweep follows R's line now, and builds.
+    let f = h.app.session.doc.find_feature("Swept").unwrap();
+    let FeatureKind::Sweep { path_sketch, path, .. } = &f.kind else { panic!("{:?}", f.kind) };
+    assert_eq!(path_sketch.0, other, "the sweep still follows the stale path");
+    assert_eq!(path, &vec![PathEntry::OfPathSketch("l1".into())]);
+    assert!(
+        h.app.session.model.result(f.id).unwrap().error.is_none(),
+        "the sweep does not build: {:?}",
+        h.app.session.model.result(f.id).unwrap().error
+    );
+    assert!(h.app.dialog.is_none(), "the sweep was not applied: {:?}", h.app.preview.error);
 }

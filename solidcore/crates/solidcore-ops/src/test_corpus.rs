@@ -62,6 +62,7 @@ pub(crate) fn operand(case: &str, name: &str) -> (Body, Order) {
 pub(crate) fn kernel_order(b: &Body) -> Order {
     let g = b.lock();
     Order {
+        split_edges: 0,
         faces: g.face_list().to_vec(),
         edges: g.edge_list().to_vec(),
         vertices: g.vertex_list().to_vec(),

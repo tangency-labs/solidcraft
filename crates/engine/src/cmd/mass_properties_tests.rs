@@ -267,3 +267,32 @@ fn combining_two_point_like_bodies_adds_the_parallel_axis_terms() {
     near(t[0][1], -sxy, 1e-12);
     near(t[1][0], -sxy, 1e-12);
 }
+
+#[test]
+fn repeated_occurrences_report_world_body_names_matching_measure() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Other", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "body_name": "Bolt"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let part = run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    let (comp, occ1) = (part["component"].as_u64().unwrap(), part["occurrence"].as_u64().unwrap());
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Bolt (2)"}));
+    run(&mut s, "material.assign", json!({"bodies": ["Bolt (2)"], "material": "Aluminum"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let occ2 = run(&mut s, "occurrence.copy", json!({"component": comp, "translate": [0, 40, 0]}))["occurrence"].as_u64().unwrap();
+
+    let mass = run(&mut s, "assembly.mass_properties", json!({}));
+    let o1 = occurrence(&mass, occ1);
+    let o2 = occurrence(&mass, occ2);
+    assert_eq!(o1["bodies"][0]["name"], "Bolt (2)");
+    assert_eq!(o2["bodies"][0]["name"], "Bolt (2) (Part:2)");
+    assert_eq!(o1["bodies"][0]["material"], "Aluminum");
+    assert_eq!(o2["bodies"][0]["material"], "Aluminum");
+    near(num(&o1["bodies"][0]["volume_mm3"]), 1000.0, 1e-9);
+    near(num(&o2["bodies"][0]["volume_mm3"]), 1000.0, 1e-9);
+
+    let measured = run(&mut s, "inspect.measure", json!({"names_only": true}));
+    let names: Vec<&str> = measured["bodies"].as_array().unwrap().iter().filter_map(|b| b["name"].as_str()).collect();
+    assert!(names.contains(&"Bolt (2)"), "{names:?}");
+    assert!(names.contains(&"Bolt (2) (Part:2)"), "{names:?}");
+}

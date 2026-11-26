@@ -80,8 +80,8 @@
 //! - `sm_RmAndDel_OldLoopVertices` deletes two vertex uses: the port unlinks them from
 //!   their vertex and removes their records (finding
 //!   `plan/findings/topology.brep--deleted-records-leave-their-arenas-follow-up.md`).
-//! - `sm_SetObjectMap` / `sm_GetObjectMap` keep an [`EntityRef`] `BTreeMap`
-//!   ([`ObjectMap`]) instead of the pointer hash map (plan hazard `ptr-hash`: upstream
+//! - `sm_SetObjectMap` / `sm_GetObjectMap` keep a slot per [`EntityRef`] by kind and arena
+//!   index ([`ObjectMap`]) instead of the pointer hash map (plan hazard `ptr-hash`: upstream
 //!   `SmMapPtrToPtr` iteration order is pointer order; only lookups are used here) and
 //!   the ported [`CopyBrepMap`] for the optional copy maps.
 //! - `SmPendingTopologyDelete`'s destructor work (detaching the pending object's
@@ -118,7 +118,11 @@ use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::error::topology::{SideOpen, TopologyFailure};
+use crate::error::{
+    ignore_status, ignored, EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_INVALID_INPUT,
+    SM_ERR_NULL_POINTER,
+};
 use crate::geom::a_object::sag_is_kind_of;
 use crate::geom::attribute::{AttributeHandle, AttributeStore, ObjectKey};
 use crate::geom::context::{with_mark_lock, MarkType, ALL_MARKS};
@@ -187,13 +191,27 @@ fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
 
+/// A defect ([`TopologyFailure::Defect`]) with the status `SM_ERR` it replaces.
+fn defect(why: &'static str) -> SolidError {
+    SolidError::topology(OP, TopologyFailure::Defect { why })
+}
+
+/// A defect of the B-rep's own links, with the status `SM_ERR_NULL_POINTER` of the `NER`
+/// it replaces.
+fn broken_link(why: &'static str) -> SolidError {
+    Failure::new(OP, TopologyFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
 // ---- SmBrep members (SmBrep.h inline functions) -----------------------------------------
 
 impl Brep {
     /// `GetThisModelSizeEstimate`: the B-rep's model size estimate; with
     /// `chase_defaults` (upstream default `TRUE`) a stored [`tol::USE_DEFAULT`] is
-    /// replaced by the context's estimate (`m_cpContext->GetThisModelSizeEstimate()`,
-    /// the kernel context).
+    /// replaced by the kernel's configured default, the context's estimate
+    /// (`m_cpContext->GetThisModelSizeEstimate()`, the kernel context). No operation
+    /// on a B-rep writes that default: it is what the caller configured.
     #[must_use]
     pub fn this_model_size_estimate(&self, k: &Kernel, chase_defaults: bool) -> f64 {
         if !chase_defaults {
@@ -225,26 +243,21 @@ impl Brep {
     }
 
     /// `SetThisModelSizeEstimate` (upstream default `SM_USE_DEFAULT`): stores the
-    /// estimate, passes it to the B-rep's context (the kernel context) and sets the
-    /// B-rep tolerance to [`tol::size_estimate_to_zone_tol_3d`] of it; returns that
-    /// tolerance.
-    pub fn set_this_model_size_estimate(
-        &mut self,
-        k: &mut Kernel,
-        model_size_estimate: f64,
-    ) -> f64 {
+    /// estimate and sets the B-rep tolerance to [`tol::size_estimate_to_zone_tol_3d`]
+    /// of it; returns that tolerance. The estimate is this B-rep's alone: the kernel
+    /// context keeps what its caller configured (upstream passes the estimate on to
+    /// the B-rep's context, which there is one model's; the kernel context here is
+    /// every B-rep's, so a write to it would change what the other B-reps answer).
+    pub fn set_this_model_size_estimate(&mut self, model_size_estimate: f64) -> f64 {
         *self.model_size_estimate = model_size_estimate;
-        k.context.set_this_model_size_estimate(model_size_estimate);
         *self.tolerance = tol::size_estimate_to_zone_tol_3d(*self.model_size_estimate);
         *self.tolerance
     }
 
     /// `SetThisLargeSmallSizeRatio` (upstream default `SM_USE_DEFAULT`): stores the
-    /// ratio and passes it to the B-rep's context (the kernel context).
-    pub fn set_this_large_small_size_ratio(&mut self, k: &mut Kernel, large_small_size_ratio: f64) {
+    /// ratio, on this B-rep alone (see [`Brep::set_this_model_size_estimate`]).
+    pub fn set_this_large_small_size_ratio(&mut self, large_small_size_ratio: f64) {
         *self.large_small_size_ratio = large_small_size_ratio;
-        k.context
-            .set_this_large_small_size_ratio(large_small_size_ratio);
     }
 
     /// `SetInfiniteRegion`: makes `region` the infinite region (the raw member write;
@@ -525,6 +538,7 @@ pub fn tessellate_boundaries(
                 Err(
                     err @ (SolidError::Unported { .. }
                     | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }
                     | SolidError::PreparationRequired { .. }),
                 ) => return Err(err),
                 Ok(_) | Err(_) => None,
@@ -867,18 +881,14 @@ pub fn reset_infinite_region(
 ) -> Result<()> {
     // No work: Null input
     let Some(new_infinite_region) = new_infinite_region else {
-        return Err(SolidError::topology_invalid_value(
-            OP,
-            "no new infinite region was given",
-        ));
+        return Err(SolidError::topology(OP, TopologyFailure::NoRegionGiven));
     };
 
     // If given region is not one our our regions, fail.
     if !regions(b, None)?.contains(&new_infinite_region) {
-        return Err(SolidError::topology_invalid_value(
-            OP,
-            "the new infinite region is not a region of the B-rep",
-        ));
+        return Err(Failure::new(OP, TopologyFailure::NotInBrep)
+            .with_status(SM_ERR_INVALID_INPUT)
+            .into_error());
     }
 
     // Reset the infinite region, and make sure that the first in list is infinite region.
@@ -929,15 +939,12 @@ pub fn reset_infinite_region(
 pub fn set_region_is_void_flags_for_nested_solids(k: &mut Kernel, b: &mut Brep) -> Result<()> {
     // check state - look for a properly labeled infinite region
     let Some(infinite) = b.infinite_region() else {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the B-rep has no infinite region",
-        ));
+        return Err(SolidError::topology(OP, TopologyFailure::NoInfiniteRegion));
     };
     if regions(b, None)?.first() != Some(&infinite) {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             OP,
-            "the infinite region is not the head of the region list",
+            TopologyFailure::InfiniteRegionNotFirst,
         ));
     }
 
@@ -1035,8 +1042,76 @@ pub fn find_highest_vote(regions: &[Option<RegionId>], votes: &[u64]) -> Result<
 // ---- copy maps (sm_SetObjectMap, sm_GetObjectMap) ---------------------------------------
 
 /// The `SmMapPtrToPtr<SmTopology, SmTopology>` of the B-rep copy: original object to
-/// its copy (`None` is a null copy).
-pub type ObjectMap = BTreeMap<EntityRef, Option<EntityRef>>;
+/// its copy (`None` is a null copy). A slot per original, by kind and arena index: a copy
+/// records every object of the B-rep it copies and looks each up several times, which a
+/// tree of all of them made a search each.
+#[derive(Debug, Clone, Default)]
+pub struct ObjectMap {
+    slots: [Vec<Slot>; 11],
+}
+
+impl ObjectMap {
+    /// An empty map.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The slot list of `e`'s kind and `e`'s index in it.
+    fn place(e: EntityRef) -> Option<(usize, usize)> {
+        let (kind, index) = match e {
+            EntityRef::Brep(x) => (0, x.index()),
+            EntityRef::Shell(x) => (1, x.index()),
+            EntityRef::Face(x) => (2, x.index()),
+            EntityRef::Loop(x) => (3, x.index()),
+            EntityRef::Edge(x) => (4, x.index()),
+            EntityRef::Vertex(x) => (5, x.index()),
+            EntityRef::Region(x) => (6, x.index()),
+            EntityRef::Faceuse(x) => (7, x.index()),
+            EntityRef::Loopuse(x) => (8, x.index()),
+            EntityRef::Edgeuse(x) => (9, x.index()),
+            EntityRef::Vertexuse(x) => (10, x.index()),
+        };
+        Some((kind, usize::try_from(index).ok()?))
+    }
+
+    /// Records `orig -> copy` (`None` a null copy).
+    pub fn insert(&mut self, orig: EntityRef, copy: Option<EntityRef>) {
+        let Some((kind, index)) = Self::place(orig) else {
+            return;
+        };
+        let Some(slots) = self.slots.get_mut(kind) else {
+            return;
+        };
+        if slots.len() <= index {
+            // an arena index of an object the copied B-rep holds
+            slots.resize(index + 1, Slot::Unset);
+        }
+        if let Some(slot) = slots.get_mut(index) {
+            *slot = Slot::Set(copy);
+        }
+    }
+
+    /// The copy recorded for `orig`: `None` when none was, or a null copy was.
+    #[must_use]
+    pub fn get(&self, orig: EntityRef) -> Option<EntityRef> {
+        let (kind, index) = Self::place(orig)?;
+        match self.slots.get(kind)?.get(index)? {
+            Slot::Set(copy) => *copy,
+            Slot::Unset => None,
+        }
+    }
+}
+
+/// What an [`ObjectMap`] holds for one original.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum Slot {
+    /// Nothing recorded.
+    #[default]
+    Unset,
+    /// A copy, or a null copy (`None`).
+    Set(Option<EntityRef>),
+}
 
 /// `sm_SetObjectMap`: records `orig -> copy`, and in the optional `SmCopyBrepMap`s
 /// ([`CopyBrepMap`], unit `topology.proto_topology_p1`) `copy -> orig` and `orig ->
@@ -1062,7 +1137,7 @@ pub fn set_object_map(
 /// `sm_GetObjectMap`: the copy recorded for `from` (`None` when none, or a null copy).
 #[must_use]
 pub fn get_object_map(from: EntityRef, map: &ObjectMap) -> Option<EntityRef> {
-    map.get(&from).copied().flatten()
+    map.get(from)
 }
 
 // ---- attributes (sm_AddAttributes, SmPendingTopologyDelete) -----------------------------
@@ -1228,6 +1303,13 @@ fn vertexuse_loop(b: &Brep, vu: VertexuseId) -> Result<Option<LoopId>> {
     loopuse::loop_(b, lu)
 }
 
+/// Why a loop vertex use has no neighbour in its vertex's list: it has no vertex, or its
+/// vertex does not list it, though the kernel lists every vertex use on its vertex when it
+/// links the two.
+const UNLISTED_VU: &str = "the loop vertex use has no vertex, or its vertex's list of uses \
+                           misses it, though the kernel links every vertex use to its vertex \
+                           and lists it there";
+
 /// `sm_RmAndDel_OldLoopVertices`: when `vu` is a loop vertex use, finds its partner
 /// (the next, else the previous, loop vertex use on the same loop in the vertex's
 /// list), removes both from the vertex and deletes them (their records are removed).
@@ -1247,24 +1329,22 @@ pub fn rm_and_del_old_loop_vertices(b: &mut Brep, vu: VertexuseId) -> Result<()>
         Ok(vertexuse::is_loop_vertexuse(b, other)? && vertexuse_loop(b, other)? == this_loop)
     };
 
-    let other = vertexuse_neighbour(b, vu, true)?
-        .ok_or_else(|| SolidError::topology_missing(OP, "the vertex use's next neighbour"))?; // NER
+    let other = vertexuse_neighbour(b, vu, true)?.ok_or_else(|| broken_link(UNLISTED_VU))?; // NER
 
     // When OtherVU is a LoopVertexuse attached to the same Loop as input VU
     let del = if partner(b, other)? {
         other
     } else {
         // try the VU in the other direction of the Vertex's doubly linked Vertexuse list
-        let other = vertexuse_neighbour(b, vu, false)?.ok_or_else(|| {
-            SolidError::topology_missing(OP, "the vertex use's previous neighbour")
-        })?; // NER
+        let other = vertexuse_neighbour(b, vu, false)?.ok_or_else(|| broken_link(UNLISTED_VU))?; // NER
         if partner(b, other)? {
             other
         } else {
             // Unable to find the partner of this loop vertexuse
-            return Err(SolidError::topology_failed(
-                OP,
-                "the loop vertex use has no partner on the same loop",
+            return Err(defect(
+                "neither neighbour of the loop vertex use in its vertex's list is the vertex \
+                 use of the same loop's other side, though the kernel inserts a vertex \
+                 loop's two vertex uses side by side",
             ));
         }
     };
@@ -1339,23 +1419,8 @@ fn mark_loops_to_delete_bounded(
             .copied()
             .ok_or_else(|| null("sm_MarkLoopsToDelete: loop without edges"))?
             .ok_or_else(|| null("sm_MarkLoopsToDelete: edge use without edge"))?;
-        if edge::is_wire(b, e)? {
-            return Err(SolidError::topology_failed(
-                OP,
-                "a loop to delete has a wire edge",
-            ));
-        }
-        if edge::is_lamina(b, e)? {
-            return Err(SolidError::topology_failed(
-                OP,
-                "a loop to delete has a lamina edge",
-            ));
-        }
-        if !edge::is_manifold(b, e)? {
-            return Err(SolidError::topology_failed(
-                OP,
-                "a loop to delete has a non-manifold edge",
-            ));
+        if edge::is_wire(b, e)? || edge::is_lamina(b, e)? || !edge::is_manifold(b, e)? {
+            return Err(SolidError::topology(OP, TopologyFailure::EdgeNotManifold));
         }
 
         let eu = edge::primary_edgeuse(b, e)?
@@ -1439,6 +1504,20 @@ fn start_vertex(b: &Brep, eu: EdgeuseId) -> Result<VertexId> {
         .ok_or_else(|| null("vertex use without vertex"))
 }
 
+/// [`TopologyFailure::TrimCurveOffEnd`]: a lifted trim curve end `distance` from its
+/// vertex or edge end, past `tolerance`.
+fn trim_curve_off_end(at_end: bool, to_vertex: bool, distance: f64, tolerance: f64) -> SolidError {
+    SolidError::topology(
+        OP,
+        TopologyFailure::TrimCurveOffEnd {
+            at_end,
+            to_vertex,
+            distance,
+            tolerance,
+        },
+    )
+}
+
 /// `sm_CheckUVTrimCurve`: checks the edge use's own UV trim curve (not its mate's):
 /// at both ends the surface point of the trim curve must be within the face tolerance
 /// plus the vertex tolerance of the vertex, and within the face tolerance plus the
@@ -1450,7 +1529,25 @@ fn start_vertex(b: &Brep, eu: EdgeuseId) -> Result<VertexId> {
 /// dereferences null (no edge, curve, mate, vertex use, vertex, face or surface);
 /// those of the evaluations.
 pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
-    let _ = k;
+    check_uv_trim_curve_at(k, b, eu, &|e| edge::tolerance(b, e), &|v| {
+        vertex::tolerance(b, v)
+    })
+}
+
+/// [`check_uv_trim_curve`] with the edge and vertex tolerances given by `edge_tolerance`
+/// and `vertex_tolerance` in place of those `b` holds (not upstream: the `.smb` writer asks
+/// whether a read of what it writes keeps the trim, `topology::brep_data_write`).
+///
+/// # Errors
+///
+/// As [`check_uv_trim_curve`], and those of the two tolerance functions.
+pub(crate) fn check_uv_trim_curve_at(
+    k: &Kernel,
+    b: &Brep,
+    eu: EdgeuseId,
+    edge_tolerance: &dyn Fn(EdgeId) -> Result<f64>,
+    vertex_tolerance: &dyn Fn(VertexId) -> Result<f64>,
+) -> Result<()> {
     let Some(trim_crv) = eu1::uv_trim_curve_pointer(b, eu)? else {
         return Ok(());
     };
@@ -1494,21 +1591,25 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
     let face_3d_start = surf.evaluate_point(k, Point2::new(start_uv.x, start_uv.y))?;
 
     let face_tol = face2::tolerance(b, face)?;
-    let edge_tol = edge::tolerance(b, e)?;
-    let mut vrtx_tol = vertex::tolerance(b, start_vtx)?;
+    let edge_tol = edge_tolerance(e)?;
+    let mut vrtx_tol = vertex_tolerance(start_vtx)?;
 
     let dist_face_vrtx_start = face_3d_start.distance(vrtx_3d_start);
     if dist_face_vrtx_start > face_tol + vrtx_tol {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the UV trim curve's start is off the start vertex",
+        return Err(trim_curve_off_end(
+            false,
+            true,
+            dist_face_vrtx_start,
+            face_tol + vrtx_tol,
         ));
     }
     let dist_face_edge_start = face_3d_start.distance(edge_3d_start);
     if dist_face_edge_start > face_tol + edge_tol {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the UV trim curve's start is off the edge's start",
+        return Err(trim_curve_off_end(
+            false,
+            false,
+            dist_face_edge_start,
+            face_tol + edge_tol,
         ));
     }
 
@@ -1521,20 +1622,24 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
     };
     let vrtx_3d_end = vertex::point(b, end_vtx)?;
     let face_3d_end = surf.evaluate_point(k, Point2::new(end_uv.x, end_uv.y))?;
-    vrtx_tol = vertex::tolerance(b, end_vtx)?; // have to update this to End vtx.
+    vrtx_tol = vertex_tolerance(end_vtx)?; // have to update this to End vtx.
 
     let dist_face_vrtx_end = face_3d_end.distance(vrtx_3d_end);
     if dist_face_vrtx_end > face_tol + vrtx_tol {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the UV trim curve's end is off the end vertex",
+        return Err(trim_curve_off_end(
+            true,
+            true,
+            dist_face_vrtx_end,
+            face_tol + vrtx_tol,
         ));
     }
     let dist_face_edge_end = face_3d_end.distance(edge_3d_end);
     if dist_face_edge_end > face_tol + edge_tol {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the UV trim curve's end is off the edge's end",
+        return Err(trim_curve_off_end(
+            true,
+            false,
+            dist_face_edge_end,
+            face_tol + edge_tol,
         ));
     }
     Ok(())
@@ -1701,13 +1806,16 @@ pub fn find_side_of_curve(
 ) -> Result<bool> {
     match side_of_curve(k, curve, point, projection_direction, tol)? {
         SideOfCurve::Right(right) => Ok(right),
-        SideOfCurve::Undecided(reason) => Err(SolidError::topology_failed(OP, reason)),
-        SideOfCurve::NoProjection => Err(SolidError::topology_failed(OP, NOT_ONCE)),
+        SideOfCurve::Undecided(why) => Err(SolidError::topology(
+            OP,
+            TopologyFailure::SideUndecided { why },
+        )),
+        SideOfCurve::NoProjection => Err(defect(
+            "the projection of the point onto the curve found no foot, though the curve \
+             comes nearer to the point inside its interval than at its ends, so a foot exists",
+        )),
     }
 }
-
-/// Why [`find_side_of_curve`] fails when the projection has no single solution.
-const NOT_ONCE: &str = "the point does not project onto the curve exactly once";
 
 /// What [`side_of_curve`] found for a point.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1719,7 +1827,7 @@ pub(crate) enum SideOfCurve {
     /// vector and the tangent are parallel, or the projection has no single solution
     /// and the curve may be nearest at an end (a point beyond the end of the curve).
     /// It carries the reason [`find_side_of_curve`] fails with.
-    Undecided(&'static str),
+    Undecided(SideOpen),
     /// The projection gave no solution although the curve comes nearer to the point
     /// inside its interval than at its ends: a nearest point exists there and was not
     /// found, so nothing is known about the point (#13679).
@@ -1758,7 +1866,7 @@ pub(crate) fn side_of_curve(
     )?;
 
     // Determine if point is on left or right side of the curve relative to the projection plane.
-    if solutions.len() != 1 {
+    let [sol] = solutions.as_slice() else {
         // No solution where the curve is nearest at an end is the projection's
         // ordinary answer for a point beyond the end. Where the curve comes nearer
         // inside, a nearest point exists that the projection did not find.
@@ -1767,12 +1875,9 @@ pub(crate) fn side_of_curve(
         return Ok(if missed {
             SideOfCurve::NoProjection
         } else {
-            SideOfCurve::Undecided(NOT_ONCE)
+            SideOfCurve::Undecided(SideOpen::NotProjectedOnce)
         });
-    }
-    let sol = solutions.get(0).ok_or_else(|| {
-        SolidError::topology_failed(OP, "the curve has no projection of the point")
-    })?;
+    };
 
     let pv = curve.evaluate(k, sol.start.param(0)?, 1, true, true)?;
     let (p0, p1) = match pv.as_slice() {
@@ -1801,16 +1906,18 @@ pub(crate) fn side_of_curve(
             && along.length() >= EFF_ZERO
             && (vec.dot(along) / scale).abs() > EFF_ZERO_RAD
         {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP,
-                "the point does not project onto the curve exactly once",
+                TopologyFailure::SideUndecided {
+                    why: SideOpen::BeyondEnd,
+                },
             ));
         }
     }
 
     // point is on the curve
     if vec.length() < tol {
-        return Ok(SideOfCurve::Undecided("the point is on the curve"));
+        return Ok(SideOfCurve::Undecided(SideOpen::OnCurve));
     }
 
     vec = vec.unitize_or_z();
@@ -1818,18 +1925,14 @@ pub(crate) fn side_of_curve(
 
     // projection direction is the same as the curve tangent or curve tangent is zero
     if tan.length() < tol {
-        return Ok(SideOfCurve::Undecided(
-            "the curve tangent is zero or along the projection direction",
-        ));
+        return Ok(SideOfCurve::Undecided(SideOpen::TangentAlongProjection));
     }
     tan = tan.unitize_or_z();
 
     // projected vec and curve tangent are parallel
     let side = tan.cross(vec);
     if side.length() < EFF_ZERO {
-        return Ok(SideOfCurve::Undecided(
-            "the point lies along the curve tangent",
-        ));
+        return Ok(SideOfCurve::Undecided(SideOpen::AlongTangent));
     }
 
     // set output
@@ -1947,8 +2050,10 @@ pub fn find_sector_of_face(
                 match crate::query::face::p2::face_surface_cache(k, b, face) {
                     Ok(lease) => Some(lease),
                     Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                    Err(_) => {
-                        return Err(SolidError::topology_missing(OP, "the face's surface cache"))
+                    Err(e) => {
+                        return Err(Failure::new(OP, TopologyFailure::SurfaceCacheNotMade)
+                            .caused_by(e)
+                            .into_error())
                     }
                 }
             };
@@ -1972,10 +2077,7 @@ pub fn find_sector_of_face(
             }
             let solutions = solved?;
             let Some(first) = solutions.get(0) else {
-                return Err(SolidError::topology_failed(
-                    OP,
-                    "the test point does not project onto the face's surface",
-                ));
+                return Err(SolidError::topology(OP, TopologyFailure::NoFootOnSurface));
             };
             let uv_found = uv_of(&first.start)?;
             let (surf_pnt, norm) = eval(uv_found)?;
@@ -1988,10 +2090,7 @@ pub fn find_sector_of_face(
 
     // Can't classify a point on the surface - that point won't be in a region sector
     if distance < EFF_ZERO {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the test point is on the face's surface",
-        ));
+        return Err(SolidError::topology(OP, TopologyFailure::TestVectorZero));
     }
 
     // classify testPoint based on angle between FacePointNormal and TestVec
@@ -2488,7 +2587,12 @@ fn first_nonseparating_seam(
         let mut start_degree = 0usize;
         let mut end_degree = 0usize;
         for e in loopuse::edges(b, seam_lu, None)? {
-            let e = e.ok_or_else(|| SolidError::topology_missing(OP, "the seam loop's edge"))?;
+            let e = e.ok_or_else(|| {
+                broken_link(
+                    "an edge use of the seam's edge loop has no edge, though the kernel links \
+                     every edge use of an edge loop to its edge",
+                )
+            })?;
             let record = b.edge(e)?;
             let Some(segment) = record.curve.as_ref().and_then(|c| match c.kind() {
                 CurveKind::CrvOnSurf(c) => Some(c.as_ref()),
@@ -2556,10 +2660,12 @@ fn first_nonseparating_seam(
 
         // Vertex loops do not separate the face. CurveOnClassify has already
         // divided the input curve at any vertices that lie on this seam.
-        let lu = b
-            .loop_(l)?
-            .loopuse
-            .ok_or_else(|| SolidError::topology_missing(OP, "the loop's loop use"))?;
+        let lu = b.loop_(l)?.loopuse.ok_or_else(|| {
+            broken_link(
+                "a loop of the face has no loop use, though the kernel makes every loop \
+                     with its loop uses",
+            )
+        })?;
         if loopuse::is_vertex_loopuse(b, lu)? {
             continue;
         }
@@ -2672,10 +2778,14 @@ pub fn make_vertex_split_uv_trim_curve(
     // its point evaluation is the UV curve point lifted by the face surface.
     let edge_to_split = eu1::edge(b, eu_orig)?
         .ok_or_else(|| null("sm_MakeVertexSplitUVTrimCurve: edge use without edge"))?;
-    let face = eu1::face(b, eu_orig)?
-        .ok_or_else(|| SolidError::topology_missing(OP, "the edge use's face"))?; // NER
+    let face = eu1::face(b, eu_orig)?.ok_or_else(|| {
+        broken_link(
+            "the edge use has a UV trim curve but no face, though the kernel gives UV trim \
+             curves only to edge uses in a face's loop",
+        )
+    })?; // NER
     let surface = face2::surface(b, face)?
-        .ok_or_else(|| SolidError::topology_missing(OP, "the face's surface"))?
+        .ok_or_else(|| SolidError::topology(OP, TopologyFailure::FaceWithoutSurface))?
         .clone_for_evaluation()?; // NER
     let lift = |t: f64| -> Result<Point3> {
         let p = new_uv_curve.evaluate_point(k, t)?;
@@ -2761,7 +2871,12 @@ pub fn make_vertex_split_uv_trim_curve(
             new_uv_curve.trim(k, &mut ivl1, TrimMode::Notify)?;
             new_uv_curve.edit_parameterization(k, &ivl1_3d)?;
         }
+        // Not upstream (#21416): a UV trim curve lifted across a periodic surface's seam
+        // (`CreateUVTrimCurve`'s periodic projection runs on through it) split at the seam
+        // has its part past the seam a period outside the face's domain
+        uv_into_period(k, &surface, attached)?;
     }
+    uv_into_period(k, &surface, &mut new_uv_curve)?;
 
     ignored(eu1::set_uv_trim_curve(
         b,
@@ -2772,6 +2887,93 @@ pub fn make_vertex_split_uv_trim_curve(
         None,
     ))?;
     Ok(())
+}
+
+/// Not upstream (#21416): `uv`, a UV trim curve on `surface`, moved by a whole period into the
+/// surface's natural domain where it is proved to lie wholly past a side of that domain in a
+/// periodic direction (within a period of it). A UV curve lifted across the seam, continuous
+/// through it, holds its part beyond the seam a period outside the domain; cut at the seam, that
+/// part alone is the same curve on the face a period back. The proof is the curve's control
+/// polygon ([`uv_hull`]): with positive weights the curve lies in its convex hull, so where every
+/// control point, rounding included, lies past the side the whole curve does, between its
+/// samples too. A curve within the domain, one across a side or not proved past it, one whose
+/// hull is not certain (a kind without a control polygon of its own, a weight not positive)
+/// and one on a surface periodic in neither direction are left as they are.
+///
+/// # Errors
+/// Those of the domain, the periodicity tests, the copy and the move.
+pub(crate) fn uv_into_period(k: &Kernel, surface: &Surface, uv: &mut Curve) -> Result<()> {
+    use crate::geom::axis2_placement::Axis2Placement;
+    let Some(hull) = uv_hull(uv)? else {
+        return Ok(());
+    };
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+    let mut shift = Vec3::new(0.0, 0.0, 0.0);
+    for (param, side) in [
+        (SurfParamType::U, domain.u_interval()),
+        (SurfParamType::V, domain.v_interval()),
+    ] {
+        let (lo, hi) = (side.min(), side.max());
+        let period = hi - lo;
+        // a rounding of the domain's sides, far below any piece of a curve
+        let tol = 1e-9 * period.abs().max(1.0);
+        let along = |p: &Point3| if param == SurfParamType::U { p.x } else { p.y };
+        // the hull's extent along the direction, each control point's rounding included
+        let (min, max) = hull
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), (p, e)| {
+                (a.min(along(p) - e), b.max(along(p) + e))
+            });
+        let by = if min >= hi - tol && max > hi + tol && max <= hi + period + tol {
+            -period
+        } else if max <= lo + tol && min < lo - tol && min >= lo - period - tol {
+            period
+        } else {
+            continue;
+        };
+        // (asked only of a curve past a side: the test evaluates the surface)
+        if period.is_nan() || period <= 0.0 || !surface.is_periodic(k, &domain, param)? {
+            continue;
+        }
+        if param == SurfParamType::U {
+            shift.x = by;
+        } else {
+            shift.y = by;
+        }
+    }
+    if shift == Vec3::new(0.0, 0.0, 0.0) {
+        return Ok(());
+    }
+    let mut axis = Axis2Placement::default();
+    axis.set_canonical(shift, Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0))?;
+    uv.transform(k, &axis, None)?;
+    uv.convert_to_2d(k)?;
+    Ok(())
+}
+
+/// Not upstream (#21416): points whose convex hull holds the UV curve `uv` over its natural
+/// interval, each with the error bound of its coordinates, `x` and `y` the curve's `u` and `v`
+/// ([`Curve::piece_hull_points`] of a 3D copy of it, made for the hull alone: a 2D curve has
+/// none there). A B-spline curve, a line or an ellipse, whose control polygon is their own;
+/// `None` for the other kinds and where no hull is certain (a weight not positive, knots not
+/// clamped) or the copy is not made 3D.
+///
+/// # Errors
+/// Those of the copy.
+fn uv_hull(uv: &Curve) -> Result<Option<Vec<(Point3, f64)>>> {
+    let mut copy = uv.clone_for_evaluation()?;
+    let made_3d = match copy.kind_mut() {
+        CurveKind::BSpline(b) => b.convert_to_3d().is_ok(),
+        CurveKind::Line(l) => l.convert_to_3d().is_ok(),
+        CurveKind::Ellipse(e) => {
+            e.convert_to_3d();
+            true
+        }
+        _ => false,
+    };
+    Ok(made_3d
+        .then(|| copy.piece_hull_points(&uv.natural_interval()))
+        .flatten())
 }
 
 // ---- B-rep intersection (SmBrep::BrepIntersect) -----------------------------------------
@@ -2977,9 +3179,11 @@ pub fn create_corner_blend(
 ) -> Result<Vec<BSplineSurface>> {
     // Need at least two edges to blend
     if edgeuses.len() < 2 {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             OP,
-            "a corner blend needs at least two edge uses",
+            TopologyFailure::TooFewEdgeuses {
+                given: edgeuses.len(),
+            },
         ));
     }
     // locals
@@ -2994,19 +3198,15 @@ pub fn create_corner_blend(
     };
 
     // set sWorkEUS = list of all input edgeuses running in the SM_OT_SAME direction
-    for i in 0..work_eus.len() {
-        let eu = work_eus.get(i).copied().ok_or_else(|| {
-            SolidError::topology_failed(OP, "the edge use list is shorter than its length")
-        })?;
+    for (i, slot) in work_eus.iter_mut().enumerate() {
+        let eu = *slot;
         let eu = if eu1::orientation(b, eu)? == OrientType::Opposite {
             eu1::mate(b, eu)?
                 .ok_or_else(|| null("CreateCornerBlend: opposite edge use without mate"))?
         } else {
             eu
         };
-        if let Some(slot) = work_eus.get_mut(i) {
-            *slot = eu;
-        }
+        *slot = eu;
         let e =
             eu1::edge(b, eu)?.ok_or_else(|| null("CreateCornerBlend: edge use without edge"))?;
         if edge::is_wire(b, e)? {
@@ -3021,10 +3221,9 @@ pub fn create_corner_blend(
     let mut tangencies: Vec<bool> = vec![*work_tan
         .first()
         .ok_or_else(|| null("CreateCornerBlend: tangent flags shorter than edge uses"))?];
-    ordered_eus.push(work_eus.remove(0));
-    let first_eu = *ordered_eus
-        .first()
-        .ok_or_else(|| SolidError::topology_failed(OP, "the ordered edge use list is empty"))?;
+    let first_eu = work_eus.remove(0);
+    ordered_eus.push(first_eu);
+    let mut last_eu = first_eu;
     eu_orients.push(eu1::orientation(b, first_eu)?);
     work_tan.remove(0);
 
@@ -3035,16 +3234,11 @@ pub fn create_corner_blend(
         let mut found = false;
 
         // for every sWorkEUS edgeuse - look for one sharing a common endPoint with the last
-        for i in 0..work_eus.len() {
-            let eu = *work_eus.get(i).ok_or_else(|| {
-                SolidError::topology_failed(OP, "the edge use list is shorter than its length")
-            })?;
+        // (a copy to walk: the edge use found is taken out of `work_eus` before the break)
+        for (i, &eu) in work_eus.clone().iter().enumerate() {
             let tan = *work_tan
                 .get(i)
                 .ok_or_else(|| null("CreateCornerBlend: tangent flags shorter than edge uses"))?;
-            let last_eu = *ordered_eus.last().ok_or_else(|| {
-                SolidError::topology_failed(OP, "the ordered edge use list is empty")
-            })?;
             let param = if eu_orients.last() == Some(&OrientType::Same) {
                 1.0
             } else {
@@ -3062,6 +3256,7 @@ pub fn create_corner_blend(
                 // insert this edge into local inputs in SAME orientation
                 tangencies.push(tan);
                 ordered_eus.push(eu);
+                last_eu = eu;
                 eu_orients.push(OrientType::Same);
                 work_eus.remove(i);
                 work_tan.remove(i);
@@ -3078,6 +3273,7 @@ pub fn create_corner_blend(
                 // insert this edge into local inputs in OPPOSITE orientation
                 tangencies.push(tan);
                 ordered_eus.push(eu);
+                last_eu = eu;
                 eu_orients.push(OrientType::Opposite);
                 work_eus.remove(i);
                 work_tan.remove(i);
@@ -3091,10 +3287,7 @@ pub fn create_corner_blend(
 
         // exit error: A gap in the input edgeuses
         if !found && tol_scale > 100.0 {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the corner blend's edge uses leave a gap",
-            ));
+            return Err(SolidError::topology(OP, TopologyFailure::EdgeuseChainGap));
         }
 
         // arrive here to try again - increase check tolerance and try searching the edgeuses again.
@@ -3140,14 +3333,22 @@ pub fn create_corner_blend(
             })?;
             let uv_copy = uv_curve.copy(k)?;
             let Some(uv_bspline) = bspline_part(&uv_copy) else {
-                return Err(SolidError::topology_failed(
+                return Err(Failure::new(
                     OP,
-                    "the UV trim curve is not a B-spline",
-                ));
+                    TopologyFailure::CurveNotBSpline {
+                        entity: Some(EntityRef::Edgeuse(eu)),
+                    },
+                )
+                .with_status(SM_ERR)
+                .into_error());
             };
             ordered_uv.push(Some(uv_bspline));
-            let face = eu1::face(b, eu)?
-                .ok_or_else(|| SolidError::topology_missing(OP, "the edge use's face"))?; // NER
+            let face = eu1::face(b, eu)?.ok_or_else(|| {
+                broken_link(
+                    "an edge use of a non-wire edge has no face, though the kernel puts every \
+                     edge use outside a wire into a loop of a face",
+                )
+            })?; // NER
 
             // pF->GetSurface(): the face's own surface (kind and owner), read below once
             // the edge uses are done editing the B-rep
@@ -3167,9 +3368,12 @@ pub fn create_corner_blend(
         }
 
         // grab the second curve - pass 1: use curve end, pass 2: use curve start
-        let curve_3d = ordered_3d.get(1).ok_or_else(|| {
-            SolidError::topology_failed(OP, "the corner blend has no second curve")
-        })?;
+        let Some(curve_3d) = ordered_3d.get(1) else {
+            return Err(defect(
+                "the corner blend has no second curve, though two edge uses or more were \
+                 ordered and each gave its curve",
+            ));
+        };
         let mut param = if eu_orients.get(1) == Some(&OrientType::Same) {
             1.0
         } else {
@@ -3263,8 +3467,8 @@ pub fn create_edge_edge_blend(
     curves_dir_flag: u64,
     opt_ds_def: Option<&mut DerivSurfDefinition<'_>>,
 ) -> Result<Surface> {
-    let eu_1 = eu_1.ok_or_else(|| SolidError::topology_missing(OP, "the first edge use"))?; // NER
-    let eu_2 = eu_2.ok_or_else(|| SolidError::topology_missing(OP, "the second edge use"))?; // NER
+    let eu_1 = eu_1.ok_or_else(|| SolidError::topology(OP, TopologyFailure::NoEdgeuseGiven))?; // NER
+    let eu_2 = eu_2.ok_or_else(|| SolidError::topology(OP, TopologyFailure::NoEdgeuseGiven))?; // NER
 
     // eu_2's B-rep: `b_2`, or `b_1` when both edge uses are in one B-rep (each edge use's
     // reads touch only its own B-rep, as upstream's)
@@ -3288,10 +3492,11 @@ pub fn create_edge_edge_blend(
 
     // locals
     let (Some(edge1), Some(edge2)) = (eu1::edge(b_1, eu_1)?, eu1::edge(b2!(), eu_2)?) else {
-        return Err(SolidError::topology_invalid_value(
+        // Could not fetch Edge from Edgeuse: the edge uses are the caller's
+        return Err(SolidError::topology(
             OP,
-            "an edge use has no edge",
-        )); // Could not fetch Edge from Edgeuse
+            TopologyFailure::EdgeuseWithoutEdge,
+        ));
     };
 
     // edge locals
@@ -3300,17 +3505,13 @@ pub fn create_edge_edge_blend(
     let rail1 = edge::create_trimmed_nurbs_curve(k, b_1, edge1)?;
     let rail2 = edge::create_trimmed_nurbs_curve(k, b2!(), edge2)?;
     let tolerance = max2(edge::tolerance(b_1, edge1)?, edge::tolerance(b2!(), edge2)?);
-    let (Some(rail1), Some(rail2)) = (rail1, rail2) else {
-        return Err(SolidError::topology_invalid_value(
-            OP,
-            "an edge has no trimmed B-spline curve",
-        )); // Could not build BSplineCurves from Edges
-    };
-    let (Some(mut rail1), Some(mut rail2)) = (bspline_part(&rail1), bspline_part(&rail2)) else {
-        return Err(SolidError::topology_invalid_value(
-            OP,
-            "an edge's trimmed curve is not a B-spline",
-        ));
+    // (a trimmed copy is a B-spline curve, so `bspline_part` finds it whenever there is one)
+    let (Some(mut rail1), Some(mut rail2)) = (
+        rail1.as_ref().and_then(bspline_part),
+        rail2.as_ref().and_then(bspline_part),
+    ) else {
+        // Could not build BSplineCurves from Edges
+        return Err(SolidError::topology(OP, TopologyFailure::NoTrimmedBSpline));
     };
 
     // to preserve previous behavior - use backward compatible style for ruled surfaces
@@ -3379,10 +3580,10 @@ pub fn create_edge_edge_blend(
         face2::surface(b2!(), face2_)?.is_some(),
     );
     if !(surfaces_present.0 && surfaces_present.1) {
-        return Err(SolidError::topology_invalid_value(
-            OP,
-            "an edge use's face has no surface",
-        )); // Could not fetch Surface from Edgeuse
+        // Could not fetch Surface from Edgeuse
+        return Err(Failure::new(OP, TopologyFailure::FaceWithoutSurface)
+            .with_status(SM_ERR_INVALID_INPUT)
+            .into_error());
     }
 
     // set the bIntoFace values for curve/Surface pairs
@@ -3473,9 +3674,9 @@ pub fn create_edge_edge_blend(
     let curve2 = Curve::from(rail2);
     // (the face surfaces fetched above; re-borrowed past the edge use evaluations)
     let surface1 = face2::surface(b_1, face1)?
-        .ok_or_else(|| SolidError::topology_missing(OP, "the first face's surface"))?;
+        .ok_or_else(|| SolidError::topology(OP, TopologyFailure::FaceWithoutSurface))?;
     let surface2 = face2::surface(b2!(), face2_)?
-        .ok_or_else(|| SolidError::topology_missing(OP, "the second face's surface"))?;
+        .ok_or_else(|| SolidError::topology(OP, TopologyFailure::FaceWithoutSurface))?;
     surface1.create_blend_surface(
         k,
         &curve1,
@@ -4038,6 +4239,26 @@ mod tests {
     }
 
     #[test]
+    fn an_edge_edge_blend_refuses_an_edge_use_without_edge_as_invalid_input() {
+        let k = Kernel::default();
+        for missing in 0..2 {
+            let (mut b, _, uses, _) = seam_fixture();
+            b.edgeuse_mut(uses[missing]).unwrap().edge = None;
+            let e =
+                create_edge_edge_blend(&k, 0, &mut b, Some(uses[0]), None, Some(uses[1]), 0, None)
+                    .unwrap_err();
+            assert_eq!(
+                e.topology_failure(),
+                Some(&TopologyFailure::EdgeuseWithoutEdge),
+                "{e}"
+            );
+            assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{e}");
+            assert!(!e.is_defect(), "{e}");
+            assert_eq!(e.sm_status(), Some(SM_ERR_INVALID_INPUT), "{e}");
+        }
+    }
+
+    #[test]
     fn seam_redistribution_requires_four_uses_and_usable_trims() {
         let (b, edge, uses, previous) = seam_fixture();
         for count in [0, 2, 6] {
@@ -4227,9 +4448,11 @@ mod tests {
             |x: f64, y: f64| find_side_of_curve(&k, &line, Vec3::new(x, y, 0.0), Vec3::Z, 1e-6);
         assert_eq!(side(0.25, 0.5), Ok(false));
         assert_eq!(side(0.25, -0.5), Ok(true));
-        let not_once = SolidError::topology_failed(
+        let not_once = SolidError::topology(
             OP,
-            "the point does not project onto the curve exactly once",
+            TopologyFailure::SideUndecided {
+                why: SideOpen::BeyondEnd,
+            },
         );
         for (x, y) in [(2.0, 0.5), (2.0, -0.5), (-3.0, 1.0), (1.5, 0.0)] {
             assert_eq!(side(x, y), Err(not_once.clone()), "({x}, {y})");
@@ -4283,12 +4506,22 @@ mod tests {
             b.this_model_size_estimate(&k, true),
             tol::MODEL_SIZE_ESTIMATE
         );
-        assert_eq!(b.set_this_model_size_estimate(&mut k, 1000.0), 1.0e-4);
+        // a B-rep's own estimate and ratio stay off the context
+        assert_eq!(b.set_this_model_size_estimate(1000.0), 1.0e-4);
         assert_eq!(b.tolerance(), 1.0e-4);
-        assert_eq!(k.context.stored_model_size_estimate(), 1000.0);
-        b.set_this_large_small_size_ratio(&mut k, 7.0);
+        assert_eq!(k.context.stored_model_size_estimate(), tol::USE_DEFAULT);
+        assert_eq!(k.context.this_zone_tol_3d(), 1.0e-5);
+        b.set_this_large_small_size_ratio(7.0);
         assert_eq!(b.this_large_small_size_ratio(&k, false), 7.0);
-        assert_eq!(k.context.stored_large_small_size_ratio(), 7.0);
+        assert_eq!(k.context.stored_large_small_size_ratio(), tol::USE_DEFAULT);
+        // a B-rep that stores the default follows what the caller set on the context
+        let defaulted = Brep::new();
+        k.context.set_this_model_size_estimate(0.05);
+        k.context.set_this_large_small_size_ratio(3.0);
+        assert_eq!(defaulted.this_model_size_estimate(&k, true), 0.05);
+        assert_eq!(defaulted.this_large_small_size_ratio(&k, true), 3.0);
+        assert_eq!(b.this_model_size_estimate(&k, true), 1000.0);
+        assert_eq!(b.this_large_small_size_ratio(&k, true), 7.0);
     }
 
     #[test]
@@ -4307,5 +4540,79 @@ mod tests {
         assert_eq!(copy.get_at(Some(c)).unwrap(), Some(a));
         assert_eq!(rev.get_at(Some(a)).unwrap(), Some(c));
         assert_eq!(copy.len(), 1);
+    }
+
+    /// A cylinder of radius 2 about z, periodic in `u`, and the degree 1 UV curve through
+    /// `points` at the parameters `params` (clamped: the first and last twice).
+    fn cylinder_and_uv_polyline(k: &Kernel, points: &[Point2], params: &[f64]) -> (Surface, Curve) {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::nurbs::math::{CPoint, NOW, NOZ};
+        use crate::surface::cone::Cone;
+        let surface = Surface::from(
+            Cone::create_canonical_cylinder(k, &Axis2Placement::IDENTITY, 2.0).unwrap(),
+        );
+        let pw: Vec<CPoint> = points
+            .iter()
+            .map(|p| CPoint::new(p.x, p.y, NOZ, NOW))
+            .collect();
+        let mut u = vec![params[0]];
+        u.extend_from_slice(params);
+        u.push(params[params.len() - 1]);
+        let n = pw.len() - 1;
+        let c = BSplineCurve::from_data(2, n, n + 2, 1, &pw, &u).unwrap();
+        (surface, Curve::from(c))
+    }
+
+    /// #21416 review: a split UV piece is moved a period back only where its control polygon
+    /// proves it lies wholly past the seam. The reviewer's piece runs from the seam `hi` back
+    /// into the domain to `hi - q` at t = 1/16, then out to `hi + q` from t = 1/8 to 1: every
+    /// one of the nine samples at i/8 lies at or past `hi`, but the piece crosses the seam
+    /// between the first two, so moved by the period its point at 1/16 would be at `lo - q`,
+    /// outside the domain. It is left as it is. A piece wholly past the seam, from `hi` to
+    /// `hi + q`, is moved back: from `lo` to `lo + q`.
+    #[test]
+    fn a_uv_piece_crossing_the_seam_between_samples_is_not_moved_a_period() {
+        let k = Kernel::default();
+        let probe = cylinder_and_uv_polyline(
+            &k,
+            &[Point2::new(0.0, 0.0), Point2::new(1.0, 0.0)],
+            &[0.0, 1.0],
+        )
+        .0;
+        let domain = probe.natural_uv_domain_with_nurb(&k).unwrap();
+        assert!(probe.is_periodic(&k, &domain, SurfParamType::U).unwrap());
+        let (lo, hi) = (domain.u_interval().min(), domain.u_interval().max());
+        let q = (hi - lo) / 4.0;
+        let v = 1.0;
+
+        let mut points = vec![Point2::new(hi, v), Point2::new(hi - q, v)];
+        let mut params = vec![0.0, 1.0 / 16.0];
+        for i in 1..=8 {
+            points.push(Point2::new(hi + q, v));
+            params.push(f64::from(i) / 8.0);
+        }
+        let (surface, mut crossing) = cylinder_and_uv_polyline(&k, &points, &params);
+        // the nine samples a sampled test reads all lie at or past the seam
+        for i in 0..=8 {
+            let p = crossing.evaluate_point(&k, f64::from(i) / 8.0).unwrap();
+            assert!(p.x >= hi, "sample {i} at {}", p.x);
+        }
+        uv_into_period(&k, &surface, &mut crossing).unwrap();
+        let p = crossing.evaluate_point(&k, 1.0 / 16.0).unwrap();
+        assert_eq!((p.x, p.y), (hi - q, v));
+        let p = crossing.evaluate_point(&k, 1.0).unwrap();
+        assert_eq!((p.x, p.y), (hi + q, v));
+
+        let (surface, mut past) = cylinder_and_uv_polyline(
+            &k,
+            &[Point2::new(hi, v), Point2::new(hi + q, v)],
+            &[0.0, 1.0],
+        );
+        uv_into_period(&k, &surface, &mut past).unwrap();
+        for (t, u) in [(0.0, lo), (1.0, lo + q)] {
+            let p = past.evaluate_point(&k, t).unwrap();
+            assert!((p.x - u).abs() <= 1e-12 * hi.abs(), "{t}: {} {u}", p.x);
+            assert!((p.y - v).abs() <= 1e-12, "{t}: {}", p.y);
+        }
     }
 }

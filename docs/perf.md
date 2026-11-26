@@ -895,6 +895,16 @@ can still recompute (oracle 61, 62): solving the sketch moves its points by roun
 its inputs are not exactly the old ones. Oracle 59's first parameter edit fails (a recipe
 expression the bench's `* 1.02` can't scale) and is left out.
 
+Renaming a parameter changes no value, so it recomputes no feature (#611): as for a body or a
+feature rename (#3044), the model keeps every result and takes the renamed design's fingerprints.
+A sketch the rename reaches (a dimension's parameter, a point's or a pattern's expression) keeps
+its solve: the solved copies the model keeps of it take the new name, as solving the renamed
+sketch gives them, and their cache keys follow. A rename that reaches sheet metal or plastic
+rules, canvases or placements, or a message that quotes the old name, is still evaluated. On the
+20 x 20 hole plate (`parameters.rename` of the box length) the step went from 22413 ms (every
+feature evaluated) to 1.2 ms (none); with the plate's width a sketch dimension's parameter, from
+18660 ms to 1.4 ms.
+
 
 ## Prism pairs, body measurements and the evaluation cache budget (2026-10-13)
 
@@ -1285,3 +1295,40 @@ rounds per order, in milliseconds, the tree's time including building it:
 The order moves either walk by about 1%.
 
 Both walks return the same placements in the same order (the benchmark asserts it).
+
+## A camera move patches the model scene's changed blocks (2026-11-22)
+
+The model scene was built again after every camera move. `scene_key` hashed the display
+refinement's generation (`display_lod::Lod::generation`), and the planner bumps it whenever the
+set of drawn steps changes — its bodies' edge simplification steps, one per body, chosen from how
+many pixels per millimetre the view gives it. On an assembly, a camera move of any size flips
+some body's step, so the key changed and `publish_model_scene` built the scene again: every shown
+body's draw, its palette slots and its block, to throw away every block the block cache (#1148)
+kept. On grid100 (56,100 bodies, 276 M triangles, 3,600 blocks) the app's own frame log put
+168–180 ms of each camera move's 383 ms in "model scene"; the GPU frame is 9 ms.
+
+The published scene now keeps the draws of each of its blocks, and a change of the refinement's
+generation alone patches it: the bodies whose edge step changed have the blocks they are in
+rebuilt from those draws, keyed as a build keys them, and republished with a new patch number
+(as `publish_levels` already republishes levels) so the renderer uploads only the changed blocks.
+Nothing else in the key may have changed; a body drawn at another step draws other triangles and
+so a new block, which still builds the scene, as any other change does.
+
+`scene_rebuild_cost` (in `crates/ui-egui/src/viewport.rs`, ignored: a manual measurement on
+`SOLIDCRAFT_SCALE_DESIGN`) times the build and the patch on the same design, `ci` profile,
+Apple M2 Max, a load average of 5–18 from other work on the machine (the whole rebuild is the
+number that matters; the patch is two orders below it):
+
+| grid100 | ms |
+|---|---:|
+| whole scene, cold (first build after the open) | 2,784 |
+| whole scene, warm (what a camera move did) | 136 |
+| patch, one body's edge step changed, one block rebuilt | 1.1 |
+| patch, all 56,099 bodies' steps changed, every block rebuilt | 658 |
+
+The still picture is unchanged: the ORBIT harness on grid100 (40 frames orbiting 56,100 bodies)
+printed `painted=bf55f6f89fd7978a` both before and after, over the same 276,227,800 triangles.
+
+The harness never shows the rebuild itself (`scene_builds=0` either way): its pointer orbit does
+not let the camera rest for `REFINE_STILL_MS`, so the refinement, and with it the rebuild, only
+happens in the app when a person's camera move ends.

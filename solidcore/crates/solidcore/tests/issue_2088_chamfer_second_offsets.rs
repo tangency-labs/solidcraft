@@ -293,6 +293,28 @@ fn issue_2486_chamfers_between_planes_are_chords_by_their_definitions() {
     }
 }
 
+/// An exact chord's record of a chamfer of setbacks (a kind nothing builds yet) is refused
+/// on rebuild, and a chord of offsets writes its chamfer as before the kind.
+#[test]
+fn an_exact_chord_of_setbacks_is_refused_on_rebuild() {
+    use solidcore::surface::procedural_blend::record::ChamferKindRecord;
+    let (k, b, _) = chamfered_box(ChamferSize::Distances([1.0, 2.0]));
+    let defs = definitions(&b);
+    let rec = exact_to_record(&k, &defs[0]).unwrap();
+    let text = serde_json::to_string(&rec.chamfer).unwrap();
+    assert!(
+        text.starts_with(r#"{"size":{"Distances":"#) && !text.contains("kind"),
+        "{text}"
+    );
+    let mut setbacks = rec;
+    if let Some(c) = setbacks.chamfer.as_mut() {
+        c.kind = ChamferKindRecord::Setbacks;
+        c.wedge = 0.0;
+    }
+    assert!(setbacks.validate().is_err());
+    assert!(exact_rebuild(&k, &setbacks).is_err());
+}
+
 /// `SmApiChamferFillet`'s chord between the cube's planes: every chamfer face keeps the
 /// chord 1 as its definition, exact, and the cube has its closed-form volume with bevelled
 /// corners: twelve prisms of legs 1/sqrt 2 less the corners' overlaps.

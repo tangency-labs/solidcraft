@@ -49,12 +49,13 @@
 //!   `SM_VALIDATE_INTERSECTORS`.
 
 use crate::curve::curve::Curve;
+use crate::error::topology::TopologyFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::SolverOperation;
-use crate::geom::solution_array::SolutionType;
+use crate::geom::solution_array::{Solution, SolutionType};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::intersect::surface_drop_lib::p3::DropSolveContext;
@@ -142,9 +143,9 @@ pub fn create_plane_from_bbox(
     let bilinear = BSplineSurface::create_bilinear_surface(p00, p10, p01, p11)?;
     match Plane::is_nurb_surface_plane(k, &bilinear, 1.0) {
         Ok(Some(plane)) => Ok(Some(Surface::from(plane))),
-        Ok(None) => Err(SolidError::topology_failed(
+        Ok(None) => Err(SolidError::topology(
             OP_PLANE,
-            "the bounding box's corners are not on a plane",
+            TopologyFailure::SectionPlaneNotMade,
         )),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
         // (an `SER` inside reads as `TRUE` and leaves no plane)
@@ -381,7 +382,8 @@ pub struct PlanarSection {
 /// [`SolidError::NotFound`] for a dangling id; `SM_ERR_NULL_POINTER` for a face without
 /// surface; those of the planarity test, the embedded edge test and, with
 /// `force_uv_classify`, of `DropAndTrimCurve`, the drop curve evaluations, `DropPoint`
-/// and `LiftCurve` (upstream's `SER`); [`SolidError::Unported`].
+/// and `LiftCurve` (upstream's `SER`); those of [`distinct_pieces`] on a face's 3D-trimmed
+/// pieces; [`SolidError::Unported`].
 pub fn create_planar_section_curves(
     k: &Kernel,
     b: &mut Brep,
@@ -406,7 +408,7 @@ pub fn create_planar_section_curves(
         let uv_domain = face2::uv_domain(b, f)?;
         // the face's surface, as an evaluation copy (same owner and cache slot)
         let surface = face2::surface(b, f)?
-            .ok_or_else(|| SolidError::topology_missing(OP_SECTION, "the face's surface"))?
+            .ok_or_else(|| SolidError::topology(OP_SECTION, TopologyFailure::FaceWithoutSurface))?
             .clone_for_evaluation()?;
         let face_tol = face2::tolerance(b, f)?;
 
@@ -505,7 +507,7 @@ pub fn create_planar_section_curves(
                     let face_curve =
                         status_free(edge::curve(b, e).map(Option::<&Curve>::cloned), None)?
                             .ok_or_else(|| {
-                                SolidError::topology_missing(OP_SECTION, "the edge's curve")
+                                SolidError::topology(OP_SECTION, TopologyFailure::EdgeWithoutCurve)
                             })?;
                     let edge_ivl = status_free(edge::interval(b, e), Extent1d::new())?;
                     if is_full_coincidence(&face_curve, &edge_ivl)? {
@@ -597,46 +599,75 @@ pub fn create_planar_section_curves(
     })
 }
 
-/// Whether all of `curve` lies on `other` within `tol`: one of the coincidence check's
-/// ranges of values runs from `curve`'s start to its end. Other solutions, such as the
-/// touch a closed `other` reports at its closing point, do not count against it. The
-/// check's status is ignored, as the section's other coincidence checks do, except
-/// [`SolidError::Unported`] and a cancelled pass.
+/// Whether all of `curve` lies on `other` within `tol`: the coincidence check of `curve`
+/// against `other`, read by [`covers`].
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] and cancellation from the check; those of the solutions'
-/// parameters.
+/// Those of [`covers`].
 fn lies_on(k: &Kernel, curve: &Curve, other: &Curve, tol: f64) -> Result<bool> {
-    let ivl = curve.natural_interval();
-    let param_tol = 1.0 / 100.0 * (EFF_ZERO_SQRT + ivl.length());
     let (found, status) = curve.global_coincidence_checker_with_partial::<NoObject>(
         k,
-        &ivl,
+        &curve.natural_interval(),
         other,
         &other.natural_interval(),
         tol,
         true,
         [None, None],
     );
-    if let Err(e) = status {
-        if e.is_unported_or_cancelled() {
-            return Err(e);
+    covers(k, curve, &found.solutions, status, tol)
+}
+
+/// Whether the solutions of a coincidence check of `curve` (`status` its result) cover it
+/// within `tol`: one of their ranges of values runs from `curve`'s start to its end. A
+/// range's end counts as the curve's end only where the curve's point at it is within `tol`
+/// of the curve's own end point, so a range that stops short by more than `tol` does not
+/// cover the curve. Other solutions, such as the touch a closed curve reports at its closing
+/// point, do not count against it. The check keeps the solutions it found before an error,
+/// so a failed check covers the curve when one of them does.
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] and cancellation from the check, whatever it found; any other
+/// error of the check when none of its ranges covers the curve; those of the curve's
+/// evaluations and of the solutions' parameters.
+fn covers(
+    k: &Kernel,
+    curve: &Curve,
+    solutions: &[Solution<NoObject>],
+    status: Result<()>,
+    tol: f64,
+) -> Result<bool> {
+    let status = match status {
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        status => status,
+    };
+    let ivl = curve.natural_interval();
+    let param_tol = 1.0 / 100.0 * (EFF_ZERO_SQRT + ivl.length());
+    let (start, end) = (
+        curve.evaluate_point(k, ivl.min())?,
+        curve.evaluate_point(k, ivl.max())?,
+    );
+    for s in solutions {
+        if s.solution_type != SolutionType::RangeOfValues {
+            continue;
         }
-    }
-    for s in &found.solutions {
-        if s.solution_type == SolutionType::RangeOfValues
-            && ivl.classify_point(s.start.param(0)?, param_tol) == ExtentPointType::Start
-            && ivl.classify_point(s.end.param(0)?, param_tol) == ExtentPointType::End
+        let (t0, t1) = (s.start.param(0)?, s.end.param(0)?);
+        if ivl.classify_point(t0, param_tol) == ExtentPointType::Start
+            && ivl.classify_point(t1, param_tol) == ExtentPointType::End
+            && curve.evaluate_point(k, t0)?.distance(start) <= tol
+            && curve.evaluate_point(k, t1)?.distance(end) <= tol
         {
             return Ok(true);
         }
     }
-    Ok(false)
+    status.map(|()| false)
 }
 
 /// The pieces of one face's section, trimmed in 3D, with every piece that lies wholly on
-/// another dropped (of two that lie on each other, the first is kept).
+/// another dropped. The pieces are taken longest first (of equal lengths, in their order),
+/// and each is tested only against the pieces already kept, so every piece dropped lies
+/// within `tol` of a piece that is kept; the kept pieces keep their order.
 ///
 /// The surface section is traced over the face's whole UV domain, and a surface can cover
 /// itself there: a spline that winds round a circle several times (as a coil's or a
@@ -648,27 +679,38 @@ fn lies_on(k: &Kernel, curve: &Curve, other: &Curve, tol: f64) -> Result<bool> {
 ///
 /// # Errors
 ///
-/// Those of [`lies_on`].
+/// Those of the pieces' lengths and of [`lies_on`].
 fn distinct_pieces(k: &Kernel, pieces: Vec<Curve>, tol: f64) -> Result<Vec<Curve>> {
-    let mut covered = Vec::new();
+    if pieces.len() < 2 {
+        return Ok(pieces);
+    }
+    let mut longest_first = Vec::new();
     for (i, piece) in pieces.iter().enumerate() {
-        let mut on_another = false;
-        for (j, other) in pieces.iter().enumerate() {
-            if i == j || !lies_on(k, piece, other, tol)? {
-                continue;
-            }
-            // a copy of an earlier piece, or a part of a longer one
-            if j < i || !lies_on(k, other, piece, tol)? {
-                on_another = true;
-                break;
+        longest_first.push((piece.length(k, &piece.natural_interval(), tol)?, i));
+    }
+    longest_first.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+    let mut kept: Vec<usize> = Vec::new();
+    for (_, i) in longest_first {
+        let Some(piece) = pieces.get(i) else {
+            continue;
+        };
+        let mut on_kept = false;
+        for &j in &kept {
+            if let Some(other) = pieces.get(j) {
+                if lies_on(k, piece, other, tol)? {
+                    on_kept = true;
+                    break;
+                }
             }
         }
-        covered.push(on_another);
+        if !on_kept {
+            kept.push(i);
+        }
     }
     Ok(pieces
         .into_iter()
-        .zip(covered)
-        .filter_map(|(piece, on_another)| (!on_another).then_some(piece))
+        .enumerate()
+        .filter_map(|(i, piece)| kept.contains(&i).then_some(piece))
         .collect())
 }
 
@@ -771,6 +813,7 @@ fn status_free<T>(r: Result<T>, fallback: T) -> Result<T> {
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::NotFound { .. }),
         ) => Err(e),
         Err(_) => Ok(fallback),
@@ -1011,6 +1054,124 @@ mod tests {
                 off_ends.iter().all(|d| *d <= tol),
                 "{corners:?}: ends off the face's sides: {off_ends:?}"
             );
+            assert_eq!(count, 1, "{corners:?}: one curve");
         }
+    }
+
+    /// The arc of radius `r` about the z axis in z = 0 from angle 0 to `angle` (under pi),
+    /// as one rational quadratic span on [0, 1].
+    fn arc(r: f64, angle: f64) -> Curve {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::CPoint;
+        let half = angle / 2.0;
+        let w = half.cos();
+        let points = vec![
+            CPoint::new(r, 0.0, 0.0, 1.0),
+            CPoint::new(w * r, w * r * half.tan(), 0.0, w),
+            CPoint::new(r * angle.cos(), r * angle.sin(), 0.0, 1.0),
+        ];
+        let nurb = NurbCurve::new(points, 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap();
+        Curve::from(BSplineCurve::from_nurb(nurb, 3, false))
+    }
+
+    fn lengths(k: &Kernel, curves: &[Curve]) -> Vec<f64> {
+        curves
+            .iter()
+            .map(|c| c.length(k, &c.natural_interval(), 1e-12).unwrap())
+            .collect()
+    }
+
+    /// A piece that stops short of another's end by more than the tolerance does not cover
+    /// it, however small a part of its interval that is: of an arc of radius 10 and angle 1
+    /// and the same arc 0.5% shorter (0.05 short, against a tolerance of 1e-5), the shorter
+    /// lies on the longer, the longer not on the shorter, and with the shorter first, the
+    /// longer is the piece kept.
+    #[test]
+    fn a_piece_a_little_longer_than_another_is_kept() {
+        let k = Kernel::default();
+        let tol = 1e-5;
+        let (long, short) = (arc(10.0, 1.0), arc(10.0, 0.995));
+        assert!(lies_on(&k, &short, &long, tol).unwrap());
+        assert!(!lies_on(&k, &long, &short, tol).unwrap());
+        let kept = distinct_pieces(&k, vec![short, long], tol).unwrap();
+        let kept = lengths(&k, &kept);
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert!((kept[0] - 10.0).abs() < 1e-9, "{kept:?}");
+    }
+
+    /// A piece is dropped only for lying on a piece that is kept. Of three arcs of angle 1 at
+    /// radii 10, 10 + 0.6 tol and 10 + 1.2 tol, each lies on its neighbour but the outer
+    /// not on the inner: the outer, longest, is kept; the middle lies on it and is dropped;
+    /// the inner does not and is kept. Tested against every piece, the outer was dropped
+    /// for lying on the middle one, dropped itself, and nothing kept was within `tol` of it.
+    #[test]
+    fn a_piece_is_dropped_only_for_lying_on_a_kept_one() {
+        let k = Kernel::default();
+        let tol = 1e-5;
+        let (inner, middle, outer) = (
+            arc(10.0, 1.0),
+            arc(10.0 + 0.6 * tol, 1.0),
+            arc(10.0 + 1.2 * tol, 1.0),
+        );
+        assert!(lies_on(&k, &middle, &inner, tol).unwrap());
+        assert!(lies_on(&k, &outer, &middle, tol).unwrap());
+        assert!(!lies_on(&k, &outer, &inner, tol).unwrap());
+        let pieces = vec![inner.clone(), middle, outer.clone()];
+        let kept = distinct_pieces(&k, pieces, tol).unwrap();
+        assert_eq!(
+            lengths(&k, &kept),
+            lengths(&k, &[inner, outer]),
+            "the inner and the outer arc, in their order"
+        );
+    }
+
+    /// Exact copies keep the first, in its place among the others: of two copies each of an
+    /// arc of radius 20 and angle 1/4 (length 5) and one of radius 10 and angle 1 (length
+    /// 10), in turn, the first of each is kept, in that order.
+    #[test]
+    fn of_exact_copies_the_first_is_kept() {
+        let k = Kernel::default();
+        let tol = 1e-5;
+        let (a, b) = (arc(10.0, 1.0), arc(20.0, 0.25));
+        let kept = distinct_pieces(&k, vec![b.clone(), a.clone(), b, a], tol).unwrap();
+        let got = lengths(&k, &kept);
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert!(
+            (got[0] - 5.0).abs() < 1e-9 && (got[1] - 10.0).abs() < 1e-9,
+            "{got:?}"
+        );
+    }
+
+    /// The range of values of a coincidence check from `t0` to `t1` on the checked curve.
+    fn range(t0: f64, t1: f64) -> Solution<NoObject> {
+        let mut s = Solution::new();
+        s.solution_type = SolutionType::RangeOfValues;
+        s.num_variables = 1;
+        s.start.parameters[0] = t0;
+        s.end.parameters[0] = t1;
+        s
+    }
+
+    /// How a coincidence check's result is read, on an arc of radius 10 and angle 1 (on
+    /// [0, 1]): a range over all of it covers it, also when the check then failed (the check
+    /// keeps what it found before an error); with no such range a failed check passes its
+    /// error on instead of reading as "not covered"; and an unported or cancelled check
+    /// passes its error on whatever it found.
+    #[test]
+    fn a_failed_coincidence_check_is_not_read_as_not_covered() {
+        let k = Kernel::default();
+        let tol = 1e-5;
+        let piece = arc(10.0, 1.0);
+        let failed = || Err(SolidError::invalid_input("test", "the check failed"));
+        let unported = || Err(SolidError::unported("test", "test"));
+        let whole = [range(0.0, 1.0)];
+        assert!(covers(&k, &piece, &whole, Ok(()), tol).unwrap());
+        assert!(!covers(&k, &piece, &[], Ok(()), tol).unwrap());
+        assert!(covers(&k, &piece, &whole, failed(), tol).unwrap());
+        assert!(covers(&k, &piece, &[], failed(), tol).is_err());
+        assert!(covers(&k, &piece, &[range(0.0, 0.5)], failed(), tol).is_err());
+        assert!(covers(&k, &piece, &whole, unported(), tol).is_err());
+        assert!(covers(&k, &piece, &[], unported(), tol).is_err());
     }
 }

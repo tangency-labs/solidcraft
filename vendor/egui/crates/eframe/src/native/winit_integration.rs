@@ -181,6 +181,21 @@ pub enum UserEvent {
     /// A request related to [`accesskit`](https://accesskit.dev/).
     #[cfg(feature = "accesskit")]
     AccessKitActionRequest(accesskit_winit::Event),
+
+    /// SolidCraft: run this viewport's logic pass now, without waiting for a compositor frame
+    /// callback and without the GPU paint (the compositor's next frame presents the result).
+    ///
+    /// The app may send this through [`EventLoopProxy`](winit::event_loop::EventLoopProxy)
+    /// from another thread (it receives the proxy from
+    /// [`NativeOptions::event_loop_ready`](crate::NativeOptions)). On Wayland a window the
+    /// compositor has stopped giving frames to (off-screen, on another workspace) only
+    /// receives its frame callbacks from a slow fallback timer, so a request served in the
+    /// app's logic pass would stall once per second. Running the pass directly answers it at
+    /// once; the compositor's frames then present the result whenever they come.
+    RunLogicNow {
+        /// What to run.
+        viewport_id: ViewportId,
+    },
 }
 
 #[cfg(feature = "accesskit")]

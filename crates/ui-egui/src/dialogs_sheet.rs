@@ -1,5 +1,5 @@
 //! Sheet metal dialogs: Flange (base from profiles, edge flanges from picked edges, contour from
-//! open sketch lines; the picks decide which), Hem, Unfold and Refold, Convert to Sheet Metal,
+//! open sketch lines; the picks decide which), Tab (profiles on a face of a sheet join it), Hem, Unfold and Refold, Convert to Sheet Metal,
 //! Sheet Metal Rules (the rule manager) and Create Flat Pattern (a flat view of the part with
 //! its bend lines, the bend table and DXF export).
 
@@ -27,6 +27,9 @@ const FOLD_POSITIONS: [&str; 4] = ["centerline", "start", "end", "mould"];
 const FOLD_POSITION_LABELS: [&str; 4] = ["Centerline", "Start of Bend", "End of Bend", "Outside Mould Line"];
 /// The flange types' messages, by the type's index (Base, Edge, Contour).
 const FLANGE_TYPES: [&str; 3] = ["sheet.flange_type_base", "sheet.flange_type_edge", "sheet.flange_type_contour"];
+const CONTOUR_ORIENTATIONS: [&str; 3] = ["ui.center", "sheet.flange.side_1", "sheet.flange.side_2"];
+const CONTOUR_ORIENTATION_VALUES: [&str; 3] = ["center", "side1", "side2"];
+const CONTOUR_DIRECTIONS: [&str; 2] = ["ui.one_side", "ui.symmetric"];
 const POSITIONS: [&str; 5] = ["inside", "outside", "middle", "material_outside", "tangent"];
 const POSITION_LABELS: [&str; 5] = ["Inside", "Outside", "Middle", "Material Outside", "Tangent to Edge"];
 /// Where an edge flange's height is measured from (`height_from`; the first is the default).
@@ -46,6 +49,9 @@ pub(crate) const RULE_FIELDS: [(&str, &str); 8] = [
 /// The corner relief shapes the manager offers (the rule's `corner_relief_shape`) and their labels.
 pub(crate) const RELIEF_SHAPES: [&str; 4] = ["notch", "round", "rectangular", "tear"];
 const RELIEF_SHAPE_LABELS: [&str; 4] = ["Notch", "Round", "Rectangular", "Tear"];
+/// The bend relief shapes the manager offers (the rule's `bend_relief_shape`) and their labels.
+pub(crate) const BEND_RELIEF_SHAPES: [&str; 3] = ["rectangular", "obround", "tear"];
+const BEND_RELIEF_SHAPE_LABELS: [&str; 3] = ["Rectangular", "Obround", "Tear"];
 /// How the manager's rule reads bend angles in the DXF bend notes (the rule's `angle_display`)
 /// and their labels.
 pub(crate) const ANGLE_DISPLAYS: [&str; 2] = ["bend", "included"];
@@ -55,6 +61,9 @@ const ANGLE_DISPLAY_LABELS: [&str; 2] = ["Bend", "Included"];
 /// Which way a further bend turns, against the bend before it.
 const BEND_WAY_LABELS: [&str; 2] = ["Same way", "Other way"];
 const FLANGE_RELIEF_LABELS: [&str; 5] = ["Rule", "Notch", "Round", "Rectangular", "Tear"];
+/// The bend relief shapes an edge flange offers: the rule's (index 0, nothing of its own), then
+/// the shapes of `BEND_RELIEF_SHAPES` in order.
+const FLANGE_BEND_RELIEF_LABELS: [&str; 4] = ["Rule", "Rectangular", "Obround", "Tear"];
 
 /// One stretch of a picked edge in the Flange dialog: `from`…`to` as fractions of the stretch the
 /// sheet still has of the edge, and the stretch's own angle, height and side (text, as typed).
@@ -108,6 +117,9 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::SheetPath { radius, .. }) {
             radius: String = String::new() => radius.as_deref().map(str::to_string).unwrap_or_default(),
         } => json!({});
+        Tab("sheet.tab", "ui.sheet_tab_title", [("Profile", PROFILES, true)],
+            FeatureKind::SheetTab { .. }) {
+        } => json!({});
         ; custom {
             /// Base, edge or contour flange (`ty` follows the picks: profiles, edges, sketch lines).
             Flange {
@@ -118,8 +130,13 @@ crate::dialog_descriptor::dialog_descriptors! {
                 position: usize,
                 /// Edge flanges: where the height is measured from (index into `HEIGHT_FROM`).
                 height_from: usize,
+                /// Contour flange: which side of the sheet thickness the contour follows.
+                orientation: usize,
+                /// Contour flange: split its width equally across the sketch plane.
+                symmetric: bool,
                 flip: bool,
                 distance: String,
+                /// Contour flange: the width on the other side of the sketch plane.
                 reverse: bool,
                 rule: usize,
                 /// Edge flanges: the edges with an angle and/or a height of their own (the picked point,
@@ -129,6 +146,9 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// 0 is the rule's) and its size (empty: the rule's).
                 relief: usize,
                 relief_size: String,
+                /// Edge flanges: the bend relief shape of their own (index into
+                /// `FLANGE_BEND_RELIEF_LABELS`; 0 is the rule's).
+                bend_relief: usize,
                 /// Edge flanges: further bends (angle, height, turns the other way), each a flange on
                 /// the far edge of the one before it (the command's `then`).
                 then: Vec<(String, String, bool)>,
@@ -169,6 +189,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 values: Vec<String>,
                 /// The corner relief shape (index into `RELIEF_SHAPES`).
                 relief: usize,
+                /// The bend relief shape (index into `BEND_RELIEF_SHAPES`).
+                bend_relief: usize,
                 /// How bend angles read (index into `ANGLE_DISPLAYS`).
                 angles: usize,
                 active: bool,
@@ -227,6 +249,8 @@ fn new_flange(app: &SolveApp, ty: usize) -> Sm {
         radius: String::new(),
         position: 0,
         height_from: 0,
+        orientation: 1,
+        symmetric: false,
         flip: false,
         distance: crate::dialogs::length_default(&app.session, "20"),
         reverse: false,
@@ -234,6 +258,7 @@ fn new_flange(app: &SolveApp, ty: usize) -> Sm {
         own: Vec::new(),
         relief: 0,
         relief_size: String::new(),
+        bend_relief: 0,
         then: Vec::new(),
         segments: Vec::new(),
     }
@@ -257,6 +282,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
                     name: String::new(),
                     values: Vec::new(),
                     relief: 0,
+                    bend_relief: 0,
                     angles: 0,
                     active: true,
                     loaded: None,
@@ -292,6 +318,16 @@ fn rule_combo(app: &SolveApp, ui: &mut egui::Ui, id: &str, rule: &mut usize) {
     let names = rule_names(app);
     let refs: Vec<&str> = names.iter().map(String::as_str).collect();
     choice_row(ui, "Rule", id, rule, &refs);
+}
+
+/// The Flange window's rule box with a note under it, wrapped in the control column, that says where the rule's values are
+/// changed: the window itself has no thickness or K-factor (#17421).
+fn flange_rule_combo(app: &SolveApp, ui: &mut egui::Ui, rule: &mut usize) {
+    rule_combo(app, ui, "sm_rule", rule);
+    let hint = solidcraft_ui_text::tr("ui.sheet_flange_rule_values");
+    crate::ui_kit::below_row_control(ui, "Rule", ui.available_width(), |ui| {
+        crate::ui_kit::text(ui, hint, crate::ui_kit::Text::Note("sheet_flange_rule_values"))
+    });
 }
 
 /// The flange type the picks make: edges an edge flange, sketch lines a contour, else base.
@@ -367,7 +403,26 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
     let t = Tokens::get();
     let mut enter = false;
     match k {
-        Sm::Flange { ty, height, angle, radius, position, height_from, flip, distance, reverse, rule, own, relief, relief_size, then, segments } => {
+        Sm::Flange {
+            ty,
+            height,
+            angle,
+            radius,
+            position,
+            height_from,
+            orientation,
+            symmetric,
+            flip,
+            distance,
+            reverse,
+            rule,
+            own,
+            relief,
+            relief_size,
+            bend_relief,
+            then,
+            segments,
+        } => {
             *ty = flange_type(inputs);
             form_row(ui, "Type", |ui| {
                 ui.label(FLANGE_TYPES.get(*ty).copied().map(solidcraft_ui_text::tr).unwrap_or(""));
@@ -459,6 +514,8 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                     }
                     crate::ui_kit::section(ui, "flange_advanced", "Advanced", false, |ui| {
                         enter |= hint_row(ui, "Bend Radius", radius, solidcraft_ui_text::tr_label("from the rule"));
+                        // The relief beside the bends' ends: the rule's unless set here.
+                        choice_row(ui, "Bend Relief Shape", "sm_flange_bend_relief", bend_relief, &FLANGE_BEND_RELIEF_LABELS);
                         // The relief at the corners these flanges make: the rule's unless set here.
                         choice_row(ui, "Corner Relief Shape", "sm_flange_relief", relief, &FLANGE_RELIEF_LABELS);
                         enter |= hint_row(ui, "Corner Relief", relief_size, solidcraft_ui_text::tr_label("from the rule"));
@@ -500,12 +557,19 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                 2 => {
                     enter |= expr_row(ui, "Distance", distance);
 
-                    rule_combo(app, ui, "sm_rule", rule);
+                    flange_rule_combo(app, ui, rule);
                 }
-                _ => rule_combo(app, ui, "sm_rule", rule),
+                _ => flange_rule_combo(app, ui, rule),
             }
             if *ty == 2 {
-                crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip), ("Other side", reverse)]);
+                crate::ui_kit::section(ui, "sheet_contour_options", "Options", true, |ui| {
+                    choice_row(ui, "ui.orientation", "sm_contour_orientation", orientation, &CONTOUR_ORIENTATIONS);
+                    let mut direction = usize::from(*symmetric);
+                    choice_row(ui, "ui.direction", "sm_contour_direction", &mut direction, &CONTOUR_DIRECTIONS);
+                    *symmetric = direction == 1;
+                    enter |= hint_row(ui, "Bend Radius", radius, solidcraft_ui_text::tr_label("from the rule"));
+                    crate::ui_kit::checkbox_grid(ui, &mut [("Flip", flip), ("Other side", reverse)], 2);
+                });
             } else {
                 crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip)]);
             }
@@ -561,6 +625,12 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
             crate::ui_kit::caption(ui, "Flanges", solidcraft_ui_text::tr_label("set by the sketch's lines"));
             enter |= hint_row(ui, "Bend Radius", radius, solidcraft_ui_text::tr_label("from the rule"));
         }
+        Sm::Tab {} => {
+            // No thickness to set: the tab takes the sheet's own.
+            form_row(ui, "Thickness", |ui| {
+                ui.label(solidcraft_ui_text::tr_label("from the rule"));
+            });
+        }
         Sm::Unfold { .. } => {}
         Sm::Convert { rule, side, thin } => {
             rule_combo(app, ui, "sm_conv_rule", rule);
@@ -600,7 +670,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
             rule_combo(app, ui, "sm_rec_rule", rule);
             enter |= hint_row(ui, "New Rule", new_rule, solidcraft_ui_text::tr_label("none: the rule above"));
         }
-        Sm::Rules { pick, name, values, relief, angles, active, loaded, material } => {
+        Sm::Rules { pick, name, values, relief, bend_relief, angles, active, loaded, material } => {
             let rules = rule_list(app);
             crate::rule_editor::rule_editor! {
                 ui, "sm_rules", rules, pick, name, active, loaded;
@@ -619,6 +689,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                         crate::length_input::stored(&app.session.doc, &base.gap),
                     ];
                     *relief = RELIEF_SHAPES.iter().position(|s| s.eq_ignore_ascii_case(base.corner_relief_shape.trim())).unwrap_or(0);
+                    *bend_relief = BEND_RELIEF_SHAPES.iter().position(|s| s.eq_ignore_ascii_case(base.bend_relief_shape.trim())).unwrap_or(0);
                     *angles = ANGLE_DISPLAYS.iter().position(|d| d.eq_ignore_ascii_case(base.angle_display.trim())).unwrap_or(0);
                     *active = app.session.doc.sheet_rule(None).name == base.name || *pick >= rules.len();
                     material.clone_from(&base.material);
@@ -626,6 +697,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                 fields: {
                     crate::ui_kit::text_row(ui, "Material", material, "Material");
                     for ((key, label), v) in RULE_FIELDS.iter().zip(values.iter_mut()) {
+                        if *key == "relief_width" {
+                            // The bend relief's shape goes with its size, the two rows below.
+                            choice_row(ui, "Bend Relief Shape", "sm_bend_relief_shape", bend_relief, &BEND_RELIEF_SHAPE_LABELS);
+                        }
                         if *key == "corner_relief" {
                             // The shape goes with its size, the row below.
                             choice_row(ui, "Corner Relief Shape", "sm_relief_shape", relief, &RELIEF_SHAPE_LABELS);
@@ -1011,7 +1086,24 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
     let s = &app.session;
     let (cmd, mut p): (&str, Value) = match k {
         Sm::Flange {
-            height, angle, radius, position, height_from, flip, distance, reverse, rule, own, relief, relief_size, then, segments, ..
+            height,
+            angle,
+            radius,
+            position,
+            height_from,
+            orientation,
+            symmetric,
+            flip,
+            distance,
+            reverse,
+            rule,
+            own,
+            relief,
+            relief_size,
+            bend_relief,
+            then,
+            segments,
+            ..
         } => {
             let mut p = match flange_type(inputs) {
                 1 => {
@@ -1025,6 +1117,9 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
                         p["corner_relief_shape"] = json!(shape);
                     }
                     put(&mut p, &[("corner_relief", relief_size)]);
+                    if let Some(shape) = bend_relief.checked_sub(1).and_then(|i| BEND_RELIEF_SHAPES.get(i)) {
+                        p["bend_relief_shape"] = json!(shape);
+                    }
                     // A split edge takes no `then` in v1: a chain needs one far edge to stand on,
                     // and the refusal names the edge whose segments took it away.
                     if !then.is_empty() {
@@ -1060,7 +1155,17 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
                         .named_sketch()
                         .or_else(|| st.sketches.iter().rev().find(|ss| ids.iter().all(|id| ss.sketch.curve_index(id).is_some())).map(|ss| ss.feature))
                         .ok_or("pick lines of one sketch")?;
-                    json!({"type": "contour", "sketch": sketch, "curves": ids, "distance": distance, "reverse": reverse})
+                    let mut p = json!({
+                        "type": "contour",
+                        "sketch": sketch,
+                        "curves": ids,
+                        "distance": distance,
+                        "orientation": CONTOUR_ORIENTATION_VALUES.get(*orientation).copied().unwrap_or("side1"),
+                        "symmetric": symmetric,
+                        "reverse": reverse,
+                    });
+                    put(&mut p, &[("radius", radius)]);
+                    p
                 }
                 _ => {
                     let ps: Vec<(u64, usize)> = items(inputs, 0).profiles();
@@ -1123,6 +1228,18 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             let mut p = json!({"edge": edge, "sketch": sketch, "curves": curves});
             put(&mut p, &[("radius", radius)]);
             ("sheet.path_flange", p)
+        }
+        Sm::Tab {} => {
+            let ps: Vec<(u64, usize)> = items(inputs, 0).profiles();
+            match ps.first().map(|x| x.0) {
+                Some(sketch) => {
+                    let idx: Vec<usize> = ps.iter().filter(|x| x.0 == sketch).map(|x| x.1).collect();
+                    ("sheet.tab", json!({"sketch": sketch, "profiles": idx}))
+                }
+                // An edited tab of all its sketch's profiles keeps them (in `extra`).
+                None if extra.contains_key("sketch") => ("sheet.tab", json!({})),
+                None => return Err("select the tab's profile: a closed sketch on a flat face of the sheet".into()),
+            }
         }
         Sm::Perforate { margin, .. } => {
             let mut p = json!({});
@@ -1211,7 +1328,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             }
             ("sheet.convert", p)
         }
-        Sm::Rules { pick, name, values, relief, angles, active, material, .. } => {
+        Sm::Rules { pick, name, values, relief, bend_relief, angles, active, material, .. } => {
             let rules = rule_list(app);
             let fields = RULE_FIELDS.iter().map(|(key, _)| *key).zip(values);
             let mut p = crate::rule_editor::params(rules.get(*pick).map(|r| r.name.as_str()), name, *active, fields)?;
@@ -1222,6 +1339,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
                 p["material"] = json!(material.trim());
             }
             p["corner_relief_shape"] = json!(RELIEF_SHAPES.get(*relief).copied().unwrap_or("notch"));
+            p["bend_relief_shape"] = json!(BEND_RELIEF_SHAPES.get(*bend_relief).copied().unwrap_or("rectangular"));
             p["angle_display"] = json!(ANGLE_DISPLAYS.get(*angles).copied().unwrap_or("bend"));
             ("sheet.manage_rules", p)
         }
@@ -1252,17 +1370,34 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             (f, ps.into_iter().map(|index| Sel::Profile { sketch: sketch.0, index }).collect())
         }
-        FeatureKind::SheetContour { sketch, curves, distance, rule, flip, reverse, .. } => {
+        FeatureKind::SheetContour { sketch, curves, distance, radius, rule, orientation, symmetric, flip, reverse, .. } => {
             let mut f = new_flange(app, 2);
-            if let Sm::Flange { flip: fl, rule: r, distance: d, reverse: rv, .. } = &mut f {
+            if let Sm::Flange { flip: fl, rule: r, distance: d, reverse: rv, radius: rad, orientation: o, symmetric: sym, .. } = &mut f {
                 *fl = *flip;
+                *rv = *reverse;
                 *r = rule_index(rule);
                 *d = distance.to_string();
-                *rv = *reverse;
+                *rad = radius.as_ref().map(ToString::to_string).unwrap_or_default();
+                *o =
+                    orientation.as_deref().and_then(|value| CONTOUR_ORIENTATION_VALUES.iter().position(|candidate| *candidate == value)).unwrap_or(1);
+                *sym = *symmetric;
             }
             (f, curves.iter().map(|id| crate::selection::curve_pick(id, sketch.0, app.session.active_sketch)).collect())
         }
-        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, corner_relief_shape, corner_relief, height_from, .. } => {
+        FeatureKind::SheetFlange {
+            edges,
+            height,
+            angle,
+            radius,
+            position,
+            flip,
+            body,
+            corner_relief_shape,
+            corner_relief,
+            height_from,
+            bend_relief_shape,
+            ..
+        } => {
             if let Some(b) = body {
                 extra.insert("body".into(), json!(b));
             }
@@ -1310,6 +1445,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                     .as_deref()
                     .and_then(|name| HEIGHT_FROM.iter().position(|h| h.eq_ignore_ascii_case(name.trim())))
                     .unwrap_or(0),
+                orientation: 1,
+                symmetric: false,
                 flip: *flip,
                 distance: crate::dialogs::length_default(&app.session, "20"),
                 reverse: false,
@@ -1320,6 +1457,10 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                     .and_then(|name| RELIEF_SHAPES.iter().position(|s| s.eq_ignore_ascii_case(name.trim())))
                     .map_or(0, |i| i + 1),
                 relief_size: corner_relief.as_deref().map(str::to_string).unwrap_or_default(),
+                bend_relief: bend_relief_shape
+                    .as_deref()
+                    .and_then(|name| BEND_RELIEF_SHAPES.iter().position(|s| s.eq_ignore_ascii_case(name.trim())))
+                    .map_or(0, |i| i + 1),
                 then: Vec::new(),
                 segments,
             };
@@ -1375,8 +1516,24 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             return Some((Kind::Sheet(k), ins, extra));
         }
+        FeatureKind::SheetTab { sketch, profiles, body } => {
+            if let Some(b) = body {
+                extra.insert("body".into(), json!(b));
+            }
+            let ps = st.sketch(sketch.0).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
+            let (_, mut ins) = start(app, "sheet.tab")?;
+            if let Some(i) = ins.first_mut() {
+                i.items = ps.into_iter().map(|index| Sel::Profile { sketch: sketch.0, index }).collect();
+            }
+            // Profiles stay a profile selection (`All` keeps them all).
+            if matches!(profiles, ProfileSel::All) && ins.first().is_some_and(|i| i.items.is_empty()) {
+                extra.insert("sketch".into(), json!(sketch.0));
+                extra.insert("profiles".into(), json!("all"));
+            }
+            return Some((Kind::Sheet(Sm::simple_restore(kind)?), ins, extra));
+        }
         FeatureKind::SheetPerforate { body, .. } => (Sm::simple_restore(kind)?, body.iter().map(|n| Sel::Body { name: n.to_string() }).collect()),
-        FeatureKind::SheetUnfold { body, refold } => {
+        FeatureKind::SheetUnfold { body, refold, .. } => {
             (Sm::Unfold { refold: *refold }, body.iter().map(|n| Sel::Body { name: n.to_string() }).collect())
         }
         FeatureKind::SheetConvert { body, face, faces, rule, bends, engrave, direction } => {
@@ -1590,6 +1747,13 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
         let pts: Vec<Pos2> = h.iter().map(|p| to(*p)).collect();
         if pts.len() >= 2 {
             painter.add(egui::Shape::closed_line(pts, Stroke::new(1.4, t.text)));
+        }
+    }
+    // A cut of no width (a tear bend relief, or where a split edge's stretches part) is cut
+    // along beside the outline: drawn as the outline is.
+    for slit in v["slits"].as_array().into_iter().flatten() {
+        if let (Some(a), Some(b)) = (read(&slit[0]), read(&slit[1])) {
+            painter.line_segment([to(a), to(b)], Stroke::new(1.8, t.text));
         }
     }
     if let Some(body) = v["body"].as_str() {
