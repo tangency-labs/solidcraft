@@ -123,7 +123,7 @@ pub fn circular_edges(body: &ModelBody, path: &[u64], basis: &Plane) -> Result<V
         || !basis.y.is_finite()
         || (basis.x.len2() - 1.0).abs() > 1e-9
         || (basis.y.len2() - 1.0).abs() > 1e-9
-        || solidcraft_kernel::services::affine::distance_along([0.0; 3], basis.y.into(), basis.x.into()).abs() > 1e-9
+        || solidcraft_kernel::affine::distance_along([0.0; 3], basis.y.into(), basis.x.into()).abs() > 1e-9
     {
         return Err(DocError::Invalid("the view basis is not finite and orthonormal".into()));
     }
