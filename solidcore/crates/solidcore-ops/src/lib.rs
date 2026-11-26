@@ -80,6 +80,7 @@ pub mod hole_stacks;
 pub mod joint_turn;
 pub mod label;
 pub mod measure;
+pub mod mesh;
 pub mod mid_joint;
 pub mod mid_sheet;
 pub mod network;

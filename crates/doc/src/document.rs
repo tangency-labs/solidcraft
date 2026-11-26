@@ -449,6 +449,17 @@ pub struct Extent {
     /// `start_offset`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<FacePick>,
+    /// Two Sides: the second side runs through all bodies instead of `distance2`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub through_all2: bool,
+    /// Two Sides: the second side ends at the face (or vertex/point) at this point instead of
+    /// `distance2` (To Object for the second side).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to2: Option<FacePick>,
+    /// Offset past the second side's To Object face (expression; negative stops short).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "To offset 2")]
+    pub to_offset2: Option<Expr>,
     /// From Object on a face at a slant to the extrusion starts on a plane parallel to the
     /// sketch, at the level where the face meets the middle of the profiles, instead of on the
     /// face. Designs saved before From Object followed a slanted face open with it set, so they
@@ -1285,6 +1296,11 @@ pub enum FeatureKind {
         /// Hole keeps it.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         old_surface_start: bool,
+        /// Press-in hardware this hole is the mounting hole of (#17752): a self-clinching nut,
+        /// stud or standoff in a sheet. The hole is a plain through hole of the hardware's
+        /// size; it has no `thread` of its own, the hardware has the thread.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hardware: Option<Hardware>,
     },
     /// A thread on a cylindrical face. Cosmetic by default (no geometry change; drawn and
     /// exported as an annotation); `modeled` cuts the real helical ISO profile into the face.
@@ -2989,8 +3005,7 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         records: Option<std::sync::Arc<solidcraft_kernel::ImportRecords>>,
     },
-    /// Rebuild an upstream mesh as a solid: analytic planar/cylindrical faces for a
-    /// constant-section part, planar facets for any other closed mesh.
+    /// Rebuild a closed mesh as a solid with analytic faces where certified and planar facets otherwise.
     MeshConvert {
         body: BodyName,
         #[walk(length = "Tolerance")]
@@ -3710,6 +3725,20 @@ pub enum HoleKind {
         #[walk(angle = "Tip angle")]
         tip_angle: Option<Expr>,
     },
+}
+
+/// The press-in hardware a sheet metal hole is for (#17752), kept so that a drawing's hole
+/// callout or table can name it: its kind, its thread as written (`M3`), its length when it has
+/// one (a stud's or a standoff's) and the id of the part (`nut.m3`, see
+/// [`crate::hardware_catalog::HardwareSize::part`]) that a component can stand for it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct Hardware {
+    pub kind: crate::hardware_catalog::HardwareKind,
+    pub thread: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "Hardware length")]
+    pub length: Option<Expr>,
+    pub part: String,
 }
 
 /// A Single hole's reference edge (#37): a point on a straight edge of the hole's face, and the

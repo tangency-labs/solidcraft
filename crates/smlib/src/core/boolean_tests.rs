@@ -370,6 +370,54 @@ fn a_ring_and_a_lip_with_walls_nearly_together() {
     }
 }
 
+/// A 10 mm box with one edge on the face x = 0 whose line misses its start vertex by `gap`.
+/// That edge and its vertices keep tolerance `tol`. The tools used with it sit on the opposite face.
+fn box_with_an_edge_off_its_vertex(gap: f64, tol: f64) -> crate::Brep {
+    use solidcore_record::brep::Curve;
+    let src = crate::Brep::make_box([0.0; 3], [10.0; 3]).unwrap();
+    let mut rec = src.to_native().unwrap();
+    let edge = rec.edges.iter_mut().find(|e| matches!(&e.curve, Curve::Line { start, end } if start[0].abs() < 1e-9 && end[0].abs() < 1e-9)).unwrap();
+    if let Curve::Line { start, end } = &mut edge.curve {
+        // Off the vertex, along the face: the coordinate the edge does not run in.
+        if (start[1] - end[1]).abs() < 1e-9 {
+            start[1] += gap;
+        } else {
+            start[2] += gap;
+        }
+    }
+    edge.tolerance = tol;
+    let vs = edge.vertices;
+    rec.vertices[vs[0] as usize].tolerance = tol;
+    rec.vertices[vs[1] as usize].tolerance = tol;
+    crate::Brep::from_record(&rec, true).unwrap()
+}
+
+/// Issue 790: a multi-body union must pass the check a chain of single unions passes.
+///
+/// The target's own check fails (an edge 4e-4 mm off its vertex, tolerance 2.6e-4 mm). One
+/// union with a 3 x 2 x 2 box from (9, 2, 2) overlaps that box in a 1 x 2 x 2 block and heals
+/// the edge: volume 1000 + 12 - 4 = 1008. A second box from (9, 6, 2) does not meet the first,
+/// so the chain measures 1008 + 8 = 1016 and passes the check. `union_all` of the three is the
+/// same pairing and must do both.
+#[test]
+fn union_all_of_a_body_with_an_edge_off_its_vertex_passes_the_check_a_chain_of_unions_passes() {
+    let target = box_with_an_edge_off_its_vertex(4e-4, 2.6e-4);
+    assert!(!target.check(crate::check::CheckLevel::All).unwrap().is_valid(), "the target is the body whose own check fails");
+    let a = crate::Brep::make_box([9.0, 2.0, 2.0], [3.0, 2.0, 2.0]).unwrap();
+    let b = crate::Brep::make_box([9.0, 6.0, 2.0], [3.0, 2.0, 2.0]).unwrap();
+    let once = target.boolean(&a, BooleanOp::Union).unwrap().unwrap();
+    assert!(once.check(crate::check::CheckLevel::All).unwrap().is_valid(), "one union");
+    assert!((once.volume(1e-8).unwrap() - 1008.0).abs() < 1e-6, "{}", once.volume(1e-8).unwrap());
+    let chain = target.boolean(&a, BooleanOp::Union).unwrap().unwrap().boolean(&b, BooleanOp::Union).unwrap().unwrap();
+    let chain_report = chain.check(crate::check::CheckLevel::All).unwrap();
+    assert!(chain_report.is_valid(), "the chain: {chain_report}");
+    assert!((chain.volume(1e-8).unwrap() - 1016.0).abs() < 1e-6, "{}", chain.volume(1e-8).unwrap());
+    let all = crate::Brep::union_all(&[&target, &a, &b]).unwrap();
+    let report = all.check(crate::check::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    assert!((all.volume(1e-8).unwrap() - 1016.0).abs() < 1e-6, "{}", all.volume(1e-8).unwrap());
+}
+
 /// Face and edge tags (`Brep::tagged`) through booleans: each operand tagged, the result's history
 /// ([`Raw`]) read back.
 mod history {

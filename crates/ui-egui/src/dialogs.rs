@@ -270,6 +270,10 @@ crate::dialog_descriptor::dialog_descriptors! {
                 symmetric_offset: bool,
                 /// Extent type All (through everything) instead of a distance.
                 all: bool,
+                /// Two Sides: the second side's Extent Type is All.
+                all2: bool,
+                /// Two Sides: the distance beyond the second side's To Object face.
+                to_offset2: String,
                 /// Thin Extrude: a wall along the picked curves (or profiles' outlines).
                 thin: bool,
                 /// The wall thickness (inside, with Two Sides).
@@ -592,7 +596,7 @@ crate::dialog_descriptor::dialog_descriptors! {
 /// The Single hole placement's input: places on planar faces. A pick on or near a sketch point
 /// that lies on the face (a circle's centre) is taken at that point, as Multiple picks it.
 /// Holes go on any face (flat or curved; the engine drills against the face's normal there).
-const HOLE_FACES: Accept = PLANAR_FACES | FACES | selection::POINTS;
+pub(crate) const HOLE_FACES: Accept = PLANAR_FACES | FACES | selection::POINTS;
 
 /// The Single hole placement's inputs: the face, then up to two reference edges (#37).
 fn single_hole_inputs() -> Vec<SelInput> {
@@ -1121,6 +1125,8 @@ impl Dialog {
                     offset_start: false,
                     symmetric_offset: false,
                     all: false,
+                    all2: false,
+                    to_offset2: String::new(),
                     thin: false,
                     wall: length_default(s, "2"),
                     wall_side: 0,
@@ -2711,14 +2717,20 @@ fn single_profile(s: &Session, sketch: u64) -> Vec<Sel> {
 /// opened at, else a point a shown sketch shows exactly there (where a pick snapped to it).
 fn single_hole_point(app: &SolveApp, d: &Dialog, x: &Sel) -> Option<(u64, String)> {
     let Sel::Face { point, .. } = x else { return None };
-    if let Some(k) = d.extra.get("single_point").filter(|k| k["point"] == pt3(*point)) {
+    single_point_at(app, &d.extra, *point)
+}
+
+/// [`single_hole_point`] for the place `point`, with the dialog's `extra` that may name the point
+/// it opened at (the Hardware dialog places the same way).
+pub(crate) fn single_point_at(app: &SolveApp, extra: &serde_json::Map<String, Value>, point: Vec3) -> Option<(u64, String)> {
+    if let Some(k) = extra.get("single_point").filter(|k| k["point"] == pt3(point)) {
         return Some((k["sketch"].as_u64()?, k["id"].as_str()?.to_string()));
     }
     let st = crate::open_meshing::session_world(&app.session);
     crate::viewport::visible_sketches(app).into_iter().find_map(|sid| {
         let ss = st.sketch(sid)?;
         let shown = SnapPoints::of(&ss.sketch);
-        let p = ss.sketch.points.iter().find(|p| shown.takes(p) && ss.plane.to_world(p.pos).dist(*point) < 1e-9)?;
+        let p = ss.sketch.points.iter().find(|p| shown.takes(p) && ss.plane.to_world(p.pos).dist(point) < 1e-9)?;
         Some((sid, p.id.clone()))
     })
 }
@@ -4233,6 +4245,10 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
             crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Hint("held_off_its_line")).rect
         } else if context_refusal(app, d, &error) {
             crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Hint("context")).rect
+        } else if matches!(d.kind, Kind::Sheet(crate::dialogs_sheet::Sm::Hardware { .. })) && crate::dialogs_sheet::hardware_refusal(&error) {
+            // A sheet too thin for the hardware, a size the table lacks: what to change, not a failure
+            // of the design, so there is nothing to report.
+            crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Report("hardware_refusal", true)).rect
         } else {
             // A fillet's refusal reads in plain words, or not at all where its Setback field already
             // says what is wrong; the kernel's own text stays in the hover text, Copy Details and the
@@ -5479,6 +5495,7 @@ fn rememberable(kind: &Kind) -> bool {
                     | crate::dialogs_sheet::Sm::Fold { .. }
                     | crate::dialogs_sheet::Sm::Path { .. }
                     | crate::dialogs_sheet::Sm::Flange { .. }
+                    | crate::dialogs_sheet::Sm::Hardware { .. }
                     | crate::dialogs_sheet::Sm::Unfold { .. },
             )
             | Kind::Surface(_)
@@ -5764,8 +5781,10 @@ pub(crate) fn roll_marker(app: &mut SolveApp, marker: Option<usize>) -> Result<(
 /// The pick input an extent of To Object adds (a face, vertex or point to go to).
 const TO_OBJECT: &str = "To Object";
 const FROM_OBJECT: &str = "From Object";
+/// The pick input the second side of Two Sides adds when its extent is To Object.
+pub(crate) const TO_OBJECT2: &str = "ui.extrude_to_object_2";
 
-fn object_on(inputs: &[SelInput], label: &str) -> bool {
+pub(crate) fn object_on(inputs: &[SelInput], label: &str) -> bool {
     inputs.iter().any(|i| i.label == label)
 }
 
@@ -6688,6 +6707,11 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
         return crate::hole_folder::commands(app, d, cmds);
     }
     if let Some((id, _)) = d.editing {
+        // An edit rebuilds one feature: a selection that makes several commands (places on a face
+        // added to a hole at sketch points) is refused, not applied by its first command alone.
+        if cmds.len() > 1 && matches!(d.kind, Kind::Sheet(crate::dialogs_sheet::Sm::Hardware { .. })) {
+            return Err("an edit changes one feature: pick the points of one sketch, or one place on a face".into());
+        }
         let (cmd, mut params) = cmds.into_iter().next().ok_or("nothing to apply")?;
         if let Some(feature) = app.session.doc.feature(id) {
             let original_all = match &feature.kind {
@@ -6802,6 +6826,12 @@ fn exact_regions(d: &Dialog, cmds: &mut [(String, Value)]) {
 /// component Move/Copy moves by its placement drawn as its bodies moved.
 pub fn preview_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
     let mut cmds = apply_commands(app, d)?;
+    // An Insert SVG/DXF window previews the drawing once, as drawn (its middle at the sketch's
+    // origin), and moves that preview for each position, size and angle: importing again for
+    // every value read, added and evaluated the whole drawing each time (docs/perf.md).
+    if let Kind::InsertDrawing(p) = &d.kind {
+        crate::dialogs_insert_drawing::preview_placement(p, &mut cmds);
+    }
     if let Kind::Assembly(k) = &d.kind {
         crate::dialogs_assembly::animate(app, k, &mut cmds);
     }
@@ -6900,6 +6930,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             offset_start,
             symmetric_offset,
             all,
+            all2,
+            to_offset2,
             thin,
             wall,
             wall_side,
@@ -6910,7 +6942,18 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let mut common = json!({"distance": distance, "direction": DIRS.get(*direction).copied().unwrap_or("positive"), "operation": OPS.get(*operation).copied().unwrap_or("new")});
             let tapered = s.doc.eval(taper, ValueKind::Angle).map(|v| v.abs() > 1e-12).unwrap_or(!taper.trim().is_empty());
             if two_sided(*direction) {
-                common["distance2"] = json!(distance2);
+                // The distance only counts for a Distance second side: text left in the hidden field
+                // of an All or To Object 2 side is not read (the command saves 0 for it).
+                if !*all2 && !object_on(&d.inputs, TO_OBJECT2) {
+                    common["distance2"] = json!(distance2);
+                }
+                if *all2 {
+                    common["through_all2"] = json!(true);
+                }
+                if object_on(&d.inputs, TO_OBJECT2) {
+                    common["to2"] = object_point(&d.inputs, TO_OBJECT2).ok_or("select the object the second side extrudes to")?;
+                    put(&mut common, &[("to_offset2", to_offset2)]);
+                }
             } else if *direction < 2 && (*taper_present || tapered) {
                 common["taper"] = json!(taper);
             }
@@ -9173,7 +9216,7 @@ pub(crate) fn axis_now(s: &Session, axis: &Value) -> Option<Vec3> {
 }
 
 /// A point of expressions: numbers as numbers, expressions as strings.
-fn pt_expr(p: &solidcraft_engine::doc::PointExpr) -> Value {
+pub(crate) fn pt_expr(p: &solidcraft_engine::doc::PointExpr) -> Value {
     Value::Array(p.iter().map(|e| e.parse::<f64>().ok().filter(|x| x.is_finite()).map_or_else(|| json!(e), |x| json!(x))).collect())
 }
 
@@ -9208,6 +9251,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 offset_start: extent.start_offset.is_some(),
                 symmetric_offset: extent.symmetric_offset,
                 all: extent.through_all,
+                all2: extent.through_all2,
+                to_offset2: extent.to_offset2.as_deref().map(str::to_string).unwrap_or_default(),
                 thin: thin.is_some(),
                 wall: thin.as_ref().map_or_else(|| length_default(s, "2"), |t| t.thickness.to_string()),
                 wall_side: thin.as_ref().map_or(0, |t| WALL_SIDES.iter().position(|w| ThinSide::parse(w) == Some(t.side)).unwrap_or(0)),
@@ -9217,7 +9262,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             // Extent references belong to the extrude's authoring frame, including free
             // points. They are not body-local picks (a reference may be on another body).
             let frame = feature_frame(s, f.component);
-            for (label, point) in [(TO_OBJECT, extent.to), (FROM_OBJECT, extent.from)] {
+            for (label, point) in [(TO_OBJECT, extent.to), (FROM_OBJECT, extent.from), (TO_OBJECT2, extent.to2)] {
                 if let Some(point) = point {
                     set_object(&mut d.inputs, &mut d.active, label, true);
                     if let Some(input) = d.inputs.iter_mut().find(|i| i.label == label) {
@@ -9459,6 +9504,13 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d.extra.insert("pull".into(), pt3(pull.0));
             d
         }
+        // The mounting hole of press-in hardware is edited in the Hardware window, which keeps the hardware.
+        hole @ FeatureKind::Hole { hardware: Some(_), .. } => {
+            let (kind, inputs, extra) = crate::dialogs_sheet::for_feature(app, hole)?;
+            let mut d = Dialog::new(kind, inputs);
+            d.extra = extra;
+            d
+        }
         FeatureKind::Hole {
             position,
             at,
@@ -9477,6 +9529,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             // Not in the Hole window yet: an edit keeps it (`timeline.redefine`).
             thread_class: _,
             old_surface_start: _,
+            // A hole with hardware is edited in the Hardware window (above).
+            hardware: _,
         } => {
             let mut d = start("solid.hole")?;
             let mut k = hole_defaults(s);

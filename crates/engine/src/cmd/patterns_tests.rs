@@ -1045,6 +1045,110 @@ fn component_pattern_copies_inherit_seed_dof_and_anchor_downstream_joints() {
     let dofs = dof_map(&mut s);
     assert_eq!(dofs.get(&free_seed), Some(&6));
     assert_eq!(dofs.get(&free_copy), Some(&6));
+
+    // 4. Loop closure moving a sub-assembly refreshes its pattern copies, downstream joints,
+    //    and downstream DOFs.
+    let mut s = Session::default();
+    let base = run(&mut s, "component.create", json!({"name": "Base", "activate": true}))["occurrence"].as_u64().expect("base");
+    run(&mut s, "solid.box", json!({"length": 50, "width": 20, "height": 10}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let sub_res = run(&mut s, "component.create", json!({"name": "Sub", "activate": true, "grounded": false}));
+    let sub_comp = sub_res["component"].as_u64().expect("sub comp");
+    let sub_occ = sub_res["occurrence"].as_u64().expect("sub occ");
+    run(&mut s, "solid.box", json!({"length": 30, "width": 10, "height": 10}));
+    let pin_occ = run(&mut s, "component.create", json!({"name": "Pin", "parent": sub_comp, "activate": true, "grounded": false}))["occurrence"]
+        .as_u64()
+        .expect("pin occ");
+    run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 10}));
+    run(&mut s, "component.activate", json!({"component": sub_comp}));
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"a": sub_occ, "b": pin_occ, "type": "rigid", "at": {"occurrence": sub_occ, "point": [0, 0, 10], "z": [0, 0, 1]}}),
+    );
+    let pattern = run(&mut s, "solid.pattern.rectangular", json!({"components": ["Pin"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 15}));
+    let copy_occ = pattern["occurrences"][0].as_u64().expect("copy occ");
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let cap_occ =
+        run(&mut s, "component.create", json!({"name": "Cap", "activate": true, "grounded": false}))["occurrence"].as_u64().expect("cap occ");
+    run(&mut s, "solid.box", json!({"length": 6, "width": 6, "height": 4}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"a": copy_occ, "b": cap_occ, "type": "rigid", "at": {"occurrence": copy_occ, "point": [15, 0, 10], "z": [0, 0, 1]}}),
+    );
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"a": base, "b": sub_occ, "type": "slider", "at": {"occurrence": base, "point": [0, 0, 10], "z": [0, 0, 1]}}),
+    );
+    // Closing rigid joint with offset 10 forces the slider from 0 to 10 mm and reduces DOF to 0.
+    let closing = run(
+        &mut s,
+        "joint.as_built",
+        json!({"a": base, "b": sub_occ, "type": "rigid", "at": {"occurrence": base, "point": [0, 0, 10], "z": [0, 0, 1]}}),
+    )["joint"]
+        .as_u64()
+        .expect("closing joint");
+    run(&mut s, "joint.edit", json!({"joint": closing, "offset": 10}));
+    let listed = run(&mut s, "joint.list", json!({}));
+    assert_eq!(listed["conflicts"], json!([]));
+    assert_eq!(listed["errors"], json!([]));
+    let dofs = dof_map(&mut s);
+    assert_eq!(dofs.get(&sub_occ), Some(&0));
+    assert_eq!(dofs.get(&pin_occ), Some(&0));
+    assert_eq!(dofs.get(&copy_occ), Some(&0));
+    assert_eq!(dofs.get(&cap_occ), Some(&0));
+    let sub_z = s.occurrence_placement(&[sub_occ]).expect("sub placement").world[3][2];
+    let copy_z = s.occurrence_placement(&[sub_occ, copy_occ]).expect("copy placement").world[3][2];
+    let cap_z = s.occurrence_placement(&[cap_occ]).expect("cap placement").world[3][2];
+    assert!((sub_z - 10.0).abs() < 1e-6, "loop closure should move sub: {sub_z}");
+    assert!((copy_z - 10.0).abs() < 1e-6, "copy should follow loop-closed parent: {copy_z}");
+    assert!((cap_z - 10.0).abs() < 1e-6, "downstream cap should follow refreshed copy: {cap_z}");
+
+    // 5. A pattern copy contained inside a joint-dependent descendant (`cap_occ`) also refreshes
+    //    after loop closure, and a second descendant with its own local parallel-slider loop keeps
+    //    its independently measured DOF (1) instead of having the seed's -1 delta subtracted again.
+    let cap_comp = s.doc.occurrences.iter().find(|o| o.id == cap_occ).expect("cap occ").component;
+    let nested_pin =
+        run(&mut s, "component.create", json!({"name": "NestedPin", "parent": cap_comp, "activate": true, "grounded": false}))["occurrence"]
+            .as_u64()
+            .expect("nested pin");
+    run(&mut s, "solid.cylinder", json!({"radius": 1, "height": 5}));
+    run(&mut s, "component.activate", json!({"component": cap_comp}));
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"a": cap_occ, "b": nested_pin, "type": "rigid", "at": {"occurrence": cap_occ, "point": [0, 0, 10], "z": [0, 0, 1]}}),
+    );
+    let nested_pattern =
+        run(&mut s, "solid.pattern.rectangular", json!({"components": ["NestedPin"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 8}));
+    let nested_copy = nested_pattern["occurrences"][0].as_u64().expect("nested copy");
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let slider_cap = run(&mut s, "component.create", json!({"name": "SliderCap", "activate": true, "grounded": false}))["occurrence"]
+        .as_u64()
+        .expect("slider cap");
+    run(&mut s, "solid.box", json!({"length": 6, "width": 6, "height": 4}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"a": copy_occ, "b": slider_cap, "type": "slider", "at": {"occurrence": copy_occ, "point": [15, 0, 10], "z": [0, 0, 1]}}),
+    );
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"a": copy_occ, "b": slider_cap, "type": "slider", "at": {"occurrence": copy_occ, "point": [15, 3, 10], "z": [0, 0, 1]}}),
+    );
+    // Re-trigger loop closure with a new offset (15 mm) and verify nested_copy & slider_cap.
+    run(&mut s, "joint.edit", json!({"joint": closing, "offset": 15}));
+    let dofs = dof_map(&mut s);
+    assert_eq!(dofs.get(&nested_pin), Some(&0));
+    assert_eq!(dofs.get(&nested_copy), Some(&0));
+    assert_eq!(dofs.get(&slider_cap), Some(&1), "independently measured local loop keeps 1 DOF");
+    let nested_z = s.occurrence_placement(&[cap_occ, nested_copy]).expect("nested copy placement").world[3][2];
+    assert!((nested_z - 15.0).abs() < 1e-6, "nested copy inside downstream cap should follow loop closure: {nested_z}");
 }
 
 /// A component pattern's copies placed again on a rebuild read the spacing as the first copies

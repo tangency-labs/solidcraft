@@ -301,10 +301,12 @@ fn vertices(b: &Brep) -> KernelResult<Vec<[f64; 3]>> {
 /// The union of `bodies` under [`Contract::Closed`], pairwise level by level (an odd one
 /// carried to the next level as it is), with solids touching along edges or at vertices
 /// allowed. Each union ([`union_step`]) is `SmApiBoolean`'s, except that two solids the kernel
-/// proves apart are put side by side with no intersection work ([`union_if_apart`]): a plate and pegs that each stand in it but meet no other peg take one
-/// boolean per level, the plate's, where each union of pegs was one (#21438). No tolerance is
-/// updated between the pairwise unions or after the last; a single body makes no union and is
-/// untouched.
+/// proves apart are put side by side with no intersection work ([`union_if_apart`]): a plate
+/// and pegs that each stand in it but meet no other peg take one boolean per level, the
+/// plate's, where each union of pegs was one (#21438). Each pairwise result gets
+/// [`after_boolean`]'s tolerance update, as [`boolean`] does, so a later level unions a
+/// repaired operand and the result passes the same check a chain of single unions does. A
+/// single body makes no union and is untouched.
 ///
 /// # Errors
 /// [`Error::Argument`] for no body; [`Error::Empty`] for an empty result; [`Error::NotSolid`];
@@ -313,8 +315,8 @@ pub fn union_all(bodies: Vec<Body>) -> Result<Body> {
     union_all_with(bodies, Contract::Closed)
 }
 
-/// [`union_all`] under `contract`. Under [`Contract::Proved`] each pairwise result gets
-/// [`after_boolean`]'s update as it is made, so a later level unions repaired operands.
+/// [`union_all`] under `contract`. Each pairwise result gets [`after_boolean`]'s update as
+/// it is made, so a later level unions repaired operands.
 ///
 /// # Errors
 /// As [`union_all`]; under [`Contract::Proved`], [`Error::NotSolidBecause`] too for a result of
@@ -335,7 +337,7 @@ pub fn union_all_with(bodies: Vec<Body>, contract: Contract) -> Result<Body> {
             let mut it = level.into_iter();
             while let Some(a) = it.next() {
                 match it.next() {
-                    Some(b) => next.push(union_step(k, a, b, contract)?),
+                    Some(b) => next.push(union_step(k, a, b)?),
                     None => next.push(a),
                 }
             }
@@ -353,17 +355,15 @@ pub fn union_all_with(bodies: Vec<Body>, contract: Contract) -> Result<Body> {
 /// ([`matched_tolerances`]). Two solids the kernel then proves apart (every shell's certified box
 /// farther from the other's than their intersection tolerance) are put side by side
 /// ([`union_if_apart`]), which is what a boolean of them gives, without the intersection work;
-/// any other pair is `SmApiBoolean`'s union. Either result gets [`after_boolean`]'s update under
-/// [`Contract::Proved`] alone, so both routes leave the same tolerances for the next level.
-fn union_step(k: &mut Kernel, mut a: Brep, mut b: Brep, contract: Contract) -> KernelResult<Brep> {
+/// any other pair is `SmApiBoolean`'s union. Either result gets [`after_boolean`]'s update, so
+/// both routes leave the same tolerances for the next level.
+fn union_step(k: &mut Kernel, mut a: Brep, mut b: Brep) -> KernelResult<Brep> {
     matched_tolerances(k, &mut a, &mut b)?;
     let mut r = match union_if_apart(k, a, b)? {
         Apart::United(r) => *r,
         Apart::NotProved(a, b) => sm::boolean(k, *a, *b, BooleanOperation::Union)?.result,
     };
-    if contract == Contract::Proved {
-        after_boolean(k, &mut r)?;
-    }
+    after_boolean(k, &mut r)?;
     Ok(r)
 }
 
