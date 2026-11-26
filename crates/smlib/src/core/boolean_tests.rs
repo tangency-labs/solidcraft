@@ -495,6 +495,22 @@ mod history {
         assert_eq!(h.faces.iter().flat_map(|f| f.origins.iter().map(|o| o.0)).max(), Some(2), "{h:?}");
     }
 
+    /// `boolean_tagged` and `union_all_tagged` preserve operand provenance tags for unions.
+    #[test]
+    fn tagged_boolean_and_union_all_keep_operand_origins() {
+        let a = super::Shape::Box([0.0; 3], [10.0; 3]).core();
+        let b = super::Shape::Box([5.0; 3], [10.0; 3]).core();
+        let c = super::Shape::Box([10.0; 3], [10.0; 3]).core();
+        let u = super::super::boolean::boolean_tagged(&a, &b, BooleanOp::Union).unwrap().unwrap();
+        let uh = super::super::history::read(&u).unwrap();
+        assert_eq!(uh.faces.len(), 12, "{uh:?}");
+        assert!(uh.faces.iter().any(|f| f.origins.iter().any(|o| o.0 == 0)));
+        assert!(uh.faces.iter().any(|f| f.origins.iter().any(|o| o.0 == 1)));
+        let all = super::super::boolean::union_all_tagged(&[&a, &b, &c]).unwrap();
+        let ah = super::super::history::read(&all).unwrap();
+        assert_eq!(ah.faces.iter().flat_map(|f| f.origins.iter().map(|o| o.0)).max(), Some(2), "{ah:?}");
+    }
+
     /// A row of four boxes sharing their top and bottom planes, united in pairs and the pairs
     /// united: each top merged with its neighbour's stands for two faces, and the merge of those
     /// stands for all four.
