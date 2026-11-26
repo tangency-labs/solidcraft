@@ -7,7 +7,7 @@
 //! together by one rigid group (`RigidGroup`), so the import moves as one; `component.unlock`
 //! releases them.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
 use solidcore_record::Vec3;
@@ -32,6 +32,8 @@ struct Place {
     slot: usize,
     parent: Option<usize>,
     transform: Mat,
+    /// The occurrence's own name, from the file (`None`: the component's name and a number).
+    name: Option<String>,
 }
 
 /// How a STEP file's tree becomes components.
@@ -49,6 +51,46 @@ struct Plan {
 /// A placement STEP assemblies can carry over as an occurrence: finite, rigid, not mirrored.
 fn rigid(m: &Mat) -> bool {
     crate::cmd::component::valid_position(m)
+}
+
+/// The occurrence names in use while one import names its placements. A file can give thousands
+/// of placements one name, so a name is looked up in a set, and each name remembers the next
+/// ` (k)` to try instead of counting up from ` (2)` again.
+struct PlacementNames {
+    used: HashSet<String>,
+    next: HashMap<String, usize>,
+}
+
+impl PlacementNames {
+    fn new(occurrences: &[solidcraft_doc::Occurrence]) -> Self {
+        Self { used: occurrences.iter().map(|o| o.name.clone()).collect(), next: HashMap::new() }
+    }
+
+    /// An occurrence made during the import: its name is taken too.
+    fn note(&mut self, name: &str) {
+        self.used.insert(name.to_string());
+    }
+
+    /// The name an occurrence the file names (a KiCad footprint's reference) is given: the file's
+    /// name, cut to the 128 characters a rename allows, with ` (2)`, ` (3)`… when another
+    /// occurrence has it. `None` keeps the usual `Component:N`: for an empty name, and for one of
+    /// digits only, which a command would read as an occurrence id.
+    fn take(&mut self, wanted: &str) -> Option<String> {
+        let wanted: String = wanted.trim().chars().take(128).collect();
+        if wanted.is_empty() || wanted.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        let name = if self.used.contains(&wanted) {
+            let start = self.next.get(&wanted).copied().unwrap_or(2);
+            let (k, name) = (start..).map(|k| (k, format!("{wanted} ({k})"))).find(|(_, name)| !self.used.contains(name))?;
+            self.next.insert(wanted, k.saturating_add(1));
+            name
+        } else {
+            wanted
+        };
+        self.used.insert(name.clone());
+        Some(name)
+    }
 }
 
 /// What an import's file says about its structure.
@@ -107,7 +149,7 @@ impl Plan {
             if p.slot == made {
                 made += 1;
             }
-            places.push(Place { slot: p.slot, parent: p.parent, transform: p.transform });
+            places.push(Place { slot: p.slot, parent: p.parent, transform: p.transform, name: p.name.clone() });
         }
         if plan.bodies.iter().flatten().any(|s| *s >= made) {
             return None;
@@ -151,14 +193,14 @@ impl Plan {
         if let Some(&slot) = seen.get(&key) {
             // Another placement of a part already made: an occurrence of its component, and the
             // file's copy of its bodies is not built.
-            self.places.push(Place { slot, parent, transform: node.transform });
+            self.places.push(Place { slot, parent, transform: node.transform, name: None });
             collect_bodies(node, &mut self.skip, 0);
             return;
         }
         let slot = self.slots.len();
         self.slots.push(Slot { name: node.name.trim().to_string() });
         seen.insert(key, slot);
-        self.places.push(Place { slot, parent, transform: node.transform });
+        self.places.push(Place { slot, parent, transform: node.transform, name: None });
         for b in &node.bodies {
             self.bodies.push((*b, slot, inverse));
         }
@@ -497,10 +539,11 @@ pub(crate) fn add_in_component(
     let mut comps: Vec<u64> = Vec::with_capacity(plan.slots.len());
     // The occurrences made: what the import's rigid group holds.
     let mut made: Vec<u64> = Vec::with_capacity(plan.places.len());
+    let mut names = PlacementNames::new(&s.doc.occurrences);
     for place in &plan.places {
         let parent_comp = place.parent.and_then(|p| comps.get(p).copied()).unwrap_or(top);
-        if let Some(&comp) = comps.get(place.slot) {
-            made.push(s.doc_mut().add_occurrence(comp, parent_comp, place.transform)?);
+        let occ = if let Some(&comp) = comps.get(place.slot) {
+            s.doc_mut().add_occurrence(comp, parent_comp, place.transform)?
         } else {
             let slot = plan.slots.get(place.slot).ok_or_else(|| EngineError::Other("import: component plan".into()))?;
             let label = if slot.name.is_empty() { None } else { Some(slot.name.as_str()) };
@@ -510,8 +553,16 @@ pub(crate) fn add_in_component(
             if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occ) {
                 o.transform = place.transform;
             }
-            made.push(occ);
+            occ
+        };
+        // The occurrence was just made, so it is at the end of the list.
+        if let Some(o) = s.doc_mut().occurrences.iter_mut().rev().find(|o| o.id == occ) {
+            names.note(&o.name);
+            if let Some(name) = place.name.as_deref().and_then(|wanted| names.take(wanted)) {
+                o.name = name;
+            }
         }
+        made.push(occ);
     }
     if let FeatureKind::Import { skip, .. } = &mut kind {
         // Bodies the reader already leaves out (a FreeCAD body's hidden intermediate shapes),
@@ -644,6 +695,14 @@ pub(crate) fn move_to_origin(s: &mut Session, placed: &Placed) -> Result<Option<
 /// Evaluates the design. Returns the features made and the component.
 pub(crate) fn add_design(s: &mut Session, design: &solidcraft_io::NativeDesign, name: &str) -> Result<(Vec<u64>, Placed)> {
     let (top, top_occ) = new_component(s, name)?;
+    let made = add_design_in(s, design, top)?;
+    let name = s.doc.components.iter().find(|c| c.id == top).map(|c| c.name.clone()).unwrap_or_default();
+    Ok((made, Placed { component: top, occurrence: top_occ, name, components: 0, rigid_group: None }))
+}
+
+/// Add a design rebuilt from a file (as [`add_design`] does) inside component `top`, which
+/// already exists. Evaluates the design. Returns the features made.
+pub(crate) fn add_design_in(s: &mut Session, design: &solidcraft_io::NativeDesign, top: u64) -> Result<Vec<u64>> {
     let source = &design.doc;
     let mut sketches: BTreeMap<u64, u64> = BTreeMap::new();
     let mut names: BTreeMap<String, String> = BTreeMap::new();
@@ -711,8 +770,7 @@ pub(crate) fn add_design(s: &mut Session, design: &solidcraft_io::NativeDesign, 
     if let Some(e) = made.iter().find_map(|id| s.model.result(*id).and_then(|r| r.error.clone())) {
         return Err(EngineError::Other(e));
     }
-    let name = s.doc.components.iter().find(|c| c.id == top).map(|c| c.name.clone()).unwrap_or_default();
-    Ok((made, Placed { component: top, occurrence: top_occ, name, components: 0, rigid_group: None }))
+    Ok(made)
 }
 
 /// Record that body `names[b]` lives in component `c`, placed by `offset`.
@@ -795,4 +853,9 @@ impl Session {
     pub fn contents_held(&self, component: u64) -> bool {
         self.doc.rigid_group_of(component).is_some() || !self.contents_joints(component).is_empty()
     }
+}
+
+/// Repeated STEP assembly placements omitted by the Import feature.
+pub(crate) fn step_skip(import: &StepImport) -> Vec<u64> {
+    Plan::of(import).skip
 }

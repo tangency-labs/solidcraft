@@ -31,6 +31,8 @@ pub const CHECK_FOR_UPDATES: &str = "CheckForUpdates";
 /// 0: no anonymous usage statistics, and the person cannot turn them on. 1: allowed, the person
 /// chooses. Locks `usage_statistics` when 0.
 pub const USAGE_STATISTICS: &str = "UsageStatistics";
+/// The highest `AgentTurnLimit`: the most Preferences offers (0 is no limit).
+pub const MAX_TURN_LIMIT: u32 = 200;
 
 /// The longest text value read for a setting; anything longer is not a valid choice.
 const MAX_CHOICE: usize = 64;
@@ -44,6 +46,10 @@ enum Kind {
     Units,
     /// A `REG_SZ`: `system` or the id of a language SolidCraft has.
     Language,
+    /// A `REG_DWORD` from 0 to `max`.
+    Number { max: u32 },
+    /// A `REG_SZ`: one of the agent permission modes (`ask`, `edits`, `all`).
+    Permission,
 }
 
 /// A preference an organization can set: the policy's value name, the preference's `ui.prefs`
@@ -56,7 +62,13 @@ pub struct Lock {
 
 /// Every preference a policy can set. Keep `packaging/windows/policies/` in step.
 pub const LOCKS: &[Lock] = &[
+    Lock { policy: "AgentControl", pref: "agent_control", kind: Kind::Switch },
+    Lock { policy: "AgentTurnLimit", pref: "agent_chat_turn_limit", kind: Kind::Number { max: MAX_TURN_LIMIT } },
+    Lock { policy: "AiFeatures", pref: "ai_features", kind: Kind::Switch },
+    Lock { policy: "AiPermissions", pref: "ai_permissions", kind: Kind::Permission },
+    Lock { policy: "AiToolbarButton", pref: "ai_toolbar_button", kind: Kind::Switch },
     Lock { policy: CHECK_FOR_UPDATES, pref: "check_updates", kind: Kind::Switch },
+    Lock { policy: "ConnectAiApps", pref: "connect_ai_apps", kind: Kind::Switch },
     Lock { policy: "DefaultUnits", pref: "default_units", kind: Kind::Units },
     Lock { policy: "Language", pref: "language", kind: Kind::Language },
     Lock { policy: "ReopenDesigns", pref: "reopen_designs", kind: Kind::Switch },
@@ -64,11 +76,16 @@ pub const LOCKS: &[Lock] = &[
     Lock { policy: "ShowDonateButton", pref: "show_donate_button", kind: Kind::Switch },
 ];
 
+/// Features that send data outside the organization and that its policy can turn off: the
+/// policy's value name (`REG_DWORD`, 0 turns the feature off, 1 leaves it on) and the feature.
+pub const ALLOWS: &[(&str, &str)] = &[("AllowEasyPrint", "easyprint"), ("AllowProblemReports", "problem_reports")];
+
 /// A preference's value, as a policy sets it.
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(untagged)]
 pub enum Setting {
     Switch(bool),
+    Number(u32),
     Text(String),
 }
 
@@ -110,6 +127,8 @@ pub enum Value {
 pub struct Layer {
     /// The valid values of [`LOCKS`], by the preference they set.
     pub settings: BTreeMap<&'static str, Setting>,
+    /// The valid values of [`ALLOWS`], by feature: false turns it off.
+    pub allowed: BTreeMap<&'static str, bool>,
     /// [`USAGE_STATISTICS`]: 0 turns them off and locks the preference; 1 leaves the choice.
     pub usage_statistics: Option<bool>,
     /// [`ORGANIZATION_NAME`], cleaned: one line, no control or direction characters, at most
@@ -138,6 +157,19 @@ impl Layer {
                 Some((lock.pref, setting?))
             })
             .collect();
+        let allowed = ALLOWS
+            .iter()
+            .filter_map(|(policy, feature)| {
+                let value = get(policy)?;
+                match parse(Kind::Switch, &value) {
+                    Some(Setting::Switch(on)) => Some((*feature, on)),
+                    _ => {
+                        log::warn!("policy: {policy} is {value:?}, expected 0 or 1; ignored");
+                        None
+                    }
+                }
+            })
+            .collect();
         let usage_statistics = match get(USAGE_STATISTICS) {
             None => None,
             Some(value) => {
@@ -151,7 +183,7 @@ impl Layer {
                 on
             }
         };
-        Layer { settings, usage_statistics, organization: text(ORGANIZATION_NAME) }
+        Layer { settings, allowed, usage_statistics, organization: text(ORGANIZATION_NAME) }
     }
 
     /// [`CHECK_FOR_UPDATES`]: whether update checks run.
@@ -164,7 +196,7 @@ impl Layer {
 
     /// Whether any value is set.
     fn any(&self) -> bool {
-        !self.settings.is_empty() || self.usage_statistics.is_some() || self.organization.is_some()
+        !self.settings.is_empty() || !self.allowed.is_empty() || self.usage_statistics.is_some() || self.organization.is_some()
     }
 
     /// `self`, with `under` for the values `self` leaves unset.
@@ -172,8 +204,12 @@ impl Layer {
         for (pref, setting) in under.settings {
             self.settings.entry(pref).or_insert(setting);
         }
+        for (feature, on) in under.allowed {
+            self.allowed.entry(feature).or_insert(on);
+        }
         Layer {
             settings: self.settings,
+            allowed: self.allowed,
             usage_statistics: self.usage_statistics.or(under.usage_statistics),
             organization: self.organization.or(under.organization),
         }
@@ -195,6 +231,10 @@ fn parse(kind: Kind, value: &Value) -> Option<Setting> {
             }
             crate::i18n::LOCALES.iter().find(|locale| locale.id.eq_ignore_ascii_case(text)).map(|locale| Setting::Text(locale.id.into()))
         }
+        (Kind::Number { max }, Value::Number(n)) if *n <= max => Some(Setting::Number(*n)),
+        (Kind::Permission, Value::Text(text)) if text.len() <= MAX_CHOICE => {
+            crate::agent_chat::agents::Mode::parse(&text.trim().to_ascii_lowercase()).map(|mode| Setting::Text(mode.id().into()))
+        }
         _ => None,
     }
 }
@@ -202,7 +242,13 @@ fn parse(kind: Kind, value: &Value) -> Option<Setting> {
 /// The preference `pref` of `p` (None: not one of [`LOCKS`]).
 fn get(p: &crate::prefs::Prefs, pref: &str) -> Option<Setting> {
     Some(match pref {
+        "agent_chat_turn_limit" => Setting::Number(p.agent_chat_turn_limit),
+        "agent_control" => Setting::Switch(p.agent_control),
+        "ai_features" => Setting::Switch(p.ai_features),
+        "ai_permissions" => Setting::Text(p.ai_permissions.id().into()),
+        "ai_toolbar_button" => Setting::Switch(p.ai_toolbar_button),
         "check_updates" => Setting::Switch(p.check_updates),
+        "connect_ai_apps" => Setting::Switch(p.connect_ai_apps),
         "default_units" => Setting::Text(p.default_units.clone()),
         "language" => Setting::Text(p.language.clone()),
         "reopen_designs" => Setting::Switch(p.reopen_designs),
@@ -215,7 +261,17 @@ fn get(p: &crate::prefs::Prefs, pref: &str) -> Option<Setting> {
 /// Set the preference `pref` of `p` to `setting`; a setting of the other kind changes nothing.
 fn set(p: &mut crate::prefs::Prefs, pref: &str, setting: &Setting) {
     match (pref, setting) {
+        ("agent_chat_turn_limit", Setting::Number(n)) => p.agent_chat_turn_limit = *n,
+        ("agent_control", Setting::Switch(on)) => p.agent_control = *on,
+        ("ai_features", Setting::Switch(on)) => p.ai_features = *on,
+        ("ai_permissions", Setting::Text(id)) => {
+            if let Some(mode) = crate::agent_chat::agents::Mode::parse(id) {
+                p.ai_permissions = mode;
+            }
+        }
+        ("ai_toolbar_button", Setting::Switch(on)) => p.ai_toolbar_button = *on,
         ("check_updates", Setting::Switch(on)) => p.check_updates = *on,
+        ("connect_ai_apps", Setting::Switch(on)) => p.connect_ai_apps = *on,
         ("default_units", Setting::Text(text)) => p.default_units.clone_from(text),
         ("language", Setting::Text(text)) => p.language.clone_from(text),
         ("reopen_designs", Setting::Switch(on)) => p.reopen_designs = *on,
@@ -238,6 +294,17 @@ pub struct Policy {
 }
 
 impl Policy {
+    /// Whether the feature (one of [`ALLOWS`]) may run: false only when a mandatory value turns
+    /// it off.
+    pub fn allows(&self, feature: &str) -> bool {
+        self.mandatory.allowed.get(feature) != Some(&false)
+    }
+
+    /// The features a mandatory value turns off.
+    pub fn turned_off(&self) -> Vec<&'static str> {
+        self.mandatory.allowed.iter().filter(|(_, on)| !**on).map(|(feature, _)| *feature).collect()
+    }
+
     /// The preferences (by their `ui.prefs` names) a mandatory value replaces.
     pub fn locked(&self) -> Vec<&'static str> {
         // UsageStatistics allowed (1) leaves the choice to the person; only off locks it.
@@ -308,6 +375,7 @@ pub fn check_updates(app: &SolveApp) -> bool {
 /// person's own choice (from the saved file, a reload or a shortcut such as the Donate pill's
 /// Hide): it is kept in [`Policy::own`] for when the policy goes. Cheap; runs every frame.
 pub fn enforce(app: &mut SolveApp) {
+    crate::easyprint_ui::block(app, !app.policy.allows("easyprint"));
     enforce_keeping(app, false);
 }
 
@@ -578,7 +646,16 @@ mod tests {
 
     #[test]
     fn each_switch_is_zero_or_one_and_anything_else_is_not_set() {
-        for policy in [CHECK_FOR_UPDATES, "ReopenDesigns", "ShowDiscordButton", "ShowDonateButton"] {
+        for policy in [
+            "AgentControl",
+            "AiFeatures",
+            "AiToolbarButton",
+            CHECK_FOR_UPDATES,
+            "ConnectAiApps",
+            "ReopenDesigns",
+            "ShowDiscordButton",
+            "ShowDonateButton",
+        ] {
             assert_eq!(one(policy, Value::Number(0)), switch(false), "{policy}");
             assert_eq!(one(policy, Value::Number(1)), switch(true), "{policy}");
             for hostile in [Value::Number(2), Value::Number(u32::MAX), Value::Text("0".into()), Value::Text("x".repeat(10_000))] {
@@ -615,6 +692,72 @@ mod tests {
             Value::Number(0),
         ] {
             assert_eq!(one("Language", hostile), None);
+        }
+    }
+
+    #[test]
+    fn the_turn_limit_is_zero_to_two_hundred_and_permissions_a_mode_and_anything_else_is_not_set() {
+        for n in [0, 1, 24, MAX_TURN_LIMIT] {
+            assert_eq!(one("AgentTurnLimit", Value::Number(n)), Some(Setting::Number(n)));
+        }
+        for hostile in [Value::Number(MAX_TURN_LIMIT + 1), Value::Number(u32::MAX), Value::Text("24".into())] {
+            assert_eq!(one("AgentTurnLimit", hostile), None);
+        }
+        for (text, mode) in [("ask", "ask"), ("EDITS", "edits"), (" All ", "all")] {
+            assert_eq!(one("AiPermissions", Value::Text(text.into())), self::text(mode), "{text}");
+        }
+        for hostile in [Value::Text("everything".into()), Value::Text(String::new()), Value::Text("a".repeat(100_000)), Value::Number(0)] {
+            assert_eq!(one("AiPermissions", hostile), None);
+        }
+    }
+
+    #[test]
+    fn the_organizations_permissions_hold_for_every_agent_and_its_always_allowed_answers_wait() {
+        use crate::agent_chat::agents::{Mode, always_allowed_in_force, mode_in_force, mode_shown};
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.preferences.ai_permissions = Mode::Edits;
+        app.preferences.agent_permissions.insert("codex".into(), Mode::All);
+        app.preferences.agent_always_allow.insert("claude".into(), vec!["file.save".into()]);
+        assert_eq!(mode_in_force(&app, "codex"), Mode::All, "without a policy an agent's own mode holds");
+        assert!(always_allowed_in_force(&app, "claude", "file.save"));
+        assert_eq!((mode_shown(&app, "codex"), mode_shown(&app, "claude")), (Some(Mode::All), None), "each agent's row shows its own choice");
+        app.policy = Policy::from_json(r#"{"AiPermissions": "ask"}"#);
+        enforce(&mut app);
+        for agent in ["codex", "claude", "other"] {
+            assert_eq!(mode_in_force(&app, agent), Mode::Ask, "{agent}");
+            assert_eq!(mode_shown(&app, agent), Some(Mode::Ask), "{agent}'s locked row shows the organization's mode");
+        }
+        assert!(!always_allowed_in_force(&app, "claude", "file.save"), "an Always allowed answer doesn't apply");
+        // Kept for when the policy goes.
+        assert_eq!(app.preferences.agent_permissions.get("codex"), Some(&Mode::All));
+        assert_eq!(app.preferences.agent_always_allow["claude"], ["file.save"]);
+        assert_eq!(saved(&app)["ai_permissions"], serde_json::json!("edits"));
+        assert_eq!(app.preferences.agent_chat_turn_limit, crate::agent_chat::gate::DEFAULT_TURN_LIMIT);
+        app.policy = Policy::from_json(r#"{"AgentTurnLimit": 12, "AiFeatures": 0, "AgentControl": 0, "ConnectAiApps": 0, "AiToolbarButton": 0}"#);
+        enforce(&mut app);
+        let p = &app.preferences;
+        assert_eq!(
+            (p.agent_chat_turn_limit, p.ai_features, p.agent_control, p.connect_ai_apps, p.ai_toolbar_button),
+            (12, false, false, false, false)
+        );
+        assert_eq!(saved(&app)["agent_chat_turn_limit"], serde_json::json!(0), "the person's own limit is saved");
+    }
+
+    #[test]
+    fn a_feature_is_turned_off_only_by_a_mandatory_zero() {
+        for (policy, feature) in ALLOWS {
+            let off = Policy::from_json(&format!(r#"{{"{policy}": 0}}"#));
+            assert!(!off.allows(feature) && off.managed(), "{policy}");
+            assert_eq!(off.turned_off(), [*feature]);
+            assert!(off.locked().is_empty(), "{policy} locks no preference");
+            assert!(Policy::from_json(&format!(r#"{{"{policy}": 1}}"#)).allows(feature), "{policy}");
+            for hostile in [r#"2"#, r#""0""#, r#"-1"#, r#"null"#] {
+                let policy = Policy::from_json(&format!(r#"{{"{policy}": {hostile}}}"#));
+                assert!(policy.allows(feature) && !policy.managed(), "{hostile}");
+            }
+            let recommended = Policy::from_json(&format!(r#"{{"Recommended": {{"{policy}": 0}}}}"#));
+            assert!(recommended.allows(feature), "a recommended value turns nothing off");
+            assert!(Policy::default().allows(feature));
         }
     }
 
@@ -808,7 +951,8 @@ mod tests {
     fn the_templates_offer_every_policy_the_app_reads() {
         let admx = include_str!("../../../packaging/windows/policies/solidcraft.admx");
         let adml = include_str!("../../../packaging/windows/policies/en-US/solidcraft.adml");
-        for name in LOCKS.iter().map(|lock| lock.policy).chain([ORGANIZATION_NAME, USAGE_STATISTICS]) {
+        for name in LOCKS.iter().map(|lock| lock.policy).chain(ALLOWS.iter().map(|(policy, _)| *policy)).chain([ORGANIZATION_NAME, USAGE_STATISTICS])
+        {
             assert!(admx.contains(&format!(r#"valueName="{name}""#)), "{name} is missing from solidcraft.admx");
             assert!(adml.contains(&format!(r#"<string id="{name}">"#)), "{name} is missing from solidcraft.adml");
         }

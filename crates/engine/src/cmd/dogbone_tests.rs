@@ -323,8 +323,8 @@ fn a_step_export_carries_the_reliefs() {
     let step = std::fs::read_to_string(&path).unwrap();
     let mut back = Session::default();
     let r = run(&mut back, "file.insert_step", json!({"path": path}));
-    // Four relief walls, two of them split at their seam (see the face counts above).
-    assert_eq!(step.matches("CYLINDRICAL_SURFACE").count(), 6, "four relief walls");
+    // One cylindrical surface per relief wall.
+    assert_eq!(step.matches("CYLINDRICAL_SURFACE").count(), 4, "four relief walls");
     assert!(step.contains("1.5"));
     let name = r["created_bodies"][0].as_str().unwrap().to_string();
     let v = back.model.state().body(&name).unwrap().measure().unwrap().volume;
