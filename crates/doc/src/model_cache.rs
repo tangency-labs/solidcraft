@@ -1160,12 +1160,15 @@ impl Model {
         let mut prepared_states = std::collections::HashSet::new();
         // The pose-only features saved at the pose `doc` gives them: their results stand.
         let mut poses = HashMap::new();
+        let mut step_doc_owned = super::init_capture_step_doc(doc, &vals);
+        let mut resolved_joints = std::collections::BTreeMap::new();
         for (i, (f, r)) in doc.features.iter().zip(features).enumerate() {
+            let eval_doc = step_doc_owned.as_ref().unwrap_or(doc);
             let saved = unhex(r.get("fingerprint").unwrap_or(&Json::Null))?;
             // A fingerprint reads the state before its feature (where the bodies it takes lie).
             // After a state the file left out, the saved one is taken: `evaluate` works that state
             // out, checks the fingerprints after it, and evaluates again from one that differs.
-            prev = if exact { chain_fingerprint(doc, &vals, f, prev, i >= marker, &import_digests, Some(&before)) } else { saved };
+            prev = if exact { chain_fingerprint(eval_doc, &vals, f, prev, i >= marker, &import_digests, Some(&before)) } else { saved };
             if r.get("id").and_then(Json::as_u64) != Some(f.id) || saved != prev {
                 return Err(bad("saved model: the document changed"));
             }
@@ -1194,7 +1197,7 @@ impl Model {
             if exact
                 && pose_only(f)
                 && let Some(pose) = r.get("pose").map(unhex).transpose()?
-                && pose == placement_digest(doc, f, Some(&before))
+                && pose == placement_digest(eval_doc, f, Some(&before))
             {
                 poses.insert(f.id, pose);
             }
@@ -1229,7 +1232,11 @@ impl Model {
             }
             if !result.skipped {
                 exact = !result.unkept;
+                let changed = super::bodies_changed(&before, &result.state);
                 before = result.state.clone();
+                if result.error.is_none() && i < marker && !f.suppressed {
+                    super::advance_capture_step(&mut step_doc_owned, &mut resolved_joints, &vals, f, &before, changed);
+                }
             }
             results.push(result);
         }
@@ -1238,7 +1245,19 @@ impl Model {
         for (f, r) in doc.features.iter().zip(results.iter_mut()).filter(|(_, r)| !r.skipped && !r.unkept) {
             r.warning = crate::eval::with_retained_notes(doc, r.warning.take(), f, &r.state);
         }
-        let mut model = Model { results, param_errors, import_digests, context: ctx, frame_bodies, validation, heal_off: !heal, ..Model::default() };
+        let resolved_occurrences = step_doc_owned.map(|d| d.occurrences.into_iter().map(|o| (o.id, o.transform)).collect()).unwrap_or_default();
+        let mut model = Model {
+            results,
+            param_errors,
+            import_digests,
+            context: ctx,
+            frame_bodies,
+            validation,
+            heal_off: !heal,
+            resolved_occurrences,
+            resolved_joints,
+            ..Model::default()
+        };
         let unkept = model.results.iter().filter(|r| r.unkept).count();
         // A pose-only feature's fingerprint leaves its pose out, so its saved result may be from
         // another pose than `doc`'s: evaluated again, with what reads none of it kept (#12139).
@@ -1259,15 +1278,22 @@ impl Model {
         // Each result where an evaluation would have put it, so an edit undone (or set back)
         // finds it again rather than evaluating the feature anew.
         let mut before = Arc::new(ModelState::default());
+        let mut cache_step_doc = super::init_capture_step_doc(doc, &vals);
+        let mut cache_joints = std::collections::BTreeMap::new();
         if let Ok(mut cache) = model.cache.lock() {
-            for (f, r) in doc.features.iter().zip(&model.results).filter(|(_, r)| !r.skipped && r.error.is_none()) {
+            for (i, (f, r)) in doc.features.iter().zip(&model.results).enumerate().filter(|(_, (_, r))| !r.skipped && r.error.is_none()) {
+                let eval_doc = cache_step_doc.as_ref().unwrap_or(doc);
                 // A pose-only feature's fingerprint leaves its pose out, so its saved result may be
                 // from another pose than `doc`'s: it is no result for `doc`'s key (#12139).
                 if pose_only(f) {
+                    let changed = super::bodies_changed(&before, &r.state);
                     before = r.state.clone();
+                    if i < marker && !f.suppressed {
+                        super::advance_capture_step(&mut cache_step_doc, &mut cache_joints, &vals, f, &before, changed);
+                    }
                     continue;
                 }
-                let key = EvalKey::new(doc, &vals, f, r.fingerprint, ctx, shared, &before, &model.import_digests);
+                let key = EvalKey::new(eval_doc, &vals, f, r.fingerprint, ctx, shared, &before, &model.import_digests);
                 let whole = CachedEval {
                     error: None,
                     error_code: None,
@@ -1298,7 +1324,11 @@ impl Model {
                     }
                 }
                 cache.states.put(key.whole, whole, r.state.retained_bytes(), r.ms);
+                let changed = super::bodies_changed(&before, &r.state);
                 before = r.state.clone();
+                if i < marker && !f.suppressed {
+                    super::advance_capture_step(&mut cache_step_doc, &mut cache_joints, &vals, f, &before, changed);
+                }
             }
         }
         Ok(model)

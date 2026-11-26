@@ -10,10 +10,57 @@
 use super::placing::{parent_path, placement_of};
 use super::*;
 use crate::Sel;
+use solidcraft_doc::PlaneRef;
+use solidcraft_doc::construct::GeoRef;
 
 /// `path` with its leading `from` replaced by `to`, when it starts with `from`.
 fn rebased(path: &[u64], from: &[u64], to: &[u64]) -> Option<Vec<u64>> {
     path.strip_prefix(from).map(|rest| to.iter().chain(rest).copied().collect())
+}
+
+/// Calls `f` on each placement path from the design that `p` is built on, wherever it is nested
+/// (an offset of an origin datum, a plane through a datum point): the paths the model reads for
+/// it (`plane_datum_paths` in `eval.rs`). False when it is nested deeper than a design keeps.
+fn plane_paths(p: &mut PlaneRef, f: &mut impl FnMut(&mut Vec<u64>), depth: usize) -> bool {
+    if depth > 64 {
+        return false;
+    }
+    let depth = depth + 1;
+    match p {
+        PlaneRef::Datum { datum } => {
+            f(&mut datum.path);
+            true
+        }
+        PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => plane_paths(base, f, depth),
+        PlaneRef::ThroughPoint { base, point } => plane_paths(base, f, depth) & geo_paths(point, f, depth),
+        PlaneRef::AtAngle { base, line, pivot, .. } => {
+            let mut fine = plane_paths(base, f, depth);
+            for g in [line, pivot].into_iter().flatten() {
+                fine &= geo_paths(g, f, depth);
+            }
+            fine
+        }
+        _ => p.refs_mut().into_iter().fold(true, |fine, g| geo_paths(g, f, depth) & fine),
+    }
+}
+
+/// [`plane_paths`] for a construct reference: an origin datum, a plane, an edge on a placement
+/// or a snap point of one of them.
+fn geo_paths(g: &mut GeoRef, f: &mut impl FnMut(&mut Vec<u64>), depth: usize) -> bool {
+    if depth > 64 {
+        return false;
+    }
+    match g {
+        GeoRef::Datum { datum } => f(&mut datum.path),
+        GeoRef::PlacedEdge { path, author_path, .. } => {
+            f(path);
+            f(author_path);
+        }
+        GeoRef::Plane { plane } => return plane_paths(plane, f, depth + 1),
+        GeoRef::Snap { of, .. } => return geo_paths(of, f, depth + 1),
+        _ => {}
+    }
+    true
 }
 
 pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
@@ -57,13 +104,23 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     let uncaptured = s.uncaptured_moves().into_owned();
     for ancestor in from_path.iter().chain(&to_path) {
         let Some(pending) = uncaptured.get(ancestor).copied() else { continue };
-        scratch.pending_moves.remove(ancestor);
+        scratch.clear_pending_move(*ancestor);
         if let Some(x) = scratch.doc_mut().occurrences.iter_mut().find(|x| x.id == *ancestor) {
+            let prev = x.transform;
             x.transform = pending;
+            x.adjust_base_for_direct_move(&prev, &pending);
         }
     }
-    scratch.pending_moves.remove(&id);
+    scratch.clear_pending_move(id);
     if let Some(x) = scratch.doc_mut().occurrences.iter_mut().find(|x| x.id == id) {
+        let prev = x.transform;
+        if let Some(pending) = uncaptured.get(&id) {
+            x.adjust_base_for_direct_move(&prev, pending);
+        }
+        if let Some(base) = x.base_transform {
+            let reframed = solidcraft_doc::mat_mul(&inverse, &solidcraft_doc::mat_mul(&from_frame, &base));
+            x.base_transform = solidcraft_doc::is_placement(&reframed).then_some(reframed);
+        }
         x.parent = to;
         x.transform = transform;
         // A move typed in world axes takes them into the new parent's frame.
@@ -117,6 +174,7 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     // is one definition) now runs through its one new place. A path that would grow past the 64
     // placements a design keeps is refused here rather than saved where it can't be read back.
     let mut too_deep = false;
+    let mut nested_too_deep = false;
     let mut rebase = |path: &mut Vec<u64>| {
         if let Some(at) = path.iter().position(|x| *x == id) {
             let moved: Vec<u64> = new_path.iter().chain(&path[at + 1..]).copied().collect();
@@ -140,26 +198,23 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     // A joint side on a placement's origin plane or axis names it by its path from the design
-    // (`o:4/origin/XY`), which follows the move the same way (#22216).
+    // (`o:4/origin/XY`), which follows the move the same way (#22216), also when the plane is
+    // built on it (an offset of it, a plane through one of its points).
     for joint in &mut scratch.doc_mut().assembly.joints {
         for side in [&mut joint.a, &mut joint.b] {
             use solidcraft_doc::joints::{AxisRef, AxisTarget, Snap};
             match &mut side.snap {
-                Snap::Plane { plane, .. } => {
-                    if let solidcraft_doc::PlaneRef::Datum { datum } = plane.as_mut() {
-                        rebase(&mut datum.path);
-                    }
-                }
-                Snap::Axis { axis, .. } => {
-                    if let AxisRef::Target(AxisTarget::Datum { datum }) = axis.as_mut() {
-                        rebase(&mut datum.path);
-                    }
-                }
+                Snap::Plane { plane, .. } => nested_too_deep |= !plane_paths(plane, &mut rebase, 0),
+                Snap::Axis { axis, .. } => match axis.as_mut() {
+                    AxisRef::Target(AxisTarget::Datum { datum }) => rebase(&mut datum.path),
+                    AxisRef::Target(AxisTarget::Geo { geo }) => nested_too_deep |= !geo_paths(geo, &mut rebase, 0),
+                    _ => {}
+                },
                 _ => {}
             }
         }
     }
-    if too_deep {
+    if too_deep || nested_too_deep {
         return Err(bad(cmd, format!("moving {} would nest a face attachment or a joint's origin plane more than 64 placements deep", o.name)));
     }
     // The paths through it follow it before the model is worked out again: that drops a selected

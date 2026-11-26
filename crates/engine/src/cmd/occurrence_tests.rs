@@ -1774,22 +1774,29 @@ fn reparent_carries_a_joint_on_the_moved_placements_origin_plane() {
         "joint.create",
         json!({"name": "J1", "type": "rigid", "a": {"occurrence": a, "plane": "XY"}, "b": {"occurrence": b, "plane": "XY"}, "offset": 5}),
     );
-    let joint = |s: &mut Session| run(s, "joint.inspect", json!({"joint": "J1"}))["joints"][0].clone();
-    let side_b = |s: &mut Session| joint(s)["b"].clone();
-    let before = side_b(&mut s);
-    assert_eq!(before["snap"]["plane"]["datum"], json!(format!("o:{b}/origin/XY")), "{before}");
+    // A plane built on the datum (an offset of it) names the same path, one level down.
+    let offset = json!({"type": "offset", "base": {"type": "datum", "datum": format!("o:{b}/origin/XZ")}, "distance": "2 mm"});
+    run(
+        &mut s,
+        "joint.create",
+        json!({"name": "J2", "type": "planar", "a": {"occurrence": a, "plane": "XZ"}, "b": {"occurrence": b, "plane": offset}}),
+    );
+    let joint = |s: &mut Session, name: &str| run(s, "joint.inspect", json!({"joint": name}))["joints"][0].clone();
+    let datums = |s: &mut Session| {
+        let (j1, j2) = (joint(s, "J1"), joint(s, "J2"));
+        for j in [&j1, &j2] {
+            assert_eq!(j["b"]["resolves"], json!(true), "{j}");
+            assert!(j["errors"].as_array().is_none_or(Vec::is_empty), "{j}");
+        }
+        (j1["b"]["snap"]["plane"]["datum"].clone(), j2["b"]["snap"]["plane"]["base"]["datum"].clone())
+    };
+    assert_eq!(datums(&mut s), (json!(format!("o:{b}/origin/XY")), json!(format!("o:{b}/origin/XZ"))));
 
     run(&mut s, "occurrence.reparent", json!({"occurrence": b, "parent": group_component}));
-    let moved = side_b(&mut s);
-    assert_eq!(moved["resolves"], json!(true), "{moved}");
-    assert_eq!(moved["snap"]["plane"]["datum"], json!(format!("o:{group}/{b}/origin/XY")));
-    let errors = joint(&mut s)["errors"].clone();
-    assert!(errors.as_array().is_none_or(Vec::is_empty), "{errors}");
+    assert_eq!(datums(&mut s), (json!(format!("o:{group}/{b}/origin/XY")), json!(format!("o:{group}/{b}/origin/XZ"))));
 
     run(&mut s, "occurrence.reparent", json!({"occurrence": b, "parent": "root"}));
-    let back = side_b(&mut s);
-    assert_eq!(back["resolves"], json!(true), "{back}");
-    assert_eq!(back["snap"]["plane"]["datum"], json!(format!("o:{b}/origin/XY")));
+    assert_eq!(datums(&mut s), (json!(format!("o:{b}/origin/XY")), json!(format!("o:{b}/origin/XZ"))));
 }
 
 /// A component can't go inside itself or what it holds. Out of a parent placed more than once it
@@ -2610,8 +2617,9 @@ fn an_expressed_world_move_under_a_turned_parent_follows_along_world_axes() {
     assert!((after[0] - 29.5).abs() < 1e-6 && (after[1] - 0.5).abs() < 1e-6, "{after:?}");
 }
 
-/// Plain numbers move as they always did and keep nothing; a move by expressions refuses to stay
-/// pending, and an expression that is not a length is refused with the design unchanged.
+/// Plain numbers move as they always did and keep nothing; a move by expressions with
+/// `capture: false` stays pending with its expressions until `component.capture_position`, and an
+/// expression that is not a length is refused with the design unchanged.
 #[test]
 fn numbers_keep_no_expressions_and_bad_expressions_are_refused() {
     let mut s = Session::default();
@@ -2630,10 +2638,20 @@ fn numbers_keep_no_expressions_and_bad_expressions_are_refused() {
     run(&mut s, "parameters.change", json!({"name": "dy", "expression": "20 mm"}));
     at(centre(&mut s, occ), [1.0, 10.5, 0.5]);
 
+    // Pending expression moves are accepted and update live before capture, then enter CapturePosition.
+    let pending_move = run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [0, "dy", 0], "capture": false}));
+    assert_eq!(pending_move["pending"], json!(true));
+    assert_eq!(s.pending_moves.get(&occ).unwrap()[3][1], 30.0);
+    run(&mut s, "parameters.change", json!({"name": "dy", "expression": "25 mm"}));
+    assert_eq!(s.pending_moves.get(&occ).unwrap()[3][1], 35.0);
+    let cap = run(&mut s, "component.capture_position", json!({}));
+    assert!(cap["feature"].as_u64().is_some(), "{cap}");
+    at(centre(&mut s, occ), [1.0, 35.5, 0.5]);
+
     let doc = s.doc.clone();
     for (translate, capture, expected) in [
-        (json!([0, "dy", 0]), false, "captured"),
         (json!([0, "turn", 0]), true, "translate:"),
+        (json!([0, "turn", 0]), false, "translate:"),
         (json!([0, "nope", 0]), true, "translate:"),
         (json!([0, true, 0]), true, "three finite numbers"),
         (json!([0, true, "dy"]), true, "numbers or length expressions"),
@@ -2898,7 +2916,6 @@ fn component_names_count_characters_not_bytes() {
     let error = s.execute("component.rename", &json!({"component": component, "name": "ł".repeat(129)})).unwrap_err().to_string();
     assert!(error.contains("1…128 characters"), "{error}");
 }
-
 /// The Browser's index of placed bodies (their path, by world name) makes the design's name
 /// index once for the whole walk, not once at every placement: naming each placement on its own
 /// built the index for every placement, and on a 100-printer assembly that was 14 s inside one
@@ -2936,4 +2953,649 @@ fn the_browser_body_paths_make_the_name_index_once() {
         let placement = s.occurrence_placement(path).expect("a path the index named");
         assert!(placement.bodies.iter().any(|b| &b.world == world), "{world} at {path:?}");
     }
+}
+
+#[test]
+fn capture_position_creates_timeline_feature_preserves_expressions_and_isolates_history() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "dx", "expression": "10 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "dy", "expression": "5 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "ox", "expression": "5 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "theta", "expression": "90 deg"}));
+
+    let (_, occ) = created(&mut s, "Block");
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Box"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+
+    // #20644: a root-level cut using Block before CapturePosition sees Block at its pre-capture placement.
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0], "operation": "new", "body_name": "Plate"}));
+    run(&mut s, "solid.combine", json!({"target": "Plate", "tools": ["Box"], "operation": "cut", "keep_tools": true}));
+    let plate_vol = |s: &Session| s.model.state().body("Plate").map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).unwrap_or(0.0);
+    assert!((plate_vol(&s) - 3000.0).abs() < 1e-6, "pre-capture cut volume: {}", plate_vol(&s));
+
+    // Move Block with capture: false preserving translate, origin, and angle expressions.
+    let mv = run(
+        &mut s,
+        "occurrence.move",
+        json!({"occurrence": occ, "translate": ["dx", "dy", 0], "origin": ["ox", 0, 0], "axis": [0, 0, 1], "angle": "theta", "capture": false}),
+    );
+    assert_eq!(mv["pending"], json!(true));
+    assert!(s.pending_moves.contains_key(&occ));
+
+    // While pending, parameters.users lists the pending move and parameters.delete refuses.
+    let users = run(&mut s, "parameters.users", json!({"name": "dx"}));
+    assert!(users.to_string().contains("translate x"), "{users}");
+    assert!(s.execute("parameters.delete", &json!({"name": "dx"})).is_err());
+
+    // Capture Pos. creates FeatureKind::CapturePosition preserving all expressions.
+    let cap = run(&mut s, "component.capture_position", json!({}));
+    assert_eq!(cap["captured"], json!(1));
+    let cp_id = cap["feature"].as_u64().expect("CapturePosition feature id");
+    assert!(s.pending_moves.is_empty());
+
+    let feat = s.doc.feature(cp_id).expect("CapturePosition feature exists");
+    let solidcraft_doc::FeatureKind::CapturePosition { moves, .. } = &feat.kind else {
+        panic!("expected CapturePosition, got {:?}", feat.kind);
+    };
+    assert_eq!(moves.len(), 1);
+    assert_eq!(moves[0].translate, ["dx", "dy", "0"]);
+    assert_eq!(moves[0].origin, Some([solidcraft_doc::Expr::new("ox"), solidcraft_doc::Expr::new("0"), solidcraft_doc::Expr::new("0")]));
+    assert_eq!(moves[0].angle.as_deref(), Some("theta"));
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == occ).unwrap().base_transform, Some(solidcraft_doc::IDENTITY));
+
+    // A 10x10x10 box rotated 90 deg about (5, 0, 0) lands at x in [-5, 5], y in [-5, 5], then + (10, 5, 0) -> center (10, 5, 5).
+    at(centre(&mut s, occ), [10.0, 5.0, 5.0]);
+
+    // Changing dx updates CapturePosition and downstream world placement, while Plate's pre-capture cut stays at 3000 mm3.
+    run(&mut s, "parameters.change", json!({"name": "dx", "expression": "25 mm"}));
+    at(centre(&mut s, occ), [25.0, 5.0, 5.0]);
+    assert!((plate_vol(&s) - 3000.0).abs() < 1e-6, "post-capture change must not alter pre-capture cut: {}", plate_vol(&s));
+
+    // Renaming dx updates the CapturePosition expression and deleting a referenced parameter is refused.
+    run(&mut s, "parameters.rename", json!({"name": "dx", "new_name": "shift_x"}));
+    let solidcraft_doc::FeatureKind::CapturePosition { moves, .. } = &s.doc.feature(cp_id).unwrap().kind else {
+        panic!("expected CapturePosition");
+    };
+    assert_eq!(moves[0].translate[0], "shift_x");
+    assert!(s.execute("parameters.delete", &json!({"name": "shift_x"})).is_err());
+    run(&mut s, "parameters.change", json!({"name": "shift_x", "expression": "40 mm"}));
+    at(centre(&mut s, occ), [40.0, 5.0, 5.0]);
+
+    // Save/reopen preserves base_transform, CapturePosition timeline, and live parameter rebuilds.
+    let saved = s.doc.to_json();
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    at(centre(&mut reopened, occ), [40.0, 5.0, 5.0]);
+    run(&mut reopened, "parameters.change", json!({"name": "shift_x", "expression": "15 mm"}));
+    at(centre(&mut reopened, occ), [15.0, 5.0, 5.0]);
+}
+
+#[test]
+fn capture_position_composes_multiple_pending_moves_base_transform_world_space_and_direct_moves() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "step_x", "expression": "10 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "step_y", "expression": "4 mm"}));
+
+    let (parent_c, parent_occ) = created(&mut s, "Parent");
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    let (_, child_occ) = (
+        run(&mut s, "component.create", json!({"name": "Child", "parent": parent_c}))["component"].as_u64().unwrap(),
+        s.doc.occurrences.last().unwrap().id,
+    );
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+
+    // Sequential pending moves on parent (expression + matrix expression), then world-space child move.
+    run(&mut s, "occurrence.move", json!({"occurrence": parent_occ, "translate": ["step_x", 0, 0], "capture": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": parent_occ, "matrix": [0, -1, 0, 0, 1, 0, 0, "step_y", 0, 0, 1, 0], "capture": false}));
+    let baseline = s.occurrence_placement(&[parent_occ]).unwrap().local;
+    for scrub in [2.0, 7.0, 0.0] {
+        run(&mut s, "occurrence.move", json!({"occurrence": parent_occ, "base_transform": baseline, "translate": [scrub, 0, 0], "capture": false}));
+    }
+    // World-space move on child after parent moved + rotated.
+    run(
+        &mut s,
+        "occurrence.move",
+        json!({"occurrence": child_occ, "path": [parent_occ, child_occ], "space": "world", "translate": ["step_x", 0, 0], "capture": false}),
+    );
+    let child_world_before = s.occurrence_placement(&[parent_occ, child_occ]).unwrap().world;
+
+    let cap = run(&mut s, "component.capture_position", json!({}));
+    assert_eq!(cap["captured"], json!(2), "{cap}");
+    assert!(cap["feature"].as_u64().is_some(), "{cap}");
+    let child_world_after = s.occurrence_placement(&[parent_occ, child_occ]).unwrap().world;
+    for (a, b) in child_world_before.iter().flatten().zip(child_world_after.iter().flatten()) {
+        assert!((a - b).abs() < 1e-6, "world transform mismatch: {child_world_before:?} vs {child_world_after:?}");
+    }
+
+    // Second empty capture is a no-op with no timeline feature created.
+    let features_before = s.doc.features.len();
+    let noop = run(&mut s, "component.capture_position", json!({}));
+    assert_eq!(noop["captured"], json!(0));
+    assert!(noop.get("feature").is_none(), "{noop}");
+    assert_eq!(s.doc.features.len(), features_before);
+
+    // Direct capture: true move after CapturePosition adjusts base_transform so rebuilds keep it.
+    run(&mut s, "occurrence.move", json!({"occurrence": parent_occ, "space": "world", "translate": [0, 0, 20], "capture": true}));
+    let z_after_direct = s.occurrence_placement(&[parent_occ]).unwrap().world[3][2];
+    assert!((z_after_direct - 20.0).abs() < 1e-6);
+    run(&mut s, "parameters.change", json!({"name": "step_x", "expression": "15 mm"}));
+    let z_after_param = s.occurrence_placement(&[parent_occ]).unwrap().world[3][2];
+    assert!((z_after_param - 20.0).abs() < 1e-6, "direct move lost on rebuild: {z_after_param}");
+}
+
+#[test]
+fn capture_position_timeline_suppress_rollback_reorder_delete_and_undo_redo() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "dx", "expression": "10 mm"}));
+    let (_, occ) = created(&mut s, "Block");
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [-1, -1, -1]}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+
+    // Step 1: translate by dx (10, 0, 0) -> pending -> capture -> undo -> redo.
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": ["dx", 0, 0], "capture": false}));
+    let cap1 = run(&mut s, "component.capture_position", json!({}));
+    let cp1 = cap1["feature"].as_u64().unwrap();
+    at(centre(&mut s, occ), [10.0, 0.0, 0.0]);
+
+    // Undo restores pending_moves AND pending_move_records (with expression "dx"); redo restores CapturePosition.
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.pending_moves.contains_key(&occ));
+    assert!(s.doc.feature(cp1).is_none());
+    run(&mut s, "edit.redo", json!({}));
+    assert!(s.pending_moves.is_empty());
+    at(centre(&mut s, occ), [10.0, 0.0, 0.0]);
+    // Verify undo-restored pending_move_records still follow parameter changes when undone cleanly.
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "parameters.change", json!({"name": "dx", "expression": "12 mm"}));
+    assert_eq!(s.pending_moves.get(&occ).unwrap()[3][0], 12.0);
+    run(&mut s, "parameters.change", json!({"name": "dx", "expression": "10 mm"}));
+    let cp1 = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert!(s.pending_moves.is_empty());
+    at(centre(&mut s, occ), [10.0, 0.0, 0.0]);
+
+    // Step 2: rotate 90 deg about origin -> capture as cp2.
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "axis": [0, 0, 1], "angle": "90 deg", "capture": false}));
+    let cp2 = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    // Translate (10,0,0) THEN rotate 90 deg about Z -> (0, 10, 0).
+    at(centre(&mut s, occ), [0.0, 10.0, 0.0]);
+
+    // Suppress cp2 -> back to cp1 (10, 0, 0); unsuppress -> (0, 10, 0).
+    run(&mut s, "timeline.suppress", json!({"feature": cp2, "suppressed": true}));
+    at(centre(&mut s, occ), [10.0, 0.0, 0.0]);
+    run(&mut s, "timeline.suppress", json!({"feature": cp2, "suppressed": false}));
+    at(centre(&mut s, occ), [0.0, 10.0, 0.0]);
+
+    // Rollback before cp1 -> back to base (0, 0, 0); roll_to end -> (0, 10, 0).
+    let idx1 = s.doc.feature_index(cp1).unwrap();
+    run(&mut s, "timeline.rollback", json!({"position": idx1}));
+    at(centre(&mut s, occ), [0.0, 0.0, 0.0]);
+    run(&mut s, "timeline.roll_to", json!({}));
+    at(centre(&mut s, occ), [0.0, 10.0, 0.0]);
+
+    // Reorder cp2 before cp1: rotate 90 deg about Z (at origin) THEN translate (10, 0, 0) -> (10, 0, 0)!
+    run(&mut s, "timeline.reorder", json!({"feature": cp2, "position": idx1}));
+    at(centre(&mut s, occ), [10.0, 0.0, 0.0]);
+
+    // Delete cp2 -> cp1 still active -> delete cp1 -> base_transform cleared to None and o.transform restored to 0.
+    run(&mut s, "timeline.delete", json!({"feature": cp2}));
+    at(centre(&mut s, occ), [10.0, 0.0, 0.0]);
+    assert!(s.doc.occurrences.iter().find(|o| o.id == occ).unwrap().base_transform.is_some());
+
+    run(&mut s, "timeline.delete", json!({"feature": cp1}));
+    at(centre(&mut s, occ), [0.0, 0.0, 0.0]);
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == occ).unwrap().base_transform, None);
+}
+
+#[test]
+fn capture_position_timeline_inspect_edit_and_redefine() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "dx", "expression": "10 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "theta", "expression": "90 deg"}));
+    let (_, occ) = created(&mut s, "Block");
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [-1, -1, -1]}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": ["dx", 0, 0], "capture": false}));
+    let cp_id = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    at(centre(&mut s, occ), [10.0, 0.0, 0.0]);
+
+    // timeline.inspect exposes definition and dN inputs.
+    let inspected = run(&mut s, "timeline.inspect", json!({"feature": cp_id}));
+    assert_eq!(inspected["definition"]["moves"][0]["translate"][0], json!("dx"));
+    assert!(!inspected["inputs"].as_array().unwrap().is_empty(), "{inspected}");
+    let first_param = inspected["inputs"][0]["param"].as_str().unwrap().to_string();
+
+    // timeline.edit updates expressions and rebuilds; bad occurrence or typo field is refused atomically.
+    run(&mut s, "timeline.edit", json!({"feature": cp_id, "set": {"moves": [{"occurrence": occ, "translate": ["dx * 2", "0", "0"]}]}}));
+    at(centre(&mut s, occ), [20.0, 0.0, 0.0]);
+    let doc_before_err = s.doc.clone();
+    assert!(s.execute("timeline.edit", &json!({"feature": cp_id, "set": {"moves": [{"occurrence": 9999, "translate": ["1", "0", "0"]}]}})).is_err());
+    assert!(s.execute("timeline.edit", &json!({"feature": cp_id, "set": {"moves": [{"occurrence": occ, "typo": 1}]}})).is_err());
+    assert_eq!(s.doc, doc_before_err);
+
+    // timeline.redefine with component.capture_position preserves dN parameter names and updates geometry.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({
+            "feature": cp_id,
+            "command": "component.capture_position",
+            "params": {"moves": [{"occurrence": occ, "translate": ["dx + 5 mm", 0, 0], "angle": "theta"}]}
+        }),
+    );
+    at(centre(&mut s, occ), [15.0, 0.0, 0.0]);
+    let inspected_after = run(&mut s, "timeline.inspect", json!({"feature": cp_id}));
+    assert_eq!(inspected_after["inputs"][0]["param"], json!(first_param));
+    assert!(
+        s.execute(
+            "timeline.redefine",
+            &json!({"feature": cp_id, "command": "component.capture_position", "params": {"moves": [{"occurrence": 9999, "translate": [1, 0, 0]}]}})
+        )
+        .is_err()
+    );
+    at(centre(&mut s, occ), [15.0, 0.0, 0.0]);
+}
+
+#[test]
+fn capture_position_redefine_while_rolled_back_does_not_leak_transforms() {
+    let mut s = Session::default();
+    let (_, o1) = created(&mut s, "One");
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [-1, -1, -1]}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let (_, o2) = created(&mut s, "Two");
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [-1, -1, -1]}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+
+    run(&mut s, "occurrence.move", json!({"occurrence": o1, "translate": [10, 0, 0], "capture": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": o2, "translate": [0, 5, 0], "capture": false}));
+    let cp_id = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    at(centre(&mut s, o1), [10.0, 0.0, 0.0]);
+    at(centre(&mut s, o2), [0.0, 5.0, 0.0]);
+
+    let cp_idx = s.doc.feature_index(cp_id).unwrap();
+    run(&mut s, "timeline.rollback", json!({"position": cp_idx}));
+    at(centre(&mut s, o1), [0.0, 0.0, 0.0]);
+    at(centre(&mut s, o2), [0.0, 0.0, 0.0]);
+
+    let redef = run(
+        &mut s,
+        "timeline.redefine",
+        json!({
+            "feature": cp_id,
+            "command": "component.capture_position",
+            "params": {
+                "moves": [
+                    {"occurrence": o1, "translate": [20, 0, 0]},
+                    {"occurrence": o2, "translate": [0, 7, 0]}
+                ]
+            }
+        }),
+    );
+    assert_eq!(redef["rolled_back"], json!(true), "{redef}");
+    // While still rolled back behind marker, occurrences must remain at pre-capture (0, 0, 0).
+    at(centre(&mut s, o1), [0.0, 0.0, 0.0]);
+    at(centre(&mut s, o2), [0.0, 0.0, 0.0]);
+
+    run(&mut s, "timeline.roll_to", json!({}));
+    at(centre(&mut s, o1), [20.0, 0.0, 0.0]);
+    at(centre(&mut s, o2), [0.0, 7.0, 0.0]);
+}
+
+#[test]
+fn capture_position_isolates_failing_pending_move_and_validates_suppressed_edit() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "dx", "expression": "10 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "k", "expression": "1"}));
+
+    let (_, o1) = created(&mut s, "Healthy");
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [-1, -1, -1]}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let (p_comp, o2) = created(&mut s, "BrokenParent");
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [-1, -1, -1]}));
+    let (_, c_occ) = (
+        run(&mut s, "component.create", json!({"name": "HealthyWorldChild", "parent": p_comp, "grounded": false}))["component"].as_u64().unwrap(),
+        s.doc.occurrences.last().unwrap().id,
+    );
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [-1, -1, -1]}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+
+    run(&mut s, "occurrence.move", json!({"occurrence": o1, "translate": ["dx", 0, 0], "capture": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": o2, "translate": ["10 mm / k", 0, 0], "capture": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": c_occ, "path": [o2, c_occ], "space": "world", "translate": ["dx", 0, 0], "capture": false}));
+    // Break o2's pending expression without removing its pending transform.
+    run(&mut s, "parameters.change", json!({"name": "k", "expression": "0"}));
+
+    let cap_id = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    let solidcraft_doc::FeatureKind::CapturePosition { moves, .. } = &s.doc.feature(cap_id).unwrap().kind else {
+        panic!("expected CapturePosition");
+    };
+    let m1 = moves.iter().find(|m| m.occurrence == o1).expect("o1 move");
+    let mc = moves.iter().find(|m| m.occurrence == c_occ).expect("c_occ move");
+    assert_eq!(m1.translate[0].as_ref(), "dx", "healthy o1 must keep its expression");
+    assert_eq!(mc.translate[0].as_ref(), "dx", "healthy world child must keep its expression");
+    at(centre(&mut s, o1), [10.0, 0.0, 0.0]);
+    assert!((s.occurrence_placement(&[o2]).unwrap().world[3][0] - 10.0).abs() < 1e-6);
+    assert!((s.occurrence_placement(&[o2, c_occ]).unwrap().world[3][0] - 20.0).abs() < 1e-6);
+
+    run(&mut s, "parameters.change", json!({"name": "dx", "expression": "25 mm"}));
+    at(centre(&mut s, o1), [25.0, 0.0, 0.0]);
+    assert!((s.occurrence_placement(&[o2]).unwrap().world[3][0] - 10.0).abs() < 1e-6);
+    assert!((s.occurrence_placement(&[o2, c_occ]).unwrap().world[3][0] - 35.0).abs() < 1e-6);
+
+    // Eager validation in timeline.edit even when CapturePosition is suppressed or behind marker.
+    run(&mut s, "timeline.suppress", json!({"feature": cap_id, "suppressed": true}));
+    let doc_before = s.doc.clone();
+    let scale_rot = [[2.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+    let trans_rot = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [5.0, 0.0, 0.0, 1.0]];
+    assert!(s.execute("timeline.edit", &json!({"feature": cap_id, "set": {"moves": [{"occurrence": o1, "rotation": scale_rot}]}})).is_err());
+    assert!(s.execute("timeline.edit", &json!({"feature": cap_id, "set": {"moves": [{"occurrence": o1, "rotation": trans_rot}]}})).is_err());
+    assert_eq!(s.doc, doc_before);
+
+    // Bug 2 regression: suppressed and rolled-back timeline.edit eagerly rejects invalid move expressions and zero rotation axis.
+    for state in ["suppressed", "rolled_back"] {
+        if state == "suppressed" {
+            run(&mut s, "timeline.suppress", json!({"feature": cap_id, "suppressed": true}));
+        } else {
+            run(&mut s, "timeline.suppress", json!({"feature": cap_id, "suppressed": false}));
+            let idx = s.doc.feature_index(cap_id).unwrap();
+            run(&mut s, "timeline.rollback", json!({"position": idx}));
+        }
+        let doc_snap = s.doc.clone();
+        for bad_set in [
+            json!({"moves": [{"occurrence": o1, "translate": ["missing_param", "0", "0"]}]}),
+            json!({"moves": [{"occurrence": o1, "translate": ["2 * (", "0", "0"]}]}),
+            json!({"moves": [{"occurrence": o1, "translate": ["1e12", "0", "0"]}]}),
+            json!({"moves": [{"occurrence": o1, "translate": ["0", "0", "0"], "rotate_axis": [0, 0, 0], "angle": "90 deg"}]}),
+        ] {
+            assert!(s.execute("timeline.edit", &json!({"feature": cap_id, "set": bad_set})).is_err(), "{state}: {bad_set}");
+        }
+        assert_eq!(s.doc, doc_snap, "{state}: failed edit must not mutate doc");
+        if state == "rolled_back" {
+            run(&mut s, "timeline.roll_to", json!({}));
+        }
+    }
+}
+
+#[test]
+fn capture_position_joint_driven_20644_isolation_across_suppress_rollback_and_reopen() {
+    let mut s = Session::default();
+    let (_, base_occ) = created(&mut s, "Base");
+    run(&mut s, "occurrence.ground", json!({"occurrence": base_occ, "grounded": true}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 20, "body_name": "BaseBox"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+
+    let (_, arm_occ) = created(&mut s, "Arm");
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 20, "corner": [20, 0, 0], "body_name": "ArmBox"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+
+    // Create Slider joint placing ArmBox aligned on BaseBox top (at [0..10, 0..10, 0..20]).
+    run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [5, 5, 20]}, "b": {"face": [25, 5, 0]}, "name": "Rail"}));
+
+    // Pre-capture Plate [0..20, 0..10, 25..35] cut by ArmBox (initially at [0..10, 0..10, 20..40]).
+    // Measure pre-drive Plate cut volume and pre-capture offset plane Z on ArmBox top face (z=40).
+    run(&mut s, "solid.box", json!({"length": 20, "width": 10, "height": 10, "corner": [0, 0, 25], "operation": "new", "body_name": "Plate"}));
+    run(&mut s, "solid.combine", json!({"target": "Plate", "tools": ["ArmBox"], "operation": "cut", "keep_tools": true}));
+    let pre_plane =
+        run(&mut s, "construct.plane.offset", json!({"base": {"face": [5, 5, 40]}, "offset": 0, "name": "PreArmTop"}))["feature"].as_u64().unwrap();
+    let plate_vol = |s: &Session| solidcraft_kernel::measure(&s.model.state().body("Plate").unwrap().body).unwrap().volume;
+    let plane_z = |s: &Session, name: &str| crate::view::construction_planes(s).into_iter().find(|(_, n, _)| n == name).unwrap().2.origin.z;
+    let base_vol = plate_vol(&s);
+    let base_z = plane_z(&s, "PreArmTop");
+
+    // Drive Rail by +20 mm and capture in timeline.
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 20}));
+    let cp1 = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == arm_occ).unwrap().base_transform, None);
+
+    // #20644 isolation: pre-capture Plate cut and PreArmTop must keep pre-capture pose while CP1 is active.
+    assert!((plate_vol(&s) - base_vol).abs() < 1e-4, "active CP1 leaked joint pose into pre-capture Plate: {} vs {base_vol}", plate_vol(&s));
+    assert!(
+        (plane_z(&s, "PreArmTop") - base_z).abs() < 1e-6,
+        "active CP1 leaked joint pose into PreArmTop: {} vs {base_z}",
+        plane_z(&s, "PreArmTop")
+    );
+
+    // Post-capture offset plane sees driven pose (base_z + 20).
+    let post_top = run(&mut s, "construct.plane.offset", json!({"base": {"face": [5, 5, base_z + 20.0]}, "offset": 0, "name": "PostArmTop"}));
+    let _ = post_top;
+    assert!((plane_z(&s, "PostArmTop") - (base_z + 20.0)).abs() < 1e-6);
+
+    // Suppress, unsuppress, rollback, roll_to, and save/reopen preserve pre-capture isolation.
+    run(&mut s, "timeline.suppress", json!({"feature": cp1, "suppressed": true}));
+    assert!((plate_vol(&s) - base_vol).abs() < 1e-4);
+    assert!((plane_z(&s, "PreArmTop") - base_z).abs() < 1e-6);
+    assert!((plane_z(&s, "PostArmTop") - base_z).abs() < 1e-6);
+
+    run(&mut s, "timeline.suppress", json!({"feature": cp1, "suppressed": false}));
+    assert!((plate_vol(&s) - base_vol).abs() < 1e-4);
+    assert!((plane_z(&s, "PreArmTop") - base_z).abs() < 1e-6);
+    assert!((plane_z(&s, "PostArmTop") - (base_z + 20.0)).abs() < 1e-6);
+
+    let idx = s.doc.feature_index(cp1).unwrap();
+    run(&mut s, "timeline.rollback", json!({"position": idx}));
+    assert!((plate_vol(&s) - base_vol).abs() < 1e-4);
+    assert!((plane_z(&s, "PreArmTop") - base_z).abs() < 1e-6);
+    run(&mut s, "timeline.roll_to", json!({}));
+    assert!((plate_vol(&s) - base_vol).abs() < 1e-4);
+    assert!((plane_z(&s, "PreArmTop") - base_z).abs() < 1e-6);
+
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!((plate_vol(&reopened) - base_vol).abs() < 1e-4);
+    assert!((plane_z(&reopened, "PreArmTop") - base_z).abs() < 1e-6);
+    assert!((plane_z(&reopened, "PostArmTop") - (base_z + 20.0)).abs() < 1e-6);
+    let _ = pre_plane;
+}
+
+#[test]
+fn capture_position_edit_cleanup_redefine_zero_delta_copy_and_rollback_persistence() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "5 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "ox", "expression": "2 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "theta", "expression": "90 deg"}));
+
+    // Parent rotated 90 deg around Z + nested Child + Copy of Parent + Free Part.
+    let (p_comp, p_occ1) = created(&mut s, "Parent");
+    run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": [-2, -2, -2]}));
+    run(&mut s, "occurrence.move", json!({"occurrence": p_occ1, "axis": [0, 0, 1], "angle": "90 deg"}));
+    let (_, c_occ) = (
+        run(&mut s, "component.create", json!({"name": "Child", "parent": p_comp, "grounded": false}))["component"].as_u64().unwrap(),
+        s.doc.occurrences.last().unwrap().id,
+    );
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [-1, -1, -1]}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let p_occ2 = run(&mut s, "occurrence.copy", json!({"component": p_comp, "translate": [0, 40, 0]}))["occurrence"].as_u64().unwrap();
+    let (_, free_occ) = created(&mut s, "Free");
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [-1, -1, -1]}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+
+    // Item 3a: Zero-delta parametric move ("gap - gap" and "gap - 5 mm") still records and tracks parameter changes.
+    run(&mut s, "occurrence.move", json!({"occurrence": free_occ, "translate": ["gap - 5 mm", "gap - gap", 0], "capture": false}));
+    let cp_zero = run(&mut s, "component.capture_position", json!({}));
+    assert_eq!(cp_zero["captured"], json!(1));
+    let cp1 = cp_zero["feature"].as_u64().unwrap();
+    at(centre(&mut s, free_occ), [0.0, 0.0, 0.0]);
+    run(&mut s, "parameters.change", json!({"name": "gap", "expression": "15 mm"}));
+    at(centre(&mut s, free_occ), [10.0, 0.0, 0.0]);
+
+    // Item 2b: timeline.edit reassigning moves (free_occ -> p_occ2) and clearing moves: [] cleans up unused base_transform.
+    run(&mut s, "timeline.edit", json!({"feature": cp1, "set": {"moves": [{"occurrence": p_occ2, "translate": ["10 mm", "0", "0"]}]}}));
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == free_occ).unwrap().base_transform, None);
+    assert!(s.doc.occurrences.iter().find(|o| o.id == p_occ2).unwrap().base_transform.is_some());
+    assert!((s.occurrence_placement(&[p_occ2]).unwrap().world[3][0] - 10.0).abs() < 1e-6);
+    assert!((s.occurrence_placement(&[p_occ1]).unwrap().world[3][0]).abs() < 1e-6);
+
+    run(&mut s, "timeline.edit", json!({"feature": cp1, "set": {"moves": []}}));
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == p_occ2).unwrap().base_transform, None);
+    assert!((s.occurrence_placement(&[p_occ2]).unwrap().world[3][0]).abs() < 1e-6);
+
+    // Item 2b nested World edit preserving vs omitting space/path + Item 4b same-occurrence nested reorder.
+    run(
+        &mut s,
+        "occurrence.move",
+        json!({"occurrence": c_occ, "path": [p_occ1, c_occ], "space": "world", "translate": [10, 0, 0], "capture": false}),
+    );
+    let cp_world = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    run(
+        &mut s,
+        "timeline.edit",
+        json!({"feature": cp_world, "set": {"moves": [{"occurrence": c_occ, "space": "world", "path": [p_occ1, c_occ], "translate": ["18 mm", "0", "0"]}]}}),
+    );
+    // Preserving space=world and path keeps +18 along world +X even though p_occ1 is rotated +90Z.
+    let w_after_world = s.occurrence_placement(&[p_occ1, c_occ]).unwrap().world;
+    assert!((w_after_world[3][0] - 18.0).abs() < 1e-6 && w_after_world[3][1].abs() < 1e-6, "{:?}", w_after_world[3]);
+    run(&mut s, "timeline.edit", json!({"feature": cp_world, "set": {"moves": [{"occurrence": c_occ, "translate": ["12 mm", "0", "0"]}]}}));
+    // Replacing moves without space/path defaults to Local (+12 in p_occ1's +90Z frame -> world +12 Y).
+    let w_after_local = s.occurrence_placement(&[p_occ1, c_occ]).unwrap().world;
+    assert!(w_after_local[3][0].abs() < 1e-6 && (w_after_local[3][1] - 12.0).abs() < 1e-6, "{:?}", w_after_local[3]);
+
+    // Item 2c: redefine with origin expression + multi-move on p_occ1 checks input_keys.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({
+            "feature": cp_world,
+            "command": "component.capture_position",
+            "params": {
+                "moves": [
+                    {"occurrence": p_occ1, "origin": ["ox", 0, 0], "rotate_axis": [0, 0, 1], "angle": "theta", "translate": [0, 0, 0]},
+                    {"occurrence": p_occ1, "translate": [5, 0, 0]}
+                ]
+            }
+        }),
+    );
+    let inspect = run(&mut s, "timeline.inspect", json!({"feature": cp_world}));
+    assert!(inspect["inputs"].as_array().unwrap().len() >= 4, "{inspect}");
+    let before_ox = s.occurrence_placement(&[p_occ1]).unwrap().world[3];
+    run(&mut s, "parameters.change", json!({"name": "ox", "expression": "10 mm"}));
+    let after_ox = s.occurrence_placement(&[p_occ1]).unwrap().world[3];
+    assert!((after_ox[0] - before_ox[0]).abs() > 1.0 || (after_ox[1] - before_ox[1]).abs() > 1.0);
+
+    // Item 3b: occurrence.copy isolation across suppress & rollback.
+    run(&mut s, "timeline.suppress", json!({"feature": cp_world, "suppressed": true}));
+    assert!((s.occurrence_placement(&[p_occ2]).unwrap().world[3][1] - 40.0).abs() < 1e-6);
+    assert!((s.occurrence_placement(&[p_occ1]).unwrap().world[3][0]).abs() < 1e-6);
+    run(&mut s, "timeline.suppress", json!({"feature": cp_world, "suppressed": false}));
+
+    // Item 3c: Save/reopen while suppressed (without rollback), save/reopen while rolled back before CP1,
+    // and capturing a new CapturePosition while rolled back before CP1.
+    run(&mut s, "timeline.suppress", json!({"feature": cp_world, "suppressed": true}));
+    let mut reopened_sup = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!((reopened_sup.occurrence_placement(&[p_occ1]).unwrap().world[3][0]).abs() < 1e-6);
+    run(&mut reopened_sup, "timeline.suppress", json!({"feature": cp_world, "suppressed": false}));
+    assert!((reopened_sup.occurrence_placement(&[p_occ1]).unwrap().world[3][0] - after_ox[0]).abs() < 1e-6);
+
+    let idx_cp1 = s.doc.feature_index(cp1).unwrap();
+    run(&mut s, "timeline.rollback", json!({"position": idx_cp1}));
+    let mut reopened_rb = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(reopened_rb.doc.marker, Some(idx_cp1));
+    run(&mut reopened_rb, "occurrence.move", json!({"occurrence": free_occ, "translate": [7, 0, 0], "capture": false}));
+    let cp_rb = run(&mut reopened_rb, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    at(centre(&mut reopened_rb, free_occ), [7.0, 0.0, 0.0]);
+    run(&mut reopened_rb, "timeline.roll_to", json!({}));
+    at(centre(&mut reopened_rb, free_occ), [7.0, 0.0, 0.0]);
+    let _ = cp_rb;
+
+    // Item 4c: Mixed-ID revert_position atomicity.
+    run(&mut s, "timeline.roll_to", json!({}));
+    run(&mut s, "occurrence.move", json!({"occurrence": free_occ, "translate": [3, 0, 0], "capture": false}));
+    let doc_snap = s.doc.clone();
+    let pending_snap = s.pending_moves.clone();
+    assert!(s.execute("component.revert_position", &json!({"occurrences": [free_occ, 99999]})).is_err());
+    assert_eq!(s.doc, doc_snap);
+    assert_eq!(s.pending_moves, pending_snap);
+
+    // Item 5: selection.delete of referenced occurrence + suppress does not panic.
+    run(&mut s, "select.set", json!({"items": [{"type": "occurrence", "path": [p_occ1]}]}));
+    let _ = s.execute("selection.delete", &json!({}));
+    let _ = s.execute("timeline.suppress", &json!({"feature": cp_world, "suppressed": true}));
+}
+
+#[test]
+fn capture_position_rotational_align_persistence_and_reorder() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "dx", "expression": "10 mm"}));
+    let (_, o_base) = created(&mut s, "Base");
+    run(&mut s, "occurrence.ground", json!({"occurrence": o_base, "grounded": true}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "BaseBox"}));
+    // Tilt BaseBox 90 deg about X so its top face normal tilts onto -Y.
+    run(&mut s, "occurrence.move", json!({"occurrence": o_base, "axis": [1, 0, 0], "angle": "90 deg", "move_grounded": true}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+
+    let (_, o_part) = created(&mut s, "Part");
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "body_name": "PartBox"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+
+    // Non-parallel rotational align(capture: false) followed by parametric move -> capture -> save/reopen -> suppress.
+    run(&mut s, "occurrence.align", json!({"occurrence": o_part, "from_face": [25, 5, 10], "to_face": [5, -10, 5], "capture": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": o_part, "translate": ["dx", 0, 0], "capture": false}));
+    let cp1 = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    let solidcraft_doc::FeatureKind::CapturePosition { moves, .. } = &s.doc.feature(cp1).unwrap().kind else {
+        panic!("expected CapturePosition");
+    };
+    assert!(moves[0].rotation.is_some(), "rotational align should persist rotation matrix");
+
+    let pos_after = centre(&mut s, o_part);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    at(centre(&mut reopened, o_part), [pos_after[0], pos_after[1], pos_after[2]]);
+    run(&mut reopened, "parameters.change", json!({"name": "dx", "expression": "25 mm"}));
+    at(centre(&mut reopened, o_part), [pos_after[0] + 15.0, pos_after[1], pos_after[2]]);
+    run(&mut reopened, "timeline.suppress", json!({"feature": cp1, "suppressed": true}));
+    at(centre(&mut reopened, o_part), [25.0, 5.0, 5.0]);
+}
+
+#[test]
+fn capture_position_session_new_syncs_unsynced_document_moves_and_joints() {
+    let mut s = Session::default();
+    let (_, occ_a) = created(&mut s, "Base");
+    run(&mut s, "occurrence.ground", json!({"occurrence": occ_a, "grounded": true}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "BoxA"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+
+    let (_, _occ_b) = created(&mut s, "Slider");
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "body_name": "BoxB"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let jid = run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Rail"}))["joint"]
+        .as_u64()
+        .unwrap();
+
+    let (_, occ_c) = created(&mut s, "Mover");
+    run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 4, "body_name": "BoxC"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+
+    // Build an unsynced Document where CapturePosition exists in doc.features, while occurrences and joints
+    // still hold pre-capture values/transforms (Bug A: Session::with_model must not short-circuit sync).
+    let mut doc = (*s.doc).clone();
+    if let Some(o) = doc.occurrences.iter_mut().find(|o| o.id == occ_c) {
+        o.base_transform = Some(solidcraft_doc::IDENTITY);
+        o.transform = solidcraft_doc::IDENTITY;
+    }
+    if let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == jid) {
+        j.base_values = Some(vec![0.0]);
+        j.values = vec![0.0];
+        j.captured = None;
+    }
+    doc.add_feature(
+        solidcraft_doc::FeatureKind::CapturePosition {
+            moves: vec![solidcraft_doc::CapturedOccurrenceMove {
+                occurrence: occ_c,
+                space: solidcraft_doc::MoveSpace::Local,
+                translate: ["15 mm".into(), "0 mm".into(), "0 mm".into()],
+                origin: None,
+                rotate_axis: None,
+                angle: None,
+                rotation: None,
+                path: None,
+            }],
+            joints: vec![solidcraft_doc::CapturedJoint { joint: jid, values: vec![20.0], exprs: Vec::new() }],
+        },
+        None,
+    )
+    .unwrap();
+
+    let synced = Session::new(doc);
+    let world_c = synced.occurrence_placement(&[occ_c]).unwrap().world;
+    assert!((world_c[3][0] - 15.0).abs() < 1e-6, "occ_c remained unsynced: {:?}", world_c[3]);
+    let joint = synced.doc.assembly.joints.iter().find(|j| j.id == jid).unwrap();
+    assert_eq!(joint.captured, Some(vec![20.0]));
+    assert_eq!(joint.values, vec![20.0]);
 }

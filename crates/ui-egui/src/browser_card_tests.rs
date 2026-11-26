@@ -2176,7 +2176,7 @@ fn unpresented_app_requests_have_provenance_before_a_direct_session_replacement(
     let mut h = Harness::new();
     three_bodies(&mut h);
     let document = (*h.app.session.doc).clone();
-    h.app = crate::SolveApp::new(solidcraft_engine::Session::new(document.clone()), crate::Services::default());
+    *h.app = crate::SolveApp::new(solidcraft_engine::Session::new(document.clone()), crate::Services::default());
     // Existing callers can set the public request fields before the first UI frame.
     h.app.tree.reveal = Some("Three".into());
     h.app.tree.timeline_reveal = Some(document.features[2].id);

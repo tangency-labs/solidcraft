@@ -187,9 +187,40 @@ pub(super) fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
 
     let applied = apply && !Arc::ptr_eq(&r.doc, &s.doc);
     if applied {
+        let before_vals: Vec<(u64, Vec<f64>, Vec<Option<String>>)> = s
+            .doc
+            .assembly
+            .joints
+            .iter()
+            .filter(|j| j.kind != JointKind::Rigid && (j.captured.is_none() || j.base_values.is_none()))
+            .map(|j| (j.id, j.values.clone(), crate::normalize_joint_exprs(&j.exprs.values, j.kind.dofs().len())))
+            .collect();
         let mut doc = (*r.doc).clone();
         doc.assembly.contact_enabled = s.doc.assembly.contact_enabled;
+        if let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == id) {
+            j.exprs.set_value(index, None);
+        }
+        let mut moved = BTreeSet::new();
+        for (n, o) in doc.occurrences.iter().zip(&s.doc.occurrences) {
+            if (n.id == o.id && n.transform != o.transform) || n.id != o.id {
+                moved.insert(n.id);
+            }
+        }
         *s.doc_mut() = doc;
+        let exploded = &s.exploded;
+        s.pending_moves.retain(|occ_id, m| !moved.contains(occ_id) || exploded.get(occ_id) == Some(m));
+        s.pending_move_records.retain(|rec| !moved.contains(&rec.occurrence));
+        let mut pending = std::mem::take(&mut s.pending_joint_bases);
+        for (jid, old_vals, old_exprs) in before_vals {
+            if let Some(j) = s.doc.assembly.joints.iter().find(|j| j.id == jid) {
+                let dofs = j.kind.dofs().len();
+                let cur_exprs = crate::normalize_joint_exprs(&j.exprs.values, dofs);
+                if j.values != old_vals || cur_exprs != old_exprs {
+                    pending.entry(jid).or_insert((old_vals, old_exprs));
+                }
+            }
+        }
+        s.pending_joint_bases = pending;
     }
     let (stopped_at, stopped_by) = r.stop.map(|(v, stop)| (shown(v), stop)).unzip();
     let min_gap = report_gaps.then(|| r.nearest.into_iter().map(|(part, g)| (part, NearestGap { mm: g.mm, at_value: g.at, to: g.to })).collect());
@@ -326,7 +357,7 @@ fn run(s: &Session, mut geometry: ContactGeometry, sw: Sweep, cmd: &str) -> Resu
     let shown = |v: f64| if angle { v.to_degrees() } else { v };
     // On a copy, played from where the parts are placed; contact sets do not stop it.
     let mut t = s.scratch();
-    t.pending_moves.clear();
+    t.clear_pending_moves();
     t.doc_mut().assembly.contact_enabled = false;
     if free && let Some(limit) = t.doc_mut().assembly.joints.iter_mut().find(|j| j.id == id).and_then(|j| j.limits.get_mut(index)) {
         *limit = None;

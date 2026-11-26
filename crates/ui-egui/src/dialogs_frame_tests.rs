@@ -2927,7 +2927,7 @@ fn group_buttons_stay_visible_and_new_group_is_clickable_at_default_dialog_width
     for (width, height) in [(1280, 720), (800, 600)] {
         for count in [1, 3] {
             let mut h = Harness::new();
-            h.app = frame_app();
+            *h.app = frame_app();
             h.call("ui.resize", json!({"width": width, "height": height}));
             let lines = frame_lines(&h.app);
             let mut d = dialog_on(&mut h.app, &lines[..1]);
@@ -3279,7 +3279,7 @@ fn gusset_edit_restores_the_outline_from_the_clip_expression() {
 /// Click each icon and verify both the resulting plate bounds and translated accessible names.
 fn gusset_placement_icons_select_both_sides_and_center_with_exact_bounds() {
     let mut h = crate::scenario::Harness::new();
-    h.app = gusset_with_picked_supports();
+    *h.app = gusset_with_picked_supports();
     h.app.home.open = false;
     h.app.start("frame.gusset");
     h.frames(3);

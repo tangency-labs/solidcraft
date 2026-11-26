@@ -197,6 +197,8 @@ fn joint_face_measurements_are_shared_across_motion_samples_and_snap_kinds() {
         exprs: Default::default(),
         offset_xy: [0.0; 2],
         captured: None,
+        base_values: None,
+        base_exprs: Vec::new(),
         constraint: None,
         dynamics: Vec::new(),
     });
@@ -1144,6 +1146,8 @@ fn a_cams_profile_is_meshed_once() {
         exprs: Default::default(),
         offset_xy: [0.0; 2],
         captured: None,
+        base_values: None,
+        base_exprs: Vec::new(),
         constraint: None,
     };
     let profile = CamProfile::Edges { occurrence, picks: vec![Vec3::new(5.0, 0.0, 10.0)], names: Vec::new() };
@@ -3048,7 +3052,7 @@ fn a_tap_marking_searches_only_the_bodies_near_it() {
     let hole = FeatureKind::Hole {
         position: FacePick(Vec3::new(30.0, 30.0, 12.0)),
         at: None,
-        direction: Dir(-Vec3::Z),
+        direction: crate::dir_expr(-Vec3::Z),
         diameter: "5".into(),
         depth: Some("10".into()),
         hole: HoleKind::default(),
@@ -3192,7 +3196,7 @@ fn a_tapped_hole_reads_the_bodies_along_its_drill_line() {
     let hole = FeatureKind::Hole {
         position: FacePick(Vec3::new(30.0, 30.0, 12.0)),
         at: None,
-        direction: Dir(-Vec3::Z),
+        direction: crate::dir_expr(-Vec3::Z),
         diameter: "5".into(),
         depth: Some("10".into()),
         hole: HoleKind::default(),
@@ -3289,6 +3293,7 @@ fn a_flange_lays_its_sheet_out_once() {
         corner_relief_shape: None,
         corner_relief: None,
         height_from: None,
+        bend_relief_shape: None,
     };
     for p in [Vec3::new(75.0, 0.0, 2.5), Vec3::new(75.0, 100.0, 2.5), Vec3::new(0.0, 50.0, 2.5), Vec3::new(150.0, 50.0, 2.5)] {
         // The pick is named as the engine names it, on the model as it is.
@@ -4869,6 +4874,45 @@ fn a_pattern_knows_its_copies_beside_the_body_took_no_material() {
     assert!(result.error.is_none(), "{result:?}");
     assert!(result.warning.as_deref().is_some_and(|w| w.starts_with("9 of 9 cut copies remove no material")), "{result:?}");
     assert_eq!((work.classifications, work.miss_intersects), (0, 0), "{work:?}");
+}
+
+/// #611: a parameter rename keeps the results only when they are the ones evaluating `previous`
+/// gives: a `previous` that builds something else (a literal that differs) is refused, and the
+/// model is left as it was.
+#[test]
+fn a_parameter_rename_keeps_no_results_evaluated_for_another_design() {
+    let mut doc = Document::default();
+    doc.set_param("w", "2", None, None).unwrap();
+    let feature = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "w".into(),
+                width: "3".into(),
+                height: "4".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let shown = model.results.iter().map(|r| r.fingerprint).collect::<Vec<_>>();
+    let mut other = doc.clone();
+    let FeatureKind::Box { height, .. } = &mut other.feature_mut(feature).unwrap().kind else { panic!("box") };
+    *height = "5".into();
+    let mut renamed = other.clone();
+    renamed.rename_param("w", "v").unwrap();
+    assert_eq!(renamed.param_rename_from(&other), Some(("w".into(), "v".into())));
+    assert!(!model.rename_param(&other, &renamed, "w", "v"), "the results are not the 2 x 3 x 5 box's");
+    assert_eq!(model.results.iter().map(|r| r.fingerprint).collect::<Vec<_>>(), shown, "the model is left as it was");
+    // The design the results were evaluated for is renamed without evaluating.
+    let mut same = doc.clone();
+    same.rename_param("w", "v").unwrap();
+    assert!(model.rename_param(&doc, &same, "w", "v"));
+    model.evaluate(&same);
+    assert_eq!(model.last_recomputed, 0);
 }
 
 /// Add a sketch on XY with disjoint rectangles `(x, y, w, h)` and extrude all of them to `height`

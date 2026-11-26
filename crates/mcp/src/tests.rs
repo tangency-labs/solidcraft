@@ -678,6 +678,35 @@ fn export_tool_writes_a_urdf_package() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `export` passes `quality` and `chord` to `file.export`, called directly and as a batch step
+/// (#20393): a batch step dropped them and wrote the standard mesh.
+#[test]
+fn export_tool_passes_the_mesh_quality_and_chord() {
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "solid.cylinder", "params": {"diameter": 3, "height": 14}}));
+    let dir = std::env::temp_dir().join(format!("solidcraft-mcp-chord-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let triangles = |name: &str| -> u32 {
+        let bytes = std::fs::read(dir.join(name)).unwrap_or_default();
+        bytes.get(80..84).map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    };
+    let at = |name: &str| dir.join(name).to_string_lossy().to_string();
+    tool(&mut s, "export", json!({"path": at("standard.urdf")}));
+    tool(&mut s, "export", json!({"path": at("direct.urdf"), "chord": 0.05}));
+    tool(&mut s, "export", json!({"path": at("fine.urdf"), "quality": "fine"}));
+    let r = tool(&mut s, "batch", json!({"commands": [{"command": "export", "params": {"path": at("batch.urdf"), "chord": 0.05}}]}));
+    assert_eq!(r["completed"], 1, "{r}");
+    let (standard, direct, batch, fine) =
+        (triangles("standard-base.stl"), triangles("direct-base.stl"), triangles("batch-base.stl"), triangles("fine-base.stl"));
+    assert!(direct > 0 && direct * 5 < standard, "chord 0.05: {direct}, standard {standard}");
+    assert_eq!(batch, direct, "a batch step takes the chord too");
+    assert!(fine > standard, "fine {fine}, standard {standard}");
+    let r = raw_tool(&mut s, "export", json!({"path": at("both.urdf"), "chord": 0.05, "quality": "fine"}));
+    assert_eq!(r["result"]["isError"], json!(true), "{r}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// `format` accepts every format the extension does: iges, igs and stp were refused (#11806).
 #[test]
 fn export_tool_format_argument_accepts_iges() {
@@ -5662,4 +5691,79 @@ fn the_instructions_tell_the_agent_to_use_the_selection() {
         call(&mut s, 1, "initialize", json!({"protocolVersion": PROTOCOL_VERSION, "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}));
     let text = r["result"]["instructions"].as_str().unwrap();
     assert!(text.contains("The user's current selection comes with every reply; when they say 'this', 'these' or 'the selected', use it."), "{text}");
+}
+
+/// Both MCP inspection forms expose every world placement, including a compact filtered copy.
+/// Counts, positions and volumes are specified independently of inspect.measure (#21797).
+#[test]
+fn inspect_design_lists_repeated_body_placements_and_filters_their_world_names() {
+    for opts in [crate::Options::default(), crate::Options { compact: true }] {
+        let mut s = Server::new(Box::new(Headless::default())).with_options(opts);
+        let exec = |s: &mut Server, command: &str, params: Value| tool(s, "execute", json!({"command":command, "params":params}));
+        let part = exec(&mut s, "component.create", json!({"name":"Part", "grounded":false}));
+        exec(&mut s, "solid.box", json!({"corner":[0,0,0], "length":10, "width":20, "height":30, "body_name":"Box", "name":"MadeBox"}));
+        exec(&mut s, "component.activate", json!({"component":0}));
+        let second = exec(&mut s, "occurrence.copy", json!({"component":part["component"], "translate":[40,0,0]}))["occurrence"].clone();
+        let third = exec(&mut s, "occurrence.copy", json!({"component":part["component"], "translate":[0,50,0]}))["occurrence"].clone();
+        let names = json!(["Box", "Box (Part:2)", "Box (Part:3)"]);
+        let args = json!({"measure":true, "sketches":false, "joints":false});
+        let first = tool(&mut s, "inspect_design", args.clone());
+        assert_eq!(first["bodies"].as_array().unwrap().len(), 3, "{opts:?}: {first}");
+        for (name, min, max) in [
+            ("Box", [0.0, 0.0, 0.0], [10.0, 20.0, 30.0]),
+            ("Box (Part:2)", [40.0, 0.0, 0.0], [50.0, 20.0, 30.0]),
+            ("Box (Part:3)", [0.0, 50.0, 0.0], [10.0, 70.0, 30.0]),
+        ] {
+            let b = first["bodies"].as_array().unwrap().iter().find(|b| b["name"] == name).unwrap();
+            assert_eq!(b["closed"], true, "{b}");
+            assert!((b["volume_mm3"].as_f64().unwrap() - 6000.0).abs() < 1e-6, "{b}");
+            for k in 0..3 {
+                assert!((b["bbox"]["min"][k].as_f64().unwrap() - min[k]).abs() < 1e-6, "{b}");
+                assert!((b["bbox"]["max"][k].as_f64().unwrap() - max[k]).abs() < 1e-6, "{b}");
+            }
+        }
+        for measure in [false, true] {
+            let named = tool(&mut s, "inspect_design", json!({"measure":measure, "bodies":"names", "sketches":false, "joints":false}));
+            assert_eq!(named["bodies"], names, "{opts:?}: {named}");
+            let none = tool(&mut s, "inspect_design", json!({"measure":measure, "bodies":false, "sketches":false, "joints":false}));
+            assert!(none.get("bodies").is_none());
+        }
+        let batch = tool(&mut s, "batch", json!({"commands":[{"command":"inspect_design", "params":{"measure":false, "bodies":"names"}}]}));
+        assert_eq!(batch["results"][0]["bodies"], names, "{opts:?}: {batch}");
+        if opts.compact {
+            for measure in [false, true] {
+                let filtered =
+                    tool(&mut s, "inspect_design", json!({"bodies":["Box (Part:2)"], "measure":measure, "sketches":false, "joints":false}));
+                let b = &filtered["bodies"][0];
+                assert_eq!(filtered["bodies"].as_array().unwrap().len(), 1);
+                assert_eq!(b["name"], "Box (Part:2)");
+                if measure {
+                    assert!((b["volume_mm3"].as_f64().unwrap() - 6000.0).abs() < 1e-6, "{b}");
+                    assert_eq!(b["bbox"]["min"], json!([40.0, 0.0, 0.0]));
+                } else {
+                    assert!(b.get("volume_mm3").is_none());
+                }
+            }
+        } else {
+            let refused = raw_tool(&mut s, "inspect_design", json!({"bodies":["Box (Part:2)"]}));
+            assert_eq!(refused["error"]["code"], -32602, "noncompact arguments are unchanged: {refused}");
+        }
+        exec(&mut s, "browser.visibility", json!({"paths":[[second]], "visible":false}));
+        exec(&mut s, "occurrence.move", json!({"occurrence":third, "to_matrix":[[0,-1,0,0],[1,0,0,50],[0,0,1,7]], "capture":false}));
+        let before = tool(&mut s, "inspect_design", json!({"bodies":false, "measure":false, "sketches":false, "joints":false}));
+        let moved = tool(&mut s, "inspect_design", args);
+        assert_eq!(moved["bodies"].as_array().unwrap().len(), 3);
+        for b in moved["bodies"].as_array().unwrap() {
+            assert_eq!(b["visible"], b["name"] != "Box (Part:2)", "{b}");
+        }
+        let b = moved["bodies"].as_array().unwrap().iter().find(|b| b["name"] == "Box (Part:3)").unwrap();
+        assert_eq!(b["bbox"]["min"], json!([-20.0, 50.0, 7.0]));
+        assert_eq!(b["bbox"]["max"], json!([0.0, 60.0, 37.0]));
+        assert!((b["volume_mm3"].as_f64().unwrap() - 6000.0).abs() < 1e-6, "{b}");
+        for key in ["revision", "undo", "redo", "dirty", "marker", "selection", "timeline", "sketches"] {
+            assert_eq!(moved[key], before[key], "inspection changed {key}: {opts:?}");
+        }
+        let after = tool(&mut s, "inspect_design", json!({"bodies":false, "measure":false, "sketches":false, "joints":false}));
+        assert_eq!(after, before, "no document/history mutation: {opts:?}");
+    }
 }

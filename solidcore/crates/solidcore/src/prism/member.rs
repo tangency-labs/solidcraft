@@ -35,6 +35,11 @@ pub const MAX_REACH: f64 = 1e6;
 /// Shortest (mm) a member may be along any line through its section.
 pub const MIN_LENGTH: f64 = 1e-6;
 
+/// How far a member's frame axes and direction may be from unit length, and its axes from
+/// square: a frame made by normalising (a sketch plane, a turned section) is unit and square to a
+/// few rounding units, far inside this.
+pub const FRAME_TOLERANCE: f64 = 1e-9;
+
 /// Two lines are alongside each other, for a butt joint, when the squared sine of the angle
 /// between them is at most this.
 const ALONGSIDE: f64 = 1e-12;
@@ -139,7 +144,8 @@ impl Member {
     /// `lo`..`hi`.
     ///
     /// # Errors
-    /// [`Refusal::Degenerate`] when the line has no length or the box is empty.
+    /// [`Refusal::Degenerate`] when the line has no length, the box is empty, a number is not
+    /// finite or the frame's axes are not unit and square to each other (to [`FRAME_TOLERANCE`]).
     pub fn along(
         frame: Frame,
         start: Point3,
@@ -149,7 +155,55 @@ impl Member {
     ) -> Result<Self, Refusal> {
         let length = start.distance(end);
         let dir = (end - start).unitize().map_err(|_| Refusal::Degenerate)?;
-        if !(length > 0.0 && lo.x <= hi.x && lo.y <= hi.y) {
+        Self::checked(frame, dir, length, lo, hi)
+    }
+
+    /// A member from its fields as given (an application's copy of a member's data), checked as
+    /// [`Member::along`] checks its own: every number finite, the frame's axes unit and square to
+    /// each other and `dir` a unit vector (each to [`FRAME_TOLERANCE`]), `length` above zero and
+    /// the box not empty. The fields are kept exactly as given, so every member's own fields make
+    /// that member again.
+    ///
+    /// # Errors
+    /// [`Refusal::Degenerate`] when a number is not finite, an axis or `dir` is not a unit vector,
+    /// the axes are not square, the length is not above zero or the box is empty.
+    pub fn from_parts(
+        frame: Frame,
+        dir: Vec3,
+        length: f64,
+        lo: Point2,
+        hi: Point2,
+    ) -> Result<Self, Refusal> {
+        Self::checked(frame, dir, length, lo, hi)
+    }
+
+    /// The member of these fields, when they are sound: the checks [`Member::along`] and
+    /// [`Member::from_parts`] share.
+    fn checked(
+        frame: Frame,
+        dir: Vec3,
+        length: f64,
+        lo: Point2,
+        hi: Point2,
+    ) -> Result<Self, Refusal> {
+        let finite = [frame.origin, frame.x_axis, frame.y_axis]
+            .iter()
+            .flatten()
+            .chain(&[length, lo.x, lo.y, hi.x, hi.y])
+            .all(|v| v.is_finite());
+        let (x, y) = (Vec3::from(frame.x_axis), Vec3::from(frame.y_axis));
+        // NaN compares false, so a non-finite vector is refused here.
+        let unit = |v: Vec3| (v.length() - 1.0).abs() <= FRAME_TOLERANCE;
+        let square = x.dot(y).abs() <= FRAME_TOLERANCE;
+        if !(finite
+            && unit(x)
+            && unit(y)
+            && square
+            && unit(dir)
+            && length > 0.0
+            && lo.x <= hi.x
+            && lo.y <= hi.y)
+        {
             return Err(Refusal::Degenerate);
         }
         Ok(Self {

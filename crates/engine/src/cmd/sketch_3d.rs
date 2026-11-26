@@ -23,6 +23,7 @@ use crate::schema::sketch_3d::{
     Move3dParams, Move3dResult, OnPlaneParams, OnPlaneResult, POINT3_MUST, Point3dParams, Point3dResult, Spline3dParams, point3_coordinates,
 };
 use crate::schema::sketch_dimension::DimensionResult;
+use crate::schema::sketch_modify::FilletResult;
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
@@ -735,6 +736,91 @@ pub(super) fn join_in(sk: &mut solidcraft_sketch::Sketch, doc: &solidcraft_doc::
         .collect();
     sk.remove_wire_constraints(&on_traces);
     Ok(joints.into_iter().filter(|j| !on_traces.contains(j)).collect())
+}
+
+/// `sketch.fillet` on corners of drawn 3D lines (#21319), for the bends of a tube path: each
+/// corner `{a, b}` of two drawn 3D lines that share an end point is rounded with a 3D arc in
+/// the plane of the two lines ([`solidcraft_sketch::Sketch::fillet_drawn_lines`]). The first
+/// arc carries the radius dimension, with a parameter of its own, and the others are equal to
+/// it. `None` when no corner names two drawn 3D lines, for the planar command (which refuses
+/// every other 3D curve).
+pub(super) fn fillet_3d(s: &mut Session, p: &Value, cmd: &str, radius: &str, corners: &[Value]) -> Result<Option<FilletResult>> {
+    if s.sheet_sketching() {
+        return Ok(None);
+    }
+    // A sketch that cannot be found is the planar command's to report, in its own order.
+    let Ok(id) = sketch_store::target(s, p, cmd) else { return Ok(None) };
+    let Ok(sk) = sketch_store::read(&s.doc, id) else { return Ok(None) };
+    let line = |q: &Value, k: &str| q.get(k).and_then(Value::as_str).filter(|id| sk.is_drawn_line(id)).map(str::to_string);
+    let pairs: Vec<Option<(String, String)>> = corners.iter().map(|q| line(q, "a").zip(line(q, "b"))).collect();
+    // A 3D point names no corner: lines that meet there are told apart only by naming them.
+    fn text<'a>(q: &'a Value, k: &str) -> Option<&'a str> {
+        q.get(k).and_then(Value::as_str)
+    }
+    if corners.iter().filter_map(|q| text(q, "point")).any(|r| sk.resolve_point(r).is_none() && sk.wire_point(r).is_some()) {
+        return Err(bad(cmd, "a 3D corner is given as its two 3D lines, `a` and `b`, not as a point"));
+    }
+    if pairs.iter().all(Option::is_none) {
+        return Ok(None);
+    }
+    if let Some((other, _)) = corners.iter().zip(&pairs).find(|(_, pair)| pair.is_none()) {
+        let spatial = ["a", "b"].iter().any(|k| text(other, k).is_some_and(|id| sk.is_spatial_corner_curve(id)));
+        return Err(bad(
+            cmd,
+            if spatial {
+                "not supported yet: filleting 3D or linked sketch curves, other than two drawn 3D lines that share an end point"
+            } else {
+                "round 3D corners and corners on the sketch plane in separate steps"
+            },
+        ));
+    }
+    let pairs: Vec<(String, String)> = pairs.into_iter().flatten().collect();
+    let said = |e: solidcraft_sketch::SketchError| match e {
+        solidcraft_sketch::SketchError::Invalid(why) => bad(cmd, why),
+        e => e.into(),
+    };
+    let ((curves, constraints, param, virtual_corners, moved), info) = edit(s, p, cmd, true, |sk, doc| {
+        let r = doc.eval(radius, solidcraft_doc::expr::Kind::Length).map_err(|e| bad(cmd, format!("radius: {e}")))?;
+        if !(r > 1e-9 && r < 1e8) {
+            return Err(bad(cmd, "radius must be positive"));
+        }
+        off_traces(doc, id, pairs.iter().flat_map(|(a, b)| [a.as_str(), b.as_str()]), cmd)?;
+        join_all(sk, doc, id)?;
+        // Rounded as the design's parameters place the lines now: the stored sketch keeps the
+        // geometry of its last edit, from before a parameter changed.
+        doc.apply_wire_values(&doc.param_values().0, sk)?;
+        sk.solve_wires_with(None, false);
+        let param = doc.new_model_param(radius, "mm");
+        let (mut arcs, mut constraints, mut corners, mut moved): (Vec<String>, Vec<String>, Vec<String>, Vec<String>) = Default::default();
+        for (a, b) in &pairs {
+            let made = sk.fillet_drawn_lines(a, b, r).map_err(said)?;
+            constraints.extend(made.tangents);
+            // One radius for them all: the first carries the dimension, the rest are equal to it.
+            constraints.push(
+                match arcs.first() {
+                    None => sk.add_wire_dimension(WireConstraintKind::Radius { arc: made.arc.clone(), value: r }, Some(param.clone()), false),
+                    Some(first) => sk.add_wire_constraint(WireConstraintKind::Equal { a: first.clone(), b: made.arc.clone(), arcs: true }),
+                }
+                .map_err(said)?,
+            );
+            arcs.push(made.arc);
+            corners.extend(made.corner);
+            moved.extend(made.moved);
+        }
+        Ok((arcs, constraints, param, corners, moved))
+    })?;
+    Ok(Some(FilletResult {
+        curves,
+        constraints,
+        param: Some(param),
+        expression: None,
+        virtual_corners,
+        moved_to_virtual_corner: moved,
+        offset_released: Vec::new(),
+        sketch: info,
+        created: None,
+        param_warnings: Vec::new(),
+    }))
 }
 
 /// `sketch.constraint.parallel`, `.perpendicular`, `.collinear`, `.equal` and `.tangent` on 3D

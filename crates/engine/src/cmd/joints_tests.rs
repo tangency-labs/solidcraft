@@ -906,10 +906,17 @@ fn capture_position_saves_joint_values_and_revert_position_puts_them_back() {
     let mut s = two_cubes();
     run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Rail"}));
     let b = Vec3::new(25.0, 5.0, 0.0);
-    // Nothing captured yet: Revert Position leaves the joint where it is.
-    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 3}));
+    // Not driven yet: Revert Position leaves the joint where it is.
     let r = run(&mut s, "component.revert_position", json!({}));
     assert_eq!(r["joints"], json!(0), "{r}");
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 10.0)));
+    // Driven before first capture: Revert Position puts it back to its pre-drive baseline.
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 3}));
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 13.0)));
+    let r = run(&mut s, "component.revert_position", json!({}));
+    assert_eq!(r["joints"], json!(1), "{r}");
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 10.0)));
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 3}));
     assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 13.0)));
     // Capture at 3 mm, drive away, and revert.
     let r = run(&mut s, "component.capture_position", json!({}));
@@ -4861,6 +4868,1302 @@ fn joint_dynamics_refuses_hostile_values() {
         assert!(s.execute("joint.dynamics", &p).is_err(), "{p}");
     }
     assert!(s.doc.assembly.joints[0].dynamics.iter().all(Option::is_none));
+}
+
+#[test]
+fn capture_position_timeline_joint_snapshot_suppress_rollback_and_parameter_change() {
+    let mut s = two_cubes();
+    run(&mut s, "parameters.add", json!({"name": "travel", "expression": "3 mm"}));
+    let jid = run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Rail"}))["joint"]
+        .as_u64()
+        .unwrap();
+    let b = Vec3::new(25.0, 5.0, 0.0);
+
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 3}));
+    let cap = run(&mut s, "component.capture_position", json!({}));
+    assert_eq!(cap["joints"], json!(1), "{cap}");
+    let cp_id = cap["feature"].as_u64().expect("CapturePosition feature id");
+
+    // Driving away via joint.drive is preserved across unrelated refreshes, and revert_position returns to 3.
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 9}));
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 19.0)));
+    run(&mut s, "component.revert_position", json!({}));
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 13.0)));
+
+    // Redefining CapturePosition with an expression on the joint updates on parameters.change.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({
+            "feature": cp_id,
+            "command": "component.capture_position",
+            "params": {"joints": [{"joint": jid, "values": [3.0], "exprs": ["travel"]}]}
+        }),
+    );
+    run(&mut s, "parameters.change", json!({"name": "travel", "expression": "7 mm"}));
+    assert_eq!(s.doc.assembly.joints[0].captured, Some(vec![7.0]));
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 17.0)));
+
+    // Suppress restores pre-capture baseline (0.0 -> (5.0, 5.0, 10.0)), unsuppress restores 7.0,
+    // rollback restores 0.0, roll_to restores 7.0, and delete restores 0.0 and clears base_values.
+    run(&mut s, "timeline.suppress", json!({"feature": cp_id, "suppressed": true}));
+    assert_eq!(s.doc.assembly.joints[0].captured, None);
+    assert_eq!(s.doc.assembly.joints[0].values, vec![0.0]);
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 10.0)));
+    run(&mut s, "timeline.suppress", json!({"feature": cp_id, "suppressed": false}));
+    assert_eq!(s.doc.assembly.joints[0].captured, Some(vec![7.0]));
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 17.0)));
+    let cp_idx = s.doc.feature_index(cp_id).unwrap();
+    run(&mut s, "timeline.rollback", json!({"position": cp_idx}));
+    assert_eq!(s.doc.assembly.joints[0].captured, None);
+    assert_eq!(s.doc.assembly.joints[0].values, vec![0.0]);
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 10.0)));
+    run(&mut s, "timeline.roll_to", json!({}));
+    assert_eq!(s.doc.assembly.joints[0].captured, Some(vec![7.0]));
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 17.0)));
+    run(&mut s, "timeline.delete", json!({"feature": cp_id}));
+    assert_eq!(s.doc.assembly.joints[0].captured, None);
+    assert_eq!(s.doc.assembly.joints[0].values, vec![0.0]);
+    assert_eq!(s.doc.assembly.joints[0].base_values, None);
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 10.0)));
+}
+
+#[test]
+fn capture_position_joint_baseline_multi_capture_reopen_and_uncaptured_drive() {
+    // 0 -> drive(30 deg) -> cp1 -> drive(60 deg) -> cp2 -> suppress/rollback/delete + save/reopen + uncaptured drive(90 deg)
+    let mut s = two_cubes();
+    run(&mut s, "joint.create", json!({"type": "revolute", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Hinge"}));
+    let b = Vec3::new(35.0, 5.0, 0.0);
+    let p0 = place(&s, "B", b);
+
+    run(&mut s, "joint.drive", json!({"joint": "Hinge", "value": 30}));
+    let p30 = place(&s, "B", b);
+    let cp1 = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert_eq!(s.doc.assembly.joints[0].base_values, Some(vec![0.0]));
+
+    run(&mut s, "joint.drive", json!({"joint": "Hinge", "value": 60}));
+    let p60 = place(&s, "B", b);
+    let cp2 = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+
+    // Suppress cp2 -> 30 deg; rollback before cp1 -> 0 deg; roll_to end -> 60 deg.
+    run(&mut s, "timeline.suppress", json!({"feature": cp2, "suppressed": true}));
+    assert!((s.doc.assembly.joints[0].values[0] - 30.0_f64.to_radians()).abs() < 1e-9);
+    assert!(near(place(&s, "B", b), p30));
+    run(&mut s, "timeline.suppress", json!({"feature": cp2, "suppressed": false}));
+    assert!(near(place(&s, "B", b), p60));
+
+    let idx1 = s.doc.feature_index(cp1).unwrap();
+    let idx2 = s.doc.feature_index(cp2).unwrap();
+    run(&mut s, "timeline.rollback", json!({"position": idx2}));
+    assert!(near(place(&s, "B", b), p30));
+    run(&mut s, "timeline.rollback", json!({"position": idx1}));
+    assert!((s.doc.assembly.joints[0].values[0]).abs() < 1e-9);
+    assert!(near(place(&s, "B", b), p0));
+    run(&mut s, "timeline.roll_to", json!({}));
+    assert!(near(place(&s, "B", b), p60));
+
+    // Save / reopen round-trip followed immediately by suppress(cp2) -> 30 deg and suppress(cp1) -> 0 deg.
+    let saved = s.doc.to_json();
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    run(&mut reopened, "timeline.suppress", json!({"feature": cp2, "suppressed": true}));
+    assert!(near(place(&reopened, "B", b), p30));
+    run(&mut reopened, "timeline.suppress", json!({"feature": cp1, "suppressed": true}));
+    assert!((reopened.doc.assembly.joints[0].values[0]).abs() < 1e-9);
+    assert!(near(place(&reopened, "B", b), p0));
+
+    // Uncaptured joint.drive(90) after cp2 + unrelated command keeps 90, and revert_position returns to 60.
+    run(&mut s, "joint.drive", json!({"joint": "Hinge", "value": 90}));
+    let p90 = place(&s, "B", b);
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "corner": [50, 50, 0]}));
+    assert!((s.doc.assembly.joints[0].values[0] - 90.0_f64.to_radians()).abs() < 1e-9);
+    assert!(near(place(&s, "B", b), p90));
+    run(&mut s, "component.revert_position", json!({}));
+    assert!((s.doc.assembly.joints[0].values[0] - 60.0_f64.to_radians()).abs() < 1e-9);
+    assert!(near(place(&s, "B", b), p60));
+
+    // Delete cp2 -> 30 deg; delete cp1 -> 0 deg and base_values cleared.
+    run(&mut s, "timeline.delete", json!({"feature": cp2}));
+    assert!(near(place(&s, "B", b), p30));
+    assert!(s.doc.assembly.joints[0].base_values.is_some());
+    run(&mut s, "timeline.delete", json!({"feature": cp1}));
+    assert!(near(place(&s, "B", b), p0));
+    assert_eq!(s.doc.assembly.joints[0].base_values, None);
+    assert_eq!(s.doc.assembly.joints[0].captured, None);
+}
+
+#[test]
+fn capture_position_joint_exprs_sync_redefine_revert_and_legacy_captured() {
+    let mut s = two_cubes();
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "5 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "other_gap", "expression": "12 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "same_gap", "expression": "12 mm"}));
+    let jid = run(
+        &mut s,
+        "joint.create",
+        json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "values": ["gap"], "name": "Rail"}),
+    )["joint"]
+        .as_u64()
+        .unwrap();
+    let b = Vec3::new(25.0, 5.0, 0.0);
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 15.0)));
+
+    let cp_id = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert_eq!(s.doc.assembly.joints[0].base_values, Some(vec![5.0]));
+    assert_eq!(s.doc.assembly.joints[0].base_exprs, vec![Some("gap".to_string())]);
+
+    // Redefine CapturePosition to a different expression ("other_gap" = 12 mm): j.values and j.exprs must sync!
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({
+            "feature": cp_id,
+            "command": "component.capture_position",
+            "params": {"joints": [{"joint": jid, "values": [5.0], "exprs": ["other_gap"]}]}
+        }),
+    );
+    assert_eq!(s.doc.assembly.joints[0].captured, Some(vec![12.0]));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![12.0]);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("other_gap"));
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 22.0)));
+
+    // Redefine to a different expression with the SAME numeric value ("same_gap" = 12 mm): j.exprs must sync!
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({
+            "feature": cp_id,
+            "command": "component.capture_position",
+            "params": {"joints": [{"joint": jid, "values": [12.0], "exprs": ["same_gap"]}]}
+        }),
+    );
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("same_gap"));
+
+    // Base expression ("gap") blocks delete and updates on rename!
+    assert!(s.execute("parameters.delete", &json!({"name": "gap"})).is_err());
+    run(&mut s, "parameters.rename", json!({"name": "gap", "new_name": "base_gap"}));
+    assert_eq!(s.doc.assembly.joints[0].base_exprs, vec![Some("base_gap".to_string())]);
+
+    // joint.drive clears j.exprs, and component.revert_position restores BOTH j.values and j.exprs ("same_gap").
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 20}));
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 30.0)));
+    run(&mut s, "component.revert_position", json!({}));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![12.0]);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("same_gap"));
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 22.0)));
+    run(&mut s, "parameters.change", json!({"name": "same_gap", "expression": "14 mm"}));
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 24.0)));
+
+    // Redefine to a constant ([9.0], no exprs) clears j.exprs.values[0] while keeping base_exprs = ["base_gap"].
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({
+            "feature": cp_id,
+            "command": "component.capture_position",
+            "params": {"joints": [{"joint": jid, "values": [9.0]}]}
+        }),
+    );
+    assert_eq!(s.doc.assembly.joints[0].values, vec![9.0]);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), None);
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 19.0)));
+
+    // Suppressing restores "base_gap" (5 mm -> 15.0); while suppressed or rolled back, timeline.edit eagerly
+    // validates joint bounds/expressions; deleting clears base_values/base_exprs while keeping "base_gap".
+    run(&mut s, "timeline.suppress", json!({"feature": cp_id, "suppressed": true}));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![5.0]);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("base_gap"));
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 15.0)));
+    let doc_suppressed = s.doc.clone();
+    assert!(s.execute("timeline.edit", &json!({"feature": cp_id, "set": {"joints": [{"joint": jid, "values": [1e12]}]}})).is_err());
+    assert!(s.execute("timeline.edit", &json!({"feature": cp_id, "set": {"joints": [{"joint": jid, "values": [0.0], "exprs": ["   "]}]}})).is_err());
+    assert!(
+        s.execute("timeline.edit", &json!({"feature": cp_id, "set": {"joints": [{"joint": jid, "values": [0.0], "exprs": ["x".repeat(4097)]}]}}))
+            .is_err()
+    );
+    assert_eq!(s.doc, doc_suppressed);
+    run(&mut s, "timeline.delete", json!({"feature": cp_id}));
+    assert_eq!(s.doc.assembly.joints[0].base_values, None);
+    assert!(s.doc.assembly.joints[0].base_exprs.is_empty());
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("base_gap"));
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 15.0)));
+
+    // Legacy Joint::captured: Some([3.0]) without CapturePosition (and with an unrelated CapturePosition on another occurrence)
+    // must keep j.captured intact.
+    let mut legacy = two_cubes();
+    run(&mut legacy, "joint.create", json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Rail"}));
+    run(&mut legacy, "joint.drive", json!({"joint": "Rail", "value": 3}));
+    legacy.doc_mut().assembly.joints[0].captured = Some(vec![3.0]);
+    legacy.pending_joint_bases.clear();
+    let (_, extra_occ) = (
+        run(&mut legacy, "component.create", json!({"name": "Extra", "grounded": false}))["component"].as_u64().unwrap(),
+        legacy.doc.occurrences.last().unwrap().id,
+    );
+    run(&mut legacy, "component.activate", json!({"component": 0}));
+    run(&mut legacy, "component.capture_position", json!({"moves": [{"occurrence": extra_occ, "translate": [2, 0, 0]}]}));
+    assert_eq!(legacy.doc.assembly.joints[0].captured, Some(vec![3.0]));
+    assert_eq!(legacy.doc.assembly.joints[0].base_values, None);
+}
+
+#[test]
+fn capture_position_preserves_pre_drive_joint_exprs_across_suppress_rollback_and_delete() {
+    // Test 1: Slider with "gap" (5 mm) -> joint.drive(15) -> capture_position -> suppress/rollback/delete restores "gap" and 5.0.
+    let mut s = two_cubes();
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "5 mm"}));
+    run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "values": ["gap"], "name": "Rail"}));
+    let b = Vec3::new(25.0, 5.0, 0.0);
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 15}));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![15.0]);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), None);
+
+    let cp_id = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert_eq!(s.doc.assembly.joints[0].base_values, Some(vec![5.0]));
+    assert_eq!(s.doc.assembly.joints[0].base_exprs, vec![Some("gap".to_string())]);
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 25.0)));
+
+    run(&mut s, "timeline.suppress", json!({"feature": cp_id, "suppressed": true}));
+    assert_eq!(s.doc.assembly.joints[0].base_exprs, vec![Some("gap".to_string())]);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("gap"));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![5.0]);
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 15.0)));
+
+    run(&mut s, "timeline.suppress", json!({"feature": cp_id, "suppressed": false}));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![15.0]);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), None);
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 25.0)));
+
+    let cp_idx = s.doc.feature_index(cp_id).unwrap();
+    run(&mut s, "timeline.rollback", json!({"position": cp_idx}));
+    assert_eq!(s.doc.assembly.joints[0].base_exprs, vec![Some("gap".to_string())]);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("gap"));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![5.0]);
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 15.0)));
+
+    run(&mut s, "timeline.roll_to", json!({}));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![15.0]);
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 25.0)));
+
+    run(&mut s, "timeline.delete", json!({"feature": cp_id}));
+    assert_eq!(s.doc.assembly.joints[0].base_values, None);
+    assert!(s.doc.assembly.joints[0].base_exprs.is_empty());
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("gap"));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![5.0]);
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 15.0)));
+
+    // Test 2: Same numeric value drive (gap = 5 mm -> joint.drive(5)) still records base_exprs and restores "gap".
+    let mut s_same = two_cubes();
+    run(&mut s_same, "parameters.add", json!({"name": "gap", "expression": "5 mm"}));
+    run(
+        &mut s_same,
+        "joint.create",
+        json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "values": ["gap"], "name": "Rail"}),
+    );
+    run(&mut s_same, "joint.drive", json!({"joint": "Rail", "value": 5}));
+    assert_eq!(s_same.doc.assembly.joints[0].values, vec![5.0]);
+    assert_eq!(s_same.doc.assembly.joints[0].exprs.value(0), None);
+    let cp_same = run(&mut s_same, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert_eq!(s_same.doc.assembly.joints[0].base_exprs, vec![Some("gap".to_string())]);
+    run(&mut s_same, "timeline.suppress", json!({"feature": cp_same, "suppressed": true}));
+    assert_eq!(s_same.doc.assembly.joints[0].base_exprs, vec![Some("gap".to_string())]);
+    assert_eq!(s_same.doc.assembly.joints[0].exprs.value(0), Some("gap"));
+    assert_eq!(s_same.doc.assembly.joints[0].values, vec![5.0]);
+
+    // Test 3: Multi-DOF cylindrical single-index drive preserves both base expressions.
+    let mut s_cyl = two_cubes();
+    run(&mut s_cyl, "parameters.add", json!({"name": "ang0", "expression": "15 deg"}));
+    run(&mut s_cyl, "parameters.add", json!({"name": "dist0", "expression": "5 mm"}));
+    run(
+        &mut s_cyl,
+        "joint.create",
+        json!({"type": "cylindrical", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "values": ["ang0", "dist0"], "name": "Cyl"}),
+    );
+    run(&mut s_cyl, "joint.drive", json!({"joint": "Cyl", "index": 0, "value": 45}));
+    assert_eq!(s_cyl.doc.assembly.joints[0].exprs.value(0), None);
+    assert_eq!(s_cyl.doc.assembly.joints[0].exprs.value(1), Some("dist0"));
+    let cp_cyl = run(&mut s_cyl, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert_eq!(s_cyl.doc.assembly.joints[0].base_exprs, vec![Some("ang0".to_string()), Some("dist0".to_string())]);
+    run(&mut s_cyl, "timeline.suppress", json!({"feature": cp_cyl, "suppressed": true}));
+    assert_eq!(s_cyl.doc.assembly.joints[0].exprs.value(0), Some("ang0"));
+    assert_eq!(s_cyl.doc.assembly.joints[0].exprs.value(1), Some("dist0"));
+    assert!((s_cyl.doc.assembly.joints[0].values[0] - 15.0_f64.to_radians()).abs() < 1e-9);
+    assert!((s_cyl.doc.assembly.joints[0].values[1] - 5.0).abs() < 1e-9);
+}
+
+#[test]
+fn capture_position_timeline_edit_legacy_captured_syncs_joint_values() {
+    let mut legacy = two_cubes();
+    let jid =
+        run(&mut legacy, "joint.create", json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Rail"}))["joint"]
+            .as_u64()
+            .unwrap();
+    run(&mut legacy, "joint.drive", json!({"joint": "Rail", "value": 3}));
+    legacy.doc_mut().assembly.joints[0].captured = Some(vec![3.0]);
+    legacy.pending_joint_bases.clear();
+
+    run(&mut legacy, "component.create", json!({"name": "Extra", "grounded": false}));
+    let extra_occ = legacy.doc.occurrences.last().unwrap().id;
+    run(&mut legacy, "component.activate", json!({"component": 0}));
+    let cp_id = run(&mut legacy, "component.capture_position", json!({"moves": [{"occurrence": extra_occ, "translate": [2, 0, 0]}]}))["feature"]
+        .as_u64()
+        .unwrap();
+
+    // Uncaptured drive changes j.values away from legacy j.captured ([3.0]) to [10.0].
+    run(&mut legacy, "joint.drive", json!({"joint": "Rail", "value": 10}));
+    assert_eq!(legacy.doc.assembly.joints[0].values, vec![10.0]);
+    assert_eq!(legacy.doc.assembly.joints[0].captured, Some(vec![3.0]));
+
+    // timeline.edit adding the joint with cj.values == [3.0] must still sync j.values from [10.0] back to [3.0].
+    run(&mut legacy, "timeline.edit", json!({"feature": cp_id, "set": {"joints": [{"joint": jid, "values": [3.0]}]}}));
+    assert_eq!(legacy.doc.assembly.joints[0].values, vec![3.0]);
+    assert_eq!(legacy.doc.assembly.joints[0].captured, Some(vec![3.0]));
+    let b = Vec3::new(25.0, 5.0, 0.0);
+    assert!(near(place(&legacy, "B", b), Vec3::new(5.0, 5.0, 13.0)));
+}
+
+#[test]
+fn uncaptured_joint_moves_and_revert_do_not_corrupt_occurrence_base_transform() {
+    let mut s = two_cubes();
+    let b_occ = occ(&s, "B");
+    run(&mut s, "parameters.add", json!({"name": "dx", "expression": "4 mm"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": b_occ, "translate": ["dx", 0, 0], "capture": false}));
+    let cp1 = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    let b_base_after_cp1 = s.doc.occurrences.iter().find(|o| o.id == b_occ).unwrap().base_transform;
+    assert!(b_base_after_cp1.is_some());
+
+    // Creating a joint permanently aligns occurrences and adjusts base_transform accordingly.
+    run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [29, 5, 0]}, "name": "Rail"}));
+    let expected_base = s.doc.occurrences.iter().find(|o| o.id == b_occ).unwrap().base_transform;
+    assert!(expected_base.is_some());
+
+    // Uncaptured joint.drive must NOT mutate B.base_transform.
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 15}));
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == b_occ).unwrap().base_transform, expected_base);
+
+    // Uncaptured joint.reach must NOT mutate B.base_transform.
+    let tip = place(&s, "B", Vec3::new(29.0, 5.0, 0.0));
+    run(&mut s, "joint.reach", json!({"occurrence": "B", "at": [tip.x, tip.y, tip.z], "point": [tip.x, tip.y, tip.z + 5.0]}));
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == b_occ).unwrap().base_transform, expected_base);
+
+    // parameters.change must NOT shift B.base_transform via solve_joints.
+    run(&mut s, "parameters.change", json!({"name": "dx", "expression": "7 mm"}));
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == b_occ).unwrap().base_transform, expected_base);
+
+    // Reverted occurrence.move(capture: true) must NOT leave B.base_transform shifted.
+    let reverted = run(&mut s, "occurrence.move", json!({"occurrence": b_occ, "translate": [0, 20, 0], "capture": true}));
+    assert_eq!(reverted["reverted"], true, "{reverted}");
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == b_occ).unwrap().base_transform, expected_base);
+
+    // Capturing joint pose in CP2, driving away, and calling component.revert_position must keep expected_base.
+    let cp2 = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 30}));
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == b_occ).unwrap().base_transform, expected_base);
+    run(&mut s, "component.revert_position", json!({}));
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == b_occ).unwrap().base_transform, expected_base);
+
+    // Suppressing/deleting CP1 and CP2 must restore without corrupted transforms.
+    run(&mut s, "timeline.suppress", json!({"feature": cp1, "suppressed": true}));
+    run(&mut s, "timeline.suppress", json!({"feature": cp1, "suppressed": false}));
+    run(&mut s, "timeline.delete", json!({"feature": cp2}));
+    run(&mut s, "timeline.delete", json!({"feature": cp1}));
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == b_occ).unwrap().base_transform, None);
+}
+
+#[test]
+fn parameters_commands_track_pending_joint_bases_before_capture() {
+    let mut s = two_cubes();
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "5 mm"}));
+    run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "values": ["gap"], "name": "Rail"}));
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 15}));
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), None);
+
+    // Delete via parameters.delete or parameters.change(delete:) must refuse while referenced in pending_joint_bases.
+    let err_del = s.execute("parameters.delete", &json!({"name": "gap"})).unwrap_err();
+    assert!(err_del.to_string().contains("used by"), "{err_del}");
+    let err_chg = s.execute("parameters.change", &json!({"delete": "gap"})).unwrap_err();
+    assert!(err_chg.to_string().contains("used by"), "{err_chg}");
+
+    // parameters.users reports the joint pending baseline.
+    let users = run(&mut s, "parameters.users", json!({"name": "gap"}));
+    assert!(users["users"].as_array().is_some_and(|a| a.iter().any(|u| u["type"] == "joint" && u["name"] == "Rail")), "{users}");
+
+    // parameters.rename updates pending_joint_bases and reports references_updated.
+    let ren = run(&mut s, "parameters.rename", json!({"name": "gap", "new_name": "gap2"}));
+    assert_eq!(ren["references_updated"], 1, "{ren}");
+
+    // parameters.change("gap3 = 8 mm") also updates pending_joint_bases.
+    let chg_ren = run(&mut s, "parameters.change", json!({"name": "gap2", "expression": "gap3 = 8 mm"}));
+    assert_eq!(chg_ren["renamed"]["references_updated"], 1, "{chg_ren}");
+
+    let cp_id = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert_eq!(s.doc.assembly.joints[0].base_exprs, vec![Some("gap3".to_string())]);
+    run(&mut s, "timeline.suppress", json!({"feature": cp_id, "suppressed": true}));
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("gap3"));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![8.0]);
+}
+
+#[test]
+fn capture_position_after_cp1_same_value_drive_clears_expr_and_noop_motion_link() {
+    let find_cp_joint_exprs = |s: &Session, cp_id: u64, jid: u64| -> Vec<Option<String>> {
+        let f = s.doc.features.iter().find(|f| f.id == cp_id).unwrap();
+        match &f.kind {
+            solidcraft_doc::FeatureKind::CapturePosition { joints, .. } => {
+                joints.iter().find(|cj| cj.joint == jid).map(|cj| cj.exprs.clone()).unwrap()
+            }
+            other => panic!("expected CapturePosition, got {other:?}"),
+        }
+    };
+
+    // 1. Single-DOF same-value joint.drive after CP1 creates CP2, prevents resurrection, and restores on suppress.
+    let mut s = two_cubes();
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "5 mm"}));
+    let jid = run(
+        &mut s,
+        "joint.create",
+        json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "values": ["gap"], "name": "Rail"}),
+    )["joint"]
+        .as_u64()
+        .unwrap();
+    let _cp1 = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    let noop1 = run(&mut s, "component.capture_position", json!({}));
+    assert_eq!(noop1["captured"], 0, "{noop1}");
+    assert_eq!(noop1["joints"], 0, "{noop1}");
+    assert!(noop1["feature"].is_null(), "{noop1}");
+
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 5}));
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), None);
+    let cp2 = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert!(find_cp_joint_exprs(&s, cp2, jid).is_empty());
+    let noop2 = run(&mut s, "component.capture_position", json!({}));
+    assert_eq!(noop2["captured"], 0, "{noop2}");
+    assert_eq!(noop2["joints"], 0, "{noop2}");
+    assert!(noop2["feature"].is_null(), "{noop2}");
+
+    run(&mut s, "parameters.change", json!({"name": "gap", "expression": "20 mm"}));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![5.0]);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), None);
+
+    run(&mut s, "timeline.suppress", json!({"feature": cp2, "suppressed": true}));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![20.0]);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("gap"));
+    run(&mut s, "timeline.suppress", json!({"feature": cp2, "suppressed": false}));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![5.0]);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), None);
+    run(&mut s, "timeline.delete", json!({"feature": cp2}));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![20.0]);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("gap"));
+
+    // 2. Multi-DOF cylindrical single-DOF same-value drive after CP1 clears only DOF 0 and preserves DOF 1.
+    let mut s_cyl = two_cubes();
+    run(&mut s_cyl, "parameters.add", json!({"name": "ang0", "expression": "0 deg"}));
+    run(&mut s_cyl, "parameters.add", json!({"name": "dist0", "expression": "5 mm"}));
+    let cyl_id = run(
+        &mut s_cyl,
+        "joint.create",
+        json!({"type": "cylindrical", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "values": ["ang0", "dist0"], "name": "Cyl"}),
+    )["joint"]
+        .as_u64()
+        .unwrap();
+    let _cp1 = run(&mut s_cyl, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    run(&mut s_cyl, "joint.drive", json!({"joint": "Cyl", "index": 0, "value": 0}));
+    let cp2 = run(&mut s_cyl, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert_eq!(find_cp_joint_exprs(&s_cyl, cp2, cyl_id), vec![None, Some("dist0".to_string())]);
+    run(&mut s_cyl, "parameters.change", json!({"name": "ang0", "expression": "45 deg"}));
+    assert!(s_cyl.doc.assembly.joints[0].values[0].abs() < 1e-9);
+    assert_eq!(s_cyl.doc.assembly.joints[0].exprs.value(0), None);
+    run(&mut s_cyl, "parameters.change", json!({"name": "dist0", "expression": "12 mm"}));
+    assert!((s_cyl.doc.assembly.joints[0].values[1] - 12.0).abs() < 1e-9);
+    assert_eq!(s_cyl.doc.assembly.joints[0].exprs.value(1), Some("dist0"));
+
+    // 3. MotionLink added BEFORE CP1: single-DOF and multi-DOF trailing DOF linked -> second capture_position is a no-op.
+    let mut s_ml1 = two_cubes();
+    run(&mut s_ml1, "component.activate", json!({"component": "root"}));
+    run(&mut s_ml1, "component.create", json!({"name": "C", "grounded": false}));
+    run(&mut s_ml1, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0]}));
+    run(&mut s_ml1, "parameters.add", json!({"name": "follower_gap", "expression": "0 mm"}));
+    run(&mut s_ml1, "joint.create", json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Driver"}));
+    let fid1 = run(
+        &mut s_ml1,
+        "joint.create",
+        json!({"type": "slider", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "C", "face": [45, 5, 0]}, "values": ["follower_gap"], "name": "Follower"}),
+    )["joint"]
+        .as_u64()
+        .unwrap();
+    run(&mut s_ml1, "joint.motion_link", json!({"a": "Driver", "b": "Follower", "ratio": 1}));
+    let cp_ml1 = run(&mut s_ml1, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert!(find_cp_joint_exprs(&s_ml1, cp_ml1, fid1).is_empty());
+    assert_eq!(s_ml1.doc.assembly.joints[1].exprs.value(0), None);
+    assert_eq!(s_ml1.doc.assembly.joints[1].base_exprs, vec![Some("follower_gap".to_string())]);
+    let noop_ml1 = run(&mut s_ml1, "component.capture_position", json!({}));
+    assert!(noop_ml1["feature"].is_null(), "{noop_ml1}");
+
+    let mut s_ml_cyl = two_cubes();
+    run(&mut s_ml_cyl, "component.activate", json!({"component": "root"}));
+    run(&mut s_ml_cyl, "component.create", json!({"name": "C", "grounded": false}));
+    run(&mut s_ml_cyl, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0]}));
+    run(&mut s_ml_cyl, "parameters.add", json!({"name": "ang0", "expression": "10 deg"}));
+    run(&mut s_ml_cyl, "parameters.add", json!({"name": "dist0", "expression": "0 mm"}));
+    run(&mut s_ml_cyl, "joint.create", json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Driver"}));
+    let fid_cyl = run(
+        &mut s_ml_cyl,
+        "joint.create",
+        json!({"type": "cylindrical", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "C", "face": [45, 5, 0]}, "values": ["ang0", "dist0"], "name": "Follower"}),
+    )["joint"]
+        .as_u64()
+        .unwrap();
+    run(&mut s_ml_cyl, "joint.motion_link", json!({"a": "Driver", "b": "Follower", "ib": 1, "ratio": 1}));
+    let cp_ml_cyl = run(&mut s_ml_cyl, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert_eq!(find_cp_joint_exprs(&s_ml_cyl, cp_ml_cyl, fid_cyl), vec![Some("ang0".to_string())]);
+    let noop_ml_cyl = run(&mut s_ml_cyl, "component.capture_position", json!({}));
+    assert!(noop_ml_cyl["feature"].is_null(), "{noop_ml_cyl}");
+
+    // 4. MotionLink added AFTER CP1: un-expressed -> no-op; expressed -> CP2 clears once, third call is no-op.
+    let mut s_post_unexpr = two_cubes();
+    run(&mut s_post_unexpr, "component.activate", json!({"component": "root"}));
+    run(&mut s_post_unexpr, "component.create", json!({"name": "C", "grounded": false}));
+    run(&mut s_post_unexpr, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0]}));
+    run(&mut s_post_unexpr, "joint.create", json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Driver"}));
+    run(
+        &mut s_post_unexpr,
+        "joint.create",
+        json!({"type": "slider", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "C", "face": [45, 5, 0]}, "name": "Follower"}),
+    );
+    let _cp1 = run(&mut s_post_unexpr, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    run(&mut s_post_unexpr, "joint.motion_link", json!({"a": "Driver", "b": "Follower", "ratio": 1}));
+    let noop_post = run(&mut s_post_unexpr, "component.capture_position", json!({}));
+    assert!(noop_post["feature"].is_null(), "{noop_post}");
+
+    let mut s_post_expr = two_cubes();
+    run(&mut s_post_expr, "component.activate", json!({"component": "root"}));
+    run(&mut s_post_expr, "component.create", json!({"name": "C", "grounded": false}));
+    run(&mut s_post_expr, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0]}));
+    run(&mut s_post_expr, "parameters.add", json!({"name": "follower_gap", "expression": "0 mm"}));
+    run(&mut s_post_expr, "joint.create", json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Driver"}));
+    let fid_post = run(
+        &mut s_post_expr,
+        "joint.create",
+        json!({"type": "slider", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "C", "face": [45, 5, 0]}, "values": ["follower_gap"], "name": "Follower"}),
+    )["joint"]
+        .as_u64()
+        .unwrap();
+    let _cp1 = run(&mut s_post_expr, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    run(&mut s_post_expr, "joint.motion_link", json!({"a": "Driver", "b": "Follower", "ratio": 1}));
+    let cp2 = run(&mut s_post_expr, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert!(find_cp_joint_exprs(&s_post_expr, cp2, fid_post).is_empty());
+    assert_eq!(s_post_expr.doc.assembly.joints[1].exprs.value(0), None);
+    let noop_third = run(&mut s_post_expr, "component.capture_position", json!({}));
+    assert!(noop_third["feature"].is_null(), "{noop_third}");
+    run(&mut s_post_expr, "parameters.change", json!({"name": "follower_gap", "expression": "20 mm"}));
+    assert_eq!(s_post_expr.doc.assembly.joints[1].exprs.value(0), None);
+    assert!(s_post_expr.doc.assembly.joints[1].values[0].abs() < 1e-9);
+}
+
+#[test]
+fn capture_position_legacy_captured_joint_same_value_drive_and_noop() {
+    // Untouched legacy j.captured (both with and without j.exprs) must be a no-op on capture_position {}.
+    for with_expr in [false, true] {
+        let mut legacy = two_cubes();
+        if with_expr {
+            run(&mut legacy, "parameters.add", json!({"name": "gap", "expression": "5 mm"}));
+        }
+        let values = if with_expr { json!(["gap"]) } else { json!([5]) };
+        run(
+            &mut legacy,
+            "joint.create",
+            json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "values": values, "name": "Rail"}),
+        );
+        legacy.doc_mut().assembly.joints[0].captured = Some(vec![5.0]);
+        let noop = run(&mut legacy, "component.capture_position", json!({}));
+        assert_eq!(noop["captured"], 0, "{noop}");
+        assert_eq!(noop["joints"], 0, "{noop}");
+        assert!(noop["feature"].is_null(), "{noop}");
+        assert!(!legacy.doc.has_capture_position_timeline());
+
+        if with_expr {
+            // After same-value joint.drive(5), capture_position {} creates CP1 preserving base_exprs and clearing exprs.
+            run(&mut legacy, "joint.drive", json!({"joint": "Rail", "value": 5}));
+            assert_eq!(legacy.doc.assembly.joints[0].exprs.value(0), None);
+            let cp1 = run(&mut legacy, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+            assert_eq!(legacy.doc.assembly.joints[0].base_exprs, vec![Some("gap".to_string())]);
+            let f = legacy.doc.features.iter().find(|f| f.id == cp1).unwrap();
+            match &f.kind {
+                solidcraft_doc::FeatureKind::CapturePosition { joints, .. } => {
+                    assert!(joints[0].exprs.is_empty());
+                }
+                other => panic!("expected CapturePosition, got {other:?}"),
+            }
+            run(&mut legacy, "parameters.change", json!({"name": "gap", "expression": "20 mm"}));
+            assert_eq!(legacy.doc.assembly.joints[0].values, vec![5.0]);
+            assert_eq!(legacy.doc.assembly.joints[0].exprs.value(0), None);
+            run(&mut legacy, "timeline.suppress", json!({"feature": cp1, "suppressed": true}));
+            assert_eq!(legacy.doc.assembly.joints[0].values, vec![20.0]);
+            assert_eq!(legacy.doc.assembly.joints[0].exprs.value(0), Some("gap"));
+        }
+    }
+}
+
+#[test]
+fn capture_position_multi_cp_preserves_uncaptured_drive_and_restores_on_cp0_suppress() {
+    let mut s = two_cubes();
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "C", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0]}));
+    run(&mut s, "parameters.add", json!({"name": "dx", "expression": "5 mm"}));
+    run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Rail"}));
+    let c_occ = occ(&s, "C");
+    let c_pt = Vec3::new(40.0, 0.0, 0.0);
+
+    // CP0 captures Rail = 10.0.
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 10}));
+    let cp0 = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert_eq!(s.doc.assembly.joints[0].captured, Some(vec![10.0]));
+
+    // CP1 moves C by dx while Rail remains 10.0.
+    run(&mut s, "occurrence.move", json!({"occurrence": c_occ, "translate": ["dx", 0, 0], "capture": false}));
+    let cp1 = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert!(near(place(&s, "C", c_pt), Vec3::new(45.0, 0.0, 0.0)));
+
+    // Uncaptured joint.drive(Rail, 25) stays preserved across CP1 parameter edits, suppress, rollback, and delete.
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 25}));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![25.0]);
+    assert_eq!(s.doc.assembly.joints[0].captured, Some(vec![10.0]));
+
+    run(&mut s, "parameters.change", json!({"name": "dx", "expression": "12 mm"}));
+    assert!(near(place(&s, "C", c_pt), Vec3::new(52.0, 0.0, 0.0)));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![25.0]);
+
+    run(&mut s, "timeline.suppress", json!({"feature": cp1, "suppressed": true}));
+    assert!(near(place(&s, "C", c_pt), c_pt));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![25.0]);
+    assert_eq!(s.doc.assembly.joints[0].captured, Some(vec![10.0]));
+
+    run(&mut s, "timeline.suppress", json!({"feature": cp1, "suppressed": false}));
+    assert!(near(place(&s, "C", c_pt), Vec3::new(52.0, 0.0, 0.0)));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![25.0]);
+
+    let cp1_idx = s.doc.feature_index(cp1).unwrap();
+    run(&mut s, "timeline.rollback", json!({"position": cp1_idx}));
+    assert!(near(place(&s, "C", c_pt), c_pt));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![25.0]);
+
+    run(&mut s, "timeline.roll_to", json!({}));
+    run(&mut s, "timeline.delete", json!({"feature": cp1}));
+    assert!(near(place(&s, "C", c_pt), c_pt));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![25.0]);
+
+    // component.revert_position {} restores Rail = 10.0.
+    run(&mut s, "component.revert_position", json!({}));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![10.0]);
+
+    // Driving Rail = 25.0 and suppressing/deleting CP0 restores Rail = 0.0 and clears captured.
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 25}));
+    run(&mut s, "timeline.suppress", json!({"feature": cp0, "suppressed": true}));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![0.0]);
+    assert_eq!(s.doc.assembly.joints[0].captured, None);
+
+    run(&mut s, "timeline.suppress", json!({"feature": cp0, "suppressed": false}));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![10.0]);
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 25}));
+    run(&mut s, "timeline.delete", json!({"feature": cp0}));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![0.0]);
+    assert_eq!(s.doc.assembly.joints[0].captured, None);
+}
+
+#[test]
+fn selection_delete_on_pending_joint_base_clears_parameter_users() {
+    let mut s = two_cubes();
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "5 mm"}));
+    run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "values": ["gap"], "name": "Rail"}));
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 15}));
+    assert!(!s.pending_joint_bases.is_empty());
+    let users_before = run(&mut s, "parameters.users", json!({"name": "gap"}));
+    assert!(!users_before["users"].as_array().unwrap().is_empty(), "{users_before}");
+
+    run(&mut s, "selection.delete", json!({"joints": ["Rail"]}));
+    assert!(s.pending_joint_bases.is_empty());
+    let users_after = run(&mut s, "parameters.users", json!({"name": "gap"}));
+    assert!(users_after["users"].as_array().unwrap().is_empty(), "{users_after}");
+    run(&mut s, "parameters.delete", json!({"name": "gap"}));
+}
+
+#[test]
+fn capture_position_joint_timeline_bugs_reopen_redefine_and_reverse_order() {
+    // 1. Bug 1 & Bug 2 regression + Item 3d: parametric base_exprs & CapturedJoint::exprs across save/reopen + suppressed/rolled-back edit.
+    let mut s = two_cubes();
+    run(&mut s, "parameters.add", json!({"name": "base_gap", "expression": "2 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "cap_gap", "expression": "15 mm"}));
+    let jid = run(
+        &mut s,
+        "joint.create",
+        json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "values": ["base_gap"], "name": "Rail"}),
+    )["joint"]
+        .as_u64()
+        .unwrap();
+    let b = Vec3::new(25.0, 5.0, 0.0);
+
+    // Pre-capture feature in root reading B's top face at base_gap = 2 mm (z = 22).
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "construct.plane.offset", json!({"base": {"face": [5, 5, 22]}, "offset": 0, "name": "PreJointPlane"}));
+    let plane_z = |s: &Session, name: &str| crate::view::construction_planes(s).into_iter().find(|(_, n, _)| n == name).unwrap().2.origin.z;
+    assert!((plane_z(&s, "PreJointPlane") - 22.0).abs() < 1e-6);
+
+    // Uncaptured joint.drive sets pending_joint_bases and triggers has_uncaptured_positions / uncaptured_joint_count.
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 15}));
+    assert_eq!(s.uncaptured_joint_count(), 1);
+    assert!(s.has_uncaptured_positions());
+
+    // Pre-capture revert_position restores base_gap and clears pending_joint_bases.
+    let rev = run(&mut s, "component.revert_position", json!({}));
+    assert_eq!(rev["joints"], json!(1), "{rev}");
+    assert_eq!(s.uncaptured_joint_count(), 0);
+    assert!(!s.has_uncaptured_positions());
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 12.0)));
+
+    // Drive again and capture, then redefine with cap_gap expr.
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 15}));
+    let cp1 = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert_eq!(s.uncaptured_joint_count(), 0);
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({
+            "feature": cp1,
+            "command": "component.capture_position",
+            "params": {"joints": [{"joint": jid, "values": [15.0], "exprs": ["cap_gap"]}]}
+        }),
+    );
+
+    // Bug 1 check: pre-capture PreJointPlane stays at 22.0 while CP1 active (B at z=25).
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 25.0)));
+    assert!((plane_z(&s, "PreJointPlane") - 22.0).abs() < 1e-6, "PreJointPlane leaked to {}", plane_z(&s, "PreJointPlane"));
+
+    // Bug 2 regression: suppressed and rolled-back timeline.edit rejects invalid joint exprs.
+    run(&mut s, "timeline.suppress", json!({"feature": cp1, "suppressed": true}));
+    let snap = s.doc.clone();
+    for bad_expr in ["missing_param", "1e12", "2 * ("] {
+        assert!(
+            s.execute("timeline.edit", &json!({"feature": cp1, "set": {"joints": [{"joint": jid, "values": [0.0], "exprs": [bad_expr]}]}})).is_err(),
+            "{bad_expr}"
+        );
+    }
+    assert_eq!(s.doc, snap);
+    run(&mut s, "timeline.suppress", json!({"feature": cp1, "suppressed": false}));
+
+    let idx = s.doc.feature_index(cp1).unwrap();
+    run(&mut s, "timeline.rollback", json!({"position": idx}));
+    let snap2 = s.doc.clone();
+    assert!(
+        s.execute("timeline.edit", &json!({"feature": cp1, "set": {"joints": [{"joint": jid, "values": [0.0], "exprs": ["missing_param"]}]}}))
+            .is_err()
+    );
+    assert_eq!(s.doc, snap2);
+
+    // Item 3c: capturing a new CapturePosition while rolled back before CP1 + save/reopen while rolled back and while suppressed.
+    let mut reopened_rb = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(reopened_rb.doc.marker, Some(idx));
+    assert_eq!(reopened_rb.doc.assembly.joints[0].values, vec![2.0]);
+    assert_eq!(reopened_rb.doc.assembly.joints[0].exprs.value(0), Some("base_gap"));
+    assert!(near(place(&reopened_rb, "B", b), Vec3::new(5.0, 5.0, 12.0)));
+    run(&mut reopened_rb, "joint.drive", json!({"joint": "Rail", "value": 11}));
+    let cp_rb = run(&mut reopened_rb, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert!(near(place(&reopened_rb, "B", b), Vec3::new(5.0, 5.0, 21.0)));
+    run(&mut reopened_rb, "timeline.roll_to", json!({}));
+    assert!(near(place(&reopened_rb, "B", b), Vec3::new(5.0, 5.0, 25.0)));
+    run(&mut reopened_rb, "timeline.delete", json!({"feature": cp_rb}));
+
+    run(&mut s, "timeline.roll_to", json!({}));
+    run(&mut s, "timeline.suppress", json!({"feature": cp1, "suppressed": true}));
+    let mut reopened_sup = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(near(place(&reopened_sup, "B", b), Vec3::new(5.0, 5.0, 12.0)));
+    assert_eq!(reopened_sup.doc.assembly.joints[0].exprs.value(0), Some("base_gap"));
+    run(&mut reopened_sup, "timeline.suppress", json!({"feature": cp1, "suppressed": false}));
+    assert!(near(place(&reopened_sup, "B", b), Vec3::new(5.0, 5.0, 25.0)));
+    run(&mut s, "timeline.suppress", json!({"feature": cp1, "suppressed": false}));
+
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    run(&mut reopened, "parameters.change", json!({"name": "cap_gap", "expression": "21 mm"}));
+    assert!(near(place(&reopened, "B", b), Vec3::new(5.0, 5.0, 31.0)));
+    run(&mut reopened, "parameters.rename", json!({"name": "cap_gap", "new_name": "stroke_gap"}));
+    assert!(reopened.execute("parameters.delete", &json!({"name": "stroke_gap"})).is_err());
+    run(&mut reopened, "timeline.suppress", json!({"feature": cp1, "suppressed": true}));
+    assert!(near(place(&reopened, "B", b), Vec3::new(5.0, 5.0, 12.0)));
+    run(&mut reopened, "parameters.change", json!({"name": "base_gap", "expression": "6 mm"}));
+    assert!(near(place(&reopened, "B", b), Vec3::new(5.0, 5.0, 16.0)));
+    run(&mut reopened, "timeline.delete", json!({"feature": cp1}));
+    assert_eq!(reopened.doc.assembly.joints[0].base_values, None);
+    assert!(reopened.doc.assembly.joints[0].base_exprs.is_empty());
+
+    // Item 4c: move -> align -> joint.drive -> capture -> undo -> redo with unjoined Free component.
+    let mut s2 = two_cubes();
+    run(&mut s2, "component.activate", json!({"component": "root"}));
+    run(&mut s2, "component.create", json!({"name": "Free", "grounded": false}));
+    run(&mut s2, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [50, 0, 0], "body_name": "FreeBox"}));
+    run(&mut s2, "component.activate", json!({"component": "root"}));
+    let free_occ = occ(&s2, "Free");
+    run(&mut s2, "joint.create", json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Rail"}));
+    run(&mut s2, "occurrence.move", json!({"occurrence": free_occ, "translate": [10, 0, 0], "capture": false}));
+    run(&mut s2, "occurrence.align", json!({"occurrence": free_occ, "from": [60, 0, 0], "to": [70, 0, 0], "capture": false}));
+    run(&mut s2, "joint.drive", json!({"joint": "Rail", "value": 8}));
+    let cap = run(&mut s2, "component.capture_position", json!({}));
+    assert_eq!(cap["captured"], json!(1));
+    assert_eq!(cap["joints"], json!(1));
+    let cp_mix = cap["feature"].as_u64().unwrap();
+    assert!(near(place(&s2, "B", b), Vec3::new(5.0, 5.0, 18.0)));
+    assert!(near(place(&s2, "Free", Vec3::new(50.0, 0.0, 0.0)), Vec3::new(70.0, 0.0, 0.0)));
+
+    // Item 2c: inspect input_keys on CapturePosition holding both moves and joints.
+    let inspect = run(&mut s2, "timeline.inspect", json!({"feature": cp_mix}));
+    assert!(!inspect["inputs"].as_array().unwrap().is_empty(), "{inspect}");
+
+    run(&mut s2, "edit.undo", json!({}));
+    assert!(s2.doc.feature(cp_mix).is_none());
+    assert_eq!(s2.uncaptured_joint_count(), 1);
+    assert!(near(place(&s2, "B", b), Vec3::new(5.0, 5.0, 18.0)));
+    run(&mut s2, "edit.redo", json!({}));
+    assert!(s2.doc.feature(cp_mix).is_some());
+    assert_eq!(s2.uncaptured_joint_count(), 0);
+    assert!(near(place(&s2, "B", b), Vec3::new(5.0, 5.0, 18.0)));
+    assert!(near(place(&s2, "Free", Vec3::new(50.0, 0.0, 0.0)), Vec3::new(70.0, 0.0, 0.0)));
+}
+
+#[test]
+fn capture_position_drive_and_reach_while_suppressed_or_rolled_back_revert_to_base_expr() {
+    let mut s = two_cubes();
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "5 mm"}));
+    run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "values": ["gap"], "name": "Rail"}));
+    let b = Vec3::new(25.0, 5.0, 0.0);
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 15.0)));
+
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 15}));
+    let cp1 = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 25.0)));
+
+    // 1. Suppress CP1 -> joint.drive while suppressed must record pending_joint_bases and revert_position must restore "gap".
+    run(&mut s, "timeline.suppress", json!({"feature": cp1, "suppressed": true}));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![5.0]);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("gap"));
+
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 25}));
+    assert_eq!(s.uncaptured_joint_count(), 1);
+    assert!(s.has_uncaptured_positions());
+    let rev = run(&mut s, "component.revert_position", json!({}));
+    assert_eq!(rev["joints"], json!(1), "{rev}");
+    assert_eq!(s.uncaptured_joint_count(), 0);
+    assert!(!s.has_uncaptured_positions());
+    assert_eq!(s.doc.assembly.joints[0].values, vec![5.0]);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("gap"));
+
+    // Un-suppressing while a pending drive exists clears pending_joint_bases and restores CP1 cleanly.
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 28}));
+    assert_eq!(s.uncaptured_joint_count(), 1);
+    run(&mut s, "timeline.suppress", json!({"feature": cp1, "suppressed": false}));
+    assert_eq!(s.uncaptured_joint_count(), 0);
+    assert_eq!(s.doc.assembly.joints[0].values, vec![15.0]);
+    assert!(s.pending_joint_bases.is_empty());
+
+    // 2. Roll back before CP1 -> joint.drive must record pending_joint_bases and revert_position must restore "gap".
+    let idx = s.doc.feature_index(cp1).unwrap();
+    run(&mut s, "timeline.rollback", json!({"position": idx}));
+    assert_eq!(s.doc.assembly.joints[0].values, vec![5.0]);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("gap"));
+
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 35}));
+    assert_eq!(s.uncaptured_joint_count(), 1);
+    assert!(s.has_uncaptured_positions());
+    let rev_rb = run(&mut s, "component.revert_position", json!({}));
+    assert_eq!(rev_rb["joints"], json!(1), "{rev_rb}");
+    assert_eq!(s.uncaptured_joint_count(), 0);
+    assert!(!s.has_uncaptured_positions());
+    assert_eq!(s.doc.assembly.joints[0].values, vec![5.0]);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("gap"));
+
+    // 3. joint.reach while CP1 is suppressed or rolled back (Cylindrical with expressed DOF 0 + free DOF 1)
+    //    must record pending_joint_bases, report uncaptured_joint_count == 1, and revert_position restores base & expr.
+    let mut s_reach = two_cubes();
+    run(&mut s_reach, "parameters.add", json!({"name": "ang0", "expression": "15 deg"}));
+    run(
+        &mut s_reach,
+        "joint.create",
+        json!({"type": "cylindrical", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "values": ["ang0", 0], "name": "Cyl"}),
+    );
+    let b_reach = Vec3::new(25.0, 5.0, 0.0);
+    let p0 = place(&s_reach, "B", b_reach);
+    run(&mut s_reach, "joint.drive", json!({"joint": "Cyl", "values": [15, 12]}));
+    let cp_reach = run(&mut s_reach, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+
+    run(&mut s_reach, "timeline.suppress", json!({"feature": cp_reach, "suppressed": true}));
+    assert!((s_reach.doc.assembly.joints[0].values[0] - 15.0_f64.to_radians()).abs() < 1e-6);
+    assert!(s_reach.doc.assembly.joints[0].values[1].abs() < 1e-6);
+    assert_eq!(s_reach.doc.assembly.joints[0].exprs.value(0), Some("ang0"));
+
+    run(&mut s_reach, "joint.reach", json!({"occurrence": "B", "at": [p0.x, p0.y, p0.z], "point": [p0.x, p0.y, p0.z + 20.0]}));
+    assert!((s_reach.doc.assembly.joints[0].values[1] - 20.0).abs() < 1e-6);
+    assert_eq!(s_reach.uncaptured_joint_count(), 1);
+    assert!(s_reach.has_uncaptured_positions());
+    let rev_reach_sup = run(&mut s_reach, "component.revert_position", json!({}));
+    assert_eq!(rev_reach_sup["joints"], json!(1), "{rev_reach_sup}");
+    assert_eq!(s_reach.uncaptured_joint_count(), 0);
+    assert!(s_reach.doc.assembly.joints[0].values[1].abs() < 1e-6);
+    assert_eq!(s_reach.doc.assembly.joints[0].exprs.value(0), Some("ang0"));
+
+    run(&mut s_reach, "timeline.suppress", json!({"feature": cp_reach, "suppressed": false}));
+    let idx_reach = s_reach.doc.feature_index(cp_reach).unwrap();
+    run(&mut s_reach, "timeline.rollback", json!({"position": idx_reach}));
+    run(&mut s_reach, "joint.reach", json!({"occurrence": "B", "at": [p0.x, p0.y, p0.z], "point": [p0.x, p0.y, p0.z + 22.0]}));
+    assert!((s_reach.doc.assembly.joints[0].values[1] - 22.0).abs() < 1e-6);
+    assert_eq!(s_reach.uncaptured_joint_count(), 1);
+    assert!(s_reach.has_uncaptured_positions());
+    let rev_reach_rb = run(&mut s_reach, "component.revert_position", json!({}));
+    assert_eq!(rev_reach_rb["joints"], json!(1), "{rev_reach_rb}");
+    assert_eq!(s_reach.uncaptured_joint_count(), 0);
+    assert!(s_reach.doc.assembly.joints[0].values[1].abs() < 1e-6);
+    assert_eq!(s_reach.doc.assembly.joints[0].exprs.value(0), Some("ang0"));
+}
+
+#[test]
+fn capture_position_legacy_captured_joint_reach_preserves_base_and_restores() {
+    let mut legacy = two_cubes();
+    run(&mut legacy, "parameters.add", json!({"name": "ang0", "expression": "15 deg"}));
+    run(
+        &mut legacy,
+        "joint.create",
+        json!({"type": "cylindrical", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "values": ["ang0", 0], "name": "Cyl"}),
+    );
+    let p0 = place(&legacy, "B", Vec3::new(25.0, 5.0, 0.0));
+    let base_vals = legacy.doc.assembly.joints[0].values.clone();
+    legacy.doc_mut().assembly.joints[0].captured = Some(base_vals.clone());
+    assert_eq!(legacy.doc.assembly.joints[0].base_values, None);
+
+    let noop = run(&mut legacy, "component.capture_position", json!({}));
+    assert!(noop["feature"].is_null(), "{noop}");
+
+    run(&mut legacy, "joint.reach", json!({"occurrence": "B", "at": [p0.x, p0.y, p0.z], "point": [p0.x, p0.y, p0.z + 20.0]}));
+    assert!((legacy.doc.assembly.joints[0].values[1] - 20.0).abs() < 1e-6);
+    assert_eq!(legacy.uncaptured_joint_count(), 1);
+    assert!(legacy.has_uncaptured_positions());
+
+    let cp1 = run(&mut legacy, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert_eq!(legacy.uncaptured_joint_count(), 0);
+    assert!(!legacy.has_uncaptured_positions());
+    assert_eq!(legacy.doc.assembly.joints[0].base_values.as_ref(), Some(&base_vals));
+    assert_eq!(legacy.doc.assembly.joints[0].base_exprs, vec![Some("ang0".to_string())]);
+    let captured_vals = legacy.doc.assembly.joints[0].captured.clone().unwrap();
+    assert!((captured_vals[1] - 20.0).abs() < 1e-6);
+
+    run(&mut legacy, "timeline.suppress", json!({"feature": cp1, "suppressed": true}));
+    assert!((legacy.doc.assembly.joints[0].values[0] - base_vals[0]).abs() < 1e-6);
+    assert!(legacy.doc.assembly.joints[0].values[1].abs() < 1e-6);
+    assert_eq!(legacy.doc.assembly.joints[0].exprs.value(0), Some("ang0"));
+    assert_eq!(legacy.doc.assembly.joints[0].exprs.value(1), None);
+
+    run(&mut legacy, "timeline.suppress", json!({"feature": cp1, "suppressed": false}));
+    assert!((legacy.doc.assembly.joints[0].values[1] - 20.0).abs() < 1e-6);
+
+    let idx = legacy.doc.feature_index(cp1).unwrap();
+    run(&mut legacy, "timeline.rollback", json!({"position": idx}));
+    assert!((legacy.doc.assembly.joints[0].values[0] - base_vals[0]).abs() < 1e-6);
+    assert!(legacy.doc.assembly.joints[0].values[1].abs() < 1e-6);
+    assert_eq!(legacy.doc.assembly.joints[0].exprs.value(0), Some("ang0"));
+    assert_eq!(legacy.doc.assembly.joints[0].exprs.value(1), None);
+
+    run(&mut legacy, "timeline.roll_to", json!({}));
+    assert!((legacy.doc.assembly.joints[0].values[1] - 20.0).abs() < 1e-6);
+}
+
+#[test]
+fn capture_position_cleanup_clears_pending_joint_bases_on_delete_edit_redefine() {
+    #[derive(Copy, Clone, Debug)]
+    enum Mode {
+        Suppress,
+        Rollback,
+    }
+    #[derive(Copy, Clone, Debug)]
+    enum Op {
+        Delete,
+        Edit,
+        Redefine,
+    }
+    for mode in [Mode::Suppress, Mode::Rollback] {
+        for op in [Op::Delete, Op::Edit, Op::Redefine] {
+            let mut s = two_cubes();
+            run(&mut s, "component.activate", json!({"component": "root"}));
+            run(&mut s, "component.create", json!({"name": "C", "grounded": false}));
+            run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [40, 0, 0], "body_name": "CBox"}));
+            run(&mut s, "component.activate", json!({"component": "root"}));
+            let c_occ = occ(&s, "C");
+
+            run(&mut s, "parameters.add", json!({"name": "gap", "expression": "5 mm"}));
+            run(
+                &mut s,
+                "joint.create",
+                json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "values": ["gap"], "name": "Rail"}),
+            );
+            run(&mut s, "occurrence.move", json!({"occurrence": c_occ, "translate": [10, 0, 0], "capture": false}));
+            run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 15}));
+            let cp1 = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+
+            match mode {
+                Mode::Suppress => {
+                    run(&mut s, "timeline.suppress", json!({"feature": cp1, "suppressed": true}));
+                }
+                Mode::Rollback => {
+                    let idx = s.doc.feature_index(cp1).unwrap();
+                    run(&mut s, "timeline.rollback", json!({"position": idx}));
+                }
+            }
+            assert_eq!(s.doc.assembly.joints[0].values, vec![5.0], "{mode:?}/{op:?}");
+            assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("gap"), "{mode:?}/{op:?}");
+
+            run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 25}));
+            assert_eq!(s.doc.assembly.joints[0].values, vec![25.0], "{mode:?}/{op:?}");
+            assert_eq!(s.doc.assembly.joints[0].exprs.value(0), None, "{mode:?}/{op:?}");
+            assert_eq!(s.uncaptured_joint_count(), 1, "{mode:?}/{op:?}");
+            assert!(s.has_uncaptured_positions(), "{mode:?}/{op:?}");
+
+            match op {
+                Op::Delete => {
+                    run(&mut s, "timeline.delete", json!({"feature": cp1}));
+                }
+                Op::Edit => {
+                    run(&mut s, "timeline.edit", json!({"feature": cp1, "set": {"joints": []}}));
+                }
+                Op::Redefine => {
+                    run(
+                        &mut s,
+                        "timeline.redefine",
+                        json!({
+                            "feature": cp1,
+                            "command": "component.capture_position",
+                            "params": {"moves": [{"occurrence": c_occ, "translate": [10, 0, 0]}], "joints": []}
+                        }),
+                    );
+                }
+            }
+
+            assert_eq!(s.doc.assembly.joints[0].values, vec![5.0], "{mode:?}/{op:?}");
+            assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("gap"), "{mode:?}/{op:?}");
+            assert_eq!(s.doc.assembly.joints[0].base_values, None, "{mode:?}/{op:?}");
+            assert_eq!(s.doc.assembly.joints[0].captured, None, "{mode:?}/{op:?}");
+            assert_eq!(s.uncaptured_joint_count(), 0, "{mode:?}/{op:?}");
+            assert!(!s.has_uncaptured_positions(), "{mode:?}/{op:?}");
+            assert!(s.pending_joint_bases.is_empty(), "{mode:?}/{op:?}");
+
+            run(&mut s, "edit.undo", json!({}));
+            assert_eq!(s.doc.assembly.joints[0].values, vec![25.0], "{mode:?}/{op:?} undo");
+            assert_eq!(s.doc.assembly.joints[0].exprs.value(0), None, "{mode:?}/{op:?} undo");
+            assert_eq!(s.uncaptured_joint_count(), 1, "{mode:?}/{op:?} undo");
+            assert!(s.has_uncaptured_positions(), "{mode:?}/{op:?} undo");
+
+            run(&mut s, "edit.redo", json!({}));
+            assert_eq!(s.doc.assembly.joints[0].values, vec![5.0], "{mode:?}/{op:?} redo");
+            assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("gap"), "{mode:?}/{op:?} redo");
+            assert_eq!(s.doc.assembly.joints[0].base_values, None, "{mode:?}/{op:?} redo");
+            assert_eq!(s.doc.assembly.joints[0].captured, None, "{mode:?}/{op:?} redo");
+            assert_eq!(s.uncaptured_joint_count(), 0, "{mode:?}/{op:?} redo");
+            assert!(!s.has_uncaptured_positions(), "{mode:?}/{op:?} redo");
+            assert!(s.pending_joint_bases.is_empty(), "{mode:?}/{op:?} redo");
+        }
+    }
+}
+
+#[test]
+fn capture_position_inactive_edit_partial_joint_drop_preserves_kept_pending_base() {
+    #[derive(Copy, Clone, Debug)]
+    enum Mode {
+        Suppress,
+        Rollback,
+    }
+    for mode in [Mode::Suppress, Mode::Rollback] {
+        let mut s = two_cubes();
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": "C", "grounded": false}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0]}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "parameters.add", json!({"name": "gap1", "expression": "5 mm"}));
+        run(&mut s, "parameters.add", json!({"name": "gap2", "expression": "7 mm"}));
+        let j1 = run(
+            &mut s,
+            "joint.create",
+            json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "values": ["gap1"], "name": "Rail1"}),
+        )["joint"]
+            .as_u64()
+            .unwrap();
+        let j2 = run(
+            &mut s,
+            "joint.create",
+            json!({"type": "slider", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "C", "face": [45, 5, 0]}, "values": ["gap2"], "name": "Rail2"}),
+        )["joint"]
+            .as_u64()
+            .unwrap();
+
+        run(&mut s, "joint.drive", json!({"joint": "Rail1", "value": 15}));
+        run(&mut s, "joint.drive", json!({"joint": "Rail2", "value": 17}));
+        let cp1 = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+
+        match mode {
+            Mode::Suppress => {
+                run(&mut s, "timeline.suppress", json!({"feature": cp1, "suppressed": true}));
+            }
+            Mode::Rollback => {
+                let idx = s.doc.feature_index(cp1).unwrap();
+                run(&mut s, "timeline.rollback", json!({"position": idx}));
+            }
+        }
+        assert_eq!(s.doc.assembly.joints[0].values, vec![5.0], "{mode:?}");
+        assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("gap1"), "{mode:?}");
+        assert_eq!(s.doc.assembly.joints[1].values, vec![7.0], "{mode:?}");
+        assert_eq!(s.doc.assembly.joints[1].exprs.value(0), Some("gap2"), "{mode:?}");
+
+        run(&mut s, "joint.drive", json!({"joint": "Rail1", "value": 25}));
+        run(&mut s, "joint.drive", json!({"joint": "Rail2", "value": 27}));
+        assert_eq!(s.uncaptured_joint_count(), 2, "{mode:?}");
+        assert!(s.has_uncaptured_positions(), "{mode:?}");
+
+        run(&mut s, "timeline.edit", json!({"feature": cp1, "set": {"joints": [{"joint": j2, "values": [17.0]}]}}));
+        assert_eq!(s.doc.assembly.joints[0].values, vec![5.0], "{mode:?}");
+        assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("gap1"), "{mode:?}");
+        assert_eq!(s.doc.assembly.joints[0].base_values, None, "{mode:?}");
+        assert_eq!(s.doc.assembly.joints[0].captured, None, "{mode:?}");
+        assert!(!s.pending_joint_bases.contains_key(&j1), "{mode:?}");
+
+        assert_eq!(s.doc.assembly.joints[1].values, vec![27.0], "{mode:?}");
+        assert_eq!(s.doc.assembly.joints[1].exprs.value(0), None, "{mode:?}");
+        assert_eq!(s.doc.assembly.joints[1].captured, None, "{mode:?}");
+        assert!(s.pending_joint_bases.contains_key(&j2), "{mode:?}");
+        assert_eq!(s.uncaptured_joint_count(), 1, "{mode:?}");
+        assert!(s.has_uncaptured_positions(), "{mode:?}");
+
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.doc.assembly.joints[0].values, vec![25.0], "{mode:?} undo");
+        assert_eq!(s.doc.assembly.joints[1].values, vec![27.0], "{mode:?} undo");
+        assert_eq!(s.uncaptured_joint_count(), 2, "{mode:?} undo");
+        assert!(s.has_uncaptured_positions(), "{mode:?} undo");
+
+        run(&mut s, "edit.redo", json!({}));
+        assert_eq!(s.doc.assembly.joints[0].values, vec![5.0], "{mode:?} redo");
+        assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("gap1"), "{mode:?} redo");
+        assert_eq!(s.doc.assembly.joints[1].values, vec![27.0], "{mode:?} redo");
+        assert_eq!(s.uncaptured_joint_count(), 1, "{mode:?} redo");
+        assert!(s.has_uncaptured_positions(), "{mode:?} redo");
+
+        let rev = run(&mut s, "component.revert_position", json!({}));
+        assert_eq!(rev["joints"], json!(1), "{mode:?}: {rev}");
+        assert_eq!(s.doc.assembly.joints[1].values, vec![7.0], "{mode:?}");
+        assert_eq!(s.doc.assembly.joints[1].exprs.value(0), Some("gap2"), "{mode:?}");
+        assert_eq!(s.uncaptured_joint_count(), 0, "{mode:?}");
+        assert!(!s.has_uncaptured_positions(), "{mode:?}");
+        assert!(s.pending_joint_bases.is_empty(), "{mode:?}");
+    }
+}
+
+#[test]
+fn capture_position_inactive_edit_moves_joints_and_add_joint_preserves_pending_bases() {
+    #[derive(Copy, Clone, Debug)]
+    enum Mode {
+        Suppress,
+        Rollback,
+    }
+    #[derive(Copy, Clone, Debug)]
+    enum EditCase {
+        MovesOnly,
+        Joints,
+        AddDrivenJoint,
+    }
+    for mode in [Mode::Suppress, Mode::Rollback] {
+        for case in [EditCase::MovesOnly, EditCase::Joints, EditCase::AddDrivenJoint] {
+            let mut s = two_cubes();
+            run(&mut s, "component.activate", json!({"component": "root"}));
+            run(&mut s, "component.create", json!({"name": "C", "grounded": false}));
+            run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0]}));
+            run(&mut s, "component.activate", json!({"component": "root"}));
+            let c_occ = occ(&s, "C");
+            run(&mut s, "parameters.add", json!({"name": "gap1", "expression": "5 mm"}));
+            let j1 = run(
+                &mut s,
+                "joint.create",
+                json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "values": ["gap1"], "name": "Rail1"}),
+            )["joint"]
+                .as_u64()
+                .unwrap();
+
+            run(&mut s, "occurrence.move", json!({"occurrence": c_occ, "translate": [10, 0, 0], "capture": false}));
+            run(&mut s, "joint.drive", json!({"joint": "Rail1", "value": 15}));
+            let cp1 = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+
+            let j2_opt = if matches!(case, EditCase::AddDrivenJoint) {
+                run(&mut s, "component.create", json!({"name": "D", "grounded": false}));
+                run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [70, 0, 0]}));
+                run(&mut s, "component.activate", json!({"component": "root"}));
+                run(&mut s, "parameters.add", json!({"name": "gap2", "expression": "7 mm"}));
+                let j2 = run(
+                    &mut s,
+                    "joint.create",
+                    json!({"type": "slider", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "D", "face": [75, 5, 0]}, "values": ["gap2"], "name": "Rail2"}),
+                )["joint"]
+                    .as_u64()
+                    .unwrap();
+                Some(j2)
+            } else {
+                None
+            };
+
+            match mode {
+                Mode::Suppress => {
+                    run(&mut s, "timeline.suppress", json!({"feature": cp1, "suppressed": true}));
+                }
+                Mode::Rollback => {
+                    let idx = s.doc.feature_index(cp1).unwrap();
+                    run(&mut s, "timeline.rollback", json!({"position": idx}));
+                }
+            }
+
+            match case {
+                EditCase::MovesOnly => {
+                    run(&mut s, "joint.drive", json!({"joint": "Rail1", "value": 25}));
+                    run(&mut s, "timeline.edit", json!({"feature": cp1, "set": {"moves": [{"occurrence": c_occ, "translate": [20, 0, 0]}]}}));
+                    assert_eq!(s.doc.assembly.joints[0].values, vec![25.0], "{mode:?}/{case:?}");
+                    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), None, "{mode:?}/{case:?}");
+                }
+                EditCase::Joints => {
+                    run(&mut s, "joint.drive", json!({"joint": "Rail1", "value": 25}));
+                    run(&mut s, "timeline.edit", json!({"feature": cp1, "set": {"joints": [{"joint": j1, "values": [18.0]}]}}));
+                    assert_eq!(s.doc.assembly.joints[0].values, vec![25.0], "{mode:?}/{case:?}");
+                    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), None, "{mode:?}/{case:?}");
+                }
+                EditCase::AddDrivenJoint => {
+                    let j2 = j2_opt.unwrap();
+                    run(&mut s, "joint.drive", json!({"joint": "Rail2", "value": 27}));
+                    run(
+                        &mut s,
+                        "timeline.edit",
+                        json!({"feature": cp1, "set": {"joints": [{"joint": j1, "values": [15.0]}, {"joint": j2, "values": [17.0]}]}}),
+                    );
+                    assert_eq!(s.doc.assembly.joints[1].values, vec![27.0], "{mode:?}/{case:?}");
+                    assert_eq!(s.doc.assembly.joints[1].exprs.value(0), None, "{mode:?}/{case:?}");
+                    assert_eq!(s.doc.assembly.joints[1].base_values, Some(vec![7.0]), "{mode:?}/{case:?}");
+                    assert_eq!(s.doc.assembly.joints[1].base_exprs, vec![Some("gap2".to_string())], "{mode:?}/{case:?}");
+                    assert_eq!(s.doc.assembly.joints[1].captured, None, "{mode:?}/{case:?}");
+                }
+            }
+
+            assert_eq!(s.uncaptured_joint_count(), 1, "{mode:?}/{case:?}");
+            assert!(s.has_uncaptured_positions(), "{mode:?}/{case:?}");
+
+            let rev = run(&mut s, "component.revert_position", json!({}));
+            assert_eq!(rev["joints"], json!(1), "{mode:?}/{case:?}: {rev}");
+            assert_eq!(s.uncaptured_joint_count(), 0, "{mode:?}/{case:?}");
+            assert!(!s.has_uncaptured_positions(), "{mode:?}/{case:?}");
+            assert!(s.pending_joint_bases.is_empty(), "{mode:?}/{case:?}");
+            match case {
+                EditCase::MovesOnly | EditCase::Joints => {
+                    assert_eq!(s.doc.assembly.joints[0].values, vec![5.0], "{mode:?}/{case:?}");
+                    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("gap1"), "{mode:?}/{case:?}");
+                }
+                EditCase::AddDrivenJoint => {
+                    assert_eq!(s.doc.assembly.joints[1].values, vec![7.0], "{mode:?}/{case:?}");
+                    assert_eq!(s.doc.assembly.joints[1].exprs.value(0), Some("gap2"), "{mode:?}/{case:?}");
+                }
+            }
+        }
+    }
 }
 
 /// A value given as an expression has the bound a number has: past it, the design would save

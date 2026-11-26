@@ -246,6 +246,10 @@ pub struct JointForm {
     alignment_primary_cache: [Option<JointOrigin>; 2],
     /// Backend A/B -> primary UI row, captured when this creation dialog opens.
     pub primary_order: [usize; 2],
+    /// As-built: the bodies of each component picked whole (its Browser row, or the component
+    /// selected when the dialog opened). They are one side, not parts to separate; a record goes
+    /// once any of its bodies leaves Components.
+    pub whole_components: Vec<Vec<String>>,
 }
 
 impl JointForm {
@@ -282,6 +286,7 @@ impl JointForm {
             alignment_primary_key: None,
             alignment_primary_cache: [None, None],
             primary_order: [0, 1],
+            whole_components: Vec::new(),
         }
     }
 
@@ -851,6 +856,55 @@ pub struct SnapPt {
     pub param: Value,
 }
 
+/// New Component with bodies picked: makes the component, then moves the bodies into it as
+/// part of the same undo step, with the moves in one History folder named after the component
+/// when there are two or more (#21840). `None` when the window has no bodies picked, so it runs
+/// as any other window. A refused move takes the new component back out and leaves the undo and
+/// redo steps, the active component and the selection as they were before OK.
+pub(crate) fn run_new_component(app: &mut SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<Result<(), String>> {
+    if !matches!(k, Asm::NewComponent { .. }) {
+        return None;
+    }
+    let commands = commands(app, k, inputs).ok()?;
+    let [(create, create_params), (moving, move_params)] = commands.as_slice() else { return None };
+    Some((|| {
+        // What a refused move puts back: the create drops redo steps (and at the undo limit the
+        // oldest undo step), and taking the component out again leaves the root active.
+        let s = &app.session;
+        let (undo, redo) = (s.undo.clone(), s.redo.clone());
+        let (active, path) = (s.active_component, s.active_occurrence_path.clone());
+        let (selection, all_bodies) = (s.selection.clone(), s.selection_all_bodies);
+        let made = app.run(create, create_params.clone())?;
+        let mut move_params = move_params.clone();
+        if let Some(id) = made.get("component") {
+            move_params["component"] = id.clone();
+        }
+        let history = std::mem::take(&mut app.session.undo);
+        let moved = match app.run(moving, move_params) {
+            Ok(moved) => moved,
+            Err(error) => {
+                app.session.undo = history;
+                if let Err(why) = app.run("edit.undo", json!({})) {
+                    return Err(format!("{error}; the new component could not be taken back out: {why}"));
+                }
+                let s = &mut app.session;
+                (s.undo, s.redo) = (undo, redo);
+                (s.active_component, s.active_occurrence_path) = (active, path);
+                (s.selection, s.selection_all_bodies) = (selection, all_bodies);
+                return Err(error);
+            }
+        };
+        let features = moved.get("features").and_then(Value::as_array).cloned().unwrap_or_default();
+        if features.len() > 1
+            && let Err(error) = app.run("timeline.group", json!({ "name": made["name"], "features": features }))
+        {
+            app.set_status(error, true);
+        }
+        app.session.undo = history;
+        Ok(())
+    })())
+}
+
 /// The occurrence placing a world body (0: the root design), the instance its name says.
 pub(crate) fn occurrence_of_body(s: &Session, body: &str) -> Option<u64> {
     placement_of_body(s, body).map(|path| path.last().copied().unwrap_or(0))
@@ -1387,8 +1441,11 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut Vec
             crate::ui_kit::options(ui, "component_options", &mut [("Activate", activate)]);
         }
         Asm::Joint(f) => {
-            // As-built: two components picked, the position comes next.
-            if f.as_built && *active == 0 && inputs.first().is_some_and(|i| i.items.len() >= 2) {
+            let picked = sel_items(inputs, 0);
+            f.whole_components.retain(|bodies| bodies.iter().all(|b| picked.contains(&Sel::Body { name: b.clone() })));
+            // As-built: two components picked, the position comes next. Counted as OK counts
+            // them: a component with two bodies is one.
+            if f.as_built && *active == 0 && occurrences(&app.session, picked).len() >= 2 {
                 *active = 1;
             }
             // Picks that make no joint say why, under them, and offer the way out (#1239).
@@ -2488,6 +2545,11 @@ fn joint_problem(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<(String
     let doc = &app.session.doc;
     let occs: Vec<Option<u64>> =
         bodies.iter().map(|b| placement_of_body(&app.session, b).map(|path| solidcraft_engine::doc::joints::origin_anchor(doc, &path).0)).collect();
+    // As-built: one component picked whole is one side, and the second is still to come (#21842).
+    let whole = f.as_built && f.whole_components.iter().any(|w| w.iter().all(|b| bodies.contains(b)) && bodies.iter().all(|b| w.contains(b)));
+    if whole {
+        return None;
+    }
     // Only every pick naming a body makes the one-component case a problem: a datum plane or axis
     // side names its placement's origin, not a body, so a datum of one part against a face of
     // another is still a two-part joint.
@@ -2498,6 +2560,20 @@ fn joint_problem(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<(String
         });
     }
     commands(app, k, inputs).err().map(|e| (e, Vec::new()))
+}
+
+/// As-built: a component was picked whole, as these bodies. Kept while Components holds them all.
+pub(crate) fn picked_whole_component(d: &mut Dialog, bodies: &[String]) {
+    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { return };
+    let held = d.inputs.first().is_some_and(|i| bodies.iter().all(|b| i.items.contains(&Sel::Body { name: b.clone() })));
+    if f.as_built && held && !bodies.is_empty() && !f.whole_components.iter().any(|w| w == bodies) {
+        f.whole_components.push(bodies.to_vec());
+    }
+}
+
+/// As-built with fewer than two components in Components: they are still being picked.
+pub(crate) fn as_built_wants_components(s: &Session, d: &Dialog) -> bool {
+    matches!(&d.kind, Kind::Assembly(Asm::Joint(f)) if f.as_built) && occurrences(s, sel_items(&d.inputs, 0)).len() < 2
 }
 
 /// The occurrences of picked bodies (deduplicated, in pick order).
@@ -2534,15 +2610,17 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
         }
         Asm::NewComponent { name, activate } => {
             let bodies: Vec<String> = sel_items(inputs, 0).body_names();
-            if bodies.is_empty() {
-                let mut p = json!({ "activate": activate });
-                if !name.trim().is_empty() {
-                    p["name"] = json!(name.trim());
-                }
-                cmd("component.create", p)
-            } else {
-                cmd("component.from_bodies", json!({ "bodies": bodies }))
+            let mut p = json!({ "activate": activate });
+            if !name.trim().is_empty() {
+                p["name"] = json!(name.trim());
             }
+            let mut out = cmd("component.create", p);
+            // The picked bodies go into the component just made (#21840); `run_new_component`
+            // sends the move with the id the create returned.
+            if !bodies.is_empty() {
+                out.push(("component.move_bodies".into(), json!({ "bodies": bodies, "component": s.doc.next_id.max(1) })));
+            }
+            out
         }
         Asm::Joint(f) => {
             let alignment = alignment_params(s, f, inputs)?;
