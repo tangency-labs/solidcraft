@@ -202,6 +202,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EXPORT_STEP_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::ExportResult>)
         .params("path; bodies?: [names] (default: every body; a design with components then exports as a STEP assembly) → {path, bytes, format}: STEP, whatever the path's extension"),
+    CommandSpec::new("file.stl_to_step", "Convert STL to STEP", crate::checked!("file.stl_to_step", stl_to_step))
+        .any_part()
+        .icon("export")
+        .noundo()
+        .params(concat!(
+            "input: STL (.stl) file path; output: STEP (.step or .stp) file path; ",
+            "units?: mm|cm|m|in|ft (default mm); ",
+            "tolerance?: length expression (default 0.05 mm); ",
+            "→ {input, path, bytes, format, converted_bodies}: converts the STL in a temporary design, leaving the open design unchanged",
+        )),
     CommandSpec::new("file.export_stl", "Export STL", crate::checked!("file.export_stl", export_stl))
         .icon("mesh_export")
         .noundo()
@@ -1131,6 +1141,44 @@ fn insert_mesh(s: &mut Session, p: &Value) -> Result<Value> {
         return serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()));
     }
     add_mesh(s, path, str_(p, "name"), up, unit, mesh_origin(p, cmd)?, crease_angle)
+}
+
+fn stl_to_step(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "file.stl_to_step";
+    let input = str_(p, "input").filter(|path| usable_path(path)).ok_or_else(|| bad(cmd, "`input` is required"))?;
+    let output = str_(p, "output").filter(|path| usable_path(path)).ok_or_else(|| bad(cmd, "`output` is required"))?;
+    let input_extension = std::path::Path::new(input).extension().and_then(|ext| ext.to_str()).unwrap_or_default();
+    if !input_extension.eq_ignore_ascii_case("stl") {
+        return Err(bad(cmd, "`input` must be an STL (.stl) file"));
+    }
+    let output_extension = std::path::Path::new(output).extension().and_then(|ext| ext.to_str()).unwrap_or_default();
+    if !["step", "stp"].iter().any(|ext| output_extension.eq_ignore_ascii_case(ext)) {
+        return Err(bad(cmd, "`output` must use the .step or .stp extension"));
+    }
+    let tolerance = match p.get("tolerance") {
+        None | Some(Value::Null) => "0.05 mm",
+        Some(Value::String(value)) if !value.trim().is_empty() => value,
+        Some(value) => return Err(bad(cmd, format!("`tolerance` must be a length expression, not {value}"))),
+    };
+    let unit = mesh_units(p, input, cmd)?;
+    let mut converted = Session::default();
+    let imported = add_mesh(&mut converted, input, None, None, unit, false, None)?;
+    let body_values = imported.get("created_bodies").and_then(Value::as_array).ok_or_else(|| bad(cmd, "mesh import returned no body list"))?;
+    let bodies = body_values
+        .iter()
+        .map(|value| value.as_str().map(str::to_owned).ok_or_else(|| bad(cmd, "mesh import returned an invalid body name")))
+        .collect::<Result<Vec<_>>>()?;
+    if bodies.is_empty() {
+        return Err(bad(cmd, "the STL contains no mesh bodies"));
+    }
+    for body in &bodies {
+        converted.execute("mesh.convert", &json!({"body": body, "tolerance": tolerance}))?;
+    }
+    let mut exported = converted.execute("file.export_step", &json!({"path": output}))?;
+    let result = exported.as_object_mut().ok_or_else(|| bad(cmd, "STEP export returned an invalid result"))?;
+    result.insert("input".into(), Value::String(input.to_owned()));
+    result.insert("converted_bodies".into(), json!(bodies));
+    Ok(exported)
 }
 
 /// The shading-only crease reader, shared by the handler and its typed contract.
@@ -4081,6 +4129,58 @@ mod tests {
             assert!(e.contains("solids"), "{cmd} {params}: {e}");
         }
         assert!(!std::path::Path::new(&at("a.stl")).exists() && !std::path::Path::new(&at("a.3mf")).exists());
+    }
+
+    #[test]
+    fn stl_to_step_exports_a_solid_without_changing_the_open_design() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-stl-to-step-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("box.stl");
+        let output = dir.join("box.step");
+        let mut s = crate::tests::mesh_convert::imported_box();
+        let before = s.doc.to_json();
+        let mesh = solidcraft_io::export(&s.model.state(), &["Mesh".into()], Format::StlBinary, "Box").unwrap();
+        std::fs::write(&input, mesh).unwrap();
+
+        let result = s.execute("file.stl_to_step", &json!({"input":input,"output":output})).unwrap();
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(result["converted_bodies"].as_array().map(Vec::len), Some(1));
+        assert_eq!(result["format"], "Step");
+
+        let mut reopened = Session::default();
+        reopened.execute("doc.open", &json!({"path":output})).unwrap();
+        let state = reopened.model.state();
+        let body = &state.bodies[0].body;
+        assert!(!body.is_mesh());
+        assert!(body.validity().is_empty());
+        assert!((solidcraft_kernel::measure(body).unwrap().volume - 6000.0).abs() < 1e-6);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn stl_to_step_failure_preserves_the_open_design_and_existing_output() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-stl-to-step-invalid-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("invalid.stl");
+        let output = dir.join("invalid.step");
+        std::fs::write(&input, b"not an STL").unwrap();
+        std::fs::write(&output, b"existing output").unwrap();
+        let mut s = crate::tests::mesh_convert::imported_box();
+        let before = s.doc.to_json();
+
+        assert!(s.execute("file.stl_to_step", &json!({"input":input,"output":output})).is_err());
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(std::fs::read(&output).unwrap(), b"existing output");
+
+        std::fs::write(
+            &input,
+            b"solid open\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid open\n",
+        )
+        .unwrap();
+        assert!(s.execute("file.stl_to_step", &json!({"input":input,"output":output})).is_err());
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(std::fs::read(&output).unwrap(), b"existing output");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// Every placement of a part is its first placement's triangles, moved: a copy moved by a

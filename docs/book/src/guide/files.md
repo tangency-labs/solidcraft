@@ -231,6 +231,13 @@ Closed meshes can be rebuilt as solids with the `mesh.convert` command (command 
 scripts and the control channel): a mesh with a constant cross-section as analytic planar and
 cylindrical faces, any other closed mesh as the faceted solid its triangles describe.
 
+To convert a standalone STL file without adding it to the open design, use
+`file.stl_to_step` with `input` and `output` paths. It imports the STL into a temporary design,
+converts each mesh body using the same rules as `mesh.convert`, then writes a STEP solid.
+Coordinates are millimetres by default; `units` can specify `mm`, `cm`, `m`, `in` or `ft`, and
+`tolerance` defaults to `0.05 mm`. The input must be a closed mesh that can be converted; an
+import or conversion failure leaves the open design and output file unchanged.
+
 Use **Surface → Mesh → Reduce Mesh** to create a separate, simpler mesh without changing the
 original. Select the mesh body and choose either a retained percentage (greater than 0 and less
 than 100) or a positive target triangle count. The status reports the original, target and achieved
