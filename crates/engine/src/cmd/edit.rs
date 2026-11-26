@@ -648,6 +648,9 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     // Features that work now; any of them failing after the delete is reported (a later
     // feature that names a deleted body, #267).
     let worked: std::collections::BTreeSet<u64> = s.model.results.iter().filter(|r| r.error.is_none() && !r.skipped).map(|r| r.id).collect();
+    // Pin surviving features' evaluated body names before deleting, so disambiguated names
+    // (e.g. `VIS (3)`) do not slide down into freed suffixes.
+    s.pin_body_names();
     let mut removed_capture_joints = std::collections::BTreeSet::new();
     for &id in &ids {
         if let Some(f) = s.doc.feature(id)
@@ -1286,6 +1289,9 @@ fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
                 && joints.iter().all(|id| s.doc.assembly.joints.iter().any(|joint| joint.id == *id && joint.suppressed)))
         }
     };
+    if want {
+        s.pin_body_names();
+    }
     let keep = if want { counted_names_from(s, &ids) } else { Vec::new() };
     // One command, so one undo step however many features it changes.
     let doc = s.doc_mut();
