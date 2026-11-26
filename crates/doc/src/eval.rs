@@ -13705,7 +13705,8 @@ fn no_face_from_tools(mb: &ModelBody) -> bool {
 
 /// Whether `new` has a face on a surface no face of `old` lies on. A plane, cylinder, cone,
 /// sphere or torus is compared by its geometry, to within a ten-millionth of the bodies' size;
-/// any other surface (a spline) by its exact definition in the record. A cut that removes
+/// a spline or blend surface by its control net within the same tolerance, and any other surface
+/// by its exact definition in the record. A cut that removes
 /// material usually leaves such a face (a wall of the pocket); one that only splits faces where
 /// its tool touches them (#18825) leaves none. It is a quick test, not a proof: a cut whose new
 /// faces all lie on surfaces the body had already (a thin wall cut away between two pockets)
@@ -13723,12 +13724,15 @@ fn new_surface_faces(old: &Body, new: &Body) -> Vec<bool> {
     let region = bounds(old).union(&bounds(new));
     let same = |a: &S, b: &S| kernel::same_surface(a, b, tol, &region);
     let (old_rec, new_rec) = (old.record(), new.record());
-    let olds: Vec<(Option<S>, Option<&solidcore_record::brep::Surface>)> =
-        (0..old.face_count()).map(|fi| (kernel::face_surface(old, fi), old_rec.faces.get(fi).map(|f| &f.surface))).collect();
+    let olds: Vec<(Option<S>, Option<&solidcore_record::brep::Face>)> =
+        (0..old.face_count()).map(|fi| (kernel::face_surface(old, fi), old_rec.faces.get(fi))).collect();
     (0..new.face_count())
         .map(|fi| match kernel::face_surface(new, fi) {
             Some(surface) => !olds.iter().any(|(o, _)| o.as_ref().is_some_and(|o| same(o, &surface))),
-            None => new_rec.faces.get(fi).is_some_and(|f| !olds.iter().any(|(_, o)| *o == Some(&f.surface))),
+            None => new_rec
+                .faces
+                .get(fi)
+                .is_some_and(|f| !olds.iter().any(|(_, o)| o.as_ref().is_some_and(|&o| kernel::same_face_record_surface(o, f, tol)))),
         })
         .collect()
 }

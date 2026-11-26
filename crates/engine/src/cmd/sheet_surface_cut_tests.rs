@@ -1823,3 +1823,60 @@ fn overlapping_countersinks_from_opposite_faces_open_the_flat_where_they_break_t
     run(&mut s, "sheet.refold", json!({}));
     assert!((exact_volume(&s) - v).abs() < 1e-6 * v, "after refold: {} vs {v}", exact_volume(&s));
 }
+
+/// Cuts through a flat flange of a sheet with mitered tear corners (ruled B-spline bend-end faces)
+/// continue to succeed when shortening the sheet shifts its bounding-box centre past 1000 mm from
+/// the world origin (triggering the boolean's temporary origin recentering and last-bit rounding on
+/// untouched spline faces), while a genuine slanted cut across a bend reaching the sheet edge is
+/// still refused.
+#[test]
+fn cuts_on_a_tear_corner_sheet_far_from_origin_succeed_and_slant_across_bend_is_refused() {
+    let mut s = session();
+    run(&mut s, "parameters.add", json!({"name": "web_len", "expression": "300"}));
+    run(
+        &mut s,
+        "sheet.manage_rules",
+        json!({"action": "create", "name": "TearCorner", "thickness": T, "k_factor": 0.5, "bend_radius": 2.0, "gap": 0.1, "corner_relief_shape": "tear"}),
+    );
+    run(&mut s, "solid.box", json!({"corner": [-1140, 0, 0], "length": "web_len", "width": 60, "height": T, "body_name": "Plate"}));
+    run(&mut s, "sheet.convert", json!({"body": "Plate", "face": [-1100, 30, T], "rule": "TearCorner"}));
+    run(&mut s, "sheet.flange", json!({"edges": [[-1100, 0, T], [-1140, 30, T]], "height": 25}));
+
+    // At web_len = 300 the box centre is around x = -990 (|centre| < 1000 mm).
+    let hole = run(
+        &mut s,
+        "solid.hole",
+        json!({"position": [-1140, 45, 15], "direction": [1, 0, 0], "type": "countersink", "diameter": 4, "cs_diameter": 6, "cs_angle": "90 deg"}),
+    );
+    let hole_id = hole["feature"].as_u64().expect("hole feature id");
+    let cyl = run(&mut s, "solid.cylinder", json!({"base": [-1141, 25, 15], "axis": [1, 0, 0], "radius": 2.5, "height": 5, "operation": "cut"}));
+    let cyl_id = cyl["feature"].as_u64().expect("cylinder feature id");
+
+    // Shortening web_len to 260 moves the box centre past |centre| = 1000 mm (x ≈ -1010): the
+    // boolean translates operands to the origin and back, rounding untouched B-spline bend-end
+    // faces by a few ULPs. Both mid-flange cuts must still rebuild cleanly with a valid flat.
+    run(&mut s, "parameters.change", json!({"name": "web_len", "expression": "260"}));
+    let hole_res = s.model.result(hole_id).cloned().expect("hole evaluated");
+    assert!(hole_res.error.is_none(), "hole failed after shortening: {:?}", hole_res.error);
+    let cyl_res = s.model.result(cyl_id).cloned().expect("cylinder cut evaluated");
+    assert!(cyl_res.error.is_none(), "cylinder cut failed after shortening: {:?}", cyl_res.error);
+
+    let fp = flat(&mut s);
+    assert_eq!(fp["bends"].as_array().map(Vec::len), Some(2), "{fp}");
+    let mut radii: Vec<f64> = flat_circles(&mut s).iter().map(|c| c.0).collect();
+    radii.sort_by(f64::total_cmp);
+    assert!(radii.len() == 2 && (radii[0] - 2.0).abs() < 1e-6 && (radii[1] - 2.5).abs() < 1e-6, "flat circles: {radii:?}");
+
+    let v = exact_volume(&s);
+    run(&mut s, "sheet.unfold", json!({}));
+    run(&mut s, "sheet.refold", json!({}));
+    assert!((exact_volume(&s) - v).abs() < 1e-6 * v, "after refold: {} vs {v}", exact_volume(&s));
+
+    // A genuine slanted cut across the bend reaching the sheet edge must still be refused.
+    let err = s
+        .execute("solid.cylinder", &json!({"base": [-1142, 4, 2], "axis": [1, 1, 1], "radius": 4.0, "height": 20, "operation": "cut"}))
+        .expect_err("slanted cut reaching bend edge must still be refused")
+        .to_string();
+    assert!(err.contains("not supported yet at a slant, on a roll or across a bend"), "{err}");
+    assert!((exact_volume(&s) - v).abs() < 1e-6 * v, "sheet changed after refused cut: {} vs {v}", exact_volume(&s));
+}
