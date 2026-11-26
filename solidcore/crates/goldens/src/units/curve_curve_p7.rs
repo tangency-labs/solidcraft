@@ -475,6 +475,11 @@ fn build(c: &CurveIn) -> Result<Curve, HarnessError> {
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::upstream_status(e).is_some() => {
@@ -648,7 +653,7 @@ fn rust_cci(cci: &CciIn, leaves: Option<(u64, u64)>) -> Result<Output, HarnessEr
         ($c:expr, $cache:expr, $h:expr) => {
             match build_cache(&k, $c, $cache, $h) {
                 Ok(cc) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     Some(cc)
                 }
                 Err(Fail::Deferred(d)) => return Ok(*d),
@@ -698,7 +703,7 @@ fn rust_cci(cci: &CciIn, leaves: Option<(u64, u64)>) -> Result<Output, HarnessEr
             };
             match gs.solve_it(&req, &mut sols) {
                 Ok(()) => {
-                    o.extend([0.0, sols.len() as f64]);
+                    o.extend([crate::status::ok_slot(0.0), sols.len() as f64]);
                     for s in sols.as_slice() {
                         put_sol(&mut o, s, &n1, &n2);
                     }

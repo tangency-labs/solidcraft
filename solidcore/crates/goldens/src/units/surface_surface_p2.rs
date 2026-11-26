@@ -590,6 +590,11 @@ fn side(left: bool) -> Side {
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
@@ -1087,7 +1092,7 @@ fn surface_op_on(
                         2 => e.set_sect_dir(Vec3::new(st[1], st[2], st[3])),
                         _ => match e.eval() {
                             Ok(()) => {
-                                o.push(0.0);
+                                o.push(crate::status::ok_slot(0.0));
                                 let pvv = e.values();
                                 for (i, row) in pvv.iter().enumerate() {
                                     for (j, v) in row.iter().enumerate() {
@@ -1447,7 +1452,7 @@ fn rust_static_op(op: &OpIn) -> Result<Run, HarnessError> {
             f.set(&args);
             let dump = |o: &mut Vec<f64>, g: &DropCurveFail<Handle>| {
                 o.extend([
-                    f64::from(g.fail_status),
+                    crate::status::drop_status_slot(g.fail_status, f64::from(g.fail_status)),
                     g.from_call as f64,
                     f64::from(g.create_path_type as i32),
                     flag(g.has_context),

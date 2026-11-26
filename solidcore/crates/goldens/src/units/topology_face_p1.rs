@@ -194,7 +194,7 @@ fn path_of(brep: &BrepIn) -> Result<String, HarnessError> {
 fn resolve_with(i: &Inputs, c: [usize; 10]) -> Result<Inputs, Box<Output>> {
     let [_, _, _, n_f, _, n_l, ..] = c;
     if n_f == 0 {
-        return Err(Box::new(Output::err("no_face")));
+        return Err(Box::new(Output::harness("no_face")));
     }
     let mut r = i.clone();
     r.face = shared::sel(i.face.max(0), n_f);
@@ -208,13 +208,13 @@ fn resolve_with(i: &Inputs, c: [usize; 10]) -> Result<Inputs, Box<Output>> {
         }
         OpIn::LoopRoundTrip { loop_ } => {
             if n_l == 0 {
-                return Err(Box::new(Output::err("no_loop")));
+                return Err(Box::new(Output::harness("no_loop")));
             }
             *loop_ = shared::sel((*loop_).max(0), n_l);
         }
         OpIn::DeleteInnerLoop { loops, .. } => {
             if n_l == 0 || loops.is_empty() {
-                return Err(Box::new(Output::err("no_loop")));
+                return Err(Box::new(Output::harness("no_loop")));
             }
             // distinct selectors, at most four (a deleted loop cannot be named again)
             let mut kept: Vec<i64> = Vec::new();
@@ -256,8 +256,8 @@ fn fail(e: &SolidError) -> Fail {
 /// `SM_ERR_INVALID_INPUT`); a deferral or another error ends the case.
 fn status<T>(r: &Result<T, SolidError>) -> Result<f64, Fail> {
     match r {
-        Ok(_) => Ok(0.0),
-        Err(up_err) if solidcore::error::upstream_status(up_err).is_some() => Ok(f64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1))),
+        Ok(_) => Ok(crate::status::ok_slot(0.0)),
+        Err(up_err) if crate::status::is_kernel(up_err, solidcore::error::upstream_status(up_err).is_some()) => Ok(f64::from(crate::status::kind_slot(up_err, solidcore::error::upstream_status(up_err).unwrap_or(-1)))),
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(SM_ERR_INVALID_INPUT),
         Err(e) => Err(fail(e)),
     }
@@ -610,7 +610,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
         } => {
             if let OpIn::UvDomainAfterTrimShift { domain, shift, .. } = &i.op {
                 if fp2::surface(&b, f).map_err(e)?.is_none() {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     return Ok(o);
                 }
                 solidcore::topology::face::p3::create_uv_trim_curves(&k, &mut b, f, false, None)
@@ -658,7 +658,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
             };
             // (upstream dereferences the upward face use only without a loop to use)
             if (l.is_none() && b.face(f).map_err(e)?.faceuse.is_none()) || !lu_ok {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             }
             let r = fp1::create_oriented_trim_boundary(&k, &mut b, f, *param, *fill, l, ko);
@@ -693,7 +693,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
         }
         OpIn::SetSurface { delete } => {
             let Some(s) = b.face(f).map_err(e)?.surface.clone() else {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             };
             let r = fp1::set_surface(&k, &mut b, f, key_of(EntityRef::Face(f)), s, *delete);
@@ -708,7 +708,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
         OpIn::LoopRoundTrip { loop_ } => {
             let l = LoopId::from_index(*loop_ as u32);
             if !ok_round_trip(&b, f, l).map_err(e)? {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             }
             let r = fp1::remove_loop(&mut b, f, l);
@@ -719,7 +719,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
         }
         OpIn::RemoveUv => {
             if b.face(f).map_err(e)?.faceuse.is_none() {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             }
             let r = fp1::remove_uv_trim_curves(&mut b, f);
@@ -732,7 +732,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
                 || face.faceuse.is_none()
                 || !reaches_brep(&b, f).map_err(e)?
             {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             }
             let r = fp1::swap_uv(&k, &mut b, f);
@@ -762,7 +762,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
         } => {
             let face = b.face(f).map_err(e)?;
             if face.surface.is_none() || face.faceuse.is_none() {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             }
             let (problem, mut cu, mut cv) = seam_problem(&k, &mut b, f, &mut o)?;
@@ -808,7 +808,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
         OpIn::SplitAtSeam { props } => {
             let face = b.face(f).map_err(e)?;
             if face.surface.is_none() || face.faceuse.is_none() {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             }
             let (problem, mut cu, mut cv) = seam_problem(&k, &mut b, f, &mut o)?;
@@ -889,7 +889,7 @@ fn delete_inner_loop_record(
         guard |= mate.is_none();
     }
     if guard {
-        o.push(NULL_DEREF);
+        o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
         return Ok(());
     }
     let mut store = AttributeStore::default();

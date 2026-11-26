@@ -459,7 +459,7 @@ fn rust_inputs(
         }
         Inputs::MergeSelf { face, .. } => {
             if n_f == 0 {
-                return Ok(Err(Output::err("no_face")));
+                return Ok(Err(Output::harness("no_face")));
             }
             *face = shared::sel((*face).max(0), n_f);
         }
@@ -934,8 +934,8 @@ fn cpp_null_deref(label: &str, symbol: &str) -> Fail {
 /// `InvalidInput`); a deferral or another error ends the case.
 fn status<T>(r: &Result<T, SolidError>) -> Result<f64, Fail> {
     match r {
-        Ok(_) => Ok(0.0),
-        Err(e) if solidcore::error::upstream_status(e).is_some() => Ok(f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))),
+        Ok(_) => Ok(crate::status::ok_slot(0.0)),
+        Err(e) if crate::status::is_kernel(e, solidcore::error::upstream_status(e).is_some()) => Ok(f64::from(crate::status::kind_slot(e, solidcore::error::upstream_status(e).unwrap_or(-1)))),
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(SM_ERR_INVALID_INPUT),
         Err(e) => Err(match Output::unported(e) {
             Some(o) => Fail::Deferred(Box::new(o)),
@@ -1353,8 +1353,8 @@ fn rust_record(k: &mut Kernel, i: &Inputs, built: Option<Brep>) -> Record {
                     Vec3::new(0.0, *side, 0.0),
                 ];
                 for (a, b) in p.iter().zip(p.iter().cycle().skip(1)) {
-                    if Line::create_line_segment(3, *a, *b, None).is_err() {
-                        return Ok(vec![NOT_RUN]);
+                    if let Err(e) = Line::create_line_segment(3, *a, *b, None) {
+                        return Ok(vec![crate::status::kind_slot(&e, NOT_RUN)]);
                     }
                 }
                 // The shim's loop: `new SmBrep()` (its infinite void region), MakeShellVertex
@@ -1411,7 +1411,7 @@ fn rust_record(k: &mut Kernel, i: &Inputs, built: Option<Brep>) -> Record {
                         }
                         Err(e) if e.is_unported() => return Err(defer(e)),
                         // (the shim cannot build the loop either)
-                        Err(_) => return Ok(vec![NOT_RUN]),
+                        Err(kernel_err) => return Ok(vec![crate::status::kind_slot(&kernel_err, NOT_RUN)]),
                     }
                 }
                 let (c, ivl) = line(3)?;
@@ -1428,7 +1428,7 @@ fn rust_record(k: &mut Kernel, i: &Inputs, built: Option<Brep>) -> Record {
                 ) {
                     Ok(e) => es.push(e),
                     Err(e) if e.is_unported() => return Err(defer(e)),
-                    Err(_) => return Ok(vec![SC_ERR_ARG]),
+                    Err(kernel_err) => return Ok(vec![crate::status::kind_slot(&kernel_err, SC_ERR_ARG)]),
                 }
                 let mut eus = Vec::new();
                 for &e in &es {
@@ -1701,7 +1701,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     if let Inputs::Read { file, damage, .. } = i {
         let bytes = read_bytes(file, *damage)?;
         if !stream_accepted(&bytes, read_bytes(file, None)? == bytes) {
-            return Ok(Output::err("guard"));
+            return Ok(Output::harness("guard"));
         }
     }
     let mut k = Kernel::default();

@@ -31,7 +31,7 @@ use solidcore::nurbs::geom::{
     Plane, Rectangle,
 };
 use solidcore::nurbs::math::{combine2_pts, CPoint, RealMatrix, NOW, NOZ};
-use solidcore::{Result as SolidResult, Vec3};
+use solidcore::{Result as SolidResult, SolidError, Vec3};
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
@@ -231,9 +231,16 @@ fn nan(o: &mut Vec<f64>, k: usize) {
 /// `0` for `Ok`, the `NL_*_ERR` number for an NLib error, `-1` otherwise.
 fn status<T>(r: &SolidResult<T>) -> f64 {
     match r {
-        Ok(_) => 0.0,
-        Err(e) if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
-        Err(_) => -1.0,
+        Ok(_) => crate::status::ok_slot(0.0),
+        Err(e) => crate::status::kind_slot(e, legacy_status(e)),
+    }
+}
+
+/// [`status`]'s error value as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
+    match e {
+        e if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
+        _ => -1.0,
     }
 }
 
@@ -479,7 +486,7 @@ fn rust_flat(i: &Inputs) -> SolidResult<Vec<f64>> {
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     match rust_flat(i) {
         Ok(flat) => split(i, &flat),
-        Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(format!("rust: {e}")))),
+        Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, format!("rust: {e}")))),
     }
 }
 

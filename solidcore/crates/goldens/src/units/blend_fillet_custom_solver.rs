@@ -322,6 +322,11 @@ fn surface_of(s: &InlineSrf) -> Result<Surface, HarnessError> {
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
@@ -479,7 +484,7 @@ fn rust_create(
     let res = EiffelTowerCrossSectionFsg::new().create_surface(&k, tol, &mut r1, &mut r2, &pts);
     let mut o = Vec::new();
     match &res {
-        Ok(_) => o.push(0.0),
+        Ok(_) => o.push(crate::status::ok_slot(0.0)),
         Err(e) => {
             if let Some(out) = Output::unported(e) {
                 return Ok(out);
@@ -546,7 +551,7 @@ fn rust_jac(
     let mut o = Vec::new();
     let found = match &res {
         Ok(b) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             *b
         }
         Err(e) => {
@@ -636,8 +641,8 @@ fn rust_init(
     };
     let mut o = Vec::new();
     match &res {
-        Ok(Some(iv)) => o.extend([0.0, iv.surface2_rail as f64, iv.surface2_index as f64]),
-        Ok(None) => o.extend([0.0, -1.0, 999.0]),
+        Ok(Some(iv)) => o.extend([crate::status::ok_slot(0.0), iv.surface2_rail as f64, iv.surface2_index as f64]),
+        Ok(None) => o.extend([crate::status::ok_slot(0.0), -1.0, 999.0]),
         Err(e) => {
             if let Some(out) = Output::unported(e) {
                 return Ok(out);

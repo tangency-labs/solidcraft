@@ -216,7 +216,7 @@ fn own_brep(i: &Inputs) -> Result<Result<Brep, Output>, HarnessError> {
         }
         Built::Failed(e) => Err(Output::unported(&e).unwrap_or_else(|| {
             if file {
-                Output::err(format!("rust read failed: {e}"))
+                Output::kernel(&e, format!("rust read failed: {e}"))
             } else {
                 Output::rejected("native fixture construction failed")
             }
@@ -358,9 +358,9 @@ fn rust_protocol(b: &Brep, status: i32, reports: &AssertArray) -> Result<Vec<f64
         out.extend([domain.min(), domain.max()]);
         for i in 0..5 {
             match curve.evaluate_point(&kernel, domain.evaluate(f64::from(i) / 4.0)) {
-                Ok(p) => out.extend([1000.0, p.x, p.y, p.z]),
+                Ok(p) => out.extend([1.0, crate::status::ok_slot(1000.0), p.x, p.y, p.z]),
                 Err(e) if e.is_unported() => return Err(herr(e.to_string())),
-                Err(_) => out.push(1001.0),
+                Err(e) => out.extend([0.0, crate::status::kind_slot(&e, 1001.0)]),
             }
         }
     }
@@ -400,9 +400,11 @@ fn output(protocol: &[f64]) -> Result<Output, HarnessError> {
         }
         values.extend_from_slice(rd.slice(2)?);
         for _ in 0..5 {
+            // (whether the point was evaluated, then the status the row records)
+            let evaluated = rd.num()? == 1.0;
             let s = rd.num()? as i64;
             geometry.push(s);
-            if s == 1000 {
+            if evaluated {
                 values.extend_from_slice(rd.slice(3)?);
             }
         }
@@ -440,7 +442,7 @@ impl UnitDiff for Runner {
             validation::validate_pointers(&kernel, &mut b, Some(&mut reports), i.level, i.walk, &key);
         let status = match run {
             Ok(x) => crate::output::pointer_check_status(x),
-            Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
+            Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string()))),
         };
         output(&rust_protocol(&b, status, &reports)?)
     }

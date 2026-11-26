@@ -289,7 +289,7 @@ fn this_face(f: FaceId) -> ObjectRef {
 /// case.
 fn status<T>(r: &Result<T, SolidError>) -> Result<f64, Fail> {
     match r {
-        Ok(_) => Ok(0.0),
+        Ok(_) => Ok(crate::status::ok_slot(0.0)),
         // the port's refusal of FindOuterLoops' zero-area loop: upstream reads past its
         // arrays there (plan/upstream-issues.md UB-119) and goes on with garbage counts,
         // so the case is not comparable (the shim cannot tell it beforehand)
@@ -300,8 +300,8 @@ fn status<T>(r: &Result<T, SolidError>) -> Result<f64, Fail> {
             "cpp-guard:ub-119",
             "SmTrimmingTools::FindOuterLoops",
         )))),
-        Err(e) if solidcore::error::upstream_status(e).is_some() => {
-            Ok(f64::from(solidcore::error::upstream_status(e).unwrap_or(-1)))
+        Err(e) if crate::status::is_kernel(e, solidcore::error::upstream_status(e).is_some()) => {
+            Ok(f64::from(crate::status::kind_slot(e, solidcore::error::upstream_status(e).unwrap_or(-1))))
         }
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(1007.0),
         Err(e) => Err(match Output::unported(e) {

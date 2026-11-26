@@ -485,7 +485,7 @@ impl UnitDiff for Runner {
         let prog = lower(&i);
         match rust_flat(&i) {
             Ok(flat) => split(&i, &prog, &flat),
-            Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
+            Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string()))),
         }
     }
 

@@ -792,6 +792,11 @@ fn state(o: &mut Vec<f64>, c: &Curve) -> Result<(), HarnessError> {
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
@@ -1160,7 +1165,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         OpIn::Reverse { a, b: bb } => {
             let mut c = c_ref()?.clone();
             match c.reverse_parameterization(&Kernel::default(), &Extent1d::from_min_max(*a, *bb)) {
-                Ok(nv) => o.extend([0.0, nv.min(), nv.max()]),
+                Ok(nv) => o.extend([crate::status::ok_slot(0.0), nv.min(), nv.max()]),
                 Err(e) => match deferred_or_status(e) {
                     Err(d) => return Ok(*d),
                     Ok(s) => o.push(s),
@@ -1339,7 +1344,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                         };
                         match r {
                             Ok((t, pvv)) => {
-                                o.extend([0.0, t]);
+                                o.extend([crate::status::ok_slot(0.0), t]);
                                 pv(&mut o, pvv[0]);
                                 pv(&mut o, pvv[1]);
                             }

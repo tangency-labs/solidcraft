@@ -435,9 +435,12 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
             let status = match result {
                 Ok(()) => 0,
                 Err(e) if e.is_unported() => return Err(e),
-                Err(solidcore::SolidError::InvalidInput { .. } | solidcore::SolidError::PortInvariant { .. }) => 1007,
-                Err(e) if solidcore::error::upstream_status(&e).is_some() => {
-                    solidcore::error::upstream_status(&e).unwrap_or(-1)
+                Err(
+                    kernel_err @ (solidcore::SolidError::InvalidInput { .. }
+                    | solidcore::SolidError::PortInvariant { .. }),
+                ) => crate::status::kind_slot(&kernel_err, 1007),
+                Err(e) if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
+                    crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1))
                 }
                 Err(_) => solidcore::error::SM_ERR,
             };
@@ -471,9 +474,12 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
             let status = match result {
                 Ok(()) => 0,
                 Err(e) if e.is_unported() => return Err(e),
-                Err(solidcore::SolidError::InvalidInput { .. } | solidcore::SolidError::PortInvariant { .. }) => 1007,
-                Err(e) if solidcore::error::upstream_status(&e).is_some() => {
-                    solidcore::error::upstream_status(&e).unwrap_or(-1)
+                Err(
+                    kernel_err @ (solidcore::SolidError::InvalidInput { .. }
+                    | solidcore::SolidError::PortInvariant { .. }),
+                ) => crate::status::kind_slot(&kernel_err, 1007),
+                Err(e) if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
+                    crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1))
                 }
                 Err(_) => solidcore::error::SM_ERR,
             };
@@ -530,9 +536,12 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
             let status = match result {
                 Ok(()) => 0,
                 Err(e) if e.is_unported() => return Err(e),
-                Err(solidcore::SolidError::InvalidInput { .. } | solidcore::SolidError::PortInvariant { .. }) => 1007,
-                Err(e) if solidcore::error::upstream_status(&e).is_some() => {
-                    solidcore::error::upstream_status(&e).unwrap_or(-1)
+                Err(
+                    kernel_err @ (solidcore::SolidError::InvalidInput { .. }
+                    | solidcore::SolidError::PortInvariant { .. }),
+                ) => crate::status::kind_slot(&kernel_err, 1007),
+                Err(e) if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
+                    crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1))
                 }
                 Err(_) => solidcore::error::SM_ERR,
             };
@@ -624,7 +633,7 @@ impl UnitDiff for Runner {
         let i: Inputs = case.parse()?;
         match rust(&i) {
             Ok(data) => output(&i, data),
-            Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
+            Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string()))),
         }
     }
     fn generate(&self, rng: &mut Rng) -> Option<Value> {

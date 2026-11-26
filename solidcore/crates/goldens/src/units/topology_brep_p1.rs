@@ -546,22 +546,20 @@ fn brep_block(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
 
 // ---- C++ side ---------------------------------------------------------------------------
 
-/// The output of an op: a `-2` status is the shim's guard on an input upstream would
-/// dereference null on (the C++ was not run), reported as an error on both sides so
-/// the case counts as `both_errored`, not as a value comparison.
-fn guarded_output(o: Vec<f64>) -> Output {
-    if o.first() == Some(&NULL_DEREF) {
-        Output::err("null_dereference_guard")
-    } else {
-        Output::new().values("out", o)
-    }
-}
-
 // ---- Rust side --------------------------------------------------------------------------
 
+/// Why an op has no values of its own. The two null-dereference outcomes are reported as
+/// an error on both sides so the case counts as `both_errored`, not as a value comparison;
+/// they are decided from the error or the runner's own guard, never from a status number
+/// read back out of a slot.
 enum Fail {
     Solid(SolidError),
     Harness(HarnessError),
+    /// `InvalidInput` raised by the unit itself: a null dereference upstream.
+    NullDeref(SolidError),
+    /// The runner did not make the call: the shim's guard on an input upstream would
+    /// dereference null on (the C++ was not run).
+    Skipped,
 }
 
 impl From<SolidError> for Fail {
@@ -648,10 +646,31 @@ fn index_of(e: EntityRef) -> i64 {
 /// `SM_ERR_INVALID_INPUT`.
 const SM_ERR_INVALID_INPUT: f64 = 1007.0;
 
-/// The `SmStatus` of a Rust error: an upstream code as is; `InvalidInput` raised by the
-/// unit itself marks a null dereference upstream (`-2`), from a callee it is that
-/// callee's `SM_ERR_INVALID_INPUT`.
+/// Whether `e` marks a null dereference upstream: `InvalidInput` raised by the unit
+/// itself (not from a callee, and with no upstream status).
+fn null_deref(e: &SolidError) -> bool {
+    solidcore::error::nurbs::upstream_status(e).is_none()
+        && matches!(e, SolidError::InvalidInput { operation, .. } | SolidError::PortInvariant { operation, .. }
+            if *operation == "topology::brep::p1")
+}
+
+/// The status a failed op records first, or the [`Fail::NullDeref`] it is.
+fn status(e: SolidError) -> Result<f64, Fail> {
+    if null_deref(&e) {
+        Err(Fail::NullDeref(e))
+    } else {
+        Ok(status_of(&e))
+    }
+}
+
+/// The `SmStatus` of a Rust error: an upstream code as is; `InvalidInput` from a callee
+/// is that callee's `SM_ERR_INVALID_INPUT`.
 fn status_of(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status_of(e))
+}
+
+/// [`status_of`] as recorded before kinds.
+fn legacy_status_of(e: &SolidError) -> f64 {
     match e {
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
             f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
@@ -797,7 +816,11 @@ fn eu_state(k: &Kernel, b: &Brep, eu: EdgeuseId, out: &mut Vec<f64>) -> Result<(
     // the curve's owner, as the shim's `g.find(6, uv->GetOwner())`
     out.push(crate::own_builder::uv_owner_index(b, eu, None));
     match r.drop_curve_fail.as_deref() {
-        Some(f) => out.extend([1.0, f64::from(f.fail_status), flag(f.brep.is_some())]),
+        Some(f) => out.extend([
+            1.0,
+            crate::status::drop_status_slot(f.fail_status, f64::from(f.fail_status)),
+            flag(f.brep.is_some()),
+        ]),
         None => out.extend([0.0, 0.0, 0.0]),
     }
     match r.vertexuse {
@@ -960,7 +983,11 @@ fn put_healed(k: &Kernel, b: &Brep, o: &mut Vec<f64>) -> Result<(), Fail> {
         ]);
         curve_id(k, eu.uv_trim_curve.as_ref(), o);
         match eu.drop_curve_fail.as_deref() {
-            Some(f) => o.extend([1.0, f64::from(f.fail_status), flag(f.brep.is_some())]),
+            Some(f) => o.extend([
+                1.0,
+                crate::status::drop_status_slot(f.fail_status, f64::from(f.fail_status)),
+                flag(f.brep.is_some()),
+            ]),
             None => o.extend([0.0, 0.0, 0.0]),
         }
         o.extend([
@@ -1031,10 +1058,10 @@ fn run_rust_op(
                     }
                 }
                 7 if b.faces().iter().any(|(_, r)| r.surface.is_none()) => {
-                    return Ok(Ok(vec![NULL_DEREF]));
+                    return Err(Fail::Skipped);
                 }
                 8 if b.edges().iter().any(|(_, r)| r.curve.is_none()) => {
-                    return Ok(Ok(vec![NULL_DEREF]));
+                    return Err(Fail::Skipped);
                 }
                 _ => {}
             }
@@ -1148,21 +1175,20 @@ fn run_rust_op(
                 2 => bp1::set_region_is_void_flags_for_nested_solids(k, b),
                 _ => Ok(()),
             };
-            let status = match r {
-                Ok(()) => 0.0,
-                Err(e) if e.is_unported() => return Err(e.into()),
-                Err(e) => status_of(&e),
-            };
-            o.push(status);
             // the shim stops at the guard where upstream dereferences the null old
-            // infinite region (the swap flag); otherwise it reports the state
-            if status != NULL_DEREF {
-                o.push(b.infinite_region().map_or(-1.0, |r| f64::from(r.index())));
-                o.extend(ids(&bp1::regions(b, None)?));
-            }
+            // infinite region (the swap flag: a [`Fail::NullDeref`]); otherwise it reports
+            // the state
+            let succeeded = r.is_ok();
+            o.push(match r {
+                Ok(()) => crate::status::ok_slot(0.0),
+                Err(e) if e.is_unported() => return Err(e.into()),
+                Err(e) => status(e)?,
+            });
+            o.push(b.infinite_region().map_or(-1.0, |r| f64::from(r.index())));
+            o.extend(ids(&bp1::regions(b, None)?));
             // a successful mode 1/2: every region's raw IsVoid flag, in the export's
             // region order (the shim's traversal registry)
-            if *mode != 0 && status == 0.0 {
+            if *mode != 0 && succeeded {
                 let flags: Vec<f64> = b
                     .regions()
                     .iter()
@@ -1253,11 +1279,11 @@ fn run_rust_op(
             let Some(t) = entity(*target) else {
                 // upstream dereferences the null object once per index; with no index
                 // it returns SM_SUCCESS (and the object has no attributes to list)
-                return Ok(Ok(if indexed.is_empty() {
-                    vec![0.0, 0.0]
+                return if indexed.is_empty() {
+                    Ok(Ok(vec![0.0, 0.0]))
                 } else {
-                    vec![NULL_DEREF]
-                }));
+                    Err(Fail::Skipped)
+                };
             };
             let mut store = AttributeStore::default();
             let mut handles = Vec::new();
@@ -1267,8 +1293,8 @@ fn run_rust_op(
             let indexed: Vec<usize> = indexed.iter().map(|&i| i as usize).collect();
             let key = key_of(t).key;
             match bp1::add_attributes(&mut store, key, &indexed, &handles) {
-                Ok(()) => o.push(0.0),
-                Err(e) => o.push(status_of(&e)),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
+                Err(e) => o.push(status(e)?),
             }
             let got: Vec<i64> = store
                 .attributes(key)
@@ -1281,17 +1307,17 @@ fn run_rust_op(
             let e = EdgeId::from_index(*edge as u32);
             match bp1::reverse_reflection_edgeuses(b, e) {
                 Ok(()) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     o.extend(ids(&b.edge(e)?.edgeuses));
                 }
-                Err(e) => o.push(status_of(&e)),
+                Err(e) => o.push(status(e)?),
             }
         }
         OpIn::ReflectShell { face } => {
             let f = FaceId::from_index(*face as u32);
             match bp1::swap_reflection_shells(b, f) {
                 Ok(()) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     let fu1 = b.face(f)?.faceuse.ok_or_else(|| harness("no face use"))?;
                     let fu2 = b.faceuse(fu1)?.mate.ok_or_else(|| harness("no mate"))?;
                     for fu in [fu1, fu2] {
@@ -1327,7 +1353,7 @@ fn run_rust_op(
                         }
                     }
                 }
-                Err(e) => o.push(status_of(&e)),
+                Err(e) => o.push(status(e)?),
             }
         }
         OpIn::RmLoopVu { vu } => {
@@ -1340,18 +1366,12 @@ fn run_rust_op(
             };
             match r {
                 Ok(()) => {
-                    o.extend([0.0, size]);
+                    o.extend([crate::status::ok_slot(0.0), size]);
                     if let Some(v) = v {
                         o.extend(ids(&b.vertex(v)?.vertexuses));
                     }
                 }
-                Err(e) => {
-                    let st = status_of(&e);
-                    o.push(st);
-                    if st != NULL_DEREF {
-                        o.push(size);
-                    }
-                }
+                Err(e) => o.extend([status(e)?, size]),
             }
         }
         OpIn::MarkLoops { loop_, level } => {
@@ -1363,15 +1383,12 @@ fn run_rust_op(
                 *level,
             ) {
                 Ok(()) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     o.extend(ids(&loops));
                 }
                 Err(e) => {
-                    let st = status_of(&e);
-                    o.push(st);
-                    if st != NULL_DEREF {
-                        o.extend(ids(&loops));
-                    }
+                    o.push(status(e)?);
+                    o.extend(ids(&loops));
                 }
             }
         }
@@ -1396,7 +1413,7 @@ fn run_rust_op(
                 key_of: &key_of,
             };
             match bp1::swap_face_uv(k, b, &mut marks, f, mark, &mut env) {
-                Err(e) if !e.is_unported() => return Ok(Ok(vec![status_of(&e)])),
+                Err(e) if !e.is_unported() => return Ok(Ok(vec![status(e)?])),
                 r => r?,
             }
             // a swap transforms the surface and mirrors the trim curves: compared only
@@ -1426,9 +1443,9 @@ fn run_rust_op(
                 }
             }
             o.push(match bp1::check_uv_trim_curve(k, b, e) {
-                Ok(()) => 0.0,
+                Ok(()) => crate::status::ok_slot(0.0),
                 Err(e) if e.is_unported() => return Err(e.into()),
-                Err(e) => status_of(&e),
+                Err(e) => status(e)?,
             });
         }
         OpIn::LockBox => {
@@ -1439,9 +1456,9 @@ fn run_rust_op(
             let c = Curve::from(bspline_of(curve)?);
             match bp1::find_side_of_curve(k, &c, Vec3::from_array(*p), Vec3::from_array(*dir), *tol)
             {
-                Ok(right) => o.extend([0.0, flag(right)]),
+                Ok(right) => o.extend([crate::status::ok_slot(0.0), flag(right)]),
                 Err(e) if e.is_unported() => return Err(e.into()),
-                Err(e) => o.extend([status_of(&e), 2.0]), // UNSURE
+                Err(e) => o.extend([status(e)?, 2.0]), // UNSURE
             }
         }
         OpIn::FindSector {
@@ -1464,10 +1481,10 @@ fn run_rust_op(
                 Vec3::from_array(*dir),
             ) {
                 Ok((dist, region)) => {
-                    o.extend([0.0, dist, region.map_or(-1.0, |r| f64::from(r.index()))]);
+                    o.extend([crate::status::ok_slot(0.0), dist, region.map_or(-1.0, |r| f64::from(r.index()))]);
                 }
                 Err(e) if e.is_unported() => return Err(e.into()),
-                Err(e) => o.push(status_of(&e)),
+                Err(e) => o.push(status(e)?),
             }
         }
         OpIn::UpdateIvls { vertex } => {
@@ -1477,7 +1494,7 @@ fn run_rust_op(
                 .iter()
                 .any(|&e| b.edge(e).map_or(true, |r| r.curve.is_none()))
             {
-                return Ok(Ok(vec![NULL_DEREF]));
+                return Err(Fail::Skipped);
             }
             if let Some(d) = inexact(types, Some(&[]), Some(&edges)) {
                 return Ok(Err(d));
@@ -1492,9 +1509,9 @@ fn run_rust_op(
             };
             let r = bp1::update_vertex_edge_intervals(k, b, &mut env, v);
             match r {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 Err(e) if e.is_unported() => return Err(e.into()),
-                Err(e) => o.push(status_of(&e)),
+                Err(e) => o.push(status(e)?),
             }
             o.push(b.vertex(v)?.tolerance);
             o.push(edges.len() as f64);
@@ -1516,9 +1533,9 @@ fn run_rust_op(
             let uv: Option<Curve> = has_uv.then(stand_in_uv_curve);
             let d = Extent2d::from_bounds(dom[0], dom[1], dom[2], dom[3]);
             match bp1::redistribute_seam_uv_trim_curves(k, b, e, uv.as_ref(), seam, &d) {
-                Ok(swapped) => o.extend([0.0, flag(swapped)]),
+                Ok(swapped) => o.extend([crate::status::ok_slot(0.0), flag(swapped)]),
                 Err(err) if err.is_unported() => return Err(err.into()),
-                Err(err) => o.push(status_of(&err)),
+                Err(err) => o.push(status(err)?),
             }
         }
         OpIn::SplitUv {
@@ -1534,7 +1551,7 @@ fn run_rust_op(
             let en = EdgeuseId::from_index(*eu_new as u32);
             if b.edgeuse(eo)?.uv_trim_curve.is_some() {
                 let Some(e) = b.edgeuse(eo)?.edge else {
-                    return Ok(Ok(vec![NULL_DEREF]));
+                    return Err(Fail::Skipped);
                 };
                 let face = solidcore::topology::edgeuse::p1::face(b, eo)?;
                 let fs: Vec<FaceId> = face.into_iter().collect();
@@ -1566,9 +1583,9 @@ fn run_rust_op(
                 *for_tess,
             );
             match r {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 Err(e) if e.is_unported() => return Err(e.into()),
-                Err(e) => o.push(status_of(&e)),
+                Err(e) => o.push(status(e)?),
             }
             eu_state(k, b, eo, &mut o)?;
             eu_state(k, b, en, &mut o)?;
@@ -1604,7 +1621,7 @@ fn run_rust_op(
                 .collect();
             match bp1::create_corner_blend(k, b, &ids, tangent.as_deref(), *tol, *ang) {
                 Ok(s) => {
-                    o.extend([0.0, s.len() as f64]);
+                    o.extend([crate::status::ok_slot(0.0), s.len() as f64]);
                     for blend in s {
                         put_surface(&mut o, &Surface::from(blend))?;
                     }
@@ -1612,12 +1629,14 @@ fn run_rust_op(
                 Err(e) if e.is_unported() => return Err(e.into()),
                 // UB-195: an empty rational-curve drop is where upstream reads sUVCurves[0]
                 // of an empty array; the port's InvalidInput there is that null dereference
-                Err(SolidError::InvalidInput {
-                    operation: "nurbs::b_spline_surface_n_lib::p1::create_non_rational_curve",
-                    ..
-                }) => o.extend([NULL_DEREF, 0.0]),
+                Err(
+                    kernel_err @ SolidError::InvalidInput {
+                        operation: "nurbs::b_spline_surface_n_lib::p1::create_non_rational_curve",
+                        ..
+                    },
+                ) => return Err(Fail::NullDeref(kernel_err)),
                 // upstream resets the output array before failing
-                Err(e) => o.extend([status_of(&e), 0.0]),
+                Err(e) => o.extend([status(e)?, 0.0]),
             }
         }
         OpIn::EdgeEdgeBlend {
@@ -1653,11 +1672,11 @@ fn run_rust_op(
                 None,
             ) {
                 Ok(s) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     put_surface(&mut o, &s)?;
                 }
                 Err(e) if e.is_unported() => return Err(e.into()),
-                Err(e) => o.push(status_of(&e)),
+                Err(e) => o.push(status(e)?),
             }
         }
         OpIn::EdgeEdgeBlend2 {
@@ -1701,11 +1720,11 @@ fn run_rust_op(
                 None,
             ) {
                 Ok(s) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     put_surface(&mut o, &s)?;
                 }
                 Err(e) if e.is_unported() => return Err(e.into()),
-                Err(e) => o.push(status_of(&e)),
+                Err(e) => o.push(status(e)?),
             }
         }
         OpIn::ParallelProj {
@@ -1719,7 +1738,7 @@ fn run_rust_op(
             want_faces,
         } => {
             if b.faces().iter().any(|(_, r)| r.surface.is_none()) {
-                return Ok(Ok(vec![NULL_DEREF]));
+                return Err(Fail::Skipped);
             }
             if let Some(d) = inexact(types, None, Some(&[])) {
                 return Ok(Err(d));
@@ -1736,7 +1755,7 @@ fn run_rust_op(
             };
             match bp1::create_parallel_projection_curves(k, b, &c, Vec3::from_array(*vec), &opts) {
                 Ok(r) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     match r.curves_3d {
                         None => o.push(-1.0),
                         Some(cs) => {
@@ -1764,7 +1783,7 @@ fn run_rust_op(
                     }
                 }
                 Err(e) if e.is_unported() => return Err(e.into()),
-                Err(e) => o.push(status_of(&e)),
+                Err(e) => o.push(status(e)?),
             }
         }
         OpIn::Heal { healer_op, make_uv } => {
@@ -1822,8 +1841,10 @@ fn run_rust_on(k: &mut Kernel, i: &Inputs) -> Result<Output, HarnessError> {
         return Ok(refused);
     }
     match run_rust_op(k, &mut b, &types, &op) {
-        Ok(Ok(o)) => Ok(guarded_output(o)),
+        Ok(Ok(o)) => Ok(Output::new().values("out", o)),
         Ok(Err(o)) => Ok(o),
+        Err(Fail::Skipped) => Ok(Output::harness("null_dereference_guard")),
+        Err(Fail::NullDeref(e)) => Ok(Output::kernel(&e, "null_dereference_guard")),
         Err(Fail::Solid(e)) => match Output::unported(&e) {
             Some(o) => Ok(o),
             None => Err(harness(format!("rust: {e}"))),
@@ -1855,7 +1876,7 @@ fn rust_brep(
         }
         Some(Built::Failed(e)) => match Output::unported(&e) {
             Some(o) => Ok(Err(o)),
-            None => Ok(Err(Output::err(format!(
+            None => Ok(Err(Output::kernel(&e, format!(
                 "brep_build_status_{}",
                 build_status(&e)
             )))),
@@ -1873,7 +1894,7 @@ fn rust_brep(
                 }
                 Built::Failed(e) => match Output::unported(&e) {
                     Some(o) => Ok(Err(o)),
-                    None => Ok(Err(Output::err(format!(
+                    None => Ok(Err(Output::kernel(&e, format!(
                         "brep_build_status_{}",
                         build_status(&e)
                     )))),
@@ -1898,7 +1919,7 @@ fn cross_body_input(i: &Inputs, other: &BrepIn) -> Result<Vec<f64>, HarnessError
     Ok(input)
 }
 
-fn independent_face(k: &mut Kernel, input: &BrepIn) -> Result<(Brep, f64), Fail> {
+fn independent_face(k: &mut Kernel, input: &BrepIn) -> Result<(Brep, Built), Fail> {
     let BrepIn::Face { surface, dom } = input else {
         return Err(harness("cross-body intersection needs a face").into());
     };
@@ -1923,14 +1944,34 @@ fn independent_face(k: &mut Kernel, input: &BrepIn) -> Result<(Brep, f64), Fail>
         &domain,
         &mut fenv,
     ) {
-        Ok(_) => 0.0,
+        Ok(_) => Built::Face,
         Err(e) if e.is_unported() => return Err(e.into()),
         Err(e) => {
             eprintln!("cross-body face construction failed: {e:?}; {e}; domain={domain:?}");
-            status_of(&e)
+            Built::Failed(status_of(&e))
         }
     };
     Ok((b, status))
+}
+
+/// Whether a cross-body face was built, and the build status the row records.
+#[derive(Clone, Copy)]
+enum Built {
+    Face,
+    Failed(f64),
+}
+
+impl Built {
+    fn ok(self) -> bool {
+        matches!(self, Self::Face)
+    }
+
+    fn status(self) -> f64 {
+        match self {
+            Self::Face => crate::status::ok_slot(0.0),
+            Self::Failed(s) => s,
+        }
+    }
 }
 
 fn put_intersection_curve(k: &Kernel, curve: &Curve, out: &mut Vec<f64>) -> Result<(), Fail> {
@@ -1940,11 +1981,11 @@ fn put_intersection_curve(k: &Kernel, curve: &Curve, out: &mut Vec<f64>) -> Resu
     for fraction in INTERSECTION_SAMPLES {
         match curve.evaluate_point(k, domain.evaluate(fraction)) {
             Ok(point) => {
-                out.push(0.0);
+                out.extend([flag(true), crate::status::ok_slot(0.0)]);
                 out.extend(point.to_array());
             }
             Err(e) if e.is_unported() => return Err(e.into()),
-            Err(e) => out.push(status_of(&e)),
+            Err(e) => out.extend([flag(false), status_of(&e)]),
         }
     }
     // Preserve dynamic type while observing the inherited native B-spline net.
@@ -1988,7 +2029,7 @@ fn run_rust_intersection(
         let (mut b, first_status) = independent_face(&mut k, first)?;
         let (mut second, second_status) = independent_face(&mut k, other)?;
         b.set_validate_only(i.validate_only);
-        if i.init_gaps && first_status == 0.0 {
+        if i.init_gaps && first_status.ok() {
             let vertexuses: Vec<_> = b.vertexuses().iter().map(|(id, _)| id).collect();
             for vu in vertexuses {
                 solidcore::topology::vertexuse::vertex_face_gap(&k, &mut b, vu, false)?;
@@ -1999,13 +2040,13 @@ fn run_rust_intersection(
                 solidcore::topology::edgeuse::p1::edge_ccw_edge_gap(&k, &mut b, eu, false)?;
             }
         }
-        let ran = first_status == 0.0 && second_status == 0.0;
-        let mut out = vec![first_status, second_status, flag(ran)];
+        let ran = first_status.ok() && second_status.ok();
+        let mut out = vec![first_status.status(), second_status.status(), flag(ran)];
         if ran {
             let (curves, points) =
                 bp1::brep_intersect_mut(&k, &mut b, &mut second, tol, ang, want_points)?;
             out.extend([
-                0.0,
+                crate::status::ok_slot(0.0),
                 curves.len() as f64,
                 points.as_ref().map_or(-1.0, |p| p.len() as f64),
             ]);
@@ -2026,6 +2067,8 @@ fn run_rust_intersection(
             Output::unported(&e).ok_or_else(|| harness(format!("rust cross-body: {e}")))
         }
         Err(Fail::Harness(e)) => Err(e),
+        Err(Fail::NullDeref(e)) => Ok(Output::kernel(&e, "null_dereference_guard")),
+        Err(Fail::Skipped) => Ok(Output::harness("null_dereference_guard")),
     }
 }
 
@@ -2099,9 +2142,12 @@ fn intersection_output(raw: &[f64]) -> Result<Output, HarnessError> {
                 .int(&format!("{prefix}.kind"), rd.integer()?)
                 .values(&format!("{prefix}.domain"), rd.take(2)?.to_vec());
             for j in 0..INTERSECTION_SAMPLES.len() {
+                // (the evaluation's own flag, not the recorded status, says whether a
+                // point follows)
+                let evaluated = rd.flag()?;
                 let status = rd.integer()?;
                 out = out.int(&format!("{prefix}.sample.{j}.status"), status);
-                if status == 0 {
+                if evaluated == 1 {
                     out = out.values(&format!("{prefix}.sample.{j}.xyz"), rd.take(3)?.to_vec());
                 }
             }
@@ -2441,7 +2487,7 @@ mod cross_body_tests {
         // Unknown non-B-spline types are observed, not skipped or flattened.
         let mut raw = vec![0., 0., 1., 0., 1., -1., 19999., 0., 1.];
         for _ in INTERSECTION_SAMPLES {
-            raw.extend([0., 1., 2., 3.]);
+            raw.extend([1., 0., 1., 2., 3.]);
         }
         raw.push(0.);
         let unknown = intersection_output(&raw).unwrap();

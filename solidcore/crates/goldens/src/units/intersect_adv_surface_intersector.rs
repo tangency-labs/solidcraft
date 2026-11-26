@@ -225,6 +225,11 @@ impl From<HarnessError> for Fail {
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::upstream_status(e).is_some() => {
@@ -238,7 +243,7 @@ fn status(e: &SolidError) -> f64 {
 fn st<T>(o: &mut Vec<f64>, r: solidcore::Result<T>) -> Result<Option<T>, Fail> {
     match r {
         Ok(v) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             Ok(Some(v))
         }
         Err(e) => {
@@ -520,7 +525,7 @@ fn run_op(k: &Kernel, cx: &mut Ctx<'_>, si: &mut Si<'_>, op: &OpIn, o: &mut Vec<
         }
         OpIn::Push { i } => {
             if si.base.is_linked(TsectId(*i)) {
-                o.push(REJECTED);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, REJECTED));
             } else {
                 st(o, si.base.add_point_to_curve(TsectId(*i)))?;
             }
@@ -540,7 +545,7 @@ fn run_op(k: &Kernel, cx: &mut Ctx<'_>, si: &mut Si<'_>, op: &OpIn, o: &mut Vec<
             let r = si.compute_singularity_point(uvs, id, prev.map(TsectId));
             if let Err(e) = &r {
                 if is_sing_overflow(e) {
-                    o.push(REJECTED);
+                    o.push(crate::status::kind_slot(e, REJECTED));
                     return Ok(());
                 }
             }
@@ -609,7 +614,7 @@ fn run_op(k: &Kernel, cx: &mut Ctx<'_>, si: &mut Si<'_>, op: &OpIn, o: &mut Vec<
                 cx.aux.get(t).and_then(|a| a.get(i)).copied() == Some(AuxDataType::BezierSurface)
             };
             if !is_patch(0, *a) || !is_patch(1, *bb) {
-                o.push(REJECTED);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, REJECTED));
                 return Ok(());
             }
             std::mem::swap(&mut si.solver.solutions, &mut cx.sols);
@@ -693,7 +698,7 @@ fn rust_inner(i: &Inputs) -> Result<Vec<f64>, Fail> {
     } else if i.build_trees {
         match si.set_surface_caches(&k, &mut caches) {
             Ok(()) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 for t in 0..2 {
                     let tree = si
                         .solver

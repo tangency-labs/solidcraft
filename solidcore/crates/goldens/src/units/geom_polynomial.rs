@@ -47,7 +47,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         [a, b, c, d, e] => solve_quartic(&[a, b, c, d, e], i.tol),
         _ => return Err(HarnessError::new(format!("{} coefficients", i.c.len()))),
     };
-    Ok(output(roots.len(), roots.to_vec(), SM_SUCCESS))
+    Ok(output(roots.len(), roots.to_vec(), crate::status::ok_slot(SM_SUCCESS)))
 }
 
 // ---- generation ---------------------------------------------------------------

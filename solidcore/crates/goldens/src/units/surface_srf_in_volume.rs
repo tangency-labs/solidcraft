@@ -847,6 +847,11 @@ fn put_state(o: &mut Vec<f64>, c: &SrfInVolume) {
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
@@ -876,7 +881,7 @@ macro_rules! tri {
 /// `Err(deferred)`.
 fn st_of<T>(r: &solidcore::Result<T>) -> Result<f64, Box<Output>> {
     match r {
-        Ok(_) => Ok(0.0),
+        Ok(_) => Ok(crate::status::ok_slot(0.0)),
         Err(e) => match Output::unported(e) {
             Some(d) => Err(Box::new(d)),
             None => Ok(status(e)),
@@ -961,7 +966,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         let mut db = DatabaseReader::with_stream(FileType::Ascii, InputStream::new(bytes.clone()));
         match SrfInVolume::read_from_db(&k, &mut db, *version) {
             Ok(c) => {
-                o.extend([0.0, 1.0]);
+                o.extend([crate::status::ok_slot(0.0), 1.0]);
                 put_state(&mut o, &c);
             }
             Err(e) => {

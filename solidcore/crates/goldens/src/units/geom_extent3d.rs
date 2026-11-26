@@ -285,15 +285,17 @@ fn b(v: bool) -> f64 {
 /// Status value of a Rust error (upstream `SmStatus`).
 fn status_of(e: &SolidError) -> Result<f64, HarnessError> {
     match e {
-        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(1007.0),
-        err if solidcore::error::upstream_status(err).is_some() => Ok(f64::from(solidcore::error::upstream_status(err).unwrap_or(-1))),
+        kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
+            Ok(crate::status::kind_slot(kernel_err, 1007.0))
+        }
+        err if crate::status::is_kernel(err, solidcore::error::upstream_status(err).is_some()) => Ok(f64::from(crate::status::kind_slot(err, solidcore::error::upstream_status(err).unwrap_or(-1)))),
         other => Err(harness(format!("unexpected rust error: {other}"))),
     }
 }
 
 fn status<T>(r: &solidcore::Result<T>) -> Result<f64, HarnessError> {
     match r {
-        Ok(_) => Ok(0.0),
+        Ok(_) => Ok(crate::status::ok_slot(0.0)),
         Err(e) => status_of(e),
     }
 }

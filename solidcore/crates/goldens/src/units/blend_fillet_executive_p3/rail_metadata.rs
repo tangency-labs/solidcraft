@@ -63,7 +63,7 @@ pub(super) fn snapshot(
                             for fraction in [0.17, 0.37, 0.83] {
                                 match curve.evaluate_point(k, interval.evaluate(fraction)) {
                                     Ok(point) => {
-                                        state.push(0.0);
+                                        state.push(crate::status::ok_slot(0.0));
                                         values.extend([point.x, point.y]);
                                     }
                                     Err(error) => state.push(status(error)?),

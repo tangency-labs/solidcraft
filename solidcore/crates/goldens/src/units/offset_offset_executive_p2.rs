@@ -592,10 +592,11 @@ impl From<SolidError> for RunError {
 // Unported must escape even when the static offset collapses ordinary errors.
 fn operation<T>(result: solidcore::Result<T>) -> RResult<(i32, Option<T>)> {
     match result {
-        Ok(value) => Ok((NATIVE_SUCCESS, Some(value))),
+        Ok(value) => Ok((crate::status::ok_slot(NATIVE_SUCCESS), Some(value))),
+        Err(e) if crate::status::is_kernel(&e, false) => Ok((crate::status::kind_slot(&e, 0), None)),
         Err(SolidError::Upstream { code, .. }) => Ok((code, None)),
         // a failure in solidcore's terms (#2615): its C++ comparison status
-        Err(e @ SolidError::Failed(_)) => Ok((e.sm_status().unwrap_or(solidcore::error::SM_ERR), None)),
+        Err(e @ SolidError::Failed(_)) => Ok((crate::status::kind_slot(&e, e.sm_status().unwrap_or(solidcore::error::SM_ERR)), None)),
         Err(error) => Err(RunError::Kernel(error)),
     }
 }
@@ -929,8 +930,11 @@ fn box_refusal(input: &Inputs) -> HResult<Option<Output>> {
             let code = solidcore::error::upstream_status(&error)
                 .ok_or_else(|| bad(format!("{side} box refused without a status: {error}")))?;
             return Ok(Some(
-                Output::rejected(format!("{side} box refused by its constructor (status {code})"))
-                    .int("status", i64::from(code)),
+                Output::rejected(format!(
+                    "{side} box refused by its constructor ({})",
+                    crate::status::kernel_text(&error, format!("status {code}"))
+                ))
+                .int("status", crate::status::kind_slot(&error, i64::from(code))),
             ));
         }
     }
@@ -1130,7 +1134,7 @@ fn rust_projection(kernel: &Kernel, fixture: &Fixture, brep: &Brep) -> HResult<P
                 let normal = surface
                     .evaluate_normal(kernel, uv, Side::Left, Side::Left)
                     .map_err(setup)?;
-                result.statuses.extend([i64::from(NATIVE_SUCCESS); 2]);
+                result.statuses.extend([i64::from(crate::status::ok_slot(NATIVE_SUCCESS)); 2]);
                 result.values.extend(xyz(point));
                 result.values.extend(xyz(normal));
             }
@@ -1153,7 +1157,7 @@ fn rust_projection(kernel: &Kernel, fixture: &Fixture, brep: &Brep) -> HResult<P
             ]);
             for parameter in [edge.interval.min(), edge.interval.max()] {
                 let point = curve.evaluate_point(kernel, parameter).map_err(setup)?;
-                result.statuses.push(i64::from(NATIVE_SUCCESS));
+                result.statuses.push(i64::from(crate::status::ok_slot(NATIVE_SUCCESS)));
                 result.values.extend(xyz(point));
             }
         }
@@ -1900,7 +1904,7 @@ impl UnitDiff for Runner {
             Ok(output) => Ok(output),
             Err(RunError::Harness(error)) => Err(error),
             Err(RunError::Kernel(error)) => Ok(Output::unported(&error)
-                .unwrap_or_else(|| Output::err(format!("Rust operation: {error}")))),
+                .unwrap_or_else(|| Output::kernel(&error, format!("Rust operation: {error}")))),
         }
     }
     fn cases(&self, context: &CaseContext) -> HResult<Vec<Case>> {

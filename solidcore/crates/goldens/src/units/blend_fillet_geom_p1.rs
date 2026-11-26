@@ -1199,6 +1199,11 @@ fn uv(p: [f64; 2]) -> Point2 {
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 pub(crate) fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         err if solidcore::error::upstream_status(err).is_some() => f64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
@@ -2024,7 +2029,7 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
             let s = surface_of(surface)?;
             let dom = Extent2d::from_bounds(domain[0][0], domain[0][1], domain[1][0], domain[1][1]);
             match try_status!(fg::set_surface_closure(&k, &s, &dom)) {
-                Ok(c) => o.extend([0.0, c as u64 as f64]),
+                Ok(c) => o.extend([crate::status::ok_slot(0.0), c as u64 as f64]),
                 Err(st) => o.push(st),
             }
         }
@@ -2039,7 +2044,7 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
                 })
                 .collect();
             match try_status!(fg::is_order_correct(&pts, *i1, *i2)) {
-                Ok(ret) => o.extend([0.0, flag(ret)]),
+                Ok(ret) => o.extend([crate::status::ok_slot(0.0), flag(ret)]),
                 Err(st) => o.push(st),
             }
         }
@@ -2053,7 +2058,7 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
             let r =
                 fg::adjust_uv_on_seam(&k, &s, Vec3::new(ref_dir[0], ref_dir[1], ref_dir[2]), &mut q);
             match try_status!(r) {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 Err(st) => o.push(st),
             }
             o.extend([q.x, q.y]);
@@ -2071,7 +2076,7 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
                 fg::interpolate_endpts_and_tangents(v3(*start), v3(*end), &mut sv, &mut ev, *dim);
             let curve = match try_status!(r) {
                 Ok(c) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     Some(c)
                 }
                 Err(st) => {
@@ -2133,7 +2138,7 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
             );
             match try_status!(r) {
                 Ok(Some(x)) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     // (the C++ dumps the SmBSplineCurve outputs' NURBs)
                     dump_bcurve(&mut o, x.curve_3d.as_ref().and_then(b_spline_part));
                     dump_bcurve(&mut o, x.surface1_uv_curve.as_ref().and_then(b_spline_part));
@@ -2148,7 +2153,7 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
         Inputs::EvaluateMate { surface, uv: p } => {
             let (b, f) = face_brep(&mut k, surface_of(surface)?)?;
             match try_status!(fg::evaluate_mate(&k, &b, f, uv(*p))) {
-                Ok(q) => o.extend([0.0, q.x, q.y, q.z]),
+                Ok(q) => o.extend([crate::status::ok_slot(0.0), q.x, q.y, q.z]),
                 Err(st) => o.extend([st, 0.0, 0.0, 0.0]),
             }
         }
@@ -2159,7 +2164,7 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
                     let (b, f) = face_brep(&mut k, srf)?;
                     o.push(0.0);
                     match try_status!(fg::evaluate_mate(&k, &b, f, uv(*p))) {
-                        Ok(q) => o.extend([0.0, q.x, q.y, q.z]),
+                        Ok(q) => o.extend([crate::status::ok_slot(0.0), q.x, q.y, q.z]),
                         Err(st) => o.extend([st, 0.0, 0.0, 0.0]),
                     }
                 }
@@ -2192,7 +2197,7 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
                 &mut orients,
             );
             match try_status!(r) {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 Err(st) => o.push(st),
             }
             o.push(uvs.len() as f64);
@@ -2217,7 +2222,7 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
                 *faces.get(1).ok_or_else(|| harness("face"))?,
             );
             match try_status!(fg::classify_face_point(&k, &mut b, v3(*pos), f1, f2)) {
-                Ok(w) => o.extend([0.0, f64::from(w)]),
+                Ok(w) => o.extend([crate::status::ok_slot(0.0), f64::from(w)]),
                 Err(st) => o.extend([st, 0.0]),
             }
         }
@@ -2295,7 +2300,7 @@ fn rust_pseudo(model: &Model, q: &Query) -> Result<Rec, HarnessError> {
             }
             let r = m.fb.find_fillet_brep_edge(&m.k, e, &m.fillet, &cs, *multi);
             match try_status!(r) {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 Err(st) => o.push(st),
             }
             let fe = m.fb.fillet_edge(e).map_err(h)?;
@@ -2335,7 +2340,7 @@ fn rust_pseudo(model: &Model, q: &Query) -> Result<Rec, HarnessError> {
             let mut ivl = Extent1d::from_min_max(interval[0], interval[1]);
             let r = m.fb.trim_geom(&m.k, g, &mut ivl);
             match try_status!(r) {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 Err(st) => o.push(st),
             }
             o.extend([ivl.min(), ivl.max()]);
@@ -2357,7 +2362,7 @@ fn rust_pseudo(model: &Model, q: &Query) -> Result<Rec, HarnessError> {
             let v = m.vertex(*v)?;
             let r = m.fb.calc_vert_on_vert(v, &m.target);
             match try_status!(r) {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 Err(st) => o.push(st),
             }
             let p = m.fb.vertex_point(v).map_err(h)?;
@@ -2369,7 +2374,7 @@ fn rust_pseudo(model: &Model, q: &Query) -> Result<Rec, HarnessError> {
             let s = surface_of(surface)?;
             let r = m.fb.calc_cliff_rail_int_edge(&m.k, v, &m.target, &s, *tol);
             match try_status!(r) {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 Err(st) => o.push(st),
             }
             let p = m.fb.vertex_point(v).map_err(h)?;
@@ -2382,7 +2387,7 @@ fn rust_pseudo(model: &Model, q: &Query) -> Result<Rec, HarnessError> {
             let f2 = *m.target_faces.get(*f2).ok_or_else(|| harness("face"))?;
             let r = m.fb.update_split_face(&m.k, v, &mut m.target, f1, f2);
             match try_status!(r) {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 Err(st) => o.push(st),
             }
             let fv = m.fb.fillet_vertex(v).map_err(h)?;
@@ -2415,7 +2420,7 @@ fn rust_pseudo(model: &Model, q: &Query) -> Result<Rec, HarnessError> {
                 [None, None],
             );
             match try_status!(r) {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 Err(st) => o.push(st),
             }
             m.put(&mut o)?;
@@ -3526,7 +3531,7 @@ impl UnitDiff for Runner {
         // in the guarded hang regimes (HANG-20), so it must not run them (fuzz mutations
         // of the flagged fixtures reach them unflagged)
         if !contract(i.op(), &program(&i)?) {
-            return Ok(Output::err("outside the input contract"));
+            return Ok(Output::harness("outside the input contract"));
         }
         let rec = match &i {
             Inputs::Fb { model, query } => rust_pseudo(model, query)?,
@@ -3535,7 +3540,7 @@ impl UnitDiff for Runner {
         match rec {
             Rec::Flat(flat) => to_output(&i, &flat),
             Rec::Deferred(e) => {
-                Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())))
+                Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())))
             }
         }
     }

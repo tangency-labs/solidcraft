@@ -266,6 +266,11 @@ fn check_sizes(i: &Inputs) -> Result<(), HarnessError> {
 // ---- Rust side ------------------------------------------------------------------------
 
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e => crate::output::blend_status(e).map_or(-1.0, f64::from),
@@ -806,7 +811,7 @@ fn rust_run(i: &Inputs, o: &mut Vec<f64>) -> Result<Result<(), SolidError>, Harn
             );
             match r {
                 Ok(found) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     put_offsets(o, &fs);
                     o.push(b(found));
                     if found {
@@ -859,7 +864,7 @@ fn rust_run(i: &Inputs, o: &mut Vec<f64>) -> Result<Result<(), SolidError>, Harn
             );
             match r {
                 Ok(param) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     put_offsets(o, &fs);
                     o.push(b(param.is_some()));
                     if let Some(p) = param {
@@ -905,7 +910,7 @@ fn rust_run(i: &Inputs, o: &mut Vec<f64>) -> Result<Result<(), SolidError>, Harn
             );
             match r {
                 Ok(found) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     put_offsets(o, &fa);
                     put_offsets(o, &fb);
                     o.push(b(found));

@@ -206,7 +206,7 @@ fn lookup(name: &str) -> Result<Op, HarnessError> {
 fn status_code(e: &SolidError) -> Option<f64> {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Some(1007.0),
-        err if solidcore::error::upstream_status(err).is_some() => Some(f64::from(solidcore::error::upstream_status(err).unwrap_or(-1))),
+        err if crate::status::is_kernel(err, solidcore::error::upstream_status(err).is_some()) => Some(f64::from(crate::status::kind_slot(err, solidcore::error::upstream_status(err).unwrap_or(-1)))),
         _ => None,
     }
 }
@@ -274,7 +274,7 @@ fn put3(o: &mut Vec<f64>, v: Vec3) {
 /// The Rust result `[status, values...]` (or the error to classify).
 fn rust_values(op: Op, args: &[f64]) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
     let mut a = Args::new(args);
-    let mut o = vec![SM_SUCCESS];
+    let mut o = vec![crate::status::ok_slot(SM_SUCCESS)];
     macro_rules! tri {
         ($e:expr) => {
             match $e {
@@ -586,7 +586,7 @@ fn rust_op(op: Op, args: &[f64]) -> Result<Output, HarnessError> {
         Err(e) => match status_code(&e) {
             Some(s) => Ok(finish(&[s])),
             None => Ok(Output::unported(&e)
-                .unwrap_or_else(|| Output::err(format!("rust_error: {e}")))),
+                .unwrap_or_else(|| Output::kernel(&e, format!("rust_error: {e}")))),
         },
     }
 }
@@ -616,7 +616,7 @@ fn static_rust(name: &str, args: &[f64]) -> Result<Output, HarnessError> {
         let all = [Vec3::new(s1, s2, s3), Vec3::new(s4, s5, s6)];
         let mut pts: Vec<Vec3> = all.iter().take(n).copied().collect();
         let st = match gu::add_point(&mut pts, tol, pnt) {
-            Ok(()) => SM_SUCCESS,
+            Ok(()) => crate::status::ok_slot(SM_SUCCESS),
             Err(e) => status_code(&e).ok_or_else(|| HarnessError::new(e.to_string()))?,
         };
         // Slots beyond the count keep their input values, as in the C++ array.
@@ -637,7 +637,7 @@ fn static_rust(name: &str, args: &[f64]) -> Result<Output, HarnessError> {
             distances: [s5, s6],
         };
         cp.add(a.f()?, a.f()?, a.f()?, a.f()?);
-        v.push(SM_SUCCESS);
+        v.push(crate::status::ok_slot(SM_SUCCESS));
         v.push(cp.count as f64);
         v.extend(cp.params1);
         v.extend(cp.params2);

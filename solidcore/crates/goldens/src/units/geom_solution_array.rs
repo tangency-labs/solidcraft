@@ -934,7 +934,7 @@ impl UnitDiff for Runner {
         match run_rust(&i.ops) {
             Ok((oi, of)) => Ok(Output::new().ints("ints", oi).values("floats", of)),
             Err(RunError::Rust(e)) => {
-                Ok(Output::unported(&e).unwrap_or_else(|| Output::err(format!("rust_error: {e}"))))
+                Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, format!("rust_error: {e}"))))
             }
             Err(RunError::Harness(e)) => Err(e),
         }

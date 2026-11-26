@@ -121,9 +121,9 @@ fn rust_err(e: &SolidError) -> Output {
     }
     match e {
         e if nlib_number(e).is_some() => {
-            Output::err(format!("nlib_{}", nlib_number(e).unwrap_or_default()))
+            Output::kernel(e, format!("nlib_{}", nlib_number(e).unwrap_or_default()))
         }
-        other => Output::err(format!("rust: {other}")),
+        other => Output::kernel(other, format!("rust: {other}")),
     }
 }
 
@@ -195,10 +195,11 @@ fn rust(i: Inputs) -> Result<Output, HarnessError> {
                     .values("s", s)
                     .values("xr", xr)
                     .values("xs", xs)),
-                Err(SolidError::InvalidInput { operation, reason })
-                    if operation == MAKE_OP && reason.starts_with("index out of range") =>
+                Err(e)
+                    if matches!(&e, SolidError::InvalidInput { operation, reason }
+                        if *operation == MAKE_OP && reason.starts_with("index out of range")) =>
                 {
-                    return Ok(Output::err(PAST_END));
+                    return Ok(Output::kernel(&e, PAST_END));
                 }
                 Err(e) => Err(e),
             }

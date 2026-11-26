@@ -484,6 +484,11 @@ fn level_2() -> u8 {
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 fn status(e: &SolidError) -> i64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> i64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
         SolidError::Upstream { .. } | SolidError::Failed(_) => {
@@ -734,7 +739,7 @@ fn measures(k: &Kernel, b: &mut Brep) -> Result<Vec<f64>, Stop> {
     };
     crate::dump::body(k, "volume", b);
     let mut o = match brep_volume(k, b, VOLUME_ACCURACY, &attrs) {
-        Ok(v) => vec![0.0, v],
+        Ok(v) => vec![crate::status::ok_slot(0.0), v],
         Err(e) => vec![fail(&e)?, 0.0],
     };
     let faces = brep_p1::faces(b, None).map_err(|e| stop("GetFaces", &e))?;

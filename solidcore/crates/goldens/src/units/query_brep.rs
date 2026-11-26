@@ -307,7 +307,7 @@ fn rust_evaluate(i: &EvalIn) -> Result<Output, Fail> {
             })
         }
     }
-    .map_or_else(|code| code, |()| SUCCESS);
+    .map_or_else(|code| code, |()| crate::status::ok_slot(SUCCESS));
     let mut flat = vec![code];
     flat.extend(out);
     Ok(eval_output(&flat))
@@ -421,13 +421,16 @@ fn seed_box() -> Extent3d {
 
 /// The `SmStatus` of a Rust result; `None` for an error upstream has no status for.
 fn status_code(e: &SolidError) -> Option<f64> {
+    if crate::status::is_kernel(e, false) {
+        return Some(crate::status::kind_slot(e, 0.0));
+    }
     solidcore::error::upstream_status(e).map(f64::from)
 }
 
 /// Appends a box step's status and box (the seed when it failed).
 fn push_box(o: &mut Vec<f64>, r: solidcore::Result<Extent3d>) -> Result<(), Fail> {
     let (status, bx) = match r {
-        Ok(bx) => (SUCCESS, bx),
+        Ok(bx) => (crate::status::ok_slot(SUCCESS), bx),
         Err(e) => match Output::unported(&e) {
             Some(d) => return Err(Fail::Deferred(Box::new(d))),
             None => (
@@ -474,13 +477,13 @@ fn run_steps(k: &Kernel, b: &mut Brep, steps: &[StepIn]) -> Result<Vec<f64>, Fai
                 // the default argument is `FALSE`
                 let r = qb::lock_bounding_box(k, b, tight && !defaults);
                 o.push(match st(r)? {
-                    Ok(()) => SUCCESS,
+                    Ok(()) => crate::status::ok_slot(SUCCESS),
                     Err(code) => code,
                 });
             }
             StepIn::Unlock => {
                 qb::unlock_bounding_box(b);
-                o.push(SUCCESS);
+                o.push(crate::status::ok_slot(SUCCESS));
             }
         }
     }
@@ -540,7 +543,7 @@ fn rust_classify(i: &ClassifyIn) -> Result<Output, Fail> {
         Err(o) => return Ok(o),
     };
     let Some(p) = classify_point(&m, i)? else {
-        return Ok(Output::new().values("classify", vec![NO_ENTITY]));
+        return Ok(Output::new().values("classify", vec![crate::status::state_slot(crate::status::RunnerState::NoSuchEntity, NO_ENTITY)]));
     };
     let k = crate::runner_kernel();
     let mut b = m.brep;
@@ -548,13 +551,13 @@ fn rust_classify(i: &ClassifyIn) -> Result<Output, Fail> {
     let tol = zone_tol3d(&k, i.tol);
     let r = query.point_3d_classify(&k, &mut b, Vec3::new(p[0], p[1], p[2]), tol, i.do_bnd);
     let (status, pc) = match r {
-        Ok(pc) => (SUCCESS, pc),
+        Ok(pc) => (crate::status::ok_slot(SUCCESS), pc),
         Err(e) => {
             if let Some(d) = Output::unported(&e) {
                 return Ok(d);
             }
             let Some(code) = status_code(&e) else {
-                return Ok(Output::err(format!("rust error: {e}")));
+                return Ok(Output::kernel(&e, format!("rust error: {e}")));
             };
             // as the call starts the classification
             let mut pc = PointClassification::new(tol);

@@ -219,6 +219,11 @@ struct Inputs {
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
         e if solidcore::error::upstream_status(e).is_some() => {
@@ -562,7 +567,7 @@ fn run_rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
 
     match &i.op {
         OpIn::IsClosed { repeats } => match g.is_sweep_closed(*repeats) {
-            Ok(c) => o.extend([0.0, flag(c)]),
+            Ok(c) => o.extend([crate::status::ok_slot(0.0), flag(c)]),
             Err(e) => {
                 defer(&e)?;
                 o.extend([status(&e), 0.0]);
@@ -576,7 +581,7 @@ fn run_rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             };
             match r {
                 Ok(cs) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     put_frame(o, &cs);
                 }
                 Err(e) => {
@@ -614,7 +619,7 @@ fn run_rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
                 v3(*vec),
                 *amount,
             ) {
-                Ok(st) => o.extend([0.0, f64::from(st.code())]),
+                Ok(st) => o.extend([crate::status::ok_slot(0.0), f64::from(st.code())]),
                 Err(e) => {
                     defer(&e)?;
                     o.push(status(&e));
@@ -634,7 +639,7 @@ fn run_rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             if matches!(i.op, OpIn::VertexHigher { .. }) {
                 match g.vertex_sweep_higher(&b, v) {
                     Ok(r) => {
-                        o.push(0.0);
+                        o.push(crate::status::ok_slot(0.0));
                         o.push(flag(r.is_some()));
                         if let Some((c, tol)) = r {
                             o.push(tol);
@@ -649,7 +654,7 @@ fn run_rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             } else {
                 match g.vertex_sweep_same(&b, v) {
                     Ok((p, tol)) => {
-                        o.push(0.0);
+                        o.push(crate::status::ok_slot(0.0));
                         put3(o, p);
                         o.push(tol);
                     }
@@ -666,7 +671,7 @@ fn run_rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             put_fixture(o, &b, e, first)?;
             match g.edge_sweep_same(&k, &b, e) {
                 Ok((c, tol)) => {
-                    o.extend([0.0, 1.0, tol]);
+                    o.extend([crate::status::ok_slot(0.0), 1.0, tol]);
                     put_curve(&k, o, &c, false)?;
                 }
                 Err(err) => {
@@ -681,7 +686,7 @@ fn run_rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             put_fixture(o, &b, e, first)?;
             match g.edge_sweep_higher(&k, &b, e) {
                 Ok(r) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     o.push(flag(r.surface.is_some()));
                     if let Some(srf) = &r.surface {
                         put_surface(&k, o, srf)?;
@@ -731,7 +736,7 @@ fn run_rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             o.push(zone_tol3d(&k, *ftol));
             match g.face_sweep_same(&k, &b, f) {
                 Ok(r) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     o.push(flag(r.is_some()));
                     if let Some((srf, tol)) = r {
                         o.push(tol);

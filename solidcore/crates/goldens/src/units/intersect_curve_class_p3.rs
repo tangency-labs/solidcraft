@@ -692,6 +692,11 @@ fn build_pool(objects: &[ObjIn]) -> Result<Pool, HarnessError> {
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         e if solidcore::error::upstream_status(e).is_some() => {
             f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
@@ -719,7 +724,7 @@ impl From<HarnessError> for Fail {
 
 /// The output of a case refused with status `s`.
 fn refused(s: f64) -> Output {
-    Output::err(format!("refused_{s}"))
+    Output::harness_text(format!("refused_{s}"))
 }
 
 /// `Ok(v)` or the status; `Unported` defers the case.
@@ -1275,7 +1280,7 @@ fn rust_run_inspected(s: &Script, inspect: &mut Inspect<'_>) -> Result<Vec<f64>,
                     OpIn::FindInterval { prm, last, tol, .. } => {
                         let r = cc.find_interval(&k, &pool, *prm, *last, zone_tol3d(&k, *tol));
                         match st(r)? {
-                            Ok(f) => o.extend([0.0, f.index as f64, f.end_dist_3d, f64::from(f.position.code())]),
+                            Ok(f) => o.extend([crate::status::ok_slot(0.0), f.index as f64, f.end_dist_3d, f64::from(f.position.code())]),
                             Err(s) => o.push(s),
                         }
                     }
@@ -1283,7 +1288,7 @@ fn rust_run_inspected(s: &Script, inspect: &mut Inspect<'_>) -> Result<Vec<f64>,
                         let r = cc.find_point_class(&k, &pool, *prm, zone_tol3d(&k, *tol));
                         match st(r)? {
                             Ok(pc) => {
-                                o.push(0.0);
+                                o.push(crate::status::ok_slot(0.0));
                                 put_pc(&mut o, &pc);
                             }
                             Err(s) => o.push(s),
@@ -1292,7 +1297,7 @@ fn rust_run_inspected(s: &Script, inspect: &mut Inspect<'_>) -> Result<Vec<f64>,
                     OpIn::IsCoincident { a, b: bb, tol, .. } => {
                         let r = cc.is_coincident(&k, &pool, &Extent1d::from_min_max(*a, *bb), zone_tol3d(&k, *tol));
                         match st(r)? {
-                            Ok(flag) => o.extend([0.0, b(flag)]),
+                            Ok(flag) => o.extend([crate::status::ok_slot(0.0), b(flag)]),
                             Err(s) => o.push(s),
                         }
                     }
@@ -1303,7 +1308,7 @@ fn rust_run_inspected(s: &Script, inspect: &mut Inspect<'_>) -> Result<Vec<f64>,
                         let r = cc
                             .insert_point_class_mut(&mut k, &mut pool, &pc, *prm, *last, *force);
                         match st(r)? {
-                            Ok(made) => o.extend([0.0, b(made)]),
+                            Ok(made) => o.extend([crate::status::ok_slot(0.0), b(made)]),
                             Err(s) => o.push(s),
                         }
                         // every vertex object's point: a merged surf/surf/surf point
@@ -1330,7 +1335,7 @@ fn rust_run_inspected(s: &Script, inspect: &mut Inspect<'_>) -> Result<Vec<f64>,
                     OpIn::NearVertex { index, p, .. } => {
                         let r = change_edge_point_class_to_near_vertex(&k, &pool, *index, cc, v3(*p));
                         match st(r)? {
-                            Ok(changed) => o.extend([0.0, b(changed)]),
+                            Ok(changed) => o.extend([crate::status::ok_slot(0.0), b(changed)]),
                             Err(s) => o.push(s),
                         }
                     }
@@ -1384,7 +1389,7 @@ fn rust(s: &Script) -> Result<Output, HarnessError> {
         Ok(v) => Ok(Output::new().values("out", v)),
         Err(Fail::Deferred(d)) => Ok(*d),
         Err(Fail::Refused(s)) => Ok(refused(s)),
-        Err(Fail::Undefined(why)) => Ok(Output::err(format!("undefined_upstream: {why}"))),
+        Err(Fail::Undefined(why)) => Ok(Output::harness_text(format!("undefined_upstream: {why}"))),
         Err(Fail::Harness(e)) => Err(e),
     }
 }

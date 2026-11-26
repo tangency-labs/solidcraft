@@ -607,7 +607,7 @@ fn status<T>(r: Result<T, SolidError>) -> Result<(f64, Option<T>), Fail> {
         Err(e) => match Output::unported(&e) {
             Some(o) => Err(Fail::Deferred(Box::new(o))),
             None => match e {
-                e if solidcore::error::upstream_status(&e).is_some() => Ok((f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1)), None)),
+                e if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => Ok((f64::from(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1))), None)),
                 other => Err(Fail::Harness(harness(format!("rust: {other}")))),
             },
         },
@@ -1832,7 +1832,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     let mut k = crate::runner_kernel();
     if standalone(&i.op) {
         let Some((op, args)) = op_args(&i.op, &[0; 10])? else {
-            return Ok(Output::err("no target"));
+            return Ok(Output::harness("no target"));
         };
         // an input outside the contract is a harness error (PR #502's convention)
         if !in_contract(op, "", &args, &[0; 10], false) {
@@ -1850,7 +1850,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         Err(o) => return Ok(o),
     };
     let Some((op, args)) = op_args(&i.op, &c)? else {
-        return Ok(Output::err("no target"));
+        return Ok(Output::harness("no target"));
     };
     // an input outside the contract is a harness error (PR #502's convention): the port
     // works through the excluded hang regimes as upstream does (HANG-16: a

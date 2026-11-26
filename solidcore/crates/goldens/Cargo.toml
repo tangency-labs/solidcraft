@@ -8,7 +8,7 @@ description = "Checks every unit's cases against its committed expected output (
 build = "build.rs"
 
 [dependencies]
-solidcore = { path = "../solidcore" }
+solidcore ={ path = "../solidcore" }
 # The `ssi` engine of --ssi-corpus (a surface/surface intersection of its own, not a port).
 ssi = { path = "../ssi" }
 # The `solidcore-ssi` engine of --ssi-corpus (`ssi` behind the port's inputs and output).

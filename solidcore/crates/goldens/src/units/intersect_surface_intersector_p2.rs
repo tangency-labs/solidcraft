@@ -332,6 +332,11 @@ impl From<HarnessError> for Fail {
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
@@ -671,7 +676,7 @@ fn run_op(
         OpIn::AddCurve { i } | OpIn::AddStart { i } => {
             pt_of(si, *i)?;
             if si.is_linked(id(*i)) {
-                o.push(REJECTED);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, REJECTED));
             } else {
                 let r = if matches!(op, OpIn::AddCurve { .. }) {
                     si.add_point_to_curve(id(*i))
@@ -695,7 +700,7 @@ fn run_op(
         OpIn::Classify { i } => {
             let p = pt_of(si, *i)?;
             if classify_rejected(&p) {
-                o.push(REJECTED);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, REJECTED));
             } else if let Some(d) = st(o, si.classify_boundary_start_point_intersection(k, &p))? {
                 o.push(b(d));
             }

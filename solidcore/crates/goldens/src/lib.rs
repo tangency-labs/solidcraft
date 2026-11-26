@@ -8,6 +8,7 @@
 //! defining `pub struct Runner;` that implements [`UnitDiff`]. It is
 //! registered automatically by `build.rs`. See `crates/goldens/README.md`.
 
+pub mod call_log;
 pub mod case;
 /// Input contracts shared by several unit runners' generators.
 pub mod cases {
@@ -48,6 +49,7 @@ pub mod script;
 pub mod solidcraft;
 pub mod soundness;
 pub mod ssi;
+pub mod status;
 pub mod step;
 pub(crate) mod trim_hook;
 #[cfg(test)]

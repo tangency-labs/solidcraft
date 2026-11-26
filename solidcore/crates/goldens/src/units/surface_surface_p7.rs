@@ -365,6 +365,11 @@ pub(crate) fn req_of(v: u8) -> Result<SolutionRequested, HarnessError> {
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
 pub(crate) fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
@@ -478,7 +483,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
         OpIn::Eval1 { uv, ul, vl } => {
             match st(evaluate_1st_derivatives(k, &s, p2(*uv), side(*ul), side(*vl)))? {
                 Ok((p, du, dv)) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     for x in [p, du, dv] {
                         pv(&mut o, x);
                     }
@@ -489,7 +494,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
         OpIn::Eval2 { uv, ul, vl } => {
             match st(evaluate_2nd_derivatives(k, &s, p2(*uv), side(*ul), side(*vl)))? {
                 Ok(d) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     for x in [d.point, d.du, d.dv, d.duv, d.duu, d.dvv] {
                         pv(&mut o, x);
                     }
@@ -523,7 +528,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
             };
             match st(r)? {
                 Ok(n) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     pv(&mut o, n);
                 }
                 Err(c) => o.push(c),
@@ -569,7 +574,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
             want4,
         } => match st(compute_higher_order_derivs(k, &s, p2(*uv), p2(*g1), *want3, *want4))? {
             Ok(h) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 pv(&mut o, h.g2);
                 if let Some(g) = h.g3 {
                     pv(&mut o, g);
@@ -582,7 +587,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
         },
         OpIn::Inward { uv } => match st(compute_inward_vector(k, &s, p2(*uv)))? {
             Ok(v) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 pv(&mut o, v);
             }
             Err(c) => o.push(c),
@@ -591,7 +596,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
             let pts: Vec<Vec3> = pts.iter().map(|p| v3(*p)).collect();
             match st(drop_points_to_tangent_plane(k, &s, p2(*uv), side(*ul), side(*vl), &pts))? {
                 Ok(r) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     for x in r {
                         puv(&mut o, x);
                     }
@@ -603,7 +608,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
             let vecs: Vec<Vec3> = vecs.iter().map(|p| v3(*p)).collect();
             match st(drop_vectors_at(k, &s, p2(*uv), side(*ul), side(*vl), &vecs))? {
                 Ok(r) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     for x in r {
                         puv(&mut o, x);
                     }
@@ -671,7 +676,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
             );
             match st(r)? {
                 Ok(a) => {
-                    o.extend([0.0, a.len() as f64]);
+                    o.extend([crate::status::ok_slot(0.0), a.len() as f64]);
                     for sol in a.as_slice() {
                         o.extend([
                             sol.start.solution_value,
@@ -715,7 +720,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
             );
             match st(r)? {
                 Ok(a) => {
-                    o.extend([0.0, a.len() as f64]);
+                    o.extend([crate::status::ok_slot(0.0), a.len() as f64]);
                     put_sols(&mut o, &a)?;
                 }
                 Err(c) => o.extend([c, 0.0]),
@@ -749,7 +754,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
             );
             match st(r)? {
                 Ok(a) => {
-                    o.extend([0.0, a.len() as f64]);
+                    o.extend([crate::status::ok_slot(0.0), a.len() as f64]);
                     put_sols(&mut o, &a)?;
                 }
                 Err(c) => o.extend([c, 0.0]),
@@ -778,8 +783,8 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
                 *guess_t,
             );
             match st(r)? {
-                Ok(Some(x)) => o.extend([0.0, 1.0, x.distance, x.t, x.uv.x, x.uv.y]),
-                Ok(None) => o.extend([0.0, 0.0]),
+                Ok(Some(x)) => o.extend([crate::status::ok_slot(0.0), 1.0, x.distance, x.t, x.uv.x, x.uv.y]),
+                Ok(None) => o.extend([crate::status::ok_slot(0.0), 0.0]),
                 Err(c) => o.extend([c, 0.0]),
             }
         }
@@ -799,14 +804,14 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
             let bc = SmCurve::from(BSplineCurve::from_nurb(cur, curve.dim, false));
             let k = Kernel::default();
             match st(s.create_parallel_projection_curves(&k, &dom_of(*dom), &bc, v3(*vec), *dist, None, None))? {
-                Ok((c3d, _)) => o.extend([0.0, c3d.len() as f64]),
+                Ok((c3d, _)) => o.extend([crate::status::ok_slot(0.0), c3d.len() as f64]),
                 Err(c) => o.extend([c, 0.0]),
             }
         }
         OpIn::LoadGuesses { dom, p, sop } => {
             match st(load_guesses(k, &s, &dom_of(*dom), v3(*p), sop_of(*sop)?))? {
                 Ok(g) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     puv(&mut o, g);
                 }
                 Err(c) => o.push(c),

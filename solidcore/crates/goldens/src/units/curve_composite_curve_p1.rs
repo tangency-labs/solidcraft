@@ -612,6 +612,11 @@ fn pv(o: &mut Vec<f64>, v: Vec3) {
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         err if solidcore::error::upstream_status(err).is_some() => f64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
@@ -751,7 +756,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
                 o.push(b(ftry(c.has_repeated_end_control_points(&k, 1e-6))?));
                 o.push(c.type_code() as f64);
                 o.push(match c.evaluate_point(&k, ivl.min()) {
-                    Ok(_) => 0.0,
+                    Ok(_) => crate::status::ok_slot(0.0),
                     Err(e) => status(&e),
                 });
                 o.push(b(x.segment(x.num_segments()).is_none()));

@@ -73,7 +73,7 @@ fn parse(value: &Value) -> Result<Inputs, HarnessError> {
 /// Separates all discrete fields from floating values so identities/statuses/counts
 /// compare exactly, not using the relative floating-point tolerance.
 fn output(flat: &[f64]) -> Result<Output, HarnessError> {
-    if flat.first().copied() != Some(SUCCESS) {
+    if flat.first().copied() != Some(crate::status::ok_slot(SUCCESS)) {
         return Err(harness(format!(
             "native_face fixture read failed: {flat:?}"
         )));
@@ -85,7 +85,7 @@ fn output(flat: &[f64]) -> Result<Output, HarnessError> {
         .get(9)
         .copied()
         .ok_or_else(|| harness("missing build status"))?;
-    if build_status != -1.0 && build_status != SUCCESS {
+    if build_status != -1.0 && build_status != crate::status::ok_slot(SUCCESS) {
         // A failed native operation is NOT a rejected fixture or a successful
         // status-only parity case. The fixture must exercise a successful build.
         return Err(harness(format!(
@@ -265,8 +265,8 @@ fn probes(k: &Kernel, brep: &Brep, face: FaceId, input: &Inputs) -> SolidResult<
 
 fn status(error: SolidError) -> SolidResult<f64> {
     match error {
-        e if solidcore::error::upstream_status(&e).is_some() => {
-            Ok(f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1)))
+        e if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
+            Ok(f64::from(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1))))
         }
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(1007.0),
         other => Err(other),
@@ -276,7 +276,7 @@ fn status(error: SolidError) -> SolidResult<f64> {
 fn test(out: &mut Vec<f64>, result: SolidResult<(bool, Option<EntityRef>)>) -> SolidResult<()> {
     match result {
         Ok((ok, value)) => {
-            out.extend([SUCCESS, flag(ok)]);
+            out.extend([crate::status::ok_slot(SUCCESS), flag(ok)]);
             object(out, value);
         }
         Err(error) => {
@@ -290,7 +290,7 @@ fn test(out: &mut Vec<f64>, result: SolidResult<(bool, Option<EntityRef>)>) -> S
 fn classify(out: &mut Vec<f64>, result: SolidResult<(i32, Option<EntityRef>)>) -> SolidResult<()> {
     match result {
         Ok((class, value)) => {
-            out.extend([SUCCESS, f64::from(class)]);
+            out.extend([crate::status::ok_slot(SUCCESS), f64::from(class)]);
             object(out, value);
         }
         Err(error) => {
@@ -322,7 +322,7 @@ fn rust_record(input: &Inputs, brep: &mut Brep, face: FaceId) -> SolidResult<Vec
         .as_ref()
         .ok_or_else(|| SolidError::null_pointer("difftest::native_face"))?;
     let mut out = vec![
-        SUCCESS,
+        crate::status::ok_slot(SUCCESS),
         f64::from(face.index()),
         source.type_code() as f64,
         f64::from(input.loops),
@@ -356,13 +356,13 @@ fn rust_record(input: &Inputs, brep: &mut Brep, face: FaceId) -> SolidResult<Vec
                 .map(|_| ());
         }
         let build_status = match built {
-            Ok(()) => SUCCESS,
+            Ok(()) => crate::status::ok_slot(SUCCESS),
             Err(error) => status(error)?,
         };
         out.push(build_status);
         cache.base_mut().face_was_modified = input.modified;
         state(&mut out, cache.base(), brep.editing_enabled());
-        if build_status != SUCCESS {
+        if build_status != crate::status::ok_slot(SUCCESS) {
             out.push(0.0);
             return Ok(out);
         }

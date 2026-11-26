@@ -321,7 +321,7 @@ fn sub<T>(
 ) -> Result<(), SolidError> {
     match r {
         Ok(v) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             put(o, v);
             Ok(())
         }

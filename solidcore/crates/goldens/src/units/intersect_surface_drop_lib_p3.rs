@@ -89,6 +89,11 @@ fn param_code(p: SurfParamType) -> f64 {
 
 /// A status record value: `0` for `SM_SUCCESS` (1000), as the shim's `st`.
 fn code(c: i32) -> f64 {
+    crate::status::drop_status_slot(c, legacy_code(c))
+}
+
+/// [`code`] as recorded before kinds.
+fn legacy_code(c: i32) -> f64 {
     if c == SM_SUCCESS {
         0.0
     } else {
@@ -151,7 +156,7 @@ fn put_record(o: &mut Vec<f64>, f: &DropCurveFail<NoObject>) -> Result<(), Harne
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let k = crate::runner_kernel();
     let Some(srf) = rust_surface(&k, &i.surface)? else {
-        return Ok(Output::new().values("rec", vec![NO_SURFACE]));
+        return Ok(Output::new().values("rec", vec![crate::status::state_slot(crate::status::RunnerState::NotReached, NO_SURFACE)]));
     };
     let curve = rust_curve(&k, &i.curve)?;
     let mut fail: DropCurveFail<NoObject> = DropCurveFail::default();
@@ -172,7 +177,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let mut o = Vec::new();
     match r {
         Ok(out) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             o.push(out.max_drop_to_surf);
             o.push(out.max_approx_dev);
             put_curves(&mut o, &out.uv_curves)?;

@@ -293,6 +293,11 @@ fn ext(d: &[[f64; 3]; 2]) -> Extent3d {
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::upstream_status(e).is_some() => {
@@ -394,7 +399,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         Inputs::Trim { a, b, .. } => {
             let mut trim = Extent3d::new();
             match need()?.trim_param_bounding_box_simple(&ext(&[*a, *b]), &mut trim) {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 Err(e) => {
                     if let Some(d) = Output::unported(&e) {
                         return Ok(d);
@@ -408,11 +413,12 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let v = need()?;
             let (g, ok) = bend_of(v)?.inv_evaluate_guess_point_simple(v3(*p));
             // the dispatch reports the same status
-            let st = match v.inv_evaluate_guess_point_simple(v3(*p)) {
-                Ok(_) => 0.0,
-                Err(e) => status(&e),
+            let r = v.inv_evaluate_guess_point_simple(v3(*p));
+            let st = match &r {
+                Ok(_) => crate::status::ok_slot(0.0),
+                Err(e) => status(e),
             };
-            if ok != (st == 0.0) {
+            if ok != r.is_ok() {
                 return Err(harness("dispatch status disagrees with the bend"));
             }
             o.push(st);

@@ -683,6 +683,11 @@ fn build_surface(s: &SurfIn) -> Result<Surface, HarnessError> {
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 pub(super) fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     solidcore::error::nurbs::upstream_status(e).map_or(-1.0, f64::from)
 }
 
@@ -828,7 +833,7 @@ fn st3<T>(r: solidcore::Result<T>) -> Result<Result<T, f64>, Fail> {
 /// The status of a call (0 on success).
 fn st0<T>(r: solidcore::Result<T>) -> Result<f64, Fail> {
     Ok(match st(r)? {
-        Ok(_) => 0.0,
+        Ok(_) => crate::status::ok_slot(0.0),
         Err(s) => s,
     })
 }
@@ -843,7 +848,7 @@ pub(super) fn put_curve(k: &Kernel, o: &mut Vec<f64>, c: &Curve) {
     for i in 0..=4 {
         match c.evaluate_point(k, ivl.evaluate(f64::from(i) / 4.0)) {
             Ok(p) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 put_vec(o, p);
             }
             Err(e) => o.push(status(&e)),
@@ -863,7 +868,7 @@ fn put_surface(k: &Kernel, o: &mut Vec<f64>, s: &Surface) {
             );
             match s.evaluate_point(k, uv) {
                 Ok(p) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     put_vec(o, p);
                 }
                 Err(e) => o.push(status(&e)),
@@ -2765,7 +2770,7 @@ pub(super) fn unique_live<T: PartialEq + Copy>(v: &[T], live: impl Fn(T) -> bool
 fn put_eval(out: &mut Vec<f64>, r: Result<(Option<Vec3>, Option<Vec3>), f64>, mode: i64) {
     match r {
         Ok((pp, tt)) => {
-            out.push(0.0);
+            out.push(crate::status::ok_slot(0.0));
             if mode & 1 != 0 {
                 put_vec(out, pp.unwrap_or(Vec3::UNDEF));
             }
@@ -5356,7 +5361,7 @@ fn apply_transform_op_inner(
 
 fn transform_status(res: solidcore::Result<()>) -> Result<f64, Fail> {
     Ok(match res {
-        Ok(()) => SM_SUCCESS,
+        Ok(()) => crate::status::ok_slot(SM_SUCCESS),
         Err(e) => match Output::unported(&e) {
             Some(d) => return Err(Fail::Deferred(Box::new(d))),
             None => match e {

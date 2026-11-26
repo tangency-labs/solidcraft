@@ -425,7 +425,7 @@ enum Rec {
 /// `0` for success, else the status of the error; an unported callee defers.
 fn st<T>(r: &solidcore::Result<T>) -> Result<f64, SolidError> {
     match r {
-        Ok(_) => Ok(0.0),
+        Ok(_) => Ok(crate::status::ok_slot(0.0)),
         Err(e) if e.is_unported() => Err(e.clone()),
         Err(e) => Ok(status(e)),
     }
@@ -1433,7 +1433,7 @@ impl UnitDiff for Runner {
         match rust(&i)? {
             Rec::Flat(flat) => to_output(&i.query, &flat),
             Rec::Deferred(e) => {
-                Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())))
+                Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())))
             }
         }
     }

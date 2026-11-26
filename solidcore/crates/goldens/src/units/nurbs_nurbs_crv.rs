@@ -406,6 +406,11 @@ fn dump(o: &mut Vec<f64>, c: &Curve) {
 /// returns that number), `1` for any other upstream error (including `sm_BasisEval`'s
 /// domain-end flag, `Unsupported`), `-1` for a port-only one.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         e if nlib_number(e) == Some(14) => 14.0,
         e if nlib_number(e).is_some() => 1.0,
@@ -543,7 +548,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(()) => to_output(i, p, &o),
         Err(e) => match Output::unported(&e) {
             Some(d) => Ok(d),
-            None => to_output(i, p, &[status(&e)]).or_else(|_| Ok(Output::err(e.to_string()))),
+            None => to_output(i, p, &[status(&e)]).or_else(|_| Ok(Output::kernel(&e, e.to_string()))),
         },
     }
 }

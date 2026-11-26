@@ -730,6 +730,11 @@ fn param_of(v: u8) -> Result<SurfParamType, HarnessError> {
 
 /// The `SmStatus` of a Rust error.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
             f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
@@ -764,7 +769,7 @@ fn push_res<T>(
 ) -> Result<(), Fail> {
     match r {
         Ok(v) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             f(o, v)
         }
         Err(e) => {
@@ -1099,7 +1104,7 @@ fn run_step_seen(
         StepIn::Copy => push_res(o, s.copy(k), |o, c| put_result(k, o, &Surface::from(c))),
         StepIn::Eq { other } => match rust_off(k, other)? {
             Ok(other) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 let eq = s.approx_eq(k, &Surface::from(other));
                 let w = Surface::from(s.clone());
                 let self_eq = w.approx_eq(k, &w);

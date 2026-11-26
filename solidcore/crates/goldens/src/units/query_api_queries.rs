@@ -66,6 +66,11 @@ fn cclosest(o: &mut Vec<f64>, p: api::CurveClosestPoint) {
     o.push(p.parameter);
 }
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.,
         e => solidcore::error::upstream_status(e).map_or(-1., f64::from),

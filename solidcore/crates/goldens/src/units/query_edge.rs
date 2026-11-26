@@ -564,7 +564,7 @@ fn resolve(k: &Kernel, s: &Scene, op: &OpIn) -> Option<Resolved> {
 }
 
 fn no_entity() -> Output {
-    Output::err("no_entity_of_that_kind")
+    Output::harness("no_entity_of_that_kind")
 }
 
 // ---- Rust side --------------------------------------------------------------------
@@ -608,11 +608,14 @@ fn rust_err(e: &SolidError) -> Output {
     if let Some(o) = Output::unported(e) {
         return o;
     }
-    let failed = if matches!(e, SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) {
-        NULL_DEREF
-    } else {
-        1
-    };
+    let failed = crate::status::kind_slot(
+        e,
+        if matches!(e, SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) {
+            NULL_DEREF
+        } else {
+            1
+        },
+    );
     Output::new().int("failed", failed)
 }
 
@@ -636,7 +639,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let br = &mut s.brep;
     let eid = |i: usize| EdgeId::from_index(i as u32);
     let euid = |i: usize| EdgeuseId::from_index(i as u32);
-    let ok = Output::new().int("failed", 0);
+    let ok = Output::new().int("failed", crate::status::ok_slot(0));
     Ok(match r {
         Resolved::Bbox { edge, req, tight } => {
             match qe::calculate_bounding_box(&k, br, eid(edge), req, tight) {
@@ -661,7 +664,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             nparam,
         } => {
             let Some(edge) = br.edgeuse(euid(eu)).ok().and_then(|x| x.edge) else {
-                return Ok(Output::new().int("failed", NULL_DEREF));
+                return Ok(Output::new().int("failed", crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)));
             };
             match qe::radial_sector_classify(&k, br, edge, nparam, euid(eu), euid(classify)) {
                 Ok(c) => ok.int("result", i64::from(c.code())),
@@ -676,7 +679,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             force,
         } => {
             let Some(edge) = br.edgeuse(euid(eu)).ok().and_then(|x| x.edge) else {
-                return Ok(Output::new().int("failed", NULL_DEREF));
+                return Ok(Output::new().int("failed", crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)));
             };
             let ivl = Extent1d::from_min_max(line.domain[0], line.domain[1]);
             let c = build_curve(&k, &CurveIn::Line(line))?;

@@ -418,6 +418,11 @@ fn trim_interval(c: &BrepCase, e: i64, t: [f64; 2]) -> Result<[f64; 2], HarnessE
 // ---- Rust side ------------------------------------------------------------------------
 
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
@@ -796,7 +801,9 @@ fn rust_brep(
             let side = EdgeuseId::from_index(eid(r[3])?);
             let one = |res: Result<usize, SolidError>| match res {
                 Ok(v) => Ok(v as f64),
-                Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(-2.0),
+                Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => {
+                    Ok(crate::status::kind_slot(&kernel_err, -2.0))
+                }
                 Err(e) => Err(e),
             };
             (|| -> Result<(), SolidError> {
@@ -1000,7 +1007,7 @@ fn rust_static(i: &Inputs, o: &mut Vec<f64>) -> Result<Result<(), SolidError>, H
                         Some(_) if !both => Some(vec![-2.0]),
                         Some(r) => {
                             let st = match e.evaluate(&k, *r) {
-                                Ok(_) => 0.0,
+                                Ok(_) => crate::status::ok_slot(0.0),
                                 Err(err @ SolidError::Unported { .. }) => return Err(err),
                                 Err(err) => status(&err),
                             };
@@ -1328,7 +1335,7 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
                         none,
                         none,
                     ) {
-                        Ok(_) => 0.0,
+                        Ok(_) => crate::status::ok_slot(0.0),
                         Err(e) => status(&e),
                     },
                 );
@@ -1403,7 +1410,7 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
                 &mut guess,
             );
             match r {
-                Ok(_) => o.push(0.0),
+                Ok(_) => o.push(crate::status::ok_slot(0.0)),
                 Err(e @ SolidError::Unported { .. }) => {
                     return Ok(Output::unported(&e).unwrap_or_default())
                 }

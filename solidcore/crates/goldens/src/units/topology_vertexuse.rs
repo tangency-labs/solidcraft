@@ -538,7 +538,7 @@ impl From<HarnessError> for Fail {
 fn slot<T>(r: Result<T, SolidError>, f: impl FnOnce(T) -> i64) -> Result<i64, SolidError> {
     match r {
         Ok(v) => Ok(f(v)),
-        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(NULL_DEREF),
+        Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => Ok(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
         Err(e) => Err(e),
     }
 }
@@ -546,7 +546,7 @@ fn slot<T>(r: Result<T, SolidError>, f: impl FnOnce(T) -> i64) -> Result<i64, So
 /// An upstream status: `0` for success, the `SmStatus` of an upstream error.
 fn status_of(e: &SolidError) -> Result<f64, SolidError> {
     match e {
-        up_err if solidcore::error::upstream_status(up_err).is_some() => Ok(f64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1))),
+        up_err if crate::status::is_kernel(up_err, solidcore::error::upstream_status(up_err).is_some()) => Ok(f64::from(crate::status::kind_slot(up_err, solidcore::error::upstream_status(up_err).unwrap_or(-1)))),
         other => Err(other.clone()),
     }
 }
@@ -636,7 +636,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         Err(o) => return Ok(o),
     };
     let Some(op) = resolve(&i.op, c) else {
-        return Ok(Output::err("no_vertexuse"));
+        return Ok(Output::harness("no_vertexuse"));
     };
     // The ops read the cached gaps (`IsOnPole`: the vertex/face gap's face UV), so a
     // gap that cannot be refilled is reported, not left at its placeholder.
@@ -849,8 +849,8 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                 2 => vu1::calc_vertex_edge_gap(&k, b, v, *want_out, *f)
                     .map(|g| vec![0.0, g.map_or(-1.0, |g| flag(g.is_init()))]),
                 3 => match vu1::calc_vertex_face_gap(&k, b, v, *want_out, *f) {
-                    Ok(g) => Ok(vec![0.0, g.map_or(-1.0, |g| flag(g.is_init()))]),
-                    Err(e) if solidcore::error::upstream_status(&e).is_some() => {
+                    Ok(g) => Ok(vec![crate::status::ok_slot(0.0), g.map_or(-1.0, |g| flag(g.is_init()))]),
+                    Err(e) if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
                         // the output was reset before the failing step
                         Ok(vec![status_of(&e)?, if *want_out { 0.0 } else { -1.0 }])
                     }
@@ -860,8 +860,8 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             };
             match r {
                 Ok(x) => out.extend(x),
-                Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
-                    return Ok(Output::new().values("state", vec![NULL_DEREF as f64]))
+                Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => {
+                    return Ok(Output::new().values("state", vec![crate::status::kind_slot(&kernel_err, NULL_DEREF) as f64]))
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -893,8 +893,8 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
         }
         OpIn::UvPoint { vu, ok_to_make } => {
             match vu1::compute_uv_point(&k, b, vid(*vu), *ok_to_make) {
-                Ok(p) => vec![0.0, p.x, p.y],
-                Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => vec![NULL_DEREF as f64],
+                Ok(p) => vec![crate::status::ok_slot(0.0), p.x, p.y],
+                Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => vec![crate::status::kind_slot(&kernel_err, NULL_DEREF) as f64],
                 Err(e) => vec![
                     status_of(&e)?,
                     solidcore::math::UNDEF_DOUBLE,
@@ -940,7 +940,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                     );
                     out
                 }
-                Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => vec![NULL_DEREF as f64],
+                Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => vec![crate::status::kind_slot(&kernel_err, NULL_DEREF) as f64],
                 Err(e) => return Err(e.into()),
             }
         }
@@ -956,7 +956,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                     if *want_u { i64::from(m.u) } else { -1 },
                     if *want_v { i64::from(m.v) } else { -1 },
                 ],
-                Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => vec![NULL_DEREF],
+                Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => vec![crate::status::kind_slot(&kernel_err, NULL_DEREF)],
                 Err(e) => return Err(e.into()),
             };
             return Ok(Output::new().ints("q", q));
@@ -967,7 +967,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                 gap_states(b, &mut out);
                 out
             }
-            Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => vec![NULL_DEREF as f64],
+            Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => vec![crate::status::kind_slot(&kernel_err, NULL_DEREF) as f64],
             Err(e) => return Err(e.into()),
         },
     };

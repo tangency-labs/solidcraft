@@ -241,6 +241,11 @@ fn build_curve(k: &Kernel, c: &CurveIn) -> Result<Curve, HarnessError> {
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::upstream_status(e).is_some() => {
@@ -276,7 +281,7 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
                 conts: vec![ContinuityType::C0],
             };
             match v.calculate_continuities_simple(k, param, &mut d, *geom) {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 Err(e) => {
                     if let Some(d) = Output::unported(&e) {
                         return Ok(d);

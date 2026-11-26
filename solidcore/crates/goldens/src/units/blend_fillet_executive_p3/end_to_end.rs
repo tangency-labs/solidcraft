@@ -587,6 +587,9 @@ fn point(out: &mut Vec<f64>, p: Vec3) {
     out.extend([p.x, p.y, p.z]);
 }
 pub(super) fn status(error: SolidError) -> SolidResult<f64> {
+    if crate::status::is_kernel(&error, false) {
+        return Ok(crate::status::kind_slot(&error, 0.0));
+    }
     match error {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(1007.0),
         // every error carrying its exact C++ status (an upstream status, a typed refusal of
@@ -600,7 +603,7 @@ pub(super) fn status(error: SolidError) -> SolidResult<f64> {
 pub(super) fn sample(out: &mut Vec<f64>, value: SolidResult<Vec3>) -> SolidResult<()> {
     match value {
         Ok(p) => {
-            out.push(0.0);
+            out.push(crate::status::ok_slot(0.0));
             point(out, p);
         }
         Err(error) => out.push(status(error)?),
@@ -1128,7 +1131,7 @@ fn shell_rust(k: &mut Kernel, input: &RealSolid, shell: ShellAfter) -> SolidResu
         .collect::<SolidResult<_>>()?;
     let mut values = Vec::new();
     match apply(k, &mut body, &edges, input) {
-        Ok(()) => values.push(0.0),
+        Ok(()) => values.push(crate::status::ok_slot(0.0)),
         Err(error) => {
             values.push(status(error)?);
             return Ok(values);
@@ -1179,7 +1182,7 @@ fn shell_rust(k: &mut Kernel, input: &RealSolid, shell: ShellAfter) -> SolidResu
         p1::faces(&result, None)?.len() as f64,
     ]);
     match solidcore::query::api_queries::brep_is_manifold_solid(&result) {
-        Ok(manifold) => values.extend([0.0, f64::from(u8::from(manifold))]),
+        Ok(manifold) => values.extend([crate::status::ok_slot(0.0), f64::from(u8::from(manifold))]),
         Err(error) => values.extend([status(error)?, 0.0]),
     }
     let store = solidcore::geom::attribute::AttributeStore::default();

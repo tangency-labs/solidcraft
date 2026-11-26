@@ -1357,8 +1357,8 @@ fn idx<I: Copy>(o: Option<I>, f: impl Fn(I) -> u32) -> f64 {
 /// An upstream status of a failed op: the `SmStatus` of an upstream error.
 fn status_of(e: SolidError) -> Result<f64, Fail> {
     match e {
-        e if solidcore::error::upstream_status(&e).is_some() => {
-            Ok(f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1)))
+        e if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
+            Ok(f64::from(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1))))
         }
         other => Err(other.into()),
     }
@@ -1498,7 +1498,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     };
     let op = match resolve(&i.op, &counts_of(c)) {
         Ok(op) => op,
-        Err(name) => return Ok(Output::err(name)),
+        Err(name) => return Ok(Output::harness_text(name)),
     };
     let (code, args) = op_args(&op)?;
     let mut input = block;
@@ -1580,7 +1580,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
             }
             match fp2::points_in_face(&mut k, b, fid(*f), *count) {
             Ok(r) => {
-                o.extend([0.0, r.uv.len() as f64]);
+                o.extend([crate::status::ok_slot(0.0), r.uv.len() as f64]);
                 for p in &r.uv {
                     o.extend([p.x, p.y]);
                 }
@@ -1588,7 +1588,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
                     o.extend([p.x, p.y, p.z]);
                 }
             }
-            Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => o.push(NULL_DEREF),
+            Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => o.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
             Err(e) => o.extend([status_of(e)?, 0.0]),
             }
         }
@@ -1597,7 +1597,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
             // `CalculateAnInternalPoint` (its OP_INTERNAL)
             super::query_face_p1::drop_trim_cache(b, fid(*f))?;
             match fp2::calculate_an_internal_point(&k, b, fid(*f)) {
-            Ok(p) => o.extend([0.0, p.x, p.y, p.z]),
+            Ok(p) => o.extend([crate::status::ok_slot(0.0), p.x, p.y, p.z]),
                 Err(e) => o.extend([status_of(e)?, 0.0, 0.0, 0.0]),
             }
         }
@@ -1608,7 +1608,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
             want_uv,
         } => match fp2::create_curves_from_face(&k, b, fid(*f), orient(*or), *want_3d, *want_uv) {
             Ok(r) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 o.push(r.curve_loops.len() as f64);
                 o.extend(r.curve_loops.iter().map(|&n| n as f64));
                 o.push(r.curve_orients.len() as f64);
@@ -1625,7 +1625,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
                     }
                 }
             }
-            Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => o.push(NULL_DEREF),
+            Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => o.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
             Err(e) => o.extend([status_of(e)?, 0.0, 0.0, 0.0, 0.0, 0.0]),
         },
         OpIn::Trim {
@@ -1674,7 +1674,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
                         None => o.push(-1.0),
                     }
                 }
-                Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => o.push(NULL_DEREF),
+                Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => o.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
                 Err(e) => o.extend([
                     status_of(e)?,
                     if *want_3d { 0.0 } else { -1.0 },
@@ -1706,13 +1706,14 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
             let dom = if *face_dom {
                 match eu1::face(b, cur) {
                     Ok(Some(f)) => fp2::uv_domain(b, f)?,
-                    _ => return Ok(vec![NULL_DEREF]),
+                    Ok(None) => return Ok(vec![crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)]),
+                    Err(kernel_err) => return Ok(vec![crate::status::kind_slot(&kernel_err, NULL_DEREF)]),
                 }
             } else {
                 Extent2d::from_bounds(dom[0], dom[1], dom[2], dom[3])
             };
             let Some(v) = v else {
-                return Ok(vec![NULL_DEREF]);
+                return Ok(vec![crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)]);
             };
             let uv_of = |b: &Brep, e: Option<EdgeuseId>| -> Result<Option<SmCurve>, Fail> {
                 match e {
@@ -1727,11 +1728,11 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
                     o.push(-1.0);
                     return Ok(o);
                 }
-                return Ok(vec![NULL_DEREF]);
+                return Ok(vec![crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)]);
             };
             match fp2::fix_uv_trim_curves(&k, b, cur, p, v, *tol, *dist, &dom) {
-                Ok(fixed) => o.extend([0.0, flag(fixed)]),
-                Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => return Ok(vec![NULL_DEREF]),
+                Ok(fixed) => o.extend([crate::status::ok_slot(0.0), flag(fixed)]),
+                Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => return Ok(vec![crate::status::kind_slot(&kernel_err, NULL_DEREF)]),
                 Err(e) => o.extend([status_of(e)?, 0.0]),
             }
             crate::dump::body(&k, "uv_trims", b);
@@ -1754,9 +1755,10 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
             let surf = match eu1::face(b, e) {
                 Ok(Some(f)) => match fp2::surface(b, f)? {
                     Some(s) => s.clone(),
-                    None => return Ok(vec![NULL_DEREF]),
+                    None => return Ok(vec![crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)]),
                 },
-                _ => return Ok(vec![NULL_DEREF]),
+                Ok(None) => return Ok(vec![crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)]),
+                Err(kernel_err) => return Ok(vec![crate::status::kind_slot(&kernel_err, NULL_DEREF)]),
             };
             let before: Vec<bool> = slots.iter().map(Option::is_some).collect();
             match fp2::find_best_uv_curve(&k, b, &surf, e, &mut slots, &orients) {
@@ -1770,7 +1772,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
                     o.push(which.map_or(-1.0, |w| w as f64));
                     put_curve(&mut o, found.as_ref())?;
                 }
-                Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => return Ok(vec![NULL_DEREF]),
+                Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => return Ok(vec![crate::status::kind_slot(&kernel_err, NULL_DEREF)]),
                 Err(e) => o.extend([status_of(e)?, -1.0, -1.0]),
             }
             o.extend(slots.iter().map(|s| flag(s.is_some())));
@@ -1786,7 +1788,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
                 flag(r.on_singularity),
                 flag(r.crosses_missing_seam),
             ]),
-            Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => o.push(NULL_DEREF),
+            Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => o.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
             Err(e) => return Err(e.into()),
         },
         OpIn::Rescue { f, to_null } => {
@@ -1794,7 +1796,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
             let me = ObjectKey(1 + u64::from(f.index()));
             let face = b.face_mut(f)?;
             let Some(s) = face.surface.as_mut() else {
-                return Ok(vec![NULL_DEREF]);
+                return Ok(vec![crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)]);
             };
             let owned = |s: &Surface| flag(s.owner().is_some_and(|x| x.key == me));
             o.push(owned(s));

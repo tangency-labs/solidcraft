@@ -303,6 +303,11 @@ fn link(i: i64) -> Option<NodeId> {
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::upstream_status(e).is_some() => {
@@ -467,7 +472,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                     &mut ext,
                     link(call.node),
                 ) {
-                    Ok(()) => o.push(0.0),
+                    Ok(()) => o.push(crate::status::ok_slot(0.0)),
                     Err(e) if e.is_unported() => {
                         err = Some(e);
                         break;

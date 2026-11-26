@@ -465,6 +465,11 @@ fn clone_ctor_unsafe(i: &Inputs) -> bool {
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::upstream_status(e).is_some() => {
@@ -506,7 +511,7 @@ fn probes(k: &Kernel, o: &mut Vec<f64>, c: &Curve, ts: &[f64]) -> Result<(), Sol
     for &t in ts {
         match c.evaluate_point(k, t) {
             Ok(p) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 pv(o, p);
             }
             Err(e @ SolidError::Unported { .. }) => return Err(e),
@@ -514,7 +519,7 @@ fn probes(k: &Kernel, o: &mut Vec<f64>, c: &Curve, ts: &[f64]) -> Result<(), Sol
         }
         match c.evaluate(k, t, 3, true, true) {
             Ok(v) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 for x in v {
                     pv(o, x);
                 }

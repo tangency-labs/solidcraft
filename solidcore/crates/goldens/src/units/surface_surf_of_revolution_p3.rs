@@ -204,6 +204,11 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
 /// for `InvalidInput` (e.g. `SmBSplineCurve::Trim` of an interval shorter than
 /// `SM_EFF_ZERO`, reached by `UpdateAnalyticalDomain`), else `-1`.
 fn status(e: &solidcore::SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &solidcore::SolidError) -> f64 {
     match e {
         solidcore::SolidError::InvalidInput { .. } | solidcore::SolidError::PortInvariant { .. } => 1007.0,
         _ => super::surface_surf_of_revolution_p1::status(e),
@@ -422,7 +427,7 @@ fn rust_op(
                     if e.is_unported() {
                         return Ok(Err(e));
                     }
-                    o.push(SC_ERR_ARG);
+                    o.push(crate::status::kind_slot(&e, SC_ERR_ARG));
                     return Ok(Ok(()));
                 }
             }
@@ -503,7 +508,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             o.push(status(&e));
         }
         Ok(surf) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             let at = o.len();
             if let Err(e) = rust_op(&k, &surf, &i.op, &mut o)? {
                 if let Some(out) = Output::unported(&e) {

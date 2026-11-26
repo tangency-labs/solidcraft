@@ -187,7 +187,7 @@ fn resolve_with(
 ) -> Result<Result<Inputs, Output>, HarnessError> {
     let [_, _, _, n_f, _, n_l, ..] = c;
     if n_f == 0 {
-        return Ok(Err(Output::err("no_face")));
+        return Ok(Err(Output::harness("no_face")));
     }
     let mut r = i.clone();
     r.face = shared::sel(i.face.max(0), n_f);
@@ -222,7 +222,7 @@ fn resolve_with(
             let f = FaceId::from_index(r.face as u32);
             let edges = face_edges(b, f)?;
             if edges.is_empty() {
-                return Ok(Err(Output::err("no_face_edge")));
+                return Ok(Err(Output::harness("no_face_edge")));
             }
             let e = edges
                 .get(shared::sel((*edge).max(0), edges.len()) as usize)
@@ -273,7 +273,7 @@ fn put_list<I: ArenaId>(o: &mut Vec<f64>, r: Result<Vec<I>, SolidError>) -> Resu
             o.push(v.len() as f64);
             o.extend(v.iter().map(|x| f64::from(x.index())));
         }
-        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => o.push(NULL_DEREF),
+        Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => o.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
         Err(e) => return Err(fail(&e)),
     }
     Ok(())
@@ -608,7 +608,7 @@ fn rust_record(
         OpIn::Connected { kind, index } => match fp4::is_connected_to(&b, f, target(*kind, *index))
         {
             Ok(c) => o.push(flag(c)),
-            Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => o.push(NULL_DEREF),
+            Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => o.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
             Err(e) => return Err(fail(&e)),
         },
         OpIn::Line {
@@ -620,7 +620,7 @@ fn rust_record(
         } => {
             let face = b.face(f).map_err(|e| fail(&e))?;
             let Some(surface) = face.surface.as_ref() else {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             };
             let handle = SurfaceHandle(
@@ -675,7 +675,7 @@ fn rust_record(
             let e = EdgeId::from_index(*edge as u32);
             let v = VertexId::from_index(*vertex as u32);
             if sector_null_deref(&b, f, v, e).map_err(|e| fail(&e))? {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             }
             let edge_rec = b.edge(e).map_err(|e| fail(&e))?;
@@ -758,7 +758,7 @@ fn rust_record(
                 .map_err(|e| fail(&e))?
                 .len();
             if no_surface && n_loops >= 2 {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
             } else {
                 o.push(flag(
                     fp4::assert_test_face37(&k, &mut b, f).map_err(|e| fail(&e))?,

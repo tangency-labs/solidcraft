@@ -243,6 +243,11 @@ fn rust_curve(d: &CurveData) -> Result<BSplineCurve, HarnessError> {
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::upstream_status(e).is_some() => {
@@ -417,7 +422,7 @@ fn run_op(
             let prev = if *use_prev { *last } else { None };
             match st(sil.compute_point_values(k, p2(*uv), &mut p, prev.as_ref()))? {
                 Ok(()) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     put_point(o, &p);
                     *last = Some(p);
                 }
@@ -426,7 +431,7 @@ fn run_op(
         }
         OpIn::Lps { uv } => match st(sil.local_point_solve(k, &TracePoint::new(), p2(*uv)))? {
             Ok(r) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 o.push(b(r.is_some()));
                 if let Some(found) = r {
                     put_uv(o, found);
@@ -438,7 +443,7 @@ fn run_op(
             let mut q = p2(*uv);
             match st(sil.does_point_lie_on_curve(k, &mut q, *refine))? {
                 Ok(f) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     o.push(b(f));
                     put_uv(o, q);
                 }
@@ -450,7 +455,7 @@ fn run_op(
             let ivl = Extent1d::from_min_max(interval[0], interval[1]);
             match st(sil.find_solutions_on_boundary_curve(k, &Curve::from(c), &ivl))? {
                 Ok(sols) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     o.push(sols.as_slice().len() as f64);
                     for s in sols.as_slice() {
                         put_sol(o, s);

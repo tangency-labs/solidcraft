@@ -141,7 +141,11 @@ fn put_curve(o: &mut Vec<f64>, c: Option<&Curve>) -> solidcore::Result<()> {
     Ok(())
 }
 fn put_intersection(more: bool, x: &SurfaceIntersection) -> solidcore::Result<Vec<f64>> {
-    let mut o = vec![1000.0, fl(more), x.curves_3d.len() as f64];
+    let mut o = vec![
+        crate::status::ok_slot(1000.0),
+        fl(more),
+        x.curves_3d.len() as f64,
+    ];
     for c in &x.curves_3d {
         put_curve(&mut o, Some(c))?;
     }
@@ -208,9 +212,7 @@ fn output(v: &[f64]) -> Result<Output, HarnessError> {
     if v.len() < 3 {
         return Err(HarnessError::new("short cone intersection result"));
     }
-    if at(v, 0) != 1000.0 {
-        return Ok(Output::err(format!("status_{}", at(v, 0) as i64)));
-    }
+    // (the record is built only on success: an error never reaches it)
     Ok(Output::new()
         .ints("status_and_more", vec![at(v, 0) as i64, at(v, 1) as i64])
         .values("geometry", v.get(2..).unwrap_or(&[]).to_vec()))
@@ -302,11 +304,11 @@ impl UnitDiff for Runner {
         match rust(&i) {
             Ok(v) => output(&v),
             Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| {
-                Output::err(format!(
+                Output::kernel(&e, format!(
                     "status_{}",
                     match e {
-                        ref e if solidcore::error::upstream_status(e).is_some() => {
-                            solidcore::error::upstream_status(e).unwrap_or(-1)
+                        ref e if crate::status::is_kernel(e, solidcore::error::upstream_status(e).is_some()) => {
+                            crate::status::kind_slot(e, solidcore::error::upstream_status(e).unwrap_or(-1))
                         }
                         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
                         _ => -1,

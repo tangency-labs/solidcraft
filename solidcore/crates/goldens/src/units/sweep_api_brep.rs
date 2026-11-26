@@ -362,6 +362,11 @@ fn options_of(o: Option<[bool; 5]>) -> Option<SweepOptions> {
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::upstream_status(e).is_some() => {
@@ -627,7 +632,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             if let (Inputs::FromBoxFace { .. }, Swept::CurveSweep(c)) = (i, &mut s) {
                 return Ok(match box_volume(&k, &mut c.brep) {
                     Ok((st, v)) => out.int("volume_status", st).scalar("volume", v),
-                    Err(e) => Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())),
+                    Err(e) => Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())),
                 });
             }
             if !observes(i) {
@@ -647,7 +652,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 .len();
             match rust_observation(&k, body, rotational(i)) {
                 Ok(flat) => decode_observation(out, &flat, nv, ne, rotational(i)),
-                Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
+                Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string()))),
             }
         }
         Err(e) => match Output::unported(&e) {
@@ -907,14 +912,14 @@ fn rust_observation(k: &Kernel, body: &mut Brep, fine: bool) -> solidcore::Resul
                 None => Err(SolidError::sm_err("harness::linear_observation")),
             };
             match result {
-                Ok(p) => flat.extend([0.0, p.x, p.y, p.z]),
+                Ok(p) => flat.extend([crate::status::ok_slot(0.0), p.x, p.y, p.z]),
                 Err(e) if e.is_unported() => return Err(e),
                 Err(e) => flat.extend([status(&e), 0.0, 0.0, 0.0]),
             }
         }
     }
     match solidcore::query::api_queries::brep_is_manifold_solid(body) {
-        Ok(m) => flat.extend([0.0, f64::from(m)]),
+        Ok(m) => flat.extend([crate::status::ok_slot(0.0), f64::from(m)]),
         Err(e) if e.is_unported() => return Err(e),
         Err(e) => flat.extend([status(&e), 0.0]),
     }
@@ -924,13 +929,13 @@ fn rust_observation(k: &Kernel, body: &mut Brep, fine: bool) -> solidcore::Resul
         key_of: &|_| ObjectKey(0),
     };
     match brep_volume(k, body, 1e-6, &attrs) {
-        Ok(v) => flat.extend([0.0, v]),
+        Ok(v) => flat.extend([crate::status::ok_slot(0.0), v]),
         Err(e) if e.is_unported() => return Err(e),
         Err(e) => flat.extend([status(&e), 0.0]),
     }
     if fine {
         match brep_volume(k, body, 1e-8, &attrs) {
-            Ok(v) => flat.extend([0.0, v]),
+            Ok(v) => flat.extend([crate::status::ok_slot(0.0), v]),
             Err(e) if e.is_unported() => return Err(e),
             Err(e) => flat.extend([status(&e), 0.0]),
         }

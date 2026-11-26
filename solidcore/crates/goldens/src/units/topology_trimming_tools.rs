@@ -906,8 +906,8 @@ fn fail(e: &SolidError) -> Fail {
 /// The `SmStatus` of an error (`0` success); deferral and other errors end the case.
 fn status<T>(r: &Result<T, SolidError>) -> Result<f64, Fail> {
     match r {
-        Ok(_) => Ok(0.0),
-        Err(up_err) if solidcore::error::upstream_status(up_err).is_some() => Ok(f64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1))),
+        Ok(_) => Ok(crate::status::ok_slot(0.0)),
+        Err(up_err) if crate::status::is_kernel(up_err, solidcore::error::upstream_status(up_err).is_some()) => Ok(f64::from(crate::status::kind_slot(up_err, solidcore::error::upstream_status(up_err).unwrap_or(-1)))),
         Err(e) => Err(fail(e)),
     }
 }
@@ -1061,12 +1061,12 @@ fn put_samples(k: &Kernel, o: &mut Vec<f64>, c: &Curve) {
     for i in 0..=4 {
         match c.evaluate_point(k, ivl.evaluate(f64::from(i) / 4.0)) {
             Ok(p) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 put_vec(o, p);
             }
             Err(e) => {
                 o.push(match e {
-                    up_err if solidcore::error::upstream_status(&up_err).is_some() => f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1)),
+                    up_err if crate::status::is_kernel(&up_err, solidcore::error::upstream_status(&up_err).is_some()) => f64::from(crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1))),
                     _ => -1.0,
                 });
                 o.extend([0.0, 0.0, 0.0]);
@@ -1120,10 +1120,10 @@ fn find_outer(
     );
     match r {
         Ok(outer) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             put_outer(o, &ordered, &counts, &orients, normal, &outer);
         }
-        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => o.extend([0.0, NULL_DEREF]),
+        Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => o.extend([0.0, crate::status::kind_slot(&kernel_err, NULL_DEREF)]),
         Err(e) => {
             o.push(status::<()>(&Err(e))?);
         }
@@ -1149,7 +1149,7 @@ fn run_rust_geom(k: &mut Kernel, op: &OpIn) -> Result<Vec<f64>, Fail> {
                     put_vec(&mut o, r.plane_normal);
                     put_vec(&mut o, r.curves_box.min());
                     put_vec(&mut o, r.curves_box.max());
-                    if *outer && st == 0.0 {
+                    if *outer && r.status().is_ok() {
                         find_outer(
                             k,
                             &mut o,
@@ -1393,7 +1393,7 @@ fn run_rust_loops(
             LoopOp::Sample { key, t } => {
                 o.push(5.0);
                 if !sample_safe(&l, &store, CurveKey(*key), *t)? {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 }
                 let (p1, p2) = l
@@ -1413,11 +1413,11 @@ fn run_rust_loops(
             } => {
                 o.push(6.0);
                 let Some(s) = srf.as_ref() else {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 };
                 if !sample_safe(&l, &store, CurveKey(*key), *t)? {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 }
                 let ci = CurveIntersections::new(None, side_of(*dir), *iso);
@@ -1774,7 +1774,7 @@ fn run_rust_brep(k: &mut Kernel, b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fa
                 o.push(if ok_loop(b, l)? {
                     flag(tt::loop_uv_curves_present(b, l).map_err(f)?)
                 } else {
-                    NULL_DEREF
+                    crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)
                 });
             }
             for fi in 0..b.faces().len() {
@@ -1786,14 +1786,14 @@ fn run_rust_brep(k: &mut Kernel, b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fa
                 o.push(if ok {
                     flag(tt::face_uv_curves_present(b, fc).map_err(f)?)
                 } else {
-                    NULL_DEREF
+                    crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)
                 });
             }
         }
         OpIn::BExtremes { eu, .. } => {
             let eu = eid(*eu);
             if !ok_extremes(b, eu)? {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             }
             let r = tt::edge_uv_extremes(k, b, eu);
@@ -1849,7 +1849,7 @@ fn run_rust_brep(k: &mut Kernel, b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fa
                 None
             };
             let Some(srf) = srf.filter(|_| ok_loop_extremes(b, l).unwrap_or(false)) else {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             };
             let mut a = AssertArray::new();
@@ -1870,7 +1870,7 @@ fn run_rust_brep(k: &mut Kernel, b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fa
             let fc = fid(*face);
             for l in face_loops(b, fc)? {
                 if !ok_loop(b, l)? {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     return Ok(o);
                 }
             }
@@ -1885,7 +1885,7 @@ fn run_rust_brep(k: &mut Kernel, b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fa
                     ok = ok_loop_extremes(b, l)?;
                 }
                 if !ok {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     return Ok(o);
                 }
             }
@@ -1910,7 +1910,7 @@ fn run_rust_brep(k: &mut Kernel, b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fa
             // the shim's dry run of the gaps at edge uses without UV trim curve
             for &l in &loops {
                 if !ok_loop(b, l)? || !ok_loop_extremes(b, l)? {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     return Ok(o);
                 }
                 let eus = loop_eus(b, l)?;
@@ -1936,7 +1936,7 @@ fn run_rust_brep(k: &mut Kernel, b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fa
                         Err(_) => continue,
                     };
                     if pe.distance(cs) < 2.0 * tol {
-                        o.push(NULL_DEREF);
+                        o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                         return Ok(o);
                     }
                 }
@@ -1961,13 +1961,13 @@ fn run_rust_brep(k: &mut Kernel, b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fa
                 None
             };
             let Some(srf) = srf else {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             };
             let mut eus = loop_eus(b, l)?;
             for &eu in &eus {
                 if eu1::uv_trim_curve(b, eu).map_err(f)?.0.is_none() {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     return Ok(o);
                 }
             }
@@ -1984,7 +1984,7 @@ fn run_rust_brep(k: &mut Kernel, b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fa
             let first = face_loops(b, fc)?.first().copied();
             mirror_pre(k, b, first, *mirror, &mut o)?;
             let Some(srf) = b.face(fc).map_err(f)?.surface.clone() else {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             };
             let bounds = srf.natural_uv_domain_with_nurb(k).map_err(|e| HarnessError::new(e.to_string()))?;
@@ -1999,16 +1999,16 @@ fn run_rust_brep(k: &mut Kernel, b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fa
             if closed {
                 let loops = face_loops(b, fc)?;
                 let Some(&l0) = loops.first() else {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     return Ok(o);
                 };
                 if !ok_loop(b, l0)? || !ok_loop_extremes(b, l0)? {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     return Ok(o);
                 }
                 for eu in loop_eus(b, l0)? {
                     if eu1::uv_trim_curve(b, eu).map_err(f)?.0.is_none() {
-                        o.push(NULL_DEREF);
+                        o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                         return Ok(o);
                     }
                 }
@@ -2022,7 +2022,7 @@ fn run_rust_brep(k: &mut Kernel, b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fa
         }
         OpIn::BOrient { f: face, .. } => {
             if !ok_face_loops(b, fid(*face))? {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             }
             let r = tt::fix_face_loop_orientations(k, b, fid(*face));
@@ -2031,7 +2031,7 @@ fn run_rust_brep(k: &mut Kernel, b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fa
         }
         OpIn::BOrder { f: face, .. } => {
             if !ok_face_loops(b, fid(*face))? {
-                o.push(NULL_DEREF);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                 return Ok(o);
             }
             let r = tt::fix_trim_loop_order(k, b, fid(*face));
@@ -2079,7 +2079,7 @@ fn run_rust(i: &OpIn) -> Result<Output, HarnessError> {
                 }
             };
             let Some(op) = resolve_op(i, counts(&b)) else {
-                return Ok(Output::err("no_entity_of_that_kind"));
+                return Ok(Output::harness("no_entity_of_that_kind"));
             };
             run_rust_brep(&mut k, &mut b, &op)
         }
@@ -2100,7 +2100,7 @@ fn run_rust(i: &OpIn) -> Result<Output, HarnessError> {
                 }
             };
             let Some(op) = resolve_op(i, counts(&b)) else {
-                return Ok(Output::err("no_entity_of_that_kind"));
+                return Ok(Output::harness("no_entity_of_that_kind"));
             };
             run_rust_brep(&mut k, &mut b, &op)
         }

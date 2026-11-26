@@ -124,7 +124,7 @@ fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
             let brep = *b;
             let s = sel(i.op.eu(), counts(&brep)[6]);
             if s < 0 {
-                return Ok(Err(Output::err("no_entity_of_that_kind")));
+                return Ok(Err(Output::harness("no_entity_of_that_kind")));
             }
             let eu = EdgeuseId::from_index(u32::try_from(s).map_err(|_| harness("index"))?);
             Ok(Ok(Setup {
@@ -141,9 +141,6 @@ fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
 /// The output of an op body (after the build status), as both sides build it.
 fn output_of(body: &[f64]) -> Output {
     let first = body.first().copied().unwrap_or(f64::NAN);
-    if first == NULL_DEREF {
-        return Output::err("null_deref");
-    }
     Output::new()
         .int("status", first as i64)
         .values("state", body.get(1..).unwrap_or(&[]).to_vec())
@@ -154,7 +151,7 @@ fn output_of(body: &[f64]) -> Output {
 /// The status a failed Rust op reports (`None`: not an upstream status).
 fn status_of(e: &SolidError) -> Option<f64> {
     match e {
-        up_err if solidcore::error::upstream_status(up_err).is_some() => Some(f64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1))),
+        up_err if crate::status::is_kernel(up_err, solidcore::error::upstream_status(up_err).is_some()) => Some(f64::from(crate::status::kind_slot(up_err, solidcore::error::upstream_status(up_err).unwrap_or(-1)))),
         _ => None,
     }
 }
@@ -191,11 +188,11 @@ fn put_created_lift(
     let edge = eu1::edge(b, eu)?.map(|e| b.edge(e)).transpose()?;
     let face = eu1::face(b, eu)?.map(|f| b.face(f)).transpose()?;
     let (Some(edge), Some(surface)) = (edge, face.and_then(|f| f.surface.as_ref())) else {
-        out.push(NULL_DEREF);
+        out.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
         return Ok(());
     };
     let Some(curve) = edge.curve.as_ref() else {
-        out.push(NULL_DEREF);
+        out.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
         return Ok(());
     };
     out.extend([5.0, curve.type_code() as f64]);
@@ -248,7 +245,7 @@ fn run_rust_op(op: &OpIn, b: &mut Brep, eu: EdgeuseId) -> Result<Vec<f64>, Solid
             match r {
                 Ok(c) => {
                     v.extend([
-                        0.0,
+                        crate::status::ok_slot(0.0),
                         c.max_dist_to_surf,
                         c.max_deviation.filter(|_| *want_dev).unwrap_or(-1.0),
                     ]);
@@ -311,7 +308,7 @@ fn run_rust_op(op: &OpIn, b: &mut Brep, eu: EdgeuseId) -> Result<Vec<f64>, Solid
             let mut v = Vec::new();
             match eu3::evaluate_binormal_uv(&k, b, eu, t, *use_3d, &options) {
                 Ok(r) => {
-                    v.push(0.0);
+                    v.push(crate::status::ok_slot(0.0));
                     for p in [
                         r.eval.point,
                         r.eval.binormal,
@@ -338,7 +335,7 @@ fn run_rust_op(op: &OpIn, b: &mut Brep, eu: EdgeuseId) -> Result<Vec<f64>, Solid
             let mut v = Vec::new();
             match eu3::normalized_evaluate(&k, b, eu, *t, *parameter_space, *want_deriv, *ok_make) {
                 Ok(r) => {
-                    v.push(0.0);
+                    v.push(crate::status::ok_slot(0.0));
                     v.extend([r.point.x, r.point.y, r.point.z]);
                     let d = r.first_deriv.unwrap_or(Vec3::new(0.0, 0.0, 0.0));
                     v.extend([d.x, d.y, d.z]);
@@ -380,7 +377,9 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
                         "SmSurfaceCache::SubdivideToTolerances past MAX_SUBDIVISION_NODES (port bound)",
                     ))
                 }
-                SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(Output::err("null_deref")),
+                e @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
+                    Ok(Output::kernel(&e, "null_deref"))
+                }
                 e => Err(harness(format!("rust: {e}"))),
             }
         }

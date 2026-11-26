@@ -406,6 +406,11 @@ impl<'s> SurfaceTrace<'s> for SectionTracer<'s> {
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::upstream_status(e).is_some() => {
@@ -603,7 +608,7 @@ fn run_op(
             }
             let c = curve.as_ref().map(rust_curve).transpose()?;
             match st(flush_curve(k, &mut t.base, acc, c.as_ref()))? {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 Err(s) => o.push(s),
             }
             o.push(acc.curves_3d.len() as f64);
@@ -625,7 +630,7 @@ fn run_op(
                 SurfParamType::U
             };
             match st(t.test_iso_curve(k, param, *value))? {
-                Ok(f) => o.extend([0.0, b(f)]),
+                Ok(f) => o.extend([crate::status::ok_slot(0.0), b(f)]),
                 Err(s) => o.extend([s, 0.0]),
             }
         }
@@ -648,7 +653,7 @@ fn run_op(
             let _ = t.base.new_point(p);
             match st(t.test_point(k, &mut p))? {
                 Ok(done) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     o.extend([b(done), b(t.base.curve_is_closed)]);
                     put_uv(o, p.curve_uv[0]);
                     put_vec(o, p.curve_3d[0]);
@@ -665,7 +670,7 @@ fn run_op(
             let (tol, ang) = (t.base.approx_tol_3d, t.base.ang_tol_rad);
             match st(do_trace_base(t, k, &mut cache, Some(tol), Some(ang)))? {
                 Ok(r) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     put_curves(o, &r.curves_3d);
                     put_curves(o, &r.uv_curves);
                     put_doubles(o, &r.max_drop_dists);

@@ -431,6 +431,11 @@ pub(crate) fn put_curve(o: &mut Vec<f64>, c: &BSplineCurve) -> solidcore::Result
 
 /// The `SmStatus` of a Rust error.
 pub(crate) fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::upstream_status(e).is_some() => {
@@ -476,7 +481,7 @@ fn closure(c: u8) -> SurfParamType {
 /// A status record value: `0` for `SM_SUCCESS`.
 fn code(c: i32) -> f64 {
     if c == SM_SUCCESS {
-        0.0
+        crate::status::ok_slot(0.0)
     } else {
         f64::from(c)
     }
@@ -513,7 +518,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             adjust,
         } => {
             let Some(s) = rust_surface(k, surface)? else {
-                o.push(NO_SURFACE);
+                o.push(crate::status::state_slot(crate::status::RunnerState::NotReached, NO_SURFACE));
                 return Ok(());
             };
             let mut p = pt_in(pt)?;
@@ -540,7 +545,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             end_t,
         } => {
             let Some(s) = rust_surface(k, surface)? else {
-                o.push(NO_SURFACE);
+                o.push(crate::status::state_slot(crate::status::RunnerState::NotReached, NO_SURFACE));
                 return Ok(());
             };
             let c = rust_curve(k, curve)?;
@@ -558,7 +563,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
                 ))?
                 .is_err()
             {
-                o.push(REJECTED);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, REJECTED));
                 return Ok(());
             }
             let pole_pts: Option<Vec<Vec3>> = poles.as_ref().map(|ps| ps.iter().map(|p| v3(*p)).collect());
@@ -594,7 +599,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             flush,
         } => {
             let Some(s) = rust_surface(k, surface)? else {
-                o.push(NO_SURFACE);
+                o.push(crate::status::state_slot(crate::status::RunnerState::NotReached, NO_SURFACE));
                 return Ok(());
             };
             let d = ext(*domain);
@@ -613,7 +618,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
                     &mut ch,
                 );
                 match st(r)? {
-                    Ok(()) => o.push(0.0),
+                    Ok(()) => o.push(crate::status::ok_slot(0.0)),
                     Err(c) => {
                         o.push(c);
                         failed = true;
@@ -628,7 +633,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
                 let mut ch = false;
                 let r = flush_curve(&d, &mut poly, &mut knots, uv_tol[0], uv_tol[1], &mut curves, &mut ch);
                 match st(r)? {
-                    Ok(()) => o.push(0.0),
+                    Ok(()) => o.push(crate::status::ok_slot(0.0)),
                     Err(c) => o.push(c),
                 }
                 o.push(b(ch));
@@ -649,7 +654,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
             let mut ch = false;
             let r = flush_curve(&d, &mut poly, &mut knots, uv_tol[0], uv_tol[1], &mut curves, &mut ch);
             match st(r)? {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 Err(c) => o.push(c),
             }
             o.push(b(ch));

@@ -407,10 +407,10 @@ pub(crate) fn put_default_geom(
             d.min().y + fv * (d.max().y - d.min().y),
         );
         match s.surface.evaluate_point(k, uv) {
-            Ok(p) => v.extend([0.0, p.x, p.y, p.z]),
+            Ok(p) => v.extend([crate::status::ok_slot(0.0), p.x, p.y, p.z]),
             Err(e) if e.is_unported() => return Err(e),
-            Err(e) if solidcore::error::nurbs::upstream_status(&e).is_some() => {
-                v.extend([f64::from(solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1)), 0.0, 0.0, 0.0]);
+            Err(e) if crate::status::is_kernel(&e, solidcore::error::nurbs::upstream_status(&e).is_some()) => {
+                v.extend([f64::from(crate::status::kind_slot(&e, solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1))), 0.0, 0.0, 0.0]);
             }
             Err(e) => return Err(e),
         }
@@ -495,6 +495,11 @@ fn surface_of(s: &SrfIn) -> Result<Surface, HarnessError> {
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 pub(crate) fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } => 1007.0,
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
@@ -600,7 +605,7 @@ fn rust_generator(i: &Inputs) -> Result<Rec, HarnessError> {
         _ => return Err(harness("not a generator op")),
     };
     match &res {
-        Ok(_) => o.push(0.0),
+        Ok(_) => o.push(crate::status::ok_slot(0.0)),
         Err(e) => match fail(e) {
             Ok(s) => o.push(s),
             Err(out) => return Ok(Err(out)),
@@ -792,7 +797,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
             let r2 = bcurve_of(rail2)?;
             match LinearCrossSectionFsg.create_surface(&r1, &r2) {
                 Ok(s) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     dump_surface(&mut o, &s);
                 }
                 Err(e) => match fail(&e) {
@@ -817,7 +822,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
                 }
                 match fs.evaluate_base_curve(&k, t, n) {
                     Ok(pv) => {
-                        o.push(0.0);
+                        o.push(crate::status::ok_slot(0.0));
                         for v in pv {
                             o.extend([v.x, v.y, v.z]);
                         }
@@ -868,7 +873,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
             // (`SmExtent2d(u0, v0, u1, v1)`: stored as given, as the shim builds it)
             let mut d = Extent2d::from_bounds(domain[0], domain[1], domain[2], domain[3]);
             match fs.setup_offset_extension(&k, &s, &mut d) {
-                Ok(()) => o.push(0.0),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
                 // (no status upstream: a void function)
                 Err(e) => match fail(&e) {
                     Ok(s) => o.push(s),
@@ -949,7 +954,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
             );
             let found = match &res {
                 Ok(b) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     *b
                 }
                 Err(e) => match fail(e) {
@@ -1031,7 +1036,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
             );
             let found = match &res {
                 Ok(b) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     *b
                 }
                 Err(e) => match fail(e) {
@@ -1147,7 +1152,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
         Inputs::VrSetup { solver, user } => {
             let mut fs = vr_of(&k, solver)?;
             match fs.setup_offset_values(&tsect(*user)) {
-                Ok(d) => o.extend([0.0, d]),
+                Ok(d) => o.extend([crate::status::ok_slot(0.0), d]),
                 Err(e) => match fail(&e) {
                     Ok(s) => o.extend([s, -999.0]),
                     Err(out) => return Ok(Err(out)),
@@ -1183,19 +1188,19 @@ fn eu_setup(brep: &BrepIn, eu: i64) -> Result<Result<Setup, Output>, HarnessErro
     let n_eu = c.get(6).copied().unwrap_or(0);
     let s = sel(eu, n_eu);
     if s < 0 {
-        return Ok(Err(Output::err("no_entity_of_that_kind")));
+        return Ok(Err(Output::harness("no_entity_of_that_kind")));
     }
     let eu = EdgeuseId::from_index(u32::try_from(s).map_err(|_| harness("index"))?);
     Ok(Ok(Setup { brep, eu, types }))
 }
 
 /// The output of the constructor's record after the build status, as both sides build
-/// it: `-2` (upstream would dereference null) is an error output.
-fn eu_output(body: &[f64]) -> Output {
+/// it: `None` (upstream would dereference null) is an error output.
+fn eu_output(body: Option<&[f64]>) -> Output {
+    let Some(body) = body else {
+        return Output::harness("null_deref");
+    };
     let first = body.first().copied().unwrap_or(f64::NAN);
-    if first == -2.0 {
-        return Output::err("null_deref");
-    }
     Output::new()
         .int("status", first as i64)
         .values("out", body.get(1..).unwrap_or(&[]).to_vec())
@@ -1252,8 +1257,8 @@ fn eu_safe(b: &Brep, eu: Option<EdgeuseId>) -> Result<bool, SolidError> {
     Ok(true)
 }
 
-/// The Rust record body of the constructor; `Err` for an error that is not an
-/// upstream status.
+/// The Rust record body of the constructor; `None` where upstream would dereference
+/// null, `Err` for an error that is not an upstream status.
 #[allow(clippy::too_many_arguments)]
 fn rust_edgeuse_body(
     b: &mut Brep,
@@ -1265,7 +1270,7 @@ fn rust_edgeuse_body(
     r2: Option<f64>,
     fu: f64,
     fv: f64,
-) -> Result<Vec<f64>, SolidError> {
+) -> Result<Option<Vec<f64>>, SolidError> {
     let k = crate::runner_kernel();
     let radial = if has_prim(b, eu)? {
         eu1::radial(b, eu)?
@@ -1273,14 +1278,14 @@ fn rust_edgeuse_body(
         None
     };
     if !eu_safe(b, Some(eu))? || !eu_safe(b, radial)? {
-        return Ok(vec![-2.0]);
+        return Ok(None);
     }
     let mut v = Vec::new();
     let mut pseudo = FilletBrep::new();
     let id = FilletSolverId(0);
     match constant_radius_from_edgeuse(&k, b, &mut pseudo, id, tol, ang, tan, r, eu, r2) {
         Ok(fs) => {
-            v.push(0.0);
+            v.push(crate::status::ok_slot(0.0));
             for i in 0..2 {
                 let e = fs.solver.edgeuses.get(i).copied().flatten();
                 v.push(e.map_or(-1.0, |e| f64::from(e.index())));
@@ -1300,8 +1305,11 @@ fn rust_edgeuse_body(
                     d.min().y + fv * (d.max().y - d.min().y),
                 );
                 match s.surface.evaluate_point(&k, uv) {
-                    Ok(p) => v.extend([0.0, p.x, p.y, p.z]),
+                    Ok(p) => v.extend([crate::status::ok_slot(0.0), p.x, p.y, p.z]),
                     Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if crate::status::is_kernel(&e, false) => {
+                        v.extend([crate::status::kind_slot(&e, 0.0), 0.0, 0.0, 0.0]);
+                    }
                     Err(e) => {
                         let st = match solidcore::error::nurbs::upstream_status(&e) {
                             Some(code) => f64::from(code),
@@ -1319,12 +1327,12 @@ fn rust_edgeuse_body(
             }
             put_default_geom(&k, &mut v, &fs.solver, id, &pseudo, faces, fu, fv)?;
         }
-        Err(e) if solidcore::error::nurbs::upstream_status(&e).is_some() => v.push(f64::from(solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1))),
+        Err(e) if crate::status::is_kernel(&e, solidcore::error::nurbs::upstream_status(&e).is_some()) => v.push(f64::from(crate::status::kind_slot(&e, solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1)))),
         Err(e) => return Err(e),
     }
     put_eu_state(&k, &mut v, b, Some(eu))?;
     put_eu_state(&k, &mut v, b, radial)?;
-    Ok(v)
+    Ok(Some(v))
 }
 
 /// The edge-use op's B-rep and the selected edge use, before its body (`body` false) or
@@ -1357,7 +1365,7 @@ pub(crate) fn eu_case(case: &Case, body: bool) -> Result<Option<(Brep, EdgeuseId
     if body {
         let out = rust_edgeuse_body(&mut s.brep, s.eu, tol, ang, tan, r, r2, fu, fv)
             .map_err(|e| he(&e))?;
-        if out.first() == Some(&-2.0) {
+        if out.is_none() {
             return Ok(None);
         }
     }
@@ -1409,13 +1417,13 @@ fn rust_edgeuse(i: &Inputs) -> Result<Output, HarnessError> {
         return Ok(o);
     }
     match rust_edgeuse_body(&mut s.brep, s.eu, *tol, *ang, *tan, *r, *r2, *fu, *fv) {
-        Ok(body) => Ok(eu_output(&body)),
+        Ok(body) => Ok(eu_output(body.as_deref())),
         Err(e) => {
             if let Some(o) = Output::unported(&e) {
                 return Ok(o);
             }
             match e {
-                SolidError::InvalidInput { .. } => Ok(Output::err("null_deref")),
+                e @ SolidError::InvalidInput { .. } => Ok(Output::kernel(&e, "null_deref")),
                 e => Err(harness(format!("rust: {e}"))),
             }
         }

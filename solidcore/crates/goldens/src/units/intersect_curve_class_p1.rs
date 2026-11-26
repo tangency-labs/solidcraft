@@ -906,6 +906,11 @@ pub(crate) fn build_pool(objects: &[ObjIn]) -> Result<Pool, HarnessError> {
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 pub(crate) fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         e if solidcore::error::upstream_status(e).is_some() => {
             f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
@@ -933,7 +938,7 @@ impl From<HarnessError> for Fail {
 
 /// The output of a case refused with status `s`.
 pub(crate) fn refused(s: f64) -> Output {
-    Output::err(format!("refused_{s}"))
+    Output::harness_text(format!("refused_{s}"))
 }
 
 /// `Ok(v)` or the status; `Unported` defers the case.
@@ -1029,7 +1034,7 @@ pub(crate) fn put_curve(k: &Kernel, o: &mut Vec<f64>, c: &Curve) {
     }
     for i in 0..=6 {
         match c.evaluate_point(k, ivl.evaluate(f64::from(i) / 6.0)) {
-            Ok(p) => o.extend([0.0, p.x, p.y, p.z]),
+            Ok(p) => o.extend([crate::status::ok_slot(0.0), p.x, p.y, p.z]),
             Err(e) => o.push(status(&e)),
         }
     }
@@ -1658,7 +1663,7 @@ fn rust(s: &Script) -> Result<Output, HarnessError> {
         Ok(v) => Ok(Output::new().values("out", v)),
         Err(Fail::Deferred(d)) => Ok(*d),
         Err(Fail::Refused(s)) => Ok(refused(s)),
-        Err(Fail::Undefined(why)) => Ok(Output::err(format!("undefined_upstream: {why}"))),
+        Err(Fail::Undefined(why)) => Ok(Output::harness_text(format!("undefined_upstream: {why}"))),
         Err(Fail::Harness(e)) => Err(e),
     }
 }

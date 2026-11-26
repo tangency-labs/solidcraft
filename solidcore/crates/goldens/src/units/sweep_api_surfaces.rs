@@ -402,6 +402,11 @@ fn dump_surface(o: &mut Vec<f64>, s: &BSplineSurface) {
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
@@ -418,7 +423,7 @@ fn surface_result(
 ) -> Result<(), SolidError> {
     match r {
         Ok(s) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             dump_surface(o, &s);
             Ok(())
         }
@@ -585,7 +590,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             }
             match api::create_skin_from_faces(&mut k, &faces, degree) {
                 Ok(r) => {
-                    o.extend([0.0, 1.0, r.new_faces.len() as f64]);
+                    o.extend([crate::status::ok_slot(0.0), 1.0, r.new_faces.len() as f64]);
                     Ok(())
                 }
                 Err(e) if e.is_unported() => Err(e),

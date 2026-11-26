@@ -235,6 +235,11 @@ fn operation_output(items: &[Item], i: &Inputs) -> Result<Output, HarnessError> 
 
 /// Upstream status of a Rust error: the guard's `-2` for `InvalidInput`.
 fn status(e: &SolidError) -> i64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> i64 {
     match e {
         e if solidcore::error::upstream_status(e).is_some() => {
             i64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
@@ -1238,7 +1243,9 @@ fn snapshot_impl(
             i64::from(e.drop_curve_fail.is_some()),
             e.drop_curve_fail
                 .as_ref()
-                .map_or(0, |f| i64::from(f.fail_status)),
+                .map_or(0, |f| {
+                    crate::status::drop_status_slot(f.fail_status, i64::from(f.fail_status))
+                }),
             i64::from(e.drop_curve_fail.as_ref().is_some_and(|f| f.brep.is_some())),
             i64::from(e.max_edge_face_gap.is_init()),
             i64::from(e.edge_ccw_edge_gap.is_init()),
@@ -1276,7 +1283,7 @@ impl UnitDiff for Runner {
         let inputs: Inputs = case.parse()?;
         match rust(&inputs)? {
             Ok(items) => operation_output(&items, &inputs),
-            Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
+            Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string()))),
         }
     }
 

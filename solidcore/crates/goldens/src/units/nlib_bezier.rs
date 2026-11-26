@@ -310,7 +310,12 @@ fn build_srf(s: &InlineSrf) -> Result<Surface, Fail> {
         s: used[3],
     };
     Surface::with_indices(to_net(&s.net), s.u.clone(), s.v.clone(), idx)
-        .map_err(|e| Fail::Refused(format!("rust surface: {e}")))
+        .map_err(|e| {
+            Fail::Refused(format!(
+                "rust surface: {}",
+                crate::status::kernel_text(&e, e.to_string())
+            ))
+        })
 }
 
 fn to_cpts(v: &[[f64; 4]]) -> Vec<CPoint> {
@@ -411,10 +416,17 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
 /// otherwise.
 fn status<T>(r: &SolidResult<T>) -> f64 {
     match r {
-        Ok(_) => 0.0,
-        Err(e) if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
-        Err(SolidError::NotConverged { .. }) => 1000.0,
-        Err(_) => -1.0,
+        Ok(_) => crate::status::ok_slot(0.0),
+        Err(e) => crate::status::kind_slot(e, legacy_status(e)),
+    }
+}
+
+/// [`status`]'s error value as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
+    match e {
+        e if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
+        SolidError::NotConverged { .. } => 1000.0,
+        _ => -1.0,
     }
 }
 

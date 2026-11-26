@@ -683,7 +683,7 @@ fn rust(s: &Script) -> Result<Output, HarnessError> {
         Ok(v) => Ok(Output::new().values("out", v)),
         Err(Fail::Deferred(d)) => Ok(*d),
         Err(Fail::Refused(s)) => Ok(refused(s)),
-        Err(Fail::Undefined(why)) => Ok(Output::err(format!("undefined_upstream: {why}"))),
+        Err(Fail::Undefined(why)) => Ok(Output::harness_text(format!("undefined_upstream: {why}"))),
         Err(Fail::Harness(e)) => Err(e),
     }
 }

@@ -85,8 +85,8 @@ fn status(r: SolidResult<()>) -> SolidResult<f64> {
     match r {
         Ok(()) => Ok(0.),
         Err(e) if e.is_unported() => Err(e),
-        Err(e) if solidcore::error::upstream_status(&e).is_some() => {
-            Ok(f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1)))
+        Err(e) if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
+            Ok(f64::from(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1))))
         }
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(1007.),
         Err(e) => Err(e),
@@ -570,7 +570,11 @@ fn own_fixture(f: &[f64; 11]) -> Result<Result<Brep, Output>, HarnessError> {
     match built {
         Some(Built::Brep(b)) => Ok(Ok(*b)),
         Some(Built::Failed(e)) => Ok(Err(Output::unported(&e).unwrap_or_else(|| {
-            Output::rejected(format!("fixture constructor status {}", build_status(&e)))
+            Output::rejected_kernel(
+                "fixture constructor",
+                &e,
+                format!("fixture constructor status {}", build_status(&e)),
+            )
         }))),
         None => Err(HarnessError::new("fixture kind without a build")),
     }

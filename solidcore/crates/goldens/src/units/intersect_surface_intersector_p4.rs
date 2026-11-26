@@ -239,6 +239,11 @@ impl From<HarnessError> for Fail {
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e => solidcore::error::upstream_status(e).map_or(-1.0, f64::from),
@@ -249,7 +254,7 @@ fn status(e: &SolidError) -> f64 {
 fn st<T>(o: &mut Vec<f64>, r: solidcore::Result<T>) -> Result<Option<T>, Fail> {
     match r {
         Ok(v) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             Ok(Some(v))
         }
         Err(e) => {
@@ -844,7 +849,7 @@ fn run_op(run: &mut Run, si: &mut SurfaceIntersector<'_>, op: &OpIn, o: &mut Vec
         OpIn::AddCurve { i } | OpIn::AddStart { i } | OpIn::AddThrough { i } => {
             pt_of(si, *i)?;
             if si.is_linked(id(*i)) {
-                o.push(REJECTED);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, REJECTED));
             } else {
                 let r = match op {
                     OpIn::AddCurve { .. } => si.add_point_to_curve(id(*i)),
@@ -897,7 +902,7 @@ fn run_op(run: &mut Run, si: &mut SurfaceIntersector<'_>, op: &OpIn, o: &mut Vec
         OpIn::Trace { i } => {
             pt_of(si, *i)?;
             if si.curve_points().is_empty() && si.is_linked(id(*i)) {
-                o.push(REJECTED);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, REJECTED));
             } else {
                 let r = si.trace_curve(&k, id(*i), &run.outs.curves_3d);
                 st(o, r)?;
@@ -924,7 +929,7 @@ fn run_op(run: &mut Run, si: &mut SurfaceIntersector<'_>, op: &OpIn, o: &mut Vec
             ang_tol,
         } => {
             if points_rejected(si, points) {
-                o.push(REJECTED);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, REJECTED));
             } else {
                 let ids: Vec<TsectId> = points.iter().map(|&i| id(i)).collect();
                 let opts = PointIntersectionOptions {
@@ -952,7 +957,7 @@ fn run_op(run: &mut Run, si: &mut SurfaceIntersector<'_>, op: &OpIn, o: &mut Vec
         } => {
             let curve = run.curves.get(*curve).ok_or_else(|| harness("curve index"))?;
             if points_rejected(si, points) {
-                o.push(REJECTED);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, REJECTED));
             } else {
                 let ids: Vec<TsectId> = points.iter().map(|&i| id(i)).collect();
                 let opts = LawIntersectionOptions {

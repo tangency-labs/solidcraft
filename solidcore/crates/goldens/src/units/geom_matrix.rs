@@ -130,7 +130,7 @@ fn floats(v: &[Value]) -> Result<Vec<f64>, HarnessError> {
 fn normalise(e: &SolidError) -> String {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => "status_1007".into(),
-        err if solidcore::error::upstream_status(err).is_some() => format!("status_{}", solidcore::error::upstream_status(err).unwrap_or(-1)),
+        err if crate::status::is_kernel(err, solidcore::error::upstream_status(err).is_some()) => format!("status_{}", crate::status::kind_slot(err, solidcore::error::upstream_status(err).unwrap_or(-1))),
         other => format!("rust_error: {other}"),
     }
 }
@@ -247,7 +247,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let op = lookup(&i.op)?;
     match rust_run(op, i)? {
         Ok(o) => Ok(o),
-        Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(normalise(&e)))),
+        Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, normalise(&e)))),
     }
 }
 

@@ -287,7 +287,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     ) {
         Ok(c) => c,
         Err(e) => {
-            return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())));
+            return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())));
         }
     };
     let mut o = vec![0.0];

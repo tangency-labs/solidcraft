@@ -348,7 +348,7 @@ fn topo(i: &Inputs) -> Result<Result<Topo, Output>, HarnessError> {
     let (n_eu, n_v) = (c[6], c[9]);
     let vv = sel(*v, n_v);
     if vv < 0 {
-        return Ok(Err(Output::err("no_vertex")));
+        return Ok(Err(Output::harness("no_vertex")));
     }
     let vid = VertexId::from_index(vv as u32);
     // the edge uses starting at the vertex (export order)
@@ -359,7 +359,7 @@ fn topo(i: &Inputs) -> Result<Result<Topo, Output>, HarnessError> {
         .filter(|&id| eu_vertex(&b, id) == Some(vid))
         .collect();
     if ring.is_empty() {
-        return Ok(Err(Output::err("no_edge_use")));
+        return Ok(Err(Output::harness("no_edge_use")));
     }
     let from_ring = |s: i64| ring.get(sel(s, ring.len()).max(0) as usize).copied();
     let chosen: Vec<EdgeuseId> = if *walk {
@@ -369,7 +369,7 @@ fn topo(i: &Inputs) -> Result<Result<Topo, Output>, HarnessError> {
         };
         match corner_walk(&b, start) {
             Some(w) => w,
-            None => return Ok(Err(Output::err("walk_open"))),
+            None => return Ok(Err(Output::harness("walk_open"))),
         }
     } else if eus.is_empty() {
         ring.clone()
@@ -386,7 +386,7 @@ fn topo(i: &Inputs) -> Result<Result<Topo, Output>, HarnessError> {
             .collect()
     };
     if chosen.is_empty() {
-        return Ok(Err(Output::err("no_edge_use")));
+        return Ok(Err(Output::harness("no_edge_use")));
     }
     let mut args = vec![vv];
     args.extend(chosen.iter().map(|e| i64::from(e.index())));
@@ -562,7 +562,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         // every InvalidInput of the op is a null dereference upstream (the empty list is
         // screened above): a missing radial (`NULL_DEREF`) or, from unit
         // `topology.edgeuse_p1`, a missing edge; the shim refuses both
-        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(Output::err("refused")),
+        Err(e @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => Ok(Output::kernel(&e, "refused")),
         Err(e) => Ok(rust_err(&e)),
     }
 }

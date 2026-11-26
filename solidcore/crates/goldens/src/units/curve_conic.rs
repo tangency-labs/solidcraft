@@ -117,6 +117,11 @@ fn lookup(name: &str) -> Result<(Op, bool), HarnessError> {
 }
 
 fn status_code(e: &SolidError) -> i64 {
+    crate::status::kind_slot(e, legacy_status_code(e))
+}
+
+/// [`status_code`] as recorded before kinds.
+fn legacy_status_code(e: &SolidError) -> i64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => i64::from(SM_ERR_INVALID_INPUT),
         e if solidcore::error::upstream_status(e).is_some() => {
@@ -192,7 +197,7 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
             let n = usize::try_from(i.n).map_err(|_| HarnessError::new("negative n"))?;
             match a.evaluate(i.t, n, i.flags & 1 != 0) {
                 Ok(v) => {
-                    out.push(SM_SUCCESS);
+                    out.push(crate::status::ok_slot(SM_SUCCESS));
                     for p in v {
                         put_v(&mut out, p);
                     }
@@ -201,18 +206,18 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
             }
         }
         Op::EvaluatePoint => {
-            out.push(SM_SUCCESS);
+            out.push(crate::status::ok_slot(SM_SUCCESS));
             put_v(&mut out, a.evaluate_point(i.t));
         }
         Op::Implicit => {
-            out.push(SM_SUCCESS);
+            out.push(crate::status::ok_slot(SM_SUCCESS));
             out.extend(a.compute_implicit_equation());
         }
         Op::IntersectImplicit => {
             let [w0, w1, w2, w3, w4, w5] = i.w;
             match a.intersect_implicit_conic(&[w0, w1, w2, w3, w4, w5]) {
                 Ok(r) => {
-                    out.push(SM_SUCCESS);
+                    out.push(crate::status::ok_slot(SM_SUCCESS));
                     out.push(r.len() as f64);
                     out.extend(r);
                 }
@@ -223,7 +228,7 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
             let b = build(&i.b)?;
             match a.intersect_conic(&b, i.t) {
                 Ok(r) => {
-                    out.push(SM_SUCCESS);
+                    out.push(crate::status::ok_slot(SM_SUCCESS));
                     out.push(r.len() as f64);
                     for s in r {
                         out.extend([s.param, s.other_param, s.distance]);
@@ -233,7 +238,7 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
             }
         }
         Op::Invert => {
-            out.push(SM_SUCCESS);
+            out.push(crate::status::ok_slot(SM_SUCCESS));
             match a.invert_point_on_conic(Vec3::new(i.w[0], i.w[1], i.w[2])) {
                 Some(p) => out.extend([1.0, p]),
                 None => out.push(0.0),
@@ -242,7 +247,7 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
         Op::Knots => {
             let ivl = Extent1d::from_min_max(i.w[0], i.w[1]);
             let (knots, mults) = a.knots((i.flags & 1 != 0).then_some(&ivl));
-            out.push(SM_SUCCESS);
+            out.push(crate::status::ok_slot(SM_SUCCESS));
             out.push(knots.len() as f64);
             out.extend(knots);
             if i.flags & 2 != 0 {
@@ -254,7 +259,7 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
         }
         Op::Continuities => {
             let (min, conts) = a.calculate_continuities();
-            out.push(SM_SUCCESS);
+            out.push(crate::status::ok_slot(SM_SUCCESS));
             out.push(f64::from(min as i32));
             out.push(conts.len() as f64);
             out.extend(conts.iter().map(|&c| f64::from(c as i32)));
@@ -284,7 +289,7 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
             db.open_for_read(db_bytes(i)?, ft);
             match Conic::read_from_db(&mut db) {
                 Ok(k) => {
-                    out.push(SM_SUCCESS);
+                    out.push(crate::status::ok_slot(SM_SUCCESS));
                     put_state(&mut out, &k);
                     match k.evaluate(0.0, 1, false) {
                         Ok(v) => {
@@ -306,7 +311,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     match rust_values(i)? {
         Ok(v) => Ok(Output::new().values("r", v)),
         Err(e) => Ok(Output::unported(&e)
-            .unwrap_or_else(|| Output::err(format!("status_{}", status_code(&e))))),
+            .unwrap_or_else(|| Output::kernel(&e, format!("status_{}", status_code(&e))))),
     }
 }
 

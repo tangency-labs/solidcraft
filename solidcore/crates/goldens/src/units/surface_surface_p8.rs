@@ -291,7 +291,7 @@ fn rust_run_with(i: &Inputs, contact: &mut Option<Vec<i64>>) -> Result<Vec<f64>,
         OpIn::Knots { cont, at } => {
             match st(s.find_knots_by_max_continuity(&k, cont_of(*cont)?, *at))? {
                 Ok((u, v)) => {
-                    o.extend([0.0, u.len() as f64]);
+                    o.extend([crate::status::ok_slot(0.0), u.len() as f64]);
                     o.extend(&u);
                     o.push(v.len() as f64);
                     o.extend(&v);
@@ -310,7 +310,7 @@ fn rust_run_with(i: &Inputs, contact: &mut Option<Vec<i64>>) -> Result<Vec<f64>,
             };
             let target = if *same { &s } else { &s2 };
             match st(s.coincidence_check(&k, target, *tol, *whole))? {
-                Ok(c) => o.extend([0.0, b(c.are_coincident), c.max_distance]),
+                Ok(c) => o.extend([crate::status::ok_slot(0.0), b(c.are_coincident), c.max_distance]),
                 Err(c) => o.push(c),
             }
         }
@@ -426,7 +426,7 @@ fn rust_run_with(i: &Inputs, contact: &mut Option<Vec<i64>>) -> Result<Vec<f64>,
         },
         OpIn::Invert { p, dom, uv, tol } => {
             match st(s.invert_point_near_singularity(&k, v3(*p), &dom_of(*dom), p2(*uv), *tol))? {
-                Ok(r) => o.extend([0.0, f64::from(r.reason as i32), r.uv.x, r.uv.y]),
+                Ok(r) => o.extend([crate::status::ok_slot(0.0), f64::from(r.reason as i32), r.uv.x, r.uv.y]),
                 Err(c) => o.push(c),
             }
         }
@@ -1344,6 +1344,11 @@ fn cont_of(v: u8) -> Result<ContinuityType, HarnessError> {
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } => 1007.0,
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {

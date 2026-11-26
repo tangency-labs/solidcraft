@@ -254,7 +254,7 @@ fn put_state(o: &mut Vec<f64>, v: &Volume) {
 fn put_knots(o: &mut Vec<f64>, r: solidcore::Result<(Vec<f64>, Vec<usize>)>) {
     match r {
         Ok((k, m)) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             o.push(k.len() as f64);
             o.extend(k);
             o.push(m.len() as f64);
@@ -270,6 +270,11 @@ fn put_knots(o: &mut Vec<f64>, r: solidcore::Result<(Vec<f64>, Vec<usize>)>) {
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::upstream_status(e).is_some() => {
@@ -298,7 +303,7 @@ macro_rules! tri {
 /// The status of a result: `Ok(0)` / `Ok(code)`, or `Err(deferred)`.
 fn st_of<T>(r: &solidcore::Result<T>) -> Result<f64, Box<Output>> {
     match r {
-        Ok(_) => Ok(0.0),
+        Ok(_) => Ok(crate::status::ok_slot(0.0)),
         Err(e) => match Output::unported(e) {
             Some(d) => Err(Box::new(d)),
             None => Ok(status(e)),

@@ -535,7 +535,7 @@ fn resolve(op: &OpIn, c: [usize; 10]) -> Option<OpIn> {
 
 /// The output when the B-rep has no entity of the kind an op needs.
 fn no_entity() -> Output {
-    Output::err("no_entity_of_that_kind")
+    Output::harness("no_entity_of_that_kind")
 }
 
 fn is_brep_op(op: &OpIn) -> bool {
@@ -562,8 +562,8 @@ pub(crate) fn fixture_input(value: Value) -> Result<(String, Vec<f64>), HarnessE
 fn trim_sample_output(body: &[f64]) -> Output {
     match body.split_first() {
         Some((&0.0, values)) => Output::new().values("sample", values.to_vec()),
-        Some((&status, _)) => Output::err(format!("trim_sample_status_{status}")),
-        None => Output::err("trim_sample_empty"),
+        Some((&status, _)) => Output::harness_text(format!("trim_sample_status_{status}")),
+        None => Output::harness("trim_sample_empty"),
     }
 }
 
@@ -623,7 +623,7 @@ impl ImportTypes {
 fn slot<T>(r: Result<T, SolidError>, f: impl FnOnce(T) -> i64) -> Result<i64, SolidError> {
     match r {
         Ok(v) => Ok(f(v)),
-        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(NULL_DEREF),
+        Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => Ok(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
         Err(e) => Err(e),
     }
 }
@@ -661,7 +661,7 @@ pub(crate) fn rust_brep(
         }
         Some(Built::Failed(e)) => match Output::unported(&e) {
             Some(o) => Ok(Err(o)),
-            None => Ok(Err(Output::err(format!(
+            None => Ok(Err(Output::kernel(&e, format!(
                 "brep_build_status_{}",
                 build_status(&e)
             )))),
@@ -676,7 +676,7 @@ pub(crate) fn rust_brep(
                 }
                 Built::Failed(e) => match Output::unported(&e) {
                     Some(o) => Ok(Err(o)),
-                    None => Ok(Err(Output::err(format!(
+                    None => Ok(Err(Output::kernel(&e, format!(
                         "brep_build_status_{}",
                         build_status(&e)
                     )))),
@@ -827,7 +827,11 @@ fn eu_state(k: &Kernel, b: &Brep, eu: Option<EdgeuseId>, out: &mut Vec<f64>) -> 
     // the curve's owner, as the shim's `g.find(6, uv->GetOwner())`
     out.push(crate::own_builder::uv_owner_index(b, eu, None));
     match r.drop_curve_fail.as_deref() {
-        Some(f) => out.extend([1.0, f64::from(f.fail_status), flag(f.brep.is_some())]),
+        Some(f) => out.extend([
+            1.0,
+            crate::status::drop_status_slot(f.fail_status, f64::from(f.fail_status)),
+            flag(f.brep.is_some()),
+        ]),
         None => out.extend([0.0, 0.0, 0.0]),
     }
     match r.vertexuse {
@@ -838,6 +842,11 @@ fn eu_state(k: &Kernel, b: &Brep, eu: Option<EdgeuseId>, out: &mut Vec<f64>) -> 
 }
 
 fn status_of(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status_of(e))
+}
+
+/// [`status_of`] as recorded before kinds.
+fn legacy_status_of(e: &SolidError) -> f64 {
     match e {
         up_err if solidcore::error::upstream_status(up_err).is_some() => f64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1)),
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => NULL_DEREF as f64,
@@ -1001,8 +1010,8 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             let e = eid(*eu);
             let mate = match eu1::mate(b, e) {
                 Ok(m) => m,
-                Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
-                    return Ok(Output::new().values("state", vec![NULL_DEREF as f64]))
+                Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => {
+                    return Ok(Output::new().values("state", vec![crate::status::kind_slot(&kernel_err, NULL_DEREF) as f64]))
                 }
                 Err(x) => return Err(x.into()),
             };
@@ -1033,8 +1042,8 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             };
             match r {
                 Ok(()) => {}
-                Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
-                    return Ok(Output::new().values("state", vec![NULL_DEREF as f64]))
+                Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => {
+                    return Ok(Output::new().values("state", vec![crate::status::kind_slot(&kernel_err, NULL_DEREF) as f64]))
                 }
                 Err(x) => return Err(x.into()),
             }
@@ -1070,7 +1079,7 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                 )),
                 2 => match eu1::calc_max_edge_face_gap(&crate::runner_kernel(), b, e, *f) {
                     Ok(g) => {
-                        out.extend([0.0, flag(*want_out && g.is_init())]);
+                        out.extend([crate::status::ok_slot(0.0), flag(*want_out && g.is_init())]);
                         if *want_out && g.is_init() {
                             vals.extend([g.gap_3d, g.edge_t, g.face_uv.x, g.face_uv.y]);
                         }
@@ -1080,7 +1089,7 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                 },
                 _ => match eu1::calc_edge_ccw_edge_gap(&crate::runner_kernel(), b, e, *want_out, *f) {
                     Ok(g) => {
-                        out.extend([0.0, flag(g.is_some_and(|g| g.is_init()))]);
+                        out.extend([crate::status::ok_slot(0.0), flag(g.is_some_and(|g| g.is_init()))]);
                         if let Some(g) = g.filter(solidcore::heal::gap::EdgeEdgeGap::is_init) {
                             vals.extend([g.gap_3d, g.edge_t0, g.edge_t1]);
                         }
@@ -1216,7 +1225,7 @@ fn run_rust_geom(k: &Kernel, op: &OpIn) -> Result<Output, Fail> {
             }
             let res = e.evaluate(x, &mut f, if *jac { Some(&mut m) } else { None });
             let failed = match res {
-                Ok(_) => 0,
+                Ok(_) => crate::status::ok_slot(0),
                 Err(x) if x.is_unported() => return Err(x.into()),
                 Err(_) => 1,
             };

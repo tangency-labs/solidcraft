@@ -423,6 +423,11 @@ fn to_output(i: &Inputs, c: &InlineCrv, flat: &[f64]) -> Result<Output, HarnessE
 /// (recursion limits of the extensions and the Bezier arc length, the size check of
 /// `ST_curxcrr`), `-1` for anything else.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         e if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
         SolidError::NotConverged { operation, .. }
@@ -463,7 +468,7 @@ fn rust_record(i: &Inputs, c: &InlineCrv, cur: &Curve) -> Vec<f64> {
     let inplace = |f: &dyn Fn(&mut Curve) -> Result<(), SolidError>| {
         let mut q = cur.clone();
         let st = match f(&mut q) {
-            Ok(()) => 0.0,
+            Ok(()) => crate::status::ok_slot(0.0),
             Err(e) => status(&e),
         };
         let mut r = vec![st];
@@ -501,7 +506,7 @@ fn rust_record(i: &Inputs, c: &InlineCrv, cur: &Curve) -> Vec<f64> {
                     .and_then(|u| cur.eval_unbounded_pts_and_derivs(u, e.ndr, cont.cont(), &mut st));
                 match res {
                     Ok(d) => {
-                        r.push(0.0);
+                        r.push(crate::status::ok_slot(0.0));
                         for p in d {
                             push3(&mut r, p);
                         }

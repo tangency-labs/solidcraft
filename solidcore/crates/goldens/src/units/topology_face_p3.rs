@@ -460,9 +460,9 @@ fn put_samples(c: &SmCurve, out: &mut Vec<f64>) -> Result<(), SolidError> {
     out.extend([ivl.min(), ivl.max()]);
     for k in 0..=2u8 {
         match c.evaluate_point(&crate::runner_kernel(), ivl.evaluate(f64::from(k) / 2.0)) {
-            Ok(p) => out.extend([0.0, p.x, p.y, p.z]),
-            Err(e) if solidcore::error::upstream_status(&e).is_some() => {
-                out.extend([f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1)), 0.0, 0.0, 0.0]);
+            Ok(p) => out.extend([crate::status::ok_slot(0.0), p.x, p.y, p.z]),
+            Err(e) if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
+                out.extend([f64::from(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1))), 0.0, 0.0, 0.0]);
             }
             Err(e) => return Err(e),
         }
@@ -529,7 +529,7 @@ fn status_of(e: SolidError) -> Result<Result<i32, Output>, HarnessError> {
         return Ok(Err(o));
     }
     match e {
-        e if solidcore::error::upstream_status(&e).is_some() => Ok(Ok(solidcore::error::upstream_status(&e).unwrap_or(-1))),
+        e if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => Ok(Ok(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1)))),
         e => Err(harness(format!("rust: {e}"))),
     }
 }
@@ -634,7 +634,7 @@ fn own_brep(i: &Inputs) -> Result<crate::own_builder::RustBrep<(Brep, [usize; 10
             Ok((*b, c))
         }
         Own::Failed(e) => Err(Output::unported(&e).unwrap_or_else(|| {
-            Output::err(format!("brep_build_status_{}", build_status(&e)))
+            Output::kernel(&e, format!("brep_build_status_{}", build_status(&e)))
         })),
     })
 }
@@ -940,7 +940,7 @@ fn run_rust_case(i: &Inputs) -> Result<Output, HarnessError> {
         Err(out) => return Ok(out),
     };
     let Some(a) = args(&i.op, counts, |f| first_loop(&b, f)) else {
-        return Ok(Output::err("no face"));
+        return Ok(Output::harness("no face"));
     };
     let op = op_of(&i.op);
     let f = FaceId::from_index(a[0] as u32);
@@ -955,7 +955,7 @@ fn run_rust_case(i: &Inputs) -> Result<Output, HarnessError> {
                 || face_geometry_complete(&b, FaceId::from_index(a[1] as u32)))
     };
     if op as i32 >= Op::LoopOrient as i32 && !complete {
-        out.push(NULL_DEREF);
+        out.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
         return Ok(Output::new().values("out", out));
     }
     match &i.op {

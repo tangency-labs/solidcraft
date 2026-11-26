@@ -325,7 +325,7 @@ fn rust_op(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
                 let mut g = global()?;
                 let mut uv = p2(*uv);
                 match g.refine_guess(&Kernel::default(), &mut uv) {
-                    Ok(()) => o.push(0.0),
+                    Ok(()) => o.push(crate::status::ok_slot(0.0)),
                     Err(e) => o = err_record(&e)?,
                 }
                 push2(&mut o, uv);
@@ -388,7 +388,7 @@ fn rust_op(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
                 let mut next = SurfPtSolveStepper::copy_of(&k, &prev);
                 next.set_uv(p2(*uv1));
                 match next.adjust_step(&k, &prev) {
-                    Ok((adjusted, scale)) => o.extend([0.0, flag(adjusted), scale]),
+                    Ok((adjusted, scale)) => o.extend([crate::status::ok_slot(0.0), flag(adjusted), scale]),
                     Err(e) => {
                         o = err_record(&e)?;
                         // upstream's outputs on SM_ERR
@@ -440,7 +440,7 @@ fn rust_op(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
                 let mut next = SurfPtSolveStepper::copy_of(&k, &prev);
                 next.set_uv(p2(*uv1));
                 match next.line_search(&k, &mut prev) {
-                    Ok(()) => o.push(0.0),
+                    Ok(()) => o.push(crate::status::ok_slot(0.0)),
                     Err(e) => o = err_record(&e)?,
                 }
                 push_state(&mut o, &next);
@@ -455,7 +455,7 @@ fn rust_op(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
                 let mut next = SurfPtSolveStepper::copy_of(&k, &prev);
                 next.set_uv(p2(*uv1));
                 match next.line_search_bracketted(&k, &mut prev, norm_of(*norm)) {
-                    Ok(()) => o.push(0.0),
+                    Ok(()) => o.push(crate::status::ok_slot(0.0)),
                     Err(e) => o = err_record(&e)?,
                 }
                 push_state(&mut o, &next);

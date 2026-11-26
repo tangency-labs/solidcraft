@@ -313,6 +313,11 @@ pub(crate) fn push_v(o: &mut Vec<f64>, v: Vec3) {
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 pub(crate) fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
             f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
@@ -591,8 +596,8 @@ fn rust_op(
             let frame = Axis2Placement::new(v3(*origin), v3(*x), v3(*y));
             let plane = match Plane::create_canonical(&frame) {
                 Err(e) if e.is_unported() => return Ok(Err(e)),
-                Err(_) => {
-                    o.push(SC_ERR_ARG);
+                Err(kernel_err) => {
+                    o.push(crate::status::kind_slot(&kernel_err, SC_ERR_ARG));
                     return Ok(Ok(()));
                 }
                 Ok(p) => p,
@@ -635,7 +640,7 @@ fn rust_iso_circles(
         Err(e) if e.is_unported() => return Err(harness(format!("unported: {e}"))),
         Err(e) => o.push(status(&e)),
         Ok(r) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             o.extend(
                 [
                     r.found_circles,
@@ -693,7 +698,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             o.push(status(&e));
         }
         Ok(surf) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             let at = o.len();
             if let Err(e) = rust_op(&k, &surf, &i.op, &mut o)? {
                 if let Some(out) = Output::unported(&e) {

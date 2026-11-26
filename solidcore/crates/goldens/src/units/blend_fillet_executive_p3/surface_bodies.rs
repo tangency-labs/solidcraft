@@ -233,10 +233,10 @@ pub(super) fn rust(input: &SurfaceSurfaceBodies) -> Result<Output, HarnessError>
         let mut values = Vec::new();
         match result {
             Ok(Some(body)) => {
-                values.extend([0.0, 1.0]);
+                values.extend([crate::status::ok_slot(0.0), 1.0]);
                 body_record(&k, &body, &mut values)?;
             }
-            Ok(None) => values.extend([0.0, 0.0]),
+            Ok(None) => values.extend([crate::status::ok_slot(0.0), 0.0]),
             Err(error) => values.extend([status(error)?, 0.0]),
         }
         let bodies: Vec<&Brep> = body1.iter().chain(&body2).map(|(b, _)| b).collect();

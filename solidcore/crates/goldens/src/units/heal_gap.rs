@@ -950,8 +950,8 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
                 f.build_sample_set(&k, *stop)
             };
             match r {
-                Ok(()) => o.push(0.0),
-                Err(err) if solidcore::error::upstream_status(&err).is_some() => o.push(f64::from(solidcore::error::upstream_status(&err).unwrap_or(-1))),
+                Ok(()) => o.push(crate::status::ok_slot(0.0)),
+                Err(err) if crate::status::is_kernel(&err, solidcore::error::upstream_status(&err).is_some()) => o.push(f64::from(crate::status::kind_slot(&err, solidcore::error::upstream_status(&err).unwrap_or(-1)))),
                 Err(e) => return rust_fail(&e),
             }
             put_gf(&mut o, &f);
@@ -1059,7 +1059,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
             let args = topo_args(&b, c, *kind, *sel0, *sel1, *f0, *f1, *uv)?;
             match topo_rust(&k, &mut b, &args) {
                 Ok(v) => o = v,
-                Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => o.push(NULL_DEREF),
+                Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => o.push(crate::status::kind_slot(&kernel_err, NULL_DEREF)),
                 Err(e) => return rust_fail(&e),
             }
         }

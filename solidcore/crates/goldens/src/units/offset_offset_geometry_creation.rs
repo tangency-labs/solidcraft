@@ -1589,6 +1589,11 @@ fn put_curve(out: &mut Vec<f64>, c: Option<&SmCurve>) -> Result<(), HarnessError
 
 /// The upstream status code of an error the surface samples report.
 fn status_code(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status_code(e))
+}
+
+/// [`status_code`] as recorded before kinds.
+fn legacy_status_code(e: &SolidError) -> f64 {
     match e {
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
             f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
@@ -2087,7 +2092,7 @@ fn native_face(k: &mut Kernel, b: &BrepIn) -> Result<Result<Brep, SolidError>, H
 /// A failed Rust build of B-rep `which` (`a` / `b`) as the shim reports a failed build.
 fn own_failure(which: &str, e: &SolidError) -> Output {
     Output::unported(e).unwrap_or_else(|| {
-        Output::err(format!(
+        Output::kernel(e, format!(
             "brep_build_{which}_status_{}",
             crate::own_builder::build_status(e)
         ))
@@ -2134,7 +2139,7 @@ fn prepare(i: &Inputs) -> Result<Prepared, Early> {
     let two = Two::new(brep_a, brep_b, [exact_a, exact_b]);
     let (hdr, ops) = match resolve(i, &mut counts, &two) {
         Ok(r) => r,
-        Err(name) => return Err(Box::new(Ok(Output::err(name)))),
+        Err(name) => return Err(Box::new(Ok(Output::harness_text(name)))),
     };
     Ok(Prepared { two, hdr, ops })
 }
@@ -2168,11 +2173,11 @@ impl From<HarnessError> for Fail {
 fn status<T>(r: Result<T, SolidError>, o: &mut Vec<f64>) -> Result<Option<T>, Fail> {
     match r {
         Ok(v) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             Ok(Some(v))
         }
-        Err(e) if solidcore::error::nurbs::upstream_status(&e).is_some() => {
-            o.push(f64::from(solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1)));
+        Err(e) if crate::status::is_kernel(&e, solidcore::error::nurbs::upstream_status(&e).is_some()) => {
+            o.push(f64::from(crate::status::kind_slot(&e, solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1))));
             Ok(None)
         }
         Err(e)
@@ -2186,17 +2191,19 @@ fn status<T>(r: Result<T, SolidError>, o: &mut Vec<f64>) -> Result<Option<T>, Fa
             // the port's refusal of a UV curve off the extended domain (#21743, not
             // upstream): its status (`SM_ERR`), as the offset executive's runners record
             // a typed failure
-            o.push(f64::from(e.sm_status().unwrap_or(solidcore::error::SM_ERR)));
+            o.push(f64::from(crate::status::kind_slot(&e, e.sm_status().unwrap_or(solidcore::error::SM_ERR))));
             Ok(None)
         }
-        Err(SolidError::InvalidInput {
-            operation: UNDEFINED_UPSTREAM,
-            ..
-        }) => {
+        Err(
+            kernel_err @ SolidError::InvalidInput {
+                operation: UNDEFINED_UPSTREAM,
+                ..
+            },
+        ) => {
             // the library met a null dereference or failed cast upstream would make
             // (undefined): the shim's refusal status, so that it never passes as a
             // real SM_ERR_INVALID_INPUT; a shim that did not refuse the same op fails
-            o.push(NULL_DEREF);
+            o.push(crate::status::kind_slot(&kernel_err, NULL_DEREF));
             Ok(None)
         }
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
@@ -2434,7 +2441,7 @@ fn run_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Two), Fail> {
             OpIn::SetEdgeCurve { e, c } => {
                 o.push(3.0);
                 let (Some(e), Some(c)) = (triple_to_h(*e), triple_to_h(*c)) else {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 };
                 let curve = ClassGeometry::curve(&two, c)
@@ -2449,7 +2456,7 @@ fn run_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Two), Fail> {
             OpIn::SetEuUv { eu, c, max_dist } => {
                 o.push(4.0);
                 let Some(eu) = triple_to_h(*eu) else {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 };
                 let curve = match triple_to_h(*c) {
@@ -2468,7 +2475,7 @@ fn run_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Two), Fail> {
             OpIn::Mark { eu } => {
                 o.push(5.0);
                 let Some(eu) = triple_to_h(*eu) else {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 };
                 two.marked.insert(eu);
@@ -2496,15 +2503,15 @@ fn run_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Two), Fail> {
                 let is_local = matches!(r.op, OpIn::LocalFaceuseOffset { .. });
                 o.push(if is_local { 16.0 } else { 7.0 });
                 let Some(fu) = triple_to_h(*fu) else {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 };
                 let Some(face) = two.faceuse_face(fu)? else {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 };
                 if two.face_surface(face)?.is_none() {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 }
                 if is_local {
@@ -2513,7 +2520,7 @@ fn run_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Two), Fail> {
                     if let Some(idx) = local_faces.iter().position(|f| *f == Some(face)) {
                         let sh = hdr.local.get(idx).and_then(|[_, sh]| triple_to_h(*sh));
                         if sh.is_none_or(|sh| ClassGeometry::surface(&two, sh).is_none()) {
-                            o.push(NULL_DEREF);
+                            o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                             continue;
                         }
                     }
@@ -2564,7 +2571,7 @@ fn run_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Two), Fail> {
                 }
                 // (no `all_ok`: VertexOffset walks no loops, as the shim)
                 if bad {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 }
                 let r = geom.vertex_offset(&k, &mut two, v, &es);
@@ -2581,11 +2588,11 @@ fn run_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Two), Fail> {
             OpIn::UpdateFaceDomain { f, s } => {
                 o.push(9.0);
                 let (Some(f), Some(s)) = (triple_to_h(*f), triple_to_h(*s)) else {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 };
                 if two.face_surface(f)?.is_none() || ClassGeometry::surface(&two, s).is_none() {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 }
                 if !two
@@ -2616,11 +2623,11 @@ fn run_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Two), Fail> {
                     triple_to_h(*orig),
                 );
                 let Some(eu) = eu else {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 };
                 let Some(edge) = two.edgeuse_edge(eu)? else {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 };
                 let mut bad = false;
@@ -2645,7 +2652,7 @@ fn run_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Two), Fail> {
                     }
                 }
                 if bad {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 }
                 // the copies the shim hands over
@@ -2686,11 +2693,11 @@ fn run_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Two), Fail> {
             } => {
                 o.push(11.0);
                 let (Some(base), Some(c3)) = (triple_to_h(*base), triple_to_h(*c3)) else {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 };
                 if !all_ok {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 }
                 let c3 = match c3.kind {
@@ -2743,7 +2750,7 @@ fn run_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Two), Fail> {
                     triple_to_h(*other_off),
                 );
                 let (Some(eu), Some(off)) = (eu, off) else {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 };
                 let mut bad = !all_ok || two.edgeuse_uv_trim_curve(eu)?.is_none();
@@ -2757,7 +2764,7 @@ fn run_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Two), Fail> {
                     }
                 }
                 if bad {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 }
                 // LiftCurve's iso curve keeps the subclass's kind (lifts_iso_on_inexact_face)
@@ -2794,7 +2801,7 @@ fn run_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Two), Fail> {
             } => {
                 o.push(13.0);
                 if !all_ok {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 }
                 let (eu, other, off, other_off) = (
@@ -2820,11 +2827,11 @@ fn run_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Two), Fail> {
                 o.push(14.0);
                 let (Some(off), Some(other_off)) = (triple_to_h(*off), triple_to_h(*other_off))
                 else {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 };
                 if !all_ok {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 }
                 let r = geom.have_tangent_gaps(&k, &mut two, *n, off, other_off);
@@ -2846,11 +2853,11 @@ fn run_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Two), Fail> {
                     triple_to_h(*other_off),
                 );
                 let Some(orig) = orig else {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 };
                 if !all_ok {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 }
                 if i.dist.abs() > MAX_EDGEUSE_OFFSET_DISTANCE {
@@ -2873,7 +2880,7 @@ fn run_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Two), Fail> {
                             };
                         }
                         if bad {
-                            o.push(NULL_DEREF);
+                            o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                             continue;
                         }
                         // ExtendTrimEdges' LiftCurve (lifts_iso_on_inexact_face)
@@ -2914,7 +2921,7 @@ fn run_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Two), Fail> {
             OpIn::EdgeState { e } => {
                 o.push(17.0);
                 let Some(e) = triple_to_h(*e) else {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 };
                 o.push(0.0);
@@ -2923,7 +2930,7 @@ fn run_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Two), Fail> {
             OpIn::SetEdgeTol { e, tol } => {
                 o.push(18.0);
                 let Some(e) = triple_to_h(*e) else {
-                    o.push(NULL_DEREF);
+                    o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF));
                     continue;
                 };
                 ed::set_tolerance(two.brep_m(e)?, eid(e), *tol, false, false)?;

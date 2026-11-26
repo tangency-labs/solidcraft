@@ -146,6 +146,11 @@ fn v3(p: &P3) -> Vec3 {
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } => 1007.0,
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
@@ -201,7 +206,7 @@ fn put_surface_samples(k: &Kernel, o: &mut Vec<f64>, s: &Surface) -> Result<(), 
     for fu in f {
         for fv in f {
             match s.evaluate_point(k, dom.evaluate(fu, fv)) {
-                Ok(p) => o.extend([0.0, p.x, p.y, p.z]),
+                Ok(p) => o.extend([crate::status::ok_slot(0.0), p.x, p.y, p.z]),
                 Err(e) => {
                     if let Some(d) = Output::unported(&e) {
                         return Err(Box::new(d));

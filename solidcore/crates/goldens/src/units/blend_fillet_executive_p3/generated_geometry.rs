@@ -12,7 +12,7 @@ pub(super) fn evaluated(
 ) -> Result<()> {
     match result {
         Ok(point) => {
-            state.push(0.0);
+            state.push(crate::status::ok_slot(0.0));
             values.extend([point.x, point.y, point.z]);
         }
         Err(error) => state.push(status(error)?),

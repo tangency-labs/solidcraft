@@ -613,6 +613,11 @@ fn state(o: &mut Vec<f64>, c: &ProjectedCurve) -> Result<(), HarnessError> {
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
@@ -758,7 +763,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         OpIn::Reverse { a, b: bb } => {
             let mut c = Curve::from(pc);
             match c.reverse_parameterization(&Kernel::default(), &Extent1d::from_min_max(*a, *bb)) {
-                Ok(nv) => o.extend([0.0, nv.min(), nv.max()]),
+                Ok(nv) => o.extend([crate::status::ok_slot(0.0), nv.min(), nv.max()]),
                 Err(e) => {
                     if let Some(d) = Output::unported(&e) {
                         return Ok(d);
@@ -829,7 +834,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let t = c.natural_interval().mid();
             match nc.evaluate_point(&k, t) {
                 Ok(p) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     pv(&mut o, p);
                 }
                 Err(e) => {
@@ -844,7 +849,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             // merges them
             match nc.knots(&k, None) {
                 Ok((kn, mult)) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     o.push(kn.len() as f64);
                     o.extend_from_slice(&kn);
                     o.push(mult.len() as f64);

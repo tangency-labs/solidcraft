@@ -172,6 +172,11 @@ fn mates_of(m: &MatesIn, a: [usize; 10], b: [usize; 10]) -> [Vec<i64>; 3] {
 /// The upstream status of a Rust error (`SM_ERR_INVALID_INPUT` for
 /// [`SolidError::InvalidInput`]); `-1` for kinds without one.
 fn status(e: &SolidError) -> i64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> i64 {
     match e {
         SolidError::Upstream { .. } | SolidError::Failed(_) => e.sm_status().map_or(-1, i64::from),
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,

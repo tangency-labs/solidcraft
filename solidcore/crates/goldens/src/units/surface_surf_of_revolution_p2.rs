@@ -60,6 +60,11 @@ fn harness(msg: impl Into<String>) -> HarnessError {
 /// The `SmStatus` of a Rust error; `1007` (`SM_ERR_INVALID_INPUT`) for `InvalidInput`
 /// (where upstream returns it), `-1` for one upstream cannot return.
 fn status(e: &solidcore::SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &solidcore::SolidError) -> f64 {
     match e {
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
             f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
@@ -336,7 +341,7 @@ fn rust_is_nurb(
                 return Ok(Err(e));
             }
             Ok(b) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 Surface::from(b)
             }
         },
@@ -377,7 +382,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             o.push(status(&e));
         }
         Ok(surf) => {
-            o.push(0.0);
+            o.push(crate::status::ok_slot(0.0));
             let at = o.len();
             if let Err(e) = rust_op(&k, &surf, &i.op, &mut o)? {
                 if let Some(out) = Output::unported(&e) {

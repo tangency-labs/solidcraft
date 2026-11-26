@@ -461,6 +461,11 @@ fn cont_of(v: u8) -> Result<ContinuityType, HarnessError> {
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     if std::env::var("P5_DEBUG").is_ok() {
         eprintln!("rust error: {e:?}");
     }
@@ -557,7 +562,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
         OpIn::NormalSing { uv, tol } => {
             match st(s.evaluate_normal_at_singularity(&k, p2(*uv), *tol))? {
                 Ok(n) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     pv(&mut o, n);
                 }
                 Err(c) => o.push(c),
@@ -735,7 +740,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                 conts(tc)?,
                 &sol,
             ))? {
-                Ok(keep) => o.extend([0.0, b(keep)]),
+                Ok(keep) => o.extend([crate::status::ok_slot(0.0), b(keep)]),
                 Err(c) => o.extend([c, 1.0]),
             }
         }

@@ -542,6 +542,11 @@ fn side(left: bool) -> Side {
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::upstream_status(e).is_some() => {
@@ -601,7 +606,7 @@ fn dump_curve(k: &Kernel, o: &mut Vec<f64>, c: &SmCurve) {
         let t = a + (b - a) * (f64::from(i) / 4.0);
         match c.evaluate_point(k, t) {
             Ok(p) => {
-                o.push(0.0);
+                o.push(crate::status::ok_slot(0.0));
                 push3(o, p);
             }
             Err(e) => {
@@ -675,7 +680,7 @@ fn push_matrix(
 /// The status of a call that only reports one (unported errors propagate).
 fn st<T>(r: solidcore::Result<T>) -> solidcore::Result<f64> {
     match r {
-        Ok(_) => Ok(0.0),
+        Ok(_) => Ok(crate::status::ok_slot(0.0)),
         Err(e) if e.is_unported() => Err(e),
         Err(e) => Ok(status(&e)),
     }

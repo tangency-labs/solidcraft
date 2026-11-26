@@ -193,6 +193,11 @@ fn build(k: &Kernel, rd: &mut Rd<'_>, kind: usize) -> Result<Surface, HarnessErr
 
 /// The `SmStatus` of a Rust error.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         e if solidcore::error::upstream_status(e).is_some() => {
             f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
@@ -297,7 +302,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     ) {
         Ok(r) => r,
         Err(e) => {
-            return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())));
+            return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())));
         }
     };
     let mut v = vec![
@@ -310,7 +315,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         match b_spline_part(&k, s) {
             Ok(b) => put(&mut v, &b),
             Err(e) => {
-                return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())));
+                return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())));
             }
         }
     }

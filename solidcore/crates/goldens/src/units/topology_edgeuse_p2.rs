@@ -46,11 +46,6 @@ pub struct Runner;
 /// Largest sample count of `Convex`.
 const MAX_SAMPLES: usize = 64;
 
-/// "Upstream would dereference null" in an output slot.
-const NULL_DEREF: f64 = -2.0;
-/// The shim did not run the op (deferred on the Rust side).
-const NOT_RUN: f64 = -3.0;
-
 /// The UV curve given to `CheckAndSetUVTrimCurve`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "src", rename_all = "snake_case")]
@@ -163,7 +158,7 @@ fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
     };
     let s = sel(i.op.eu(), counts(&brep)[6]);
     if s < 0 {
-        return Ok(Err(Output::err("no_entity_of_that_kind")));
+        return Ok(Err(Output::harness("no_entity_of_that_kind")));
     }
     let eu = EdgeuseId::from_index(u32::try_from(s).map_err(|_| harness("index"))?);
     Ok(Ok(Setup {
@@ -353,13 +348,6 @@ fn analytic_evaluators(s: &Setup) -> Option<Output> {
 /// The output of an op body (after the build status), as both sides build it.
 fn output_of(op: &OpIn, body: &[f64]) -> Output {
     let first = body.first().copied().unwrap_or(f64::NAN);
-    if first == NULL_DEREF {
-        return Output::err("null_deref");
-    }
-    if first == NOT_RUN {
-        // only on paths the Rust side defers; compared, it fails the case
-        return Output::err("not_run_by_cpp");
-    }
     match op {
         OpIn::Tangent { .. } | OpIn::Convex { .. } => Output::new().int("result", first as i64),
         OpIn::CheckSet { .. } => Output::new()
@@ -384,7 +372,9 @@ pub(super) fn put_eu_state(k: &Kernel, o: &mut Vec<f64>, b: &Brep, eu: Option<Ed
     o.push(crate::own_builder::uv_owner_index(b, eu, None));
     let fail = r.drop_curve_fail.as_deref();
     o.push(flag(fail.is_some()));
-    o.push(fail.map_or(0.0, |f| f64::from(f.fail_status)));
+    o.push(fail.map_or(0.0, |f| {
+        crate::status::drop_status_slot(f.fail_status, f64::from(f.fail_status))
+    }));
     o.push(flag(fail.is_some_and(|f| f.brep.is_some())));
     o.push(match r.vertexuse {
         Some(vu) => flag(b.vertexuse(vu)?.vertex_face_gap.is_init()),
@@ -473,8 +463,8 @@ fn run_rust_op(
                 )
             });
             let code = match status {
-                Ok(()) => Ok(0.0),
-                Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => Ok(f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1))),
+                Ok(()) => Ok(crate::status::ok_slot(0.0)),
+                Err(up_err) if crate::status::is_kernel(&up_err, solidcore::error::upstream_status(&up_err).is_some()) => Ok(f64::from(crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1)))),
                 Err(e) => Err(e),
             };
             code.map(|c| {
@@ -488,8 +478,8 @@ fn run_rust_op(
         }
         OpIn::Rebuild { .. } => {
             let status = match eu2::rebuild_uv_trim_curve(&k, b, eu) {
-                Ok(()) => Ok(0.0),
-                Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => Ok(f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1))),
+                Ok(()) => Ok(crate::status::ok_slot(0.0)),
+                Err(up_err) if crate::status::is_kernel(&up_err, solidcore::error::upstream_status(&up_err).is_some()) => Ok(f64::from(crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1)))),
                 Err(e) => Err(e),
             };
             status.and_then(|s| {
@@ -579,7 +569,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     };
     if let OpIn::CheckSet { uv, .. } = &i.op {
         if uv_curve(&s.brep, s.eu, uv).is_none() {
-            return Ok(Output::err("no_uv_curve"));
+            return Ok(Output::harness("no_uv_curve"));
         }
         if let Some(o) = inexact_geometry(&s) {
             return Ok(o);
@@ -601,7 +591,9 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
                 return Ok(o);
             }
             match e {
-                SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(Output::err("null_deref")),
+                e @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
+                    Ok(Output::kernel(&e, "null_deref"))
+                }
                 e => Err(harness(format!("rust: {e}"))),
             }
         }

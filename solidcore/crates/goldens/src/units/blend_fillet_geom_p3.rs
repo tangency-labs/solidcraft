@@ -943,6 +943,11 @@ fn dump_curve(o: &mut Vec<f64>, c: Option<&Curve>) {
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e => crate::output::blend_status(e).map_or(-1.0, f64::from),

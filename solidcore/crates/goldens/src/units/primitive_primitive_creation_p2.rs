@@ -34,6 +34,11 @@ struct Inputs {
 
 /// The status code of an operation error (its upstream `SmStatus`).
 fn error(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_error(e))
+}
+
+/// [`error`] as recorded before kinds.
+fn legacy_error(e: &SolidError) -> f64 {
     match e {
         e if solidcore::error::upstream_status(e).is_some() => {
             f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))

@@ -292,7 +292,7 @@ fn edit_of(e: &EditIn) -> Edit {
 fn to_output(flat: &[f64]) -> Result<Output, HarnessError> {
     let (b, rest) = flat.split_first().ok_or_else(|| harness("empty record"))?;
     let out = Output::new().values("build", vec![*b]);
-    if *b != SUCCESS {
+    if *b != crate::status::ok_slot(SUCCESS) {
         if !rest.is_empty() {
             return Err(harness("record continues after a failed build"));
         }
@@ -322,6 +322,11 @@ fn push_v(o: &mut Vec<f64>, v: Vec3) {
 /// The `SmStatus` of a Rust error (`InvalidInput` is `SM_ERR_INVALID_INPUT`); `-1` for
 /// one upstream cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
             f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
@@ -500,7 +505,7 @@ fn put_state(k: &Kernel, o: &mut Vec<f64>, s: &Cone) -> solidcore::Result<()> {
     let mx = s.max_analytic_domain(k)?;
     o.extend([mx.min().x, mx.min().y, mx.max().x, mx.max().y]);
     let apex = s.apex(k)?;
-    o.push(if apex.is_cylinder { SM_ERR } else { SUCCESS });
+    o.push(if apex.is_cylinder { SM_ERR } else { crate::status::ok_slot(SUCCESS) });
     o.push(flag(apex.is_cylinder));
     push_v(o, apex.point);
     o.push(apex.param);
@@ -666,12 +671,12 @@ fn rust_op(k: &Kernel, s: &mut Cone, op: &OpIn, o: &mut Vec<f64>) -> solidcore::
     match op {
         OpIn::Offset { distance, tol } => {
             if !offset_defined(k, s, *distance, *tol)? {
-                o.push(SC_ERR_ARG);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, SC_ERR_ARG));
                 return Ok(());
             }
             match s.create_offset_surface(k, *distance, *tol) {
                 Ok(off) => {
-                    o.push(SUCCESS);
+                    o.push(crate::status::ok_slot(SUCCESS));
                     o.push(flag(off.is_some()));
                     if let Some(off) = off {
                         put_state(k, o, &off)?;
@@ -717,7 +722,7 @@ fn rust_op(k: &Kernel, s: &mut Cone, op: &OpIn, o: &mut Vec<f64>) -> solidcore::
             let swap = s.rev().swap_uv();
             edit_nurb(s.base_mut().get_or_create_gw_nurb()?, &edit_of(edit), swap)?;
             match s.rebuild_step_from_nurb_parameters(k) {
-                Ok(()) => o.push(SUCCESS),
+                Ok(()) => o.push(crate::status::ok_slot(SUCCESS)),
                 Err(e) if e.is_unported() => return Err(e),
                 Err(e) => o.push(status(&e)),
             }
@@ -737,12 +742,12 @@ fn rust_op(k: &Kernel, s: &mut Cone, op: &OpIn, o: &mut Vec<f64>) -> solidcore::
             let dom = trim_domain(s, *dom);
             let (origin, x, y) = (v3(*origin), v3(*x), v3(*y));
             if !trim_defined(k, s, x, y, origin, &dom) {
-                o.push(SC_ERR_ARG);
+                o.push(crate::status::state_slot(crate::status::RunnerState::Skipped, SC_ERR_ARG));
                 return Ok(());
             }
             match ellipse_trim_intervals(k, origin, x, y, *rx, *ry, *start, *end, s, &dom, *tol) {
                 Ok(ivls) => {
-                    o.push(SUCCESS);
+                    o.push(crate::status::ok_slot(SUCCESS));
                     o.push(ivls.len() as f64);
                     for ivl in ivls {
                         o.extend([ivl.min(), ivl.max()]);
@@ -761,16 +766,16 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let mut o = Vec::new();
     match rust_cone(&k, &i.cone) {
         Err(e) if e.is_unported() => {
-            return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())));
+            return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())));
         }
         Err(e) => {
             o.push(status(&e));
             return to_output(&o);
         }
         Ok(mut s) => {
-            o.push(SUCCESS);
+            o.push(crate::status::ok_slot(SUCCESS));
             if let Err(e) = rust_op(&k, &mut s, &i.op, &mut o) {
-                return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())));
+                return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())));
             }
         }
     }

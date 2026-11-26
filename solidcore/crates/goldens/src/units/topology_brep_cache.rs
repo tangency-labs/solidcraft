@@ -314,7 +314,7 @@ impl UnitDiff for Runner {
         let i: Inputs = case.parse()?;
         match run(&i) {
             Ok(o) => Ok(o),
-            Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
+            Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string()))),
         }
     }
     fn cases(&self, ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {

@@ -86,6 +86,11 @@ fn entity_id(e: Option<E>) -> i64 {
     }
 }
 fn status(e: &SolidError) -> i64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> i64 {
     match e {
         e if solidcore::error::upstream_status(e).is_some() => {
             i64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
@@ -494,7 +499,7 @@ impl solidcore::sweep::topology_sweep::store::SweepIdentities for WholeIdentitie
 /// points sorted, then each edge's two end points (lesser first) sorted.
 fn whole_output(record: &[f64]) -> Output {
     let Some((&status, rest)) = record.split_first() else {
-        return Output::err("empty whole-B-rep record".to_string());
+        return Output::harness("empty whole-B-rep record");
     };
     let mut ints = vec![status as i64];
     let mut values = Vec::new();
@@ -655,7 +660,7 @@ fn body_output(record: &[f64]) -> Output {
     let (faces, edges, vertices) = (counts[2] as usize, counts[4] as usize, counts[5] as usize);
     let prefix = 7 + 3 * vertices + 2 * edges;
     let Some(head) = record.get(..prefix) else {
-        return Output::err("short non-manifold body record".to_string());
+        return Output::harness("short non-manifold body record");
     };
     let rest = &record[prefix..];
     let mut output = whole_output(head);
@@ -1188,7 +1193,7 @@ impl UnitDiff for Runner {
         let i: Input = c.parse()?;
         Ok(match rust(&i) {
             Ok(output) => output,
-            Err(e) => Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())),
+            Err(e) => Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string())),
         })
     }
     fn cases(&self, ctx: &CaseContext) -> std::result::Result<Vec<Case>, HarnessError> {

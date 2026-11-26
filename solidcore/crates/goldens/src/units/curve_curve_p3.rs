@@ -564,6 +564,11 @@ fn pv(o: &mut Vec<f64>, v: Vec3) {
 /// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::upstream_status(e).is_some() => {
@@ -607,7 +612,7 @@ macro_rules! tri {
 /// The status of `r` (`0` for `Ok`), or the deferral.
 fn st_of<T>(r: &solidcore::Result<T>) -> Result<f64, Box<Output>> {
     match r {
-        Ok(_) => Ok(0.0),
+        Ok(_) => Ok(crate::status::ok_slot(0.0)),
         Err(e) => match Output::unported(e) {
             Some(o) => Err(Box::new(o)),
             None => Ok(status(e)),
@@ -890,7 +895,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
                 g.base.best_answer_so_far_sq = *best;
                 let branch: Branch = [Some(nd), None, None];
                 match g.local_solve(&branch) {
-                    Ok(needs) => o.extend([0.0, b(needs)]),
+                    Ok(needs) => o.extend([crate::status::ok_slot(0.0), b(needs)]),
                     Err(e) => match Fail::from(e) {
                         Fail::Deferred(d) => return Ok(*d),
                         Fail::Status(s) => o.extend([s, 0.0]),

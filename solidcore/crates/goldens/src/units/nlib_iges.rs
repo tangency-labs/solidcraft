@@ -164,6 +164,11 @@ fn is_surface(i: &Inputs) -> bool {
 }
 
 fn status_of(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status_of(e))
+}
+
+/// [`status_of`] as recorded before kinds.
+fn legacy_status_of(e: &SolidError) -> f64 {
     match e {
         e if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
         SolidError::Degenerate { .. } => 1000.0,
@@ -249,7 +254,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         Inputs::Validate { u, p, v } => {
             let m = u.len().checked_sub(1).ok_or_else(|| harness("no knots"))?;
             match iges::validate(u, m, *p, *v) {
-                Ok(()) => vec![0.0],
+                Ok(()) => vec![crate::status::ok_slot(0.0)],
                 Err(e) => vec![status_of(&e)],
             }
         }

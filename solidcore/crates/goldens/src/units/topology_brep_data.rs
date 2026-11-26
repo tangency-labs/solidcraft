@@ -160,6 +160,11 @@ fn to_output(items: &[Item]) -> Output {
 
 /// Upstream status of a Rust error.
 fn status(e: &SolidError) -> i64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> i64 {
     match e {
         e if solidcore::error::upstream_status(e).is_some() => {
             i64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
@@ -534,7 +539,7 @@ impl UnitDiff for Runner {
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         match rust(&case.parse()?)? {
             Ok(items) => Ok(to_output(&items)),
-            Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
+            Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string()))),
         }
     }
 

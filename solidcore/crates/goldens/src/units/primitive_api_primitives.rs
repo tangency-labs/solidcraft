@@ -263,6 +263,11 @@ impl Inputs {
 
 /// The upstream status of a Rust error.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::nurbs::upstream_status(e).is_some() => {
@@ -341,7 +346,7 @@ fn put_grid(o: &mut Vec<f64>, d: &Extent2d, eval: impl Fn(Point2) -> solidcore::
             );
             match eval(uv) {
                 Ok(p) => {
-                    o.push(0.0);
+                    o.push(crate::status::ok_slot(0.0));
                     put_vec(o, p);
                 }
                 Err(e) => o.push(status(&e)),

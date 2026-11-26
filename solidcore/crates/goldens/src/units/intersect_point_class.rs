@@ -653,6 +653,11 @@ fn build_pool(objects: &[ObjIn]) -> Result<Pool, HarnessError> {
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         e if solidcore::error::upstream_status(e).is_some() => {
             f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
@@ -880,7 +885,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                         return Err(rejected());
                     }
                     match st(pc.find_obj_point_3d(&k, &pool))? {
-                        Ok(p) => o.extend([0.0, p.x, p.y, p.z]),
+                        Ok(p) => o.extend([crate::status::ok_slot(0.0), p.x, p.y, p.z]),
                         Err(c) => o.push(c),
                     }
                 }
@@ -985,7 +990,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                     };
                     match st(merged)? {
                         Ok(m) => {
-                            o.extend([0.0, m.new_edges.len() as f64, m.new_vertices.len() as f64]);
+                            o.extend([crate::status::ok_slot(0.0), m.new_edges.len() as f64, m.new_vertices.len() as f64]);
                         }
                         Err(c) => o.extend([c, 0.0, 0.0]),
                     }

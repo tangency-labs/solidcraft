@@ -134,7 +134,7 @@ fn key_int(k: Option<ObjectKey>) -> i64 {
 fn normalise(e: &SolidError) -> String {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => "invalid_input".into(),
-        err if solidcore::error::upstream_status(err).is_some() => format!("status_{}", solidcore::error::upstream_status(err).unwrap_or(-1)),
+        err if crate::status::is_kernel(err, solidcore::error::upstream_status(err).is_some()) => format!("status_{}", crate::status::kind_slot(err, solidcore::error::upstream_status(err).unwrap_or(-1))),
         other => format!("rust_error: {other}"),
     }
 }
@@ -188,7 +188,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let mut r = match AssertReport::new(rust_spec(spec)?) {
                 Ok(r) => r,
                 Err(e) => {
-                    return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(normalise(&e))))
+                    return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, normalise(&e))))
                 }
             };
             if let Some(v) = set_value {
@@ -247,7 +247,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                             Ok(r) => r,
                             Err(e) => {
                                 return Ok(Output::unported(&e)
-                                    .unwrap_or_else(|| Output::err(normalise(&e))))
+                                    .unwrap_or_else(|| Output::kernel(&e, normalise(&e))))
                             }
                         };
                         if matches!(op, SeqIn::Add(_)) {

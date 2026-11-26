@@ -498,7 +498,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                     cc.interval_max_uv(&k, &geometry, *j, given)
                 };
                 match st(r)? {
-                    Ok(p) => o.extend([0.0, p.x, p.y]),
+                    Ok(p) => o.extend([crate::status::ok_slot(0.0), p.x, p.y]),
                     Err(code) => o.extend([code, uv[0], uv[1]]),
                 }
             }
@@ -532,7 +532,7 @@ fn rust(s: &Script) -> Result<Output, HarnessError> {
         Ok(v) => Ok(Output::new().values("out", v)),
         Err(Fail::Deferred(d)) => Ok(*d),
         Err(Fail::Refused(s)) => Ok(refused(s)),
-        Err(Fail::Undefined(why)) => Ok(Output::err(format!("undefined_upstream: {why}"))),
+        Err(Fail::Undefined(why)) => Ok(Output::harness_text(format!("undefined_upstream: {why}"))),
         Err(Fail::Harness(e)) => Err(e),
     }
 }

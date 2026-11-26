@@ -358,7 +358,7 @@ fn put_curve(k: &Kernel, out: &mut Vec<f64>, curve: &Curve) {
     ]);
     for j in 0..=4 {
         match curve.evaluate_point(k, domain.evaluate(f64::from(j) / 4.0)) {
-            Ok(p) => out.extend([0., p.x, p.y, p.z]),
+            Ok(p) => out.extend([crate::status::ok_slot(0.0), p.x, p.y, p.z]),
             Err(e) => out.extend([status(&e), -f64::MAX, -f64::MAX, -f64::MAX]),
         }
     }
@@ -397,6 +397,11 @@ fn put_cc(out: &mut Vec<f64>, cc: &CurveClassification<H>, target: H) {
     }
 }
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         e if solidcore::error::upstream_status(e).is_some() => {
             f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))

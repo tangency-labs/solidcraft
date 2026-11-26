@@ -826,12 +826,14 @@ fn static_rust(case: &Case) -> Result<Output, HarnessError> {
                 return Ok(deferred);
             }
             let status = match e {
-                SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-                ref e if solidcore::error::upstream_status(e).is_some() => {
-                    f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+                ref kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
+                    crate::status::kind_slot(kernel_err, 1007.0)
+                }
+                ref e if crate::status::is_kernel(e, solidcore::error::upstream_status(e).is_some()) => {
+                    f64::from(crate::status::kind_slot(e, solidcore::error::upstream_status(e).unwrap_or(-1)))
                 }
                 // a typed refusal (no upstream status): recorded, not a harness failure
-                SolidError::Unsupported { .. } => return Ok(Output::err(e.to_string())),
+                SolidError::Unsupported { .. } => return Ok(Output::kernel(&e, e.to_string())),
                 _ => return Err(HarnessError::new(e.to_string())),
             };
             if let Some(slot) = flat.first_mut() {

@@ -775,6 +775,11 @@ pub(crate) fn face_brep(k: &Kernel, face: &FaceIn) -> Result<(Brep, FaceId), Har
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 fn status(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status(e))
+}
+
+/// [`status`] as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
     match e {
         e if solidcore::error::upstream_status(e).is_some() => {
             f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
@@ -1326,7 +1331,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                     OpIn::IvlBound { j, do_min, .. } => {
                         let r = cc.ivl_bound_edgeuse_obj(&k, &pool, *j, *do_min);
                         match st(r)? {
-                            Ok(eu) => o.extend([0.0, pool.id(eu)]),
+                            Ok(eu) => o.extend([crate::status::ok_slot(0.0), pool.id(eu)]),
                             Err(s) => o.push(s),
                         }
                     }
@@ -1393,7 +1398,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                         // touches collected before the failure)
                         match st(r)? {
                             Ok(touches) => {
-                                o.push(0.0);
+                                o.push(crate::status::ok_slot(0.0));
                                 put_touches(&mut o, &pool, &touches);
                                 if *with_props {
                                     let snap = hfp::snapshot(&props, pool.face_id());
@@ -1469,7 +1474,7 @@ fn rust(s: &Script) -> Result<Output, HarnessError> {
     match rust_run(s) {
         Ok(v) => Ok(Output::new().values("out", v)),
         Err(Fail::Deferred(d)) => Ok(*d),
-        Err(Fail::Undefined(why)) => Ok(Output::err(format!("undefined_upstream: {why}"))),
+        Err(Fail::Undefined(why)) => Ok(Output::harness_text(format!("undefined_upstream: {why}"))),
         Err(Fail::Harness(e)) => Err(e),
     }
 }

@@ -318,6 +318,11 @@ fn build_poly(
 
 /// The status of a failed Rust operation, as upstream numbers it.
 fn status_of(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status_of(e))
+}
+
+/// [`status_of`] as recorded before kinds.
+fn legacy_status_of(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         e if solidcore::error::upstream_status(e).is_some() => {
@@ -377,7 +382,7 @@ fn put_color(
 ) -> solidcore::Result<()> {
     match res {
         Ok(c) => {
-            rec.push(0.0);
+            rec.push(crate::status::ok_slot(0.0));
             rec.extend([c.x, c.y, c.z]);
         }
         Err(e @ SolidError::Unported { .. }) => return Err(e),
@@ -534,7 +539,7 @@ fn run_rust(k: &Kernel, i: &Inputs, st: &mut Stats) -> solidcore::Result<Vec<f64
                 st.fires += 1;
                 match tracer.fire_ray(k, v3(*p), v3(*v), *max_t) {
                     Ok(hit) => {
-                        rec.push(0.0);
+                        rec.push(crate::status::ok_slot(0.0));
                         rec.push(f64::from(u8::from(hit.hits_something)));
                         put_solution(
                             &mut rec,
@@ -613,7 +618,7 @@ fn run_rust(k: &Kernel, i: &Inputs, st: &mut Stats) -> solidcore::Result<Vec<f64
                 solver.t_max_of_bbox = *t_max;
                 let r = solver.local_solve(k, surf, leaf, None);
                 match &r.status {
-                    Ok(()) => rec.push(0.0),
+                    Ok(()) => rec.push(crate::status::ok_slot(0.0)),
                     Err(e @ SolidError::Unported { .. }) => return Err(e.clone()),
                     Err(e) => rec.push(status_of(e)),
                 }
@@ -724,7 +729,7 @@ fn run_rust(k: &Kernel, i: &Inputs, st: &mut Stats) -> solidcore::Result<Vec<f64
                 let r = renderer.as_mut().ok_or_else(|| bad_index("renderer"))?;
                 let res = r.do_render(k, *shadows, v3(*background), v3(*object));
                 match res {
-                    Ok(_) => rec.push(0.0),
+                    Ok(_) => rec.push(crate::status::ok_slot(0.0)),
                     Err(e @ SolidError::Unported { .. }) => return Err(e),
                     Err(e) => rec.push(status_of(&e)),
                 }
@@ -1405,7 +1410,7 @@ impl UnitDiff for Runner {
         match run_rust(k, &i, &mut Stats::default()) {
             Ok(rec) => Ok(Output::new().values("rec", rec)),
             Err(e) => Ok(Output::unported(&e)
-                .unwrap_or_else(|| Output::err(format!("rust_error: {e}")))),
+                .unwrap_or_else(|| Output::kernel(&e, format!("rust_error: {e}")))),
         }
     }
 

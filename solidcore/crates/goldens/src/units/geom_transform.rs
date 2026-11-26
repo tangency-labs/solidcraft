@@ -211,6 +211,11 @@ fn lookup<T: Copy>(table: &[(&str, T)], name: &str) -> Result<T, HarnessError> {
 }
 
 fn status_code(e: &SolidError) -> f64 {
+    crate::status::kind_slot(e, legacy_status_code(e))
+}
+
+/// [`status_code`] as recorded before kinds.
+fn legacy_status_code(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => f64::from(SM_ERR_INVALID_INPUT),
         err if solidcore::error::upstream_status(err).is_some() => f64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
@@ -285,7 +290,7 @@ fn put_mat(out: &mut Vec<f64>, t: &Transform) {
 
 fn put_status<T>(out: &mut Vec<f64>, r: &solidcore::Result<T>) {
     out.push(match r {
-        Ok(_) => 0.0,
+        Ok(_) => crate::status::ok_slot(0.0),
         Err(e) => status_code(e),
     });
 }
@@ -497,7 +502,7 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     match rust_values(i)? {
         Ok(v) => Ok(Output::new().values("r", v)),
-        Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(normalise(&e)))),
+        Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, normalise(&e)))),
     }
 }
 
