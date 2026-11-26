@@ -329,6 +329,22 @@ fn offset_moves_a_face() {
     assert!(e.to_string().contains("no room"), "{e}");
 }
 
+/// The side of a disc 1000 times wider than it is thick is the face moved or drafted: the point
+/// SMLib is handed lies on the side, not on a display triangle nearer the top (#22802).
+#[test]
+fn offset_and_draft_move_the_side_of_a_thin_wide_disc() {
+    let pi = std::f64::consts::PI;
+    let disc = cylinder(Vec3::ZERO, Vec3::Z, 500.0, 1.0).unwrap();
+    let side = Vec3::new(500.0, 0.0, 0.5);
+    let grown = crate::offset_faces(&disc, &[side], 1.0).unwrap();
+    let want = pi * 501.0 * 501.0;
+    assert!((volume(&grown) - want).abs() < want * 1e-7, "{} vs {want}", volume(&grown));
+    let top = 500.0 - 3f64.to_radians().tan();
+    let want = pi / 3.0 * (500.0 * 500.0 + 500.0 * top + top * top);
+    let drafted = crate::draft(&disc, &[side], &Plane::XY, Vec3::Z, 3f64.to_radians()).unwrap();
+    assert!((volume(&drafted) - want).abs() < want * 1e-7, "{} vs {want}", volume(&drafted));
+}
+
 /// A narrow annular end must be picked on its exact trims, independently of the body's length
 /// (and hence the chord tolerance of the old picking mesh).
 #[test]
