@@ -130,8 +130,10 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "appearance.assign" => &[("faces", Picks), ("bodies", Body), ("body", Body)],
         "solid.move" => &[("bodies", Body), ("translate", Delta), ("axis", Dir), ("origin", Moved)],
         // A combine's tools keep the names of further placements (`Drill (Hinge:2)`): each cuts
-        // where its own occurrence puts it, not at the component's first placement (#20040).
-        "solid.combine" => &[("target", Body)],
+        // where its own occurrence puts it, not at the component's first placement (#20040). So
+        // does its target: the combine itself makes that placement independent, which needs to
+        // know which placement it is, and takes the model's name for it otherwise.
+        "solid.combine" => &[],
         "solid.remove" | "solid.bounding_solid" | "material.assign" => &[("bodies", Body)],
         _ => &[],
     }

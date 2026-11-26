@@ -16491,6 +16491,18 @@ fn eval_feature_kind(
                 }
                 _ => ModelState::default(),
             };
+            // Consuming a part's first placement deletes every other placement, silently.
+            if !keep_tools {
+                let target_component = st.body(target).map(|b| b.component);
+                for t in tools {
+                    let Some(b) = st.body(t) else { continue };
+                    if Some(b.component) != target_component && doc.occurrences.iter().filter(|o| o.component == b.component).count() > 1 {
+                        return Err(DocError::Invalid(format!(
+                            "`{t}` is placed more than once, and combining it would remove all of its placements: keep the tools"
+                        )));
+                    }
+                }
+            }
             let mut tb = Vec::new();
             for t in tools {
                 match st.body(t) {

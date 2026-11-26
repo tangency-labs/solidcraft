@@ -2823,6 +2823,188 @@ mod tests {
         run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN)
     }
 
+    fn measure(s: &mut Session) -> (f64, f64) {
+        let m = run(s, "inspect.measure", json!({}));
+        (m["total"]["volume_mm3"].as_f64().unwrap(), m["total"]["area_mm2"].as_f64().unwrap())
+    }
+
+    /// A 10 mm cube design, and a session with three placements of it at x = 0, 30 and 60 and a pin.
+    fn three_cubes(tag: &str, edge: f64) -> (Session, std::path::PathBuf, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("solidcraft-join-reused-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cube = dir.join("cube.sc");
+        let mut part = Session::default();
+        run(&mut part, "solid.box", json!({"length": edge, "width": edge, "height": edge, "body_name": "Cube"}));
+        run(&mut part, "file.save", json!({"path": cube}));
+        let mut s = Session::default();
+        run(&mut s, "component.insert_design", json!({"path": cube, "name": "P1"}));
+        for (name, x) in [("P2", 30), ("P3", 60)] {
+            run(&mut s, "component.insert_design", json!({"path": cube, "name": name, "matrix": [[1,0,0,x],[0,1,0,0],[0,0,1,0]], "reuse": true}));
+        }
+        (s, dir, cube)
+    }
+
+    fn placed_at(s: &Session) -> Vec<f64> {
+        let linked = s.doc.links.keys().next().copied().unwrap();
+        let mut xs: Vec<f64> = s.doc.occurrences.iter().filter(|o| o.component == linked).map(|o| o.transform[3][0]).collect();
+        xs.sort_by(f64::total_cmp);
+        xs
+    }
+
+    /// joining the middle of three placements consumes that placement only, as joining a copy made on its own.
+    #[test]
+    fn joining_the_middle_of_three_placements_consumes_only_it() {
+        let (mut s, dir, cube) = three_cubes("mid", 10.0);
+        run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 20, "base": [35, 5, -5], "body_name": "Pin"}));
+        let before = measure(&mut s);
+        run(&mut s, "solid.combine", json!({"target": "Pin", "tools": ["Cube (P1:2)"], "operation": "join"}));
+        // The same join of a cube made on its own, in the same place.
+        let mut r = Session::default();
+        run(&mut r, "component.insert_design", json!({"path": cube, "name": "P2", "matrix": [[1,0,0,30],[0,1,0,0],[0,0,1,0]]}));
+        run(&mut r, "solid.cylinder", json!({"radius": 3, "height": 20, "base": [35, 5, -5], "body_name": "Pin"}));
+        run(&mut r, "solid.combine", json!({"target": "Pin", "tools": ["Cube"], "operation": "join"}));
+        let (joined_only_v, joined_only_a) = measure(&mut r);
+        let (all_v, all_a) = measure(&mut s);
+        let (others_v, others_a) = (2000.0, 1200.0);
+        assert!((all_v - others_v - joined_only_v).abs() <= 1e-12 * all_v, "{all_v} {joined_only_v}");
+        assert!((all_a - others_a - joined_only_a).abs() <= 1e-12 * all_a, "{all_a} {joined_only_a}");
+        assert!(all_v < before.0 + 1e-9, "the join cannot add material");
+        assert_eq!(placed_at(&s), vec![0.0, 60.0], "the other placements keep their places and link");
+        assert_eq!(s.doc.links.len(), 1, "the copy is not linked: only the part's link remains");
+        assert_eq!(s.doc.notes.len(), 1, "the user is told the placement was made independent");
+        assert!(s.doc.notes[0].text.contains("independent"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// two placements of one part joined into each other.
+    #[test]
+    fn joining_two_placements_of_one_part_into_each_other_keeps_the_third() {
+        let (mut s, dir, cube) = three_cubes("two", 10.0);
+        run(&mut s, "solid.combine", json!({"target": "Cube", "tools": ["Cube (P1:2)"], "operation": "join", "touching": "one_body"}));
+        assert_eq!(placed_at(&s), vec![60.0], "only the third placement is still the linked part");
+        // The same two cubes made on their own, joined.
+        let mut r = Session::default();
+        run(&mut r, "component.insert_design", json!({"path": cube, "name": "A"}));
+        run(&mut r, "component.insert_design", json!({"path": cube, "name": "B", "matrix": [[1,0,0,30],[0,1,0,0],[0,0,1,0]]}));
+        let names: Vec<String> = r.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+        run(&mut r, "solid.combine", json!({"target": names[0], "tools": [names[1]], "operation": "join", "touching": "one_body"}));
+        let (rv, ra) = measure(&mut r);
+        let (v, a) = measure(&mut s);
+        assert!((v - 1000.0 - rv).abs() <= 1e-12 * v && (a - 600.0 - ra).abs() <= 1e-12 * a, "{v} {rv} {a} {ra}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// after the join the source is edited: the linked placements follow it, the joined one does not.
+    #[test]
+    fn editing_the_source_after_a_join_updates_linked_placements_only() {
+        let (mut s, dir, cube) = three_cubes("edit", 10.0);
+        run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 20, "base": [35, 5, -5], "body_name": "Pin"}));
+        run(&mut s, "solid.combine", json!({"target": "Pin", "tools": ["Cube (P1:2)"], "operation": "join"}));
+        let (v0, _) = measure(&mut s);
+        let mut part = Session::default();
+        run(&mut part, "solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Cube"}));
+        run(&mut part, "file.save", json!({"path": cube}));
+        run(&mut s, "component.update_links", json!({}));
+        let (v1, _) = measure(&mut s);
+        assert!((v1 - v0 - 2.0 * 7000.0).abs() < 1e-6, "two linked cubes grew from 1000 to 8000 each; the joined one stayed: {v0} {v1}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// the join through undo, redo, save and reload.
+    #[test]
+    fn a_join_of_one_placement_survives_undo_redo_and_reload() {
+        let (mut s, dir, _) = three_cubes("undo", 10.0);
+        run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 20, "base": [35, 5, -5], "body_name": "Pin"}));
+        let before = measure(&mut s);
+        run(&mut s, "solid.combine", json!({"target": "Pin", "tools": ["Cube (P1:2)"], "operation": "join"}));
+        let joined = measure(&mut s);
+        run(&mut s, "edit.undo", json!({}));
+        let undone = measure(&mut s);
+        assert!((undone.0 - before.0).abs() < 1e-9 && placed_at(&s) == vec![0.0, 30.0, 60.0], "undo restores all three placements");
+        assert!(s.doc.notes.is_empty());
+        run(&mut s, "edit.redo", json!({}));
+        let redone = measure(&mut s);
+        assert!((redone.0 - joined.0).abs() < 1e-9 && placed_at(&s) == vec![0.0, 60.0]);
+        let saved = dir.join("out.sc");
+        run(&mut s, "file.save", json!({"path": saved}));
+        run(&mut s, "doc.open", json!({"path": saved}));
+        let reloaded = measure(&mut s);
+        assert!((reloaded.0 - joined.0).abs() < 1e-9 && (reloaded.1 - joined.1).abs() < 1e-9);
+        assert_eq!(placed_at(&s), vec![0.0, 60.0]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A later placement as the combine's TARGET is made independent at its own placement.
+    #[test]
+    fn a_later_placement_as_the_target_is_cut_intersected_and_joined_at_its_place() {
+        for placement in ["Cube (P1:2)", "Cube (P1:3)"] {
+            let x = if placement.contains(":2") { 30.0 } else { 60.0 };
+            for operation in ["cut", "intersect", "join"] {
+                let (mut s, dir, cube) = three_cubes(&format!("target-{operation}-{x}"), 10.0);
+                let pin = json!({"radius": 3, "height": 20, "base": [x + 5.0, 5, -5], "body_name": "Pin"});
+                run(&mut s, "solid.cylinder", pin.clone());
+                run(&mut s, "solid.combine", json!({"target": placement, "tools": ["Pin"], "operation": operation}));
+                let mut r = Session::default();
+                run(&mut r, "component.insert_design", json!({"path": cube, "name": "P", "matrix": [[1,0,0,x],[0,1,0,0],[0,0,1,0]]}));
+                run(&mut r, "solid.cylinder", pin);
+                run(&mut r, "solid.combine", json!({"target": "Cube", "tools": ["Pin"], "operation": operation}));
+                let (rv, ra) = measure(&mut r);
+                let (v, a) = measure(&mut s);
+                assert!((v - 2000.0 - rv).abs() <= 1e-12 * v && (a - 1200.0 - ra).abs() <= 1e-12 * a, "{placement} {operation}: {v} {rv} {a} {ra}");
+                let linked = s.doc.links.keys().next().copied().unwrap();
+                assert_eq!(s.doc.occurrences.iter().filter(|o| o.component == linked).count(), 2, "{placement} {operation}");
+                let _ = std::fs::remove_dir_all(dir);
+            }
+        }
+    }
+
+    /// The first placement joined into a later one, and the reverse, are joins of two placements.
+    #[test]
+    fn joining_the_first_placement_into_a_later_one_and_back() {
+        for (target, tool) in [("Cube (P1:3)", "Cube"), ("Cube", "Cube (P1:3)"), ("Cube (P1:3)", "Cube (P1:2)"), ("Cube (P1:2)", "Cube (P1:3)")] {
+            let (mut s, dir, cube) = three_cubes("both", 10.0);
+            run(&mut s, "solid.combine", json!({"target": target, "tools": [tool], "operation": "join", "touching": "one_body"}));
+            let mut r = Session::default();
+            run(&mut r, "component.insert_design", json!({"path": cube, "name": "A"}));
+            run(&mut r, "component.insert_design", json!({"path": cube, "name": "B", "matrix": [[1,0,0,60],[0,1,0,0],[0,0,1,0]]}));
+            let names: Vec<String> = r.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+            run(&mut r, "solid.combine", json!({"target": names[0], "tools": [names[1]], "operation": "join", "touching": "one_body"}));
+            let (rv, _) = measure(&mut r);
+            let (v, _) = measure(&mut s);
+            assert!((v - 1000.0 - rv).abs() <= 1e-12 * v, "{target} {tool}: {v} {rv}");
+            let linked = s.doc.links.keys().next().copied().unwrap();
+            assert_eq!(s.doc.occurrences.iter().filter(|o| o.component == linked).count(), 1, "{target} {tool}: one placement is left");
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    /// Every placement of one part as a tool of one combine, and as target and tools.
+    #[test]
+    fn one_combine_takes_several_placements_of_the_same_part() {
+        let (mut s, dir, cube) = three_cubes("several", 10.0);
+        run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 20, "base": [5, 5, -5], "body_name": "Pin"}));
+        run(
+            &mut s,
+            "solid.combine",
+            json!({"target": "Pin", "tools": ["Cube", "Cube (P1:2)", "Cube (P1:3)"], "operation": "join", "touching": "one_body"}),
+        );
+        let mut r = Session::default();
+        run(&mut r, "solid.cylinder", json!({"radius": 3, "height": 20, "base": [5, 5, -5], "body_name": "Pin"}));
+        for (name, x) in [("A", 0), ("B", 30), ("C", 60)] {
+            run(&mut r, "component.insert_design", json!({"path": cube, "name": name, "matrix": [[1,0,0,x],[0,1,0,0],[0,0,1,0]]}));
+        }
+        let tools: Vec<String> = r.model.state().bodies.iter().map(|b| b.name.clone()).filter(|n| n != "Pin").collect();
+        run(&mut r, "solid.combine", json!({"target": "Pin", "tools": tools, "operation": "join", "touching": "one_body"}));
+        let ((v, a), (rv, ra)) = (measure(&mut s), measure(&mut r));
+        assert!((v - rv).abs() <= 1e-12 * v && (a - ra).abs() <= 1e-12 * a, "{v} {rv} {a} {ra}");
+        // Target and tools from the same part.
+        let (mut t, dir2, _) = three_cubes("several-target", 10.0);
+        run(&mut t, "solid.combine", json!({"target": "Cube (P1:2)", "tools": ["Cube", "Cube (P1:3)"], "operation": "join", "touching": "one_body"}));
+        assert!((measure(&mut t).0 - 3000.0).abs() <= 1e-9);
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(dir2);
+    }
+
     #[cfg(unix)]
     #[test]
     fn save_as_through_directory_alias_keeps_links_after_reopening_and_moving() {
