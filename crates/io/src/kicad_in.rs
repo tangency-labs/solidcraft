@@ -1494,7 +1494,7 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
     // beside it: a footprint that names both forms of one model has one model, built once.
     let mut files = std::collections::HashMap::<(std::path::PathBuf, [u64; 10]), usize>::new();
     let mut totals = (0usize, 0usize);
-    let mut embedded_cache = EmbeddedCache::default();
+    let mut embedded_cache = EmbeddedCache::new(&board);
     if options.components {
         for footprint in &board.footprints {
             let back = footprint.layer.starts_with("B.");
@@ -1724,10 +1724,22 @@ fn collect_embedded_files(root: &Expr<'_>, out: &mut Vec<KicadEmbeddedFile>, war
 
 /// Embedded files already unpacked (or already found unusable), by name, and the bytes unpacked
 /// so far: one file used by many footprints is unpacked once, and the total is bounded.
-#[derive(Default)]
 struct EmbeddedCache {
     files: HashMap<String, std::result::Result<Vec<u8>, String>>,
     total: usize,
+    /// The board's embedded entries by name (positions in `KicadBoard::embedded_files`, every
+    /// entry of a name), so a lookup is one hash probe, not a scan of all entries.
+    by_name: HashMap<String, Vec<usize>>,
+}
+
+impl EmbeddedCache {
+    fn new(board: &KicadBoard) -> Self {
+        let mut by_name: HashMap<String, Vec<usize>> = HashMap::new();
+        for (index, file) in board.embedded_files.iter().enumerate() {
+            by_name.entry(file.name.clone()).or_default().push(index);
+        }
+        Self { files: HashMap::new(), total: 0, by_name }
+    }
 }
 
 /// The model file a `kicad-embed://<name>` path stands for. `Err` says in a few words why the
@@ -1745,7 +1757,8 @@ fn embedded_model(board: &KicadBoard, name: &str, cache: &mut EmbeddedCache) -> 
 }
 
 fn unpack_embedded(board: &KicadBoard, name: &str, cache: &mut EmbeddedCache) -> std::result::Result<Vec<u8>, String> {
-    let entries: Vec<&KicadEmbeddedFile> = board.embedded_files.iter().filter(|f| f.name == name).collect();
+    let entries: Vec<&KicadEmbeddedFile> =
+        cache.by_name.get(name).into_iter().flatten().filter_map(|index| board.embedded_files.get(*index)).collect();
     if entries.is_empty() {
         return Err("the embedded file is not in the board file".into());
     }
@@ -4342,7 +4355,7 @@ fn tokenize(source: &str) -> Result<Vec<Token<'_>>> {
                     .map(|n| start + n)
                     .ok_or_else(|| IoError::Invalid("unterminated |…| text in KiCad PCB".into()))?;
                 let text = source.get(start..end).ok_or_else(|| IoError::Invalid("invalid UTF-8 boundary in KiCad PCB".into()))?;
-                tokens.push(Token::Atom(text));
+                push_token(&mut tokens, cap, Token::Atom(text))?;
                 index = end + 1;
             }
             b';' => {
