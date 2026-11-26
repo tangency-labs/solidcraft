@@ -4589,3 +4589,14 @@ fn a_draft_of_a_spline_side_is_refused_naming_what_the_face_is() {
     assert_eq!(shape(&s), before);
     assert_eq!(body_volume(&s, "Base"), volume);
 }
+
+#[test]
+fn draft_invalid_neutral_errors_name_neutral() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Block"}));
+    for neutral in [json!(null), json!(1.5), json!("MissingPlane"), json!("Box1"), json!({"origin": [0, 0, 0]})] {
+        let err = s.execute("solid.draft", &json!({"faces": [[0, 10, 10]], "angle": 3, "neutral": neutral})).unwrap_err().to_string();
+        assert!(err.contains("`neutral`"), "neutral={neutral}: {err}");
+        assert!(!err.contains("`plane`"), "neutral={neutral}: {err}");
+    }
+}

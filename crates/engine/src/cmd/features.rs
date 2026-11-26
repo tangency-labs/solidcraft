@@ -3984,8 +3984,8 @@ pub(super) fn plane_param_named(s: &Session, v: Option<&Value>, cmd: &str, key: 
     const WANT: &str = PLANE_FORMS;
     let construction = |r: &str| match s.doc.find_feature(r) {
         Some(f) if matches!(f.kind, FeatureKind::ConstructionPlane { .. }) => Ok(PlaneRef::Construction { feature: f.id.into(), placement: None }),
-        Some(f) => Err(bad(cmd, format!("`{}` is not a construction plane (a plane is {WANT})", f.name))),
-        None => Err(bad(cmd, format!("no plane `{r}` (a plane is {WANT})"))),
+        Some(f) => Err(bad(cmd, format!("`{key}`: `{}` is not a construction plane (a plane is {WANT})", f.name))),
+        None => Err(bad(cmd, format!("`{key}`: no plane `{r}` (a plane is {WANT})"))),
     };
     match v {
         Some(Value::String(n)) if solidcore_record::Plane::named(n.trim()).is_some() => {
@@ -3995,7 +3995,7 @@ pub(super) fn plane_param_named(s: &Session, v: Option<&Value>, cmd: &str, key: 
                 return Err(bad(
                     cmd,
                     format!(
-                        "plane `{}` is ambiguous: an origin-plane alias and a construction plane; use `{}` for the origin plane, construction plane feature id {}, or an explicit {{origin, normal}} plane",
+                        "`{key}`: plane `{}` is ambiguous: an origin-plane alias and a construction plane; use `{}` for the origin plane, construction plane feature id {}, or an explicit {{origin, normal}} plane",
                         n.trim(),
                         origin_plane_alias(n).unwrap_or("XY"),
                         f.id
@@ -4029,7 +4029,7 @@ pub(super) fn plane_param_named(s: &Session, v: Option<&Value>, cmd: &str, key: 
             };
             let at = |e: &str| s.doc.eval(e, Kind::Length).unwrap_or(0.0);
             let here = Vec3::new(at(&origin[0]), at(&origin[1]), at(&origin[2]));
-            let plane = explicit_plane(o, here).ok_or_else(|| bad(cmd, "plane needs x_dir and y_dir, or normal"))?;
+            let plane = explicit_plane(o, here).ok_or_else(|| bad(cmd, format!("`{key}` needs x_dir and y_dir, or normal")))?;
             if origin.iter().all(|e| solidcraft_doc::expr::is_literal(e)) {
                 return Ok(PlaneRef::Custom { plane });
             }
