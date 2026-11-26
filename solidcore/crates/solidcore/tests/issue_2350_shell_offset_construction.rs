@@ -357,6 +357,17 @@ fn unmerged_inset_of(
     wall: f64,
     open: (usize, f64),
 ) -> solidcore::Result<Brep> {
+    unmerged_inset_with_steps(build, wall, open, None)
+}
+
+/// [`unmerged_inset_of`], the check for crossed planar insets given `steps` steps where that
+/// is `Some` (its default where `None`).
+fn unmerged_inset_with_steps(
+    build: fn(&mut Kernel) -> Brep,
+    wall: f64,
+    open: (usize, f64),
+    steps: Option<usize>,
+) -> solidcore::Result<Brep> {
     use offset_fixture::planar_faces_at;
     use solidcore::offset::offset_executive::p1::OffsetOperation;
     use solidcore::offset::offset_executive::p2::SolidOffsetOptions;
@@ -368,6 +379,9 @@ fn unmerged_inset_of(
     executive.set_inset(true);
     executive.set_extend_convex_edges(true);
     executive.set_shell_faces(&faces);
+    if let Some(steps) = steps {
+        executive.set_crossing_witness_steps(steps);
+    }
     let mut notifications = Notifications::new(&mut part);
     executive.do_solid_offset(
         &mut k,
@@ -444,4 +458,78 @@ fn unmerged_inset_whose_floor_partly_crosses_the_bottom_is_refused() {
         let result = unmerged_inset_of(pocket_over_strip_block, wall, open);
         assert!(result.is_ok(), "wall {wall} open {open:?}: {result:?}");
     }
+}
+
+/// A 200 x 200 x 40 block (z -40..0) with two blind pockets 40 x 40 from its top: one
+/// (x -70..-30, y -20..20) down to z = -29, its floor 11 above the bottom, and one (x 30..70,
+/// y -20..20) down to z = -29.5, its floor 10.5 above the bottom.
+fn two_pocket_block(k: &mut Kernel) -> Brep {
+    use solidcore::boolean::api_brep::boolean_difference;
+    use solidcore::math::Point3;
+    use solidcore::primitive::api_primitives::create_box;
+    let block = create_box(k, Point3::new(-100.0, -100.0, -40.0), 200.0, 200.0, 40.0).unwrap();
+    let wide = create_box(k, Point3::new(-70.0, -20.0, -29.0), 40.0, 40.0, 40.0).unwrap();
+    let narrow = create_box(k, Point3::new(30.0, -20.0, -29.5), 40.0, 40.0, 40.0).unwrap();
+    let body = boolean_difference(k, block, wide).unwrap();
+    let mut part = boolean_difference(k, body, narrow).unwrap();
+    part.refresh_cached_topology();
+    part
+}
+
+/// The wall named by a refusal of walls meeting across, or `None` where the inset built.
+fn crossing_refusal(result: solidcore::Result<Brep>) -> Option<f64> {
+    match result {
+        Ok(_) => None,
+        Err(err) => {
+            let Some(&Reason::Offset(OffsetFailure::WallsMeetAcross {
+                distance, largest, ..
+            })) = err.failure().map(|f| &f.reason)
+            else {
+                panic!("not walls meeting across a floor: {err}");
+            };
+            assert!((distance - 10.0).abs() <= 1e-12, "{distance}");
+            Some(largest)
+        }
+    }
+}
+
+/// #21674 (review): the unmerged inset by 10 of [`two_pocket_block`] with a side (y = -100)
+/// left in place crosses the bottom's inset under both pockets (floors 11 and 10.5 thick,
+/// less than two walls). With its steps the check refuses it naming half the thinner floor,
+/// 5.25. With no steps it finds no crossing and the inset builds, as before the check. With
+/// the fewest steps that find a crossing the scan runs out before the other pair: the
+/// crossing found is real, so the inset is still refused, naming half the floor it found.
+/// The scan judges the 11 thick floor first, so that is 5.5 (and the steps are found by
+/// search, not taken from a count of the scan's work).
+#[test]
+fn unmerged_inset_whose_crossing_check_runs_out_after_a_crossing_is_refused() {
+    let at = |steps: Option<usize>| {
+        crossing_refusal(unmerged_inset_with_steps(
+            two_pocket_block,
+            10.0,
+            (1, -100.0),
+            steps,
+        ))
+    };
+    let full = at(None).expect("wall 10: the crossings are refused");
+    assert!((full - 5.25).abs() <= 1e-9, "{full}");
+    assert_eq!(at(Some(0)), None, "no steps: the inset builds as before");
+    // the fewest steps with a refusal: more steps take the same scan further, so once a
+    // crossing is found it stays found
+    let mut high = 1;
+    while at(Some(high)).is_none() {
+        high *= 2;
+        assert!(high <= 1 << 20, "no refusal within {high} steps");
+    }
+    let mut low = high / 2;
+    while high - low > 1 {
+        let mid = low + (high - low) / 2;
+        if at(Some(mid)).is_some() {
+            high = mid;
+        } else {
+            low = mid;
+        }
+    }
+    let first = at(Some(high)).expect("refused at the fewest steps");
+    assert!((first - 5.5).abs() <= 1e-9, "{high} steps: {first}");
 }

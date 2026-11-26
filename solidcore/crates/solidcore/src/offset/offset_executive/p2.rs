@@ -520,10 +520,10 @@ fn planar_walls(
 }
 
 /// The most steps (one pair of edges' crossings found, one point classified) that
-/// [`refuse_crossing_planar_insets`] takes over a body. Past them it stops without refusing,
-/// leaving the inset as the build made it (what it did before the check): a budget that runs
-/// out never becomes a refusal.
-const CROSSING_WITNESS_STEPS: usize = 20_000;
+/// [`refuse_crossing_planar_insets`] takes over a body. Past them it stops scanning: it
+/// refuses with a crossing it found before, and with none it leaves the inset as the build
+/// made it (what it did before the check). Running out is never a refusal by itself.
+pub(super) const CROSSING_WITNESS_STEPS: usize = 20_000;
 
 /// Takes one of the steps `left`; false when none remains.
 fn spend_steps(left: &mut usize) -> bool {
@@ -794,8 +794,16 @@ fn crossing_witness(
 ///
 /// A pair whose insets meet exactly (`|h|` the wall) is [`refuse_meeting_planar_insets`]' to
 /// decide. The pairs scanned are each two planar faces (a few operations each); the queries
-/// are bounded by [`CROSSING_WITNESS_STEPS`]: when they run out the check stops without
-/// refusing, as the inset was before it.
+/// are bounded by `steps` ([`CROSSING_WITNESS_STEPS`] outside tests). When they run out the
+/// scan stops there:
+/// - with a crossing found, it is refused: a witness is exact, so the insets do cross, but
+///   the gap reported is the narrowest among the pairs scanned so far, which may not be the
+///   narrowest of the body (`largest` may be larger than the largest wall that fits);
+/// - with none found, it is not refused and the inset is as it was before the check. The
+///   pairs left unscanned are not known to cross, and a refusal there would turn insets that
+///   built before the check (large bodies of many planar faces) into failures: an unfinished
+///   check is not a reason to refuse.
+#[allow(clippy::too_many_arguments)] // the inset, its two bodies, the wall, the steps
 fn refuse_crossing_planar_insets(
     kernel: &mut Kernel,
     original: &mut Brep,
@@ -803,6 +811,7 @@ fn refuse_crossing_planar_insets(
     wall: f64,
     offsets: &[(FaceId, Vec<FaceId>)],
     built: &Brep,
+    steps: usize,
     operation: &'static str,
 ) -> Result<()> {
     if !(wall.is_finite() && wall > 0.0 && brep_is_manifold_solid(original)?) {
@@ -813,11 +822,11 @@ fn refuse_crossing_planar_insets(
     // the solid's sense and the queries are found on copies, made at the first pair, leaving
     // the input and the offset's faces as they are
     let mut copies: Option<(Brep, Brep)> = None;
-    let mut left = CROSSING_WITNESS_STEPS;
+    let mut left = steps;
     // the narrowest gap between two faces whose insets cross, and the face whose inset
     // crossed
     let mut narrowest: Option<(FaceId, f64)> = None;
-    for b in planar.iter().filter(|w| w.offset) {
+    'scan: for b in planar.iter().filter(|w| w.offset) {
         kernel.check_cancelled(operation)?;
         let Some((_, built_faces)) = offsets.iter().find(|(f, _)| *f == b.face) else {
             continue;
@@ -862,9 +871,10 @@ fn refuse_crossing_planar_insets(
                         break;
                     }
                     Witness::None => {}
-                    // out of steps: no refusal (a refusal found so far may not be the
-                    // narrowest), the inset as before the check
-                    Witness::OutOfSteps => return Ok(()),
+                    // out of steps: the scan stops; a crossing found so far is refused
+                    // (its gap may not be the narrowest), and with none the inset is as
+                    // before the check
+                    Witness::OutOfSteps => break 'scan,
                 }
             }
         }
@@ -1774,6 +1784,7 @@ impl OffsetExecutive {
                 }
                 let wall = self.offset_distance();
                 let open = self.shell_faces().to_vec();
+                let steps = self.crossing_witness_steps();
                 if let Some(built) = self.offset_brep() {
                     refuse_crossing_planar_insets(
                         kernel,
@@ -1782,6 +1793,7 @@ impl OffsetExecutive {
                         wall,
                         &offsets,
                         built,
+                        steps,
                         OP_EXTENDED,
                     )?;
                 }
