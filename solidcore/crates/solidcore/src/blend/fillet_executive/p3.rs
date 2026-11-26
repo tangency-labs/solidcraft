@@ -2494,6 +2494,13 @@ pub trait BrepCreationAccess<O: ClassObject + SolutionObject + Ord>:
     /// # Errors
     /// Those of the sizing and the face's interior-point query.
     fn creation_bands_meet(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<Vec<BandFit<O>>>;
+
+    /// Not upstream (#2784): whether the last [`SolverGeometryAccess::geometry_faces_outlast`]
+    /// found a blend's band reaching another blended edge of a curved face (its band covers that
+    /// face up to the other edge or past it). `false` where the context does not judge it.
+    fn creation_bands_reached_curved_face(&self) -> bool {
+        false
+    }
 }
 
 /// A band contact's limiting size and the target entities that locate it.
@@ -3670,7 +3677,12 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     }
                 }
             }
-            self.bands_meet_apart = met && all_curved && self.blends_take_material(k, access)?;
+            // where no band contact is found (each band covers the face past the other edge),
+            // the reach the faces-outlast check found on a curved face stands for it
+            let reached = access.creation_bands_reached_curved_face();
+            let curved_only = if met { all_curved } else { reached };
+            self.bands_meet_apart =
+                (met || reached) && curved_only && self.blends_take_material(k, access)?;
             let refused = self.record_no_room(
                 NoRoomReason::FaceConsumed,
                 "Fillet Error: the blends take the whole of a face they roll on, some at an angle to it (the blend is larger than the faces allow)",

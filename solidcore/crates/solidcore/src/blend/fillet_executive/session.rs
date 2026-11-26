@@ -398,6 +398,9 @@ struct SessionObjects<'target> {
     /// target's faces before filleting, which the clean-up reads to leave the target's own
     /// faces, and which are removed when filleting ends.
     cleanup_face_marks: Vec<AttributeHandle>,
+    /// Not upstream (#2784): the last faces-outlast check found a blend's band reaching another
+    /// blended edge of a curved face ([`SessionObjects::bands_reach_blended_edges`]).
+    bands_reached_curved: bool,
     /// WR-661: the target's boundary (lamina edges) and faces before filleting, which an
     /// open result must keep to be kept ([`finish::OpenInput`]).
     open_input: finish::OpenInput,
@@ -1854,6 +1857,7 @@ impl<'target> FilletSession<'target> {
                 merge_attributes: None,
                 cleanup_kept: None,
                 cleanup_face_marks: Vec::new(),
+                bands_reached_curved: false,
                 open_input: finish::OpenInput::default(),
                 vertices_before: BTreeSet::new(),
                 extended_surfaces: BTreeMap::new(),
@@ -4758,6 +4762,9 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
         Ok(out)
     }
 
+    fn creation_bands_reached_curved_face(&self) -> bool {
+        self.bands_reached_curved
+    }
     fn creation_bands_meet(
         &mut self,
         k: &mut Kernel,
@@ -6432,6 +6439,7 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
     fn geometry_faces_outlast(&mut self, k: &mut Kernel, solvers: &[FilletObject]) -> Result<bool> {
         use crate::blend::fillet_geom::p1::FilletGeomType;
         use crate::topology::{edgeuse::p1 as eu, loopuse};
+        self.bands_reached_curved = false;
         // Each face and blended edge whose blend's rail on that face is a point, and
         // whether that blend's cross section meets the face tangentially.
         let mut point_rails: Vec<(FaceId, EdgeId, bool)> = Vec::new();
@@ -6517,7 +6525,9 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
         }
         // Not the fork's (#2784): a band that reaches another blended edge of its face
         // takes the face whole, whatever the face's kind
-        Ok(!self.bands_reach_blended_edges(k, solvers)?)
+        let reached = self.bands_reach_blended_edges(k, solvers)?;
+        self.bands_reached_curved = reached;
+        Ok(!reached)
     }
     fn geometry_ease_set_back_sections(
         &mut self,
