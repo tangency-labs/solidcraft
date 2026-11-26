@@ -374,7 +374,7 @@ pub fn raise_band(body: &Body, at: Vec3, width: f64, height: f64, outside: bool)
         let (far, other_loop) = (profile(&moved, &plane)?, profile(&pieces(&asm, &other, n)?, &plane)?);
         // The kernel's offset meets only neighbouring pieces: moved past a neck narrower than
         // twice the band, the far edge crosses itself, and bounds no face.
-        if loop_crosses_itself(&far, tol) {
+        if loop_crosses_itself(&far, tol).ok_or_else(|| fail("whether the band's far edge crosses itself"))? {
             return Err(LipRefusal::BandCrossesItself.into());
         }
         let placed = loop_placement(&far, &other_loop, tol).ok_or_else(|| fail("where the band's far edge lies"))?;
