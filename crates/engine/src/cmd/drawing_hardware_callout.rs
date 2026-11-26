@@ -96,7 +96,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         hardware: Some(hole),
     };
     if let Some(view) = note.anchor.view() {
-        check_drawn(&record, view, note.paths(), ADD)?;
+        check_drawn(&record, view, note.references(), ADD)?;
     }
     note.id = record.allocate_id(&mut s.ids).map_err(|e| bad(ADD, e.to_string()))?;
     let id = note.id;
