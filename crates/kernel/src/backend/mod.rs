@@ -16,6 +16,7 @@ mod curves;
 mod develop;
 mod exchange;
 mod frames;
+mod hole_stacks;
 mod modelling;
 mod points;
 mod projection;

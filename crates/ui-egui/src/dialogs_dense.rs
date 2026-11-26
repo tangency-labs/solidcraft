@@ -92,6 +92,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         },
         Kind::Frame(_) => Some("frame.member"),
         Kind::EndCap(_) => Some("frame.end_cap"),
+        Kind::CellGrid(_) => Some("solid.cell_grid"),
         Kind::RotateMember(_) => Some("frame.rotate_member"),
         Kind::FrameTrim(_) => Some("frame.trim"),
         Kind::Gusset(_) => Some("frame.gusset"),
@@ -588,6 +589,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 *bodies = selected == 1;
                 input.accept = if *bodies { BODIES } else { super::PROJECT_GEOMETRY };
                 input.items.clear();
+                // Geometry offers Tangent chain for edges; bodies have no edges to chain.
+                input.chain = (!*bodies).then_some(false);
+                input.chain_seeds.clear();
+                input.chain_written.clear();
             }
             ui_kit::row(ui, tr("ui.sketch_intersect_projection_link"), |ui| ui_kit::checkbox(ui, "", projection_link));
             ui_kit::row(ui, tr("ui.construction"), |ui| ui_kit::checkbox(ui, "", construction));
@@ -1183,7 +1188,7 @@ fn coil_section_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Valu
 
 /// An angle text field stepped by `delta` arrows of `step_deg`: a plain number moves and keeps
 /// its unit, an expression is left as typed, and `max_deg` stops the step past it.
-fn angle_step(text: &str, delta: i64, step_deg: f64, max_deg: Option<f64>) -> Option<String> {
+pub(crate) fn angle_step(text: &str, delta: i64, step_deg: f64, max_deg: Option<f64>) -> Option<String> {
     let text = if text.trim().is_empty() { "0 deg" } else { text };
     let next = crate::dim_view::window::stepped(text, delta as f64, solidcraft_engine::doc::expr::Kind::Angle, "", 0.0, step_deg)?;
     match max_deg {
@@ -1639,6 +1644,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Frame(_) => enter |= crate::dialogs_frame::rows(app, ui, d),
         Kind::EndCap(k) => enter |= crate::dialogs_end_cap::rows(app, ui, k, &d.inputs),
         Kind::Pulley(k) => enter |= crate::dialogs_pulley::rows(app, ui, k),
+        Kind::CellGrid(k) => enter |= crate::dialogs_cell_grid::rows(app, ui, k, &d.inputs),
         Kind::RotateMember(k) => enter |= crate::dialogs_rotate_member::rows(app, ui, k, &mut d.inputs),
         Kind::FrameTrim(k) => enter |= crate::dialogs_frame::trim_rows(ui, k),
         Kind::Gusset(k) => enter |= crate::dialogs_gusset::rows(app, ui, k),

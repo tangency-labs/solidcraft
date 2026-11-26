@@ -4632,6 +4632,64 @@ fn driving_a_joint_moves_the_ungrounded_side() {
     assert_eq!(r["reason"], "both sides are held by grounded parts: Base:1, Post:1", "{r}");
 }
 
+/// A joint between two grounded parts that don't meet where it puts them moves neither, and the
+/// reply says that is why, in `conflicts` and `warnings`, not "off by … from the placement the
+/// other joints give" when there are no other joints (#12867). Ungrounding one lets the joint
+/// place it; grounding it again where it now meets lists nothing. A constraint (Mate) shares
+/// this, and a part grounded against the root's own bodies is held in place the same way.
+#[test]
+fn a_joint_between_two_grounded_parts_says_it_moves_neither() {
+    let ground_b = |s: &mut Session, grounded: bool| {
+        let b = occ(s, "B");
+        run(s, "occurrence.ground", json!({"occurrence": b, "grounded": grounded}))
+    };
+    let mut s = two_cubes();
+    ground_b(&mut s, true);
+    let corner = |s: &Session| place(s, "B", Vec3::new(20.0, 0.0, 0.0));
+    let before = corner(&s);
+    let why = "both its parts are grounded (A:1, B:1), so it can move neither";
+    let r = run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "name": "Seat", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 10]}}),
+    );
+    assert_eq!(r["conflicts"], json!([{"joint": r["joint"], "name": "Seat", "why": why}]), "{r}");
+    assert_eq!(r["warnings"], json!([format!("Seat: {why}; unground one to let the joint place it")]), "{r}");
+    assert!(near(corner(&s), before), "neither part moves");
+    let solved = run(&mut s, "joint.solve", json!({}));
+    assert_eq!(solved["conflicts"][0]["why"], why, "{solved}");
+
+    // Ungrounded, B goes where the joint puts it; grounded there again, nothing conflicts.
+    let r = ground_b(&mut s, false);
+    assert!(r["conflicts"].as_array().is_none_or(Vec::is_empty), "{r}");
+    assert!(!near(corner(&s), before), "the joint places B");
+    ground_b(&mut s, true);
+    let r = run(&mut s, "joint.solve", json!({}));
+    assert!(r["conflicts"].as_array().is_some_and(Vec::is_empty), "parts that meet list nothing: {r}");
+
+    // A Mate between two grounded parts, by its own name.
+    let mut s = two_cubes();
+    ground_b(&mut s, true);
+    let r = run(
+        &mut s,
+        "assembly.constraint.create",
+        json!({"type": "mate", "name": "Flat", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 0]}, "offset": 5}),
+    );
+    assert_eq!(r["conflicts"][0]["why"], why, "{r}");
+    assert!(r["warnings"][0].as_str().is_some_and(|w| w.starts_with("Flat: both its parts are grounded")), "{r}");
+
+    // The root's own bodies are held in place too.
+    let mut s = two_cubes();
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 40, 0]}));
+    let r = run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "name": "Base", "a": {"occurrence": "root", "face": [5, 45, 10]}, "b": {"occurrence": "A", "face": [5, 5, 10]}}),
+    );
+    assert_eq!(r["conflicts"][0]["why"], "both its parts are held in place (the root, A:1), so it can move neither", "{r}");
+}
+
 /// A rigid joint whose origin face is gone (its sketch circle replaced) still holds its part at
 /// the pose it had, the error stays on the rigid joint, and a revolute from that part to a leaf
 /// turns only the leaf: the part is not cut from the grounded base (#16139).

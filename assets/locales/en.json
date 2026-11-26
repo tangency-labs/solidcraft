@@ -1528,6 +1528,7 @@
   "cmd.file.gpg_keys": "Signing Keys",
   "cmd.file.import": "Import with Plugin",
   "cmd.file.import_cache_clear": "Clear Reused Imports",
+  "cmd.file.stl_to_step": "Convert STL to STEP",
   "cmd.file.verify": "Verify Signature",
   "cmd.file_copy": "Copy Design File",
   "cmd.file_export": "Export",
