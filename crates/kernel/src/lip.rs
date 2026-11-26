@@ -115,6 +115,8 @@ fn offset_loop(pieces: &[Piece], n: Vec3, w: f64, tol: f64) -> Result<Vec<Piece>
             let (Some(&a), Some(&b)) = (starts.get(i), starts.get((i + 1) % segs.len())) else { return Err(fail("piece")) };
             let arc = match *s {
                 Seg2::Line { .. } => None,
+                // An arc left no wider than the model's tolerance has closed, as at a radius of 0.
+                Seg2::Arc { radius, .. } if radius <= tol => return Err(fail("the offset closes an arc")),
                 Seg2::Arc { center, sweep, .. } => Some(Arc { centre: plane.to_world(center), sweep }),
                 _ => return Err(fail("piece")),
             };
