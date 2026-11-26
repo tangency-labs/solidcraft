@@ -1134,7 +1134,11 @@ fn cell_grid_sends_the_voronoi_values_and_edit_restores_them() {
         (c.shape, c.seed, c.irregularity, c.corner_radius) = (5, "7".into(), "0.4".into(), "0.5 mm".into());
     }
     let (_, p) = sent(&d);
-    assert_eq!((p["shape"].as_str(), p.get("seed"), p.get("irregularity"), p.get("corner_radius")), (Some("voronoi"), Some(&json!("7")), Some(&json!("0.4")), Some(&json!("0.5 mm"))), "{p}");
+    assert_eq!(
+        (p["shape"].as_str(), p.get("seed"), p.get("irregularity"), p.get("corner_radius")),
+        (Some("voronoi"), Some(&json!("7")), Some(&json!("0.4")), Some(&json!("0.5 mm"))),
+        "{p}"
+    );
     // The kernel does not build Voronoi cells yet: the stored feature is a hexagon grid with the
     // Voronoi values set, which is what Edit Feature reads.
     let hexagons = json!({"sketch": sketch, "size": "6 mm", "web": "1.5 mm", "depth": "2 mm"});

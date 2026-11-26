@@ -155,7 +155,14 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut CellGrid, _: &[SelInput])
         app.tr("Shape"),
         "cell_grid_shape",
         &mut c.shape,
-        &[app.tr("ui.cell_grid.hexagon"), app.tr("ui.perforate_square"), app.tr("ui.cell_grid.triangle"), app.tr("ui.circle"), app.tr("ui.polygon"), app.tr("ui.cell_grid.voronoi")],
+        &[
+            app.tr("ui.cell_grid.hexagon"),
+            app.tr("ui.perforate_square"),
+            app.tr("ui.cell_grid.triangle"),
+            app.tr("ui.circle"),
+            app.tr("ui.polygon"),
+            app.tr("ui.cell_grid.voronoi"),
+        ],
     );
     let mut enter = false;
     if SHAPES.get(c.shape) == Some(&"polygon") {
