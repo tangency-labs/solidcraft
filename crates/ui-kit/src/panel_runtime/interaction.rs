@@ -953,7 +953,7 @@ pub struct HostInteraction {
     candidate: Option<PreparedHostLayout>,
     last_position: Option<Point>,
     live_drag: bool,
-    /// Empty workspace and chrome are the Float target (`float_panel_on_empty_drop`).
+    /// Empty workspace and chrome are the Float target (the app always sets it).
     float_on_empty_drop: bool,
     drag_out: Option<HostDragOut>,
     /// The screen rectangle the host last showed the Window target's desktop
@@ -1659,7 +1659,7 @@ fn move_preview(
     }
 }
 
-/// With `float_panel_on_empty_drop`, anywhere in the window that no dock target
+/// With the host's float-on-empty-drop on (always, in the app), anywhere in the window that no dock target
 /// takes is the Float target, not a fallback: the panel floats at the pointer,
 /// clamped into the workspace. Above the workspace (the toolbar band) it lands
 /// just below the band. A refused target still never floats.

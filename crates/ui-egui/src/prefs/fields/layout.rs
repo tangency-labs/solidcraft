@@ -61,8 +61,6 @@ macro_rules! layout_preferences {
             /// behind a card with the file's progress and Cancel, as it always did. Off (the default): the
             /// operation is a row of the operations panel and the design stays usable meanwhile.
             file_operations_wait: bool = false, PAGE_LAYOUT;
-            /// A panel let go where no dock target takes it floats there. Off: the drag is cancelled, as before.
-            float_panel_on_empty_drop: bool = true, PAGE_LAYOUT;
             /// Toolbar tabs hidden by the person. An empty list keeps every existing tab visible.
             hidden_toolbar_tabs: Vec<String> = Vec::new(), PAGE_LAYOUT;
             /// On, the History bar folds long runs of one component's features into chips and starts

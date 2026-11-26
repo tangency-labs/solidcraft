@@ -15779,7 +15779,7 @@ fn floats(preview: &HostPreview) -> bool {
         && matches!(preview.destination, Some(Destination::NewSection { location: SectionLocation::Floating { .. }, .. }))
 }
 
-/// `float_panel_on_empty_drop` is on in the app; fixture hosts take it explicitly.
+/// The app always floats a panel let go over empty workspace; fixture hosts take it explicitly.
 fn floating_interaction() -> HostInteraction {
     let mut interaction = HostInteraction::default();
     interaction.set_float_on_empty_drop(true);
@@ -16254,33 +16254,6 @@ fn browser_history_and_parts_library_float_where_let_go_dock_again_resize_and_re
             assert_eq!(app_zone(&h, instance), zone, "{scale} {instance}: docks again");
         }
     }
-}
-
-#[test]
-fn with_float_panel_on_empty_drop_off_empty_space_has_no_landing_as_before() {
-    let mut service = fixture_service(false).unwrap();
-    apply_fixture(&mut service, vec![fixture_open("fixture.log", "moving", "moving", Zone::Left, 0).unwrap()]);
-    let host = allocate_fixture(&service, Size { width: 1400.0, height: 900.0 }, Direction::Ltr, &fixture_metric_policy(&service));
-    let before = service.inspect();
-    let mut interaction = HostInteraction::default();
-    fixture_press(&service, &host, &mut interaction, HostPointerTarget::Header { instance: id("moving") });
-    let at = Point { x: 700.0, y: 500.0 };
-    let preview = fixture_move(&service, &host, &mut interaction, at);
-    assert!(!floats(&preview) && preview.action.is_none(), "{preview:?}");
-    assert_eq!(preview.rejection.unwrap().detail, "no explicit docking target");
-    assert!(interaction.update(&service, &fixture_scope(&service), &host, HostPointerEvent::Release { at }).candidate.is_none());
-    assert_eq!(service.inspect(), before);
-
-    // In the app, the preference turns it off: the panel goes back where it was.
-    let mut h = production_content_harness(false, false);
-    h.app.preferences.float_panel_on_empty_drop = false;
-    h.frames(4);
-    let zone = app_zone(&h, "browser");
-    let drop = app_empty_point(&h, "browser");
-    let from = app_header(&h, "browser");
-    let preview = app_drag(&mut h, from, drop);
-    assert!(preview.as_ref().is_none_or(|preview| !floats(preview)), "{preview:?}");
-    assert_eq!(app_zone(&h, "browser"), zone);
 }
 
 #[test]
