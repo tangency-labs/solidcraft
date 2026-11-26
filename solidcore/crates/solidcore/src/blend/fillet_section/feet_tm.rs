@@ -735,7 +735,10 @@ pub fn gn_enclose_tm(
         k.work_counters
             .add_feet_tm_coefficients(series.computed().saturating_sub(before));
         if let Some(err) = early_err {
-            tm_try!(Err::<(), _>(err));
+            return match err {
+                e @ (SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. }) => Err(e),
+                _ => Ok(None),
+            };
         }
         if not_finite {
             return Ok(None);

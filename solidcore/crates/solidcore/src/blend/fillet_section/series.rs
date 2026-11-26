@@ -1359,8 +1359,8 @@ mod tests {
                         .mul(&vb.a[1], tr)
                         .sub(&va.a[1].mul(&vb.a[0], tr), tr),
                 ];
-                for q in 0..3 {
-                    check_ivl(&vout.a[q], &want_cross[q], "cross_into");
+                for (got, want) in vout.a.iter().zip(&want_cross) {
+                    check_ivl(got, want, "cross_into");
                 }
             }
             // InvSqrtSeries incremental updates match Ser::inv_sqrt bit for bit.
