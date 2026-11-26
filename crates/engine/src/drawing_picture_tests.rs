@@ -479,3 +479,26 @@ fn a_views_picture_keeps_only_the_bodies_it_draws() {
     assert_eq!(bodies(&s, id ^ UNDER), Some(vec![(c_at, Painted)]), "C's own picture, under the model's");
     assert_eq!(bodies(&s, id), Some(vec![(a_at, Painted), (b_at, Painted)]), "the model's, without C");
 }
+
+/// A view's `hide_bodies` leaves one body of a part out of its picture too (#22107): with the door
+/// hidden the picture is the carcass's alone, 100 mm across where both are 220, still centred.
+#[test]
+fn a_hidden_body_leaves_the_picture() {
+    let mut s = crate::drawing_scene::tests::carcass_and_door();
+    run(&mut s, "drawing.create", json!({}));
+    let view = run(
+        &mut s,
+        "drawing.view.base",
+        json!({"sheet": "Sheet 1", "view": "front", "scale": "1:1", "position_mm": [200, 150], "visual_style": "shaded"}),
+    );
+    let id = ids::decode(view["view"].as_str().unwrap()).unwrap();
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let (both, grid, rows) = drawn(&s, sheet, id);
+    assert!((both.max.x - both.min.x - 220.0).abs() < 1.0, "{both:?}");
+    // The door is 200..220 mm along the model's x, so 290..310 on paper.
+    assert!(alpha(&grid, &rows, 300.0, 150.0) > 0, "the door is painted");
+    run(&mut s, "drawing.view.edit", json!({"view": view["view"], "set": {"hide_bodies": [{"body": "Door"}]}}));
+    let (one, grid, rows) = drawn(&s, sheet, id);
+    assert!((one.max.x - one.min.x - 100.0).abs() < 1.0 && ((one.min.x + one.max.x) / 2.0 - 200.0).abs() < 1.0, "{one:?}");
+    assert!(alpha(&grid, &rows, 200.0, 150.0) > 0, "the carcass is painted");
+}
