@@ -80,8 +80,8 @@
 //! - `sm_RmAndDel_OldLoopVertices` deletes two vertex uses: the port unlinks them from
 //!   their vertex and removes their records (finding
 //!   `plan/findings/topology.brep--deleted-records-leave-their-arenas-follow-up.md`).
-//! - `sm_SetObjectMap` / `sm_GetObjectMap` keep an [`EntityRef`] `BTreeMap`
-//!   ([`ObjectMap`]) instead of the pointer hash map (plan hazard `ptr-hash`: upstream
+//! - `sm_SetObjectMap` / `sm_GetObjectMap` keep a slot per [`EntityRef`] by kind and arena
+//!   index ([`ObjectMap`]) instead of the pointer hash map (plan hazard `ptr-hash`: upstream
 //!   `SmMapPtrToPtr` iteration order is pointer order; only lookups are used here) and
 //!   the ported [`CopyBrepMap`] for the optional copy maps.
 //! - `SmPendingTopologyDelete`'s destructor work (detaching the pending object's
@@ -1042,8 +1042,76 @@ pub fn find_highest_vote(regions: &[Option<RegionId>], votes: &[u64]) -> Result<
 // ---- copy maps (sm_SetObjectMap, sm_GetObjectMap) ---------------------------------------
 
 /// The `SmMapPtrToPtr<SmTopology, SmTopology>` of the B-rep copy: original object to
-/// its copy (`None` is a null copy).
-pub type ObjectMap = BTreeMap<EntityRef, Option<EntityRef>>;
+/// its copy (`None` is a null copy). A slot per original, by kind and arena index: a copy
+/// records every object of the B-rep it copies and looks each up several times, which a
+/// tree of all of them made a search each.
+#[derive(Debug, Clone, Default)]
+pub struct ObjectMap {
+    slots: [Vec<Slot>; 11],
+}
+
+impl ObjectMap {
+    /// An empty map.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The slot list of `e`'s kind and `e`'s index in it.
+    fn place(e: EntityRef) -> Option<(usize, usize)> {
+        let (kind, index) = match e {
+            EntityRef::Brep(x) => (0, x.index()),
+            EntityRef::Shell(x) => (1, x.index()),
+            EntityRef::Face(x) => (2, x.index()),
+            EntityRef::Loop(x) => (3, x.index()),
+            EntityRef::Edge(x) => (4, x.index()),
+            EntityRef::Vertex(x) => (5, x.index()),
+            EntityRef::Region(x) => (6, x.index()),
+            EntityRef::Faceuse(x) => (7, x.index()),
+            EntityRef::Loopuse(x) => (8, x.index()),
+            EntityRef::Edgeuse(x) => (9, x.index()),
+            EntityRef::Vertexuse(x) => (10, x.index()),
+        };
+        Some((kind, usize::try_from(index).ok()?))
+    }
+
+    /// Records `orig -> copy` (`None` a null copy).
+    pub fn insert(&mut self, orig: EntityRef, copy: Option<EntityRef>) {
+        let Some((kind, index)) = Self::place(orig) else {
+            return;
+        };
+        let Some(slots) = self.slots.get_mut(kind) else {
+            return;
+        };
+        if slots.len() <= index {
+            // an arena index of an object the copied B-rep holds
+            slots.resize(index + 1, Slot::Unset);
+        }
+        if let Some(slot) = slots.get_mut(index) {
+            *slot = Slot::Set(copy);
+        }
+    }
+
+    /// The copy recorded for `orig`: `None` when none was, or a null copy was.
+    #[must_use]
+    pub fn get(&self, orig: EntityRef) -> Option<EntityRef> {
+        let (kind, index) = Self::place(orig)?;
+        match self.slots.get(kind)?.get(index)? {
+            Slot::Set(copy) => *copy,
+            Slot::Unset => None,
+        }
+    }
+}
+
+/// What an [`ObjectMap`] holds for one original.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum Slot {
+    /// Nothing recorded.
+    #[default]
+    Unset,
+    /// A copy, or a null copy (`None`).
+    Set(Option<EntityRef>),
+}
 
 /// `sm_SetObjectMap`: records `orig -> copy`, and in the optional `SmCopyBrepMap`s
 /// ([`CopyBrepMap`], unit `topology.proto_topology_p1`) `copy -> orig` and `orig ->
@@ -1069,7 +1137,7 @@ pub fn set_object_map(
 /// `sm_GetObjectMap`: the copy recorded for `from` (`None` when none, or a null copy).
 #[must_use]
 pub fn get_object_map(from: EntityRef, map: &ObjectMap) -> Option<EntityRef> {
-    map.get(&from).copied().flatten()
+    map.get(from)
 }
 
 // ---- attributes (sm_AddAttributes, SmPendingTopologyDelete) -----------------------------

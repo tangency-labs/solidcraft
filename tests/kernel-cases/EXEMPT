@@ -215,7 +215,9 @@ file.send_to_slicer               hands the file to a slicer
 file.slicers                      a listing of slicers
 file.trash                       file guards and isolated trash: tested in crates/engine/src/cmd/file_library.rs tests
 file.verify                       signature checks: tested in crates/io/src/design/provenance.rs and the engine/UI signature tests
+frame.cope                        a retained round-tube cope: geometry in closed form in crates/engine/src/cmd/frame_tests.rs
 frame.end_cap                     plates on member ends; tested in crates/engine/src/cmd/frame_tests.rs
+frame.export_cope_dxf             a cope's 1:1 DXF wrap template: crates/engine/src/cmd/frame_tests.rs
 frame.gusset                      support contact, placement and editing in engine frame_tests.rs and UI dialogs_frame_tests.rs
 frame.multi_trim                  sets one corner of a Frame Member; tested in crates/engine/src/cmd/frame_tests.rs
 frame.plate                       tested in crates/engine/src/cmd/frame_tests.rs and crates/ui-egui/src/dialogs_frame_tests.rs
@@ -234,6 +236,7 @@ inspect.environment_map           display analysis: shading
 inspect.hole_stacks               read-only query: tested in crates/engine/src/cmd/hole_stacks_tests.rs
 inspect.parameter_variants        inspect: independent rebuilds and regressions in crates/engine/src/cmd/parameter_sweep_tests.rs
 inspect.silhouette                display analysis: outline
+inspect.socket_reach              read-only clearance query: tested in crates/engine/src/cmd/clearance_tests.rs
 inspect.zebra                     display analysis: shading
 joint.dynamics                    URDF joint dynamics: no geometry built (crates/engine/src/cmd/urdf_tests.rs)
 joint.origin_frame                URDF frame flag on a joint origin: no geometry built (crates/engine/src/cmd/urdf_tests.rs)
@@ -389,6 +392,7 @@ render.surface.import             rendering image resources; crates/engine/src/c
 render.texture.list               rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
 render.texture.remove             rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
 select.all                        the selection
+select.boundary                   the selection; crates/engine/src/cmd/edit_tests.rs::select_boundary_takes_the_rim_of_a_face_set_and_leaves_its_holes
 select.clear                      the selection
 select.edge_loop                  the selection; crates/engine/src/cmd/edit_tests.rs::select_edge_loop_takes_the_rim_of_a_pocket_from_one_edge
 select.filter                     the selection
@@ -406,8 +410,10 @@ settings.profile.import           settings profiles: preferences saved, applied 
 settings.profile.list             settings profiles: preferences saved, applied and shared
 settings.profile.rename           settings profiles: preferences saved, applied and shared
 settings.profile.save             settings profiles: preferences saved, applied and shared
+shaft_spline.insert               crates/engine/src/cmd/shaft_spline_tests.rs (volumes and faces against hand-derived values) and the tooth outline tests in solidcore/crates/solidcore/src/teeth/tests.rs
 sheet.bead                        formed beads pressed into a panel: crates/engine/src/cmd/sheet_surface_bead_tests.rs and solidcore/crates/solidcore/src/develop/bead_tests.rs
 sheet.convert                     every face a panel: crates/engine/src/cmd/sheet_surface_convert_tests.rs and sheet_convert_tests.rs (thin solids are sheet.recognize, which the convert-named cases here run)
+sheet.hardware                    a hole in a sheet's flat, no kernel operation of its own: crates/engine/src/cmd/sheet_surface_cut_tests.rs and crates/ui-egui/src/dialogs_sheet_tests.rs
 sheet.measure_body                measures a body's thickness and modelled bend radii, makes nothing: crates/engine/src/cmd/sheet_recognize_tests.rs
 sheet.rule_library                the standard library's listing, makes nothing: crates/engine/src/cmd/sheet_tests.rs and crates/doc/src/sheet_library_tests.rs
 sheet.rules                       a listing of sheet metal rules
@@ -434,12 +440,14 @@ sketch.constraint.collinear       2D sketch only (the sketch solver and engine t
 sketch.constraint.concentric      2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.curvature       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.equal           2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.constraint.horizontal      2D sketch only (the sketch solver and engine tests, sketch_constraints_tests.rs); no kernel operation
 sketch.constraint.midpoint        2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.on_plane        3D sketch solve only (the 3D solver and engine tests, sketch_3d_frame_tests.rs); no kernel operation
 sketch.constraint.parallel        2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.perpendicular   2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.polygon         2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.symmetry        2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.constraint.vertical        2D sketch only (the sketch solver and engine tests, sketch_constraints_tests.rs); no kernel operation
 sketch.construction               2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.construction_line          2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.construction_line.angle    2D sketch only (the sketch solver and engine tests); no kernel operation
@@ -453,6 +461,7 @@ sketch.construction_line.tangent_two  2D sketch only (the sketch solver and engi
 sketch.construction_line.vertical 2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.copy                       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.create3d                   3D sketch lifecycle: a new sketch with 3D Sketch on (engine tests, sketch_3d_frame_tests.rs); no kernel operation
+sketch.crosshairs                 2D sketch only: two fixed construction lines (crates/engine/src/cmd/sketch_infinite_tests.rs); no kernel operation
 sketch.cut                        2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.delete                     2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.detach_point               2D sketch only (crates/engine/src/cmd/sketch_constraints_tests.rs: detach_point_uses_real_curve_arc_length_and_propagates_mirror_symmetry and detach_point_on_circle_centre_respects_distance_and_explicit_offset); no kernel operation
@@ -480,6 +489,7 @@ sketch.line.midpoint              2D sketch only (the sketch solver and engine t
 sketch.link_visibility            projection links: engine tests in crates/engine/src/cmd/sketch_link_manage_tests.rs
 sketch.loose_ends                 2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.loose_ends.tie             2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.merge_lines                2D sketch only; crates/engine/src/cmd/sketch_merge_lines_tests.rs
 sketch.mirror                     2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.move                       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.move3d                     2D sketch only (the sketch solver and engine tests); no kernel operation
@@ -539,6 +549,7 @@ tab.view.beside                   puts a view beside another in the tiling: no g
 tab.view.close                    closes a view of the design: no geometry, tested in the engine's tab_views tests and the UI's documents tests
 tab.view.close_others             closes the other views in a window; no geometry, tested in the engine and UI
 tab.view.close_right              closes the views to the right of a view in a window; no geometry, tested in the engine and UI
+tab.view.collapse                 collapses a view in the tiling: no geometry, tested in the engine's tab_views tests and the UI's documents tests
 tab.view.duplicate                copies a view of the design: no geometry, tested in the engine's tab_views tests and the UI's documents tests
 tab.view.equal_sizes              changes tile ratios; no geometry, tested in the views crate and engine
 tab.view.layout                   sets how the design's views are tiled: no geometry, tested in the views crate and the UI's documents tests
@@ -616,11 +627,13 @@ view.render_inspector             the view: camera, layout, display
 view.render_live                  live-image pause state only: crates/ui-egui/src/render_workspace_tests.rs::live_edits_coalesce_and_pause_drains_late_capture_without_document_or_result_changes
 view.render_select                the view: camera, layout, display
 view.render_stage                 the view: camera, layout, display
+view.reset_home                   the view: crates/engine/src/cmd/browser.rs and crates/ui-egui/src/view_gizmo.rs
 view.ribbon_tabs_only             the view: camera, layout, display
 view.right                        the view: camera, layout, display
 view.save                         the view: camera, layout, display
 view.scale_bar                    display-only preference: crates/engine/src/cmd/view_navigation.rs and crates/ui-egui/src/scale_bar.rs
 view.set_compass                  per-view UI visibility, no geometry
+view.set_home                     the view: crates/engine/src/cmd/browser.rs and crates/ui-egui/src/view_gizmo.rs
 view.shots_strip                  the view: camera, layout, display
 view.spin                         the view: camera, layout, display
 view.status_details               the view: camera, layout, display

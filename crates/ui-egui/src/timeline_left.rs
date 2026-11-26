@@ -1265,7 +1265,19 @@ fn feature_row_body(
         }
         crate::timeline::sketch_plane_button(app, ui, id);
         if let Some(sketch) = sketch
-            && rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, "Edit Profile Sketch", "sketch", on)).clicked()
+            && rule
+                .one_row(|on| {
+                    let row = crate::ui_kit::menu::button_enabled(ui, "Edit Profile Sketch", "sketch", on);
+                    // The sketch it opens, on hover (#20405); a reason it is off takes its place.
+                    match crate::timeline::profile_sketch_tip(app, sketch.0).filter(|_| on) {
+                        Some(tip) => {
+                            use crate::ui_kit::BackingTooltipExt as _;
+                            row.backing_on_hover_text(tip)
+                        }
+                        None => row,
+                    }
+                })
+                .clicked()
         {
             app.edit_sketch(sketch.0);
             ui.close();

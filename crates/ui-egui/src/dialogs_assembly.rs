@@ -246,6 +246,10 @@ pub struct JointForm {
     alignment_primary_cache: [Option<JointOrigin>; 2],
     /// Backend A/B -> primary UI row, captured when this creation dialog opens.
     pub primary_order: [usize; 2],
+    /// As-built: the bodies of each component picked whole (its Browser row, or the component
+    /// selected when the dialog opened). They are one side, not parts to separate; a record goes
+    /// once any of its bodies leaves Components.
+    pub whole_components: Vec<Vec<String>>,
 }
 
 impl JointForm {
@@ -282,6 +286,7 @@ impl JointForm {
             alignment_primary_key: None,
             alignment_primary_cache: [None, None],
             primary_order: [0, 1],
+            whole_components: Vec::new(),
         }
     }
 
@@ -524,6 +529,14 @@ pub(crate) fn side_pick(app: &SolveApp, o: &JointOrigin) -> Option<Sel> {
             };
             return Some(Sel::Axis { name });
         }
+        Snap::SketchPoint { sketch, point, .. } => {
+            let path = origin_placement(s, o)?;
+            let comp = s.doc.feature(*sketch).map_or(0, |f| f.component);
+            if comp != 0 && path != s.feature_path(comp) {
+                return Some(Sel::PlacedSketchPoint { sketch: *sketch, id: point.clone(), path });
+            }
+            return Some(Sel::SketchPoint { id: format!("{sketch}:{point}") });
+        }
         Snap::Point { .. } | Snap::Frame { .. } => return Some(Sel::Occurrence { path: origin_placement(s, o)? }),
     };
     // The pick is in its part's coordinates; the placed bodies are in the world.
@@ -637,14 +650,16 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
         if let Snap::FaceCenter { x: Some(XRef::Planar { planar_face, reverse }), .. }
         | Snap::CircleCenter { x: Some(XRef::Planar { planar_face, reverse }), .. }
         | Snap::Plane { x: Some(XRef::Planar { planar_face, reverse }), .. }
-        | Snap::Axis { x: Some(XRef::Planar { planar_face, reverse }), .. } = &origin.snap
+        | Snap::Axis { x: Some(XRef::Planar { planar_face, reverse }), .. }
+        | Snap::SketchPoint { x: Some(XRef::Planar { planar_face, reverse }), .. } = &origin.snap
         {
             f.alignment[i] = Some(json!({"face": planar_face, "occurrence": origin.occurrence}));
             f.reverse_alignment[i] = *reverse;
         } else if let Snap::FaceCenter { x: Some(XRef::Reference { reference, reverse }), .. }
         | Snap::CircleCenter { x: Some(XRef::Reference { reference, reverse }), .. }
         | Snap::Plane { x: Some(XRef::Reference { reference, reverse }), .. }
-        | Snap::Axis { x: Some(XRef::Reference { reference, reverse }), .. } = &origin.snap
+        | Snap::Axis { x: Some(XRef::Reference { reference, reverse }), .. }
+        | Snap::SketchPoint { x: Some(XRef::Reference { reference, reverse }), .. } = &origin.snap
         {
             f.alignment[i] = Some(json!({"reference":reference,"occurrence":origin.occurrence}));
             f.reverse_alignment[i] = *reverse;
@@ -849,6 +864,55 @@ pub struct SnapPt {
     pub z: Vec3,
     pub kind: SnapKind,
     pub param: Value,
+}
+
+/// New Component with bodies picked: makes the component, then moves the bodies into it as
+/// part of the same undo step, with the moves in one History folder named after the component
+/// when there are two or more (#21840). `None` when the window has no bodies picked, so it runs
+/// as any other window. A refused move takes the new component back out and leaves the undo and
+/// redo steps, the active component and the selection as they were before OK.
+pub(crate) fn run_new_component(app: &mut SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<Result<(), String>> {
+    if !matches!(k, Asm::NewComponent { .. }) {
+        return None;
+    }
+    let commands = commands(app, k, inputs).ok()?;
+    let [(create, create_params), (moving, move_params)] = commands.as_slice() else { return None };
+    Some((|| {
+        // What a refused move puts back: the create drops redo steps (and at the undo limit the
+        // oldest undo step), and taking the component out again leaves the root active.
+        let s = &app.session;
+        let (undo, redo) = (s.undo.clone(), s.redo.clone());
+        let (active, path) = (s.active_component, s.active_occurrence_path.clone());
+        let (selection, all_bodies) = (s.selection.clone(), s.selection_all_bodies);
+        let made = app.run(create, create_params.clone())?;
+        let mut move_params = move_params.clone();
+        if let Some(id) = made.get("component") {
+            move_params["component"] = id.clone();
+        }
+        let history = std::mem::take(&mut app.session.undo);
+        let moved = match app.run(moving, move_params) {
+            Ok(moved) => moved,
+            Err(error) => {
+                app.session.undo = history;
+                if let Err(why) = app.run("edit.undo", json!({})) {
+                    return Err(format!("{error}; the new component could not be taken back out: {why}"));
+                }
+                let s = &mut app.session;
+                (s.undo, s.redo) = (undo, redo);
+                (s.active_component, s.active_occurrence_path) = (active, path);
+                (s.selection, s.selection_all_bodies) = (selection, all_bodies);
+                return Err(error);
+            }
+        };
+        let features = moved.get("features").and_then(Value::as_array).cloned().unwrap_or_default();
+        if features.len() > 1
+            && let Err(error) = app.run("timeline.group", json!({ "name": made["name"], "features": features }))
+        {
+            app.set_status(error, true);
+        }
+        app.session.undo = history;
+        Ok(())
+    })())
 }
 
 /// The occurrence placing a world body (0: the root design), the instance its name says.
@@ -1142,8 +1206,7 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
         }
         Sel::SketchPoint { id } => {
             // A sketch point's world position, its plane's normal as the joint's z, kept by its
-            // sketch and id so it follows the sketch as the part changes. No body names it, so the
-            // engine finds the occurrence from the world point (its own body).
+            // sketch and id so it follows the sketch and parameter edits as the part changes.
             let (sketch, point) = match id.split_once(':') {
                 Some((sketch, point)) => (sketch.parse().ok()?, point),
                 None => (s.active_sketch?, id.as_str()),
@@ -1151,7 +1214,7 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
             let ss = st.sketch(sketch)?;
             let at = ss.plane.to_world(ss.sketch.point(ss.sketch.resolve_point(point)?)?);
             let z = ss.plane.normal();
-            let mut snap = SnapPt { at, z, kind: SnapKind::Vertex, param: json!({"point": pt(at), "z": pt(z)}) };
+            let mut snap = SnapPt { at, z, kind: SnapKind::Vertex, param: json!({"sketch": sketch, "point": point}) };
             // On the copy of its part the sketch is drawn at: a copy placed on top of it has the
             // same bodies there, and the point alone would find the first.
             let component = s.doc.feature(sketch).map_or(0, |f| f.component);
@@ -1163,7 +1226,7 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
         Sel::PlacedSketchPoint { sketch, id, path } => {
             // The same point on another copy of its part: where that copy has it, held by that copy.
             let (at, z) = st.placed_sketch_point(*sketch, path, id)?;
-            let mut snap = SnapPt { at, z, kind: SnapKind::Vertex, param: json!({"point": pt(at), "z": pt(z)}) };
+            let mut snap = SnapPt { at, z, kind: SnapKind::Vertex, param: json!({"sketch": *sketch, "point": id}) };
             placed_on(&mut snap, path);
             return Some(snap);
         }
@@ -1387,8 +1450,11 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut Vec
             crate::ui_kit::options(ui, "component_options", &mut [("Activate", activate)]);
         }
         Asm::Joint(f) => {
-            // As-built: two components picked, the position comes next.
-            if f.as_built && *active == 0 && inputs.first().is_some_and(|i| i.items.len() >= 2) {
+            let picked = sel_items(inputs, 0);
+            f.whole_components.retain(|bodies| bodies.iter().all(|b| picked.contains(&Sel::Body { name: b.clone() })));
+            // As-built: two components picked, the position comes next. Counted as OK counts
+            // them: a component with two bodies is one.
+            if f.as_built && *active == 0 && occurrences(&app.session, picked).len() >= 2 {
                 *active = 1;
             }
             // Picks that make no joint say why, under them, and offer the way out (#1239).
@@ -1402,6 +1468,19 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut Vec
                     {
                         // A refusal shows on the status line; the picks stay either way.
                         let _ = app.run("component.from_bodies", json!({ "bodies": bodies }));
+                    }
+                });
+            } else if let Some(held) = grounded_sides(app, f, inputs) {
+                // Both picked parts are grounded: the joint would move neither (#12867). Say so,
+                // and offer to unground the second, so the preview shows the joint placing it.
+                ui.vertical(|ui| {
+                    crate::ui_kit::status_line(ui, &held.why, crate::ui_kit::StatusTone::Warning);
+                    let label = solidcraft_ui_text::format("joint.unground_part", &[("occurrence", &held.name)]);
+                    let r = crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal);
+                    crate::scenario::publish_handle("joint:unground", r.rect.center());
+                    if r.clicked() {
+                        // A refusal shows on the status line; the picks stay either way.
+                        let _ = app.run("occurrence.ground", json!({ "occurrence": held.occurrence, "grounded": false }));
                     }
                 });
             }
@@ -2134,8 +2213,9 @@ pub(crate) fn resolve_alignment_order(s: &Session, d: &mut Dialog, interaction: 
         f.alignment_primary_key = Some(key);
     }
     let supported = (0..2).all(|side| {
-        alignment_primary_origin(s, f, &d.inputs, side)
-            .is_none_or(|o| matches!(o.snap, Snap::FaceCenter { .. } | Snap::CircleCenter { .. } | Snap::Plane { .. } | Snap::Axis { .. }))
+        alignment_primary_origin(s, f, &d.inputs, side).is_none_or(|o| {
+            matches!(o.snap, Snap::FaceCenter { .. } | Snap::CircleCenter { .. } | Snap::Plane { .. } | Snap::Axis { .. } | Snap::SketchPoint { .. })
+        })
     });
     f.alignment_origin_problem = (!supported).then_some("dialog.secondary_alignment_origins_required");
     if !supported {
@@ -2313,7 +2393,9 @@ pub(crate) fn alignment_accepts(s: &Session, d: &Dialog, sel: &Sel) -> bool {
 fn primary_alignment_frame(s: &Session, d: &Dialog, side: usize) -> Option<(Vec3, Vec3)> {
     let Kind::Assembly(Asm::Joint(f)) = &d.kind else { return None };
     let mut origin = alignment_primary_origin(s, f, &d.inputs, side)?;
-    if let Snap::FaceCenter { x, .. } | Snap::CircleCenter { x, .. } | Snap::Plane { x, .. } | Snap::Axis { x, .. } = &mut origin.snap {
+    if let Snap::FaceCenter { x, .. } | Snap::CircleCenter { x, .. } | Snap::Plane { x, .. } | Snap::Axis { x, .. } | Snap::SketchPoint { x, .. } =
+        &mut origin.snap
+    {
         *x = None;
     }
     let frame = solidcraft_engine::doc::joints::resolve_origin(&s.doc, &s.model.state(), &origin).ok()?;
@@ -2488,6 +2570,11 @@ fn joint_problem(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<(String
     let doc = &app.session.doc;
     let occs: Vec<Option<u64>> =
         bodies.iter().map(|b| placement_of_body(&app.session, b).map(|path| solidcraft_engine::doc::joints::origin_anchor(doc, &path).0)).collect();
+    // As-built: one component picked whole is one side, and the second is still to come (#21842).
+    let whole = f.as_built && f.whole_components.iter().any(|w| w.iter().all(|b| bodies.contains(b)) && bodies.iter().all(|b| w.contains(b)));
+    if whole {
+        return None;
+    }
     // Only every pick naming a body makes the one-component case a problem: a datum plane or axis
     // side names its placement's origin, not a body, so a datum of one part against a face of
     // another is still a two-part joint.
@@ -2498,6 +2585,73 @@ fn joint_problem(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<(String
         });
     }
     commands(app, k, inputs).err().map(|e| (e, Vec::new()))
+}
+
+/// Both of a new joint's picked parts are grounded: what the dialog says, and the part its
+/// Unground button frees (the second pick).
+#[derive(Debug, PartialEq)]
+pub(crate) struct GroundedSides {
+    pub why: String,
+    pub occurrence: u64,
+    pub name: String,
+}
+
+/// The Joint dialog's note when both picks are on parts that can't move (#12867): grounded
+/// parts, or the root's own bodies, which never move. A joint between them moves neither. `None`
+/// while editing, before both sides are picked, or when either side is on a part that can move.
+pub(crate) fn grounded_sides(app: &SolveApp, f: &JointForm, inputs: &[SelInput]) -> Option<GroundedSides> {
+    if f.editing.is_some() {
+        return None;
+    }
+    let picks: Vec<&Sel> =
+        if f.as_built { sel_items(inputs, 0).iter().collect() } else { (0..2).filter_map(|i| sel_items(inputs, i).first()).collect() };
+    let doc = &app.session.doc;
+    let mut occs: Vec<u64> = Vec::new();
+    for pick in picks {
+        let occ = side_occurrence(&app.session, pick)?;
+        if !occs.contains(&occ) {
+            occs.push(occ);
+        }
+    }
+    let [a, b] = occs.as_slice() else { return None };
+    let grounded = |o: u64| doc.occurrences.iter().find(|x| x.id == o && x.grounded);
+    let joint = if f.name.trim().is_empty() { default_joint_name(doc, f.joint_kind()) } else { f.name.trim().to_string() };
+    // The Unground button frees the second part, or the one that isn't the root.
+    let (why, free) = match (*a, *b) {
+        (0, o) | (o, 0) => {
+            let free = grounded(o)?;
+            (solidcraft_ui_text::format("joint.moves_neither_root", &[("joint", &joint), ("occurrence", &free.name)]), free)
+        }
+        (a, b) => {
+            let (oa, ob) = (grounded(a)?, grounded(b)?);
+            (solidcraft_ui_text::format("joint.moves_neither", &[("joint", &joint), ("a", &oa.name), ("b", &ob.name)]), ob)
+        }
+    };
+    Some(GroundedSides { why, occurrence: free.id, name: free.name.clone() })
+}
+
+/// The occurrence a joint side picked on `pick` holds (0: the root). A face, edge, vertex or body
+/// is held through the placement it was picked on; a component's plane or axis names its
+/// occurrence as the joint command does ([`snap_of`]). `None` for a pick no part owns here.
+fn side_occurrence(s: &Session, pick: &Sel) -> Option<u64> {
+    match pick {
+        Sel::Plane { .. } | Sel::Axis { .. } => snap_of(s, pick)?.param.get("occurrence")?.as_u64(),
+        _ => placement_of_body(s, body_of(pick)?).map(|path| solidcraft_engine::doc::joints::origin_anchor(&s.doc, &path).0),
+    }
+}
+
+/// As-built: a component was picked whole, as these bodies. Kept while Components holds them all.
+pub(crate) fn picked_whole_component(d: &mut Dialog, bodies: &[String]) {
+    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { return };
+    let held = d.inputs.first().is_some_and(|i| bodies.iter().all(|b| i.items.contains(&Sel::Body { name: b.clone() })));
+    if f.as_built && held && !bodies.is_empty() && !f.whole_components.iter().any(|w| w == bodies) {
+        f.whole_components.push(bodies.to_vec());
+    }
+}
+
+/// As-built with fewer than two components in Components: they are still being picked.
+pub(crate) fn as_built_wants_components(s: &Session, d: &Dialog) -> bool {
+    matches!(&d.kind, Kind::Assembly(Asm::Joint(f)) if f.as_built) && occurrences(s, sel_items(&d.inputs, 0)).len() < 2
 }
 
 /// The occurrences of picked bodies (deduplicated, in pick order).
@@ -2534,15 +2688,17 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
         }
         Asm::NewComponent { name, activate } => {
             let bodies: Vec<String> = sel_items(inputs, 0).body_names();
-            if bodies.is_empty() {
-                let mut p = json!({ "activate": activate });
-                if !name.trim().is_empty() {
-                    p["name"] = json!(name.trim());
-                }
-                cmd("component.create", p)
-            } else {
-                cmd("component.from_bodies", json!({ "bodies": bodies }))
+            let mut p = json!({ "activate": activate });
+            if !name.trim().is_empty() {
+                p["name"] = json!(name.trim());
             }
+            let mut out = cmd("component.create", p);
+            // The picked bodies go into the component just made (#21840); `run_new_component`
+            // sends the move with the id the create returned.
+            if !bodies.is_empty() {
+                out.push(("component.move_bodies".into(), json!({ "bodies": bodies, "component": s.doc.next_id.max(1) })));
+            }
+            out
         }
         Asm::Joint(f) => {
             let alignment = alignment_params(s, f, inputs)?;
@@ -2583,6 +2739,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                                 | Snap::CircleCenter { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
                                 | Snap::Plane { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
                                 | Snap::Axis { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
+                                | Snap::SketchPoint { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
                         )
                     {
                         p[key] = alignment[i].clone().unwrap_or(Value::Null);
@@ -2636,7 +2793,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             if (x.abs() > 1e-12 || y.abs() > 1e-12) && alignment.iter().any(Option::is_some) {
                 return Err("Secondary alignment needs Offset X and Offset Y to be zero".into());
             }
-            let a_param = if x.abs() > 1e-12 || y.abs() > 1e-12 { offset_frame(&a) } else { a.param };
+            let a_param = if (x.abs() > 1e-12 || y.abs() > 1e-12) && a.param.get("sketch").is_none() { offset_frame(&a) } else { a.param };
             // Picked origins mate by default (the engine's default: B's z opposite A's, faces
             // meet face to face, a pin goes into its hole); the dialog's Flip is the command's
             // `flip`, which turns B the other way.
@@ -2806,8 +2963,8 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
             let mut to_document = std::collections::HashMap::new();
             for (name, _, _, _, frame) in preview.doc.body_frames_with_source(&raw) {
                 if let Some((_, _, _, _, before)) = before_frames.iter().find(|(old, ..)| old == &name)
-                    && let Ok(inverse) = solidcraft_kernel::services::affine::inverse(&frame)
-                    && let Ok(mapping) = solidcraft_kernel::services::affine::then(&inverse, before)
+                    && let Ok(inverse) = solidcraft_kernel::affine::inverse(&frame)
+                    && let Ok(mapping) = solidcraft_kernel::affine::then(&inverse, before)
                 {
                     to_document.insert(name, mapping);
                 }
@@ -3035,13 +3192,13 @@ fn placed_snap(app: &SolveApp, sel: &Sel, mut snap: SnapPt) -> SnapPt {
     {
         let frame = body_of(sel)
             .and_then(|body| interaction.to_document.get(body))
-            .and_then(|frame| solidcraft_kernel::services::affine::inverse(frame).ok())
+            .and_then(|frame| solidcraft_kernel::affine::inverse(frame).ok())
             .or_else(|| {
                 let occurrence = alignment_occurrence(&app.session, sel)?;
                 let before = solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, occurrence);
                 let after = solidcraft_engine::doc::joints::occurrence_world(&interaction.document, occurrence);
-                let inverse = solidcraft_kernel::services::affine::inverse(&before).ok()?;
-                solidcraft_kernel::services::affine::then(&inverse, &after).ok()
+                let inverse = solidcraft_kernel::affine::inverse(&before).ok()?;
+                solidcraft_kernel::affine::then(&inverse, &after).ok()
             });
         if let Some(frame) = frame {
             snap.at = solidcraft_engine::doc::apply_point(&frame, snap.at);

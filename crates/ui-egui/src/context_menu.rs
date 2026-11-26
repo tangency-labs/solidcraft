@@ -854,6 +854,7 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let find = if rule.many { json!({"feature": id, "features": targets}) } else { json!({"feature": id}) };
     let one = |item: Item| rule.one(item);
     let profile = act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some());
+    let profile = crate::timeline::naming_profile_sketch(app, profile, sketch.map(|s| s.0));
     let dimensions = act("ui.editDimensions", "Edit Dimensions", "dimension").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some());
     let mut items = vec![
         one(act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(exists)),
@@ -1038,7 +1039,8 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
             v.push(cmd(app, "occurrence.move", "Move"));
         }
         v.push(act("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": feature })).on(feature.is_some()));
-        v.push(act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch })).on(sketch.is_some()));
+        let profile = act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch })).on(sketch.is_some());
+        v.push(crate::timeline::naming_profile_sketch(app, profile, sketch));
         v.push(act("ui.editDimensions", "Edit Dimensions", "dimension").with(json!({ "sketch": sketch })).on(sketch.is_some()));
         v.push(act("ui.lookAt", "Look At", "lookat").on(sel.iter().any(|s| planar(&s))));
         let marked = matches!(sel, [Sel::Face { body, index, .. }] if crate::print_face_ui::is_print_face(app, body, *index));
@@ -1075,6 +1077,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         if one_flat {
             v.push(cmd(app, "solid.press_pull", "Press Pull"));
         }
+        v.push(cmd(app, "select.boundary", "Select Boundary"));
         v.push(cmd(app, "inspect.measure", "Measure"));
         // What cannot act on these faces is left out.
         v.retain(|i| i.enabled || i.is_sep());
@@ -1592,7 +1595,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         let oid = occ.map(|o| o.id).unwrap_or(0);
         let movable = !grounded && occ.is_some() && app.session.held_by_rigid_group(oid).is_none();
         v.push(act("ui.moveOccurrence", "Move/Copy", "move").key("M").with(json!({ "occurrence": oid })).on(movable));
-        let moved = !app.session.pending_moves.is_empty();
+        let moved = app.session.moved_uncaptured();
         let joints = &app.session.doc.assembly.joints;
         let mut placement = vec![
             cmd(app, "occurrence.ground", if grounded { "Unground" } else { "Ground" }).with(json!({ "occurrence": oid, "grounded": !grounded })),
@@ -1600,8 +1603,9 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
             // Capture Position also saves the joints' values, and Revert Position puts them back.
             cmd(app, "component.capture_position", "Capture Position")
                 .on(moved || joints.iter().any(|j| j.kind != solidcraft_engine::doc::joints::JointKind::Rigid)),
-            cmd(app, "component.revert_position", "Revert Position")
-                .on(moved || joints.iter().any(|j| j.captured.is_some() && j.kind != solidcraft_engine::doc::joints::JointKind::Rigid)),
+            cmd(app, "component.revert_position", "Revert Position").on(moved
+                || app.session.uncaptured_joint_count() > 0
+                || joints.iter().any(|j| j.captured.is_some() && j.kind != solidcraft_engine::doc::joints::JointKind::Rigid)),
         ];
         // An imported assembly moves as one until its rigid group is released.
         if app.session.contents_held(id) {
@@ -1618,8 +1622,11 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         own.push(act("ui.relinkSource", "Relink Source (All Instances)…", "update").with(json!({"component": id})));
         own.push(cmd(app, "component.break_link", "Break Link").with(json!({ "component": id })));
         own.push(act("ui.relinkSourceNames", "Relink Source and Use Its Names…", "update").with(json!({"component": id})));
-    } else if id != 0 && app.session.can_extract(id) {
-        own.push(act("ui.extractComponent", "Extract to File…", "export").with(json!({"component": id})));
+    } else if id != 0 {
+        // Offered even when the component can't go, greyed out with the reason (#18623).
+        own.push(
+            act("ui.extractComponent", "Extract to File…", "export").with(json!({"component": id})).off_because(app.session.extract_refusal(id)),
+        );
     }
     own.push(Item::sep());
     own.push(
@@ -1945,6 +1952,11 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     if !lines.is_empty() {
         v.push(cmd(app, "sketch.infinite", "Infinite Line").with(json!({ "curves": lines })));
     }
+    // #20317: lines joined end to end on one straight line become one. The whole selection goes,
+    // so an arc in it is refused rather than left out.
+    if lines.len() >= 2 {
+        v.push(cmd(app, "sketch.merge_lines", "Merge Lines").with(json!({ "curves": curves })));
+    }
     // Projected geometry: the whole projection, or just the selected members (Delete).
     let links = selected_links(&ss.sketch, &ents);
     if !links.is_empty() {
@@ -2081,7 +2093,11 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     let mut c: Vec<Item> = solidcraft_engine::command_specs()
         .into_iter()
         .filter(|spec| spec.tab == "SKETCH" && spec.panel == "CONSTRAINTS" && spec.id != "sketch.constraint.fix")
-        .filter(|spec| align.is_empty() || spec.id != "sketch.constraint.horizontal_vertical")
+        // Two points, or a point and a line, have their own Horizontal and Vertical rows (`align`).
+        .filter(|spec| {
+            align.is_empty()
+                || !matches!(spec.id, "sketch.constraint.horizontal_vertical" | "sketch.constraint.horizontal" | "sketch.constraint.vertical")
+        })
         .filter(|spec| spec.selection.is_some() && spec.disabled_refusal(&app.session).is_none())
         .filter_map(|spec| {
             solidcraft_engine::sketch_selection::params_for(spec.id, &app.session, &geometry).map(|params| cmd(app, spec.id, spec.label).with(params))
@@ -2609,6 +2625,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         | "ui.shortcutKey"
         | "ui.quickAccessAdd"
         | "ui.quickAccessRemove" => crate::toolbar_custom::run(app, &item.id, &p),
+        "ui.setHome" => crate::view_gizmo::set_home(app),
         "ui.navigatorStyle" => {
             if let Some(style) = p.get("style").and_then(|s| serde_json::from_value(s.clone()).ok()) {
                 crate::view_gizmo::pick_style(app, style);

@@ -10,9 +10,9 @@ use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, expr, num, req_expr, req_vec2, str_, string_list, vec2, vec3};
 use crate::schema::frame::SketchSolve;
 use crate::schema::sketch::{
-    CoincidentMade, CoincidentParams, CoincidentResult, CollinearParams, ConcentricParams, Constrained, ConstraintResult, EditParams, EditResult,
-    EqualMade, EqualParams, EqualResult, ExitParams, FixOutcome, FixParams, FixResult, HorizontalVerticalParams, MidpointParams, ParallelParams,
-    PerpendicularParams, SymmetryParams, SymmetryResult, TangentMade, TangentParams, TangentResult,
+    AxisAlignParams, CoincidentMade, CoincidentParams, CoincidentResult, CollinearParams, ConcentricParams, Constrained, ConstraintResult,
+    EditParams, EditResult, EqualMade, EqualParams, EqualResult, ExitParams, FixOutcome, FixParams, FixResult, HorizontalVerticalParams,
+    MidpointParams, ParallelParams, PerpendicularParams, SymmetryParams, SymmetryResult, TangentMade, TangentParams, TangentResult,
 };
 use crate::schema::sketch_dimension::{DimensionResult, SketchDimensionParams};
 use crate::schema::sketch_dimensioned::{DrawDimensionedParams, DrawDimensionedResult};
@@ -72,6 +72,7 @@ const DRAW_DIMENSIONED_CONTRACT: TypedContract<DrawDimensionedParams> = TypedCon
 const EDIT_CONTRACT: TypedContract<EditParams> = TypedContract::new();
 const EXIT_CONTRACT: TypedContract<ExitParams> = TypedContract::new();
 const HORIZONTAL_VERTICAL_CONTRACT: TypedContract<HorizontalVerticalParams> = TypedContract::new();
+const AXIS_ALIGN_CONTRACT: TypedContract<AxisAlignParams> = TypedContract::new();
 const COINCIDENT_CONTRACT: TypedContract<CoincidentParams> = TypedContract::new();
 const TANGENT_CONTRACT: TypedContract<TangentParams> = TypedContract::new();
 const EQUAL_CONTRACT: TypedContract<EqualParams> = TypedContract::new();
@@ -368,6 +369,24 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SYMMETRY_CONTRACT)
         .output(output_schema_for::<SymmetryResult>)
         .params(concat!("a, b: two points or two curves (lines mirror their ends, circles/arcs their centres); line: symmetry line id, or x / y for the sketch's own axes (a curve with that id wins; an axis becomes a linked construction line on it, reported in created); or point (or a point id as line, \"origin\" too): symmetric about that point, each pair joined by a construction line it is the midpoint of", model_operand_doc!())),
+    CommandSpec::new("sketch.constraint.horizontal", "Horizontal", crate::checked!("sketch.constraint.horizontal", c_horizontal))
+        .in_sketch_part()
+        .at("SKETCH", "CONSTRAINTS")
+        .icon("c_horizontal")
+        .enabled(in_sketch)
+        .from_selection(super::sketch_selection::horizontal)
+        .contract(&AXIS_ALIGN_CONTRACT)
+        .output(output_schema_for::<ConstraintResult>)
+        .params("line: id | points: [a, b] (point ids or {midpoint: line_id}, as for sketch.constraint.horizontal_vertical); makes the line horizontal, or the two points level, whichever way the line or points run now"),
+    CommandSpec::new("sketch.constraint.vertical", "Vertical", crate::checked!("sketch.constraint.vertical", c_vertical))
+        .in_sketch_part()
+        .at("SKETCH", "CONSTRAINTS")
+        .icon("c_vertical")
+        .enabled(in_sketch)
+        .from_selection(super::sketch_selection::vertical)
+        .contract(&AXIS_ALIGN_CONTRACT)
+        .output(output_schema_for::<ConstraintResult>)
+        .params("line: id | points: [a, b] (point ids or {midpoint: line_id}, as for sketch.constraint.horizontal_vertical); makes the line vertical, or one point plumb above the other, whichever way the line or points run now"),
     CommandSpec::new("sketch.construction", "Normal/Construction", crate::checked!("sketch.construction", construction))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
@@ -1666,6 +1685,9 @@ fn entry_point(s: &Session) -> SketchEntry {
         undo_top: s.undo.last().map(|snap| snap.doc.clone()),
         restore_marker: None,
         pending_moves: s.pending_moves.clone(),
+        pending_move_records: s.pending_move_records.clone(),
+        pending_joint_bases: s.pending_joint_bases.clone(),
+        last_capture_state: s.last_capture_state.clone(),
         visibility: s.visibility.clone(),
     }
 }
@@ -1833,7 +1855,11 @@ fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usiz
     let mut after = (*s.doc).clone();
     after.marker = marker.filter(|m| *m < after.features.len());
     let section = s.undo.get(start..).unwrap_or_default().iter().find_map(|snap| snap.section.clone()).filter(|was| *was != s.section_state());
-    let changed = before != after || entry.pending_moves != s.pending_moves || entry.visibility != s.visibility || section.is_some();
+    let changed = before != after
+        || entry.pending_moves != s.pending_moves
+        || entry.pending_move_records != s.pending_move_records
+        || entry.visibility != s.visibility
+        || section.is_some();
     s.undo.truncate(start);
     if changed {
         s.undo.push(Snapshot {
@@ -1844,6 +1870,9 @@ fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usiz
             sketch_restore_marker: None,
             active_sheet_sketch: s.active_sheet_sketch.clone(),
             pending_moves: entry.pending_moves.clone(),
+            pending_move_records: entry.pending_move_records.clone(),
+            pending_joint_bases: entry.pending_joint_bases.clone(),
+            last_capture_state: entry.last_capture_state.clone(),
             visibility: entry.visibility.clone(),
             part: None,
             section,
@@ -3479,8 +3508,28 @@ impl AlignmentTarget {
 }
 
 fn c_horizontal_vertical(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "sketch.constraint.horizontal_vertical";
     let mode = str_(p, "mode").map(str::to_ascii_lowercase);
+    let forced = match mode.as_deref() {
+        Some("horizontal") => Some(true),
+        Some("vertical") => Some(false),
+        _ => None,
+    };
+    align_axis(s, p, "sketch.constraint.horizontal_vertical", forced)
+}
+
+/// Horizontal on its own, whichever way the line or the points run now.
+fn c_horizontal(s: &mut Session, p: &Value) -> Result<Value> {
+    align_axis(s, p, "sketch.constraint.horizontal", Some(true))
+}
+
+/// Vertical on its own, whichever way the line or the points run now.
+fn c_vertical(s: &mut Session, p: &Value) -> Result<Value> {
+    align_axis(s, p, "sketch.constraint.vertical", Some(false))
+}
+
+/// A line made horizontal or vertical, or two points made level or plumb: `horizontal` says
+/// which, or, when it is `None`, the way they run now (the nearer of the two).
+fn align_axis(s: &mut Session, p: &Value, cmd: &'static str, horizontal: Option<bool>) -> Result<Value> {
     constrain_reply(s, p, cmd, |sk| {
         if let Some(pts) = p.get("points").and_then(Value::as_array) {
             if pts.len() != 2 {
@@ -3510,11 +3559,7 @@ fn c_horizontal_vertical(s: &mut Session, p: &Value) -> Result<Value> {
                 return Err(bad(cmd, "alignment needs two distinct points"));
             }
             let d = sk.point(b).ok_or_else(|| bad(cmd, "invalid second point"))? - sk.point(a).ok_or_else(|| bad(cmd, "invalid first point"))?;
-            let horiz = match mode.as_deref() {
-                Some("horizontal") => true,
-                Some("vertical") => false,
-                _ => d.x.abs() >= d.y.abs(),
-            };
+            let horiz = horizontal.unwrap_or(d.x.abs() >= d.y.abs());
             return Ok(if horiz { ConstraintKind::HorizontalPoints { p: a, q: b } } else { ConstraintKind::VerticalPoints { p: a, q: b } });
         }
         let l = curve_ref(sk, p.get("line"), cmd, "line")?;
@@ -3523,11 +3568,15 @@ fn c_horizontal_vertical(s: &mut Session, p: &Value) -> Result<Value> {
             _ => return Err(bad(cmd, "`line` must be a line")),
         };
         let d = sk.point(b).unwrap_or_default() - sk.point(a).unwrap_or_default();
-        let horiz = match mode.as_deref() {
-            Some("horizontal") => true,
-            Some("vertical") => false,
-            _ => d.x.abs() >= d.y.abs(),
-        };
+        let horiz = horizontal.unwrap_or(d.x.abs() >= d.y.abs());
+        // A line running nearer the other way is turned to the way asked first, keeping its
+        // length: the constraint alone moves one coordinate of each end, and would leave the
+        // line its short extent (nothing, for an exactly vertical line made horizontal).
+        // Horizontal and Vertical alone; the combined command keeps what it always did.
+        let across = if horiz { d.y.abs() > d.x.abs() } else { d.x.abs() > d.y.abs() };
+        if across && cmd != "sketch.constraint.horizontal_vertical" {
+            turn_line(sk, a, b, horiz);
+        }
         Ok(if horiz { ConstraintKind::Horizontal { l } } else { ConstraintKind::Vertical { l } })
     })
 }
@@ -3566,6 +3615,27 @@ fn same_coincident_cluster(sk: &Sketch, a: usize, b: usize) -> bool {
         }
     }
     false
+}
+
+/// Whether nothing holds the sketch point `p` where it is: not fixed, not projected, and with no
+/// Fix constraint on it.
+fn point_free(sk: &Sketch, p: usize) -> bool {
+    sk.points.get(p).is_some_and(|pt| !pt.fixed && pt.link.is_none() && pt.exprs.is_none())
+        && !sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Fix { p: q } if q == p))
+}
+
+/// Turn the line from `a` to `b` to horizontal (`horizontal`) or vertical, keeping its length and
+/// the way it ran along that axis: about its middle when both ends are free, about the end that
+/// is held when one is. Two held ends are left where they are (the solve then says whether the
+/// constraint can hold). Only the starting places change: the solve that follows still decides.
+fn turn_line(sk: &mut Sketch, a: usize, b: usize, horizontal: bool) {
+    let (Some(pa), Some(pb)) = (sk.point(a), sk.point(b)) else { return };
+    let Some((new_a, new_b)) = solidcraft_sketch::turned_to_axis(pa, pb, horizontal, point_free(sk, a), point_free(sk, b)) else { return };
+    for (p, at) in [(a, new_a), (b, new_b)] {
+        if let Some(pt) = sk.points.get_mut(p) {
+            pt.pos = at;
+        }
+    }
 }
 
 fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {

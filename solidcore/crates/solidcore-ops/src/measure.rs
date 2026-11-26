@@ -1556,13 +1556,17 @@ impl Body {
     /// [`Error::Argument`] for an entity of the body that `order` does not hold; any other
     /// kernel error.
     pub fn adjacency(&self, order: &Order) -> Result<Adjacency> {
-        let at = |list: &[EdgeId], e: EdgeId| list.iter().position(|&x| x == e);
+        // where each kernel entity stands in `order`, its first place there, as a search of
+        // the list finds it: looked up once per use instead of searching the list each time
+        let faces_at = first_places(&order.faces);
+        let edges_at = first_places(&order.edges);
+        let vertices_at = first_places(&order.vertices);
         read_body("adjacency", self, |_, b| {
             let mut face_edges = Vec::with_capacity(order.faces.len());
             for &f in &order.faces {
                 let mut edges = Vec::new();
                 for e in face_p4::edges(b, f, None, false, None)? {
-                    let Some(i) = at(&order.edges, e) else {
+                    let Some(&i) = edges_at.get(&e) else {
                         return Ok(Err(Error::Argument));
                     };
                     edges.push(i);
@@ -1574,7 +1578,7 @@ impl Body {
             for &e in &order.edges {
                 let mut faces = Vec::new();
                 for f in edge::faces(b, e, None)? {
-                    let Some(i) = order.faces.iter().position(|&x| x == f) else {
+                    let Some(&i) = faces_at.get(&f) else {
                         return Ok(Err(Error::Argument));
                     };
                     faces.push(i);
@@ -1582,8 +1586,8 @@ impl Body {
                 edge_faces.push(faces);
                 let ends = match edge::start_end_vertices(b, e)? {
                     (Some(s), Some(t)) => {
-                        let index = |v: VertexId| order.vertices.iter().position(|&x| x == v);
-                        let (Some(s), Some(t)) = (index(s), index(t)) else {
+                        let (Some(&s), Some(&t)) = (vertices_at.get(&s), vertices_at.get(&t))
+                        else {
                             return Ok(Err(Error::Argument));
                         };
                         Some([s, t])
@@ -2620,6 +2624,16 @@ pub fn point_along_line(
 pub fn distance_across_surface(point_: [f64; 3], foot: [f64; 3], q: [f64; 3]) -> Option<f64> {
     let (p, f, q) = (point(point_).ok()?, point(foot).ok()?, point(q).ok()?);
     Some(solidcore::query::distance_across_surface(p, f, q))
+}
+
+/// Each entry of `list` with its first place in it: the index a search of the list from the
+/// start finds for it.
+fn first_places<T: Copy + Eq + std::hash::Hash>(list: &[T]) -> std::collections::HashMap<T, usize> {
+    let mut at = std::collections::HashMap::new();
+    for (i, &x) in list.iter().enumerate() {
+        at.entry(x).or_insert(i);
+    }
+    at
 }
 
 #[cfg(test)]
@@ -3943,6 +3957,45 @@ pub(crate) mod tests {
             ..o.clone()
         };
         assert_eq!(b.adjacency(&short), Err(Error::Argument));
+    }
+
+    /// An order with its lists reversed numbers every face, edge and vertex from the other
+    /// end: the adjacency in it is the adjacency in the first order, renumbered.
+    #[test]
+    fn adjacency_follows_the_orders_numbering() {
+        all_fixes();
+        let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+        let o = kernel_order(&b);
+        let a = b.adjacency(&o).unwrap();
+        let mut r = o.clone();
+        r.faces.reverse();
+        r.edges.reverse();
+        r.vertices.reverse();
+        let ar = b.adjacency(&r).unwrap();
+        let (nf, ne, nv) = (o.faces.len(), o.edges.len(), o.vertices.len());
+        for f in 0..nf {
+            let want: Vec<usize> = a.face_edges[nf - 1 - f]
+                .iter()
+                .map(|e| ne - 1 - e)
+                .collect();
+            assert_eq!(ar.face_edges[f], want, "face {f}");
+        }
+        for e in 0..ne {
+            let want: Vec<usize> = a.edge_faces[ne - 1 - e]
+                .iter()
+                .map(|f| nf - 1 - f)
+                .collect();
+            assert_eq!(ar.edge_faces[e], want, "edge {e}");
+            let want = a.edge_vertices[ne - 1 - e].map(|[s, t]| [nv - 1 - s, nv - 1 - t]);
+            assert_eq!(ar.edge_vertices[e], want, "edge {e}");
+        }
+        for v in 0..nv {
+            assert_eq!(
+                ar.vertex_points[v],
+                a.vertex_points[nv - 1 - v],
+                "vertex {v}"
+            );
+        }
     }
 
     #[test]

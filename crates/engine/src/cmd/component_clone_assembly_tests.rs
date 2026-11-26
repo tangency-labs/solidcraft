@@ -42,6 +42,8 @@ fn joint(id: u64, a: u64, b: u64) -> Joint {
         exprs: Default::default(),
         offset_xy: [3.0, -4.0],
         captured: None,
+        base_values: None,
+        base_exprs: Vec::new(),
         constraint: None,
         dynamics: Vec::new(),
     }
@@ -54,6 +56,7 @@ fn occurrence(id: u64) -> Occurrence {
         parent: 0,
         name: format!("Occurrence{id}"),
         transform: IDENTITY,
+        base_transform: None,
         grounded: false,
         expressed_moves: Vec::new(),
         bom_type: None,

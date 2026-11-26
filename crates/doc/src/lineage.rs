@@ -15,6 +15,7 @@ use std::sync::{Arc, OnceLock};
 use solidcore_record::{Region2, Vec3};
 use solidcraft_kernel::Body;
 use solidcraft_kernel::history::{BodyHistory, Change, EdgeProv, FaceOrigin, FaceProv, History};
+use solidcraft_kernel::services::mesh::{FACE_ORDER_VERSION, ReconstructionKind};
 
 use crate::SolvedSketch;
 
@@ -608,6 +609,40 @@ pub(crate) fn part_role(origins: &[FaceOrigin], part: &str) -> Option<String> {
         [FaceOrigin::Profile { segment }] => Some(format!("{part}:side:{segment}")),
         _ => None,
     }
+}
+
+/// The faces of a deterministic mesh reconstruction, bound to its exact inputs. An ordinal
+/// alone is unsafe: another tolerance or an upstream mesh edit may reorder recovered faces.
+/// Identity uses the original shared-vertex positions and triangle indices, independent of display
+/// normals, split vertices and serde fields. The v6 encoding is little-endian: reconstruction
+/// kind (0 analytic, 1 faceted), the producer's u32 face-order version, tolerance bits, u64 vertex
+/// count, xyz f64 bit patterns, u64 triangle count, then each triangle's u32 indices.
+/// The producer versions face ordering; bump this domain when the input encoding changes.
+pub(crate) fn reconstructed_tool(body: Body, positions: &[Vec3], triangles: &[[u32; 3]], tolerance: f64, kind: ReconstructionKind) -> Traced {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    hash.update(b"solidcraft-mesh-reconstruction-v6");
+    hash.update([match kind {
+        ReconstructionKind::Analytic => 0,
+        ReconstructionKind::Faceted => 1,
+    }]);
+    hash.update(FACE_ORDER_VERSION.to_le_bytes());
+    hash.update(tolerance.to_le_bytes());
+    hash.update((positions.len() as u64).to_le_bytes());
+    for p in positions {
+        for coordinate in [p.x, p.y, p.z] {
+            hash.update(coordinate.to_bits().to_le_bytes());
+        }
+    }
+    hash.update((triangles.len() as u64).to_le_bytes());
+    for triangle in triangles {
+        for index in triangle {
+            hash.update(index.to_le_bytes());
+        }
+    }
+    let digest = format!("{:x}", hash.finalize());
+    let roles = (0..body.face_count()).map(|face| vec![format!("mesh:{digest}:face:{face}")]).collect();
+    Traced::made(body, Some(roles))
 }
 
 /// Faces named by their place in a body built as a whole (an imported part's faces in the
@@ -1284,9 +1319,11 @@ pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::n
         // A name moves with the feature it belongs to: in a cut's family the first name is the
         // cut body's own feature's and the rest are the cut's, and `body.rename` stores a name in
         // the `body_names` of the feature a body says made it (#10438). So does the body a name
-        // past the first was split off, which gives that piece its material and look.
-        let names: Vec<(String, u64, Option<String>)> =
-            members.iter().filter_map(|i| bodies.get(*i).map(|b| (b.name.clone(), b.feature, b.split_from.clone()))).collect();
+        // past the first was split off, which gives that piece its material and look, and whether
+        // the name's owner is the body's component rather than its feature's (a root cut's piece
+        // of a placed part's body, #21156).
+        let names: Vec<(String, u64, Option<String>, bool)> =
+            members.iter().filter_map(|i| bodies.get(*i).map(|b| (b.name.clone(), b.feature, b.split_from.clone(), b.transferred))).collect();
         // The pieces take the family's places in that order too, so the state lists them as
         // their names run. The session pins a feature's body names in state order, and the next
         // evaluation hands them out in this order: listed in the kernel's order, the pieces
@@ -1295,10 +1332,11 @@ pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::n
         if moved.len() != members.len() || names.len() != members.len() {
             continue;
         }
-        for ((mut b, (name, feature, split_from)), place) in moved.into_iter().zip(names).zip(&members) {
+        for ((mut b, (name, feature, split_from, transferred)), place) in moved.into_iter().zip(names).zip(&members) {
             b.name = name;
             b.feature = feature;
             b.split_from = split_from;
+            b.transferred = transferred;
             if let Some(slot) = bodies.get_mut(*place) {
                 *slot = b;
             }
