@@ -329,8 +329,7 @@ fn offset_moves_a_face() {
     assert!(e.to_string().contains("no room"), "{e}");
 }
 
-/// The side of a disc 1000 times wider than it is thick is the face moved or drafted: the point
-/// SMLib is handed lies on the side, not on a display triangle nearer the top (#22802).
+/// The side of a disc 1000 times wider than it is thick is the face moved or drafted (#22802).
 #[test]
 fn offset_and_draft_move_the_side_of_a_thin_wide_disc() {
     let pi = std::f64::consts::PI;
