@@ -161,6 +161,7 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("dialogs_save_mesh.rs", 1, "an installed slicer's own icon, drawn untinted"),
     ("dialogs_library.rs", 1, "a library appearance's swatch: the colour is the fact"),
     ("render_ui/scene.rs", 2, "Browser appearance swatches: the colours are document data"),
+    ("browser.rs", 1, "a component identification swatch in the Browser: the colour is document data (#16677)"),
     ("render_workspace_library.rs", 1, "a catalog appearance preview: the colour is authored data"),
     ("render_workspace_materials.rs", 1, "an authored material swatch: the displayed colour is the material data"),
     ("render_workspace_quality.rs", 1, "the denoise guide legend reproduces categorical mask pixels; colour is exported image data"),
