@@ -33,11 +33,12 @@
 //! on one surface are read as separate faces.
 
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
+use solidcraft_kernel::affine;
 use solidcraft_kernel::services::measure::{Straight, straight_direction};
 use solidcraft_kernel::services::prism::{
     ChannelFill, FillFailure, FillNote, FillOptions, FillSide, PlanarPiece, extrude_planar_regions, fill_channel, planar_edges,
 };
-use solidcraft_kernel::services::{ExactBody as Body, Order, affine, sweep};
+use solidcraft_kernel::services::{ExactBody as Body, Order, sweep};
 
 /// Which of the two parts of a joint something is about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -103,6 +104,9 @@ pub enum GrooveRefusal {
     /// An ops call failed.
     #[error(transparent)]
     Ops(#[from] solidcraft_kernel::services::Error),
+    /// A placement call refused its numbers, in the kernel's words.
+    #[error(transparent)]
+    Placement(#[from] affine::AffineRefused),
 }
 
 type Result<T> = std::result::Result<T, GrooveRefusal>;

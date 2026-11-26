@@ -1072,7 +1072,7 @@ mod tests {
             assert!(sketch_header_name(&app, owner).is_some(), "the view hosts the sketch");
             let ground = Rect::from_min_size(pos2(80.0, 130.0), vec2(600.0, 360.0));
             let ctx = crate::fonts::test_context();
-            let output =
+            let mut output =
                 ctx.run_ui(egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 700.0))), ..Default::default() }, |ui| {
                     ground_chip(&mut app, ui, owner, ground);
                 });
@@ -1091,6 +1091,7 @@ mod tests {
                 !output.shapes.iter().any(|clipped| matches!(&clipped.shape, egui::Shape::Text(text) if text.galley.text() == "Editing" || text.galley.text().contains(" · "))),
                 "{sheet:?}: no Editing state or sketch breadcrumb is drawn over the view"
             );
+            output.textures_delta.clear();
         }
     }
 

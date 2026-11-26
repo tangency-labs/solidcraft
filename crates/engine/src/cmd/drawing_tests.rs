@@ -2054,6 +2054,7 @@ fn sheet_fill_profiles_refuse_equation_metadata_without_disabling_sketch_inspect
         end: "1".into(),
         variable_unit: solidcraft_sketch::VariableUnit::Number,
         tolerance: 0.01,
+        radians_trig: false,
     });
     let before = s.doc.clone();
     let history = (s.undo.len(), s.redo.len(), s.evaluations);

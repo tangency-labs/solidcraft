@@ -196,6 +196,19 @@ fn fill_tools<'de, D: Deserializer<'de>>(d: D) -> Result<Option<NameList>, D::Er
     names_in(d, 1..=MAX_TOOLS, TOOLS_MESSAGE)
 }
 
+/// Boundary Fill's `planes`: up to 64 plane names (the handler checks that each is one).
+fn fill_planes<'de, D: Deserializer<'de>>(d: D) -> Result<Option<NameList>, D::Error> {
+    names_in(d, 0..=MAX_TOOLS, "`planes` must list at most 64 plane names")
+}
+
+fn fill_planes_schema(_: &mut SchemaGenerator) -> Schema {
+    // Unlike the tools, no planes at all is allowed: the handler reads `[]` as none.
+    json_schema!({
+        "description": "Planes that also bound the cells, by name: an origin plane (XY, XZ, YZ) or a construction plane. A plane cuts space like an infinite plane, so it can close an open end of a tool body; a cell lies on the side of each plane its point is on. Up to 64 with the tools.",
+        "anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}, "minItems": 0, "maxItems": MAX_TOOLS}]
+    })
+}
+
 fn fill_tools_schema(_: &mut SchemaGenerator) -> Schema {
     names_schema("The tool bodies whose surfaces bound the cells, by name: 1 to 64.", MAX_TOOLS)
 }
@@ -251,6 +264,9 @@ pub struct BoundaryFillParams {
     #[serde(default, deserialize_with = "fill_tools")]
     #[schemars(schema_with = "fill_tools_schema")]
     pub tools: Option<NameList>,
+    #[serde(default, deserialize_with = "fill_planes")]
+    #[schemars(schema_with = "fill_planes_schema")]
+    pub planes: Option<NameList>,
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "FillCells")]
     pub cells: Option<FillCells>,
@@ -303,7 +319,10 @@ pub struct CoilParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PointExpr3")]
     pub base: Option<PointExpr3>,
-    /// The direction the helix climbs, or an axis reference in the same forms as Revolve. Default: Z.
+    /// The direction the helix climbs: X, Y, Z or `[x, y, z]`, each a number or an expression
+    /// with no unit (`["0", "-sin(t)", "-cos(t)"]`), which the coil follows as the parameters
+    /// change (a parameter added as a plain number is a length: divide it by its unit,
+    /// `"n / 1 mm"`); or an axis reference in the same forms as Revolve. Default: Z.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "CoilAxis")]
     pub axis: Option<CoilAxis>,
@@ -365,6 +384,17 @@ pub struct EmbossParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "EmbossFacePoint")]
     pub face: Option<EmbossFacePoint>,
+    /// A shift of the profiles along the sketch's x before they are laid on the face. The sketch
+    /// is not changed. Default: none.
+    #[serde(default)]
+    pub offset_x: Option<LengthExpr>,
+    /// A shift of the profiles along the sketch's y. Default: none.
+    #[serde(default)]
+    pub offset_y: Option<LengthExpr>,
+    /// A turn of the profiles, counter-clockwise in the sketch, about the middle of their bounds.
+    /// The offsets are not turned with them. Default: none.
+    #[serde(default)]
+    pub angle: Option<AngleExpr>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

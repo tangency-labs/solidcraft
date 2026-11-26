@@ -31,7 +31,7 @@ pub use solidcore::error::fill::{FillFailure, FillSide};
 pub use solidcore::prism::fill::{Contour, FillNote, FillOptions};
 pub use solidcore::prism::measure::Interval;
 pub use solidcore::prism::placement::LoopPlacement;
-pub use solidcore::prism::profile::{tapered_flange_ends, ProfileRefusal};
+pub use solidcore::prism::profile::ProfileRefusal;
 
 use crate::body::Contract;
 use crate::body::{finish, Body, Expect};
@@ -321,27 +321,7 @@ pub fn prism_equivalent(a: &Body, b: &Body) -> Result<Option<bool>> {
     })
 }
 
-/// A free-form curve of several spans in a plane, as the one B-spline it is.
-#[derive(Clone, Debug, PartialEq)]
-pub struct PlanarSpline {
-    /// Its degree.
-    pub degree: usize,
-    /// Its clamped knots.
-    pub knots: Vec<f64>,
-    /// Its control points in the plane's coordinates.
-    pub points: Vec<Vec2>,
-    /// Its weights (empty: all one).
-    pub weights: Vec<f64>,
-}
-
-/// One piece of an edge read exactly in a plane.
-#[derive(Clone, Debug, PartialEq)]
-pub enum PlanarPiece {
-    /// A line, arc or single free-form segment.
-    Seg(Seg2),
-    /// A free-form curve of several spans.
-    Spline(PlanarSpline),
-}
+pub use solidcore_record::projection::{PlanarPiece, PlanarSpline};
 
 /// Edges read in a plane, with the tolerance they were read to.
 #[derive(Clone, Debug, PartialEq)]
@@ -439,6 +419,32 @@ pub fn fitted_loop(points: &[Vec2], tolerance: f64, epsilon: f64) -> Result<Loop
 #[must_use]
 pub fn loop_holds(lp: &Loop2, p: Vec2) -> Option<bool> {
     convert::loop2(lp).holds(convert::vec2(p))
+}
+
+/// How far `p` is from `seg`, exactly, for a line or a circular arc ([`kp::Seg2::distance_to`]):
+/// the foot clamped to a line's ends; on an arc the radial distance where `p` is within its angles,
+/// else the distance to the nearer end. `None` for a free-form segment or a point that is no number.
+#[must_use]
+pub fn segment_distance(seg: &Seg2, p: Vec2) -> Option<f64> {
+    convert::seg2(seg).distance_to(convert::vec2(p))
+}
+
+/// Whether the circles `a` and `b` (centre and radius) are one hole: their centres and their radii
+/// each less than `tol` apart ([`solidcore::develop::same_circle`]).
+#[must_use]
+pub fn same_circle(a: (Vec2, f64), b: (Vec2, f64), tol: f64) -> bool {
+    solidcore::develop::same_circle((convert::vec2(a.0), a.1), (convert::vec2(b.0), b.1), tol)
+}
+
+/// Where a note `height` high stands to name the circle `at` (centre and radius), level with its
+/// centre and clear of its rim on the right: its lower left corner
+/// ([`solidcore::develop::note_beside`]).
+#[must_use]
+pub fn note_beside(at: (Vec2, f64), height: f64) -> Vec2 {
+    convert::record_vec2(solidcore::develop::note_beside(
+        (convert::vec2(at.0), at.1),
+        height,
+    ))
 }
 
 /// Counter-clockwise angle between two planar rays, in radians modulo one turn.
@@ -562,6 +568,59 @@ pub fn symmetric_offset_probe_points(
         near_limit,
     )
     .map(|[x, y, z]| Vec3::new(x, y, z))
+}
+
+/// Where the line along `sketch`'s normal through `point` meets `plane`, as a level along that
+/// normal from `sketch`'s origin ([`extrude::level_on_plane`]): an extrude's end on a flat face
+/// at a slant to it.
+///
+/// # Errors
+///
+/// [`Error::Refused`] for a plane along the normal or a level that is not finite.
+pub fn level_on_plane(sketch: &Plane, point: Vec3, plane: &Plane) -> Result<f64> {
+    extrude::level_on_plane(
+        &convert::plane(sketch),
+        convert::vec3(point),
+        &convert::plane(plane),
+    )
+    .map_err(crate::error::status)
+}
+
+/// The least and the most level of `plane` above `sketch` over the outer loops of `regions`
+/// ([`extrude::plane_rise`]): how far a flat face at a slant to an extrude rises across its
+/// profiles.
+///
+/// # Errors
+///
+/// [`Error::Refused`] for a plane along the normal, no outer segment or a malformed segment;
+/// [`Error::Status`] for a free-form piece whose search does not settle.
+pub fn plane_rise(sketch: &Plane, plane: &Plane, regions: &[Region2]) -> Result<(f64, f64)> {
+    let regions: Vec<_> = regions.iter().map(convert::region2).collect();
+    extrude::plane_rise(&convert::plane(sketch), &convert::plane(plane), &regions)
+        .map_err(crate::error::status)
+}
+
+/// The least and the most of `to`'s level above `sketch` less `from`'s over the outer loops of
+/// `regions` ([`extrude::plane_gap`]): the gap an extrude From one flat face To another runs
+/// across its profiles.
+///
+/// # Errors
+///
+/// As [`plane_rise`].
+pub fn plane_gap(
+    sketch: &Plane,
+    from: &Plane,
+    to: &Plane,
+    regions: &[Region2],
+) -> Result<(f64, f64)> {
+    let regions: Vec<_> = regions.iter().map(convert::region2).collect();
+    extrude::plane_gap(
+        &convert::plane(sketch),
+        &convert::plane(from),
+        &convert::plane(to),
+        &regions,
+    )
+    .map_err(crate::error::status)
 }
 
 /// A channel filled by [`fill_channel`] ([`fill::Filled`] in the record's types).

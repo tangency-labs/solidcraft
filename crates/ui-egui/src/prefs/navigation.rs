@@ -50,6 +50,14 @@ pub(super) fn mapping_rows(app: &SolveApp) -> Vec<(Vec<String>, String)> {
         .filter(|binding| app.preferences.right_drag_orbits || !(binding.button == NavButton::Right && binding.mode == NavMode::Orbit))
         .map(|binding| row(binding.button, binding.keys, binding.mode))
         .collect();
+    // The preset's two-button drags (NX: middle + right pans, middle + left zooms, #22063).
+    if chosen(NavButton::Middle).is_none() {
+        gestures.extend(nav_preset(&app.preferences.nav).chords.iter().map(|(other, mode)| {
+            let (mut names, action) = row(NavButton::Middle, NavKeys::default(), *mode);
+            names.push(button_label(*other));
+            (names, action)
+        }));
+    }
     gestures.extend(NavButton::ALL.into_iter().chain(NavButton::mapped_numbered(&app.preferences)).filter_map(|button| {
         let choice = chosen(button)?;
         Some(row(button, choice.keys, choice.mode?))
@@ -220,6 +228,28 @@ fn orbit(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         ui.add_enabled_ui(app.preferences.free_orbit, |ui| {
             let response = setting::free_orbit_upright(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.free_orbit_upright.help"));
             crate::scenario::publish_target("prefs:free_orbit_upright", response.rect);
+        });
+        let label = app.tr("nav.free_orbit_key.label");
+        let width = ui_kit::ContentWidth::label(ui, label) + t.space_16 + t.space_4;
+        ui_kit::settings_form(ui, width, |ui| {
+            ui_kit::settings_row_help(ui, label, app.tr("nav.free_orbit_key.help"), |ui| {
+                let current = FreeOrbitKey::of(app);
+                let name = |key: FreeOrbitKey| match key {
+                    FreeOrbitKey::Off => solidcraft_ui_text::tr("nav.buttons.no_key"),
+                    FreeOrbitKey::Alt => "Alt/Option",
+                    FreeOrbitKey::Ctrl => "Ctrl/Cmd",
+                };
+                ui_kit::settings_control_width(ui, t.space_24 * 4.0, |ui| {
+                    let response = ui_kit::dropdown_menu(ui, "pref_free_orbit_key", name(current), |ui| {
+                        for &(key, id) in FreeOrbitKey::ALL {
+                            if ui_kit::list_picker(ui, id, name(key), current == key).clicked() {
+                                app.preferences.free_orbit_key = id.into();
+                            }
+                        }
+                    });
+                    crate::scenario::publish_target("prefs:free_orbit_key", response.rect);
+                });
+            });
         });
     });
 }
@@ -468,7 +498,7 @@ fn button_rows(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     }
 }
 
-fn button_label(button: NavButton) -> String {
+pub(super) fn button_label(button: NavButton) -> String {
     let id = match button {
         NavButton::Left => "prefs.button_left",
         NavButton::Middle => "prefs.button_middle",

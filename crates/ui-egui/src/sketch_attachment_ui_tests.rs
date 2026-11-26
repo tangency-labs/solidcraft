@@ -150,16 +150,17 @@ fn unsupported_modified_face_offers_explicit_fixed_plane_without_live_links() {
     let mut h = Harness::new();
     h.app.set_origin_shown(false);
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Modified"})).unwrap();
-    // An intentional split gives the +z source two distinct planar pieces. A
-    // strict attachment cannot claim the original whole-face certificate.
-    h.app.run("solid.split_face", json!({"body":"Modified","faces":[[5,5,10]],"plane":{"origin":[5,0,0],"normal":[1,0,0]}})).unwrap();
+    // A notch makes the top a C; a split across its arms leaves two pieces on one side of the
+    // plane, told apart only by place. A strict attachment cannot claim either by exact history.
+    h.app.run("solid.box", json!({"length":6,"width":4,"height":5,"corner":[4,3,5],"operation":"cut","targets":["Modified"]})).unwrap();
+    h.app.run("solid.split_face", json!({"body":"Modified","faces":[[2,5,10]],"plane":{"origin":[7,0,0],"normal":[1,0,0]}})).unwrap();
     let before = h.app.session.doc.to_json();
     let undo = h.app.session.undo.len();
     h.call("ui.view", json!({"view":"top"}));
     h.call("ui.view", json!({"view":"fit"}));
     h.settle();
     h.step(&json!({"start":"sketch.create"})).unwrap();
-    h.step(&json!({"click":{"world":[2.5,5,10]}})).unwrap();
+    h.step(&json!({"click":{"world":[8.5,1.5,10]}})).unwrap();
     assert!(h.app.session.active_sketch.is_none());
     assert!(h.app.dialog.as_ref().unwrap().error.is_some());
     assert_eq!(h.app.session.doc.to_json(), before);

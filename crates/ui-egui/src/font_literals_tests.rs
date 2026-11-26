@@ -11,7 +11,7 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("ui_kit/settings_search.rs", 2, "hidden off-screen areas that measure search matches: never drawn"),
 ];
 
-fn test_only(attrs: &[syn::Attribute]) -> bool {
+pub(crate) fn test_only(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|a| a.path().is_ident("test") || (a.path().is_ident("cfg") && a.parse_args::<syn::Path>().is_ok_and(|p| p.is_ident("test"))))
 }
 
