@@ -120,7 +120,6 @@ crates/doc/src/eval.rs:line_in_sketch_plane dot,normalized
 crates/doc/src/eval.rs:mesh_content_digest triangles
 crates/doc/src/eval.rs:mirror_matrix dot
 crates/doc/src/eval.rs:nearest_object_face closest_on_triangle,cross,triangles
-crates/doc/src/eval.rs:new_surface_faces cross,dot
 crates/doc/src/eval.rs:off_its_face dot (only warns that a sketch's face point is off its face; no geometry is built from it)
 crates/doc/src/eval.rs:offset_sheet dot,normalized
 crates/doc/src/eval.rs:on_edge_without_cap cross,dot
@@ -142,8 +141,6 @@ crates/doc/src/eval.rs:seg_at cross,normalized
 crates/doc/src/eval.rs:sketch_line_plane normalized
 crates/doc/src/eval.rs:slanted_plane dot
 crates/doc/src/eval.rs:tangent_face_chain dot,normalized,triangles
-crates/doc/src/eval.rs:trim_between_planes dot
-crates/doc/src/eval.rs:trim_between_slopes dot
 crates/doc/src/eval.rs:trim_to_curved_face dot
 crates/doc/src/eval.rs:trim_to_face dot
 crates/doc/src/eval.rs:trim_to_plane dot
@@ -431,7 +428,6 @@ crates/doc/src/sheet_surface_shadow.rs:Reader::slope cross,dot,normalized
 crates/doc/src/sheet_surface_shadow.rs:Slab::depth atan2,hypot
 crates/doc/src/sheet_surface_shadow.rs:crossed cross
 crates/doc/src/sheet_surface_shadow.rs:exact atan2,cross,dot
-crates/doc/src/sheet_surface_shadow.rs:same_surface cross,dot
 crates/doc/src/sheet_surface_shadow.rs:shadow cross,dot,normalized
 crates/doc/src/sheet_surface_tab.rs:SurfaceSheet::add_tab cross,dot
 crates/engine/src/cmd/board_import.rs:Edge::dist_to_segment dot

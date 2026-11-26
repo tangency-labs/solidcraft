@@ -1089,10 +1089,12 @@ A command entry that takes a while, such as computing a toolpath, declares `"job
 "entries": [{"name": "pocket", "job": true, "input_schema": {"type": "object", "properties": {}}}]
 ```
 
-- **Time.** A job runs for up to ten minutes, a fixed limit. The runtime's
-  `deadline_ms` (at most 30 seconds) still applies to the plugin's other entries. Fuel and memory
-  limits are the same as for any entry. Each job has a limit of 1,048,576 host calls, including
-  progress reports.
+- **Time.** A job runs for up to ten minutes, a fixed limit. Like every entry's deadline, the ten
+  minutes count only the time the plugin's own code runs, not the time the app spends answering
+  its host calls. The runtime's `deadline_ms` (at most 30 seconds unless a user raises it in
+  Preferences > Plugins) still applies to the plugin's other entries. Fuel and memory limits are
+  the same as for any entry. Each job has at least 1,048,576 host calls, including progress
+  reports; a `host_calls` the plugin asks for above that, within the user's ceiling, is honoured.
 - **Where it shows.** Every plugin run started from its dialog or by an agent runs on a worker and
   is a row in the operations panel at the bottom right of the view, named for the plugin and the
   entry ("Gears: Pocket"). The step the plugin reports with `control.progress(fraction, message)`
@@ -1473,7 +1475,8 @@ values always take precedence. Automated imports therefore do not depend on earl
   it, returning the command's JSON reply (or `{"error": "..."}` when the command fails). Staging
   again starts a new design; `evaluate.reset` discards it, and nothing outlives the import. The
   session reads no files, not even fonts or linked designs, and runs no command that writes; its
-  time counts against the import's deadline, and Cancel stops the import between commands. A
+  native evaluation time does not count against the guest compute deadline. Cancel stops the
+  import between commands. A
   design the app can't open, a command outside the list or a reply over 1 MiB is an error for that
   call only, so the importer can report its history as unchecked instead of failing.
 - **Failures.** A failure fails that one import, named with the plugin and the file ("Sample
@@ -1500,7 +1503,8 @@ values always take precedence. Automated imports therefore do not depend on earl
   compiles it again on one background thread; later files use its faster code, and it is what goes
   into the cache, so the next session loads it at once. Nothing waits for it. Fuel, memory, the
   deadline and Cancel hold the same under both compilers.
-- **Limits.** An importer's component may be up to 64 MiB, its deadline up to 10 minutes, and its
+- **Limits.** An importer's component may be up to 64 MiB, its guest compute deadline up to
+  10 minutes under default host policy (or more with a raised `max_deadline_ms`), and its
   `stack_kib` up to 64 MiB (a command may ask for at most 1 MiB). Its fuel and memory must fit the user's default limits in Preferences › Plugins
   unless the user approved more for this exact package at install. Build it for `wasm32-unknown-unknown` and wrap it with
   `wasm-tools component new`: the host links no WASI, so a component that imports any is refused.
@@ -1560,13 +1564,15 @@ message catalog (`plugin_error.*`) in the window's language; the command line an
 | `invalid-input` from the plugin | Sample could not open broken.smp: (its reason) |
 | More memory than plugins may use | Sample could not open big.smp: it asks for 2048 MiB of memory, and plugins may use 128 MiB. Install the plugin again and allow its memory request, or raise Max plugin memory (MiB) in Preferences › Plugins (in solidcraft-cli, max_memory_mib in the --plugin-limits file). |
 | More fuel than plugins may use | ... it asks for N fuel, and plugins may use M. Install the plugin again and allow its fuel request, or raise Max plugin fuel in Preferences › Plugins (in solidcraft-cli, max_fuel in the --plugin-limits file). |
-| It ran out of fuel, memory, stack or time | ... it used all N fuel it asks for and was stopped. Ask its author to raise its fuel limit. (memory in MiB, stack in KiB, time in seconds) |
+| More command host calls than plugins may use | ... it asks for N host calls, and plugins may use M. Raise Max plugin host calls in Preferences › Plugins (in solidcraft-cli, max_host_calls in the --plugin-limits file). |
+| More guest compute time than plugins may use | ... it asks for N ms of guest time, and plugins may use M ms. Raise Max plugin guest time (ms) in Preferences › Plugins (in solidcraft-cli, max_deadline_ms in the --plugin-limits file). |
+| It ran out of fuel, memory, host calls, stack or guest compute time | ... it used all N fuel it asks for and was stopped. Ask its author to raise its fuel limit. (memory in MiB, host calls as a count, stack in KiB, time in seconds) |
 | Its design is over 256 MiB | ... the design it made is larger than 256 MiB, the most a plugin can hand over. |
 | A trap | ... it stopped on an error inside the plugin (details). Report this to its author. |
 
 `plugin.inspect` words `limits_error` the same way. The structured kinds are `unsupported`
-(`reason`), `over_ceiling` (`limit` is `fuel` or `memory_mib`, with `requested` and `allowed`) and
-`exhausted` (`limit` is `fuel`, `memory_mib`, `stack_kib`, `deadline_ms` or `design_mib`, with
+(`reason`), `over_ceiling` (`limit` is `fuel`, `memory_mib`, `host_calls` or `deadline_ms`, with `requested` and `allowed`) and
+`exhausted` (`limit` is `fuel`, `memory_mib`, `host_calls`, `stack_kib`, `deadline_ms` or `design_mib`, with
 `allowed`). The engine's own numbers for a stopped run (fuel used and left) go to the debug log.
 
 ## Plugin data in a design
