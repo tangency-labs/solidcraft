@@ -1563,6 +1563,38 @@ mod tests {
         CPoint { x, y, z: 0.0, w }
     }
 
+    /// A curve far from the origin whose control points all lie within 1e-9 of (1, 1, 1)
+    /// (the healer's degenerate wire edge): its bound from that point is about 1e-9, not
+    /// the size of the span's plain interval evaluation, which widens with the points'
+    /// distance from the origin (5.2 here).
+    #[test]
+    fn a_curve_far_from_the_origin_is_bounded_by_its_own_size() {
+        let p = |z: f64| CPoint {
+            x: 1.0,
+            y: 1.0,
+            z,
+            w: NOW,
+        };
+        let c = BSplineCurve::from_nurb(
+            Nurbs::new(
+                vec![p(1.0), p(1.0), p(1.000_000_001)],
+                2,
+                vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            3,
+            true,
+        )
+        .into();
+        let far = curve_to_point(
+            &c,
+            &Extent1d::from_min_max(0.0, 1.0),
+            Vec3::new(1.0, 1.0, 1.0),
+        )
+        .unwrap();
+        assert!((1e-9..=1.1e-9).contains(&far), "{far}");
+    }
+
     #[test]
     fn whole_curve_bound_catches_the_interior_bump_five_samples_miss() {
         // A degree-one hat on [1/16, 3/16], peaking at 1/8. Every old sample
