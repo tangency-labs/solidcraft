@@ -8982,7 +8982,8 @@ fn floating_handles_agree_with_input_regions_and_leave_content_presses_alone() {
     for control in layout.controls.iter().filter(|control| matches!(control.target, HostPointerTarget::Resize { .. })) {
         let bounds = control.bounds;
         assert!(outer_box.contains_rect(egui_rect(bounds)), "{control:?} stays within the reach outside the card");
-        if !matches!(control.target, HostPointerTarget::Resize { edge, .. } if edge.moves_north()) {
+        // Corners reach further in so a diagonal resize does not take pixel aim.
+        if !matches!(control.target, HostPointerTarget::Resize { edge, .. } if edge.moves_north() || edge.is_corner()) {
             assert!(!egui_rect(bounds).intersect(inner_box).is_positive(), "{control:?} reaches no deeper than the content inset");
         }
         if matches!(control.target, HostPointerTarget::Resize { edge: HostResizeEdge::Left | HostResizeEdge::Right, .. }) {
@@ -8998,11 +8999,13 @@ fn floating_handles_agree_with_input_regions_and_leave_content_presses_alone() {
     let (right, bottom) = (card.origin.x + card.size.width, card.origin.y + card.size.height);
     for (name, at) in [
         ("above the bottom inset", Point { x: card.origin.x + card.size.width / 2.0, y: bottom - inset_y - 1.0 }),
-        ("above the bottom inset at the corner", Point { x: right - inset_x - 1.0, y: bottom - inset_y - 1.0 }),
         ("inside the right inset", Point { x: right - inset_x - 1.0, y: card.origin.y + card.size.height / 2.0 }),
     ] {
         assert!(!matches!(layout.hit_test(at), Some(HostPointerTarget::Resize { .. })), "{name} belongs to the content");
     }
+    // The point just inside the corner's insets now resizes from the corner: every corner resizes.
+    let corner = Point { x: right - inset_x - 1.0, y: bottom - inset_y - 1.0 };
+    assert_eq!(layout.hit_test(corner), Some(HostPointerTarget::Resize { section: section("editor-section"), edge: HostResizeEdge::BottomRight }));
     for (name, at) in [
         ("the bottom inset", Point { x: card.origin.x + card.size.width / 2.0, y: bottom - inset_y + 0.5 }),
         ("the right inset", Point { x: right - inset_x + 0.5, y: card.origin.y + card.size.height / 2.0 }),
@@ -9090,6 +9093,98 @@ fn floating_resize_handles_leave_every_header_tab_alone_in_both_directions() {
             let leading =
                 Point { x: if rtl { tab.bounds.origin.x + tab.bounds.size.width - 1.0 } else { tab.bounds.origin.x + 1.0 }, y: middle(tab.bounds).y };
             assert_eq!(layout.hit_test(leading), Some(HostPointerTarget::Tab { instance: tab.instance.clone() }), "rtl={rtl}");
+        }
+    }
+}
+
+#[test]
+fn panels_floated_by_letting_go_resize_from_every_edge_and_corner_in_the_app() {
+    use HostResizeEdge::*;
+    let cases = [
+        (Left, egui::vec2(-24.0, 0.0)),
+        (Right, egui::vec2(24.0, 0.0)),
+        (Top, egui::vec2(0.0, -16.0)),
+        (Bottom, egui::vec2(0.0, 16.0)),
+        (TopLeft, egui::vec2(-24.0, -16.0)),
+        (TopRight, egui::vec2(24.0, -16.0)),
+        (BottomLeft, egui::vec2(-24.0, 16.0)),
+        (BottomRight, egui::vec2(24.0, 16.0)),
+    ];
+    for scale in [1.0, 1.5] {
+        for instance in ["parts-library", "browser"] {
+            for (edge, delta) in cases {
+                let mut h = production_content_harness(false, false);
+                h.app.preferences.ui_scale = scale;
+                h.app.run("view.parts_library", serde_json::json!({"visible": true})).unwrap();
+                h.frames(4);
+                let at = app_empty_point(&h, instance);
+                let from = app_header(&h, instance);
+                app_drag(&mut h, from, at);
+                assert_eq!(app_zone(&h, instance), Zone::Floating, "{scale} {instance}: floated by letting go");
+                let card = app_card(&h, instance).outer;
+                let press = floating_press_point(card, edge);
+                h.frame_with(vec![egui::Event::PointerMoved(press)]);
+                h.frame_with(vec![button_event(press, true)]);
+                h.frame_with(vec![egui::Event::PointerMoved(press + delta)]);
+                h.frame_with(vec![button_event(press + delta, false)]);
+                settle_panels(&mut h);
+                let after = app_card(&h, instance).outer;
+                let (l, t, r, b) = (card.origin.x, card.origin.y, right(card), bottom(card));
+                let (nl, nt, nr, nb) = (after.origin.x, after.origin.y, right(after), bottom(after));
+                let name = format!("{scale} {instance} {edge:?}: {card:?} -> {after:?}");
+                let (west, east) = (matches!(edge, Left | TopLeft | BottomLeft), matches!(edge, Right | TopRight | BottomRight));
+                let (north, south) = (matches!(edge, Top | TopLeft | TopRight), matches!(edge, Bottom | BottomLeft | BottomRight));
+                assert_eq!(nl != l, west, "{name}: left side");
+                assert_eq!(nr != r, east, "{name}: right side");
+                assert_eq!(nt != t, north, "{name}: top side");
+                assert_eq!(nb != b, south, "{name}: bottom side");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_floated_panels_corners_show_the_diagonal_cursor_and_resize_both_sides_where_a_mouse_lands() {
+    use HostResizeEdge::*;
+    // Where a person aims for a corner: a few points in at the bottom. At the top the
+    // header's buttons keep their presses (on the right in LTR, the left in RTL), so the
+    // corner is just outside the card there.
+    let corners = [
+        (TopLeft, egui::vec2(-2.0, -2.0), egui::CursorIcon::ResizeNwSe, egui::vec2(-20.0, -14.0)),
+        (TopRight, egui::vec2(2.0, -2.0), egui::CursorIcon::ResizeNeSw, egui::vec2(20.0, -14.0)),
+        (BottomLeft, egui::vec2(6.0, -6.0), egui::CursorIcon::ResizeNeSw, egui::vec2(-20.0, 14.0)),
+        (BottomRight, egui::vec2(-6.0, -6.0), egui::CursorIcon::ResizeNwSe, egui::vec2(20.0, 14.0)),
+    ];
+    for (scale, language) in [(1.0, "en"), (1.5, "en"), (1.0, "he")] {
+        for (edge, inset, cursor, delta) in corners {
+            let mut h = production_content_harness(false, false);
+            h.app.preferences.ui_scale = scale;
+            h.app.preferences.language = language.into();
+            h.app.run("view.parts_library", serde_json::json!({"visible": true})).unwrap();
+            h.frames(4);
+            let at = app_empty_point(&h, "parts-library");
+            let from = app_header(&h, "parts-library");
+            app_drag(&mut h, from, at);
+            let card = egui_rect(app_card(&h, "parts-library").outer);
+            let corner = match edge {
+                TopLeft => card.left_top(),
+                TopRight => card.right_top(),
+                BottomLeft => card.left_bottom(),
+                _ => card.right_bottom(),
+            };
+            let press = corner + inset;
+            h.frame_with(vec![egui::Event::PointerMoved(press)]);
+            h.frame();
+            assert_eq!(h.output.cursor_icon, cursor, "{scale} {language} {edge:?}: hovering {press:?} near the corner of {card:?}");
+            h.frame_with(vec![button_event(press, true)]);
+            h.frame_with(vec![egui::Event::PointerMoved(press + delta)]);
+            h.frame_with(vec![button_event(press + delta, false)]);
+            settle_panels(&mut h);
+            let after = egui_rect(app_card(&h, "parts-library").outer);
+            assert!(
+                after.width() != card.width() && after.height() != card.height(),
+                "{scale} {language} {edge:?}: both sides move: {card:?} -> {after:?}"
+            );
         }
     }
 }

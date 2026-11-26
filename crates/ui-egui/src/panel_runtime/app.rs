@@ -1464,6 +1464,8 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
             host.set_header_action_visible(InstanceId("browser".into()), ControlId("magnifier".into()), browser_header.is_none());
             host.set_live_drag(app.preferences.live_panel_drag_preview);
             host.set_float_on_empty_drop(app.preferences.float_panel_on_empty_drop);
+            // #19054 and #19115 shipped with this on; 5921596eae dropped its preference and its default.
+            host.set_wide_grab(true);
         }
         let result = (|| {
             #[cfg(not(target_arch = "wasm32"))]
@@ -1637,6 +1639,7 @@ pub(crate) fn prepare_pop_out_panels(
             host.set_gap(gap)?;
             host.set_live_drag(app.preferences.live_panel_drag_preview);
             host.set_float_on_empty_drop(app.preferences.float_panel_on_empty_drop);
+            host.set_wide_grab(true);
         }
         runtime.prepare_host_in_domain(&app.session, logical_rect(domain), logical_rect(capacity), &chrome)?;
         if let Some(workspace) = workspace
