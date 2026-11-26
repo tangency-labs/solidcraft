@@ -132,9 +132,9 @@ go to the new `.sc` file at its origin, with the parameters they use, and the co
 becomes linked to that file, as **Insert Design** makes it. Its placements and the joints to the
 rest of the assembly stay. Components whose own history builds the same bodies are offered to
 become placements of the new link too (`component.copies`, `component.replace_with_link`).
-The menu offers Extract only for a component that can leave: nothing outside uses its sketches
-or changes its bodies, no bodies were moved into or out of it, and none of its subcomponents is
-joined to the rest of the design.
+A component can leave when nothing outside uses its sketches or changes its bodies, no bodies
+were moved into or out of it, and none of its subcomponents is joined to the rest of the design.
+When it can't, the menu shows Extract greyed out, and hovering it says why.
 
 **Joints** (`joint.create`, J) connect two components by joint origins that snap to faces, edges,
 circles and vertices: rigid, revolute, slider, cylindrical, pin-slot, planar and ball, with
@@ -217,7 +217,8 @@ It returns `overlaps` (pairs sharing at least `min_volume`, 0.01 mm³ by default
 volume, area, box and centre), `near` (pairs closer than `clearance`, with the distance and the
 two nearest points; a contact sharing less than `min_volume` is listed here at 0 with its
 `overlap_mm3`), `nearest` (each body's `nearest` closest checked bodies, omitting pairs in
-`unchecked`) and `unchecked` (pairs whose overlap could not be worked out, with the reason).
+`unchecked`) and `unchecked` (pairs whose overlap could not be worked out, with the reason and
+the non-boolean minimum `distance_mm` when computable).
 `against` limits the check to pairs with one
 body in `bodies` and the other in `against`, and `skip_within` leaves out pairs inside one
 occurrence (`"occurrence"`) or one placed component, its subcomponents included
@@ -525,6 +526,15 @@ other links. The same **Update changed linked designs when a tab comes back** pr
 automatic STEP refresh. Use **Break Link** on the
 component to keep an independent copy, or pass `link: false` to `file.insert_step`. Older designs keep their unlinked imports. The web app keeps independent
 copies because uploaded files have no disk source path.
+
+A file that an installed **importer plugin** reads links the same way: **Insert Design** takes it
+(`component.insert_design` with `path`, and `format` and `options` to choose the importer). The
+link remembers which plugin and version read the file, with its options. **Update Links** asks
+that plugin to read the file again when it changed, and keeps placements, names and joints as
+for any linked part. If the plugin is not installed or is turned off, the link says which plugin
+and version it needs and the component keeps its last bodies. A file read by a plugin is not
+read again by itself when a tab comes back; use **Update Links**. **Break Link** keeps the
+bodies and forgets both the file and the plugin.
 
 An assembly can be saved without the bodies of its linked parts:
 `file.save {linked_bodies: false}` (or `file.save_as`). The file then keeps each link, with its

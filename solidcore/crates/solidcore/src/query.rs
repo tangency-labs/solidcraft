@@ -22,8 +22,8 @@ pub mod faces_continue;
 pub mod flush_contact;
 mod line_meeting;
 pub mod r#loop;
-pub mod member_turn;
 pub mod normal;
+mod planar_disjoint;
 pub mod point_identity;
 pub mod poly;
 pub mod poly_properties;
@@ -31,6 +31,7 @@ pub mod seam_bound;
 pub mod section_corners;
 pub mod tangent_edge;
 pub mod tess;
+pub mod tube_cope;
 pub mod vertex_meet;
 
 pub use face_surface::{
