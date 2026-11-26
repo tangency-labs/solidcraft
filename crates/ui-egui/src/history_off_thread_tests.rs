@@ -553,6 +553,15 @@ fn switching_from_a_sketch_to_a_feature_defers_a_new_command_until_restoration()
     assert_eq!(marker(&h), None);
     assert_eq!(h.app.dialog.as_ref().unwrap().editing, None);
     let undo = h.app.session.undo.len();
+    // Wait for the box's preview, as a person does: the window's height changes while it
+    // computes, and a click aimed at OK a frame earlier can miss it.
+    for _ in 0..3000 {
+        if !h.app.preview.busy && h.app.applying.is_none() {
+            break;
+        }
+        h.frames(1);
+        std::thread::sleep(Duration::from_millis(10));
+    }
     h.frames(2);
     h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
     for _ in 0..500 {
@@ -684,6 +693,51 @@ fn an_agent_design_change_computes_off_the_window_thread() {
     let holes = std::f64::consts::PI * (4.0 * 15.0 + 9.0 * 10.0);
     let v = h.app.run("inspect.measure", json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
     assert!((v - (12500.0 - holes)).abs() < 1.0, "{v}");
+}
+
+/// A continuous member keeps the worker's sweep instead of computing it again on the window thread.
+#[test]
+fn an_agent_continuous_frame_member_reuses_the_worker_result() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Chassis"})).unwrap();
+    let mut lines = Vec::new();
+    for (command, params) in [
+        ("sketch.line", json!({"points": [[100, -200], [100, 0]]})),
+        ("sketch.arc.three_point", json!({"start": [100, 0], "through": [100.0 / 2f64.sqrt(), 100.0 / 2f64.sqrt()], "end": [0, 100]})),
+        ("sketch.line", json!({"points": [[0, 100], [-300, 100]]})),
+    ] {
+        let result = h.app.run(command, params).unwrap();
+        lines.extend(result["created"]["curves"].as_array().unwrap().iter().cloned());
+    }
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    h.app.preferences.agent_off_thread = true;
+    let (tx, rx) = std::sync::mpsc::channel();
+    h.app.control_rx = Some(rx);
+    let before = h.app.session.doc.clone();
+    let undo = h.app.session.undo.len();
+    let member = ask(
+        &tx,
+        "engine.execute",
+        json!({"command": "frame.member", "params": {
+            "sketch": "Chassis", "lines": lines, "continuous": true,
+            "profile": {"kind": "round_tube", "diameter": 20, "wall": 2}, "body_name": "Hoop"
+        }}),
+    );
+    let view = ask(&tx, "ui.inspect", json!({}));
+    h.frames(1);
+    assert!(view.try_recv().is_ok_and(|r| r["ok"] == true), "the window answers meanwhile");
+    if h.app.agent_computing().is_some() {
+        assert!(std::sync::Arc::ptr_eq(&before, &h.app.session.doc));
+    }
+    let reply = reply_to(&mut h, &member);
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(h.app.session.doc.features.len(), before.features.len() + 1);
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.model.last_recomputed, 0, "the window reuses the computed member");
+    assert_eq!(h.app.session.model.state().bodies.len(), 1);
+    assert_eq!(h.app.session.model.state().bodies[0].name, "Hoop");
 }
 
 /// A person's edit while the agent's command computes goes first; the agent's command is
@@ -964,6 +1018,63 @@ fn an_agent_export_runs_on_a_copy() {
     assert!(std::fs::metadata(&path).is_ok_and(|m| m.len() > 0), "written");
     assert!(h.app.session.log.iter().any(|l| l.contains("Export")), "echoed as when it runs here: {:?}", h.app.session.log);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_agent_cope_computes_ahead_and_its_template_export_reads_a_copy() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    for (name, points, diameter) in [("Rail", json!([[0, 0], [200, 0]]), 40), ("Mate", json!([[0, -150], [0, 150]]), 60)] {
+        let sketch = format!("{name} path");
+        for (command, params) in [
+            ("sketch.create", json!({"plane":"XY", "name":sketch})),
+            ("sketch.line", json!({"points":points, "ids":["l1"], "infer":false})),
+            ("sketch.finish", json!({})),
+            ("frame.member", json!({"sketch":sketch, "profile":{"kind":"round_tube", "diameter":diameter, "wall":2}, "body_name":name})),
+        ] {
+            h.app.run(command, params).unwrap();
+        }
+    }
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    h.app.preferences.agent_off_thread = true;
+    let (tx, rx) = std::sync::mpsc::channel();
+    h.app.control_rx = Some(rx);
+    let before = h.app.session.doc.clone();
+    let undo = h.app.session.undo.len();
+    let cope = ask(&tx, "engine.execute", json!({"command":"frame.cope", "params":{"member":"Rail", "tools":["Mate"], "end":"start"}}));
+    let view = ask(&tx, "ui.inspect", json!({}));
+    h.frames(1);
+    assert!(view.try_recv().is_ok_and(|r| r["ok"] == true), "the window answers meanwhile");
+    // The worker may already have finished; while it computes, the design is untouched.
+    if h.app.agent_computing().is_some() {
+        assert!(std::sync::Arc::ptr_eq(&before, &h.app.session.doc));
+    }
+    let reply = reply_to(&mut h, &cope);
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(h.app.session.doc.features.len(), before.features.len() + 1);
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.model.last_recomputed, 0, "the window reuses the computed cut");
+
+    let treated = h.app.session.doc.clone();
+    let undo = h.app.session.undo.len();
+    let path = h.dir.join("rail-start.dxf");
+    let export = ask(
+        &tx,
+        "engine.execute",
+        json!({"command":"frame.export_cope_dxf", "params":{"member":"Rail", "end":"start", "tolerance":0.05, "path":path}}),
+    );
+    let view = ask(&tx, "ui.inspect", json!({}));
+    h.frames(1);
+    // The worker may already have finished; while it reads its copy, no design change waits on it.
+    if !h.app.control_answering.is_empty() {
+        assert!(h.app.agent_computing().is_none(), "export holds no design-change slot");
+    }
+    assert!(view.try_recv().is_ok_and(|r| r["ok"] == true));
+    let reply = reply_to(&mut h, &export);
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert!(path.is_file());
+    assert!(std::sync::Arc::ptr_eq(&treated, &h.app.session.doc));
+    assert_eq!(h.app.session.undo.len(), undo);
 }
 
 /// #4604: measuring the whole design (an inspection measures every body) reads a copy off the
@@ -2440,4 +2551,38 @@ fn cancel_puts_back_a_parameter_change_computed_off_the_window_thread() {
         assert_eq!(len(&h).as_deref(), Some("60 mm"), "Cancel puts the edit back (in before Cancel: {in_before_cancel})");
         assert!(volume_at_len(&mut h, 60.0).abs() < 1.0);
     }
+}
+
+/// #15333: an agent's interference check of a motion study ran on the window thread, so a slow
+/// pair froze the window until the app was closed as not responding (the session then ended
+/// without a clean exit). The check only reads the design, so it is read on a copy now, as
+/// `inspect.interference` is, and answers from there.
+#[test]
+fn an_interference_check_of_a_motion_study_is_read_on_a_copy() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    for (name, x) in [("A", 0), ("B", 20)] {
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("component.create", json!({"name": name})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app.run("occurrence.ground", json!({"occurrence": "A:1", "grounded": true})).unwrap();
+    h.app.run("joint.create", json!({"type": "slider", "a": {"face": [10, 5, 5]}, "b": {"face": [20, 5, 5]}, "name": "Rail"})).unwrap();
+    h.app.run("joint.drive", json!({"joint": "Rail", "value": 10})).unwrap();
+    h.app.run("motion.study", json!({"name": "Push", "steps": 15, "keys": [{"joint": "Rail", "points": [[0, 10], [15, -5]]}]})).unwrap();
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    h.app.preferences.agent_off_thread = true;
+    let (tx, rx) = std::sync::mpsc::channel();
+    h.app.control_rx = Some(rx);
+    let check = ask(&tx, "engine.execute", json!({"command": "motion.interference", "params": {"study": "Push"}}));
+    h.frames(1);
+    assert_eq!(h.app.control_answering.len(), 1, "read on a copy, off the window thread");
+    let r = reply_to(&mut h, &check);
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(r["result"]["study"], json!("Push"), "{r}");
+    // B slides into A over the study: they collide from step 11 on.
+    let hits = r["result"]["collisions"].as_array().cloned().unwrap_or_default();
+    assert_eq!(hits.len(), 1, "{r}");
+    assert_eq!((&hits[0]["a"], &hits[0]["first_step"]), (&json!("A:1"), &json!(11.0)), "{r}");
 }

@@ -152,6 +152,12 @@ impl<G: ClassGeometry<O>, O: ClassObject> ClassGeometry<O> for WithTemporaries<'
             None => self.inner.curve(o),
         }
     }
+    fn intersect_curve(&self, o: O) -> Option<&Curve> {
+        if self.curves.iter().any(|(h, _)| *h == o) {
+            return None;
+        }
+        self.inner.intersect_curve(o)
+    }
     fn surface(&self, o: O) -> Option<&Surface> {
         match self.surfaces.iter().find(|(h, _)| *h == o) {
             Some((_, s)) => Some(*s),
@@ -216,6 +222,9 @@ fn insert_solutions<O: ClassObject>(
                 })
             }),
             nodes: s.nodes,
+            contact: s.contact,
+            unique: s.unique,
+            shared_contact: s.shared_contact,
         })
         .collect();
     super::p5::insert_solutions(k, geometry, cc, &mut mapped, target, Some(tol))?;
@@ -331,6 +340,9 @@ fn intersections(
                         num_objects: s.num_objects,
                         objects: [Some(this), Some(other), None, None, None],
                         nodes: s.nodes,
+                        contact: s.contact,
+                        unique: s.unique,
+                        shared_contact: s.shared_contact,
                     })
                     .collect());
             }

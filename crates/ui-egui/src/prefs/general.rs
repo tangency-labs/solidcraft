@@ -75,6 +75,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let tip = app.tr("prefs.keep_unsaved_in_browser_tip").to_string();
                 ui_kit::checkbox(ui, app.tr("prefs.keep_unsaved_in_browser"), &mut app.preferences.keep_unsaved_in_browser)
                     .backing_on_hover_text(tip);
+                if !app.preferences.keep_unsaved_in_browser {
+                    let response = setting::recover_after_browser_leave(app, ui);
+                    crate::scenario::publish_target("prefs:recover_after_browser_leave", response.rect);
+                }
                 if app.preferences.keep_unsaved_in_browser {
                     let tip = app.tr("prefs.keep_unsaved_also_asks_tip").to_string();
                     ui_kit::checkbox(ui, app.tr("prefs.keep_unsaved_also_asks"), &mut app.preferences.keep_unsaved_also_asks)
@@ -195,6 +199,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::settings_section(ui, "dialogs", app.tr("prefs.dialogs"), |ui| {
             let right_click = setting::right_click_confirms(app, ui);
             crate::scenario::publish_target("prefs:right_click_confirms", right_click.rect);
+            let import_options = setting::ask_import_options(app, ui);
+            crate::scenario::publish_target("prefs:ask_import_options", import_options.rect);
             let first_letter = setting::dialog_first_letter_buttons(app, ui).backing_on_hover_text(app.tr("prefs.dialog_first_letter_buttons_help"));
             crate::scenario::publish_target("prefs:dialog_first_letter_buttons", first_letter.rect);
         });

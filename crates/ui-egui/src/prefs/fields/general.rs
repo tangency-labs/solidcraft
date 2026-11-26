@@ -8,6 +8,10 @@
 macro_rules! general_preferences {
     ($next:ident $(, $rest:ident)* ; $($fields:tt)*) => {
         $next! { $($rest),* ; $($fields)*
+            /// Opening, inserting or dropping a file whose format has import options (STEP, IGES,
+            /// FreeCAD, Rhino, glTF) asks them first (`import_options`); off imports at once with the defaults,
+            /// as before.
+            ask_import_options: bool = true, PAGE_GENERAL => check_id("settings.ask_import_options");
             /// Import with cadmpeg: a STEP, IGES, FreeCAD or Rhino file is read from cadmpeg's model
             /// straight into B-rep records: a STEP or IGES file decoded by cadmpeg's STEP or IGES decoder
             /// instead of SolidCraft's own reader, and a FreeCAD or Rhino file's solids instead of
@@ -62,6 +66,8 @@ macro_rules! general_preferences {
             /// How strongly a print face stands out in the viewport (#8429): the share of the section
             /// colour in its tint, 0 to 1; its outline follows. 0 draws no highlight.
             print_face_highlight: f32 = 0.2, PAGE_GENERAL, accept(0.0..=1.0);
+            /// Keep offering the single autosave after browser departure; disabling it also affects exits without a prompt.
+            recover_after_browser_leave: bool = true, PAGE_GENERAL => check_id_help("prefs.recover_after_browser_leave", "prefs.recover_after_browser_leave_tip");
             /// Reopen the saved designs that were open when the app was last closed (#5542).
             reopen_designs: bool = true, PAGE_GENERAL;
             /// A right-click in the view with a dialog open confirms its input: on to the next one, then OK.

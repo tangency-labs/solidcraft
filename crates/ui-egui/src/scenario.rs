@@ -129,9 +129,10 @@ fn widget_near_centres(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)
     })
 }
 
-/// The app in a headless egui context.
+/// The app in a headless egui context. The app is boxed: it is hundreds of kilobytes, and a
+/// helper that returns or holds a harness would keep a copy of it in its stack frame (#21642).
 pub struct Harness {
-    pub app: SolveApp,
+    pub app: Box<SolveApp>,
     pub ctx: egui::Context,
     /// The last frame's platform output (with its accessibility tree: dialog widgets are found
     /// by their text there).
@@ -176,7 +177,7 @@ impl Harness {
         solidcraft_engine::use_import_cache_dir(std::env::temp_dir().join(format!("solidcraft-scenario-imports-{}", std::process::id())));
         solidcraft_ui_text::pin_system_language();
         let mut h = Harness {
-            app: SolveApp::new(Session::default(), Services::default()),
+            app: Box::new(SolveApp::new(Session::default(), Services::default())),
             ctx: {
                 let ctx = egui::Context::default();
                 crate::fonts::setup_bundled_fonts(&ctx);
@@ -285,6 +286,33 @@ impl Harness {
 
     pub fn frames(&mut self, n: usize) {
         for _ in 0..n {
+            self.frame();
+        }
+    }
+
+    /// `n` frames, each drawn once the dialog's preview worker has answered: what they show does
+    /// not depend on how fast the worker ran. On a loaded machine a preview's result (an error
+    /// row, say) can otherwise land a frame later than on an idle one.
+    #[cfg(test)]
+    pub fn frames_after_preview(&mut self, n: usize) {
+        for _ in 0..n {
+            self.app.preview.wait_for_worker();
+            self.frame();
+        }
+    }
+
+    /// `n` frames, each drawn once the model behind a finished sketch has been worked out on its
+    /// worker: a command waiting for that model (started while the marker rolls back) opens on
+    /// the same frame however fast the worker ran.
+    #[cfg(test)]
+    pub fn frames_after_sketch_refresh(&mut self, n: usize) {
+        for _ in 0..n {
+            let uids: Vec<u64> = self.app.sketch_refreshes.keys().copied().collect();
+            for uid in uids {
+                if let Some(job) = self.app.sketch_refreshes.remove(&uid) {
+                    self.app.sketch_refreshes.insert(uid, job.completed());
+                }
+            }
             self.frame();
         }
     }
@@ -481,6 +509,9 @@ impl Harness {
     }
 
     /// Run one step.
+    // The harness runs only under tests, where libtest captures `eprintln!`; `note!` would write
+    // past the capture and fill the logs of passing tests.
+    #[allow(clippy::print_stderr)]
     pub fn step(&mut self, s: &Value) -> Result<(), String> {
         let flag = |k: &str| s.get(k).and_then(Value::as_bool).unwrap_or(false);
         let res =
@@ -628,7 +659,7 @@ impl Harness {
                         self.frames(1);
                     }
                 }
-                let mut old = std::mem::replace(&mut self.app, SolveApp::new(Session::default(), Services::default()));
+                let mut old = std::mem::replace(&mut *self.app, SolveApp::new(Session::default(), Services::default()));
                 if how == "close" {
                     crate::recovery_ui::close(&mut old);
                     // The desktop saves its settings on close and loads them on the next start.

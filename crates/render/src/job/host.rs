@@ -1830,15 +1830,28 @@ impl ImageHost {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let pool = if usize::BITS >= 64 { super::NATIVE_CPU_POOL_BYTES } else { MEMORY_LIMIT };
-            let shared = Self::shared_with_memory(pool, Some(super::host_memory::shared_native_memory()));
-            let worker_shared = shared.clone();
-            let worker = std::thread::Builder::new()
-                .name("solidcraft-render".into())
-                .spawn(move || native_worker(worker_shared))
-                .map_err(|e| JobError::new(ErrorCode::HostUnavailable, format!("could not start CPU image worker: {e}")))?;
-            Ok(Self(Arc::new(Owner { executor: None, shared, kind: HostKind::NativeWorker, running: Mutex::new(None), _worker: Some(worker) })))
+            Self::native_cpu(super::host_memory::shared_native_memory())
         }
+    }
+
+    /// A native CPU host with its own RAM-admission ledger instead of the
+    /// process-wide one. Every host in a test process shares that ledger, so a
+    /// test that checks exact ledger totals needs one no other test can lease from.
+    #[cfg(all(not(target_arch = "wasm32"), any(test, feature = "test-support")))]
+    pub fn for_platform_with_own_memory_ledger() -> Result<Self> {
+        Self::native_cpu(Arc::new(super::host_memory::NativeMemoryPool::new()))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn native_cpu(memory: Arc<super::host_memory::NativeMemoryPool>) -> Result<Self> {
+        let pool = if usize::BITS >= 64 { super::NATIVE_CPU_POOL_BYTES } else { MEMORY_LIMIT };
+        let shared = Self::shared_with_memory(pool, Some(memory));
+        let worker_shared = shared.clone();
+        let worker = std::thread::Builder::new()
+            .name("solidcraft-render".into())
+            .spawn(move || native_worker(worker_shared))
+            .map_err(|e| JobError::new(ErrorCode::HostUnavailable, format!("could not start CPU image worker: {e}")))?;
+        Ok(Self(Arc::new(Owner { executor: None, shared, kind: HostKind::NativeWorker, running: Mutex::new(None), _worker: Some(worker) })))
     }
 
     /// Start an isolated bounded native worker. GPU discovery occurs before registration.

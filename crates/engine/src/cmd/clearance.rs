@@ -6,7 +6,7 @@
 //! that are left run in parallel. A pair whose bodies have not changed or moved since a call
 //! with the same settings measured it is not measured again ([`PairCache`]).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -37,7 +37,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("inspect.clearance", "C
      \"component\" (pairs of bodies inside one placed component, its subcomponents included) | null; envelopes?: bool (default false: component envelopes, solid.bounding_solid with `component`, are left out unless named; true: each is checked instead of the bodies inside it, and a body named inside one means it; an envelope is never paired with a body inside it); tolerance?: mm (default 1e-6: a gap \
      below it is contact, 0) → overlaps: [{a, b, volume_mm3, area_mm2, bbox, center}]; near: [{a, b, distance_mm, from, to, overlap_mm3?: \
      a contact's shared volume below min_volume, exact?: false when measured on the meshes}], nearest by body (the same for pairs that overlap: 0); \
-     nearest: {body: [{body, distance_mm}]}; unchecked: [{a, b, reason}] (pairs whose overlap could not be worked out; each mesh body, STL/3MF/OBJ import, is not measured and is listed as {a: name, b: null, reason: \"mesh body: not checked\"}, also when named in `bodies` or `against`; the result's `bodies` counts the solid bodies only); pairs_checked; \
+     nearest: {body: [{body, distance_mm}]} (omits pairs in unchecked); unchecked: [{a, b, reason, distance_mm?, exact?}] (pairs whose overlap could not be worked out, with non-boolean minimum distance when computable and exact: false when measured on the meshes; each mesh body, STL/3MF/OBJ import, is not measured and is listed as {a: name, b: null, reason: \"mesh body: not checked\"}, also when named in `bodies` or `against`; the result's `bodies` counts the solid bodies only); pairs_checked; \
      pairs_reused (of those, measured by an earlier call: neither body changed or moved since); pairs_pruned (ruled out by their boxes); ms. Distances are measured on the exact faces and edges, the meshes only rule pairs out",
 )];
 
@@ -61,6 +61,12 @@ const MAX_CACHED: usize = 2 * MAX_PAIRS;
 /// (clearance, smallest overlap, tolerance).
 #[derive(Default)]
 pub(crate) struct PairCache(HashMap<(u64, u64, [u64; 3]), PairResult>);
+
+impl PairCache {
+    pub(crate) fn clear(&mut self) {
+        self.0.clear();
+    }
+}
 
 /// What one pair came to.
 #[derive(Clone, Default)]
@@ -203,17 +209,37 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
             })
             .as_ref()
     };
+    let mut incomplete = vec![false; n];
     let boxes: Vec<Aabb3> = (0..n)
         .map(|i| match (solid.get(i), meshes.get(i).and_then(Option::as_ref)) {
             (Some(b), Some(m)) if flag(&used, i) => {
-                // Over the triangles with finite corners, as a shape's set of them is.
+                // Over the triangles with finite corners, as a shape's set of them is. Also track
+                // whether any face was left unmeshed so an incomplete or empty display mesh never
+                // silently prunes a body from overlap/clearance checks.
                 let mut bx = Aabb3::EMPTY;
-                for p in m.triangles.iter().filter_map(|t| m.tri(t)).filter(|p| p.iter().all(|v| v.is_finite())) {
+                let mut seen_faces = vec![false; b.body.face_count()];
+                for (k, t) in m.triangles.iter().enumerate() {
+                    let Some(p) = m.tri(t) else { continue };
+                    if !p.iter().all(|v| v.is_finite()) {
+                        continue;
+                    }
                     p.into_iter().for_each(|v| bx.add(v));
+                    if let Some(seen) = m.tri_face.get(k).and_then(|&fi| seen_faces.get_mut(fi as usize)) {
+                        *seen = true;
+                    }
                 }
                 let chord = b.display_tol();
                 let g = solidcore_record::Vec3::new(1.0, 1.0, 1.0) * if chord.is_finite() && chord > 0.0 { chord } else { 0.0 };
-                if bx.is_empty() { bx } else { Aabb3 { min: bx.min - g, max: bx.max + g } }
+                let mesh_box = if bx.is_empty() { bx } else { Aabb3 { min: bx.min - g, max: bx.max + g } };
+                if bx.is_empty() || seen_faces.iter().any(|&seen| !seen) {
+                    if let Some(slot) = incomplete.get_mut(i) {
+                        *slot = true;
+                    }
+                    let exact = b.body.exact_bounds().ok().unwrap_or_else(|| b.outline_bounds()).inflated(2.0 * b.body.record().tolerance);
+                    mesh_box.union(&exact)
+                } else {
+                    mesh_box
+                }
             }
             _ => Aabb3::EMPTY,
         })
@@ -251,7 +277,8 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
         let (Some(a), Some(b)) = (shape(i), shape(j)) else { return Ok(PairResult::default()) };
         let (Some(ba), Some(bb)) = (solid.get(i), solid.get(j)) else { return Ok(PairResult::default()) };
         let (Some(ka), Some(kb)) = (kept_body(i), kept_body(j)) else { return Ok(PairResult::default()) };
-        Ok(measure_pair((ba, ka), a, (bb, kb), b, gap, min_volume, tolerance))
+        let incomplete_pair = flag(&incomplete, i) || flag(&incomplete, j);
+        Ok(measure_pair((ba, ka), a, (bb, kb), b, gap, min_volume, tolerance, incomplete_pair))
     });
     if let Ok(mut cache) = s.clearance_cache.lock() {
         for (&k, r) in todo.iter().zip(&measured) {
@@ -274,8 +301,6 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let results = results.into_iter().map(|r| r.unwrap_or_else(|| Ok(PairResult::default())));
 
-    let mut known: HashMap<(usize, usize), f64> = HashMap::new();
-    let (mut overlaps, mut near) = (Vec::new(), Vec::new());
     // The mesh bodies the call was about (every one without `bodies`, else those named in
     // `bodies` or `against`) come first, so "nothing found" is not read as "no overlap".
     let mut asked: Vec<String> = Vec::new();
@@ -285,24 +310,87 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
     let mut unchecked: Vec<Unchecked> = mesh_bodies
         .iter()
         .filter(|b| p.get("bodies").is_none_or(Value::is_null) || asked.contains(&b.name))
-        .map(|b| Unchecked { a: b.name.clone(), b: None, reason: super::interference::MESH_NOT_CHECKED.to_string() })
+        .map(|b| Unchecked { a: b.name.clone(), b: None, reason: super::interference::MESH_NOT_CHECKED.to_string(), distance_mm: None, exact: None })
         .collect();
-    let name = |i: usize| solid.get(i).map_or("", |b| b.name.as_str());
-    let pair = |i: usize, j: usize, reason: String| Unchecked { a: name(i).to_string(), b: Some(name(j).to_string()), reason };
+    let names: Vec<&str> = solid.iter().map(|b| b.name.as_str()).collect();
+    let ctx = PairContext { names: &names, subjects: &subjects, boxes: &boxes, allowed: &allowed, gap, min_volume, nearest };
+    let summary = collect_pair_results(&ctx, &close, results, &mut unchecked, |pairs| {
+        solidcraft_kernel::map_with_local_pools(pairs, usize::MAX, |&(i, j)| {
+            let (Some(a), Some(b)) = (shape(i), shape(j)) else { return Ok(None) };
+            Ok(solidcraft_kernel::body_distance(a, b, f64::INFINITY)?.map(|d| if d.distance < tolerance { 0.0 } else { d.distance }))
+        })
+    });
+
+    let reply = ClearanceReply {
+        overlaps: summary.overlaps,
+        near: summary.near,
+        nearest: summary.nearest,
+        unchecked,
+        bodies: subjects.len(),
+        pairs_checked: close.len(),
+        pairs_reused: reused,
+        pairs_pruned: total.saturating_sub(close.len()),
+        truncated: truncated > 0,
+        ms: started.elapsed().as_secs_f64() * 1000.0,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
+
+struct PairContext<'a> {
+    names: &'a [&'a str],
+    subjects: &'a [usize],
+    boxes: &'a [Aabb3],
+    allowed: &'a dyn Fn(usize, usize) -> bool,
+    gap: f64,
+    min_volume: f64,
+    nearest: usize,
+}
+
+struct PairSummary {
+    overlaps: Vec<Overlap>,
+    near: Vec<NearPair>,
+    nearest: BTreeMap<String, Vec<Neighbour>>,
+}
+
+/// Turns measured close pairs into `overlaps`, `near`, `unchecked` and (when asked) `nearest`.
+/// Pairs whose measurement failed (`Err` or `r.unchecked`) are excluded from `nearest` so
+/// `body_distance` cannot fall back to reporting an unchecked collision as `0.0` mm contact.
+fn collect_pair_results(
+    ctx: &PairContext<'_>,
+    close: &[(usize, usize)],
+    results: impl IntoIterator<Item = solidcraft_kernel::Result<PairResult>>,
+    unchecked: &mut Vec<Unchecked>,
+    measure_distance: impl Fn(&[(usize, usize)]) -> Vec<solidcraft_kernel::Result<Option<f64>>>,
+) -> PairSummary {
+    let mut known: HashMap<(usize, usize), f64> = HashMap::new();
+    let mut unchecked_pairs: HashSet<(usize, usize)> = HashSet::new();
+    let (mut overlaps, mut near) = (Vec::new(), Vec::new());
+    let name = |i: usize| ctx.names.get(i).copied().unwrap_or("");
+    let pair = |i: usize, j: usize, reason: String, distance: Option<BodyDistance>| Unchecked {
+        a: name(i).to_string(),
+        b: Some(name(j).to_string()),
+        reason,
+        distance_mm: distance.map(|d| d.distance),
+        exact: distance.and_then(|d| (!d.exact).then_some(false)),
+    };
+    let key = |i: usize, j: usize| (i.min(j), i.max(j));
     for (&(i, j), r) in close.iter().zip(results) {
         let r = match r {
             Ok(r) => r,
             Err(e) => {
-                unchecked.push(pair(i, j, e.to_string()));
+                unchecked.push(pair(i, j, e.to_string(), None));
+                unchecked_pairs.insert(key(i, j));
                 continue;
             }
         };
         if let Some(reason) = r.unchecked {
-            unchecked.push(pair(i, j, reason));
+            unchecked.push(pair(i, j, reason, r.distance));
+            unchecked_pairs.insert(key(i, j));
             continue;
         }
         if let Some((volume, area, bbox, center)) = r.overlap
-            && volume >= min_volume
+            && volume >= ctx.min_volume
         {
             overlaps.push(Overlap {
                 a: name(i).to_string(),
@@ -312,12 +400,12 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
                 bbox: OverlapBounds { min: bbox.min.into(), max: bbox.max.into() },
                 center: center.into(),
             });
-            known.insert((i, j), 0.0);
+            known.insert(key(i, j), 0.0);
             continue;
         }
         let Some(d) = r.distance else { continue };
-        known.insert((i, j), d.distance);
-        if d.distance < gap {
+        known.insert(key(i, j), d.distance);
+        if d.distance < ctx.gap {
             near.push(NearPair {
                 a: name(i).to_string(),
                 b: name(j).to_string(),
@@ -332,37 +420,20 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
     near.sort_by(|x, y| x.distance_mm.total_cmp(&y.distance_mm));
 
     let mut nearest_out = BTreeMap::new();
-    if nearest > 0 {
-        let lists = nearest_lists(&subjects, n, nearest, &boxes, &allowed, &mut known, |pairs| {
-            solidcraft_kernel::map_with_local_pools(pairs, usize::MAX, |&(i, j)| {
-                let (Some(a), Some(b)) = (shape(i), shape(j)) else { return Ok(None) };
-                Ok(solidcraft_kernel::body_distance(a, b, f64::INFINITY)?.map(|d| if d.distance < tolerance { 0.0 } else { d.distance }))
-            })
-        });
+    if ctx.nearest > 0 {
+        let nearest_allowed = |i: usize, j: usize| (ctx.allowed)(i, j) && !unchecked_pairs.contains(&key(i, j));
+        let lists = nearest_lists(ctx.subjects, ctx.names.len(), ctx.nearest, ctx.boxes, &nearest_allowed, &mut known, measure_distance);
         for (i, list) in lists {
             let rows = list.iter().map(|&(j, d)| Neighbour { body: name(j).to_string(), distance_mm: d }).collect();
             nearest_out.insert(name(i).to_string(), rows);
         }
     }
-
-    let reply = ClearanceReply {
-        overlaps,
-        near,
-        nearest: nearest_out,
-        unchecked,
-        bodies: subjects.len(),
-        pairs_checked: close.len(),
-        pairs_reused: reused,
-        pairs_pruned: total.saturating_sub(close.len()),
-        truncated: truncated > 0,
-        ms: started.elapsed().as_secs_f64() * 1000.0,
-        param_warnings: Vec::new(),
-    };
-    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+    PairSummary { overlaps, near, nearest: nearest_out }
 }
 
 /// One pair: its overlap when the meshes meet or one holds the other, otherwise its distance
 /// when it may be closer than `gap`.
+#[allow(clippy::too_many_arguments)]
 fn measure_pair(
     (ba, ka): (&solidcraft_doc::ModelBody, &solidcraft_kernel::Body),
     a: &DistanceShape,
@@ -371,6 +442,7 @@ fn measure_pair(
     gap: f64,
     min_volume: f64,
     tolerance: f64,
+    incomplete_pair: bool,
 ) -> PairResult {
     let mut out = PairResult::default();
     let slack = 2.0 * (a.chord() + b.chord());
@@ -387,21 +459,11 @@ fn measure_pair(
         nested && i.positions.first().is_some_and(|p| o.contains(*p))
     };
     let touching = mesh.is_some_and(|m| m.distance <= slack);
-    if touching || holds(ba, bb) || holds(bb, ba) {
-        // A pair whose shared part can't be worked out is reported, not passed as clear.
-        match solidcraft_kernel::boolean(ka, kb, solidcraft_kernel::BoolOp::Intersect) {
-            Err(e) => {
-                out.unchecked = Some(e.to_string());
-                return out;
-            }
-            Ok(Some(o)) => match measure_near_origin(&o, shared_region(a, b).center()) {
-                Ok(m) => out.overlap = Some((m.volume, m.area, m.bbox, m.centroid)),
-                Err(e) => {
-                    out.unchecked = Some(e.to_string());
-                    return out;
-                }
-            },
-            Ok(None) => {}
+    let may_overlap = touching || holds(ba, bb) || holds(bb, ba) || (incomplete_pair && !solidcraft_kernel::apart(ka, kb).unwrap_or(false));
+    if may_overlap {
+        intersect_pair((ka, a), (kb, b), min_volume, tolerance, incomplete_pair, &mut out);
+        if out.unchecked.is_some() {
+            return out;
         }
         if out.overlap.is_some_and(|o| o.0 >= min_volume) {
             return out;
@@ -414,6 +476,9 @@ fn measure_pair(
         }
     }
     if mesh.is_none() {
+        if incomplete_pair && gap > 0.0 {
+            out.unchecked = Some("mesh incomplete: clearance could not be verified on unmeshed faces".into());
+        }
         return out;
     }
     match solidcraft_kernel::body_distance(a, b, gap) {
@@ -421,12 +486,231 @@ fn measure_pair(
             if d.distance < tolerance {
                 d.distance = 0.0;
             }
-            out.distance = Some(d);
+            if incomplete_pair && (d.distance > 0.0 || !d.exact) {
+                out.unchecked = Some("mesh incomplete: clearance could not be verified on unmeshed faces".into());
+            } else {
+                out.distance = Some(d);
+            }
         }
-        Ok(None) => {}
+        Ok(None) => {
+            if incomplete_pair && gap > 0.0 {
+                out.unchecked = Some("mesh incomplete: clearance could not be verified on unmeshed faces".into());
+            }
+        }
         Err(e) => out.unchecked = Some(e.to_string()),
     }
     out
+}
+
+/// Runs the exact intersection boolean for one pair under `Validation::EachStep`, retrying in
+/// reversed operand order, checking certified disjointness (`interiors_disjoint`), retrying
+/// shifted near the shared region on kernel failure, and falling back to a sanity-checked
+/// `Validation::Off` measurement when SMLib's check alone refused the temporary overlap solid
+/// while both operands passed; verifies an empty boolean result against exact interior point
+/// witnesses so a real overlap is never silently reported as clear; and attaches a non-boolean
+/// fallback distance when a pair still lands in `unchecked`.
+fn intersect_pair(
+    (ka, a): (&solidcraft_kernel::Body, &DistanceShape),
+    (kb, b): (&solidcraft_kernel::Body, &DistanceShape),
+    min_volume: f64,
+    tolerance: f64,
+    incomplete_pair: bool,
+    out: &mut PairResult,
+) {
+    let at = shared_center(a, b, ka, kb);
+    let is_cancelled = || solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled());
+    if is_cancelled() {
+        out.unchecked = Some("cancelled".into());
+        return;
+    }
+    let fallback_distance = |out: &mut PairResult| {
+        if is_cancelled() {
+            return;
+        }
+        if let Ok(Some(mut d)) = solidcraft_kernel::body_distance(a, b, f64::INFINITY) {
+            if d.distance < tolerance {
+                d.distance = 0.0;
+            }
+            if !incomplete_pair || (d.distance == 0.0 && d.exact) {
+                out.distance = Some(d);
+            }
+        }
+    };
+    let record_overlap = |m: solidcraft_kernel::MassMeasure, out: &mut PairResult| {
+        if m.volume > 0.0
+            && let Some(why) = super::interference::impossible_overlap(m.volume, &m.bbox, ka, kb)
+        {
+            out.unchecked = Some(why);
+            return;
+        }
+        out.overlap = Some((m.volume, m.area, m.bbox, m.centroid));
+    };
+    let verify_empty = |out: &mut PairResult| {
+        if is_cancelled() {
+            out.unchecked = Some("cancelled".into());
+            return;
+        }
+        match solidcraft_kernel::overlap_witness(a, b) {
+            Ok(None) => {}
+            Err(e) => {
+                out.unchecked = Some(e.to_string());
+                fallback_distance(out);
+            }
+            Ok(Some(witness)) => {
+                // Exact point classification proved interior overlap despite the empty boolean:
+                // retry shifted directly to the witness point (both operand orders) before
+                // recording the pair as unchecked.
+                let recovered = if is_cancelled() {
+                    None
+                } else if let Some(m) = intersect_shifted(ka, kb, witness, false) {
+                    Some(m)
+                } else if !is_cancelled() {
+                    intersect_shifted(ka, kb, witness, true)
+                } else {
+                    None
+                };
+                if let Some(m) = recovered {
+                    record_overlap(m, out);
+                } else {
+                    out.unchecked = Some(format!(
+                        "overlap at [{:.3}, {:.3}, {:.3}] could not be intersected by the boolean kernel",
+                        witness.x, witness.y, witness.z
+                    ));
+                    fallback_distance(out);
+                }
+            }
+        }
+    };
+
+    // A pair whose shared part can't be worked out is reported, not passed as clear. SMLib's
+    // check of the shared part runs here: a part it refuses is reported unless a sanity-checked
+    // measurement-only fallback recovers a valid overlap when both operands passed SMLib's check.
+    match run_intersect(ka, kb) {
+        Ok(Some(o)) => match measure_near_origin(&o, at) {
+            Ok(m) => record_overlap(m, out),
+            Err(e) => {
+                out.unchecked = Some(e.to_string());
+                fallback_distance(out);
+            }
+        },
+        Err(first_err) => {
+            if is_cancelled() {
+                out.unchecked = Some(first_err.to_string());
+                return;
+            }
+            match run_intersect(kb, ka) {
+                Ok(Some(o)) => match measure_near_origin(&o, at) {
+                    Ok(m) => record_overlap(m, out),
+                    Err(e) => {
+                        out.unchecked = Some(e.to_string());
+                        fallback_distance(out);
+                    }
+                },
+                Ok(None) => verify_empty(out),
+                Err(second_err) => {
+                    if is_cancelled() {
+                        out.unchecked = Some(first_err.to_string());
+                        return;
+                    }
+                    if solidcraft_kernel::interiors_disjoint(ka, kb) == Some(true) {
+                        return;
+                    }
+                    if !is_cancelled()
+                        && let Some(m) = retry_shifted_intersect(ka, kb, at, &is_cancelled)
+                    {
+                        record_overlap(m, out);
+                        return;
+                    }
+                    match super::interference::fallback_unchecked_overlap(
+                        ka,
+                        kb,
+                        (&first_err, &second_err),
+                        |o| measure_near_origin(o, at),
+                        |v| v > 0.0 && v >= min_volume,
+                        is_cancelled,
+                    ) {
+                        super::interference::UncheckedFallback::Measured(m) => {
+                            out.overlap = Some((m.volume, m.area, m.bbox, m.centroid));
+                        }
+                        super::interference::UncheckedFallback::Cancelled => {
+                            out.unchecked = Some(first_err.to_string());
+                        }
+                        super::interference::UncheckedFallback::NotRecovered => {
+                            out.unchecked = Some(first_err.to_string());
+                            fallback_distance(out);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(None) => verify_empty(out),
+    }
+}
+
+fn run_intersect(a: &solidcraft_kernel::Body, b: &solidcraft_kernel::Body) -> solidcraft_kernel::Result<Option<solidcraft_kernel::Body>> {
+    solidcraft_kernel::validating(solidcraft_kernel::Validation::EachStep, || solidcraft_kernel::boolean(a, b, solidcraft_kernel::BoolOp::Intersect))
+        .0
+}
+
+/// Retries a failed intersection near the origin (when placed away from it) in both operand orders.
+/// Only a validated non-empty solid result replaces the original error.
+fn retry_shifted_intersect(
+    ka: &solidcraft_kernel::Body,
+    kb: &solidcraft_kernel::Body,
+    at: solidcore_record::Vec3,
+    is_cancelled: &impl Fn() -> bool,
+) -> Option<solidcraft_kernel::MassMeasure> {
+    let far = at.x.abs().max(at.y.abs()).max(at.z.abs()) > 1.0;
+    if !far || is_cancelled() {
+        return None;
+    }
+    if let Some(m) = intersect_shifted(ka, kb, at, false) {
+        return Some(m);
+    }
+    if is_cancelled() {
+        return None;
+    }
+    intersect_shifted(ka, kb, at, true)
+}
+
+/// Intersects `ka` and `kb` translated by `-at` (so the shared region sits at the origin) and
+/// translates the measured overlap box and centroid back by `+at`.
+fn intersect_shifted(
+    ka: &solidcraft_kernel::Body,
+    kb: &solidcraft_kernel::Body,
+    at: solidcore_record::Vec3,
+    swap: bool,
+) -> Option<solidcraft_kernel::MassMeasure> {
+    if !at.is_finite() {
+        return None;
+    }
+    let ta = solidcraft_kernel::transform(ka, -at, solidcore_record::Vec3::ZERO, solidcore_record::Vec3::Z, 0.0).ok()?;
+    let tb = solidcraft_kernel::transform(kb, -at, solidcore_record::Vec3::ZERO, solidcore_record::Vec3::Z, 0.0).ok()?;
+    let (first, second) = if swap { (&tb, &ta) } else { (&ta, &tb) };
+    let overlap = run_intersect(first, second).ok()??;
+    let mut m = solidcraft_kernel::measure_mass(&overlap).ok()?;
+    if !m.volume.is_finite() || m.volume <= 0.0 {
+        return None;
+    }
+    m.centroid += at;
+    m.bbox = Aabb3 { min: m.bbox.min + at, max: m.bbox.max + at };
+    Some(m)
+}
+
+/// Center of the shared region of `a` and `b`, falling back to their exact bounding boxes when a
+/// display mesh is empty or incomplete.
+fn shared_center(a: &DistanceShape, b: &DistanceShape, ka: &solidcraft_kernel::Body, kb: &solidcraft_kernel::Body) -> solidcore_record::Vec3 {
+    let region = shared_region(a, b);
+    if !region.is_empty() {
+        return region.center();
+    }
+    if let (Ok(ea), Ok(eb)) = (ka.exact_bounds(), kb.exact_bounds()) {
+        let exact = ea.intersection(&eb);
+        if !exact.is_empty() {
+            return exact.center();
+        }
+    }
+    solidcore_record::Vec3::ZERO
 }
 
 /// The box where two bodies may share volume: where their boxes meet, grown by a margin.
@@ -442,11 +726,11 @@ fn shared_region(a: &DistanceShape, b: &DistanceShape) -> Aabb3 {
     Aabb3 { min: min - g, max: max + g }
 }
 
-/// [`solidcraft_kernel::measure`] of `body` moved by `-at` and back: far from the origin, the
+/// [`solidcraft_kernel::measure_mass`] of `body` moved by `-at` and back: far from the origin, the
 /// centre of a thin part loses its precision (its moments are large numbers that nearly cancel).
-fn measure_near_origin(body: &solidcraft_kernel::Body, at: solidcore_record::Vec3) -> solidcraft_kernel::Result<solidcraft_kernel::BodyMeasure> {
+fn measure_near_origin(body: &solidcraft_kernel::Body, at: solidcore_record::Vec3) -> solidcraft_kernel::Result<solidcraft_kernel::MassMeasure> {
     let moved = solidcraft_kernel::transform(body, -at, solidcore_record::Vec3::ZERO, solidcore_record::Vec3::Z, 0.0)?;
-    let mut m = solidcraft_kernel::measure(&moved)?;
+    let mut m = solidcraft_kernel::measure_mass(&moved)?;
     m.centroid += at;
     m.bbox = Aabb3 { min: m.bbox.min + at, max: m.bbox.max + at };
     Ok(m)
@@ -476,7 +760,7 @@ fn nearest_lists(
         c.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)));
         order.insert(i, (c, 0));
     }
-    let mut failed: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+    let mut failed: HashSet<(usize, usize)> = HashSet::new();
     let measured = |known: &HashMap<(usize, usize), f64>, i: usize, c: &[(f64, usize)]| -> Vec<(usize, f64)> {
         let mut l: Vec<(usize, f64)> = c.iter().filter_map(|&(_, j)| known.get(&key(i, j)).map(|d| (j, *d))).collect();
         l.sort_by(|x, y| x.1.total_cmp(&y.1).then(x.0.cmp(&y.0)));

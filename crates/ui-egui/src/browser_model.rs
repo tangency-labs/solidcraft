@@ -106,7 +106,7 @@ impl Model {
             index.entry(feature.component).or_default().push(i);
         }
         let mut children: HashMap<u64, Vec<u64>> = HashMap::new();
-        for occurrence in &session.doc.occurrences {
+        for occurrence in session.doc.active_occurrences() {
             children.entry(occurrence.parent).or_default().push(occurrence.id);
         }
         // Sub-components in the order the design saved for them; the rest follow in placement order.

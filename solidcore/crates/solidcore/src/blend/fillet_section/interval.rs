@@ -201,7 +201,6 @@ impl Ivl {
     }
 
     /// `sm_Checked`: `[a, b]` rounded outward, or the whole line if either is NaN.
-    #[inline]
     #[must_use]
     pub fn checked(a: f64, b: f64) -> Self {
         if a.is_nan() || b.is_nan() {
@@ -392,20 +391,7 @@ impl Sub for Ivl {
 
 impl Mul for Ivl {
     type Output = Self;
-    #[inline]
     fn mul(self, b: Self) -> Self {
-        // Not the fork's: where both operands are finite and in order and one of them lies
-        // on one side of 0, the smallest and largest of the four products are known from
-        // the signs, and only those two are formed. Rounding to nearest is monotone (`x <=
-        // y` gives `fl(x) <= fl(y)`, an overflow included), and `product` is the floating
-        // product bit for bit, so they are the four products' least and greatest, as the
-        // general case below picks them: the same ends up to the sign of a zero, which
-        // `checked` takes to the same bits (`round_down(±0) = -1e-300`, `round_up(±0) =
-        // 1e-300`). Finite operands have no NaN product. The unit test
-        // `the_signed_product_is_the_general_one_bit_for_bit` compares the two.
-        if let Some((lo, hi)) = signed_product_ends(self, b) {
-            return Self::checked(lo, hi);
-        }
         let p0 = product(self.lo, b.lo);
         let rest = [
             product(self.lo, b.hi),
@@ -425,44 +411,6 @@ impl Mul for Ivl {
     }
 }
 
-/// The least and greatest of the four products of the ends of `a` and `b` ([`product`]),
-/// formed from the two the signs pick, where both are finite and in order and one of them
-/// does not straddle 0; `None` otherwise (the general case).
-#[inline]
-fn signed_product_ends(a: Ivl, b: Ivl) -> Option<(f64, f64)> {
-    let ordered = |x: Ivl| x.lo.is_finite() && x.hi.is_finite() && x.lo <= x.hi;
-    if !(ordered(a) && ordered(b)) {
-        return None;
-    }
-    let (al, ah, bl, bh) = (a.lo, a.hi, b.lo, b.hi);
-    // each operand: at least 0, at most 0, or across 0
-    let ends = if al >= 0.0 {
-        if bl >= 0.0 {
-            (al, bl, ah, bh)
-        } else if bh <= 0.0 {
-            (ah, bl, al, bh)
-        } else {
-            (ah, bl, ah, bh)
-        }
-    } else if ah <= 0.0 {
-        if bl >= 0.0 {
-            (al, bh, ah, bl)
-        } else if bh <= 0.0 {
-            (ah, bh, al, bl)
-        } else {
-            (al, bh, al, bl)
-        }
-    } else if bl >= 0.0 {
-        (al, bh, ah, bh)
-    } else if bh <= 0.0 {
-        (ah, bl, al, bl)
-    } else {
-        return None;
-    };
-    let (x0, y0, x1, y1) = ends;
-    Some((product(x0, y0), product(x1, y1)))
-}
-
 impl Div for Ivl {
     type Output = Self;
     fn div(self, b: Self) -> Self {
@@ -477,109 +425,6 @@ impl Div for Ivl {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The product as the fork forms it, all four products of the ends, for
-    /// `the_signed_product_is_the_general_one_bit_for_bit`.
-    fn general_mul(a: Ivl, b: Ivl) -> Ivl {
-        let p0 = product(a.lo, b.lo);
-        let rest = [
-            product(a.lo, b.hi),
-            product(a.hi, b.lo),
-            product(a.hi, b.hi),
-        ];
-        let (mut lo, mut hi) = (p0, p0);
-        for pi in rest {
-            if pi.is_nan() {
-                return Ivl::whole();
-            }
-            lo = cmin(lo, pi);
-            hi = cmax(hi, pi);
-        }
-        Ivl::checked(lo, hi)
-    }
-
-    /// The two products the signs pick give the same interval as the four, bit for bit
-    /// (NaN ends compared as NaN), over random ends across every binade, ends near the
-    /// subnormal window, zeros of both signs, infinities, NaN, point intervals and
-    /// intervals out of order, in every combination of signs.
-    #[test]
-    fn the_signed_product_is_the_general_one_bit_for_bit() {
-        let same_bits = |x: f64, y: f64| x.to_bits() == y.to_bits() || (x.is_nan() && y.is_nan());
-        let check = |a: Ivl, b: Ivl| {
-            let (fast, slow) = (a * b, general_mul(a, b));
-            assert!(
-                same_bits(fast.lo, slow.lo) && same_bits(fast.hi, slow.hi),
-                "{a:?} * {b:?}: {fast:?} against {slow:?}"
-            );
-        };
-        let special = [
-            0.0,
-            -0.0,
-            1.0,
-            -1.0,
-            1e-300,
-            -1e-300,
-            2.3e-16,
-            f64::MIN_POSITIVE,
-            -f64::MIN_POSITIVE,
-            5e-324,
-            -5e-324,
-            1e-160,
-            -1e-160,
-            1e160,
-            -1e160,
-            f64::MAX,
-            -f64::MAX,
-            f64::INFINITY,
-            f64::NEG_INFINITY,
-            f64::NAN,
-        ];
-        for &a0 in &special {
-            for &a1 in &special {
-                for &b0 in &special {
-                    for &b1 in &special {
-                        check(Ivl::new(a0, a1), Ivl::new(b0, b1));
-                    }
-                }
-            }
-        }
-        let mut seed = 0x2545_f491_4f6c_dd1d_u64;
-        let mut next = || {
-            seed ^= seed << 13;
-            seed ^= seed >> 7;
-            seed ^= seed << 17;
-            seed
-        };
-        // a random double: any sign, any binade (subnormals and the window around them
-        // included), any significand; occasionally a zero or a value shared with the other
-        // end
-        let mut random = || {
-            let r = next();
-            match r % 16 {
-                0 => 0.0,
-                1 => -0.0,
-                _ => {
-                    let e = (next() % 2047) & 0x7ff;
-                    let m = next() & ((1 << 52) - 1);
-                    f64::from_bits(((r & 1) << 63) | (e << 52) | m)
-                }
-            }
-        };
-        for _ in 0..400_000 {
-            let (a0, a1, b0, b1) = (random(), random(), random(), random());
-            let order = |x: f64, y: f64| if x <= y { (x, y) } else { (y, x) };
-            let (a0, a1) = order(a0, a1);
-            let (b0, b1) = order(b0, b1);
-            check(Ivl::new(a0, a1), Ivl::new(b0, b1));
-            check(Ivl::new(a1, a0), Ivl::new(b0, b1));
-            check(Ivl::from(a0), Ivl::new(b0, b1));
-            check(Ivl::new(a0, a1), Ivl::from(b1));
-            // ends near 1e-300, where the integer product and widening take over
-            let tiny = |x: f64| x * 1e-290;
-            check(Ivl::new(tiny(a0), tiny(a1)), Ivl::new(b0, b1));
-            check(Ivl::new(tiny(a0), tiny(a1)), Ivl::new(tiny(b0), tiny(b1)));
-        }
-    }
 
     /// The integer product is the floating one bit for bit, over every pair of binades
     /// whose product can be subnormal (random significands and signs, a fixed seed), on

@@ -493,6 +493,42 @@ fn a_folded_chip_of_the_apps_own_takes_its_slots_and_the_marker_inside_it_goes_a
     assert_eq!(rig.drag(d, folded - vec2(20.0, 0.0)), vec![Action::Reorder { step: 4, slot: 1, before: true }]);
 }
 
+/// An open chip's first slot is a drop's place both before its tray and after the chip: left of
+/// the chip the bar goes before the tray, on the chip or after it, before its first step (#18471).
+#[test]
+fn an_open_chips_first_slot_is_before_its_tray_or_after_the_chip() {
+    // Marker places: slot 0 (before step A) at 0, slot 1 at 30 before a tray whose chip spans
+    // 36..96 and holds step B (its slot shares the place before the tray), the end at 132.
+    let (xs, end) = ([0.0, 30.0], 132.0);
+    let heads = [Head { slot: 1, chip: (36.0, 96.0), inside: 98.0 }];
+    assert_eq!(slot_at(&xs, &[], &heads, end, 31.0), (1, 30.0), "just before the tray");
+    assert_eq!(slot_at(&xs, &[], &heads, end, 40.0), (1, 98.0), "on the chip's left end: after it");
+    assert_eq!(slot_at(&xs, &[], &heads, end, 97.0), (1, 98.0), "between the chip and its step");
+    assert_eq!(slot_at(&xs, &[], &heads, end, 10.0), (0, 0.0), "before A");
+    assert_eq!(slot_at(&xs, &[], &[], end, 70.0), (1, 30.0), "no open chip: before the tray");
+    // The chip's first slot opens another one: a tray from 100 whose chip spans 104..150, then B
+    // (its slot still at 30). On the outer chip the bar goes right after it, before the inner
+    // tray, not past it.
+    let (xs, end) = ([0.0, 30.0], 184.0);
+    let heads = [Head { slot: 1, chip: (36.0, 96.0), inside: 98.0 }, Head { slot: 1, chip: (104.0, 150.0), inside: 152.0 }];
+    assert_eq!(slot_at(&xs, &[], &heads, end, 60.0), (1, 98.0), "on the outer chip: before the inner tray");
+    assert_eq!(slot_at(&xs, &[], &heads, end, 120.0), (1, 152.0), "on the inner chip: before B");
+}
+
+/// The drop bar at the marker's slot goes beside the marker, unless the drop is on or past an
+/// open chip whose first slot that is: then it is inside its tray, and the bar shows it there.
+#[test]
+fn the_drop_bar_at_the_marker_before_an_open_chip_shows_a_drop_on_the_chip_inside_it() {
+    // The marker at slot 1 spans 24..36 (centred at 30, before the tray), the chip spans 36..96.
+    let marker = Rect::from_min_max(pos2(24.0, 5.0), pos2(36.0, 35.0));
+    let heads = [Head { slot: 1, chip: (36.0, 96.0), inside: 98.0 }];
+    assert_eq!(bar_x(1, 98.0, 60.0, Some(marker), &heads), 98.0, "on the chip: inside, after it");
+    assert_eq!(bar_x(1, 98.0, 97.0, Some(marker), &heads), 98.0, "past the chip: inside");
+    assert_eq!(bar_x(1, 30.0, 31.0, Some(marker), &heads), 38.0, "right of the marker's centre: after it");
+    assert_eq!(bar_x(1, 30.0, 26.0, Some(marker), &heads), 22.0, "left of the marker's centre: before it");
+    assert_eq!(bar_x(1, 98.0, 60.0, None, &heads), 98.0, "the marker elsewhere");
+}
+
 #[test]
 fn dropping_on_a_folded_chip_at_the_start_lands_before_the_group() {
     let mut rig = Rig::new(&["A", "B", "C"], 3);
