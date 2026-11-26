@@ -444,6 +444,7 @@ pub use route::check_bend_clearance;
 pub use route::curves;
 pub use route::cylinder;
 pub use route::default_cell_grid;
+pub use route::develop;
 pub use route::extrude;
 pub use route::fillet;
 pub use route::gusset_prepare;

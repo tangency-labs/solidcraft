@@ -19,7 +19,6 @@ pub use solidcore_ops::PointNormalFace;
 pub use solidcore_ops::cancel;
 pub use solidcore_ops::centroid_and_mean_radius;
 pub use solidcore_ops::constraint;
-pub use solidcore_ops::develop;
 pub use solidcore_ops::dxf;
 pub use solidcore_ops::face_pair;
 pub use solidcore_ops::face_surface;
