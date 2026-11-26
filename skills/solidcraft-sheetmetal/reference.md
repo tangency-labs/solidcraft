@@ -100,6 +100,11 @@ name. When you omit `name`, the command returns the last bend's feature ID and n
 - `sheet.export_bend_table`: `body?`, `format?` (`csv`|`json`), `path?`. Each row gives the bend's
   angle, direction, radius, allowance, length and its flat centre line, so an agent can check
   where a bend landed.
+- `sheet.check_shop`: `shop` (`generic`, one of your preset ids, a profile file's path or a profile
+  object), `body?`, `dxf?`. Read-only. Core ships Generic, a strict preliminary check; a shop's own
+  numbers are a preset: `sheet.shop_presets` (`profile?` gives Generic's or a preset's object to
+  edit), `sheet.save_shop_preset` (`name?`, `profile` or `path`), `sheet.delete_shop_preset`
+  (`id`). Presets are the user's, kept with their preferences. Format: `docs/formats/shop-rules.md`.
 
 ### On a drawing
 A note (`drawing.note.add`) or a title block cell on a sheet that documents a sheet metal part

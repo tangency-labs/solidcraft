@@ -26,10 +26,10 @@ A sheet metal part is a flat sheet plus bends: base first, then flanges. Work th
 - Parameters, not numbers; edge picks are plain numbers.
 
 ## Verify
-- `sheet.flat_pattern` and `sheet.export_bend_table {"format":"json"}` give the flat size, outline and each bend's line, length and allowance.
-- `sheet.check_shop {"shop":"pcbway"}`: findings; pass the reply's `dxf` keys, not `from`, to `sheet.export_dxf` as params.
+- `sheet.flat_pattern`, `sheet.export_bend_table {"format":"json"}`: flat size, each bend's line, length, allowance.
+- `sheet.check_shop {"shop":"generic"}` or a preset id (`sheet.shop_presets`): findings; `sheet.export_dxf` takes the reply's `dxf` minus `from`.
 - `measure` must match the flat area times thickness; a bend that keeps the volume has not built.
-- `inspect.interference`/`inspect.clearance` against mating bodies.
+- `inspect.interference`/`clearance` against mating bodies.
 
 ## The AI workflow (FR-17 to FR-20)
 1. **Segments:** derive count and boundaries from the intent (stiffeners, clearances, mating faces), state the assumption and confidence, offer an alternative, compute the fractions.

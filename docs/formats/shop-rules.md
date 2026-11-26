@@ -5,12 +5,40 @@ stocks, its smallest hole, how near a hole may be to an edge or a bend, whether 
 hardware are modelled. `sheet.check_shop` holds a part against one. Each value keeps the page it
 came from, so a number that changes is a one-line edit, and a rule whose pages disagree says so.
 
-The built-in profiles are `assets/sheet-metal/shop-rules.json`: `generic` (what PCBWay, JLCCNC
-and SendCutSend ask in common, taken strictly), `pcbway`, `jlccnc` and `sendcutsend`. Every value
-there was checked against the shop's own page on 2026-11-25; a profile's note names the few
-values that still need a spot check. `sheet.check_shop` also takes a profile as an object,
-or the path of a file holding one (a path ends in `.json`). Profiles are read only from files you
-name; SolidCraft never fetches one.
+SolidCraft ships one profile, `generic`, in `assets/sheet-metal/shop-rules.json`: a strict preliminary
+check, the strictest of the values laser-cutting and press-brake shops commonly publish. It has no
+stock list or sheet size, which differ from shop to shop, and its note names the few values that still
+need a spot check. A named shop's own numbers are not built in: they come from a plugin, or from
+you, as a preset.
+
+`sheet.check_shop` takes `shop` as `generic`, as the id of a preset, as the path of a profile file
+(a path ends in `.json`), or as a profile object. Profiles are read only from files you name;
+SolidCraft never fetches one.
+
+## Presets
+
+A preset is your own profile, kept under an id and a name and offered by `sheet.check_shop` and by
+the Shop Check window beside Generic. It is checked exactly as any profile is (below) before it is
+kept, and again when your list is read back, so a damaged entry is left out and never breaks the
+others. Presets belong to you, not to a design: the app keeps them with your preferences (so they are
+there in every design, and in the browser), and a script or the command line keeps the ones it saves
+for the session.
+
+- `sheet.shop_presets` lists the built-in profile and your presets (ids and names). With
+  `{"profile": "generic"}` (or a preset's id) it also gives that profile as the object a preset starts
+  from (Generic's has no `id`: the preset's is made from its name).
+- `sheet.save_shop_preset` keeps a profile as a preset: `{"name": "Acme Fab", "profile": {...}}`, or
+  `{"path": "acme.json"}` for a file holding one profile object (the format below). The id is the
+  profile's `id`, or one made from the name (`Acme Fab` is `acme-fab`); a preset of the same id is
+  replaced. A profile that is not valid is refused with the rule and the value. `Generic` is the
+  built-in profile's name and id, and not a preset's. Up to 32 presets, each at most 256 KiB.
+- `sheet.delete_shop_preset` removes one: `{"id": "acme-fab"}`.
+
+In the Shop Check window the Shop row lists Generic and your presets. Under it, **Save as preset...**
+keeps the shop shown (Generic's values for a first preset) under a new name, **Import profile
+file...** reads a profile file into a preset, and **Delete preset** removes the one shown after a
+second click. To set your shop's numbers, make a preset from Generic, or write a profile file in the
+format below, then edit the values and import it again: the same id replaces the preset.
 
 ## File (version 1)
 
