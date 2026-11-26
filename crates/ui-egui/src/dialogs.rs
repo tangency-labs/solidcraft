@@ -8933,8 +8933,13 @@ pub(crate) fn profile_indices(ss: &solidcraft_engine::doc::SolvedSketch, sel: &P
     let mut indices: Vec<usize> = match sel {
         ProfileSel::All => (0..ps.len()).collect(),
         ProfileSel::Indices { indices } => indices.iter().copied().filter(|i| *i < ps.len()).collect(),
-        ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } | ProfileSel::SidedCurves { .. } => {
+        ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } => {
             solidcraft_engine::doc::profile_selection_indices(ss, sel).unwrap_or_default()
+        }
+        // The regions the feature builds, also those a change of the regions left to the closest
+        // match (#22548): re-saving the dialog must not drop them.
+        ProfileSel::SidedCurves { .. } => {
+            solidcraft_engine::doc::profile_selection_indices_lenient(ss, sel).map(|(found, _)| found).unwrap_or_default()
         }
         ProfileSel::Curves { loops } => loops
             .iter()

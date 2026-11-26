@@ -503,11 +503,13 @@ fn extrude_base(s: &Session, p: &Value) -> Option<(Vec3, Vec3)> {
         ProfileSel::All => ps.first()?.region.interior_point(),
         ProfileSel::Indices { indices } => ps.get(*indices.first()?)?.region.interior_point(),
         ProfileSel::Points { points } => *points.first()?,
-        selection @ (ProfileSel::Curves { .. }
-        | ProfileSel::OffsetBoundaries { .. }
-        | ProfileSel::WholeBoundaries { .. }
-        | ProfileSel::SidedCurves { .. }) => {
+        selection @ (ProfileSel::Curves { .. } | ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. }) => {
             let indices = solidcraft_doc::profile_selection_indices(ss, &selection).ok()?;
+            ps.get(*indices.first()?)?.region.interior_point()
+        }
+        // Where the feature builds, also after a change of the regions (#22548).
+        selection @ ProfileSel::SidedCurves { .. } => {
+            let (indices, _) = solidcraft_doc::profile_selection_indices_lenient(ss, &selection).ok()?;
             ps.get(*indices.first()?)?.region.interior_point()
         }
     };

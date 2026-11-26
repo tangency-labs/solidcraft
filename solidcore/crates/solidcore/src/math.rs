@@ -1316,7 +1316,14 @@ pub fn left_side_along_line_2d(
     let u = sub_2d(q, p);
     let len = length_2d(u);
     let size = 1.0 + len + length_2d(p);
-    if !(tol.is_finite() && tol >= 0.0 && len.is_finite() && size.is_finite() && len > tol * size) {
+    // Whether the line has a length is its own matter; how far a piece may lie off it grows
+    // with where it is, as rounding does.
+    if !(tol.is_finite()
+        && tol >= 0.0
+        && len.is_finite()
+        && size.is_finite()
+        && len > tol * (1.0 + len))
+    {
         return None;
     }
     let off = |x: [f64; 2]| {
@@ -1925,6 +1932,20 @@ mod tests {
             None
         );
         assert_eq!(distance_2d([1.0, 1.0], [4.0, 5.0]), 5.0);
+        // A short line far from the origin tells the same side as at the origin.
+        for x in [0.0, 5e5] {
+            let (p, q) = ([x, 0.0], [x, 4e-4]);
+            assert_eq!(
+                left_side_along_line_2d([x, 1e-4], [x, 3e-4], p, q, 1e-9),
+                Some(true),
+                "{x}"
+            );
+            assert_eq!(
+                left_side_along_line_2d([x, 3e-4], [x, 1e-4], p, q, 1e-9),
+                Some(false),
+                "{x}"
+            );
+        }
     }
 
     /// A counter-clockwise arc piece has the region inside its circle, a clockwise one outside;
