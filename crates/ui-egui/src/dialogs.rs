@@ -5580,6 +5580,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         let run = match &mut d.kind {
             Kind::Text(k) => Some(crate::sketch_text::apply(app, k)),
             Kind::ChatContext => Some(crate::agent_chat::pick_done(app, &d)),
+            Kind::InsertDrawing(p) if p.opens_design() => Some(crate::dialogs_insert_drawing::apply_open(app, p)),
             Kind::Move { .. } if nothing_to_run => Some(Ok(())),
             _ => match begin_applying(app, &d) {
                 // Computing: the dialog stays, saying so, until it is in.
@@ -5682,6 +5683,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.session.feature_edit_sketch = None;
         crate::command_sketch::closed(app, applied);
         crate::dialogs_motion::closed(app, &mut d, applied);
+        if !applied && let Kind::InsertDrawing(p) = &d.kind {
+            crate::dialogs_insert_drawing::cancel_open(app, p);
+        }
         if let Kind::Text(k) = &mut d.kind {
             crate::sketch_text::closed(app, k, applied);
         }
@@ -6018,6 +6022,9 @@ pub fn cancel(app: &mut SolveApp) {
     crate::command_sketch::closed(app, false);
     if let Some(mut d) = app.dialog.take() {
         crate::dialogs_motion::closed(app, &mut d, false);
+        if let Kind::InsertDrawing(p) = &d.kind {
+            crate::dialogs_insert_drawing::cancel_open(app, p);
+        }
         if let Kind::Text(k) = &mut d.kind {
             crate::sketch_text::closed(app, k, false);
         }

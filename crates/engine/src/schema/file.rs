@@ -15,7 +15,8 @@ use solidcraft_doc::point_cloud::{MAX_POINTS, UNITS};
 use solidcraft_io::Format;
 
 use super::check::whole;
-use super::types::{StringList, not_blank_pattern};
+use super::sketch_import::{AngleDegrees, DrawingAlign};
+use super::types::{Point2, StringList, not_blank_pattern};
 
 /// How closely an exported mesh follows curved faces.
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
@@ -986,6 +987,9 @@ fn kicad_representation_schema(_: &mut SchemaGenerator) -> Schema {
 pub struct OpenParams {
     /// The file to open; the kind of file is read from its extension.
     pub path: OpenPath,
+    /// For an SVG opened with SolidCraft's reader: placement in the new XY sketch.
+    #[serde(default)]
+    pub svg_placement: Option<SvgPlacement>,
     /// true opens the file in a tab of its own, after the active one, and shows it, even when the
     /// active design is empty: the design that was open stays open, as it was. A design that is
     /// already open in a tab is shown instead, as the same file opened twice is. A person at the
@@ -1097,6 +1101,24 @@ pub struct OpenParams {
     /// shown; a design already open shows its tab instead. Given with `new_tab`, the place wins.
     #[serde(default)]
     pub tab: Option<u64>,
+}
+
+/// The placement and reading options shared with `sketch.insert_svg`.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SvgPlacement {
+    /// Where the anchor goes, in millimetres. Default: [0, 0].
+    pub at: Option<Point2>,
+    /// Size factor. Default: 1.
+    pub scale: Option<f64>,
+    /// Counter-clockwise rotation about the anchor, in degrees. Default: 0.
+    pub angle: Option<AngleDegrees>,
+    /// The anchor: the file's origin or the drawing's middle. Default: origin.
+    pub align: Option<DrawingAlign>,
+    /// The resolution used to interpret SVG pixels. Default: 96 dpi.
+    pub dpi: Option<f64>,
+    /// How far in millimetres simplification may deviate from the outline. Default: 0.
+    pub simplify: Option<f64>,
 }
 
 /// Another SolidCraft that has the design open, from its lock file.

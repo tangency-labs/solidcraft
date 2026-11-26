@@ -42,6 +42,12 @@ impl Align {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Destination {
+    Insert,
+    Open { from_home: bool },
+}
+
 /// The drawing being placed: the insert command, its file, and where, how big and how turned
 /// it goes. `x` and `y` are where the drawing's middle lands, or the file's origin with
 /// [`Align::Origin`]; it scales and turns about that point.
@@ -49,6 +55,7 @@ impl Align {
 pub struct Place {
     pub command: String,
     pub path: String,
+    pub(crate) destination: Destination,
     pub x: f64,
     pub y: f64,
     pub scale: f64,
@@ -72,6 +79,12 @@ pub struct Place {
     pub align: Align,
 }
 
+impl Place {
+    pub(crate) fn opens_design(&self) -> bool {
+        matches!(self.destination, Destination::Open { .. })
+    }
+}
+
 /// The dots per inch an SVG's pixels are read at unless the dialog says otherwise.
 pub(crate) const DEFAULT_DPI: f64 = 96.0;
 
@@ -86,6 +99,7 @@ pub struct InsertRead {
     pub serial: u64,
     command: String,
     path: String,
+    destination: Destination,
     done: Receiver<Result<Value, String>>,
     /// Cancelled from the operations panel: the answer is dropped and no window opens.
     pub cancelled: bool,
@@ -113,6 +127,18 @@ pub fn reading_label(name: &str) -> String {
 /// the drawing read beside the window: the operations panel shows it while it takes, and the
 /// window opens when it is done. With no thread to read on (the browser), the file is read here.
 pub fn start(app: &mut SolveApp, command: &str, path: String) {
+    start_read(app, command, path, Destination::Insert);
+}
+
+/// File Open uses the same placement controls, with its own new design as the destination.
+pub(crate) fn start_open(app: &mut SolveApp, path: String) {
+    let started_from_home = std::mem::take(&mut app.file_load.home_at_start);
+    let from_home = app.home.open || started_from_home;
+    app.home.open = from_home;
+    start_read(app, "sketch.insert_svg", path, Destination::Open { from_home });
+}
+
+fn start_read(app: &mut SolveApp, command: &str, path: String, destination: Destination) {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let mut copy = app.session.scratch();
@@ -143,6 +169,7 @@ pub fn start(app: &mut SolveApp, command: &str, path: String) {
                 serial: crate::operations::serial(),
                 command: command.to_string(),
                 path,
+                destination,
                 done,
                 cancelled: false,
                 progress,
@@ -152,13 +179,18 @@ pub fn start(app: &mut SolveApp, command: &str, path: String) {
             return;
         }
     }
-    open(app, command, path);
+    read_here(app, command, path, destination);
 }
 
 /// Takes up a read that finished: opens the window on the file's size, or drops the answer when
 /// the read was cancelled. Called once a frame.
 pub fn tick(app: &mut SolveApp) {
     let Some(read) = &app.insert_read else { return };
+    let asked = app.session.uid == read.session && crate::workspace::focused_sketch(app) == read.sketch;
+    // A File Open chosen while a modeling dialog is up can wait for its turn.
+    if matches!(read.destination, Destination::Open { .. }) && asked && !read.cancelled && app.dialog.is_some() {
+        return;
+    }
     let job = match read.done.try_recv() {
         Ok(job) => job,
         Err(TryRecvError::Empty) => {
@@ -175,7 +207,6 @@ pub fn tick(app: &mut SolveApp) {
     // The window is for the sketch and design the picker ran in, and only when nothing opened
     // meanwhile: an answer that arrives after the sketch is finished, another sketch is picked or
     // a dialog opens is dropped rather than put over what the person is doing.
-    let asked = app.session.uid == read.session && crate::workspace::focused_sketch(app) == read.sketch;
     if read.cancelled || !asked || app.dialog.is_some() {
         crate::operations::record_ended(app, &key, label, crate::operations::Outcome::Cancelled);
         return;
@@ -188,25 +219,30 @@ pub fn tick(app: &mut SolveApp) {
         }
     }
     let bounds = job.ok();
-    open_with_bounds(app, &read.command, read.path, bounds.as_ref());
+    open_with_bounds(app, &read.command, read.path, read.destination, bounds.as_ref());
 }
 
-/// Open the placement for `path`, read here on the window's thread: the tests' path, and the
-/// browser's. The picker calls [`start`] instead.
-pub fn open(app: &mut SolveApp, command: &str, path: String) {
+#[cfg(test)]
+fn open(app: &mut SolveApp, command: &str, path: String) {
+    read_here(app, command, path, Destination::Insert);
+}
+
+/// Open the placement for `path` after reading it synchronously when no worker is available.
+fn read_here(app: &mut SolveApp, command: &str, path: String, destination: Destination) {
     let bounds =
         app.session.execute("sketch.drawing_bounds", &json!({"path": path, "format": if command.ends_with("dxf") { "dxf" } else { "svg" }})).ok();
-    open_with_bounds(app, command, path, bounds.as_ref());
+    open_with_bounds(app, command, path, destination, bounds.as_ref());
 }
 
 /// The placement window for `path`, with what `sketch.drawing_bounds` answered (`None`: the file
 /// could not be read, and the window opens without a size).
-fn open_with_bounds(app: &mut SolveApp, command: &str, path: String, bounds: Option<&Value>) {
+fn open_with_bounds(app: &mut SolveApp, command: &str, path: String, destination: Destination, bounds: Option<&Value>) {
     let (natural, middle, edges) = measured(bounds);
     let simplify = suggested_simplify(edges, solidcraft_engine::sketch::limits::max_points(), natural);
     let place = Place {
         command: command.to_string(),
         path,
+        destination,
         x: 0.0,
         y: 0.0,
         scale: 1.0,
@@ -216,9 +252,22 @@ fn open_with_bounds(app: &mut SolveApp, command: &str, path: String, bounds: Opt
         measured_dpi: DEFAULT_DPI,
         simplify,
         middle,
-        align: Align::Middle,
+        align: match destination {
+            Destination::Insert => Align::Middle,
+            Destination::Open { .. } => Align::Origin,
+        },
     };
+    if matches!(destination, Destination::Open { .. }) {
+        app.home.open = false;
+    }
     app.dialog = Some(Dialog::new(Kind::InsertDrawing(place), Vec::new()));
+}
+
+/// Return to Home when a placement asked from there is dismissed.
+pub(crate) fn cancel_open(app: &mut SolveApp, p: &Place) {
+    if matches!(p.destination, Destination::Open { from_home: true }) {
+        app.home.open = true;
+    }
 }
 
 /// The drawing's own width and height, the middle of its box and how many edges it has, from what
@@ -413,6 +462,20 @@ pub fn preview_placement(p: &Place, cmds: &mut [(String, Value)]) {
 
 /// The command OK runs (and the preview shows).
 pub fn commands(p: &Place) -> Result<Vec<(String, Value)>, String> {
+    let mut params = params(p)?;
+    params.insert("path".into(), json!(p.path));
+    Ok(vec![(p.command.clone(), Value::Object(params))])
+}
+
+/// Confirmed placement for a File Open request. The regular open worker builds and lands the
+/// new design, keeping the current design intact on failure.
+pub(crate) fn apply_open(app: &mut SolveApp, p: &Place) -> Result<(), String> {
+    let mut request = crate::file_load::Request::new(&p.path, crate::file_load::Kind::Open);
+    request.options.insert("svg_placement".into(), Value::Object(params(p)?));
+    crate::file_load::begin_request(app, request)
+}
+
+fn params(p: &Place) -> Result<serde_json::Map<String, Value>, String> {
     if !(p.x.is_finite() && p.y.is_finite()) {
         return Err("the position must be a number".into());
     }
@@ -422,14 +485,20 @@ pub fn commands(p: &Place) -> Result<Vec<(String, Value)>, String> {
     if !p.angle.is_finite() {
         return Err("the angle must be a number".into());
     }
-    let mut params = json!({"path": p.path, "at": [p.x, p.y], "scale": p.scale, "angle": p.angle, "align": p.align.word(), "simplify": p.simplify});
+    let mut params = serde_json::Map::from_iter([
+        ("at".into(), json!([p.x, p.y])),
+        ("scale".into(), json!(p.scale)),
+        ("angle".into(), json!(p.angle)),
+        ("align".into(), json!(p.align.word())),
+        ("simplify".into(), json!(p.simplify)),
+    ]);
     if !p.command.ends_with("dxf") && p.dpi != DEFAULT_DPI {
         if !(p.dpi.is_finite() && (1.0..=10000.0).contains(&p.dpi)) {
             return Err("the resolution must be from 1 to 10000 dpi".into());
         }
-        params["dpi"] = json!(p.dpi);
+        params.insert("dpi".into(), json!(p.dpi));
     }
-    Ok(vec![(p.command.clone(), params)])
+    Ok(params)
 }
 
 #[cfg(test)]
@@ -566,6 +635,7 @@ mod tests {
     fn the_preview_command_imports_the_drawing_as_drawn() {
         let p = Place {
             command: "sketch.insert_svg".into(),
+            destination: Destination::Insert,
             path: "x.svg".into(),
             x: 5.0,
             y: -3.0,
@@ -609,6 +679,7 @@ mod tests {
         use solidcore_record::Seg2;
         let p = Place {
             command: "sketch.insert_svg".into(),
+            destination: Destination::Insert,
             path: "x.svg".into(),
             x: 5.0,
             y: -3.0,
@@ -898,6 +969,7 @@ mod tests {
         assert!(handle_at("dialog:insert:dpi").is_some(), "the resolution is drawn for an SVG");
         let svg = Place {
             command: "sketch.insert_svg".into(),
+            destination: Destination::Insert,
             path: "a.svg".into(),
             x: 0.0,
             y: 0.0,
@@ -960,6 +1032,7 @@ mod tests {
         h.frames(2);
         let bad = Place {
             command: "sketch.insert_svg".into(),
+            destination: Destination::Insert,
             path: "x.svg".into(),
             x: 0.0,
             y: 0.0,
