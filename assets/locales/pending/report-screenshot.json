@@ -9,7 +9,7 @@
   },
   "ar": {
     "ui.report_screenshot_copied": "نُسخت لقطة الشاشة. لم تُرفق بعد: في نموذج المشكلة على GitHub، انقر داخل مربع النص واضغط Ctrl+V (أو Cmd+V على macOS).",
-    "ui.report_screenshot_drag": "لم تُرفق لقطة الشاشة بعد. الصق نص التقرير في نموذج المشكلة، ثم اسحب ملف PNG ‏{file} إلى النموذج لإرفاقه.",
+    "ui.report_screenshot_drag": "لم تُرفق لقطة الشاشة بعد. الصق نص التقرير في نموذج المشكلة، ثم اسحب ملف PNG {file} إلى النموذج لإرفاقه.",
     "ui.report_screenshot_open": "يفتح المتصفح وينسخ لقطة الشاشة. الصق لقطة الشاشة في نموذج المشكلة على GitHub لإرفاقها.",
     "ui.report_screenshot_paste": "لم تُرفق لقطة الشاشة بعد. انقر داخل هذا المربع واضغط Ctrl+V لإرفاقها.",
     "ui.report_screenshot_paste_mac": "لم تُرفق لقطة الشاشة بعد. انقر داخل هذا المربع واضغط Cmd+V لإرفاقها.",
@@ -62,5 +62,13 @@
     "ui.report_screenshot_paste": "截图尚未附加。请点击此文本框并按 Ctrl+V 来附加截图。",
     "ui.report_screenshot_paste_mac": "截图尚未附加。请点击此文本框并按 Cmd+V 来附加截图。",
     "ui.report_screenshot_save_failed": "无法保存截图：{error}。请附加已检查的截图或展示问题的简短示例。"
+  },
+  "fr": {
+    "ui.report_screenshot_copied": "Capture d’écran copiée. Elle n’est PAS encore jointe : dans le formulaire de ticket GitHub, cliquez dans la zone de texte et appuyez sur Ctrl+V (Cmd+V sous macOS).",
+    "ui.report_screenshot_drag": "La capture d’écran n’est PAS encore jointe. Collez le texte du rapport dans le formulaire de ticket, puis faites glisser le fichier PNG {file} dans le formulaire pour le joindre.",
+    "ui.report_screenshot_open": "Ouvre votre navigateur et copie la capture d’écran. Collez-la dans le formulaire de ticket GitHub pour la joindre.",
+    "ui.report_screenshot_paste": "La capture d’écran n’est PAS encore jointe. Cliquez dans cette zone et appuyez sur Ctrl+V pour la joindre.",
+    "ui.report_screenshot_paste_mac": "La capture d’écran n’est PAS encore jointe. Cliquez dans cette zone et appuyez sur Cmd+V pour la joindre.",
+    "ui.report_screenshot_save_failed": "Impossible d’enregistrer la capture d’écran : {error}. Joignez la capture d’écran vérifiée ou un court exemple illustrant le problème."
   }
 }

@@ -51,8 +51,10 @@
 //!   [`BoundsCheck`], `(bool, SurfParamType)` from the boundary test, the new grid
 //!   point of the stride check. Upstream's in/out best indices of
 //!   `FindPolygonTriangleGuess` (kept when no net point qualifies) are passed in.
-//!   The constructor keeps the unused `cpdOptTargetDistance` and
-//!   `eSolutionRequested` (`NotUsed` upstream).
+//!   The constructor keeps the target distance (`cpdOptTargetDistance`, `NotUsed`
+//!   upstream, "cbi: do this"): the global solve bounds a minimum by it as the tree
+//!   solve does (#20438; a maximise goes to the tree solve). `eSolutionRequested` stays unused (`NotUsed`
+//!   upstream): the solve finds one candidate (#20438).
 //! - **Ignored statuses.** Where upstream ignores an evaluation's status the outputs
 //!   keep their previous values (initially undefined, [`Vec3::UNDEF`]), and an
 //!   `SmSurfaceEval` accessor reads the values it holds; [`SolidError::Unported`]
@@ -130,6 +132,8 @@ pub struct SurfacePointSolver<'s> {
     tight_tol: f64,
     /// `m_dLooseTol`.
     loose_tol: f64,
+    /// `cpdOptTargetDistance` (`NotUsed` upstream; bounds the answer, #20438).
+    target_distance: Option<f64>,
 }
 
 impl<'s> SurfacePointSolver<'s> {
@@ -152,7 +156,7 @@ impl<'s> SurfacePointSolver<'s> {
         solver_op: SolverOperation,
         test_point: Point3,
         distance_tolerance: f64,
-        _opt_target_distance: Option<f64>,
+        opt_target_distance: Option<f64>,
         _solution_requested: SolutionRequested,
     ) -> Result<Self> {
         // We need an SmBSplineSurface for some operations.
@@ -168,6 +172,7 @@ impl<'s> SurfacePointSolver<'s> {
             // Tight tolerance: tight, but it should be achievable.
             tight_tol: EFF_ZERO * (1.0 + test_point.max_dimension()),
             loose_tol: distance_tolerance,
+            target_distance: opt_target_distance,
         };
 
         if solver_op == SolverOperation::Signed3dDirectedMaximize {
@@ -238,6 +243,12 @@ impl<'s> SurfacePointSolver<'s> {
     #[must_use]
     pub const fn loose_tol(&self) -> f64 {
         self.loose_tol
+    }
+
+    /// The target distance the answer is bounded by (`cpdOptTargetDistance`).
+    #[must_use]
+    pub const fn target_distance(&self) -> Option<f64> {
+        self.target_distance
     }
 
     /// The direction of the directed operation, zero otherwise (`m_sDirVec`).
@@ -471,6 +482,9 @@ pub struct SurfPtGlobalSolver<'s> {
     closed_in_u: Option<bool>,
     /// `m_bClosedInV` (`None` = `UNSURE`).
     closed_in_v: Option<bool>,
+    /// Not upstream (#20438): the last [`Self::solve`] dropped its answer, a minimum
+    /// beyond the target distance.
+    dropped_beyond_target: bool,
 }
 
 /// The result of [`SurfPtGlobalSolver::find_polygon_triangle_guess`].
@@ -532,7 +546,23 @@ impl<'s> SurfPtGlobalSolver<'s> {
             )?,
             closed_in_u: None,
             closed_in_v: None,
+            dropped_beyond_target: false,
         })
+    }
+
+    /// Whether the last [`Self::solve`] dropped its answer because it was a minimum
+    /// farther than the target distance by more than the tolerance (#20438). The
+    /// solve's one candidate need not be the nearest point (#20483), so a caller that
+    /// must honour the target asks the tree solve instead
+    /// ([`Surface::global_point_solve_1`]).
+    #[must_use]
+    pub const fn dropped_beyond_target(&self) -> bool {
+        self.dropped_beyond_target
+    }
+
+    /// Records whether the solve dropped a minimum beyond the target distance.
+    pub(super) fn set_dropped_beyond_target(&mut self, dropped: bool) {
+        self.dropped_beyond_target = dropped;
     }
 
     /// Whether the surface is closed over the domain in `which_dir` (`SM_SP_U` or

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Timeline 2D</title>
+  <circle cx="9.5" cy="32" r="2.4" fill="#8e9faf"/>
+  <circle cx="9.5" cy="53.5" r="2.4" fill="#8e9faf"/>
+  <circle cx="24.5" cy="10.5" r="2.4" fill="#8e9faf"/>
+  <circle cx="24.5" cy="32" r="2.4" fill="#8e9faf"/>
+  <circle cx="39.5" cy="10.5" r="2.4" fill="#8e9faf"/>
+  <circle cx="39.5" cy="53.5" r="2.4" fill="#8e9faf"/>
+  <circle cx="54.5" cy="32" r="2.4" fill="#8e9faf"/>
+  <circle cx="54.5" cy="53.5" r="2.4" fill="#8e9faf"/>
+  <path d="M4 5L15 5L15 16L4 16ZM19 48L30 48L30 59L19 59ZM49 5L60 5L60 16L49 16Z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M34 26.5L45 26.5L45 37.5L34 37.5Z" fill="#328bd3" stroke="#328bd3" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

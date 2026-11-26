@@ -124,14 +124,14 @@ the user grants it, as folders are:
 | Group | Commands |
 |---|---|
 | `file` | `file.*`, `library.*`, `sketch.insert_*`, and other commands that read or write files: `canvas.insert`, `component.insert_design`, `parts.insert`, `pointcloud.insert`, `pointcloud.reload`, `parameters.import`, `parameters.export`, `timeline.export_script`, `sketch.export_dxf`, `sketch.export_svg`, `sheet.export_dxf`, `sheet.export_bend_table`, `render.export`, `motion.export`, `motion.export_animation` |
-| `doc` | `doc.*`: opening, recovering or switching designs |
+| `doc` | `doc.*`: opening, recovering or switching designs, and `doc.info`: the open design's file |
 | `app` | `settings.*`, `ui.*`, `diagnostics.*`: app state outside any design |
 | `plugin` | `plugin.*`: inspecting or running plugins |
 
 A manifest that lists a grouped command without its group is refused when it is read. A refused
 call is a typed `permission_denied` error naming the group, and it poisons the transaction like
 any other refusal. Ungrouped commands run under an empty file scope, so even a feature that names
-an external font or linked design gets no file access. A granted `file` or `doc` command runs within the approved folders requested by its manifest. Known input-only commands (`file.insert_step`, `file.insert_mesh`, `file.insert_gerber`, `file.gerber_files`, `sketch.insert_dxf`, `sketch.insert_svg`) may read files from read-only grants. Commands that can write files, and commands that have not been reviewed as input-only, keep the stricter scope requiring both read and write approval. A read-only grant never authorizes a save, export, copy, move or delete.
+an external font or linked design gets no file access. A granted `file` or `doc` command runs within the approved folders requested by its manifest. Known input-only commands (`file.insert_step`, `file.insert_mesh`, `file.insert_gerber`, `file.gerber_files`, `sketch.insert_dxf`, `sketch.insert_svg`) may read files from read-only grants. Commands that can write files, and commands that have not been reviewed as input-only, keep the stricter scope requiring both read and write approval. A read-only grant never authorizes a save, export, copy, move or delete. In such a command's parameters, any string `grant:<name>/<path>` names a file in the folder granted as `<name>`. The host replaces it with that file's absolute path before the command runs (`SolidCraftHost::run_command`, `solidcraft_io::vfs::grant_path`), so the scope checks above, including links, judge it like any other path. Only the folders this command may use resolve: read grants for an input-only command, read-and-write grants otherwise. The rest must be plain names. Anything else is a `permission_denied` refusal. Outside a plugin's `file` and `doc` commands, `grant:` has no meaning: it is an ordinary path, as before.
 `plugin.install` validates its optional `approve` object against the manifest and stores grants
 by plugin id after successful publication. Each folder approval has `name`, absolute local `path`,
 `read` and `write`. Omitting `approve` leaves no grants, including after replacement. Explicit approvals
@@ -143,6 +143,13 @@ that id's stored grants with the manifest's requests; another plugin's grants ne
 A hand-installed package with no grant record receives no groups or folders. Removing a package
 through `plugin.remove` deletes its grant record; `plugin.revoke` deletes the record and keeps the
 package. These are host preferences, never design data.
+
+`doc.info` (group `doc`, effect `read`) reports the design a run started on, as it was before the
+run: `path`, `read_only`, `unsaved`, `disk` and `document_id`. `run_package` records them in
+`AppState::caller_design`. The scratch keeps `path` empty, so a save in the run never defaults to
+the user's file. `Session::source_path` carries the file name through the desktop worker's copies,
+for `doc.info` only. A design the run opens itself answers for itself. Outside a run, `doc.info`
+reports the session's own design.
 
 ## Versions and capabilities
 

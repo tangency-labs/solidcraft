@@ -246,8 +246,8 @@ use crate::curve::curve::{Curve, CurvePropertyType};
 use crate::curve::line::Line;
 use crate::error::surface::SurfaceFailure;
 use crate::error::{
-    ignore_status, EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_NOT_WITHIN_TOLERANCE,
-    SM_ERR_OUTSIDE_OF_DOMAIN,
+    ignore_status, native_failure, EntityRef, Failure, Result, SolidError, SM_ERR,
+    SM_ERR_NOT_WITHIN_TOLERANCE, SM_ERR_OUTSIDE_OF_DOMAIN,
 };
 use crate::geom::a_object::{self, AObject, CacheStore};
 use crate::geom::assert_array::labels::DERIV_SURF_DEFINITION_TYPE;
@@ -465,6 +465,12 @@ pub struct Surface {
     /// definition is a set the net is on, or within its bound of); a motion moves it; an
     /// evaluation copy, which only evaluates, has none.
     definition: Option<Box<KeptDefinition>>,
+    /// Not upstream: whether the stored net is a fitted approximation of a definition (a
+    /// bound above 0: a swept wall, a Setback or Mixed corner's patch), kept by an
+    /// evaluation copy, which drops the definition itself, so that what proves a final
+    /// answer on the net alone ([`Surface::net_is_fitted`]) never takes such a net for its
+    /// surface. A copy carries it.
+    fitted_net: bool,
 }
 
 /// The trimmed surface cache a surface's cache slot holds: the `SM_OC_TRIMSRF` entry of
@@ -625,6 +631,7 @@ impl Clone for Surface {
             singularities_memo: SingularitiesMemo::new(),
             continuity_memo: ContinuityMemo::new(),
             definition: self.definition.clone(),
+            fitted_net: self.fitted_net,
         };
         s.update_owned_bases();
         s
@@ -991,6 +998,8 @@ impl Surface {
             singularities_memo: SingularitiesMemo::new(),
             continuity_memo: self.continuity_memo.share(),
             definition: None,
+            // (the definition goes, what it says of the net stays)
+            fitted_net: self.net_is_fitted(),
         })
     }
 
@@ -1098,6 +1107,7 @@ impl Surface {
             singularities_memo: SingularitiesMemo::new(),
             continuity_memo: self.continuity_memo.share(),
             definition: self.definition.clone(),
+            fitted_net: self.fitted_net,
         }
     }
 }
@@ -1265,6 +1275,7 @@ impl Surface {
             singularities_memo: SingularitiesMemo::new(),
             continuity_memo: ContinuityMemo::new(),
             definition: None,
+            fitted_net: false,
         }
     }
 
@@ -1305,6 +1316,21 @@ impl Surface {
             }
             _ => None,
         }
+    }
+
+    /// Whether the stored net is a fitted approximation of a definition rather than the
+    /// surface itself (not upstream): a definition kept with a bound other than 0 (a swept
+    /// wall, a Setback or Mixed corner's patch; a bound that is not a number counts), or an
+    /// evaluation copy of such a surface, which keeps this though it drops the definition.
+    /// A plain B-spline, an analytic surface and a net whose definition is exact (bound 0:
+    /// an exact round, a drafted face, a section blend, a Ball, Swept or End corner) are
+    /// their nets.
+    #[must_use]
+    pub fn net_is_fitted(&self) -> bool {
+        self.fitted_net
+            || self
+                .procedural_definition()
+                .is_some_and(|d| d.bound() != 0.0)
     }
 
     /// The definition this surface is the net of, whatever made it (#2572): a blend's
@@ -1643,6 +1669,14 @@ impl Surface {
         if let Some(made) = self.made_kind.take_for_edit() {
             self.kind = made;
         }
+    }
+
+    /// Not upstream: the content digest of this surface ([`crate::geom::content`]): equal
+    /// for two surfaces that evaluate alike bit for bit, whichever objects they are; `None`
+    /// for a kind that has no digest yet or a surface keeping a blend's definition.
+    #[must_use]
+    pub fn content_id(&self) -> Option<crate::geom::content::ContentId> {
+        crate::geom::content::content_id(self)
     }
 
     /// The concrete kind, mutable: a kind made by [`Surface::kind_with_nurb`] is moved
@@ -4194,6 +4228,26 @@ impl Surface {
         context: Option<SurfaceIntersectContext<'_, O>>,
         out: &mut SurfaceIntersection,
     ) -> Result<()> {
+        // A two-row spline loft can have a plane section at a single parameter.
+        // Test the control net in either order. If constructing the section fails,
+        // the general intersector still needs to classify the surface pair.
+        use crate::surface::plane::spline_section::intersect;
+        let tolerance = approx_tol_3d.map_or(k.tolerances.zone_tol_3d, |t| {
+            crate::geom::tol::approx_tol3d(k, t)
+        });
+        let section = match (self.kind(), other.kind()) {
+            (SurfaceKind::BSpline(s), SurfaceKind::Plane(p)) => {
+                intersect(k, s, uv_domain, p, other_uv_domain, tolerance)
+            }
+            (SurfaceKind::Plane(p), SurfaceKind::BSpline(s)) => {
+                intersect(k, s, other_uv_domain, p, uv_domain, tolerance)
+            }
+            _ => Ok(None),
+        };
+        if let Some(section) = native_failure(section)?.flatten() {
+            *out = section;
+            return Ok(());
+        }
         match self.kind_with_nurb(k)? {
             SurfaceKind::Plane(p) => crate::surface::plane::p2::global_surface_intersect_into(
                 k,
@@ -4238,6 +4292,7 @@ impl Surface {
             // SmSphere::GlobalSurfaceIntersect: its special cases, else the base
             // SmSurface::GlobalSurfaceIntersect of this surface
             SurfaceKind::Sphere(s) => s.global_surface_intersect_with_into(
+                Some(self),
                 k,
                 uv_domain,
                 other,
@@ -4271,6 +4326,11 @@ impl Surface {
             SurfaceKind::Torus(t) => {
                 // (each special case resets the outputs on entry)
                 *out = SurfaceIntersection::default();
+                // (not upstream, #15049) the generators' contact where both are faces'
+                let contact = crate::surface::surf_of_revolution::p3::revolved_contact_tol(
+                    k,
+                    [Some(self), Some(other)],
+                );
                 // IntersectWithSphere / IntersectWithCone: a planar generator, else
                 // the general intersection
                 let revolved = |other: &dyn Revolved, out: &mut SurfaceIntersection| {
@@ -4284,6 +4344,7 @@ impl Surface {
                         other,
                         other_uv_domain,
                         approx_tol_3d,
+                        contact,
                         out,
                     )
                 };
@@ -4309,6 +4370,7 @@ impl Surface {
                         o.as_ref(),
                         other_uv_domain,
                         approx_tol_3d,
+                        contact,
                         out,
                     )?,
                     _ => true,
@@ -7902,6 +7964,58 @@ impl<'s> IsoCurveLengthIntegrand<'s> {
         Self {
             surface,
             u_iso_value,
+        }
+    }
+}
+
+/// Not upstream: the content digest ([`crate::geom::content`]): the kind as it evaluates
+/// (with the NURB a cone, sphere or torus made, [`Surface::kind`]). The owners, the
+/// tolerance recorded from the face reached (a copy has neither) and the notification
+/// identity say which object the surface is and who owns it, not what it is; a digest of a
+/// neighbourhood writes the face's tolerance itself. The cache slot and the memos are caches.
+/// A surface that keeps a blend's definition, and the kinds that hold curves, other surfaces
+/// or volumes with state of their own, have no digest yet.
+impl crate::geom::content::Content for Surface {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            kind: _,
+            owner: _,
+            owner_chain_face: _,
+            owner_zone_tol_3d: _,
+            cache_slot: _,
+            notify_identity: _,
+            made_kind: _,
+            boundary_memo: _,
+            singularities_memo: _,
+            continuity_memo: _,
+            definition,
+            fitted_net: _,
+        } = self;
+        if definition.is_some() {
+            return None;
+        }
+        match self.kind() {
+            SurfaceKind::BSpline(s) => {
+                d.tag(1);
+                s.content(d)
+            }
+            SurfaceKind::Plane(s) => {
+                d.tag(2);
+                s.content(d)
+            }
+            SurfaceKind::Cone(s) => {
+                d.tag(3);
+                s.content(d)
+            }
+            SurfaceKind::Sphere(s) => {
+                d.tag(4);
+                s.content(d)
+            }
+            SurfaceKind::Torus(s) => {
+                d.tag(5);
+                s.content(d)
+            }
+            _ => None,
         }
     }
 }

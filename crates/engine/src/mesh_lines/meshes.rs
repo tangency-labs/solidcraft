@@ -21,7 +21,8 @@ use crate::{Result, Session};
 pub(crate) const WORKERS: usize = 8;
 #[cfg(target_arch = "wasm32")]
 pub(crate) const WORKERS: usize = 1;
-const MESH_BYTES: usize = 512 * 1024 * 1024;
+const MESH_MIB: usize = 512;
+const MESH_BYTES: usize = MESH_MIB * 1024 * 1024;
 const MAX_BODIES: usize = 100_000;
 
 pub(crate) struct Placement {
@@ -251,7 +252,7 @@ fn prepare_placed(
                 claim(&bytes, geometry, limit)
             };
             if !retained {
-                return Ok(Err(Refused::Memory));
+                return Ok(Err(Refused::MeshBuffers(MESH_MIB)));
             }
             Some(mesh)
         } else {
@@ -485,8 +486,8 @@ mod tests {
             calls.fetch_add(1, Ordering::Relaxed);
             tessellate(item, tolerance)
         };
-        let run_at_limit = |limit| prepare_placed(&items, "test", 0.02, ask, |why| format!("{why:?}"), limit, counted);
-        let reuse = run_at_limit(MESH_BYTES).unwrap();
+        let run_at_limit = |items: &[Placed<'_>], limit| prepare_placed(items, "test", 0.02, ask, |why| why.to_string(), limit, counted);
+        let reuse = run_at_limit(&items, MESH_BYTES).unwrap();
         assert_eq!(calls.swap(0, Ordering::Relaxed), 1);
         assert_eq!(reuse.placements.len(), 2);
         assert_eq!(reuse.meshes.len(), 1);
@@ -495,7 +496,7 @@ mod tests {
         let with_cache = reuse.bytes + adjacency_bytes(&first.edge_faces);
         for limit in [reuse.bytes, with_cache] {
             // The first limit excludes even the adjacency. The second leaves zero worker space.
-            let fallback = run_at_limit(limit).unwrap();
+            let fallback = run_at_limit(&items, limit).unwrap();
             assert_eq!(calls.swap(0, Ordering::Relaxed), 2);
             assert_eq!(fallback.bytes, reuse.bytes);
             assert_eq!(fallback.triangles, reuse.triangles);
@@ -509,7 +510,11 @@ mod tests {
                 assert_eq!(a.joins, b.joins);
             }
         }
-        assert!(run_at_limit(reuse.bytes - 1).is_err());
+        // Both the atomic reservation and the shared budget report the geometry limit.
+        for placements in [&items[..1], items.as_slice()] {
+            let Err(error) = run_at_limit(placements, reuse.bytes - 1) else { panic!("expected the mesh to exceed its buffer budget") };
+            assert!(error.to_string().ends_with("the mesh buffers exceed the 512 MiB limit"), "{error}");
+        }
     }
 
     /// Two placements of one part share its first placement's geometry, the second at the move

@@ -208,6 +208,7 @@ const URDF_OPTIONS: &[OptionSpec] = &[
         kind: OptionKind::Number { default: 10.0, min: 0.0, max: 1e9, unit: "", from_file: None },
     },
     OptionSpec { param: "images", label: "Pictures as textured visuals", kind: OptionKind::Bool { default: false } },
+    OptionSpec { param: "mimic", label: "Couple motion links", kind: OptionKind::Bool { default: false } },
 ];
 
 const SDF_OPTIONS: &[OptionSpec] = &[
@@ -427,6 +428,14 @@ pub static FORMATS: &[FormatSpec] = &[
         role: Role::Artifact,
         import: None,
         export: Some(ExportSpec { command: "file.export", format: None, options: SDF_OPTIONS, scope: ExportScope::Design, lossless: false }),
+    },
+    FormatSpec {
+        id: "mjcf",
+        label: "MuJoCo model (MJCF)",
+        extensions: &["xml"],
+        role: Role::Artifact,
+        import: None,
+        export: Some(ExportSpec { command: "file.export", format: Some("mjcf"), options: &[], scope: ExportScope::Design, lossless: false }),
     },
     FormatSpec {
         id: "design-json",

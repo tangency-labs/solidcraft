@@ -12,6 +12,7 @@
 //! The shared host owns panel placement. In Classic, the palette docks at the right edge and its
 //! header drags it, like a command dialog's title (#8923).
 
+use crate::i18n::LocaleNames as _;
 use crate::ui_kit::BackingTooltipExt as _;
 use std::cell::Cell;
 
@@ -28,9 +29,9 @@ thread_local! {
     static MODE: Cell<(u8, Option<u64>)> = const { Cell::new((0, None)) };
 }
 
-/// Option keys and existing localized labels. The five primary design rows are selected below;
+/// Option keys and existing localized labels. The primary design rows are selected below;
 /// the remaining display options live in More. Point/profile labels share the dialog IDs.
-pub const TOGGLES: [(&str, &str); 10] = [
+pub const TOGGLES: &[(&str, &str)] = &[
     ("grid", "Sketch Grid"),
     ("snap", "Snap"),
     ("slice", "Slice"),
@@ -40,6 +41,7 @@ pub const TOGGLES: [(&str, &str); 10] = [
     ("show_constraints", "Constraints"),
     ("show_projected", "Projected Geometries"),
     ("show_construction", "Construction Geometries"),
+    ("show_control_polygons", "sketch.show_control_polygons"),
     ("sketch_3d", "3D Sketch"),
 ];
 
@@ -375,8 +377,13 @@ pub(crate) fn shared_presentation(app: &SolveApp) -> Option<crate::panel_runtime
     let world = crate::open_meshing::session_world(&app.session);
     let sketch = world.sketch(active)?;
     let solved = sketch.report.shown_ok();
-    let title =
-        if sketch.name.trim().is_empty() || sketch.name.len() > 256 { app.tr("ui.palette_sketch_options").to_owned() } else { sketch.name.clone() };
+    // A default name such as `Sketch1` reads as the browser shows it (`Esquisse1` in French); a
+    // name the user gave stays as typed.
+    let title = if sketch.name.trim().is_empty() || sketch.name.len() > 256 {
+        app.tr("ui.palette_sketch_options").to_owned()
+    } else {
+        solidcraft_ui_text::Locale::for_language(&app.preferences.language).given_name(&sketch.name)
+    };
     Some(crate::panel_runtime::PanelPresentation {
         title,
         icon: "sketch".into(),
@@ -411,8 +418,9 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     };
     let status = constraint_status(remaining, solved, geometry);
     let fraction = constrained_fraction(remaining, total, solved && geometry);
-    let option_label =
-        |label: &'static str| if matches!(label, "ui.profile" | "ui.points") { solidcraft_ui_text::tr(label) } else { app.tr_label(label) };
+    let option_label = |label: &'static str| {
+        if matches!(label, "ui.profile" | "ui.points" | "sketch.show_control_polygons") { solidcraft_ui_text::tr(label) } else { app.tr_label(label) }
+    };
     let more = solidcraft_ui_text::tr("ui.palette_more");
     let shown = |key: &str| match key {
         "grid" => !opts.hide_grid,
@@ -424,6 +432,7 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         "show_constraints" => !opts.hide_constraints,
         "show_projected" => !opts.hide_projected,
         "show_construction" => !opts.hide_construction,
+        "show_control_polygons" => !opts.hide_control_polygons,
         "sketch_3d" => opts.three_d,
         _ => false,
     };
@@ -442,6 +451,10 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let image_tool = image_tool(app);
     let framing = app.preferences.frame_images_in_sketch;
     let mut frame_image = false;
+    // The 3-Point Arc's tangent snap (#20719): a mode of that tool, so it is here and not in
+    // Preferences; kept for the next time the tool runs.
+    let arc_snap = app.preferences.sketch_arc_tangent_snap;
+    let mut arc_snap_clicked = false;
     let has_curves = !selected_curves(app).is_empty();
     let selected_types = if has_curves { selected_linetypes(app) } else { std::array::from_fn(|i| mode(app) == i as u8) };
     // A construction line tool that takes a length has a line type of its own, which the Line
@@ -494,6 +507,10 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .collect();
                 let section = ui.vertical(|ui| crate::ui_kit::tool_choices(ui, app.tr_label(family.label), current, &choices));
                 crate::scenario::publish_rect("sketch_palette:feature_options", section.response.rect);
+                if current == "sketch.arc.three_point" {
+                    arc_snap_clicked =
+                        crate::ui_kit::checkbox_row(ui, "arc_tangent_snap", solidcraft_ui_text::tr("ui.palette_arc_tangent_snap"), arc_snap);
+                }
                 section.inner
             });
             start = section.flatten();
@@ -540,7 +557,7 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             row_types.get(1).copied().unwrap_or(false),
         );
         crate::ui_kit::section(ui, "more", more, false, |ui| {
-            for (key, label) in TOGGLES {
+            for &(key, label) in TOGGLES {
                 if !["show_constraints", "show_dimensions", "show_points", "snap"].contains(&key)
                     && crate::ui_kit::checkbox_row(ui, key, option_label(label), shown(key))
                 {
@@ -621,6 +638,9 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     if frame_image {
         app.preferences.frame_images_in_sketch = !framing;
     }
+    if arc_snap_clicked {
+        app.preferences.sketch_arc_tangent_snap = !arc_snap;
+    }
     if let Some(id) = start {
         app.start(id);
     }
@@ -663,7 +683,7 @@ mod tests {
         let more = crate::scenario::handle_at("sketch_palette:options_fold").unwrap();
         h.call("ui.click", json!({"x":more.x,"y":more.y}));
         let active = h.app.session.active_sketch.unwrap();
-        for (key, _) in TOGGLES {
+        for &(key, _) in TOGGLES {
             let before = h.app.session.doc.to_json();
             let undo = h.app.session.undo.len();
             let at = crate::scenario::handle_at(&format!("sketch_palette:toggle:{key}")).unwrap();
@@ -713,6 +733,23 @@ mod tests {
             h.call("ui.click", json!({"x":at.x,"y":at.y}));
             assert_eq!(h.app.preferences.frame_images_in_sketch, on, "{cmd}");
         }
+    }
+
+    /// The palette's title names the sketch as the browser does: a default name is translated, a
+    /// name the user gave is kept.
+    #[test]
+    fn palette_title_translates_a_default_sketch_name() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.settle();
+        let title = |app: &SolveApp| shared_presentation(app).map(|p| p.title);
+        assert_eq!(title(&h.app).as_deref(), Some("Sketch1"));
+        h.app.preferences.language = "fr".into();
+        assert_eq!(title(&h.app).as_deref(), Some("Esquisse1"));
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"XY", "name":"Leg"})).unwrap();
+        h.settle();
+        assert_eq!(title(&h.app).as_deref(), Some("Leg"));
     }
 
     #[test]
@@ -1248,7 +1285,7 @@ mod tests {
         }
         h.settle();
         assert!(h.app.tool.is_none(), "Esc still puts the tool down");
-        assert!(h.app.session.selection.is_empty(), "and clears the selection");
+        assert!(!h.app.session.has_selection(), "and clears the selection");
         assert_eq!(h.app.session.active_sketch, sketch, "the sketch stays open");
 
         h.app.finish_sketch();
@@ -1314,7 +1351,7 @@ mod tests {
 
         h.app.start("sketch.line");
         h.settle();
-        assert!(h.app.session.selection.is_empty(), "starting a drawing tool clears the prior curve selection");
+        assert!(!h.app.session.has_selection(), "starting a drawing tool clears the prior curve selection");
 
         let construction = crate::scenario::handle_at("dialog:Line Type:construction").unwrap();
         h.call("ui.click", json!({"x": construction.x, "y": construction.y}));

@@ -161,7 +161,7 @@ pub(crate) fn command_receiver(app: &mut crate::SolveApp, id: &str, params: &ser
         crate::drawing_workspace::sync_history(app);
         return Ok(());
     }
-    let explicit = matches!(id, "sketch.create" | "sketch.edit" | "drawing.sketch.create" | "drawing.sketch.edit")
+    let explicit = matches!(id, "sketch.create" | "sketch.create3d" | "sketch.edit" | "drawing.sketch.create" | "drawing.sketch.edit")
         .then(|| params.get("view").and_then(serde_json::Value::as_u64))
         .flatten();
     let target = explicit.unwrap_or_else(|| crate::view_windows::command_view(app));
@@ -559,7 +559,16 @@ pub const SECTIONS: &[Section] = &[
         tab: "MODEL",
         panel: "SKETCH",
         promoted: 1,
-        ids: &["sketch.create", "sketch.edit", "sketch.line3d", "sketch.arc3d", "sketch.spline3d", "sketch.point3d"],
+        ids: &[
+            "sketch.create",
+            "sketch.create3d",
+            "sketch.edit",
+            "sketch.line3d",
+            "sketch.arc3d",
+            "sketch.spline3d",
+            "sketch.spline3d.control_point",
+            "sketch.point3d",
+        ],
     },
     Section { tab: "MODEL", panel: "CREATE", promoted: 3, ids: &["solid.extrude", "solid.revolve", "solid.hole"] },
     Section {
@@ -644,7 +653,12 @@ pub const SECTIONS: &[Section] = &[
     },
     Section { tab: "INSERT", panel: "IMAGES", promoted: 3, ids: &["canvas.insert", "canvas.decal", "canvas.edit"] },
     Section { tab: "INSERT", panel: "2D", promoted: 2, ids: &["sketch.insert_dxf", "sketch.insert_svg", "sketch.insert_airfoil"] },
-    Section { tab: "INSERT", panel: "LIBRARY", promoted: 3, ids: &["parts.fastener", "parts.library", "parts.resize", "parts.insert"] },
+    Section {
+        tab: "INSERT",
+        panel: "LIBRARY",
+        promoted: 3,
+        ids: &["parts.fastener", "parts.library", "parts.resize", "parts.insert", "pulley.insert"],
+    },
     Section { tab: "INSERT", panel: "LINKS", promoted: 2, ids: &["component.update_links", "component.break_link"] },
     Section { tab: "INSPECT", panel: "MEASURE", promoted: 3, ids: &["inspect.measure", "inspect.center_of_mass", "component.properties"] },
     Section { tab: "INSPECT", panel: "SECTION", promoted: 1, ids: &["inspect.section"] },
@@ -787,7 +801,7 @@ pub const SECTIONS: &[Section] = &[
     // A frame starts from a sketch of its lines; its profile sizes are often parameters.
     Section { tab: "WELDMENTS", panel: "SKETCH", promoted: 1, ids: &["sketch.create"] },
     Section { tab: "WELDMENTS", panel: "CREATE", promoted: 4, ids: &["frame.member", "frame.end_cap", "frame.plate", "frame.gusset"] },
-    Section { tab: "WELDMENTS", panel: "MODIFY", promoted: 1, ids: &["frame.rotate_member"] },
+    Section { tab: "WELDMENTS", panel: "MODIFY", promoted: 1, ids: &["frame.rotate_member", "frame.trim"] },
     Section { tab: "WELDMENTS", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
 ];
 
@@ -907,6 +921,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("drawing.view.section.planned", "Section View"),
     ("document.units", "Units"),
     ("frame.rotate_member", "Rotate"),
+    ("frame.trim", "Trim"),
     ("inspect.accessibility", "Access"),
     ("inspect.center_of_mass", "Mass Center"),
     ("inspect.curvature_comb", "Curv. Comb"),
@@ -924,6 +939,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("parts.fastener", "Fastener"),
     ("parts.library", "Parts"),
     ("parts.resize", "Resize Part"),
+    ("pulley.insert", "Pulley"),
     ("plastic.assign_rule", "Assign Rule"),
     ("plastic.manage_rules", "Plastic Rules"),
     ("pointcloud.insert", "Point Clouds"),
@@ -988,6 +1004,7 @@ pub const PLACEMENTS: &[(&str, &str, &str, &str)] = &[
     ("SHEET METAL", "CREATE", "SHEET METAL", "CREATE"),
     ("SHEET METAL", "MODIFY", "SHEET METAL", "FLAT"),
     ("WELDMENTS", "CREATE", "WELDMENTS", "CREATE"),
+    ("WELDMENTS", "MODIFY", "WELDMENTS", "MODIFY"),
     ("PLASTIC", "CREATE", "MODEL", "CREATE"),
     ("PLASTIC", "SETUP", "MANAGE", "RULES"),
     ("MESH", "MODIFY", "INSERT", "FILES"),
@@ -1084,6 +1101,7 @@ pub fn feature_icon(k: &FeatureKind) -> Option<&'static str> {
         FeatureKind::SheetFold { .. } => "fold",
         FeatureKind::SheetPath { .. } => "path_flange",
         FeatureKind::SheetTab { .. } => "sheet_tab",
+        FeatureKind::SheetBead { .. } => "rib",
         FeatureKind::SheetUnfold { refold: false, .. } => "unfold",
         FeatureKind::SheetUnfold { .. } => "refold",
         FeatureKind::SheetConvert { .. } | FeatureKind::SheetSurfaceConvert { .. } | FeatureKind::SheetRecognize { .. } => "convert_sheet",
@@ -1705,6 +1723,7 @@ mod tests {
             ("SHEET METAL", "CREATE", "sheet.convert"),
             ("SHEET METAL", "SKETCH", "sketch.create"),
             ("SURFACE", "SKETCH", "sketch.create"),
+            ("MODEL", "SKETCH", "sketch.create3d"),
             ("SKETCH", "REFERENCE", "canvas.insert"),
         ] {
             assert!(layout(tab, panel, &specs).unwrap().0.iter().any(|c| c.id == id));
@@ -2071,9 +2090,9 @@ mod tests {
         assert!(h.app.params.is_some(), "the ordinary Parameters button opens the editor");
         assert!(h.app.dialog.is_none());
         assert!(h.widget("User Parameters").is_some());
-        assert!(h.widget("Model Parameters").is_some());
+        assert!(h.widget("Model Parameters").is_none(), "model groups are bands in the shared table");
         // Exercise the inline draft row through the public add prompt and Enter.
-        h.step(&json!({"click":{"handle":"dialog:table:user:add"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:table:parameters:add"}})).unwrap();
         let parameters = h.app.params.as_mut().unwrap();
         parameters.new_name = "width".into();
         parameters.new_expr = "25 mm".into();

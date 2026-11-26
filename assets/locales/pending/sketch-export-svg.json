@@ -26,5 +26,9 @@
   "zh": {
     "cmd.sketch_export_svg": "另存为 SVG",
     "ui.exportSvg": "导出 SVG…"
+  },
+  "fr": {
+    "cmd.sketch_export_svg": "Enregistrer sous SVG",
+    "ui.exportSvg": "Exporter en SVG…"
   }
 }

@@ -460,7 +460,7 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
         }
         Sel::Body { name } => {
             let body = st.body(name)?;
-            let closed = crate::cmd::inspect::encloses_volume(&body.body);
+            let closed = body.is_closed();
             let m = body.mesh();
             let tris: Vec<[Vec3; 3]> = m.triangles.iter().filter_map(|t| m.tri(t)).collect();
             let definitions = s.model.state();

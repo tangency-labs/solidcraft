@@ -1642,6 +1642,51 @@ fn rebuilt_projection_keeps_the_lines_drawn_on_it() {
 }
 
 #[test]
+fn closed_control_polygon_shares_points_including_the_closing_side() {
+    let mut sketch = Sketch::default();
+    let pts = [v(10.0, 10.0), v(30.0, 10.0), v(30.0, 30.0), v(10.0, 30.0)].map(|point| sketch.add_point(point, None).unwrap()).to_vec();
+    let spline = sketch
+        .add_curve(CurveKind::Spline { pts: pts.clone(), control: true, degree: 3, periodic: true, nurbs: None, handles: Vec::new() }, None)
+        .unwrap();
+    let sides = sketch.add_spline_control_polygon(spline).unwrap();
+    assert_eq!(sides.len(), 4);
+    assert_eq!(sketch.points.len(), 5);
+    assert!(matches!(sketch.curves[sides[3]].kind, CurveKind::Line { a, b } if a == pts[3] && b == pts[0]));
+    assert!(sketch.validate_spline_handles().is_ok());
+    assert!(sketch.add_spline_control_polygon(spline).is_err());
+    sketch.add_constraint(ConstraintKind::Horizontal { l: sides[0] }, None).unwrap();
+    sketch.add_constraint(ConstraintKind::Length { l: sides[0], value: 26.0 }, None).unwrap();
+    let solved = solve(&mut sketch);
+    assert!(solved.ok(), "{solved:?}");
+    let a = sketch.point(pts[0]).unwrap();
+    let b = sketch.point(pts[1]).unwrap();
+    assert!((a.dist(b) - 26.0).abs() < 1e-6 && (a.y - b.y).abs() < 1e-6);
+    sketch.remove_points(&[pts[0]]);
+    assert!(sketch.curves.is_empty());
+    assert!(sketch.validate_spline_handles().is_ok());
+}
+
+#[test]
+fn control_polygon_ownership_round_trips_from_the_original_field() {
+    let mut sketch = Sketch::default();
+    let pts = [v(0.0, 10.0), v(10.0, 20.0), v(20.0, 10.0)].map(|point| sketch.add_point(point, None).unwrap()).to_vec();
+    let spline =
+        sketch.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
+    let sides = sketch.add_spline_control_polygon(spline).unwrap();
+
+    let mut old = serde_json::to_value(&sketch).unwrap();
+    for side in sides {
+        let curve = old["curves"][side].as_object_mut().unwrap();
+        assert!(!curve.contains_key("spline_handle_of"));
+        let owner = curve.remove("spline_control_polygon_of").unwrap();
+        curve.insert("spline_handle_of".into(), owner);
+    }
+    let reopened: Sketch = serde_json::from_value(old).unwrap();
+    assert_eq!(reopened, sketch);
+    reopened.validate_spline_handles().unwrap();
+}
+
+#[test]
 fn a_degree_nine_control_spline_stays_exact_and_closes_a_profile_exactly() {
     // A G4 blend curve is one degree-9 Bézier; a sketch keeps it as a control spline whose exact
     // piece is that Bézier, and profile measurement must keep using the curve, not its chords.
@@ -3264,6 +3309,39 @@ fn removing_a_point_from_a_spline_with_its_own_knots_is_refused() {
     assert_eq!((kept.len(), now), (7, &nurbs));
 }
 
+/// A loose spline that ends at a corner of a loop, tangent to the loop's arc there and bending
+/// a little less than it, so that it hugs the arc from outside: its sampled chords cut inside
+/// the circle and "cross" the arc a few thousandths from the corner, where the spline itself
+/// only touches it. That crossing is no cut, and the turn at the corner follows the spline's own
+/// tangent and bend, not its chord's: the loop is the arc and the two lines, with no hairline
+/// piece of the spline in it (the extrude of such a profile was not a closed solid).
+#[test]
+fn a_loose_spline_tangent_to_an_arc_at_a_corner_leaves_the_loop_whole() {
+    use solidcraft_geom::Seg2Geom;
+    let mut sk = Sketch::new();
+    let (o, corner, top) = (v(0.0, 0.0), v(10.0, 0.0), v(0.0, 10.0));
+    sk.add_arc(o, corner, top, [None, None, None], Some("a1")).unwrap();
+    sk.add_line(top, o, None, None, Some("l1")).unwrap();
+    sk.add_line(o, corner, None, None, Some("l2")).unwrap();
+    // A cubic Bézier along the circle of radius 12.5 about (-2.5, 0), which touches the arc's
+    // circle from outside at the corner, from 40 degrees down to the corner.
+    let (c, r, sweep) = (v(-2.5, 0.0), 12.5_f64, 40_f64.to_radians());
+    let k = 4.0 / 3.0 * (sweep / 4.0).tan() * r;
+    let at = |a: f64| c + v(a.cos(), a.sin()) * r;
+    let tangent = |a: f64| v(-a.sin(), a.cos());
+    let cv = [at(sweep), at(sweep) - tangent(sweep) * k, corner + tangent(0.0) * k, corner];
+    let pts: Vec<usize> = cv.iter().map(|&p| sk.add_point(p, None).unwrap()).collect();
+    sk.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, Some("s1")).unwrap();
+    let profiles = find_profiles(&sk);
+    assert_eq!(profiles.len(), 1, "{:?}", profiles.iter().map(|p| p.outer_curves.clone()).collect::<Vec<_>>());
+    let profile = &profiles[0];
+    assert_eq!(distinct_curves(&profile.outer_curves), ["a1", "l1", "l2"].map(String::from), "{:?}", profile.outer_curves);
+    assert!((profile.area - 25.0 * std::f64::consts::PI).abs() < 1e-6, "{}", profile.area);
+    for seg in &profile.region.outer.segs {
+        assert!(seg.start().dist(seg.end()) > 1.0, "a hairline piece {seg:?}");
+    }
+}
+
 /// A circle just inside a hexagon's corners (a hex socket drawn with a circle nearly through its
 /// corners, #20661): the circle crosses each side twice, close to the corner. The sketch keeps
 /// the central region and a sliver at each corner, so a point at the centre finds a profile.
@@ -3441,4 +3519,28 @@ fn the_duplicate_fold_is_reserved_in_the_tolerance_budget() {
     let given = [Vec2::new(0.0, 0.0), Vec2::new(5.0, 0.000099999), Vec2::new(5.0, 0.000100004), Vec2::new(10.0, 0.0)];
     let fit = crate::fit_within_tolerance(&given, 0.0001, false).unwrap();
     assert!(fit.deviation <= 0.0001, "deviation {}", fit.deviation);
+}
+
+/// A sketch stops at the curve limit in force ([`crate::limits::max_curves`]; past the ceiling a
+/// design file is not opened), and the generic add refuses the circle radii the dedicated one does
+/// (a radius that is not a number would save and not open again).
+#[test]
+fn curves_stop_at_the_cap_and_circle_radii_are_checked() {
+    let mut sk = Sketch::new();
+    let a = sk.add_point(v(0.0, 0.0), None).unwrap();
+    let b = sk.add_point(v(10.0, 0.0), None).unwrap();
+    for r in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        assert!(sk.add_curve(CurveKind::Circle { c: a, r }, None).is_err(), "radius {r}");
+    }
+    let first = sk.add_line_pts(a, b, None).unwrap();
+    let line = sk.curves[first].clone();
+    let cap = crate::limits::max_curves();
+    sk.curves.extend((1..cap).map(|i| Curve { id: format!("filler{i}"), ..line.clone() }));
+    assert_eq!(sk.curves.len(), cap);
+    let points = sk.points.len();
+    assert_eq!(sk.add_line_pts(a, b, None), Err(SketchError::TooLarge));
+    assert_eq!(sk.add_line(v(0.0, 5.0), v(5.0, 5.0), None, None, None), Err(SketchError::TooLarge));
+    assert_eq!(sk.add_circle(v(0.0, 0.0), 1.0, Some(a), None), Err(SketchError::TooLarge));
+    assert_eq!(sk.add_curve(CurveKind::Line { a, b }, None), Err(SketchError::TooLarge));
+    assert_eq!(sk.points.len(), points, "a refused curve adds no points");
 }

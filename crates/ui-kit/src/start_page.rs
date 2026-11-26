@@ -105,6 +105,8 @@ pub struct Banner<'a, A> {
     pub after_filename: Label<'a>,
     pub recover: (Label<'a>, A),
     pub discard: Option<(Label<'a>, A)>,
+    /// A close (×) after the buttons, with its hover text: hides the banner, keeps the designs.
+    pub close: Option<(Label<'a>, A)>,
 }
 
 pub struct Recent<'a, A> {
@@ -290,7 +292,14 @@ fn start_content<A>(ui: &mut egui::Ui, id: &str, start: Start<'_, A>, chosen: &m
         };
         let (recover_label, recover_chosen) = banner.recover;
         let (discard_label, discard_chosen) = banner.discard.map_or((None, None), |(label, chosen)| (Some(label), Some(chosen)));
-        let (recover, discard) = FileView::recovery_banner(ui, &banner_id, message, &recover_label, discard_label.as_deref());
+        let (close_label, close_chosen) = banner.close.map_or((None, None), |(label, chosen)| (Some(label), Some(chosen)));
+        let (recover, discard, close) = match close_label.as_deref() {
+            Some(close) => FileView::recovery_banner_closable(ui, &banner_id, message, &recover_label, discard_label.as_deref(), close),
+            None => {
+                let (recover, discard) = FileView::recovery_banner(ui, &banner_id, message, &recover_label, discard_label.as_deref());
+                (recover, discard, None)
+            }
+        };
         publish(&format!("{banner_id}:recover"), &recover);
         if recover.clicked() {
             *chosen = Some(recover_chosen);
@@ -299,6 +308,12 @@ fn start_content<A>(ui: &mut egui::Ui, id: &str, start: Start<'_, A>, chosen: &m
             publish(&format!("{banner_id}:discard"), &discard);
             if discard.clicked() {
                 *chosen = Some(discard_chosen);
+            }
+        }
+        if let (Some(close), Some(close_chosen)) = (close, close_chosen) {
+            publish(&format!("{banner_id}:close"), &close);
+            if close.clicked() {
+                *chosen = Some(close_chosen);
             }
         }
         ui.add_space(t.file_section_gap);
