@@ -1438,6 +1438,7 @@ fn kicad_options_record(options: &solidcraft_io::KicadOptions) -> Value {
         "components": options.components,
         "copper": options.copper.as_str(),
         "silkscreen": options.silkscreen,
+        "holes": options.holes.as_str(),
     });
     if let Some(thickness) = options.thickness {
         record["thickness"] = json!(thickness);
@@ -1591,7 +1592,12 @@ pub(super) struct KicadReplaced {
 /// again in `comp`, which keeps its own placements, its name and its link (whose feature moves to
 /// the new one). Nothing changes when the board can't be read or built.
 pub(super) fn replace_kicad(s: &mut Session, comp: u64, board: &str, bytes: Vec<u8>, record: &Value) -> Result<KicadReplaced> {
-    let options = kicad_options(record, "component.update_links")?;
+    // A link recorded before the holes option read every hole: it keeps its board's result.
+    let mut record = record.clone();
+    if let Some(fields) = record.as_object_mut() {
+        fields.entry("holes").or_insert_with(|| json!("all"));
+    }
+    let options = kicad_options(&record, "component.update_links")?;
     let KicadRead { imported, bytes, refused, .. } = board_from_bytes(board.to_string(), bytes, &options, &KicadPaths::current())?;
     let old_name = s.doc.links.get(&comp).and_then(|l| s.doc.feature(l.feature)).map(|f| f.name.clone());
     let warnings = imported.feature.warnings.clone();
