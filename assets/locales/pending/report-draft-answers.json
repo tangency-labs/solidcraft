@@ -46,5 +46,11 @@
     "ui.report_finish_current": "开始另一份报告前，请关闭当前草稿。",
     "ui.report_restore_answers": "恢复填写内容",
     "ui.report_saved_answers": "已关闭报告中的填写内容在本次会话中仍然可用。可在此恢复或丢弃这些内容。"
+  },
+  "fr": {
+    "ui.report_discard_answers": "Abandonner les réponses",
+    "ui.report_finish_current": "Fermez le brouillon actuel avant de commencer un autre rapport.",
+    "ui.report_restore_answers": "Restaurer les réponses",
+    "ui.report_saved_answers": "Les réponses d’un rapport fermé sont disponibles pour cette session. Vous pouvez les restaurer ici ou les abandonner."
   }
 }

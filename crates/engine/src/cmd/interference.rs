@@ -153,14 +153,22 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
     let waited_ms = waited.elapsed().as_secs_f64() * 1000.0;
 
     // Mesh bodies are not intersected: say so, rather than let `count: 0` read as "no overlap".
-    let mut unchecked: Vec<PlacedUnchecked> =
-        meshes_left.iter().map(|b| placed(Unchecked { a: b.name.clone(), b: None, reason: MESH_NOT_CHECKED.to_string() })).collect();
+    let mut unchecked: Vec<PlacedUnchecked> = meshes_left
+        .iter()
+        .map(|b| placed(Unchecked { a: b.name.clone(), b: None, reason: MESH_NOT_CHECKED.to_string(), distance_mm: None, exact: None }))
+        .collect();
     let (mut hits, mut timed) = (Vec::new(), Vec::new());
     let (mut not_checked, mut boolean_ms, mut tessellate_ms) = (0usize, 0.0, 0.0);
     for ((a, b), d) in done {
         let Some(d) = d else {
             not_checked += 1;
-            unchecked.push(placed(Unchecked { a, b: Some(b), reason: format!("not checked: the time budget of {budget_s} s ran out (budget_s)") }));
+            unchecked.push(placed(Unchecked {
+                a,
+                b: Some(b),
+                reason: format!("not checked: the time budget of {budget_s} s ran out (budget_s)"),
+                distance_mm: None,
+                exact: None,
+            }));
             continue;
         };
         boolean_ms += d.kernel.boolean_ms;
@@ -176,7 +184,7 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
         match d.outcome {
             Outcome::Hit(overlap) => hits.push(PlacedOverlap { a_part: place(&overlap.a), b_part: place(&overlap.b), overlap }),
             Outcome::Clear => {}
-            Outcome::Unchecked(reason) => unchecked.push(placed(Unchecked { a, b: Some(b), reason })),
+            Outcome::Unchecked(reason) => unchecked.push(placed(Unchecked { a, b: Some(b), reason, distance_mm: None, exact: None })),
         }
     }
     // A timing profile of the command (`--profile`) counts the kernel time the workers spent,
@@ -241,6 +249,9 @@ fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String), size: f64, envelo
         Err(e) => return Outcome::Unchecked(e.to_string()),
     };
     if m.volume > threshold {
+        if let Some(why) = impossible_overlap(m.volume, &m.bbox, a, b) {
+            return Outcome::Unchecked(why);
+        }
         return Outcome::Hit(Overlap {
             a: na.clone(),
             b: nb.clone(),
@@ -259,6 +270,37 @@ fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String), size: f64, envelo
         ));
     }
     Outcome::Clear
+}
+
+/// Why a shared part of `a` and `b` measured as `volume` within `bbox` can't be theirs: a part
+/// shared by two bodies is no bigger than the smaller one and lies inside both of their boxes.
+/// A boolean that misreads a pin seated in its bore can hand back the whole larger body (#21553);
+/// that is reported as not checked, never as an overlap. `None`: the part fits (or a body can't
+/// be measured, and the overlap stands as measured).
+pub(crate) fn impossible_overlap(volume: f64, bbox: &Aabb3, a: &Body, b: &Body) -> Option<String> {
+    let (ma, mb) = (solidcraft_kernel::measure_mass(a).ok()?, solidcraft_kernel::measure_mass(b).ok()?);
+    overlap_out_of_bounds(volume, bbox, (ma.volume, &ma.bbox), (mb.volume, &mb.bbox))
+}
+
+/// [`impossible_overlap`] on the measured numbers.
+fn overlap_out_of_bounds(volume: f64, bbox: &Aabb3, (va, ba): (f64, &Aabb3), (vb, bb): (f64, &Aabb3)) -> Option<String> {
+    let smaller = va.abs().min(vb.abs());
+    let size = ba.diagonal().max(bb.diagonal()).max(1.0);
+    if volume > smaller * (1.0 + 1e-6) + 1e-9 * size.powi(3) {
+        return Some(format!(
+            "not checked: the shared part measured {volume:.3} mm³, more than the smaller body's {smaller:.3} mm³; the boolean misread this pair"
+        ));
+    }
+    let tol = 1e-6 * size;
+    let axes = [
+        (bbox.min.x, bbox.max.x, ba.min.x.max(bb.min.x), ba.max.x.min(bb.max.x)),
+        (bbox.min.y, bbox.max.y, ba.min.y.max(bb.min.y), ba.max.y.min(bb.max.y)),
+        (bbox.min.z, bbox.max.z, ba.min.z.max(bb.min.z), ba.max.z.min(bb.max.z)),
+    ];
+    if !axes.iter().all(|&(min, max, low, high)| min >= low - tol && max <= high + tol) {
+        return Some("not checked: the shared part reaches outside where the two bodies' boxes overlap; the boolean misread this pair".into());
+    }
+    None
 }
 
 /// Each job's answer (in pair order, with the pair's names; `None`: not finished within

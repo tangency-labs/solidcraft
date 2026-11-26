@@ -222,8 +222,8 @@ fn normalized_points(pairs: &[(usize, Vec2)]) -> Result<Vec<Vec2>> {
             if p.x > trailing_x {
                 return Err(IoError::Invalid(format!("line {line}: x = {} is outside {}..{trailing_x}", p.x, leading.x)));
             }
-            let q = solidcraft_kernel::services::import_geometry::chord_coordinates(*p, leading.x, trailing_x)
-                .map_err(|e| IoError::Invalid(format!("line {line}: {e}")))?;
+            let q =
+                solidcraft_kernel::affine::chord_coordinates(*p, leading.x, trailing_x).map_err(|e| IoError::Invalid(format!("line {line}: {e}")))?;
             if q.y.abs() > 1.0 {
                 return Err(IoError::Invalid(format!("line {line}: y = {} is outside -1..1", q.y)));
             }

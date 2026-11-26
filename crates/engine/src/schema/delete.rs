@@ -30,6 +30,9 @@ const MAX_LIST: usize = 10_000;
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct SelectionDeleteParams {
+    /// Keep identifiable surviving projection edges linked when deleting sketch geometry. Default: false, break the remaining link.
+    #[serde(default)]
+    pub preserve_projection_link: bool,
     /// What to delete, as selection items: `{"type": "feature", "id": 3}`, `{"type": "body",
     /// "name": "Body1"}`, `{"type": "sketch_curve", "id": "c1"}` and so on. At most 10000. Items
     /// that can't be deleted (an origin plane, an edge or vertex, a profile outside the sketch

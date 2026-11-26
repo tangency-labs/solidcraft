@@ -29,7 +29,7 @@ use solidcore::primitive::api_primitives as api;
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p1::faces;
 use solidcore::topology::brep::p5::transform;
-use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+use solidcore::topology::brep::validation::{check_brep, CheckLevel, PointerCheck};
 use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::{Brep, EdgeuseId, EdgeuseOwner};
 use solidcore::Kernel;
@@ -128,7 +128,7 @@ fn trim_face_extents(k: &Kernel, b: &Brep, eu: EdgeuseId) -> (f64, f64) {
 }
 
 struct Measured {
-    pointers_status: i32,
+    pointers: PointerCheck,
     assert_valid: Option<bool>,
     lines: Vec<String>,
     before: Vec<(EdgeuseId, Vec<Vec3>)>,
@@ -154,8 +154,8 @@ fn measure_turn(turn: f64) -> Measured {
     let lines = check.lines();
     let after = hole_trims(&body);
     eprintln!(
-        "pointers_status {} assert_valid {:?}, {} line(s) {:#?}",
-        check.pointers_status,
+        "pointers {:?} assert_valid {:?}, {} line(s) {:#?}",
+        check.pointers,
         check.assert_valid,
         lines.len(),
         lines
@@ -166,7 +166,7 @@ fn measure_turn(turn: f64) -> Measured {
         }
     }
     Measured {
-        pointers_status: check.pointers_status,
+        pointers: check.pointers,
         assert_valid: check.assert_valid,
         lines,
         before,
@@ -191,7 +191,7 @@ fn wr406_bored_plate_check_keeps_the_hole_trims() {
     // with no report (upstream moves each one's first-end control point onto the chord
     // and reports two kinks)
     let on = measure();
-    assert_eq!(on.pointers_status, 1000);
+    assert_eq!(on.pointers, PointerCheck::Passed);
     assert_eq!(on.assert_valid, Some(true));
     assert!(on.lines.is_empty(), "{:#?}", on.lines);
     assert_eq!(on.before, on.after, "the check left the trims alone");
@@ -203,7 +203,7 @@ fn wr406_bored_plate_check_keeps_the_hole_trims() {
 #[test]
 fn wr406_axis_aligned_bore_keeps_the_check_clean() {
     let m = measure_turn(0.0);
-    assert_eq!(m.pointers_status, 1000);
+    assert_eq!(m.pointers, PointerCheck::Passed);
     assert_eq!(m.assert_valid, Some(true));
     assert!(m.lines.is_empty(), "{:#?}", m.lines);
     assert_eq!(m.before, m.after, "the check did not touch the trims");

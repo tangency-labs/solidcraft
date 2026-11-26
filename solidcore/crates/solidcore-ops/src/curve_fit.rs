@@ -1,11 +1,13 @@
 //! Curves fitted to points: through points (edit points), closed, rebuilt to a degree and span
-//! count, and a body's edge as a free curve. The curve is the record's ([`Curve`]); the knots,
-//! the fits, the edge's trimmed curve and the bound are the kernel's ([`interp`]: global
-//! interpolation, The NURBS Book's §9.2.1; [`periodic_uniform`]; [`approx_knots`]: least
-//! squares at given parameters, §9.4.1; [`create_trimmed_nurbs_curve`]; [`certified_distance`]
-//! and [`interpolation_bound`]). Ops checks the inputs and converts; every fit comes with the
-//! kernel's certified bound of how far it is from what it fits. A fit made elsewhere, as cubic
-//! pieces through its points, gets the same bounds ([`fit_spline_bounds`]).
+//! count or to a degree and a tolerance, and a body's edge as a free curve. The curve is the
+//! record's ([`Curve`]); the knots, the fits, the edge's trimmed curve and the bound are the
+//! kernel's ([`interp`]: global interpolation, The NURBS Book's §9.2.1; [`periodic_uniform`];
+//! [`approx_knots`]: least squares at given parameters, §9.4.1; [`refit_within`]: least squares
+//! with the fewest spans a halving search finds within a tolerance;
+//! [`create_trimmed_nurbs_curve`]; [`certified_distance`] and [`interpolation_bound`]). Ops
+//! checks the inputs and converts; every fit comes with the kernel's certified bound of how far
+//! it is from what it fits. A fit made elsewhere, as cubic pieces through its points, gets the
+//! same bounds ([`fit_spline_bounds`]).
 
 use solidcore::curve::from_parameters::{from_parameters, record_of as kernel_record, EdgeCurve};
 use solidcore::geom::tol::{context_zone_tol_3d, SmallTopoType};
@@ -14,6 +16,7 @@ use solidcore::nurbs::crv_deviation::{certified_distance, interpolation_bound};
 use solidcore::nurbs::crv_fit::end_directions::{interp_end_directions, square_to_plane};
 use solidcore::nurbs::crv_fit::p1::{approx_knots, param_values, DerivEnd, ParamMethod};
 use solidcore::nurbs::crv_fit::p2::interp;
+use solidcore::nurbs::crv_fit::within::refit_within;
 use solidcore::nurbs::geom::Interval;
 use solidcore::nurbs::knots::{clamped_uniform, periodic_uniform, KnotVector, Side, MAX_DEGREE};
 use solidcore::topology::edge::create_trimmed_nurbs_curve;
@@ -267,16 +270,104 @@ pub fn rebuild(curve: &Curve, degree: usize, spans: usize) -> Result<(Curve, f64
     })?
 }
 
-/// What [`fit_spline_bounds`] certifies, in the points' units.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FitSplineBounds {
-    /// How far, at most, a point given with a fit point is from the curve there
-    /// ([`interpolation_bound`]); 0 without such points.
-    pub deviation: f64,
-    /// How far, at most, the curve is from the polygon through its fit points, each span
-    /// against its chord at the same share of the span ([`certified_distance`]).
-    pub bulge: f64,
+/// `curve` refitted as a clamped spline of `degree` on `[0, 1]` within `tolerance` of it at
+/// every parameter (mapped onto `[0, 1]`), through its two ends, the start leaving along
+/// `start` and the end reached along `end` where they are given, and the kernel's certified
+/// bound of how far it is from `curve` ([`refit_within`]: least squares on simple knots, the
+/// span with the largest bound halved until every span is within the tolerance, at most 4096
+/// control points, as many as [`rebuild`] takes).
+///
+/// The fit is made on the curve's own domain, so the bound is against the curve as it is
+/// given, every span of it; the rebuilt curve is then mapped onto `[0, 1]`. An end that is
+/// given a direction leaves along it to within the kernel's numeric zero for angles
+/// (`EFF_ZERO_RAD`, a ten-thousandth of a degree): two curves rebuilt with one direction at
+/// a point they share meet there within twice that.
+///
+/// # Errors
+/// [`Error::Argument`] for a curve that is not a valid clamped spline (a rational spline and a
+/// closed periodic one are refused, as by [`rebuild`]), a degree of 0 or past the record's most
+/// ([`MAX_SPLINE_DEGREE`]), a direction given on a degree below 2, a direction with a
+/// coordinate that is not finite, of no length, or against the curve's own tangent at that
+/// end, or a tolerance not finite or not positive; [`Error::PastTolerance`] with the bound
+/// reached when 4096 control points (or the floating-point room of the parameter) do not
+/// reach the tolerance, or the tolerance is below what the rounding of the curve's own
+/// coordinates allows any bound to be; [`Error::Unsupported`] when they reach it but an end
+/// does not leave along its direction (a direction square to the curve's own there, or an end
+/// leg only a few roundings of its coordinates long, as on a small curve far from the
+/// origin), or when the rebuilt curve has knots that `[0, 1]` cannot keep apart; the
+/// kernel's status otherwise.
+pub fn rebuild_within(
+    curve: &Curve,
+    degree: usize,
+    tolerance: f64,
+    start: Option<[f64; 3]>,
+    end: Option<[f64; 3]>,
+) -> Result<(Curve, f64)> {
+    let nurb = nurb_of(curve)?;
+    if !matches!(curve, Curve::Spline { .. })
+        || degree == 0
+        || degree > MAX_SPLINE_DEGREE
+        || !tolerance.is_finite()
+        || tolerance <= 0.0
+    {
+        return Err(Error::Argument);
+    }
+    if (start.is_some() || end.is_some()) && degree < 2 {
+        return Err(Error::Argument);
+    }
+    let direction = |d: Option<[f64; 3]>| -> Result<Option<Vec3>> {
+        match d {
+            Some([x, y, z]) if [x, y, z].iter().all(|c| c.is_finite()) => {
+                Ok(Some(Vec3::new(x, y, z)))
+            }
+            Some(_) => Err(Error::Argument),
+            None => Ok(None),
+        }
+    };
+    let (start, end) = (direction(start)?, direction(end)?);
+    // How many spans of non-zero length a knot vector has.
+    let spans = |knots: &[f64]| {
+        knots
+            .windows(2)
+            .filter(|w| matches!(w, [a, b] if a < b))
+            .count()
+    };
+    run("curve_fit::rebuild_within", |_| {
+        // The fit is made on the curve's own domain, so its bound is against the curve as it
+        // was given: mapped onto [0, 1] first, two knots the mapping rounds together would
+        // lose the span between them, and the bound would be against another curve.
+        let fit = match refit_within(&nurb, degree, tolerance, start, end, 4096) {
+            Ok(fit) => fit,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        if fit.bound > tolerance {
+            return Ok(Err(Error::PastTolerance { bound: fit.bound }));
+        }
+        // within the tolerance, but an end does not leave along its direction: the search
+        // stopped at its limit before the end's reach was positive, or the end's leg is too
+        // short against the rounding of its coordinates to lie along the direction
+        if !fit.ends_held() {
+            return Ok(Err(Error::Unsupported(
+                "an end the fit cannot bring to leave along its direction",
+            )));
+        }
+        // Onto [0, 1], as every curve of this module. The rebuilt curve's own knots are
+        // mapped; two of them rounded together would lose a span of it.
+        let bound = fit.bound;
+        let mut unit = fit.curve;
+        let before = spans(unit.knots());
+        unit.reparam_to_interval(Interval { ul: 0.0, ur: 1.0 })?;
+        if spans(unit.knots()) != before {
+            return Ok(Err(Error::Unsupported(
+                "a rebuilt curve whose knots cannot be kept apart on [0, 1]",
+            )));
+        }
+        Ok(record_of(&unit).map(|c| (c, bound)))
+    })?
 }
+
+pub use solidcore_record::curve_query::FitSplineBounds;
 
 impl Answer for FitSplineBounds {}
 

@@ -20,6 +20,7 @@ impl Model {
     pub fn evaluate_shared(&mut self, doc: &Arc<Document>) -> bool {
         let reusable = !self.no_cache
             && self.primed.is_empty()
+            && !doc.has_capture_position_timeline()
             && self.placement_inputs.as_ref().is_some_and(|inputs| {
                 inputs.state.upgrade().is_some_and(|state| Arc::ptr_eq(&state, &self.state()))
                     && !self.is_stale()
@@ -114,6 +115,9 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
                 taper: _,
                 to,
                 to_offset: _,
+                through_all2,
+                to2,
+                to_offset2: _,
                 from,
                 corner: _,
                 to_body_apart: _,
@@ -121,7 +125,7 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
                 picked_placements: _,
                 one_sided_direction: _,
             } = extent;
-            to.is_none() && from.is_none() && !through_all && components.get(&sketch.0) == Some(&f.component)
+            to.is_none() && from.is_none() && !through_all && !through_all2 && to2.is_none() && components.get(&sketch.0) == Some(&f.component)
         }
         _ => false,
     }
@@ -172,8 +176,12 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         timeline_groups,
         browser_order,
         named_views,
+        home_view,
+        saved_sections,
         visibility,
         point_clouds,
+        // Display only: a plane's drawn size shapes nothing.
+        plane_extents: _,
         notes: _,
         // Plugin data is kept beside the design; no feature reads it.
         plugin_data: _,
@@ -211,6 +219,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         && *timeline_groups == b.timeline_groups
         && *browser_order == b.browser_order
         && *named_views == b.named_views
+        && *home_view == b.home_view
+        && *saved_sections == b.saved_sections
         && *visibility == b.visibility
         && *point_clouds == b.point_clouds
 }

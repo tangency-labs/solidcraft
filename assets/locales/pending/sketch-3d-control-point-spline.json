@@ -35,5 +35,10 @@
     "cmd.sketch_spline3d_control_point": "三维控制点样条曲线",
     "help.sketch.spline3d.control_point": "开启3D 草图后，在空间中绘制由控制点决定形状的平滑曲线，曲线不经过这些点。用于通过移动控制点来塑形的扫掠路径和导轨。",
     "sketch.hint.spline3d.control_point": "三维控制点样条曲线：在三维空间中单击三个或更多控制点；右键单击或按 Esc 结束"
+  },
+  "fr": {
+    "cmd.sketch_spline3d_control_point": "Spline 3D à points de contrôle",
+    "help.sketch.spline3d.control_point": "Trace une courbe lisse dans l’espace, définie par des points de contrôle qu’elle ne traverse pas, lorsque l’option Esquisse 3D est activée. Utilisez-la pour créer des trajectoires de balayage et des rails de guidage que vous façonnez en déplaçant les points.",
+    "sketch.hint.spline3d.control_point": "Spline 3D à points de contrôle : cliquez sur au moins trois points de contrôle en 3D ; faites un clic droit ou appuyez sur Échap pour terminer"
   }
 }

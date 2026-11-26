@@ -49,7 +49,7 @@ fn tint_plugins_compile_and_run_on_the_gpu() {
         [Region::Icon, Region::Button, Region::Panel].into_iter().flat_map(|r| [0.0, 400.0, 800.0, 1200.0].map(|x| region(r, x))).collect();
     let Some((adapter, device, queue)) = crate::gpu::offscreen_device() else {
         for (folder, key) in &plugins {
-            crate::plugin_shaders::load(folder.clone(), key.clone(), 1024).unwrap_or_else(|e| panic!("{key}: {e}"));
+            crate::plugin_shaders::load(folder.clone(), key.clone(), Default::default(), 1024).unwrap_or_else(|e| panic!("{key}: {e}"));
             eprintln!("{key}: compiled; no GPU adapter, so not run");
         }
         return;
@@ -60,7 +60,7 @@ fn tint_plugins_compile_and_run_on_the_gpu() {
     }
     for (folder, key) in &plugins {
         let run = |time: f32| {
-            let loaded = crate::plugin_shaders::load(folder.clone(), key.clone(), 1024).unwrap_or_else(|e| panic!("{key}: {e}"));
+            let loaded = crate::plugin_shaders::load(folder.clone(), key.clone(), Default::default(), 1024).unwrap_or_else(|e| panic!("{key}: {e}"));
             let animated = loaded.animated;
             (evaluate(&adapter, &device, &queue, loaded, &asked, time).unwrap_or_else(|e| panic!("{key}: {e}")), animated)
         };
@@ -77,7 +77,7 @@ fn tint_plugins_compile_and_run_on_the_gpu() {
 #[test]
 fn a_background_is_not_taken_for_a_tint() {
     let Some((adapter, device, queue)) = crate::gpu::offscreen_device() else { return };
-    let loaded = crate::plugin_shaders::load(example("dusk"), "dusk/dusk".into(), 1024).unwrap();
+    let loaded = crate::plugin_shaders::load(example("dusk"), "dusk/dusk".into(), Default::default(), 1024).unwrap();
     let error = build(&adapter, &device, &queue, loaded).err().unwrap();
     assert_eq!(error, "not a tint");
 }
