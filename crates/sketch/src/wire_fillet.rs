@@ -204,9 +204,21 @@ impl Sketch {
             // Both lines' ends held alike now say one thing twice: once is enough.
             let mut twice: Vec<String> = Vec::new();
             for (i, c) in sk.wire_constraints.iter().enumerate() {
-                if moved.contains(&c.id) && sk.wire_constraints.iter().take(i).any(|earlier| earlier.kind.same_as(&c.kind)) {
-                    twice.push(c.id.clone());
+                let Some(earlier) = sk.wire_constraints.iter().take(i).find(|earlier| earlier.kind.same_as(&c.kind)) else { continue };
+                if !moved.contains(&c.id) {
+                    continue;
                 }
+                // Two ends fixed by coordinates of their own cannot become one point fixed
+                // once: dropping either would lose the expressions that place it.
+                if let (WireConstraintKind::Fix { exprs: first, .. }, WireConstraintKind::Fix { exprs: second, .. }) = (&earlier.kind, &c.kind)
+                    && first != second
+                {
+                    return Err(bad(format!(
+                        "both lines' ends at the corner are fixed, each by its own coordinates (`{}` and `{}`): remove one of them first",
+                        earlier.id, c.id
+                    )));
+                }
+                twice.push(c.id.clone());
             }
             sk.wire_constraints.retain(|c| !twice.contains(&c.id));
             // And what a move left naming one point twice (a distance between the two ends).
@@ -325,6 +337,33 @@ mod tests {
         sk.validate_wire_constraints().unwrap();
     }
 
+    /// Both lines' ends fixed at the corner become one fixed point, and two lines held equal in
+    /// length stay equal: each loses the same 20 mm.
+    #[test]
+    fn two_fixed_ends_become_one_fixed_point_and_equal_lines_stay_equal() {
+        let (mut sk, ids) = path(&[v(0.0, 0.0, 0.0), v(100.0, 0.0, 0.0), v(100.0, 0.0, 100.0)]);
+        let end = |wire: &str, index: usize| WirePoint { wire: wire.to_string(), index };
+        let first = sk.add_wire_constraint(WireConstraintKind::Fix { p: end(&ids[0], 1), at: v(100.0, 0.0, 0.0), exprs: None }).unwrap();
+        let second = sk.add_wire_constraint(WireConstraintKind::Fix { p: end(&ids[1], 0), at: v(100.0, 0.0, 0.0), exprs: None }).unwrap();
+        let equal = sk.add_wire_constraint(WireConstraintKind::Equal { a: ids[0].clone(), b: ids[1].clone(), arcs: false }).unwrap();
+        let done = sk.fillet_drawn_lines(&ids[0], &ids[1], 20.0).unwrap();
+        let corner = done.corner.clone().expect("the corner is kept");
+        let fixes: Vec<&str> = sk
+            .wire_constraints
+            .iter()
+            .filter(|c| matches!(&c.kind, WireConstraintKind::Fix { p, .. } if *p == end(&corner, 0)))
+            .map(|c| c.id.as_str())
+            .collect();
+        assert_eq!(fixes, vec![first.as_str()], "{:?}", sk.wire_constraints);
+        assert_eq!(done.moved, vec![first], "`{second}` said the same as the first");
+        assert!(sk.wire_constraints_holding().contains(&equal), "{:?}", sk.wire_constraints);
+        assert!(
+            (fit(&sk, &ids[0])[1].dist(v(0.0, 0.0, 0.0)) - 80.0).abs() < 1e-9
+                && (fit(&sk, &ids[1])[0].dist(v(100.0, 0.0, 100.0)) - 80.0).abs() < 1e-9
+        );
+        assert!(sk.wire_constraints_hold(), "{:?}", sk.wire_constraints);
+    }
+
     /// No corner, no fit, or a constraint a shorter line would break: refused with the reason,
     /// and the sketch is as it was.
     #[test]
@@ -352,6 +391,14 @@ mod tests {
         refused(&mut sk, &ids[0], &other_space, 5.0, "different coordinate spaces");
         let equal = sk.add_wire_constraint(WireConstraintKind::Equal { a: ids[1].clone(), b: apart.clone(), arcs: false }).unwrap();
         refused(&mut sk, &ids[0], &ids[1], 5.0, &format!("held equal in length to `{apart}` by `{equal}`"));
+        // Both ends at the corner fixed, one by expressions of its own: neither can be dropped.
+        let (mut sk, ids) = path(&[v(0.0, 0.0, 0.0), v(100.0, 0.0, 0.0), v(100.0, 0.0, 80.0)]);
+        let end = |wire: &str, index: usize| WirePoint { wire: wire.to_string(), index };
+        let by_number = sk.add_wire_constraint(WireConstraintKind::Fix { p: end(&ids[0], 1), at: v(100.0, 0.0, 0.0), exprs: None }).unwrap();
+        let exprs = crate::PointExprs3 { x: Some("reach".into()), ..Default::default() };
+        let by_expression =
+            sk.add_wire_constraint(WireConstraintKind::Fix { p: end(&ids[1], 0), at: v(100.0, 0.0, 0.0), exprs: Some(Box::new(exprs)) }).unwrap();
+        refused(&mut sk, &ids[0], &ids[1], 20.0, &format!("each by its own coordinates (`{by_number}` and `{by_expression}`)"));
         // In one straight line, and back along each other.
         let (mut sk, ids) = path(&[v(0.0, 0.0, 0.0), v(10.0, 0.0, 5.0), v(20.0, 0.0, 10.0)]);
         refused(&mut sk, &ids[0], &ids[1], 2.0, "one straight line");
