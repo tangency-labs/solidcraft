@@ -1484,8 +1484,14 @@ impl GeoRef {
                             .filter_map(|v| rec.vertices.get(v as usize).map(|pt| Vec3::new(pt.point[0], pt.point[1], pt.point[2])))
                             .any(|q| q.dist(*at) <= tol)
                     };
-                    let mut meet: Vec<String> =
-                        rec.edges.iter().zip(crate::naming::edge_names(b)).filter(|(e, n)| !n.is_empty() && ends_here(e)).map(|(_, n)| n).collect();
+                    let edge_names = crate::naming::edge_name_index(b);
+                    let mut meet: Vec<String> = rec
+                        .edges
+                        .iter()
+                        .zip(&edge_names.names)
+                        .filter(|(e, n)| !n.is_empty() && ends_here(e))
+                        .map(|(_, n)| n.clone())
+                        .collect();
                     if meet.is_empty() {
                         continue;
                     }
