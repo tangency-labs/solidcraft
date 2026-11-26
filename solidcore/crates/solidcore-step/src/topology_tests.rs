@@ -3919,7 +3919,8 @@ fn a_pcurve_a_little_past_a_spline_patchs_knot_range_is_put_on_it() {
 /// So does a side a quarter turn past the seam whose neighbours do not end on it, the next one
 /// starting a whole turn back (a loop lifted past the seam, as at the pole of the sphere faces
 /// #98053 and #98718 of file 211 in #12859): put on the seam it would be a quarter turn from its
-/// edge, and the face was left out.
+/// edge, and the face was left out. Nor does one whose side before it ends on the seam while the
+/// next starts a turn back: it is measured against the side on the seam only.
 #[test]
 fn a_pcurve_its_fit_leaves_past_a_closed_surfaces_seam_is_put_on_it() {
     let frame = Frame { origin: [0.0; 3], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] };
@@ -3970,6 +3971,17 @@ fn a_pcurve_its_fit_leaves_past_a_closed_surfaces_seam_is_put_on_it() {
     let mut pcs = vec![lifted.clone()];
     assert_eq!(onto_seam(&cylinder, std::slice::from_ref(&uses), &mut pcs), 0);
     assert_eq!(pcs[0], lifted);
+    // The side before it ends on the seam, the next starts a turn back: the side runs from the
+    // seam a quarter turn past it, which no rounding is, so it stays.
+    let mixed = vec![
+        side([hi - 1.0, 0.2], [hi, 0.2]),
+        side([hi, 0.2], [q, 0.8]),
+        side([lo + 0.25 * period, 0.8], [hi - 1.0, 0.8]),
+        side([hi - 1.0, 0.8], [hi - 1.0, 0.2]),
+    ];
+    let mut pcs = vec![mixed.clone()];
+    assert_eq!(onto_seam(&cylinder, std::slice::from_ref(&uses), &mut pcs), 0);
+    assert_eq!(pcs[0], mixed);
 }
 
 /// A closed spline edge whose end vertex sits a few µm off the curve's seam (its start and end
