@@ -4663,13 +4663,12 @@ fn is_root(c: &u64) -> bool {
 }
 
 /// `base` brought onto the line through `at` along the unit direction `dir`, by the kernel
-/// ([`solidcraft_kernel::services::affine::plane_onto_line`]): tilted by the least turn that makes
+/// ([`solidcraft_kernel::affine::plane_onto_line`]): tilted by the least turn that makes
 /// it parallel to the line, then moved along its normal until it holds the line. A base that
 /// already holds the line comes back unchanged (#6180). A line square to the base is refused.
 fn onto_axis(base: Plane, at: Vec3, dir: Vec3) -> Result<Plane> {
-    let (origin, [x, y]) =
-        solidcraft_kernel::services::affine::plane_onto_line(base.origin.into(), base.x.into(), base.y.into(), at.into(), dir.into())
-            .ok_or_else(|| DocError::Invalid("the axis is square to the plane, so no plane at an angle from it goes through the axis".into()))?;
+    let (origin, [x, y]) = solidcraft_kernel::affine::plane_onto_line(base.origin.into(), base.x.into(), base.y.into(), at.into(), dir.into())
+        .ok_or_else(|| DocError::Invalid("the axis is square to the plane, so no plane at an angle from it goes through the axis".into()))?;
     Plane::new(origin.into(), x.into(), y.into()).ok_or_else(|| DocError::Invalid("degenerate plane".into()))
 }
 
