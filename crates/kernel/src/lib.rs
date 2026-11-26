@@ -463,6 +463,7 @@ pub use route::gusset_prepare;
 pub use route::gusset_support;
 pub use route::gusset_support_pick;
 pub use route::gusset_support_plane;
+pub use route::hole_stacks;
 pub use route::member_along;
 pub use route::member_axes;
 pub use route::member_axis;
