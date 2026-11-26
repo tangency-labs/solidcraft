@@ -87,6 +87,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_sheet::Sm::Recognize { .. } => Some("sheet.recognize"),
             crate::dialogs_sheet::Sm::Rules { .. } => Some("sheet.manage_rules"),
             crate::dialogs_sheet::Sm::FlatPattern { .. } => Some("sheet.flat_pattern"),
+            crate::dialogs_sheet::Sm::ExportDxf { .. } => Some("sheet.export_dxf"),
             crate::dialogs_sheet::Sm::Hardware { .. } => Some("sheet.hardware"),
             _ => k.simple_metadata().map(|(command, _)| command),
         },
@@ -523,6 +524,23 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
         crate::command_sketch::offer_row(app, d, ui);
     }
+    // When a pick field is active (no widget holds keyboard focus), Tab enters the first
+    // control after the pick inputs (e.g. Direction in Extrude) instead of jumping to the app bar.
+    let prior_focus = d.had_keyboard_focus || ctx.memory(|m| m.focused().is_some_and(|id| m.had_focus_last_frame(id)));
+    if !prior_focus
+        && !ui.is_sizing_pass()
+        && app.issue_report.draft.is_none()
+        && ui.memory(|m| m.allows_interaction(ui.layer_id()))
+        && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
+    {
+        ctx.memory_mut(|m| {
+            if let Some(id) = m.focused() {
+                m.surrender_focus(id);
+            }
+            m.move_focus(egui::FocusDirection::Next);
+        });
+        ctx.request_repaint();
+    }
     d.sync_material(&app.session);
     // The Hole dialog's dropdowns preview each choice on a copy of the form as it stands.
     let hole_form = matches!(d.kind, Kind::Hole { .. }).then(|| (d.kind.clone(), to_object_on(&d.inputs)));
@@ -536,7 +554,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::UrdfExport(f) => enter |= crate::dialogs_urdf::rows(ui, f),
         Kind::ViewDxf { dashed, tolerance, zero_origin } => crate::dialogs_view_dxf::rows(app, ui, dashed, tolerance, zero_origin),
         Kind::ViewNavigator(form) => crate::view_gizmo::rows(app, ui, form, &d.inputs),
-        Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::rows(ui, p),
+        Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::rows(app, ui, p),
         Kind::InsertAirfoil(a) => crate::dialogs_insert_airfoil::rows(ui, a),
         Kind::ShaftSpline(k) => {
             // A face taken by a row it does not belong in goes to its own row (a bore out of Shaft, a shaft out

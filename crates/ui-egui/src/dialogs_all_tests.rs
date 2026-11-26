@@ -1536,7 +1536,10 @@ fn hand_drawn_dialog_texts_are_translated() {
         ("motion.study", "Loop"),
         ("surface.stitch", "tight"),
         ("sheet.flange", "Base"),
-        ("solid.emboss", "Orthogonal line profiles tangent to one supported cylinder wrap automatically. Pick a wall to choose a target."),
+        (
+            "solid.emboss",
+            "Leave Target Face empty to use the face the sketch lies on, or the cylinder it touches. Pick a face if Emboss chooses the wrong one.",
+        ),
     ] {
         let mut d = Dialog::for_command(&h.app, command).unwrap();
         let mut painted = Vec::new();
@@ -2606,6 +2609,43 @@ fn coil_and_revolve_keep_the_owner_of_a_collinear_axis() {
     }
 }
 
+/// Two cylinders touch along a line. A round face picked on that line is the face that was
+/// clicked: the point alone names the first body's face there (#20586).
+#[test]
+fn a_round_face_picked_as_an_axis_where_two_faces_touch_is_the_clicked_face() {
+    use solidcraft_engine::doc::naming;
+    let mut h = Harness::new();
+    for (name, x) in [("First", 0), ("Second", 10)] {
+        h.app.run("solid.cylinder", json!({"base":[x,0,0],"radius":5,"height":10,"operation":"new","body_name":name})).unwrap();
+    }
+    // Far from both cylinders, so the revolve makes a body of its own about either axis.
+    let profile = h.app.run("sketch.create", json!({"plane":"XZ"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[40,1],"p1":[42,3]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let touch = Vec3::new(5.0, 0.0, 5.0);
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let second = state.body("Second").unwrap();
+    let index = second.body.face_at_point(touch).unwrap().unwrap();
+    let name = naming::face_names(second)[index].clone();
+    assert!(state.body("First").unwrap().body.face_at_point(touch).unwrap().is_some(), "both side faces hold the pick");
+    let mut d = Dialog::for_command(&h.app, "solid.revolve").unwrap();
+    d.inputs[0].items = vec![Sel::Profile { sketch: profile, index: 0 }];
+    d.inputs[1].items = vec![Sel::Face { body: "Second".into(), index, point: touch }];
+    let commands = apply_commands(&h.app, &d).unwrap();
+    let axis = commands[0].1["axis"].clone();
+    let bodies = h.app.session.model.state().bodies.len();
+    for (command, params) in commands {
+        h.app.run(&command, params).unwrap();
+    }
+    let state = h.app.session.model.state();
+    assert_eq!(state.bodies.len(), bodies + 1, "the revolve is a body of its own");
+    let ring = state.bodies.iter().find(|b| !["First", "Second"].contains(&b.name.as_str())).unwrap();
+    let bounds = ring.body.exact_bounds().unwrap();
+    let centre = (bounds.min + bounds.max) * 0.5;
+    assert!((centre.x - 10.0).abs() < 1e-6 && centre.y.abs() < 1e-6, "turned about the second cylinder's axis: {centre:?}");
+    assert_eq!(axis["name"], json!(name), "the axis names the clicked face: {axis}");
+}
+
 #[test]
 fn coil_from_a_profile_hides_the_primitive_section() {
     let mut h = fixture();
@@ -3118,6 +3158,100 @@ fn viewport_click_preserves_active_secondary_dialog_value() {
     h.step(&json!({"click":{"world":[15,10,0]}})).unwrap();
     h.step(&json!({"text":"30"})).unwrap();
     assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Extrude { distance, distance2, .. } if distance == "10 mm" && distance2 == "30"));
+}
+
+#[test]
+fn extrude_two_sides_tab_moves_directly_from_distance_to_distance_2() {
+    let mut h = extrude_dialog_with_typed_distance();
+    // Switch to Two Sides + Cut so Target Bodies is present in the dialog above Distance.
+    if let Kind::Extrude { direction, operation, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
+        *direction = crate::dialogs::TWO_SIDES;
+        *operation = 2; // Cut
+    }
+    h.frames(3);
+    crate::test_support::click(&mut h, "dialog:Distance");
+    assert!(extrude_control_focused(&h, "dialog:Distance"));
+
+    // Tab moves directly through Extent Type 2 to Distance 2 (never landing on an invisible scrub
+    // label that drops editor focus and highlights Target Bodies).
+    h.step(&json!({"key": "Tab"})).unwrap();
+    assert!(extrude_control_focused(&h, "dialog:ui.extrude_extent_type_2"), "Tab from Distance should focus Extent Type 2 directly");
+    h.step(&json!({"key": "Tab"})).unwrap();
+    assert!(extrude_control_focused(&h, "dialog:Distance 2"), "Tab from Extent Type 2 should focus Distance 2 directly");
+    h.step(&json!({"key": "A", "cmd": true})).unwrap();
+    h.step(&json!({"text": "25"})).unwrap();
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Extrude { distance, distance2, .. } if distance == "30 mm" && distance2 == "25"));
+
+    // Shift+Tab must move directly back through Extent Type 2, Distance, Extent Type, and Direction.
+    h.step(&json!({"key": "Tab", "shift": true})).unwrap();
+    assert!(extrude_control_focused(&h, "dialog:ui.extrude_extent_type_2"), "Shift+Tab from Distance 2 should focus Extent Type 2 directly");
+    h.step(&json!({"key": "Tab", "shift": true})).unwrap();
+    assert!(extrude_control_focused(&h, "dialog:Distance"), "Shift+Tab from Extent Type 2 should focus Distance directly");
+    h.step(&json!({"key": "Tab", "shift": true})).unwrap();
+    assert!(extrude_control_focused(&h, "dialog:Extent Type"), "Shift+Tab from Distance should focus Extent Type directly");
+    h.step(&json!({"key": "Tab", "shift": true})).unwrap();
+    assert!(extrude_control_focused(&h, "dialog:Direction"), "Shift+Tab from Extent Type should focus Direction directly");
+
+    // Forward Tab from Direction must visit Extent Type -> Distance -> Extent Type 2 -> Distance 2 -> Operation in order.
+    h.step(&json!({"key": "Tab"})).unwrap();
+    assert!(extrude_control_focused(&h, "dialog:Extent Type"), "Tab from Direction should focus Extent Type directly");
+    h.frames(1);
+    assert_eq!(
+        crate::scenario::count_of("dialog:selection:Profiles:active"),
+        Some(0.0),
+        "Profiles must not stay highlighted while Extent Type holds focus"
+    );
+    h.step(&json!({"key": "Tab"})).unwrap();
+    assert!(extrude_control_focused(&h, "dialog:Distance"), "Tab from Extent Type should focus Distance directly");
+    h.step(&json!({"key": "Tab"})).unwrap();
+    assert!(extrude_control_focused(&h, "dialog:ui.extrude_extent_type_2"), "Tab from Distance should focus Extent Type 2 directly");
+    h.step(&json!({"key": "Tab"})).unwrap();
+    assert!(extrude_control_focused(&h, "dialog:Distance 2"), "Tab from Extent Type 2 should focus Distance 2 directly");
+    h.step(&json!({"key": "Tab"})).unwrap();
+    assert!(extrude_control_focused(&h, "dialog:Operation"), "Tab from Distance 2 should focus Operation directly");
+
+    // Clicking the Profiles pick field activates it; pressing Tab from there must enter the first
+    // control after the pick inputs (Name, then Direction) instead of jumping to the app bar, and
+    // drop the active highlight from Profiles.
+    let profiles = crate::scenario::rect_of("dialog:field:Profiles").expect("Profiles field rect").center();
+    h.step(&json!({"click": [profiles.x, profiles.y]})).unwrap();
+    h.frames(2);
+    assert_eq!(crate::scenario::count_of("dialog:selection:Profiles:active"), Some(1.0));
+    h.step(&json!({"key": "Tab"})).unwrap();
+    assert!(extrude_control_focused(&h, "dialog:Name"), "Tab from Profiles should focus Name directly");
+    h.frames(1);
+    assert_eq!(crate::scenario::count_of("dialog:selection:Profiles:active"), Some(0.0), "Profiles must not stay highlighted while Name holds focus");
+    h.step(&json!({"key": "Tab"})).unwrap();
+    assert!(extrude_control_focused(&h, "dialog:Direction"), "Tab from Name should focus Direction directly");
+    h.frames(1);
+    assert_eq!(
+        crate::scenario::count_of("dialog:selection:Profiles:active"),
+        Some(0.0),
+        "Profiles must not stay highlighted while Direction holds focus"
+    );
+}
+
+#[test]
+fn extrude_two_sides_canvas_tab_moves_directly_from_distance_to_distance_2() {
+    let mut h = extrude_focus_fixture();
+    if let Kind::Extrude { direction, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
+        *direction = crate::dialogs::TWO_SIDES;
+    }
+    h.frames(3);
+    let first = egui::Id::unique("sc_canvas_value");
+    let second = egui::Id::unique("sc_canvas_value2");
+    h.ctx.memory_mut(|m| m.request_focus(first));
+    h.frames(1);
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(first));
+
+    h.step(&json!({"key": "Tab"})).unwrap();
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(second), "Tab from canvas Distance should focus canvas Distance 2");
+    h.step(&json!({"key": "A", "cmd": true})).unwrap();
+    h.step(&json!({"text": "25"})).unwrap();
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Extrude { distance2, .. } if distance2 == "25"));
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "Enter from canvas Distance 2 applies Extrude");
 }
 
 /// A circle drawn partly past the top face its sketch is on is cut by the face's projected outline

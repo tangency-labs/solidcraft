@@ -235,7 +235,7 @@ crate::dialog_descriptor::dialog_descriptors! {
         } => json!({"diameter": diameter, "operation": OPS.get(*operation).copied().unwrap_or("new")});
         // The offsets and the angle place the profiles on the face without editing the sketch
         // (#20386); each is left out of the command while its field is empty.
-        Emboss("solid.emboss", "EMBOSS", [("Profiles", PROFILES, true), ("Target Face (optional)", FACES, false)],
+        Emboss("solid.emboss", "EMBOSS", [("Profiles", PROFILES, true), ("Target Face", FACES, false)],
             FeatureKind::Emboss { depth, deboss, offset_x, offset_y, angle, .. }) {
             depth: String = "1 mm".into() => shown_expr(depth, ValueKind::Length),
             deboss: bool = false => *deboss,
@@ -706,6 +706,8 @@ pub struct Dialog {
     pub focus: bool,
     /// Last focused value editor, shared by the form and its on-canvas value box.
     value_focus: Option<egui::Id>,
+    /// Whether any widget held keyboard focus at the end of the previous frame.
+    pub(crate) had_keyboard_focus: bool,
     /// A viewport press or click returns the keyboard after selection and canvas updates.
     pub(crate) restore_value_focus: bool,
     /// A pick field was clicked into and waits for its pick: a click in the view that picks
@@ -1027,6 +1029,7 @@ impl Dialog {
             profile_selection_changed: false,
             focus: true,
             value_focus: None,
+            had_keyboard_focus: false,
             restore_value_focus: false,
             awaiting_pick: false,
             pick_refused: None,
@@ -1418,6 +1421,7 @@ impl Dialog {
             }
         };
         recall(app, &mut d);
+        crate::op_auto::start_new_body(app, &mut d);
         // Patterns of features picked in the timeline: the objects are features.
         if is_pattern(&d.kind)
             && s.selection.iter().any(|x| matches!(x, Sel::Feature { .. }))
@@ -4153,9 +4157,11 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     let mut clear: Option<usize> = None;
     let mut activate: Option<usize> = None;
     let mut remove = None;
-    // Only one field may look active at a time (#10066): while a text editor holds the keyboard,
-    // no pick field draws its accent ring, and clicking a pick field takes the keyboard back.
-    let text_focus = crate::ui_kit::editor_has_focus(ui.ctx());
+    // Only one field may look active at a time (#10066): while any control in this dialog
+    // (or a text editor, including a canvas value box) holds the keyboard, no pick field draws
+    // its accent ring, and clicking a pick field takes the keyboard back.
+    let keyboard_focus = crate::ui_kit::editor_has_focus(ui.ctx())
+        || ui.ctx().memory(|m| m.focused()).is_some_and(|id| ui.ctx().read_response(id).is_some_and(|r| r.layer_id == ui.layer_id()));
     let mut toggle_list: Option<usize> = None;
     let mut hovered: Option<(usize, Sel)> = None;
     let mut chain_set: Option<(usize, bool)> = None;
@@ -4169,7 +4175,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
             .filter(|_| inp.items.is_empty() && !(i == 1 && unresolved_axis));
         form_row(ui, inp.label, |ui| {
             ui.horizontal(|ui| {
-                let active = i == d.active && !text_focus;
+                let active = i == d.active && !keyboard_focus;
                 // A chip: "↖ Select" (outlined) while empty, "N selected" (filled) once picked.
                 let custom_axis = i == 1 && inp.items.is_empty() && stored_revolve_axis(&d.kind).is_some();
                 // Frame's Path counts its rows: a lone first point of a pair is none yet.
@@ -5206,7 +5212,7 @@ pub(crate) fn action_labels(kind: &Kind) -> (&'static str, &'static str) {
         Kind::ConfirmDelete { .. } => ("Delete", "Cancel"),
         Kind::SaveMesh(k) => (crate::dialogs_save_mesh::button(k), "Cancel"),
         Kind::UrdfExport(_) => ("Export URDF…", "Cancel"),
-        Kind::ViewDxf { .. } => ("Export DXF…", "Cancel"),
+        Kind::ViewDxf { .. } | Kind::Sheet(crate::dialogs_sheet::Sm::ExportDxf { .. }) => ("Export DXF…", "Cancel"),
         _ => ("OK", "Cancel"),
     }
 }
@@ -5483,9 +5489,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         crate::scenario::publish_rect("dialog:outer", r);
         crate::scenario::publish_target("dialog:card", r);
     }
-    if let Some(field) = crate::ui_kit::canvas_value_focus(ctx) {
-        value_fields.push(field);
-    }
+    value_fields.extend(crate::ui_kit::canvas_value_fields(ctx));
     // Without value boxes in the view (#9479), the keyboard the window's opening or a pick gives
     // the box goes to the form's value field, once the form has drawn one.
     if d.focus && !crate::canvas::boxes_shown(ctx) && !value_fields.is_empty() {
@@ -5519,6 +5523,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             d.pick_refused = None;
         }
     }
+    d.had_keyboard_focus = ctx.memory(|m| m.focused()).is_some();
     // Each prompt draws only for its own dialog, so both run (`|`, not `||`).
     let preset_prompt = crate::hole_presets::name_prompt(ctx, &mut d, &mut app.preferences.hole_presets, &app.session.doc)
         | crate::personal_sheet_rules::name_prompt(ctx, &mut d, &mut app.preferences.personal_sheet_rules, &app.session.doc);
@@ -5536,7 +5541,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // Keyboard: Enter applies (from a value field, or with nothing focused), Esc cancels.
     let (enter_free, esc) = ctx.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
     let nothing_focused = ctx.memory(|m| m.focused().is_none());
-    let canvas_enter = enter_free && ctx.memory(|m| m.had_focus_last_frame(egui::Id::unique("sc_canvas_value")));
+    let canvas_enter = enter_free
+        && ctx
+            .memory(|m| m.had_focus_last_frame(egui::Id::unique("sc_canvas_value")) || m.had_focus_last_frame(egui::Id::unique("sc_canvas_value2")));
     let enter_applies = enter_applies(&d);
     let report_active = app.issue_report.draft.is_some();
     let confirm = std::mem::take(&mut d.confirm);
@@ -6750,6 +6757,10 @@ fn run_primed(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
 }
 
 pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
+    if let Kind::Sheet(crate::dialogs_sheet::Sm::ExportDxf { body, options }) = &d.kind {
+        crate::dialogs_sheet::export_flat(app, body, Some(*options));
+        return Ok(());
+    }
     if let Kind::UrdfExport(f) = &d.kind {
         return crate::dialogs_urdf::run(app, f);
     }
@@ -8816,15 +8827,31 @@ pub(crate) fn round_axis(s: &Session, sel: &Sel) -> Option<(Vec3, Vec3)> {
     o.is_finite().then(|| (o, solidcraft_engine::doc::construct::canonical_dir(d)))
 }
 
-/// An axis pick that the command keeps as a reference to the model (`{edge|face: [x,y,z]}`), so
-/// the feature follows the edge or face: a circular edge, or a cylinder, cone or torus face.
-/// Straight edges stay a fixed line, as they always have.
+/// An axis pick that the command keeps as a reference to the model (`{edge: [x,y,z]}`, or a face
+/// as `{type: face, at, name}`), so the feature follows the edge or face: a circular edge, or a
+/// cylinder, cone or torus face. Straight edges stay a fixed line, as they always have.
 fn round_axis_ref(app: &SolveApp, sel: &Sel) -> Option<Value> {
     round_axis(&app.session, sel)?;
     match sel {
         Sel::Edge { .. } if !is_straight_edge(&app.session, sel) => construct_ref(app, sel).ok(),
-        Sel::Face { .. } => construct_ref(app, sel).ok(),
+        Sel::Face { body, index, point } => Some(clicked_face_ref(app, body, *index, *point)),
         _ => None,
+    }
+}
+
+/// A clicked face as a reference by its name as well as its point. Where two faces touch at the
+/// point (two cylinders along their common line), the point alone names the first body's face
+/// there, and the axis is then the other face's (#20586). A face without a name keeps its point.
+fn clicked_face_ref(app: &SolveApp, body: &str, index: usize, point: Vec3) -> Value {
+    let state = crate::open_meshing::session_world(&app.session);
+    let name = state
+        .body(body)
+        .filter(|b| !b.body.is_mesh())
+        .and_then(|b| solidcraft_engine::doc::naming::face_names(b).get(index).cloned())
+        .filter(|name| !name.is_empty());
+    match name {
+        Some(name) => json!({"type": "face", "at": pt(point), "name": name}),
+        None => json!({"face": pt(point)}),
     }
 }
 

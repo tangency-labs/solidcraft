@@ -7246,7 +7246,7 @@
   "ui.ribbon_exit": "Wyjdź",
   "ui.ribbon_labels": "Pokazuj tekst pod ikonami wstążki",
   "ui.ribbon_menus_skip_pinned": "Pomijaj przypięte polecenia w menu rozwijanych",
-  "ui.ribbon_pin_footer": "Przypięte polecenia są widoczne na wstążce. Najedź na wiersz, aby go przypiąć lub odpiąć.",
+  "ui.ribbon_pin_footer": "Przypięte polecenia są widoczne na wstążce. Przypnij lub odepnij polecenie z jego menu ⋯.",
   "ui.ribbon_workspace": "Środowisko",
   "ui.right": "Prawy",
   "ui.right_click_confirms": "Prawy klik zatwierdza pola okna dialogowego",
