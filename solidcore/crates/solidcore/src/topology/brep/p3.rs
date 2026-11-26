@@ -592,16 +592,24 @@ fn destroy_face(b: &mut Brep, env: &mut NotifyEnv<'_>, f: FaceId) -> Result<()> 
 
 /// Same as [`destroy_face`] without scanning `face_list`: callers compact `face_list`
 /// once afterwards via [`Brep::retain_face_list`].
+///
+/// Even when the destruction notification or attribute cleanup fails (e.g. `Cancelled`),
+/// the face record and its owned surface link are still removed so a face whose face uses
+/// were already removed is never left resolvable in the B-rep.
 fn destroy_face_unlisted(b: &mut Brep, env: &mut NotifyEnv<'_>, f: FaceId) -> Result<()> {
-    ignore_soft(face_notify(
+    let notify_res = ignore_soft(face_notify(
         b,
         f,
         env,
         NotifyOperation::Destruction,
         [arg(EntityRef::Face(f)), None, None],
-    ))?;
+    ));
     let fref = (env.key_of)(EntityRef::Face(f));
-    env.attributes.clear_attributes(fref.key)?;
+    let clear_res = if notify_res.is_ok() {
+        env.attributes.clear_attributes(fref.key)
+    } else {
+        Ok(())
+    };
     let expected = p1::default_face_owner(b, f);
     let face = b.face_mut(f)?;
     face.faceuse = None;
@@ -615,6 +623,8 @@ fn destroy_face_unlisted(b: &mut Brep, env: &mut NotifyEnv<'_>, f: FaceId) -> Re
     }
     // delete pFace
     b.remove_face_record_unlisted(f)?;
+    notify_res?;
+    clear_res?;
     Ok(())
 }
 
@@ -3820,6 +3830,8 @@ fn delete_faces_batch_in(
 
             edge_remove_edgeuse(b, e, eu)?;
             edge_remove_edgeuse(b, e, eu_mate)?;
+            b.edgeuse_mut(eu)?.edge = None;
+            b.edgeuse_mut(eu_mate)?.edge = None;
 
             let (vu1, v1) = eu_vertex(b, eu)?;
             vertex_remove_vertexuse(b, v1, vu1)?;
@@ -8143,5 +8155,77 @@ pub(crate) mod test_support {
             assert!(b.edge(e).is_ok(), "dangling edge {e:?} left in edge_list");
         }
         assert_eq!(p1::edges(&b, None).unwrap().len(), 11);
+        // No surviving edge use may still point to the deleted wire edge.
+        for (eu, rec) in b.edgeuses().iter() {
+            if let Some(e) = rec.edge {
+                assert!(
+                    b.edge(e).is_ok(),
+                    "surviving edgeuse {eu:?} points to deleted edge {e:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn delete_faces_batch_compacts_face_list_when_face_destroy_is_cancelled() {
+        use super::{delete_faces_batch, p1, Kernel, Point3, Result, SolidError};
+        use crate::error::EntityRef;
+        use crate::geom::attribute::{
+            ids, Attribute, AttributeHandlers, AttributeView, Behavior, ObjectKey, Placement,
+        };
+        use crate::primitive::api_primitives::create_box;
+        use crate::topology::brep::p2::ArenaNotifyState;
+        use crate::topology::loopuse::notify_ref;
+
+        #[derive(Clone, Debug, PartialEq)]
+        struct CancelFaceDestroy;
+        impl AttributeHandlers for CancelFaceDestroy {
+            fn destruction(
+                &self,
+                _view: &AttributeView<'_>,
+                _deleted: ObjectKey,
+            ) -> Result<Vec<Placement>> {
+                Err(SolidError::cancelled("test::cancel_face_destroy"))
+            }
+        }
+
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::ZERO, 10.0, 10.0, 10.0).unwrap();
+        b.set_editing_enabled(true);
+        let faces = p1::faces(&b, None).unwrap();
+        let target = faces[0];
+        let next_face = faces[1];
+
+        let mut state = ArenaNotifyState::new(&b);
+        let h = state
+            .attributes
+            .insert(Attribute::application(
+                ids::USER_1,
+                Behavior::Reference,
+                CancelFaceDestroy,
+            ))
+            .unwrap();
+        state
+            .attributes
+            .add_attribute(notify_ref(EntityRef::Face(target)).key, h)
+            .unwrap();
+
+        let err = {
+            let mut env = state.env(None);
+            delete_faces_batch(&mut k, &mut b, &mut env, &[target, next_face], None)
+        }
+        .unwrap_err();
+        assert!(err.is_cancelled(), "expected Cancelled, got {err:?}");
+        // The cancelled face had its face uses removed, so its record and `face_list`
+        // entry must both be gone; all remaining listed faces must resolve with live uses.
+        assert!(b.face(target).is_err());
+        let surviving = p1::faces(&b, None).unwrap();
+        assert_eq!(surviving.len(), 5);
+        assert!(!surviving.contains(&target));
+        for f in surviving {
+            let rec = b.face(f).unwrap();
+            let fu = rec.faceuse.expect("surviving face must have a faceuse");
+            assert!(b.faceuse(fu).is_ok());
+        }
     }
 }

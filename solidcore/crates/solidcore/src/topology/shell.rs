@@ -978,20 +978,30 @@ pub(crate) fn move_faceuses_to_shell(
         ShellMembers::Empty | ShellMembers::Faceuses(_) => {}
         _ => return Err(invalid_members()),
     }
-    for (source, moving) in by_source {
-        let members = &mut brep.shell_mut(source)?.members;
-        match members {
+    // Validate every source shell's member list before mutating any shell so a partial
+    // mismatch (e.g. `[u, v]` claiming `source` when `source` lists only `u`) never
+    // leaves `u` unlinked on error.
+    for (&source, moving) in &by_source {
+        match &brep.shell(source)?.members {
             ShellMembers::Faceuses(list) => {
-                let before = list.len();
-                list.retain(|fu| !moving.contains(fu));
-                if before - list.len() != moving.len() {
-                    return Err(invalid_members());
+                let mut remaining = moving.clone();
+                for fu in list {
+                    remaining.remove(fu);
                 }
-                if list.is_empty() {
-                    *members = ShellMembers::Empty;
+                if !remaining.is_empty() {
+                    return Err(invalid_members());
                 }
             }
             _ => return Err(invalid_members()),
+        }
+    }
+    for (source, moving) in by_source {
+        let members = &mut brep.shell_mut(source)?.members;
+        if let ShellMembers::Faceuses(list) = members {
+            list.retain(|fu| !moving.contains(fu));
+            if list.is_empty() {
+                *members = ShellMembers::Empty;
+            }
         }
         refresh_faceuse_sibling_links(brep, source)?;
     }
@@ -2484,5 +2494,56 @@ mod tests {
                 (21.0, "face")
             ]
         );
+    }
+
+    #[test]
+    fn move_faceuses_to_shell_validates_all_sources_before_editing() {
+        use crate::topology::Faceuse;
+
+        let mut b = Brep::new();
+        let src = b.add_shell_record(Shell::default()).unwrap();
+        let dst = b.add_shell_record(Shell::default()).unwrap();
+
+        let fu_keep = b
+            .add_faceuse_record(Faceuse {
+                shell: Some(src),
+                ..Faceuse::default()
+            })
+            .unwrap();
+        let fu_u = b
+            .add_faceuse_record(Faceuse {
+                shell: Some(src),
+                ..Faceuse::default()
+            })
+            .unwrap();
+        let fu_v = b
+            .add_faceuse_record(Faceuse {
+                shell: Some(src),
+                ..Faceuse::default()
+            })
+            .unwrap();
+        // `src` lists `fu_keep` and `fu_u`, but NOT `fu_v` (even though `fu_v.shell == Some(src)`).
+        b.shell_mut(src).unwrap().members = ShellMembers::Faceuses(vec![fu_keep, fu_u]);
+
+        assert!(move_faceuses_to_shell(&mut b, &[fu_u, fu_v], dst).is_err());
+        // `src` must still list both `fu_keep` and `fu_u`, and `dst` must still be empty.
+        assert_eq!(
+            b.shell(src).unwrap().members,
+            ShellMembers::Faceuses(vec![fu_keep, fu_u])
+        );
+        assert_eq!(b.shell(dst).unwrap().members, ShellMembers::Empty);
+        assert_eq!(b.faceuse(fu_u).unwrap().shell, Some(src));
+
+        // Moving just `fu_u` while `src` also retains `fu_keep` succeeds.
+        move_faceuses_to_shell(&mut b, &[fu_u], dst).unwrap();
+        assert_eq!(
+            b.shell(src).unwrap().members,
+            ShellMembers::Faceuses(vec![fu_keep])
+        );
+        assert_eq!(
+            b.shell(dst).unwrap().members,
+            ShellMembers::Faceuses(vec![fu_u])
+        );
+        assert_eq!(b.faceuse(fu_u).unwrap().shell, Some(dst));
     }
 }
