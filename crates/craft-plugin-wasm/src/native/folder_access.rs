@@ -113,27 +113,33 @@ impl<H: PluginHost> folders::Host for State<H> {
             return Ok(Some(String::new()));
         }
         let folder = self.input_folders.get(&grant).ok_or_else(|| PluginError::Trap("folder disappeared".into()))?;
-        if folder.dir.metadata(&target).is_ok_and(|m| m.is_file()) {
-            return Ok(Some(target.to_string_lossy().replace('\\', "/")));
-        }
-        let (Some(parent), Some(wanted)) = (target.parent(), target.file_name().map(|n| n.to_string_lossy().to_lowercase())) else {
-            return Ok(None);
+        // A disk that ignores case opens a file under any spelling, so the listing decides how the
+        // folder spells it. The path as typed is the answer only when the listing cannot tell.
+        let typed = folder.dir.metadata(&target).is_ok_and(|m| m.is_file()).then(|| target.to_string_lossy().replace('\\', "/"));
+        let (Some(parent), Some(typed_name)) = (target.parent(), target.file_name().map(|n| n.to_string_lossy().into_owned())) else {
+            return Ok(typed);
         };
+        let wanted = typed_name.to_lowercase();
         let listing = if parent.as_os_str().is_empty() { folder.dir.entries() } else { folder.dir.read_dir(parent) };
-        let Ok(listing) = listing else { return Ok(None) };
+        let Ok(listing) = listing else { return Ok(typed) };
         let mut found = None;
+        let mut matches = 0;
         for (scanned, entry) in listing.flatten().enumerate() {
             if scanned >= MAX_IMPORT_FILES {
-                return Ok(None);
+                return Ok(typed);
             }
             let name = entry.file_name().to_string_lossy().into_owned();
             if name.starts_with('.') || name.to_lowercase() != wanted || !entry.file_type().is_ok_and(|t| t.is_file()) {
                 continue;
             }
-            if found.is_some() {
-                return Ok(None);
+            if name == typed_name {
+                return Ok(Some(target.to_string_lossy().replace('\\', "/")));
             }
+            matches += 1;
             found = Some(parent.join(name));
+        }
+        if matches != 1 {
+            return Ok(typed);
         }
         if let Some(found) = found {
             // Recheck the name actually returned, including links and the shared file budget.

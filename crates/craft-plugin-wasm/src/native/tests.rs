@@ -2402,6 +2402,23 @@ fn folder_reads_confine_paths_resolve_case_and_share_the_import_budgets() {
     assert_eq!(allowed.resolve("library".into(), "part.bin".into()).unwrap(), Some("Part.BIN".into()));
     assert_eq!(allowed.resolve("library".into(), "".into()).unwrap(), Some("".into()));
     assert_eq!(allowed.resolve("library".into(), "absent".into()).unwrap(), None);
+    assert_eq!(allowed.resolve("library".into(), "Part.BIN".into()).unwrap(), Some("Part.BIN".into()));
+    let mut importing = make();
+    importing.import = Some(ImportState {
+        dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(),
+        dialog: None,
+        name: "Part.BIN".into(),
+        input_folder: true,
+        read_bytes: 0,
+        files: Default::default(),
+        design: Vec::new(),
+        evaluate: false,
+        scratch: Vec::new(),
+        evaluating: false,
+    });
+    assert_eq!(source::Host::resolve(&mut importing, "part.bin".into()).unwrap(), Some("Part.BIN".into()));
+    assert_eq!(source::Host::resolve(&mut importing, "Part.BIN".into()).unwrap(), Some("Part.BIN".into()));
+    assert_eq!(source::Host::resolve(&mut importing, "absent".into()).unwrap(), None);
     for path in ["../outside", "/outside", ".secret", "parts/../../outside", "C:\\outside", "parts\\..\\outside"] {
         assert!(make().read("library".into(), path.into(), 0, 1).is_err(), "{path}");
     }
