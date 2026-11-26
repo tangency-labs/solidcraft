@@ -1,5 +1,7 @@
 [
   {"note":"Each instance has a selectable full path. The second row targets its placement, eye and fold independently."},
+  {"note":"Every placement lists its contents, as before #21458, so the second row has contents to fold."},
+  {"call":"ui.prefs","params":{"browser_instances_list_contents":true}},
   {"call":"engine.execute","params":{"command":"component.create","params":{"name":"Block"}}},
   {"call":"engine.execute","params":{"command":"solid.box","params":{"length":10,"width":10,"height":10}}},
   {"call":"engine.execute","params":{"command":"component.activate","params":{"component":0}}},

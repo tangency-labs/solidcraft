@@ -160,6 +160,8 @@ pub(crate) fn reveal_construction(app: &mut SolveApp, id: u64) {
             None => return,
         }
     };
+    // That placement lists its contents even when it is a further one (#21458).
+    app.tree.shown_instance = Some(path.clone());
     open_found_rows(app, component, &path, "construction", &id.to_string());
 }
 
