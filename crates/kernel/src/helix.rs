@@ -7,6 +7,9 @@ use solidcraft_geom::prelude::*;
 use crate::body::Body;
 use crate::{KernelError, Result};
 
+/// The most turns a helical sweep takes: the kernel's, as many as its spans hold.
+pub const MAX_HELIX_TURNS: f64 = solidcore_ops::sweep::SCREW_MAX_TURNS;
+
 /// Rotate `v` about the unit axis `k` by `ang` (Rodrigues).
 fn rot(v: Vec3, k: Vec3, ang: f64) -> Vec3 {
     v * ang.cos() + k.cross(v) * ang.sin() + k * (k.dot(v) * (1.0 - ang.cos()))
@@ -58,10 +61,8 @@ fn helix_profile(
     turns: f64,
 ) -> Result<(Vec3, crate::numbered::NumberedLoop)> {
     let k = axis.normalized().ok_or_else(|| KernelError::Invalid("helix axis".into()))?;
-    // The kernel's bound: as many turns as its spans hold.
-    const MAX_TURNS: f64 = solidcore_ops::sweep::SCREW_MAX_TURNS;
-    if !(pitch.is_finite() && turns.is_finite() && turns > 0.0 && turns <= MAX_TURNS && pitch.abs() < 1e7 && axis_origin.is_finite()) {
-        return Err(KernelError::Invalid(format!("helix: turns must be in (0, {MAX_TURNS}] and the pitch finite")));
+    if !(pitch.is_finite() && turns.is_finite() && turns > 0.0 && turns <= MAX_HELIX_TURNS && pitch.abs() < 1e7 && axis_origin.is_finite()) {
+        return Err(KernelError::Invalid(format!("helix: turns must be in (0, {MAX_HELIX_TURNS}] and the pitch finite")));
     }
     if region.area().abs() < 1e-9 {
         return Err(KernelError::Invalid("profile has no area".into()));

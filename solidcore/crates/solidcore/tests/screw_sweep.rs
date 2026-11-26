@@ -378,12 +378,20 @@ fn issue_22577_more_turns_than_the_spans_hold_are_refused_by_the_spans() {
         ),
         "{refusal:?}"
     );
-    // past what the span bound can ever hold, the turns themselves are refused
+    // past what the span bound can ever hold (a span turns at most an eighth of a turn), the
+    // turns themselves are refused, before any span is counted
     let past = MAX_STATIONS / 8.0 + 1.0;
-    assert!(matches!(
-        screw_sweep(&mut k, &rod_thread().curves(), O, Z, 1.25, past, 1.0),
-        Err(SolidError::InvalidInput { .. })
-    ));
+    let early = screw_sweep(&mut k, &rod_thread().curves(), O, Z, 1.25, past, 1.0);
+    assert!(
+        matches!(
+            early,
+            Err(SolidError::InvalidInput {
+                reason: "origin, pitch, turns or tolerance out of range",
+                ..
+            })
+        ),
+        "{early:?}"
+    );
 }
 
 #[test]

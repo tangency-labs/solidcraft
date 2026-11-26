@@ -1828,8 +1828,9 @@ pub fn sweep_stations(profile: &[Curve], stations: &[Affine], end: Ends) -> Resu
 ///
 /// # Errors
 /// [`Error::Argument`] for a number, law or curve list refused; [`Error::Refused`] for the
-/// kernel's refusals, in its words (a profile on the axis, more turns than the spans hold at
-/// the tolerance); the kernel's status; [`Error::Empty`], [`Error::NotSolid`].
+/// kernel's refusals, in its words (an axis without a usable length, a profile on the axis,
+/// more turns than the spans hold at the tolerance); the kernel's status; [`Error::Empty`],
+/// [`Error::NotSolid`].
 pub fn screw_sweep(
     profile: &[Curve],
     origin: [f64; 3],

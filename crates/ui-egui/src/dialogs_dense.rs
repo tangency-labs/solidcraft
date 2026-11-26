@@ -326,8 +326,8 @@ fn quantity_row(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label
     count_row_to(ui, doc, label, value, MAX_PATTERN_INSTANCES)
 }
 
-/// The most revolutions a coil makes (the helix's own limit).
-const MAX_COIL_REVOLUTIONS: i64 = 200;
+/// The most revolutions a coil makes (the helix's own limit, a whole number of turns).
+const MAX_COIL_REVOLUTIONS: i64 = solidcraft_engine::kernel::MAX_HELIX_TURNS as i64;
 
 /// A count row with step arrows by whole numbers from 1 to `max`, evaluated as the document
 /// evaluates it. A fraction still types in (a coil's revolutions); an arrow steps it to the next
