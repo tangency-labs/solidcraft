@@ -37,6 +37,9 @@ pub(crate) struct WindowState {
     pub scale_factor: f64,
 
     pub modifiers_state: ModifiersState,
+    // SolidCraft: modifiers already held (`GetAsyncKeyState`) when focus was gained, until the
+    // thread's synchronous `GetKeyState` catches up or the key is released (#20352).
+    pub inherited_modifiers: ModifiersState,
     pub fullscreen: Option<Fullscreen>,
     pub current_theme: Theme,
     pub preferred_theme: Option<Theme>,
@@ -174,6 +177,7 @@ impl WindowState {
             scale_factor,
 
             modifiers_state: ModifiersState::default(),
+            inherited_modifiers: ModifiersState::default(),
             fullscreen: None,
             current_theme,
             preferred_theme,

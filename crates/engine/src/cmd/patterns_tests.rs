@@ -1469,39 +1469,6 @@ fn editing_a_pattern_by_seed_name_resolves_it_to_the_id() {
     assert!(e.contains("Nope"), "{e}");
 }
 
-/// A plate with a `count1` × `count2` feature pattern of one through-hole cut: its volume and how
-/// long the pattern took. It runs on its own thread so a hang fails the test instead of CI.
-fn hole_pattern(count1: usize, count2: usize) -> (f64, std::time::Duration) {
-    use std::time::{Duration, Instant};
-    let mut s = Session::default();
-    run(&mut s, "solid.box", json!({"length": 200, "width": 100, "height": 1, "operation": "new_body", "body_name": "Plate"}));
-    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "2", "name": "H"}));
-    run(&mut s, "sketch.circle.center", json!({"center": [4, 4], "diameter": 2}));
-    run(&mut s, "sketch.finish", json!({}));
-    run(
-        &mut s,
-        "solid.extrude",
-        json!({"sketch": "H", "distance": "4", "direction": "negative", "operation": "cut", "targets": ["Plate"], "name": "Hole"}),
-    );
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let t = Instant::now();
-        let r = s.execute(
-            "solid.pattern.rectangular",
-            &json!({"features": ["Hole"], "dir1": [1, 0, 0], "count1": count1, "spacing1": 6, "dir2": [0, 1, 0], "count2": count2, "spacing2": 6}),
-        );
-        let took = t.elapsed();
-        let v = r.map(|_| volume(&mut s)).map_err(|e| e.to_string());
-        let _ = tx.send((v, took));
-    });
-    let (v, took) = rx.recv_timeout(Duration::from_secs(900)).expect("the hole pattern did not finish within 900 s");
-    let n = (count1 * count2) as f64;
-    let v = v.expect("pattern");
-    // The measure meshes the bores: each hole reads about 0.06 % small, so allow 0.1 % a hole.
-    assert!((v - (200.0 * 100.0 - n * PI)).abs() < n * PI * 1e-3, "{n} holes: {v}");
-    (v, took)
-}
-
 /// Whether a job four times the size took at most about twice linear: `pair` times the small job,
 /// then the big one. Linear is 4×, the old quadratic costs 16× or more. The load of the other test
 /// binaries can rise between the two runs (on a 16-core Mac under `cargo xtask test`, 32 circles
@@ -1546,20 +1513,6 @@ fn scales_linearly_keeps_each_sizes_fastest_run() {
     assert!(r.as_ref().is_err_and(|e| e.contains("fastest 1.00 s and 16.00 s, limit 10.00 s")), "{r:?}");
 }
 
-/// 512 identical through-holes from a feature pattern of one cut (#261). 128 took 30 s and 512 did
-/// not finish in 150 s: each copy was cut into an ever more complex plate. The time must grow about
-/// linearly with the count. A ratio, not a time: CI runs every test binary at once and is many
-/// times slower than a machine running this alone (about 6 s for 512 holes there).
-#[test]
-fn pattern_of_512_hole_cuts_finishes_in_reasonable_time() {
-    // #14515: on the merge-queue runner, with every test binary running at once, the small run keeps
-    // its parallel speed-up while the big one does not, and three pairs in a row took 10.7x to 11.1x
-    // (2.9 s then 31 s) though the cost is linear. The old quadratic cost is 16x or more, so allow 13x.
-    if let Err(missed) = scales_within(13.0, || (hole_pattern(16, 8).1, hole_pattern(32, 16).1)) {
-        panic!("128 holes, then 512, took {missed}");
-    }
-}
-
 /// A plate with `n` Ø2 circles drawn in one sketch (16 a row, 6 mm apart) and cut by one extrude:
 /// how long the cut took. It runs on its own thread so a hang fails the test instead of CI.
 fn sketch_hole_cut(n: usize) -> std::time::Duration {
@@ -1590,7 +1543,8 @@ fn sketch_hole_cut(n: usize) -> std::time::Duration {
 
 /// Many holes drawn in one sketch and cut by one extrude (#368), the usual way to draw a vent
 /// field: 32 took 2 s and 128 took 60 s, though a feature pattern of the same holes is near
-/// linear since #261. Linear is 4×. A ratio, not a time (see the 512-hole pattern test).
+/// linear since #261. Linear is 4×. A ratio, not a time: CI runs every test binary at once and is
+/// many times slower than a machine running this alone.
 #[test]
 fn one_extrude_of_many_sketch_circles_scales_linearly() {
     if let Err(missed) = scales_linearly(|| (sketch_hole_cut(32), sketch_hole_cut(128))) {

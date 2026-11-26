@@ -13,7 +13,7 @@ pub(crate) fn validate_periodic_points(points: &[Vec2]) -> Result<()> {
     if points.len() > MAX_SPLINE_POINTS {
         return Err(bad());
     }
-    solidcraft_kernel::services::fit_projection::check_periodic(points).map_err(|_| bad())
+    solidcraft_kernel::curves::check_periodic(points).map_err(|_| bad())
 }
 
 /// A closed control spline's rule: a degree from 3 to the kernel's Bézier limit, and at least
@@ -32,7 +32,7 @@ pub fn validate_closed_control(points: usize, degree: u8) -> Result<()> {
 
 pub fn periodic_beziers(points: &[Vec2]) -> Result<Vec<[Vec2; 4]>> {
     validate_periodic_points(points)?;
-    solidcraft_kernel::services::fit_projection::fit_beziers(points, true).map_err(|e| SketchError::Invalid(e.to_string()))
+    solidcraft_kernel::curves::fit_beziers(points, true).map_err(|e| SketchError::Invalid(e.to_string()))
 }
 
 impl Sketch {
