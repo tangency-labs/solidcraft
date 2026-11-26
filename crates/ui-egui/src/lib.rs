@@ -572,6 +572,8 @@ impl Default for UiState {
 pub struct Services {
     /// HTTP for the agent chat's API agents (OpenAI-compatible and Anthropic-compatible endpoints); None: no API agents.
     pub agent_http: Option<agent_chat::backend::HttpFn>,
+    /// Optional streaming (SSE) HTTP for API agents; when `None`, falls back to `agent_http`.
+    pub agent_http_stream: Option<agent_chat::backend::HttpStreamFn>,
     /// Show the designs the browser keeps for itself; None: the host has no such store.
     pub browser_files: Option<Box<dyn Fn()>>,
     /// Whether a recent design that is not in memory can be brought back by the host (the browser
@@ -645,6 +647,15 @@ pub struct Services {
     pub usage_http: Option<tickets::Http>,
     /// Linux: the window system this run uses, `wayland` or `x11` (Preferences shows it, #3083).
     pub window_system: Option<&'static str>,
+}
+
+impl Services {
+    /// Streaming HTTP transport for API agents: uses `agent_http_stream` when provided, otherwise
+    /// wraps `agent_http` in a non-streaming fallback so WASM, test stubs, and mocks need no
+    /// changes.
+    pub fn agent_http_stream_or_fallback(&self) -> Option<agent_chat::backend::HttpStreamFn> {
+        self.agent_http_stream.clone().or_else(|| self.agent_http.clone().map(agent_chat::backend::http_stream_fallback))
+    }
 }
 
 /// The view before a sketch opened and the view that faced the sketch then (#7038).

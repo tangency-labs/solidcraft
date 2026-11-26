@@ -46,6 +46,33 @@ pub enum PromptPart {
     },
 }
 
+/// Token and context-window usage reported by a backend (ACP `usage_update` or API `usage`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Usage {
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub context_window: Option<u64>,
+}
+
+impl Usage {
+    pub fn is_empty(&self) -> bool {
+        self.input_tokens.is_none() && self.output_tokens.is_none() && self.context_window.is_none()
+    }
+
+    /// Overlay any present fields from `next` onto `self`.
+    pub fn merge(&mut self, next: Usage) {
+        if next.input_tokens.is_some() {
+            self.input_tokens = next.input_tokens;
+        }
+        if next.output_tokens.is_some() {
+            self.output_tokens = next.output_tokens;
+        }
+        if next.context_window.is_some() {
+            self.context_window = next.context_window;
+        }
+    }
+}
+
 /// What a backend reports to the panel.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
@@ -108,6 +135,8 @@ pub enum Event {
         id: String,
         result: Result<Vec<ConfigOption>, String>,
     },
+    /// Token and context-window usage reported by the backend.
+    Usage(Usage),
     /// The message is answered (`reason`: why it stopped, empty for a normal end).
     TurnEnded {
         reason: String,
@@ -184,6 +213,32 @@ pub struct HttpRequest {
 
 /// Sends an [`HttpRequest`]: the status and the body, or why it failed.
 pub type HttpFn = std::sync::Arc<dyn Fn(&HttpRequest) -> Result<(u16, Vec<u8>), String> + Send + Sync>;
+
+/// Result of a streaming [`HttpRequest`].
+///
+/// When `streamed` is `true`, SSE lines were delivered to the callback as they arrived and `body`
+/// is empty. When `streamed` is `false` (for example, a non-200 status or a server that answered
+/// with `application/json` instead of `text/event-stream`), `body` holds the complete response.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HttpStreamResponse {
+    pub status: u16,
+    pub content_type: String,
+    pub streamed: bool,
+    pub body: Vec<u8>,
+}
+
+/// Sends an [`HttpRequest`], streaming lines through `on_line` when the server responds with
+/// `text/event-stream`. Returning `false` from `on_line` stops reading early (e.g. on cancel).
+pub type HttpStreamFn = std::sync::Arc<dyn Fn(&HttpRequest, &mut dyn FnMut(&str) -> bool) -> Result<HttpStreamResponse, String> + Send + Sync>;
+
+/// Wraps a plain [`HttpFn`] into an [`HttpStreamFn`] fallback so WASM, test stubs, and mocks
+/// without a streaming transport continue to work with zero changes.
+pub fn http_stream_fallback(http: HttpFn) -> HttpStreamFn {
+    std::sync::Arc::new(move |req: &HttpRequest, _on_line: &mut dyn FnMut(&str) -> bool| {
+        let (status, body) = http(req)?;
+        Ok(HttpStreamResponse { status, content_type: "application/json".to_string(), streamed: false, body })
+    })
+}
 
 /// The system keychain (the desktop host's), for API keys: never in the preferences.
 pub trait Secrets: Send + Sync {
