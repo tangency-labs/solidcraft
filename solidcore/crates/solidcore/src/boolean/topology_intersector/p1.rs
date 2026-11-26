@@ -1264,8 +1264,9 @@ pub struct TopologyIntersector<O> {
     /// intersecting (`split_edges_at_vertices`), as pairs (B-rep 1's vertex, B-rep 2's).
     pub(super) vertices_on_edges: Vec<(O, O)>,
     /// Not upstream: line edge pairs declared coincident before intersecting
-    /// (`coincident_line_edges`), as pairs (B-rep 1's edge, B-rep 2's).
-    pub(super) coincident_line_edges: Vec<(O, O)>,
+    /// (`coincident_line_edges`), as `(B-rep 1's edge, B-rep 2's edge, threshold)` where
+    /// `threshold` is the exact `xsect_tol_3d_from_zones` that mated the pair.
+    pub(super) coincident_line_edges: Vec<(O, O, f64)>,
 }
 
 /// Not upstream: the tolerances vertex `v` and its edges need to cover the gaps between

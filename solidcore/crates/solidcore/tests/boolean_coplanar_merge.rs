@@ -265,11 +265,51 @@ fn shifted_shelf_join_succeeds_across_coincidence_tolerance_window() {
             store: &store,
             key_of: &|_| ObjectKey(0),
         };
-        let vol = brep_volume(&k, &mut joined, 1e-6, &attrs).unwrap();
-        let expected = 3968.0 - if d >= 2e-5 { 36.0 * d } else { 0.0 };
+        let vol = brep_volume(&k, &mut joined, 1e-10, &attrs).unwrap();
+        let gap_open = d >= 2e-5;
+        let expected = 3968.0 - if gap_open { 36.0 * d } else { 0.0 };
+        // Tolerance 1e-5 is >70x smaller than the gap volume 36*d = 7.236e-4 at d = 2.01e-5.
         assert!(
-            (vol - expected).abs() < 1e-3,
+            (vol - expected).abs() < 1e-5,
             "d={d:e}: volume {vol} vs expected {expected}"
         );
+        // Gap closed: two rectangular pockets (16 faces, 36 edges, 24 vertices).
+        // Gap open: one C-shaped pocket around the shelf (15 faces, 36 edges, 24 vertices).
+        let expected_counts = if gap_open { [15, 36, 24] } else { [16, 36, 24] };
+        assert_eq!(
+            [
+                joined.face_list().len(),
+                joined.edge_list().len(),
+                joined.vertex_list().len(),
+            ],
+            expected_counts,
+            "d={d:e}: unexpected topology counts"
+        );
+        // Every vertex lies on the exact boundary S of (outer \ pocket) U shelf within the
+        // coincidence snap distance (<= d when snapped, <= 1e-9 when the gap stays open).
+        let max_v_dist = if gap_open { 1e-9 } else { d + 1e-9 };
+        let x_planes = [0.0, 2.0, 18.0 - d, 18.0, 20.0];
+        let y_planes = [0.0, 2.0, 8.0, 10.0, 18.0, 20.0];
+        let z_planes = [0.0, 2.0, 20.0];
+        for &vid in joined.vertex_list() {
+            let p = solidcore::topology::vertex::point(&joined, vid).unwrap();
+            let dx = x_planes
+                .iter()
+                .map(|&x| (p.x - x).abs())
+                .fold(f64::INFINITY, f64::min);
+            let dy = y_planes
+                .iter()
+                .map(|&y| (p.y - y).abs())
+                .fold(f64::INFINITY, f64::min);
+            let dz = z_planes
+                .iter()
+                .map(|&z| (p.z - z).abs())
+                .fold(f64::INFINITY, f64::min);
+            let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+            assert!(
+                dist <= max_v_dist,
+                "d={d:e}: vertex {p:?} is {dist:e} off operand planes (max {max_v_dist:e})"
+            );
+        }
     }
 }

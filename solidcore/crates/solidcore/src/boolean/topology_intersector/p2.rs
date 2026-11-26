@@ -1443,7 +1443,12 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             capture_distance,
             0.0,
         )?;
-        mgr.set_coincident_edges(coincident_edges);
+        mgr.set_coincident_edges(
+            coincident_edges
+                .into_iter()
+                .map(|(e1, e2, _)| (e1, e2))
+                .collect(),
+        );
         self.proto_topo_mgr = Some(mgr);
 
         // Intersect Topology; if that didn't work, quit before we mess up the Breps.
@@ -1648,18 +1653,18 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             .then(|| SpatialIndex::new(boxes2.iter().copied().map(Some)));
 
         // Not upstream: face pairs whose boundaries share a pre-mated coincident line edge
-        // pair (`coincident_line_edges`). Parallel planar faces in this set must check surface
-        // coincidence at the same intersection tolerance so `intersect_topology` agrees with
-        // the edge mates already declared at `xsect_tol_3d_from_zones`.
-        let coincident_face_pairs: std::collections::BTreeSet<(O, O)> =
+        // pair (`coincident_line_edges`), mapped to the exact threshold that mated those edges.
+        // Parallel planar faces in this map check surface coincidence at that same threshold so
+        // `intersect_topology` agrees with the edge mates even under nonuniform tolerances.
+        let coincident_face_pairs: std::collections::BTreeMap<(O, O), f64> =
             if self.coincident_line_edges.is_empty() {
-                std::collections::BTreeSet::new()
+                std::collections::BTreeMap::new()
             } else {
                 let mut left_faces: std::collections::BTreeMap<O, Vec<O>> =
                     std::collections::BTreeMap::new();
                 let mut right_faces: std::collections::BTreeMap<O, Vec<O>> =
                     std::collections::BTreeMap::new();
-                for &(e1, e2) in &self.coincident_line_edges {
+                for &(e1, e2, _) in &self.coincident_line_edges {
                     left_faces.entry(e1).or_default();
                     right_faces.entry(e2).or_default();
                 }
@@ -1677,12 +1682,16 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         }
                     }
                 }
-                let mut pairs = std::collections::BTreeSet::new();
-                for &(e1, e2) in &self.coincident_line_edges {
+                let mut pairs: std::collections::BTreeMap<(O, O), f64> =
+                    std::collections::BTreeMap::new();
+                for &(e1, e2, edge_tol) in &self.coincident_line_edges {
                     if let (Some(fs1), Some(fs2)) = (left_faces.get(&e1), right_faces.get(&e2)) {
                         for &f1 in fs1 {
                             for &f2 in fs2 {
-                                pairs.insert((f1, f2));
+                                pairs
+                                    .entry((f1, f2))
+                                    .and_modify(|t| *t = max2(*t, edge_tol))
+                                    .or_insert(edge_tol);
                             }
                         }
                     }
@@ -1811,28 +1820,18 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     }
                 }
                 // Not upstream: two planar faces that already share a pre-mated coincident line
-                // edge pair (`coincident_line_edges`, decided at `xsect_tol_3d_from_zones`) check
-                // plane coincidence at that same tolerance so parallel faces within `[tol, xsect]`
+                // edge pair (`coincident_line_edges`) check plane coincidence at the same
+                // threshold that mated their edges, so parallel faces within `[tol, edge_tol]`
                 // imprint their remaining edges rather than disagreeing with their mated edges.
-                let coinc_tol = if coincident_face_pairs.contains(&(f1, f2)) {
-                    match (
-                        brep.surface(surf1).and_then(plane_of),
-                        brep.surface(surf2).and_then(plane_of),
-                        ProtoBrep::topology_tolerance(&*brep, f1),
-                        ProtoBrep::topology_tolerance(&*brep, f2),
-                    ) {
-                        (Some(_), Some(_), Some(t1), Some(t2)) => {
-                            let xsect = xsect_tol_3d_from_zones(k, t1, t2);
-                            if xsect.is_finite() {
-                                max2(tol, xsect)
-                            } else {
-                                tol
-                            }
-                        }
-                        _ => tol,
+                let coinc_tol = match (
+                    coincident_face_pairs.get(&(f1, f2)).copied(),
+                    brep.surface(surf1).and_then(plane_of),
+                    brep.surface(surf2).and_then(plane_of),
+                ) {
+                    (Some(edge_tol), Some(_), Some(_)) if edge_tol.is_finite() => {
+                        max2(tol, edge_tol)
                     }
-                } else {
-                    tol
+                    _ => tol,
                 };
                 let (are_coincident, _coincident_distance) =
                     surface_coincidence_check(k, brep, surf1, surf2, coinc_tol, false)?;
@@ -3183,7 +3182,7 @@ fn coincident_line_edges<O: ClassObject + SolutionObject + Ord>(
     brep: &impl IntersectorBrepP2<O>,
     this: O,
     other: O,
-) -> Result<Vec<(O, O)>> {
+) -> Result<Vec<(O, O, f64)>> {
     let segments = |b: O| -> Result<Vec<(O, [Point3; 2], f64)>> {
         let mut out = Vec::new();
         for e in brep.brep_edges(b)? {
@@ -3224,7 +3223,7 @@ fn coincident_line_edges<O: ClassObject + SolutionObject + Ord>(
                 continue;
             }
             if (within(a0, b0) && within(a1, b1)) || (within(a0, b1) && within(a1, b0)) {
-                pairs.push((e, f));
+                pairs.push((e, f, tol));
             }
         }
     }
