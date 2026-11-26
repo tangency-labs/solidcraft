@@ -1365,7 +1365,7 @@ fn a_joint_split_by_a_vertex_gets_a_bead_on_each_piece() {
             "h {h}"
         );
         assert_eq!(beads.len(), 2, "h {h}");
-        let want = bead_section(FRAC_PI_2, h, 0.0).0.section_area() * LENGTH / 2.0;
+        let want = bead([SETBACK; 2], FRAC_PI_2, h).section_area() * LENGTH / 2.0;
         for mut one in beads {
             let got = volume(&k, &mut one);
             assert!(
@@ -1416,17 +1416,17 @@ fn a_straight_edge_written_as_a_b_spline_gets_its_bead() {
             c
         });
         let before = smb(&k, &b);
-        let mut bead = beads_apart(&mut k, &mut b, &[e], &[size], h, &[])
+        let mut body = beads_apart(&mut k, &mut b, &[e], &[size], h, &[])
             .unwrap()
             .remove(0);
         assert!(smb(&k, &b) == before, "h {h}: the corner changed");
-        let want = bead_section(FRAC_PI_2, h, 0.0).0.section_area() * LENGTH;
-        let got = volume(&k, &mut bead);
+        let want = bead([SETBACK; 2], FRAC_PI_2, h).section_area() * LENGTH;
+        let got = volume(&k, &mut body);
         assert!(
             ((got - want) / want).abs() <= 1e-6,
             "h {h}: {got} against {want}"
         );
-        assert_sound(&mut k, &mut bead, "the bead on a B-spline edge");
+        assert_sound(&mut k, &mut body, "the bead on a B-spline edge");
     }
     let mut k = kernel();
     let (mut b, e) = corner_with_edge_curve(&mut k, |a, z| {
