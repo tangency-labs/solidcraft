@@ -74,6 +74,7 @@ impl Stars {
     /// whose neighbourhood has no digest, or that a broken link leaves unreadable, has none.
     pub(crate) fn of(b: &Brep, salt: ContentId) -> Self {
         let mut out = Self::default();
+        let salt = body_salt(b, salt);
         let parts = Parts::of(b);
         for f in b.face_list().iter().copied() {
             if let Some(d) = face_digest(b, f, salt, &parts) {
@@ -142,6 +143,19 @@ pub(crate) fn salt(k: &Kernel, level: u8, stitched: bool) -> Option<ContentId> {
     let _ = std::fmt::write(&mut d, format_args!("{kernel:?}"));
     d.f64(k.blend_net_tolerance.get());
     Some(d.finish())
+}
+
+/// `salt` with what the tests read of the body as a whole: its tolerance (the floor of
+/// the vertex gap tests and the limit of the tolerance a check may grow), whether it is
+/// only validated and whether editing is enabled (which decide whether a trim may be raised).
+fn body_salt(b: &Brep, salt: ContentId) -> ContentId {
+    let mut d = Digest::new();
+    d.tag(0xB0D7);
+    d.hashed(&salt);
+    d.f64(b.tolerance());
+    d.bool(b.validate_only());
+    d.bool(b.editing_enabled());
+    d.finish()
 }
 
 /// Starts the check of a body whose digests are `stars`: which of them are clean is read
