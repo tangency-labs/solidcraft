@@ -431,6 +431,41 @@ fn point_through_two_edges() {
 }
 
 #[test]
+fn point_at_the_average_of_points_takes_any_number_in_any_order_and_follows_them() {
+    let mut s = part();
+    // two vertices: halfway between them
+    run(&mut s, "construct.point.average", json!({"points": [{"vertex": [0.5, 0.5, 0.5]}, {"vertex": [39, 29, 19]}], "name": "M"}));
+    assert!(near(point(&s, "M"), Vec3::new(20.0, 15.0, 10.0)), "{:?}", point(&s, "M"));
+    // three points, given in either order: their centroid
+    let corners = [json!({"vertex": [0.5, 0.5, 0.5]}), json!({"vertex": [39, 0.5, 0.5]}), json!({"vertex": [0.5, 29, 0.5]})];
+    run(&mut s, "construct.point.average", json!({"points": corners, "name": "C"}));
+    let reversed: Vec<Value> = corners.iter().rev().cloned().collect();
+    run(&mut s, "construct.point.average", json!({"points": reversed, "name": "R"}));
+    let centroid = Vec3::new(40.0 / 3.0, 10.0, 0.0);
+    assert!(near(point(&s, "C"), centroid), "{:?}", point(&s, "C"));
+    assert!(near(point(&s, "R"), centroid), "{:?}", point(&s, "R"));
+    // four points, one a construction point that moves: the average follows it
+    run(&mut s, "construct.point.vertex", json!({"point": {"point": [0, 0, 0]}, "name": "A"}));
+    let points = json!([{"construct_point": "A"}, {"point": [10, 20, 30]}, {"point": [10, 0, 0]}, {"point": [0, 20, 30]}]);
+    run(&mut s, "construct.point.average", json!({"points": points, "name": "N"}));
+    assert!(near(point(&s, "N"), Vec3::new(5.0, 10.0, 15.0)), "{:?}", point(&s, "N"));
+    run(&mut s, "timeline.redefine", json!({"feature": "A", "command": "construct.point.vertex", "params": {"point": {"point": [-20, 0, 0]}}}));
+    assert!(near(point(&s, "N"), Vec3::new(0.0, 10.0, 15.0)), "{:?}", point(&s, "N"));
+    // saved as `{type: "average", points}`, and reopened where it was
+    let saved = s.doc.to_json();
+    assert!(saved.contains(r#""type":"average""#) || saved.contains(r#""type": "average""#), "{saved}");
+    let bytes = crate::io::write_design_container(&s.doc).unwrap();
+    let reopened = Session::new(crate::io::read_design(&bytes).unwrap());
+    assert!(near(point(&reopened, "N"), Vec3::new(0.0, 10.0, 15.0)), "{:?}", point(&reopened, "N"));
+    // fewer than two points, or no list, is refused and adds nothing
+    let features = s.doc.features.len();
+    for params in [json!({}), json!({"points": []}), json!({"points": [{"point": [1, 2, 3]}]}), json!({"points": {"point": [1, 2, 3]}})] {
+        assert!(s.execute("construct.point.average", &params).is_err(), "{params}");
+    }
+    assert_eq!(s.doc.features.len(), features);
+}
+
+#[test]
 fn point_through_three_planes() {
     let mut s = part();
     run(
@@ -1171,6 +1206,127 @@ fn construction_on_a_moved_body_moves_with_it() {
     assert!(near(point(&s, "PinTop"), Vec3::new(30.0, 0.0, 0.0)), "{:?}", point(&s, "PinTop"));
     let (o, d) = axis(&s, "Tether");
     assert!(on_line(o, d, Vec3::new(0.0, 0.0, 20.0)) && on_line(o, d, Vec3::new(0.0, 50.0, 20.0)), "{o:?} {d:?}");
+}
+
+/// `view.plane_size` is one undo step saved with the design; `extent: null` undoes the size.
+#[test]
+fn a_construction_plane_keeps_the_size_it_is_given() {
+    let mut s = part();
+    let made = run(&mut s, "construct.plane.offset", json!({"base":"XY","offset":5,"name":"Lid"}));
+    let id = made["feature"].as_u64().unwrap_or_else(|| s.doc.find_feature("Lid").unwrap().id);
+    let undo = s.undo.len();
+    run(&mut s, "view.plane_size", json!({"plane":"Lid","extent":[-5,-2,45,32]}));
+    assert_eq!(s.doc.plane_extents.get(&id), Some(&[-5.0, -2.0, 45.0, 32.0]));
+    assert_eq!(s.undo.len(), undo + 1);
+    let saved = s.doc.to_json();
+    let back = solidcraft_doc::Document::from_json(&saved).unwrap();
+    assert_eq!(back.plane_extents.get(&id), Some(&[-5.0, -2.0, 45.0, 32.0]));
+    assert!(near(plane(&s, "Lid").origin, Vec3::new(0.0, 0.0, 5.0)));
+    for bad in [
+        json!({"plane":"Lid","extent":[0,0,0,10]}),
+        json!({"plane":"Lid","extent":[0,0,10]}),
+        json!({"plane":"Nope","extent":[0,0,1,1]}),
+        json!({"plane":"Lid","extent":[0,0,1e9,1]}),
+        json!({"plane":"Lid"}),
+        json!({"plane":"Lid","extent":[-5,-2,45,32]}),
+    ] {
+        assert!(s.execute("view.plane_size", &bad).is_err(), "{bad}");
+    }
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.plane_extents.is_empty());
+    run(&mut s, "edit.redo", json!({}));
+    run(&mut s, "view.plane_size", json!({"plane":"Lid","extent":null}));
+    assert!(s.doc.plane_extents.is_empty());
+    // Deleting a plane drops its size; undo brings both back.
+    run(&mut s, "view.plane_size", json!({"plane":"Lid","extent":[-5,-2,45,32]}));
+    run(&mut s, "timeline.delete", json!({"feature":"Lid"}));
+    assert!(s.doc.plane_extents.is_empty());
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.plane_extents.get(&id), Some(&[-5.0, -2.0, 45.0, 32.0]));
+}
+
+/// #6074: a tangent plane on a face that is not a plane, cylinder, cone, sphere or torus, here
+/// a sheet extruded from a spline. The spline's control points (0, 0), (10, 0), (20, 0),
+/// (30, 30) make one cubic Bézier with x = 30t and y = 30t³, so the wall is y = x³/900 for
+/// every z, its slope is x²/300 and its normal runs along (-x²/300, 1, 0).
+#[test]
+fn plane_tangent_to_a_spline_wall_takes_its_exact_normal() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Curve"}));
+    let cubic = run(&mut s, "sketch.spline.control_point", json!({"points": [[0, 0], [10, 0], [20, 0], [30, 30]]}))["curves"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.extrude", json!({"sketch": "Curve", "curves": [cubic], "distance": 10, "body_name": "Wall"}));
+    let wall = |x: f64| (x * x * x / 900.0, Vec3::new(-x * x / 300.0, 1.0, 0.0));
+    let touches = |t: &Plane, x: f64| {
+        let (y, n) = wall(x);
+        // The plane's origin is the touching point: on the wall itself, not only on the plane.
+        parallel(t.normal(), n) && (t.origin.x - x).abs() < 1e-6 && (t.origin.y - y).abs() < 1e-6
+    };
+    // At x = 15: y = 3.75 and the slope is 0.75, so the normal runs along (-0.6, 0.8, 0). The
+    // plane faces the side the wall does: a Surface Extrude's wall faces its curve's direction
+    // crossed with the sketch normal, (0.8, 0.6, 0) × Z = (0.6, -0.8, 0).
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": [15, 3.75, 5]}, "name": "T"}));
+    let t = plane(&s, "T");
+    assert!(touches(&t, 15.0) && near(t.normal(), Vec3::new(0.6, -0.8, 0.0)), "{t:?}");
+    // A pick 0.02 mm off the wall along that normal, as one on the display mesh is: the same
+    // plane, through the wall and not through the pick.
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": [15.0 - 0.012, 3.75 + 0.016, 5]}, "name": "Off"}));
+    let off = plane(&s, "Off");
+    assert!(touches(&off, 15.0), "{off:?}");
+    // `at` moves the touching point along the face: at x = 24, y = 15.36 and the slope is 1.92.
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": [15, 3.75, 5]}, "at": [24, 15.36, 2], "name": "At"}));
+    let at = plane(&s, "At");
+    assert!(touches(&at, 24.0) && (at.origin.z - 2.0).abs() < 1e-6, "{at:?}");
+
+    // A reference turns the plane about a round face's axis, which this face has not: refused
+    // with that reason, and nothing is added.
+    for extra in [json!({"reference": {"plane": "XZ"}}), json!({"reference": {"plane": "XZ"}, "angle": "30 deg"})] {
+        let mut p = json!({"face": {"face": [15, 3.75, 5]}, "name": "R"});
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        let err = s.execute("construct.plane.tangent", &p).expect_err("no axis to turn about").to_string();
+        assert!(err.contains("reference") && err.contains("cylinder, cone, sphere or torus"), "{err}");
+    }
+    assert!(construction_planes(&s).iter().all(|p| p.1 != "R"));
+}
+
+/// #6074 on a solid: the wall of an extruded ellipse x²/400 + y²/100 = 1. Its outward normal is
+/// the gradient (x/200, y/50, 0); at (12, 8), a point of the ellipse (0.36 + 0.64 = 1), that is
+/// (0.06, 0.16, 0), along (3, 8, 0). The plane faces out of the material, as it does on a
+/// cylinder.
+#[test]
+fn plane_tangent_to_an_elliptic_wall_faces_out_of_the_solid() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Oval"}));
+    run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "minor_radius": 10}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Oval", "distance": 10, "body_name": "Post"}));
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": [12, 8, 5]}, "name": "T"}));
+    let t = plane(&s, "T");
+    let out = Vec3::new(3.0, 8.0, 0.0);
+    assert!(parallel(t.normal(), out) && t.normal().dot(out) > 0.0 && near(t.origin, Vec3::new(12.0, 8.0, 5.0)), "{t:?}");
+}
+
+/// #6074 on a loft: between the line (0, 0, 0)…(10, 0, 0) and the line (0, 0, 10)…(10, 10, 10)
+/// a loft of two sections is ruled, S(u, v) = (10u, 10uv, 10v): the saddle y = xz/10. Its normal
+/// runs along the gradient of xz/10 - y, (z/10, -1, x/10); at (5, 2.5, 5) that is
+/// (0.5, -1, 0.5), along (1, -2, 1).
+#[test]
+fn plane_tangent_to_a_loft_face() {
+    let mut s = Session::default();
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 10, "name": "Upper"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "A"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "ids": ["a"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "Upper", "name": "B"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 10]], "ids": ["b"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.loft", json!({"sections": [{"sketch": "A", "curves": ["a"]}, {"sketch": "B", "curves": ["b"]}], "body_name": "Saddle"}));
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": [5, 2.5, 5]}, "name": "T"}));
+    let t = plane(&s, "T");
+    assert!(parallel(t.normal(), Vec3::new(1.0, -2.0, 1.0)) && near(t.origin, Vec3::new(5.0, 2.5, 5.0)), "{t:?}");
 }
 
 /// #11469: a tangent plane picked on an inserted STL said only "no face at …", as if the pick

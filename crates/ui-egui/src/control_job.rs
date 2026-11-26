@@ -98,6 +98,7 @@ const AHEAD_AREAS: &[&str] = &[
     "explode",
     "expr",
     "face",
+    "frame",
     "joint",
     "material",
     "mesh",
@@ -119,11 +120,13 @@ const NAMES_A_FILE: &[&str] = &["path", "paths", "file", "files", "dir", "folder
 const ANSWERED_ON_A_COPY: &[&str] = &[
     "file.export",
     "file.export_3mf",
+    "file.export_mjcf",
     "file.export_obj",
     "file.export_sdf",
     "file.export_step",
     "file.export_stl",
     "file.export_urdf",
+    "file.export_urdf_options",
     "file.save_mesh",
 ];
 
@@ -670,6 +673,7 @@ impl SolveApp {
             solidcraft_engine::plugin::sync_panels(&mut self.session);
             let mut copy = self.session.scratch();
             copy.plugin_forms_interactive = crate::plugin_menu::take_interactive_run(self, req.serial);
+            copy.plugin_state.user.dialog_folders = crate::plugin_menu::take_folder_consent(self, req.serial);
             if let Some(level) = level {
                 copy.param_check = level;
             }
@@ -935,6 +939,8 @@ impl SolveApp {
                             if let Some(solidcraft_engine::plugin::HostError::StaleRevision { expected, actual }) = error.host_error() {
                                 stale_revision = Some((expected.clone(), actual.clone()));
                                 error.to_string()
+                            } else if error.host_error().is_some() {
+                                error.to_string()
                             } else {
                                 self.tr("ui.plugin_context_changed").to_string()
                             }
@@ -947,6 +953,14 @@ impl SolveApp {
                 if let Some(exits) = reply.get("sketch_exits").and_then(Value::as_array) {
                     for sketch in exits {
                         self.sketch_closed(sketch.as_u64());
+                    }
+                }
+                if let Some(messages) = reply.get("messages").and_then(Value::as_array) {
+                    for m in messages {
+                        let level = m.get("level").and_then(Value::as_str).unwrap_or("info");
+                        let text = m.get("message").and_then(Value::as_str).unwrap_or_default();
+                        let error = level == "error";
+                        self.messages.push(text, error, crate::now_ms());
                     }
                 }
                 crate::render_workspace::apply_command(self, "plugin.run", &reply)?;

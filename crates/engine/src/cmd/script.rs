@@ -247,6 +247,8 @@ pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool, own:
         (doc.point_clouds.is_empty(), "point clouds"),
         (doc.print_faces.is_empty(), "print-face assignments (body.print_face)"),
         (doc.named_views.is_empty(), "named views"),
+        (doc.home_view.is_none(), "the Home view"),
+        (doc.saved_sections.is_empty(), "saved section analyses"),
         (doc.browser_groups.is_empty() && doc.browser_order.is_empty(), "Browser folders and order"),
         (doc.timeline_groups.is_empty(), "timeline folders"),
         (doc.visibility.is_empty(), "hidden items"),

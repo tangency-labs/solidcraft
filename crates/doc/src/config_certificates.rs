@@ -444,10 +444,9 @@ impl<'a> ExactSketchCurves<'a> {
         let reversed = generated.reversed();
         let mut found: Option<Option<&str>> = None;
         for (id, originals) in &self.free_form {
-            if originals
-                .iter()
-                .any(|original| *original == *generated || *original == reversed || solidcore_ops::prism::cubic_contains(original, generated))
-            {
+            if originals.iter().any(|original| {
+                *original == *generated || *original == reversed || solidcraft_kernel::services::prism::cubic_contains(original, generated)
+            }) {
                 found = Some(if found.is_some() { None } else { Some(*id) });
             }
         }
@@ -804,7 +803,7 @@ fn split_on_purpose(body: &ModelBody, plane: &solidcore_record::Plane) -> bool {
 }
 
 /// Whether two exact planes are one oriented plane (pieces of one face).
-fn same_oriented_plane(a: &solidcore_record::Plane, b: &solidcore_record::Plane, scale: f64) -> bool {
+pub(crate) fn same_oriented_plane(a: &solidcore_record::Plane, b: &solidcore_record::Plane, scale: f64) -> bool {
     a.normal().dot(b.normal()) >= 1. - 1e-8 && (b.origin - a.origin).dot(a.normal()).abs() <= 1e-7 * (1. + scale)
 }
 
@@ -889,12 +888,26 @@ impl Document {
                 .collect();
         }
         if indices.is_empty() {
+            let pieces: Vec<usize> = (0..names.faces.len())
+                .filter(|&i| crate::history_names::matches(&names, i, name) == Some(crate::history_names::Match::Piece))
+                .collect();
+            if let [only] = pieces.as_slice() {
+                indices.push(*only);
+            } else if pieces.is_empty()
+                && let Some(only) = crate::name_lookup::unique_resuffixed_on_body(&names, name)
+            {
+                indices.push(only);
+            }
+        }
+        if indices.is_empty() {
             return Err(DocError::Unknown(format!("face `{name}` on `{}` no longer exists", body.name)));
         }
         self.coplanar_pieces(body, &indices, |index| names.verified(index))?;
         // A piece by its own name stands for itself, which a piece of a face split on purpose
-        // (Split Face) never does: that needs a fixed plane.
+        // (Split Face) told apart only by the faces around it never does: that needs a fixed
+        // plane. One by the name Split Face gave it (`F2:top#[F7:split:in]`) does.
         if crate::naming::strip_piece(name) != name
+            && !crate::history_names::names_split_piece(name)
             && let Some(plane) = indices.first().and_then(|index| body.body.planar_face(*index))
             && split_on_purpose(body, &plane)
         {

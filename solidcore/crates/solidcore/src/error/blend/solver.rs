@@ -102,7 +102,9 @@ pub enum SolverFailure {
     },
     /// The edge bounds no material (no use of it lies in a loop of a shell of a region
     /// that is not a void, as a sheet's edge), so it is neither concave nor convex: a case
-    /// the concavity test does not handle ([`ErrorKind::Unsupported`]).
+    /// the concavity test does not handle ([`ErrorKind::Unsupported`]). Also the answer,
+    /// as before #19829, for an edge with no such use and a loop use without a shell or in
+    /// a shell without a region (`edge_bounds_material_linked`).
     EdgeBoundsNoMaterial {
         /// The edge.
         edge: crate::topology::EdgeId,

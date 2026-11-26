@@ -502,7 +502,7 @@ pub fn largest_size_on_its_faces(
         if on_edge {
             return Ok(None); // a radius law: no single size
         }
-    } else if solver_type == FilletSolverType::ConstDist {
+    } else if solver_type == FilletSolverType::ConstDist && base.station_setback().is_none() {
         kind = FitKind::Chord; // a ball of any radius, sized by its chord
         max = 20.0 * smos_max(off[0], off[1]);
     } else if solver_type == FilletSolverType::ConstRadius && off[0] > 0.0 && off[1] > 0.0 {

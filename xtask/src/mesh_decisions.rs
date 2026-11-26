@@ -53,6 +53,7 @@ pub const SKIPPED_MODULES: &[(&str, &str)] = &[
     ("crates/engine/src/fuzz.rs", "the fuzz harness, which frames what it built"),
     ("crates/engine/src/mesh_lines/meshes.rs", "a drawing's view lines from display meshes"),
     ("crates/engine/src/mesh_lines/scene.rs", "a drawing's hidden-line occlusion over display meshes"),
+    ("crates/engine/src/pick_pieces.rs", "the pieces a click on a rim or surface picks, over the display mesh, as hover and box select take them"),
     ("crates/engine/src/product_scene.rs", "the scene a rendered picture draws"),
     ("crates/engine/src/render_jobs.rs", "rendered pictures"),
     ("crates/engine/src/schema/drawing_view.rs", "the counts of a drawing's view lines from display meshes"),

@@ -9,6 +9,7 @@
 //! | [`OffsetExecutive`] accessors | `GetInset`, `GetTangencyTolDegrees`, `GetExtendConvexEdges`, `GetOffsetBrep`, `GetShellFaces`, setters |
 //! | `notify_edge_and_vertices` (private) | `sm_NotifyEdgeAndVertices` |
 //! | [`OffsetExecutive::replace_implicit_offsets`] | `ReplaceImplicitOffsets` |
+//! | [`certified_offset_surface`] | none (the net `ReplaceImplicitOffsets` puts in an offset face's place, certified; WR-718) |
 //! | [`OffsetExecutive::remove_excess_faces`] | `RemoveExcessFaces` |
 //! | `forget_seconds`, `forget_firsts`, `removed_faces_edgeuses` (private) | `sm_ForgetSeconds`, `sm_ForgetFirsts`, `RemoveExcessFaces`' `sGone` |
 //! | [`OffsetExecutive::get_create_extended_surface`] | `GetCreateExtendedSurface` |
@@ -27,7 +28,9 @@
 //! | `build_boolean_offset_faces` (private) | `BuildOffsetOfFaceuse` 2D-boolean branch |
 //! | [`OffsetExecutive::map_edgeuses`] | `MapEdgeuses` |
 //!
-//! Deviations: RAII replaces the destructor. Constructor scalars are an immutable snapshot
+//! Deviations: not upstream (#13685), a rounded offset's cap whose tube folds over itself is
+//! refused (`refuse_folding_tube`, the certificate `query::tangent_edge::tube_regularity`).
+//! RAII replaces the destructor. Constructor scalars are an immutable snapshot
 //! of `SmOffsetGeometryCreation` parameters, not a retained creator reference or its implementation. `Relation` uses deterministic id order
 //! instead of upstream hash/pointer order; bubble sorting remains stable, including unordered
 //! floating-point comparisons. Extension identity is a caller-supplied key, never an address.
@@ -120,6 +123,7 @@ use crate::offset::offset_geometry_creation::{OffsetGeometryCreation, SsiData};
 
 use super::edgeuse::{CapNotifications, MarkSource};
 use super::p2::OffsetNotifications;
+use crate::surface::offset_surface::OffsetSurface;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p1::{self as bp1, SetRegionVoidType};
@@ -276,6 +280,13 @@ pub struct OffsetExecutive {
     pub(super) unmated_edgeuses: BTreeSet<EdgeuseId>,
     /// Source uses whose paired edge curves were successfully installed.
     pub(super) mated_edgeuses: BTreeSet<EdgeuseId>,
+    /// Not upstream: the source uses whose mated offset reached no neighbour's offset at
+    /// either end (the trim took the drop of both its vertices): where both edges of a
+    /// face of two edges are such, the face's offset is empty (`eliminate_empty_lenses`).
+    pub(super) unreached_edgeuses: BTreeSet<EdgeuseId>,
+    /// Not upstream: the original faces of two edges whose offset is empty, their
+    /// neighbours' offsets mated across them (`eliminate_empty_lenses`).
+    pub(super) eliminated_lenses: BTreeSet<FaceId>,
     /// The faces of a local operation and the surfaces replacing theirs, in step (the
     /// part of `SmLocalOperationGeometryCreation` the executive reads: `m_vFaces`,
     /// `m_vSurfaces`).
@@ -340,6 +351,8 @@ impl OffsetExecutive {
             wall_extensions: Vec::new(),
             unmated_edgeuses: BTreeSet::new(),
             mated_edgeuses: BTreeSet::new(),
+            unreached_edgeuses: BTreeSet::new(),
+            eliminated_lenses: BTreeSet::new(),
             local_faces: Vec::new(),
             local_surfaces: Vec::new(),
         }
@@ -569,8 +582,12 @@ impl OffsetExecutive {
     /// beyond a collapsed face, seen from its edge use `edgeuse`. Across a rail (a
     /// tangent edge of a four-sided round) it is the radial of the opposite rail; across
     /// an end edge, seen from `from` (one of that edge's vertices), the radial of the
-    /// rail at the edge's other vertex. `None` when the edge use's face did not
-    /// collapse, the face across collapsed too, or the face has another shape.
+    /// rail at the edge's other vertex. A round of more or fewer sides (one that meets
+    /// another round at a corner, or ends on a sliver of a third face) has its rails
+    /// told from its ends by what they bound: across a rail it is the radial of the
+    /// loop's one other tangent edge onto a face that keeps an offset. `None` when the
+    /// edge use's face did not collapse, the face across collapsed too, or the face has
+    /// another shape.
     ///
     /// # Errors
     ///
@@ -592,11 +609,33 @@ impl OffsetExecutive {
         let tan_tol_deg = self.tangency_tol_degrees();
         let next = if eu2::is_tangent_sector(kernel, original, edgeuse, tan_tol_deg, false, true)? {
             let loopuse = present(eu::loopuse(original, edgeuse)?, EU_NO_LOOPUSE)?;
-            if eu::loopuse_edgeuses(original, loopuse)?.len() != 4 {
-                return Ok(None);
+            let uses = eu::loopuse_edgeuses(original, loopuse)?;
+            if uses.len() == 4 {
+                let ccw = present(eu::ccw_edgeuse(original, edgeuse)?, EU_NO_NEIGHBOUR)?;
+                eu::ccw_edgeuse(original, ccw)?
+            } else {
+                // a rail is a tangent edge onto a face that keeps an offset: an end met by
+                // another collapsed round (a seam's split, a corner's mitre) is not one
+                let mut rails = Vec::new();
+                for &u in &uses {
+                    if u == edgeuse
+                        || !eu2::is_tangent_sector(kernel, original, u, tan_tol_deg, false, true)?
+                    {
+                        continue;
+                    }
+                    let beyond = match eu::radial(original, u)? {
+                        Some(r) if r != u => eu::face(original, r)?,
+                        _ => None,
+                    };
+                    if beyond.is_some_and(|f| !self.is_collapsed_face(f)) {
+                        rails.push(u);
+                    }
+                }
+                match rails.as_slice() {
+                    [rail] => Some(*rail),
+                    _ => None,
+                }
             }
-            let ccw = present(eu::ccw_edgeuse(original, edgeuse)?, EU_NO_NEIGHBOUR)?;
-            eu::ccw_edgeuse(original, ccw)?
         } else {
             let Some(from) = from else {
                 return Ok(None);
@@ -673,6 +712,7 @@ impl OffsetExecutive {
         self.crossing_edgeuses.clear();
         self.periodic_boundary_ends.clear();
         self.mated_edgeuses.clear();
+        self.unreached_edgeuses.clear();
         self.wall_extensions.clear();
     }
 
@@ -992,38 +1032,10 @@ impl OffsetExecutive {
             else {
                 continue;
             };
-            // get SmOffsetSurface base (use extended surface if there is one)
-            let base = offset
-                .extended_base_surface()
-                .unwrap_or_else(|| offset.base_surface());
-            // make sure base surface is an SmBSplineSurface (`SM_CAST_PTR`, which every
-            // subclass passes: plane, extrusion, revolution, cone, sphere, torus); its
-            // B-spline part with the NURB `GetOrCreateGwNurbPointer` makes when missing
-            let Some(nurb) = crate::topology::brep::p3::with_nurb(kernel, base)? else {
-                // a kind with no B-spline form (an offset surface: an offset of an offset)
-                return Err(failed(OffsetFailure::OffsetBaseKindUnsupported {
-                    surface_type: base.type_code(),
-                }));
-            };
-            // Not upstream (WR-718, #2350 S1): the offset certified within the tolerance
-            // at every parameter, in the base's parametrisation, where upstream fits
-            // NLib's `N_SrfOffset` and checks it at samples (the cancel token polled
-            // inside, #2136 / #2372)
-            let base_nurb = present(
-                nurb.gw_nurb(),
-                "the base's B-spline form has no NURB, though `with_nurb` makes it from the \
-                 surface's own exact definition where it is missing",
-            )?;
-            let made = crate::offset::construction::sheets::certified_offset(
-                kernel,
-                base_nurb,
-                offset.offset_distance(),
-                approximation_tol_3d,
-            )?;
-            let approximation =
-                crate::nurbs::b_spline_surface::p1::BSplineSurface::from_nurb(made.surface, false);
+            let (approximation, _) =
+                certified_offset_surface(kernel, offset, approximation_tol_3d)?;
             // remember face/surface pair
-            fix.push((f, Surface::from(approximation)));
+            fix.push((f, approximation));
         }
 
         // for every face that had an approximate surface built for an exact offset
@@ -1400,6 +1412,7 @@ impl OffsetExecutive {
         };
         let creator = self.geometry_creator();
         let mut new_faces = Vec::new();
+        let mut tube_checked = false;
         // cpp:2918–3071: every mapped offset edge-use pair may need a cap face.
         for (index, offset) in synchronized.edgeuses.iter().copied().enumerate() {
             let mut other_offset = paired_other(&synchronized, index, edge)?;
@@ -1451,6 +1464,18 @@ impl OffsetExecutive {
             let Some(surface) = cap.surface else {
                 continue;
             };
+            // Not upstream (#13685): a rounded offset's cap is the tube of radius |d| about
+            // the edge; one that folds over itself is refused, naming the largest distance at
+            // which it is proved not to fold, never built into an unsound body. Checked once an edge, on the first cap
+            // built; a closing wall and a local operation's caps are no such tube.
+            if !tube_checked
+                && !cap.closing_wall
+                && self.local_faces.is_empty()
+                && self.operation() != OffsetOperation::LocalOperation
+            {
+                tube_checked = true;
+                self.refuse_folding_tube(kernel, original, edgeuse, edge)?;
+            }
             // Build a face in m_pOffsetBrep for the new cap surface; its own
             // `sLoopPoints` is empty.
             let new_face = self.make_cap_face(
@@ -1482,6 +1507,39 @@ impl OffsetExecutive {
             &new_faces,
             &mut notifications.rekey(offset_key_of),
         )
+    }
+
+    /// Not upstream (#13685): refuses the rounded offset when the tube of radius `|d|` its cap
+    /// about `edge` lies on folds over itself ([`crate::error::offset::OffsetFailure::TubeFolds`],
+    /// naming the largest distance at which it is proved not to fold) or is not proved regular
+    /// ([`crate::error::offset::OffsetFailure::TubeNotCertified`]). The tube runs along the
+    /// face use normals for an outset, against them for an inset: those on the side of
+    /// `edgeuse`, the use of `edge` the offset builds from.
+    fn refuse_folding_tube(
+        &self,
+        kernel: &Kernel,
+        original: &mut Brep,
+        edgeuse: EdgeuseId,
+        edge: EdgeId,
+    ) -> Result<()> {
+        use crate::error::offset::OffsetFailure;
+        use crate::error::Failure;
+        use crate::query::tangent_edge::{tube_regularity, TubeRegularity};
+        let d = self.offset_distance.abs();
+        let outward = (self.offset_distance >= 0.0) != self.inset();
+        let reason = match tube_regularity(kernel, original, edgeuse, d, outward)? {
+            TubeRegularity::Regular => return Ok(()),
+            TubeRegularity::Folds { largest } => OffsetFailure::TubeFolds {
+                edge,
+                distance: self.offset_distance,
+                largest,
+            },
+            TubeRegularity::NotCertified => OffsetFailure::TubeNotCertified {
+                edge,
+                distance: self.offset_distance,
+            },
+        };
+        Err(Failure::new(OP, reason).into_error())
     }
 
     /// The geometry creator this executive's scalars stand for
@@ -1766,10 +1824,10 @@ impl OffsetExecutive {
         if let [only] = edges.as_slice() {
             let mut edgeuse = present(eu::primary_edgeuse(original, *only)?, EDGE_NO_EDGEUSE)?;
             if start_vertex(original, edgeuse)? != vertex {
-                edgeuse = present(eu::radial(original, edgeuse)?, EU_NO_RADIAL)?;
+                edgeuse = input_edgeuse_radial(original, edgeuse)?;
             }
             if eu::is_strut(original, edgeuse)? {
-                let faceuse = present(eu::faceuse(original, edgeuse)?, EU_NO_FACEUSE)?;
+                let faceuse = input_edgeuse_faceuse(original, edgeuse)?;
                 let mut faces = self.faceuse_to_faces.seconds(faceuse);
                 if faces.is_empty() {
                     // GetSeconds accepts a null key and returns an empty list upstream.
@@ -2094,10 +2152,8 @@ impl OffsetExecutive {
                         {
                             for edgeuse in edge::edgeuses(original, edge_id, None, None)? {
                                 if eu::faceuse(original, edgeuse)? == Some(faceuse) {
-                                    let radial =
-                                        present(eu::radial(original, edgeuse)?, EU_NO_RADIAL)?;
-                                    let radial_faceuse =
-                                        present(eu::faceuse(original, radial)?, EU_NO_FACEUSE)?;
+                                    let radial = input_edgeuse_radial(original, edgeuse)?;
+                                    let radial_faceuse = input_edgeuse_faceuse(original, radial)?;
                                     for radial_face in self.faceuse_to_faces.seconds(radial_faceuse)
                                     {
                                         relate_surface_pair(
@@ -3200,6 +3256,52 @@ fn defect(why: &'static str, status: i32) -> SolidError {
         .into_error()
 }
 
+/// The certified B-spline of the implicit offset surface `offset`: a bicubic B-spline within
+/// `tolerance` of the exact offset of its extended (else its own) base at every parameter, in
+/// the base's parametrisation, with the certified bound of that distance
+/// ([`crate::offset::construction::sheets::certified_offset`]; not upstream, WR-718: upstream
+/// fits NLib's `N_SrfOffset` and checks it at samples). What
+/// [`OffsetExecutive::replace_implicit_offsets`] puts in an offset face's place, and what an
+/// export that cannot keep the offset writes for it (#21926). The base must have a B-spline
+/// form (`SM_CAST_PTR` to `SmBSplineSurface`, which every subclass passes: plane, extrusion,
+/// revolution, cone, sphere, torus); its NURB is made where it is missing
+/// (`GetOrCreateGwNurbPointer`).
+///
+/// # Errors
+///
+/// [`OffsetFailure::OffsetBaseKindUnsupported`] (`SM_ERR`) for a base with no B-spline form
+/// (an offset surface: an offset of an offset); those of `certified_offset` (the cancel token
+/// is polled inside, #2136 / #2372).
+pub fn certified_offset_surface(
+    kernel: &Kernel,
+    offset: &OffsetSurface,
+    tolerance: f64,
+) -> Result<(Surface, f64)> {
+    // get SmOffsetSurface base (use extended surface if there is one)
+    let base = offset
+        .extended_base_surface()
+        .unwrap_or_else(|| offset.base_surface());
+    let Some(nurb) = crate::topology::brep::p3::with_nurb(kernel, base)? else {
+        return Err(failed(OffsetFailure::OffsetBaseKindUnsupported {
+            surface_type: base.type_code(),
+        }));
+    };
+    let base_nurb = present(
+        nurb.gw_nurb(),
+        "the base's B-spline form has no NURB, though `with_nurb` makes it from the \
+         surface's own exact definition where it is missing",
+    )?;
+    let made = crate::offset::construction::sheets::certified_offset(
+        kernel,
+        base_nurb,
+        offset.offset_distance(),
+        tolerance,
+    )?;
+    let approximation =
+        crate::nurbs::b_spline_surface::p1::BSplineSurface::from_nurb(made.surface, false);
+    Ok((Surface::from(approximation), made.bound))
+}
+
 /// The failure of p1 for `cause`, with the cause's status (that of the site it replaced).
 #[track_caller]
 fn failed(cause: OffsetFailure) -> SolidError {
@@ -3214,6 +3316,22 @@ fn input_faceuse_face(original: &Brep, faceuse: FaceuseId) -> Result<FaceId> {
         .faceuse(faceuse)?
         .face
         .ok_or_else(|| failed(OffsetFailure::FaceuseHasNoFace { faceuse }))
+}
+
+/// The radial of `edgeuse`, an edge use of the operation's input: a caller can clear it
+/// with `Brep::edgeuse_mut`, so a missing radial is [`OffsetFailure::EdgeuseHasNoRadial`],
+/// not a defect.
+fn input_edgeuse_radial(original: &Brep, edgeuse: EdgeuseId) -> Result<EdgeuseId> {
+    eu::radial(original, edgeuse)?
+        .ok_or_else(|| failed(OffsetFailure::EdgeuseHasNoRadial { edgeuse }))
+}
+
+/// The face use of `edgeuse`, an edge use of the operation's input: a caller can unlink it
+/// with `Brep::edgeuse_mut` or `Brep::loopuse_mut`, so a missing face use is
+/// [`OffsetFailure::EdgeuseHasNoFaceuse`], not a defect.
+fn input_edgeuse_faceuse(original: &Brep, edgeuse: EdgeuseId) -> Result<FaceuseId> {
+    eu::faceuse(original, edgeuse)?
+        .ok_or_else(|| failed(OffsetFailure::EdgeuseHasNoFaceuse { edgeuse }))
 }
 
 /// `value`, or the defect `why` with `SM_ERR_NULL_POINTER` ([`defect`]): a link or entity
@@ -3242,7 +3360,8 @@ pub(super) fn ignored_unless_defect<T>(r: Result<T>) -> Result<Option<T>> {
 // makes both with every link.
 
 /// Why the offset B-rep is not there.
-const NO_OFFSET: &str = "the offset B-rep is not there, though the executive's caller sets it \
+pub(super) const NO_OFFSET: &str =
+    "the offset B-rep is not there, though the executive's caller sets it \
                          before any step that builds into it, and every step that takes it \
                          gives it back";
 /// Why an edge use has no edge.
@@ -3263,12 +3382,6 @@ const EU_NO_NEIGHBOUR: &str = "an edge use has no neighbour in its loop, though 
 /// Why an edge use has no mate.
 const EU_NO_MATE: &str =
     "an edge use has no mate, though the kernel makes edge uses in mated pairs";
-/// Why an edge use has no radial.
-const EU_NO_RADIAL: &str = "an edge use has no radial, though the kernel links the uses around \
-                            every edge in a ring";
-/// Why an edge use has no face use.
-const EU_NO_FACEUSE: &str = "an edge use of a face has no face use, though the kernel makes \
-                             every edge use of a face in a loop of its face use";
 /// Why an edge has no edge use.
 const EDGE_NO_EDGEUSE: &str =
     "an edge has no edge use, though the kernel makes every edge with its uses";
@@ -3276,7 +3389,7 @@ const EDGE_NO_EDGEUSE: &str =
 const EDGE_NO_SAME_EDGEUSE: &str = "an edge has no edge use running with its curve, though the \
                                     kernel makes an edge's uses in mated pairs, one each way";
 /// Why an edge has no vertex at an end.
-const EDGE_NO_VERTEX: &str =
+pub(super) const EDGE_NO_VERTEX: &str =
     "an edge has no vertex at an end, though the kernel bounds every edge by its vertices";
 /// Why a vertex of a loop use is missing.
 const LOOP_NO_VERTEX: &str = "a loop use has an edge use with no vertex, though the kernel \
@@ -3284,7 +3397,7 @@ const LOOP_NO_VERTEX: &str = "a loop use has an edge use with no vertex, though 
 /// Why a face use has no mate.
 const FU_NO_MATE: &str = "a face use has no mate, though the kernel makes face uses in mated pairs";
 /// Why an offset face has no surface.
-const OFFSET_FACE_NO_SURFACE: &str =
+pub(super) const OFFSET_FACE_NO_SURFACE: &str =
     "an offset face has no surface, though the offset gives every face it builds one";
 /// Why an offset face has no face use.
 const OFFSET_FACE_NO_FACEUSE: &str =
@@ -3298,7 +3411,8 @@ const DOMAIN_FACE_NOT_PLANAR: &str = "the face made from the four sides of the o
                                       construction makes its face on the plane through its \
                                       curves";
 /// Why a face just built is not returned.
-const NO_NEW_FACE: &str = "the face construction succeeded but returned no face, though a face \
+pub(super) const NO_NEW_FACE: &str =
+    "the face construction succeeded but returned no face, though a face \
                            construction that succeeds returns the face it made";
 
 /// Why the trimmed B-spline curve of the input's `edge` is missing
@@ -3795,6 +3909,36 @@ mod tests {
     use crate::surface::plane::Plane;
     use crate::surface::side::BoxSide;
     use crate::topology::{Edge, Edgeuse, Face, Faceuse, ShellId, Vertex, Vertexuse};
+
+    /// A radial or face use missing from an edge use of the input is the caller's input
+    /// (the conversion guide, rule 9): a caller can build such a body with the public record
+    /// mutators, so each names its cause, not a defect.
+    #[test]
+    fn a_missing_input_edgeuse_radial_or_faceuse_is_named() {
+        // an edge use in no loop and with no neighbour around its edge
+        let mut original = Brep::new();
+        let edgeuse = original
+            .add_edgeuse_record(Edgeuse {
+                owner: crate::topology::EdgeuseOwner::Shell(None),
+                ..Edgeuse::default()
+            })
+            .unwrap();
+        let input = |e: SolidError, cause: OffsetFailure| {
+            assert!(!e.is_defect(), "{e}");
+            assert_eq!(e.offset_failure(), Some(&cause), "{e}");
+            assert_eq!(e.kind(), ErrorKind::InvalidInput, "{e}");
+            assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER), "{e}");
+            assert_eq!(e.entity(), Some(EntityRef::Edgeuse(edgeuse)), "{e}");
+        };
+        input(
+            input_edgeuse_radial(&original, edgeuse).unwrap_err(),
+            OffsetFailure::EdgeuseHasNoRadial { edgeuse },
+        );
+        input(
+            input_edgeuse_faceuse(&original, edgeuse).unwrap_err(),
+            OffsetFailure::EdgeuseHasNoFaceuse { edgeuse },
+        );
+    }
 
     /// The fork's tangency-labs/smlib@9d8ace9 (tangency-labs/solidcore#1795, WR-344):
     /// an edge whose mate failed is left out of the merge's no-SSI pairs in the

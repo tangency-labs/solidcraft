@@ -2176,7 +2176,7 @@ fn unpresented_app_requests_have_provenance_before_a_direct_session_replacement(
     let mut h = Harness::new();
     three_bodies(&mut h);
     let document = (*h.app.session.doc).clone();
-    h.app = crate::SolveApp::new(solidcraft_engine::Session::new(document.clone()), crate::Services::default());
+    *h.app = crate::SolveApp::new(solidcraft_engine::Session::new(document.clone()), crate::Services::default());
     // Existing callers can set the public request fields before the first UI frame.
     h.app.tree.reveal = Some("Three".into());
     h.app.tree.timeline_reveal = Some(document.features[2].id);
@@ -2247,25 +2247,27 @@ fn the_browser_lists_one_body_per_placement() {
     assert_eq!(body_rows, 2, "a body row per placement: {rows:?}");
 }
 
+/// Frames until the link badges' answer is back.
+fn link_answer(h: &mut Harness) {
+    h.frames(1);
+    for _ in 0..2000 {
+        if !h.app.tree.links.busy() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        h.frames(1);
+    }
+    h.frames(1);
+    assert!(!h.app.tree.links.busy(), "the answer never came");
+}
+
 /// #14024: a linked component's row says which file it comes from and how that file is, asked
 /// beside the window: once for a design, and again when the window comes back to the front.
 #[test]
 fn a_linked_components_row_shows_the_state_of_its_file() {
-    fn answer(h: &mut Harness) {
-        h.frames(1);
-        for _ in 0..2000 {
-            if !h.app.tree.links.busy() {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(5));
-            h.frames(1);
-        }
-        h.frames(1);
-        assert!(!h.app.tree.links.busy(), "the answer never came");
-    }
     fn back_to_the_front(h: &mut Harness) {
         h.app.synthetic.push(egui::Event::WindowFocused(true));
-        answer(h);
+        link_answer(h);
     }
     let mut h = Harness::new();
     h.frames(2);
@@ -2279,7 +2281,7 @@ fn a_linked_components_row_shows_the_state_of_its_file() {
     let ctx = h.ctx.clone();
     let _ = ctx.run_ui(egui::RawInput::default(), |ui| h.app.logic(ui.ctx()));
     assert!(h.app.tree.links.busy(), "asked without painting the Browser");
-    answer(&mut h);
+    link_answer(&mut h);
 
     let link = h.app.tree.links.get(component).expect("the link's badge").clone();
     assert_eq!((link.state, link.note), (LinkState::Linked, None));
@@ -2314,4 +2316,25 @@ fn a_linked_components_row_shows_the_state_of_its_file() {
     h.app.run("component.break_link", json!({"component": component})).unwrap();
     h.frames(2);
     assert!(h.app.tree.links.get(component).is_none(), "a design with no links shows no badge");
+}
+
+/// A design opened from its file reads its link next to that file, and asks once.
+#[test]
+fn a_saved_designs_linked_component_shows_its_badge() {
+    let mut h = Harness::new();
+    let part = h.dir.join("part.solidcraft");
+    let mut source = solidcraft_engine::Session::default();
+    source.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
+    source.execute("file.save", &json!({"path": part})).unwrap();
+    let component = h.app.run("component.insert_design", json!({"path": part})).unwrap()["component"].as_u64().unwrap();
+    let host = h.dir.join("host.solidcraft");
+    h.app.run("file.save", json!({"path": host})).unwrap();
+    h.app.run("doc.open", json!({"path": host})).unwrap();
+    assert_eq!(h.app.session.design().links[&component].path, "part.solidcraft", "the file keeps the link relative");
+
+    link_answer(&mut h);
+    let link = h.app.tree.links.get(component).expect("the link's badge");
+    assert_eq!((link.state, link.note), (LinkState::Linked, None));
+    h.frames(5);
+    assert!(!h.app.tree.links.busy(), "one answer, no asking again every frame");
 }

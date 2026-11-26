@@ -1168,19 +1168,64 @@ pub fn closest_to_ray(
     })?
 }
 
-/// Isolated intersections of `curve` over the record's parameter `interval` with `plane`,
-/// in curve order and in the plane's local coordinates. The kernel solves the exact curve
-/// against the plane at its model tolerance; contacts at both interval endpoints count.
-/// A curve lying in the plane has no isolated intersections and gives an empty list.
+/// Isolated intersections of `curve` over the record's parameter `interval` with `plane`:
+/// the crossings of [`plane_section`]. A curve lying in the plane has no isolated
+/// intersections and gives an empty list.
 ///
 /// # Errors
-/// [`Error::Argument`] for invalid curve data, a nonfinite or reversed interval, or a plane
-/// that is not finite and orthonormal; the kernel's status otherwise.
+/// Those of [`plane_section`].
 pub fn plane_crossings(
     curve: &Curve,
     interval: [f64; 2],
     plane: &solidcore_record::Plane,
 ) -> Result<Vec<solidcore_record::Vec2>> {
+    Ok(match plane_section(curve, interval, plane)? {
+        PlaneSection::InPlane => Vec::new(),
+        PlaneSection::Meets { points, .. } => points,
+    })
+}
+
+/// Where a curve meets a plane ([`plane_section`]).
+#[derive(Clone, Debug, PartialEq)]
+pub enum PlaneSection {
+    /// The curve lies in the plane over the whole interval.
+    InPlane,
+    /// The curve meets the plane at isolated points and over parts of its interval, or
+    /// misses it.
+    Meets {
+        /// The isolated intersections, in curve order and in the plane's local coordinates.
+        /// A point at an end of a part in `in_plane` is not among them.
+        points: Vec<solidcore_record::Vec2>,
+        /// The parts of the curve lying in the plane, in curve order. Together they never
+        /// cover the whole interval.
+        in_plane: Vec<PlanePart>,
+    },
+}
+
+/// A part of a curve lying in a plane ([`PlaneSection::Meets`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlanePart {
+    /// The part's interval in the record's parameter (radians on a circle or ellipse).
+    pub interval: [f64; 2],
+    /// The curve's points at the two ends of `interval`.
+    pub ends: [solidcore_record::Vec3; 2],
+}
+
+/// Where `curve` over the record's parameter `interval` meets `plane`: whether it lies in
+/// the plane over the whole interval, or else its isolated intersections and the parts of
+/// it lying in the plane. The kernel solves the exact curve against the plane at its model
+/// tolerance ([`api_intersectors::curve_plane_section`]); contacts at both interval
+/// endpoints count. A part's interval is in the record's parameter
+/// ([`solidcore::curve::from_parameters::record_parameter`]).
+///
+/// # Errors
+/// [`Error::Argument`] for invalid curve data, a nonfinite or reversed interval, or a plane
+/// that is not finite and orthonormal; the kernel's status otherwise.
+pub fn plane_section(
+    curve: &Curve,
+    interval: [f64; 2],
+    plane: &solidcore_record::Plane,
+) -> Result<PlaneSection> {
     if !interval.iter().all(|t| t.is_finite())
         || ![plane.origin, plane.x, plane.y]
             .iter()
@@ -1191,23 +1236,83 @@ pub fn plane_crossings(
     }
     let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
     let frame = solidcore_convert::plane(plane);
-    run("curve::plane_crossings", |k| {
+    run("curve::plane_section", |k| {
         let made = match from_parameters(k, &record, interval) {
             Ok(made) => made,
             Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
             Err(e) => return Err(e),
         };
         let found =
-            match api_intersectors::curve_plane_crossings(k, &made.curve, &made.interval, &frame) {
+            match api_intersectors::curve_plane_section(k, &made.curve, &made.interval, &frame) {
                 Ok(found) => found,
                 Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
                 Err(e) => return Err(e),
             };
-        Ok(Ok(found
-            .into_iter()
-            .map(|p| solidcore_record::Vec2::new(p.x, p.y))
-            .collect()))
+        let (points, ranges) = match found {
+            api_intersectors::PlaneSection::InPlane => return Ok(Ok(PlaneSection::InPlane)),
+            api_intersectors::PlaneSection::Meets { points, in_plane } => (points, in_plane),
+        };
+        let mut in_plane = Vec::with_capacity(ranges.len());
+        for range in ranges {
+            let (a, b) = (range.min(), range.max());
+            let (pa, pb) = (
+                made.curve.evaluate_point(k, a)?,
+                made.curve.evaluate_point(k, b)?,
+            );
+            let vec3 = |p: Point3| solidcore_record::Vec3::new(p.x, p.y, p.z);
+            in_plane.push(PlanePart {
+                interval: [
+                    record_parameter(&record, interval, a, pa),
+                    record_parameter(&record, interval, b, pb),
+                ],
+                ends: [vec3(pa), vec3(pb)],
+            });
+        }
+        Ok(Ok(PlaneSection::Meets {
+            points: points
+                .into_iter()
+                .map(|p| solidcore_record::Vec2::new(p.x, p.y))
+                .collect(),
+            in_plane,
+        }))
     })?
+}
+
+/// Isolated plane intersections of ordered curve pieces, retaining the first hit
+/// when pieces meet within the kernel's zone tolerance. This is the same
+/// tolerance and inclusive comparison used by the kernel's single-curve
+/// [`api_intersectors::curve_plane_crossings`]. Distances are measured by the kernel.
+///
+/// # Errors
+/// The errors of [`plane_crossings`] for any piece.
+pub fn piece_plane_crossings(
+    pieces: &[(&Curve, [f64; 2])],
+    plane: &solidcore_record::Plane,
+) -> Result<Vec<solidcore_record::Vec2>> {
+    let tolerance = run("curve::piece_plane_crossings_tolerance", |k| {
+        Ok(solidcore::geom::tol::zone_tol3d(
+            k,
+            solidcore::geom::tol::USE_DEFAULT,
+        ))
+    })?;
+    let mut points: Vec<solidcore_record::Vec2> = Vec::new();
+    for (curve, interval) in pieces {
+        for hit in plane_crossings(curve, *interval, plane)? {
+            let mut duplicate = false;
+            for point in &points {
+                let distance =
+                    crate::measure::point_distance([point.x, point.y, 0.0], [hit.x, hit.y, 0.0])?;
+                if distance.value <= tolerance {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if !duplicate {
+                points.push(hit);
+            }
+        }
+    }
+    Ok(points)
 }
 
 pub use solidcore::curve::stretch::Stretch;
@@ -1298,6 +1403,191 @@ pub fn stretch_cvs(
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+
+    /// A line and an arc lying in Z = 0 lie in it over their whole record intervals (the
+    /// arc's in radians). The same line tilted out of the plane crosses it once, at its
+    /// start, and an arc in a parallel plane misses it.
+    #[test]
+    fn plane_section_tells_a_curve_in_the_plane_from_one_that_crosses_it() {
+        use solidcore_record::{Plane, Vec2};
+
+        let flat = Curve::Line {
+            start: [0.0, 0.0, 0.0],
+            end: [40.0, 3.0, 0.0],
+        };
+        assert_eq!(
+            plane_section(&flat, [0.0, 1.0], &Plane::XY),
+            Ok(PlaneSection::InPlane)
+        );
+        let tilted = Curve::Line {
+            start: [0.0, 0.0, 0.0],
+            end: [40.0, 3.0, 1.0],
+        };
+        assert_eq!(
+            plane_section(&tilted, [0.0, 1.0], &Plane::XY),
+            Ok(PlaneSection::Meets {
+                points: vec![Vec2::new(0.0, 0.0)],
+                in_plane: Vec::new(),
+            })
+        );
+        let arc = |z| Curve::Circle {
+            frame: solidcore_record::brep::Frame {
+                origin: [5.0, 0.0, z],
+                x_axis: [1.0, 0.0, 0.0],
+                y_axis: [0.0, 1.0, 0.0],
+            },
+            radius: 10.0,
+        };
+        assert_eq!(
+            plane_section(&arc(0.0), [0.3, std::f64::consts::PI], &Plane::XY),
+            Ok(PlaneSection::InPlane)
+        );
+        assert_eq!(
+            plane_section(&arc(1.0), [0.3, std::f64::consts::PI], &Plane::XY),
+            Ok(PlaneSection::Meets {
+                points: Vec::new(),
+                in_plane: Vec::new(),
+            })
+        );
+    }
+
+    /// A curve lying in Z = 0 over part of its length gives that part, with its record
+    /// interval and end points, and no point at the part's ends. A polyline in the plane
+    /// over its first segment, then rising, gives that segment, parameter 0 to 1. A cubic
+    /// spline in the plane over its first and last spans, with a bump above it between,
+    /// gives both spans: its first four and last four control points lie in the plane, and
+    /// a cubic span depends on four.
+    #[test]
+    fn plane_section_gives_the_parts_of_a_curve_lying_in_the_plane() {
+        use solidcore_record::{Plane, Vec3};
+
+        let rises = Curve::Polyline {
+            points: vec![
+                [0.0, 0.0, 0.0],
+                [5.0, 0.0, 0.0],
+                [5.0, 0.0, 3.0],
+                [9.0, 0.0, 3.0],
+            ],
+        };
+        assert_eq!(
+            plane_section(&rises, [0.0, 3.0], &Plane::XY),
+            Ok(PlaneSection::Meets {
+                points: Vec::new(),
+                in_plane: vec![PlanePart {
+                    interval: [0.0, 1.0],
+                    ends: [Vec3::new(0.0, 0.0, 0.0), Vec3::new(5.0, 0.0, 0.0)],
+                }],
+            })
+        );
+
+        let bump = Curve::Spline {
+            knots: vec![
+                0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 6.0, 6.0, 6.0,
+            ],
+            points: vec![
+                [0.0, 0.0, 0.0],
+                [10.0, 0.0, 0.0],
+                [20.0, 0.0, 0.0],
+                [30.0, 0.0, 0.0],
+                [40.0, 0.0, 20.0],
+                [50.0, 0.0, 0.0],
+                [60.0, 0.0, 0.0],
+                [70.0, 0.0, 0.0],
+                [80.0, 0.0, 0.0],
+            ],
+        };
+        let Ok(PlaneSection::Meets { points, in_plane }) =
+            plane_section(&bump, [0.0, 6.0], &Plane::XY)
+        else {
+            panic!("the bump spline does not lie in the plane everywhere");
+        };
+        assert!(points.is_empty(), "{points:?}");
+        let near = |a: Vec3, b: [f64; 3]| {
+            <[f64; 3]>::from(a)
+                .iter()
+                .zip(b)
+                .all(|(x, y)| (x - y).abs() < 1e-9)
+        };
+        let [first, last] = in_plane[..] else {
+            panic!("{in_plane:?}")
+        };
+        assert_eq!(first.interval, [0.0, 1.0]);
+        assert_eq!(last.interval, [5.0, 6.0]);
+        assert!(near(first.ends[0], [0.0, 0.0, 0.0]), "{first:?}");
+        assert!(near(last.ends[1], [80.0, 0.0, 0.0]), "{last:?}");
+        assert!(first.ends[1].z.abs() < 1e-12 && last.ends[0].z.abs() < 1e-12);
+    }
+
+    #[test]
+    fn piece_plane_crossings_keep_shared_endpoints_once() {
+        use solidcore_record::Plane;
+
+        let a = Curve::Line {
+            start: [-1.0, -1.0, 0.0],
+            end: [0.0, 0.0, 0.0],
+        };
+        let b = Curve::Line {
+            start: [0.0, 0.0, 0.0],
+            end: [1.0, 1.0, 0.0],
+        };
+        let c = Curve::Line {
+            start: [2.0, -1.0, 0.0],
+            end: [2.0, 1.0, 0.0],
+        };
+        let hits = piece_plane_crossings(
+            &[(&a, [0.0, 1.0]), (&b, [0.0, 1.0]), (&c, [0.0, 1.0])],
+            &Plane::XZ,
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 2);
+        assert!(hits[0].x.abs() < 1e-7 && hits[0].y.abs() < 1e-7);
+        assert!((hits[1].x - 2.0).abs() < 1e-7 && hits[1].y.abs() < 1e-7);
+        assert!(piece_plane_crossings(&[], &Plane::XZ).unwrap().is_empty());
+    }
+
+    #[test]
+    fn piece_plane_crossings_follow_the_kernel_zone_boundary() {
+        use solidcore_record::Plane;
+
+        let tolerance = run("test::plane_crossing_tolerance", |k| {
+            Ok(solidcore::geom::tol::zone_tol3d(
+                k,
+                solidcore::geom::tol::USE_DEFAULT,
+            ))
+        })
+        .unwrap();
+        let a = Curve::Line {
+            start: [-1.0, -1.0, 0.0],
+            end: [0.0, 0.0, 0.0],
+        };
+        let b = Curve::Line {
+            start: [0.0, 0.0, 0.0],
+            end: [1.0, 1.0, 0.0],
+        };
+        // The first two pieces share an endpoint. The third crosses at a
+        // known distance below, on, or above the kernel's coincidence boundary.
+        for (factor, expected) in [(0.5, 1), (1.0, 1), (1.5, 2)] {
+            let offset = factor * tolerance;
+            let c = Curve::Line {
+                start: [offset, -1.0, 0.0],
+                end: [offset, 1.0, 0.0],
+            };
+            let hits = piece_plane_crossings(
+                &[(&a, [0.0, 1.0]), (&b, [0.0, 1.0]), (&c, [0.0, 1.0])],
+                &Plane::XZ,
+            )
+            .unwrap();
+            assert_eq!(
+                hits.len(),
+                expected,
+                "distance = {factor} times zone tolerance"
+            );
+            assert_eq!(hits[0], solidcore_record::Vec2::ZERO);
+            if expected == 2 {
+                assert_eq!(hits[1], solidcore_record::Vec2::new(offset, 0.0));
+            }
+        }
+    }
 
     #[test]
     fn plane_crossings_keep_line_endpoints_and_refuse_hostile_inputs() {

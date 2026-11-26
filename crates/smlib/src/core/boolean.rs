@@ -55,6 +55,17 @@ pub(crate) fn boolean(a: &Body, b: &Body, op: BooleanOp) -> Result<Option<Body>>
     call::ops_on("SmApiBoolean", &operands(&[a, b]), || ops::boolean(ca, cb, operation(op)))
 }
 
+/// [`boolean`] of `a` and `b` tagged as operands 0 and 1 ([`super::history::tag`]): the tagged
+/// copies are the operation's to consume, so they are not copied again. A boolean of tagged
+/// copies made them and then copied them both, the larger operand's copy as dear as the
+/// boolean on a body of many faces (solidcore#3359). A failure's dump gets `a` and `b`.
+pub(crate) fn boolean_tagged(a: &Body, b: &Body, op: BooleanOp) -> Result<Option<Body>> {
+    usable("SmApiBoolean", &[a, b])?;
+    let ta = super::history::tag(a, 0)?;
+    let tb = super::history::tag(b, 1)?;
+    call::ops_on("SmApiBoolean", &operands(&[a, b]), || ops::boolean(ta, tb, operation(op)))
+}
+
 /// The kernel's operation for [`merged`].
 fn kernel_operation(op: BooleanOp) -> BooleanOperation {
     match op {
@@ -80,13 +91,83 @@ pub(crate) fn merged(k: &mut Kernel, a: Brep, b: Brep, op: BooleanOp) -> SolidRe
 
 /// The union of copies of `bodies`, pairwise, level by level (an odd one carried to the next
 /// level as it is): at least one body and at most [`crate::MAX_UNION_BREPS`].
+///
+/// Not upstream: when the level-by-level union fails with the classification's own typed
+/// refusal ([`Error::NotOneFoot`], `compute_point_parameters` finding no single nearest point
+/// on a face's surface), the same bodies are united once more on fresh copies, one at a time
+/// against the result so far ([`union_one_by_one`]). The union of solids is the same set
+/// whichever pairing computes it, and a pair the level scheme cannot classify may classify fine
+/// against the accumulated body, so a join of many bodies that fails one pairing is built
+/// instead of refused (SolidCraft issue #16552). Any other failure — a deliberate refusal such
+/// as the solid leak, an unported step, a cancellation — keeps its own error; so does a failure
+/// of the retry.
 pub(crate) fn union_all(bodies: &[&Body]) -> Result<Body> {
     if bodies.is_empty() || bodies.len() > crate::MAX_UNION_BREPS {
         return Err(Error::Argument);
     }
     usable("smlib_boolean_union_all", bodies)?;
     let c = copies(bodies)?;
-    call::ops_on("smlib_boolean_union_all", &operands(bodies), || ops::union_all(c))
+    match call::ops_on("smlib_boolean_union_all", &operands(bodies), || ops::union_all(c)) {
+        Ok(b) => Ok(b),
+        Err(first @ Error::NotOneFoot { .. }) => {
+            let fresh = copies(bodies)?;
+            match union_one_by_one(fresh) {
+                Ok(b) => Ok(b),
+                // the retry's own classification refusal keeps the level scheme's; any other
+                // failure of the retry - a deliberate refusal, an unported step, a cancellation -
+                // is the answer, not masked by the level scheme's refusal
+                Err(Error::NotOneFoot { .. }) => Err(first),
+                Err(e) => Err(e),
+            }
+        }
+        Err(first) => Err(first),
+    }
+}
+
+/// Not upstream: the same bodies united one at a time, each into the result so far. A pair that
+/// fails the classification's typed refusal ([`Error::NotOneFoot`]) is put aside until the
+/// others are in (a later union may classify the pair that failed now); one that still fails
+/// then fails the retry. Any other failure — a deliberate refusal, an unported step — fails the
+/// retry with its own error at once, so it is neither deferred nor masked by the level scheme's
+/// refusal. Each union works on a copy of the result so far and a copy of the body, so a failed
+/// union leaves both ready to try again.
+fn union_one_by_one(bodies: Vec<Body>) -> Result<Body> {
+    let mut bodies = bodies.into_iter();
+    let Some(mut acc) = bodies.next() else { return Err(Error::Argument) };
+    let mut deferred = Vec::new();
+    for b in bodies {
+        match boolean_pair(&acc, &b) {
+            Ok(Some(u)) => acc = u,
+            Ok(None) => return Err(Error::Empty),
+            Err(Error::NotOneFoot { .. }) => deferred.push(b),
+            Err(e) => return Err(e),
+        }
+    }
+    for b in deferred {
+        acc = boolean_pair(&acc, &b)?.ok_or(Error::Empty)?;
+    }
+    Ok(acc)
+}
+
+/// A union of two bodies on copies, as [`ops::boolean`] gives it (the result is `None` only
+/// where a union of nonempty solids never lands: an empty body).
+fn boolean_pair(a: &Body, b: &Body) -> Result<Option<Body>> {
+    let mut c = copies(&[a, b])?.into_iter();
+    let (Some(ca), Some(cb)) = (c.next(), c.next()) else { return Err(Error::Argument) };
+    let inputs = [("a", a), ("b", b)];
+    call::ops_on("smlib_boolean_union_all", &inputs, || ops::boolean(ca, cb, operation(BooleanOp::Union)))
+}
+
+/// [`union_all`] of `bodies` tagged each as its own operand, in order
+/// ([`super::history::tag`]): the tagged copies are the union's to consume, so they are not
+/// copied again, as in [`boolean_tagged`]. A failure's dump gets `bodies`.
+pub(crate) fn union_all_tagged(bodies: &[&Body]) -> Result<Body> {
+    if bodies.is_empty() || bodies.len() > crate::MAX_UNION_BREPS {
+        return Err(Error::Argument);
+    }
+    usable("smlib_boolean_union_all", bodies)?;
+    let tagged = bodies.iter().enumerate().map(|(i, b)| super::history::tag(b, i)).collect::<Result<Vec<_>>>()?;
+    call::ops_on("smlib_boolean_union_all", &operands(bodies), || ops::union_all(tagged))
 }
 
 /// `a` op `b` for sheets of planar faces on one plane, on copies: `None` when either has no

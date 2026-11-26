@@ -30,7 +30,7 @@ pub(super) struct Exported {
 pub(super) fn export_bodies(s: &Session, cmd: &str, named: &[String], format: Format) -> Result<Exported> {
     let mut bodies = named.to_vec();
     if bodies.is_empty() {
-        bodies = s.selection.iter().filter_map(|x| if let crate::Sel::Body { name } = x { Some(name.clone()) } else { None }).collect();
+        bodies = s.selected_items()?.into_iter().filter_map(|x| if let crate::Sel::Body { name } = x { Some(name) } else { None }).collect();
     }
     if bodies.is_empty() {
         return Err(bad(cmd, "select the bodies to send, or give `bodies`"));

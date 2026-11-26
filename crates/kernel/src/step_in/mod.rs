@@ -45,8 +45,8 @@ pub const MAX_BODIES: usize = 10_000;
 pub const MAX_VISITS: usize = 100_000;
 /// Most planned solids converted in one go (bounds the geometry held at once).
 const MAX_WINDOW: usize = 64;
-/// Most representation entries walked while deciding which items are converted exactly once. A
-/// larger file keeps every conversion instead of paying for the walk.
+/// Work limit for the extra representation walks used to find template products and
+/// items that are converted exactly once. On reaching it, use the ordinary import walk.
 const MAX_CLOSURE_WORK: usize = 1 << 16;
 
 /// A body read from a STEP file.
@@ -363,14 +363,14 @@ fn translation(t: [f64; 3]) -> M4 {
 /// (`Reader::modelling_checked`): every rigid motion is one class (`None`), any other placement
 /// (a transformation operator's scale, shear or mirror) its own, by the matrix's exact bits.
 ///
-/// A rigid placement is applied by [`solidcraft_geom::brep::placement::moved`], which moves
+/// A rigid placement is applied by [`crate::placement::moved`], which moves
 /// every point and direction of the part by the same rotation and translation and keeps every
 /// tolerance; SMLib's check compares distances, lengths and orientations with those tolerances,
 /// which the motion keeps but for the rounding of the coordinates it moves. Any other placement
 /// is mapped without its tolerances, so the check can differ: such a placement is checked as it
 /// is.
 fn check_class(m: &M4) -> Option<[u64; 16]> {
-    if solidcraft_geom::brep::placement::Rigid::of_matrix(m).is_some() {
+    if crate::placement::Rigid::of_matrix(m).is_some() {
         return None;
     }
     let mut bits = [0u64; 16];
@@ -417,6 +417,12 @@ fn dress_with(
 /// [`dress_with`] the file's colours `paints`.
 fn dress(paints: &checks::Paints, body: Body, item: u64, face_origin: &[u64]) -> Body {
     dress_with(&paints.colors, &paints.color_names, &paints.opacity, body, item, face_origin)
+}
+
+struct MappedItem {
+    rep: u64,
+    origin: u64,
+    target: u64,
 }
 
 struct Reader {
@@ -914,17 +920,122 @@ impl Reader {
         seen
     }
 
+    fn mapped_item(&self, item: u64) -> Option<MappedItem> {
+        let e = self.ex.get(item).filter(|e| e.name() == "MAPPED_ITEM")?;
+        let map = self.ex.get(e.params().get(1)?.as_ref_id()?)?;
+        Some(MappedItem {
+            rep: map.params().get(1)?.as_ref_id()?,
+            origin: map.params().first()?.as_ref_id()?,
+            target: e.params().get(2)?.as_ref_id()?,
+        })
+    }
+
     /// Representations a MAPPED_ITEM walks (empty for any other item).
     fn mapped_targets(&self, item: u64) -> Vec<u64> {
-        let Some(e) = self.ex.get(item).filter(|e| e.name() == "MAPPED_ITEM") else { return Vec::new() };
-        let mapped = e
-            .params()
-            .get(1)
-            .and_then(Param::as_ref_id)
-            .and_then(|map| self.ex.get(map))
-            .and_then(|map| map.params().get(1))
-            .and_then(Param::as_ref_id);
-        mapped.map(|rep| self.rep_closure(&[rep])).unwrap_or_default()
+        self.mapped_item(item).map(|map| self.rep_closure(&[map.rep])).unwrap_or_default()
+    }
+
+    fn mapped_placement(&mut self, map: &MappedItem, units: Units, world: &M4) -> R<M4> {
+        let source_units = self.units_of(map.rep);
+        let target = self.placement_matrix(map.target, units);
+        let origin = self.placement_matrix(map.origin, source_units);
+        let placement = mat_mul(world, &mat_mul(&target?, &placement_inverse(&origin?)));
+        if placement.iter().flatten().any(|v| !v.is_finite()) {
+            return Err("non-finite composed placement".into());
+        }
+        Ok(placement)
+    }
+
+    /// Shapes reached by a usable mapping, starting from product-owned representations.
+    /// Count every visit as the import walk does, even if two mappings place the same
+    /// shape at the same position. The scan may decline to omit a source if the
+    /// remaining walk can reach a visit or body limit.
+    fn mapped_shapes(&mut self, reps: impl Iterator<Item = u64>, work: &mut usize) -> Option<HashSet<u64>> {
+        let mut frontier: Vec<_> = reps.map(|rep| (rep, IDENTITY)).collect();
+        let mut mapped = HashSet::new();
+        let mut closures = HashMap::new();
+        let mut bodies = 0usize;
+        let limit = MAX_CLOSURE_WORK.min(MAX_VISITS);
+        for depth in 0..=MAX_ASSEMBLY_DEPTH {
+            let mut next = Vec::new();
+            for (rep, world) in frontier {
+                let Some((items, _)) = self.reps.get(&rep) else { continue };
+                *work += items.len();
+                if *work > limit {
+                    return None;
+                }
+                let mut maps = Vec::new();
+                for &item in items {
+                    let Some(entity) = self.ex.get(item) else { continue };
+                    match entity.name() {
+                        name if body_item(rep, name) => {
+                            bodies += solidcore_step::topology::items(&self.ex, item).len();
+                            if bodies > MAX_BODIES {
+                                return None;
+                            }
+                        }
+                        "MAPPED_ITEM" if depth < MAX_ASSEMBLY_DEPTH => maps.extend(self.mapped_item(item)),
+                        _ => {}
+                    }
+                }
+                if maps.is_empty() {
+                    continue;
+                }
+                let units = self.units_of(rep);
+                for map in maps {
+                    let Ok(placement) = self.mapped_placement(&map, units, &world) else { continue };
+                    // Only a regular placement covers a shape. A nested operator may
+                    // still undo an ill-conditioned scale, so keep walking the map.
+                    let regular = solidcore_ops::affine::inverse(&placement).is_ok();
+                    let shapes = closures.entry(map.rep).or_insert_with(|| self.rep_closure(&[map.rep]));
+                    *work += shapes.len();
+                    if *work > limit {
+                        return None;
+                    }
+                    for &shape in shapes.iter() {
+                        if regular {
+                            mapped.insert(shape);
+                        }
+                        next.push((shape, placement));
+                    }
+                }
+            }
+            if next.is_empty() {
+                break;
+            }
+            frontier = next;
+        }
+        Some(mapped)
+    }
+
+    /// A flat file can define its parts as mapped shapes. Omit a template when all of
+    /// its shapes are reached from a root that will be kept. A cycle alone cannot
+    /// hide all its products.
+    fn mapped_template_products(&mut self, roots: &[u64]) -> HashSet<u64> {
+        let limit = MAX_CLOSURE_WORK.min(MAX_VISITS);
+        if !(2..=limit).contains(&roots.len()) || !self.children.is_empty() {
+            return HashSet::new();
+        }
+        let mut products = Vec::new();
+        let mut work = roots.len();
+        for &pd in roots {
+            let Some(reps) = self.pd_reps.get(&pd).filter(|reps| !reps.is_empty()) else { continue };
+            let shapes = self.rep_closure(reps);
+            work += shapes.len();
+            if work > limit {
+                return HashSet::new();
+            }
+            products.push((pd, shapes));
+        }
+        let Some(sources) = self.mapped_shapes(products.iter().flat_map(|(_, shapes)| shapes.iter().copied()), &mut work) else {
+            return HashSet::new();
+        };
+        let (templates, kept): (Vec<_>, Vec<_>) = products.into_iter().partition(|(_, shapes)| shapes.iter().all(|rep| sources.contains(rep)));
+        if templates.is_empty() || kept.is_empty() {
+            return HashSet::new();
+        }
+        let Some(placed) = self.mapped_shapes(kept.iter().flat_map(|(_, shapes)| shapes.iter().copied()), &mut work) else { return HashSet::new() };
+        templates.into_iter().filter(|(_, shapes)| shapes.iter().all(|rep| placed.contains(rep))).map(|(pd, _)| pd).collect()
     }
 
     fn label(&self, item: u64) -> String {
@@ -1012,23 +1123,14 @@ impl Reader {
                     }
                 }
                 "MAPPED_ITEM" => {
-                    let p = e.params();
-                    let (Some(map), Some(target)) = (p.get(1).and_then(Param::as_ref_id), p.get(2).and_then(Param::as_ref_id)) else { continue };
-                    let Some(me) = self.ex.get(map) else { continue };
-                    let (Some(origin), Some(mapped)) =
-                        (me.params().first().and_then(Param::as_ref_id), me.params().get(1).and_then(Param::as_ref_id))
-                    else {
-                        continue;
-                    };
-                    let mu = self.units_of(mapped);
-                    match (self.placement_matrix(target, u), self.placement_matrix(origin, mu)) {
-                        (Ok(t), Ok(o)) => {
-                            let mm = mat_mul(m, &mat_mul(&t, &placement_inverse(&o)));
-                            for r in self.rep_closure(&[mapped]) {
+                    let Some(map) = self.mapped_item(item) else { continue };
+                    match self.mapped_placement(&map, u, m) {
+                        Ok(mm) => {
+                            for r in self.rep_closure(&[map.rep]) {
                                 self.rep_bodies(r, &mm, path, product, instance, out, depth + 1);
                             }
                         }
-                        (Err(e), _) | (_, Err(e)) => self.warn(format!("mapped item #{item}: {e}")),
+                        Err(e) => self.warn(format!("mapped item #{item}: {e}")),
                     }
                 }
                 _ => {}
@@ -1675,9 +1777,10 @@ impl StepReading {
         let mut roots: Vec<u64> =
             ex.entities.iter().filter(|(id, e)| e.name() == "PRODUCT_DEFINITION" && !child_pds.contains(id)).map(|(id, _)| *id).collect();
         roots.sort();
+        let templates = rd.mapped_template_products(&roots);
         let identity = IDENTITY;
         let mut tree = Vec::new();
-        for pd in roots {
+        for pd in roots.into_iter().filter(|pd| !templates.contains(pd)) {
             tree.push(rd.node(pd, identity, identity, &[], None, 0, &mut Vec::new()));
         }
         // Solids outside any product structure (bare geometry files).

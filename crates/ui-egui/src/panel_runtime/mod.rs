@@ -7,7 +7,7 @@ mod host;
 mod interaction;
 mod layout;
 #[cfg(not(target_arch = "wasm32"))]
-mod native;
+pub(crate) mod native;
 #[cfg(not(target_arch = "wasm32"))]
 mod native_ui;
 mod plugin;

@@ -54,13 +54,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&REPLACE_CONTRACT)
         .output(output_schema_for::<Replaced>)
         .params(
-        "sketch?: the sketch to replace (default: the active sketch); from: the sketch whose contents take its place (id or name); file?: a design file `from` is in (default: this design). The sketch keeps its plane, place in the timeline and the features built on it; its curves, points, constraints, dimensions and texts become a copy of `from`'s, at the same sketch coordinates (one undo step)",
+        "sketch?: the sketch to replace (default: the active sketch); from: the sketch whose contents take its place (id or name); file?: a design file `from` is in (default: this design); keep_ids?: true gives the new curves and points `from`'s ids (default false: new ids, so a feature that names an old curve or point, such as an extrude side face `<Extrude>:side:l6`, must be reselected). The sketch keeps its plane, place in the timeline and the features built on it; its curves, points, constraints, dimensions and texts become a copy of `from`'s, at the same sketch coordinates (one undo step). `ids` maps each of `from`'s curve and point ids to the id it has now",
     ),
 ];
 
 /// A curve of the clipboard; its points are indices into [`SketchClip::points`].
 #[derive(Clone, Debug)]
 pub struct ClipCurve {
+    /// The curve's id in the sketch it was copied from.
+    pub id: String,
     pub kind: CurveKind,
     pub construction: bool,
     pub centerline: bool,
@@ -101,6 +103,8 @@ pub struct SketchClip {
     /// whole-sketch copies or copies from another design).
     pub source_sketch: Option<u64>,
     pub points: Vec<Vec2>,
+    /// Each of [`Self::points`]' id in the sketch it was copied from.
+    pub point_ids: Vec<String>,
     pub curves: Vec<ClipCurve>,
     pub constraints: Vec<ClipConstraint>,
     pub external_equals: Vec<ClipExternalEqual>,
@@ -228,12 +232,14 @@ fn clip_of(doc: &Document, sk: &Sketch, id: u64, ids: &[String], whole: bool, cm
     let mut pmap: BTreeMap<usize, usize> = BTreeMap::new();
     if whole && let Some(o) = sk.points.iter().position(|q| q.id == ORIGIN) {
         clip.points.push(Vec2::ZERO);
+        clip.point_ids.push(ORIGIN.to_string());
         clip.origin = Some(0);
         pmap.insert(o, 0);
     }
     let take = |q: usize, clip: &mut SketchClip, pmap: &mut BTreeMap<usize, usize>| -> usize {
         *pmap.entry(q).or_insert_with(|| {
             clip.points.push(sk.point(q).unwrap_or_default());
+            clip.point_ids.push(sk.points.get(q).map(|x| x.id.clone()).unwrap_or_default());
             clip.points.len() - 1
         })
     };
@@ -245,7 +251,14 @@ fn clip_of(doc: &Document, sk: &Sketch, id: u64, ids: &[String], whole: bool, cm
         kind.map_points(&|q| used.iter().find(|(o, _)| *o == q).map_or(q, |(_, n)| *n));
         cmap.insert(c, clip.curves.len());
         // Projected geometry comes in as ordinary geometry.
-        clip.curves.push(ClipCurve { kind, construction: cu.construction, centerline: cu.centerline, reversed: cu.reversed, infinite: cu.infinite });
+        clip.curves.push(ClipCurve {
+            id: cu.id.clone(),
+            kind,
+            construction: cu.construction,
+            centerline: cu.centerline,
+            reversed: cu.reversed,
+            infinite: cu.infinite,
+        });
     }
     for &q in &ps {
         let known = pmap.contains_key(&q);
@@ -339,7 +352,7 @@ fn cut(s: &mut Session, p: &Value) -> Result<Value> {
         d["sketch"] = sk.clone();
     }
     delete.run_nested(s, &d)?;
-    s.selection.clear();
+    s.clear_selection();
     // The cut geometry is gone: a paste back into this sketch goes where it was, not offset.
     if let Some(c) = s.sketch_clipboard.as_mut() {
         c.sketch = u64::MAX;
@@ -380,7 +393,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
     let mut p = p.clone();
     p["sketch"] = json!(target);
     let same_sketch = clip.source_sketch == Some(target);
-    let ((curves, lone, constraints), info) = edit(s, &p, cmd, false, |sk, doc| paste_clip(sk, doc, &clip, t, same_sketch))?;
+    let ((curves, lone, constraints, _), info) = edit(s, &p, cmd, false, |sk, doc| paste_clip(sk, doc, &clip, t, same_sketch, false))?;
     if !positioned
         && target == clip.sketch
         && let Some(c) = s.sketch_clipboard.as_mut()
@@ -427,7 +440,8 @@ fn whole_clip(doc: &Document, id: u64, cmd: &str) -> Result<SketchClip> {
 /// display options and what is built on it) and takes a copy of another sketch's contents, as a
 /// whole-sketch copy and paste would. Projected geometry comes as ordinary geometry; patterns,
 /// offsets and formula curves come as the geometry they made. The dimension parameters the old
-/// contents had, when nothing else uses them, go with them.
+/// contents had, when nothing else uses them, go with them. The new contents get new ids, unless
+/// `keep_ids` asks for the source's curve and point ids (#21550).
 fn replace(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.replace";
     if !(p.is_object() || p.is_null()) {
@@ -439,6 +453,11 @@ fn replace(s: &mut Session, p: &Value) -> Result<Value> {
         None => None,
         Some(Value::String(f)) if !f.trim().is_empty() => Some(f.clone()),
         Some(_) => return Err(bad(cmd, "`file` must be the path of a design file")),
+    };
+    let keep_ids = match p.get("keep_ids").filter(|v| !v.is_null()) {
+        None => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err(bad(cmd, "`keep_ids` must be true or false")),
     };
     let clip = match &file {
         Some(path) => {
@@ -455,7 +474,7 @@ fn replace(s: &mut Session, p: &Value) -> Result<Value> {
             whole_clip(&s.doc, source, cmd)?
         }
     };
-    let ((curves, points, constraints), info) = edit(s, &json!({ "sketch": target }), cmd, false, |sk, doc| {
+    let ((curves, points, constraints, ids), info) = edit(s, &json!({ "sketch": target }), cmd, false, |sk, doc| {
         let old: Vec<String> = sk.constraints.iter().filter_map(|c| c.param.clone()).collect();
         // Emptied, but its id counters kept: the new contents' ids carry on from the old ones, so
         // a reference to an old curve or point (a sweep path, a profile picked by its curves)
@@ -479,25 +498,29 @@ fn replace(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
         *sk = fresh;
-        paste_clip(sk, doc, &clip, Vec2::ZERO, false)
+        // With `keep_ids` the new contents take the source's curve and point ids instead (#21550):
+        // the caller asked for a reference to `l1` to find the new `l1`.
+        paste_clip(sk, doc, &clip, Vec2::ZERO, false, keep_ids)
     })?;
     if s.active_sketch == Some(target) {
-        s.selection.clear();
+        s.clear_selection();
     }
     let source = match from {
         Value::String(x) => x.clone(),
         other => other.to_string(),
     };
-    reply(cmd, Replaced { sketch_id: target, from: source, file, curves, points, constraints, sketch: info, param_warnings: Vec::new() })
+    reply(cmd, Replaced { sketch_id: target, from: source, file, curves, points, constraints, ids, sketch: info, param_warnings: Vec::new() })
 }
 
-/// The ids of what a paste added: curves (those of texts included), lone points, constraints.
-type PastedIds = (Vec<String>, Vec<String>, Vec<String>);
+/// The ids of what a paste added: curves (those of texts included), lone points, constraints,
+/// and each copied curve's and point's id in its source sketch with the id its copy got.
+type PastedIds = (Vec<String>, Vec<String>, Vec<String>, BTreeMap<String, String>);
 
 /// Add a copy of `clip`, moved by `t`, to `sk`. When `same_sketch` is `true`, `Equal`
 /// constraints referencing curves left behind in the source sketch are re-attached where those
-/// curves still exist by id.
-fn paste_clip(sk: &mut Sketch, doc: &mut Document, clip: &SketchClip, t: Vec2, same_sketch: bool) -> Result<PastedIds> {
+/// curves still exist by id. When `keep_ids` is `true`, each copied curve and point takes its
+/// source id where `sk` has no entity of that id yet (a fresh id otherwise).
+fn paste_clip(sk: &mut Sketch, doc: &mut Document, clip: &SketchClip, t: Vec2, same_sketch: bool, keep_ids: bool) -> Result<PastedIds> {
     if sk.curves.len().saturating_add(clip.curves.len()) > solidcraft_sketch::limits::max_curves() {
         return Err(solidcraft_sketch::SketchError::TooLarge.into());
     }
@@ -506,14 +529,25 @@ fn paste_clip(sk: &mut Sketch, doc: &mut Document, clip: &SketchClip, t: Vec2, s
     for (i, q) in clip.points.iter().enumerate() {
         match origin.filter(|_| clip.origin == Some(i)) {
             Some(o) => pts.push(o),
-            None => pts.push(sk.add_point(*q + t, None)?),
+            None => {
+                let wanted = clip.point_ids.get(i).filter(|_| keep_ids).map(String::as_str).filter(|x| !x.is_empty());
+                let n = match sk.add_point(*q + t, wanted) {
+                    Err(solidcraft_sketch::SketchError::Duplicate(_)) => sk.add_point(*q + t, None)?,
+                    other => other?,
+                };
+                pts.push(n);
+            }
         }
     }
     let mut made = Vec::with_capacity(clip.curves.len());
     for c in &clip.curves {
         let mut kind = c.kind.clone();
         kind.map_points(&|q| pts.get(q).copied().unwrap_or(usize::MAX));
-        let i = sk.add_curve(kind, None)?;
+        let wanted = Some(c.id.as_str()).filter(|x| keep_ids && !x.is_empty());
+        let i = match sk.add_curve(kind.clone(), wanted) {
+            Err(solidcraft_sketch::SketchError::Duplicate(_)) => sk.add_curve(kind, None)?,
+            other => other?,
+        };
         if let Some(cu) = sk.curves.get_mut(i) {
             cu.construction = c.construction;
             cu.centerline = c.centerline;
@@ -545,6 +579,17 @@ fn paste_clip(sk: &mut Sketch, doc: &mut Document, clip: &SketchClip, t: Vec2, s
             cons.push(sk.add_constraint(ConstraintKind::Equal { a, b }, None)?);
         }
     }
+    let mut ids = BTreeMap::new();
+    for (c, i) in clip.curves.iter().zip(&made) {
+        if let Some(cu) = sk.curves.get(*i) {
+            ids.insert(c.id.clone(), cu.id.clone());
+        }
+    }
+    for (old, i) in clip.point_ids.iter().zip(&pts) {
+        if let Some(q) = sk.points.get(*i).filter(|_| !old.is_empty()) {
+            ids.insert(old.clone(), q.id.clone());
+        }
+    }
     let mut curve_ids: Vec<String> = made.iter().filter_map(|i| sk.curves.get(*i).map(|c| c.id.clone())).collect();
     for (src, path) in &clip.texts {
         let mut src = src.clone();
@@ -559,7 +604,7 @@ fn paste_clip(sk: &mut Sketch, doc: &mut Document, clip: &SketchClip, t: Vec2, s
         curve_ids.extend(sk.link_curves(&link).into_iter().filter_map(|i| sk.curves.get(i).map(|c| c.id.clone())));
     }
     let lone: Vec<String> = clip.lone.iter().filter_map(|n| pts.get(*n)).filter_map(|i| sk.points.get(*i).map(|q| q.id.clone())).collect();
-    Ok((curve_ids, lone, cons))
+    Ok((curve_ids, lone, cons, ids))
 }
 
 #[cfg(test)]

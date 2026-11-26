@@ -945,12 +945,12 @@ fn surface_op_on(
         }),
         OpIn::Reverse { dir } => {
             let dir = param_of(*dir)?;
-            edit(&mut s, |x| x.reverse(&Kernel::default(), dir))
+            edit(&mut s, |x| x.reverse(&crate::runner_kernel(), dir))
         }
         OpIn::Reparam { dom } => edit(&mut s, |x| {
-            x.reparameterize(&Kernel::default(), &dom_of(*dom))
+            x.reparameterize(&crate::runner_kernel(), &dom_of(*dom))
         }),
-        OpIn::Swap => edit(&mut s, |x| x.swap_uv(&Kernel::default())),
+        OpIn::Swap => edit(&mut s, |x| x.swap_uv(&crate::runner_kernel())),
         OpIn::Transform {
             origin,
             x,
@@ -959,13 +959,13 @@ fn surface_op_on(
         } => {
             let ax = Axis2Placement::new(v3(*origin), v3(*x), v3(*y));
             edit(&mut s, |srf| {
-                srf.transform(&Kernel::default(), &ax, scale.map(v3))
+                srf.transform(&crate::runner_kernel(), &ax, scale.map(v3))
             })
         }
         OpIn::Trim { dom } => {
             let mut d = dom_of(*dom);
             let r = match s.as_mut() {
-                Some(x) => x.trim_with_domain(&Kernel::default(), &mut d),
+                Some(x) => x.trim_with_domain(&crate::runner_kernel(), &mut d),
                 None => Err(base_err()),
             };
             match r {
@@ -982,7 +982,7 @@ fn surface_op_on(
             let dir = param_of(*dir)?;
             record(|o| {
                 let (l, r) = match &s {
-                    Some(x) => x.split_at(&Kernel::default(), *t, dir)?,
+                    Some(x) => x.split_at(&crate::runner_kernel(), *t, dir)?,
                     None => sp2::base_split_at()?,
                 };
                 dump_state(o, Some(&l));
@@ -993,7 +993,7 @@ fn surface_op_on(
         OpIn::StepInv { dom, p, tol, guess } => record(|o| {
             let (uv, loc) = match &s {
                 Some(x) => x.step_inversion(
-                    &Kernel::default(),
+                    &crate::runner_kernel(),
                     &dom_of(*dom),
                     v3(*p),
                     *tol,
@@ -1006,7 +1006,7 @@ fn surface_op_on(
             Ok(())
         }),
         OpIn::AdjustStep { dom } => edit(&mut s, |x| {
-            x.adjust_step_uv_domain(&Kernel::default(), &dom_of(*dom))
+            x.adjust_step_uv_domain(&crate::runner_kernel(), &dom_of(*dom))
         }),
         OpIn::MaxAnal => record(|o| {
             let d = match &s {
@@ -1033,7 +1033,7 @@ fn surface_op_on(
         OpIn::DropFast { dom, p } => record(|_| {
             match &s {
                 Some(x) => x.drop_point_fast::<Handle>(
-                    &Kernel::default(),
+                    &crate::runner_kernel(),
                     &dom_of(*dom),
                     SolverOperation::Minimize,
                     v3(*p),
@@ -1050,8 +1050,8 @@ fn surface_op_on(
             let uv = p2(*uv);
             let (a, b) = match &s {
                 Some(x) => (
-                    x.convert_uv_from_step_to_nurbs(&Kernel::default(), uv)?,
-                    x.convert_uv_from_nurbs_to_step(&Kernel::default(), uv)?,
+                    x.convert_uv_from_step_to_nurbs(&crate::runner_kernel(), uv)?,
+                    x.convert_uv_from_nurbs_to_step(&crate::runner_kernel(), uv)?,
                 ),
                 None => (base_convert_uv(uv), base_convert_uv(uv)),
             };
@@ -1116,7 +1116,7 @@ fn surface_op_on(
             let mut other = Surface::from(bss_of(other)?);
             let mut this = s.clone();
             record(|o| {
-                let k = Kernel::default();
+                let k = crate::runner_kernel();
                 let x = this.as_mut().ok_or_else(base_err)?;
                 if let Some(t) = translate {
                     let mut ax = Axis2Placement::default();
@@ -1152,7 +1152,7 @@ fn cross_values(s: &CrossSets) -> (Vec<Vec3>, Vec<Vec3>, [Option<Vec<Vec3>>; 6])
 }
 
 fn rust_static_op(op: &OpIn) -> Result<Run, HarnessError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let run = match op {
         OpIn::Lift2 { v } => {
             let a: Vec<Vec3> = v.iter().copied().map(v3).collect();
@@ -1686,7 +1686,7 @@ fn rust_static_op(op: &OpIn) -> Result<Run, HarnessError> {
                 },
             );
             record(|o| {
-                let s = Surface::read_from_db(&Kernel::default(), *ty, &mut r, *version)?;
+                let s = Surface::read_from_db(&crate::runner_kernel(), *ty, &mut r, *version)?;
                 dump_state(o, Some(&s));
                 Ok(())
             })
@@ -1749,7 +1749,7 @@ pub fn result_breps(case: &Case) -> Result<Drawn, HarnessError> {
     }
     let i: Inputs = case.parse()?;
     let t = i.this.as_ref().ok_or_else(|| cannot("a static op has no surface"))?;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let (_, s) = surface_op_on(&k, &i.op, t)?;
     let s = s.ok_or_else(|| cannot("the base class (or an unread record) has no surface"))?;
     let dom = s
@@ -2781,7 +2781,7 @@ fn gen_static_case(rng: &mut Rng) -> Inputs {
 /// tolerance) and one far away; the domain is the STEP domain or a sub-domain of it.
 fn revolution_cases() -> Result<Vec<Case>, HarnessError> {
     type StepOp = (String, [f64; 4], [f64; 3], f64, Option<[f64; 2]>);
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let placements = [
         ([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
         ([1.0, -2.0, 0.5], [0.6, 0.8, 0.0], [0.0, 0.0, 1.0]),
@@ -2932,7 +2932,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        let k = &Kernel::default();
+        let k = &crate::runner_kernel();
         if case.inputs.get("common_const_make").is_some() {
             if let Some(v) = case.inputs.get("common_sphere") { return super::surface_sphere::const_make_rust(v.clone()); }
             if let Some(v) = case.inputs.get("common_torus") { return super::surface_torus::const_make_rust(v.clone()); }
@@ -3029,7 +3029,7 @@ mod tests {
             panic!("intersection case");
         };
         let second = Surface::from(bss_of(&other).unwrap());
-        let k = Kernel::default();
+        let k = crate::runner_kernel();
         let result = first
             .global_surface_intersect(
                 &k,
@@ -3135,7 +3135,7 @@ mod tests {
             panic!("intersection case");
         };
         let mut second = Surface::from(bss_of(&other).unwrap());
-        let k = Kernel::default();
+        let k = crate::runner_kernel();
         if let Some(t) = translate {
             let mut ax = Axis2Placement::default();
             ax.translate(v3(t));
@@ -3188,7 +3188,7 @@ mod tests {
     /// The generators reach the ops with successful outcomes on the Rust side.
     #[test]
     fn generated_cases_cover_ops() {
-        let k = &Kernel::default();
+        let k = &crate::runner_kernel();
         let mut tally: BTreeMap<(String, String), usize> = BTreeMap::new();
         for seed in 0..2000u64 {
             let mut rng = Rng::new(0x5eed_0000 + seed);
