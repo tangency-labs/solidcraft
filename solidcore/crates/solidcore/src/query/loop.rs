@@ -912,7 +912,11 @@ impl WindingHull {
             ) {
                 return None;
             }
-            curve.clone_for_evaluation().ok()?;
+            // the walk's copy of the curve for evaluation can only fail, for these three
+            // kinds, on its nesting check: the check alone, without the copy (an
+            // ellipse's copy rebuilds its NURB, for every loop of every point a face
+            // classifies)
+            Surface::check_curve_evaluation_copy_depth(curve, 0).ok()?;
             eu1::orientation(b, eu).ok()?;
             let failed = b
                 .edgeuse(eu)

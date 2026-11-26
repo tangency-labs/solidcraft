@@ -46,6 +46,7 @@ mod reseam;
 pub(crate) mod seams;
 mod slivers;
 mod touching;
+mod tracked;
 mod wound;
 
 /// Most control points in one direction of a schema spline.
@@ -1216,7 +1217,13 @@ impl<'t> Assembly<'t> {
         // the whole body mutable, can its crossed cuts become edges and its trim pieces be
         // moved into the base period. An internal seam used on both sides is replaced rather
         // than retained as a boundary that would divide the same material into sliver faces.
-        if let Some((completed, from)) = pcurve::complete_periodic_seams(&brep).map_err(|e| e.to_string())? {
+        let (completion, skipped) = pcurve::complete_periodic_seams_noted(&brep).map_err(|e| e.to_string())?;
+        if let Some(why) = skipped {
+            // The body keeps its imported trims, which passed every check; say so rather than
+            // leave a reader to find that its round faces were not tidied along their seams.
+            notes.push(format!("the seams of faces on closed surfaces were not completed, the body keeps its imported trims ({why})"));
+        }
+        if let Some((completed, from)) = completion {
             face_origin = from
                 .iter()
                 .map(|&i| face_origin.get(i).copied().ok_or_else(|| pcurve::PeriodicSeamError::InputFaceLost(i).to_string()))
@@ -1759,6 +1766,11 @@ impl<'t> Assembly<'t> {
         };
         let mut pcs =
             pcurve::pcurves_within(&surface, &uses_of(&self.edges, &edge_loops, made.as_ref())?, fit, box_on_form).map_err(|e| e.to_string())?;
+        // A spline face's trim that lies far off its edge (the kernel's drop settled on another part
+        // of the surface) is made again by following the edge along the surface.
+        if form.is_none() {
+            tracked::retrack(&surface, &self.edges, &edge_loops, &mut pcs)?;
+        }
         // Each loop's uses are moved by whole turns (four form parameters) to run on from one
         // another, on the form that does not close.
         if wound {
