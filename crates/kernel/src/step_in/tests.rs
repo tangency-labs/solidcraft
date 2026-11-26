@@ -747,6 +747,7 @@ fn benchmark_independent_step_solids() {
 }
 
 fn assert_same_import(serial: &StepImport, parallel: &StepImport) {
+    assert_eq!(serial.report.current(), parallel.report.current());
     assert_eq!(serial.tree, parallel.tree);
     assert_eq!(serial.warnings, parallel.warnings);
     assert_eq!((&serial.schema, &serial.system), (&parallel.schema, &parallel.system));
@@ -2141,6 +2142,40 @@ fn instanced_assembly_of(parts: u64, n: u64) -> String {
     }
     t += TAIL;
     t
+}
+
+#[test]
+fn finishing_a_partly_read_assembly_reuses_its_placed_parts() {
+    let text = instanced_assembly_of(4, (3 * MAX_WINDOW + 1) as u64);
+    let mut reading = StepReading::with_workers(&text, 3).unwrap();
+    assert!(reading.step());
+    assert_eq!(reading.progress().0, MAX_WINDOW);
+    let finished = reading.finish().unwrap();
+    assert_same_import(&step_import_with_workers(&text, 1).unwrap(), &finished);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn cancelling_a_large_read_discards_work_ahead_and_allows_retry() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    struct CancelAtWindow(AtomicBool);
+    impl crate::watch::Watch for CancelAtWindow {
+        fn cancelled(&self) -> bool {
+            self.0.load(Ordering::Relaxed)
+        }
+
+        fn progress(&self, stage: &'static str, done: usize, _: usize) {
+            if stage == "converting" && done == MAX_WINDOW {
+                self.0.store(true, Ordering::Relaxed);
+            }
+        }
+    }
+    let text = boxes_step(MAX_WINDOW * 2 + 3, "cancel work ahead");
+    let watch = Arc::new(CancelAtWindow(AtomicBool::new(false)));
+    let err = crate::watch::watching(watch, || StepReading::with_workers(&text, 3)?.finish_shared()).unwrap_err();
+    assert!(err.to_string().contains("cancelled"), "{err}");
+    let imported = step_import_shared(&text).unwrap();
+    assert_eq!(imported.bodies.len(), MAX_WINDOW * 2 + 3);
 }
 
 /// A part placed many times is oriented (meshed whole) once, not once per instance (#2814:
