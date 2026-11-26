@@ -12859,7 +12859,7 @@ fn feature_tools_with_constructor(
                             "not supported yet: extending a To face that is not a plane, cylinder, cone, sphere or torus".into(),
                         ));
                     };
-                    hs.extend(extended_levels(&surface, &ss.plane, &footprint_points(&ss.plane, &regions)).into_iter().map(|h| h - off));
+                    hs.extend(kernel::extended_levels(&surface, &ss.plane, &footprint_points(&ss.plane, &regions)).into_iter().map(|h| h - off));
                 }
                 let margin = tb.body.size() * 0.05 + 1.0 + to_offset.abs();
                 if hi > 0.0 {
@@ -17635,7 +17635,16 @@ fn trim_to_body(tools: Vec<Traced>, target: &ModelBody, dist_to_start: impl Fn(V
 /// at the face's surface extended past them ([`trim_to_offset_face`] with no offset), refused
 /// when a piece still runs out to `far`. `near` is a point on the face (the To pick).
 #[allow(clippy::too_many_arguments)]
-fn trim_to_face(tools: Vec<Traced>, target: &ModelBody, face: usize, near: Vec3, plane: &Plane, start: f64, far: f64, extend: bool) -> Result<Vec<Traced>> {
+fn trim_to_face(
+    tools: Vec<Traced>,
+    target: &ModelBody,
+    face: usize,
+    near: Vec3,
+    plane: &Plane,
+    start: f64,
+    far: f64,
+    extend: bool,
+) -> Result<Vec<Traced>> {
     if extend {
         return trim_to_extended_face(tools, target, face, plane, start, far);
     }
@@ -17700,71 +17709,6 @@ fn trim_to_extended_face(tools: Vec<Traced>, target: &ModelBody, face: usize, pl
         return Err(DocError::Invalid("nothing lies between the profile and the To object".into()));
     }
     Ok(out)
-}
-
-/// The levels along `plane`'s normal where the lines through `points` (in the plane) along it meet
-/// the surface `surface` carried on without end, at most (a torus: the span of its bounding
-/// sphere, which holds every meeting): where an extrusion over those points must run to reach it.
-fn extended_levels(surface: &kernel::FaceSurface, plane: &Plane, points: &[Vec3]) -> Vec<f64> {
-    use kernel::FaceSurface as S;
-    let n = plane.normal();
-    // The roots of `a t^2 + 2 b t + c`, a line when `a` vanishes.
-    let roots = |a: f64, b: f64, c: f64, out: &mut Vec<f64>| {
-        let scale = a.abs().max(b.abs()).max(c.abs()).max(1e-300);
-        if a.abs() <= 1e-12 * scale {
-            if b.abs() > 1e-12 * scale {
-                out.push(-c / (2.0 * b));
-            }
-            return;
-        }
-        let disc = b * b - a * c;
-        if disc >= 0.0 {
-            let r = disc.sqrt();
-            out.extend([(-b - r) / a, (-b + r) / a]);
-        }
-    };
-    let mut out = Vec::new();
-    match *surface {
-        S::Plane { normal, point } => {
-            let m = normal.vec();
-            let across = n.dot(m);
-            if across.abs() > 1e-9 {
-                for q in points {
-                    out.push((point - *q).dot(m) / across);
-                }
-            }
-        }
-        S::Cylinder { origin, axis, radius } => {
-            let a = axis.vec();
-            let u = n - a * n.dot(a);
-            for q in points {
-                let w = *q - origin;
-                let v = w - a * w.dot(a);
-                roots(u.dot(u), u.dot(v), v.dot(v) - radius * radius, &mut out);
-            }
-        }
-        S::Cone { apex, axis, half_angle } => {
-            let a = axis.vec();
-            let c2 = half_angle.cos().powi(2);
-            for q in points {
-                let w = *q - apex;
-                roots(n.dot(a).powi(2) - c2, w.dot(a) * n.dot(a) - c2 * w.dot(n), w.dot(a).powi(2) - c2 * w.dot(w), &mut out);
-            }
-        }
-        S::Sphere { center, radius } => {
-            for q in points {
-                let w = *q - center;
-                roots(1.0, w.dot(n), w.dot(w) - radius * radius, &mut out);
-            }
-        }
-        S::Torus { center, major, minor, .. } => {
-            let h = (center - plane.origin).dot(n);
-            out.extend([h - major - minor, h + major + minor]);
-        }
-    }
-    // The lines start in the plane, so a root is a level along the normal from it.
-    out.retain(|t| t.is_finite());
-    out
 }
 
 /// Points over `regions` in `plane`'s frame, in the plane: the outlines and a grid across their box.

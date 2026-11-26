@@ -630,6 +630,7 @@ pub use surface_kind::EdgeCircle;
 pub use surface_kind::FaceSurface;
 pub use surface_kind::axial_face_section;
 pub use surface_kind::edge_circle;
+pub use surface_kind::extended_levels;
 pub use surface_kind::face_edge_indices;
 pub use surface_kind::face_surface;
 pub use surface_kind::same_face_record_surface;
