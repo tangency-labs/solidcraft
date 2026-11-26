@@ -760,7 +760,8 @@ fn a_frame_without_turns_keeps_its_fingerprint() {
         let steps = super::ImportDigests::default();
         let fp = super::chain_fingerprint(doc, &vals, f, 0, false, &steps, None);
         // And the key its result is cached under, which leaves the chain out.
-        (fp, super::EvalKey::new(doc, &vals, f, fp, 0, 0, &ModelState::default(), &steps).whole)
+        let comps = super::ComponentDigests::of(doc);
+        (fp, super::EvalKey::new(doc, &vals, f, fp, 0, 0, &ModelState::default(), &steps, &comps).whole)
     };
     let before = key(&doc);
     let turn = doc
@@ -6809,4 +6810,225 @@ fn world_state_moved_reusing_and_body_frames_match_nested_assembly() {
     for ((ax, ay), (ex, ey)) in moved_xy.iter().zip([(10.0, 10.0), (10.0, 40.0), (200.0, 10.0), (200.0, 40.0)]) {
         assert!((ax - ex).abs() < 1e-9 && (ay - ey).abs() < 1e-9, "({ax}, {ay}) vs ({ex}, {ey})");
     }
+}
+
+/// Adding an unrelated component must not invalidate the evaluation cache (`EvalKey::whole`,
+/// `EvalKey::reads`, `EvalKey::relative`, or `primed`) for existing features — including features
+/// whose `Feature::reads` is `None` (#22662).
+#[test]
+fn adding_unrelated_component_keeps_eval_cache_warm() {
+    let mut doc = Document::new("unrelated component cache");
+    let comp_a = doc.add_component(Some("PartA"), 0).unwrap();
+    let plate = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "20".into(),
+                width: "20".into(),
+                height: "6".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("Plate"),
+        )
+        .unwrap();
+    doc.feature_mut(plate).unwrap().component = comp_a;
+    let hole_f = doc.add_feature(hole(Vec3::new(10.0, 10.0, 6.0), Vec3::new(0.0, 0.0, -1.0), 3.0), Some("Hole1")).unwrap();
+    doc.feature_mut(hole_f).unwrap().component = comp_a;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    // Confirm the Hole feature exercises the `EvalKey::whole` path (`reads == None`).
+    assert!(doc.feature(hole_f).unwrap().reads(&doc, &model.state_before(hole_f)).is_none());
+
+    // Add a new unrelated component (as `component.create` / `parts.insert` does).
+    let _fastener = doc.add_component(Some("M5x10 BHCS"), 0).unwrap();
+
+    // Force cache lookup (no `self.results` prefix reuse) using the shared EvalCache.
+    let mut cached = Model { cache: model.cache.clone(), ..Model::new() };
+    cached.evaluate(&doc);
+    assert!(cached.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(cached.last_recomputed, 0, "adding an unrelated component must hit the eval cache");
+    assert_eq!(cached.last_restored, doc.features.len());
+    assert_eq!(full_eval_snapshot(&cached), full_eval_snapshot(&cold_model(&doc)));
+
+    // Primed results evaluated before the unrelated component was added also remain valid.
+    let mut primed = Model::new();
+    primed.prime(&model);
+    primed.evaluate(&doc);
+    assert_eq!(primed.last_recomputed, 0, "adding an unrelated component must not invalidate primed results");
+    assert_eq!(primed.last_restored, doc.features.len());
+}
+
+/// Toggling UI-only component metadata (`history_hidden`, `identification_color`, properties,
+/// etc.) must not invalidate the evaluation cache or `evaluate_shared`'s placement proof (#22662).
+#[test]
+fn component_display_metadata_changes_keep_eval_cache_warm() {
+    let mut doc = Document::new("component display metadata");
+    let comp_a = doc.add_component(Some("PartA"), 0).unwrap();
+    let plate = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "20".into(),
+                width: "20".into(),
+                height: "6".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("Plate"),
+        )
+        .unwrap();
+    doc.feature_mut(plate).unwrap().component = comp_a;
+    let hole_f = doc.add_feature(hole(Vec3::new(10.0, 10.0, 6.0), Vec3::new(0.0, 0.0, -1.0), 3.0), Some("Hole1")).unwrap();
+    doc.feature_mut(hole_f).unwrap().component = comp_a;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+
+    // Mutate every display/metadata-only field on PartA.
+    let c = doc.components.iter_mut().find(|c| c.id == comp_a).unwrap();
+    c.history_hidden = true;
+    c.identification_color = Some([10, 20, 30]);
+    c.identification_color_index = Some(42);
+    c.properties.insert("finish".into(), "anodized".into());
+    c.name_split = Some(crate::ComponentNameSplit { separator: "-".into(), left_property: "part".into(), right_property: "rev".into() });
+
+    let mut cached = Model { cache: model.cache.clone(), ..Model::new() };
+    cached.evaluate(&doc);
+    assert!(cached.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(cached.last_recomputed, 0, "UI-only component changes must hit the eval cache");
+    assert_eq!(cached.last_restored, doc.features.len());
+    assert_eq!(full_eval_snapshot(&cached), full_eval_snapshot(&cold_model(&doc)));
+
+    // Local-geometry shared evaluation proof also stays valid across UI-only component changes.
+    let mut local_doc = Document::new("local display metadata");
+    let comp_l = local_doc.add_component(Some("LocalPart"), 0).unwrap();
+    let box_l = local_doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "10".into(),
+                width: "10".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("Cube"),
+        )
+        .unwrap();
+    local_doc.feature_mut(box_l).unwrap().component = comp_l;
+    let mut shared_doc = Arc::new(local_doc);
+    let mut shared_model = Model::new();
+    assert!(shared_model.evaluate_shared(&shared_doc));
+    {
+        let d = Arc::make_mut(&mut shared_doc);
+        let c = d.components.iter_mut().find(|c| c.id == comp_l).unwrap();
+        c.history_hidden = true;
+        c.identification_color = Some([1, 2, 3]);
+    }
+    assert!(!shared_model.evaluate_shared(&shared_doc), "UI-only component change must keep evaluate_shared proof");
+    assert_eq!(shared_model.last_recomputed, 0);
+}
+
+/// Renaming a component that a feature can reach must still invalidate that feature's cache key
+/// (e.g. so target error messages reflect the renamed component).
+#[test]
+fn renaming_reached_component_invalidates_its_cache_key() {
+    let mut doc = Document::new("rename reached component");
+    let comp_a = doc.add_component(Some("OldName"), 0).unwrap();
+    let comp_b = doc.add_component(Some("Cutter"), 0).unwrap();
+    let plate = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "20".into(),
+                width: "20".into(),
+                height: "6".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("Plate"),
+        )
+        .unwrap();
+    doc.feature_mut(plate).unwrap().component = comp_a;
+    // Cut in comp_b with default targets: comp_b has no bodies, so `empty_boolean_targets` names
+    // the overlapping body's component (`OldName`).
+    let cut = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(2.0, 2.0, 0.0)),
+                length: "4".into(),
+                width: "4".into(),
+                height: "6".into(),
+                operation: Operation::Cut,
+                centred: false,
+            },
+            Some("MissCut"),
+        )
+        .unwrap();
+    doc.feature_mut(cut).unwrap().component = comp_b;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let err_before = model.result(cut).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_before.contains("OldName"), "expected error naming OldName, got: {err_before}");
+
+    doc.components.iter_mut().find(|c| c.id == comp_a).unwrap().name = "NewName".into();
+    let mut cached = Model { cache: model.cache.clone(), ..Model::new() };
+    cached.evaluate(&doc);
+    let err_after = cached.result(cut).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_after.contains("NewName"), "expected refreshed error naming NewName, got: {err_after}");
+    assert!(cached.last_recomputed >= 1);
+
+    // Primed results must also reject reuse when a reached component was renamed.
+    let mut primed = Model::new();
+    primed.prime(&model);
+    primed.evaluate(&doc);
+    let err_primed = primed.result(cut).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_primed.contains("NewName"), "expected primed miss naming NewName, got: {err_primed}");
+    assert!(primed.last_recomputed >= 1);
+
+    // Rolled-back results must also reject reuse when a reached component was renamed while rolled back.
+    doc.components.iter_mut().find(|c| c.id == comp_a).unwrap().name = "OldName".into();
+    let mut rolled = Model::new();
+    rolled.evaluate(&doc);
+    assert!(rolled.result(cut).and_then(|r| r.error.as_deref()).is_some_and(|e| e.contains("OldName")));
+    doc.marker = Some(1);
+    rolled.evaluate(&doc);
+    doc.components.iter_mut().find(|c| c.id == comp_a).unwrap().name = "RenamedWhileRolled".into();
+    doc.marker = None;
+    rolled.evaluate(&doc);
+    let err_rolled = rolled.result(cut).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_rolled.contains("RenamedWhileRolled"), "expected rolled miss naming RenamedWhileRolled, got: {err_rolled}");
+    assert!(rolled.last_recomputed >= 1);
+}
+
+/// Adding a missing destination component for a `BodyTransfer` must invalidate its cached refusal
+/// so the transfer succeeds on the next evaluation (#22662).
+#[test]
+fn body_transfer_cache_invalidates_when_destination_component_is_added() {
+    let mut doc = Document::new("body transfer cache");
+    block(&mut doc, "Plate", Vec3::ZERO, [10.0, 10.0, 4.0]);
+    let dest = doc.add_component(Some("Dest"), 0).unwrap();
+    let transfer = doc
+        .add_feature(
+            FeatureKind::BodyTransfer { bodies: vec![crate::BodyName("Plate".into())], from: 0, to: dest, transform: crate::IDENTITY },
+            Some("MovePlate"),
+        )
+        .unwrap();
+    let saved_dest = doc.components.pop().unwrap();
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.result(transfer).and_then(|r| r.error.as_deref()).is_some(), "transfer to missing component must fail");
+
+    doc.components.push(saved_dest);
+    let mut cached = Model { cache: model.cache.clone(), ..Model::new() };
+    cached.evaluate(&doc);
+    assert_eq!(cached.result(transfer).and_then(|r| r.error.as_deref()), None, "transfer must succeed once destination component exists");
+    assert_eq!(cached.state().body("Plate").unwrap().component, dest);
+    assert!(cached.last_recomputed >= 1);
 }
