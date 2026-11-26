@@ -441,7 +441,7 @@ fn topology_curve_normalizes_minor_major_ellipse() {
     let (step_surf, map) = crate::write::topology::surface(&rev).unwrap_or_else(|e| panic!("{e}"));
     let Surface::Revolution { profile: rev_profile, .. } = &step_surf else { panic!("{step_surf:?}") };
     assert!(matches!(**rev_profile, Curve::Ellipse { semi_axis_1, semi_axis_2, .. } if semi_axis_1 == 4.0 && semi_axis_2 == 2.0));
-    for (t, ang) in [(0.0, 0.3), (FRAC_PI_4, 1.1), (FRAC_PI_2, 2.0)] {
+    for (t, ang) in [(0.0_f64, 0.3_f64), (FRAC_PI_4, 1.1), (FRAC_PI_2, 2.0)] {
         let r = 10.0 + 2.0 * t.cos();
         let want = [r * ang.cos(), r * ang.sin(), 4.0 * t.sin()];
         let [u, v] = map.apply([t, ang]);
