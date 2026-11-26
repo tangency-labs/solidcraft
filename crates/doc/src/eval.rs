@@ -3439,7 +3439,12 @@ impl Feature {
                 Some(read)
             }
             FeatureKind::Extrude { sketch: s, extent, .. }
-                if extent.to.is_none() && extent.from.is_none() && !extent.through_all && extent.taper.is_none() =>
+                if extent.to.is_none()
+                    && extent.from.is_none()
+                    && !extent.through_all
+                    && !extent.through_all2
+                    && extent.to2.is_none()
+                    && extent.taper.is_none() =>
             {
                 Some(Reads { bodies: operated(self, feature_op(self))?, ..sketch(s)? })
             }
@@ -4126,7 +4131,7 @@ fn reads_none_of(f: &Feature, st: &ModelState, moved: &[(u64, Vec<ModelBody>)], 
         FeatureKind::Mirror { features, bodies, plane, .. } if features.is_empty() && placement_reuse::local_plane(plane, 0) => {
             bodies.iter().map(|b| b.0.clone()).collect()
         }
-        FeatureKind::Extrude { extent, .. } if extent.to.is_some() || extent.from.is_some() => return false,
+        FeatureKind::Extrude { extent, .. } if extent.to.is_some() || extent.from.is_some() || extent.to2.is_some() => return false,
         FeatureKind::Revolve { to: Some(_), .. } | FeatureKind::Revolve { axis: AxisRef::Model { .. }, .. } => return false,
         kind if drawn_tools_change_bodies(kind) => {
             let mut reads = PlacementReads::default();
@@ -4433,7 +4438,7 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
     // The faces To / From Object names, in `face_points` order.
     let object_names = match &f.kind {
         FeatureKind::Extrude { extent, .. } | FeatureKind::SurfaceExtrude { extent, .. } => {
-            usize::from(extent.to.is_some()) + usize::from(extent.from.is_some())
+            usize::from(extent.to.is_some()) + usize::from(extent.from.is_some()) + usize::from(extent.to2.is_some())
         }
         FeatureKind::Revolve { to, .. } => usize::from(to.is_some()),
         _ => 0,
@@ -10585,17 +10590,17 @@ fn join_apart_tools(tools: Vec<Traced>) -> Result<Vec<Traced>> {
 }
 
 /// The tool bodies a feature adds or removes (extrude, revolve, primitives), in the current state.
-/// `to_body` is the body a To Object extent runs to (an extrude), when it found one.
+/// `to_body` is the bodies the To Object extents run to (an extrude: one per side), when found.
 fn feature_tools_with_constructor(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
     f: &Feature,
     st: &ModelState,
     constructor: &mut Option<ExtrudeConstructor>,
-    to_body: &mut Option<String>,
+    to_body: &mut Vec<String>,
     warning: &mut Option<String>,
 ) -> Result<Vec<Traced>> {
-    *to_body = None;
+    to_body.clear();
     let unnamed = |bodies: Vec<Body>| -> Vec<Traced> { bodies.into_iter().map(Traced::unnamed).collect() };
     match &f.kind {
         FeatureKind::Extrude { sketch, profiles, extent, operation, targets, thin } => {
@@ -10620,7 +10625,7 @@ fn feature_tools_with_constructor(
             // middle of the profiles. The points are in this feature's component frame, so the
             // model is seen from there: a target in another, moved component where it is shown.
             let n = ss.plane.normal();
-            let tst = if extent.to.is_some() || extent.from.is_some() {
+            let tst = if extent.to.is_some() || extent.from.is_some() || extent.to2.is_some() {
                 state_in_frame_pinned_to(doc, st, f.component, &extent.picked_placements)?
             } else {
                 std::borrow::Cow::Borrowed(st)
@@ -10637,7 +10642,7 @@ fn feature_tools_with_constructor(
             let to_end_face = to_face.filter(|face| !extent.to.is_some_and(|p| on_edge_without_cap(&tst, *face, p.0, n)));
             // The body the extent runs to: a Join to it joins that body too (#6424), unless the
             // design was built before it did (#8151).
-            *to_body = to_face.filter(|_| !extent.to_body_apart).and_then(|(bi, _)| tst.bodies.get(bi)).map(|b| b.name.clone());
+            to_body.extend(to_face.filter(|_| !extent.to_body_apart).and_then(|(bi, _)| tst.bodies.get(bi)).map(|b| b.name.clone()));
             let centre = {
                 let pts: Vec<Vec2> = regions.iter().flat_map(|r| r.outer.polyline(1e-2)).collect();
                 let c = pts.iter().fold(Vec2::default(), |a, p| a + *p) * (1.0 / pts.len().max(1) as f64);
@@ -10673,6 +10678,9 @@ fn feature_tools_with_constructor(
                 two_sided: extent.distance2.is_some(),
             };
             let level_because = match (&slanted_from, &kept_slope) {
+                // The second side's own end keeps the start at the face's level too.
+                (Some(_), _) if extent.to2.is_some() => Some("To Object is set"),
+                (Some(_), _) if extent.through_all2 => Some("Through All is set"),
                 (Some(slope), _) => level_start_reason(slope, n, &ends),
                 (None, Some(slope)) => {
                     Some(level_start_reason(slope, n, &ends).unwrap_or("the design was saved before the start followed the slanted face"))
@@ -10744,6 +10752,41 @@ fn feature_tools_with_constructor(
                     through_all_side(reach, val(vals, &extent.distance, Kind::Length).ok())
                 }
                 (None, _) => val(vals, &extent.distance, Kind::Length)?,
+            };
+            // Two Sides: where the second side ends when it runs through all or to an object
+            // (#18691), measured as the first side is, from where the extrude starts.
+            let second_end = match (extent.through_all2, extent.to2) {
+                (_, Some(p)) => {
+                    let name = f.face_names.get(usize::from(extent.to.is_some()) + usize::from(extent.from.is_some())).map(String::as_str);
+                    let face = object_face_at_level(&tst, name, p.0, &ss.plane);
+                    let end_face = face.filter(|face| !on_edge_without_cap(&tst, *face, p.0, n));
+                    // A Join to it joins that body too, as for the first side.
+                    let second_body = face.filter(|_| !extent.to_body_apart).and_then(|(bi, _)| tst.bodies.get(bi)).map(|b| b.name.clone());
+                    to_body.extend(second_body.filter(|name| !to_body.contains(name)));
+                    let off = match &extent.to_offset2 {
+                        Some(e) => val(vals, e, Kind::Length)?,
+                        None => 0.0,
+                    };
+                    // The second side ends on a level, so only a plane parallel to the sketch fits: the
+                    // first side cuts its tool back to a curved or slanted face, this one does not yet.
+                    if end_face.is_some_and(|face| square_face_level(&tst, face, &ss.plane).is_none()) {
+                        return Err(DocError::Invalid(
+                            "not supported yet: the second side's To Object on a curved face or a face not parallel to the sketch; pick a plane parallel to the sketch, a vertex or a point, or use a Distance".into(),
+                        ));
+                    }
+                    let h = height_at(&tst, end_face, &ss.plane, centre, p.0);
+                    let start = from + extent.start_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
+                    let to = h + if h >= start { off } else { -off };
+                    if (to - start).abs() < 1e-9 {
+                        return Err(DocError::Invalid("the second side's To object is where the extrude starts".into()));
+                    }
+                    Some(SecondEnd::Level(to - start))
+                }
+                (true, None) => {
+                    let start = from + extent.start_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
+                    Some(SecondEnd::Reach(through_all_distance(st, &ss.plane, start, &crate::plain(targets))?))
+                }
+                (false, None) => None,
             };
             // The curved (or slanted) To face the tool is cut back to, with a taper or without
             // (#15820): see the straight path below. Not when the extrude runs From a slanted
@@ -10840,7 +10883,7 @@ fn feature_tools_with_constructor(
                 };
             // To Object gives a signed distance from the start: one side only.
             let direction = if extent.to.is_some() { crate::Direction::Positive } else { extent.direction };
-            let (a, b) = extent_sides(vals, extent, d, direction)?;
+            let (a, b) = extent_sides(vals, extent, d, direction, second_end)?;
             // A negative distance flips the side.
             let (mut lo, mut hi) = if a <= b { (a, b) } else { (b, a) };
             // To a curved (or slanted) face: run right through the target body, then keep what
@@ -12220,6 +12263,15 @@ fn from_profile_on_closed_path(segs: Vec<solidcore_record::Seg2>, path: &Plane, 
     out
 }
 
+/// Where the second side of a two-sided extrude ends when it is not a plain distance (#18691).
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum SecondEnd {
+    /// Through All: how far it runs, away from the first side.
+    Reach(f64),
+    /// To Object: the signed level along the sketch normal, from where the extrude starts.
+    Level(f64),
+}
+
 /// Where an extrude of distance `d` starts and ends along the sketch normal, before any start
 /// offset: one side, the other, both (symmetric), or a second distance on the other side.
 ///
@@ -12227,11 +12279,24 @@ fn from_profile_on_closed_path(segs: Vec<solidcore_record::Seg2>, path: &Plane, 
 /// or along it for `direction: negative` (#2700). Entered distances keep those sides whatever
 /// their signs; a To Object below the sketch or a Through All that reaches down sends the first
 /// side down and the second back along the normal.
-pub(crate) fn extent_sides(vals: &BTreeMap<String, Value>, extent: &crate::Extent, d: f64, direction: crate::Direction) -> Result<(f64, f64)> {
+pub(crate) fn extent_sides(
+    vals: &BTreeMap<String, Value>,
+    extent: &crate::Extent,
+    d: f64,
+    direction: crate::Direction,
+    second_end: Option<SecondEnd>,
+) -> Result<(f64, f64)> {
     Ok(match (&extent.distance2, direction) {
         (Some(d2), _) => {
             let negative = direction == crate::Direction::Negative;
             let first = if negative { -d } else { d };
+            // A second side that runs through all or to an object ends where the model puts
+            // it: Through All goes the other way from the first side, To Object to its level.
+            match second_end {
+                Some(SecondEnd::Reach(reach)) => return Ok((if first < 0.0 { reach } else { -reach }, first)),
+                Some(SecondEnd::Level(level)) => return Ok((level, first)),
+                None => {}
+            }
             let d2 = val(vals, d2, Kind::Length)?;
             // An entered distance keeps its side whatever its sign: Direction fixes the sides,
             // and a sign only turns its own side over. A reach computed from the model (To
@@ -14162,7 +14227,7 @@ fn replay(
                 }
                 None => with_named_face_points(doc, vals, named_from.unwrap_or(st), src)?.map(|(g, _)| g),
             };
-            let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut None, &mut None)?;
+            let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut Vec::new(), &mut None)?;
             if record_probes {
                 probe_boxes.extend(tools.iter().map(|t| tool_cut_box(&t.body, extra_tol)));
             }
@@ -16030,7 +16095,7 @@ fn eval_feature_kind(
         | FeatureKind::Sweep { operation, targets, .. } => {
             refuse_ambiguous_targets(doc, st, f, &crate::plain(targets))?;
             let mut constructor = None;
-            let mut to_body = None;
+            let mut to_body = Vec::new();
             let tools = feature_tools_with_constructor(doc, vals, f, st, &mut constructor, &mut to_body, warning)?;
             // #9969: a cut whose tool lies clear of the body (a profile drawn beside it, a
             // distance that stops short, the wrong direction) reported success and changed
@@ -16110,7 +16175,7 @@ fn eval_feature_kind(
             // becomes part of that panel. A Join to an object (#6424) is left to the generic path
             // below, which joins the object as well.
             if *operation == Operation::Join
-                && to_body.is_none()
+                && to_body.is_empty()
                 && matches!(f.kind, FeatureKind::Extrude { .. })
                 && !st.surface_sheets.is_empty()
                 && !more::surface_sheet_join(f, st, &crate::plain(targets), constructor.as_ref())?.is_empty()
@@ -16119,7 +16184,7 @@ fn eval_feature_kind(
             }
             // A Join extrude to an object joins that object too (#6424): the tool and the body
             // it runs to are one body, not only the body the profile was sketched on.
-            let extra: Vec<String> = if *operation == Operation::Join { to_body.into_iter().collect() } else { Vec::new() };
+            let extra: Vec<String> = if *operation == Operation::Join { to_body } else { Vec::new() };
             apply_traced_with(doc, st, f, tools, *operation, &crate::plain(targets), &extra)?;
             unchanged(st, warning);
             Ok(())

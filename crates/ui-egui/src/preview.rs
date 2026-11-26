@@ -687,7 +687,7 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
             (command.clone(), params)
         };
         let fields: &[&str] = match command.as_str() {
-            "solid.extrude" => &["distance", "distance2", "to_offset"],
+            "solid.extrude" => &["distance", "distance2", "to_offset", "to_offset2"],
             "solid.offset_face" => &["distance"],
             // A radius dragged or typed: each result shows while the next computes, rather than
             // the preview holding still until the input stops changing.
