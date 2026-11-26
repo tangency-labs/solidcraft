@@ -473,6 +473,7 @@ pub use route::stock_planar;
 pub use route::stock_retained_line;
 pub use route::stock_section_plane;
 pub use route::stock_spatial_arc;
+pub use route::stock_terminal_planes;
 pub use route::thicken;
 pub use route::torus;
 pub use route::trim_member;

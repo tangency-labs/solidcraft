@@ -271,6 +271,7 @@ frame_member
     Rotation = frame_member.angle (Angle)
   expressions: 40, 3, 40, frame_member.angle
 frame_member_sketch
+frame_cope
 frame_trim
   inputs:
     Angle = frame_trim.angle (Angle)

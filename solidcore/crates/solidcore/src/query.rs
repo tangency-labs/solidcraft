@@ -31,6 +31,7 @@ pub mod seam_bound;
 pub mod section_corners;
 pub mod tangent_edge;
 pub mod tess;
+pub mod tube_cope;
 pub mod vertex_meet;
 
 pub use face_surface::{

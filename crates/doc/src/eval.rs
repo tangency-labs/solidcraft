@@ -41,6 +41,8 @@ type IsoLines = (Option<Body>, std::collections::HashMap<(usize, usize, usize), 
 /// A body in the evaluated model.
 #[derive(Clone, Debug)]
 pub struct ModelBody {
+    /// Physical round-member data, valid only for the exact shape it certifies.
+    pub(crate) round_member: Option<Arc<crate::frame_cope::CertifiedMember>>,
     pub name: String,
     /// Definition identity for a computed placement; never parsed from its display name.
     pub source_name: Option<String>,
@@ -228,6 +230,7 @@ impl ModelBody {
     /// A newly evaluated body with empty caches; a constructor adds its provenance afterward.
     pub fn new(name: String, body: Body, feature: u64) -> Self {
         ModelBody {
+            round_member: None,
             name,
             source_name: None,
             source_transform: crate::IDENTITY,
@@ -4505,6 +4508,12 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             // So are the other surface bodies that cut with it (#13303).
             for b in tool_bodies {
                 reads.placed_body(st, b);
+            }
+        }
+        FeatureKind::FrameCope { member, tools, .. } => {
+            reads.placed_body(st, member);
+            for tool in tools {
+                reads.placed_body(st, tool);
             }
         }
         // A pattern of bodies copies them along its directions or about its axis in its own
@@ -16709,6 +16718,7 @@ fn eval_feature_kind(
         FeatureKind::FrameGusset { .. } => crate::gusset::evaluate(doc, vals, f, st),
         FeatureKind::FrameMember { .. } => frame_member::evaluate(doc, vals, f, st),
         FeatureKind::FrameTrim { .. } => frame_member::trim(doc, vals, f, st, warning),
+        FeatureKind::FrameCope { .. } => frame_member::cope(doc, f, st),
         FeatureKind::FramePlate { .. } => crate::frame_plate::evaluate(doc, vals, f, st),
         FeatureKind::BoundingSolid { bodies, margin, contents, margins } => {
             let m = val(vals, margin, Kind::Length)?;
