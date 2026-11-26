@@ -32,6 +32,9 @@ const DIRECTIONS: [&str; 3] = ["positive", "negative", "symmetric"];
 const PROFILES_INPUT: usize = 0;
 const BODIES_INPUT: usize = 1;
 const ANCHOR_INPUT: usize = 2;
+/// The dialog's own note (not a command key) of the point the anchor field was filled with when
+/// the dialog opened on a stored grid: a field still holding it is not a new pick.
+const ANCHOR_SHOWN: &str = "anchor_shown";
 /// A corner, the origin or a snap point (an edge's middle or end, a hole's centre), each picked as
 /// a vertex with its point; a sketch point; a construction point.
 const ANCHOR_PICKS: crate::selection::Accept = crate::selection::VERTICES
@@ -235,13 +238,13 @@ pub fn commands(app: &SolveApp, c: &CellGrid, inputs: &[SelInput], extra: &Map<S
         if !bodies.is_empty() {
             args.insert("targets".into(), json!(bodies));
         }
-        // Editing: the stored anchor stays as typed (it may follow parameters) while its point is
-        // still the one in the field; a new pick replaces it, an empty field is the sketch origin.
+        // Editing: the stored anchor stays as typed (it may follow parameters) while the field
+        // still holds the point it was filled with, even if a parameter has moved the anchor
+        // since; a new pick replaces it, an empty field is the sketch origin.
         let kept = extra.get("anchor").filter(|kept| stored_point(app, kept).is_some());
+        let shown = extra.get(ANCHOR_SHOWN).and_then(point_of);
         match crate::selection::items(inputs, ANCHOR_INPUT).first() {
-            Some(Sel::Vertex { body, point })
-                if body.is_empty() && kept.and_then(|k| stored_point(app, k)).is_some_and(|k| k.dist(*point) < 1e-9) =>
-            {
+            Some(Sel::Vertex { body, point }) if body.is_empty() && kept.is_some() && shown.is_some_and(|s| s.dist(*point) < 1e-9) => {
                 args.insert("anchor".into(), kept.cloned().unwrap_or_default());
             }
             Some(pick) => {
@@ -250,7 +253,7 @@ pub fn commands(app: &SolveApp, c: &CellGrid, inputs: &[SelInput], extra: &Map<S
             }
             None => {}
         }
-        for (k, v) in extra.iter().filter(|(k, _)| *k != "anchor") {
+        for (k, v) in extra.iter().filter(|(k, _)| *k != "anchor" && *k != ANCHOR_SHOWN) {
             args.entry(k.clone()).or_insert_with(|| v.clone());
         }
     }
@@ -338,6 +341,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
         let typed = json!(anchor.iter().map(length).collect::<Vec<_>>());
         if let (Some(input), Some(point)) = (inputs.get_mut(ANCHOR_INPUT), stored_point(app, &typed)) {
             input.items = vec![Sel::Vertex { body: String::new(), point }];
+            extra.insert(ANCHOR_SHOWN.into(), crate::selection::point_value(point));
         }
         extra.insert("anchor".into(), typed);
     }
@@ -360,6 +364,11 @@ fn anchor_point(app: &SolveApp, pick: &Sel) -> Option<Vec3> {
         }
         _ => None,
     }
+}
+
+/// The point of a `[x, y, z]` of numbers.
+fn point_of(value: &Value) -> Option<Vec3> {
+    Some(Vec3::new(value.get(0)?.as_f64()?, value.get(1)?.as_f64()?, value.get(2)?.as_f64()?))
 }
 
 /// The point of a stored anchor, `[x, y, z]` as typed.

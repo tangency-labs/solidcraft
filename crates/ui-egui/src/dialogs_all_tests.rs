@@ -1194,6 +1194,30 @@ fn cell_grid_anchor_takes_a_construction_point_of_a_moved_component_where_it_sho
     assert_eq!(commands[0].1.get("anchor"), Some(&crate::selection::point_value(shown)), "{commands:?}");
 }
 
+/// Editing a grid whose anchor is an expression: a parameter changed while the dialog is open
+/// moves the anchor, and OK keeps the expression; a new pick still replaces it with numbers.
+#[test]
+fn cell_grid_edit_keeps_an_anchor_expression_after_a_parameter_change() {
+    let mut h = Harness::new();
+    h.app.run("parameters.add", json!({"name": "Inset", "expression": "4 mm"})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Field"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [62, 62]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("solid.cell_grid", json!({"sketch": "Field", "anchor": ["Inset", "2 mm", "0 mm"], "through_all": true})).unwrap();
+    let kind = h.app.session.doc.find_feature("CellGrid1").unwrap().kind.clone();
+    let (Kind::CellGrid(c), inputs, extra) = crate::dialogs_cell_grid::for_feature(&h.app, &kind).unwrap() else { panic!() };
+    let typed = extra.get("anchor").cloned().unwrap();
+    assert_eq!(typed[0], json!("Inset"), "{typed}");
+    h.app.run("parameters.change", json!({"name": "Inset", "expression": "9 mm"})).unwrap();
+    let commands = crate::dialogs_cell_grid::commands(&h.app, &c, &inputs, &extra).unwrap();
+    assert_eq!(commands[0].1.get("anchor"), Some(&typed), "{commands:?}");
+    assert!(commands[0].1.get("anchor_shown").is_none(), "{commands:?}");
+    let mut moved = inputs.clone();
+    moved[2].items = vec![Sel::Vertex { body: String::new(), point: Vec3::new(9.0, 2.0, 0.0) }];
+    let commands = crate::dialogs_cell_grid::commands(&h.app, &c, &moved, &extra).unwrap();
+    assert_eq!(commands[0].1.get("anchor"), Some(&crate::selection::point_value(Vec3::new(9.0, 2.0, 0.0))), "{commands:?}");
+}
+
 form_case!(replace_face, "solid.replace_face", []);
 form_case!(boundary_fill, "solid.boundary_fill", ["Cells", "Operation"]);
 form_case!(align, "solid.align", ["Object Type", "From Snap", "To Snap"]);
