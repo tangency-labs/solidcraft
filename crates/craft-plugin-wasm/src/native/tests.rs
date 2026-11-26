@@ -2403,6 +2403,19 @@ fn folder_reads_confine_paths_resolve_case_and_share_the_import_budgets() {
     assert_eq!(allowed.resolve("library".into(), "".into()).unwrap(), Some("".into()));
     assert_eq!(allowed.resolve("library".into(), "absent".into()).unwrap(), None);
     assert_eq!(allowed.resolve("library".into(), "Part.BIN".into()).unwrap(), Some("Part.BIN".into()));
+    assert_eq!(allowed.resolve("library".into(), "PARTS".into()).unwrap(), None);
+    // One free place in the file budget: the typed spelling takes it. Where the disk opens the file
+    // under that spelling it stays the answer and the run goes on; elsewhere the folder's spelling
+    // does not fit.
+    let mut edge = make();
+    edge.folder_files = (1..MAX_IMPORT_FILES).map(|i| ("library".into(), PathBuf::from(format!("file{i}")))).collect();
+    let answer = edge.resolve("library".into(), "part.bin".into());
+    if root.join("part.bin").is_file() {
+        assert_eq!(answer.unwrap(), Some("part.bin".into()));
+        assert_eq!(edge.size("library".into(), "part.bin".into()).unwrap(), Some(6));
+    } else {
+        assert!(answer.is_err());
+    }
     let mut importing = make();
     importing.import = Some(ImportState {
         dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(),

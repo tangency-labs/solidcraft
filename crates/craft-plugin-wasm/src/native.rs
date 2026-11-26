@@ -749,11 +749,11 @@ impl<H: PluginHost> source::Host for State<H> {
             return Ok(Some(String::new()));
         }
         let import = self.import.as_ref().ok_or_else(|| PluginError::Trap("not an import".into()))?;
-        // A disk that ignores case opens a file under any spelling, so the listing decides how the
-        // folder spells it. The path as typed is the answer only when the listing cannot tell.
+        // The listing decides the spelling, because a disk that ignores case opens a file under any
+        // spelling: the entry spelled as typed, else the one file whose name matches ignoring case
+        // (a part an assembly spelled differently from the disk). The path as typed is the answer
+        // only when it opens a file and the listing cannot tell.
         let typed = import.dir.metadata(&target).is_ok_and(|m| m.is_file()).then(|| target.to_string_lossy().replace('\\', "/"));
-        // Else the one file in that folder whose name matches ignoring case: a part an assembly
-        // spelled differently from the disk (made on a case-insensitive system).
         let (Some(parent), Some(typed_name)) = (target.parent(), target.file_name().map(|n| n.to_string_lossy().into_owned())) else {
             return Ok(typed);
         };
