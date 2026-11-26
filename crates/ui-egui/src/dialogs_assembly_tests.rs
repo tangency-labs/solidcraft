@@ -1396,6 +1396,103 @@ fn a_sketch_point_picked_on_another_copy_of_a_part_holds_that_copy() {
     assert!(at.dist(Vec3::new(35.0, 5.0, 10.0)) < 1e-6, "{at:?}");
 }
 
+/// Snapping a joint origin to a sketch circle's centre in the UI stores a persistent
+/// `Snap::SketchPoint` reference rather than baking a static world point, so the joined
+/// component follows parameter changes (#21815).
+#[test]
+fn joint_snapped_to_sketch_circle_center_follows_parameter_change() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("parameters.add", json!({"name": "h", "expression": "100", "unit": "mm"})).unwrap();
+    app.run("component.create", json!({"name": "Post", "parent": "root", "activate": true, "grounded": true})).unwrap();
+    app.run(
+        "solid.box",
+        json!({"length": 20, "width": 20, "height": "h", "corner": [0, 0, 0], "operation": "new", "body_name": "PostBody", "name": "PostBox"}),
+    )
+    .unwrap();
+    app.run("sketch.create", json!({"plane": "YZ", "offset": 20, "name": "HoleSketch"})).unwrap();
+    app.run("sketch.circle.center", json!({"center": [10, 90], "radius": 3})).unwrap();
+    app.run("sketch.dimension", json!({"entities": ["c1"], "type": "diameter", "value": "6"})).unwrap();
+    app.run("sketch.dimension", json!({"entities": ["origin", "c1.center"], "type": "horizontal", "value": "10"})).unwrap();
+    app.run("sketch.dimension", json!({"entities": ["origin", "c1.center"], "type": "vertical", "value": "h - 10"})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("component.create", json!({"name": "Beam", "parent": "root", "activate": true, "grounded": false})).unwrap();
+    app.run(
+        "solid.box",
+        json!({"length": 50, "width": 20, "height": 20, "corner": [20, 0, 80], "operation": "new", "body_name": "BeamBody", "name": "BeamBox"}),
+    )
+    .unwrap();
+    app.run("component.activate", json!({"component": 0})).unwrap();
+
+    let sketch = app.session.doc.find_feature("HoleSketch").unwrap().id;
+    let snap = snap_of(&app.session, &Sel::SketchPoint { id: format!("{sketch}:c1.center") }).unwrap();
+    assert_eq!(snap.param["sketch"], json!(sketch));
+    assert_eq!(snap.param["point"], json!("c1.center"));
+
+    let beam_face = {
+        let st = app.session.world_state().unwrap();
+        let b = st.body("BeamBody").expect("BeamBody");
+        let faces = b.joint_faces().unwrap();
+        let f = faces.iter().find(|f| f.centroid.dist(Vec3::new(20.0, 10.0, 90.0)) < 1e-6).expect("Beam -X face");
+        Sel::Face { body: "BeamBody".into(), index: f.index, point: f.centroid }
+    };
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, Sel::SketchPoint { id: format!("{sketch}:c1.center") });
+    d.pick(&app.session, beam_face);
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    assert_eq!(app.session.doc.assembly.joints.len(), 1);
+    assert!(
+        matches!(&app.session.doc.assembly.joints[0].a.snap, solidcraft_engine::doc::joints::Snap::SketchPoint { sketch: s, point, .. } if *s == sketch && point == "c1.center"),
+        "{:?}",
+        app.session.doc.assembly.joints[0].a.snap
+    );
+
+    // Changing h from 100 mm to 60 mm moves c1.center to [20, 10, 50] and pulls Beam:1 down by 40 mm.
+    app.run("parameters.change", json!({"name": "h", "expression": "60"})).unwrap();
+    let beam_occ = app.session.doc.occurrences.iter().find(|o| o.name == "Beam:1").unwrap().id;
+    let t = solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, beam_occ);
+    let com = solidcraft_engine::doc::apply_point(&t, Vec3::new(45.0, 10.0, 90.0));
+    assert!(com.dist(Vec3::new(45.0, 10.0, 50.0)) < 1e-6, "Beam:1 COM should follow h -> 60 mm: {com:?}");
+
+    // Nonzero lateral offsets (Offset X / Offset Y) must also keep the persistent sketch reference.
+    app.run("joint.delete", json!({"joint": app.session.doc.assembly.joints[0].id})).unwrap();
+    app.run("parameters.change", json!({"name": "h", "expression": "100"})).unwrap();
+    let beam_face2 = {
+        let st = app.session.world_state().unwrap();
+        let b = st.body("BeamBody").expect("BeamBody");
+        let faces = b.joint_faces().unwrap();
+        let f = faces.iter().find(|f| f.plane_normal.is_some_and(|n| n.x < -0.9)).expect("Beam -X face");
+        Sel::Face { body: "BeamBody".into(), index: f.index, point: f.centroid }
+    };
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, Sel::SketchPoint { id: format!("{sketch}:c1.center") });
+    d.pick(&app.session, beam_face2);
+    if let crate::dialogs::Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.offset[0] = "5".into();
+        f.offset[1] = "2".into();
+    }
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    assert!(
+        matches!(&app.session.doc.assembly.joints[0].a.snap, solidcraft_engine::doc::joints::Snap::SketchPoint { sketch: s, point, .. } if *s == sketch && point == "c1.center"),
+        "nonzero lateral offset must keep Snap::SketchPoint: {:?}",
+        app.session.doc.assembly.joints[0].a.snap
+    );
+    let before_t = solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, beam_occ);
+    let before_com = solidcraft_engine::doc::apply_point(&before_t, Vec3::new(45.0, 10.0, 90.0));
+    app.run("parameters.change", json!({"name": "h", "expression": "60"})).unwrap();
+    let after_t = solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, beam_occ);
+    let after_com = solidcraft_engine::doc::apply_point(&after_t, Vec3::new(45.0, 10.0, 90.0));
+    assert!(
+        (after_com - before_com).dist(Vec3::new(0.0, 0.0, -40.0)) < 1e-6,
+        "offset sketch joint should follow h -> 60 mm by -40 mm in Z: before={before_com:?}, after={after_com:?}"
+    );
+}
+
 #[test]
 fn revolute_joint_uses_the_picked_straight_edges() {
     let mut app = two_boxes();
@@ -2219,6 +2316,146 @@ fn picks_on_one_component_say_why_and_offer_components() {
     assert_eq!((c[0].1["a"]["occurrence"].clone(), c[0].1["b"]["occurrence"].clone()), (json!(occ(&app, "Body1")), json!(occ(&app, "Body2"))));
     let out = frame(&mut app, vec![]);
     assert!(text_at(&out, &why).is_none(), "nothing left to say");
+}
+
+/// #12867: a joint between two grounded parts moves neither. The Joint dialog says so under the
+/// picks and offers to unground the second part; after that the note is gone. A joint made
+/// between them anyway says the same in Messages, as an error.
+#[test]
+fn picks_on_two_grounded_parts_say_the_joint_moves_neither_and_offer_to_unground_one() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        s.execute("component.create", &json!({"name": name})).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    for name in ["A", "B"] {
+        let o = occ(&app, name);
+        app.run("occurrence.ground", json!({"occurrence": o, "grounded": true})).unwrap();
+    }
+    let why = solidcraft_ui_text::format("joint.moves_neither", &[("joint", "Rigid1"), ("a", "A:1"), ("b", "B:1")]);
+
+    // Made anyway (as a script or the dialog's OK would): Messages says why, as an error.
+    app.messages.clear();
+    let r = app
+        .run(
+            "joint.create",
+            json!({"type": "rigid", "name": "Rigid1", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 10]}}),
+        )
+        .unwrap();
+    assert!(r["conflicts"].as_array().is_some_and(|c| c.len() == 1), "{r}");
+    assert!(app.messages.iter().any(|m| m.text == why && m.error), "{:?}", app.messages.iter().map(|m| &m.text).collect::<Vec<_>>());
+    app.run("edit.undo", json!({})).unwrap();
+
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(5.0, 5.0, 10.0)).unwrap());
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(25.0, 5.0, 10.0)).unwrap());
+    let Kind::Assembly(Asm::Joint(f)) = &d.kind else { panic!("{:?}", d.kind) };
+    // The dialog names the joint it would make (its default name).
+    let why = solidcraft_ui_text::format("joint.moves_neither", &[("joint", "Rigid Joint1"), ("a", "A:1"), ("b", "B:1")]);
+    let held = grounded_sides(&app, f, &d.inputs).expect("both picks are grounded");
+    assert_eq!((held.why.as_str(), held.occurrence, held.name.as_str()), (why.as_str(), occ(&app, "B"), "B:1"));
+    app.dialog = Some(d);
+    let ctx = crate::fonts::test_context();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    let frame = |app: &mut SolveApp, events: Vec<egui::Event>| {
+        let input = egui::RawInput { screen_rect: Some(screen), events, ..Default::default() };
+        let mut out = ctx.run_ui(input, |ui| crate::dialogs::show(app, ui.ctx()));
+        // Nothing is painted: drop the texture changes (an unapplied delta panics on drop).
+        out.textures_delta.clear();
+        out
+    };
+    // The auto-sized dialog takes a few frames to settle its width.
+    for _ in 0..3 {
+        frame(&mut app, vec![]);
+    }
+    let out = frame(&mut app, vec![]);
+    assert!(text_at(&out, &why).is_some(), "the dialog says why");
+    let label = solidcraft_ui_text::format("joint.unground_part", &[("occurrence", "B:1")]);
+    let at = text_at(&out, &label).expect("and offers to unground the second part");
+    let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+    frame(&mut app, vec![egui::Event::PointerMoved(at)]);
+    frame(&mut app, vec![button(true)]);
+    frame(&mut app, vec![button(false)]);
+    let b = occ(&app, "B");
+    assert!(app.session.doc.occurrences.iter().any(|o| o.id == b && !o.grounded), "B is ungrounded");
+    assert!(app.dialog.is_some(), "the dialog stays open");
+    let out = frame(&mut app, vec![]);
+    assert!(text_at(&out, &why).is_none(), "nothing left to say");
+}
+
+/// #12867: the Joint dialog's note covers every pick a joint takes, not only faces: a grounded
+/// component's plane or axis is a side on that part. The root's own bodies never move, so a
+/// grounded part picked against them gets the note too, and the button ungrounds the part,
+/// whichever was picked first. Editing a joint that doesn't hold says why in Messages too.
+#[test]
+fn grounded_note_covers_datum_picks_the_root_and_edits() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        s.execute("component.create", &json!({"name": name})).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    // A body of the root's own, away from both parts.
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [0, 40, 0]})).unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    for name in ["A", "B"] {
+        let o = occ(&app, name);
+        app.run("occurrence.ground", json!({"occurrence": o, "grounded": true})).unwrap();
+    }
+    let note = |app: &mut SolveApp, a: Sel, b: Sel| {
+        app.start("joint.create");
+        let mut d = app.dialog.take().unwrap();
+        d.pick(&app.session, a);
+        d.pick(&app.session, b);
+        let Kind::Assembly(Asm::Joint(f)) = &d.kind else { panic!("{:?}", d.kind) };
+        let held = grounded_sides(app, f, &d.inputs);
+        app.dialog = None;
+        held
+    };
+    let face = |app: &SolveApp, x: f64, y: f64| face_sel(&app.session, Vec3::new(x, y, 10.0)).unwrap();
+    let both = solidcraft_ui_text::format("joint.moves_neither", &[("joint", "Rigid Joint1"), ("a", "A:1"), ("b", "B:1")]);
+
+    // A component plane or axis of a grounded part is a side on that part, as a face is.
+    for (a, b) in [
+        (Sel::Plane { name: "A/XY".into() }, face(&app, 25.0, 5.0)),
+        (face(&app, 5.0, 5.0), Sel::Axis { name: "B/Z".into() }),
+        (Sel::Plane { name: "A/XZ".into() }, Sel::Axis { name: "B/X".into() }),
+    ] {
+        let held = note(&mut app, a.clone(), b.clone()).unwrap_or_else(|| panic!("{a:?} and {b:?} are both on grounded parts"));
+        assert_eq!((held.why.as_str(), held.occurrence), (both.as_str(), occ(&app, "B")), "{a:?}, {b:?}");
+    }
+
+    // The root against a grounded part, in either order: the button frees the part.
+    let root_note = solidcraft_ui_text::format("joint.moves_neither_root", &[("joint", "Rigid Joint1"), ("occurrence", "B:1")]);
+    for (a, b) in [(face(&app, 5.0, 45.0), face(&app, 25.0, 5.0)), (face(&app, 25.0, 5.0), face(&app, 5.0, 45.0))] {
+        let held = note(&mut app, a, b).expect("the root never moves");
+        assert_eq!((held.why.as_str(), held.occurrence, held.name.as_str()), (root_note.as_str(), occ(&app, "B"), "B:1"));
+    }
+    // A part that can move gets no note.
+    let a = occ(&app, "A");
+    app.run("occurrence.ground", json!({"occurrence": a, "grounded": false})).unwrap();
+    let (root_face, a_face, b_face) = (face(&app, 5.0, 45.0), face(&app, 5.0, 5.0), face(&app, 25.0, 5.0));
+    assert_eq!(note(&mut app, root_face, a_face), None);
+    assert_eq!(note(&mut app, Sel::Plane { name: "A/XY".into() }, b_face), None);
+    app.run("occurrence.ground", json!({"occurrence": a, "grounded": true})).unwrap();
+
+    // An edit that leaves the joint not holding says why in Messages, as a new joint does.
+    let texts = |app: &SolveApp| app.messages.iter().filter(|m| m.error).map(|m| m.text.clone()).collect::<Vec<_>>();
+    app.run(
+        "joint.create",
+        json!({"type": "rigid", "name": "Rigid1", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 10]}}),
+    )
+    .unwrap();
+    app.messages.clear();
+    let r = app.run("joint.edit", json!({"joint": "Rigid1", "offset": 2})).unwrap();
+    assert!(r["joint"].as_u64().is_some(), "the edit names its joint: {r}");
+    let why = solidcraft_ui_text::format("joint.moves_neither", &[("joint", "Rigid1"), ("a", "A:1"), ("b", "B:1")]);
+    assert!(texts(&app).contains(&why), "{:?}", texts(&app));
 }
 
 /// Stand with two bodies and Umbrella with one, both placed at the top level, which is active.
