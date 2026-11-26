@@ -1228,9 +1228,9 @@ fn span_parameters(
     blend: &crate::blend::foot_blend::FootBlend,
     spans: &[BeadSpan],
 ) -> Result<Vec<[f64; 2]>> {
-    let (lo, hi) = (blend.interval.min(), blend.interval.max());
-    let curve = Curve::from(blend.leader.clone());
-    let length = curve.length(k, &blend.interval, LENGTH_ACCURACY)?;
+    let (lo, hi) = (blend.interval().min(), blend.interval().max());
+    let curve = Curve::from(blend.leader().clone());
+    let length = curve.length(k, blend.interval(), LENGTH_ACCURACY)?;
     let at = |share: f64| -> Result<f64> {
         if share <= 0.0 {
             return Ok(lo);

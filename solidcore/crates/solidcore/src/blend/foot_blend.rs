@@ -99,19 +99,22 @@ pub struct FootSide {
 }
 
 /// A foot blend's leader and supports: the joint edge's curve, as its B-spline form, over
-/// its interval, and the edge's two faces.
+/// its interval, and the edge's two faces. They are read through [`FootBlend::edge`],
+/// [`FootBlend::leader`], [`FootBlend::interval`] and [`FootBlend::sides`] and are not
+/// changed once the blend is made, so what was read from the edge with them (the wedge of a
+/// straight edge between two planes) stays the joint's.
 #[derive(Debug, Clone)]
 pub struct FootBlend {
     /// The joint edge of the part, where the blend was made from one.
-    pub edge: Option<EdgeId>,
+    edge: Option<EdgeId>,
     /// The leader: the edge's curve as its B-spline form, in the edge curve's parameter.
-    pub leader: BSplineCurve,
+    leader: BSplineCurve,
     /// The leader as a curve, for its evaluations.
     curve: Curve,
     /// The edge's interval on its curve.
-    pub interval: Extent1d,
+    interval: Extent1d,
     /// The two supports, support 1 first.
-    pub sides: [FootSide; 2],
+    sides: [FootSide; 2],
     /// Whether the joint closes on itself (its start vertex is its end vertex).
     pub closed: bool,
     /// The wedge between the faces of a straight edge between two planes, as the planar
@@ -252,6 +255,30 @@ fn binormal_reading(
 }
 
 impl FootBlend {
+    /// The joint edge of the part, where the blend was made from one.
+    #[must_use]
+    pub fn edge(&self) -> Option<EdgeId> {
+        self.edge
+    }
+
+    /// The leader: the edge's curve as its B-spline form, in the edge curve's parameter.
+    #[must_use]
+    pub fn leader(&self) -> &BSplineCurve {
+        &self.leader
+    }
+
+    /// The edge's interval on its curve.
+    #[must_use]
+    pub fn interval(&self) -> &Extent1d {
+        &self.interval
+    }
+
+    /// The two supports, support 1 first.
+    #[must_use]
+    pub fn sides(&self) -> &[FootSide; 2] {
+        &self.sides
+    }
+
     /// The foot blend of `edge` of `target`: its curve as its B-spline form, and its two faces
     /// through the edge uses on the void's side (whose faces' normals point out of the
     /// material), each with its side read from the edge use's binormal at the middle of the
@@ -1008,39 +1035,6 @@ impl FootBlend {
         Ok(fit)
     }
 
-    /// The wedge kept for a straight edge between two planes ([`FootBlend::of_edge`]), while
-    /// it still describes this blend: the supports and the leader are public and can be
-    /// changed after the edge was read, so the wedge is taken only where both supports are
-    /// planes and the angle between the directions they leave the root in, at the middle of
-    /// `span`, is the wedge to a millionth of a radian. `None` otherwise (the joint is then
-    /// enclosed like any other).
-    ///
-    /// # Errors
-    ///
-    /// Those of the evaluations.
-    fn planar_wedge(&self, k: &Kernel, span: [f64; 2]) -> Result<Option<f64>> {
-        use crate::surface::surface::p2::SurfaceKind;
-        let Some(wedge) = self.planar else {
-            return Ok(None);
-        };
-        let [from, to] = span;
-        let (_, tangent) = self.root_at(k, 0.5 * (from + to))?;
-        let mut into = [Vec3::ZERO; 2];
-        for (side, d) in self.sides.iter().zip(into.iter_mut()) {
-            let SurfaceKind::Plane(_) = side.surface.geometry().kind() else {
-                return Ok(None);
-            };
-            // (a plane's normal is the same at every parameter)
-            let Some(n) = normal_at(k, &side.surface, Point2::new(0.0, 0.0))? else {
-                return Ok(None);
-            };
-            *d = n.cross(tangent) * side.side;
-        }
-        let [d1, d2] = into;
-        let angle = d1.cross(d2).length().atan2(d1.dot(d2));
-        Ok(((angle - wedge).abs() <= 1e-6).then_some(wedge))
-    }
-
     /// The sagitta that fits over the span `span` (a magnitude) and the leader's parameter
     /// the least bound is near; the feet's chains are not proved here
     /// ([`FootBlend::sagitta_that_fits`] proves them before it names the size).
@@ -1050,9 +1044,9 @@ impl FootBlend {
     /// the size is the float below it, the planar bead's own fit, so the bead takes every
     /// sagitta the planar bead takes and no other. That closed form is evaluated in floats,
     /// not enclosed: it is within rounding of the bound, and can take a sagitta a few last
-    /// places past it, as the planar bead does. The wedge kept from the edge is used only
-    /// while the supports are still what it was read from
-    /// ([`FootBlend::planar_wedge`]). On any other joint it is the float below
+    /// places past it, as the planar bead does. The wedge is the one read from the edge
+    /// ([`FootBlend::of_edge`]): the blend's edge, leader, interval and supports are not
+    /// changed after it, so it is used as it is. On any other joint it is the float below
     /// the lower end [`FootBlend::bound_over`] encloses over the span (the bound is open, and
     /// every sagitta below that lower end is below the bound at every parameter); a lower end
     /// not above 0 proves no size and is not named.
@@ -1074,7 +1068,7 @@ impl FootBlend {
         use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
         let within = core::slice::from_ref(&span);
         let planar = self
-            .planar_wedge(k, span)?
+            .planar
             .and_then(|wedge| ChamferDefinition::new(ChamferSize::Distances(legs), wedge).ok());
         if let Some(chamfer) = planar {
             let bound = BeadDefinition { chamfer, sagitta }.bound(sagitta);

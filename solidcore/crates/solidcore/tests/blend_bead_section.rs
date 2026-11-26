@@ -63,6 +63,15 @@ const SQUARE: [BeadEnd; 2] = [BeadEnd::Square; 2];
 
 /// The setbacks of every case (mm).
 const SETBACK: f64 = 5.0;
+
+/// How far below the largest leg that fits a leg search may name its leg: the searches of
+/// `blend::foot_blend` (`LEG_FIT_BRACKET`) and `blend::weld_bead` halve down from the leg
+/// asked until their bracket is `1e-7 (1 + its upper end)` wide, and its upper end is at most
+/// the leg asked.
+fn leg_stop(asked: f64) -> f64 {
+    1e-7 * (1.0 + asked)
+}
+
 /// How far the profiles are swept: the corner edge's length (mm).
 const LENGTH: f64 = 100.0;
 /// The arms' thickness (mm).
@@ -1109,7 +1118,10 @@ fn a_bead_apart_whose_toe_runs_past_its_face_is_refused_with_the_leg_that_fits()
     assert_eq!(err.kind(), ErrorKind::FilletTooLarge, "{err}");
     let fit = err.fit().unwrap();
     assert_eq!(fit.measure, FitMeasure::Leg, "{err}");
-    assert!(fit.size > 40.0 - 1e-5 && fit.size <= 40.0 + 1e-6, "{err}");
+    assert!(
+        fit.size > 40.0 - leg_stop(50.0) && fit.size <= 40.0 + 1e-6,
+        "{err}"
+    );
     assert!(err.site().is_some_and(|s| s.face.is_some()), "{err:?}");
     let size = ChamferSize::Distances([fit.size, SETBACK]);
     assert!(
@@ -1135,10 +1147,10 @@ fn a_bead_apart_past_its_sagitta_bound_is_refused_with_the_bound() {
     let fit = err.fit().unwrap();
     assert_eq!(fit.measure, FitMeasure::Sagitta, "{err}");
     let want = 50.0_f64.sqrt() / 2.0 * (3.0 * PI / 8.0).tan();
-    // the bound is checked at the bead's stations: never past the closed form, and within a
-    // millionth of it
+    // the fit is the float below the planar bead's closed-form bound: never past the closed
+    // form, and within rounding of it
     assert!(
-        fit.size <= want && want - fit.size < 1e-6,
+        fit.size <= want && want - fit.size < 1e-9,
         "{} {want}",
         fit.size
     );
@@ -1388,7 +1400,7 @@ fn a_bead_round_a_rod_on_a_plate_is_sound() {
 /// fits: round the rod on its plate (the rod 40 high, the plate reaching 35 beyond it) a leg
 /// of 45 along either face is refused as `NoToeAtLeg`, naming that face and its leg: the
 /// rod's height on the rod's cylinder, the plate's reach on the plate, each from below and
-/// within the leg search's stop (`1e-7 (1 + 45)`). At the leg named along the rod the bead
+/// within the leg search's stop ([`leg_stop`] of 45). At the leg named along the rod the bead
 /// builds, and the part's file is unchanged.
 #[test]
 fn a_leg_past_the_end_of_a_rod_is_refused_with_the_leg_that_fits() {
@@ -1441,10 +1453,13 @@ fn a_leg_past_the_end_of_a_rod_is_refused_with_the_leg_that_fits() {
         panic!("the joint has two faces: {fits:?}");
     };
     assert!(
-        on_plate > 35.0 - 1e-5 && on_plate <= 35.0 + 1e-6,
+        on_plate > 35.0 - leg_stop(45.0) && on_plate <= 35.0 + 1e-6,
         "{on_plate}"
     );
-    assert!(on_rod > 40.0 - 1e-5 && on_rod <= 40.0 + 1e-6, "{on_rod}");
+    assert!(
+        on_rod > 40.0 - leg_stop(45.0) && on_rod <= 40.0 + 1e-6,
+        "{on_rod}"
+    );
     let size = ChamferSize::Distances([on_rod, 4.0]);
     let along = [Some(rod_face)];
     if let Err(refused) = weld_bead_body(
@@ -1577,7 +1592,7 @@ fn a_foot_blend_puts_each_foot_at_its_leg_between_planes() {
             let edge = pick(&k, &b, at);
             let before = smb(&k, &b);
             let blend = FootBlend::of_edge(&k, &mut b, edge, None).unwrap();
-            let (lo, hi) = (blend.interval.min(), blend.interval.max());
+            let (lo, hi) = (blend.interval().min(), blend.interval().max());
             for f in [0.0, 0.3, 1.0] {
                 let s = blend.station(&k, lo + f * (hi - lo), legs, None).unwrap();
                 let w = [s.feet[0] - s.root, s.feet[1] - s.root];
@@ -1615,7 +1630,7 @@ fn a_foot_blend_keeps_its_legs_round_a_tube_joint() {
     let (mut part, joints) = tubes(&mut k, &joint);
     let before = smb(&k, &part);
     let blend = FootBlend::of_edge(&k, &mut part, joints[0], None).unwrap();
-    let (lo, hi) = (blend.interval.min(), blend.interval.max());
+    let (lo, hi) = (blend.interval().min(), blend.interval().max());
     let mut worst = 0.0_f64;
     for i in 0..200 {
         let t = lo + (hi - lo) * (f64::from(i) + 0.5) / 200.0;
@@ -1657,7 +1672,7 @@ fn a_foot_blend_section_face_runs_from_foot_to_foot_between_planes() {
         let edge = pick(&k, &b, at);
         let blend = FootBlend::of_edge(&k, &mut b, edge, None).unwrap();
         let face = blend.section_face(&k, legs, h, tol).unwrap();
-        let (lo, hi) = (blend.interval.min(), blend.interval.max());
+        let (lo, hi) = (blend.interval().min(), blend.interval().max());
         for i in 0..23 {
             let t = lo + (hi - lo) * (f64::from(i) + 0.37) / 23.0;
             let s = blend.station(&k, t, legs, None).unwrap();
@@ -1694,7 +1709,7 @@ fn a_foot_blend_section_face_runs_round_a_tube_joint() {
     let blend = FootBlend::of_edge(&k, &mut part, joints[0], None).unwrap();
     for h in [0.0, 1.0, -0.2] {
         let face = blend.section_face(&k, [4.0, 4.0], h, tol).unwrap();
-        let (lo, hi) = (blend.interval.min(), blend.interval.max());
+        let (lo, hi) = (blend.interval().min(), blend.interval().max());
         for i in 0..61 {
             let t = lo + (hi - lo) * (f64::from(i) + 0.37) / 61.0;
             let s = blend.station(&k, t, [4.0, 4.0], None).unwrap();
@@ -1924,7 +1939,10 @@ fn a_toe_past_its_face_is_refused_with_the_leg_that_fits() {
     assert_eq!(err.kind(), ErrorKind::FilletTooLarge, "{err}");
     let fit = err.fit().unwrap();
     assert_eq!(fit.measure, FitMeasure::Leg, "{err}");
-    assert!(fit.size > 40.0 - 1e-5 && fit.size <= 40.0 + 1e-6, "{err}");
+    assert!(
+        fit.size > 40.0 - leg_stop(45.0) && fit.size <= 40.0 + 1e-6,
+        "{err}"
+    );
     assert!(err.site().is_some_and(|s| s.face.is_some()), "{err:?}");
     let size = ChamferSize::Distances([fit.size, 5.0]);
     assert!(
@@ -2128,6 +2146,10 @@ fn a_tolerance_the_net_cannot_hold_is_refused_at_the_station_cap() {
 /// convex. The refusal is the station's own: its Newton does not converge at one of the
 /// joint's check stations (`StationDidNotConverge`, naming the station, the residual and the
 /// tolerance it had to reach). The part does not change.
+///
+/// This records a defect as it is, #22763: `StationDidNotConverge` is the defect class, and
+/// these stations should converge or be refused with a size that builds. The match on it, and
+/// with it the refusal carrying no sagitta, are to be rewritten when #22763 is fixed.
 #[test]
 fn a_sagitta_s_fit_is_named_only_where_the_feet_are_proved() {
     use solidcore::error::FitMeasure;
@@ -2288,7 +2310,7 @@ fn the_bound_enclosed_over_a_joint_is_below_the_bound_at_every_parameter() {
     let legs = [4.0; 2];
     for (what, k, mut part, joint) in parts {
         let blend = FootBlend::of_edge(&k, &mut part, joint, None).unwrap();
-        let (lo, hi) = (blend.interval.min(), blend.interval.max());
+        let (lo, hi) = (blend.interval().min(), blend.interval().max());
         for h in [-1.0, 1.0] {
             let started = std::time::Instant::now();
             let enclosed = blend.bound_over(&k, legs, h, [lo, hi]).unwrap();
@@ -2633,13 +2655,13 @@ fn the_feet_series_in_a_corner_are_the_leader_s() {
     let (mut b, at) = corner(&mut k, FRAC_PI_2);
     let edge = pick(&k, &b, at);
     let blend = FootBlend::of_edge(&k, &mut b, edge, None).unwrap();
-    let (lo, hi) = (blend.interval.min(), blend.interval.max());
+    let (lo, hi) = (blend.interval().min(), blend.interval().max());
     let (ta, tb) = (lo + 0.3 * (hi - lo), lo + 0.4 * (hi - lo));
     let series = blend
         .feet_series(&k, [SETBACK, 3.0], ta, tb)
         .unwrap()
         .expect("the piece is proved");
-    let cn = NurbsCurve::of(&blend.leader).unwrap();
+    let cn = NurbsCurve::of(blend.leader()).unwrap();
     let d = curve_derivs_over(&cn, Ivl::new(ta, tb), 1, None).unwrap();
     for foot in &series {
         for (got, want) in [
@@ -2679,8 +2701,8 @@ fn the_feet_series_round_a_rod_hold_their_closed_forms() {
     let joint = pick(&k, &part, [65.0, 50.0, 10.0]);
     let (r, l) = (15.0, 6.0);
     let blend = FootBlend::of_edge(&k, &mut part, joint, None).unwrap();
-    let lo = blend.interval.min();
-    let (knots, _) = blend.leader.knots(None).unwrap();
+    let lo = blend.interval().min();
+    let (knots, _) = blend.leader().knots(None).unwrap();
     let next = knots
         .iter()
         .copied()
@@ -2691,7 +2713,7 @@ fn the_feet_series_round_a_rod_hold_their_closed_forms() {
         .feet_series(&k, [l; 2], ta, tb)
         .unwrap()
         .expect("the piece is proved");
-    let cn = NurbsCurve::of(&blend.leader).unwrap();
+    let cn = NurbsCurve::of(blend.leader()).unwrap();
     let d = curve_derivs_over(&cn, Ivl::new(ta, tb), FEET_SERIES_ORDER, None).unwrap();
     let s = blend.station(&k, 0.5 * (ta + tb), [l; 2], None).unwrap();
     let mut fact = 1.0;
@@ -2751,7 +2773,7 @@ fn the_chord_s_section_face_is_within_its_proved_bound() {
         let face = blend
             .section_face(&k, legs, 0.0, WELD_FIT_TOLERANCE)
             .unwrap();
-        let (lo, hi) = (blend.interval.min(), blend.interval.max());
+        let (lo, hi) = (blend.interval().min(), blend.interval().max());
         for j in 0..=40 {
             let t = lo + (hi - lo) * f64::from(j) / 40.0;
             let s = blend.station(&k, t, legs, None).unwrap();
@@ -2804,7 +2826,7 @@ fn the_arc_s_section_face_is_within_its_proved_bound() {
             );
             assert!(bound <= WELD_FIT_TOLERANCE, "{what} {h}: {bound}");
             let face = blend.section_face(&k, legs, h, WELD_FIT_TOLERANCE).unwrap();
-            let (lo, hi) = (blend.interval.min(), blend.interval.max());
+            let (lo, hi) = (blend.interval().min(), blend.interval().max());
             for j in 0..=20 {
                 let t = lo + (hi - lo) * f64::from(j) / 20.0;
                 let s = blend.station(&k, t, legs, None).unwrap();
@@ -2848,7 +2870,7 @@ fn a_foot_on_the_other_branch_is_not_proved() {
     let (mut b, at) = corner(&mut k, FRAC_PI_2);
     let edge = pick(&k, &b, at);
     let blend = FootBlend::of_edge(&k, &mut b, edge, None).unwrap();
-    let (lo, hi) = (blend.interval.min(), blend.interval.max());
+    let (lo, hi) = (blend.interval().min(), blend.interval().max());
     let legs = [5.0, 5.0];
     let mut stations = Vec::new();
     for f in [0.0, 0.25, 0.5] {
@@ -2915,7 +2937,10 @@ fn a_part_without_some_uv_curves_is_only_read() {
     assert_eq!(err.kind(), ErrorKind::FilletTooLarge, "{err}");
     let fit = err.fit().unwrap();
     assert_eq!(fit.measure, FitMeasure::Leg, "{err}");
-    assert!(fit.size > 40.0 - 1e-5 && fit.size <= 40.0 + 1e-6, "{err}");
+    assert!(
+        fit.size > 40.0 - leg_stop(45.0) && fit.size <= 40.0 + 1e-6,
+        "{err}"
+    );
 }
 
 // ---- the exact bead's refusals and the part left as it was ----
@@ -3271,7 +3296,10 @@ fn an_oversized_leg_is_refused_before_an_oversized_sagitta() {
     };
     let leg = fit(apart(&mut k, &mut b, 60.0, 100.0));
     assert_eq!(leg.measure, FitMeasure::Leg, "{leg:?}");
-    assert!(leg.size > 40.0 - 1e-5 && leg.size <= 40.0, "{leg:?}");
+    assert!(
+        leg.size > 40.0 - leg_stop(60.0) && leg.size <= 40.0,
+        "{leg:?}"
+    );
     let h = fit(apart(&mut k, &mut b, leg.size, 100.0));
     assert_eq!(h.measure, FitMeasure::Sagitta, "{h:?}");
     assert!(apart(&mut k, &mut b, leg.size, h.size).is_ok(), "{h:?}");
