@@ -288,12 +288,7 @@ impl<T: GnScalar> Copy for Ser<T> where T::Storage: Copy {}
 
 /// `sum_{i1=0..=i} sum_{k1=0..=k} a[i1][k1] * b[i - i1][k - k1]`, `i1` then `k1` ascending.
 #[inline]
-fn cauchy_at<T: GnScalar>(
-    a: &[[T; STORE_E + 1]],
-    b: &[[T; STORE_E + 1]],
-    i: usize,
-    k: usize,
-) -> T {
+fn cauchy_at<T: GnScalar>(a: &[[T; STORE_E + 1]], b: &[[T; STORE_E + 1]], i: usize, k: usize) -> T {
     let mut sum = T::of(0.0);
     let rows_b = b.iter().take(i + 1).rev();
     for (ra, rb) in a.iter().take(i + 1).zip(rows_b) {
@@ -1035,14 +1030,13 @@ impl<T: GnScalar> VSer<T> {
         let (q0r, q1r, q2r) = (q0.c.rows(), q1.c.rows(), q2.c.rows());
         let [o0, o1, o2] = &mut out.a;
         let i_len = tr.max_i() + 1;
-        for (i, ((r0, r1), r2)) in o0
-            .c
-            .rows_mut()
-            .iter_mut()
-            .zip(o1.c.rows_mut())
-            .zip(o2.c.rows_mut())
-            .enumerate()
-            .take(i_len)
+        for (i, ((r0, r1), r2)) in
+            o0.c.rows_mut()
+                .iter_mut()
+                .zip(o1.c.rows_mut())
+                .zip(o2.c.rows_mut())
+                .enumerate()
+                .take(i_len)
         {
             let k_len = tr.max_k(i) + 1;
             for (k, ((x0, x1), x2)) in r0.iter_mut().zip(r1).zip(r2).enumerate().take(k_len) {
@@ -1355,9 +1349,15 @@ mod tests {
                 };
                 va.cross_into(&vb, tr, &mut vout);
                 let want_cross = [
-                    va.a[1].mul(&vb.a[2], tr).sub(&va.a[2].mul(&vb.a[1], tr), tr),
-                    va.a[2].mul(&vb.a[0], tr).sub(&va.a[0].mul(&vb.a[2], tr), tr),
-                    va.a[0].mul(&vb.a[1], tr).sub(&va.a[1].mul(&vb.a[0], tr), tr),
+                    va.a[1]
+                        .mul(&vb.a[2], tr)
+                        .sub(&va.a[2].mul(&vb.a[1], tr), tr),
+                    va.a[2]
+                        .mul(&vb.a[0], tr)
+                        .sub(&va.a[0].mul(&vb.a[2], tr), tr),
+                    va.a[0]
+                        .mul(&vb.a[1], tr)
+                        .sub(&va.a[1].mul(&vb.a[0], tr), tr),
                 ];
                 for q in 0..3 {
                     check_ivl(&vout.a[q], &want_cross[q], "cross_into");

@@ -19,9 +19,7 @@
 
 use std::borrow::Cow;
 
-use super::series::{
-    inv_sqrt_scalar, GnScalar, InvSqrtSeries, Ser, Trunc, VSer, MAX_K, MAX_S, V3,
-};
+use super::series::{inv_sqrt_scalar, GnScalar, InvSqrtSeries, Ser, Trunc, VSer, MAX_K, MAX_S, V3};
 use crate::error::blend::{BlendFailure, SectionDegeneracy, SectionLimit, SectionProof};
 use crate::error::{Failure, Result, SolidError};
 use crate::kernel::Kernel;
@@ -1060,10 +1058,9 @@ pub fn gn_evaluate_vn<T: GnScalar>(
             None
         };
         for a in 1..=top {
-            let (Some((lu_slice, pu_slice)), Some((lv_slice, pv_slice))) = (
-                pu.split_at_mut_checked(a),
-                pv.split_at_mut_checked(a),
-            ) else {
+            let (Some((lu_slice, pu_slice)), Some((lv_slice, pv_slice))) =
+                (pu.split_at_mut_checked(a), pv.split_at_mut_checked(a))
+            else {
                 return Err(SolidError::blend(
                     OP,
                     BlendFailure::Defect {
@@ -1542,10 +1539,9 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
                     fs.pv.push(Ser::constant(zero_s));
                 }
                 for a in 1..=top {
-                    let (Some((lu_slice, pu_slice)), Some((lv_slice, pv_slice))) = (
-                        fs.pu.split_at_mut_checked(a),
-                        fs.pv.split_at_mut_checked(a),
-                    ) else {
+                    let (Some((lu_slice, pu_slice)), Some((lv_slice, pv_slice))) =
+                        (fs.pu.split_at_mut_checked(a), fs.pv.split_at_mut_checked(a))
+                    else {
                         return Err(SolidError::blend(
                             OP,
                             BlendFailure::Defect {
@@ -1983,8 +1979,8 @@ pub(crate) fn gn_evaluate_point_ref<T: GnScalar>(
         }
         let [n0, n1] = n_out;
         let [s0, s1] = side;
-        let q = (((zero + n0.x * n1.x) + (zero + n0.y * n1.y)) + (zero + n0.z * n1.z))
-            * T::of(s0 * s1);
+        let q =
+            (((zero + n0.x * n1.x) + (zero + n0.y * n1.y)) + (zero + n0.z * n1.z)) * T::of(s0 * s1);
         let one_plus = one + q;
         let one_minus = one - q;
         if !(one_plus.is_positive() && one_minus.is_positive()) {
@@ -2013,8 +2009,8 @@ pub(crate) fn gn_evaluate_point_ref<T: GnScalar>(
         y: v0.y - l1.at(0, 0),
         z: v0.z - l2.at(0, 0),
     };
-    let g3 = ((zero + tl.x * t0.at(0, 0)) + (zero + tl.y * t1.at(0, 0)))
-        + (zero + tl.z * t2.at(0, 0));
+    let g3 =
+        ((zero + tl.x * t0.at(0, 0)) + (zero + tl.y * t1.at(0, 0))) + (zero + tl.z * t2.at(0, 0));
     Ok([v0.x - v1.x, v0.y - v1.y, v0.z - v1.z, g3])
 }
 
@@ -2646,7 +2642,15 @@ fn solve_station_body(
         equal_setback,
     };
     let mut sx = x.map(Ser::constant);
-    let jac = gn_jacobian_ref([p0, p1], &sys.leader, &sys.tangent, r, side, law, equal_setback)?;
+    let jac = gn_jacobian_ref(
+        [p0, p1],
+        &sys.leader,
+        &sys.tangent,
+        r,
+        side,
+        law,
+        equal_setback,
+    )?;
     // (the coefficients of one total degree do not enter each other's: one evaluation
     // solves them all; G is computed only at that degree and below, and at the powers of
     // eps solved for, bit for bit the whole truncation's there (`Trunc::computing`), and

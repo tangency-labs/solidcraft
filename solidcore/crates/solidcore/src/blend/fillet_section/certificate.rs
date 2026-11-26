@@ -167,9 +167,9 @@ use super::form::{binom, gn_form_normalized, GnSectionFormT};
 use super::interval::{cmax, cmin, round_down, round_up, Ivl};
 use super::series::{v_hull, GnScalar, Ser, Trunc, VSer, MAX_E, MAX_S, TAYLOR, V3, VZ};
 use super::station::{
-    ders_basis_flat, gn_evaluate_point_ref, gn_evaluate_vn, gn_jacobian_ref,
-    gn_solve_station_with, gn_top_jets, knot, smax, solve4, span, GnIncremental, GnStation,
-    GnSystem, Nurbs, Partials, StationOptions,
+    ders_basis_flat, gn_evaluate_point_ref, gn_evaluate_vn, gn_jacobian_ref, gn_solve_station_with,
+    gn_top_jets, knot, smax, solve4, span, GnIncremental, GnStation, GnSystem, Nurbs, Partials,
+    StationOptions,
 };
 use super::tay::{
     gn_half_angle, gn_invert, gn_target, tay_sqrt, GnAreaCells, Ring, Tay, TayScalar, TAY,
@@ -2011,8 +2011,7 @@ fn enclose_over_cells(
             break;
         };
         let [pb0, pb1] = &pb;
-        let Ok(jac) =
-            gn_jacobian_ref([pb0, pb1], &leader, &tangent, r, side, law_r, equal_setback)
+        let Ok(jac) = gn_jacobian_ref([pb0, pb1], &leader, &tangent, r, side, law_r, equal_setback)
         else {
             break;
         };
