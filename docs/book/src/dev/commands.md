@@ -71,7 +71,8 @@ File, Help and ribbon clicks resolve a namespaced entry against that
 list and call `plugin_menu::open_entry(app, p, e)`, as the Plugins menu does. The shared dialog draws
 the entry's `input_schema`, checks its enabled state and grants, and submits through the existing
 worker path. Unknown menu names draw no host rows; every entry remains in the Plugins menu.
-Unknown ribbon names use the Plugins ribbon tab. Opening a dialog never executes an entry.
+Unknown ribbon names draw no host button; every entry remains in the Model tab's Plugins group.
+Opening a dialog never executes an entry.
 Execution still requires explicit approval and the package identity checked by `plugin.run`.
 
 See [Plugins](../../../plugins.md) for placement, package limits and integration contracts, and

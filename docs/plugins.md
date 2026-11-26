@@ -360,7 +360,7 @@ widget, menu or ribbon code.
 | `menu` named `File` or `Help` | The existing File or Help menu; each item includes the plugin's name |
 | Any other `menu` name | No host menu item; the entry remains in the Plugins menu |
 | `ribbon` named for an existing Design ribbon tab | A group named for the plugin in that tab |
-| Any other `ribbon` name | One Plugins ribbon tab, with a group per plugin |
+| `ribbon` named Model, or any other name | No extra button; the entry stays in the Model tab's Plugins group |
 
 The Design tab names are Model, Surface, Assemble, Insert, Inspect, Manage, View, Sketch,
 Sheet Metal and Weldments. Existing tab visibility and workspace rules still apply.
