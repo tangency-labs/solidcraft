@@ -478,9 +478,24 @@ consume an undo step.
 {"command":"sheet.export_dxf","params":{"path":"bracket-flat.dxf"}}
 ```
 
-The DXF is an AutoCAD 2000 (`AC1015`) drawing in millimetres, made for a laser-cutting shop's
+The DXF is an AutoCAD 2000 (`AC1015`) drawing, made for a laser-cutting shop's
 nesting or CAM software: each kind of line is on a layer of its own, with a colour (AutoCAD's
 index) and, for the bends, a linetype that the file defines.
+
+`"units"` is `mm` (the default) or `inches`: in `inches` every coordinate, radius and text height
+is written in inches, the header is `$INSUNITS 1` and `$MEASUREMENT 0` (instead of `$INSUNITS 4`
+and `$MEASUREMENT 1`), the `DASHED` pattern is in half and quarter inches, the bend notes' radii
+are in inches and the pocket layers name their depths in inches (`POCKET_…_Z…_TO_…_IN`). The
+drawing is the same part, only its units are different; the bend table's CSV stays in millimetres.
+
+```json
+{"command":"sheet.export_dxf","params":{"path":"bracket-flat-in.dxf","units":"inches"}}
+```
+
+`"bend_lines"` (default `true`) and `"markings"` (default `true`) keep or leave out the bend
+centre lines and the letters' contours with the bend notes — for a cutter that would cut or etch
+them. **Export DXF…** opens these options before the save picker, from the flat-pattern panel
+or the Sheet Metal ribbon. The choices apply to that export only.
 
 | Layer | Colour | Line | Holds |
 |---|---|---|---|
@@ -492,6 +507,7 @@ index) and, for the bends, a linetype that the file defines.
 | `BEND_NOTES` | 8 grey | continuous | the note beside each bend line, only with `"bend_notes": true` |
 | `POCKET_…` | 3 green | continuous | pockets, a layer for each depth (see below) |
 | `PERFORATION` | 3 green | continuous | the holes of a perforation field |
+| `HARDWARE` | 8 grey | continuous | the note beside each press-in hardware hole, `M3 nut` or `M4 stud 10 mm`, as high as `note_height`; only with `"hardware_notes": true`, and not with `"layers": "single"` |
 
 `OUTLINE`, `CUT`, `BEND_UP` and `BEND_DOWN` are always in the layer table, the others when the
 sheet has something for them. The inner contours (`CUT`, `TEXT`) are written before the outline,
@@ -518,6 +534,11 @@ high (`"note_height"` changes that), centred half a height beside the middle of 
 parallel to it and readable from below or from the right. A bend that cut-outs split has a note
 for each piece. Notes are off by default, because a program that cuts or marks every layer would
 mark them.
+
+The file for a shop is the sheet and its mounting holes: press-in hardware is not in it, and the
+holes are plain circles. `"hardware_notes": true` adds a note beside each hardware hole on
+`HARDWARE` (`M3 nut`), as high as `note_height`; in the app, the flat pattern window has a Hardware
+notes tickbox for it when the sheet has hardware. Like the bend notes it is off by default.
 
 For a program that cuts every line it is given, `"bend_lines": false` leaves the bend lines out
 (`BEND_UP` and `BEND_DOWN` are then empty), and `"layers": "single"` writes every entity on layer
@@ -606,7 +627,8 @@ The pocket floor and side walls remain solid geometry; overlapping cuts from opp
 become a through hole wherever they remove the whole thickness. Flat-pattern JSON lists
 `pockets` with their side, depth and bottom/top thickness coordinates in millimetres.
 DXF pocket boundaries use `POCKET_BOTTOM_Z…_TO_…_MM`, `POCKET_TOP_Z…_TO_…_MM`, or
-`POCKET_INTERNAL_Z…_TO_…_MM` layers. These are machining operations, so do not treat every
+`POCKET_INTERNAL_Z…_TO_…_MM` layers (named in `_IN` with their depths in inches in an inches
+drawing, `"units": "inches"`). These are machining operations, so do not treat every
 pocket layer as a through-cut contour when importing the drawing into a CAM tool. (Text
 machined to a depth is a marking, on `ETCH`.)
 

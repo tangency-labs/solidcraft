@@ -11,7 +11,9 @@ use solidcraft_geom::paper::NoPictures;
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
 
 use super::*;
-use crate::drawing_scene::tests::{add_a_pin, configured_block, hinge_pair, in_the_model, plate as sheet_plate, two_cubes, with_the_model};
+use crate::drawing_scene::tests::{
+    add_a_pin, carcass_and_door, configured_block, hinge_pair, in_the_model, plate as sheet_plate, two_cubes, with_the_model,
+};
 use crate::drawing_view::bend_dashes_mm;
 use crate::schema::tests::conforms;
 
@@ -5212,6 +5214,65 @@ fn a_cut_hole_is_not_hatched() {
     assert_eq!(sides, BTreeSet::from([-1, 1]), "{block:?}");
 }
 
+/// A 100 x 60 x 10 plate cut through a centred 10 mm bore and a 30 x 20 x 5 pocket.
+/// The bore removes -30 < x < -20 throughout the centred section; the pocket removes
+/// 5 < x < 35 above y = 0. Every complete stroke must stay out of both open rectangles.
+#[test]
+fn a_full_section_through_a_bore_and_pocket_hatches_only_material() {
+    for (hole, pocket, cut_y) in
+        [(true, true, 30.0_f64), (true, true, 29.99), (true, true, 30.01), (true, false, 30.0), (false, true, 30.0), (false, false, 30.0)]
+    {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 10, "body_name": "Plaque"}));
+        if hole {
+            run(&mut s, "solid.hole", json!({"position": [25, 30, 10], "diameter": 10}));
+        }
+        if pocket {
+            run(&mut s, "solid.box", json!({"length": 30, "width": 20, "height": 5, "corner": [55, 20, 5], "operation": "cut"}));
+        }
+        run(&mut s, "drawing.create", json!({}));
+        let base = run(&mut s, "drawing.view.base", json!({"sheet": "Sheet 1", "view": "top", "scale": "1:1", "position_mm": [90, 220]}));
+        let cut = run(
+            &mut s,
+            "drawing.view.section",
+            json!({"parent": base["view"], "line": {"kind": "full", "points": [[-10, cut_y], [110, cut_y]], "arrows": "left"}}),
+        );
+        let id = ids::decode(cut["view"].as_str().unwrap()).unwrap();
+        let (set, hatches) = drawn_hatches(&s, id);
+        let hatch = hatch_of(&set, &hatches, "Plaque");
+        assert!(!hatch.filled && !hatch.strokes.is_empty(), "hole={hole}, pocket={pocket}, y={cut_y}: {hatch:?}");
+        let hole_half = (25.0 - (cut_y - 30.0).powi(2)).sqrt();
+        let mut left = false;
+        let mut right = false;
+        let mut below_pocket = false;
+        for stroke in &hatch.strokes {
+            let (a, b) = stroke_ends(stroke);
+            let (a, b) = if a.x <= b.x { (a, b) } else { (b, a) };
+            assert!(a.x < b.x && a.y >= -5.0 - EPS && b.y <= 5.0 + EPS, "{stroke:?}");
+            if hole {
+                assert!(b.x <= -25.0 - hole_half + EPS || a.x >= -25.0 + hole_half - EPS, "a stroke crosses the bore: {stroke:?}");
+            }
+            if pocket {
+                let lo = a.x.max(5.0 + EPS);
+                let hi = b.x.min(35.0 - EPS);
+                if lo < hi {
+                    let y = |x| a.y + (b.y - a.y) * ((x - a.x) / (b.x - a.x));
+                    assert!(y(lo).max(y(hi)) <= EPS || y(lo).min(y(hi)) >= 5.0 - EPS, "a stroke crosses the pocket: {stroke:?}");
+                    below_pocket |= y(lo).min(y(hi)) < -1.0;
+                }
+            }
+            left |= b.x < -30.0;
+            right |= a.x > 35.0;
+        }
+        assert!(left && right && (!pocket || below_pocket), "material on both sides and below the pocket is hatched");
+        let scene = run(&mut s, "drawing.scene", json!({"sheet": "Sheet 1"}));
+        let state = scene["views"].as_array().unwrap().iter().find(|v| v["view"] == cut["view"]).unwrap();
+        assert!(state.get("reason").is_none(), "{state}");
+        assert_eq!(state["hatches"][0]["filled"], false, "{state}");
+        assert_eq!(state["hatches"][0]["strokes"], hatch.strokes.len(), "{state}");
+    }
+}
+
 /// The tapped block cut through its hole's axis (#13051's section): the drill's sides are cut edges
 /// 1.7 mm either side of the middle at 1:2 (Ø6.8), the thread's root lines are thin and seen at
 /// 2.0 (Ø8), 6 mm down from the top (12 deep), with a limit line across; the hatching stops at the
@@ -5435,4 +5496,117 @@ fn a_section_drawn_from_the_mesh_draws_the_cut_body() {
             .count()
     };
     assert!(cut_edges(1.0) > 0 && cut_edges(-1.0) > 0, "{} {}", cut_edges(1.0), cut_edges(-1.0));
+}
+
+/// The body names `v`'s lines name, each once.
+fn line_bodies(v: &Value) -> Vec<Value> {
+    let mut names: Vec<Value> = v["lines"].as_array().unwrap().iter().map(|l| l["body"].clone()).collect();
+    names.sort_by_key(|n| n.to_string());
+    names.dedup();
+    names
+}
+
+/// `hide_bodies` leaves out one body of a part (#22107): from the front at 1:1 the carcass and the
+/// door are 220 mm across, the carcass alone 100. A body no part has, or none at that path, is
+/// refused by name; hiding every body leaves nothing and is refused; an empty name is refused.
+#[test]
+fn a_snapshots_hide_bodies_leaves_out_one_body() {
+    let mut s = carcass_and_door();
+    let both = snap(&mut s, json!({"scale": "1:1"}));
+    assert_eq!(line_bodies(&both), [json!("Carcass"), json!("Door")]);
+    assert!((boundary(&both).0.x - 220.0).abs() < 1e-6, "{both}");
+    let one = snap(&mut s, json!({"scale": "1:1", "hide_bodies": [{"path": [], "body": "Door"}]}));
+    assert_eq!(line_bodies(&one), [json!("Carcass")]);
+    assert!((boundary(&one).0.x - 100.0).abs() < 1e-6 && one["source"]["bodies"] == 1, "{one}");
+    let e = refused(&mut s, json!({"hide_bodies": [{"body": "Lid"}]}));
+    assert!(e.contains("hide_bodies: no body `Lid` among the design's own bodies"), "{e}");
+    let e = refused(&mut s, json!({"hide_bodies": [{"path": [7], "body": "Door"}]}));
+    assert!(e.contains("hide_bodies: no body `Door` at occurrence path [7]"), "{e}");
+    let e = refused(&mut s, json!({"hide_bodies": [{"body": "Door"}, {"body": "Carcass"}]}));
+    assert!(e.contains("the source and hide leave no bodies to draw"), "{e}");
+    for (p, why) in [
+        (json!({"hide_bodies": [{"body": ""}]}), "named in 1 to 128 characters"),
+        (json!({"hide_bodies": [{"body": "D".repeat(129)}]}), "named in 1 to 128 characters"),
+        (json!({"hide_bodies": [{"body": "Door", "side": 1}]}), "side"),
+        (json!({"hide_bodies": [{"path": []}]}), "body"),
+    ] {
+        let e = refused(&mut s, p.clone());
+        assert!(e.contains(why), "{p}: {e}");
+    }
+}
+
+/// `hide_bodies` on a saved view (#22107): made with it, the base view fits the carcass alone;
+/// inspect says where it comes from and lists every body with whether it draws it; a projected view follows it, naming its parent, until it sets its
+/// own (`[]` hides nothing); `null` follows again; an edit is one undo step; a copy alone keeps it. A
+/// body the design doesn't place is refused by name and changes nothing.
+#[test]
+fn a_saved_views_hide_bodies_follows_its_chain() {
+    let mut s = carcass_and_door();
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let door = json!([{"path": [], "body": "Door"}]);
+    let (_, view) = create(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "position_mm": [200, 150], "hide_bodies": door}));
+    assert!((width(&mut s, view) - 100.0).abs() < 1e-6);
+    let inspected = inspect_view(&mut s, view);
+    assert_eq!(inspected["settings"]["hide_bodies"], json!({"value": door, "from": "this", "set": door}), "{inspected}");
+    assert!(inspected.get("unmatched").is_none(), "{inspected}");
+    // Every body the design places, before what the view leaves out, and whether it draws it.
+    let every_body = json!([{"path": [], "body": "Carcass", "drawn": true}, {"path": [], "body": "Door", "drawn": false}]);
+    assert_eq!(inspected["bodies"], every_body, "{inspected}");
+
+    let (_, side) = create(&mut s, PROJECTED, json!({"parent": ids::encode(view), "side": "above", "place": {"at": [200, 250]}}));
+    assert!((width(&mut s, side) - 100.0).abs() < 1e-6, "it follows its parent");
+    let inspected = inspect_view(&mut s, side);
+    assert_eq!(
+        inspected["settings"]["hide_bodies"],
+        json!({"value": door, "from": "parent", "parent": ids::encode(view), "set": null}),
+        "{inspected}"
+    );
+    let steps = s.undo.len();
+    let reply = edit_view(&mut s, side, json!({"hide_bodies": []}));
+    assert_eq!((reply["changed"].clone(), s.undo.len()), (json!(["hide_bodies"]), steps + 1));
+    assert!((width(&mut s, side) - 220.0).abs() < 1e-6, "an empty list hides nothing, whatever the parent hides");
+    edit_view(&mut s, side, json!({"hide_bodies": null}));
+    assert!((width(&mut s, side) - 100.0).abs() < 1e-6, "null follows the parent again");
+    run(&mut s, "edit.undo", json!({}));
+    assert!((width(&mut s, side) - 220.0).abs() < 1e-6);
+
+    let alone = listed(&to_sheet(&mut s, COPY, json!({"view": ids::encode(view), "sheet": "Sheet 1", "position_mm": [300, 100]})))[0];
+    assert_eq!(saved(&s, alone).settings.hide_bodies.as_deref(), Some(&[HiddenBody { path: vec![], body: "Door".into() }][..]));
+
+    let before = s.drawing("test").unwrap().to_json().unwrap();
+    let e = edit_refused(&mut s, view, json!({"hide_bodies": [{"body": "Lid"}]}));
+    assert!(e.contains("hide_bodies: no body `Lid` among the design's own bodies"), "{e}");
+    let e = edit_refused(&mut s, view, json!({"hide_bodies": [{"body": "Door"}, {"body": "Carcass"}]}));
+    assert!(e.contains("the source and hide leave no bodies to draw"), "{e}");
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
+    let e = create_refused(&mut s, BASE, json!({"sheet": sheet, "hide_bodies": [{"path": [9], "body": "Door"}]}));
+    assert!(e.contains("hide_bodies: no body `Door` at occurrence path [9]"), "{e}");
+    edit_view(&mut s, view, json!({"hide_bodies": null}));
+    assert!((width(&mut s, view) - 220.0).abs() < 1e-6, "null clears it");
+}
+
+/// A hidden body renamed since matches nothing (#22107, as dimensions don't follow a rename, #4892):
+/// the view draws it again, and inspect lists the entry as `unmatched` until the old name is back.
+#[test]
+fn a_renamed_hidden_body_is_unmatched() {
+    let mut s = carcass_and_door();
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let (_, view) = create(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "hide_bodies": [{"body": "Door"}]}));
+    assert!((width(&mut s, view) - 100.0).abs() < 1e-6);
+    let drawing = ids::encode(s.drawing("test").unwrap().id);
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "body.rename", json!({"body": "Door", "name": "Gate"}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    let inspected = inspect_view(&mut s, view);
+    assert_eq!(inspected["unmatched"], json!([{"path": [], "body": "Door"}]), "{inspected}");
+    let gate = json!([{"path": [], "body": "Carcass", "drawn": true}, {"path": [], "body": "Gate", "drawn": true}]);
+    assert_eq!(inspected["bodies"], gate, "the renamed body is listed by its new name, drawn: {inspected}");
+    assert!((width(&mut s, view) - 220.0).abs() < 1e-6, "the renamed body is drawn again");
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "body.rename", json!({"body": "Gate", "name": "Door"}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert!(inspect_view(&mut s, view).get("unmatched").is_none());
+    assert!((width(&mut s, view) - 100.0).abs() < 1e-6);
 }

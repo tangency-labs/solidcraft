@@ -120,7 +120,6 @@ crates/doc/src/eval.rs:line_in_sketch_plane dot,normalized
 crates/doc/src/eval.rs:mesh_content_digest triangles
 crates/doc/src/eval.rs:mirror_matrix dot
 crates/doc/src/eval.rs:nearest_object_face closest_on_triangle,cross,triangles
-crates/doc/src/eval.rs:new_surface_faces cross,dot
 crates/doc/src/eval.rs:off_its_face dot (only warns that a sketch's face point is off its face; no geometry is built from it)
 crates/doc/src/eval.rs:offset_sheet dot,normalized
 crates/doc/src/eval.rs:on_edge_without_cap cross,dot
@@ -142,8 +141,6 @@ crates/doc/src/eval.rs:seg_at cross,normalized
 crates/doc/src/eval.rs:sketch_line_plane normalized
 crates/doc/src/eval.rs:slanted_plane dot
 crates/doc/src/eval.rs:tangent_face_chain dot,normalized,triangles
-crates/doc/src/eval.rs:trim_between_planes dot
-crates/doc/src/eval.rs:trim_between_slopes dot
 crates/doc/src/eval.rs:trim_to_curved_face dot
 crates/doc/src/eval.rs:trim_to_face dot
 crates/doc/src/eval.rs:trim_to_plane dot
@@ -156,7 +153,6 @@ crates/doc/src/eval_frame.rs:cut_members dot
 crates/doc/src/eval_frame.rs:ordered dot
 crates/doc/src/eval_frame.rs:plane_up cross,dot,normalized
 crates/doc/src/eval_frame.rs:section_view normalized
-crates/doc/src/eval_frame.rs:straight dot,normalized
 crates/doc/src/eval_frame.rs:untrimmed_member_section dot,normalized
 crates/doc/src/eval_more.rs:FaceSlice::outline dot,triangles
 crates/doc/src/eval_more.rs:chain_loops cross
@@ -189,7 +185,6 @@ crates/doc/src/face_anchor.rs:Document::resolve_face_anchor_noted cross,dot
 crates/doc/src/face_anchor.rs:FaceAnchor::validate hypot
 crates/doc/src/face_anchor.rs:validate_face_anchor_json hypot
 crates/doc/src/frame.rs:group_axes cross,dot,normalized
-crates/doc/src/frame.rs:member_axes cross,dot,normalized
 crates/doc/src/frame.rs:rounded_polygon atan2,cross,dot,normalized
 crates/doc/src/frame_corners.rs:away normalized
 crates/doc/src/frame_corners.rs:corner_cuts dot,normalized
@@ -431,7 +426,6 @@ crates/doc/src/sheet_surface_shadow.rs:Reader::slope cross,dot,normalized
 crates/doc/src/sheet_surface_shadow.rs:Slab::depth atan2,hypot
 crates/doc/src/sheet_surface_shadow.rs:crossed cross
 crates/doc/src/sheet_surface_shadow.rs:exact atan2,cross,dot
-crates/doc/src/sheet_surface_shadow.rs:same_surface cross,dot
 crates/doc/src/sheet_surface_shadow.rs:shadow cross,dot,normalized
 crates/doc/src/sheet_surface_tab.rs:SurfaceSheet::add_tab cross,dot
 crates/engine/src/cmd/board_import.rs:Edge::dist_to_segment dot
@@ -488,7 +482,7 @@ crates/engine/src/cmd/features.rs:axis_line_object normalized
 crates/engine/src/cmd/features.rs:beyond_coarse_sizes dot
 crates/engine/src/cmd/features.rs:edge_points dot
 crates/engine/src/cmd/features.rs:extrude_reach dot
-crates/engine/src/cmd/features.rs:hole normalized
+crates/engine/src/cmd/features.rs:hole_with normalized
 crates/engine/src/cmd/features.rs:leaving normalized
 crates/engine/src/cmd/features.rs:move_bodies normalized
 crates/engine/src/cmd/features_more.rs:align dot,normalized
@@ -846,7 +840,6 @@ crates/io/src/kicad_in.rs:glyph_polyline atan2
 crates/io/src/kicad_in.rs:kicad_board_mesh_noted triangles
 crates/io/src/kicad_in.rs:model_body_meshes triangles
 crates/io/src/kicad_in.rs:pad_drill_points atan2
-crates/io/src/kicad_in.rs:parse_kicad_board_with atan2
 crates/io/src/kicad_in.rs:read_kicad triangles
 crates/io/src/kicad_in.rs:region_loops hypot
 crates/io/src/kicad_in.rs:split_pinches hypot
@@ -1023,11 +1016,6 @@ crates/kernel/src/matchsurf.rs:match_surface dot,normalized
 crates/kernel/src/matchsurf.rs:seam_continuity dot,normalized
 crates/kernel/src/matchsurf.rs:shape dot
 crates/kernel/src/matchsurf.rs:support_faces dot
-crates/kernel/src/mesh_convert.rs:convert_prismatic_mesh cross,normalized,triangles
-crates/kernel/src/mesh_convert.rs:extrusion dot,triangles
-crates/kernel/src/mesh_convert.rs:face_loops cross,dot
-crates/kernel/src/mesh_convert.rs:faceted_solid cross,dot,normalized,triangles
-crates/kernel/src/mesh_convert.rs:weld cross,normalized,triangles
 crates/kernel/src/meshbody.rs:Body::from_packed_flat_mesh_indexed triangles
 crates/kernel/src/meshbody.rs:Body::mesh_transformed cross,normalized,triangles
 crates/kernel/src/meshbody.rs:Body::triangle_mesh triangles
@@ -1300,10 +1288,6 @@ crates/ui-egui/src/drawing_workspace/dimension.rs:shape_of cross,dot,normalized
 crates/ui-egui/src/drawing_workspace/dimension.rs:smaller_angle atan2,dot,normalized
 crates/ui-egui/src/drawing_workspace/placement.rs:Placement::target cross
 crates/ui-egui/src/edit_clipboard.rs:paste_placement dot
-crates/ui-egui/src/edit_in_place.rs:draw_context triangles
-crates/ui-egui/src/edit_in_place.rs:scene_key triangles
-crates/ui-egui/src/edit_in_place.rs:snapshot triangles
-crates/ui-egui/src/edit_in_place.rs:take_refresh triangles
 crates/ui-egui/src/extrude_face_snap.rs:flat_faces_of cross,dot,normalized,triangles
 crates/ui-egui/src/extrude_face_snap.rs:nearest distance
 crates/ui-egui/src/extrude_face_snap.rs:stops dot

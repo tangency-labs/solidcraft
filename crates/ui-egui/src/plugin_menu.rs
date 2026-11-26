@@ -73,6 +73,9 @@ pub(crate) struct State {
     folder_consents: std::collections::BTreeMap<u64, solidcraft_engine::plugin::folders::DialogFolders>,
     panel_pick: Option<PanelPick>,
     panel_runs: Vec<std::sync::mpsc::Receiver<Value>>,
+    /// The dialog the viewport previews this pass, found before the dialogs are taken out of
+    /// `dialogs` to be drawn (`preview_commands` cannot find a dialog that is out of the list).
+    previewed: Option<u64>,
 }
 
 #[cfg(test)]
@@ -908,6 +911,41 @@ fn slot_name(entry: &solidcraft_engine::plugin::Entry, kind: &str) -> Option<Str
         .and_then(|slot| slot["name"].as_str().map(str::trim).filter(|n| !n.is_empty()).map(str::to_owned))
 }
 
+fn slot_label_or_name(entry: &solidcraft_engine::plugin::Entry, kind: &str) -> Option<String> {
+    for slot in &entry.slots {
+        match slot {
+            solidcraft_engine::plugin::UiSlot::Ribbon { label: Some(l), .. } if kind == "ribbon" && !l.trim().is_empty() => {
+                return Some(l.trim().to_owned());
+            }
+            solidcraft_engine::plugin::UiSlot::Menu { label: Some(l), .. } if kind == "menu" && !l.trim().is_empty() => {
+                return Some(l.trim().to_owned());
+            }
+            _ => {}
+        }
+    }
+    if !entry.label.trim().is_empty() {
+        return Some(entry.label.trim().to_owned());
+    }
+    slot_name(entry, kind).filter(|name| kind != "ribbon" || crate::plugin_slots::ribbon_name(name).is_none() && !name.eq_ignore_ascii_case("model"))
+}
+
+/// Whether this entry appears in the Model tab's Plugins group.
+///
+/// Existing declarations without an explicit `model_group` setting retain prior
+/// inclusion behavior (they continue to appear in the Model tab Plugins group).
+/// An explicit `model_group: false` (on the entry or its ribbon slot) opts out.
+pub(crate) fn entry_shows_in_model_group(entry: &solidcraft_engine::plugin::Entry) -> bool {
+    if let Some(explicit) = entry.model_group {
+        return explicit;
+    }
+    for slot in &entry.slots {
+        if let solidcraft_engine::plugin::UiSlot::Ribbon { model_group: Some(explicit), .. } = slot {
+            return *explicit;
+        }
+    }
+    true
+}
+
 /// Whether the user has `plugin` turned on in Preferences › Plugins (read live, so turning it off
 /// hides it at once).
 pub(crate) fn shown(app: &SolveApp, plugin: &Listed) -> bool {
@@ -953,14 +991,15 @@ pub(crate) fn ribbon_buttons(app: &SolveApp) -> Vec<RibbonButton> {
             });
         }
         for entry in &plugin.entries {
-            if plugin.ribbon_groups.iter().any(|group| group.entries.contains(&entry.name)) && !individually_pinned(app, plugin, entry) {
+            let grouped = plugin.ribbon_groups.iter().any(|group| group.entries.contains(&entry.name));
+            if (grouped || !entry_shows_in_model_group(entry)) && !individually_pinned(app, plugin, entry) {
                 continue;
             }
             let title = command_title(plugin, entry);
             let name = if title == plugin.name { title.clone() } else { format!("{}: {title}", plugin.name) };
             buttons.push(RibbonButton {
                 id: format!("{RIBBON_PREFIX}{}:{}", plugin.id, entry.name),
-                label: slot_name(entry, "ribbon").unwrap_or(title),
+                label: slot_label_or_name(entry, "ribbon").unwrap_or(title),
                 name,
                 icon: command_icon(plugin, entry).to_owned(),
             });
@@ -2478,6 +2517,14 @@ pub(crate) fn preview_commands(app: &SolveApp) -> Option<(u64, String, Vec<(Stri
     Some((dialog.id, dialog.plugin.id.clone(), vec![("plugin.run".to_owned(), run)]))
 }
 
+/// Why the preview of `dialog` failed: the error of the run for its current inputs, while the
+/// viewport previews this dialog and it is not running.
+pub(crate) fn preview_error<'a>(app: &'a SolveApp, dialog: &EntryDialog) -> Option<&'a str> {
+    let editable = dialog.running.is_none() && dialog.file_job.is_none();
+    (dialog.preview && editable && app.plugin_menu.previewed == Some(dialog.id)).then_some(())?;
+    app.preview.error.as_deref()
+}
+
 /// The first result drawn by this dialog follows its run's last Fit/Home command, as OK does.
 /// Even a run with no view command consumes the first preview: later edits never move the view.
 pub(crate) fn preview_drawn(app: &mut SolveApp, id: u64, view: Option<Value>) {
@@ -2500,6 +2547,8 @@ pub(crate) fn dry_run(scratch: &mut solidcraft_engine::Session, id: &str) {
     // Requests stay in the preview reply, which is discarded with the scratch design.
     // No preview reply goes through poll_dialog, the only place that opens requested forms.
     scratch.plugin_forms_interactive = true;
+    // The entry can ask (`plugin.preview`) and leave out what the preview does not need.
+    scratch.plugin_state.preview = true;
     if let Some(grants) = scratch.plugin_state.grants.get_mut(id) {
         grants.folders.clear();
         grants.command_groups.clear();
@@ -2794,6 +2843,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
     poll(app);
     sync_picks(app);
     poll_hooks(app, ctx);
+    app.plugin_menu.previewed = preview_commands(app).map(|(id, _, _)| id);
     for mut dialog in std::mem::take(&mut app.plugin_menu.dialogs) {
         let id = dialog.id;
         let (stays, run_it, claim) = show_dialog(app, ctx, &mut dialog);
@@ -3039,6 +3089,10 @@ fn body(
         ui_kit::status_line(ui, &asks, ui_kit::StatusTone::Warning);
     }
     let editable = dialog.running.is_none() && dialog.file_job.is_none();
+    // A failed preview says why at the top, above the fields, where it is seen without scrolling.
+    if let Some(error) = preview_error(app, dialog) {
+        ui_kit::status_line(ui, &solidcraft_ui_text::format("ui.plugin_dialog_preview_failed", &[("error", error)]), ui_kit::StatusTone::Error);
+    }
     let mut browse = None;
     match dialog.fields.as_mut() {
         None => {
@@ -3122,14 +3176,6 @@ fn body(
     // Preview: a command that edits the design, as the native tools have it.
     if !dialog.read && !dialog.job && dialog.opens.is_none() && dialog.fields.is_some() {
         ui.add_enabled_ui(editable, |ui| ui_kit::checkbox(ui, app.tr_label("Preview"), &mut dialog.preview));
-        if dialog.preview
-            && editable
-            && app.preview.error.is_some()
-            && preview_commands(app).is_some_and(|(id, _, _)| id == dialog.id)
-            && let Some(error) = &app.preview.error
-        {
-            ui_kit::status_line(ui, &solidcraft_ui_text::format("ui.plugin_dialog_preview_failed", &[("error", error)]), ui_kit::StatusTone::Dim);
-        }
     }
     if dialog.changed {
         let key = if dialog.revalidated { "ui.plugin_edit_revalidated" } else { "ui.plugin_edit_changed" };

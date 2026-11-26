@@ -236,7 +236,7 @@ pub(super) fn refused(call: &'static str, e: solidcore_ops::Error, detail: Optio
         Ops::SetbackTooShort { least, at, builds, .. } => Error::SetbackTooShort { least, at, builds },
         Ops::CornerUnsupported { why, at } => Error::CornerUnsupported { why, at },
         Ops::CornerRefused { corner } => Error::CornerRefused { corner },
-        Ops::TurnRefused { room, why, at } => Error::TurnRefused { room, why, at },
+        Ops::TurnRefused { room, why, at, .. } => Error::TurnRefused { room, why, at },
         Ops::NoEffect => Error::NoEffect,
         Ops::Unsupported(why) if why == MIXED_CORNER_RAILS_CROSS => Error::Unported(MIXED_CORNER_UNSUPPORTED),
         Ops::Unsupported(_) | Ops::Unported(_) => Error::Unsupported,
