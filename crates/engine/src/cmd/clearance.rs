@@ -451,7 +451,7 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
         let missing: Vec<usize> = chunk_bodies.iter().copied().filter(|&i| shapes.get(i).is_some_and(Option::is_none)).collect();
         if !missing.is_empty() {
             let build_threads = clearance_worker_limit(missing.len(), avail);
-            let built = solidcraft_kernel::map_on_threads(&missing, build_threads, |&i| {
+            let built = solidcraft_kernel::map_on_threads(&missing, build_threads, |&i| -> Result<Option<DistanceShape<'_>>> {
                 let (Some(b), Some((m, mat))) = (solid.get(i), placed_meshes.get(i).and_then(Option::as_ref)) else {
                     return Ok(None);
                 };
@@ -586,7 +586,7 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
             }
             if !missing.is_empty() {
                 let build_threads = clearance_worker_limit(missing.len(), avail);
-                let built = solidcraft_kernel::map_on_threads(&missing, build_threads, |&i| {
+                let built = solidcraft_kernel::map_on_threads(&missing, build_threads, |&i| -> Result<Option<DistanceShape<'_>>> {
                     let (Some(b), Some((m, mat))) = (solid.get(i), placed_meshes.get(i).and_then(Option::as_ref)) else {
                         return Ok(None);
                     };
