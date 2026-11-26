@@ -2867,6 +2867,50 @@ mod tests {
         assert!(crate::scenario::handle_at("drawing:first:standard").is_some(), "with none left, the page that starts a drawing shows");
     }
 
+    /// Undo after Delete Drawing opened the next one: the delete is a step of the model, so
+    /// Drawing's undo, which goes through the open drawing's own steps, leaves it alone. Design's
+    /// undo brings the deleted drawing back in its old place in the picker. Undo opens and closes
+    /// no drawing, so the one opened in its place stays open, in Design and back in Drawing.
+    #[test]
+    fn undo_after_delete_drawing_brings_it_back_and_keeps_the_neighbour_open() {
+        use serde_json::json;
+
+        let mut h = drawing_open(json!({"name":"A"}));
+        h.app.run("drawing.create", json!({"name":"B"})).unwrap();
+        h.app.run("drawing.create", json!({"name":"C"})).unwrap();
+        let ids: Vec<u64> = h.app.session.doc.drawings.iter().map(|d| d.id).collect();
+        h.app.run("drawing.open", json!({"drawing": solidcraft_engine::doc::ids::encode(ids[1])})).unwrap();
+        h.frames(3);
+        let b = h.app.session.doc.drawings[1].clone();
+        let steps = h.app.session.undo.len();
+        ask_to_delete_the_drawing(&mut h, ids[1]);
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.frames(3);
+        let left: Vec<u64> = h.app.session.doc.drawings.iter().map(|d| d.id).collect();
+        assert_eq!((left, h.app.session.open_drawing), (vec![ids[0], ids[2]], Some(ids[2])), "C opens in B's place");
+
+        // In Drawing, undo goes through C's own steps: it has none, so the delete stays.
+        let refused = h.app.run("edit.undo", json!({})).unwrap_err();
+        assert!(refused.contains("nothing to undo in this drawing"), "{refused}");
+        let left: Vec<u64> = h.app.session.doc.drawings.iter().map(|d| d.id).collect();
+        assert_eq!((left, h.app.session.open_drawing), (vec![ids[0], ids[2]], Some(ids[2])), "Drawing's undo leaves the delete");
+
+        // Design's undo takes back the model's step: B is back where it was, and C stays open.
+        enter(&mut h.app, false).unwrap();
+        h.frames(2);
+        h.step(&json!({"key":"Z","cmd":true})).unwrap();
+        h.frames(3);
+        let back: Vec<u64> = h.app.session.doc.drawings.iter().map(|d| d.id).collect();
+        assert_eq!(back, ids, "B is back in the picker, in its old place");
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc.drawings[1], &b), "the same drawing, as it was");
+        assert_eq!(h.app.session.undo.len(), steps, "the undo took the delete's one step");
+        assert_eq!(h.app.session.open_drawing, Some(ids[2]), "undo opens no drawing: C stays open");
+        enter(&mut h.app, true).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.session.open_drawing, Some(ids[2]), "entering Drawing again keeps C open, not B");
+        assert_eq!(active_sheet(&h.app), Some(the_drawing(&h).sheets[0].id));
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn new_sheet_view_menu_keeps_its_model_window_when_existing_sheets_are_elsewhere() {
