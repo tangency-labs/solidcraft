@@ -1,6 +1,7 @@
 //! Dialogs for the surface tools and face splitting (#19): Surface Extrude, Revolve, Sweep and
 //! Loft, Offset and Ruled Surface, Blend and Boundary Surface, Patch, Stitch, Thicken, Extend, Trim, Untrim,
-//! Fair Surface, Match Surface and Split Face. Each has a live preview and Edit Feature.
+//! Fair Surface, Match Surface, Surface Fillet and Chamfer, and Split Face. Each has a live
+//! preview and Edit Feature.
 
 use crate::dialogs::put;
 use crate::ui_kit::BackingTooltipExt as _;
@@ -58,6 +59,26 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::SurfaceMatch { order, .. }) {
             order: usize = 1 => MATCH_CONTINUITY.iter().position(|(_, word)| *word == order.as_str()).unwrap_or(1),
         } => json!({"order": MATCH_CONTINUITY.get(*order).map_or("g2", |(_, word)| *word)});
+        // `trim`: an index into the fillet dialog's trims (both, first, none). The picks and the
+        // optional values are the fillet dialog's (`dialogs_surface_fillet`, #769).
+        Fillet("surface.fillet", "ui.surface_fillet_title", [("ui.surface_round_first", FACES, false), ("ui.surface_round_second", FACES, false)],
+            FeatureKind::SurfaceFillet { radius, trim, extend, .. }) {
+            radius: String = "2 mm".into() => radius.to_string(),
+            trim: usize = 0 => crate::dialogs_surface_fillet::trim_index(*trim),
+            extend: bool = false => *extend,
+        } => json!({});
+        // `ctype`: an index into Chamfer's types (equal, two distances, distance and angle);
+        // `distance2` and `angle` are sent only for their type.
+        Chamfer("surface.chamfer", "ui.surface_chamfer_title", [("ui.surface_round_first", FACES, false), ("ui.surface_round_second", FACES, false)],
+            FeatureKind::SurfaceChamfer { distance, distance2, angle, flip, trim, extend, .. }) {
+            distance: String = "2 mm".into() => distance.to_string(),
+            ctype: usize = 0 => crate::dialogs_surface_fillet::chamfer_type(distance2.is_some(), angle.is_some()),
+            distance2: String = "2 mm".into() => distance2.as_ref().map_or_else(|| "2 mm".into(), |e| e.to_string()),
+            angle: String = "45 deg".into() => angle.as_ref().map_or_else(|| "45 deg".into(), |e| e.to_string()),
+            flip: bool = false => *flip,
+            trim: usize = 0 => crate::dialogs_surface_fillet::trim_index(*trim),
+            extend: bool = false => *extend,
+        } => json!({});
         ; custom {
             /// `direction`: an index into [`EXTRUDE_SIDES`]; `to_object`: the extent is To Object
             /// (the To Object input holds the pick), with `to_offset` past it (empty: none);
@@ -293,6 +314,7 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
             // A sketch's curves divide the faces, as the command does (#17555).
             SelInput::new("Splitting tool", PLANES | FACES | SKETCH_LINES, false),
         ],
+        Surf::Fillet { .. } | Surf::Chamfer { .. } => crate::dialogs_surface_fillet::inputs(),
         _ => k.simple_inputs(),
     }
 }
@@ -344,6 +366,10 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf, inputs: &mut Vec<SelInput>, active:
         }
         Surf::Match { order } => {
             choice_row(ui, "Continuity", "match_order", order, &MATCH_CONTINUITY.map(|(label, _)| label));
+        }
+        Surf::Fillet { radius, trim, extend } => enter |= crate::dialogs_surface_fillet::fillet_rows(ui, radius, trim, extend),
+        Surf::Chamfer { distance, ctype, distance2, angle, flip, trim, extend } => {
+            enter |= crate::dialogs_surface_fillet::chamfer_rows(ui, distance, ctype, distance2, angle, flip, trim, extend);
         }
         Surf::Stitch { tolerance } => {
             enter |= hint_row(ui, "Tolerance", tolerance, solidcraft_ui_text::tr("ui.stitch_tolerance_hint"));
@@ -919,6 +945,7 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             }
             ("surface.match", json!({"body": body, "faces": faces, "target": target, "edges": edges}))
         }
+        Surf::Fillet { .. } | Surf::Chamfer { .. } => crate::dialogs_surface_fillet::command(app, k, inputs, extra)?,
         Surf::Unstitch | Surf::ReverseNormal => {
             need(0, "a body or some of its faces")?;
             let (body, faces) = body_and_faces(items(inputs, 0))?;
@@ -1298,6 +1325,12 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                 input.items = picks;
             }
             return Some((Kind::Surface(k), ins, extra));
+        }
+        FeatureKind::SurfaceFillet { .. } | FeatureKind::SurfaceChamfer { .. } => {
+            // A face that can't be found again is kept as stored until another is picked.
+            let (fill, faces_kept) = crate::dialogs_surface_fillet::for_feature(app, kind)?;
+            kept.extend(faces_kept);
+            (Surf::simple_restore(kind)?, fill)
         }
         FeatureKind::SurfaceOffset { faces, .. } => {
             (Surf::simple_restore(kind)?, vec![faces.iter().filter_map(|p| crate::dialogs::face_sel(s, p.0)).collect()])

@@ -401,7 +401,8 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Thicken { .. } => "surface_thicken",
         FeatureKind::SurfaceExtend { .. } => "surface_extend",
         FeatureKind::SurfaceTrim { .. } => "surface_trim",
-        FeatureKind::SurfaceFillet { .. } | FeatureKind::SurfaceChamfer { .. } => "surface_fillet",
+        FeatureKind::SurfaceFillet { .. } => "surface_fillet",
+        FeatureKind::SurfaceChamfer { .. } => "surface_chamfer",
         other => crate::workspace::feature_icon(other).unwrap_or("feature"),
     }
 }
@@ -2080,6 +2081,11 @@ mod tests {
             ("surface.boundary", json!({"type":"surface_network", "u":[]})),
             ("surface.match", json!({"type":"surface_match", "body":"A", "target":"B", "edges":[]})),
             ("surface.fair", json!({"type":"surface_fair", "body":"A", "tolerance":"0.001"})),
+            ("surface.fillet", json!({"type":"surface_fillet", "a":{"body":"A","point":[0,0,0]}, "b":{"body":"B","point":[0,0,0]}, "radius":"2"})),
+            (
+                "surface.chamfer",
+                json!({"type":"surface_chamfer", "a":{"body":"A","point":[0,0,0]}, "b":{"body":"B","point":[0,0,0]}, "distance":"2"}),
+            ),
             ("solid.rib", json!({"type":"rib", "sketch":0, "curves":[], "thickness":"2"})),
             ("solid.web", json!({"type":"rib", "sketch":0, "curves":[], "thickness":"2", "web":true})),
         ];

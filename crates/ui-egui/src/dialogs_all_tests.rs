@@ -600,6 +600,8 @@ fn check_form(command: &str, labels: &[&str]) {
         "solid.boundary_fill" => &["Remove Tools"],
         "surface.offset" => &["Tangent chain"],
         "surface.fair" => &["Keep edges"],
+        "surface.fillet" => &["Extend to meet"],
+        "surface.chamfer" => &["Flip", "Extend to meet"],
         "surface.trim" => &["Extend to meet", "Stitch the kept pieces"],
         "surface.ruled" => &["Flip"],
         "surface.untrim" => &["Restore outer boundary", "In place (surfaces)"],
@@ -659,6 +661,7 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         | "Bend Line Position" | "From Snap" | "To Snap" | "Joint" | "Joint 1" | "Joint 2" | "Gear 1" | "Gear 2" | "Pinion" | "Rack" | "Screw"
         | "Nut" | "Cam" | "Follower" | "Anchor" | "Bolt Pattern" => Role::ComboBox,
         "Inset By" | "Extent Type" => Role::ComboBox,
+        "Chamfer Type" | "ui.trim" if command.starts_with("surface.") => Role::ComboBox,
         "Thickness Placement" if command == "frame.gusset" => return None, // icon buttons, checked by the gusset interaction test
         "Outline" => Role::ComboBox,
         "Radius" if command == "joint.rack_pinion" => Role::Label,
@@ -1179,6 +1182,8 @@ form_case!(surface_ruled, "surface.ruled", ["Distance", "Type", "Corners"]);
 form_case!(surface_stitch, "surface.stitch", ["Tolerance"]);
 form_case!(surface_fair, "surface.fair", ["ui.fair_strength", "ui.fair_iterations", "Tolerance"]);
 form_case!(surface_match, "surface.match", ["Continuity"]);
+form_case!(surface_fillet, "surface.fillet", ["Radius", "ui.trim"]);
+form_case!(surface_chamfer, "surface.chamfer", ["Chamfer Type", "Distance", "ui.trim"]);
 form_case!(thicken, "surface.thicken", ["Thickness", "Direction", "Operation"]);
 form_case!(surface_extend, "surface.extend", ["Extent Type", "Distance"]);
 form_case!(surface_trim, "surface.trim", []);

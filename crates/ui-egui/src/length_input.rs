@@ -218,6 +218,8 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
             Surf::Offset { distance, .. } | Surf::Ruled { distance, .. } | Surf::Extend { distance, .. } => vec![distance],
             Surf::Thicken { thickness, .. } => vec![thickness],
             Surf::Stitch { tolerance } | Surf::Fair { tolerance, .. } => vec![tolerance],
+            Surf::Fillet { radius, .. } => vec![radius],
+            Surf::Chamfer { distance, distance2, .. } => vec![distance, distance2],
             _ => vec![],
         },
         D::Sheet(k) => match k {

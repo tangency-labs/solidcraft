@@ -168,7 +168,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("a, b: {body, point} (two surface bodies of one face each, a point on each face; the points pick the side of the other surface that is kept: the side the rolling ball stays on); radius: expr; trim?: both|first|none (default both: each surface is cut back to the round and sewn to it, one body; first: only a is cut back and sewn to the round, b is left as it was; none: neither changes and the round alone is a new surface body); extend?: bool (default false: a surface that stops short of the other is extended to meet it). Each surface is cut where the other meets it, the kept pieces are sewn into a's body (b's is gone, with trim both) and the seam is rounded with an exact fillet. A new surface body per undo step; nothing is made if the surfaces don't meet, or the ball does not fit"),
     CommandSpec::new("surface.chamfer", "Surface Chamfer", crate::checked!("surface.chamfer", surface_chamfer)).begins_edit()
         .at("SURFACE", "MODIFY")
-        .icon("surface_fillet")
+        .icon("surface_chamfer")
         .contract(&SURFACE_CHAMFER_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("a, b: {body, point} (two surface bodies of one face each, a point on each face; the points pick the side of the other surface that is kept); distance: expr (how far back along each surface the bevel reaches); distance2?: expr (a different distance along the second surface) or angle?: expr (the angle the bevel makes with the first surface), not both; flip?: bool (swap which surface is the first, by default the one facing up most); trim?: both|first|none (as surface.fillet: both: each surface is cut back and sewn to the bevel, one body; first: only a; none: the bevel alone as a new surface body); extend?: bool (default false: a surface that stops short of the other is extended to meet it). A new surface body per undo step; nothing is made if the surfaces don't meet, or the bevel does not fit"),
@@ -1383,6 +1383,49 @@ mod tests {
         for extra in [json!({"distance2": 3, "angle": "30 deg"}), json!({"distance": 0}), json!({"distance": 500}), json!({"trim": "second"})] {
             assert!(mk(extra.clone()).1.is_err(), "{extra}");
         }
+    }
+
+    /// The example designs of the Surface Fillet and Chamfer dialogs' pull request, as their
+    /// scripts run them: two 20 x 20 sheets crossing at right angles. Planes and the round are
+    /// exact, so the areas match the closed forms to rounding.
+    #[test]
+    fn surface_fillet_and_chamfer_examples_match_their_closed_forms() {
+        let crossing = || {
+            let mut s = Session::default();
+            sheet(&mut s, "XY", "A", [-10.0, -10.0], [10.0, 10.0]);
+            sheet(&mut s, "XZ", "B", [-10.0, -10.0], [10.0, 10.0]);
+            s
+        };
+        let sides = json!({"a": {"body": "A", "point": [0, 5, 0]}, "b": {"body": "B", "point": [0, 0, 5]}});
+        let with = |extra: Value| {
+            let mut p = sides.clone();
+            if let (Some(m), Some(e)) = (p.as_object_mut(), extra.as_object()) {
+                m.extend(e.clone());
+            }
+            p
+        };
+        let close = |got: f64, want: f64| assert!((got - want).abs() < 1e-6 * want, "{got} vs {want}");
+        // 1. Fillet radius 2, trim both: flats 2 x 20 x 8 and a quarter cylinder r 2, length 20.
+        let mut s = crossing();
+        run(&mut s, "surface.fillet", with(json!({"radius": "2 mm"})));
+        close(area(&s, "A"), 320.0 + 20.0 * std::f64::consts::PI);
+        assert_eq!(s.world_state().unwrap().body("A").unwrap().body.face_count(), 3);
+        // 2. Chamfer 2 and 3: flats 20 x 8 and 20 x 7, a bevel sqrt(13) wide.
+        let mut s = crossing();
+        run(&mut s, "surface.chamfer", with(json!({"distance": "2 mm", "distance2": "3 mm"})));
+        close(area(&s, "A"), 300.0 + 20.0 * 13.0_f64.sqrt());
+        // 3. Fillet radius 1.5, trim none: both sheets whole, the round alone 15 pi.
+        let mut s = crossing();
+        run(&mut s, "surface.fillet", with(json!({"radius": "1.5 mm", "trim": "none", "body_name": "Round"})));
+        close(area(&s, "A"), 400.0);
+        close(area(&s, "B"), 400.0);
+        close(area(&s, "Round"), 15.0 * std::f64::consts::PI);
+        // 4. Radius 500 is refused with the largest radius that fits, and nothing changes.
+        let mut s = crossing();
+        let before = s.doc.to_json();
+        let e = s.execute("surface.fillet", &with(json!({"radius": "500 mm"}))).unwrap_err().to_string();
+        assert!(e.contains("the largest radius that fits"), "{e}");
+        assert_eq!(s.doc.to_json(), before);
     }
 
     /// Surface Fillet refuses what it cannot round, without changing the design.
