@@ -720,6 +720,20 @@ pub(crate) fn crossings_across(r: &Region2, (p, u): (Vec2, Vec2)) -> Vec<f64> {
     out
 }
 
+/// The stretches of a joint's anchor `an`, `length` long, that none of `cuts` (in its panel's
+/// chart) takes, as lengths along it from its origin: what a cut across a bend leaves of it. A
+/// stretch no longer than `tol` is none.
+pub(crate) fn left_along(an: &Anchor, length: f64, cuts: &[Region2], tol: f64) -> Vec<(f64, f64)> {
+    let mut left: Vec<(f64, f64)> = vec![(0.0, length)];
+    for c in cuts {
+        let inside = crossings_across(c, (an.origin, an.dir));
+        for &[lo, hi] in inside.as_chunks::<2>().0 {
+            left = left.into_iter().flat_map(|(a, b)| [(a, b.min(lo)), (a.max(hi), b)]).filter(|(a, b)| b - a > tol).collect();
+        }
+    }
+    left
+}
+
 /// The point where two lines, each a point and a direction, cross.
 fn crossing((p, u): (Vec2, Vec2), (q, w): (Vec2, Vec2)) -> Option<Vec2> {
     let cross = u.cross(w);

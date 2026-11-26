@@ -8,7 +8,7 @@ use solidcore_record::{Plane, Vec2};
 use solidcraft_kernel_api::{Curves, OpKind};
 
 pub use solidcore_record::curve_query::{Crossing, CubicPiece, CubicStanding, CurvePoint, CurveRayPoint, FitSplineBounds, PlanePart, PlaneSection};
-pub use solidcraft_kernel_api::curves::CurveRefused;
+pub use solidcraft_kernel_api::curves::{CurveRefused, CurveSample};
 
 use super::{Which, which};
 use crate::backend::Solidcore;
@@ -73,6 +73,21 @@ pub fn arc_through(points: [[f64; 3]; 3]) -> Result<Curve, CurveRefused> {
 pub fn closest_to_ray(curve: &Curve, origin: [f64; 3], direction: [f64; 3], tolerance: f64) -> Result<Option<CurveRayPoint>, CurveRefused> {
     match which(OpKind::Curves) {
         Which::Solidcore => Solidcore.closest_to_ray(curve, origin, direction, tolerance),
+    }
+}
+
+/// Exact arc length of `curve` over `interval` (or its natural range when `None`).
+pub fn arc_length(curve: &Curve, interval: Option<[f64; 2]>) -> Result<f64, CurveRefused> {
+    match which(OpKind::Curves) {
+        Which::Solidcore => Solidcore.arc_length(curve, interval),
+    }
+}
+
+/// Sample `curve` over `interval` (or its natural range when `None`) at `distance` arc length from
+/// its start (or from its end when `from_end` is `true`).
+pub fn point_at_arc_length(curve: &Curve, interval: Option<[f64; 2]>, from_end: bool, distance: f64) -> Result<CurveSample, CurveRefused> {
+    match which(OpKind::Curves) {
+        Which::Solidcore => Solidcore.point_at_arc_length(curve, interval, from_end, distance),
     }
 }
 
@@ -168,6 +183,10 @@ mod tests {
         assert_eq!(arc, curve::arc_through([[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]]).unwrap());
         let near = closest_point(&arc, [0.0, 2.0, 0.0], 1e-9).unwrap();
         assert_eq!(near, curve::closest_point(&arc, [0.0, 2.0, 0.0], 1e-9).unwrap());
+        let len = arc_length(&arc, None).unwrap();
+        assert_eq!(len, curve::arc_length(&arc, None).unwrap());
+        let sample = point_at_arc_length(&arc, None, false, len * 0.5).unwrap();
+        assert_eq!(sample.point, curve::point_at_arc_length(&arc, None, false, len * 0.5).unwrap().point);
         let cubic = [[0.0, 0.0, 0.0], [1.0, 2.0, 0.0], [3.0, 2.0, 0.0], [4.0, 0.0, 0.0]];
         assert_eq!(cubic_pieces(cubic).unwrap(), curve::cubic_pieces(cubic).unwrap());
         let pts = [Vec2::new(0.0, 0.0), Vec2::new(1.0, 1.0), Vec2::new(2.0, 0.0), Vec2::new(3.0, 1.0)];
