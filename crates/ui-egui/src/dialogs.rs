@@ -3576,6 +3576,9 @@ pub(crate) fn hint(inp: &SelInput) -> &'static str {
         "click an axis, a sketch line, a straight or circular edge, or a cylinder face"
     } else if a & EDGES != 0 {
         "click edges or faces"
+    } else if a & PLANES != 0 && a & CURVES != 0 {
+        // Split Body's tool (#1552).
+        "click a plane, a face or a sketch curve"
     } else if a & PLANES != 0 {
         "click a plane or planar face"
     } else if a & AXES != 0 {
@@ -10663,10 +10666,13 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = vec![Sel::Body { name: body.to_string() }];
             }
-            if let (Some(k), Some(id)) = (sketch, line) {
+            // A chain saved without `line` (written by hand) shows its first curve as the tool.
+            let first = line.as_ref().or(curves.first());
+            if let (Some(k), Some(id)) = (sketch, first) {
                 d.extra.insert("tool_sketch".into(), json!(k.0));
-                if !curves.is_empty() || !extend {
-                    d.extra.insert("tool_curves".into(), json!({"sketch": k.0, "line": id, "curves": curves, "extend": extend}));
+                let rest: Vec<&String> = curves.iter().filter(|c| *c != id).collect();
+                if !rest.is_empty() || !extend {
+                    d.extra.insert("tool_curves".into(), json!({"sketch": k.0, "line": id, "curves": rest, "extend": extend}));
                 }
                 if let Some(inp) = d.inputs.get_mut(1) {
                     inp.items = vec![crate::selection::curve_pick(id, k.0, s.active_sketch)];

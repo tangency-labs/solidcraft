@@ -4252,7 +4252,7 @@ fn split_body_by_sketch_curves() {
     run(&mut s, "edit.undo", json!({}));
     run(&mut s, "solid.split_body", json!({"body": "Block", "sketch": sk, "line": id, "extend": false}));
     check(volumes_of(&s, "Block"), [under, 24000.0 - under]);
-    // The same through `curves`; the design keeps them.
+    // The same through `curves`; the design keeps it as `line`, its one form.
     let mut t = Session::default();
     block(&mut t, 40.0, 0.0);
     let tk = run(&mut t, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
@@ -4262,7 +4262,7 @@ fn split_body_by_sketch_curves() {
     check(volumes_of(&t, "Block"), [under, 24000.0 - under]);
     let saved: Value = serde_json::from_str(&t.doc.to_json()).unwrap();
     let split = saved["features"].as_array().and_then(|f| f.iter().find(|f| f["type"] == "split")).cloned().unwrap();
-    assert_eq!(split["curves"], json!([tid]), "{split}");
+    assert_eq!((split["line"].clone(), split.get("curves").cloned()), (json!(tid), None), "{split}");
 
     // A spline shorter than the box: its ends run on along their tangents.
     let mut s = Session::default();
@@ -4316,16 +4316,43 @@ fn split_body_by_sketch_curves() {
     let chain = 10504.605912847635;
     run(&mut s, "solid.split_body", json!({"body": "Block", "sketch": sk, "curves": [b.clone(), a.clone()]}));
     check(volumes_of(&s, "Block"), [chain, 24000.0 - chain]);
-    // Curves that make two chains, or miss the body, are refused and leave the design as it was.
+    // Saved in one form: the first curve as `line`, the rest as `curves`.
+    let saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let split = saved["features"].as_array().and_then(|f| f.iter().find(|f| f["type"] == "split")).cloned().unwrap();
+    assert_eq!((split["line"].clone(), split["curves"].clone()), (json!(b), json!([a])), "{split}");
+    // Curves that make two chains, a curve the sketch lacks or named twice, or no curve, are
+    // refused and leave the design as it was.
     for bad in [
         json!({"body": "Block", "sketch": sk, "curves": [a.clone(), "apart"]}),
         json!({"body": "Block", "sketch": sk, "line": "apart", "curves": ["nope"]}),
+        json!({"body": "Block", "sketch": sk, "line": a.clone(), "curves": [a.clone()]}),
+        json!({"body": "Block", "sketch": sk, "curves": [b.clone(), a.clone(), b.clone()]}),
         json!({"body": "Block", "sketch": sk, "curves": 5}),
         json!({"body": "Block", "sketch": sk, "curves": []}),
     ] {
         assert!(s.execute("solid.split_body", &bad).is_err(), "{bad}");
     }
     check(volumes_of(&s, "Block"), [chain, 24000.0 - chain]);
+
+    // An arc of 300° inside the box: its ends, continued, cross each other and would make the
+    // sheet cut itself, so it is refused; drawn as it is, it stops inside the box, refused too.
+    let mut s = Session::default();
+    block(&mut s, 40.0, 0.0);
+    let sk = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    let id = run(&mut s, "sketch.arc.center_point", json!({"center": [20, 15], "start": [17.5, 15.0 + 2.5 * 3.0_f64.sqrt()], "sweep": 300}))["created"]
+        ["curves"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    for extend in [true, false] {
+        let e = s.execute("solid.split_body", &json!({"body": "Block", "sketch": sk, "line": id, "extend": extend})).err().map(|e| e.to_string());
+        assert!(e.is_some(), "extend {extend}");
+        if extend {
+            assert!(e.as_deref().is_some_and(|e| e.contains("cross each other")), "{e:?}");
+        }
+    }
+    assert_eq!(volumes_of(&s, "Block").len(), 1);
 
     // One straight line through `curves` is still its plane: the same pieces as `line`.
     let mut s = Session::default();
@@ -4335,7 +4362,10 @@ fn split_body_by_sketch_curves() {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.split_body", json!({"body": "Block", "sketch": sk, "curves": ["cut"]}));
     check(volumes_of(&s, "Block"), [2400.0, 3600.0]);
-    // As drawn it crosses the box too: the same pieces, cut by the line's own strip.
+    let kept = |s: &Session| solidcraft_kernel::measure(&s.world_state().unwrap().body("Block").unwrap().body).unwrap().volume;
+    let by_plane = kept(&s);
+    // As drawn it crosses the box too: the same pieces, cut by the line's own strip, and the
+    // same piece keeps the body's name (the sheet's back is the plane's first side).
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30, "body_name": "Block"}));
     let sk = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
@@ -4343,6 +4373,7 @@ fn split_body_by_sketch_curves() {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.split_body", json!({"body": "Block", "sketch": sk, "line": "cut", "extend": false}));
     check(volumes_of(&s, "Block"), [2400.0, 3600.0]);
+    assert!(rel(kept(&s), by_plane) < 1e-9, "{} against {by_plane}", kept(&s));
     let saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
     let split = saved["features"].as_array().and_then(|f| f.iter().find(|f| f["type"] == "split")).cloned().unwrap();
     assert_eq!(split["extend"], json!(false), "{split}");

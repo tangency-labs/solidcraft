@@ -4466,33 +4466,42 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
     // Sketch curves as the tool: `sketch`, and `line` and/or `curves` (#1552, #7492). One straight
     // line splits as its plane; any other curve, or a chain, as the sheet it sweeps through the body.
     if lines {
-        let sketch = p.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "`sketch` must be a sketch feature id"))?;
+        // Each key's form first, as the contract checks it, then what the design must hold.
         let line = match p.get("line").filter(|v| !v.is_null()) {
             None => None,
             Some(v) => Some(v.as_str().ok_or_else(|| bad(cmd, "`line` must name a curve of the sketch"))?.to_string()),
         };
-        let curves: Vec<String> = match p.get("curves").filter(|v| !v.is_null()) {
+        let mut curves: Vec<String> = match p.get("curves").filter(|v| !v.is_null()) {
             None => Vec::new(),
-            Some(v) => {
-                let list = v.as_array().ok_or_else(|| bad(cmd, "`curves` must be a list of curve ids of the sketch"))?;
-                if list.len() > MAX_SPLIT_CURVES {
-                    return Err(bad(cmd, format!("`curves` takes at most {MAX_SPLIT_CURVES} curves")));
-                }
-                list.iter()
-                    .map(|c| c.as_str().map(str::to_string).ok_or_else(|| bad(cmd, "`curves` must be a list of curve ids of the sketch")))
-                    .collect::<Result<_>>()?
-            }
+            Some(v) => v
+                .as_array()
+                .ok_or_else(|| bad(cmd, "`curves` must be a list of curve ids of the sketch"))?
+                .iter()
+                .map(|c| c.as_str().map(str::to_string).ok_or_else(|| bad(cmd, "`curves` must be a list of curve ids of the sketch")))
+                .collect::<Result<_>>()?,
         };
-        if line.is_none() && curves.is_empty() {
-            return Err(bad(cmd, "`line` must name a curve of the sketch"));
-        }
         let extend = match p.get("extend").filter(|v| !v.is_null()) {
             None => true,
             Some(v) => v.as_bool().ok_or_else(|| bad(cmd, "`extend` must be true or false"))?,
         };
+        let sketch = p.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "`sketch` must be a sketch feature id"))?;
+        // One form saved: the chain's first curve is `line`, the rest `curves`, so Split Body's
+        // dialog finds the tool again however the call gave it.
+        let line = match line {
+            Some(l) => l,
+            None if curves.is_empty() => return Err(bad(cmd, "`line` must name a curve of the sketch")),
+            None => curves.remove(0),
+        };
+        if curves.len() + 1 > MAX_SPLIT_CURVES {
+            return Err(bad(cmd, format!("a sketch tool takes at most {MAX_SPLIT_CURVES} curves")));
+        }
+        let ids: Vec<&String> = std::iter::once(&line).chain(&curves).collect();
+        if ids.iter().enumerate().any(|(k, id)| ids.get(..k).is_some_and(|before| before.contains(id))) {
+            return Err(bad(cmd, "a curve is named twice in the sketch tool"));
+        }
         let st = s.model.state();
         let ss = st.sketch(sketch).ok_or_else(|| bad(cmd, format!("no sketch {sketch}")))?;
-        for id in line.iter().chain(&curves) {
+        for id in ids {
             if ss.sketch.curve_index(id).is_none() {
                 return Err(bad(cmd, format!("no curve `{id}` in sketch {sketch}")));
             }
@@ -4509,7 +4518,7 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
                 tool_faces: Vec::new(),
                 tool_bodies: Vec::new(),
                 sketch: Some(solidcraft_doc::SketchId(sketch)),
-                line,
+                line: Some(line),
                 curves,
                 extend,
             },

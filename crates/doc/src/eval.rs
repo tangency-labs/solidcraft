@@ -17368,13 +17368,17 @@ fn eval_feature_kind(
                         return Err(DocError::Invalid("a sketch curve tool needs its sketch".into()));
                     };
                     let ids: Vec<String> = line.iter().chain(curves).cloned().collect();
+                    if ids.iter().enumerate().any(|(k, id)| ids.get(..k).is_some_and(|before| before.contains(id))) {
+                        return Err(DocError::Invalid("a curve is named twice in the sketch tool".into()));
+                    }
                     match ids.as_slice() {
                         [] => return Err(DocError::Invalid("a sketch tool needs its line or its curves".into())),
                         [one] if *extend && sketch_curve_is_line(st, sketch.0, one)? => split_by_plane_traced(&input, &sketch_line_plane(st, sketch.0, one)?)?,
                         _ => {
-                            let raw = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?;
-                            let ss = sketch_in_feature_frame(doc, raw, f.component)?;
-                            let sheet = sketch_curve_sheet(&ss, &ids, &mb.body, *extend)?;
+                            // In the sketch's own frame, as a straight line's plane is read, so a
+                            // line cuts at the same place whatever `extend` says.
+                            let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?;
+                            let sheet = sketch_curve_sheet(ss, &ids, &mb.body, *extend)?;
                             let parts = kernel::split_body_by_sheet_where_it_cuts(&mb.body, &sheet, 0)?
                                 .ok_or_else(|| DocError::Invalid(format!("the sketch curves do not cut `{body}` through")))?;
                             parts
@@ -20418,15 +20422,19 @@ fn sketch_curve_is_line(st: &ModelState, sketch: u64, id: &str) -> Result<bool> 
 /// The sheet Split Body cuts with for sketch curves that are not one straight line (#1552): the
 /// curves `ids` of `ss` joined end to end into one chain, an open chain's ends continued along
 /// their tangents by straight lines until they are past `body` (with `extend`; else the chain as
-/// drawn), swept along the sketch's normal from below the body to above it. The sheet is the sketch's own geometry (lines, arcs and
-/// Bézier pieces exactly), so the cut is exact; it stops nowhere inside the body.
+/// drawn), swept along the sketch's normal from below the body to above it. The sheet is the
+/// sketch's own geometry (lines, arcs and Bézier pieces exactly), so the cut is exact. It is swept
+/// from the chain run backwards, so its back is the side a straight line's plane puts first (the
+/// line's direction crossed with the sketch's normal) and the pieces come in the plane's order.
+/// Two continued ends that cross each other are refused: the sheet would cut itself.
 fn sketch_curve_sheet(ss: &SolvedSketch, ids: &[String], body: &Body, extend: bool) -> Result<Body> {
     let mut chains = surface::curve_chains(ss, ids)?.into_iter();
     let (Some(mut chain), None) = (chains.next(), chains.next()) else {
         return Err(DocError::Invalid("the sketch curves must join end to end into one chain".into()));
     };
-    // The body's box seen in the sketch: its corners' place in the plane and height along it.
-    let b = body.outline_bounds();
+    // The body's box seen in the sketch: its corners' place in the plane and height along it. The
+    // exact box, as a face can bulge past its edges (a dome on a circle).
+    let b = body.exact_bounds().unwrap_or_else(|_| body.outline_bounds());
     if !(b.min.x <= b.max.x && b.min.y <= b.max.y && b.min.z <= b.max.z) {
         return Err(DocError::Invalid("the body to split is empty".into()));
     }
@@ -20458,10 +20466,29 @@ fn sketch_curve_sheet(ss: &SolvedSketch, ids: &[String], body: &Body, extend: bo
         };
         let (start, back) = (first.start(), first.start_tangent());
         let (end, on) = (last.end(), last.end_tangent());
-        chain.insert(0, solidcore_record::Seg2::Line { a: start - back * reach(start), b: start });
-        chain.push(solidcore_record::Seg2::Line { a: end, b: end + on * reach(end) });
+        let (head, tail) = (start - back * reach(start), end + on * reach(end));
+        if segments_cross(head, start, end, tail) {
+            return Err(DocError::Invalid(
+                "the sketch curves' ends, continued past the body, cross each other: draw the curves past the body, or split with extend false".into(),
+            ));
+        }
+        chain.insert(0, solidcore_record::Seg2::Line { a: head, b: start });
+        chain.push(solidcore_record::Seg2::Line { a: end, b: tail });
     }
-    Ok(kernel::extrude_sheet(&ss.plane, &[chain], below - pad, above + pad)?)
+    let backwards: Vec<solidcore_record::Seg2> = chain.iter().rev().map(|s| s.reversed()).collect();
+    Ok(kernel::extrude_sheet(&ss.plane, &[backwards], below - pad, above + pad)?)
+}
+
+/// Whether the segments `a`–`b` and `c`–`d` cross or touch, from the signs of exact cross products
+/// (each segment's ends on either side of the other's line, or on it within it).
+fn segments_cross(a: Vec2, b: Vec2, c: Vec2, d: Vec2) -> bool {
+    let side = |p: Vec2, q: Vec2, r: Vec2| (q - p).cross(r - p);
+    let within = |p: Vec2, q: Vec2, r: Vec2| r.x >= p.x.min(q.x) && r.x <= p.x.max(q.x) && r.y >= p.y.min(q.y) && r.y <= p.y.max(q.y);
+    let (d1, d2, d3, d4) = (side(c, d, a), side(c, d, b), side(a, b, c), side(a, b, d));
+    if ((d1 > 0.0 && d2 < 0.0) || (d1 < 0.0 && d2 > 0.0)) && ((d3 > 0.0 && d4 < 0.0) || (d3 < 0.0 && d4 > 0.0)) {
+        return true;
+    }
+    (d1 == 0.0 && within(c, d, a)) || (d2 == 0.0 && within(c, d, b)) || (d3 == 0.0 && within(a, b, c)) || (d4 == 0.0 && within(a, b, d))
 }
 
 /// The plane a straight sketch line sweeps along its sketch's normal: through the line, its x
