@@ -145,7 +145,7 @@ fn profile_prims(profile: &Loop2) -> Result<Vec<Prim>, CellGridError> {
             profile.segs.len()
         )));
     }
-    let mut prims = Vec::with_capacity(profile.segs.len());
+    let mut prims = Vec::new();
     for (k, seg) in profile.segs.iter().enumerate() {
         check_seg(seg, MAX_COORD).map_err(|what| bad(format!("segment {k}: {what}")))?;
         match *seg {
