@@ -1650,6 +1650,44 @@ mod tests {
         }
     }
 
+    /// A foot whose branch nothing decides is refused, after the re-solve from the edge finds
+    /// no foot either. Both supports are the plate z = 0 (tangent along the edge, the quarter
+    /// of radius 8 on it): the other support's oriented normal is `±z`, and the plate's tangent
+    /// square to the edge, `n × C′` with `n = ±z` and `C′` horizontal, has no z, so its side
+    /// `t · (±z)` is exactly 0 ([`on_wedge_side`]: `None`). The foot from a guess at its own
+    /// root, radius `8 − 0.8 = 7.2` on the plate in the station's half-plane, is found but has
+    /// no side; the re-solve from the edge has no tangent to start along (`setback_tangent`:
+    /// `None`), so foot 0 is refused `SetbackFootMirrored` at that s, never answered.
+    #[test]
+    fn a_foot_with_no_side_from_its_guess_or_the_edge_is_refused_as_mirrored() {
+        let k = Kernel::default();
+        let d = [0.8, 0.8];
+        let [plate, _] = supports();
+        let mut fs = solver(&k, d);
+        fs.curve_based.solver.surfaces = rail_slots(
+            extending_offset(&k, 0.0, (plate.clone(), SurfaceId::Free(1))).unwrap(),
+            extending_offset(&k, 0.0, (plate, SurfaceId::Free(2))).unwrap(),
+        );
+        let domains = fs.trace_domains(&k).unwrap();
+        let s = 0.37;
+        let c = quarter(WALL, 0.0).evaluate_point(s).unwrap();
+        let inner = c * ((WALL - d[0]) / WALL);
+        let uv = Point2::new((inner.x + 20.0) / 40.0, (inner.y + 20.0) / 40.0);
+        // (the guess is the foot's root: on the plate, 0.8 from the edge, square to it)
+        let jet = fs.jet(&k, s).unwrap();
+        let g = point(&k, &mut fs, 0, uv) - jet.point;
+        assert!((g.length() - d[0]).abs() < 1e-12 && g.dot(jet.d1).abs() < 1e-12);
+        let err = fs
+            .station(&k, s, [uv, uv], &domains)
+            .expect_err("refused: no side");
+        let Some(&BlendFailure::Solver(SolverFailure::SetbackFootMirrored { rail, s: at })) =
+            err.blend_failure()
+        else {
+            panic!("{err:?}");
+        };
+        assert_eq!((rail, at), (0, s));
+    }
+
     /// A straight edge from (0, 0, 20) to (10, 0, 20) over [0, 1], its jet asked past its start
     /// (s = -0.3) and then past its end (s = 1.3): the leader reaches both, and is the line
     /// continued, C(s) = (10 s, 0, 20) with C' = (10, 0, 0) and C'' = 0, at both (the jet past
@@ -2700,6 +2738,37 @@ mod tests {
             p.distance(start1) <= slack,
             "the surface's other side starts at {p:?}, not {start1:?}"
         );
+        // the uv curves are reversed with their rails: each rail's mate uv curve, over the
+        // rail's interval, starts at the trace's first foot on its support (135 degrees, as
+        // above) and maps onto the rail at every parameter, within the bound
+        for (rail, want) in [start, start1].into_iter().enumerate() {
+            let b = h.pseudo.brep();
+            let curve = b.edge(h.rails[rail]).unwrap().curve.clone().unwrap();
+            let prim = edgeuse::primary_edgeuse(b, h.rails[rail]).unwrap().unwrap();
+            let mate = edgeuse::mate(b, prim).unwrap().unwrap();
+            let (Some(uv_curve), _) = edgeuse::uv_trim_curve(b, mate).unwrap() else {
+                panic!("rail {rail} has no mate uv curve");
+            };
+            let ivl = curve.natural_interval();
+            for i in 0..=8 {
+                let t = ivl.evaluate(f64::from(i) / 8.0);
+                let w = uv_curve.evaluate_point(&h.k, t).unwrap();
+                let on = h.surfaces[rail]
+                    .evaluate_point(&h.k, Point2::new(w.x, w.y))
+                    .unwrap();
+                let p = curve.evaluate_point(&h.k, t).unwrap();
+                assert!(
+                    on.distance(p) <= slack,
+                    "rail {rail} at {t}: uv {on:?} vs rail {p:?}"
+                );
+                if i == 0 {
+                    assert!(
+                        on.distance(want) <= slack,
+                        "rail {rail}: uv curve starts at {on:?}, not {want:?}"
+                    );
+                }
+            }
+        }
     }
 
     /// The seam both the solver's trace and its re-trace go through,
