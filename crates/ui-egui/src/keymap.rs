@@ -1286,10 +1286,10 @@ mod tests {
         press(&mut h.app, "M", false);
         let dialog = h.app.dialog.as_ref().unwrap();
         assert_eq!(dialog.command(), Some(TRANSFORM_FACE));
-        assert_eq!(dialog.inputs[0].items, [face.clone()]);
+        assert_eq!(dialog.inputs[0].items, std::slice::from_ref(&face));
         assert!(h.app.session.selection.is_empty());
         press(&mut h.app, "M", true);
-        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, [face.clone()], "holding the key does not restart or close the form");
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, std::slice::from_ref(&face), "holding the key does not restart or close the form");
         press(&mut h.app, "M", false);
         assert!(h.app.dialog.is_none());
         press(&mut h.app, "M", true);
