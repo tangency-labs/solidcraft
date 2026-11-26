@@ -46,6 +46,20 @@ pub struct FlangeReach {
     pub from_line: f64,
 }
 
+/// What one panel gives for a bend: its reach, that it does not stand against the bend's zone on
+/// that side, or that it does but cannot be measured (a free-form boundary, an input that is no
+/// number). A caller that reads several panels needs the difference: a panel that is not there
+/// is skipped, one that cannot be measured leaves the answer incomplete.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Standing {
+    /// The panel stands on the zone's edge; this is how far it reaches.
+    Reach(FlangeReach),
+    /// The panel does not stand on the zone's edge on that side.
+    Absent,
+    /// It does, or may, but the reach has no closed form or an input is no number.
+    Unmeasured,
+}
+
 /// The bend's frame: its centre line starts at `origin` and runs along `u`; `n` is the side the
 /// panel is on; `edge` is the distance from the centre line to the zone's edge on that side.
 struct Bend {
@@ -110,13 +124,30 @@ pub fn flange_reach(
     left: bool,
     inset: f64,
 ) -> Option<FlangeReach> {
+    match flange_standing(panel, zone, start, end, left, inset) {
+        Standing::Reach(r) => Some(r),
+        Standing::Absent | Standing::Unmeasured => None,
+    }
+}
+
+/// [`flange_reach`], saying why there is no reach: the panel is not against the bend on that
+/// side ([`Standing::Absent`]), or it is and cannot be measured ([`Standing::Unmeasured`]).
+#[must_use]
+pub fn flange_standing(
+    panel: &Region2,
+    zone: &Region2,
+    start: Point2,
+    end: Point2,
+    left: bool,
+    inset: f64,
+) -> Standing {
     let span = end - start;
     let length = span.length();
     if !(length > 0.0 && length.is_finite() && inset.is_finite() && inset >= 0.0) {
-        return None;
+        return Standing::Unmeasured;
     }
     if panel.outer.segs.len() > MAX_SEGMENTS || zone.outer.segs.len() > MAX_SEGMENTS {
-        return None;
+        return Standing::Unmeasured;
     }
     let u = span * (1.0 / length);
     let perp = Vec2::new(-u.y, u.x);
@@ -128,7 +159,7 @@ pub fn flange_reach(
         .map(|g| (g.start() - start).dot(n))
         .fold(f64::NEG_INFINITY, f64::max);
     if !(edge > 0.0 && edge.is_finite()) {
-        return None;
+        return Standing::Absent;
     }
     let bend = Bend {
         origin: start,
@@ -155,6 +186,9 @@ pub fn flange_reach(
                 }
             }
         }
+    }
+    if stands.is_empty() {
+        return Standing::Absent;
     }
     let mut least: Option<f64> = None;
     let mut take = |above: f64| {
@@ -187,7 +221,7 @@ pub fn flange_reach(
                 sweep,
             } => {
                 if !(radius > 0.0 && radius.is_finite() && sweep.is_finite() && from.is_finite()) {
-                    return None;
+                    return Standing::Unmeasured;
                 }
                 let cs = bend.along(center);
                 // Where it can be lowest: its ends, its lowest point, and where it crosses each
@@ -219,11 +253,19 @@ pub fn flange_reach(
                         }
                     }
                 }
+                let ends =
+                    [from, from + sweep].map(|a| center + Vec2::new(a.cos(), a.sin()) * radius);
                 for ang in angles {
                     if !on_arc(ang, from, sweep) {
                         continue;
                     }
                     let p = center + Vec2::new(ang.cos(), ang.sin()) * radius;
+                    // An end of the arc was read above, with the way the arc runs on from it:
+                    // only an end that runs on over the stretch counts, not one that touches it
+                    // from outside.
+                    if ends.iter().any(|e| (p - *e).length() <= ON_EDGE) {
+                        continue;
+                    }
                     let (s, t) = (bend.along(p), bend.above(p));
                     if stands
                         .iter()
@@ -233,11 +275,13 @@ pub fn flange_reach(
                     }
                 }
             }
-            _ => return None,
+            _ => return Standing::Unmeasured,
         }
     }
-    let from_edge = least?;
-    Some(FlangeReach {
+    let Some(from_edge) = least else {
+        return Standing::Absent;
+    };
+    Standing::Reach(FlangeReach {
         from_edge,
         from_line: from_edge + edge,
     })

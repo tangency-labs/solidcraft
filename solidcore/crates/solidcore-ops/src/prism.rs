@@ -30,6 +30,7 @@ use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 pub use solidcore::error::fill::{FillFailure, FillSide};
 pub use solidcore::prism::fill::{Contour, FillNote, FillOptions};
 pub use solidcore::prism::flange::FlangeReach;
+use solidcore::prism::flange::Standing;
 pub use solidcore::prism::measure::Interval;
 pub use solidcore::prism::placement::LoopPlacement;
 pub use solidcore::prism::profile::ProfileRefusal;
@@ -438,8 +439,9 @@ pub fn segment_distance(seg: &Seg2, p: Vec2) -> Option<f64> {
 /// panel's holes do not stop the reach; a cut-out through to its edge does. Of the panels that
 /// stand on the zone's edge on that side, the least.
 ///
-/// `None` when no panel stands there, or a boundary is free-form (no closed form), or an input is
-/// no length.
+/// `None` when no panel stands there, or a panel that does stand there has a free-form boundary (no
+/// closed form), or an input is no length: a panel that cannot be measured leaves the reach unknown,
+/// however far the others reach.
 #[must_use]
 pub fn flange_reach(
     panels: &[Region2],
@@ -454,13 +456,17 @@ pub fn flange_reach(
     let mut least: Option<FlangeReach> = None;
     for panel in panels {
         let panel = convert::region2(panel);
-        let Some(reach) =
-            solidcore::prism::flange::flange_reach(&panel, &zone, start, end, left, inset)
-        else {
-            continue;
-        };
-        if least.is_none_or(|l| reach.from_edge < l.from_edge) {
-            least = Some(reach);
+        match solidcore::prism::flange::flange_standing(&panel, &zone, start, end, left, inset) {
+            Standing::Reach(reach) => {
+                if least.is_none_or(|l| reach.from_edge < l.from_edge) {
+                    least = Some(reach);
+                }
+            }
+            // Not against this bend: nothing to measure there.
+            Standing::Absent => {}
+            // Against it but not measurable: the least over the panels is unknown, and a
+            // measurable panel's reach must not stand for it.
+            Standing::Unmeasured => return None,
         }
     }
     least

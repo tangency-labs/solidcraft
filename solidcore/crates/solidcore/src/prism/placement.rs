@@ -105,7 +105,19 @@ impl Seg2 {
     /// segment, which has no closed form here, and for a point or segment that is not finite.
     #[must_use]
     pub fn distance_to(&self, p: Point2) -> Option<f64> {
-        let d = self.is_line_or_arc().then(|| point_distance(p, self))?;
+        let whole = match *self {
+            Seg2::Line { a, b } => [a.x, a.y, b.x, b.y].iter().all(|v| v.is_finite()),
+            Seg2::Arc {
+                center,
+                radius,
+                start,
+                sweep,
+            } => [center.x, center.y, radius, start, sweep]
+                .iter()
+                .all(|v| v.is_finite()),
+            _ => false,
+        };
+        let d = whole.then(|| point_distance(p, self))?;
         d.is_finite().then_some(d)
     }
 }

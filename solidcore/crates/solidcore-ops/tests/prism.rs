@@ -2165,6 +2165,58 @@ fn an_extruded_rectangle_on_a_tilted_plane_reads_its_record_back() {
     assert!((v - w).abs() <= 1e-9 * v, "volume {w} vs {v}");
 }
 
+/// Two panels stand against the zone's edge on the same side: one reaches 20 mm, the other has a
+/// cubic far edge. The reach is unknown (`None`), not the 20 mm of the one that can be measured;
+/// a free-form panel that is not against that side of the bend is no part of it.
+#[test]
+fn flange_reach_is_unknown_when_a_panel_against_the_bend_cannot_be_measured() {
+    use solidcore_ops::prism::flange_reach;
+    let zone = rectangle(v(0.0, 29.0), v(10.0, 31.0));
+    let straight = rectangle(v(0.0, 31.0), v(5.0, 51.0));
+    let curved = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Line {
+                    a: v(5.0, 31.0),
+                    b: v(10.0, 31.0),
+                },
+                Seg2::Cubic {
+                    p0: v(10.0, 31.0),
+                    p1: v(12.0, 38.0),
+                    p2: v(3.0, 38.0),
+                    p3: v(5.0, 31.0),
+                },
+            ],
+        },
+        holes: vec![],
+    };
+    let on =
+        |panels: &[Region2]| flange_reach(panels, &zone, v(0.0, 30.0), v(10.0, 30.0), true, 0.0);
+    let alone = on(std::slice::from_ref(&straight)).unwrap();
+    assert!((alone.from_edge - 20.0).abs() < 1e-9, "{alone:?}");
+    assert_eq!(on(&[straight.clone(), curved]), None);
+    // A free-form panel far off the bend (on the other side of the line) is skipped.
+    let far = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Line {
+                    a: v(0.0, 5.0),
+                    b: v(10.0, 5.0),
+                },
+                Seg2::Cubic {
+                    p0: v(10.0, 5.0),
+                    p1: v(12.0, 12.0),
+                    p2: v(-2.0, 12.0),
+                    p3: v(0.0, 5.0),
+                },
+            ],
+        },
+        holes: vec![],
+    };
+    let skipped = on(&[straight, far]).unwrap();
+    assert!((skipped.from_edge - 20.0).abs() < 1e-9, "{skipped:?}");
+}
+
 /// A flat pattern is cut at its bend's zone by the planar boolean, and the flange reach is read
 /// across each panel: a 10 wide strip, a zone from y = 29 to 31, a 20 mm flange (from y = 31 to
 /// 51) and a 29 mm base. The reach is from the zone's edge, and from the centre line one more

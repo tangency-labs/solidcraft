@@ -357,6 +357,16 @@ fn distance_to_a_line_or_an_arc_is_exact_and_a_curve_has_none() {
     // Not a number: none, never a NaN.
     assert_eq!(line.distance_to(p(f64::NAN, 1.0)), None);
     assert_eq!(arc.distance_to(p(f64::INFINITY, 0.0)), None);
+    // A segment that is not a number has none even when the point is its centre (the radius
+    // would answer alone): the finite arc keeps its answer.
+    let broken = Seg2::Arc {
+        center: p(0.0, 0.0),
+        radius: 5.0,
+        start: 0.0,
+        sweep: f64::NAN,
+    };
+    assert_eq!(broken.distance_to(p(0.0, 0.0)), None);
+    assert_eq!(arc.distance_to(p(0.0, 0.0)), Some(5.0));
 }
 
 #[test]
@@ -3956,6 +3966,42 @@ fn flange_reach_of_arcs_is_exact() {
         ],
     });
     near(reach_above(&bitten, 0.0), 17.0);
+}
+
+/// A rounded relief that only touches the measured stretch from outside is no reach: the stretch
+/// is `[1, 8]` (inset 1 on a bend of 10), the panel's edge runs along it to (8, 1) and then
+/// rounds up and away over x > 8 on a radius-2 arc about (8, 3); the arc's lowest point is its
+/// start, (8, 1), on the stretch's end. The flange reaches its full 20 mm, not 0. (An arc that
+/// runs over the stretch still decides it: `flange_reach_of_arcs_is_exact`.)
+#[test]
+fn flange_reach_ignores_an_arc_that_only_touches_the_stretch_from_outside() {
+    let relieved = plain(Loop2 {
+        segs: vec![
+            Seg2::Line {
+                a: p(0.0, 1.0),
+                b: p(8.0, 1.0),
+            },
+            Seg2::Arc {
+                center: p(8.0, 3.0),
+                radius: 2.0,
+                start: -FRAC_PI_2,
+                sweep: FRAC_PI_2,
+            },
+            Seg2::Line {
+                a: p(10.0, 3.0),
+                b: p(10.0, 21.0),
+            },
+            Seg2::Line {
+                a: p(10.0, 21.0),
+                b: p(0.0, 21.0),
+            },
+            Seg2::Line {
+                a: p(0.0, 21.0),
+                b: p(0.0, 1.0),
+            },
+        ],
+    });
+    near(reach_above(&relieved, 1.0), 20.0);
 }
 
 /// A free-form boundary has no closed form: no reach, never a guess.
