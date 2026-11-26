@@ -1796,7 +1796,8 @@ fn alignment_items(selection: &[Sel]) -> Vec<Item> {
     vec![
         act("ui.horizontalConstraint", "Horizontal Constraint", "c_horizontal")
             .with(json!({"points": points, "mode": "horizontal", "if_redundant": "refuse"})),
-        act("ui.verticalConstraint", "Vertical Constraint", "c_vertical").with(json!({"points": points, "mode": "vertical", "if_redundant": "refuse"})),
+        act("ui.verticalConstraint", "Vertical Constraint", "c_vertical")
+            .with(json!({"points": points, "mode": "vertical", "if_redundant": "refuse"})),
     ]
 }
 
@@ -2084,7 +2085,8 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
                 .with(json!({"points": points, "mode": "horizontal", "if_redundant": "refuse"})),
         );
         align.push(
-            act("ui.verticalConstraint", "Vertical Constraint", "c_vertical").with(json!({"points": points, "mode": "vertical", "if_redundant": "refuse"})),
+            act("ui.verticalConstraint", "Vertical Constraint", "c_vertical")
+                .with(json!({"points": points, "mode": "vertical", "if_redundant": "refuse"})),
         );
     }
     let mut c: Vec<Item> = solidcraft_engine::command_specs()
