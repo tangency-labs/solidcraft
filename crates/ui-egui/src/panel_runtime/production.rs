@@ -296,15 +296,18 @@ impl Product {
                         pressed: (*control == crate::ui_kit::HistoryTransport::Play).then_some(app.timeline_playback.is_some()),
                     }
                 })
-                .chain(self.header_actions().into_iter().filter(|spec| [TIMELINE_SETTINGS, TIMELINE_EXPAND, TIMELINE_COLLAPSE].contains(&spec.id.0.as_str())).map(
-                    |spec| RuntimeAction {
-                        id: spec.id,
-                        label: solidcraft_ui_text::tr(&spec.label_key).into(),
-                        enabled: true,
-                        disabled_reason: None,
-                        pressed: None,
-                    },
-                ))
+                .chain(
+                    self.header_actions()
+                        .into_iter()
+                        .filter(|spec| [TIMELINE_SETTINGS, TIMELINE_EXPAND, TIMELINE_COLLAPSE].contains(&spec.id.0.as_str()))
+                        .map(|spec| RuntimeAction {
+                            id: spec.id,
+                            label: solidcraft_ui_text::tr(&spec.label_key).into(),
+                            enabled: true,
+                            disabled_reason: None,
+                            pressed: None,
+                        }),
+                )
                 .collect(),
             Self::Assistant => vec![RuntimeAction {
                 id: ControlId("new-chat".into()),
@@ -1157,6 +1160,7 @@ pub(super) fn history_row(integration: &AppPanelRuntime) -> (bool, bool) {
 }
 
 /// Whether the History is a bottom row tall enough to be the 2D Timeline.
+#[cfg(test)]
 pub(crate) fn timeline_tall(app: &crate::SolveApp) -> bool {
     app.panel_runtime.as_ref().is_some_and(|integration| history_row(integration).1)
 }
@@ -1191,7 +1195,8 @@ pub(crate) fn set_timeline_tall(app: &mut crate::SolveApp, tall: bool) -> PanelR
     }
     let section = section.id.clone();
     let height = if tall { tall_standard_height() } else { strip_height() };
-    app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![Mutation::SetBottomHeight { section, height }] }).map(drop)
+    app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![Mutation::SetBottomHeight { section, height }] })
+        .map(drop)
 }
 
 fn registry() -> PanelResult<PanelRegistry> {
@@ -1760,7 +1765,9 @@ impl FramePanelContent for ProductionFrame<'_> {
             Product::DrawingInspector => crate::drawing_workspace::inspector_contents(self.app, ui),
             Product::RenderBrowser => crate::browser::panel_contents(self.app, ui),
             // A bottom row tall enough for the 2D Timeline shows it in place of the strip.
-            Product::History if context.flow == Flow::Wide && tall_height(context.outer.size.height) => crate::timeline_2d::panel_contents(self.app, ui),
+            Product::History if context.flow == Flow::Wide && tall_height(context.outer.size.height) => {
+                crate::timeline_2d::panel_contents(self.app, ui)
+            }
             Product::History if context.flow == Flow::Wide => crate::timeline::panel_inline(self.app, ui),
             Product::History => crate::timeline_left::panel_contents(self.app, ui),
             Product::Timeline2d => crate::timeline_2d::panel_contents(self.app, ui),

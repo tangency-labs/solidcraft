@@ -1301,7 +1301,8 @@ fn append_section(
     // they line up with those of a taller header that takes its place (the 1D and 2D History).
     let hold_collapse = !collapsible && visible_actions.clone().any(|action| trailing(&action));
     // The last trailing action (the timeline's chevron) takes that held place, furthest right like every panel's collapse button.
-    let slot_id = if hold_collapse && !side_strip { visible_actions.clone().filter(|action| trailing(action)).last().map(|action| action.id.clone()) } else { None };
+    let slot_id =
+        if hold_collapse && !side_strip { visible_actions.clone().rfind(|action| trailing(action)).map(|action| action.id.clone()) } else { None };
     let action_count = action_count - usize::from(slot_id.is_some());
     let not_slot = |action: &&HeaderActionSpec| slot_id.as_ref() != Some(&action.id);
     let primary_count = 1 + usize::from(collapsible || hold_collapse) + usize::from(spec.features.hot_closable);
