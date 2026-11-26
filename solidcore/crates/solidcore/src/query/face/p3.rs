@@ -188,7 +188,7 @@ use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p2::BinormalEval;
 use crate::topology::topology_traverser::face_edges;
 use crate::topology::{edge as topo_edge, loopuse, vertexuse};
-use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, LoopId, VertexuseId};
+use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, LoopId};
 
 const OP_TIGHT: &str = "query::face::p3::calculate_tight_bounding_box";
 const OP_UV_LINE: &str = "query::face::p3::face_classify_uv_line";
@@ -2803,7 +2803,7 @@ fn project(p: Vec3, v: Vec3) -> Vec3 {
 /// # Errors
 ///
 /// Those of the vertex use's links.
-fn sectors_at_vertex(b: &Brep, vu: VertexuseId) -> Result<usize> {
+fn sectors_at_vertex(b: &Brep, vu: crate::topology::VertexuseId) -> Result<usize> {
     let vertex =
         vertexuse::vertex(b, vu)?.ok_or_else(|| null(OP_SECTOR, "vertex use without vertex"))?;
     let faceuse = vertexuse::faceuse(b, vu)?;
