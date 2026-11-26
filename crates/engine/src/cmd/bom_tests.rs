@@ -2283,3 +2283,70 @@ fn hostile_quantities_are_refused_without_a_change() {
     assert_eq!(s.doc.to_json(), design);
     assert_eq!(s.undo.len(), undo);
 }
+
+/// With `mass`, the CSV ends in a `mass_g` column carrying each row's mass as JSON gives it, an
+/// empty field where JSON has null; without it the columns are unchanged.
+#[test]
+fn csv_with_mass_ends_in_each_rows_mass_in_grams() {
+    let dir = scratch("csv-mass");
+    let mut s = frame();
+    let csv = dir.join("bom.csv");
+    let read = |s: &mut Session, p: Value| {
+        run(s, "assembly.bom", p);
+        let text = std::fs::read_to_string(&csv).unwrap();
+        let field = |l: &str| l.strip_prefix('"').and_then(|l| l.strip_suffix('"')).unwrap().split("\",\"").map(String::from).collect::<Vec<_>>();
+        text.lines().map(field).collect::<Vec<_>>()
+    };
+    let lines = read(&mut s, json!({"path": csv, "mass": true}));
+    let header = ["item", "part_number", "description", "revision", "count", "definition", "material", "quantity", "finish", "mass_g"];
+    assert_eq!(lines[0], header);
+    let listed = run(&mut s, "assembly.bom", json!({"mass": true}));
+    let rows = listed["rows"].as_array().unwrap();
+    assert_eq!(lines.len(), rows.len() + 1, "{lines:?}");
+    let mut by_definition = std::collections::BTreeMap::new();
+    for (line, row) in lines[1..].iter().zip(rows) {
+        assert_eq!((line.len(), line[5].as_str()), (header.len(), row["definition"].as_str().unwrap()), "{line:?}");
+        let mass = (!line[9].is_empty()).then(|| line[9].parse::<f64>().unwrap());
+        assert_eq!(mass, row["mass_g"].as_f64(), "the CSV's mass is the JSON's: {line:?} {row}");
+        by_definition.insert(line[5].clone(), mass.map(|g| (g * 1e6).round() / 1e6));
+    }
+    // A steel block 100 x 50 x 10 (50 cm³ at 7.85 g/cm³) and a cube of 10 (1 cm³) at the default
+    // 1.29 g/cm³; grease has no bodies, so no mass.
+    let closed = |cm3: f64, density: f64| Some(Some((cm3 * density * 1e6).round() / 1e6));
+    assert_eq!(by_definition.get("Block").copied(), closed(100.0 * 50.0 * 10.0 / 1000.0, 7.85), "{by_definition:?}");
+    assert_eq!(by_definition.get("Spacer").copied(), closed(10.0 * 10.0 * 10.0 / 1000.0, 1.29), "{by_definition:?}");
+    assert_eq!(by_definition.get("Grease"), Some(&None));
+    // Without mass the columns stay as they were.
+    let plain = read(&mut s, json!({"path": csv}));
+    assert_eq!(plain[0], header[..9]);
+    assert!(plain.iter().all(|l| l.len() == 9), "{plain:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The CSV writes a mass in the very text the JSON file writes it: a whole number keeps its `.0`,
+/// and a tiny mass takes JSON's exponent.
+#[test]
+fn csv_writes_each_mass_as_the_json_file_writes_it() {
+    let dir = scratch("csv-mass-text");
+    let (csv, json_path) = (dir.join("bom.csv"), dir.join("bom.json"));
+    // Cubes at the default 1.29 g/cm³: 1,000 cm³ is 1,290 g; 1e-9 cm³
+    // needs an exponent.
+    for (side, want) in [(100.0, Some("1290.0")), (0.01, None)] {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "Cube"}));
+        run(&mut s, "solid.box", json!({"length": side, "width": side, "height": side}));
+        run(&mut s, "assembly.bom", json!({"path": csv, "mass": true}));
+        run(&mut s, "assembly.bom", json!({"path": json_path, "mass": true}));
+        let text = std::fs::read_to_string(&csv).unwrap();
+        let field = text.lines().nth(1).and_then(|l| l.rsplit(",\"").next()).unwrap().trim_end_matches('"').to_string();
+        let file = std::fs::read_to_string(&json_path).unwrap();
+        let number = file.split("\"mass_g\": ").nth(1).unwrap().split([',', '\n']).next().unwrap().to_string();
+        assert_eq!(field, number, "cube of {side} mm: CSV {text} JSON {file}");
+        if let Some(want) = want {
+            assert_eq!(number, want, "cube of {side} mm");
+        } else {
+            assert!(number.contains('e'), "cube of {side} mm: {number}");
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

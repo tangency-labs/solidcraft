@@ -720,3 +720,77 @@ mod mapped_tests {
         }
     }
 }
+
+/// The spline points the export reads (orientation areas, trim checks), evaluated in place, are
+/// bit for bit the points of de Boor's algorithm on a copy of the control points, as they were
+/// evaluated before: plain and rational splines in 2D and 3D, degrees 1 to 3 and 17 (past the
+/// stack buffer), across and outside the knot range.
+mod spline_point_tests {
+    use super::*;
+
+    fn reference<const D: usize>(knots: &[f64], pts: &[[f64; D]], t: f64, clamp: bool) -> Option<Vec<f64>> {
+        let n = pts.len();
+        let p = knots.len().checked_sub(n + 1)?;
+        let t = if clamp { t.clamp(*knots.get(p)?, *knots.get(n)?) } else { t };
+        if !clamp && !(*knots.get(p)? <= t && t <= *knots.get(n)?) {
+            return None;
+        }
+        let mut s = p;
+        while s + 1 < n && *knots.get(s + 1)? <= t {
+            s += 1;
+        }
+        let mut d: Vec<[f64; D]> = (0..=p).map(|j| pts.get(s + j - p).copied()).collect::<Option<_>>()?;
+        for r in 1..=p {
+            for j in (r..=p).rev() {
+                let i = s + j - p;
+                let den = knots.get(i + p + 1 - r)? - knots.get(i)?;
+                let a = if den == 0.0 { 0.0 } else { (t - knots.get(i)?) / den };
+                let (lo, hi) = (*d.get(j - 1)?, *d.get(j)?);
+                *d.get_mut(j)? = std::array::from_fn(|c| (1.0 - a) * lo[c] + a * hi[c]);
+            }
+        }
+        let q = d.get(p)?;
+        let w = q[D - 1];
+        (w != 0.0).then(|| q[..D - 1].iter().map(|x| x / w).collect())
+    }
+
+    fn knots(n: usize, p: usize) -> Vec<f64> {
+        let mut k = vec![0.0; p + 1];
+        let inner = n - p - 1;
+        k.extend((1..=inner).map(|i| i as f64 / (inner + 1) as f64 * 3.0));
+        k.extend(vec![3.0; p + 1]);
+        k
+    }
+
+    #[test]
+    fn spline_points_match_de_boor_on_copied_points() {
+        for p in [1usize, 2, 3, 17] {
+            let n = p + 6;
+            let k = knots(n, p);
+            let p3: Vec<[f64; 3]> = (0..n).map(|i| [i as f64, (i as f64).sin(), (i as f64 * 0.7).cos()]).collect();
+            let h4: Vec<[f64; 4]> = p3
+                .iter()
+                .enumerate()
+                .map(|(i, q)| {
+                    let w = 1.0 + 0.1 * i as f64;
+                    [q[0] * w, q[1] * w, q[2] * w, w]
+                })
+                .collect();
+            let p2: Vec<[f64; 2]> = p3.iter().map(|q| [q[0], q[1]]).collect();
+            let h3: Vec<[f64; 3]> = h4.iter().map(|q| [q[0], q[1], q[3]]).collect();
+            let spline3 = b::Curve::Spline { knots: k.clone(), points: p3.clone() };
+            let rational3 = b::Curve::RationalSpline { knots: k.clone(), homogeneous: h4.clone() };
+            let spline2 = b::Curve2::Spline { knots: k.clone(), points: p2.clone() };
+            let rational2 = b::Curve2::RationalSpline { knots: k.clone(), homogeneous: h3.clone() };
+            let w3: Vec<[f64; 4]> = p3.iter().map(|q| [q[0], q[1], q[2], 1.0]).collect();
+            let w2: Vec<[f64; 3]> = p2.iter().map(|q| [q[0], q[1], 1.0]).collect();
+            for i in -3..=33 {
+                let t = f64::from(i) * 0.1;
+                assert_eq!(point3(&spline3, t).map(|q| q.to_vec()), reference(&k, &w3, t, false), "p {p} t {t}");
+                assert_eq!(point3(&rational3, t).map(|q| q.to_vec()), reference(&k, &h4, t, false), "p {p} t {t}");
+                assert_eq!(point2(&spline2, t).map(|q| q.to_vec()), reference(&k, &w2, t, true), "p {p} t {t}");
+                assert_eq!(point2(&rational2, t).map(|q| q.to_vec()), reference(&k, &h3, t, true), "p {p} t {t}");
+            }
+        }
+    }
+}

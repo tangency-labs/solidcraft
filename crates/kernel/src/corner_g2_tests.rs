@@ -402,3 +402,42 @@ fn a_setback_too_short_for_the_fill_names_what_solidcores_corner_needs() {
     }
     assert!(!short.contains("builds"), "{short}");
 }
+
+/// The corner (25, 17.5, 10) of the 53.5 x 37.5 x 10 box of #20961, its three edges rounded r4
+/// with the G2 corner (set back the default 6).
+fn issue_20961_corner() -> Body {
+    let body = box_solid(Vec3::new(-28.5, -20.0, 0.0), Vec3::new(25.0, 17.5, 10.0)).unwrap();
+    let edges = [Vec3::new(-1.75, 17.5, 10.0), Vec3::new(25.0, -1.25, 10.0), Vec3::new(25.0, 17.5, 5.0)];
+    fillet_g2_corners(&body, &edges, 4.0, &[]).unwrap()
+}
+
+/// #20961: shelled from below, a box whose top corner is a G2 patch is refused only by the
+/// patch's own curvature, not by the patch's height field where it runs past the face: there,
+/// off the face, it bends to under 1 mm, which refused every wall past 0.979. A 1.25 wall now
+/// builds one valid solid whose wall is at most the kept faces' area times its thickness (each
+/// point of the wall is within the thickness of a kept face, none of which curves tighter),
+/// and a 2 wall is refused as folding, offering a wall that builds between the two (just under
+/// the face's least radius: on the face, near where a round's section ends on the side, the
+/// patch bends to about 1.46).
+#[test]
+fn a_shell_under_a_g2_corner_is_sized_by_the_patch_on_its_face() {
+    let g2 = issue_20961_corner();
+    let solid = measure(&g2).unwrap();
+    let bottom = 53.5 * 37.5 - 16.0 * (1.0 - std::f64::consts::FRAC_PI_4);
+    let open = [Vec3::new(-1.75, -1.25, 0.0)];
+    let shelled = shell(&g2, &open, 1.25).unwrap();
+    assert!(shelled.validity().is_empty(), "{:?}", shelled.validity());
+    let m = measure(&shelled).unwrap();
+    let upper = 1.25 * (solid.area - bottom);
+    assert!(m.volume > 0.0 && m.volume <= upper, "wall volume {} (at most {upper})", m.volume);
+    let refused = shell(&g2, &open, 2.0).unwrap_err().to_string();
+    // the wall the refusal offers, tried and built: just under the largest the fold test names
+    let named: f64 = refused
+        .split("a wall of ")
+        .nth(2)
+        .and_then(|w| w.split(" mm builds").next())
+        .and_then(|w| w.parse().ok())
+        .unwrap_or_else(|| panic!("no wall offered: {refused}"));
+    assert!(refused.contains("would fold"), "{refused}");
+    assert!(named > 1.25 && named < 2.0, "offered {named}: {refused}");
+}
