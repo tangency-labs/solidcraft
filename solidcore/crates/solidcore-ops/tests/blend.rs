@@ -7768,3 +7768,130 @@ fn open_frustum_end_refusal_names_the_interior_peak_that_fits() {
         true,
     );
 }
+
+/// A rectangle `2w` by `2h` about the origin extruded `height` with every wall leaning in by
+/// `taper` degrees: a frustum whose top is `2(w - height tan(taper))` by
+/// `2(h - height tan(taper))`.
+fn leaning_block(w: f64, h: f64, taper: f64, height: f64) -> Body {
+    let p = [[-w, -h], [w, -h], [w, h], [-w, h]];
+    let profile: Vec<Curve> = (0..4)
+        .map(|i| {
+            let (a, b) = (p[i], p[(i + 1) % 4]);
+            Curve::Line {
+                start: [a[0], a[1], 0.0],
+                end: [b[0], b[1], 0.0],
+            }
+        })
+        .collect();
+    let draft = taper.to_radians();
+    extrude(
+        &profile,
+        [0.0, 0.0, 1.0],
+        height,
+        draft,
+        DraftCorner::default(),
+        true,
+    )
+    .unwrap()
+}
+
+/// What a round of radius `size` (`round`) or an equal-distance chamfer of `size` takes off
+/// the top end edge of [`leaning_block`], of length `l`, its walls leaning `taper` radians.
+///
+/// In the section square to the edge (the edge at the origin O, the top running off along
+/// u1 = (-1, 0), the end wall down along u2 = (sin taper, -cos taper)) the faces' normals
+/// differ by a = 90 degrees - taper. A round touches both faces t = r tan(a/2) from O, its
+/// centre C r / cos(a/2) from O on the bisector; its section is the kite O T1 C T2 less the
+/// sector C T1 T2 of angle a, whose centroid lies 2 r sin(a/2) / (3 a/2) from C towards O. A
+/// chamfer's section is the triangle O (d u1) (d u2). Each is a section S of area A whose
+/// points lie a depth z (A `z_bar` in all) below the top.
+///
+/// Along the edge the section is cut by the two long walls, which lean out by taper: at
+/// depth z they stand l/2 + z tan(taper) either side of the edge's middle. The cut takes
+/// the integral over S of (l + 2 z tan(taper)), which is A l + 2 tan(taper) A `z_bar`, in
+/// closed form, whatever the ends' slant (the walls are planes, and S lies inside them).
+fn leaning_end_cut(round: bool, size: f64, l: f64, taper: f64) -> f64 {
+    let a = std::f64::consts::FRAC_PI_2 - taper;
+    let (u1, u2) = ([-1.0, 0.0], [taper.sin(), -taper.cos()]);
+    // area and first moment of depth of a triangle
+    let triangle = |p: [f64; 2], q: [f64; 2], r: [f64; 2]| {
+        let area = ((q[0] - p[0]) * (r[1] - p[1]) - (r[0] - p[0]) * (q[1] - p[1])).abs() / 2.0;
+        (area, -area * (p[1] + q[1] + r[1]) / 3.0)
+    };
+    let o = [0.0, 0.0];
+    let (area, moment) = if round {
+        let t = size * (a / 2.0).tan();
+        let bisector = [u1[0] + u2[0], u1[1] + u2[1]];
+        let n = bisector[0].hypot(bisector[1]);
+        let b = [bisector[0] / n, bisector[1] / n];
+        let oc = size / (a / 2.0).cos();
+        let c = [oc * b[0], oc * b[1]];
+        let (a1, m1) = triangle(o, [t * u1[0], t * u1[1]], c);
+        let (a2, m2) = triangle(o, [t * u2[0], t * u2[1]], c);
+        let sector = size * size * a / 2.0;
+        let centroid = c[1] - b[1] * 2.0 * size * (a / 2.0).sin() / (3.0 * a / 2.0);
+        (a1 + a2 - sector, m1 + m2 + sector * centroid)
+    } else {
+        let d = size;
+        triangle(o, [d * u1[0], d * u1[1]], [d * u2[0], d * u2[1]])
+    };
+    area * l + 2.0 * taper.tan() * moment
+}
+
+/// #22336: a round or a chamfer on the short end edge of a ridge whose walls lean out below
+/// it. The round's foot on the end wall lies below the edge, where the long walls stand
+/// farther apart, so the round runs past each end of the edge by
+/// r tan((90 degrees - taper) / 2) sin(taper) (a chamfer d sin(taper)) before the long walls
+/// trim it. The fillet surface and the faces it is traced on were continued past the edge by
+/// a multiple of the edge's length (twice it after the rail-end retries), so a blend that
+/// reaches farther than twice the edge's length failed with "failure to calculate
+/// intersection of fillet surface with side face". Each row of the issue's table, just under
+/// and above its old cutoff and at 1.5 times it, and the issue's own r 14 and d 6 (with the
+/// r 13.5 and d 5.6 that built before), give the frustum less [`leaning_end_cut`]: seven
+/// faces, fifteen edges and ten vertices, valid.
+#[test]
+fn a_short_ridge_end_rounds_and_chamfers_past_twice_its_length() {
+    all_fixes();
+    // (half width, half depth, taper in degrees, height, the round's old cutoff)
+    let rows = [
+        (30.0_f64, 21.0_f64, 45.0_f64, 20.0_f64, 13.6569_f64),
+        (30.0, 22.0, 45.0, 20.0, 27.3137),
+        (31.0, 17.5, 34.0, 25.0, 8.5735),
+        (31.0, 17.5, 33.5, 25.0, 12.852),
+        (31.0, 17.5, 34.3, 25.0, 5.9939),
+    ];
+    let mut cases = vec![
+        (rows[0], true, 13.5),
+        (rows[0], true, 14.0),
+        (rows[0], false, 5.6),
+        (rows[0], false, 6.0),
+    ];
+    for row in rows {
+        let (_, h, taper, height, cutoff) = row;
+        let l = 2.0 * (h - height * taper.to_radians().tan());
+        // a chamfer's old cutoff: d sin(taper) = 2 l
+        let chamfer_cutoff = 2.0 * l / taper.to_radians().sin();
+        for f in [0.95, 1.05, 1.5] {
+            cases.push((row, true, f * cutoff));
+            cases.push((row, false, f * chamfer_cutoff));
+        }
+    }
+    for ((w, h, taper, height, _), round, size) in cases {
+        let lean = taper.to_radians();
+        let (top_w, top_h) = (w - height * lean.tan(), h - height * lean.tan());
+        // the prismatoid: h/6 (bottom + top + 4 middle)
+        let middle = (w + top_w) * (h + top_h);
+        let frustum = height / 6.0 * (4.0 * w * h + 4.0 * top_w * top_h + 4.0 * middle);
+        let body = leaning_block(w, h, taper, height);
+        let edge = edge_at(&body, [top_w, 0.0, height]);
+        let kind = if round { Blend::Round } else { Blend::Chamfer };
+        let case = format!("{w} x {h}, taper {taper}, {kind:?} {size}");
+        blend(&body, kind, &[edge], &[size], &[], Corners::Filled)
+            .unwrap_or_else(|e| panic!("{case}: {e:?}"));
+        assert!(body.check(CheckLevel::All).unwrap().is_valid(), "{case}");
+        assert_eq!(body.counts().unwrap(), [7, 15, 10], "{case}");
+        let expected = frustum - leaning_end_cut(round, size, 2.0 * top_h, lean);
+        let v = volume(&body);
+        assert!(rel(v, expected) < 1e-9, "{case}: {v} {expected}");
+    }
+}
