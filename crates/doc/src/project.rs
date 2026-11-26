@@ -45,6 +45,7 @@ pub(crate) fn source_sketches(source: &LinkSource) -> Result<std::collections::B
                 sketches.insert(*sketch);
             }
             LinkSource::Intersection { a, b } => pending.extend([(a.as_ref(), depth + 1), (b.as_ref(), depth + 1)]),
+            LinkSource::FaceOffset { from, .. } => pending.push((from.as_ref(), depth + 1)),
             _ => {}
         }
     }
@@ -238,7 +239,8 @@ fn cache_key(st: &ModelState, plane: &Plane, kind: LinkKind, src: &LinkSource) -
             | LinkSource::Vertex { .. }
             | LinkSource::Iso { .. }
             | LinkSource::Spun { .. }
-    ) || matches!(src, LinkSource::Intersection { a, b } if !is_sketch_curve(a) && !is_sketch_curve(b));
+    ) || matches!(src, LinkSource::Intersection { a, b } if !is_sketch_curve(a) && !is_sketch_curve(b))
+        || matches!(src, LinkSource::FaceOffset { from, .. } if !is_sketch_curve(from));
     if !body_based {
         return None;
     }
@@ -506,6 +508,12 @@ fn resolve_uncached(
                     exact = vec![Vec::new(); wires.len()];
                 }
             }
+            Vec::new()
+        }
+        LinkSource::FaceOffset { .. } => {
+            let (found, size, offset) = face_offset(st, src)?;
+            source = found;
+            (wires, exact) = joined_wires(offset.curves, size * 1e-6)?;
             Vec::new()
         }
         LinkSource::Spun { body, origin, dir } => {
@@ -807,6 +815,60 @@ fn reversed(c: &WireCurve) -> Option<WireCurve> {
 
 /// Curve `ci` of the solved sketch `ss` as its exact pieces in space, in the order its polyline
 /// runs; none where a piece has no record curve.
+/// The offset a [`LinkSource::FaceOffset`] gives in `st` ([`crate::kernel::offset_on_face`]): the
+/// source as found again (the face's point moved onto it, the body named), the size of the face's
+/// body, and the kernel's result: its curves, how far they may be from the true offset, whether
+/// they are exact and whether the face's boundary cut them.
+pub fn face_offset(st: &ModelState, src: &LinkSource) -> Result<(LinkSource, f64, crate::kernel::FaceOffset)> {
+    let LinkSource::FaceOffset { body, at, from, distance, tolerance } = src else {
+        return Err(DocError::Invalid("not an offset curve".into()));
+    };
+    let lost = |what: &str| DocError::Invalid(format!("{what} no longer exists"));
+    let (bi, mesh) = body_mesh(st, body, *at)?;
+    let (f, q, d) = nearest_face(&mesh, *at).ok_or_else(|| lost("the face"))?;
+    let size = mesh.bounds().diagonal().max(1e-9);
+    if d > size * 0.25 {
+        return Err(lost("the face"));
+    }
+    let target = st
+        .bodies
+        .get(bi)
+        .filter(|b| !b.body.is_mesh())
+        .ok_or_else(|| DocError::Invalid("an offset curve needs a face of a solid or surface body, not a mesh".into()))?;
+    let face = usize::try_from(f).map_err(|_| DocError::Invalid("face index exceeds platform limit".into()))?;
+    let tol = tolerance.unwrap_or(solidcraft_sketch::FACE_OFFSET_TOLERANCE);
+    let (from, offset) = match from.as_ref() {
+        LinkSource::Edge { body: of, at: e } => {
+            if !of.is_empty() && *of != target.name {
+                return Err(DocError::Invalid(format!("the edge must be an edge of the face, on {}, not of {of}", target.name)));
+            }
+            let r = crate::kernel::offset_on_face(&target.body, face, crate::kernel::OffsetFrom::Edge(*e), *distance, q, tol)?;
+            (LinkSource::Edge { body: target.name.clone(), at: *e }, r)
+        }
+        LinkSource::SketchCurve { sketch, curve } => {
+            let ss = st.sketch(*sketch).ok_or_else(|| lost(&format!("sketch {sketch}")))?;
+            let pieces = match ss.sketch.curve_index(curve) {
+                Some(ci) => sketch_curves(ss, ci),
+                // A 3D curve of that sketch (a wire): its exact pieces.
+                None => {
+                    let wi = ss.sketch.wire_index(curve).ok_or_else(|| lost(&format!("sketch curve {curve}")))?;
+                    let wire = ss.sketch.wires.get(wi).ok_or_else(|| lost(&format!("sketch curve {curve}")))?;
+                    if wire.exact.is_empty() { wire.control_curve().into_iter().collect() } else { wire.exact.clone() }
+                }
+            };
+            if pieces.is_empty() {
+                return Err(DocError::Invalid(format!("sketch curve {curve} has no exact form to offset")));
+            }
+            let curves: Vec<(solidcore_record::brep::Curve, [f64; 2])> = pieces.into_iter().map(|w| (w.curve, w.interval)).collect();
+            let r = crate::kernel::offset_on_face(&target.body, face, crate::kernel::OffsetFrom::Curves(&curves), *distance, q, tol)?;
+            (from.as_ref().clone(), r)
+        }
+        _ => return Err(DocError::Invalid("an offset curve is taken from an edge of the face or a curve of another sketch lying on it".into())),
+    };
+    let found = LinkSource::FaceOffset { body: target.name.clone(), at: q, from: Box::new(from), distance: *distance, tolerance: *tolerance };
+    Ok((found, size, offset))
+}
+
 fn sketch_curves(ss: &crate::eval::SolvedSketch, ci: usize) -> Vec<WireCurve> {
     let segs = ss.sketch.exact_segs(ci).unwrap_or_else(|| ss.sketch.segs(ci));
     segs.iter()

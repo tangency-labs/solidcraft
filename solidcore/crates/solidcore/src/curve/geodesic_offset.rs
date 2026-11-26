@@ -84,8 +84,9 @@ pub struct GeodesicOffset {
 ///
 /// # Errors
 /// `InvalidInput` for a distance or a tolerance not finite and positive, a station whose foot is
-/// not found or where the surface is singular, a curve with no tangent at a station, or a
-/// geodesic leaving the surface's parameter box; `NotConverged` when a geodesic's end does not
+/// not found or where the surface is singular, a curve with no tangent at a station, a
+/// geodesic leaving the surface's parameter box, or ends that run back against the curve (the
+/// distance past its radius of curvature on the surface, where the offset folds over itself); `NotConverged` when a geodesic's end does not
 /// settle within [`MAX_STEPS`] steps; those of the evaluations, the drops and the fit.
 pub fn geodesic_offset(
     k: &Kernel,
@@ -137,8 +138,28 @@ pub fn geodesic_offset(
         let at = |i: usize| ivl.evaluate(i as f64 / steps as f64);
         let params: Vec<f64> = (0..count).map(at).collect();
         let mut ends = Vec::new();
+        let mut tangents = Vec::new();
         for &t in &params {
-            ends.push(shoot.end_at(t)?);
+            let (end, tangent) = shoot.end_at(t)?;
+            ends.push(end);
+            tangents.push(tangent);
+        }
+        // Past the curve's radius of curvature on the surface the geodesics cross and the ends
+        // run back against the curve: the offset folds over itself.
+        let back = ends
+            .windows(2)
+            .zip(tangents.windows(2))
+            .any(|(e, t)| match (e, t) {
+                ([p, q], [a, b]) => {
+                    let chord = *q - *p;
+                    chord.dot(*a) < 0.0 || chord.dot(*b) < 0.0
+                }
+                _ => false,
+            });
+        if back {
+            return Err(invalid(
+                "the offset folds over itself: the distance is past the curve's radius of curvature on the surface",
+            ));
         }
         let fit = Curve::from(BSplineCurve::create_interpolating_curve_with_params(
             ParamMethod::ChordLength,
@@ -153,7 +174,7 @@ pub fn geodesic_offset(
         let mut worst = 0.0_f64;
         for (a, b) in params.iter().zip(params.iter().skip(1)) {
             let mid = 0.5 * (a + b);
-            let truth = shoot.end_at(mid)?;
+            let (truth, _) = shoot.end_at(mid)?;
             worst = worst.max(fit.evaluate_point(k, mid)?.distance(truth));
         }
         if worst <= tolerance || count >= MAX_STATIONS {
@@ -304,8 +325,8 @@ impl Shoot<'_> {
     }
 
     /// The end of the geodesic of length `distance` leaving the curve at its parameter `t`,
-    /// square to it, to the side asked.
-    fn end_at(&self, t: f64) -> Result<Point3> {
+    /// square to it, to the side asked, and the curve's unit tangent in the surface there.
+    fn end_at(&self, t: f64) -> Result<(Point3, Vec3)> {
         let k = self.k;
         let c = self.curve.evaluate(k, t, 1, false, true)?;
         let (Some(&p), Some(&tangent)) = (c.first(), c.get(1)) else {
@@ -325,8 +346,11 @@ impl Shoot<'_> {
             d.su.cross(d.sv)
                 .unitize()
                 .map_err(|_| invalid("a surface singular on the offset's way"))?;
+        let along = (tangent - n * tangent.dot(n))
+            .unitize()
+            .map_err(|_| invalid("a curve with no tangent along the surface at a station"))?;
         let across = n
-            .cross(tangent - n * tangent.dot(n))
+            .cross(along)
             .unitize()
             .map_err(|_| invalid("a curve with no tangent along the surface at a station"))?;
         let w = match self.side {
@@ -341,7 +365,7 @@ impl Shoot<'_> {
             steps *= 2;
             let next = self.derivs(self.integrate(start, steps)?, (0.0, 0.0))?.p;
             if next.distance(last) <= self.settle {
-                return Ok(next);
+                return Ok((next, along));
             }
             last = next;
         }

@@ -40,10 +40,10 @@ pub struct IsoLine {
 }
 
 /// A face's surface and its loops in (u, v), read once for any number of iso lines.
-struct FaceTrims<'a> {
+pub(crate) struct FaceTrims<'a> {
     surface: &'a brep::Surface,
     eval: SurfaceEval,
-    domain: [[f64; 2]; 2],
+    pub(crate) domain: [[f64; 2]; 2],
     spans: Vec<TrimSpan<'a>>,
 }
 
@@ -119,7 +119,7 @@ impl TrimSpan<'_> {
 }
 
 impl<'a> FaceTrims<'a> {
-    fn new(body: &'a Body, face: usize) -> Result<FaceTrims<'a>> {
+    pub(crate) fn new(body: &'a Body, face: usize) -> Result<FaceTrims<'a>> {
         let f = body.record().faces.get(face).ok_or_else(|| KernelError::Invalid(format!("the body has no face {face}")))?;
         let surface = f.parameters();
         let eval = SurfaceEval::new(surface).map_err(|e| KernelError::Failed(format!("iso curve: {e}")))?;
@@ -169,6 +169,74 @@ impl<'a> FaceTrims<'a> {
 
     /// Pair crossings of all loops along the same line, starting outside at minus infinity.
     fn clip(&self, along_u: bool, fixed: f64) -> Result<Vec<(brep::Curve, [f64; 2], [f64; 2])>> {
+        self.ranges(along_u, fixed)?
+            .into_iter()
+            .map(|(a, b)| {
+                let (curve, interval) = iso_record(self.surface, along_u, fixed, (a, b))?;
+                Ok((curve, interval, [a, b]))
+            })
+            .collect()
+    }
+
+    /// The (u, v) widths that move a point about `mm` on the surface at the middle of the face's
+    /// box.
+    pub(crate) fn widths(&self, mm: f64) -> [f64; 2] {
+        let [[u0, u1], [v0, v1]] = self.domain;
+        match self.eval.derivs(0.5 * (u0 + u1), 0.5 * (v0 + v1)) {
+            Some((_, su, sv)) => [mm / su.len().max(1e-300), mm / sv.len().max(1e-300)],
+            None => [mm; 2],
+        }
+    }
+
+    /// The (u, v) of `p` on the face's surface, when it lies within `accept` of it.
+    pub(crate) fn uv_of(&self, p: Vec3, accept: f64) -> Option<[f64; 2]> {
+        let [[u0, u1], [v0, v1]] = self.domain;
+        let uv = self.eval.project(p, Some([0.5 * (u0 + u1), 0.5 * (v0 + v1)]), accept)?;
+        self.eval.point(uv).filter(|q| q.dist(p) <= accept).map(|_| uv)
+    }
+
+    /// `uv` moved into the face's box by whole periods of a closed surface.
+    fn wrapped(&self, uv: [f64; 2]) -> [f64; 2] {
+        let [pu, pv] = self.eval.domain().period;
+        let [du, dv] = self.domain;
+        let [u, v] = uv;
+        let wrap = |[lo, hi]: [f64; 2], x: f64, period: Option<f64>| match period.filter(|p| *p > 0.0) {
+            Some(p) => {
+                let x = lo + (x - lo).rem_euclid(p);
+                if x > hi + 1e-12 { x - p } else { x }
+            }
+            None => x,
+        };
+        [wrap(du, u, pu), wrap(dv, v, pv)]
+    }
+
+    /// Whether `uv` lies in the face, or within `eps` (in each parameter) of it: on the iso line
+    /// along u through it, or along v, or on those lines `eps` to either side, inside one of the
+    /// ranges [`FaceTrims::ranges`] gives (each widened by `eps`). A point on the face's
+    /// boundary is in the face.
+    pub(crate) fn contains(&self, uv: [f64; 2], eps: [f64; 2]) -> bool {
+        let [u, v] = self.wrapped(uv);
+        let [[u0, u1], [v0, v1]] = self.domain;
+        if u < u0 - eps[0] || u > u1 + eps[0] || v < v0 - eps[1] || v > v1 + eps[1] {
+            return false;
+        }
+        let lines = [(true, v, u, eps[0]), (true, v - eps[1], u, eps[0]), (true, v + eps[1], u, eps[0])].into_iter().chain([
+            (false, u, v, eps[1]),
+            (false, u - eps[0], v, eps[1]),
+            (false, u + eps[0], v, eps[1]),
+        ]);
+        for (along_u, fixed, x, e) in lines {
+            if let Ok(ranges) = self.ranges(along_u, fixed)
+                && ranges.iter().any(|(a, b)| x >= a - e && x <= b + e)
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// The ranges of the running parameter where the iso line at `fixed` is inside the face.
+    fn ranges(&self, along_u: bool, fixed: f64) -> Result<Vec<(f64, f64)>> {
         let held = usize::from(along_u);
         let [lo, hi] = self.domain[1 - held];
         let along = 1 - held;
@@ -202,13 +270,7 @@ impl<'a> FaceTrims<'a> {
                 }
             }
         }
-        ranges
-            .into_iter()
-            .map(|(a, b)| {
-                let (curve, interval) = iso_record(self.surface, along_u, fixed, (a, b))?;
-                Ok((curve, interval, [a, b]))
-            })
-            .collect()
+        Ok(ranges)
     }
 }
 

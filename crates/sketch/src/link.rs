@@ -86,6 +86,17 @@ pub enum LinkSource {
     /// An isoparametric curve of the face through `at`: `dir` is `u` (around a curved face),
     /// `v` (along it) or an explicit direction `[x, y, z]` (as text).
     Iso { body: String, at: Vec3, dir: String },
+    /// The curve on the face through `at` lying `distance` mm from `from` measured along the face,
+    /// on the side of `from` that `at` is on: `from` is an `Edge` of that face or a `SketchCurve`
+    /// lying on it. Fitted within `tolerance` mm (none: [`FACE_OFFSET_TOLERANCE`]). 3D curves.
+    FaceOffset {
+        body: String,
+        at: Vec3,
+        from: Box<LinkSource>,
+        distance: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tolerance: Option<f64>,
+    },
     /// The outline of a body spun about an axis (world line), laid into the sketch plane.
     Spun { body: String, origin: Vec3, dir: Vec3 },
     /// Text: baseline start `at` (sketch coordinates), capital height and angle (radians), in
@@ -167,6 +178,7 @@ impl LinkSource {
             LinkSource::Intersection { a, b } => format!("intersection of {} and {}", a.describe(), b.describe()),
             LinkSource::Spun { body, .. } => of_body("spun profile", body),
             LinkSource::Iso { body, .. } => of_body("isoparametric curve", body),
+            LinkSource::FaceOffset { body, distance, .. } => of_body(&format!("offset curve {distance} mm along a face"), body),
             LinkSource::Text { text, .. } => format!("text \"{}\"", text.chars().take(20).collect::<String>()),
         }
     }
@@ -187,6 +199,11 @@ impl LinkSource {
                 bodies.extend(b.bodies());
                 bodies
             }
+            LinkSource::FaceOffset { body, from, .. } => {
+                let mut bodies = vec![body.as_str()];
+                bodies.extend(from.bodies().into_iter().filter(|b| *b != body.as_str()));
+                bodies
+            }
             LinkSource::SketchCurve { .. }
             | LinkSource::SketchPoint { .. }
             | LinkSource::Origin
@@ -205,6 +222,10 @@ impl LinkSource {
 fn of_body(kind: &str, body: &str) -> String {
     if body.is_empty() { kind.to_string() } else { format!("{kind} of {body}") }
 }
+
+/// How far (mm) a [`LinkSource::FaceOffset`]'s fitted curve may stray from the true offset when
+/// the link names no tolerance.
+pub const FACE_OFFSET_TOLERANCE: f64 = 0.01;
 
 /// Half length of the line a sketch axis link produces.
 pub const SKETCH_AXIS_HALF: f64 = 100.0;

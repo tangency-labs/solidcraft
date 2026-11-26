@@ -28,7 +28,9 @@ impl WireSpace {
     pub fn from_legacy_link(link: &Link) -> Self {
         match (&link.kind, &link.source) {
             (LinkKind::Include, LinkSource::Edge { .. } | LinkSource::SketchCurve { .. })
-            | (_, LinkSource::OnSurface { .. } | LinkSource::Intersection { .. } | LinkSource::Iso { .. }) => Self::Component,
+            | (_, LinkSource::OnSurface { .. } | LinkSource::Intersection { .. } | LinkSource::Iso { .. } | LinkSource::FaceOffset { .. }) => {
+                Self::Component
+            }
             _ => Self::World,
         }
     }

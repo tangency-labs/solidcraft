@@ -309,6 +309,7 @@ mod surface;
 mod surface_analysis;
 mod surface_boundary;
 mod surface_match;
+mod surface_offset_curve;
 mod tab_layouts;
 mod tab_views;
 mod view_dxf;
@@ -645,6 +646,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(surface_boundary::COMMANDS.iter());
     v.extend(surface::COMMANDS.iter());
     v.extend(surface_match::COMMANDS.iter());
+    v.extend(surface_offset_curve::COMMANDS.iter());
     v.extend(sketch_modify::COMMANDS.iter());
     v.extend(sketch_project::COMMANDS.iter());
     v.extend(sketch_links::COMMANDS.iter());

@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "cmd.surface_offset_curve": "منحنى إزاحة",
+    "help.surface.offset_curve": "يضيف إلى المخطط النشط منحنى ثلاثي الأبعاد على مسافة معيّنة من حافة وجه أو من منحنى يقع عليه، تُقاس على امتداد الوجه. استخدمه لخطوط القص والتقسيم على بُعد ثابت من الحافة."
+  },
+  "de": {
+    "cmd.surface_offset_curve": "Versatzkurve",
+    "help.surface.offset_curve": "Fügt der aktiven Skizze eine 3D-Kurve in einem Abstand zu einer Kante einer Fläche oder zu einer Kurve auf ihr hinzu, gemessen entlang der Fläche. Für Schnitt- und Trennlinien in festem Abstand zur Kante."
+  },
+  "en": {
+    "cmd.surface_offset_curve": "Offset Curve",
+    "help.surface.offset_curve": "Adds a 3D curve to the active sketch at a distance from an edge of a face, or from a curve lying on it, measured along the face. Use it for trim and split lines at a fixed setback from an edge."
+  },
+  "he": {
+    "cmd.surface_offset_curve": "עקומת היסט",
+    "help.surface.offset_curve": "מוסיף לסקיצה הפעילה עקומה תלת-ממדית במרחק מקצה של פאה, או מעקומה המונחת עליה, הנמדד לאורך הפאה. השתמשו בה לקווי חיתוך ופיצול במרחק קבוע מהקצה."
+  },
+  "ja": {
+    "cmd.surface_offset_curve": "オフセット曲線",
+    "help.surface.offset_curve": "面のエッジ、または面上にある曲線から、面に沿って測った距離にある 3D 曲線をアクティブなスケッチに追加します。エッジから一定の距離にトリム線や分割線を引くときに使います。"
+  },
+  "ko": {
+    "cmd.surface_offset_curve": "간격띄우기 곡선",
+    "help.surface.offset_curve": "면의 모서리나 면 위에 놓인 곡선에서 면을 따라 잰 거리에 있는 3D 곡선을 활성 스케치에 추가합니다. 모서리에서 일정한 거리에 자르기 선과 분할 선을 만들 때 사용합니다."
+  },
+  "vi": {
+    "cmd.surface_offset_curve": "Đường cong offset",
+    "help.surface.offset_curve": "Thêm vào bản phác thảo đang mở một đường cong 3D cách một cạnh của mặt, hoặc một đường cong nằm trên mặt, một khoảng đo dọc theo mặt. Dùng cho các đường cắt và đường chia cách cạnh một khoảng cố định."
+  },
+  "zh": {
+    "cmd.surface_offset_curve": "偏移曲线",
+    "help.surface.offset_curve": "在活动草图中添加一条 3D 曲线，它与面的边或面上的曲线相距给定距离，该距离沿面测量。用于在距边固定距离处创建修剪线和分割线。"
+  }
+}

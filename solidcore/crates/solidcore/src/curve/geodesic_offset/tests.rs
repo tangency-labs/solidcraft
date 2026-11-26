@@ -161,6 +161,36 @@ fn the_equator_of_a_sphere_offsets_to_the_latitudes_d_over_r_from_it() {
 }
 
 #[test]
+fn an_offset_past_the_curves_radius_folds_and_is_refused() {
+    let mut k = Kernel::default();
+    let b = create_plane(&mut k, Point3::ZERO, 20.0, 10.0).unwrap();
+    let (s, dom) = face_of(&b, |_, _| true);
+    // A circle of radius 4 about (10, 5): inward by 3 it is the circle of radius 1; by 6 the
+    // geodesics cross the centre and the ends run back (the circle of radius 2, the other way).
+    let tau = std::f64::consts::TAU;
+    let circle = through(65, |t| {
+        Vec3::new(
+            10.0 + 4.0 * (tau * t).cos(),
+            5.0 + 4.0 * (tau * t).sin(),
+            0.0,
+        )
+    });
+    let ivl = circle.natural_interval();
+    let inward = [Side::Left, Side::Right]
+        .into_iter()
+        .find(|side| {
+            geodesic_offset(&k, &s, &dom, &circle, &ivl, 3.0, *side, 1e-5).is_ok_and(|o| {
+                along(&k, &o.curve)
+                    .iter()
+                    .all(|p| ((p.x - 10.0).hypot(p.y - 5.0) - 1.0).abs() < 1e-4)
+            })
+        })
+        .expect("one side runs inward");
+    let e = geodesic_offset(&k, &s, &dom, &circle, &ivl, 6.0, inward, 1e-5).unwrap_err();
+    assert!(e.to_string().contains("folds over itself"), "{e}");
+}
+
+#[test]
 fn an_offset_off_the_surface_and_bad_inputs_are_refused() {
     let mut k = Kernel::default();
     let b = create_plane(&mut k, Point3::ZERO, 20.0, 10.0).unwrap();

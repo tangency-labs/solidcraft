@@ -105,6 +105,9 @@ pub mod network;
 mod numbered;
 mod offset;
 mod offset_backend;
+mod offset_curve;
+#[cfg(test)]
+mod offset_curve_tests;
 mod ops;
 #[cfg(test)]
 mod outline_tests;
@@ -388,6 +391,9 @@ pub use native::encode_native_body;
 pub use native::native_preview_mesh;
 pub use native::smlib_body;
 pub use offset::with_same_surface;
+pub use offset_curve::FaceOffset;
+pub use offset_curve::OffsetFrom;
+pub use offset_curve::offset_on_face;
 pub use ops::BoolOp;
 pub use ops::apart;
 pub use ops::half_space;

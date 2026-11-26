@@ -372,6 +372,10 @@ pub(crate) fn remap_link(
             remap_link(a, ids, names, bodies, depth + 1);
             remap_link(b, ids, names, bodies, depth + 1);
         }
+        LinkSource::FaceOffset { body, from, .. } => {
+            mapped_name(body, bodies);
+            remap_link(from, ids, names, bodies, depth + 1);
+        }
         LinkSource::Plane { name } | LinkSource::ConstructionPoint { name } => mapped_name(name, names),
         // A construction axis, by name (#9324); the origin axes are no feature's.
         LinkSource::Axis { name } if !matches!(name.as_str(), "X" | "Y" | "Z") => mapped_name(name, names),
@@ -637,9 +641,13 @@ fn checked_link(source: &solidcraft_sketch::LinkSource, depth: usize) -> crate::
     if depth > 64 {
         return Err(crate::DocError::Invalid("copy link nesting exceeds 64".into()));
     }
-    if let solidcraft_sketch::LinkSource::Intersection { a, b } = source {
-        checked_link(a, depth + 1)?;
-        checked_link(b, depth + 1)?;
+    match source {
+        solidcraft_sketch::LinkSource::Intersection { a, b } => {
+            checked_link(a, depth + 1)?;
+            checked_link(b, depth + 1)?;
+        }
+        solidcraft_sketch::LinkSource::FaceOffset { from, .. } => checked_link(from, depth + 1)?,
+        _ => {}
     }
     Ok(())
 }
