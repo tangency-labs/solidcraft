@@ -4592,3 +4592,45 @@ fn a_fitted_loft_insert_with_a_knife_on_the_floor_gets_through_imprint_and_relat
         }
     }
 }
+
+/// Cutting a pocket whose top face is coplanar with the target and whose boundary has two
+/// parallel edges separated by `d in (1e-5, 2e-5]` must not split the pocket's own edge at
+/// unrelated vertices across the gap during coincident face-pair classification, regardless of
+/// whether either operand was round-tripped through `to_record`/`from_record` (which puts the
+/// coplanar cap face first in canonical order).
+#[test]
+fn coplanar_pocket_with_narrow_gap_cuts_cleanly_across_record_roundtrip() {
+    all_fixes();
+    let d = 1.3169768e-5;
+    let b1 = make_box([-16.5, -47.5, -102.25], [33.0, 95.0, 102.25]).unwrap();
+    // Build a pocket whose top face is coplanar with b1 (z = 0) and whose boundary has two
+    // parallel edges on z = 0 separated by d = 1.3169768e-5 (in (1e-5, 2e-5]).
+    let b2_outer = make_box([-14.625, -45.375, -100.5], [29.25, 90.75, 100.5]).unwrap();
+    let notch = make_box([-20.0, 37.875, -101.0], [34.625 - d, 2.0, 102.0]).unwrap();
+    let b2 = boolean(b2_outer, notch, BooleanOp::Subtract)
+        .unwrap()
+        .expect("non-empty pocket");
+    let expected_vol = volume(&b1) - volume(&b2);
+    let (rec1, _) = b1.to_record().unwrap();
+    let (rec2, _) = b2.to_record().unwrap();
+    let (b1_rt, _) = Body::from_record(&rec1, true).unwrap();
+    let (b2_rt, _) = Body::from_record(&rec2, true).unwrap();
+    for (name, a, b) in [
+        ("native_native", b1.copy().unwrap(), b2.copy().unwrap()),
+        ("rt_native", b1_rt.copy().unwrap(), b2.copy().unwrap()),
+        ("native_rt", b1.copy().unwrap(), b2_rt.copy().unwrap()),
+        ("rt_rt", b1_rt, b2_rt),
+    ] {
+        let r = boolean(a, b, BooleanOp::Subtract)
+            .unwrap_or_else(|e| panic!("{name}: {e:?}"))
+            .expect("non-empty cut");
+        let rep = r.check(CheckLevel::All).unwrap();
+        assert!(rep.is_valid(), "{name}: {}", rep.text);
+        assert!(r.is_manifold_solid().unwrap(), "{name}: not manifold solid");
+        assert!(
+            near(volume(&r), expected_vol),
+            "{name}: got {}, want {expected_vol}",
+            volume(&r)
+        );
+    }
+}
