@@ -67,9 +67,16 @@ const PICKED_PLANES: [&str; 4] =
 /// The parameters each command takes in world coordinates.
 fn table(id: &str) -> &'static [(&'static str, K)] {
     match id {
-        "solid.extrude" => {
-            &[("face", Pick), ("faces", Picks), ("face_body", Body), ("from", Make), ("to", Make), ("targets", Body), ("participants", Body)]
-        }
+        "solid.extrude" => &[
+            ("face", Pick),
+            ("faces", Picks),
+            ("face_body", Body),
+            ("from", Make),
+            ("to", Make),
+            ("to2", Make),
+            ("targets", Body),
+            ("participants", Body),
+        ],
         "solid.revolve" => &[("face", Pick), ("axis", Axis), ("to", Make), ("targets", Body), ("participants", Body)],
         // A sweep profile given as a body face: the face point, in the frame of the body under it.
         // The sweep's own geometry (its path on a body's edges, the direction its profile follows)
@@ -90,6 +97,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "solid.scale" => &[("origin", Make), ("bodies", Body)],
         "solid.offset_face" | "solid.shell" | "face.delete" => &[("faces", Picks), ("body", Body)],
         "solid.thread" => &[("face", Pick), ("faces", Picks), ("from", Pick), ("up_to", Plane)],
+        "shaft_spline.insert" => &[("shaft_face", Pick), ("shaft_start", Pick), ("bore_face", Pick), ("bore_start", Pick)],
         "solid.emboss" => &[("face", Make)],
         "solid.dome" => &[("face", Pick), ("body", Body)],
         "solid.draft" => &[("faces", Picks), ("neutral", Plane), ("pull", Dir), ("body", Body)],
@@ -855,9 +863,9 @@ fn map_local_with_input(
             }
         }
         let points = match (&feature.kind, cmd) {
-            (solidcraft_doc::FeatureKind::Revolve { to, .. }, "solid.revolve") => [("to", *to), ("from", None)],
-            (solidcraft_doc::FeatureKind::Extrude { extent, .. }, "solid.extrude") => [("to", extent.to), ("from", extent.from)],
-            _ => [("to", None), ("from", None)],
+            (solidcraft_doc::FeatureKind::Revolve { to, .. }, "solid.revolve") => [("to", *to), ("from", None), ("to2", None)],
+            (solidcraft_doc::FeatureKind::Extrude { extent, .. }, "solid.extrude") => [("to", extent.to), ("from", extent.from), ("to2", extent.to2)],
+            _ => [("to", None), ("from", None), ("to2", None)],
         };
         for (key, point) in points {
             if let Some(point) = point {

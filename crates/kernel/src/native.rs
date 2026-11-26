@@ -121,7 +121,20 @@ pub(crate) fn smlib_body_ordered(body: &Body) -> Result<(solidcraft_smlib::Brep,
 /// consumes (solidcore#3359). An export or a failed-boolean check can edit its argument:
 /// run either on a disposable copy, including the numbering fallback for an incomplete import.
 pub(crate) fn smlib_operand_ordered(body: &Body) -> Result<(std::sync::Arc<solidcraft_smlib::Brep>, Option<solidcraft_smlib::history::Order>)> {
-    let brep = body.smlib()?;
+    operand_ordered(body, body.smlib()?)
+}
+
+/// [`smlib_operand_ordered`] for a boolean that consumes its operands: where the body keeps no
+/// SMLib form yet, the one made for the operation is not kept, so the boolean takes it over
+/// rather than copying it ([`Body::smlib_to_consume`]).
+pub(crate) fn smlib_operand_to_consume(body: &Body) -> Result<(std::sync::Arc<solidcraft_smlib::Brep>, Option<solidcraft_smlib::history::Order>)> {
+    operand_ordered(body, body.smlib_to_consume()?)
+}
+
+fn operand_ordered(
+    body: &Body,
+    brep: std::sync::Arc<solidcraft_smlib::Brep>,
+) -> Result<(std::sync::Arc<solidcraft_smlib::Brep>, Option<solidcraft_smlib::history::Order>)> {
     let _span = solidcraft_profile::span("kernel", "smlib_body");
     let record = body.record();
     if complete_record_import(record, &brep) {
