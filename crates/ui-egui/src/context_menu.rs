@@ -1939,9 +1939,12 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
             v.push(act("ui.editSketchPattern", "Edit Sketch Pattern", "sketch_circ_pattern").with(json!({"pattern":pattern.id})));
         }
     }
-    // The block of the first selected member or axis line.
+    // The block of the first selected member or axis line; curves in no block can make one, which
+    // starts Make Block as the ribbon does, with the selection's curves and point.
     if let Some(block) = curves.iter().find_map(|c| ss.sketch.block_of(c)) {
         v.extend(block_items(app, sid, &block.id, true));
+    } else if curves.len() >= 2 {
+        v.push(cmd(app, "sketch.block", "Make Block"));
     }
     if crate::sketch_text::selected_entity(app).is_some() {
         v.push(cmd(app, "sketch.edit_text", "Edit Text"));

@@ -2685,16 +2685,18 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
         drawn.push((id.clone(), *sp));
     }
     let taken: Vec<Pos2> = drawn.iter().map(|(_, p)| *p).collect();
-    crate::sketch_block_canvas::paint(app, ss, painter, proj, glyph, hover, &taken);
-    if let (Some((id, at_glyph)), Some(h)) = (hovered_at, hover)
-        && let Some(c) = ss.sketch.constraints.iter().find(|c| c.id == id)
-    {
+    let block_label = crate::sketch_block_canvas::paint(app, ss, painter, proj, glyph, hover, &taken);
+    let constraint_label = hovered_at.and_then(|(id, at_glyph)| {
+        let c = ss.sketch.constraints.iter().find(|c| c.id == id)?;
         let ids = glyph_group(&ss.sketch, &id).join(", ");
         let label = if ss.report.redundant.contains(&id) {
             format!("{} ({ids}), redundant: already implied by other constraints", c.kind.name())
         } else {
             format!("{} ({ids})", c.kind.name())
         };
+        Some((label, at_glyph))
+    });
+    if let (Some((label, at_glyph)), Some(h)) = (constraint_label.or(block_label), hover) {
         // Wrapped to the view's width so a narrow view never clips it (#10794).
         let g =
             painter.layout(label, egui::FontId::proportional(solidcraft_theme::Tokens::get().font_small), tk.text, glyph_label_wrap_width(proj.rect));

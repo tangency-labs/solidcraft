@@ -38,12 +38,21 @@ fn hovered_curve_block(app: &SolveApp, ss: &SolvedSketch) -> Option<String> {
 }
 
 /// Paint each block's glyph beside its origin, clear of the constraint glyphs at `taken`, and
-/// the outline of the block under the pointer. `glyph` is the side of a glyph in pixels.
-pub(crate) fn paint(app: &SolveApp, ss: &SolvedSketch, painter: &egui::Painter, proj: &Proj, glyph: f32, hover: Option<Pos2>, taken: &[Pos2]) {
+/// the outline of the block under the pointer. `glyph` is the side of a glyph in pixels. Returns
+/// the label of the glyph under the pointer and that glyph's centre.
+pub(crate) fn paint(
+    app: &SolveApp,
+    ss: &SolvedSketch,
+    painter: &egui::Painter,
+    proj: &Proj,
+    glyph: f32,
+    hover: Option<Pos2>,
+    taken: &[Pos2],
+) -> Option<(String, Pos2)> {
     let sk = &ss.sketch;
     if sk.blocks.is_empty() {
         DRAWN.with(|d| d.borrow_mut().clear());
-        return;
+        return None;
     }
     let tk = solidcraft_theme::Tokens::get();
     let index: HashMap<&str, usize> = sk.curves.iter().enumerate().map(|(i, c)| (c.id.as_str(), i)).collect();
@@ -59,6 +68,7 @@ pub(crate) fn paint(app: &SolveApp, ss: &SolvedSketch, painter: &egui::Painter, 
         drawn.push((block.id.clone(), at));
     }
     let on_glyph = hover.and_then(|h| crate::sketch_tools::nearest_glyph(drawn.iter().map(|(id, q)| (id.as_str(), *q)), h, glyph * 0.6));
+    let tip = on_glyph.and_then(|(id, at)| sk.blocks.iter().find(|b| b.id == id).map(|b| (label(b), at)));
     let lit = on_glyph.map(|(id, _)| id.to_string()).or_else(|| hovered_curve_block(app, ss));
     if let Some(block) = lit.as_deref().and_then(|id| sk.blocks.iter().find(|b| b.id == id)) {
         let mut budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
@@ -81,6 +91,21 @@ pub(crate) fn paint(app: &SolveApp, ss: &SolvedSketch, painter: &egui::Painter, 
         crate::scenario::publish_handle(&format!("sketch:block-glyph:{id}"), *at);
     }
     DRAWN.with(|d| *d.borrow_mut() = drawn);
+    tip
+}
+
+/// A block glyph's label: the block's name, its scale and how many curves it holds, and that a
+/// double-click edits it.
+pub(crate) fn label(block: &solidcraft_engine::sketch::SketchBlock) -> String {
+    let scale = solidcraft_ui_text::tr(match block.scale {
+        solidcraft_engine::sketch::BlockScale::Fixed => "ui.block_glyph_scale_fixed",
+        solidcraft_engine::sketch::BlockScale::Free => "ui.block_glyph_scale_free",
+    });
+    let count = block.curves.len();
+    solidcraft_ui_text::format(
+        if count == 1 { "ui.block_glyph_tip_one" } else { "ui.block_glyph_tip_other" },
+        &[("name", &crate::sketch_block_tree::label(block)), ("scale", scale), ("count", &count.to_string())],
+    )
 }
 
 /// Forget the glyphs, for a frame that draws none.

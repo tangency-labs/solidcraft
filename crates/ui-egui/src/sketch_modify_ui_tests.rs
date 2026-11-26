@@ -1473,9 +1473,10 @@ fn construction_switches_a_selected_point_and_the_menu_offers_it() {
     assert!(!items.iter().any(|i| i.id == "sketch.construction"), "the origin is not offered Normal / Construction");
 }
 
-/// Sketch blocks (#4069): Make Block from the ribbon takes the selected curves; a member's menu,
-/// the block's glyph and its Browser row open Edit Block, which sends only what changed; a click
-/// on the row then Delete explodes the block, and the row's Delete Block deletes it whole.
+/// Sketch blocks (#4069): Make Block from the ribbon or the right-click menu takes the selected
+/// curves; a member's menu, the block's glyph and its Browser row open Edit Block, which sends
+/// only what changed; the glyph's label names the block; a click on the row then Delete explodes
+/// the block, and the row's Delete Block deletes it whole.
 #[test]
 fn blocks_are_made_edited_exploded_and_deleted_from_the_ribbon_menu_glyph_and_browser() {
     let mut h = Harness::new();
@@ -1489,7 +1490,10 @@ fn blocks_are_made_edited_exploded_and_deleted_from_the_ribbon_menu_glyph_and_br
     let curves = ["b1", "b2", "b3", "b4"];
     h.app.session.selection = curves.iter().map(|id| Sel::SketchCurve { id: (*id).into(), sketch: None }).collect();
     h.app.session.selection.push(Sel::SketchPoint { id: "b3.start".into() });
-    h.app.start("sketch.block");
+    let menu = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+    let make = menu.iter().find(|item| item.id == "sketch.block").expect("two curves in no block offer Make Block");
+    assert!(make.enabled && make.params.is_none() && make.icon == "c_block", "{make:?}");
+    crate::context_menu::run_item(&mut h.app, make, egui::pos2(0.0, 0.0));
     let d = h.app.dialog.as_mut().expect("Make Block opens its window");
     assert_eq!(d.inputs[0].items.len(), 4, "the selected curves are the members");
     assert_eq!(d.inputs[1].items.len(), 1, "the selected point is the origin");
@@ -1516,7 +1520,16 @@ fn blocks_are_made_edited_exploded_and_deleted_from_the_ribbon_menu_glyph_and_br
     assert!(corner.0.dist(corner.1) < 1e-9, "the block's origin is on the picked point: {corner:?}");
     h.app.dialog = None;
 
-    // A member's menu: Edit, Select and Explode Block.
+    // A member's menu: Edit, Select and Explode Block, and no Make Block while a selected curve
+    // is a member or the axis, nor for one curve.
+    h.app.run("sketch.line", json!({"points":[[30,0],[30,10]],"ids":["lone"]})).unwrap();
+    let axis = made["axis"].as_str().unwrap().to_string();
+    for picked in [vec!["b2", "lone"], vec![axis.as_str(), "lone"], vec!["lone"]] {
+        h.app.session.selection = picked.iter().map(|id| Sel::SketchCurve { id: (*id).into(), sketch: None }).collect();
+        let menu = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+        assert!(!menu.iter().any(|item| item.id == "sketch.block"), "no Make Block for {picked:?}");
+    }
+    h.app.run("edit.undo", json!({})).unwrap();
     h.app.session.selection = vec![Sel::SketchCurve { id: "b2".into(), sketch: None }];
     h.settle();
     let menu = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
@@ -1547,6 +1560,17 @@ fn blocks_are_made_edited_exploded_and_deleted_from_the_ribbon_menu_glyph_and_br
     assert!(crate::sketch_block_canvas::double_click(&mut h.app, at));
     assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::SketchModify(Mod::Block { editing: true, .. }))));
     h.app.dialog = None;
+
+    // Over the glyph, the label constraint glyphs show names the block, its scale and its curves.
+    h.step(&json!({"move":{"handle":format!("sketch:block-glyph:{block}")}})).unwrap();
+    h.frames(2);
+    let chip = crate::scenario::rect_of("sketch:glyph_label").expect("the glyph shows its label");
+    assert!(chip.width() > 0.0 && !chip.contains(at), "{chip:?} beside the glyph at {at:?}");
+    let b = h.app.session.doc.sketch(sid).unwrap().blocks.iter().find(|b| b.id == block).cloned().unwrap();
+    {
+        let _en = solidcraft_ui_text::scope("en");
+        assert_eq!(crate::sketch_block_canvas::label(&b), "Dove (Free scale, 4 curves), double-click to edit");
+    }
 
     // The Browser row: a click selects the members, and Delete then explodes the block.
     h.frames(6);
