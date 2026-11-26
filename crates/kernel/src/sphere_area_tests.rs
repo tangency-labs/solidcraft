@@ -61,12 +61,14 @@ fn the_big_side_of_one_cut_is_the_sphere_less_its_cap() {
 
 #[test]
 fn a_face_with_corners_from_two_crossing_cuts_is_exact() {
-    // Two cuts through the centre leave three quarters of the sphere, with corners at the poles.
-    let b = cut(&cut(&ball(), &block([0.0, -20.0, -20.0], [20.0, 20.0, 20.0])), &block([-20.0, 0.0, -20.0], [20.0, 20.0, 20.0]));
-    assert_close(sphere_area(&b), 2.0 * PI * R * R);
-    // Three cuts leave seven eighths, with three corners.
-    let b = cut(&ball(), &block([0.0, 0.0, 0.0], [20.0, 20.0, 20.0]));
-    assert_close(sphere_area(&b), 3.5 * PI * R * R);
+    // Two cuts through the centre leave a quarter of the sphere, a lune with corners where the
+    // cuts' circles cross, at (0, ±R, 0).
+    let b = cut(&cut(&ball(), &block([0.0, -20.0, -20.0], [20.0, 20.0, 20.0])), &block([-20.0, -20.0, 0.0], [20.0, 20.0, 20.0]));
+    assert_close(sphere_area(&b), PI * R * R);
+    // Cutting out the quarter between the same planes leaves the other three quarters, with the
+    // same corners turned the other way.
+    let b = cut(&ball(), &block([0.0, -20.0, 0.0], [20.0, 20.0, 20.0]));
+    assert_close(sphere_area(&b), 3.0 * PI * R * R);
 }
 
 #[test]
