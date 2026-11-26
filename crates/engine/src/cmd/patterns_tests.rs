@@ -32,7 +32,8 @@ fn a_mirrored_copy_keeps_the_material_and_appearance_of_its_body() {
     let r = run(&mut s, "solid.mirror", json!({"bodies": ["Block"], "plane": {"origin": [30, 0, 0], "normal": [1, 0, 0]}}));
     let copy = r["created_bodies"][0].as_str().unwrap().to_string();
     assert_ne!(copy, "Block");
-    assert_eq!(s.doc.materials.get(&copy).map(String::as_str), Some("Steel"));
+    assert_eq!(s.doc.resolved_body_material(&copy), Some("Steel"));
+    assert_eq!(s.doc.body_material(&copy), "Steel");
     let look = s.doc.appearances.bodies.get("Block");
     assert!(look.is_some());
     assert_eq!(s.doc.appearances.bodies.get(&copy), look);
@@ -558,6 +559,140 @@ fn pattern_on_path_spacing_extent_and_flip() {
     assert!(rel(volume(&mut s), PLATE - HOLE) < 1e-4);
 }
 
+/// The bounding boxes of the bodies, `[min, max]` each, in order of their lowest x, then y.
+fn body_boxes(s: &mut Session) -> Vec<[[f64; 3]; 2]> {
+    let m = run(s, "inspect.measure", json!({}));
+    let at = |b: &Value, k: &str| [0, 1, 2].map(|i| b["bbox"][k][i].as_f64().unwrap_or(f64::NAN));
+    let mut boxes: Vec<[[f64; 3]; 2]> = m["bodies"].as_array().unwrap().iter().map(|b| [at(b, "min"), at(b, "max")]).collect();
+    boxes.sort_by(|a, b| a[0][0].total_cmp(&b[0][0]).then(a[0][1].total_cmp(&b[0][1])));
+    boxes
+}
+
+fn assert_box(got: &[[f64; 3]; 2], want: [[f64; 3]; 2]) {
+    let off = (0..2).flat_map(|k| (0..3).map(move |i| (k, i))).map(|(k, i)| (got[k][i] - want[k][i]).abs()).fold(0.0, f64::max);
+    assert!(off < 1e-6, "{got:?} vs {want:?}");
+}
+
+/// #16084: Pattern on Path follows a chain of a body's edges. A 2 mm cube on the top front edge
+/// of a 100 long block, copied three times 20 apart along that edge: the path starts at the
+/// edge's end nearest the first point, so a point near x = 0 runs the copies to +x, a point near
+/// x = 100 runs them to -x, as Flip does.
+#[test]
+fn pattern_on_path_follows_a_bodys_edge_from_the_end_nearest_the_first_point() {
+    let start = |s: &mut Session| {
+        run(s, "solid.box", json!({"length": 100, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+        run(s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [-1, -1, 10], "body_name": "Pin"}));
+    };
+    let pin = |x: f64| [[x - 1.0, -1.0, 10.0], [x + 1.0, 1.0, 12.0]];
+    for (edge, flip, xs) in
+        [([5.0, 0.0, 10.0], false, [0.0, 20.0, 40.0]), ([95.0, 0.0, 10.0], false, [-40.0, -20.0, 0.0]), ([5.0, 0.0, 10.0], true, [-40.0, -20.0, 0.0])]
+    {
+        let mut s = Session::default();
+        start(&mut s);
+        run(
+            &mut s,
+            "solid.pattern.path",
+            json!({"bodies": ["Pin"], "path_body": "Block", "path_edges": [edge], "count": 3, "spacing": 20, "flip": flip}),
+        );
+        let boxes = body_boxes(&mut s);
+        assert_eq!(boxes.len(), 4, "{boxes:?}");
+        // The block is the box from x = 0 with y from 0; the pins are the three others.
+        let pins: Vec<_> = boxes.iter().filter(|b| b[0][1] < -0.5).collect();
+        assert_eq!(pins.len(), 3, "{boxes:?}");
+        for (got, x) in pins.iter().zip(xs) {
+            assert_box(got, pin(x));
+        }
+    }
+}
+
+/// #16084: a closed chain of edges starts where the first point picks it. A 2 mm cube centred
+/// on the front of the top outline of a 40 x 20 x 10 block with its upright edges rounded 4,
+/// picked there, is copied 10 or 20 along the outline: 10 stays on the 32 long front edge, at
+/// x = 20 ± 10, and 20 runs 16 to the corner and 4 round its radius 4 arc, a turn of 1 radian:
+/// at x = 20 ± (16 + 4 sin 1), y = 4 - 4 cos 1. The chain may run either way round.
+#[test]
+fn pattern_on_path_round_a_closed_outline_starts_at_the_first_point() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[0, 0, 5], [40, 0, 5], [0, 20, 5], [40, 20, 5]], "radius": 4, "tangent_chain": false}));
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [19, -1, 11], "body_name": "Pin"}));
+    let c = 8.0 * std::f64::consts::FRAC_1_SQRT_2;
+    let outline = json!([
+        [20, 0, 10],
+        [36.0 + c / 2.0, 4.0 - c / 2.0, 10],
+        [40, 10, 10],
+        [36.0 + c / 2.0, 16.0 + c / 2.0, 10],
+        [20, 20, 10],
+        [4.0 - c / 2.0, 16.0 + c / 2.0, 10],
+        [0, 10, 10],
+        [4.0 - c / 2.0, 4.0 - c / 2.0, 10]
+    ]);
+    run(&mut s, "solid.pattern.path", json!({"bodies": ["Pin"], "path_body": "Block", "path_edges": outline, "count": 2, "spacing": 10}));
+    let pins: Vec<_> = body_boxes(&mut s).into_iter().filter(|b| b[1][2] > 12.5).collect();
+    assert_eq!(pins.len(), 2, "{pins:?}");
+    let centre = |b: &[[f64; 3]; 2]| [0, 1, 2].map(|i| (b[0][i] + b[1][i]) / 2.0);
+    let xs: Vec<f64> = pins.iter().map(|b| centre(b)[0]).collect();
+    let near = |a: f64, b: f64| (a - b).abs() < 1e-6;
+    assert!(pins.iter().all(|b| near(centre(b)[1], 0.0) && near(centre(b)[2], 12.0)), "{pins:?}");
+    assert!((near(xs[0], 10.0) && near(xs[1], 20.0)) || (near(xs[0], 20.0) && near(xs[1], 30.0)), "{xs:?}");
+    // One step of 20: past the end of the straight, 4 round the corner.
+    let mut s2 = Session::default();
+    run(&mut s2, "solid.box", json!({"length": 40, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+    run(&mut s2, "solid.fillet", json!({"edges": [[0, 0, 5], [40, 0, 5], [0, 20, 5], [40, 20, 5]], "radius": 4, "tangent_chain": false}));
+    run(&mut s2, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [19, -1, 11], "body_name": "Pin"}));
+    run(&mut s2, "solid.pattern.path", json!({"bodies": ["Pin"], "path_body": "Block", "path_edges": outline, "count": 2, "spacing": 20}));
+    let copy = body_boxes(&mut s2).into_iter().filter(|b| b[1][2] > 12.5).map(|b| centre(&b)).find(|p| !near(p[0], 20.0)).unwrap();
+    let dx = 16.0 + 4.0 * 1f64.sin();
+    assert!((near(copy[0], 20.0 + dx) || near(copy[0], 20.0 - dx)) && near(copy[1], 4.0 - 4.0 * 1f64.cos()) && near(copy[2], 12.0), "{copy:?}");
+}
+
+/// #16084: copies along a body's circular edge, turning with the path, go round its centre: a
+/// 4 x 2 x 2 bar lying across the top edge of a radius 20 cylinder, copied four times a quarter
+/// of the circle (10 pi) apart, stands across the edge at 90, 180 and 270 degrees. A chain that
+/// leaves every plane (three edges of a block's corner) cannot turn the copies, and says so.
+#[test]
+fn pattern_on_path_turns_copies_round_a_bodys_circular_edge() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 10, "body_name": "Can"}));
+    run(&mut s, "solid.box", json!({"length": 4, "width": 2, "height": 2, "corner": [18, -1, 10], "body_name": "Bar"}));
+    run(
+        &mut s,
+        "solid.pattern.path",
+        json!({"bodies": ["Bar"], "path_body": "Can", "path_edges": [[20, 0, 10]], "count": 4, "spacing": format!("{} mm", 10.0 * PI), "orientation": "path"}),
+    );
+    let boxes = body_boxes(&mut s);
+    assert_eq!(boxes.len(), 5, "{boxes:?}");
+    let bars: Vec<_> = boxes.iter().filter(|b| b[1][2] > 11.0).collect();
+    assert_eq!(bars.len(), 4, "{boxes:?}");
+    let want = [
+        [[-22.0, -1.0, 10.0], [-18.0, 1.0, 12.0]],
+        [[-1.0, -22.0, 10.0], [1.0, -18.0, 12.0]],
+        [[-1.0, 18.0, 10.0], [1.0, 22.0, 12.0]],
+        [[18.0, -1.0, 10.0], [22.0, 1.0, 12.0]],
+    ];
+    for (got, want) in bars.iter().zip(want) {
+        assert_box(got, want);
+    }
+
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [-1, -1, -1], "body_name": "Pin"}));
+    let corner = json!({"bodies": ["Pin"], "path_body": "Block", "path_edges": [[20, 0, 0], [40, 0, 5], [40, 10, 10]], "count": 2, "spacing": 30});
+    run(&mut s, "solid.pattern.path", corner.clone());
+    assert!(s.model.results.iter().all(|r| r.error.is_none()));
+    let mut turned = corner;
+    turned["orientation"] = json!("path");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [-1, -1, -1], "body_name": "Pin"}));
+    let refused = s.execute("solid.pattern.path", &turned).map(|_| s.model.results.last().and_then(|r| r.error.clone()).unwrap_or_default());
+    let message = match refused {
+        Ok(error) => error,
+        Err(e) => e.to_string(),
+    };
+    assert!(message.contains("only along a path in one plane"), "{message}");
+}
+
 #[test]
 fn patterns_of_bodies() {
     let mut s = Session::default();
@@ -651,12 +786,15 @@ fn rectangular_pattern_distance_types_place_the_copies() {
 
 /// The command works a row out with the values the pattern is built with, so an expression's
 /// bare number is read in the design's unit there too (#8523): in an inch design `2 + 0` is a
-/// 2 in extent, not 2 mm that a 1 in spacing would not fit in.
+/// 2 in extent, not 2 mm that a 1 in spacing would not fit in. The spacings are checked the same
+/// way before that: with `inset` at 1 mm, `1 - inset` is 24.4 mm there, not the 0 mm a division would
+/// refuse.
 #[test]
 fn rectangular_pattern_extent_reads_an_expression_in_the_design_unit() {
     let pattern = |p: Value| {
         let mut s = Session::default();
         run(&mut s, "document.units", json!({"units": "in"}));
+        run(&mut s, "parameters.add", json!({"name": "inset", "expression": "1 mm"}));
         run(&mut s, "solid.box", json!({"length": "10 mm", "width": "10 mm", "height": "10 mm", "body_name": "Cube"}));
         let mut p = p;
         p["bodies"] = json!(["Cube"]);
@@ -678,6 +816,113 @@ fn rectangular_pattern_extent_reads_an_expression_in_the_design_unit() {
     assert_eq!(xs.len(), 2, "{xs:?}");
     assert!((xs[1] - 50.8).abs() < 1e-9, "{xs:?}");
     let solidcraft_doc::PatternKind::Rectangular { spacing1, .. } = &p else { panic!("not rectangular") };
+    assert_eq!(spacing1.as_str(), "25.4 mm");
+    let gap = 10.0 / 24.4;
+    for p in [
+        json!({"dir1": [1, 0, 0], "count1": 2, "spacing1": "10 mm * 1 mm / (1 - inset)"}),
+        json!({"dir1": [1, 0, 0], "distance1": "count_list", "count1": 2, "spacing_list1": ["10 mm * 1 mm / (1 - inset)"]}),
+    ] {
+        let (xs, _) = pattern(p.clone());
+        assert!(xs.len() == 1 && (xs[0] - gap).abs() < 1e-9, "{p}: {xs:?}");
+    }
+}
+
+/// A direction set by count and spacing list takes the list's gaps in turn and from the start
+/// again: 10, 20 and 30 mm with a count of 5 put the copies at 10, 30, 60 and 70 mm. Centred, the
+/// list runs out from the original on both sides; Flip runs it the other way.
+#[test]
+fn rectangular_pattern_spacing_list_places_the_copies() {
+    let x = |v: &[f64]| v.iter().map(|x| [*x, 0.0]).collect::<Vec<_>>();
+    let list = |extra: Value| {
+        let mut p = json!({"dir1": [1, 0, 0], "distance1": "count_list", "count1": 5, "spacing_list1": [10, "20 mm", 30]});
+        if let (Some(p), Some(extra)) = (p.as_object_mut(), extra.as_object()) {
+            p.extend(extra.clone());
+        }
+        rectangular_offsets(p)
+    };
+    let (got, s) = list(json!({}));
+    assert_offsets(&got, &x(&[10.0, 30.0, 60.0, 70.0]));
+    // The list is saved as given; the spacing keeps its first gap for switching back.
+    let Some(solidcraft_doc::FeatureKind::Pattern {
+        pattern: solidcraft_doc::PatternKind::Rectangular { spacing1, spacing_list1, distance1, .. },
+        ..
+    }) = s.doc.features.last().map(|f| &f.kind)
+    else {
+        panic!("no rectangular pattern");
+    };
+    assert_eq!(*distance1, solidcraft_doc::PatternDistance::CountList);
+    assert_eq!(spacing_list1.iter().map(|e| e.as_str()).collect::<Vec<_>>(), ["10", "20 mm", "30"]);
+    assert_eq!(spacing1.as_str(), "10 mm");
+    let (got, _) = list(json!({"count1": 7}));
+    assert_offsets(&got, &x(&[10.0, 30.0, 60.0, 70.0, 90.0, 120.0]));
+    let (got, _) = list(json!({"reversed": true}));
+    assert_offsets(&got, &x(&[-70.0, -60.0, -30.0, -10.0]));
+    let (got, _) = list(json!({"alignment": "center"}));
+    assert_offsets(&got, &x(&[-30.0, -10.0, 10.0, 30.0]));
+    // An even count centred: the extra copy goes ahead, or behind with Flip.
+    let (got, _) = list(json!({"alignment": "center", "count1": 4}));
+    assert_offsets(&got, &x(&[-10.0, 10.0, 30.0]));
+    let (got, _) = list(json!({"alignment": "center", "count1": 4, "reversed": true}));
+    assert_offsets(&got, &x(&[-30.0, -10.0, 10.0]));
+    let (got, _) = list(json!({"alignment": "left"}));
+    assert_offsets(&got, &x(&[-70.0, -60.0, -30.0, -10.0]));
+    // Each direction chooses on its own.
+    let (got, _) = rectangular_offsets(json!({
+        "dir1": [1, 0, 0], "count1": 2, "spacing1": 30,
+        "dir2": [0, 1, 0], "distance2": "count_list", "count2": 3, "spacing_list2": [5, 15]
+    }));
+    assert_offsets(&got, &[[0.0, 5.0], [0.0, 20.0], [30.0, 0.0], [30.0, 5.0], [30.0, 20.0]]);
+    // A list on a direction set another way isn't kept.
+    let (_, s) = rectangular_offsets(json!({"dir1": [1, 0, 0], "count1": 3, "spacing1": 10, "spacing_list1": [4, 5]}));
+    assert!(!s.doc.to_json().contains("spacing_list1"));
+}
+
+/// The spacing list is saved, undone and reopened with the design, and its gaps follow
+/// parameters.
+#[test]
+fn rectangular_pattern_spacing_list_saves_reopens_and_follows_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "10 mm"}));
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Cube"}));
+    let before = s.doc.to_json();
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Cube"], "dir1": [1, 0, 0], "distance1": "count_list", "count1": 4, "spacing_list1": ["gap", "2 * gap"]}),
+    );
+    let reach = |s: &Session| {
+        let st = s.model.state();
+        st.bodies.iter().filter_map(|mb| solidcraft_kernel::measure(&mb.body).ok()).map(|m| m.bbox.max.x).fold(f64::NEG_INFINITY, f64::max)
+    };
+    // Copies at 10, 30 and 40 mm.
+    assert_eq!(s.model.state().bodies.len(), 4);
+    assert!((reach(&s) - 42.0).abs() < 1e-6, "{}", reach(&s));
+    let saved = s.doc.to_json();
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc.to_json(), saved);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    assert_eq!(reopened.model.state().bodies.len(), 4);
+    run(&mut reopened, "parameters.change", json!({"name": "gap", "expression": "20 mm"}));
+    // Now at 20, 60 and 80 mm.
+    assert!((reach(&reopened) - 82.0).abs() < 1e-6, "{}", reach(&reopened));
+    // In an inch design a bare number inside an expression is inches, for the copies and for the
+    // spacing kept for switching back alike.
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    run(&mut s, "solid.box", json!({"length": "2 mm", "width": "2 mm", "height": "2 mm", "body_name": "Cube"}));
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Cube"], "dir1": [1, 0, 0], "distance1": "count_list", "count1": 3, "spacing_list1": ["1 + 0"]}),
+    );
+    assert!((reach(&s) - 52.8).abs() < 1e-6, "{}", reach(&s));
+    let Some(solidcraft_doc::FeatureKind::Pattern { pattern: solidcraft_doc::PatternKind::Rectangular { spacing1, .. }, .. }) =
+        s.doc.features.last().map(|f| &f.kind)
+    else {
+        panic!("no rectangular pattern");
+    };
     assert_eq!(spacing1.as_str(), "25.4 mm");
 }
 
@@ -724,7 +969,7 @@ fn rectangular_pattern_refuses_unusable_extents_atomically() {
     let before = s.doc.to_json();
     let undo = s.undo.len();
     let cases = [
-        (json!({"distance1": "pitch", "count1": 3, "spacing1": 10}), "`distance1` must be count_spacing, count_extent or spacing_extent"),
+        (json!({"distance1": "pitch", "count1": 3, "spacing1": 10}), "`distance1` must be count_spacing, count_extent, spacing_extent or count_list"),
         (json!({"distance1": 2, "count1": 3, "spacing1": 10}), "`distance1` must be"),
         (json!({"distance1": "spacing_extent", "spacing1": 10, "extent1": 80, "copy_at_end1": "yes"}), "`copy_at_end1` must be true or false"),
         (json!({"distance1": "count_extent", "count1": 3}), "`extent1`"),
@@ -740,6 +985,20 @@ fn rectangular_pattern_refuses_unusable_extents_atomically() {
         (json!({"distance1": "spacing_extent", "spacing1": 1e-300, "extent1": 1e8}), "pattern count must be"),
         (json!({"distance1": "count_extent", "count1": 3, "extent1": "5 deg"}), "extent1"),
         (json!({"count1": 2, "spacing1": 10, "dir2": [0, 1, 0], "distance2": "spacing_extent", "spacing2": 30, "extent2": 20}), "direction 2"),
+        (json!({"distance1": "count_list", "count1": 3}), "`spacing_list1` must list at least one spacing"),
+        (json!({"distance1": "count_list", "count1": 3, "spacing_list1": []}), "`spacing_list1` must list at least one spacing"),
+        (json!({"distance1": "count_list", "count1": 3, "spacing_list1": 10}), "`spacing_list1` must be a list of spacings"),
+        (json!({"distance1": "count_list", "count1": 3, "spacing_list1": [10, true]}), "`spacing_list1` must be a list of spacings"),
+        (json!({"distance1": "count_list", "count1": 3, "spacing_list1": [10, " "]}), "`spacing_list1` must be a list of spacings"),
+        (json!({"distance1": "count_list", "count1": 3, "spacing_list1": [10, "5 deg"]}), "spacing_list1 spacing 2"),
+        (json!({"distance1": "count_list", "count1": 3, "spacing_list1": [10, 0]}), "spacing 2 must be greater than zero"),
+        (json!({"distance1": "count_list", "count1": 3, "spacing_list1": [-10]}), "spacing 1 must be greater than zero"),
+        (json!({"distance1": "count_list", "spacing_list1": [10]}), "`count1`"),
+        (json!({"distance1": "count_list", "count1": 0, "spacing_list1": [10]}), "count"),
+        (
+            json!({"count1": 2, "spacing1": 10, "dir2": [0, 1, 0], "distance2": "count_list", "count2": 3}),
+            "`spacing_list2` must list at least one spacing",
+        ),
     ];
     for (mut p, message) in cases {
         p["bodies"] = json!(["Cube"]);
@@ -3039,12 +3298,12 @@ fn a_body_pattern_keeps_each_sources_appearance_and_material() {
     run(&mut s, "solid.pattern.rectangular", json!({"bodies":["Base","Post"],"dir1":[1,0,0],"count1":3,"spacing1":30}));
     let red = s.doc.appearances.bodies.get("Post").cloned().expect("Post is red");
     for copy in ["Base (2)", "Base (3)"] {
-        assert_eq!(s.doc.materials.get(copy).map(String::as_str), Some("Steel"), "{copy}");
+        assert_eq!(s.doc.resolved_body_material(copy), Some("Steel"), "{copy}");
         assert!(!s.doc.appearances.bodies.contains_key(copy), "{copy} was not painted");
     }
     for copy in ["Post (2)", "Post (3)"] {
         assert_eq!(s.doc.appearances.bodies.get(copy), Some(&red), "{copy}");
-        assert!(!s.doc.materials.contains_key(copy), "{copy} has no material of its own");
+        assert_eq!(s.doc.resolved_body_material(copy), None, "{copy} has no material of its own");
     }
 }
 
@@ -3086,7 +3345,7 @@ fn editing_a_body_pattern_keeps_source_material_and_appearance_on_copies() {
     assert_eq!(s.doc.materials.get("Base (2)").map(String::as_str), Some("Brass"));
     assert_eq!(s.doc.appearances.bodies.get("Base (2)"), Some(&green));
     for copy in ["Base (3)", "Base (4)"] {
-        assert_eq!(s.doc.materials.get(copy).map(String::as_str), Some("Steel"), "{copy}");
+        assert_eq!(s.doc.resolved_body_material(copy), Some("Steel"), "{copy}");
         assert_eq!(s.doc.appearances.bodies.get(copy), Some(&blue), "{copy}");
     }
 
@@ -3099,13 +3358,13 @@ fn editing_a_body_pattern_keeps_source_material_and_appearance_on_copies() {
         .unwrap();
     run(&mut one, "timeline.edit", json!({"feature": single, "set": {"pattern.count1": 3}}));
     for copy in ["Base (2)", "Base (3)"] {
-        assert_eq!(one.doc.materials.get(copy).map(String::as_str), Some("Aluminum"), "{copy}");
+        assert_eq!(one.doc.resolved_body_material(copy), Some("Aluminum"), "{copy}");
     }
 
     // 3) Changing the seed body via timeline.edit copies the new seed body's material and look.
     run(&mut s, "timeline.edit", json!({"feature": pat, "set": {"bodies": ["Post"], "pattern.count1": 3}}));
     for copy in ["Post (2)", "Post (3)"] {
-        assert_eq!(s.doc.materials.get(copy).map(String::as_str), Some("Brass"), "{copy}");
+        assert_eq!(s.doc.resolved_body_material(copy), Some("Brass"), "{copy}");
         assert_eq!(s.doc.appearances.bodies.get(copy), Some(&red), "{copy}");
     }
 
@@ -3951,4 +4210,318 @@ fn deleting_or_adding_sibling_occurrences_keeps_mirror_of_pattern_copy_working()
     assert!(s.model.result(sym_id).and_then(|r| r.error.as_deref()).is_some(), "deleting the referenced occurrence must still fail SYM");
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pattern_and_mirror_copies_follow_seed_material_after_creation_and_respect_overrides() {
+    let measured_material = |s: &mut Session, body: &str| -> String {
+        let m = run(s, "inspect.measure", json!({}));
+        m["bodies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|b| b["name"].as_str() == Some(body))
+            .and_then(|b| b["material"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+
+    // Case B: pattern created while seed is Default, then seed is assigned Steel.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new", "body_name": "Body1"}));
+    let pat = run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Body1"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 25}))["feature"]
+        .as_u64()
+        .unwrap();
+    run(&mut s, "material.assign", json!({"bodies": ["Body1"], "material": "Steel"}));
+    for body in ["Body1", "Body1 (2)", "Body1 (3)"] {
+        assert_eq!(s.doc.body_material(body), "Steel", "{body}");
+        assert!((s.doc.density(body) - 7.85).abs() < 1e-9, "{body}");
+        assert_eq!(measured_material(&mut s, body), "Steel", "{body}");
+    }
+    assert_eq!(s.doc.body_look("Body1 (2)", pat), s.doc.material_look("Steel"));
+
+    // Case C: timeline.edit re-sending `bodies: ["Body1"]` keeps Steel on every copy.
+    run(&mut s, "timeline.edit", json!({"feature": pat, "set": {"bodies": ["Body1"]}}));
+    for body in ["Body1 (2)", "Body1 (3)"] {
+        assert_eq!(s.doc.body_material(body), "Steel", "{body}");
+        assert_eq!(measured_material(&mut s, body), "Steel", "{body}");
+    }
+
+    // Explicit copy override takes precedence over seed material and survives seed changes.
+    run(&mut s, "material.assign", json!({"bodies": ["Body1 (2)"], "material": "Brass"}));
+    assert_eq!(s.doc.body_material("Body1 (2)"), "Brass");
+    assert_eq!(s.doc.body_material("Body1 (3)"), "Steel");
+    run(&mut s, "material.assign", json!({"bodies": ["Body1"], "material": "Aluminum"}));
+    assert_eq!(s.doc.body_material("Body1"), "Aluminum");
+    assert_eq!(s.doc.body_material("Body1 (2)"), "Brass");
+    assert_eq!(s.doc.body_material("Body1 (3)"), "Aluminum");
+    assert_eq!(measured_material(&mut s, "Body1 (2)"), "Brass");
+    assert_eq!(measured_material(&mut s, "Body1 (3)"), "Aluminum");
+
+    // Case G: editing spacing, direction, and count keeps overrides and gives new copies seed material.
+    run(&mut s, "timeline.edit", json!({"feature": pat, "set": {"pattern.spacing1": 35, "pattern.dir1": [0, 1, 0], "pattern.count1": 4}}));
+    assert_eq!(s.doc.body_material("Body1 (2)"), "Brass");
+    for copy in ["Body1 (3)", "Body1 (4)"] {
+        assert_eq!(s.doc.body_material(copy), "Aluminum", "{copy}");
+        assert_eq!(measured_material(&mut s, copy), "Aluminum", "{copy}");
+    }
+
+    // Case G directly after Case B (unstyled existing copy + new copies on count/spacing edit).
+    let mut g = Session::default();
+    run(&mut g, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new", "body_name": "Plate"}));
+    let pat_g = run(&mut g, "solid.pattern.rectangular", json!({"bodies": ["Plate"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 20}))["feature"]
+        .as_u64()
+        .unwrap();
+    run(&mut g, "material.assign", json!({"bodies": ["Plate"], "material": "Copper"}));
+    run(&mut g, "timeline.edit", json!({"feature": pat_g, "set": {"pattern.spacing1": 30, "pattern.count1": 4}}));
+    for copy in ["Plate (2)", "Plate (3)", "Plate (4)"] {
+        assert_eq!(g.doc.body_material(copy), "Copper", "{copy}");
+        assert_eq!(measured_material(&mut g, copy), "Copper", "{copy}");
+    }
+
+    // Parameter-driven count increase inherits seed material without any timeline.edit.
+    let mut param = Session::default();
+    run(&mut param, "parameters.add", json!({"name": "n", "expression": "2", "unit": "none"}));
+    run(&mut param, "solid.box", json!({"length": 8, "width": 8, "height": 8, "center": [0, 0, 4], "operation": "new", "body_name": "Block"}));
+    run(&mut param, "solid.pattern.rectangular", json!({"bodies": ["Block"], "dir1": [1, 0, 0], "count1": "n", "spacing1": 20}));
+    run(&mut param, "material.assign", json!({"bodies": ["Block"], "material": "Titanium"}));
+    run(&mut param, "parameters.change", json!({"name": "n", "expression": "4"}));
+    for copy in ["Block (2)", "Block (3)", "Block (4)"] {
+        assert_eq!(param.doc.body_material(copy), "Titanium", "{copy}");
+        assert_eq!(measured_material(&mut param, copy), "Titanium", "{copy}");
+    }
+}
+
+#[test]
+fn pattern_edit_in_assembly_keeps_seed_materials_for_added_renamed_and_circular_copies() {
+    let mut s = Session::default();
+    let o1 = run(&mut s, "component.create", json!({"name": "PartA", "activate": true}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "operation": "new", "body_name": "PinA"}));
+    run(&mut s, "material.assign", json!({"bodies": ["PinA"], "material": "Steel"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+
+    let o2 = run(&mut s, "component.create", json!({"name": "PartB", "activate": true}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 30, 0], "operation": "new", "body_name": "PinB"}));
+    run(&mut s, "material.assign", json!({"bodies": ["PinB"], "material": "Aluminum"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+
+    let o3 = run(&mut s, "component.create", json!({"name": "PartC", "activate": true}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 60, 0], "operation": "new", "body_name": "PinC"}));
+    run(&mut s, "material.assign", json!({"bodies": ["PinC"], "material": "Brass"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+
+    // Case E: timeline.edit adding a new seed body with aligned bodies/placements/body_names.
+    let rect = run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["PinA"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 40}))["feature"]
+        .as_u64()
+        .unwrap();
+    run(&mut s, "material.assign", json!({"bodies": ["PinA (2)"], "material": "Copper"}));
+    run(
+        &mut s,
+        "timeline.edit",
+        json!({"feature": rect, "set": {"bodies": ["PinA", "PinB"], "placements": [[o1], [o2]], "body_names": ["PinA (2)", "PinB (2)"]}}),
+    );
+    assert_eq!(s.doc.body_material("PinA (2)"), "Copper", "existing explicit override survives adding a new seed body");
+    assert_eq!(s.doc.body_material("PinB (2)"), "Aluminum", "added seed body's copy inherits its seed's material");
+    let mass = run(&mut s, "assembly.mass_properties", json!({}));
+    let mass_material = |body: &str| -> Option<String> {
+        mass["occurrences"]
+            .as_array()?
+            .iter()
+            .flat_map(|o| o["bodies"].as_array().into_iter().flatten())
+            .find(|b| b["name"].as_str() == Some(body))
+            .and_then(|b| b["material"].as_str())
+            .map(str::to_string)
+    };
+    assert_eq!(mass_material("PinA (2)").as_deref(), Some("Copper"));
+    assert_eq!(mass_material("PinB (2)").as_deref(), Some("Aluminum"));
+
+    // Case F (part 1): timeline.edit adding a seed body while omitting body_names.
+    run(&mut s, "timeline.edit", json!({"feature": rect, "set": {"bodies": ["PinA", "PinB", "PinC"], "placements": [[o1], [o2], [o3]]}}));
+    assert_eq!(s.doc.body_material("PinA (2)"), "Copper");
+    assert_eq!(s.doc.body_material("PinB (2)"), "Aluminum");
+    assert_eq!(s.doc.body_material("PinC (2)"), "Brass");
+
+    // Case F (part 2): timeline.edit renaming copies via body_names.
+    run(&mut s, "timeline.edit", json!({"feature": rect, "set": {"body_names": ["CopyA", "CopyB", "CopyC"]}}));
+    assert_eq!(s.doc.body_material("CopyA"), "Steel");
+    assert_eq!(s.doc.body_material("CopyB"), "Aluminum");
+    assert_eq!(s.doc.body_material("CopyC"), "Brass");
+
+    // Circular pattern: timeline.edit adding a second seed body with aligned placements.
+    let circ = run(
+        &mut s,
+        "solid.pattern.circular",
+        json!({"bodies": ["PinA"], "axis": {"origin": [-30, 0, 0], "dir": [0, 0, 1]}, "count": 2, "angle": "90 deg"}),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+    run(&mut s, "timeline.edit", json!({"feature": circ, "set": {"bodies": ["PinA", "PinB"], "placements": [[o1], [o2]]}}));
+    let circ_copies: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == circ).map(|b| b.name.clone()).collect();
+    assert_eq!(circ_copies.len(), 2, "{circ_copies:?}");
+    assert_eq!(s.doc.body_material(&circ_copies[0]), "Steel");
+    assert_eq!(s.doc.body_material(&circ_copies[1]), "Aluminum");
+}
+
+#[test]
+fn nested_pattern_and_mirror_copies_inherit_seed_material_recursively() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "operation": "new", "body_name": "Seed"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Seed"], "dir1": [0, 1, 0], "count1": 3, "spacing1": 25}));
+    let pat2 = run(&mut s, "solid.pattern.circular", json!({"bodies": ["Seed (2)"], "axis": "Z", "count": 2, "angle": "180 deg"}));
+    let nested_copy = pat2["created_bodies"][0].as_str().unwrap().to_string();
+    let mirror = run(&mut s, "solid.mirror", json!({"bodies": [nested_copy], "plane": {"origin": [0, 0, 30], "normal": [0, 0, 1]}}));
+    let mirror_id = mirror["feature"].as_u64().unwrap();
+    let mirrored_nested = mirror["created_bodies"][0].as_str().unwrap().to_string();
+
+    // Assign Titanium to Seed AFTER all pattern and mirror features already exist.
+    run(&mut s, "material.assign", json!({"bodies": ["Seed"], "material": "Titanium"}));
+    for body in ["Seed", "Seed (2)", "Seed (3)", nested_copy.as_str(), mirrored_nested.as_str()] {
+        assert_eq!(s.doc.body_material(body), "Titanium", "{body}");
+    }
+
+    // Overriding intermediate `Seed (2)` propagates to its downstream copies but not siblings/seed.
+    run(&mut s, "material.assign", json!({"bodies": ["Seed (2)"], "material": "Brass"}));
+    assert_eq!(s.doc.body_material("Seed"), "Titanium");
+    assert_eq!(s.doc.body_material("Seed (3)"), "Titanium");
+    assert_eq!(s.doc.body_material("Seed (2)"), "Brass");
+    assert_eq!(s.doc.body_material(&nested_copy), "Brass");
+    assert_eq!(s.doc.body_material(&mirrored_nested), "Brass");
+
+    // Updating Seed afterwards updates Seed (3), while Seed (2) and its descendants keep Brass.
+    run(&mut s, "material.assign", json!({"bodies": ["Seed"], "material": "Copper"}));
+    assert_eq!(s.doc.body_material("Seed"), "Copper");
+    assert_eq!(s.doc.body_material("Seed (3)"), "Copper");
+    assert_eq!(s.doc.body_material("Seed (2)"), "Brass");
+    assert_eq!(s.doc.body_material(&nested_copy), "Brass");
+    assert_eq!(s.doc.body_material(&mirrored_nested), "Brass");
+
+    // Editing Mirror via timeline.edit to add `Seed (3)` gives the new mirrored copy Copper.
+    run(&mut s, "timeline.edit", json!({"feature": mirror_id, "set": {"bodies": [nested_copy, "Seed (3)"]}}));
+    let mirrored: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == mirror_id).map(|b| b.name.clone()).collect();
+    assert_eq!(mirrored.len(), 2, "{mirrored:?}");
+    assert_eq!(s.doc.body_material(&mirrored[0]), "Brass");
+    assert_eq!(s.doc.body_material(&mirrored[1]), "Copper");
+}
+
+#[test]
+fn assigning_default_to_a_copy_overrides_seed_material_while_root_clears_entry() {
+    let measured_material = |s: &mut Session, body: &str| -> String {
+        let m = run(s, "inspect.measure", json!({}));
+        m["bodies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|b| b["name"].as_str() == Some(body))
+            .and_then(|b| b["material"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "operation": "new", "body_name": "Seed"}));
+    run(&mut s, "material.assign", json!({"bodies": ["Seed"], "material": "Steel"}));
+    let pat = run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Seed"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 25}))["feature"]
+        .as_u64()
+        .unwrap();
+    let mirror = run(&mut s, "solid.mirror", json!({"bodies": ["Seed (2)"], "plane": {"origin": [0, 30, 0], "normal": [0, 1, 0]}}));
+    let mirrored = mirror["created_bodies"][0].as_str().unwrap().to_string();
+
+    // Explicitly assigning Default to a copy keeps it (and its downstream copy) on Default
+    // rather than falling back to the Steel seed.
+    run(&mut s, "material.assign", json!({"bodies": ["Seed (2)"], "material": "Default"}));
+    assert_eq!(s.doc.materials.get("Seed (2)").map(String::as_str), Some(solidcraft_doc::DEFAULT_MATERIAL));
+    assert_eq!(s.doc.body_material("Seed (2)"), solidcraft_doc::DEFAULT_MATERIAL);
+    assert!((s.doc.density("Seed (2)") - solidcraft_doc::DEFAULT_DENSITY).abs() < 1e-9);
+    assert_eq!(s.doc.body_look("Seed (2)", pat), None);
+    assert_eq!(measured_material(&mut s, "Seed (2)"), solidcraft_doc::DEFAULT_MATERIAL);
+    assert_eq!(s.doc.body_material(&mirrored), solidcraft_doc::DEFAULT_MATERIAL);
+    assert_eq!(measured_material(&mut s, &mirrored), solidcraft_doc::DEFAULT_MATERIAL);
+    assert_eq!(s.doc.body_material("Seed"), "Steel");
+    assert_eq!(s.doc.body_material("Seed (3)"), "Steel");
+
+    // Assigning Default to a non-copy root body still removes its stored entry.
+    run(&mut s, "material.assign", json!({"bodies": ["Seed"], "material": "Default"}));
+    assert!(!s.doc.materials.contains_key("Seed"));
+    assert_eq!(s.doc.body_material("Seed"), solidcraft_doc::DEFAULT_MATERIAL);
+    assert_eq!(s.doc.body_material("Seed (3)"), solidcraft_doc::DEFAULT_MATERIAL);
+}
+
+#[test]
+fn explicit_copy_override_survives_when_seed_temporarily_matches_same_material() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "operation": "new", "body_name": "Seed"}));
+    run(&mut s, "material.assign", json!({"bodies": ["Seed"], "material": "Steel"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Seed"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 25}));
+    let mirror = run(&mut s, "solid.mirror", json!({"bodies": ["Seed"], "plane": {"origin": [0, 30, 0], "normal": [0, 1, 0]}}));
+    let mirrored = mirror["created_bodies"][0].as_str().unwrap().to_string();
+    let moved = run(&mut s, "solid.move", json!({"bodies": ["Seed"], "translate": [0, -30, 0], "copy": true}))["created_bodies"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Give explicit Copper overrides on a pattern copy, a mirrored copy, and a moved copy.
+    run(&mut s, "material.assign", json!({"bodies": ["Seed (2)", mirrored.as_str(), moved.as_str()], "material": "Copper"}));
+    assert_eq!(s.doc.body_material("Seed (3)"), "Steel");
+
+    // Seed changes Steel -> Copper -> Aluminum: inherited sibling follows, explicit overrides stay Copper.
+    run(&mut s, "material.assign", json!({"bodies": ["Seed"], "material": "Copper"}));
+    run(&mut s, "material.assign", json!({"bodies": ["Seed"], "material": "Aluminum"}));
+    assert_eq!(s.doc.body_material("Seed"), "Aluminum");
+    assert_eq!(s.doc.body_material("Seed (3)"), "Aluminum");
+    assert_eq!(s.doc.body_material("Seed (2)"), "Copper");
+    assert_eq!(s.doc.body_material(&mirrored), "Copper");
+    assert_eq!(s.doc.body_material(&moved), "Copper");
+}
+
+#[test]
+fn reseeding_a_pattern_updates_downstream_copies_automatically() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "operation": "new", "body_name": "SteelSeed"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 50, 0], "operation": "new", "body_name": "AlumSeed"}));
+    run(&mut s, "material.assign", json!({"bodies": ["SteelSeed"], "material": "Steel"}));
+    run(&mut s, "material.assign", json!({"bodies": ["AlumSeed"], "material": "Aluminum"}));
+
+    let pat_p = run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["SteelSeed"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 25}))["feature"]
+        .as_u64()
+        .unwrap();
+    run(&mut s, "timeline.edit", json!({"feature": pat_p, "set": {"body_names": ["CopyP"]}}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["CopyP"], "dir1": [0, 0, 1], "count1": 3, "spacing1": 25}));
+    let mirror = run(&mut s, "solid.mirror", json!({"bodies": ["CopyP (2)"], "plane": {"origin": [-20, 0, 0], "normal": [1, 0, 0]}}));
+    let mirrored_q = mirror["created_bodies"][0].as_str().unwrap().to_string();
+    run(&mut s, "material.assign", json!({"bodies": ["CopyP (3)"], "material": "Brass"}));
+
+    assert_eq!(s.doc.body_material("CopyP"), "Steel");
+    assert_eq!(s.doc.body_material("CopyP (2)"), "Steel");
+    assert_eq!(s.doc.body_material(&mirrored_q), "Steel");
+    assert_eq!(s.doc.body_material("CopyP (3)"), "Brass");
+
+    // Re-seeding pattern P from SteelSeed to AlumSeed updates CopyP and all unoverridden
+    // downstream copies (CopyP (2) and its mirror) while preserving CopyP (3)'s explicit Brass.
+    run(&mut s, "timeline.edit", json!({"feature": pat_p, "set": {"bodies": ["AlumSeed"], "body_names": ["CopyP"]}}));
+    assert_eq!(s.doc.body_material("CopyP"), "Aluminum");
+    assert_eq!(s.doc.body_material("CopyP (2)"), "Aluminum");
+    assert_eq!(s.doc.body_material(&mirrored_q), "Aluminum");
+    assert_eq!(s.doc.body_material("CopyP (3)"), "Brass");
+}
+
+#[test]
+fn multi_seed_joined_pattern_separate_copies_inherit_unanimous_seed_material() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "operation": "new", "body_name": "Left"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 40, 0], "operation": "new", "body_name": "Right"}));
+    run(&mut s, "material.assign", json!({"bodies": ["Left", "Right"], "material": "Steel"}));
+    let pat =
+        run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Left", "Right"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 30, "join": true}))
+            ["feature"]
+            .as_u64()
+            .unwrap();
+
+    let copies: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == pat).map(|b| b.name.clone()).collect();
+    assert!(copies.len() >= 2, "{copies:?}");
+    for copy in &copies {
+        assert_eq!(s.doc.body_material(copy), "Steel", "{copy}");
+    }
+    run(&mut s, "material.assign", json!({"bodies": [copies[0].as_str()], "material": "Default"}));
+    assert_eq!(s.doc.body_material(&copies[0]), solidcraft_doc::DEFAULT_MATERIAL);
+    assert_eq!(s.doc.body_material(&copies[1]), "Steel");
 }
