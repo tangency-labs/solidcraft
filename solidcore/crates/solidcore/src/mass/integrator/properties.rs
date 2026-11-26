@@ -2293,15 +2293,29 @@ fn gap_closure(
             for i in 1..grid {
                 let tau = c0 + (c1 - c0) * f64::from(i) / f64::from(grid);
                 let p = at(side.trim.evaluate_point(k, tau)?)?.0;
-                // marched from the last point; where that seed is singular (the edge's
-                // end, for the first), from the grid point's share of the edge's interval;
-                // singular from both, the strip is refused
+                // the nearer of the foot points solved from the last point and from the
+                // grid point's share of the edge's interval (#16854). Marched alone, a solve
+                // seeded on a corner of the edge curve (a C0 knot) steps along the tangent of
+                // the side behind it and can settle on a foot point of that side: on #1435's
+                // multispan patch 0.03 off a trim lying on its edge, the strip then a fold
+                // across the corner. A singular seed (the edge's end, for the first) gives no
+                // point; singular from both, the strip is refused.
                 let share = e0 + (e1 - e0) * f64::from(i) / f64::from(grid);
-                last = match nearest_on_edge(k, curve, e0, e1, p, last)? {
-                    Some(t) => t,
-                    None => nearest_on_edge(k, curve, e0, e1, p, share)?
-                        .ok_or_else(|| SolidError::mass(OP, MassFailure::EdgeCurveSingular))?,
-                };
+                let mut nearest: Option<(f64, f64)> = None;
+                for seed in [Some(last), (share != last).then_some(share)]
+                    .into_iter()
+                    .flatten()
+                {
+                    if let Some(t) = nearest_on_edge(k, curve, e0, e1, p, seed)? {
+                        let d = (curve.evaluate_point(k, t)? - p).length_squared();
+                        if nearest.is_none_or(|(_, best)| d < best) {
+                            nearest = Some((t, d));
+                        }
+                    }
+                }
+                last = nearest
+                    .map(|(t, _)| t)
+                    .ok_or_else(|| SolidError::mass(OP, MassFailure::EdgeCurveSingular))?;
                 table.push((tau, last));
             }
             table.push((c1, e1));
