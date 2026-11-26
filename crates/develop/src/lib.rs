@@ -67,23 +67,7 @@ pub use solidcraft_kernel::develop::hermite;
 pub use solidcraft_kernel::develop::offset_contour;
 pub use solidcraft_kernel::develop::segment_in_region;
 pub use solidcraft_kernel::develop::tear_slit;
-pub use solidcraft_kernel::services::query::Query;
 pub use solidcraft_kernel::query::Query;
-pub use solidcraft_kernel::services::develop::BeadAgainst;
-pub use solidcraft_kernel::services::develop::BeadRefusal;
-pub use solidcraft_kernel::services::develop::Bent;
-pub use solidcraft_kernel::services::develop::ContourRefusal;
-pub use solidcraft_kernel::services::develop::Fold;
-pub use solidcraft_kernel::services::develop::MIN_BEAD_RADIUS;
-pub use solidcraft_kernel::services::develop::bead_against;
-pub use solidcraft_kernel::services::develop::bead_flank_angle;
-pub use solidcraft_kernel::services::develop::bead_footprint;
-pub use solidcraft_kernel::services::develop::crossings;
-pub use solidcraft_kernel::services::develop::curve_through;
-pub use solidcraft_kernel::services::develop::hermite;
-pub use solidcraft_kernel::services::develop::offset_contour;
-pub use solidcraft_kernel::services::develop::segment_in_region;
-pub use solidcraft_kernel::services::develop::tear_slit;
 
 /// The maths of the record's motions, bends and laps (solidcore's), as methods.
 pub mod prelude {
