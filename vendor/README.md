@@ -101,6 +101,11 @@ SolidCraft changes to egui and eframe:
   once. The control channel (#743) serves a request with it without waiting for the compositor's
   next frame: on Wayland a window that gets no frames (off-screen, on another workspace) otherwise
   stalled each request for up to a second. Normal redraws still paint.
+- `crates/egui/src/viewport.rs`, `crates/egui-winit/src/lib.rs`, `winit/src/platform/macos.rs`,
+  `winit/src/platform_impl/macos/window_delegate.rs`: `ViewportCommand::TitlebarButtonsHidden(bool)`
+  hides or shows the traffic lights of an open macOS window (winit's `with_titlebar_buttons_hidden`
+  only worked at creation, and changing it by recreating the window loses the native frame). No
+  effect on other systems.
 
 - `crates/egui/src/data/input/pointer_button.rs`, `crates/egui-winit/src/lib.rs`,
   `crates/eframe/src/web/input.rs`: mice with more than five buttons. `PointerButton` has
