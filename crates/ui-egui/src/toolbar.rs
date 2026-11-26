@@ -1829,6 +1829,7 @@ impl RibbonPanels {
                 }))
                 .collect(),
             labels,
+            large_icons: false,
             accent,
             exit: self.exit,
             reveal,
@@ -2053,6 +2054,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         let more_tip = solidcraft_ui_text::tr_label("More toolbar panels");
         let accent = crate::workspace::tab_accent(&t, &tab);
         let mut row = panels.row(accent, labels, reveal.as_ref().map(|r| ribbon::Reveal { id: r.id, preview: r.preview, strength: pulse }), more_tip);
+        row.large_icons = app.preferences.ribbon_large_icons;
         let plugin_groups = crate::plugin_slots::ribbon_groups(app, ui, &tab);
         let builtin_groups = row.groups.len();
         row.groups.extend(plugin_groups.iter().map(|group| group.group(ui)));

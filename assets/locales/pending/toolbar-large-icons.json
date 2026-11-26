@@ -1,0 +1,42 @@
+{
+  "en": {
+    "prefs.toolbar_icon_size": "Toolbar icons",
+    "prefs.toolbar_icons_large": "Large",
+    "prefs.toolbar_icons_standard": "Standard"
+  },
+  "de": {
+    "prefs.toolbar_icon_size": "Werkzeugleisten-Symbole",
+    "prefs.toolbar_icons_large": "Groß",
+    "prefs.toolbar_icons_standard": "Standard"
+  },
+  "ja": {
+    "prefs.toolbar_icon_size": "ツールバーのアイコン",
+    "prefs.toolbar_icons_large": "大",
+    "prefs.toolbar_icons_standard": "標準"
+  },
+  "zh": {
+    "prefs.toolbar_icon_size": "工具栏图标",
+    "prefs.toolbar_icons_large": "大",
+    "prefs.toolbar_icons_standard": "标准"
+  },
+  "tr": {
+    "prefs.toolbar_icon_size": "Araç çubuğu simgeleri",
+    "prefs.toolbar_icons_large": "Büyük",
+    "prefs.toolbar_icons_standard": "Standart"
+  },
+  "ar": {
+    "prefs.toolbar_icon_size": "أيقونات شريط الأدوات",
+    "prefs.toolbar_icons_large": "كبيرة",
+    "prefs.toolbar_icons_standard": "قياسية"
+  },
+  "he": {
+    "prefs.toolbar_icon_size": "סמלי סרגל הכלים",
+    "prefs.toolbar_icons_large": "גדולים",
+    "prefs.toolbar_icons_standard": "רגילים"
+  },
+  "vi": {
+    "prefs.toolbar_icon_size": "Biểu tượng thanh công cụ",
+    "prefs.toolbar_icons_large": "Lớn",
+    "prefs.toolbar_icons_standard": "Tiêu chuẩn"
+  }
+}

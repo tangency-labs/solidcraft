@@ -234,6 +234,7 @@ impl RowRig {
                 group("B", vec![button("b.on", true), button("b.off", false)]),
             ],
             labels: true,
+            large_icons: false,
             accent: solidcraft_theme::TabAccent::for_ramp(&t, solidcraft_theme::AccentRamp::Main),
             exit: false,
             reveal: None,
@@ -634,6 +635,23 @@ fn buttons_are_dropped_before_a_button_at_a_groups_end_or_removed_off_the_row() 
 /// A button the app paints itself is drawn as the app resolves it after the pass: pressed, it
 /// is published and counted.
 #[test]
+fn large_icons_fill_the_room_around_them_without_reaching_the_label() {
+    // Standard icons keep their sizes: 26 points, the exit button's 30.
+    assert_eq!(button_icon_side(true, false, false), 26.0);
+    assert_eq!(button_icon_side(false, false, true), 30.0);
+    // Large ones (#22061) are bigger in either layout, the exit button included.
+    for labels in [true, false] {
+        for exit in [true, false] {
+            assert!(button_icon_side(labels, true, exit) > button_icon_side(labels, false, false), "labels {labels}, exit {exit}");
+        }
+    }
+    // Above a label the icon, centred 16 points down, ends before the label starts; in an
+    // icon-only button it fits the button's height.
+    assert!(16.0 + button_icon_side(true, true, false) / 2.0 <= BUTTON_LABEL_TOP);
+    assert!(button_icon_side(false, true, false) <= ICON_BUTTON_HEIGHT);
+}
+
+#[test]
 fn a_deferred_button_is_painted_as_the_app_resolves_it() {
     let ctx = crate::test_support::context();
     let t = Tokens::get();
@@ -642,6 +660,7 @@ fn a_deferred_button_is_painted_as_the_app_resolves_it() {
     let row = Row {
         groups: vec![group("A", vec![on, button("a.off", true)])],
         labels: true,
+        large_icons: false,
         accent: solidcraft_theme::TabAccent::for_ramp(&t, solidcraft_theme::AccentRamp::Main),
         exit: false,
         reveal: None,
