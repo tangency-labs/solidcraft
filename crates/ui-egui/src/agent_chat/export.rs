@@ -1,6 +1,38 @@
-//! The Markdown snapshot of the conversation currently retained by Assistant.
+//! Markdown export for the conversation currently retained by Assistant.
 
-use super::{Item, ToolStatus};
+use egui::Id;
+use solidcraft_theme::Tokens;
+use solidcraft_ui_text::tr;
+
+use super::panel::PanelAction;
+use super::{AgentChat, Item, ToolStatus};
+use crate::ui_kit;
+
+pub(super) fn export_dialog(chat: &mut AgentChat, ctx: &egui::Context) {
+    let valid = chat.can_export_conversation();
+    let Some(include_tools) = chat.export_tools.as_mut() else { return };
+    let (closed, action) = ui_kit::Confirm::new(Id::unique("sc_assistant_export"), "export", tr("ui.agent_chat_export").trim_end_matches('…'))
+        .actions(tr("ui.save"), tr("ui.cancel"), None)
+        .show(ctx, valid, |ui| {
+            let checkbox = ui_kit::checkbox(ui, tr("ui.agent_chat_export_tools"), include_tools);
+            solidcraft_ui_registry::publish_target("agent_chat:export_tools", checkbox.rect);
+            if *include_tools {
+                ui.add_space(Tokens::get().space_8);
+                ui_kit::text(ui, tr("ui.agent_chat_export_warning"), ui_kit::Text::Report("assistant_export_warning", false));
+            }
+        });
+    for (handle, button) in [("agent_chat:export_save", "dialog:ok"), ("agent_chat:export_cancel", "dialog:cancel")] {
+        if let Some(rect) = solidcraft_ui_registry::rect_of(button) {
+            solidcraft_ui_registry::publish_target(handle, rect);
+        }
+    }
+    if !closed && action == ui_kit::Action::Ok {
+        chat.actions.push(PanelAction::ExportConversation { include_tools: *include_tools });
+    }
+    if closed || action != ui_kit::Action::None {
+        chat.export_tools = None;
+    }
+}
 
 /// Export messages in display order. Tool calls and notices require a separate choice.
 pub(super) fn markdown_snapshot(items: &[Item], include_tools: bool) -> String {

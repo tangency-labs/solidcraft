@@ -6,6 +6,8 @@ use crate::ui_kit::{Container, Edge, Surface};
 use egui::{Align, Align2, Color32, Id, Layout, Rect, RichText, Sense, Stroke, pos2, vec2};
 use solidcraft_engine::panels::Flow;
 
+#[cfg(not(target_arch = "wasm32"))]
+use super::export::export_dialog;
 use super::*;
 use crate::ui_kit;
 use solidcraft_theme::Tokens;
@@ -864,33 +866,6 @@ fn report_conversation_save(app: &mut SolveApp, result: std::io::Result<()>) {
     match result {
         Ok(()) => app.set_status(tr("ui.agent_chat_export_saved"), false),
         Err(error) => app.set_status(trf("ui.agent_chat_export_failed", &[("error", &error.to_string())]), true),
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn export_dialog(chat: &mut AgentChat, ctx: &egui::Context) {
-    let valid = chat.can_export_conversation();
-    let Some(include_tools) = chat.export_tools.as_mut() else { return };
-    let (closed, action) = ui_kit::Confirm::new(Id::unique("sc_assistant_export"), "export", tr("ui.agent_chat_export").trim_end_matches('…'))
-        .actions(tr("ui.save"), tr("ui.cancel"), None)
-        .show(ctx, valid, |ui| {
-            let checkbox = ui_kit::checkbox(ui, tr("ui.agent_chat_export_tools"), include_tools);
-            solidcraft_ui_registry::publish_target("agent_chat:export_tools", checkbox.rect);
-            if *include_tools {
-                ui.add_space(Tokens::get().space_8);
-                ui_kit::text(ui, tr("ui.agent_chat_export_warning"), ui_kit::Text::Report("assistant_export_warning", false));
-            }
-        });
-    for (handle, button) in [("agent_chat:export_save", "dialog:ok"), ("agent_chat:export_cancel", "dialog:cancel")] {
-        if let Some(rect) = solidcraft_ui_registry::rect_of(button) {
-            solidcraft_ui_registry::publish_target(handle, rect);
-        }
-    }
-    if !closed && action == ui_kit::Action::Ok {
-        chat.actions.push(PanelAction::ExportConversation { include_tools: *include_tools });
-    }
-    if closed || action != ui_kit::Action::None {
-        chat.export_tools = None;
     }
 }
 
