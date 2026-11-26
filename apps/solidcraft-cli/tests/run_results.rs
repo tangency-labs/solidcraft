@@ -198,8 +198,20 @@ fn a_profile_names_the_feature_and_step_part_of_each_span() {
     let bodies: Vec<_> = spans.iter().filter(|e| e["name"] == "step.body").collect();
     assert!(!bodies.is_empty(), "{trace}");
     assert!(bodies.iter().all(|e| e["args"]["item"].as_str().is_some_and(|item| item.starts_with('#'))), "{bodies:?}");
+    let reads: Vec<_> = spans.iter().filter(|e| e["name"] == "step.read_solid").collect();
+    assert!(!reads.is_empty(), "{trace}");
+    assert!(reads.iter().all(|e| e["args"]["item"].as_str().is_some_and(|item| item.starts_with('#'))), "{reads:?}");
+    let meshes: Vec<_> = spans.iter().filter(|e| e["name"] == "step.mesh_check").collect();
+    assert!(!meshes.is_empty(), "{trace}");
+    assert!(meshes.iter().all(|e| e["args"]["item"].as_str().is_some_and(|item| item.starts_with('#'))), "{meshes:?}");
     for check in spans.iter().filter(|e| e["name"] == "step.check") {
         assert!(check["args"]["part"].is_string(), "{check}");
+    }
+    for heal in spans.iter().filter(|e| e["name"] == "step.heal") {
+        assert!(heal["args"]["item"].as_str().is_some_and(|item| item.starts_with('#')), "{heal}");
+    }
+    for refused in spans.iter().filter(|e| e["name"] == "step.refused_surfaces") {
+        assert!(refused["args"]["item"].as_str().is_some_and(|item| item.starts_with('#')), "{refused}");
     }
 }
 

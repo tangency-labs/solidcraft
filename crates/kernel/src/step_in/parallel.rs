@@ -102,11 +102,23 @@ pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
         false => (body, 0),
         true if job.placement == IDENTITY => {
             let body = body.keeping_plans();
-            let missing = solidcraft_profile::scope("import", "step.mesh_check", || body.unmeshed_display_faces());
+            let span = solidcraft_profile::span("import", "step.mesh_check");
+            let _span = match &job.source {
+                Source::Item { item, .. } => span.arg("item", format_args!("#{item}")),
+                Source::Oriented(_) => span,
+            };
+            let missing = body.unmeshed_display_faces();
+            drop(_span);
             (body, missing)
         }
         true => {
-            let missing = solidcraft_profile::scope("import", "step.mesh_check", || part.body.unmeshed_faces());
+            let span = solidcraft_profile::span("import", "step.mesh_check");
+            let _span = match &job.source {
+                Source::Item { item, .. } => span.arg("item", format_args!("#{item}")),
+                Source::Oriented(_) => span,
+            };
+            let missing = part.body.unmeshed_faces();
+            drop(_span);
             (body, missing)
         }
     };
@@ -163,10 +175,10 @@ pub(super) fn placed(body: &Body, m: &M4) -> crate::Result<Body> {
 /// and brought back as a body: the part SMLib made of the file. A solid the reader or SMLib
 /// refuses fails with the reason ([`surface_part`] then imports what it can of it).
 pub(super) fn smlib_part(ex: &Exchange, item: u64, units: Units) -> std::result::Result<(Part, Vec<Note>), Failure> {
-    let solid = solidcraft_profile::scope("import", "step.read_solid", || {
-        solidcore_step::topology::read_solid_with(ex, item, units, &solidcraft_smlib::pcurves::SmlibImportTrims)
-    })
-    .map_err(|msg| Failure { read: true, msg })?;
+    let _span = solidcraft_profile::span("import", "step.read_solid").arg("item", format_args!("#{item}"));
+    let solid = solidcore_step::topology::read_solid_with(ex, item, units, &solidcraft_smlib::pcurves::SmlibImportTrims)
+        .map_err(|msg| Failure { read: true, msg })?;
+    drop(_span);
     let part = solid_part(&solid)?;
     Ok((part, solid.notes.into_iter().map(Note::Repaired).collect()))
 }
@@ -336,7 +348,7 @@ const MAX_LEFT_OUT_ROUNDS: usize = 8;
 /// Where SMLib cannot stitch them either, or there is no face to import, the solid stays refused
 /// with the reason it was: a B-rep SMLib refuses is never kept as a mesh of its faces.
 fn surface_part(ex: &Exchange, item: u64, units: Units, refused: Failure) -> std::result::Result<(Part, Vec<Note>), Failure> {
-    let _span = solidcraft_profile::span("import", "step.refused_surfaces");
+    let _span = solidcraft_profile::span("import", "step.refused_surfaces").arg("item", format_args!("#{item}"));
     let trims = &solidcraft_smlib::pcurves::SmlibImportTrims;
     let Ok(faces) = solidcore_step::topology::read_faces_with(ex, item, units, trims) else { return Err(refused) };
     let of_solid: std::collections::HashSet<u64> = faces.iter().map(|f| f.face).collect();
