@@ -2327,7 +2327,8 @@ fn a_changed_kicad_boards_link_gets_the_changed_badge() {
     std::fs::create_dir_all(&dir).unwrap();
     let board = dir.join("board.kicad_pcb");
     let write = |width: &str| {
-        std::fs::write(&board, format!("(kicad_pcb (general (thickness 1.6)) (gr_rect (start 0 0) (end {width} 10) (layer \"Edge.Cuts\")))")).unwrap();
+        std::fs::write(&board, format!("(kicad_pcb (general (thickness 1.6)) (gr_rect (start 0 0) (end {width} 10) (layer \"Edge.Cuts\")))"))
+            .unwrap();
     };
     write("20");
     let mut s = solidcraft_engine::Session::default();
