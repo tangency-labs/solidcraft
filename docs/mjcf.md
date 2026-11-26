@@ -80,7 +80,19 @@ match.
   there: MuJoCo leaves a joint whose `range` is one value free.
 - **Dynamics** ([Joint dynamics](urdf.md#joint-dynamics)): the damping and friction saved for a
   joint's value are its `damping` and `frictionloss`. A ball joint has one of each: those of its
-  last value, with a warning if the others differ. Effort and velocity limits are not written.
+  last value, with a warning if the others differ. The effort saved is the joint's motor's limit
+  (below). MJCF has no velocity limit, so a saved velocity is not written.
+
+## Actuators
+
+Each `hinge` and `slide` that moves on its own gets a `motor` of the same name in `<actuator>`. Its
+control is the torque (N m) or force (N) on the joint, and its `ctrlrange` is ± the effort saved
+in [Joint dynamics](urdf.md#joint-dynamics); with none saved, the control has no limit. A control of
+0 is no force, so until something sets the controls the model moves as it would without motors.
+Drive a joint from Python with `data.ctrl[model.actuator("Hinge").id] = 2.0`.
+
+There is no motor on a joint that a motion link drives, on one held at a single value, or on a ball
+joint: the first two would fight the constraint that moves or holds them.
 
 ## Motion links
 
@@ -106,7 +118,7 @@ close a loop becomes an `<equality>` constraint between the bodies of its two si
 
 ## Not covered
 
-- Actuators, sensors, and effort and velocity limits.
+- Sensors, velocity limits, and actuators other than a torque or force `motor` (position or velocity servos), or on ball joints.
 - Decals and other pictures on the model.
 - Joint motion inside the copies of a component placed several times.
 - MJCF import.
