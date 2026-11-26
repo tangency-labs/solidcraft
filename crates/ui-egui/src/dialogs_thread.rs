@@ -241,7 +241,7 @@ const ENDS_AT: &[&str] = &["thread.end_square", "ui.fade"];
 const FLANKS: &[(&str, SteepFlank)] = &[("End", SteepFlank::End), ("Start", SteepFlank::Start)];
 
 /// The pick of the end the thread is measured from (`from`).
-const START_END: &str = "Start end (optional)";
+const START_END: &str = "Start side (optional)";
 /// The face or plane an Up To extent runs to (`up_to`).
 const UP_TO: &str = "Up to";
 const UP_TO_ACCEPT: Accept = FACES | PLANES;
@@ -487,8 +487,8 @@ pub(crate) fn rows(
     }
 
     crate::ui_kit::section(ui, "thread_ends", "Ends", true, |ui| {
-        // The start, a free end: plain or chamfered. A thread saved chamfered at both ends
-        // keeps that.
+        // The start, a free end: plain or chamfered; and with it chamfered, every other free end
+        // the thread reaches too (a stud's two ends, ISO 4753), the command's `tip: both`.
         let mut chamfered = usize::from(o.tip != ThreadTip::None);
         choice_row(ui, "Start", "thread_start", &mut chamfered, STARTS_AT);
         o.tip = match (chamfered, o.tip) {
@@ -497,6 +497,9 @@ pub(crate) fn rows(
             (_, kept) => kept,
         };
         if o.tip != ThreadTip::None {
+            let mut both = o.tip == ThreadTip::Both;
+            crate::ui_kit::checkbox_grid(ui, &mut [("Chamfer both ends", &mut both)], 2);
+            o.tip = if both { ThreadTip::Both } else { ThreadTip::Start };
             enter |= hint_row(ui, "Chamfer Angle", &mut o.chamfer_angle, tr("ui.iso_4753"));
             // ISO 4753's depth is for ISO metric threads; the other forms give theirs.
             let depth = if f == ThreadForm::Metric { "ui.iso_4753" } else { "thread.chamfer_depth_needed" };
@@ -837,7 +840,7 @@ mod contribution_tests {
     fn custom_hole_widget() -> crate::scenario::Harness {
         let (app, dialog) = hole();
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         h.app.dialog = Some(dialog);
         h.frames(3);
         h.step(&json!({"click":{"handle":"dialog:Hole Tap Type"}})).unwrap();
@@ -920,7 +923,7 @@ mod contribution_tests {
     fn a_tapped_hole_is_modelled_with_the_threads_end() {
         let (app, dialog) = hole();
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         h.app.dialog = Some(dialog);
         h.frames(3);
         for handle in ["dialog:Hole Tap Type", "dialog:Hole Tap Type:Tapped"] {
@@ -953,7 +956,7 @@ mod contribution_tests {
     fn a_tapped_holes_drill_is_the_tap_makers_or_one_within_its_range() {
         let (app, dialog) = hole();
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         h.app.dialog = Some(dialog);
         h.frames(3);
         for handle in ["dialog:Hole Tap Type", "dialog:Hole Tap Type:Tapped"] {
@@ -996,7 +999,7 @@ mod contribution_tests {
     fn manual_designation_keeps_keyboard_focus_when_custom_fields_appear() {
         let (app, dialog) = hole();
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         h.app.dialog = Some(dialog);
         h.frames(3);
         h.step(&json!({"click":{"handle":"dialog:Hole Tap Type"}})).unwrap();

@@ -21,7 +21,7 @@ Put a thread on a round face: an external thread on a shaft or stud, or an inter
 | Starts | Number of thread starts, 1 to 8. | 1 for fasteners. 2 or more for a fast-moving lead screw: each turn advances the pitch times the number of starts. |
 | Steep Flank (Buttress only) | Which end the steep, load-carrying flank faces. | Point it toward the load. |
 | Extent | Full runs the whole face. Length runs a set distance. Up to stops at a face or plane you pick. | Length for a threaded end on a longer shaft. Up to for a thread that stops at a shoulder. |
-| Start end (optional) | Which end of the face the thread is measured from. Shown once Extent is Length or Up to. | Pick it when the thread starts at the wrong end. |
+| Start side (optional) | Which end of the face the thread is measured from. Shown once Extent is Length or Up to. | Pick it when the thread starts at the wrong end. |
 | Start (Ends) | None leaves the thread's free end plain. Chamfer adds a lead-in chamfer and shows Chamfer Angle and Chamfer Depth; left blank, they use the ISO 4753 standard chamfer. | Chamfer the start of any thread that has to take a nut or go into a tapped hole by hand. |
 | End (Ends) | Square stops the thread sharp. Fade runs it out over a length (ISO 3508 runout, 2.5 pitches standard). | Fade for a thread cut with a die or single-point tool that stops short of a shoulder. |
 
@@ -38,7 +38,7 @@ Put a thread on a round face: an external thread on a shaft or stud, or an inter
 #### Tips and common mistakes
 
 - **Do** size the cylinder before threading it: major diameter for an external thread, tap drill size for an internal one.
-- **Do** click the face near the end you want threaded, or pick Start end. Otherwise a Length thread can start at the wrong end.
+- **Do** click the face near the end you want threaded, or pick Start side. Otherwise a Length thread can start at the wrong end.
 - **Do** chamfer the start of an external thread. The shop will put one there anyway, and a nut starts on it in the model the same way it does on the part.
 - **Do** leave room for runout before a shoulder. A thread can't run full depth right up to a shoulder without a relief groove.
 - **Don't** turn on Modeled just to show the part is threaded. The callout already says it.

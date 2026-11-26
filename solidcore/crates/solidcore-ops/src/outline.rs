@@ -8,59 +8,7 @@ use solidcore::eval::outline::pieces as k;
 use solidcore_convert::{record_vec2, vec2};
 use solidcore_record::Vec2;
 
-/// One piece of a planar outline (the kernel's [`k::Piece`], on the record's vectors).
-#[derive(Clone, Debug, PartialEq)]
-pub enum Piece {
-    /// A point.
-    Point(Vec2),
-    /// A line from the first point to the second.
-    Line(Vec2, Vec2),
-    /// A circle: its centre and radius.
-    Circle(Vec2, f64),
-    /// A counter-clockwise arc about `c` from `a` to `b`.
-    Arc {
-        /// Its centre.
-        c: Vec2,
-        /// Its start.
-        a: Vec2,
-        /// Its end.
-        b: Vec2,
-    },
-    /// A rational quadratic conic from `a` to `b` with control `apex` and shape `rho`.
-    Conic {
-        /// Its start.
-        a: Vec2,
-        /// Its middle control point.
-        apex: Vec2,
-        /// Its end.
-        b: Vec2,
-        /// Its shape: the middle weight `w` over `1 + w`.
-        rho: f64,
-    },
-    /// A full ellipse: its centre, the end of its major axis and its minor radius.
-    Ellipse {
-        /// Its centre.
-        c: Vec2,
-        /// The end of its major axis.
-        major: Vec2,
-        /// Its minor radius.
-        minor: f64,
-    },
-    /// A spline through (`control` false) or over (`control`) its points, with its own knots and
-    /// weights where it has them.
-    Spline {
-        /// Its points.
-        pts: Vec<Vec2>,
-        /// The points are control points.
-        control: bool,
-        /// Its degree.
-        degree: u8,
-        /// It closes on itself.
-        periodic: bool,
-        /// Its knots and weights, where they are not uniform.
-        nurbs: Option<(Vec<f64>, Vec<f64>)>,
-    },
-}
+pub use solidcore_record::projection::OutlinePiece as Piece;
 
 fn to_kernel(p: Piece) -> k::Piece {
     match p {

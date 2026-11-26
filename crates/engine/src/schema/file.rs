@@ -119,6 +119,12 @@ pub struct ExportMeshParams {
     /// How closely the mesh follows curved faces. Default: standard.
     #[serde(default)]
     pub quality: Option<MeshQualityParam>,
+    /// Instead of `quality`: one chord tolerance for every body, in mm, from 0.001 to 1000 (the
+    /// farthest a facet may stand off a curved face; coarser gives fewer triangles). Refused with
+    /// `quality`. Default: none, `quality` decides.
+    #[serde(default, deserialize_with = "chord_mm")]
+    #[schemars(schema_with = "chord_schema")]
+    pub chord: Option<f64>,
 }
 
 /// Export bodies as a binary STL file (`file.export_stl`), whatever the path's extension.
@@ -133,6 +139,12 @@ pub struct ExportStlParams {
     /// How closely the mesh follows curved faces. Default: standard.
     #[serde(default)]
     pub quality: Option<MeshQualityParam>,
+    /// Instead of `quality`: one chord tolerance for every body, in mm, from 0.001 to 1000 (the
+    /// farthest a facet may stand off a curved face; coarser gives fewer triangles). Refused with
+    /// `quality`. Default: none, `quality` decides.
+    #[serde(default, deserialize_with = "chord_mm")]
+    #[schemars(schema_with = "chord_schema")]
+    pub chord: Option<f64>,
     /// True writes each body with a print face (`body.print_face`) laid on it, as a slicer export
     /// lays it: turned so the face points down at Z = 0, its centre of mass over the origin. Each
     /// body is laid on its own, so several land on the origin together. Default: false, every body
@@ -171,6 +183,12 @@ pub struct Export3mfParams {
     /// How closely the mesh follows curved faces. Default: standard.
     #[serde(default)]
     pub quality: Option<MeshQualityParam>,
+    /// Instead of `quality`: one chord tolerance for every body, in mm, from 0.001 to 1000 (the
+    /// farthest a facet may stand off a curved face; coarser gives fewer triangles). Refused with
+    /// `quality`. Default: none, `quality` decides.
+    #[serde(default, deserialize_with = "chord_mm")]
+    #[schemars(schema_with = "chord_schema")]
+    pub chord: Option<f64>,
     /// What each object in the file holds. Default: body.
     #[serde(default)]
     pub objects: Option<ObjectsParam>,
@@ -206,6 +224,15 @@ pub struct ExportUrdfParams {
     /// Write motion links as `<mimic>`. Default: false (each joint free).
     #[serde(default)]
     pub mimic: Option<bool>,
+    /// How closely the link meshes follow curved faces. Default: standard.
+    #[serde(default)]
+    pub quality: Option<MeshQualityParam>,
+    /// Instead of `quality`: one chord tolerance for every body, in mm, from 0.001 to 1000 (the
+    /// farthest a facet may stand off a curved face; coarser gives fewer triangles). Refused with
+    /// `quality`. Default: none, `quality` decides.
+    #[serde(default, deserialize_with = "chord_mm")]
+    #[schemars(schema_with = "chord_schema")]
+    pub chord: Option<f64>,
     /// Also write each picture shown on the model (Canvas or Decal) as a textured COLLADA quad
     /// and its image, in one more `<visual>` of its part's link. Default: false.
     #[serde(default)]
@@ -238,6 +265,12 @@ pub struct ExportSdfParams {
     /// How closely the meshes follow curved faces. Default: standard.
     #[serde(default)]
     pub quality: Option<MeshQualityParam>,
+    /// Instead of `quality`: one chord tolerance for every body, in mm, from 0.001 to 1000 (the
+    /// farthest a facet may stand off a curved face; coarser gives fewer triangles). Refused with
+    /// `quality`. Default: none, `quality` decides.
+    #[serde(default, deserialize_with = "chord_mm")]
+    #[schemars(schema_with = "chord_schema")]
+    pub chord: Option<f64>,
 }
 
 /// Export the whole assembly as a MuJoCo model (MJCF, docs/mjcf.md), with an STL mesh for each
@@ -250,9 +283,9 @@ pub struct ExportMjcfParams {
 }
 
 /// Export bodies, or the whole design, to a file. `format` names the format; without it the
-/// path's extension does. STL, OBJ and 3MF take `quality` (and 3MF `objects`); URDF takes
-/// `mesh_prefix`, `effort`, `velocity`, `mimic`, `place_meshes` and `images` and, as MJCF does, exports the whole
-/// assembly; SDF takes `name`, `static`, `model_uris` and `quality` and writes a model folder;
+/// path's extension does. STL, OBJ and 3MF take `quality` or `chord` (and 3MF `objects`); URDF takes
+/// `mesh_prefix`, `effort`, `velocity`, `mimic`, `place_meshes`, `images`, `quality` and `chord` and, as MJCF does, exports the whole
+/// assembly; SDF takes `name`, `static`, `model_uris`, `quality` and `chord` and writes a model folder;
 /// design JSON the complete document.
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = export_required)]
@@ -276,10 +309,15 @@ pub struct ExportParams {
     /// complete design, so they refuse a list.
     #[serde(default)]
     pub bodies: Option<StringList>,
-    /// How closely the mesh follows curved faces (STL, OBJ, 3MF, GLB, OpenUSD and Rhino). Default: standard. Not read
-    /// for URDF.
+    /// How closely the mesh follows curved faces (STL, OBJ, 3MF, GLB, OpenUSD, Rhino, URDF and
+    /// SDF). Default: standard.
     #[serde(default)]
     pub quality: Option<MeshQualityParam>,
+    /// Instead of `quality`, for the same formats: one chord tolerance for every body, in mm,
+    /// from 0.001 to 1000. Refused with `quality`. Default: none, `quality` decides.
+    #[serde(default)]
+    #[schemars(schema_with = "chord_schema")]
+    pub chord: Option<f64>,
     /// What each object in a 3MF file holds. Default: body; `component` is refused for the other
     /// formats. Not read for URDF.
     #[serde(default)]
@@ -389,9 +427,44 @@ fn quality<E: serde::de::Error>(m: &Map<String, Value>) -> Result<Option<MeshQua
             Some(solidcraft_io::MeshQuality::Standard) => MeshQualityParam::Standard,
             Some(solidcraft_io::MeshQuality::Fine) => MeshQualityParam::Fine,
             Some(solidcraft_io::MeshQuality::Finest) => MeshQualityParam::Finest,
-            None => return Err(refuse(format!("`quality` must be standard, fine or finest, not {v}"))),
+            // `from_name` gives no chord: that is `chord`'s.
+            Some(solidcraft_io::MeshQuality::Chord(_)) | None => {
+                return Err(refuse(format!("`quality` must be standard, fine or finest, not {v}")));
+            }
         }),
     })
+}
+
+/// `chord` as the handler reads it (`MeshQuality::from_chord`), with its message.
+fn chord_value<E: serde::de::Error>(v: &Value) -> Result<Option<f64>, E> {
+    match v {
+        Value::Null => Ok(None),
+        _ => match v.as_f64().and_then(solidcraft_io::MeshQuality::from_chord) {
+            Some(_) => Ok(v.as_f64()),
+            None => Err(refuse(format!("`chord` must be a number of mm from {} to {}, not {v}", solidcraft_io::MIN_CHORD, solidcraft_io::MAX_CHORD))),
+        },
+    }
+}
+
+/// `chord` of a command whose contract derives its reading: `null` is left out.
+fn chord_mm<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    chord_value(&Value::deserialize(d)?)
+}
+
+fn chord_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": ["number", "null"], "minimum": solidcraft_io::MIN_CHORD, "maximum": solidcraft_io::MAX_CHORD})
+}
+
+/// `quality` and `chord` as the handler reads them (`mesh_quality`): one of them at most.
+fn quality_or_chord<E: serde::de::Error>(m: &Map<String, Value>) -> Result<(Option<MeshQualityParam>, Option<f64>), E> {
+    let chord = match m.get("chord") {
+        None => None,
+        Some(v) => chord_value::<E>(v)?,
+    };
+    if chord.is_some() && !matches!(m.get("quality"), None | Some(Value::Null)) {
+        return Err(refuse("give `quality` or `chord`, not both: `chord` sets the tolerance `quality` would"));
+    }
+    Ok((if chord.is_some() { None } else { quality::<E>(m)? }, chord))
 }
 
 /// `bodies` as the handler reads it (`params::string_list`), with its messages: `null` is left out.
@@ -418,6 +491,7 @@ impl<'de> Deserialize<'de> for ExportParams {
             options: None,
             bodies: None,
             quality: None,
+            chord: None,
             objects: None,
             mesh_prefix: None,
             effort: None,
@@ -498,7 +572,8 @@ impl<'de> Deserialize<'de> for ExportParams {
             return Ok(out);
         }
         if format == Format::Urdf {
-            // URDF reads its own keys; `quality` and `objects` are not read.
+            // URDF reads its own keys and `quality` or `chord`; `objects` is not read.
+            (out.quality, out.chord) = quality_or_chord::<D::Error>(&m)?;
             out.mesh_prefix = text::<D::Error>(&m, "mesh_prefix")?;
             let positive = |key: &str| -> Result<Option<f64>, D::Error> {
                 match m.get(key) {
@@ -528,7 +603,7 @@ impl<'de> Deserialize<'de> for ExportParams {
             };
             return Ok(out);
         }
-        out.quality = quality::<D::Error>(&m)?;
+        (out.quality, out.chord) = quality_or_chord::<D::Error>(&m)?;
         if format == Format::Sdf {
             // SDF reads its own keys and `quality`; `objects` and `lay_on_print_faces` are not read.
             out.name = text::<D::Error>(&m, "name")?;
@@ -838,6 +913,58 @@ fn linked_bodies_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({"type": "string", "enum": ["all", "folder"]})
 }
 
+/// The names of the KiCad board options `doc.open` takes (for a `.kicad_pcb` or `.kicad_pro`
+/// file), in the order [`kicad_open_properties`] lists them.
+pub const KICAD_OPEN_OPTIONS: &[&str] = &["thickness", "components", "copper", "silkscreen", "color", "representation"];
+
+/// The KiCad board options of `doc.open` as JSON Schema properties. `OpenParams` publishes these
+/// and the MCP `open` tool lists the same ones, so the two cannot name or describe them apart.
+pub fn kicad_open_properties() -> Map<String, Value> {
+    let Value::Object(properties) = serde_json::json!({
+        "thickness": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000, "description": "KiCad board only: the board's thickness in mm, instead of the one the board states"},
+        "components": {"type": "boolean", "description": "KiCad board only: bring in the components' 3D models (default true). A model is read from the board's folder or from KiCad's own 3D model library (KICAD<n>_3DMODEL_DIR); the warnings name each model that could not be read and why"},
+        "copper": {
+            "anyOf": [{"type": "string", "enum": ["none", "overlay", "mesh"]}, {"type": "boolean"}],
+            "description": "KiCad board only: overlay (default: flat copper just above the board), none (leave the traces out) or mesh (modelled with thickness; true also means mesh, false none). Pads are included whenever copper is enabled",
+        },
+        "silkscreen": {"type": "boolean", "description": "KiCad board only: the silkscreen shapes and text (default true)"},
+        "color": {
+            "anyOf": [
+                {"type": "string", "description": "#rrggbb"},
+                {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 255}, "minItems": 3, "maxItems": 3},
+            ],
+            "description": "KiCad board only: the board substrate's colour, \"#rrggbb\" or [r, g, b] with values 0-255",
+        },
+        "representation": {"type": "string", "description": "KiCad board only: mesh (the board as a mesh body). A B-rep board is not supported yet and is refused"},
+    }) else {
+        return Map::new();
+    };
+    properties
+}
+
+/// One KiCad board option's schema, for the field of `OpenParams` that carries it.
+fn kicad_option_schema(name: &str) -> Schema {
+    kicad_open_properties().remove(name).and_then(|v| Schema::try_from(v).ok()).unwrap_or_else(|| Schema::from(true))
+}
+fn kicad_thickness_schema(_: &mut SchemaGenerator) -> Schema {
+    kicad_option_schema("thickness")
+}
+fn kicad_components_schema(_: &mut SchemaGenerator) -> Schema {
+    kicad_option_schema("components")
+}
+fn kicad_copper_schema(_: &mut SchemaGenerator) -> Schema {
+    kicad_option_schema("copper")
+}
+fn kicad_silkscreen_schema(_: &mut SchemaGenerator) -> Schema {
+    kicad_option_schema("silkscreen")
+}
+fn kicad_color_schema(_: &mut SchemaGenerator) -> Schema {
+    kicad_option_schema("color")
+}
+fn kicad_representation_schema(_: &mut SchemaGenerator) -> Schema {
+    kicad_option_schema("representation")
+}
+
 /// Open a file as the design: a SolidCraft design (`.sc`, or a `.solidcraft` design from an
 /// earlier release), a `.dxf` or `.svg` drawing (a new, unsaved design with an XY sketch, with
 /// the units and defaults of `sketch.insert_dxf` and `sketch.insert_svg`), a STEP, IGES,
@@ -927,6 +1054,36 @@ pub struct OpenParams {
     /// 5000000.
     #[serde(default)]
     pub max_points: Option<MaxPoints>,
+    /// For a KiCad board only (ignored for other files): its thickness in mm. Default: the board's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "kicad_thickness_schema")]
+    pub thickness: Option<f64>,
+    /// For a KiCad board only (ignored for other files): the components' 3D models. Default: true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "kicad_components_schema")]
+    pub components: Option<bool>,
+    /// For a KiCad board only (ignored for other files): the copper, `overlay`, `none` or `mesh`.
+    /// Default: overlay.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "kicad_copper_schema")]
+    pub copper: Option<Value>,
+    /// For a KiCad board only (ignored for other files): the silkscreen. Default: true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "kicad_silkscreen_schema")]
+    pub silkscreen: Option<bool>,
+    /// For a KiCad board only (ignored for other files): the substrate colour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "kicad_color_schema")]
+    pub color: Option<Value>,
+    /// For a KiCad board only (ignored for other files): `mesh`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "kicad_representation_schema")]
+    pub representation: Option<String>,
+    /// The desktop app only (ignored elsewhere): open the file as a design in a new tab at this
+    /// place among the tabs (0 the first, past the last at the end), never in place of the design
+    /// shown; a design already open shows its tab instead. Given with `new_tab`, the place wins.
+    #[serde(default)]
+    pub tab: Option<u64>,
 }
 
 /// Another SolidCraft that has the design open, from its lock file.
