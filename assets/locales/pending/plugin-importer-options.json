@@ -1,0 +1,46 @@
+{
+  "ar": {
+    "ui.plugin_importer_remember": "تذكّر هذه الخيارات",
+    "ui.plugin_importer_restore_defaults": "استعادة القيم الافتراضية"
+  },
+  "de": {
+    "ui.plugin_importer_remember": "Diese Optionen merken",
+    "ui.plugin_importer_restore_defaults": "Standardwerte wiederherstellen"
+  },
+  "en": {
+    "ui.plugin_importer_remember": "Remember these options",
+    "ui.plugin_importer_restore_defaults": "Restore defaults"
+  },
+  "en-GB": {
+    "ui.plugin_importer_remember": "Remember these options",
+    "ui.plugin_importer_restore_defaults": "Restore defaults"
+  },
+  "es": {
+    "ui.plugin_importer_remember": "Recordar estas opciones",
+    "ui.plugin_importer_restore_defaults": "Restaurar valores predeterminados"
+  },
+  "he": {
+    "ui.plugin_importer_remember": "זכירת האפשרויות האלה",
+    "ui.plugin_importer_restore_defaults": "שחזור ברירות המחדל"
+  },
+  "ja": {
+    "ui.plugin_importer_remember": "これらのオプションを記憶",
+    "ui.plugin_importer_restore_defaults": "既定値に戻す"
+  },
+  "ko": {
+    "ui.plugin_importer_remember": "이 옵션 기억",
+    "ui.plugin_importer_restore_defaults": "기본값 복원"
+  },
+  "uk": {
+    "ui.plugin_importer_remember": "Запам’ятати ці параметри",
+    "ui.plugin_importer_restore_defaults": "Відновити стандартні значення"
+  },
+  "vi": {
+    "ui.plugin_importer_remember": "Ghi nhớ các tuỳ chọn này",
+    "ui.plugin_importer_restore_defaults": "Khôi phục mặc định"
+  },
+  "zh": {
+    "ui.plugin_importer_remember": "记住这些选项",
+    "ui.plugin_importer_restore_defaults": "恢复默认值"
+  }
+}

@@ -242,6 +242,29 @@ word!(
     ["left", "right"]
 );
 
+/// Where a contour flange's chain lies across the sheet thickness: center, side1 or side2, lower
+/// case (read by `sheet::flange`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContourOrientation(pub String);
+
+impl<'de> Deserialize<'de> for ContourOrientation {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)?.as_str() {
+            Some(w @ ("center" | "side1" | "side2")) => Ok(ContourOrientation(w.to_string())),
+            _ => Err(D::Error::custom("must be center, side1 or side2")),
+        }
+    }
+}
+
+impl JsonSchema for ContourOrientation {
+    fn schema_name() -> Cow<'static, str> {
+        "ContourOrientation".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "center, side1 or side2, lower case.", "enum": ["center", "side1", "side2"]})
+    }
+}
+
 /// A corner relief's shape: notch, round, rectangular or tear, in any case and with blanks
 /// around it (read by `ReliefShape::parse`).
 #[derive(Clone, Debug, PartialEq)]
@@ -266,6 +289,33 @@ impl JsonSchema for ReliefShapeParam {
             "description": "notch, round, rectangular or tear, in any case (blanks around it are ignored).",
             "type": "string",
             "pattern": format!("^{blank}({words}){blank}$", blank = blanks(), words = "[Nn][Oo][Tt][Cc][Hh]|[Rr][Oo][Uu][Nn][Dd]|[Rr][Ee][Cc][Tt][Aa][Nn][Gg][Uu][Ll][Aa][Rr]|[Tt][Ee][Aa][Rr]")
+        })
+    }
+}
+
+/// A rule's bend relief shape, checked by the same parser as the handler.
+#[derive(Debug)]
+pub struct BendReliefShapeParam(pub solidcraft_doc::sheet::BendReliefShape);
+
+impl<'de> Deserialize<'de> for BendReliefShapeParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Value::deserialize(d)?
+            .as_str()
+            .and_then(solidcraft_doc::sheet::BendReliefShape::parse)
+            .map(BendReliefShapeParam)
+            .ok_or_else(|| D::Error::custom("must be rectangular, obround or tear"))
+    }
+}
+
+impl JsonSchema for BendReliefShapeParam {
+    fn schema_name() -> Cow<'static, str> {
+        "BendReliefShape".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "rectangular, obround or tear, in any case (blanks around it are ignored).",
+            "type": "string",
+            "pattern": format!("^{blank}({words}){blank}$", blank = blanks(), words = "[Rr][Ee][Cc][Tt][Aa][Nn][Gg][Uu][Ll][Aa][Rr]|[Oo][Bb][Rr][Oo][Uu][Nn][Dd]|[Tt][Ee][Aa][Rr]")
         })
     }
 }
@@ -409,6 +459,13 @@ pub struct FlangeParams {
     /// Contour: the flange runs from the sketch plane the other way. Default: false.
     #[serde(default)]
     pub reverse: Option<bool>,
+    /// Contour: where the chain lies across the sheet thickness. Default: side1.
+    #[serde(default)]
+    pub orientation: Option<ContourOrientation>,
+    /// Contour: the flange runs `distance` each way across the sketch plane (twice as wide).
+    /// Default: false.
+    #[serde(default)]
+    pub symmetric: Option<bool>,
     /// Edge: the edges that get a flange.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "FlangeEdges")]
@@ -446,6 +503,11 @@ pub struct FlangeParams {
     /// Refused on a base or contour flange.
     #[serde(default)]
     pub corner_relief: Option<LengthExpr>,
+    /// Edge: the shape of the bend relief beside these flanges' bend ends where the sheet runs on
+    /// past them (rectangular, obround or tear), in place of the rule's. Refused on a base or
+    /// contour flange.
+    #[serde(default)]
+    pub bend_relief_shape: Option<BendReliefShapeParam>,
     /// Edge: further bends, each a flange on the far edge of the one before (at most 16). Refused
     /// on a base or contour flange.
     #[serde(default)]
@@ -799,6 +861,8 @@ pub struct ManageRulesParams {
     pub corner_relief: Option<LengthExpr>,
     /// Corner relief shape. Ignored when deleting.
     pub corner_relief_shape: Option<ReliefShapeParam>,
+    /// Bend relief shape: rectangular (default), obround or tear. Ignored when deleting.
+    pub bend_relief_shape: Option<BendReliefShapeParam>,
     /// Inner radius of flat hems. Ignored when deleting.
     pub hem_gap: Option<LengthExpr>,
     /// Gap between meeting flanges. Ignored when deleting.
@@ -931,6 +995,7 @@ pub struct RuleReply {
     pub relief_depth: String,
     pub corner_relief: String,
     pub corner_relief_shape: String,
+    pub bend_relief_shape: String,
     pub hem_gap: String,
     pub gap: String,
     pub angle_display: String,
@@ -950,6 +1015,7 @@ impl From<&solidcraft_doc::sheet::SheetRule> for RuleReply {
             relief_depth: r.relief_depth.clone(),
             corner_relief: r.corner_relief.clone(),
             corner_relief_shape: r.corner_relief_shape.clone(),
+            bend_relief_shape: r.bend_relief_shape.clone(),
             hem_gap: r.hem_gap.clone(),
             gap: r.gap.clone(),
             angle_display: r.angle_display.clone(),
@@ -968,6 +1034,7 @@ pub struct RuleValuesReply {
     pub relief_depth: f64,
     pub corner_relief: f64,
     pub corner_relief_shape: String,
+    pub bend_relief_shape: String,
     pub hem_gap: f64,
     pub gap: f64,
     pub angle_display: String,
@@ -983,6 +1050,7 @@ impl From<solidcraft_doc::sheet::RuleValues> for RuleValuesReply {
             relief_depth: r.relief_depth,
             corner_relief: r.corner_relief,
             corner_relief_shape: r.corner_relief_shape.name().into(),
+            bend_relief_shape: r.bend_relief_shape.name().into(),
             hem_gap: r.hem_gap,
             gap: r.gap,
             angle_display: r.angle_display.name().into(),

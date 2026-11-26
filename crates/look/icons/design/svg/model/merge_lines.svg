@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Merge Lines</title>
+  <path d="M7 22L29 22M35 22L57 22" fill="none" stroke="#8e9faf" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="32" cy="22" r="3.07" fill="#6f879c"/>
+  <path d="M7 42L57 42" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="7" cy="42" r="3.07" fill="#236ead"/>
+  <circle cx="57" cy="42" r="3.07" fill="#236ead"/>
+</svg>

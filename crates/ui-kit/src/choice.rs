@@ -520,10 +520,12 @@ pub struct SwatchPicker<'a> {
     pub textures: &'a [Option<egui::load::SizedTexture>],
     pub choose: &'a str,
     pub search_hint: &'a str,
+    /// Show a larger picture of the highlighted (else the chosen) option above the list.
+    pub preview: bool,
 }
 
 pub fn swatch_picker(ui: &mut Ui, id: &str, chosen: &mut Option<usize>, options: SwatchPicker<'_>) -> egui::Response {
-    let SwatchPicker { titles, textures, choose, search_hint } = options;
+    let SwatchPicker { titles, textures, choose, search_hint, preview } = options;
     let t = Tokens::get();
     let current = chosen.and_then(|index| titles.get(index)).map_or(choose, String::as_str);
     let grid = !titles.is_empty() && titles.len() == textures.len() && textures.iter().all(Option::is_some);
@@ -538,6 +540,21 @@ pub fn swatch_picker(ui: &mut Ui, id: &str, chosen: &mut Option<usize>, options:
             solidcraft_ui_registry::publish_target(&format!("swatch:{id}:search"), response.rect);
             ui.data_mut(|data| data.insert_temp(query_id, query.clone()));
         }
+        let hover_id = ui.make_persistent_id(("swatch_hover", id));
+        if preview {
+            // The highlighted option of the last frame, else the chosen one. The area is reserved
+            // whether or not a picture shows, so the tiles never move under the pointer.
+            let shown = ui.data(|data| data.get_temp::<usize>(hover_id)).or(*chosen);
+            let side = t.control_height * 6.0;
+            let (area, _) = ui.allocate_exact_size(vec2(ui.available_width().max(side), side), egui::Sense::hover());
+            if let Some(texture) = shown.and_then(|index| textures.get(index).copied().flatten()) {
+                let scale = (side / texture.size.x).min(side / texture.size.y);
+                let picture = egui::Rect::from_center_size(area.center(), texture.size * scale);
+                egui::Image::new(texture).paint_at(ui, picture);
+            }
+            solidcraft_ui_registry::publish_rect(&format!("swatch:{id}:preview"), area);
+        }
+        let mut hovered = None;
         let query = query.to_lowercase();
         let visible: Vec<_> = titles.iter().enumerate().filter(|(_, title)| !grid || title.to_lowercase().contains(&query)).collect();
         let side = if grid { t.control_height * 2.0 } else { t.control_height };
@@ -550,6 +567,9 @@ pub fn swatch_picker(ui: &mut Ui, id: &str, chosen: &mut Option<usize>, options:
                     let size = if grid { vec2(width, side + t.control_height + t.space_8) } else { vec2(ui.available_width(), side + t.space_8) };
                     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
                     let selected = *chosen == Some(*index);
+                    if response.hovered() {
+                        hovered = Some(*index);
+                    }
                     let fill = if selected {
                         t.selected_bg
                     } else if response.hovered() {
@@ -585,6 +605,16 @@ pub fn swatch_picker(ui: &mut Ui, id: &str, chosen: &mut Option<usize>, options:
                         *chosen = Some(*index);
                         ui.close();
                     }
+                }
+            });
+        }
+        if preview {
+            ui.data_mut(|data| match hovered {
+                Some(index) => {
+                    data.insert_temp(hover_id, index);
+                }
+                None => {
+                    data.remove::<usize>(hover_id);
                 }
             });
         }

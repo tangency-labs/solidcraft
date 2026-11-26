@@ -320,7 +320,7 @@ impl Edges {
         }
         let mut out = Edges { arena, entries, args: None, instances: None, segments: 0, args_at: 0, instances_at: 0, on_gpu: false };
         let (instances, args) = out.contents(parts);
-        out.args = Some(super::buffer_init(device, "sc_edge_args", &args, wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST)?);
+        out.args = Some(super::buffer_init(device, "sc_edge_args", &args, Self::args_usage())?);
         if !instances.is_empty() {
             let usage = wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST;
             out.instances = Some((super::buffer_init(device, "sc_edge_instances", &instances, usage)?, instances.len() as u64));
@@ -375,6 +375,17 @@ impl Edges {
         self.on_gpu = true;
     }
 
+    fn args_usage() -> wgpu::BufferUsages {
+        let base = wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST;
+        if cfg!(test) { base | wgpu::BufferUsages::COPY_SRC } else { base }
+    }
+
+    /// The buffer the edge draw arguments are drawn from (for tests).
+    #[cfg(test)]
+    pub(super) fn args(&self) -> Option<wgpu::Buffer> {
+        self.args.clone()
+    }
+
     /// Whether a GPU cull last filled its arguments and placements, rather than the CPU.
     pub(super) fn culls_on_gpu(&self) -> bool {
         self.on_gpu
@@ -388,18 +399,27 @@ impl Edges {
     /// Write the placements in view and each entry's arguments ([`Edges::contents`]): the CPU
     /// culled this frame, so the arguments and placements start their buffers again.
     pub(super) fn write(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, parts: &[Part<'_>]) {
+        let was_on_gpu = self.on_gpu;
         self.args_at = 0;
         self.instances_at = 0;
         self.on_gpu = false;
         let (instances, args) = self.contents(parts);
-        if let Some(buffer) = &self.args {
+        if was_on_gpu || self.args.is_none() {
+            // Leaving a GPU cull: its argument buffer is shared with `Indirect` (which writes
+            // triangle arguments at offset 0), so allocate a private buffer instead of clobbering
+            // it.
+            self.args = super::buffer_init(device, "sc_edge_args", &args, Self::args_usage());
+        } else if let Some(buffer) = &self.args {
             queue.write_buffer(buffer, 0, &args);
         }
         if instances.is_empty() {
+            if was_on_gpu {
+                self.instances = None;
+            }
             return;
         }
         let need = instances.len() as u64;
-        if self.instances.as_ref().is_none_or(|(_, size)| *size < need) {
+        if was_on_gpu || self.instances.as_ref().is_none_or(|(_, size)| *size < need) {
             let size = need.saturating_mul(3) / 2;
             let buffer = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("sc_edge_instances"),

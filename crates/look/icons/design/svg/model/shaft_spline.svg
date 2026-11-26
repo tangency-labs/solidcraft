@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Shaft Spline</title>
+  <path d="M14 14.5L14 49.3A18 10.39 0 0 0 50 49.3L50 14.5Z" fill="#b8c3cf"/>
+  <path d="M38.3 14.5L38.3 59.03A18 10.39 0 0 0 50 49.3L50 14.5Z" fill="#8e9faf"/>
+  <path d="M14 14.5L14 49.3A18 10.39 0 0 0 50 49.3L50 14.5Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M27.34 24.53L28.51 22.03A13.5 7.79 0 0 0 35.49 22.03L36.66 24.53L36.66 45.03A18 10.39 0 0 1 27.34 45.03Z" fill="#328bd3"/>
+  <path d="M28.51 42.53A13.5 7.79 0 0 0 35.49 42.53L36.66 45.03A18 10.39 0 0 1 27.34 45.03Z" fill="#b9ddf8"/>
+  <path d="M27.34 24.53L27.34 45.03A18 10.39 0 0 0 36.66 45.03L36.66 24.53" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M44.73 21.85L41.55 20.01A13.5 7.79 0 0 0 45.04 16.52L49.39 17.19L49.39 37.69A18 10.39 0 0 1 44.73 42.35Z" fill="#328bd3"/>
+  <path d="M44.73 21.85L44.73 42.35A18 10.39 0 0 0 49.39 37.69" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M19.27 21.85L22.45 20.01A13.5 7.79 0 0 1 18.96 16.52L14.61 17.19L14.61 37.69A18 10.39 0 0 0 19.27 42.35Z" fill="#236ead"/>
+  <path d="M19.27 21.85L19.27 42.35A18 10.39 0 0 1 14.61 37.69" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M49.39 11.81A18 10.39 0 0 1 49.39 17.19L45.04 16.52A13.5 7.79 0 0 1 41.55 20.01L44.73 21.85A18 10.39 0 0 1 36.66 24.53L35.49 22.03A13.5 7.79 0 0 1 28.51 22.03L27.34 24.53A18 10.39 0 0 1 19.27 21.85L22.45 20.01A13.5 7.79 0 0 1 18.96 16.52L14.61 17.19A18 10.39 0 0 1 14.61 11.81L18.96 12.48A13.5 7.79 0 0 1 22.45 8.99L19.27 7.15A18 10.39 0 0 1 27.34 4.47L28.51 6.97A13.5 7.79 0 0 1 35.49 6.97L36.66 4.47A18 10.39 0 0 1 44.73 7.15L41.55 8.99A13.5 7.79 0 0 1 45.04 12.48L49.39 11.81Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

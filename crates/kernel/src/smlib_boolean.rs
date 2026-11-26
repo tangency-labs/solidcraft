@@ -14,7 +14,7 @@ mod smlib {
 
     use crate::body::Body;
     use crate::history::History;
-    use crate::native::{body_from_smlib_ordered, smlib_operand_ordered, smlib_shared_operand_ordered};
+    use crate::native::{body_from_smlib_ordered, smlib_operand_ordered, smlib_operand_to_consume, smlib_shared_operand_ordered};
     use crate::ops::BoolOp;
     use crate::validation::{Checked, Step};
     use crate::{KernelError, Result, record};
@@ -54,7 +54,7 @@ mod smlib {
                 Err(e) => log::debug!(target: "smlib", "boolean with touching solids shared: {e}"),
             }
         }
-        combine(a, b, smlib_operand_ordered(a)?, smlib_operand_ordered(b)?, op)
+        combine(a, b, smlib_operand_to_consume(a)?, smlib_operand_to_consume(b)?, op)
     }
 
     /// [`boolean`] of `a` and `b` as SMLib's `sa` and `sb`, each with its numbering.
@@ -64,9 +64,41 @@ mod smlib {
             BoolOp::Cut => BooleanOp::Subtract,
             BoolOp::Intersect => BooleanOp::Intersect,
         };
-        // The operands tagged and combined, the tagged copies consumed (solidcore#3359).
-        let Some(r) = sa.boolean_tagged(&sb, kind).map_err(|e| failed("operation", e))? else { return Ok(None) };
-        let step = checked(&r, &[&sa, &sb])?;
+        // The operands tagged and combined, the tagged copies consumed (solidcore#3359). Where the
+        // step is not checked now, an operand made for this operation alone (not a body's kept
+        // form) is handed over and tagged itself, not copied first: nothing reads it after.
+        let step = if crate::validation::step() == Step::Check {
+            let Some(r) = sa.boolean_tagged(&sb, kind).map_err(|e| failed("operation", e))? else { return Ok(None) };
+            let step = checked(&r, &[&sa, &sb])?;
+            (r, step)
+        } else {
+            let taken = |s: &mut Option<std::sync::Arc<solidcraft_smlib::Brep>>| match s.take().map(std::sync::Arc::try_unwrap) {
+                Some(Ok(owned)) => Some(Err(owned)),
+                Some(Err(shared)) => {
+                    *s = Some(shared);
+                    None
+                }
+                None => None,
+            };
+            let (mut ka, mut kb) = (Some(sa), Some(sb));
+            let (oa, ob) = (taken(&mut ka), taken(&mut kb));
+            let a_in = match (oa, ka.as_deref()) {
+                (Some(owned), _) => owned,
+                (None, Some(shared)) => Ok(shared),
+                (None, None) => return Err(KernelError::Internal("SMLib boolean: an operand went missing".into())),
+            };
+            let b_in = match (ob, kb.as_deref()) {
+                (Some(owned), _) => owned,
+                (None, Some(shared)) => Ok(shared),
+                (None, None) => return Err(KernelError::Internal("SMLib boolean: an operand went missing".into())),
+            };
+            let Some(r) = solidcraft_smlib::Brep::boolean_tagged_owned(a_in, b_in, kind).map_err(|e| failed("operation", e))? else {
+                return Ok(None);
+            };
+            let step = checked(&r, &[])?;
+            (r, step)
+        };
+        let (r, step) = step;
         let (body, or) = body_from_smlib_ordered(&r)?;
         let history = match (oa, ob, or) {
             (Some(oa), Some(ob), Some(or)) => r.history().map_err(|e| failed("history", e))?.history(&[oa, ob], &or).map(Some).unwrap_or_else(|e| {
