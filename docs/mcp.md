@@ -430,9 +430,9 @@ The `export` tool and an `export` step in `batch` take the same mesh options:
   `export {"path":"robot.urdf","chord":0.05}` requests a 0.05 mm tolerance for the link meshes.
 
 These options control meshes for STL, ASCII STL, OBJ, 3MF, 3MF-tagged, GLB, OpenUSD, Rhino,
-URDF and SDF. Give either `quality` or `chord`: two non-null values are refused; `null` means
-omitted. Exporter plugins refuse these options when non-null. See [URDF export](urdf.md) for
-link meshes and computed physical properties.
+URDF and SDF. Set either `quality` or `chord`; setting both is refused. Omit the unused key.
+Exporter plugins do not take these options. See [URDF export](urdf.md) for link meshes and
+computed physical properties.
 
 `measure` with `items` reports each item under `items` (`length_mm`, `area_mm2` or `position`).
 A circle, arc, hole or other cylindrical face also gives `diameter`, `radius`, `center` and
