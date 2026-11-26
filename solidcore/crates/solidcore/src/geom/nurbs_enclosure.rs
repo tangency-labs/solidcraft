@@ -16,9 +16,10 @@
 //! | [`nurbs_partials_over_piece`], [`nurbs_partials_over_piece_about`], `partials_over_piece` | `sm_NurbsPartialsOverPiece` (the fork's) |
 //! | [`nurbs_partials_over_box`], `knot_cuts`, `below_continuity`, `partials_hull` | (not upstream) |
 //!
-//! Deviations: none from where they were, but one refusal: an order past `MAX_K` (the
+//! Deviations: none from where they were, but two refusals: an order past `MAX_K` (the
 //! highest a `Partials` holds, which the fork never asked for) is refused before any table
-//! is sized by it. The errors keep the operation name they had there, so no message
+//! is sized by it, and a span index outside the net's spans before an offset is taken
+//! from it. The errors keep the operation name they had there, so no message
 //! changes. Knots and nets are read by checked indices (a knot or a
 //! coordinate outside reads NaN, which shows in the result). No recursion.
 
@@ -27,6 +28,7 @@ use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::series::{v_hull, MAX_K, V3, VZ};
 use crate::blend::fillet_section::station::{ders_basis, knot, span, Nurbs, Partials};
 use crate::error::blend::{BlendFailure, SectionProof};
+use crate::error::geom::GeomFailure;
 use crate::error::{Result, SolidError};
 
 /// The operation the errors name: where these functions were, kept so that no message
@@ -63,7 +65,9 @@ pub(crate) const IZ: Ivl = Ivl::new(0.0, 0.0);
 ///
 /// `SM_ERR` where the weights are not proved positive over the box ("a face's weights are
 /// not positive over a box"); [`SolidError::Unsupported`] for an order `lk` past
-/// [`MAX_K`], the highest a [`Partials`] holds.
+/// [`MAX_K`], the highest a [`Partials`] holds; [`GeomFailure::SpanOutsideNet`] for a span
+/// `ku` outside `p ..= nu − 1` or `kv` outside `q ..= nv − 1` (the box itself may lie past
+/// the span: the piece is continued over it).
 #[allow(clippy::too_many_arguments)]
 pub fn nurbs_partials_over_piece(
     cn: &Nurbs,
@@ -137,6 +141,23 @@ pub(crate) fn partials_over_piece(
             operation: OP,
             reason: "partial derivatives past the highest order an enclosure holds",
         });
+    }
+    // A span names the control points ku − p ..= ku (and kv − q ..= kv), whatever box it is
+    // continued over (an end span past the knots' range is the end piece's continuation):
+    // one before the first span or past the last is refused before an offset is taken from
+    // it (`ku + i − p` would wrap).
+    for (in_v, span, first, count) in [(false, ku, cn.p, cn.nu), (true, kv, cn.q, cn.nv)] {
+        if span < first || span >= count {
+            return Err(SolidError::geom(
+                OP,
+                GeomFailure::SpanOutsideNet {
+                    in_v,
+                    span,
+                    first,
+                    last: count.saturating_sub(1),
+                },
+            ));
+        }
     }
     let um = 0.5 * (ua + ub);
     let vm = 0.5 * (va + vb);

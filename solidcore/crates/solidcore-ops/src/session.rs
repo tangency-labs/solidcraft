@@ -59,6 +59,26 @@ use crate::{Error, ErrorClass, FailureCode, Result};
 static IDLE: Mutex<Vec<Kernel>> = Mutex::new(Vec::new());
 static FIXES: Mutex<Option<UpstreamFixes>> = Mutex::new(None);
 
+/// The recertify memo the application's kernels share, so that a certificate one pool's
+/// kernel finished serves every other kernel too (a hit returns what recertifying the same
+/// blend again returns, so sharing it changes no answer, only the work). `None` until the
+/// application names it ([`set_recertify_memo`]): the session's own kernels then each keep
+/// their own, as before.
+/// The recertify memo's type, at the seam: the application's wrapper names it through
+/// this crate, not through solidcore's internals (`cargo xtask layers`).
+pub use solidcore::surface::procedural_blend::convert::RecertifyMemo;
+
+static SHARED_RECERTIFY_MEMO: Mutex<Option<Arc<Mutex<RecertifyMemo>>>> = Mutex::new(None);
+
+/// Names the recertify memo this session's kernels share ([`fresh`] injects it into every
+/// kernel the pool makes). The application calls it once, beside [`set_fixes`], with the
+/// memo its own kernel pool shares.
+pub fn set_recertify_memo(m: Arc<Mutex<RecertifyMemo>>) {
+    *SHARED_RECERTIFY_MEMO
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = Some(m);
+}
+
 /// A failed call, as the failure callback sees it. More fields come (the call's arguments,
 /// `docs/failure-codes-and-reproduction.md` 3.2): read it by its fields, never build it.
 #[derive(Debug)]
@@ -200,6 +220,13 @@ pub(crate) fn counted<T>(counter: Counter, f: impl FnOnce() -> T) -> (T, u64) {
 fn fresh() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes = current_fixes();
+    if let Some(m) = SHARED_RECERTIFY_MEMO
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+    {
+        k.recertify_memo = Arc::clone(m);
+    }
     k
 }
 

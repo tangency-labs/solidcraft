@@ -1310,6 +1310,218 @@ fn lofted(sections: &[Vec<Curve>], ends: [LoftEnd; 2]) -> Body {
     b
 }
 
+/// A circle-to-slot loft has exact, mixed-degree rims. The match splits the circle
+/// over the four original slot segments; it must close with independent planar caps.
+#[test]
+fn planar_g1_circle_to_slot_keeps_the_original_caps() {
+    use solidcore_ops::stitch::{open_edges, sew};
+    use solidcore_ops::sweep::{loft_sheet_planar_g1, LoftSection};
+    use solidcore_record::{Loop2, Plane, Seg2, Vec2, Vec3};
+
+    rig_fixes();
+    let section = |y, z, segs| LoftSection {
+        plane: Plane {
+            origin: Vec3::new(0.0, y, z),
+            x: Vec3::new(1.0, 0.0, 0.0),
+            y: Vec3::new(0.0, 1.0, 0.0),
+        },
+        segs,
+    };
+    let v = Vec2::new;
+    let a = section(0.0, 0.0, Loop2::circle(v(0.0, 0.0), 10.0).segs);
+    let b = section(
+        6.0,
+        30.0,
+        vec![
+            Seg2::Line {
+                a: v(-10.0, -8.0),
+                b: v(10.0, -8.0),
+            },
+            Seg2::Arc {
+                center: v(10.0, 0.0),
+                radius: 8.0,
+                start: -FRAC_PI_2,
+                sweep: PI,
+            },
+            Seg2::Line {
+                a: v(10.0, 8.0),
+                b: v(-10.0, 8.0),
+            },
+            Seg2::Arc {
+                center: v(-10.0, 0.0),
+                radius: 8.0,
+                start: FRAC_PI_2,
+                sweep: PI,
+            },
+        ],
+    );
+    let cap = |s: &LoftSection| {
+        let curves = s
+            .segs
+            .iter()
+            .map(|seg| Curve::from_seg2(seg, &s.plane).unwrap())
+            .collect::<Vec<_>>();
+        planar_faces(&curves).unwrap()
+    };
+    let caps = [cap(&a), cap(&b)];
+    for (end, sections) in [(0, [a.clone(), b.clone()]), (1, [b, a])] {
+        let (record, sources) = loft_sheet_planar_g1(&sections, end, 0.0, true).unwrap();
+        assert_eq!(record.faces.len(), 4);
+        assert_eq!(sources.len(), record.faces.len());
+        let mut seen = [false; 4];
+        for (face, sources) in record.faces.iter().zip(sources) {
+            let [solidcore_record::brep::Loop::Edges { edges }] = face.loops.as_slice() else {
+                panic!("expected one edge loop per wall");
+            };
+            let mut slot_rims = edges.iter().filter_map(|edge| {
+                let [a, b] = record.edges[edge.edge as usize]
+                    .vertices
+                    .map(|v| record.vertices[v as usize].point);
+                ((a[2] - 30.0).abs() < 1e-10 && (b[2] - 30.0).abs() < 1e-10).then_some((a, b))
+            });
+            let (a, b) = slot_rims.next().unwrap();
+            assert!(slot_rims.next().is_none());
+            // The slot's four endpoint pairs uniquely identify its source segments.
+            let slot = [(0.0, -2.0), (10.0, 6.0), (0.0, 14.0), (-10.0, 6.0)]
+                .iter()
+                .position(|&(x, y)| {
+                    (a[0] + b[0] - 2.0 * x).abs() < 1e-10 && (a[1] + b[1] - 2.0 * y).abs() < 1e-10
+                })
+                .unwrap();
+            assert!(!std::mem::replace(&mut seen[slot], true));
+            let expected = if end == 0 { [0, slot + 1] } else { [slot, 4] };
+            assert_eq!(sources, expected, "sources for slot segment {slot}");
+        }
+        let (sheet, _) = Body::from_record(&record, true).unwrap();
+        assert_slot_rims(&sheet, &open_edges(&sheet).unwrap());
+        let sewn = sew(&[&sheet, &caps[0], &caps[1]], 1e-5).unwrap();
+        assert!(sewn.closed && sewn.open_edges.is_empty());
+        assert!(sewn.body.check(CheckLevel::All).unwrap().is_valid());
+    }
+}
+
+/// Supporting planes may intersect the other rim even when both finite caps
+/// are separate. Do not require a nonzero projection on the free plane's normal.
+#[test]
+fn planar_g1_keeps_caps_when_their_supporting_planes_cross() {
+    use solidcore_ops::stitch::sew;
+    use solidcore_ops::sweep::{loft_sheet_planar_g1, LoftSection};
+    use solidcore_record::{Loop2, Plane, Vec2, Vec3};
+
+    rig_fixes();
+    let rect = |w: f64| {
+        Loop2::polygon(&[
+            Vec2::new(-2.0, -w),
+            Vec2::new(2.0, -w),
+            Vec2::new(2.0, w),
+            Vec2::new(-2.0, w),
+        ])
+        .segs
+    };
+    let a = LoftSection {
+        plane: Plane {
+            origin: Vec3::ZERO,
+            x: Vec3::new(1.0, 0.0, 0.0),
+            y: Vec3::new(0.0, 1.0, 0.0),
+        },
+        segs: rect(2.0),
+    };
+    let cap = |s: &LoftSection| {
+        planar_faces(
+            &s.segs
+                .iter()
+                .map(|g| Curve::from_seg2(g, &s.plane).unwrap())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap()
+    };
+    let ca = cap(&a);
+    for z in [18.749, 18.751] {
+        let b = LoftSection {
+            plane: Plane {
+                origin: Vec3::new(0.0, 25.0, z),
+                x: Vec3::new(1.0, 0.0, 0.0),
+                y: Vec3::new(0.0, 0.8, 0.6),
+            },
+            segs: rect(2.5),
+        };
+        let cb = cap(&b);
+        for crown in [0.0, 3.0] {
+            let (record, _) =
+                loft_sheet_planar_g1(&[a.clone(), b.clone()], 0, crown, true).unwrap();
+            let (sheet, _) = Body::from_record(&record, true).unwrap();
+            let sewn = sew(&[&sheet, &ca, &cb], 1e-5).unwrap();
+            assert!(sewn.closed && sewn.open_edges.is_empty());
+            assert!(sewn.body.check(CheckLevel::All).unwrap().is_valid());
+        }
+    }
+}
+
+/// Check the entire exported rim, not just the vertices that met during stitching.
+fn assert_slot_rims(sheet: &Body, rims: &[usize]) {
+    use solidcore::curve::curve::CurveKind;
+    use solidcore::curve::from_parameters::from_parameters;
+    use solidcore::nurbs::certificate::{on_circle, turn_about_axis, OnCircle};
+    use solidcore::{Kernel, Vec3};
+
+    let k = Kernel::default();
+    let (r, _) = sheet.to_record().unwrap();
+    assert_eq!(r.shells.len(), 1);
+    let mut angles = [0.0_f64; 3];
+    let mut line_levels = Vec::new();
+    for &i in rims {
+        let e = &r.edges[i];
+        let input = solidcore_convert::curve(e.parameters()).unwrap();
+        let edge = from_parameters(&k, &input, e.interval).unwrap();
+        let CurveKind::BSpline(spline) = edge.curve.kind() else {
+            panic!("expected a spline rim")
+        };
+        let curve = spline.gw_nurb().unwrap();
+        let [a, b] = e.vertices.map(|j| {
+            let [x, y, z] = r.vertices[j as usize].point;
+            Vec3::new(x, y, z)
+        });
+        if (a.z - 30.0).abs() < 1e-10 && (a.y - b.y).abs() < 1e-10 && (a.x - b.x).abs() > 19.0 {
+            // Positive weights put the entire trim in this segment's capsule.
+            assert!(curve.cpts().iter().all(|q| {
+                let p = q.to_euclid();
+                q.w > 0.0
+                    && (p.y - a.y).abs() < 1e-10
+                    && (p.z - 30.0).abs() < 1e-10
+                    && p.x.abs() <= 10.0 + 1e-10
+            }));
+            assert!((a.x.abs() - 10.0).abs() < 1e-10 && (b.x.abs() - 10.0).abs() < 1e-10);
+            line_levels.push(a.y);
+        } else {
+            let (j, c, radius) = if a.z.abs() < 1e-10 {
+                (0, Vec3::ZERO, 10.0)
+            } else if a.x > 0.0 {
+                (1, Vec3::new(10.0, 6.0, 30.0), 8.0)
+            } else {
+                (2, Vec3::new(-10.0, 6.0, 30.0), 8.0)
+            };
+            assert_eq!(
+                on_circle(&k, curve, c, Vec3::Z, radius, 1e-10).unwrap(),
+                OnCircle::Within
+            );
+            let turn = turn_about_axis(curve, c, Vec3::Z, e.interval)
+                .unwrap()
+                .unwrap();
+            let (da, db) = (a - c, b - c);
+            angles[j] += (turn * da.cross(db).z.atan2(da.dot(db))).rem_euclid(TAU);
+        }
+    }
+    assert_eq!(rims.len(), 8);
+    line_levels.sort_by(f64::total_cmp);
+    assert_eq!(line_levels.len(), 2);
+    for (got, want) in line_levels.into_iter().zip([-2.0, 14.0]) {
+        assert!((got - want).abs() < 1e-10);
+    }
+    for (got, want) in angles.into_iter().zip([TAU, PI, PI]) {
+        assert!((got - want).abs() < 1e-10, "sweep {got} != {want}");
+    }
+}
+
 /// Two equal squares, one above the other: every point's straight way to the next section is
 /// square to the planes already, so with weight 1 at both ends each row's Hermite cubic is that
 /// straight way and the loft is the box, its four flat walls planes.

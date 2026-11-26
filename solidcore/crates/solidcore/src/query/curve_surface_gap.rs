@@ -29,8 +29,9 @@
 //! continue, and a piece the bisection cannot close all give `None`: the gap is then not
 //! enclosed.
 
-use core::cell::RefCell;
-use std::collections::{btree_map::Entry, BTreeMap};
+use core::cell::{Cell, RefCell};
+use std::collections::{btree_map::Entry, BTreeMap, VecDeque};
+use std::sync::Arc;
 
 use crate::blend::fillet_section::certificate::{
     below_continuity, curve_derivs_over, knot_cuts, nurbs_partials_over_piece, partials_hull,
@@ -77,6 +78,236 @@ const CLOSE_ABSOLUTE: f64 = 1.0e-13;
 const CORRESPONDENCE_POINTS: usize = 257;
 /// Pieces the bisection starts from.
 const FIRST_PIECES: usize = 32;
+/// The most pieces the identity-correspondence fast path in [`bound_trim_pair`] may spend
+/// before falling back to [`reparametrisation`]: two full halvings of [`FIRST_PIECES`]
+/// (`32 + 64 + 128 = 224`) fit within `256`.
+const IDENTITY_FAST_PIECES: usize = 256;
+/// The most trim bounds a [`TrimBoundMemo`] keeps; the oldest goes first.
+const TRIM_MEMO_CAPACITY: usize = 4096;
+/// The largest trim pair (stored `f64` values across curve, trim and net) kept in a
+/// [`TrimBoundMemo`].
+const TRIM_MEMO_MAX_FLOATS: usize = 8192;
+/// The most retained key bytes a [`TrimBoundMemo`] holds across all entries (16 MiB);
+/// the oldest entry is evicted first whenever an insert would pass this budget.
+const TRIM_MEMO_MAX_BYTES: usize = 16 * 1024 * 1024;
+
+/// Outcome of a certified trim-image gap bound ([`MovedTrimPair::bound_before`],
+/// [`MovedTrimPair::bound_after`]): distinguishes a budget-stopped bisection whose evaluated
+/// endpoints stayed within `enough` from a gap proved past `over` or structurally unenclosed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum TrimBoundOutcome {
+    /// A proved finite upper bound at most `over`.
+    Proved(f64),
+    /// Proved to exceed `over`.
+    ExceedsOver,
+    /// Stopped by the caller's piece `budget` while every evaluated endpoint stayed within
+    /// `enough`: the true gap may still lie within `over`.
+    BudgetStopped,
+    /// Not enclosed (not due to the piece `budget`).
+    Unproved,
+}
+
+/// Exact bit-for-bit identity of a [`bound_trim_pair`] invocation over `range`,
+/// preceded by a deterministic FNV-1a pre-hash so ordered-map lookups compare a single
+/// `u64` first while equality stays exact bit for bit. Stored once behind an [`Arc`] in
+/// [`TrimBoundMemo`].
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct TrimBoundKey {
+    hash: u64,
+    bits: Vec<u64>,
+}
+
+impl TrimBoundKey {
+    /// Approximate heap and inline bytes retained by this key.
+    fn retained_bytes(&self) -> usize {
+        size_of::<Self>().saturating_add(self.bits.capacity().saturating_mul(size_of::<u64>()))
+    }
+}
+
+/// Not upstream (#22467): exact-input memo of [`bound_trim_pair`] outcomes, keyed by the exact
+/// content of the pair's data and bound parameters ([`TrimBoundKey`]). Each key is stored once
+/// behind an [`Arc`] and retained memory is bounded by both [`TRIM_MEMO_CAPACITY`] and
+/// [`TRIM_MEMO_MAX_BYTES`]. Clearing it changes no result, only speed.
+#[derive(Debug, Default)]
+pub(crate) struct TrimBoundMemo {
+    bounds: BTreeMap<Arc<TrimBoundKey>, TrimBoundOutcome>,
+    order: VecDeque<Arc<TrimBoundKey>>,
+    retained_bytes: usize,
+}
+
+impl TrimBoundMemo {
+    /// The exact outcome previously computed for `key`, if any.
+    pub(crate) fn get(&self, key: &TrimBoundKey) -> Option<TrimBoundOutcome> {
+        self.bounds.get(key).copied()
+    }
+
+    /// Number of cached trim outcomes (tests).
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.bounds.len()
+    }
+
+    /// Total key bytes retained by the memo (tests).
+    #[cfg(test)]
+    pub(crate) const fn retained_bytes(&self) -> usize {
+        self.retained_bytes
+    }
+
+    /// Records `outcome` for `key`, storing the key once and evicting the oldest entries past
+    /// [`TRIM_MEMO_CAPACITY`] or [`TRIM_MEMO_MAX_BYTES`].
+    pub(crate) fn insert(&mut self, key: TrimBoundKey, outcome: TrimBoundOutcome) {
+        if let Some(existing) = self.bounds.get_mut(&key) {
+            *existing = outcome;
+            return;
+        }
+        let entry_bytes = key.retained_bytes();
+        if entry_bytes > TRIM_MEMO_MAX_BYTES {
+            return;
+        }
+        while self.order.len() >= TRIM_MEMO_CAPACITY
+            || self.retained_bytes.saturating_add(entry_bytes) > TRIM_MEMO_MAX_BYTES
+        {
+            match self.order.pop_front() {
+                Some(old) => {
+                    if self.bounds.remove(&old).is_some() {
+                        self.retained_bytes =
+                            self.retained_bytes.saturating_sub(old.retained_bytes());
+                    }
+                }
+                None => break,
+            }
+        }
+        let key = Arc::new(key);
+        self.retained_bytes = self.retained_bytes.saturating_add(entry_bytes);
+        self.order.push_back(Arc::clone(&key));
+        self.bounds.insert(key, outcome);
+    }
+}
+
+/// Returns packed evaluation flags when `(surface, curve, uv)` all evaluate directly from the
+/// exact NURBS data carried in [`TrimPair`], so [`bound_trim_pair`] depends on nothing outside
+/// [`TrimBoundKey`].
+fn pure_nurbs_flags(surface: &Surface, curve: &Curve, uv: &Curve) -> Option<u64> {
+    use crate::curve::curve::CurveKind;
+    use crate::surface::surface::SurfaceKind;
+
+    let s_oob = match surface.kind() {
+        SurfaceKind::BSpline(s) => s.is_out_of_bounds_enabled(),
+        SurfaceKind::BallPatch(s) => s.net().is_out_of_bounds_enabled(),
+        _ => return None,
+    };
+    let CurveKind::BSpline(c) = curve.kind() else {
+        return None;
+    };
+    let CurveKind::BSpline(w) = uv.kind() else {
+        return None;
+    };
+    Some(
+        u64::from(s_oob)
+            | (u64::from(c.is_out_of_bounds_enabled()) << 1)
+            | (u64::from(w.is_out_of_bounds_enabled()) << 2),
+    )
+}
+
+/// Exact content key of a [`bound_trim_pair`] call over `range` with net-to-surface residual
+/// `residual`; `None` for a pair past [`TRIM_MEMO_MAX_FLOATS`], a net carrying a cone apex, or
+/// a failed fallible reservation.
+fn trim_bound_key(
+    pair: &TrimPair,
+    [r0, r1]: [f64; 2],
+    residual: f64,
+    floor: f64,
+    [enough, over]: [f64; 2],
+    budget: Option<usize>,
+    collapse_unproved: bool,
+    any_within_enough: bool,
+    eval_flags: u64,
+) -> Option<TrimBoundKey> {
+    if pair.net.ends.apex.is_some() {
+        return None;
+    }
+    let cn = &pair.cn;
+    let wn = &pair.wn;
+    let net = &pair.net.net;
+    let floats =
+        cn.u.len()
+            .checked_add(cn.pw.len())?
+            .checked_add(wn.u.len())?
+            .checked_add(wn.pw.len())?
+            .checked_add(net.u.len())?
+            .checked_add(net.v.len())?
+            .checked_add(net.pw.len())?;
+    if floats > TRIM_MEMO_MAX_FLOATS {
+        return None;
+    }
+    let header = if pair.net.offset.is_some() { 26 } else { 24 };
+    let cap = floats.checked_add(header)?;
+    let mut bits = Vec::new();
+    bits.try_reserve_exact(cap).ok()?;
+    let flags = u64::from(pair.net.ends.u)
+        | (u64::from(pair.net.ends.v) << 1)
+        | (u64::from(pair.net.offset.is_some()) << 2)
+        | (u64::from(budget.is_some()) << 3)
+        | (u64::from(collapse_unproved) << 4)
+        | (u64::from(any_within_enough) << 5)
+        | (eval_flags << 6);
+    bits.extend([
+        r0.to_bits(),
+        r1.to_bits(),
+        pair.c_slack.to_bits(),
+        residual.to_bits(),
+        floor.to_bits(),
+        enough.to_bits(),
+        over.to_bits(),
+        u64::try_from(budget.unwrap_or(0)).ok()?,
+        flags,
+    ]);
+    if let Some(off) = pair.net.offset {
+        bits.extend([off.lo.to_bits(), off.hi.to_bits()]);
+    }
+    let push_curve = |bits: &mut Vec<u64>, c: &NurbsCurve| -> Option<()> {
+        bits.extend([
+            u64::try_from(c.p).ok()?,
+            u64::try_from(c.n).ok()?,
+            u64::try_from(c.u.len()).ok()?,
+            u64::try_from(c.pw.len()).ok()?,
+        ]);
+        bits.extend(c.u.iter().copied().map(f64::to_bits));
+        bits.extend(c.pw.iter().copied().map(f64::to_bits));
+        Some(())
+    };
+    push_curve(&mut bits, cn)?;
+    push_curve(&mut bits, wn)?;
+    bits.extend([
+        u64::try_from(net.p).ok()?,
+        u64::try_from(net.q).ok()?,
+        u64::try_from(net.nu).ok()?,
+        u64::try_from(net.nv).ok()?,
+        u64::try_from(net.u.len()).ok()?,
+        u64::try_from(net.v.len()).ok()?,
+        u64::try_from(net.pw.len()).ok()?,
+    ]);
+    bits.extend(net.u.iter().copied().map(f64::to_bits));
+    bits.extend(net.v.iter().copied().map(f64::to_bits));
+    bits.extend(net.pw.iter().copied().map(f64::to_bits));
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for &word in &bits {
+        hash ^= word;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    Some(TrimBoundKey { hash, bits })
+}
+
+/// The identity reparametrisation `ψ(s) = s` over `[r0, r1]` (degree 1, two control points,
+/// no interior knots).
+fn identity_psi([r0, r1]: [f64; 2]) -> NurbsCurve {
+    NurbsCurve {
+        p: 1,
+        n: 2,
+        u: vec![r0, r0, r1, r1],
+        pw: vec![r0, 0.0, 0.0, 1.0, r1, 0.0, 0.0, 1.0],
+    }
+}
 
 /// A surface prepared for enclosure: its net and the directions it continues past the net.
 ///
@@ -1074,6 +1305,20 @@ fn bisect(
     )
 }
 
+/// Outcome of [`bisect_core`], distinguishing a budget-stopped run whose evaluated endpoints
+/// stayed within `enough` from an unenclosed gap or one proved past `over`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum BisectOutcome {
+    /// A proved finite bound at most `over`.
+    Proved(f64),
+    /// Proved to exceed `over`.
+    ExceedsOver,
+    /// Stopped by the piece `budget` while every evaluated endpoint stayed at most `enough`.
+    BudgetStopped,
+    /// Not enclosed (not due to the piece `budget`).
+    Unproved,
+}
+
 /// Not upstream (#19889): [`bisect`], with `ends` (where given) the end value at a parameter
 /// that `piece` takes as the end value there: `Some(g)` where `piece` evaluates `g` there
 /// (its piece's end values are then the largest of its two and `0`), `None` (or an error
@@ -1095,6 +1340,41 @@ fn bisect(
 ///
 /// Those of `piece`, and a cancellation from `ends`.
 fn bisect_with_ends(
+    range: [f64; 2],
+    first_pieces: usize,
+    corners: &[f64],
+    relative: f64,
+    floor: f64,
+    limits: [f64; 2],
+    budget: Option<usize>,
+    piece: impl FnMut(f64, f64) -> Result<Option<PieceBound>>,
+    ends: Option<&mut dyn FnMut(f64) -> Result<Option<f64>>>,
+) -> Result<Option<f64>> {
+    let (outcome, _) = bisect_core(
+        range,
+        first_pieces,
+        corners,
+        relative,
+        floor,
+        limits,
+        budget,
+        false,
+        piece,
+        ends,
+    )?;
+    Ok(match outcome {
+        BisectOutcome::Proved(bound) => Some(bound),
+        BisectOutcome::ExceedsOver => Some(f64::INFINITY),
+        BisectOutcome::BudgetStopped | BisectOutcome::Unproved => None,
+    })
+}
+
+/// [`bisect_with_ends`], with `collapse_unproved` allowing the endpoint look-ahead
+/// ([`look_ends`]) even when `over` is finite: a caller that only needs to distinguish
+/// `Proved`, `ExceedsOver`, and `BudgetStopped`/`Unproved` does not need to evaluate second
+/// partials on every remaining piece once the budget has parked a piece and no remaining
+/// endpoint exceeds `enough`. Returns the outcome together with the number of pieces popped.
+fn bisect_core(
     [lo, hi]: [f64; 2],
     first_pieces: usize,
     corners: &[f64],
@@ -1102,11 +1382,12 @@ fn bisect_with_ends(
     floor: f64,
     [enough, over]: [f64; 2],
     budget: Option<usize>,
+    collapse_unproved: bool,
     mut piece: impl FnMut(f64, f64) -> Result<Option<PieceBound>>,
     mut ends: Option<&mut dyn FnMut(f64) -> Result<Option<f64>>>,
-) -> Result<Option<f64>> {
+) -> Result<(BisectOutcome, u64)> {
     if !(lo.is_finite() && hi.is_finite() && lo < hi) || first_pieces == 0 {
-        return Ok(None);
+        return Ok((BisectOutcome::Unproved, 0));
     }
     let f = |j: usize| {
         if j == first_pieces {
@@ -1129,16 +1410,20 @@ fn bisect_with_ends(
     stack.reverse();
     let mut worst = 0.0_f64;
     let mut made = stack.len();
+    let mut evaluated = 0_u64;
     // (the largest end value evaluated, with a budget: the bound is at least it)
     let mut seen = f64::NEG_INFINITY;
     // (the open pieces the budget stopped, in the order they were reached)
     let mut parked: Vec<(f64, f64, u32, f64)> = Vec::new();
     // (whether the end values of the pieces left were looked at, once the budget first stopped
     // a piece: [`bisect_with_ends`])
-    let mut ends_looked =
-        ends.is_none() || over != f64::INFINITY || enough.is_nan() || enough < 0.0;
+    let mut ends_looked = ends.is_none()
+        || (!collapse_unproved && over != f64::INFINITY)
+        || enough.is_nan()
+        || enough < 0.0;
     loop {
         while let Some((a, b, depth, parent)) = stack.pop() {
+            evaluated = evaluated.saturating_add(1);
             let mid = 0.5 * (a + b);
             let bottom = depth >= MAX_DEPTH || !(a < mid && mid < b);
             // (the budget holds while the bound may still be at most `enough`; a piece that
@@ -1155,7 +1440,7 @@ fn bisect_with_ends(
                     if budget.is_some() {
                         seen = seen.max(p.ends);
                         if seen > over {
-                            return Ok(Some(f64::INFINITY));
+                            return Ok((BisectOutcome::ExceedsOver, evaluated));
                         }
                     }
                     let (capped, out_of_pieces) = out_of(seen);
@@ -1167,8 +1452,14 @@ fn bisect_with_ends(
                         if !ends_looked {
                             ends_looked = true;
                             if let Some(end) = ends.as_mut() {
-                                if ends_within(&stack, &mut **end, enough)? {
-                                    return Ok(None);
+                                match look_ends(&stack, &mut **end, enough, over)? {
+                                    EndsLook::AllWithin => {
+                                        return Ok((BisectOutcome::BudgetStopped, evaluated));
+                                    }
+                                    EndsLook::ExceedsOver => {
+                                        return Ok((BisectOutcome::ExceedsOver, evaluated));
+                                    }
+                                    EndsLook::ExceedsEnough => {}
                                 }
                             }
                         }
@@ -1176,7 +1467,7 @@ fn bisect_with_ends(
                     }
                     if bottom || out_of_pieces || closed {
                         if bound > over {
-                            return Ok(Some(f64::INFINITY));
+                            return Ok((BisectOutcome::ExceedsOver, evaluated));
                         }
                         worst = worst.max(bound);
                         continue;
@@ -1193,15 +1484,21 @@ fn bisect_with_ends(
                         if !ends_looked {
                             ends_looked = true;
                             if let Some(end) = ends.as_mut() {
-                                if ends_within(&stack, &mut **end, enough)? {
-                                    return Ok(None);
+                                match look_ends(&stack, &mut **end, enough, over)? {
+                                    EndsLook::AllWithin => {
+                                        return Ok((BisectOutcome::BudgetStopped, evaluated));
+                                    }
+                                    EndsLook::ExceedsOver => {
+                                        return Ok((BisectOutcome::ExceedsOver, evaluated));
+                                    }
+                                    EndsLook::ExceedsEnough => {}
                                 }
                             }
                         }
                         continue;
                     }
                     if bottom || out_of_pieces {
-                        return Ok(None);
+                        return Ok((BisectOutcome::Unproved, evaluated));
                     }
                 }
             }
@@ -1215,12 +1512,17 @@ fn bisect_with_ends(
             break;
         }
         if seen <= enough {
-            return Ok(None);
+            return Ok((BisectOutcome::BudgetStopped, evaluated));
         }
         parked.reverse();
         stack.append(&mut parked);
     }
-    Ok(worst.is_finite().then_some(worst))
+    let outcome = if worst.is_finite() {
+        BisectOutcome::Proved(worst)
+    } else {
+        BisectOutcome::Unproved
+    };
+    Ok((outcome, evaluated))
 }
 
 /// Not upstream (#19889): `end` for the look at the end values of [`bisect_with_ends`],
@@ -1237,27 +1539,39 @@ fn polled_end<'a>(
     }
 }
 
-/// Not upstream (#19889): whether no end value `end` gives at the ends of the pieces `stack`
-/// is above `enough` ([`bisect_with_ends`]).
+/// Outcome of scanning the remaining stack endpoints in [`bisect_core`].
+enum EndsLook {
+    /// No endpoint exceeded `enough`.
+    AllWithin,
+    /// At least one endpoint exceeded `enough`, none exceeded `over` yet.
+    ExceedsEnough,
+    /// At least one endpoint exceeded `over`.
+    ExceedsOver,
+}
+
+/// Not upstream (#19889): scans the end values `end` gives at the ends of the pieces `stack`
+/// against `enough` and `over` ([`bisect_core`]).
 ///
 /// # Errors
 ///
 /// A cancellation from `end` (any other error is no end value, as `piece` takes it).
-fn ends_within<'a>(
+fn look_ends<'a>(
     stack: &[(f64, f64, u32, f64)],
     end: &mut (dyn FnMut(f64) -> Result<Option<f64>> + 'a),
     enough: f64,
-) -> Result<bool> {
+    over: f64,
+) -> Result<EndsLook> {
     for &(a, b, ..) in stack {
         for t in [a, b] {
             match end(t) {
-                Ok(Some(g)) if g > enough => return Ok(false),
+                Ok(Some(g)) if g > over => return Ok(EndsLook::ExceedsOver),
+                Ok(Some(g)) if g > enough => return Ok(EndsLook::ExceedsEnough),
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Ok(_) | Err(_) => {}
             }
         }
     }
-    Ok(true)
+    Ok(EndsLook::AllWithin)
 }
 
 /// The parameters strictly inside `(lo, hi)` where the curve `cn` may not be C¹: its
@@ -1497,7 +1811,7 @@ pub(crate) fn curve_face_gap_bound_within_counted(
             }
         }
     }
-    let pieces = std::cell::Cell::new(0_usize);
+    let pieces = Cell::new(0_usize);
     let gap = bisected_face_gap_bound(k, brep, face, curve, range, floor, [enough, over], &pieces)?;
     Ok((gap, pieces.get()))
 }
@@ -1542,7 +1856,7 @@ pub(crate) fn curve_surface_gap_bound_within(
             }
         }
     }
-    let pieces = std::cell::Cell::new(0_usize);
+    let pieces = Cell::new(0_usize);
     bisected_surface_gap_bound(
         k,
         &surface,
@@ -2674,7 +2988,7 @@ fn bisected_face_gap_bound(
     range: [f64; 2],
     floor: f64,
     [enough, over]: [f64; 2],
-    pieces: &std::cell::Cell<usize>,
+    pieces: &Cell<usize>,
 ) -> Result<Option<f64>> {
     let [lo, hi] = range;
     if !(lo.is_finite() && hi.is_finite() && lo < hi && floor.is_finite() && floor >= 0.0) {
@@ -2712,7 +3026,7 @@ fn bisected_surface_gap_bound(
     range: [f64; 2],
     floor: f64,
     [enough, over]: [f64; 2],
-    pieces: &std::cell::Cell<usize>,
+    pieces: &Cell<usize>,
 ) -> Result<Option<f64>> {
     use crate::error::ignored;
     use crate::surface::surface::p4::NoObject;
@@ -4173,6 +4487,7 @@ pub(crate) fn structured_trim_image_gap_bound(
 /// # Errors
 ///
 /// The kernel's unported and cancelled statuses.
+#[cfg(test)]
 pub(crate) fn moved_pair_room(
     k: &Kernel,
     before: (&Surface, &Curve, &Curve),
@@ -4180,6 +4495,104 @@ pub(crate) fn moved_pair_room(
     range: [f64; 2],
     m: [[f64; 4]; 4],
 ) -> Result<Option<f64>> {
+    Ok(moved_pair_data(k, before, after, range, m)?.map(|p| p.room))
+}
+
+/// Not upstream (#22467): the extracted before/after exact data and rounding room of a rigid
+/// move's trim pair ([`moved_pair_data`]), so `cover_moved_edge` builds each [`TrimPair`]
+/// once and reuses the extracted data for any pre-move or direct post-move bound it runs.
+pub(crate) struct MovedTrimPair {
+    room: f64,
+    range: [f64; 2],
+    before: TrimPair,
+    after: TrimPair,
+}
+
+impl MovedTrimPair {
+    /// The rounding room `δc + δs + slack + residual` of [`moved_pair_data`].
+    pub(crate) const fn room(&self) -> f64 {
+        self.room
+    }
+
+    /// Bounds the pair before the move using its already-extracted [`TrimPair`]. With a piece
+    /// `budget`, enables endpoint short-circuiting (`collapse_unproved`), returning
+    /// [`TrimBoundOutcome::BudgetStopped`] if the cap stops the bisection while all evaluated
+    /// endpoints stay within `limits[0]`. `any_within_enough` is true only when the caller
+    /// treats every proved bound at most `limits[0]` identically (allowing the same-parameter
+    /// structured and identity-correspondence fast paths).
+    pub(crate) fn bound_before(
+        &self,
+        k: &Kernel,
+        surface: &Surface,
+        curve: &Curve,
+        uv: &Curve,
+        floor: f64,
+        limits: [f64; 2],
+        budget: Option<usize>,
+        any_within_enough: bool,
+    ) -> Result<TrimBoundOutcome> {
+        if !(floor.is_finite() && floor >= 0.0) {
+            return Ok(TrimBoundOutcome::Unproved);
+        }
+        bound_trim_pair(
+            k,
+            surface,
+            curve,
+            uv,
+            self.range,
+            floor,
+            limits,
+            budget,
+            Correspondence::Fitted,
+            budget.is_some(),
+            any_within_enough,
+            true,
+            &self.before,
+        )
+    }
+
+    /// Bounds the pair after the move using its already-extracted [`TrimPair`].
+    pub(crate) fn bound_after(
+        &self,
+        k: &Kernel,
+        surface: &Surface,
+        curve: &Curve,
+        uv: &Curve,
+        floor: f64,
+        limits: [f64; 2],
+        budget: Option<usize>,
+        any_within_enough: bool,
+    ) -> Result<TrimBoundOutcome> {
+        if !(floor.is_finite() && floor >= 0.0) {
+            return Ok(TrimBoundOutcome::Unproved);
+        }
+        bound_trim_pair(
+            k,
+            surface,
+            curve,
+            uv,
+            self.range,
+            floor,
+            limits,
+            budget,
+            Correspondence::Fitted,
+            budget.is_some(),
+            any_within_enough,
+            true,
+            &self.after,
+        )
+    }
+}
+
+/// Extracts the before/after [`TrimPair`]s and rounding room of a move for reuse in
+/// `cover_moved_edge` ([`MovedTrimPair`]).
+pub(crate) fn moved_pair_data(
+    k: &Kernel,
+    before: (&Surface, &Curve, &Curve),
+    after: (&Surface, &Curve, &Curve),
+    range: [f64; 2],
+    m: [[f64; 4]; 4],
+) -> Result<Option<MovedTrimPair>> {
     let (s0, c0, w0) = before;
     let (s1, c1, w1) = after;
     let Some(p0) = TrimPair::of(k, s0, c0, w0, range)? else {
@@ -4215,11 +4628,19 @@ pub(crate) fn moved_pair_room(
         return Ok(None);
     };
     let room = Ivl::from(dc) + Ivl::from(ds) + Ivl::from(p1.c_slack) + Ivl::from(residual);
-    Ok(room.hi.is_finite().then_some(room.hi))
+    if !room.hi.is_finite() {
+        return Ok(None);
+    }
+    Ok(Some(MovedTrimPair {
+        room: room.hi,
+        range,
+        before: p0,
+        after: p1,
+    }))
 }
 
 /// Not upstream (#19910): an upper bound on the spectral norm of the upper 3x3 block `L` of
-/// `m` ([`moved_pair_room`]): `‖L‖² = λmax(LᵀL) <= 1 + ‖LᵀL - I‖`, and the spectral norm of
+/// `m` ([`moved_pair_data`]): `‖L‖² = λmax(LᵀL) <= 1 + ‖LᵀL - I‖`, and the spectral norm of
 /// the symmetric `LᵀL - I` is at most its Frobenius norm, enclosed. `None` unless finite.
 pub(crate) fn affine_linear_norm_upper(m: [[f64; 4]; 4]) -> Option<f64> {
     let [[a, b, c, _], [d, e, f, _], [g, h, i, _], _] = m;
@@ -4242,7 +4663,7 @@ pub(crate) fn affine_linear_norm_upper(m: [[f64; 4]; 4]) -> Option<f64> {
 }
 
 /// The largest distance from a homogeneous control point of `after` to the affine map of `m`
-/// ([`moved_pair_room`]) of the matching one of `before`, enclosed; `None` unless both hold
+/// ([`moved_pair_data`]) of the matching one of `before`, enclosed; `None` unless both hold
 /// `count` points with equal positive weights and every distance is finite.
 fn moved_points_room(before: &[f64], after: &[f64], count: usize, m: [[f64; 4]; 4]) -> Option<f64> {
     let [r0, r1, r2, _] = m;
@@ -4276,7 +4697,7 @@ fn moved_points_room(before: &[f64], after: &[f64], count: usize, m: [[f64; 4]; 
 
 /// Whether every control point of the trim data `wn` lies within the knot range of `net` in
 /// `u` and `v` (enclosed), so the trim's image is evaluated within the net's knots
-/// ([`moved_pair_room`]).
+/// ([`moved_pair_data`]).
 fn trim_within_knots(wn: &NurbsCurve, net: &Nurbs) -> bool {
     let (Some(&u0), Some(&u1), Some(&v0), Some(&v1)) = (
         net.u.get(net.p),
@@ -4406,6 +4827,46 @@ enum Correspondence {
     SameParameter,
 }
 
+/// [`trim_image_gap_bound_within`] for `cover_moved_edge`'s structure-changed fallback so its
+/// bisection pieces are counted in [`crate::kernel::WorkCounters::move_trim_bisection_pieces`].
+pub(crate) fn trim_image_gap_bound_for_move(
+    k: &Kernel,
+    surface: &Surface,
+    curve: &Curve,
+    uv: &Curve,
+    range: [f64; 2],
+    floor: f64,
+    [enough, over]: [f64; 2],
+    budget: Option<usize>,
+) -> Result<Option<f64>> {
+    if !(floor.is_finite() && floor >= 0.0) {
+        return Ok(None);
+    }
+    let Some(pair) = TrimPair::of(k, surface, curve, uv, range)? else {
+        return Ok(None);
+    };
+    let outcome = bound_trim_pair(
+        k,
+        surface,
+        curve,
+        uv,
+        range,
+        floor,
+        [enough, over],
+        budget,
+        Correspondence::Fitted,
+        false,
+        false,
+        true,
+        &pair,
+    )?;
+    Ok(match outcome {
+        TrimBoundOutcome::Proved(bound) => Some(bound),
+        TrimBoundOutcome::ExceedsOver => Some(f64::INFINITY),
+        TrimBoundOutcome::BudgetStopped | TrimBoundOutcome::Unproved => None,
+    })
+}
+
 /// The bound of [`trim_image_gap_bound_within`] (`Correspondence::Fitted`) or
 /// [`trim_same_parameter_gap_bound_within`] (`Correspondence::SameParameter`).
 fn trim_gap_bound_with(
@@ -4426,7 +4887,7 @@ fn trim_gap_bound_with(
     let Some(pair) = TrimPair::of(k, surface, curve, uv, range)? else {
         return Ok(None);
     };
-    let bound = bound_trim_pair(
+    let outcome = bound_trim_pair(
         k,
         surface,
         curve,
@@ -4435,9 +4896,17 @@ fn trim_gap_bound_with(
         floor,
         [enough, over],
         budget,
-        fitted,
-        pair,
+        correspondence,
+        false,
+        false,
+        false,
+        &pair,
     )?;
+    let bound = match outcome {
+        TrimBoundOutcome::Proved(bound) => Some(bound),
+        TrimBoundOutcome::ExceedsOver => Some(f64::INFINITY),
+        TrimBoundOutcome::BudgetStopped | TrimBoundOutcome::Unproved => None,
+    };
     // (a same-parameter bound is asked of a pair with exact data: one it does not enclose is
     // not proved within any bound, which `Some(INFINITY)` tells from a pair with none)
     Ok(if fitted {
@@ -4447,8 +4916,11 @@ fn trim_gap_bound_with(
     })
 }
 
-/// [`trim_gap_bound_with`] once the pair's exact data are made: `fitted` for
-/// `Correspondence::Fitted`.
+/// [`trim_gap_bound_with`] once the pair's exact data are made: `collapse_unproved` forwards
+/// to [`bisect_core`], `any_within_enough` enables fast proofs (`structured_pair_bound` at equal
+/// parameters and identity-correspondence bisection) that are only valid when the caller treats
+/// every proved bound at most `enough` identically, and `count_move_pieces` adds evaluated
+/// pieces to [`crate::kernel::WorkCounters::move_trim_bisection_pieces`].
 fn bound_trim_pair(
     k: &Kernel,
     surface: &Surface,
@@ -4458,15 +4930,17 @@ fn bound_trim_pair(
     floor: f64,
     [enough, over]: [f64; 2],
     budget: Option<usize>,
-    fitted: bool,
-    pair: TrimPair,
-) -> Result<Option<f64>> {
-    let TrimPair {
-        cn,
-        c_slack,
-        wn,
-        net,
-    } = pair;
+    correspondence: Correspondence,
+    collapse_unproved: bool,
+    any_within_enough: bool,
+    count_move_pieces: bool,
+    pair: &TrimPair,
+) -> Result<TrimBoundOutcome> {
+    let fitted = correspondence == Correspondence::Fitted;
+    let cn = &pair.cn;
+    let c_slack = pair.c_slack;
+    let wn = &pair.wn;
+    let net = &pair.net;
     // (#20373: a trim whose image has the curve's own structure is bounded by their control
     // points at once, the curve's slack added ([`structured_pair_bound`]); where that is
     // at most `enough` (and `over`) it is the answer, otherwise the bisection runs as without
@@ -4476,10 +4950,21 @@ fn bound_trim_pair(
     // under its tolerance)
     if enough.is_finite() {
         let meets = |bound: f64| bound <= enough && bound <= over;
-        let structured = structured_pair_bound(surface, &cn, c_slack, &wn, &net, range, !fitted);
+        let structured = structured_pair_bound(surface, cn, c_slack, wn, net, range, !fitted);
         if let Some(bound) = structured {
             if meets(bound) {
-                return Ok(Some(bound));
+                return Ok(TrimBoundOutcome::Proved(bound));
+            }
+        }
+        // (#22467: a same-parameter structured bound also bounds the Hausdorff distance and
+        // covers end rows/columns of higher-degree nets such as ball patches and spheres as
+        // well as sub-interval lines; only used when the caller treats all bounds <= `enough`
+        // identically so exact bound values for other callers stay bit-for-bit unchanged.)
+        if fitted && any_within_enough {
+            if let Some(bound) = structured_pair_bound(surface, cn, c_slack, wn, net, range, true) {
+                if meets(bound) {
+                    return Ok(TrimBoundOutcome::Proved(bound));
+                }
             }
         }
         // (#22273: at equal parameters, where those cases give no bound or one above the
@@ -4488,10 +4973,10 @@ fn bound_trim_pair(
         // of a trim along a piece of it compares the piece's ends with the row's. The smaller
         // of the two certified bounds is the answer where it meets the cutoffs)
         if !fitted {
-            if let Some(piece) = row_piece_pair_bound(k, surface, &cn, c_slack, &wn, &net, range)? {
+            if let Some(piece) = row_piece_pair_bound(k, surface, cn, c_slack, wn, net, range)? {
                 let bound = structured.map_or(piece, |s| s.min(piece));
                 if meets(bound) {
-                    return Ok(Some(bound));
+                    return Ok(TrimBoundOutcome::Proved(bound));
                 }
             }
         }
@@ -4502,8 +4987,40 @@ fn bound_trim_pair(
     // (#20373 review r4: the bisection bounds the net's image; the net's own distance to the
     // surface ([`bisection_residual`]) is added to the curve's slack, so a bound past the
     // net's is not taken for the surface's; a net it does not enclose is not bounded)
-    let Some(to_surface) = bisection_residual(surface, &net) else {
-        return Ok(None);
+    let Some(to_surface) = bisection_residual(surface, net) else {
+        return Ok(TrimBoundOutcome::Unproved);
+    };
+    // (#22467: pure exact-input memoisation of `bound_trim_pair` for NURBS-evaluated move pairs.
+    // Every input that affects the outcome is encoded in `memo_key` bit for bit, so clearing
+    // `k.caches` or turning off `k.memoize_curve_caches` never changes any result.)
+    let memo_key = if k.memoize_curve_caches && fitted && count_move_pieces {
+        pure_nurbs_flags(surface, curve, uv).and_then(|eval_flags| {
+            trim_bound_key(
+                pair,
+                range,
+                to_surface,
+                floor,
+                [enough, over],
+                budget,
+                collapse_unproved,
+                any_within_enough,
+                eval_flags,
+            )
+        })
+    } else {
+        None
+    };
+    if let Some(key) = memo_key.as_ref() {
+        if let Some(cached) = k.caches.trim_move_bounds.borrow().get(key) {
+            k.check_cancelled(OP)?;
+            return Ok(cached);
+        }
+    }
+    let finish = |memo_key: Option<TrimBoundKey>, outcome: TrimBoundOutcome| {
+        if let Some(key) = memo_key {
+            k.caches.trim_move_bounds.borrow_mut().insert(key, outcome);
+        }
+        Ok(outcome)
     };
     // (only a positive residual is added: an interval sum rounds outward, so adding `0`
     // would move the slack an ulp)
@@ -4513,29 +5030,83 @@ fn bound_trim_pair(
         c_slack
     };
     if !c_slack.is_finite() {
-        return Ok(None);
+        return finish(memo_key, TrimBoundOutcome::Unproved);
     }
     let [r0, r1] = range;
+    let curve_kinks = kinks(cn, r0, r1);
+    let trim_kinks = kinks(wn, r0, r1);
+    // (#22467: for a caller that accepts any proved bound at most `enough`, try the identity
+    // correspondence `ψ(s) = s` first within a small piece budget before fitting a dense
+    // Hermite `ψ`. Most UV trims are parameterised on their edge's parameter and close in a
+    // few dozen pieces without hundreds of Newton projections or knot cuts. Any correspondence
+    // gives a proved upper bound; if the identity does not prove `bound <= enough.min(over)`
+    // within the budget, fall through to [`reparametrisation`] unchanged.)
+    let target = enough.min(over);
+    let id_budget = budget.map_or(IDENTITY_FAST_PIECES, |b| b.min(IDENTITY_FAST_PIECES));
+    if fitted
+        && any_within_enough
+        && enough.is_finite()
+        && target > c_slack
+        && id_budget >= FIRST_PIECES
+    {
+        let enough_gap = (Ivl::from(target) - Ivl::from(c_slack)).lo;
+        if enough_gap > 0.0 {
+            let id = identity_psi(range);
+            let sides = Sides {
+                curve: cn,
+                trim: wn,
+                psi: &id,
+                curve_kinks: curve_kinks.clone(),
+                trim_kinks: trim_kinks.clone(),
+                range,
+            };
+            let cache = RefCell::new(BTreeMap::new());
+            let end = |t: f64| {
+                let mut cache = cache.borrow_mut();
+                cached_trim_endpoint(&mut cache, t, || reparametrised_endpoint(&sides, net, t))
+            };
+            let (id_outcome, evaluated) = {
+                let mut look = polled_end(k, end);
+                bisect_core(
+                    range,
+                    FIRST_PIECES,
+                    &[],
+                    CLOSE_RELATIVE,
+                    floor,
+                    [enough_gap, enough_gap],
+                    Some(id_budget),
+                    true,
+                    |a, b| {
+                        k.check_cancelled(OP)?;
+                        piece_reparametrised(&sides, net, a, b, end)
+                    },
+                    Some(&mut look),
+                )?
+            };
+            if count_move_pieces {
+                k.work_counters.add_move_trim_bisection_pieces(evaluated);
+            }
+            if let BisectOutcome::Proved(gap) = id_outcome {
+                let bound = (Ivl::from(gap) + Ivl::from(c_slack)).hi;
+                if bound.is_finite() && bound <= enough && bound <= over {
+                    return finish(memo_key, TrimBoundOutcome::Proved(bound));
+                }
+            }
+        }
+    }
     let psi = if fitted {
         let knots: Vec<f64> = cn.u.iter().chain(wn.u.iter()).copied().collect();
         let Some(psi) = reparametrisation(k, surface, curve, uv, range, &knots, floor)? else {
-            return Ok(None);
+            return finish(memo_key, TrimBoundOutcome::Unproved);
         };
         psi
     } else {
-        // (the identity: degree 1, its two control points the range's ends)
-        NurbsCurve {
-            p: 1,
-            n: 2,
-            u: vec![r0, r0, r1, r1],
-            pw: vec![r0, 0.0, 0.0, 1.0, r1, 0.0, 0.0, 1.0],
-        }
+        identity_psi(range)
     };
     if !kinks(&psi, r0, r1).is_empty() {
-        return Ok(None);
+        return finish(memo_key, TrimBoundOutcome::Unproved);
     }
-    let curve_kinks = kinks(&cn, r0, r1);
-    let trim_kinks = kinks(&wn, r0, r1);
+    let budget_stopped = Cell::new(false);
     // (the bound of the curve data `cn` against the net `net` through the reparametrisation
     // `psi`, the curve's slack added, with the pieces closing at `enough`)
     let run = |psi: &NurbsCurve,
@@ -4547,7 +5118,7 @@ fn bound_trim_pair(
      -> Result<Option<f64>> {
         let sides = Sides {
             curve: cn,
-            trim: &wn,
+            trim: wn,
             psi,
             curve_kinks: curve_kinks.clone(),
             trim_kinks: trim_kinks.clone(),
@@ -4566,9 +5137,9 @@ fn bound_trim_pair(
             let mut cache = cache.borrow_mut();
             cached_trim_endpoint(&mut cache, t, || reparametrised_endpoint(&sides, net, t))
         };
-        let gap = {
+        let bisect_result = {
             let mut look = polled_end(k, end);
-            bisect_with_ends(
+            bisect_core(
                 range,
                 FIRST_PIECES,
                 cuts,
@@ -4576,6 +5147,7 @@ fn bound_trim_pair(
                 floor,
                 [enough_gap, over],
                 budget,
+                collapse_unproved,
                 |a, b| {
                     k.check_cancelled(OP)?;
                     piece_reparametrised(&sides, net, a, b, end)
@@ -4584,12 +5156,19 @@ fn bound_trim_pair(
             )
         };
         *endpoints = cache.into_inner();
-        let Some(gap) = gap? else {
-            return Ok(None);
-        };
-        if gap == f64::INFINITY {
-            return Ok(Some(gap));
+        let (outcome, evaluated) = bisect_result?;
+        if count_move_pieces {
+            k.work_counters.add_move_trim_bisection_pieces(evaluated);
         }
+        let gap = match outcome {
+            BisectOutcome::Proved(gap) => gap,
+            BisectOutcome::ExceedsOver => return Ok(Some(f64::INFINITY)),
+            BisectOutcome::BudgetStopped => {
+                budget_stopped.set(true);
+                return Ok(None);
+            }
+            BisectOutcome::Unproved => return Ok(None),
+        };
         let bound = (Ivl::from(gap) + Ivl::from(c_slack)).hi;
         Ok(bound.is_finite().then_some(bound))
     };
@@ -4606,7 +5185,7 @@ fn bound_trim_pair(
     // and no piece is cut further past [`MAX_PIECES`]: the work stays bounded.)
     let with_psi = |psi: &NurbsCurve| -> Result<Option<f64>> {
         let mut endpoints = BTreeMap::new();
-        let mut first = run(psi, &cn, &net, enough, &[], &mut endpoints)?;
+        let mut first = run(psi, cn, net, enough, &[], &mut endpoints)?;
         let mut cuts: Vec<f64> = Vec::new();
         if !first.is_some_and(|g| g <= enough) {
             cuts = psi
@@ -4617,13 +5196,13 @@ fn bound_trim_pair(
                 .collect();
             cuts.dedup();
             if !cuts.is_empty() {
-                if let Some(g) = run(psi, &cn, &net, enough, &cuts, &mut endpoints)? {
+                if let Some(g) = run(psi, cn, net, enough, &cuts, &mut endpoints)? {
                     first = Some(first.map_or(g, |b| b.min(g)));
                 }
             }
         }
         drop(endpoints);
-        recentred_retry(first, [enough, over], &cn, &net, |cn, net, enough| {
+        recentred_retry(first, [enough, over], cn, net, |cn, net, enough| {
             // Translation rounds the points in the enclosure, so it gets its own cache.
             run(psi, cn, net, enough, &cuts, &mut BTreeMap::new())
         })
@@ -4641,12 +5220,15 @@ fn bound_trim_pair(
             }
         }
     }
-    let Some(bound) = bound else {
-        return Ok(None);
-    };
     // (the cutoff applies to the bound returned, the curve's slack included: a gap at most
     // `over` whose slack takes it past `over` is above it too)
-    Ok(Some(if bound > over { f64::INFINITY } else { bound }))
+    let outcome = match bound {
+        Some(b) if b.is_finite() && b <= over => TrimBoundOutcome::Proved(b),
+        Some(_) => TrimBoundOutcome::ExceedsOver,
+        None if budget_stopped.get() => TrimBoundOutcome::BudgetStopped,
+        None => TrimBoundOutcome::Unproved,
+    };
+    finish(memo_key, outcome)
 }
 
 /// Not upstream (WR-450, #18923): [`trim_image_gap_bound`] for an edge curve that is a curve
@@ -6523,7 +7105,7 @@ mod tests {
             assert!(pieces <= FIRST_PIECES, "{pieces} pieces");
             // the bisection alone shows the same: within `enough` (only the value differs,
             // and the contract leaves any value up to `enough`)
-            let cut = std::cell::Cell::new(0);
+            let cut = Cell::new(0);
             let alone =
                 bisected_face_gap_bound(&k, &b, *f, circle, *range, 1e-8, within, &cut).unwrap();
             assert!(alone.is_some_and(|g| g <= 1e-5), "{alone:?}");
@@ -6550,7 +7132,7 @@ mod tests {
             let (g, pieces) =
                 curve_face_gap_bound_within_counted(&k, &b, *f, &off, *range, 1e-8, within)
                     .unwrap();
-            let cut = std::cell::Cell::new(0);
+            let cut = Cell::new(0);
             let alone =
                 bisected_face_gap_bound(&k, &b, *f, &off, *range, 1e-8, within, &cut).unwrap();
             assert_eq!(g.map(f64::to_bits), alone.map(f64::to_bits));
@@ -6618,7 +7200,7 @@ mod tests {
         let within = [1e-5, f64::INFINITY];
         let (g, pieces) =
             curve_face_gap_bound_within_counted(&k, &b, *f, circle, *range, 1e-8, within).unwrap();
-        let cut = std::cell::Cell::new(0);
+        let cut = Cell::new(0);
         let alone =
             bisected_face_gap_bound(&k, &b, *f, circle, *range, 1e-8, within, &cut).unwrap();
         assert_eq!(g.map(f64::to_bits), alone.map(f64::to_bits));
@@ -8191,5 +8773,51 @@ mod tests {
             let (_, slack) = net.partials(&[w], lk, continuity).unwrap();
             assert!(slack >= 2.0 * jump, "{slack:e} against twice {jump:e}");
         }
+    }
+
+    /// #22467: `TrimBoundMemo` stores each key once behind an `Arc`, evicts oldest entries
+    /// once the retained byte budget (`TRIM_MEMO_MAX_BYTES`) is reached, and updates existing
+    /// keys in place without growing entry count or retained bytes.
+    #[test]
+    fn trim_bound_memo_enforces_retained_byte_budget() {
+        let mut memo = TrimBoundMemo::default();
+        let make_key = |id: u64, words: usize| {
+            let mut bits = Vec::new();
+            bits.try_reserve_exact(words).unwrap();
+            bits.push(id);
+            bits.resize(words, id.wrapping_mul(0x9e37_79b9_7f4a_7c15));
+            TrimBoundKey { hash: id, bits }
+        };
+        // ~64 KiB per key: 300 keys (~19.2 MiB) exceed TRIM_MEMO_MAX_BYTES (16 MiB) well
+        // before TRIM_MEMO_CAPACITY (4096).
+        let words = 8192;
+        for id in 0_u32..300 {
+            memo.insert(
+                make_key(u64::from(id), words),
+                TrimBoundOutcome::Proved(f64::from(id)),
+            );
+            assert!(
+                memo.retained_bytes() <= TRIM_MEMO_MAX_BYTES,
+                "retained {} > {}",
+                memo.retained_bytes(),
+                TRIM_MEMO_MAX_BYTES
+            );
+        }
+        assert!(memo.len() < 300, "byte cap did not evict oldest entries");
+        assert_eq!(memo.get(&make_key(0, words)), None);
+        assert_eq!(
+            memo.get(&make_key(299, words)),
+            Some(TrimBoundOutcome::Proved(299.0))
+        );
+        // Updating an existing key keeps len and retained_bytes unchanged.
+        let len_before = memo.len();
+        let bytes_before = memo.retained_bytes();
+        memo.insert(make_key(299, words), TrimBoundOutcome::BudgetStopped);
+        assert_eq!(memo.len(), len_before);
+        assert_eq!(memo.retained_bytes(), bytes_before);
+        assert_eq!(
+            memo.get(&make_key(299, words)),
+            Some(TrimBoundOutcome::BudgetStopped)
+        );
     }
 }

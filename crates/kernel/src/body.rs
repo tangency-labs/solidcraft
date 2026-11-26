@@ -734,6 +734,11 @@ impl std::fmt::Debug for OutlinePrep {
 /// ([`Body::outline_prepared`]).
 pub const OUTLINE_TRIM_SAMPLES: usize = 1024;
 
+/// The relative accuracy [`Body::face_area`] asks solidcore for. Its estimate is cautious: on a
+/// cut sphere 1e-6 already lands within 1e-15 of the exact area; 1e-8 keeps a margin for other
+/// surfaces at about 2 ms for a sphere face (#22556).
+pub const FACE_AREA_ACCURACY: f64 = 1e-8;
+
 impl Body {
     /// Whether this body's lazily placed record has been moved: a placement's geometry was
     /// needed exactly ([`crate::ops::transform_matrix`]). Derived from the move's own state, so
@@ -786,10 +791,10 @@ impl Body {
         }
     }
 
-    /// This body with `result`, the SMLib result of the step `what` (of `operands`) it was decoded
-    /// from, whose check that step left to the end of its feature ([`crate::validation::check_kept`]).
-    pub(crate) fn left_unchecked(self, what: &str, how: crate::validation::Checked, result: solidcraft_smlib::Brep, operands: &[&Body]) -> Body {
-        let unchecked = crate::validation::Unchecked::new(self.record.arc(), what, how, result, operands);
+    /// This body with the step `what` (and `operands`) it was decoded from, whose check that step
+    /// left to the end of its feature ([`crate::validation::check_kept`]).
+    pub(crate) fn left_unchecked(self, what: &str, operands: &[&Body]) -> Body {
+        let unchecked = crate::validation::Unchecked::new(self.record.arc(), what, operands);
         Body { unchecked: Some(std::sync::Arc::new(unchecked)), ..self }
     }
 
@@ -2336,6 +2341,26 @@ impl Body {
             Err(solidcore_ops::Error::Argument) => Ok(None),
             Err(e) => Err(KernelError::Failed(format!("point on face: {e}"))),
         }
+    }
+
+    /// The area of face `face_index` from its exact surface and trim (#22556): solidcore's
+    /// boundary integral ([`solidcore_ops::Body::face_area`]), the measure the whole body's area
+    /// uses, at [`FACE_AREA_ACCURACY`]; no mesh. `None` for a mesh body or an index out of range.
+    ///
+    /// # Errors
+    ///
+    /// [`KernelError::Failed`] for the kernel's failure (a face it cannot integrate).
+    pub fn face_area(&self, face_index: usize) -> Result<Option<f64>> {
+        let Some(form) = self.ops_body() else { return Ok(None) };
+        let (body, order) = &*form;
+        if face_index >= self.record.faces.len() {
+            return Ok(None);
+        }
+        guard("face area", || match body.face_area(order, face_index, FACE_AREA_ACCURACY) {
+            Ok(a) => Ok(Some(a)),
+            Err(solidcore_ops::Error::Argument) => Ok(None),
+            Err(e) => Err(KernelError::Failed(format!("face area: {e}"))),
+        })
     }
 
     /// The unit normal of face `face_index` at `point`, a point of that face (within the body's
