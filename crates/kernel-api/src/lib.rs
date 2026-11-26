@@ -38,7 +38,7 @@ pub mod query;
 
 pub use affine::{Affine, AffineRefused, AxisRefusal, Matrix, OffsetQuad, SquareFaceLevel};
 pub use cell_grid::{CellGrid, CellGridLimits};
-pub use curves::{CurveRefused, Curves};
+pub use curves::{CurveRefused, CurveSample, Curves};
 pub use exchange::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWritten, Exchange};
 pub use frames::{Frames, GussetFailure, MemberRefusal, PathFailure, PathRefusal, TrimRefusal, TrimTarget};
 pub use hole_stacks::{HoleStacks, HoleStacksRefused};
