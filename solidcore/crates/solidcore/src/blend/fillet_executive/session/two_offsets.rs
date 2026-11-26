@@ -1268,18 +1268,27 @@ mod tests {
             );
         }
 
-        /// Half a ball of radius `r` (from 0 to 180 degrees about the z axis) cut by the plane
-        /// z = `z0`, the part z <= `z0` kept, its rim (the half circle of radius sqrt(r² - z0²) at
-        /// z0) chamfered by setbacks 1 and 1: in the plane through the axis the plane foot is 1
-        /// in from the rim, P = (r0 - 1, z0), and the sphere foot a chord 1 from it down the
-        /// meridian, S at the angle φ = 2 asin(1 / (2 r)) below the rim's latitude a0. The solid
-        /// loses the region between the chord PS, the flat from P to the rim E, and the arc from E
-        /// to S, turned half a turn about the axis (Pappus): the triangle PES, its area with
-        /// centroid at radius (P + E + S)_r / 3, and the circular segment of the chord ES, area
-        /// r² (φ - sin φ) / 2 with centroid 4 r sin³(φ/2) / (3 (φ - sin φ)) from the centre along
-        /// the latitude (a0 + a1) / 2. The whole turn's volumes, bnoa's (#20253), are `full`; the
-        /// half turn's are half, its ends on the flat faces through the axis (the station planes
-        /// there), as for the half cylinder.
+        /// The model: half a ball of radius `r`, the half y >= 0 (`create_partial_sphere` from 0
+        /// to 180 degrees about the z axis, so it is the solid of revolution of its meridian
+        /// region turned half a turn, and the plane y = 0 through the axis is its flat), cut by
+        /// the plane z = `z0` with the part z <= `z0` kept, its rim the half circle of radius
+        /// r0 = sqrt(r² - z0²) at z0, chamfered by setbacks 1 and 1. Its expected volume is
+        /// derived for this half model, by Pappus over the half turn (π, not 2π):
+        /// - kept before the chamfer: half the ball below z0, (4/3 π r³ - π c² (3 r - c) / 3) / 2
+        ///   with the cap's height c = r - z0;
+        /// - removed by the chamfer: in the meridian plane the plane foot is 1 in from the rim,
+        ///   P = (r0 - 1, z0), and the sphere foot a chord 1 from the rim E = (r0, z0) down the
+        ///   meridian, S at the angle φ = 2 asin(1 / (2 r)) below the rim's latitude a0. The
+        ///   region between the chord PS, the flat PE and the arc ES is the triangle PES (its
+        ///   centroid's radius the mean of its corners') and the circular segment of the chord
+        ///   ES (area r² (φ - sin φ) / 2, its centroid 4 r sin³(φ/2) / (3 (φ - sin φ)) from the
+        ///   centre at the latitude (a0 + a1) / 2), each turned half a turn: π (A r̄) apiece.
+        ///
+        /// The station planes of a rim are its meridian planes, so the chamfer's ends on the flat
+        /// y = 0 are station planes: the half model's chamfer is exactly half the whole turn's,
+        /// with no end effect. `full` is the whole turn's volume as #20253 gives it (bnoa's,
+        /// checked by Pappus independently), twice this half's: a cross-check of the derivation,
+        /// not the expectation.
         fn ball_rim_chamfered_by_setbacks_1_and_1(r: f64, z0: f64, full: f64) {
             let r0 = (r * r - z0 * z0).sqrt();
             let a0 = z0.atan2(r0);
@@ -1291,13 +1300,13 @@ mod tests {
             let seg = 0.5 * r * r * (phi - phi.sin());
             let seg_r = 4.0 * r * (0.5 * phi).sin().powi(3) / (3.0 * (phi - phi.sin()))
                 * (0.5 * (a0 + a1)).cos();
-            let removed_full = 2.0 * PI * (tri * tri_r + seg * seg_r);
             let cap = r - z0;
-            let kept_full = 4.0 / 3.0 * PI * r.powi(3) - PI * cap * cap * (3.0 * r - cap) / 3.0;
+            let kept = 0.5 * (4.0 / 3.0 * PI * r.powi(3) - PI * cap * cap * (3.0 * r - cap) / 3.0);
+            let removed = PI * (tri * tri_r + seg * seg_r);
+            let want = kept - removed;
             assert!(
-                (kept_full - removed_full - full).abs() <= 1e-7,
-                "{} vs {full}",
-                kept_full - removed_full
+                (2.0 * want - full).abs() <= 1e-7,
+                "the half's {want} is not half the whole turn's {full}"
             );
             let mut k = fixed_kernel();
             let ball = crate::primitive::api_primitives::create_partial_sphere(
@@ -1343,15 +1352,16 @@ mod tests {
             let chord = ((s[0] - p[0]).powi(2) + (s[1] - p[1]).powi(2)).sqrt();
             let area = PI * 0.5 * (p[0] + s[0]) * chord;
             let v = volume(&k, &mut b);
-            let want = 0.5 * full;
             assert!(
                 (v - want).abs() <= bound * area + 1e-8 * want,
                 "{v} vs {want} (bound {bound})"
             );
         }
 
-        /// A ball of radius 10 cut at z = 5, the part below kept (a wedge of 120 degrees at the
-        /// rim, of radius 8.660254037844387): 3510.1200237 for the whole turn.
+        /// Half a ball of radius 10 (y >= 0) cut at z = 5, the part below kept (a wedge of 120
+        /// degrees at the rim, of radius 8.660254037844387), chamfered by setbacks 1 and 1: its
+        /// volume derived for the half by Pappus over the half turn (1755.0600119), half the
+        /// whole turn's 3510.1200237.
         #[test]
         fn a_ball_cut_at_5_rim_chamfered_by_setbacks_is_its_pappus_volume() {
             ball_rim_chamfered_by_setbacks_1_and_1(10.0, 5.0, 3_510.120_023_7);
