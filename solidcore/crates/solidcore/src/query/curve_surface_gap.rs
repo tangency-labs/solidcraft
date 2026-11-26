@@ -1884,9 +1884,24 @@ fn structured_trim_gap_bound_as(
             return Some(bound);
         }
     }
-    if net.p == 1 || same_parameter {
-        let (net, wn) = swapped_uv(net, wn)?;
-        return iso_row_gap_bound(cn, &wn, &net, [lo, hi], same_parameter);
+    let swapped = if net.p == 1 || same_parameter {
+        swapped_uv(net, wn)
+    } else {
+        None
+    };
+    if let Some((net, wn)) = &swapped {
+        if let Some(bound) = iso_row_gap_bound(cn, wn, net, [lo, hi], same_parameter) {
+            return Some(bound);
+        }
+    }
+    // (#22273: at equal parameters, a trim along a piece of a row, under a curve with that
+    // piece's structure: a circle a boolean split, on its cylinder's end row)
+    if same_parameter {
+        if let Some(bound) = row_piece_gap_bound(cn, wn, net, [lo, hi]) {
+            return Some(bound);
+        }
+        let (net, wn) = swapped?;
+        return row_piece_gap_bound(cn, &wn, &net, [lo, hi]);
     }
     None
 }
@@ -2161,6 +2176,226 @@ fn iso_row_gap_bound(
         }
     }
     worst.is_finite().then_some(worst)
+}
+
+/// Not upstream (#22273): [`iso_row_gap_bound`] at equal parameters for a trim of degree 1
+/// along a piece `[u_lo, u_hi]` of a row of the net `net` (its first or last row, [`end_row`],
+/// or the row at the trim's `v` of a net of degree 1 in `v` with two rows), under a curve with
+/// the structure of that piece rather than of the whole row: a circle a boolean split at the
+/// vertices where it meets the other operand, on the end row of its cylinder, whose net row is
+/// the whole circle. `W(s)` runs from `(u_a, v)` to `(u_b, v)` (weights 1), and `range` is the
+/// whole domain of the trim and of the curve.
+///
+/// The row is the rational curve of the row's homogeneous control points (at a row of a net of
+/// two rows, `(1 - β) H_i0 + β H_i1`, `β` the fraction of `v`: the net is linear in `v` in
+/// homogeneous space), a chain of rational Bézier segments over the net's `u` knots. Restricted
+/// to `[u_lo, u_hi]` it is the chain of the segments it meets, each cut to its part `[x, y]`
+/// there: the homogeneous points of a Bézier segment of degree `p` restricted to its local
+/// parameters `[τ_x, τ_y]` are its blossom `b(τ_x^(p - i), τ_y^i)`, `i = 0..p` (de Casteljau,
+/// with `τ_y` at `i` of its levels), and the piece at its own local parameter `σ` is the
+/// segment at `τ_x + σ (τ_y - τ_x)`, linear in `u`. Enclosed in outward-rounded interval
+/// arithmetic from the exact `τ`s, so the piece's points `Q_k` and weights `b_k` enclose those
+/// of the exact restriction.
+///
+/// The curve's segment `j` (points `P_k`, weights `a_k > 0`) is compared with the piece's `j`-th
+/// (for a trim running against `u`, the `j`-th from the end, reversed) at equal local parameter
+/// `σ`. With `B_k = B_k(σ) >= 0` summing to 1, `A = Σ B_k a_k`, `X = Σ B_k a_k P_k / A` and
+/// `Y = Σ B_k b_k Q_k / Σ B_k b_k` (so `Σ B_k b_k (Q_k - Y) = 0`), for any real `c`,
+/// `X - Y = Σ B_k a_k (P_k - Q_k) / A + Σ B_k (a_k - c b_k) (Q_k - Y) / A`, so
+/// `|X - Y| <= max_k |P_k - Q_k| + max_k (|a_k - c b_k| / a_k) diam(Q)`, `Y` being in the hull
+/// of the `Q_k`. `c` is taken as `a_0` over the middle of `b_0`'s enclosure, so weights equal up
+/// to one factor (two homogeneous forms of one rational segment) leave only their rounding.
+/// `ψ` maps each piece segment's fraction onto the curve segment's as in [`iso_row_gap_bound`],
+/// and the bound adds the curve's speed times how far `ψ` slips at the knots ([`psi_shift`],
+/// over the piece's knots `u_lo, .., u_hi`). `None` where it does not apply: the row or the
+/// curve not a chain of Bézier segments, the two of different degrees or numbers of segments,
+/// or a term not finite.
+fn row_piece_gap_bound(
+    cn: &NurbsCurve,
+    wn: &NurbsCurve,
+    net: &Nurbs,
+    [lo, hi]: [f64; 2],
+) -> Option<f64> {
+    let p = cn.p;
+    if !(p > 0 && net.p == p && wn.p == 1 && wn.n == 2 && wn.pw.len() == 8) {
+        return None;
+    }
+    if cn.pw.len() != 4 * cn.n || net.pw.len() != 4 * net.nu * net.nv {
+        return None;
+    }
+    let ends =
+        |k: &[f64], p: usize, n: usize| -> Option<[f64; 2]> { Some([*k.get(p)?, *k.get(n)?]) };
+    if ends(&wn.u, wn.p, wn.n)? != [lo, hi] || ends(&cn.u, cn.p, cn.n)? != [lo, hi] {
+        return None;
+    }
+    let raw = |pw: &[f64], i: usize| -> Option<[f64; 4]> {
+        let s = pw.get(4 * i..4 * i + 4)?;
+        Some([*s.first()?, *s.get(1)?, *s.get(2)?, *s.get(3)?])
+    };
+    let curve = (0..cn.n)
+        .map(|i| {
+            let s = raw(&cn.pw, i)?;
+            let [_, _, _, w] = s;
+            Some((point_of(s)?, w))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let ([u_a, v_a, _, w_a], [u_b, v_b, _, w_b]) = (raw(&wn.pw, 0)?, raw(&wn.pw, 1)?);
+    let (Some(&nu0), Some(&nu1), Some(&nv0), Some(&nv1)) =
+        (net.u.first(), net.u.last(), net.v.first(), net.v.last())
+    else {
+        return None;
+    };
+    let rev = u_a > u_b;
+    let (u_lo, u_hi) = if rev { (u_b, u_a) } else { (u_a, u_b) };
+    if !(w_a == 1.0 && w_b == 1.0 && v_a == v_b && nu0 <= u_lo && u_lo < u_hi && u_hi <= nu1) {
+        return None;
+    }
+    if !(bezier_chain(&cn.u, p, cn.n) && bezier_chain(&net.u, p, net.nu)) {
+        return None;
+    }
+    // (the row's homogeneous control points, enclosed)
+    let hom = |[x, y, z, w]: [f64; 4]| -> Option<[Ivl; 4]> {
+        (x.is_finite() && y.is_finite() && z.is_finite() && w.is_finite() && w > 0.0)
+            .then(|| [Ivl::from(x), Ivl::from(y), Ivl::from(z), Ivl::from(w)])
+    };
+    let row: Vec<[Ivl; 4]> = if net.q == 1 && net.nv == 2 {
+        let clamped_v = matches!(net.v.as_slice(), [a, b, c, d] if a == b && b < c && c == d);
+        if !(clamped_v && nv0 <= v_a && v_a <= nv1) {
+            return None;
+        }
+        // (`β` in `[0, 1]` exactly, as in [`iso_row_gap_bound`])
+        let beta = (Ivl::from(v_a) - Ivl::from(nv0)) / (Ivl::from(nv1) - Ivl::from(nv0));
+        let beta = Ivl::new(beta.lo.max(0.0), beta.hi.min(1.0));
+        if beta.lo.is_nan() || beta.hi.is_nan() || beta.lo > beta.hi {
+            return None;
+        }
+        let one_less = Ivl::from(1.0) - beta;
+        (0..net.nu)
+            .map(|j| {
+                let (h0, h1) = (hom(raw(&net.pw, 2 * j)?)?, hom(raw(&net.pw, 2 * j + 1)?)?);
+                Some(blend4(h0, h1, one_less, beta))
+            })
+            .collect::<Option<Vec<_>>>()?
+    } else {
+        end_row(net, v_a)?
+            .into_iter()
+            .map(|i| hom(raw(&net.pw, i)?))
+            .collect::<Option<Vec<_>>>()?
+    };
+    // (the row restricted to `[u_lo, u_hi]`: each segment it meets, cut to its part there,
+    // and the piece's distinct knots)
+    let mut breaks = net.u.clone();
+    breaks.dedup();
+    let mut piece: Vec<[Ivl; 4]> = Vec::new();
+    let mut piece_knots = vec![u_lo];
+    for (j, pair) in breaks.windows(2).enumerate() {
+        let (&[r0, r1], Some(seg)) = (pair, row.get(j * p..=j * p + p)) else {
+            return None;
+        };
+        let (x, y) = (r0.max(u_lo), r1.min(u_hi));
+        if x >= y {
+            continue;
+        }
+        let cut: Vec<[Ivl; 4]> = if x == r0 && y == r1 {
+            seg.to_vec()
+        } else {
+            let span = Ivl::from(r1) - Ivl::from(r0);
+            if !span.is_positive() {
+                return None;
+            }
+            // (`τ_x` exactly 0 at the segment's start, `τ_y` exactly 1 at its end)
+            let tx = if x == r0 {
+                Ivl::from(0.0)
+            } else {
+                (Ivl::from(x) - Ivl::from(r0)) / span
+            };
+            let ty = if y == r1 {
+                Ivl::from(1.0)
+            } else {
+                (Ivl::from(y) - Ivl::from(r0)) / span
+            };
+            (0..=p)
+                .map(|i| {
+                    let mut pts = seg.to_vec();
+                    for level in 0..p {
+                        let tau = if level < i { ty } else { tx };
+                        let rest = Ivl::from(1.0) - tau;
+                        for m in 0..p - level {
+                            let (a, b) = (*pts.get(m)?, *pts.get(m + 1)?);
+                            *pts.get_mut(m)? = blend4(a, b, rest, tau);
+                        }
+                    }
+                    pts.first().copied()
+                })
+                .collect::<Option<Vec<_>>>()?
+        };
+        // (each segment after the first starts at the last point of the one before)
+        let skip = usize::from(!piece.is_empty());
+        piece.extend(cut.into_iter().skip(skip));
+        piece_knots.push(y);
+    }
+    if piece.len() != cn.n {
+        return None;
+    }
+    // (the piece's points, enclosed, with their weights)
+    let piece: Vec<(V3<Ivl>, Ivl)> = piece
+        .into_iter()
+        .map(|[x, y, z, w]| {
+            w.is_positive().then(|| {
+                (
+                    V3 {
+                        x: x / w,
+                        y: y / w,
+                        z: z / w,
+                    },
+                    w,
+                )
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let facing = |k: usize| -> Option<(V3<Ivl>, Ivl)> {
+        piece
+            .get(if rev { cn.n.checked_sub(1 + k)? } else { k })
+            .copied()
+    };
+    let mut worst = 0.0_f64;
+    for j in 0..cn.n.checked_sub(1)?.checked_div(p)? {
+        let seg = curve.get(j * p..=j * p + p)?;
+        let (&(_, a0), (_, b0)) = (seg.first()?, facing(j * p)?);
+        let c = a0 / b0.mid();
+        if !(c.is_finite() && c > 0.0) {
+            return None;
+        }
+        let (mut points, mut weights, mut diam) = (0.0_f64, 0.0_f64, 0.0_f64);
+        for (i, &(pk, ak)) in seg.iter().enumerate() {
+            let (qk, bk) = facing(j * p + i)?;
+            points = points.max(norm_upper(minus(pk, qk))?);
+            let off = Ivl::from((Ivl::from(ak) - Ivl::from(c) * bk).mag()) / Ivl::from(ak);
+            weights = weights.max(off.hi);
+            for other in 0..=p {
+                diam = diam.max(norm_upper(minus(qk, facing(j * p + other)?.0))?);
+            }
+        }
+        let bound = (Ivl::from(points) + Ivl::from(weights) * Ivl::from(diam)).hi;
+        worst = worst.max(bound);
+    }
+    let shift = psi_shift(&cn.u, &piece_knots, [u_lo, u_hi], [lo, hi], rev)?;
+    if shift > 0.0 {
+        let lip = row_lipschitz(&curve, &cn.u, p)?;
+        worst = (Ivl::from(worst) + Ivl::from(lip) * Ivl::from(shift)).hi;
+    }
+    worst.is_finite().then_some(worst)
+}
+
+/// `s a + t b` of two homogeneous points, enclosed: one step of de Casteljau for
+/// [`row_piece_gap_bound`].
+fn blend4([a0, a1, a2, a3]: [Ivl; 4], [b0, b1, b2, b3]: [Ivl; 4], s: Ivl, t: Ivl) -> [Ivl; 4] {
+    [
+        s * a0 + t * b0,
+        s * a1 + t * b1,
+        s * a2 + t * b2,
+        s * a3 + t * b3,
+    ]
 }
 
 /// A curve's control points (enclosed) with their weights, and its knots.
@@ -7145,6 +7380,86 @@ mod tests {
         )
         .unwrap();
         assert!(gate.is_some_and(|g| g > 1e-5), "{gate:?}");
+    }
+
+    /// #22273: a circle split into pieces, as a boolean splits a cylinder's end circle where it
+    /// meets the other operand, keeps the structure of the piece of its cylinder's end row each
+    /// piece lies on, not of the whole row. Each piece's trim, the iso line along its piece of
+    /// the row, is proved within `1e-5` at equal parameters by the control points of the row's
+    /// restriction at once: no bisection runs (before, each was bisected down to just under
+    /// `1e-5`, about 8 ms a piece), and each bound is at least the gap sampled at equal
+    /// parameters. The same pieces under trims slid along the row by a thousandth of it, or
+    /// running against it, are as near as sets but far at equal parameters, and their bounds
+    /// count it.
+    #[test]
+    fn the_pieces_of_a_split_circle_are_proved_on_their_pieces_of_the_row_without_bisecting() {
+        let (k, s, net, row) = side_row();
+        let (u0, u1) = (net.u[0], net.u[net.u.len() - 1]);
+        let v1 = net.v[net.v.len() - 1];
+        let trim = |a: f64, b: f64, lo: f64, hi: f64| {
+            let c = NurbCurve::new(
+                vec![CPoint::new(a, v1, 0.0, 1.0), CPoint::new(b, v1, 0.0, 1.0)],
+                1,
+                vec![lo, lo, hi, hi],
+            )
+            .unwrap();
+            Curve::from(BSplineCurve::from_nurb(c, 2, false))
+        };
+        let at = |t: f64| u0 + (u1 - u0) * t;
+        let bound = |curve: &Curve, trim: &Curve, range: [f64; 2]| {
+            trim_same_parameter_gap_bound_within(
+                &k,
+                &s,
+                curve,
+                trim,
+                range,
+                1e-8,
+                [1e-5, 1e-5],
+                Some(MAX_PIECES),
+            )
+            .unwrap()
+            .unwrap()
+        };
+        // (the circle cut at 0.401 and 0.901: a piece over two quarters' parts, one across a
+        // quarter's end, one within a quarter)
+        let mut first = Curve::from(row);
+        let mut middle = first.create_by_split_curve(&k, 0.401).unwrap();
+        let last = middle.create_by_split_curve(&k, 0.901).unwrap();
+        for (piece, range) in [
+            (&first, [0.0, 0.401]),
+            (&middle, [0.401, 0.901]),
+            (&last, [0.901, 1.0]),
+        ] {
+            let (lo, hi) = (range[0], range[1]);
+            let along = trim(at(lo), at(hi), lo, hi);
+            let before = k.work_counters.same_parameter_bisections();
+            let g = bound(piece, &along, range);
+            assert_eq!(
+                k.work_counters.same_parameter_bisections(),
+                before,
+                "the piece over {range:?} was bisected"
+            );
+            assert!(g <= 1e-9, "{range:?}: {g:e}");
+            let sampled = sampled_same_parameter_gap(&k, &s, piece, &along, range);
+            assert!(
+                g >= sampled,
+                "{range:?}: {g:e} under the sampled {sampled:e}"
+            );
+            // (slid along the row, within it, and run against it)
+            let slide = if lo == 0.0 { 1e-3 } else { -1e-3 } * (u1 - u0);
+            for wrong in [
+                trim(at(lo) + slide, at(hi) + slide, lo, hi),
+                trim(at(hi), at(lo), lo, hi),
+            ] {
+                let sampled = sampled_same_parameter_gap(&k, &s, piece, &wrong, range);
+                assert!(sampled > 1e-5, "{range:?}: {sampled:e}");
+                let g = bound(piece, &wrong, range);
+                assert!(
+                    g >= sampled,
+                    "{range:?}: {g:e} under the sampled {sampled:e}"
+                );
+            }
+        }
     }
 
     /// #20373: the same side with `u` and `v` swapped (as the stitch's orientation leaves an

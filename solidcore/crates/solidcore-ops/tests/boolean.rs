@@ -380,6 +380,87 @@ fn a_join_of_pocketed_plates_proves_its_carried_trims_without_bisecting_them() {
     assert!(near(volume(&u), 4.0 * one), "{}", volume(&u));
 }
 
+/// tangency-labs/solidcraft#22273: a slat, a box 9 x 200 x 3 joined with a cylinder of radius 2
+/// and length 200 lying along the middle of its top face, its axis in that face, as the issue's
+/// `slat.json` makes it (the cylinder an extruded circle whose seam is 0.6131 rad round from
+/// `-x`, above the top). The union carries the cylinder's trims of its end circles, which it
+/// split where they cross the top: on the cylinder's side each piece's trim runs along a piece
+/// of its net's end row, with the piece's structure, not the whole row's. Each is now proved
+/// from the control points of the row's restriction to the piece at once; before, each of the
+/// four was bisected down to just under its tolerance, and the four took about 80% of the join
+/// (`same_parameter_bisections`).
+///
+/// Its counts and volume. The cylinder's lower half lies inside the box (`|x| <= 2 < 4.5`,
+/// `1 <= z <= 3`), so the union is the box and the upper half cylinder:
+/// `V = 9 · 200 · 3 + π 2² · 200 / 2 = 5400 + 400π`. The cylinder's seam line (at 0.6131 rad
+/// from `-x`, `z = 3 + 2 sin 0.6131 > 3`) is on the upper half, and the boolean keeps it as an
+/// edge, so the half cylinder is two faces either side of it. Faces: the box's bottom and two
+/// long sides, its top in two strips either side of the cylinder, its two ends each one face
+/// with the half disc of the cylinder's cap on it (one plane), and the two faces of the half
+/// cylinder: 9. Vertices: the box's 8 corners, the 4 where the cylinder meets the top at its
+/// ends and the seam's 2 ends: 14. Edges: the box's 4 bottom and 4 vertical edges, its 2 long
+/// top edges, 4 short top edges (from a corner to the cylinder at each end), the 2 lines where
+/// the cylinder meets the top, the 2 half circles each in 2 arcs either side of the seam, and
+/// the seam: 21 (`14 − 21 + 9 = 2`).
+#[test]
+fn a_slat_joined_with_a_cylinder_along_its_top_proves_the_split_circles_trims_without_bisecting() {
+    all_fixes();
+    let slat = || make_box([-4.5, -100.0, 0.0], [9.0, 200.0, 3.0]).unwrap();
+    let knuckle = || {
+        let circle = [Curve::Arc {
+            center: [0.0, -100.0, 3.0],
+            axis: [0.0, 1.0, 0.0],
+            reference: [-1.0, 0.0, 0.0],
+            radius: 2.0,
+            start: 0.6131,
+            end: 0.6131 + TAU,
+        }];
+        extrude(
+            &circle,
+            [0.0, 1.0, 0.0],
+            200.0,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap()
+    };
+
+    let mut k = solidcore::Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        ..solidcore::Kernel::default()
+    };
+    let mut held = |b: Body| {
+        let record = b.to_record().unwrap().0;
+        solidcore_convert::brep::to_kernel(&mut k, &record, true)
+            .unwrap()
+            .0
+    };
+    let (a, b) = (held(slat()), held(knuckle()));
+    k.work_counters.reset();
+    solidcore::boolean::api_brep::boolean_union(&mut k, a, b).unwrap();
+    assert!(
+        k.work_counters.trim_deviation_bounds() > 0,
+        "no carried trim was gated"
+    );
+    assert_eq!(
+        k.work_counters.same_parameter_bisections(),
+        0,
+        "of {} carried trims gated",
+        k.work_counters.trim_deviation_bounds()
+    );
+
+    let u = boolean(slat(), knuckle(), BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    let report = u.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(u.solid_count().unwrap(), 1);
+    assert_eq!(u.counts().unwrap(), [9, 21, 14]);
+    let want = 5400.0 + 400.0 * PI;
+    assert!(near(volume(&u), want), "{}, closed form {want}", volume(&u));
+}
+
 /// The box the boolean pairs faces by holds the face (`proved_bounding_box`): it holds every
 /// vertex of the face and the face's tight box (`SmFace::CalculateTightBoundingBox`, the face's
 /// extreme points inside its trim), on faces whose trims do not bound them alone: a ball's
