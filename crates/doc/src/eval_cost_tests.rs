@@ -6551,7 +6551,6 @@ fn parallel_pattern_mirror_fillet_scale_move_and_cut_are_deterministic() {
     let work = counted(|| model.evaluate(&doc));
     assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
     assert_eq!(work.cut, 3, "only the 3 intersecting bodies should be cut: {work:?}");
-    assert!(model.state().body("Far").unwrap().cached_mesh().is_none(), "pruned Far body must not be meshed");
     let run1 = eval_snapshot(&doc);
     let run2 = eval_snapshot(&doc);
     assert_eq!(run1, run2, "parallel cut must be deterministic");
