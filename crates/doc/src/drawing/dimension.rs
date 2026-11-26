@@ -1100,9 +1100,10 @@ fn fraction_at(line: &[Vec3], at: Vec3) -> Option<f64> {
     let (mut acc, mut best) = (0.0, None::<(f64, f64)>);
     for w in line.windows(2) {
         let (a, d) = (w[0], w[1] - w[0]);
-        let l = d.len();
+        let l = a.dist(w[1]);
         if l > 0.0 {
-            let s = ((at - a).dot(d) / (l * l)).clamp(0.0, 1.0);
+            // How far along the segment the pick's foot is, by the kernel's projection.
+            let s = (solidcraft_kernel::affine::distance_along(a.into(), d.into(), at.into()) / (l * l)).clamp(0.0, 1.0);
             let gap = (a + d * s).dist(at);
             if best.is_none_or(|(g, _)| gap < g) {
                 best = Some((gap, (acc + s * l) / total));
