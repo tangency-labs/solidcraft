@@ -391,29 +391,34 @@ pub(super) fn prefetch_components(
     }
     let progress = crate::progress::current();
     let outer = cores.min(MAX_WORKERS).min(chains.len());
+    // Workers start with no file scope: they run in the caller's, so the reads a chain makes
+    // (a sketch text's font file) stay inside it.
+    let carried = crate::worker_scope::capture();
     let results = kernel::map_on_threads(&chains, outer, |chain| {
-        crate::progress::watch_nested(progress.clone(), || {
-            eval_component_chain(
-                doc,
-                vals,
-                param_errors,
-                empty,
-                frame_bodies,
-                cache,
-                import_digests,
-                feature_component,
-                envelopes,
-                prepared_imports,
-                validation,
-                heal,
-                ctx,
-                shared_ctx,
-                chain,
-            )
+        crate::worker_scope::within(&carried, || {
+            crate::progress::watch_nested(progress.clone(), || {
+                eval_component_chain(
+                    doc,
+                    vals,
+                    param_errors,
+                    empty,
+                    frame_bodies,
+                    cache,
+                    import_digests,
+                    feature_component,
+                    envelopes,
+                    prepared_imports,
+                    validation,
+                    heal,
+                    ctx,
+                    shared_ctx,
+                    chain,
+                )
+            })
         })
     });
     let mut by_key = HashMap::new();
-    for entries in results.into_iter().flatten() {
+    for entries in results.into_iter().flatten().flatten() {
         for (k, v) in entries {
             by_key.insert(k, v);
         }
