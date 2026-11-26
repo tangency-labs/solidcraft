@@ -1229,6 +1229,10 @@ mod tests {
         let got = area(&s, "A");
         assert!((got - want).abs() < 0.01 * want, "{got} vs {want}");
         assert_eq!(st.body("A").unwrap().body.face_count(), 3);
+        // The round is named after the two faces it replaces, as a solid's fillet face is.
+        let faces = run(&mut s, "model.faces", json!({"body": "A"}));
+        let names: Vec<&str> = faces["faces"].as_array().unwrap().iter().filter_map(|f| f["name"].as_str()).collect();
+        assert!(names.iter().any(|n| n.contains(":blend(")), "{names:?}");
         // Undo brings both sheets back; redo and a cold reopen give the same body.
         run(&mut s, "edit.undo", json!({}));
         assert!(s.world_state().unwrap().body("B").is_some());

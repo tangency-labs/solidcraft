@@ -1065,8 +1065,11 @@ fn fillet_surfaces(st: &mut ModelState, a: &FaceAt, b: &FaceAt, r: f64, extend: 
         let Some(p) = kernel::edge_middle(&sewn.body, k)? else { return Err(DocError::Invalid("Surface Fillet: a seam has no middle".into())) };
         picks.push(p);
     }
-    let rounded = kernel::fillet(&sewn.body, &picks, r)?;
-    let rounded = Traced::step(rounded, &[&sewn.traced()]);
+    // As Fillet builds it, so the round's face is named after the two faces it replaces.
+    let (rounded, _) = kernel::fillet_removing(&sewn.body, &picks, r, kernel::FilletTurn::Mitre)?;
+    // The round blends an edge this feature made (the seam), so the sewn body is a stage of the
+    // feature: its faces and edges are named first, and the round is named after the faces beside it.
+    let rounded = sewn.traced().then(rounded.with_preserved_planar_sources(&sewn.body)?);
     if let Some(slot) = st.bodies.get_mut(i) {
         *slot = ModelBody::traced_new(sewn.name, rounded, sewn.feature);
     }
