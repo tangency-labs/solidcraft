@@ -218,24 +218,23 @@ pub const PAGE_SWITCH: Page = Page {
     title: "Page switch",
     group: Group::Inputs,
     items: &["PageSwitch", "SelectionBar", "SelectionAction"],
-    what: "Switch between related pages, with optional count badges and a sliding active pill. Selection actions sit inside the owning table card.",
+    what: "Counted page navigation and actions for selected rows.",
     usage: r#"
 ui_kit::PageSwitch::new("pages", &["Named", "Dimensions"])
     .counts(&[8, 41]).show(ui, &mut selected);
-// The host's zero animation duration or .reduced_motion(true) snaps the pill.
 "#,
     dos: &["Keep page labels short.", "Use a stable id and honour reduced motion."],
     donts: &["Don't use page navigation to change a modelling option.", "Don't put counts in the page's identity."],
     demo: |ui, d| {
-        state(ui, "Counted pages · 140 ms ease-out", |ui| {
-            ui_kit::PageSwitch::new("counted_pages", &["Named", "Dimensions"]).counts(&[8, 41]).show(ui, &mut d.segment);
-        });
-        state(ui, "Without counts", |ui| {
-            ui_kit::PageSwitch::new("uncounted_pages", &["Overview", "Details", "History"]).show(ui, &mut d.choice);
-        });
-        state(ui, "Reduced motion", |ui| {
-            ui_kit::PageSwitch::new("static_pages", &["Named", "Dimensions"]).counts(&[8, 41]).reduced_motion(true).show(ui, &mut d.selected);
-        });
+        for (title, id, labels, counts, reduced, selected) in [
+            ("Counted pages · 140 ms ease-out", "counted_pages", &["Named", "Dimensions"][..], &[8, 41][..], false, &mut d.segment),
+            ("Without counts", "uncounted_pages", &["Overview", "Details", "History"][..], &[][..], false, &mut d.choice),
+            ("Reduced motion", "static_pages", &["Named", "Dimensions"][..], &[8, 41][..], true, &mut d.selected),
+        ] {
+            state(ui, title, |ui| {
+                ui_kit::PageSwitch::new(id, labels).counts(counts).reduced_motion(reduced).show(ui, selected);
+            });
+        }
         disabled(ui, |ui| {
             ui_kit::PageSwitch::new("disabled_pages", &["Named", "Dimensions"]).counts(&[8, 41]).show(ui, &mut d.segment);
         });

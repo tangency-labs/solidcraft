@@ -6,55 +6,36 @@ use egui::{Ui, vec2};
 pub struct PageSwitch<'a> {
     id: &'a str,
     labels: &'a [&'a str],
-    counts: &'a [usize],
-    targets: &'a [&'a str],
-    reduced_motion: bool,
+    segments: super::Segments<'a>,
 }
 
 impl<'a> PageSwitch<'a> {
     pub fn new(id: &'a str, labels: &'a [&'a str]) -> Self {
-        Self { id, labels, counts: &[], targets: &[], reduced_motion: false }
+        Self { id, labels, segments: super::Segments { page_switch: true, intrinsic: true, compact: true, ..Default::default() } }
     }
     pub fn counts(mut self, counts: &'a [usize]) -> Self {
-        self.counts = counts;
+        self.segments.counts = counts;
         self
     }
     pub fn targets(mut self, targets: &'a [&'a str]) -> Self {
-        self.targets = targets;
+        self.segments.targets = targets;
         self
     }
     /// Also honours the host's zero animation duration (the app's reduced-motion setting).
     pub fn reduced_motion(mut self, reduced: bool) -> Self {
-        self.reduced_motion = reduced;
+        self.segments.reduced_motion = reduced;
         self
     }
     pub fn width(&self, ui: &Ui) -> f32 {
         let t = solidcraft_theme::Tokens::get();
         let shown: Vec<_> = self.labels.iter().map(|label| solidcraft_ui_text::tr_label(label)).collect();
-        super::choice::segment_widths(ui, &shown, &[], self.counts, true, t.font_label).iter().sum::<f32>() + t.space_2 * 2.0
+        super::choice::segment_widths(ui, &shown, &[], self.segments.counts, true, t.font_label).iter().sum::<f32>() + t.space_2 * 2.0
     }
     pub fn show(self, ui: &mut Ui, selected: &mut usize) -> bool {
         let Some(index) = selected_index(*selected, self.labels.len()) else { return false };
         let before = *selected;
         *selected = index;
-        ui.push_id(self.id, |ui| {
-            super::segmented(
-                ui,
-                selected,
-                self.labels,
-                super::Segments {
-                    counts: self.counts,
-                    targets: self.targets,
-                    page_switch: true,
-                    reduced_motion: self.reduced_motion,
-                    intrinsic: true,
-                    compact: true,
-                    ..Default::default()
-                },
-            )
-        })
-        .inner
-            || before != *selected
+        ui.push_id(self.id, |ui| super::segmented(ui, selected, self.labels, self.segments)).inner || before != *selected
     }
 }
 

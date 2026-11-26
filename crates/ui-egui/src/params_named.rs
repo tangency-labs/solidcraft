@@ -29,8 +29,8 @@ pub(super) struct State {
     pub reveal_group: bool,
     nudge_dismissed: bool,
     prefix: String,
-    pub compact: bool,
-    key_originals: BTreeMap<String, String>,
+    /// Original key expressions while the compact editor is open.
+    pub compact: Option<BTreeMap<String, String>>,
     toast: Option<(u64, String)>,
 }
 
@@ -70,6 +70,40 @@ pub(super) fn readers(graph: &Value) -> BTreeMap<String, Vec<String>> {
     reverse.into_iter().map(|(name, readers)| (name, readers.into_iter().collect())).collect()
 }
 
+/// Share the revision's evaluated rows with rendering and completed asynchronous edits.
+pub(super) fn listed(app: &mut SolveApp, d: &mut ParamsDialog) -> Arc<Vec<Row>> {
+    if d.listed.as_ref().is_none_or(|(rev, _)| *rev != app.session.revision) {
+        let mut rows = rows(app);
+        let graph = app.session.execute("parameters.graph", &json!({})).unwrap_or_default();
+        let mut readers = readers(&graph);
+        let owners: BTreeMap<_, _> = rows.iter().filter(|r| !r.group.is_empty()).map(|r| (r.name.clone(), r.group.clone())).collect();
+        for row in &mut rows {
+            row.readers.extend(readers.remove(&row.name).unwrap_or_default());
+            row.readers.sort();
+            row.readers.dedup();
+            row.reader_features = row
+                .readers
+                .iter()
+                .filter_map(|reader| reader.strip_prefix("Feature:").or_else(|| owners.get(reader).map(String::as_str)))
+                .collect::<BTreeSet<_>>()
+                .len();
+        }
+        d.listed = Some((app.session.revision, Arc::new(rows)));
+        d.lists += 1;
+    }
+    let all = d.listed.as_ref().map(|(_, rows)| rows.clone()).unwrap_or_default();
+    if app.computing_since().is_none() && app.deferred_queue.is_empty() {
+        for name in std::mem::take(&mut d.applying).into_keys() {
+            if let Some(entry) = d.applied.get_mut(&name)
+                && let Some(now) = all.iter().find(|r| r.name == name)
+            {
+                entry.1 = now.expression.clone();
+            }
+        }
+    }
+    all
+}
+
 pub(super) fn measure(sketch: &solidcraft_engine::sketch::Sketch, kind: &solidcraft_engine::sketch::ConstraintKind) -> String {
     use solidcraft_engine::sketch::ConstraintKind as C;
     let curve = |index: usize| sketch.curves.get(index).map(|c| c.id.clone()).unwrap_or_default();
@@ -81,13 +115,12 @@ pub(super) fn measure(sketch: &solidcraft_engine::sketch::Sketch, kind: &solidcr
         C::DistanceY { p, q, .. } => ("parameters.redesign.distance_y", format!("{}, {}", point(*p), point(*q))),
         C::Radius { c, .. } => ("parameters.redesign.radius", curve(*c)),
         C::Diameter { c, .. } => ("parameters.redesign.diameter", curve(*c)),
-        C::LineAngle { l, .. } => ("parameters.redesign.angle", curve(*l)),
-        C::ArcSweep { c, .. } => ("parameters.redesign.angle", curve(*c)),
+        C::LineAngle { l: c, .. } | C::ArcSweep { c, .. } => ("parameters.redesign.angle", curve(*c)),
         C::Angle { a, b, .. } => ("parameters.redesign.angle", format!("{}, {}", curve(*a), curve(*b))),
-        C::PointLineDistance { p, l, .. } => ("parameters.redesign.distance", format!("{}, {}", point(*p), curve(*l))),
-        C::LineCircleDistance { l, c, .. } => ("parameters.redesign.distance", format!("{}, {}", curve(*l), curve(*c))),
-        C::PointCircleDistance { p, c, .. } => ("parameters.redesign.distance", format!("{}, {}", point(*p), curve(*c))),
-        C::CircleCircleDistance { a, b, .. } | C::SlotOverallLength { a, b, .. } => {
+        C::PointLineDistance { p, l: c, .. } | C::PointCircleDistance { p, c, .. } => {
+            ("parameters.redesign.distance", format!("{}, {}", point(*p), curve(*c)))
+        }
+        C::LineCircleDistance { l: a, c: b, .. } | C::CircleCircleDistance { a, b, .. } | C::SlotOverallLength { a, b, .. } => {
             ("parameters.redesign.distance", format!("{}, {}", curve(*a), curve(*b)))
         }
         _ => ("parameters.redesign.dimension", String::new()),
@@ -99,13 +132,13 @@ pub(super) fn measure(sketch: &solidcraft_engine::sketch::Sketch, kind: &solidcr
     }
 }
 
-pub(super) fn column_order(d: &ParamsDialog) -> Vec<usize> {
+pub(super) fn column_order(d: &ParamsDialog) -> &'static [usize] {
     if d.redesign.view == View::Dimensions {
-        vec![STAR, NAME, MEASURES, EXPRESSION, VALUE, ACTIONS]
+        &[STAR, NAME, MEASURES, EXPRESSION, VALUE, ACTIONS]
     } else if d.redesign.narrow {
-        vec![STAR, NAME, EXPRESSION, VALUE, ACTIONS]
+        &[STAR, NAME, EXPRESSION, VALUE, ACTIONS]
     } else {
-        vec![STAR, NAME, EXPRESSION, VALUE, UNIT, COMMENT, USED, ACTIONS]
+        &[STAR, NAME, EXPRESSION, VALUE, UNIT, COMMENT, USED, ACTIONS]
     }
 }
 
@@ -152,78 +185,8 @@ pub(super) fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialo
         counts[usize::from(!named(r))] += 1;
         counts
     });
-    let labels = [tr("parameters.redesign.named"), tr("parameters.redesign.dimensions")];
     let mut selected = usize::from(d.redesign.view == View::Dimensions);
-    let changed = ui
-        .horizontal(|ui| {
-            let t = solidcraft_theme::Tokens::get();
-            ui.spacing_mut().item_spacing.x = t.space_6;
-            let narrow = ui.available_width() < t.control_height * 20.0;
-            let pages = ui_kit::PageSwitch::new("parameter_pages", &labels).counts(&counts).targets(&["params:view:named", "params:view:dimensions"]);
-            let actions = [
-                ("parameters.redesign.export_json", "export_tray", "json"),
-                ("parameters.redesign.export_csv", "export_tray", "csv"),
-                ("parameters.redesign.import", "import_tray", ""),
-            ];
-            let search_width = if narrow { t.space_24 * 5.0 + t.space_10 } else { t.space_24 * 8.0 + t.space_8 };
-            let labelled_width: f32 = actions.iter().map(|(label, icon, _)| ui_kit::icon_label_width(ui, tr(label), Some(icon), false)).sum();
-            let gaps = t.space_6 * 6.0 + t.form_close_size;
-            let natural_page_width = pages.width(ui);
-            let header_width = natural_page_width + labelled_width + t.space_24 * 8.0 + t.space_8 + gaps;
-            if d.redesign.header_width != header_width {
-                d.redesign.header_width = header_width;
-                ui.ctx().request_repaint();
-            }
-            let icons_only = narrow || natural_page_width + labelled_width + search_width + gaps > ui.available_width();
-            let actions_width = if icons_only { t.control_height * actions.len() as f32 } else { labelled_width };
-            let page_width = natural_page_width.min((ui.available_width() - search_width - actions_width - gaps).max(t.space_24 * 3.0));
-            let changed = ui.allocate_ui(egui::vec2(page_width, t.control_height + t.space_2), |ui| pages.show(ui, &mut selected)).inner;
-            let more = ui_kit::compact_button(ui, "…", tr("parameters.redesign.actions"), true, false);
-            crate::scenario::publish_target("params:header:actions", more.rect);
-            ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Popup).menu(&more).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(
-                |ui| {
-                    let ranges = ui_kit::checkbox(ui, tr("parameters.redesign.cell_ranges"), &mut d.redesign.ranges);
-                    crate::scenario::publish_target("params:cell_ranges", ranges.rect);
-                    if ranges.changed() {
-                        d.forget_grids(ui.ctx());
-                    }
-                    group_checkbox(app, ui);
-                    if d.redesign.selected.len() >= 2 {
-                        ui_kit::divider(ui, "bulk_naming");
-                        let selected: Vec<_> = all.iter().filter(|r| d.redesign.selected.contains(&r.name)).collect();
-                        name_prefix(app, ui, d, &selected);
-                    }
-                },
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = t.space_6;
-                ui.allocate_ui(egui::vec2(search_width, t.control_height), |ui| {
-                    let id = ui.make_persistent_id("parameter_filter");
-                    let response = ui_kit::search_field(ui, id, &mut d.filter, solidcraft_ui_text::tr_label("Filter"));
-                    crate::scenario::publish_target("dialog:Filter", response.rect);
-                });
-                for (label, icon, ext) in actions {
-                    let label = tr(label);
-                    let response = if icons_only {
-                        let (rect, _) = ui.allocate_exact_size(egui::vec2(t.control_height, t.control_height), egui::Sense::hover());
-                        ui_kit::icon_button_at(ui, rect, icon, label)
-                    } else {
-                        ui_kit::icon_label_button(ui, label, icon, true, false)
-                    };
-                    let key = if ext.is_empty() { "params:import".to_owned() } else { format!("params:export_{ext}") };
-                    crate::scenario::publish_target(&key, response.rect);
-                    if response.backing_on_hover_text(label).clicked() {
-                        if ext.is_empty() {
-                            app.pick_open_command("parameters.import", json!({}), IMPORT_TYPES);
-                        } else {
-                            app.pick_save_command(&format!("parameters.{ext}"), &[ext], "parameters.export", json!({"format":ext}));
-                        }
-                    }
-                }
-            });
-            changed
-        })
-        .inner;
+    let changed = header(app, ui, d, all, &counts, &mut selected);
     if changed && finish_view_edit(app, ui.ctx(), d, all) {
         d.redesign.view = if selected == 0 { View::Named } else { View::Dimensions };
         d.reset_scroll = true;
@@ -254,6 +217,79 @@ pub(super) fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialo
     }
 }
 
+fn header(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, all: &[Row], counts: &[usize], selected: &mut usize) -> bool {
+    let labels = [tr("parameters.redesign.named"), tr("parameters.redesign.dimensions")];
+    ui.horizontal(|ui| {
+        let t = solidcraft_theme::Tokens::get();
+        ui.spacing_mut().item_spacing.x = t.space_6;
+        let narrow = ui.available_width() < t.control_height * 20.0;
+        let pages = ui_kit::PageSwitch::new("parameter_pages", &labels).counts(counts).targets(&["params:view:named", "params:view:dimensions"]);
+        let actions = [
+            ("parameters.redesign.export_json", "export_tray", "json"),
+            ("parameters.redesign.export_csv", "export_tray", "csv"),
+            ("parameters.redesign.import", "import_tray", ""),
+        ];
+        let search_width = if narrow { t.space_24 * 5.0 + t.space_10 } else { t.space_24 * 8.0 + t.space_8 };
+        let labelled_width: f32 = actions.iter().map(|(label, icon, _)| ui_kit::icon_label_width(ui, tr(label), Some(icon), false)).sum();
+        let gaps = t.space_6 * 6.0 + t.form_close_size;
+        let natural_page_width = pages.width(ui);
+        let header_width = natural_page_width + labelled_width + t.space_24 * 8.0 + t.space_8 + gaps;
+        if d.redesign.header_width != header_width {
+            d.redesign.header_width = header_width;
+            ui.ctx().request_repaint();
+        }
+        let icons_only = narrow || natural_page_width + labelled_width + search_width + gaps > ui.available_width();
+        let actions_width = if icons_only { t.control_height * actions.len() as f32 } else { labelled_width };
+        let page_width = natural_page_width.min((ui.available_width() - search_width - actions_width - gaps).max(t.space_24 * 3.0));
+        let changed = ui.allocate_ui(egui::vec2(page_width, t.control_height + t.space_2), |ui| pages.show(ui, selected)).inner;
+        let more = ui_kit::compact_button(ui, "…", tr("parameters.redesign.actions"), true, false);
+        crate::scenario::publish_target("params:header:actions", more.rect);
+        ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Popup).menu(&more).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(
+            |ui| {
+                let ranges = ui_kit::checkbox(ui, tr("parameters.redesign.cell_ranges"), &mut d.redesign.ranges);
+                crate::scenario::publish_target("params:cell_ranges", ranges.rect);
+                if ranges.changed() {
+                    d.forget_grids(ui.ctx());
+                }
+                group_checkbox(app, ui);
+                if d.redesign.selected.len() >= 2 {
+                    ui_kit::divider(ui, "bulk_naming");
+                    let selected: Vec<_> = all.iter().filter(|r| d.redesign.selected.contains(&r.name)).collect();
+                    name_prefix(app, ui, d, &selected);
+                }
+            },
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = t.space_6;
+            ui.allocate_ui(egui::vec2(search_width, t.control_height), |ui| {
+                let id = ui.make_persistent_id("parameter_filter");
+                let response = ui_kit::search_field(ui, id, &mut d.filter, solidcraft_ui_text::tr_label("Filter"));
+                crate::scenario::publish_target("dialog:Filter", response.rect);
+            });
+            for (label, icon, ext) in actions {
+                let label = tr(label);
+                let response = if icons_only {
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(t.control_height, t.control_height), egui::Sense::hover());
+                    ui_kit::icon_button_at(ui, rect, icon, label)
+                } else {
+                    ui_kit::icon_label_button(ui, label, icon, true, false)
+                };
+                let key = if ext.is_empty() { "params:import".to_owned() } else { format!("params:export_{ext}") };
+                crate::scenario::publish_target(&key, response.rect);
+                if response.backing_on_hover_text(label).clicked() {
+                    if ext.is_empty() {
+                        app.pick_open_command("parameters.import", json!({}), IMPORT_TYPES);
+                    } else {
+                        app.pick_save_command(&format!("parameters.{ext}"), &[ext], "parameters.export", json!({"format":ext}));
+                    }
+                }
+            }
+        });
+        changed
+    })
+    .inner
+}
+
 /// Switching tables blurs the previous grid. Commit live fields first; held fields stay held.
 fn finish_view_edit(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog, all: &[Row]) -> bool {
     let Some((_, name, col, _)) = d.typing.clone() else { return true };
@@ -277,8 +313,7 @@ fn finish_view_edit(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialo
         d.error = Some(error);
         return false;
     }
-    let out = ui_kit::GridOutput { edits: vec![ui_kit::Edit::Set { row: ui_kit::RowRef::Existing(name), col, text }], ..Default::default() };
-    apply_grid(app, ctx, d, &[row], "view_switch", out);
+    edit_cell(app, ctx, d, row, "view_switch", col, text);
     let valid = d.error.is_none();
     if valid {
         d.typing = None;
@@ -349,15 +384,9 @@ pub(super) fn name_editor(app: &SolveApp, ui: &mut egui::Ui, r: &Row, id: egui::
     let response = ui_kit::cell_editor(ui, id, text, "Name", problem.is_some());
     if !named(r) && response.has_focus() {
         let suggestions = suggestions(r);
-        let options: Vec<_> = suggestions
-            .iter()
-            .map(|s| ui_kit::PopupOption {
-                text: s,
-                detail: "",
-                kind: tr("parameters.redesign.suggestions"),
-                color: solidcraft_theme::Tokens::get().form_ink,
-            })
-            .collect();
+        let kind = tr("parameters.redesign.suggestions");
+        let color = solidcraft_theme::Tokens::get().form_ink;
+        let options: Vec<_> = suggestions.iter().map(|text| ui_kit::PopupOption { text, detail: "", kind, color }).collect();
         if let Some(index) = ui_kit::popup_list(
             ui.ctx(),
             id.with("suggestions"),
@@ -383,15 +412,12 @@ pub(super) fn renamed(app: &SolveApp, d: &mut ParamsDialog, old: &str, new: &str
     if let Some(value) = d.applied.remove(old) {
         d.applied.insert(new.to_owned(), value);
     }
-    if let Some(value) = d.redesign.key_originals.remove(old) {
-        d.redesign.key_originals.insert(new.to_owned(), value);
+    if let Some(originals) = &mut d.redesign.compact
+        && let Some(value) = originals.remove(old)
+    {
+        originals.insert(new.to_owned(), value);
     }
-    for (name, expression) in &mut d.redesign.key_originals {
-        if app.session.doc.text_param(name).is_none() {
-            *expression = solidcraft_engine::doc::expr::rename_reference(expression, old, new);
-        }
-    }
-    for (name, expression) in d.editing.iter_mut().chain(d.applying.iter_mut()) {
+    for (name, expression) in d.editing.iter_mut().chain(d.applying.iter_mut()).chain(d.redesign.compact.iter_mut().flat_map(|m| m.iter_mut())) {
         if app.session.doc.text_param(name).is_none() {
             *expression = solidcraft_engine::doc::expr::rename_reference(expression, old, new);
         }
@@ -506,7 +532,7 @@ pub(super) fn row_menu(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDial
             show_feature(app, &r.group);
             ui.close();
         }
-        if named(r) && r.source != "user" && ui_kit::menu::button(ui, tr("parameters.redesign.demote"), "rename").clicked() {
+        if r.source != "user" && ui_kit::menu::button(ui, tr("parameters.redesign.demote"), "rename").clicked() {
             d.redesign.demote = Some(r.name.clone());
             ui.close();
         }
@@ -544,11 +570,7 @@ pub(super) fn row_menu(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDial
                 if ui_kit::dropdown(ui, "menu_unit", &mut unit, &labels).changed()
                     && let Some(unit) = UNITS.get(unit)
                 {
-                    let out = ui_kit::GridOutput {
-                        edits: vec![ui_kit::Edit::Set { row: ui_kit::RowRef::Existing(r.name.clone()), col: UNIT, text: unit.to_string() }],
-                        ..Default::default()
-                    };
-                    apply_grid(app, ui.ctx(), d, &[r], "user", out);
+                    edit_cell(app, ui.ctx(), d, r, "user", UNIT, unit.to_string());
                 }
             }
             let mut comment = d.comments.get(&r.name).cloned().unwrap_or_else(|| r.comment.clone());
@@ -729,9 +751,8 @@ fn name_prefix(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, sele
     }
 }
 
-pub(super) fn states(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, all: &[Row]) {
-    let filter = d.filter.to_ascii_lowercase();
-    let visible = all.iter().any(|r| r.matches(&filter) && named(r) == (d.redesign.view == View::Named));
+pub(super) fn states(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, all: &[Row], filtered: &[&Row]) {
+    let visible = filtered.iter().any(|r| named(r) == (d.redesign.view == View::Named));
     if !visible {
         let key = match (d.redesign.view, d.filter.is_empty()) {
             (View::Named, true) => "parameters.redesign.empty_named",
@@ -773,23 +794,23 @@ pub(super) fn states(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog
         let toggle = ui_kit::button(ui, tr("parameters.redesign.compact"), ui_kit::Button::Normal);
         crate::scenario::publish_target("params:key:toggle", toggle.rect);
         if toggle.clicked() {
-            d.redesign.compact = !d.redesign.compact;
-            if d.redesign.compact {
-                d.redesign.key_originals = all.iter().filter(|r| named(r) && r.favorite).map(|r| (r.name.clone(), r.expression.clone())).collect();
+            d.redesign.compact = if d.redesign.compact.is_some() {
+                None
+            } else {
                 ui.scroll_to_cursor(Some(egui::Align::TOP));
-            }
+                Some(all.iter().filter(|r| named(r) && r.favorite).map(|r| (r.name.clone(), r.expression.clone())).collect())
+            };
         }
-        if d.redesign.compact {
-            compact(app, ui, d, all);
-        }
+        compact(app, ui, d, all);
     }
 }
 
 /// The explicitly permitted compact-window fallback. Uses the same held/live edit path.
 fn compact(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, all: &[Row]) {
+    let Some(originals) = d.redesign.compact.take() else { return };
     for r in all.iter().filter(|r| named(r) && r.favorite) {
         ui.push_id(("key_field", &r.name), |ui| {
-            let changed = d.redesign.key_originals.get(&r.name).is_some_and(|original| d.editing.get(&r.name).unwrap_or(&r.expression) != original);
+            let changed = originals.get(&r.name).is_some_and(|original| d.editing.get(&r.name).unwrap_or(&r.expression) != original);
             let label = if changed { solidcraft_ui_text::format("parameters.redesign.changed_key", &[("name", &r.name)]) } else { r.name.clone() };
             ui_kit::text(ui, &label, ui_kit::Text::MonoCell);
             ui_kit::text(ui, &r.comment, ui_kit::Text::Hint("key_comment"));
@@ -808,14 +829,7 @@ fn compact(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, all: &[R
                         ui,
                         value,
                         -extent..=extent,
-                        ui_kit::Slider {
-                            step: None,
-                            format: |v| format!("{v:.3}"),
-                            show_value: false,
-                            integer: false,
-                            workspace_accent: false,
-                            off_endpoint: false,
-                        },
+                        ui_kit::Slider { format: |v| format!("{v:.3}"), show_value: false, ..Default::default() },
                     );
                     crate::scenario::publish_target(&format!("params:key:slider:{}", r.name), response.rect);
                     if response.changed() {
@@ -828,11 +842,7 @@ fn compact(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, all: &[R
                 d.editing.insert(r.name.clone(), expression.clone());
             }
             if commit {
-                let out = ui_kit::GridOutput {
-                    edits: vec![ui_kit::Edit::Set { row: ui_kit::RowRef::Existing(r.name.clone()), col: EXPRESSION, text: expression }],
-                    ..Default::default()
-                };
-                apply_grid(app, ui.ctx(), d, &[r], "fav", out);
+                edit_cell(app, ui.ctx(), d, r, "fav", EXPRESSION, expression);
             }
         });
     }
@@ -842,7 +852,7 @@ fn compact(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, all: &[R
         let edits: Vec<_> = all
             .iter()
             .filter_map(|r| {
-                let original = d.redesign.key_originals.get(&r.name)?;
+                let original = originals.get(&r.name)?;
                 (d.editing.get(&r.name).unwrap_or(&r.expression) != original).then(|| ui_kit::Edit::Set {
                     row: ui_kit::RowRef::Existing(r.name.clone()),
                     col: EXPRESSION,
@@ -853,4 +863,10 @@ fn compact(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, all: &[R
         let rows: Vec<_> = all.iter().collect();
         apply_grid(app, ui.ctx(), d, &rows, "fav", ui_kit::GridOutput { edits, ..Default::default() });
     }
+    d.redesign.compact = Some(originals);
+}
+
+fn edit_cell(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog, r: &Row, salt: &str, col: usize, text: String) {
+    let edit = ui_kit::Edit::Set { row: ui_kit::RowRef::Existing(r.name.clone()), col, text };
+    apply_grid(app, ctx, d, &[r], salt, ui_kit::GridOutput { edits: vec![edit], ..Default::default() });
 }

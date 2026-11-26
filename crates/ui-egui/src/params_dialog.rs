@@ -326,7 +326,7 @@ fn draw_entries(
     table: &mut ui_kit::Table<'_>,
     d: &mut ParamsDialog,
     (entries, groups): (&[Entry], &[(&str, Vec<&Row>)]),
-    widths: (f32, f32),
+    columns: &[ui_kit::GridColumn],
     depth: usize,
 ) {
     for entry in entries {
@@ -338,7 +338,7 @@ fn draw_entries(
                     } else {
                         group.to_string()
                     };
-                    band_at(app, ui, table, d, (&format!("model:{group}"), &label, members), widths, depth);
+                    band_at(app, ui, table, d, (&format!("model:{group}"), &label, members), columns, depth);
                 }
             }
             Entry::Folder { id, name, entries } => {
@@ -351,7 +351,7 @@ fn draw_entries(
                 d.bands.insert(salt, now);
                 crate::scenario::publish_target(&format!("dialog:section:{name}"), response.rect);
                 if now {
-                    draw_entries(app, ui, table, d, (entries, groups), widths, depth + 1);
+                    draw_entries(app, ui, table, d, (entries, groups), columns, depth + 1);
                 }
             }
         }
@@ -425,18 +425,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let Some(mut d) = app.params.take() else { return };
     forget_refused_add(app, &mut d);
-    if !d.applying.is_empty() && app.computing_since().is_none() && app.deferred_queue.is_empty() {
-        // A live edit computed off the window thread (#6777) is in now; what the design lists for
-        // it is what Cancel later checks is still there (#15377), as `apply_grid` read it too early.
-        let listed = rows(app);
-        for name in std::mem::take(&mut d.applying).into_keys() {
-            if let Some(entry) = d.applied.get_mut(&name)
-                && let Some(now) = listed.iter().find(|l| l.name == name)
-            {
-                entry.1 = now.expression.clone();
-            }
-        }
-    }
     d.sort = ctx.data_mut(|m| m.get_persisted(sort_id())).unwrap_or_default();
     let sort = d.sort;
     ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
@@ -463,7 +451,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     .reset_scroll(d.reset_scroll);
     // Expanded Key controls use the available body height; the shared body scrolls the rest.
     // A manually resized height still takes precedence below.
-    let panel = if d.redesign.compact { panel } else { panel.body_rows(16.0) };
+    let panel = if d.redesign.compact.is_some() { panel } else { panel.body_rows(16.0) };
     // A width or body height the user dragged the card to replaces that default; each axis stays
     // automatic until the user drags it (review of #13422).
     let (chosen_width, chosen_height) = (SIZE.width(ctx), SIZE.height(ctx));
@@ -472,30 +460,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let width = chosen_width.map_or(default_width, |w| w.max(crate::frame::DIALOG_MIN_W));
     let panel = panel.body_height(chosen_height);
     let panel = panel.width(width.min((docked.x - drag_bounds.left()).max(crate::frame::DIALOG_MIN_W)));
-    let all = if let Some((_, rows)) = d.listed.as_ref().filter(|(rev, _)| *rev == app.session.revision) {
-        rows.clone()
-    } else {
-        let mut rows = rows(app);
-        let graph = app.session.execute("parameters.graph", &json!({})).unwrap_or_default();
-        let mut readers = redesign::readers(&graph);
-        let owners: std::collections::BTreeMap<_, _> =
-            rows.iter().filter(|r| !r.group.is_empty()).map(|r| (r.name.clone(), r.group.clone())).collect();
-        for row in &mut rows {
-            row.readers.extend(readers.remove(&row.name).unwrap_or_default());
-            row.readers.sort();
-            row.readers.dedup();
-            row.reader_features = row
-                .readers
-                .iter()
-                .filter_map(|reader| reader.strip_prefix("Feature:").or_else(|| owners.get(reader).map(String::as_str)))
-                .collect::<std::collections::BTreeSet<_>>()
-                .len();
-        }
-        let rows = Arc::new(rows);
-        d.listed = Some((app.session.revision, rows.clone()));
-        d.lists += 1;
-        rows
-    };
+    let all = redesign::listed(app, &mut d);
     let mut outcome = (false, ui_kit::Action::None);
     let live = app.preferences.parameters_apply_live;
     let mut live_choice = live;
@@ -532,7 +497,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 let mut sections = sections(&visible, d.sort);
                 redesign::follow_selection(app, &mut d, &mut sections);
                 table(app, ui, &mut d, &sections, name_floor, &all);
-                redesign::states(app, ui, &mut d, &all);
+                redesign::states(app, ui, &mut d, &all, &visible);
                 ui_kit::ComputeStatus { text: None, busy: false, applying: false }
             },
             |ui| apply_live_checkbox(ui, &mut live_choice, held_status.as_deref()),
@@ -673,13 +638,12 @@ struct ParamGrid<'a> {
     d: &'a mut ParamsDialog,
     rows: &'a [&'a Row],
     salt: &'a str,
-    name_floor: f32,
-    unit_width: f32,
+    columns: &'a [ui_kit::GridColumn],
     /// How far right an expression being edited may open (#9358).
     right: f32,
     /// The live check of each row's held or typed expression that differs from the design's.
     live: std::collections::HashMap<String, Result<String, String>>,
-    cols: Vec<usize>,
+    cols: &'static [usize],
 }
 
 impl ParamGrid<'_> {
@@ -738,7 +702,7 @@ impl ui_kit::GridSource for ParamGrid<'_> {
         self.d.redesign.ranges
     }
     fn columns(&self) -> Vec<ui_kit::GridColumn> {
-        redesign::columns(self.name_floor, self.unit_width, &self.cols)
+        self.columns.to_vec()
     }
 
     fn row_count(&self) -> usize {
@@ -801,17 +765,6 @@ impl ui_kit::GridSource for ParamGrid<'_> {
 
     fn add_row(&self) -> Option<std::borrow::Cow<'_, str>> {
         (self.salt == "user").then_some(std::borrow::Cow::Borrowed("Add parameter"))
-    }
-
-    fn header(&mut self, ui: &mut egui::Ui, col: usize) -> bool {
-        let col = self.column(col);
-        // The Name heading sorts every section at once, each inside itself (#8563).
-        if col != NAME {
-            return false;
-        }
-        let response = ui_kit::sort_header(ui, "Name", &mut self.d.sort);
-        crate::scenario::publish_handle(&format!("params:sort:{}", self.salt), response.rect.center());
-        true
     }
 
     fn draw(&mut self, ui: &mut egui::Ui, row: usize, col: usize) -> Option<egui::Response> {
@@ -956,7 +909,7 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, sections: 
     let unit_width = ui_kit::ContentWidth::dropdown(ui, &units).max(t.space_24 * 3.0 + t.space_6);
     d.redesign.narrow = ui.available_width() < 560.0;
     let cols = redesign::column_order(d);
-    let columns = redesign::columns(name_floor, unit_width, &cols);
+    let columns = redesign::columns(name_floor, unit_width, cols);
     let column_state = columns_id().with((d.redesign.view == redesign::View::Dimensions, d.redesign.narrow));
     let manual: Vec<Option<f32>> = ui.ctx().data_mut(|m| m.get_persisted(column_state)).unwrap_or_default();
     let layout: Vec<_> = columns.iter().enumerate().map(|(i, c)| c.layout(manual.get(i).copied().flatten())).collect();
@@ -972,10 +925,9 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, sections: 
             }
             true
         });
-        let widths = (name_floor, unit_width);
         if d.redesign.view == redesign::View::Named {
-            band(app, ui, table, d, ("fav", solidcraft_ui_text::tr("parameters.redesign.key"), &sections.favorites), widths);
-            band(app, ui, table, d, ("user", solidcraft_ui_text::tr("parameters.redesign.named"), &sections.users), widths);
+            band(app, ui, table, d, ("fav", solidcraft_ui_text::tr("parameters.redesign.key"), &sections.favorites), &columns);
+            band(app, ui, table, d, ("user", solidcraft_ui_text::tr("parameters.redesign.named"), &sections.users), &columns);
         } else {
             // The Dimensions view keeps the component tree and flat-list preference.
             let order = {
@@ -983,7 +935,7 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, sections: 
                 let of_group: Vec<u64> = sections.groups.iter().map(|(_, m)| m.first().map_or(0, |r| r.component)).collect();
                 listing_order(&of_group, &components, app.preferences.params_group_by_component)
             };
-            draw_entries(app, ui, table, d, (&order, &sections.groups), widths, 0);
+            draw_entries(app, ui, table, d, (&order, &sections.groups), &columns, 0);
         }
     });
     // The sections now share one horizontal viewport; existing agents may still ask for
@@ -1000,8 +952,15 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, sections: 
     }
 }
 
-fn band(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>, d: &mut ParamsDialog, band: (&str, &str, &[&Row]), widths: (f32, f32)) {
-    band_at(app, ui, table, d, band, widths, 0);
+fn band(
+    app: &mut SolveApp,
+    ui: &mut egui::Ui,
+    table: &mut ui_kit::Table<'_>,
+    d: &mut ParamsDialog,
+    band: (&str, &str, &[&Row]),
+    columns: &[ui_kit::GridColumn],
+) {
+    band_at(app, ui, table, d, band, columns, 0);
 }
 
 /// A band `depth` component folders deep.
@@ -1011,7 +970,7 @@ fn band_at(
     table: &mut ui_kit::Table<'_>,
     d: &mut ParamsDialog,
     (salt, label, rows): (&str, &str, &[&Row]),
-    (name_floor, unit_width): (f32, f32),
+    columns: &[ui_kit::GridColumn],
     depth: usize,
 ) {
     let open = d.bands.entry(salt.to_owned()).or_insert(!salt.starts_with("model:") || !d.filter.is_empty());
@@ -1056,7 +1015,7 @@ fn band_at(
         ui_kit::Grid::edit(ui.ctx(), state, &r.name, index, col, redesign::suggestions(r).into_iter().next().unwrap_or_default());
         *started = true;
     }
-    let mut grid = ParamGrid { app, d, rows, salt, name_floor, unit_width, right, live, cols: cols.clone() };
+    let mut grid = ParamGrid { app, d, rows, salt, columns, right, live, cols };
     let out = ui_kit::Grid::new(salt).state(state).show_in(ui, table, &mut grid, |ui, table, grid| {
         if grid.salt == "user" && grid.d.adding {
             let right = grid.right;
@@ -1067,7 +1026,7 @@ fn band_at(
         d.adding = true;
         d.focus_new = true;
     }
-    let out = redesign::project_output(out, &cols);
+    let out = redesign::project_output(out, cols);
     apply_grid(app, ui.ctx(), d, rows, salt, out);
 }
 
@@ -1458,7 +1417,7 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
     let reveal = d.focus_new;
     let order = redesign::column_order(d);
     let response = table.row(ui, "new", false, |row| {
-        for col in order {
+        for &col in order {
             row.cell(|ui| match col {
                 NAME => {
                     let response = ui_kit::cell_editor(ui, name_id, &mut d.new_name, "new parameter", false);
@@ -1884,7 +1843,7 @@ mod tests {
             h.app.run("parameters.add", json!({"name":name,"expression":"5 mm"})).unwrap();
             h.app.run("parameters.favorite", json!({"name":name,"favorite":true})).unwrap();
         }
-        h.app.params.as_mut().unwrap().redesign.compact = true;
+        h.app.params.as_mut().unwrap().redesign.compact = Some(Default::default());
         h.frames(6);
         let last = h.app.params.as_ref().unwrap().listed.as_ref().unwrap().1.iter().rfind(|r| r.favorite).unwrap().name.clone();
         let filter = crate::scenario::rect_of("dialog:Filter").unwrap();
@@ -2094,7 +2053,7 @@ mod tests {
         d.redesign.narrow = true;
         let order = redesign::column_order(&d);
         assert_eq!(order, [STAR, NAME, EXPRESSION, VALUE, ACTIONS]);
-        let out = redesign::project_output(ui_kit::GridOutput { editing: Some(("width".into(), 2, "30".into())), ..Default::default() }, &order);
+        let out = redesign::project_output(ui_kit::GridOutput { editing: Some(("width".into(), 2, "30".into())), ..Default::default() }, order);
         assert_eq!(out.editing.unwrap().1, EXPRESSION);
     }
 
