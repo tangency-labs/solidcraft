@@ -55,8 +55,8 @@ const MOST_POINTS: usize = 4096;
 /// thousands: a 400 mm one with an edge at a rough pace takes about 3300 to bring the bound to
 /// 2e-4 mm.
 const MOST_PIECES: usize = 3900;
-/// The map is not refined further once its bound is within this fraction of the cap.
-const SETTLED: f64 = 4.0;
+/// The map is not refined further once its bound is within this fraction of the cap (a tenth).
+const SETTLED: f64 = 10.0;
 /// Pieces of the first, even, try.
 const FIRST_PIECES: usize = 8;
 /// Samples of the boundary per span for the first guess of a projection.
