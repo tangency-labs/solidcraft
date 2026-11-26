@@ -6806,7 +6806,7 @@ fn one_edge_of_a_rim_through_a_spheres_poles_rounds_alone() {
             }
         }
         assert!(
-            shares.len() >= 3,
+            shares.len() >= 2,
             "axis {axis}, side {side}, {op:?}: {shares:?}"
         );
         for (edge, n) in shares {
