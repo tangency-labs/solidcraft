@@ -29,7 +29,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
-use crate::math::{Point3, Vec3, EFF_ZERO_SQRT, PI};
+use crate::math::{Point3, Vec3, EFF_ZERO_RAD, EFF_ZERO_SQRT, PI};
 use crate::nurbs::knots::Side;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p5::DropPointOptions;
@@ -109,7 +109,11 @@ fn oblique_end_reach(
         return Ok(0.0);
     }
     let [face0, face1] = edge_faces;
-    let min_sin = (PI / 180.0).sin();
+    // Side edges collinear with the reversed filleted-edge tangent (within `EFF_ZERO_RAD`,
+    // 1e-4 deg) are tangent continuations handled by smooth/tangent propagation rather than
+    // oblique corner intersections; cap `cot(theta)` for near-collinear numerical jitter so
+    // the projection stays finite and bounded (exact down to ~0.057 deg).
+    const MIN_SLOPE_SIN: f64 = 1.0e-3;
     let mut max_along = 0.0_f64;
     for v in [start_v, end_v] {
         let Some(t_fil) = leaving_tangent(k, target, edge_id, v)? else {
@@ -129,8 +133,11 @@ fn oblique_end_reach(
             };
             let cos_back = t_side.dot(-t_fil);
             let sin_theta = t_side.cross(t_fil).length();
-            if cos_back > 0.0 && sin_theta > min_sin {
-                max_along = smos_max(max_along, d_rail * (cos_back / sin_theta));
+            if cos_back > 0.0 && sin_theta > EFF_ZERO_RAD {
+                let proj = d_rail * (cos_back / smos_max(sin_theta, MIN_SLOPE_SIN));
+                if proj.is_finite() {
+                    max_along = smos_max(max_along, proj);
+                }
             }
         }
     }
@@ -280,13 +287,11 @@ pub(crate) fn extend_trace_to_its_rails(
     // edge's direction on it in 3D proportions), and whether the default reaches.
     let mut across = [[true, true], [true, true]];
     let mut along_dirs = [[true, true], [true, true]];
-    let mut d3d_all = [[0.0_f64; 2]; 2];
     let mut short = false;
-    for ((((surface, row), along_row), d3d_slot), edgeuse) in bases
+    for (((surface, row), along_row), edgeuse) in bases
         .into_iter()
         .zip(across.iter_mut())
         .zip(along_dirs.iter_mut())
-        .zip(d3d_all.iter_mut())
         .zip(edgeuses)
     {
         let domain: Extent2d = surface.natural_uv_domain_with_nurb(k)?;
@@ -299,7 +304,6 @@ pub(crate) fn extend_trace_to_its_rails(
         ];
         let [u_min, u_max, v_min, v_max] = ends;
         let d3d = [u_min.distance(u_max), v_min.distance(v_max)];
-        *d3d_slot = d3d;
         let uv_size = domain.size();
         for d in d3d {
             if d > EFF_ZERO_SQRT && factor * d < reach {
@@ -342,18 +346,13 @@ pub(crate) fn extend_trace_to_its_rails(
     if short {
         solver.base_mut().set_trace_reach(reach, across);
     }
+    // Always store a positive oblique along-edge reach: even when the support faces' own
+    // UV spans already cover it (`reaching_extension` takes `max`), the fillet cylinder's
+    // centre-line span and side-edge run-on still depend on `trace_reach_along`.
     if along_reach > 0.0 {
-        let along_short = d3d_all.into_iter().zip(along_dirs).any(|(d_pair, flags)| {
-            d_pair
-                .into_iter()
-                .zip(flags)
-                .any(|(d, is_along)| is_along && d > EFF_ZERO_SQRT && factor * d < along_reach)
-        });
-        if along_short {
-            solver
-                .base_mut()
-                .set_trace_reach_along(along_reach, along_dirs);
-        }
+        solver
+            .base_mut()
+            .set_trace_reach_along(along_reach, along_dirs);
     }
     Ok(())
 }
@@ -507,5 +506,98 @@ mod tests {
             "trace_along = {:?}",
             solver.base().trace_along
         );
+    }
+
+    #[test]
+    fn oblique_end_reach_handles_large_supports_and_shallow_angles() {
+        use crate::curve::curve::Curve;
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::sweep::api_brep::create_linear_sweep;
+
+        let sweep_poly = |k: &mut Kernel, pts: &[Point3]| -> Brep {
+            let segs: Vec<Curve> = (0..pts.len())
+                .map(|i| {
+                    Curve::from(
+                        BSplineCurve::create_line_segment(3, pts[i], pts[(i + 1) % pts.len()])
+                            .unwrap(),
+                    )
+                })
+                .collect();
+            let refs: Vec<Option<&Curve>> = segs.iter().map(Some).collect();
+            create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), 50.0, true).unwrap()
+        };
+        let eval_along_reach = |k: &mut Kernel, mut b: Brep, mid_target: Point3, r: f64| -> f64 {
+            let e = b
+                .edges()
+                .ids()
+                .find(|&e| {
+                    let ivl = edge::interval(&b, e).unwrap();
+                    let c = edge::curve(&b, e).unwrap().unwrap();
+                    let mid = c.evaluate_point(k, ivl.evaluate(0.5)).unwrap();
+                    mid.distance(mid_target) < 1e-4
+                })
+                .unwrap();
+            let mut session = FilletSession::new(k, &mut b).unwrap();
+            session
+                .prepare_constant_radius_edges(k, &[e], r, 1, 1, 1.0)
+                .unwrap();
+            let Some(&FilletObject::Solver(sid)) = session.executive().solvers.first() else {
+                panic!("no solver");
+            };
+            let objects = &mut session.objects;
+            let solver = objects.solvers[sid.0 as usize].as_mut().unwrap();
+            extend_trace_to_its_rails(k, objects.target, solver).unwrap();
+            solver.base().trace_reach_along
+        };
+
+        let mut k = Kernel::default();
+        k.fixes.fillet_trace_reaches_rails = true;
+
+        // 1. Support surfaces already larger than `along_reach` (`factor * 4.24 = 2.12 > 2.08`
+        //    at r = 0.2): `trace_reach_along` must still be stored for cylinder axial extension.
+        let bar_pts = [
+            Point3::new(-24.0, 40.0, 0.0),
+            Point3::new(0.0, 3.0, 0.0),
+            Point3::new(3.0, 0.0, 0.0),
+            Point3::new(45.0, 0.0, 0.0),
+            Point3::new(45.0, 40.0, 0.0),
+        ];
+        let bar = sweep_poly(&mut k, &bar_pts);
+        let reach_small_r = eval_along_reach(&mut k, bar, Point3::new(1.5, 1.5, 50.0), 0.2);
+        let want_small_r = 2.0 * 0.2 * (61.0 / 13.0) + 0.2;
+        assert!(
+            (reach_small_r - want_small_r).abs() < 1e-6,
+            "got {reach_small_r}, want {want_small_r}"
+        );
+
+        // 2. Shallow 0.5° oblique corner (below 1°, above `EFF_ZERO_RAD`): computes a finite
+        //    positive `trace_reach_along`.
+        let half_deg = 0.5_f64.to_radians();
+        let shallow_pts = [
+            Point3::new(-10.0 * half_deg.cos(), 10.0 * half_deg.sin(), 0.0),
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(4.0, 0.0, 0.0),
+            Point3::new(4.0, 20.0, 0.0),
+            Point3::new(-10.0, 20.0, 0.0),
+        ];
+        let shallow = sweep_poly(&mut k, &shallow_pts);
+        let reach_shallow = eval_along_reach(&mut k, shallow, Point3::new(2.0, 0.0, 50.0), 1.0);
+        let want_shallow = 2.0 / half_deg.tan() + 1.0;
+        assert!(
+            reach_shallow.is_finite() && (reach_shallow - want_shallow).abs() < 1e-3,
+            "got {reach_shallow}, want {want_shallow}"
+        );
+
+        // 3. Truly collinear continuation (0°, within `EFF_ZERO_RAD`): excluded (`0.0`).
+        let collinear_pts = [
+            Point3::new(-10.0, 0.0, 0.0),
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(4.0, 0.0, 0.0),
+            Point3::new(4.0, 20.0, 0.0),
+            Point3::new(-10.0, 20.0, 0.0),
+        ];
+        let collinear = sweep_poly(&mut k, &collinear_pts);
+        let reach_collinear = eval_along_reach(&mut k, collinear, Point3::new(2.0, 0.0, 50.0), 1.0);
+        assert_eq!(reach_collinear, 0.0);
     }
 }

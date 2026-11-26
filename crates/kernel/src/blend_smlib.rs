@@ -939,6 +939,7 @@ mod tests {
         assert!(matches!(vs.smlib, Some(crate::SmlibCheck::Valid)), "{:?}", vs.smlib);
         assert!(volume(&single) < volume(&joined_bevel));
         let chain = crate::tangent_chain(&joined_bevel, &[seed]).unwrap();
+        assert!(chain.len() > 1, "{chain:?}");
         let chained = fillet(&joined_bevel, &chain, 1.0, FilletTurn::Mitre).unwrap();
         let vc = crate::validity(&chained);
         assert!(vc.record.is_ok(), "{:?}", vc.record);
