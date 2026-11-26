@@ -47,5 +47,26 @@
     "Features": "特征",
     "Parameters": "参数",
     "Not used": "未使用"
+  },
+  "ar": {
+    "Where used": "أماكن الاستخدام",
+    "Sketches": "الرسومات",
+    "Features": "الميزات",
+    "Parameters": "المعاملات",
+    "Not used": "غير مستخدم"
+  },
+  "he": {
+    "Where used": "היכן בשימוש",
+    "Sketches": "סקיצות",
+    "Features": "פיצ'רים",
+    "Parameters": "פרמטרים",
+    "Not used": "לא בשימוש"
+  },
+  "vi": {
+    "Where used": "Nơi sử dụng",
+    "Sketches": "Phác thảo",
+    "Features": "Tính năng",
+    "Parameters": "Tham số",
+    "Not used": "Không dùng"
   }
 }
