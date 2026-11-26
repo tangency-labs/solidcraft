@@ -24,6 +24,7 @@ use solidcore_record::brep::history::History;
 
 pub mod affine;
 pub mod cell_grid;
+pub mod curves;
 pub mod exchange;
 pub mod frames;
 pub mod modelling;
@@ -31,6 +32,7 @@ pub mod projection;
 
 pub use affine::{Affine, AffineRefused, AxisRefusal, Matrix, OffsetQuad, SquareFaceLevel};
 pub use cell_grid::{CellGrid, CellGridLimits};
+pub use curves::{CurveRefused, Curves};
 pub use exchange::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWritten, Exchange};
 pub use frames::{Frames, GussetFailure, MemberRefusal, PathFailure, PathRefusal, TrimRefusal, TrimTarget};
 pub use modelling::{Axis2, BoolOp, ChamferSide, FilletTurn, Modelling, Primitive};
@@ -88,6 +90,8 @@ pub enum OpKind {
     Projection,
     /// Placement maths: affine maps, axes and reaches ([`Affine`]).
     Affine,
+    /// Curves queried and splines fitted ([`Curves`]).
+    Curves,
 }
 
 impl OpKind {
@@ -110,6 +114,7 @@ impl OpKind {
         OpKind::Frames,
         OpKind::Projection,
         OpKind::Affine,
+        OpKind::Curves,
     ];
 
     /// The operation's stable name, as the support matrix and route files spell it.
@@ -132,6 +137,7 @@ impl OpKind {
             OpKind::Frames => "frames",
             OpKind::Projection => "projection",
             OpKind::Affine => "affine",
+            OpKind::Curves => "curves",
         }
     }
 
