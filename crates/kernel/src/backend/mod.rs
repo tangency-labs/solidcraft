@@ -18,11 +18,14 @@ mod exchange;
 mod frames;
 mod hatch;
 mod hole_stacks;
+mod mesh;
 mod modelling;
 mod planar;
 mod points;
 mod projection;
 mod query;
+mod shaft_spline;
+mod tube_cope;
 
 use crate::body::Body;
 use crate::{KernelError, Result};

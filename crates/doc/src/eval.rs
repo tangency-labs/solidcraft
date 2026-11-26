@@ -16505,11 +16505,11 @@ fn chamfer_with(
 
 /// Adapt the one SolidCore converter's record to the document body. Recognition and faceted
 /// construction both live below the record boundary; document replay only restores state.
-fn reconstruct_mesh(positions: &[Vec3], triangles: &[[u32; 3]], tolerance: f64) -> Result<(Body, kernel::services::mesh::ReconstructionKind)> {
+fn reconstruct_mesh(positions: &[Vec3], triangles: &[[u32; 3]], tolerance: f64) -> Result<(Body, kernel::mesh::ReconstructionKind)> {
     use solidcore_record::brep::envelope;
     use solidcore_record::native::{self, Runtime, Saved};
 
-    let result = kernel::services::mesh::reconstruct_mesh(positions, triangles, tolerance).map_err(|error| DocError::Invalid(error.to_string()))?;
+    let result = kernel::mesh::reconstruct_mesh(positions, triangles, tolerance).map_err(|error| DocError::Invalid(error.to_string()))?;
     let metadata = envelope::Metadata {
         version: envelope::VERSION,
         color: None,

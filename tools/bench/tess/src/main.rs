@@ -1,6 +1,6 @@
 //! meshbake FILE.nb [--mode display|export] [--no-dev] : mesh one body with SolidCraft's mesher (`Body::mesh_plan`) and
 //! solidcore-tess's (`solidcraft_kernel::services::tess::plan`), grade each, print JSON lines. `MB_ONLY=solidcraft|solidcore-tess` runs one.
-use solidcraft_kernel::services::face_surface::FaceSurface;
+use solidcraft_kernel::query::FaceSurface;
 use solidcore_record::brep::Brep;
 use std::collections::HashMap;
 use std::time::Instant;
