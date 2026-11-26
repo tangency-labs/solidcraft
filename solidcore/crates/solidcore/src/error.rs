@@ -2536,8 +2536,10 @@ mod tests {
     }
 
     /// An error's class is the one `is_port_failure`, `is_defect` and `is_refusal` give it, read
-    /// down its cause chain: a stage failure over a refusal is a refusal, any error over a port
-    /// failure a port failure, and an error none of them classes is unclassed.
+    /// down its cause chain: an unclassed failure over a classed one takes its class, a defect
+    /// over a refusal is a refusal and a refusal over a defect a defect (the deepest classed
+    /// error decides), any error over a port failure a port failure, and an error none of them
+    /// classes is unclassed.
     #[test]
     fn an_errors_class_is_the_one_its_cause_chain_gives() {
         let refusal = SolidError::blend(
@@ -2555,7 +2557,21 @@ mod tests {
             .caused_by(unported.clone())
             .into_error();
         assert!(over_unported.is_defect() && over_unported.is_port_failure());
+        // the deepest classed error decides between a defect and a refusal
+        let defect_over_refusal = Failure::new("blend::op", blend::BlendFailure::StageFailed)
+            .caused_by(refusal.clone())
+            .into_error();
+        let refusal_over_defect = Failure::new(
+            "blend::op",
+            blend::BlendFailure::NoRoom(
+                crate::blend::fillet_executive::NoRoomReason::BallDoesNotFit,
+            ),
+        )
+        .caused_by(defect.clone())
+        .into_error();
         let cases = [
+            (&defect_over_refusal, ErrorClass::Refusal, "refusal"),
+            (&refusal_over_defect, ErrorClass::Defect, "defect"),
             (&refusal, ErrorClass::Refusal, "refusal"),
             (&stage(&refusal), ErrorClass::Refusal, "refusal"),
             (&defect, ErrorClass::Defect, "defect"),

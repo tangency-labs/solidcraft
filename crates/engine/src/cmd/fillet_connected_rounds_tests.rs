@@ -258,4 +258,10 @@ fn a_failures_class_reaches_the_timeline_json() {
         let row = doc["timeline"].as_array().unwrap().iter().find(|r| r["id"] == id).cloned().unwrap();
         assert_eq!(row["error_code"], inspected["error_code"], "{detail}: {row}");
     }
+    // a kernel class reaches the reply as the code names it, never as `unclassed`
+    for class in ["refusal", "defect", "port_failure"] {
+        let code = solidcraft_kernel::ErrorCode { call: "blend".into(), kind: 6, operation: "blend::op".into(), class: class.into() };
+        let reply = crate::schema::inspect::ErrorCodeReply::from(&code);
+        assert_eq!(json!(reply)["class"], class);
+    }
 }

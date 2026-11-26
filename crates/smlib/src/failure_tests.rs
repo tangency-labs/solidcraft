@@ -39,3 +39,32 @@ fn a_failure_is_its_own_threads() {
     .unwrap();
     assert_eq!(last(), None);
 }
+
+/// #22148: a call this crate makes on the kernel keeps the class solidcore gives the error it
+/// failed with in its code, read down the error's cause chain, beside the kind.
+#[test]
+fn a_kernel_failure_keeps_its_class_in_its_code() {
+    use solidcore::SolidError;
+    use solidcore::blend::fillet_executive::NoRoomReason;
+    use solidcore::error::blend::BlendFailure;
+    use solidcore::error::{Failure, Reason};
+    use solidcore_ops::ErrorClass;
+
+    let refusal = || Failure::new("test::blend", BlendFailure::NoRoom(NoRoomReason::BallDoesNotFit)).into_error();
+    let over = |cause: SolidError| Failure::new("test::stage", Reason::Failed("a stage failed")).caused_by(cause).into_error();
+    for (e, class) in [
+        (refusal(), ErrorClass::Refusal),
+        (over(refusal()), ErrorClass::Refusal),
+        (Failure::new("test::blend", BlendFailure::StageFailed).into_error(), ErrorClass::Defect),
+        (SolidError::unported("test::callee", "test.unit"), ErrorClass::PortFailure),
+        (SolidError::sm_err("test::status"), ErrorClass::Unclassed),
+    ] {
+        clear();
+        let kind = e.kind().code();
+        let r: crate::Result<()> = crate::core::run("classed", |_| Err(e.clone()));
+        assert!(r.is_err(), "{e:?}");
+        let (code, _) = last().unwrap_or_else(|| panic!("no code: {e:?}"));
+        assert_eq!((code.call, code.kind, code.class), ("classed", kind, class), "{e:?}");
+    }
+    clear();
+}
