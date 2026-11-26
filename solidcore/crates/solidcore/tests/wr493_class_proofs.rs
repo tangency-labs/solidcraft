@@ -1194,20 +1194,22 @@ fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
     // parameterisation keep an exact copy, so the integrator runs on the file's B-splines
     // there; the row moved by 1 to 6 ulps, at most 7.1e-16 relative, in area, cy, Ix, Pyz,
     // Pzx and Pxy (the goldens' `fillet_executive_p3` row `source-file-box_w_slot-all-edges`).
-    // The reference checks below hold it as they held main's.)
+    // The reference checks below hold it as they held main's. With the faces' area closed
+    // onto their edges (#16854) the area moved by -1.87e-8, 3.2e-9
+    // relative, and Ix and Pxy by 1 ulp; the volume and the rest are unchanged to the bit.)
     let new_row = [
-        5.9143900085495815,
+        5.91438998981404,
         0.6807481066067114,
         0.6807481066067114,
         1.9999999999999853,
         -0.21949084150622133,
         0.19830878452084488,
-        0.315824746803213,
+        0.31582474680321293,
         2.796768143646739,
         3.0415735197486984,
         -0.02963089696277083,
         0.2699966591720852,
-        -0.2988359495457321,
+        -0.29883594954573217,
     ];
     let old_row = [
         5.9143899129759,
