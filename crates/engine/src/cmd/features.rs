@@ -3976,6 +3976,10 @@ pub(crate) fn explicit_plane(o: &Value, origin: Vec3) -> Option<solidcore_record
 /// explicit plane `{origin, x_dir, y_dir}` / `{origin, normal}`. Every command that takes a
 /// plane reads it here.
 pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<solidcraft_doc::PlaneRef> {
+    plane_param_named(s, v, cmd, "plane")
+}
+
+pub(super) fn plane_param_named(s: &Session, v: Option<&Value>, cmd: &str, key: &str) -> Result<solidcraft_doc::PlaneRef> {
     use solidcraft_doc::PlaneRef;
     const WANT: &str = PLANE_FORMS;
     let construction = |r: &str| match s.doc.find_feature(r) {
@@ -4014,7 +4018,7 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
         }
         Some(Value::Number(id)) => match id.as_u64() {
             Some(id) => construction(&id.to_string()),
-            None => Err(bad(cmd, format!("`plane` must be {WANT}"))),
+            None => Err(bad(cmd, format!("`{key}` must be {WANT}"))),
         },
         Some(o @ Value::Object(_)) => {
             // The origin's coordinates are numbers or length expressions; expressions are kept,
@@ -4031,7 +4035,7 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
             }
             Ok(PlaneRef::Placed { origin, x_dir: plane.x, y_dir: plane.y })
         }
-        _ => Err(bad(cmd, format!("`plane` must be {WANT}"))),
+        _ => Err(bad(cmd, format!("`{key}` must be {WANT}"))),
     }
 }
 
@@ -5045,7 +5049,7 @@ fn draft(s: &mut Session, p: &Value) -> Result<Value> {
     let picked = faces_body(s, p, &faces);
     let angle = req_expr(cmd, p, "angle")?;
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
-    let neutral = plane_param(s, p.get("neutral"), cmd)?;
+    let neutral = plane_param_named(s, p.get("neutral"), cmd, "neutral")?;
     let (vals, _) = s.doc.param_values();
     let pl = s.doc.resolve_plane_in(&vals, &neutral, 0, s.active_component, Some(&s.model.state()))?;
     let pull = p.get("pull").and_then(vec3).unwrap_or_else(|| pl.normal());
