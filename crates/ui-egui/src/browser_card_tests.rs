@@ -1977,6 +1977,7 @@ fn reveal_browser_at_height(h: &mut Harness, height: f32) {
 fn assert_no_pending_reveals(h: &Harness) {
     assert!(h.app.tree.reveal.is_none());
     assert!(h.app.tree.reveal_source.is_none());
+    assert!(h.app.tree.reveal_occurrence.is_none());
     assert!(h.app.tree.reveal_feature.is_none());
     assert!(h.app.tree.timeline_reveal.is_none());
     assert!(h.app.tree.view_pick.is_none());
@@ -2316,6 +2317,34 @@ fn a_linked_components_row_shows_the_state_of_its_file() {
     h.app.run("component.break_link", json!({"component": component})).unwrap();
     h.frames(2);
     assert!(h.app.tree.links.get(component).is_none(), "a design with no links shows no badge");
+}
+
+/// A KiCad board's link, which names no importer plugin, gets the same badges as any other: the
+/// badge is only looked at again when the window returns to the front, like every link's.
+#[test]
+fn a_changed_kicad_boards_link_gets_the_changed_badge() {
+    let mut h = Harness::new();
+    h.frames(2);
+    let board = h.dir.join("board.kicad_pcb");
+    let write = |width: &str| {
+        std::fs::write(&board, format!("(kicad_pcb (general (thickness 1.6)) (gr_rect (start 0 0) (end {width} 10) (layer \"Edge.Cuts\")))"))
+            .unwrap();
+    };
+    write("20");
+    let component = h.app.run("doc.open", json!({"path": board})).unwrap()["component"].as_u64().unwrap();
+    let ctx = h.ctx.clone();
+    let _ = ctx.run_ui(egui::RawInput::default(), |ui| h.app.logic(ui.ctx()));
+    link_answer(&mut h);
+    let badge = h.app.tree.links.get(component).expect("the board's badge");
+    assert_eq!((badge.state, badge.note), (LinkState::Linked, None));
+
+    write("30.5");
+    h.frames(2);
+    assert_eq!(h.app.tree.links.get(component).unwrap().note, None, "not looked at until the window returns");
+    h.app.synthetic.push(egui::Event::WindowFocused(true));
+    link_answer(&mut h);
+    let changed = h.app.tree.links.get(component).unwrap();
+    assert_eq!((changed.state, changed.note), (LinkState::Changed, Some("ui.link_changed")));
 }
 
 /// A design opened from its file reads its link next to that file, and asks once.
