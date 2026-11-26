@@ -928,7 +928,6 @@ impl FilletCorner {
                             }
                             Some(tb)
                         }
-                        Ok(None) => None,
                         // only Unported and a cancellation pass on: any other failure,
                         // `FaceTrimsUnavailable` from the classification included, declines
                         Err(
@@ -936,7 +935,7 @@ impl FilletCorner {
                             | SolidError::Cancelled { .. }
                             | SolidError::OutOfFuel { .. }),
                         ) => return Err(e),
-                        Err(_) => None,
+                        Ok(None) | Err(_) => None,
                     },
                     _ => None,
                 };

@@ -1878,22 +1878,22 @@ fn four_edge_recess_floor_vertex(mirrored: bool) -> Body {
     let slab = make_box([0.0, 0.0, 0.0], [20.0, 20.0, 5.0]).unwrap();
     let wall = make_box([10.0, 0.0, 5.0], [10.0, 20.0, 5.0]).unwrap();
     let step = boolean(slab, wall, BooleanOp::Union).unwrap().unwrap();
-    let cutter = make_box([0.0, -20.0, -20.0], [30.0, 40.0, 40.0]).unwrap();
+    let cutter = make_box([0.0, -30.0, -30.0], [30.0, 60.0, 60.0]).unwrap();
     let s2 = 2.0_f64.sqrt();
     let s3 = 3.0_f64.sqrt();
     let s6 = 6.0_f64.sqrt();
     let matrix = if mirrored {
         [
-            [-1.0 / s3, 1.0 / s3, 1.0 / s3, 0.0],
-            [-1.0 / s2, -1.0 / s2, 0.0, 0.0],
-            [1.0 / s6, -1.0 / s6, 2.0 / s6, 0.0],
+            [-1.0 / s3, 1.0 / s3, -1.0 / s3, 0.0],
+            [1.0 / s2, 1.0 / s2, 0.0, 0.0],
+            [1.0 / s6, -1.0 / s6, -2.0 / s6, 0.0],
             [10.0, 20.0, 5.0, 1.0],
         ]
     } else {
         [
-            [-1.0 / s3, -1.0 / s3, 1.0 / s3, 0.0],
+            [-1.0 / s3, -1.0 / s3, -1.0 / s3, 0.0],
             [1.0 / s2, -1.0 / s2, 0.0, 0.0],
-            [1.0 / s6, 1.0 / s6, 2.0 / s6, 0.0],
+            [-1.0 / s6, -1.0 / s6, 2.0 / s6, 0.0],
             [10.0, 0.0, 5.0, 1.0],
         ]
     };
@@ -1909,8 +1909,9 @@ fn four_edge_recess_floor_vertex(mirrored: bool) -> Body {
 /// check on an unprocessed extended vertex, failing with status 1001.
 #[test]
 fn a_chamfer_on_an_edge_meeting_a_four_edge_recess_floor_vertex_builds() {
-    use solidcore_ops::{chamfer_sides_facing, ChamferSecond};
-    let expected_input = 3000.0 - 875.0 / 6.0;
+    // Half-space x + y + z < 15 (or its mirror x - y + z < -5) touches the upper wall only at V
+    // and removes integral_0^5 (15 - z)^2 / 2 dz = (15^3 - 10^3) / 6 = 2375 / 6 from the slab.
+    let expected_input = 3000.0 - 2375.0 / 6.0;
     for mirrored in [false, true] {
         let edge_y = if mirrored { 20.0 } else { 0.0 };
         for case in 0..3 {

@@ -1124,6 +1124,14 @@ impl FilletCorner {
                         extend_edge = eu1::edge(target, pick)?;
                         other_side_edgeuse = Some(other);
                     } else if same[0] || same[1] {
+                        // A cusp side edge leaves the vertex along the filleted edge's tangent:
+                        // the face between them narrows to a point there and the cliff face
+                        // behind the cusp meets the other blend face tangentially, so there is
+                        // no valid cap to build (#13156, #14134). Leave the caller's cusp
+                        // handler to report NoRoom.
+                        if super::cusp_side_edge(k, target, self)?.is_some() {
+                            return Err(shape_not_built(OP, CornerShape::EndSideEdgesShareNoFace));
+                        }
                         // Use the side edge that is a cliff edge (same == false): its edge use
                         // lies on the end face P, while the same-convexity side's edge use lies
                         // on the fillet's own side face S and its cap edge is OnExtendEdge along
