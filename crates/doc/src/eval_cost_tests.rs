@@ -3453,7 +3453,8 @@ fn skipped_pattern_copies_do_not_count_as_cuts_that_remove_no_material() {
             let want = format!("{retained} of {retained} cut copies remove no material");
             assert!(result.warning.as_deref().is_some_and(|w| w.starts_with(&want)), "{omitted:?}: {result:?}");
         }
-        assert_eq!(work.miss_intersects, usize::from(retained > 0), "{omitted:?}: {work:?}");
+        // The spaced copies' cut history certifies the misses without a separate intersection.
+        assert_eq!(work.miss_intersects, 0, "{omitted:?}: {work:?}");
         assert!((disc_volume(&model) - before).abs() < 1e-6, "repeated cuts leave the plate unchanged");
     }
 }
