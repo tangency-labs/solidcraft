@@ -525,14 +525,43 @@ impl Seg2 {
                 start,
                 sweep,
             } => {
-                // P = c + r u(t), P x P' = r^2 + r (c.x cos t + c.y sin t)
-                let end = start + sweep;
-                let (s0, c0, s1, c1) = (start.sin(), start.cos(), end.sin(), end.cos());
-                let terms = [r * r * sweep, r * c.x * (s1 - s0), -(r * c.y * (c1 - c0))];
-                let size = r * r * sweep.abs() + 2.0 * r * (c.x.abs() + c.y.abs());
-                // libm's sin and cos within two ulps; gamma covers the products and the sums
-                let v = terms.iter().sum::<f64>() * 0.5;
-                Some((v, gamma(16) * size * 0.5))
+                // the chord's term from the arc's ends as `start` and `end` give them, plus the
+                // segment between the arc and its chord, `r^2 (θ - sin θ) / 2` (θ the sweep):
+                // the sums then hold terms of the size of the ends' coordinates squared, not the
+                // `r |c|` of the integral over `c + r u(t)`, whose terms cancel for a nearly
+                // straight arc of a large radius far from the origin
+                let (a, b) = (self.start(), self.end());
+                let (p, q) = (a.x * b.y, a.y * b.x);
+                // each end within gamma(4) (|c| + r) of the exact one in each coordinate (libm's
+                // sin and cos within two ulps, the product and the sum one each); the end's
+                // angle `start + sweep` is rounded too, by up to gamma(1) |start + sweep|
+                let (ax, ay) = (gamma(4) * (c.x.abs() + r), gamma(4) * (c.y.abs() + r));
+                let turn = gamma(1) * r * (start + sweep).abs();
+                let (bx, by) = (ax + turn, ay + turn);
+                // (A + dA) x (B + dB) - A x B, the ends' errors dA, dB
+                let ends = ax * b.y.abs()
+                    + ay * b.x.abs()
+                    + bx * a.y.abs()
+                    + by * a.x.abs()
+                    + ax * by
+                    + ay * bx;
+                let (g, direct) = theta_less_sine(sweep);
+                let segment = r * r * g * 0.5;
+                // the segment's rounding: relative for the series, and the sum's own for
+                // `θ - sin θ` read directly
+                let seg_err = gamma(24)
+                    * r
+                    * r
+                    * 0.5
+                    * (g.abs() + if direct { sweep.abs() + 1.0 } else { 0.0 });
+                let value = (p - q) * 0.5 + segment;
+                Some((
+                    value,
+                    gamma(3) * (p.abs() + q.abs()) * 0.5
+                        + ends * 0.5
+                        + seg_err
+                        + gamma(2) * value.abs(),
+                ))
             }
             Seg2::Conic { a, apex, b, w } => {
                 // Green of a conic arc = the chord's term + T f(w), T the signed area of the
@@ -563,6 +592,22 @@ impl Seg2 {
             }
         }
     }
+}
+
+/// `θ - sin θ`, and whether it was read directly (`false`: by its series, for `|θ| < 1/2`,
+/// where the difference loses the digits the series keeps): `θ³/3! - θ⁵/5! + …` to `θ¹⁵/15!`,
+/// whose next term is below `θ³/6` times `2⁻⁵⁹` there.
+fn theta_less_sine(theta: f64) -> (f64, bool) {
+    if theta.abs() >= 0.5 {
+        return (theta - theta.sin(), true);
+    }
+    let t2 = theta * theta;
+    // θ³/6 (1 - θ²/20 (1 - θ²/42 (1 - θ²/72 (1 - θ²/110 (1 - θ²/156 (1 - θ²/210))))))
+    let mut f = 1.0;
+    for d in [210.0, 156.0, 110.0, 72.0, 42.0, 20.0] {
+        f = 1.0 - t2 / d * f;
+    }
+    (theta * t2 / 6.0 * f, false)
 }
 
 /// `f(w) = 2 w ∫_0^1 t^2 / W(t)^2 dt`, `W = 1 - 2 (1 - w) t (1 - t)`: the area between a
