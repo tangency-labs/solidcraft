@@ -1451,3 +1451,42 @@ fn a_root_cut_splitting_a_placed_parts_body_leaves_both_pieces_where_the_part_is
     xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
     assert_eq!(xs, [(-10.0, 8.0), (12.0, 30.0)]);
 }
+
+/// Adding primitives after a Combine (which marks `placement_local` false) evaluates the timeline
+/// once per command instead of twice, skips `param_rename_from` when feature counts differ, and
+/// avoids building `world_state()` in `frames::to_local` for identity active-frame primitives
+/// while still mapping primitives accurately inside a moved component.
+#[test]
+fn adding_primitives_after_combine_evaluates_once_and_skips_world_placement() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [5, 0, 0], "body_name": "B"}));
+    run(&mut s, "solid.combine", json!({"target": "A", "tools": ["B"]}));
+    run(&mut s, "component.create", json!({"name": "Moved", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": [0, 0, 0], "body_name": "M0"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Moved:1", "translate": [100, 0, 0]}));
+    assert!(super::placed(&s));
+
+    for k in 0..5 {
+        let prev_doc = s.doc.clone();
+        let evals_before = s.evaluations;
+        let cyl = json!({"radius": 2, "height": 10, "base": [0, 30 + k * 15, 0], "axis": "Z", "body_name": format!("Pin {k}")});
+        assert!(super::to_local(&s, "solid.cylinder", &cyl).unwrap().is_none());
+        assert!(s.cached_world_state().is_none(), "identity active-frame primitive must not build world_state in to_local");
+        run(&mut s, "solid.cylinder", cyl);
+        assert_eq!(s.evaluations, evals_before + 1, "step {k}: add_feature must evaluate once, not twice");
+        assert!(s.doc.param_rename_from(&prev_doc).is_none());
+    }
+
+    // Inside the moved component, `to_local` maps world coordinates without building `world_state()`.
+    run(&mut s, "component.activate", json!({"component": "Moved"}));
+    assert!(s.cached_world_state().is_none());
+    let moved_cyl = json!({"radius": 2, "height": 10, "base": [110, 20, 0], "axis": "Z", "body_name": "MovedPin"});
+    let mapped = super::to_local(&s, "solid.cylinder", &moved_cyl).unwrap().expect("moved active component maps base");
+    assert!(s.cached_world_state().is_none(), "active-frame-only primitive must not force world_state");
+    assert_eq!(mapped["base"], json!([10.0, 20.0, 0.0]));
+    run(&mut s, "solid.cylinder", moved_cyl);
+    let (min, max) = world_bbox(&s, "MovedPin");
+    assert!(((min.x + max.x) * 0.5 - 110.0).abs() < 1e-2 && ((min.y + max.y) * 0.5 - 20.0).abs() < 1e-2, "{min:?}..{max:?}");
+}

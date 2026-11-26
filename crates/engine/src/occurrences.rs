@@ -412,8 +412,13 @@ impl Session {
         let mut names = std::collections::BTreeMap::new();
         let mut destinations = std::collections::BTreeSet::new();
         let (before, after) = (solidcraft_doc::WorldNames::new(previous, state), solidcraft_doc::WorldNames::new(&self.doc, &renamed));
+        let owners = previous.model_body_components(state);
+        let mut by_component: std::collections::HashMap<u64, Vec<&solidcraft_doc::ModelBody>> = std::collections::HashMap::new();
+        for (body, owner) in state.bodies.iter().zip(owners) {
+            by_component.entry(owner).or_default().push(body);
+        }
         for (component, path, _) in previous.placements() {
-            for body in state.bodies.iter().filter(|body| previous.model_body_component(body) == component) {
+            for body in by_component.get(&component).into_iter().flatten().copied() {
                 let old = before.name(&body.name, component, &path);
                 let source = rename.filter(|(old, _)| *old == body.name).map_or(body.name.as_str(), |(_, new)| new);
                 let new = after.name(source, component, &path);

@@ -1177,6 +1177,7 @@ impl Model {
         let heal = records.get("tolerance_heal").and_then(Json::as_bool).unwrap_or(true);
         let import_digests = ImportDigests::of(doc, &ImportDigests::default(), heal);
         let marker = doc.marker.unwrap_or(usize::MAX);
+        let constructions = super::construction_indices(doc);
         let ctx = context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let shared = shared_context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let mut before = Arc::new(ModelState::default());
@@ -1196,7 +1197,8 @@ impl Model {
             // A fingerprint reads the state before its feature (where the bodies it takes lie).
             // After a state the file left out, the saved one is taken: `evaluate` works that state
             // out, checks the fingerprints after it, and evaluates again from one that differs.
-            prev = if exact { chain_fingerprint(eval_doc, &vals, f, prev, i >= marker, &import_digests, Some(&before)) } else { saved };
+            prev =
+                if exact { chain_fingerprint(eval_doc, &vals, f, prev, i >= marker, &import_digests, Some(&before), &constructions) } else { saved };
             if r.get("id").and_then(Json::as_u64) != Some(f.id) || saved != prev {
                 return Err(bad("saved model: the document changed"));
             }
@@ -1321,7 +1323,7 @@ impl Model {
                     }
                     continue;
                 }
-                let key = EvalKey::new(eval_doc, &vals, f, r.fingerprint, ctx, shared, &before, &model.import_digests);
+                let key = EvalKey::new(eval_doc, &vals, f, r.fingerprint, ctx, shared, &before, &model.import_digests, &constructions);
                 let whole = CachedEval {
                     error: None,
                     error_code: None,

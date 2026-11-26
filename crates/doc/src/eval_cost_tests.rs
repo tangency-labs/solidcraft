@@ -66,6 +66,8 @@ pub(crate) struct Counts {
     pub contact_tests: usize,
     /// Kernel union calls (`union` or `union_all`) made by `join`.
     pub join_unions: usize,
+    /// Historical states whose bodies `Model::release_left` had to scan.
+    pub release_states_scanned: usize,
 }
 
 thread_local! {
@@ -104,6 +106,7 @@ thread_local! {
             hole_points: 0,
             contact_tests: 0,
             join_unions: 0,
+            release_states_scanned: 0,
         })
     };
 }
@@ -669,9 +672,10 @@ fn a_frame_without_turns_keeps_its_fingerprint() {
         let vals = super::evaluation_values(doc).0;
         let f = doc.feature(frame).unwrap();
         let steps = super::ImportDigests::default();
-        let fp = super::chain_fingerprint(doc, &vals, f, 0, false, &steps, None);
+        let constructions = super::construction_indices(doc);
+        let fp = super::chain_fingerprint(doc, &vals, f, 0, false, &steps, None, &constructions);
         // And the key its result is cached under, which leaves the chain out.
-        (fp, super::EvalKey::new(doc, &vals, f, fp, 0, 0, &ModelState::default(), &steps).whole)
+        (fp, super::EvalKey::new(doc, &vals, f, fp, 0, 0, &ModelState::default(), &steps, &constructions).whole)
     };
     let before = key(&doc);
     let turn = doc
@@ -5367,4 +5371,116 @@ fn mirroring_cuts_that_consume_the_target_matches_sequential_refusal() {
     let err_seq = run(1);
     assert!(err_batch.as_deref().is_some_and(|e| e.contains("no body to cut")), "{err_batch:?}");
     assert_eq!(err_batch, err_seq);
+}
+
+/// Appending features to a growing multi-body timeline must not make `Model::release_left`
+/// rescan every historical state's bodies on each command; editing an earlier feature so a body
+/// actually leaves the model still scans and releases departed forms.
+#[test]
+fn release_left_skips_historical_state_scans_while_appending_and_releases_departed_solids() {
+    let mut doc = Document::new("release witness");
+    let first = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "10".into(),
+                width: "10".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("Base"),
+        )
+        .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    model.release_left();
+    for k in 1..20 {
+        doc.add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(k as f64 * 25.0, 0.0, 0.0)),
+                length: "8".into(),
+                width: "8".into(),
+                height: "8".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+        model.evaluate(&doc);
+        let work = counted(|| model.release_left());
+        assert_eq!(work.release_states_scanned, 0, "step {k}: appending must prove every noted solid held via its witness");
+    }
+    assert_eq!(model.state().bodies.len(), 20);
+    // Editing the first feature replaces every historical state, so old solids actually depart.
+    let FeatureKind::Box { length, .. } = &mut doc.feature_mut(first).unwrap().kind else { panic!("box") };
+    *length = "14".into();
+    model.evaluate(&doc);
+    let passes_before = model.cache.lock().unwrap().release_passes;
+    let work = counted(|| model.release_left());
+    assert!(work.release_states_scanned > 0, "departed solids must be verified against held states");
+    assert_eq!(model.cache.lock().unwrap().release_passes, passes_before + 1);
+    assert!((kernel::measure(&model.state().bodies[0].body).unwrap().volume - 1400.0).abs() < 1e-6);
+}
+
+/// Incremental append evaluation in `expr::eval_params` must match full evaluation on growing
+/// literal feature-input lists as well as fallback cases (references, duplicates, and errors).
+#[test]
+fn incremental_eval_params_matches_full_evaluation_on_appended_literal_inputs() {
+    use crate::expr::{ParamDef, eval_params};
+    let mut defs: Vec<ParamDef> = vec![
+        ParamDef { name: "base".into(), expr: "10 mm".into(), unit: "mm".into() },
+        ParamDef { name: "double".into(), expr: "base * 2".into(), unit: "mm".into() },
+    ];
+    let (v0, e0) = eval_params(&defs, 1.0);
+    assert!(e0.is_empty());
+    assert!((v0["double"].v - 20.0).abs() < 1e-12);
+    for k in 1..=30 {
+        defs.push(ParamDef { name: format!("d{k}"), expr: format!("{}", k as f64 * 1.5), unit: "mm".into() });
+        let (vals, errs) = eval_params(&defs, 1.0);
+        assert!(errs.is_empty(), "step {k}: {errs:?}");
+        assert_eq!(vals.len(), defs.len());
+        assert!((vals[&format!("d{k}")].v - k as f64 * 1.5).abs() < 1e-12);
+    }
+    // Appending a parameter that references an existing one falls back cleanly and evaluates right.
+    defs.push(ParamDef { name: "sum".into(), expr: "d1 + d30".into(), unit: "mm".into() });
+    let (vals, errs) = eval_params(&defs, 1.0);
+    assert!(errs.is_empty(), "{errs:?}");
+    assert!((vals["sum"].v - 46.5).abs() < 1e-12);
+    // Appending a bad literal expression records the error cleanly without corrupting prior values.
+    defs.push(ParamDef { name: "broken".into(), expr: "10 mm + 5 deg".into(), unit: "mm".into() });
+    let (vals, errs) = eval_params(&defs, 1.0);
+    assert!(errs.contains_key("broken"), "{errs:?}");
+    assert!((vals["sum"].v - 46.5).abs() < 1e-12);
+}
+
+/// `Document::name_feature_inputs` and `Document::param_defs` preserve exact slot ordering,
+/// existing names, user-parameter avoidance, and design-unit rules in a single pass.
+#[test]
+fn name_feature_inputs_and_param_defs_preserve_order_and_units() {
+    let mut doc = Document::new("param defs");
+    doc.units = "in".into();
+    doc.set_param("d2", "2 in", Some("in"), None).unwrap();
+    let f1 = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "10".into(),
+                width: "d2".into(),
+                height: "30".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(f1).unwrap().param_names = vec![String::new(), "custom_w".into()];
+    doc.name_feature_inputs(f1);
+    assert_eq!(doc.feature(f1).unwrap().param_names, vec!["d1", "custom_w", "d3"]);
+    let defs = doc.param_defs();
+    let by_name: BTreeMap<&str, (&str, &str)> = defs.iter().map(|p| (p.name.as_str(), (p.expr.as_str(), p.unit.as_str()))).collect();
+    assert_eq!(by_name.get("d1"), Some(&("10", "mm")));
+    assert_eq!(by_name.get("custom_w"), Some(&("d2", "in")));
+    assert_eq!(by_name.get("d3"), Some(&("30", "mm")));
 }

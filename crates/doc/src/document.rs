@@ -5381,6 +5381,12 @@ impl Document {
     /// The parameter renamed from `previous` to this design, as `(old, new)`, when that rename
     /// ([`Document::rename_param`], with every reference it follows) is all that changed (#611).
     pub fn param_rename_from(&self, previous: &Document) -> Option<(String, String)> {
+        if self.features.len() != previous.features.len()
+            || self.params.len() != previous.params.len()
+            || self.text_params.len() != previous.text_params.len()
+        {
+            return None;
+        }
         // Borrowed names: every command that changes the design asks, and most rename nothing.
         fn names(d: &Document) -> std::collections::BTreeSet<&str> {
             let stored = d.params.iter().map(|p| p.name.as_str()).chain(d.text_params.iter().map(|p| p.name.as_str()));
