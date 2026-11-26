@@ -915,22 +915,20 @@ impl<'s> SurfaceDropCurve<'s> {
         out.max_drop_dists.clear();
         out.deviations.clear();
 
-        let (max_drop_dist, max_deviation, uv_curves) = surface_drop_curve(
+        let dropped = self.base.surface.drop_curve_splitting_seams(
             k,
-            self.base.surface,
             &self.base.uv_domain,
             self.curve,
             &self.interval,
             self.base.approx_tol_3d,
             true,
-            false,
             context,
         )?;
 
-        for c in uv_curves {
+        for c in dropped.uv_curves {
             out.uv_curves.push(c);
-            out.max_drop_dists.push(max_drop_dist);
-            out.deviations.push(max_deviation);
+            out.max_drop_dists.push(dropped.max_drop_to_surf);
+            out.deviations.push(dropped.max_approx_dev);
         }
         Ok(())
     }

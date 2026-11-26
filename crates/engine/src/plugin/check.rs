@@ -136,6 +136,13 @@ fn fix_for(field: &str) -> String {
         "id" => "Set \"id\" to 1 to 64 lowercase letters, digits and dashes, not starting or ending with a dash, such as \"gear-maker\".",
         "name" => "Give \"name\" 1 to 80 printable characters on one line.",
         "version" => "Use a version such as \"1.0.0\": at most 32 letters, digits, dots, dashes and plus signs.",
+        "min_host_version" => {
+            "Set \"min_host_version\" to the oldest supported SolidCraft version, such as \"0.1.0\". Update SolidCraft when the plugin needs a newer host."
+        }
+        "optional_capabilities" => {
+            "List capabilities the plugin can do without as name@major.minor; query the granted capabilities before using one. Required capabilities belong in \"capabilities\"."
+        }
+        "extensions" => "Put optional future metadata in an \"extensions\" object; its fields grant no permissions or capabilities.",
         "description" => "Shorten \"description\" to at most 240 characters on one line; longer help goes in a README in the package.",
         "manifest" => "plugin.json must be one JSON object with only the fields the plugin guide lists; the message names the field and where it is.",
         "plugin.json" => "Put plugin.json at the top of the package (in a .zip, at its top or in its one folder), at most 16 KiB.",
@@ -146,7 +153,9 @@ fn fix_for(field: &str) -> String {
         "runtime.commands" => {
             "List exact command ids from `solidcraft-cli commands`; a command that reaches past the open design also needs its group in runtime.permissions.command_groups. An importer lists none."
         }
-        "runtime.entries" => "Declare 1 to 32 entries with distinct lowercase names, all commands, all importers or all exporters.",
+        "runtime.entries" => {
+            "Declare 1 to 32 entries, all commands, all importers or all exporters, each with its own name of lowercase letters, digits and dashes, such as \"make-gear\" (no underscores)."
+        }
         "runtime.entries.slots" => {
             "Give each entry at most 16 slots, each {\"kind\": \"menu\" or \"ribbon\", \"name\": \"...\"} with a name of at most 80 characters."
         }
@@ -273,8 +282,55 @@ fn install_problem(e: &InstallError) -> CheckProblem {
             e.to_string(),
             format!("Build the component and put it beside plugin.json as {module}, the file runtime.module names."),
         ),
+        InstallError::MissingTheme(file) => {
+            error_problem("themes", e.to_string(), format!("Add {file} beside plugin.json, or remove the theme that names it from \"themes\"."))
+        }
         _ => error_problem("package", e.to_string(), fix_for("package")),
     }
+}
+
+/// Image refusals are warnings: the entry still works with the generic plugin icon. Both
+/// commands and importers name their images in the same schema and pass the same checks.
+fn image_problems(entries: &[Entry], files: &[safe_zip::File]) -> Vec<CheckProblem> {
+    let mut named: Vec<_> = entries.iter().flat_map(|entry| images::referenced(&entry.input_schema)).collect();
+    named.sort();
+    named.dedup();
+    let palette = include_str!("../../../look/icons/design/palette.toml").parse::<toml_edit::DocumentMut>();
+    let check = |rel: &str| -> std::result::Result<(), String> {
+        if !images::valid_path(rel) {
+            return Err("not a relative .svg path inside the package".into());
+        }
+        if named.binary_search_by(|path| path.as_str().cmp(rel)).is_ok_and(|index| index >= images::MAX_IMAGES) {
+            return Err(format!("the package names more than {} images", images::MAX_IMAGES));
+        }
+        let bytes = &files.iter().find(|file| file.path == rel).ok_or("not found in the package")?.bytes;
+        let src = images::source(bytes)?;
+        let palette = palette.as_ref().map_err(ToString::to_string)?;
+        let roles = palette.get("roles").and_then(toml_edit::Item::as_table).ok_or("the icon palette has no roles")?;
+        let (names, hexes): (Vec<_>, Vec<_>) = roles
+            .iter()
+            .map(|(name, role)| role.get("source").or_else(|| role.get("light")).and_then(toml_edit::Item::as_str).map(|hex| (name, hex)))
+            .collect::<Option<Vec<_>>>()
+            .ok_or("the icon palette has a role without a source colour")?
+            .into_iter()
+            .unzip();
+        solidcraft_icon_svg::parse(src, &names, &hexes).map(|_| ())
+    };
+    let mut problems = Vec::new();
+    for entry in entries {
+        for (field, annotation) in images::annotations(&entry.input_schema) {
+            let checked = annotation.as_str().ok_or_else(|| "not a relative .svg path string".to_string()).and_then(check);
+            if let Err(reason) = checked {
+                problems.push(problem(
+                    Severity::Warning,
+                    format!("runtime.entries.{}.input_schema.{field}", entry.name),
+                    format!("image {annotation}: {reason}"),
+                    "Name an SVG file in the package that follows the plugin guide's icon rules, or remove the annotation to use the generic plugin icon.",
+                ));
+            }
+        }
+    }
+    problems
 }
 
 /// Checks the package at `path` (a folder or a `.zip`) against this session's plugin ceilings.
@@ -285,6 +341,10 @@ pub fn check(session: &Session, path: &str) -> CheckResult {
         id: None,
         name: None,
         version: None,
+        min_host_version: None,
+        optional_capabilities: Vec::new(),
+        granted_capabilities: Vec::new(),
+        extensions: serde_json::Map::new(),
         kind: None,
         approval: None,
         entries: Vec::new(),
@@ -310,6 +370,10 @@ pub fn check(session: &Session, path: &str) -> CheckResult {
     result.id = Some(manifest.id.clone());
     result.name = Some(manifest.name.clone());
     result.version = Some(manifest.version.clone());
+    result.min_host_version = manifest.min_host_version.clone();
+    result.optional_capabilities = manifest.optional_capabilities.clone();
+    result.granted_capabilities = manifest.granted_capabilities();
+    result.extensions = manifest.extensions.clone();
     result.approval = Some(package.approval.clone());
     if source == Source::Folder {
         let folder = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -344,6 +408,7 @@ pub fn check(session: &Session, path: &str) -> CheckResult {
         .into(),
     );
     result.entries = runtime.entries.clone();
+    result.problems.extend(image_problems(&runtime.entries, &package.files));
     let ceilings = session.plugin_limits;
     if runtime.limits.fuel > ceilings.max_fuel {
         result.problems.push(problem(

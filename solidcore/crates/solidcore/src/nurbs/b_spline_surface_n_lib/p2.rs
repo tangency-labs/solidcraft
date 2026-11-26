@@ -1366,9 +1366,11 @@ impl BSplineSurface {
                 maps.as_deref_mut(),
             ) {
                 Ok(s) => s,
-                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                    return Err(e)
-                }
+                Err(
+                    e @ (SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }),
+                ) => return Err(e),
                 Err(_) => {
                     // If not successful try without knots.
                     sk.kns = None;
@@ -1378,9 +1380,11 @@ impl BSplineSurface {
                         maps.as_deref_mut(),
                     ) {
                         Ok(s) => s,
-                        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                            return Err(e)
-                        }
+                        Err(
+                            e @ (SolidError::Unported { .. }
+                            | SolidError::Cancelled { .. }
+                            | SolidError::OutOfFuel { .. }),
+                        ) => return Err(e),
                         Err(e) => {
                             // It failed with derivative fields try it without them
                             if has_dir_array {

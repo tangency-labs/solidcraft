@@ -150,6 +150,12 @@ fn visible_resource_fields_confirm_exact_integers_and_refuse_invalid_ok() {
     for _ in 0..8 {
         raster::paint(&mut h, &mut textures, vec![]);
     }
+    // The Plugins page now keeps global resource ceilings under Advanced (#18764).
+    // Open that section before exercising the same visible, exact-integer controls.
+    assert!(scenario::rect_of("prefs:plugins:advanced_limits").is_some());
+    assert!(scenario::rect_of("dialog:control:Max plugin fuel").is_none());
+    click(&mut h, &mut textures, "prefs:plugins:advanced_limits");
+    raster::paint(&mut h, &mut textures, vec![]);
     let original = h.app.session.plugin_limits;
     let fuel = "dialog:control:Max plugin fuel";
     let memory = "dialog:control:Max plugin memory (MiB)";

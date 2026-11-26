@@ -1,0 +1,58 @@
+{
+  "en": {
+    "cmd.body_remove_history": "Remove History",
+    "browser.remove_history_done": "Removed the history: {removed} features became one base feature",
+    "browser.remove_history_kept": "Removed {removed} features. These stay because other bodies use them: {features}",
+    "browser.remove_history_broken": "Removed {removed} features. These now fail, as they referred to the body's history: {features}",
+    "browser.remove_history_unmoved": "Removed {removed} features. Some references to the body's faces could not move to the base feature: {notes}"
+  },
+  "ar": {
+    "cmd.body_remove_history": "إزالة السجل",
+    "browser.remove_history_done": "أُزيل السجل: أصبحت {removed} ميزات ميزة أساسية واحدة",
+    "browser.remove_history_kept": "أُزيلت {removed} ميزات. تبقى هذه لأن أجسامًا أخرى تستخدمها: {features}",
+    "browser.remove_history_broken": "أُزيلت {removed} ميزات. تفشل هذه الآن لأنها كانت تشير إلى سجل الجسم: {features}",
+    "browser.remove_history_unmoved": "أُزيلت {removed} ميزات. تعذّر نقل بعض المراجع إلى أوجه الجسم إلى الميزة الأساسية: {notes}"
+  },
+  "de": {
+    "cmd.body_remove_history": "Verlauf entfernen",
+    "browser.remove_history_done": "Verlauf entfernt: {removed} Features wurden zu einem Basis-Feature",
+    "browser.remove_history_kept": "{removed} Features entfernt. Diese bleiben, weil andere Körper sie nutzen: {features}",
+    "browser.remove_history_broken": "{removed} Features entfernt. Diese schlagen jetzt fehl, weil sie sich auf den Verlauf des Körpers bezogen: {features}",
+    "browser.remove_history_unmoved": "{removed} Features entfernt. Einige Bezüge auf Flächen des Körpers ließen sich nicht auf das Basis-Feature übertragen: {notes}"
+  },
+  "he": {
+    "cmd.body_remove_history": "הסרת היסטוריה",
+    "browser.remove_history_done": "ההיסטוריה הוסרה: {removed} תכונות הפכו לתכונת בסיס אחת",
+    "browser.remove_history_kept": "הוסרו {removed} תכונות. אלה נשארות כי גופים אחרים משתמשים בהן: {features}",
+    "browser.remove_history_broken": "הוסרו {removed} תכונות. אלה נכשלות כעת כי הפנו להיסטוריה של הגוף: {features}",
+    "browser.remove_history_unmoved": "הוסרו {removed} תכונות. חלק מההפניות לפאות הגוף לא הועברו לתכונת הבסיס: {notes}"
+  },
+  "ja": {
+    "cmd.body_remove_history": "履歴を削除",
+    "browser.remove_history_done": "履歴を削除しました: {removed} 個のフィーチャーが 1 つのベースフィーチャーになりました",
+    "browser.remove_history_kept": "{removed} 個のフィーチャーを削除しました。次のフィーチャーは他のボディが使用しているため残ります: {features}",
+    "browser.remove_history_broken": "{removed} 個のフィーチャーを削除しました。次のフィーチャーはボディの履歴を参照していたため失敗します: {features}",
+    "browser.remove_history_unmoved": "{removed} 個のフィーチャーを削除しました。ボディの面への一部の参照をベースフィーチャーに移せませんでした: {notes}"
+  },
+  "ko": {
+    "cmd.body_remove_history": "히스토리 제거",
+    "browser.remove_history_done": "히스토리를 제거했습니다: 피처 {removed}개가 하나의 기본 피처가 되었습니다",
+    "browser.remove_history_kept": "피처 {removed}개를 제거했습니다. 다른 바디가 사용하므로 다음은 남습니다: {features}",
+    "browser.remove_history_broken": "피처 {removed}개를 제거했습니다. 바디의 히스토리를 참조했으므로 다음은 이제 실패합니다: {features}",
+    "browser.remove_history_unmoved": "피처 {removed}개를 제거했습니다. 바디 면에 대한 일부 참조를 기본 피처로 옮기지 못했습니다: {notes}"
+  },
+  "vi": {
+    "cmd.body_remove_history": "Xóa lịch sử",
+    "browser.remove_history_done": "Đã xóa lịch sử: {removed} tính năng đã thành một tính năng cơ sở",
+    "browser.remove_history_kept": "Đã xóa {removed} tính năng. Các tính năng này được giữ lại vì các khối khác dùng chúng: {features}",
+    "browser.remove_history_broken": "Đã xóa {removed} tính năng. Các tính năng này giờ bị lỗi vì chúng tham chiếu đến lịch sử của khối: {features}",
+    "browser.remove_history_unmoved": "Đã xóa {removed} tính năng. Không thể chuyển một số tham chiếu đến các mặt của khối sang tính năng cơ sở: {notes}"
+  },
+  "zh": {
+    "cmd.body_remove_history": "移除历史记录",
+    "browser.remove_history_done": "已移除历史记录：{removed} 个特征合并为一个基础特征",
+    "browser.remove_history_kept": "已移除 {removed} 个特征。以下特征因其他实体在使用而保留：{features}",
+    "browser.remove_history_broken": "已移除 {removed} 个特征。以下特征因引用了实体的历史记录，现已失败：{features}",
+    "browser.remove_history_unmoved": "已移除 {removed} 个特征。部分对实体面的引用无法移到基础特征：{notes}"
+  }
+}

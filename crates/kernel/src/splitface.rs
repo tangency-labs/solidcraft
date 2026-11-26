@@ -880,7 +880,8 @@ fn split_by_sheet(body: &Body, sheet: &Body, face: usize, faces: &[usize]) -> Re
     // SMLib's face `i` is the record's `order.faces[i]` (the same where none is given).
     let k = if order.faces.is_empty() { Some(at) } else { order.faces.iter().position(|f| *f == at) };
     let k = k.ok_or_else(|| failed(SPLIT_BODY, "the tool face has no SMLib face"))?;
-    sliced(body, !sheet.face_forward(face), |sb| sb.split_body_by_sheet(&tool, k))
+    // SMLib's import gives each tool face its record's side in its surface.
+    sliced(body, false, |sb| sb.split_body_by_sheet(&tool, k))
 }
 #[cfg(test)]
 mod tests {
@@ -1282,6 +1283,41 @@ mod tests {
         assert!(split_faces(&b, &[99], &SplitTool::Plane(Plane::XY)).is_err());
     }
 
+    /// A wall (the line y = 0 from x = 0 to 10, swept 10 up z) turned over with Reverse Normal
+    /// splits at x = 5 into two halves of 50 (#13640), each facing as the turned wall did: the
+    /// other way from the wall.
+    #[test]
+    fn a_turned_wall_splits_and_its_pieces_keep_its_side() {
+        let line = vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(10.0, 0.0) }];
+        let wall = crate::extrude_sheet(&Plane::XY, &[line], 0.0, 10.0).unwrap();
+        let turned = crate::reverse_faces(&wall, &[]).unwrap();
+        let normal = |b: &Body| b.faces(0.01).unwrap().iter().map(|f| f.plane_normal.unwrap()).collect::<Vec<_>>();
+        let [n] = normal(&turned)[..] else { panic!("one face") };
+        let [m] = normal(&wall)[..] else { panic!("one face") };
+        assert!(n.dot(m) < -1.0 + 1e-9, "{n:?} vs {m:?}");
+        let pl = Plane::new(Vec3::new(5.0, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap();
+        let s = split_faces(&turned, &[0], &SplitTool::Plane(pl)).unwrap();
+        assert_eq!(s.face_count(), 2);
+        assert!(s.faces(0.01).unwrap().iter().all(|f| rel(f.area, 50.0) < 1e-9));
+        assert!(normal(&s).iter().all(|k| k.dot(n) > 1.0 - 1e-9), "{:?} vs {n:?}", normal(&s));
+    }
+
+    /// A box 10 × 20 × 30 split by a wall at x = 4 (a sheet past the box on every side) comes
+    /// apart into 2400 and 3600, the part behind the wall's face first; split by the same wall
+    /// turned over with Reverse Normal, the parts come in the other order (#13640).
+    #[test]
+    fn a_turned_tool_sheet_splits_a_body_with_its_sides_swapped() {
+        let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+        let line = vec![Seg2::Line { a: Vec2::new(4.0, -5.0), b: Vec2::new(4.0, 25.0) }];
+        let wall = crate::extrude_sheet(&Plane::XY, &[line], -5.0, 35.0).unwrap();
+        let turned = crate::reverse_faces(&wall, &[]).unwrap();
+        let v = |tool: &Body| split_body_by_faces(&b, tool, 0, &[0]).unwrap().iter().map(|p| measure(p).unwrap().volume).collect::<Vec<_>>();
+        let (a, z) = (v(&wall), v(&turned));
+        assert!(a.len() == 2 && z.len() == 2, "{a:?} {z:?}");
+        assert!(rel(a[0] + a[1], 6000.0) < 1e-9 && (rel(a[0], 2400.0) < 1e-9 || rel(a[0], 3600.0) < 1e-9), "{a:?}");
+        assert!(rel(z[0], a[1]) < 1e-9 && rel(z[1], a[0]) < 1e-9, "{a:?} then {z:?}");
+    }
+
     /// #20389: a bar run along the travel up to a quarter of a cylinder (axis z through (30, 20),
     /// radius 10, the quarter toward +x +y) is cut where it crosses the cylinder the way it does at
     /// the pick, not where it first meets the cylinder extended. The bar covers y 22…28 and z 0…4,
@@ -1311,5 +1347,95 @@ mod tests {
             let got = measure(start).unwrap().volume;
             assert!(rel(got, want) < 1e-6, "from {from}: {got} vs {want}");
         }
+    }
+
+    /// #21864: a split-in pocket whose tangent spline outline merges a degree-2 vertex during
+    /// pre-offset healing must remain separate from the raised face regardless of loop direction
+    /// (both forward and reversed outlines must cut the same 4 mm recess instead of filling it).
+    #[test]
+    fn offset_face_keeps_split_pocket_regardless_of_spline_outline_direction() {
+        use solidcore_record::{Loop2, Region2};
+        use std::f64::consts::TAU;
+
+        // Unit checks for `on_split_line` across joined/merged recorded split lines.
+        let l1 = vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(5.0, 0.0, 0.0)];
+        let l2 = vec![Vec3::new(5.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 0.0)];
+        let l3 = vec![Vec3::new(10.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 0.0)];
+        let keep_lines = vec![l1, l2, l3];
+        // Edge spanning l1 + l2 (merged degree-2 vertex at x = 5): every sample lies on the union.
+        let merged_pts =
+            [Vec3::new(0.0, 0.0, 0.0), Vec3::new(2.5, 0.0, 0.0), Vec3::new(5.0, 0.0, 0.0), Vec3::new(7.5, 0.0, 0.0), Vec3::new(10.0, 0.0, 0.0)];
+        assert!(crate::heal::on_split_line(&merged_pts, &keep_lines));
+        // Diagonal chord bridging l2 and l3 across the corner (10, 0): interior samples miss both.
+        let chord_pts =
+            [Vec3::new(5.0, 0.0, 0.0), Vec3::new(6.25, 2.5, 0.0), Vec3::new(7.5, 5.0, 0.0), Vec3::new(8.75, 7.5, 0.0), Vec3::new(10.0, 10.0, 0.0)];
+        assert!(!crate::heal::on_split_line(&chord_pts, &keep_lines));
+        assert!(!crate::heal::on_split_line(&[], &keep_lines));
+        assert!(!crate::heal::on_split_line(&merged_pts, &[]));
+
+        let outer = Loop2 { segs: vec![Seg2::Arc { center: Vec2::ZERO, radius: 101.0, start: 0.0, sweep: TAU }] };
+        let inner = Loop2 { segs: vec![Seg2::Arc { center: Vec2::ZERO, radius: 99.0, start: 0.0, sweep: TAU }] };
+        let tube = crate::extrude(&Plane::XY, &[Region2 { outer, holes: vec![inner] }], 0.0, 400.0).unwrap().remove(0);
+        let f_pos = tube.face_within(Vec3::new(0.0, 99.0, 10.0), 1.0).unwrap().unwrap();
+        let f_neg = tube.face_within(Vec3::new(0.0, -99.0, 10.0), 1.0).unwrap().unwrap();
+        let mut faces = vec![f_pos];
+        if f_neg != f_pos {
+            faces.push(f_neg);
+        }
+        let pl_y = Plane::new(Vec3::ZERO, Vec3::X, Vec3::Z).unwrap();
+        let tube = split_faces(&tube, &faces, &SplitTool::Plane(pl_y)).unwrap();
+
+        let p = |x: f64, y: f64| Vec2::new(x, y);
+        let forward = vec![
+            Seg2::Line { a: p(-8.44878, 378.5), b: p(-3.799174, 378.5) },
+            Seg2::Cubic { p0: p(-3.799174, 378.5), p1: p(-2.442599, 378.499905), p2: p(-1.254548, 377.587947), p3: p(-0.902724, 376.277972) },
+            Seg2::Cubic { p0: p(-0.902724, 376.277972), p1: p(-0.550956, 374.96748), p2: p(-1.122935, 373.583376), p3: p(-2.297185, 372.903494) },
+            Seg2::Cubic { p0: p(-2.297185, 372.903494), p1: p(-3.848691, 372.005326), p2: p(-5.399984, 371.106791), p3: p(-6.950631, 370.207141) },
+            Seg2::Cubic { p0: p(-6.950631, 370.207141), p1: p(-7.875272, 369.670732), p2: p(-9.015685, 369.668575), p3: p(-9.940929, 370.204788) },
+            Seg2::Cubic { p0: p(-9.940929, 370.204788), p1: p(-10.867204, 370.741687), p2: p(-11.433462, 371.734105), p3: p(-11.433499, 372.803648) },
+            Seg2::Line { a: p(-11.433499, 372.803648), b: p(-11.433499, 375.5) },
+            Seg2::Cubic { p0: p(-11.433499, 375.5), p1: p(-11.433488, 376.294081), p2: p(-11.120363, 377.057985), p3: p(-10.56026, 377.62132) },
+            Seg2::Cubic { p0: p(-10.56026, 377.62132), p1: p(-10.001249, 378.183525), p2: p(-9.241693, 378.499988), p3: p(-8.44878, 378.5) },
+        ];
+        let reversed: Vec<Seg2> = forward
+            .iter()
+            .rev()
+            .map(|s| match *s {
+                Seg2::Line { a, b } => Seg2::Line { a: b, b: a },
+                Seg2::Cubic { p0, p1, p2, p3 } => Seg2::Cubic { p0: p3, p1: p2, p2: p1, p3: p0 },
+                other => other,
+            })
+            .collect();
+
+        // Precomputed unit vector for the sketch plane X axis (unit normalization of (-0.382683, 0.92388, 0)).
+        const SKETCH_X: Vec3 = Vec3::new(-0.382_682_898_036_223, 0.923_879_753_837_282, 0.0);
+        // Precomputed plain offset-tube volume: pi * (101^2 - 95^2) * 400 = 470_400 * pi mm^3.
+        const PLAIN_TUBE_VOL: f64 = 1_477_805.184_292_861_8;
+
+        let sk_plane = Plane::new(Vec3::ZERO, SKETCH_X, Vec3::Z).unwrap();
+        let target = tube.face_within(Vec3::new(91.464074, 37.88566, 10.0), 1.0).unwrap().unwrap();
+        let picks = [Vec3::new(91.464074, 37.88566, 10.0), Vec3::new(91.464074, -37.88566, 10.0)];
+
+        let run_case = |segs: Vec<Seg2>| {
+            let split = split_faces(&tube, &[target], &SplitTool::Curves { plane: sk_plane, curves: vec![segs], along: None }).unwrap();
+            // Even a second heal after degree-2 vertex merging must keep the pocket separate.
+            let healed_once = crate::boolean_record::healed(&split).unwrap().with_split_lines(split.splits.clone());
+            let healed_twice = crate::boolean_record::healed(&healed_once).unwrap().with_split_lines(split.splits.clone());
+            assert_eq!(healed_twice.face_count(), split.face_count());
+            let raised = crate::offset_faces(&split, &picks, 4.0).unwrap();
+            let vol = raised.volume_at(1e-6).unwrap();
+            let raised_healed = crate::offset_faces(&healed_twice, &picks, 4.0).unwrap();
+            let healed_vol = raised_healed.volume_at(1e-6).unwrap();
+            assert_eq!(raised_healed.face_count(), raised.face_count());
+            assert!((healed_vol - vol).abs() < 1e-3, "repeated-heal offset volume ({healed_vol:.3}) must match split offset volume ({vol:.3})");
+            (raised.face_count(), vol)
+        };
+
+        let (fwd_faces, fwd_vol) = run_case(forward);
+        let (rev_faces, rev_vol) = run_case(reversed);
+        assert!(fwd_vol < PLAIN_TUBE_VOL - 200.0, "forward pocket was filled: {fwd_vol:.3} vs plain {PLAIN_TUBE_VOL:.3}");
+        assert!((fwd_vol - 1_477_519.984).abs() < 0.05, "forward volume {fwd_vol:.3}");
+        assert!((fwd_vol - rev_vol).abs() < 1e-3, "forward ({fwd_vol:.3}) and reversed ({rev_vol:.3}) volumes must match");
+        assert!(fwd_faces > 6 && rev_faces > 6, "recess walls must exist: fwd={fwd_faces}, rev={rev_faces}");
     }
 }

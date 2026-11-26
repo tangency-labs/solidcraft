@@ -924,6 +924,26 @@ fn run_step(
     step: &StepIn,
     o: &mut Vec<f64>,
 ) -> Result<(), Fail> {
+    run_step_seen(k, s, step, o, &mut |_| {})
+}
+
+/// `f` on a copy of `s` wrapped as a [`Surface`] (the `via` steps), the copy then shown to
+/// `seen` (a test watches the extension the copy made).
+fn on_clone<T>(s: &OffsetSurface, seen: &mut dyn FnMut(&Surface), f: impl FnOnce(&Surface) -> T) -> T {
+    let w = Surface::from(s.clone());
+    let r = f(&w);
+    seen(&w);
+    r
+}
+
+/// [`run_step`], showing `seen` each copy of `s` a step evaluates.
+fn run_step_seen(
+    k: &Kernel,
+    s: &mut OffsetSurface,
+    step: &StepIn,
+    o: &mut Vec<f64>,
+    seen: &mut dyn FnMut(&Surface),
+) -> Result<(), Fail> {
     match step {
         StepIn::State => {
             o.push(0.0);
@@ -941,7 +961,7 @@ fn run_step(
         } => {
             let f = flags([*ul, *vl, *upper, *nzt]);
             let r = if *via {
-                Surface::from(s.clone()).evaluate(k, p2(*uv), *hu, *hv, f)
+                on_clone(s, seen, |w| w.evaluate(k, p2(*uv), *hu, *hv, f))
             } else {
                 s.evaluate_extending(k, p2(*uv), *hu, *hv, f)
             };
@@ -958,7 +978,7 @@ fn run_step(
         } => {
             let f = flags([*ul, *vl, *upper, false]);
             let r = if *via {
-                Surface::from(s.clone()).evaluate_simple(k, p2(*uv), *hu, *hv, f)
+                on_clone(s, seen, |w| w.evaluate_simple(k, p2(*uv), *hu, *hv, f))
             } else {
                 s.evaluate_simple_extending(k, p2(*uv), *hu, *hv, f)
             };
@@ -966,7 +986,7 @@ fn run_step(
         }
         StepIn::EvalPt { uv, via } => {
             let r = if *via {
-                Surface::from(s.clone()).evaluate_point(k, p2(*uv))
+                on_clone(s, seen, |w| w.evaluate_point(k, p2(*uv)))
             } else {
                 s.evaluate_point_extending(k, p2(*uv))
             };
@@ -977,7 +997,7 @@ fn run_step(
         }
         StepIn::Normal { uv, ul, vl, via } => {
             let r = if *via {
-                Surface::from(s.clone()).evaluate_normal(k, p2(*uv), side(*ul), side(*vl))
+                on_clone(s, seen, |w| w.evaluate_normal(k, p2(*uv), side(*ul), side(*vl)))
             } else {
                 s.evaluate_normal_extending(k, p2(*uv), side(*ul), side(*vl))
             };
@@ -1005,10 +1025,10 @@ fn run_step(
             Ok(())
         }),
         StepIn::BBox { dom, want, expand } => {
-            let w = Surface::from(s.clone());
+            let r = on_clone(s, seen, |w| w.calculate_bounding_box(k, &dom_of(*dom), *want, *expand));
             push_res(
                 o,
-                w.calculate_bounding_box(k, &dom_of(*dom), *want, *expand),
+                r,
                 |o, b| {
                     if want[0] {
                         let nb = b.normal_box.ok_or_else(|| harness("no normal box"))?;
@@ -2382,5 +2402,182 @@ mod reverse_refusal_tests {
         }
         assert_eq!(moved, MOVED);
         assert!(accepted > 0, "no accepted reversal was checked");
+    }
+}
+
+/// #21383 regression check (MEASURED, not the proof): upstream's ruled row kinked 16 of
+/// the 23 golden scripts' rational B-spline bases whose boundary weight ratios vary
+/// along a side, normals jumping by up to 87 deg, and this fails on it (gen0157, sine
+/// 0.58). Each base is extended by G1R one domain size past every side, and then every
+/// weight of the extension is positive and, at 21 points of each side, the unit normals
+/// on its two sides agree to a sine of `1e-12` without folding. The `1e-12` is a
+/// regression threshold, not a derived allowance: the proof is the derivation at
+/// `ruled_far_row` in `solidcore::nurbs::srf_adv::p3`, and the certificate is
+/// `crate::g1r_cert` (see `each_moved_row_extends_its_base_by_certified_g1_steps`).
+#[cfg(test)]
+mod g1r_rational_extension_tests {
+    use super::*;
+    use solidcore::nurbs::crv_adv::p1::CurveEnd;
+    use solidcore::nurbs::srf_adv::p3::{extend_by_param_dist, ExtendContinuity};
+    use solidcore::nurbs::srf_basic::Direction;
+
+    const ROWS: [&str; 23] = [
+        "gen0157", "gen0436", "gen0572", "gen0598", "gen0745", "gen0889", "gen0989", "gen1043",
+        "gen1066", "gen1086", "gen1219", "gen1387", "gen1548", "gen1560", "gen1593", "gen1889",
+        "gen1904", "gen2014", "gen2071", "gen2316", "gen2862", "gen2912", "gen2968",
+    ];
+
+    #[test]
+    fn g1r_extension_of_a_rational_base_is_g1_across_its_sides() {
+        let ctx = CaseContext { root: crate::case::repo_root(), seeds: 16 };
+        let k = Kernel::default();
+        let mut seen = 0;
+        for c in Runner.cases(&ctx).unwrap() {
+            if !ROWS.contains(&c.name.as_str()) {
+                continue;
+            }
+            seen += 1;
+            let Ok(Inputs::Script { off, .. }) = c.parse::<Inputs>() else {
+                panic!("{}: not a script", c.name)
+            };
+            let s = rust_off(&k, &off).unwrap().unwrap();
+            let mut base = s.base_surface().clone();
+            while let SurfaceKind::OffsetSurface(o) = base.kind() {
+                base = o.base_surface().clone();
+            }
+            let bn = match base.kind_with_nurb(&k).unwrap() {
+                SurfaceKind::BSpline(b) => b.gw_nurb().cloned(),
+                SurfaceKind::SurfOfRevolution(r) => r.base().gw_nurb().cloned(),
+                SurfaceKind::SurfOfExtrusion(r) => r.base().gw_nurb().cloned(),
+                _ => None,
+            }
+            .unwrap_or_else(|| panic!("{}: no NURB for a {}", c.name, base.type_code()));
+            assert!(bn.is_rational(), "{}", c.name);
+            let d = base.natural_uv_domain_with_nurb(&k).unwrap();
+            let (lo, hi, sz) = (d.min(), d.max(), d.size());
+            let mut e = bn.clone();
+            for (par, dir, end) in [
+                (lo.x - sz.x, Direction::U, CurveEnd::Start),
+                (hi.x + sz.x, Direction::U, CurveEnd::End),
+                (lo.y - sz.y, Direction::V, CurveEnd::Start),
+                (hi.y + sz.y, Direction::V, CurveEnd::End),
+            ] {
+                e = extend_by_param_dist(&e, par, dir, end, ExtendContinuity::G1R)
+                    .unwrap_or_else(|x| panic!("{}: {x}", c.name));
+            }
+            for row in e.cpts() {
+                for cp in row {
+                    assert!(cp.w > 0.0, "{}: weight {}", c.name, cp.w);
+                }
+            }
+            let es = Surface::from(BSplineSurface::from_gw_nurb(&e));
+            for (udir, b) in [(true, lo.x), (true, hi.x), (false, lo.y), (false, hi.y)] {
+                let mut worst = 0.0_f64;
+                for t in 0..=20 {
+                    let f = f64::from(t) / 20.0;
+                    let (uv, l, r) = if udir {
+                        (Point2::new(b, lo.y + f * sz.y), (Side::Left, Side::Left), (Side::Right, Side::Left))
+                    } else {
+                        (Point2::new(lo.x + f * sz.x, b), (Side::Left, Side::Left), (Side::Left, Side::Right))
+                    };
+                    let nl = es.evaluate_normal(&k, uv, l.0, l.1).unwrap();
+                    let nr = es.evaluate_normal(&k, uv, r.0, r.1).unwrap();
+                    worst = worst.max(nl.cross(nr).length());
+                    assert!(nl.dot(nr) > 0.0, "{} side u{udir} {b}: the surface folds back", c.name);
+                }
+                assert!(worst <= 1e-12, "{} side u{udir} {b}: normals differ, sine {worst:e}", c.name);
+            }
+        }
+        assert_eq!(seen, ROWS.len());
+    }
+
+    /// The 26 rows the change moved, each replayed: the case's own offset is built and
+    /// run step by step, and after each step (and on each copy a `via` step evaluates)
+    /// every extension the offset or an offset nested in its base holds is certified when
+    /// it changed (`crate::g1r_cert::ExtensionWatch`): bit for bit the extension a fresh
+    /// G1R evaluation (or a chain of them) of the previous one (or of the base's NURB)
+    /// builds, each of its steps certified by `certify_step`, or, after an edit step
+    /// (swap, reverse, transform, trim), the previous one with that library edit
+    /// replayed on it. Every row grows at least one extension and at
+    /// least one of its steps has varying weight ratios (the new row): the row's moved
+    /// values are evaluations of certified G1 extensions (PROVEN, up to the rounding the
+    /// certificate's header bounds).
+    const MOVED: [&str; 26] = [
+        "gen0157", "gen0436", "gen0572", "gen0598", "gen0745", "gen0889", "gen0989", "gen1043",
+        "gen1066", "gen1086", "gen1219", "gen1245", "gen1387", "gen1455", "gen1548", "gen1560",
+        "gen1593", "gen1889", "gen1904", "gen1969", "gen2014", "gen2071", "gen2316", "gen2862",
+        "gen2912", "gen2968",
+    ];
+
+    #[test]
+    fn each_moved_row_extends_its_base_by_certified_g1_steps() {
+        use crate::g1r_cert::ExtensionWatch;
+        let ctx = CaseContext { root: crate::case::repo_root(), seeds: 16 };
+        let mut seen = 0;
+        for c in Runner.cases(&ctx).unwrap() {
+            if !MOVED.contains(&c.name.as_str()) {
+                continue;
+            }
+            seen += 1;
+            let Ok(Inputs::Script { off, steps }) = c.parse::<Inputs>() else {
+                panic!("{}: not a script", c.name)
+            };
+            let k = Kernel::default();
+            let mut s = rust_off(&k, &off).unwrap().unwrap();
+            let mut watch = ExtensionWatch::default();
+            let mut copies = ExtensionWatch::default();
+            let mut o = Vec::new();
+            for step in &steps {
+                let mut err = None;
+                let base = watch.clone();
+                let mut on_copy = |w: &Surface| {
+                    if let SurfaceKind::OffsetSurface(w) = w.kind() {
+                        let mut t = base.clone();
+                        if let Err(e) = t.observe(&k, w) {
+                            err.get_or_insert(e);
+                        }
+                        copies.growths += t.growths - base.growths;
+                        copies.mixed += t.mixed - base.mixed;
+                    }
+                };
+                assert!(
+                    run_step_seen(&k, &mut s, step, &mut o, &mut on_copy).is_ok(),
+                    "{}: step failed",
+                    c.name
+                );
+                if let Some(e) = err {
+                    panic!("{}: a copy's extension: {e}", c.name);
+                }
+                // (the step's library edit, which the offset applies to its extension)
+                let kr = &k;
+                let edit: Option<Box<crate::g1r_cert::Edit<'_>>> = match step {
+                    StepIn::Swap => Some(Box::new(move |e: &mut Surface| e.swap_uv(kr))),
+                    StepIn::Reverse { param } => {
+                        let p = param_of(*param).unwrap();
+                        Some(Box::new(move |e: &mut Surface| e.reverse(kr, p)))
+                    }
+                    StepIn::Transform { origin, x, y, scale } => {
+                        let ax = Axis2Placement::new(v3(*origin), v3(*x), v3(*y));
+                        let sc = scale.map(v3);
+                        Some(Box::new(move |e: &mut Surface| e.transform(kr, &ax, sc)))
+                    }
+                    StepIn::Trim { dom } => {
+                        let d = *dom;
+                        Some(Box::new(move |e: &mut Surface| {
+                            e.trim_with_domain(kr, &mut dom_of(d))
+                        }))
+                    }
+                    _ => None,
+                };
+                watch
+                    .observe_after(&k, &s, edit.as_deref())
+                    .unwrap_or_else(|e| panic!("{}: {e}", c.name));
+            }
+            let (growths, mixed) = (watch.growths + copies.growths, watch.mixed + copies.mixed);
+            eprintln!("{}: {growths} extensions, {mixed} mixed steps", c.name);
+            assert!(growths > 0, "{}: no extension made", c.name);
+            assert!(mixed > 0, "{}: no step with varying ratios", c.name);
+        }
+        assert_eq!(seen, MOVED.len());
     }
 }

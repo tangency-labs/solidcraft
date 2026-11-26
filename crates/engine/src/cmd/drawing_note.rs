@@ -10,7 +10,8 @@ use serde_json::Value;
 use solidcraft_doc::bom::Tree;
 use solidcraft_doc::drawing::fields::{FieldState, Values, no_field};
 use solidcraft_doc::drawing::note::{Anchor, Branch, End, Note, leaders_refused};
-use solidcraft_doc::ids;
+use solidcraft_doc::drawing::{ByNumber, kept_by_number};
+use solidcraft_doc::{DocError, ids};
 use solidcraft_geom::cell::{Content, HAlign, Part};
 
 use super::CommandSpec;
@@ -159,36 +160,25 @@ fn branch(s: &Session, pick: &BranchParam, cmd: &str) -> Result<Branch> {
 
 /// Note `id`'s branches after `set`: those it takes out by number as the list is now, each once,
 /// then those it adds, found as an add finds them. The numbers and the count are checked before
-/// anything is looked up, and each branch it adds is on a part its view draws (one kept from before
-/// may not be, and can be taken out).
+/// anything is looked up, as a dimension set's targets edit checks them ([`kept_by_number`]), and
+/// each branch it adds is on a part its view draws (one kept from before may not be, and can be
+/// taken out).
 fn new_branches(s: &Session, id: u64, set: BranchesSet) -> Result<Vec<Branch>> {
     let record = s.drawing(EDIT)?;
     let note = record.notes.by_id(id).ok_or_else(|| bad(EDIT, format!("the drawing has no note {}", ids::encode(id))))?;
-    let mut gone = set.remove;
-    gone.sort_unstable();
-    if gone.windows(2).any(|pair| pair.first() == pair.get(1)) {
-        return Err(bad(EDIT, "`branches.remove` names each branch once"));
-    }
-    if gone.last().is_some_and(|last| *last >= note.branches.len()) {
-        return Err(bad(
-            EDIT,
-            match note.branches.len().checked_sub(1) {
-                Some(last) => format!("`branches.remove` numbers this note's branches, 0 to {last}"),
-                None => "`branches.remove`: this note has no branches".into(),
-            },
-        ));
-    }
-    let count = note.branches.len().saturating_sub(gone.len()).saturating_add(set.add.len());
-    let own = usize::from(note.anchor.path().is_some());
-    if let Some(why) = leaders_refused(note.anchor.view().is_some(), count, own.saturating_add(count)) {
-        return Err(bad(EDIT, why));
-    }
+    let (on_view, own) = (note.anchor.view().is_some(), usize::from(note.anchor.path().is_some()));
+    let count = |n: usize| leaders_refused(on_view, n, own.saturating_add(n)).map_or(Ok(()), |why| Err(DocError::Invalid(why)));
+    let kept = kept_by_number(&note.branches, &set.remove, set.add.len(), count).map_err(|why| match why {
+        ByNumber::Past { last: Some(last) } => bad(EDIT, format!("`branches.remove` numbers this note's branches, 0 to {last}")),
+        ByNumber::Past { last: None } => bad(EDIT, "`branches.remove`: this note has no branches"),
+        ByNumber::Twice => bad(EDIT, "`branches.remove` names each branch once"),
+        ByNumber::Count(why) => bad(EDIT, why.to_string()),
+    })?;
     let added = set.add.iter().map(|pick| branch(s, pick, EDIT)).collect::<Result<Vec<_>>>()?;
     if let Some(view) = note.anchor.view() {
         check_drawn(record, view, added.iter().map(Branch::path), EDIT)?;
     }
-    let kept = note.branches.iter().enumerate().filter(|(at, _)| gone.binary_search(at).is_err()).map(|(_, branch)| branch.clone());
-    Ok(kept.chain(added).collect())
+    Ok(kept.into_iter().chain(added).collect())
 }
 
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {

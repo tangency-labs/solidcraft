@@ -1,6 +1,6 @@
 //! The convex hull certificate of `topology.vertex` `surf_sphere150_rebuild_v3_gaps`
 //! (`max_up_dim_gap_3d` with its list), on this branch and as main built it (the refit
-//! seam), carried over from #17856's WR-57 replay (`wr57_replay`), which no longer replays
+//! seam), carried over from #17856's WR-57 replay (since retired), which had stopped replaying
 //! this row: the retirement changes the surface its calls are made on.
 //!
 //! Both rows report the true largest gap to the rounding, PROVEN by the convex hull of the

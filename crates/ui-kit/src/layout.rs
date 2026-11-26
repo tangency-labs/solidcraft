@@ -306,6 +306,18 @@ pub fn hint_row_positive(ui: &mut Ui, label: &str, value: &mut String, hint: &st
     })
 }
 
+/// Expression row with an empty-value hint and step arrows; `next` steps the text as
+/// [`super::stepped_field`] describes, and `step` names the amount the arrows add. Its label
+/// scrubs a literal value as `expr_row`'s does. Tokens: `row, stepped_field`.
+pub fn step_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str, step: &str, next: impl Fn(&str, i64) -> Option<String>) -> bool {
+    scrub_row(ui, label, |ui, scrub| {
+        if let Some(scrub) = scrub {
+            super::fields::scrub(ui, scrub, value, false);
+        }
+        super::stepped_field(ui, value, hint, step, &next)
+    })
+}
+
 /// Expression row with an empty-value hint whose value the form checks: with `warning`, the
 /// field is outlined in the warning colour and the message sits under it in that colour, so the
 /// colour is never the only cue. Returns accepted Enter and the field's response. Tokens: `row,
@@ -882,6 +894,17 @@ pub fn note_height(ui: &Ui, text: &str) -> f32 {
     note_galley(ui, text).size().y + Tokens::get().space_4 * 2.0
 }
 
+/// Take the room [`text`] would take in the `Text::Hint` style at the current width: the same
+/// allocation [`text`] would make, so the rows under a hint whose words are only shown some of the
+/// time stay where they are while the words are hidden. Nothing is painted, and no handle or
+/// widget info is published: the row is not there to be found.
+pub fn hint_space(ui: &mut Ui, text: &str) {
+    let t = Tokens::get();
+    let width = dimension(ui.available_width());
+    let galley = ui.painter().layout(text.to_owned(), egui::FontId::proportional(t.font_body), t.form_dim, width);
+    ui.allocate_exact_size(vec2(width, galley.size().y), egui::Sense::hover());
+}
+
 pub fn text(ui: &mut Ui, text: &str, style: Text<'_>) -> Response {
     text_impl(ui, text, style, None)
 }
@@ -897,6 +920,11 @@ pub fn name_cell_with_hint(ui: &mut Ui, name: &str, strong: bool, hint: &str) ->
 /// 12.500 g"). True on the click that copied.
 pub fn copy_cell(ui: &mut Ui, value: &str, name: &str, mono: bool, hint: &str) -> bool {
     let response = text_impl(ui, value, if mono { Text::MonoCell } else { Text::Cell }, Some(hint));
+    let response = if ui.stack().iter().any(|node| node.tags().contains(super::table::CELL_SELECTION)) {
+        response.interact(egui::Sense::click())
+    } else {
+        response
+    };
     // A copy control rather than a label: it reads as a button, and keyboard focus shows a ring
     // (Enter or Space copies, as a click does).
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), name));
@@ -951,7 +979,11 @@ fn text_impl(ui: &mut Ui, text: &str, style: Text<'_>, hover_hint: Option<&str>)
     let response = if fixed {
         let (rect, response) = ui.allocate_exact_size(
             vec2(dimension(ui.available_width()), row_height()),
-            if matches!(style, Text::Value(_, _)) { egui::Sense::hover() } else { egui::Sense::click() },
+            if matches!(style, Text::Value(_, _)) || ui.stack().iter().any(|node| node.tags().contains(super::table::CELL_SELECTION)) {
+                egui::Sense::hover()
+            } else {
+                egui::Sense::click()
+            },
         );
         let tooltip = hover_hint.map(|hint| {
             if ui.painter().layout_no_wrap(text.to_owned(), font.clone(), ink).size().x > rect.width() {

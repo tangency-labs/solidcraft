@@ -156,7 +156,7 @@ pub const DETAILS: Page = Page {
     usage: r#"
 let events = ui_kit::details(ui, "draft", &ui_kit::Details {
     settings: vec![ui_kit::DetailSetting { id: "angle".into(), label: "Draft angle".into(),
-        value: ui_kit::DetailValue::Number { value: 3.0, min: 0.0, max: 45.0, suffix: "°".into() }, enabled: true }],
+        value: ui_kit::DetailValue::Number { value: 3.0, min: 0.0, max: 45.0, suffix: "°".into() }, enabled: true, stacked: false }],
     findings_title: "Faces".into(),
     ..Default::default()
 }, 400.0, None);
@@ -172,6 +172,7 @@ let events = ui_kit::details(ui, "draft", &ui_kit::Details {
                 label: "Draft angle".into(),
                 value: ui_kit::DetailValue::Number { value: d.angle.min(45.0), min: 0.0, max: 45.0, suffix: "°".into() },
                 enabled: true,
+                stacked: false,
             }],
             key: vec![
                 ui_kit::DetailKey {

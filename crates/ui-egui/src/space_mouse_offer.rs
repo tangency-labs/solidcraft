@@ -361,6 +361,8 @@ mod preferences_tests {
         // An uncalibrated device (the notice card is up first), the calibrated one and none.
         for device in [None, Some("hid 256f:c63a"), Some("spacenavd"), Some("hid 046d:c62b")] {
             let mut h = crate::scenario::Harness::new();
+            h.call("ui.resize", serde_json::json!({"width": 1600, "height": 1200}));
+            h.frames(3);
             h.app.home.open = false;
             h.app.load_prefs(include_str!("test_data/prefs_space_mouse_user.json"));
             h.app.space_mouse.device = device.map(Into::into);
@@ -389,6 +391,8 @@ mod preferences_tests {
     fn the_notice_never_closes_preferences() {
         for (open_first, frames_before) in [(false, 0), (false, 40), (true, 0), (true, 90)] {
             let mut h = crate::scenario::Harness::new();
+            h.call("ui.resize", serde_json::json!({"width": 1600, "height": 1200}));
+            h.frames(3);
             h.app.home.open = false;
             h.app.custom_titlebar = true;
             h.app.space_mouse.device = Some("hid 046d:c62b".into());
@@ -437,6 +441,8 @@ mod preferences_tests {
     fn a_fresh_profile_opens_preferences_from_the_start_page_and_keeps_it() {
         for device in [None, Some("hid 046d:c62b"), Some("spacenavd")] {
             let mut h = crate::scenario::Harness::new();
+            h.call("ui.resize", serde_json::json!({"width": 1600, "height": 1200}));
+            h.frames(3);
             h.app.custom_titlebar = true;
             h.app.home.open = true;
             h.frames(3);

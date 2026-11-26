@@ -1747,18 +1747,14 @@ impl<'s> SurfaceIntersector<'s> {
                     };
                     let ang_tol_rad = 0.01 + self.this_approx_tol_3d.atan2(c_radius);
 
-                    // status ignored: a zero tangent gives an angle of 0. With
-                    // `ssi_proto_topology_statuses_pass_on` (fork bcc6f01) an angle that
-                    // cannot be computed does not meet the test.
-                    let ang = start.crv_deriv().angle_between(tsp.crv_deriv());
-                    let ang_ok = ang.is_ok() || !k.fixes.ssi_proto_topology_statuses_pass_on;
-                    let ang_between_rad = ang.unwrap_or(0.0);
-
-                    // when tangent angles are the same - these are an exact/bounded
+                    // status ignored upstream (a zero tangent gives an angle of 0); fork
+                    // bcc6f01: an angle that cannot be computed does not meet the test.
+                    // When tangent angles are the same - these are an exact/bounded
                     // startPoint pair: keep the exact one. (Upstream "replaces" the
                     // bounded target by assigning a local pointer only, so either way
                     // the candidate is not added.)
-                    if ang_ok && ang_between_rad < ang_tol_rad {
+                    let ang = start.crv_deriv().angle_between(tsp.crv_deriv());
+                    if ang.is_ok_and(|ang_between_rad| ang_between_rad < ang_tol_rad) {
                         found_match = true;
                         break;
                     }
@@ -2031,47 +2027,15 @@ impl<'s> SurfaceIntersector<'s> {
 
                 // If within 10x tol, then check whether the surfaces diverge in
                 // between (two separate intersection curves).
-                if success && dist < self.this_approx_tol_3d * 10.0 {
-                    let srf1 = self.surfaces[0];
-                    let srf2 = self.surfaces[1];
-                    let dom1 = srf1.natural_uv_domain_with_nurb(k)?;
-                    let dom2 = srf2.natural_uv_domain_with_nurb(k)?;
-
-                    if k.fixes.ssi_proto_topology_statuses_pass_on {
-                        // fork bcc6f01: each drop (its status and its bOk) and evaluation
-                        // must succeed; without all the points there is no evidence that
-                        // the point lies on this curve.
-                        if self.is_point_on_curve_gap_checked(k, curve, point, crv_param)?
-                            == Some(true)
-                        {
-                            return Ok(true);
-                        }
-                        continue;
-                    }
-
-                    let (int_pt_uv1, int_pt_gap1) =
-                        surface_drop_point(k, srf1, point, &dom1, None)?;
-                    let (int_pt_uv2, int_pt_gap2) =
-                        surface_drop_point(k, srf2, point, &dom2, None)?;
-
-                    // status ignored upstream: an uninitialised point on failure
-                    let crv_pt = or_keep(curve.evaluate_point(k, crv_param), Vec3::UNDEF)?;
-
-                    let (crv_pt_uv1, crv_pt_gap1) =
-                        surface_drop_point(k, srf1, crv_pt, &dom1, Some(int_pt_uv1))?;
-                    let (crv_pt_uv2, crv_pt_gap2) =
-                        surface_drop_point(k, srf2, crv_pt, &dom2, Some(int_pt_uv2))?;
-
-                    let mid_pt_uv1 = (int_pt_uv1 + crv_pt_uv1) / 2.0;
-                    let mid_pt_uv2 = (int_pt_uv2 + crv_pt_uv2) / 2.0;
-                    let mid_srf1 = or_keep(srf1.evaluate_point(k, mid_pt_uv1), Vec3::UNDEF)?;
-                    let mid_srf2 = or_keep(srf2.evaluate_point(k, mid_pt_uv2), Vec3::UNDEF)?;
-
-                    let gap_mid = mid_srf1.distance(mid_srf2);
-
-                    if gap_mid < (int_pt_gap1 + int_pt_gap2) + (crv_pt_gap1 + crv_pt_gap2) {
-                        return Ok(true);
-                    }
+                if success
+                    && dist < self.this_approx_tol_3d * 10.0
+                    // fork bcc6f01: each drop (its status and its bOk) and evaluation must
+                    // succeed; without all the points there is no evidence that the point
+                    // lies on this curve.
+                    && self.is_point_on_curve_gap_checked(k, curve, point, crv_param)?
+                        == Some(true)
+                {
+                    return Ok(true);
                 }
             }
         }
@@ -2244,32 +2208,21 @@ pub fn compute_curve_type(
     let mut ret = TsectCurveType::Crossing;
     let ivl1 = uv_curve1.natural_interval();
     let ivl2 = uv_curve2.natural_interval();
-    let (uv1, uv2, norm1, norm2) = if k.fixes.ssi_proto_topology_statuses_pass_on {
-        // fork bcc6f01 (`sm_ComputeCurveType`): normals that cannot be evaluated show no
-        // tangency; the curve keeps the crossing type it starts with.
-        let (Some(p1), Some(p2)) = (
-            crate::error::ignored(uv_curve1.evaluate_point(k, ivl1.evaluate(0.5)))?,
-            crate::error::ignored(uv_curve2.evaluate_point(k, ivl2.evaluate(0.5)))?,
-        ) else {
-            return Ok(ret);
-        };
-        let uv1 = Point2::new(p1.x, p1.y);
-        let uv2 = Point2::new(p2.x, p2.y);
-        let (Some(norm1), Some(norm2)) = (
-            crate::error::ignored(surface_evaluate_normal(k, surface1, uv1))?,
-            crate::error::ignored(surface_evaluate_normal(k, surface2, uv2))?,
-        ) else {
-            return Ok(ret);
-        };
-        (uv1, uv2, norm1, norm2)
-    } else {
-        let p1 = or_keep(uv_curve1.evaluate_point(k, ivl1.evaluate(0.5)), Vec3::UNDEF)?;
-        let p2 = or_keep(uv_curve2.evaluate_point(k, ivl2.evaluate(0.5)), Vec3::UNDEF)?;
-        let uv1 = Point2::new(p1.x, p1.y);
-        let uv2 = Point2::new(p2.x, p2.y);
-        let norm1 = or_keep(surface_evaluate_normal(k, surface1, uv1), Vec3::UNDEF)?;
-        let norm2 = or_keep(surface_evaluate_normal(k, surface2, uv2), Vec3::UNDEF)?;
-        (uv1, uv2, norm1, norm2)
+    // fork bcc6f01 (`sm_ComputeCurveType`): normals that cannot be evaluated show no
+    // tangency; the curve keeps the crossing type it starts with.
+    let (Some(p1), Some(p2)) = (
+        crate::error::ignored(uv_curve1.evaluate_point(k, ivl1.evaluate(0.5)))?,
+        crate::error::ignored(uv_curve2.evaluate_point(k, ivl2.evaluate(0.5)))?,
+    ) else {
+        return Ok(ret);
+    };
+    let uv1 = Point2::new(p1.x, p1.y);
+    let uv2 = Point2::new(p2.x, p2.y);
+    let (Some(norm1), Some(norm2)) = (
+        crate::error::ignored(surface_evaluate_normal(k, surface1, uv1))?,
+        crate::error::ignored(surface_evaluate_normal(k, surface2, uv2))?,
+    ) else {
+        return Ok(ret);
     };
     let mut sign = 1.0;
     let dot = norm1.dot(norm2);
@@ -2675,22 +2628,6 @@ fn tangent_start_rank(tsp: &TsectPnt) -> f64 {
     }) + min2(tsp.deviation, 0.5)
 }
 
-/// `crSurface.DropPoint(point, domain, guess, ..)`: the UV point and its gap.
-fn surface_drop_point(
-    k: &Kernel,
-    surface: &Surface,
-    point: Point3,
-    domain: &Extent2d,
-    guess: Option<Point2>,
-) -> Result<(Point2, f64)> {
-    let opts = crate::surface::surface::p5::DropPointOptions {
-        guess_uv: guess,
-        ..Default::default()
-    };
-    let r = surface.drop_point::<crate::surface::surface::p4::NoObject>(k, point, domain, &opts)?;
-    Ok((r.result_uv, r.gap))
-}
-
 /// `m_cpSurface[0]->LocalSurfaceIntersect(..)`: found flag and the solution's start
 /// parameters `[u0, v0, u1, v1]` (`surface::surface::p11`; `cpOptPreviousUV` is the
 /// first point of `previous_uv`, upstream's `&rPrevTSP.UVPos(0)`). The status is
@@ -2799,7 +2736,8 @@ mod tests {
 
     /// fork bcc6f01 (`sm_ComputeCurveType`, "normals that cannot be evaluated show no
     /// tangency"): the first UV curve cannot be evaluated. Upstream reads its unset
-    /// point and goes on to compare normals there; the fork keeps the crossing type.
+    /// point and goes on to compare normals there; the port keeps the crossing type, as
+    /// the fork does.
     #[test]
     fn compute_curve_type_without_a_uv_point_is_crossing() {
         let s1 = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
@@ -2814,16 +2752,9 @@ mod tests {
             )
             .unwrap(),
         );
-        for pass_on in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.ssi_proto_topology_statuses_pass_on = pass_on;
-            let r = compute_curve_type(&k, &s1, &s2, &bad, &uv2);
-            if pass_on {
-                assert_eq!(r.unwrap(), TsectCurveType::Crossing);
-            } else {
-                assert!(!matches!(r, Ok(TsectCurveType::Crossing)), "{r:?}");
-            }
-        }
+        let k = Kernel::default();
+        let r = compute_curve_type(&k, &s1, &s2, &bad, &uv2);
+        assert_eq!(r.unwrap(), TsectCurveType::Crossing);
     }
 
     /// `m_apUserPointer` follows copies and assignment, and compares by identity.

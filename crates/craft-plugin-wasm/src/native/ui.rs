@@ -323,8 +323,13 @@ pub(crate) fn describe<H: PluginHost + 'static>(
         host,
         commands: BTreeMap::new(),
         groups: BTreeSet::new(),
+        granted_capabilities: Vec::new(),
         effect: Effect::Read,
+        user_storage: false,
         folders: BTreeMap::new(),
+        input_folders: BTreeMap::new(),
+        folder_bytes: 0,
+        folder_files: BTreeSet::new(),
         staged: BTreeMap::new(),
         created_dirs: Vec::new(),
         clock: false,
@@ -360,5 +365,5 @@ pub(crate) fn describe<H: PluginHost + 'static>(
         validate(declarations(result), runtime)
     })();
     host = store.into_data().host;
-    (host, outcome.map_err(|error| with_limits(error, limits)))
+    (host, outcome.map_err(|error| with_limits(error, limits.deadline_ms)))
 }

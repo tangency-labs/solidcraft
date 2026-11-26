@@ -37,7 +37,7 @@ pub(crate) fn active() -> bool {
 }
 
 #[cfg(test)]
-mod replay;
+pub(crate) mod replay;
 
 /// Runs `f` with the kept-trim cover's raises (tangency-labs/solidcraft#19295) put back on
 /// every read it makes: each raised edge and vertex holds its tolerance before the cover,
@@ -123,14 +123,21 @@ pub(crate) mod state {
     }
 
     /// The edge uses (arena index) of the `Fillet/sphere_diff_3cylinders.smb` read that
-    /// hold a UV trim on this branch and none on main (#20179: the read's point tests now
-    /// classify on their face, and the classification makes its missing trims). The
+    /// hold a UV trim on this branch and none on main before #20179. The read classifies
+    /// points on the cone face while the body is edited, and the classification makes the
+    /// face's missing trims. Since WR-732's retirement (#18934) the B-rep ray builds that
+    /// face's tree against its current trims while editing, and implanting them makes
+    /// these trims (`CreateUVTrimCurves` on the ray's evaluation copy of the face). The
     /// read has [`CLASSIFIED_READ_EDGEUSES`] edge uses.
     pub(crate) const CLASSIFIED_READ_TRIMS: [u32; 5] = [127, 129, 130, 132, 135];
     /// The edge use count of that read.
     pub(crate) const CLASSIFIED_READ_EDGEUSES: usize = 156;
     /// The vertex uses (arena index) of that read whose cached vertex/face gap main's read
-    /// holds and this branch's does not: setting the classified trims cleared it.
+    /// before #20179 computed without the classified trims. Setting the trims clears each
+    /// of them; the read's later classifications compute some of them again with the trims
+    /// set (which ones depends on what the case classifies: the plain read holds 128, 130,
+    /// 132 and 134 again, and 126 stays cleared). The put-back clears all five and computes
+    /// them without the trims.
     pub(crate) const CLASSIFIED_READ_GAPS: [u32; 5] = [126, 128, 130, 132, 134];
     /// The file's zone tolerance: what every edge and vertex of that read holds unless a
     /// healer or the kept-trim cover raised it.
@@ -138,7 +145,8 @@ pub(crate) mod state {
 
     /// Runs `f` with main's read of that file put back on every read of it `f` makes (a
     /// read with that many edge uses whose listed uses all hold a trim): the
-    /// [`CLASSIFIED_READ_TRIMS`] taken off, the [`CLASSIFIED_READ_GAPS`] computed again,
+    /// [`CLASSIFIED_READ_TRIMS`] taken off, the [`CLASSIFIED_READ_GAPS`] cleared and
+    /// computed again without them,
     /// and where a healer ran, its raises on those trims' edges and their vertices put back
     /// (`put_back_healed_raises`). Returns the value and how many reads it put back.
     pub(crate) fn strip_classified_trims<T>(f: impl FnOnce() -> T) -> (T, u32) {
@@ -183,9 +191,7 @@ pub(crate) mod state {
             let gaps: Vec<_> = b
                 .vertexuses()
                 .iter()
-                .filter(|(id, vu)| {
-                    CLASSIFIED_READ_GAPS.contains(&id.index()) && !vu.vertex_face_gap.is_init()
-                })
+                .filter(|(id, _)| CLASSIFIED_READ_GAPS.contains(&id.index()))
                 .map(|(id, _)| id)
                 .collect();
             assert_eq!(
@@ -195,6 +201,7 @@ pub(crate) mod state {
             );
             let k = crate::runner_kernel();
             for vu in gaps {
+                solidcore::topology::vertexuse::init_vertex_face_gap(b, vu).unwrap();
                 solidcore::topology::vertexuse::calc_vertex_face_gap(&k, b, vu, false, true)
                     .unwrap();
             }

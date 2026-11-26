@@ -2655,7 +2655,8 @@ fn assert_host_geometry(h: &PanelMountHarness, host: &HostLayout) {
         control.bounds.validate().unwrap();
         assert!(host.capacity.contains_rect(control.bounds), "reachable control: {control:?}");
         assert!(!control.accessible_name.is_empty());
-        assert!(host.painted.iter().any(|paint| paint.contains_rect(control.bounds)), "input must remain within actual paint");
+        assert!(control.bounds.contains_rect(control.ink));
+        assert!(host.painted.iter().any(|paint| paint.contains_rect(control.ink)), "drawn handle must remain within actual paint");
     }
     if let Some(viewport) = host.viewport {
         viewport.validate().unwrap();
@@ -2806,6 +2807,8 @@ struct RawPanelHost {
     time: f64,
     capacity: LogicalRect,
     native_pixels_per_point: Option<f32>,
+    /// The window's screen position, as a desktop backend reports it.
+    inner_origin: Option<egui::Pos2>,
     foreign_cover: Option<egui::Rect>,
     foreign_responses: Vec<egui::Response>,
     foreign_takes_focus: bool,
@@ -2840,6 +2843,7 @@ impl RawPanelHost {
             time: 0.0,
             capacity: capacity(),
             native_pixels_per_point: None,
+            inner_origin: None,
             foreign_cover: None,
             foreign_responses: Vec::new(),
             foreign_takes_focus: false,
@@ -2885,6 +2889,10 @@ impl RawPanelHost {
         };
         if let Some(dpi) = self.native_pixels_per_point {
             input.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(dpi);
+        }
+        if let Some(origin) = self.inner_origin {
+            let size = egui::vec2(self.capacity.size.width, self.capacity.size.height);
+            input.viewports.entry(egui::ViewportId::ROOT).or_default().inner_rect = Some(egui::Rect::from_min_size(origin, size));
         }
         // Match SolveApp's native boundary before egui validates pointer and wheel events.
         crate::finite_input(&mut input);
@@ -3253,6 +3261,37 @@ fn raw_host_shared_move_menu_is_a_pointer_independent_alternative_to_drag() {
         assert!(state.transaction_live);
         assert_eq!((state.applies, state.cancels, state.finishes), (0, 0, 0));
         assert_eq!(raw.content.commands.calls, 0);
+    }
+}
+
+/// Float lifts a listed panel (the 2D Timeline) off where it shows, at its shown size and a
+/// step up and in; any other panel floats at the free area's top-left corner at its saved size.
+#[test]
+fn raw_host_float_puts_a_listed_panel_where_it_showed_and_others_at_the_corner() {
+    for in_place in [true, false] {
+        let mut h = PanelMountHarness::new(false).unwrap();
+        open_editor(&mut h);
+        let mut raw = RawPanelHost::new(h, 1.0);
+        raw.host.set_float_in_place(if in_place { vec![id("editor")] } else { Vec::new() });
+        raw.frame(Vec::new(), false);
+        let docked = raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().clone();
+        let frame = raw.host.frame().unwrap();
+        let shown = frame.layout.sections.iter().find(|card| card.section == docked.id).unwrap().outer;
+        let capacity = frame.layout.capacity;
+        raw.menu(id("editor"));
+        raw.click(HostControlTarget::Shared { instance: id("editor"), action: HostSharedAction::Move(Zone::Floating) }, true);
+        raw.frame(Vec::new(), false);
+        let floated = raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().clone();
+        let step = solidcraft_theme::Tokens::get().space_24;
+        if in_place {
+            let origin = Point { x: shown.origin.x + step, y: shown.origin.y - step };
+            assert_eq!(floated.location, SectionLocation::Floating { origin });
+            let width = shown.size.width.min(capacity.size.width - 2.0 * step);
+            assert_eq!(floated.size, Size { width, height: shown.size.height });
+        } else {
+            assert_eq!(floated.location, SectionLocation::Floating { origin: capacity.origin });
+            assert_eq!(floated.size, docked.size);
+        }
     }
 }
 
@@ -4696,6 +4735,17 @@ fn host_metrics_and_public_geometry_reject_hostile_values_before_pointer_arithme
     assert!(update.action.is_none());
     assert_eq!(update.rejection.unwrap().rule, Rule::Bounds);
     assert!(!interaction.is_captured());
+}
+
+#[test]
+fn host_layout_refuses_a_control_reaching_past_its_capacity() {
+    let h = host_logs(1, Zone::Left);
+    let mut layout = host_layout(&h, 1280.0, 800.0, Direction::Ltr);
+    layout.validate().unwrap();
+    let edge = right(layout.capacity);
+    let control = layout.controls.iter_mut().find(|control| matches!(control.target, HostPointerTarget::Header { .. })).unwrap();
+    control.bounds.size.width = edge - control.bounds.origin.x + 8.0;
+    assert_eq!(layout.validate().unwrap_err().detail, "host control outside paint");
 }
 
 #[test]
@@ -8132,7 +8182,8 @@ fn raw_resize_card(scale: f32, restored_side: bool) -> (RawPanelHost, HostContro
         .iter()
         .find(|control| {
             matches!(&control.target,
-                HostControlTarget::Pointer(HostPointerTarget::Resize { section: target, .. }) if *target == section("editor-section")
+                HostControlTarget::Pointer(HostPointerTarget::Resize { section: target, edge })
+                    if *target == section("editor-section") && (restored_side || *edge == HostResizeEdge::BottomRight)
             )
         })
         .expect("mounted card must publish its resize control")
@@ -8148,6 +8199,9 @@ fn resize_card_delta(target: &HostControlTarget, extent: f32) -> egui::Vec2 {
             HostResizeEdge::Right => egui::vec2(extent, 0.0),
             HostResizeEdge::Top => egui::vec2(0.0, -extent),
             HostResizeEdge::Bottom => egui::vec2(0.0, extent),
+            HostResizeEdge::TopLeft => egui::vec2(-extent, -extent),
+            HostResizeEdge::TopRight => egui::vec2(extent, -extent),
+            HostResizeEdge::BottomLeft => egui::vec2(-extent, extent),
             HostResizeEdge::BottomRight => egui::vec2(extent, extent),
         },
         _ => panic!("expected an actual card resize control"),
@@ -8635,6 +8689,370 @@ fn shared_modal_receives_reserved_escape_once_and_keeps_the_restored_header_and_
                 (retained.reparents, retained.cancels, retained.applies, retained.finishes, retained.destroys)
             );
         }
+    }
+}
+
+fn raw_floating_card(scale: f32, rtl: bool, closable: bool, tabbed: bool) -> RawPanelHost {
+    raw_floating_card_sized(scale, rtl, closable, tabbed, Size { width: 280.0, height: 240.0 })
+}
+
+fn raw_floating_card_sized(scale: f32, rtl: bool, closable: bool, tabbed: bool, size: Size) -> RawPanelHost {
+    raw_floating_card_with_grab(scale, rtl, closable, tabbed, size, true)
+}
+
+fn raw_floating_card_with_grab(scale: f32, rtl: bool, closable: bool, tabbed: bool, size: Size, wide_grab: bool) -> RawPanelHost {
+    let mut content = host_with_specs(|spec| {
+        spec.max_size = Size { width: 360.0, height: 360.0 };
+        spec.min_size.height = spec.min_size.height.min(size.height);
+        spec.features.hot_closable = closable;
+    });
+    open_editor(&mut content);
+    content
+        .dispatch(vec![Mutation::Move {
+            instance: id("editor"),
+            destination: Destination::NewSection {
+                section: section("editor-section"),
+                index: 0,
+                location: SectionLocation::Floating { origin: Point { x: 200.0, y: 180.0 } },
+                size,
+            },
+        }])
+        .unwrap();
+    if tabbed {
+        content.dispatch(vec![fixture_open("fixture.log", "neighbour", "neighbour-section", Zone::Left, 1).unwrap()]).unwrap();
+        content
+            .dispatch(vec![Mutation::Move {
+                instance: id("neighbour"),
+                destination: Destination::JoinTab { section: section("editor-section"), index: 1 },
+            }])
+            .unwrap();
+    }
+    if rtl {
+        let mut environment = content.runtime.environment().clone();
+        environment.direction = Direction::Rtl;
+        content.runtime.set_environment(environment, &mut content.local).unwrap();
+    }
+    let mut raw = RawPanelHost::new(content, scale);
+    if wide_grab {
+        raw.host.set_wide_grab(true);
+    }
+    raw.prime_foreign_window();
+    for _ in 0..4 {
+        raw.frame(Vec::new(), false);
+    }
+    raw
+}
+
+fn floating_card_outer(raw: &RawPanelHost) -> LogicalRect {
+    raw.host.frame().unwrap().layout.sections.iter().find(|card| card.section == section("editor-section")).unwrap().outer
+}
+
+/// Handles straddle the border by 4 px. Header-side presses land outside the card.
+fn floating_press_point(card: LogicalRect, edge: HostResizeEdge) -> egui::Pos2 {
+    let (x, y, right, bottom) = (card.origin.x, card.origin.y, card.origin.x + card.size.width, card.origin.y + card.size.height);
+    let (mid_x, mid_y) = (x + card.size.width / 2.0, y + card.size.height / 2.0);
+    match edge {
+        HostResizeEdge::Left => egui::pos2(x + 2.0, mid_y),
+        HostResizeEdge::Right => egui::pos2(right - 2.0, mid_y),
+        HostResizeEdge::Top => egui::pos2(mid_x, y - 2.0),
+        HostResizeEdge::Bottom => egui::pos2(mid_x, bottom + 2.0),
+        HostResizeEdge::TopLeft => egui::pos2(x - 2.0, y - 2.0),
+        HostResizeEdge::TopRight => egui::pos2(right + 2.0, y - 2.0),
+        HostResizeEdge::BottomLeft => egui::pos2(x + 2.0, bottom - 2.0),
+        HostResizeEdge::BottomRight => egui::pos2(right - 2.0, bottom - 2.0),
+    }
+}
+
+fn raw_drag_floating_card(scale: f32, rtl: bool, edge: HostResizeEdge, delta: egui::Vec2) -> LogicalRect {
+    let mut raw = raw_floating_card(scale, rtl, false, false);
+    let at = floating_press_point(floating_card_outer(&raw), edge);
+    raw.frame(vec![egui::Event::PointerMoved(at)], false);
+    raw.pointer(at, true, false);
+    assert!(raw.host.interaction().is_captured(), "{edge:?} must capture the press");
+    raw.frame(vec![egui::Event::PointerMoved(at + delta)], false);
+    raw.pointer(at + delta, false, true);
+    raw.frame(Vec::new(), false);
+    floating_card_outer(&raw)
+}
+
+fn rect_tuple(outer: LogicalRect) -> (f32, f32, f32, f32) {
+    (outer.origin.x, outer.origin.y, outer.size.width, outer.size.height)
+}
+
+#[test]
+fn floating_card_resizes_from_every_edge_and_corner_keeping_the_opposite_side() {
+    // The card is at (200, 180), 280 x 240.
+    let cases = [
+        (HostResizeEdge::Left, egui::vec2(-30.0, 0.0), (170.0, 180.0, 310.0, 240.0)),
+        (HostResizeEdge::Right, egui::vec2(40.0, 0.0), (200.0, 180.0, 320.0, 240.0)),
+        (HostResizeEdge::Top, egui::vec2(0.0, -20.0), (200.0, 160.0, 280.0, 260.0)),
+        (HostResizeEdge::Bottom, egui::vec2(0.0, 40.0), (200.0, 180.0, 280.0, 280.0)),
+        (HostResizeEdge::TopLeft, egui::vec2(-30.0, -20.0), (170.0, 160.0, 310.0, 260.0)),
+        (HostResizeEdge::TopRight, egui::vec2(40.0, -20.0), (200.0, 160.0, 320.0, 260.0)),
+        (HostResizeEdge::BottomLeft, egui::vec2(-30.0, 40.0), (170.0, 180.0, 310.0, 280.0)),
+        (HostResizeEdge::BottomRight, egui::vec2(40.0, 40.0), (200.0, 180.0, 320.0, 280.0)),
+    ];
+    for (edge, delta, expected) in cases {
+        assert_eq!(rect_tuple(raw_drag_floating_card(1.0, false, edge, delta)), expected, "{edge:?}");
+    }
+}
+
+#[test]
+fn floating_edges_stay_physical_under_rtl_and_exact_at_scale_two() {
+    let left = egui::vec2(-30.0, 0.0);
+    let top_left = egui::vec2(-30.0, -20.0);
+    assert_eq!(rect_tuple(raw_drag_floating_card(1.0, true, HostResizeEdge::Left, left)), (170.0, 180.0, 310.0, 240.0));
+    assert_eq!(rect_tuple(raw_drag_floating_card(1.0, true, HostResizeEdge::TopLeft, top_left)), (170.0, 160.0, 310.0, 260.0));
+    assert_eq!(rect_tuple(raw_drag_floating_card(2.0, false, HostResizeEdge::Left, left)), (170.0, 180.0, 310.0, 240.0));
+}
+
+#[test]
+fn floating_left_and_top_resize_stop_at_the_panel_minimum_with_the_far_edge_fixed() {
+    let outer = raw_drag_floating_card(1.0, false, HostResizeEdge::Left, egui::vec2(400.0, 0.0));
+    assert_eq!((outer.size.width, outer.origin.x + outer.size.width), (160.0, 480.0));
+    let outer = raw_drag_floating_card(1.0, false, HostResizeEdge::TopLeft, egui::vec2(400.0, 400.0));
+    assert_eq!(rect_tuple(outer), (320.0, 300.0, 160.0, 120.0));
+}
+
+#[test]
+fn floating_handles_agree_with_input_regions_and_leave_content_presses_alone() {
+    let mut raw = raw_floating_card(1.0, false, false, false);
+    let card = floating_card_outer(&raw);
+    let layout = raw.host.frame().unwrap().layout.clone();
+    for edge in [HostResizeEdge::Left, HostResizeEdge::Right, HostResizeEdge::Top, HostResizeEdge::Bottom, HostResizeEdge::TopRight] {
+        let at = floating_press_point(card, edge);
+        let point = Point { x: at.x, y: at.y };
+        assert_eq!(layout.hit_test(point), Some(HostPointerTarget::Resize { section: section("editor-section"), edge }), "{edge:?}");
+        assert!(layout.consumes_pointer(point), "{edge:?} grab outside the card still consumes the pointer");
+    }
+    let header = raw.host.frame().unwrap().layout.sections.iter().find(|candidate| candidate.section == section("editor-section")).unwrap().header;
+    let reach = super::layout::FLOATING_GRAB_REACH;
+    let tokens = solidcraft_theme::Tokens::get();
+    let (outer_box, inner_box) =
+        (egui_rect(card).expand(reach), egui_rect(card).shrink2(egui::vec2(tokens.space_4.min(reach), tokens.space_2.min(reach))));
+    for control in layout.controls.iter().filter(|control| matches!(control.target, HostPointerTarget::Resize { .. })) {
+        let bounds = control.bounds;
+        assert!(outer_box.contains_rect(egui_rect(bounds)), "{control:?} stays within the reach outside the card");
+        if !matches!(control.target, HostPointerTarget::Resize { edge, .. } if edge.moves_north()) {
+            assert!(!egui_rect(bounds).intersect(inner_box).is_positive(), "{control:?} reaches no deeper than the content inset");
+        }
+        if matches!(control.target, HostPointerTarget::Resize { edge: HostResizeEdge::Left | HostResizeEdge::Right, .. }) {
+            assert!(bounds.origin.y >= header.origin.y + header.size.height, "side bands start below the header");
+        }
+    }
+    let inside = egui::pos2(card.origin.x + 6.0, card.origin.y + card.size.height / 2.0);
+    assert!(!matches!(layout.hit_test(Point { x: inside.x, y: inside.y }), Some(HostPointerTarget::Resize { .. })));
+    raw.frame(vec![egui::Event::PointerMoved(inside)], false);
+    raw.pointer(inside, true, false);
+    assert!(!raw.host.interaction().is_captured(), "a press past the 4 px inner band belongs to the content");
+    let (inset_x, inset_y) = (tokens.space_4, tokens.space_2);
+    let (right, bottom) = (card.origin.x + card.size.width, card.origin.y + card.size.height);
+    for (name, at) in [
+        ("above the bottom inset", Point { x: card.origin.x + card.size.width / 2.0, y: bottom - inset_y - 1.0 }),
+        ("above the bottom inset at the corner", Point { x: right - inset_x - 1.0, y: bottom - inset_y - 1.0 }),
+        ("inside the right inset", Point { x: right - inset_x - 1.0, y: card.origin.y + card.size.height / 2.0 }),
+    ] {
+        assert!(!matches!(layout.hit_test(at), Some(HostPointerTarget::Resize { .. })), "{name} belongs to the content");
+    }
+    for (name, at) in [
+        ("the bottom inset", Point { x: card.origin.x + card.size.width / 2.0, y: bottom - inset_y + 0.5 }),
+        ("the right inset", Point { x: right - inset_x + 0.5, y: card.origin.y + card.size.height / 2.0 }),
+    ] {
+        assert!(matches!(layout.hit_test(at), Some(HostPointerTarget::Resize { .. })), "{name} resizes");
+    }
+}
+
+#[test]
+fn a_short_wide_floating_card_creates_every_handle_it_shares_with_the_header_before_the_header_controls() {
+    let mut raw = raw_floating_card_sized(1.0, false, true, true, Size { width: 280.0, height: 40.0 });
+    let layout = raw.host.frame().unwrap().layout.clone();
+    let card = layout.sections.iter().find(|card| card.section == section("editor-section")).unwrap();
+    assert!(card.header.size.height >= card.outer.size.height, "the header is the whole inline card");
+    let menu = layout.controls.iter().position(|control| matches!(control.target, HostPointerTarget::Menu { .. })).unwrap();
+    let resizes = || layout.controls.iter().enumerate().filter(|(_, control)| matches!(control.target, HostPointerTarget::Resize { .. }));
+    for (index, control) in resizes() {
+        assert!(index < menu, "{control:?} touches the inline header, so header controls must win over it");
+    }
+    let overlap = layout.controls.iter().find_map(|control| {
+        let header_control =
+            !matches!(control.target, HostPointerTarget::Resize { .. } | HostPointerTarget::Surface { .. } | HostPointerTarget::Header { .. });
+        let shared = resizes()
+            .map(|(_, handle)| egui_rect(handle.bounds).intersect(egui_rect(control.bounds)))
+            .find(|shared| header_control && shared.is_positive())?;
+        Some((control.target.clone(), shared.center()))
+    });
+    let (target, centre) = overlap.expect("a header control and a resize handle share pixels");
+    assert_eq!(layout.hit_test(Point { x: centre.x, y: centre.y }), Some(target.clone()));
+    raw.frame(vec![egui::Event::PointerMoved(centre)], false);
+    raw.pointer(centre, true, false);
+    assert!(!raw.host.interaction().is_captured(), "a press on {target:?} never starts a resize");
+}
+
+#[test]
+fn by_default_a_floating_card_keeps_only_its_bottom_right_handle_inside_the_card() {
+    let raw = raw_floating_card_with_grab(1.0, false, false, false, Size { width: 280.0, height: 240.0 }, false);
+    let layout = raw.host.frame().unwrap().layout.clone();
+    let card = floating_card_outer(&raw);
+    let handles: Vec<_> = layout.controls.iter().filter(|control| matches!(control.target, HostPointerTarget::Resize { .. })).collect();
+    assert_eq!(handles.len(), 1);
+    assert!(matches!(handles[0].target, HostPointerTarget::Resize { edge: HostResizeEdge::BottomRight, .. }));
+    assert!(card.contains_rect(handles[0].bounds));
+    assert_eq!(handles[0].bounds, handles[0].ink);
+}
+
+#[test]
+fn turning_wide_grab_off_again_returns_a_floating_card_to_its_bottom_right_handle() {
+    let mut raw = raw_floating_card(1.0, false, false, false);
+    raw.host.set_wide_grab(false);
+    raw.frame(Vec::new(), false);
+    let layout = raw.host.frame().unwrap().layout.clone();
+    let handles: Vec<_> = layout.controls.iter().filter(|control| matches!(control.target, HostPointerTarget::Resize { .. })).collect();
+    assert_eq!(handles.len(), 1);
+    assert!(matches!(handles[0].target, HostPointerTarget::Resize { edge: HostResizeEdge::BottomRight, .. }));
+}
+
+#[test]
+fn a_floating_card_publishes_eight_named_handles_and_one_tab_stop() {
+    let mut raw = raw_floating_card(1.0, false, false, false);
+    let (_, output) = raw.frame(Vec::new(), false);
+    let nodes = output.platform_output.accesskit_update.as_ref().unwrap().nodes.iter();
+    let splitters: Vec<_> = nodes.filter(|(_, node)| node.role() == egui::accesskit::Role::Splitter).collect();
+    let names: std::collections::BTreeSet<_> = splitters.iter().map(|(_, node)| node.label().unwrap_or_default()).collect();
+    assert_eq!((splitters.len(), names.len()), (8, 8), "a screen reader gets eight distinctly named handles");
+    let focusable = splitters.iter().filter(|(_, node)| node.supports_action(egui::accesskit::Action::Focus)).count();
+    assert_eq!(focusable, 1, "only the bottom-right handle is a Tab stop");
+}
+
+#[test]
+fn floating_resize_handles_leave_every_header_tab_alone_in_both_directions() {
+    for rtl in [false, true] {
+        let raw = raw_floating_card(1.0, rtl, false, true);
+        let layout = &raw.host.frame().unwrap().layout;
+        let card = layout.sections.iter().find(|card| card.section == section("editor-section")).unwrap();
+        assert_eq!(card.tabs.len(), 2, "rtl={rtl}");
+        for tab in &card.tabs {
+            for control in layout.controls.iter().filter(|control| matches!(control.target, HostPointerTarget::Resize { .. })) {
+                assert!(
+                    !egui_rect(control.bounds).intersect(egui_rect(tab.bounds)).is_positive()
+                        || matches!(control.target, HostPointerTarget::Resize { edge, .. } if edge.moves_north()),
+                    "rtl={rtl}: {control:?} overlaps {tab:?}"
+                );
+            }
+            let leading =
+                Point { x: if rtl { tab.bounds.origin.x + tab.bounds.size.width - 1.0 } else { tab.bounds.origin.x + 1.0 }, y: middle(tab.bounds).y };
+            assert_eq!(layout.hit_test(leading), Some(HostPointerTarget::Tab { instance: tab.instance.clone() }), "rtl={rtl}");
+        }
+    }
+}
+
+#[test]
+fn a_press_on_a_floating_close_button_closes_even_inside_a_resize_corner() {
+    let close = HostControlTarget::Pointer(HostPointerTarget::Close { instance: id("editor") });
+    for inside_corner in [false, true] {
+        let mut raw = raw_floating_card(1.0, false, true, false);
+        let bounds = raw_control(&raw, &close).bounds;
+        let corner = raw_control(
+            &raw,
+            &HostControlTarget::Pointer(HostPointerTarget::Resize { section: section("editor-section"), edge: HostResizeEdge::TopRight }),
+        )
+        .bounds;
+        let at = if inside_corner {
+            let at = Point { x: bounds.origin.x + bounds.size.width - 1.0, y: bounds.origin.y + 1.0 };
+            assert!(corner.contains(at), "the probe point lies inside the top-right corner square");
+            egui::pos2(at.x, at.y)
+        } else {
+            raw.at(close.clone())
+        };
+        let before = raw.content.runtime.layout().inspect().revision;
+        raw.frame(vec![egui::Event::PointerMoved(at)], false);
+        raw.pointer(at, true, false);
+        assert!(!raw.host.interaction().is_captured(), "a close press never starts a resize");
+        raw.pointer(at, false, true);
+        raw.frame(Vec::new(), false);
+        assert_eq!(raw.content.runtime.layout().inspect().revision, before + 1);
+        assert!(raw.host.frame().unwrap().layout.sections.iter().all(|card| card.section != section("editor-section")));
+    }
+}
+
+#[test]
+fn a_press_three_logical_pixels_off_a_docked_sash_still_captures_it() {
+    let mut content = PanelMountHarness::new(false).unwrap();
+    open_editor(&mut content);
+    content.dispatch(vec![fixture_open("fixture.log", "neighbour", "neighbour-section", Zone::Left, 1).unwrap()]).unwrap();
+    let mut raw = RawPanelHost::new(content, 1.0);
+    raw.host.set_wide_grab(true);
+    raw.frame(Vec::new(), false);
+    let sash = raw.host.frame().unwrap().layout.sashes.first().unwrap().clone();
+    let target = HostControlTarget::Pointer(HostPointerTarget::Sash { first: sash.first, second: sash.second });
+    let control = raw_control(&raw, &target);
+    assert_eq!(control.ink, sash.bounds, "the drawn sash keeps its width");
+    assert!(control.bounds.size.height.min(control.bounds.size.width) >= 8.0);
+    let centre = raw.at(target);
+    let off = if sash.bounds.size.height < sash.bounds.size.width { egui::vec2(0.0, 3.0) } else { egui::vec2(3.0, 0.0) };
+    raw.frame(vec![egui::Event::PointerMoved(centre + off)], false);
+    raw.pointer(centre + off, true, false);
+    assert!(raw.host.interaction().is_captured());
+}
+
+#[test]
+fn by_default_a_docked_sash_grabs_only_what_it_draws() {
+    let mut content = PanelMountHarness::new(false).unwrap();
+    open_editor(&mut content);
+    content.dispatch(vec![fixture_open("fixture.log", "neighbour", "neighbour-section", Zone::Left, 1).unwrap()]).unwrap();
+    let mut raw = RawPanelHost::new(content, 1.0);
+    raw.frame(Vec::new(), false);
+    let layout = raw.host.frame().unwrap().layout.clone();
+    let sash = layout.sashes.first().unwrap().clone();
+    let control = layout.control(&HostPointerTarget::Sash { first: sash.first, second: sash.second }).unwrap();
+    assert_eq!(control.bounds, sash.bounds);
+    assert_eq!(control.ink, sash.bounds);
+}
+
+#[test]
+fn turning_wide_grab_off_and_on_again_rebuilds_the_docked_sash_grab() {
+    let mut content = PanelMountHarness::new(false).unwrap();
+    open_editor(&mut content);
+    content.dispatch(vec![fixture_open("fixture.log", "neighbour", "neighbour-section", Zone::Left, 1).unwrap()]).unwrap();
+    let mut raw = RawPanelHost::new(content, 1.0);
+    let frame = |raw: &mut RawPanelHost, wide: bool| {
+        raw.host.set_wide_grab(wide);
+        raw.frame(Vec::new(), false);
+        let layout = raw.host.frame().unwrap().layout.clone();
+        let sash = layout.sashes.first().unwrap().clone();
+        let control = layout.control(&HostPointerTarget::Sash { first: sash.first, second: sash.second }).unwrap().clone();
+        (control.bounds, sash.bounds, layout.input.len(), layout.occlusion.len())
+    };
+    let (wide_grab, ink, wide_input, wide_occlusion) = frame(&mut raw, true);
+    let (narrow_grab, _, narrow_input, narrow_occlusion) = frame(&mut raw, false);
+    assert_ne!(wide_grab, ink);
+    assert_eq!(narrow_grab, ink);
+    assert!(narrow_input < wide_input && narrow_occlusion < wide_occlusion);
+    assert_eq!(frame(&mut raw, true), (wide_grab, ink, wide_input, wide_occlusion));
+}
+
+#[test]
+fn a_widened_docked_sash_grab_stays_inside_the_input_area_and_the_cards_content_inset() {
+    let mut content = PanelMountHarness::new(false).unwrap();
+    open_editor(&mut content);
+    content.dispatch(vec![fixture_open("fixture.log", "neighbour", "neighbour-section", Zone::Left, 1).unwrap()]).unwrap();
+    let mut raw = RawPanelHost::new(content, 1.0);
+    raw.host.set_wide_grab(true);
+    raw.frame(Vec::new(), false);
+    let layout = raw.host.frame().unwrap().layout.clone();
+    let sash = layout.sashes.first().unwrap().clone();
+    let target = HostPointerTarget::Sash { first: sash.first, second: sash.second };
+    let control = layout.control(&target).unwrap();
+    assert!(control.bounds.size.width.max(control.bounds.size.height) >= sash.bounds.size.width.max(sash.bounds.size.height));
+    let tokens = solidcraft_theme::Tokens::get();
+    let (reach, inset) = if sash.bounds.size.width < sash.bounds.size.height {
+        ((control.bounds.size.width - sash.bounds.size.width) / 2.0, tokens.space_4)
+    } else {
+        ((control.bounds.size.height - sash.bounds.size.height) / 2.0, tokens.space_2)
+    };
+    assert!(reach > 0.0 && reach <= inset, "the grab reaches into a card by no more than the inset render_slot leaves around its content");
+    for point in [control.bounds.origin, middle(control.bounds)] {
+        assert_eq!(layout.hit_test(point).as_ref(), Some(&target));
+        assert!(layout.consumes_pointer(point), "hit-testing and input regions agree");
     }
 }
 
@@ -13666,6 +14084,55 @@ fn plugin_panels_register_declared_zones_and_draw_virtual_table_actions() {
 }
 
 #[test]
+fn plugin_panels_table_rows_support_optional_indent_level() {
+    use solidcraft_engine::plugin::ui::*;
+    let mut panel = plugin_table_snapshot();
+    let ctx = crate::fonts::test_context();
+
+    // Set row 0 with no indent, row 1 with indent 2, and row 2 with an oversized indent 20 (clamped to MAX_TABLE_ROW_INDENT = 8)
+    panel
+        .data
+        .set_data(&[
+            Datum { path: "/tools/0/name".into(), value: UiValue::Text("Root Setup".into()) },
+            Datum { path: "/tools/1/name".into(), value: UiValue::Text("Pocket Operation".into()) },
+            Datum { path: "/tools/1/indent".into(), value: UiValue::Integer(2) },
+            Datum { path: "/tools/2/name".into(), value: UiValue::Text("Deep Nested Item".into()) },
+            Datum { path: "/tools/2/indent".into(), value: UiValue::Integer(20) },
+        ])
+        .unwrap();
+    panel.data.merge_frame();
+
+    let output = crate::test_support::frame(&ctx, Default::default(), |ui| super::plugin::draw(ui, &panel, 0, &mut Vec::new(), "in", 0));
+
+    let Some(shape_root) = crate::test_support::text_shapes(&output).find(|shape| shape.galley.job.text == "Root Setup") else {
+        panic!("root setup shape missing")
+    };
+    let Some(shape_indented) = crate::test_support::text_shapes(&output).find(|shape| shape.galley.job.text == "Pocket Operation") else {
+        panic!("indented shape missing")
+    };
+    let Some(shape_clamped) = crate::test_support::text_shapes(&output).find(|shape| shape.galley.job.text == "Deep Nested Item") else {
+        panic!("clamped shape missing")
+    };
+
+    let base_x = shape_root.pos.x;
+    let expected_indent_2 = base_x + 2.0 * super::plugin::TABLE_ROW_INDENT;
+    let expected_clamped_8 = base_x + (MAX_TABLE_ROW_INDENT as f32) * super::plugin::TABLE_ROW_INDENT;
+
+    assert!(
+        (shape_indented.pos.x - expected_indent_2).abs() < 1e-3,
+        "indent level 2 shifts first cell by 28.0 pt: got {}, expected {}",
+        shape_indented.pos.x,
+        expected_indent_2
+    );
+    assert!(
+        (shape_clamped.pos.x - expected_clamped_8).abs() < 1e-3,
+        "indent level 20 clamped to 8 shifts first cell by 112.0 pt: got {}, expected {}",
+        shape_clamped.pos.x,
+        expected_clamped_8
+    );
+}
+
+#[test]
 fn plugin_panels_sync_errors_remain_observable_until_a_successful_frame() {
     let mut h = plugin_panel_harness();
     let mut panel = plugin_table_snapshot();
@@ -14564,6 +15031,7 @@ fn desktop_panel_windows_reserve_ids_only_after_commit_and_fit_the_current_monit
     let origin = builder.position.unwrap();
     assert!(monitor.contains_rect(egui::Rect::from_min_size((origin.to_vec2() * 2.0).to_pos2(), size * 2.0)));
     assert_eq!(builder.min_inner_size, Some(egui::vec2(min.width, min.height)));
+    assert_eq!(builder.native_owner, Some(egui::ViewportId::ROOT));
 
     adapter.commit(&[HostEffect::ReleaseNative { host: host.clone() }]);
     assert!(adapter.viewport_id(&host).is_none());
@@ -14685,4 +15153,354 @@ fn pop_out_browser_draws_after_the_main_browser_without_replacing_its_rows() {
         assert_eq!(semantic_content::output(ContentOwner::BROWSER).rows, main_rows);
     })
     .drop_without_applying_deltas();
+}
+
+/// Two panels on a native-capable fixture host; `moving` is docked Right.
+fn drag_out_fixture() -> (LayoutService, HostLayout, HostDragOut) {
+    let mut service = fixture_service(true).unwrap();
+    apply_fixture(
+        &mut service,
+        vec![
+            fixture_open("fixture.log", "one", "one", Zone::Left, 0).unwrap(),
+            fixture_open("fixture.log", "moving", "moving", Zone::Right, 1).unwrap(),
+        ],
+    );
+    let host = allocate_fixture(&service, Size { width: 1400.0, height: 900.0 }, Direction::Ltr, &fixture_metric_policy(&service));
+    let window = LogicalRect { origin: Point { x: 0.0, y: 0.0 }, size: Size { width: 1400.0, height: 930.0 } };
+    (service, host, HostDragOut { window, screen_origin: Point { x: 100.0, y: 50.0 } })
+}
+
+#[test]
+fn drag_out_targets_a_desktop_window_only_outside_the_app_and_opens_it_where_it_was_shown() {
+    let (mut service, host, drag_out) = drag_out_fixture();
+    let scope = fixture_scope(&service);
+    let before = service.inspect();
+    let header = HostPointerTarget::Header { instance: id("moving") };
+    let card = host.sections.iter().find(|card| card.instance == id("moving")).unwrap().outer;
+    let outside = Point { x: 1500.0, y: 400.0 };
+    let release = |interaction: &mut HostInteraction, service: &LayoutService, at| {
+        interaction.update(service, &fixture_scope(service), &host, HostPointerEvent::Release { at })
+    };
+
+    // Without the app window (the web, or a platform that does not report its screen
+    // place): a drag past the edge keeps the panel in the app.
+    let mut interaction = HostInteraction::default();
+    fixture_press(&service, &host, &mut interaction, header.clone());
+    assert!(interaction.update(&service, &scope, &host, HostPointerEvent::Move { at: outside }).preview.is_none());
+    assert!(interaction.window_landing().is_none());
+    assert!(release(&mut interaction, &service, outside).candidate.is_none());
+
+    // On: the Window target, its corner placed so the grabbed point stays under the pointer.
+    interaction.set_drag_out(Some(drag_out));
+    let start = fixture_press(&service, &host, &mut interaction, header.clone());
+    let preview = fixture_move(&service, &host, &mut interaction, outside);
+    assert_eq!((preview.target.clone(), preview.rejection.clone()), (Some(HostDropTargetId::Window), None));
+    let corner = Point { x: 100.0 + outside.x - (start.x - card.origin.x), y: 50.0 + outside.y - (start.y - card.origin.y) };
+    assert_eq!(preview.window, Some(corner));
+    assert_eq!(interaction.window_landing(), Some((&id("moving"), corner)));
+    assert_eq!(service.inspect(), before, "a preview never changes the layout");
+    // A landing that was never shown is never committed.
+    assert!(release(&mut interaction, &service, outside).candidate.is_none());
+    assert_eq!(service.inspect(), before);
+
+    // Shown, then left for a dock target inside the app: the shown window is forgotten.
+    fixture_press(&service, &host, &mut interaction, header.clone());
+    fixture_move(&service, &host, &mut interaction, outside);
+    let shown = LogicalRect { origin: corner, size: Size { width: 376.0, height: 488.0 } };
+    interaction.confirm_window_shown(corner, shown);
+    let inside = middle(host.sections.iter().find(|card| card.instance == id("one")).unwrap().outer);
+    assert!(fixture_move(&service, &host, &mut interaction, inside).window.is_none());
+    fixture_move(&service, &host, &mut interaction, outside);
+    assert!(release(&mut interaction, &service, outside).candidate.is_none());
+
+    // Escape cancels a shown Window target.
+    fixture_press(&service, &host, &mut interaction, header.clone());
+    fixture_move(&service, &host, &mut interaction, outside);
+    interaction.confirm_window_shown(corner, shown);
+    interaction.update(&service, &scope, &host, HostPointerEvent::Escape);
+    assert!(release(&mut interaction, &service, outside).candidate.is_none());
+    assert_eq!(service.inspect(), before);
+
+    // A confirmation for another landing is ignored.
+    fixture_press(&service, &host, &mut interaction, header.clone());
+    fixture_move(&service, &host, &mut interaction, outside);
+    interaction.confirm_window_shown(Point { x: 0.0, y: 0.0 }, shown);
+    assert!(release(&mut interaction, &service, outside).candidate.is_none());
+    // After a real one, moving on still opens the window where it was shown, not under the release.
+    fixture_press(&service, &host, &mut interaction, header);
+    fixture_move(&service, &host, &mut interaction, outside);
+    interaction.confirm_window_shown(corner, shown);
+    let further = Point { x: outside.x + 30.0, y: outside.y + 20.0 };
+    assert_ne!(fixture_move(&service, &host, &mut interaction, further).window, Some(corner));
+    // Released back over the app, the Window target does not apply.
+    assert!(release(&mut interaction, &service, Point { x: 700.0, y: 400.0 }).candidate.is_none());
+    // Near a screen edge or on a smaller monitor the window is kept on that monitor,
+    // away from the corner the drag asked for and smaller: it opens as it was shown.
+    fixture_press(&service, &host, &mut interaction, HostPointerTarget::Header { instance: id("moving") });
+    fixture_move(&service, &host, &mut interaction, outside);
+    let kept = LogicalRect { origin: Point { x: corner.x - 40.0, y: corner.y - 60.0 }, size: Size { width: 300.0, height: 400.0 } };
+    interaction.confirm_window_shown(corner, kept);
+    fixture_move(&service, &host, &mut interaction, further);
+    let candidate = release(&mut interaction, &service, further).candidate.expect("the shown Window target commits");
+    assert_eq!(candidate.window_landing(), Some(&(id("moving"), kept)));
+    fixture_commit(&mut service, &host, candidate);
+    let popped = service.layout().containing(&id("moving")).unwrap();
+    let SectionLocation::Window { return_to, .. } = &popped.location else { panic!("{popped:?}") };
+    assert_eq!(return_to.zone, Zone::Right, "closing the window docks the panel where it was");
+}
+
+#[test]
+fn drag_out_refuses_a_panel_that_cannot_pop_out_and_a_host_without_native_windows() {
+    for case in ["no-popout", "no-native"] {
+        let mut service = if case == "no-popout" {
+            let mut service = allocation_service(|spec| spec.features.popout = false);
+            service = LayoutService::new(
+                service.registry().clone(),
+                service.layout().clone(),
+                HostCapabilities { native_windows: true, max_native_hosts: 8, persistence: true },
+            )
+            .unwrap();
+            service
+        } else {
+            fixture_service(false).unwrap()
+        };
+        apply_fixture(&mut service, vec![fixture_open("fixture.log", "moving", "moving", Zone::Right, 0).unwrap()]);
+        let host = allocate_fixture(&service, Size { width: 1400.0, height: 900.0 }, Direction::Ltr, &fixture_metric_policy(&service));
+        let window = LogicalRect { origin: Point { x: 0.0, y: 0.0 }, size: Size { width: 1400.0, height: 930.0 } };
+        let mut interaction = HostInteraction::default();
+        interaction.set_drag_out(Some(HostDragOut { window, screen_origin: Point { x: 0.0, y: 0.0 } }));
+        fixture_press(&service, &host, &mut interaction, HostPointerTarget::Header { instance: id("moving") });
+        let preview = fixture_move(&service, &host, &mut interaction, Point { x: 1500.0, y: 400.0 });
+        assert!(preview.rejection.is_some() && preview.window.is_none(), "{case}");
+        assert!(interaction.window_landing().is_none(), "{case}");
+    }
+}
+
+#[test]
+fn a_dropped_window_opens_at_the_shown_place_kept_on_its_monitor() {
+    use super::native::{DesktopNativeAdapter, NativeMonitor};
+
+    let mut adapter = DesktopNativeAdapter::default();
+    let monitor = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(2000.0, 1600.0));
+    let monitors = || vec![NativeMonitor { name: Some("Primary".into()), bounds: monitor, scale: 2.0, primary: true }];
+    let ctx = egui::Context::default();
+    let instance = InstanceId::new("drop-panel").unwrap();
+    let bounds = (Size { width: 200.0, height: 100.0 }, Size { width: 900.0, height: 900.0 });
+    let preferred = Size { width: 360.0, height: 440.0 };
+    // No panel window is open yet: the monitors are read once a drag asks
+    // where its window would land, so the first window out is placed too.
+    adapter.update_monitors(monitors);
+    let unknown = adapter.landing(&ctx, &instance, egui::pos2(900.0, 700.0), preferred, bounds).unwrap();
+    assert_eq!(unknown.min, egui::pos2(900.0, 700.0), "no monitor was read before the drag asked");
+    adapter.update_monitors(monitors);
+    // On the monitor: the landing is the window's outer rectangle at the corner.
+    let shown = adapter.landing(&ctx, &instance, egui::pos2(100.0, 80.0), preferred, bounds).unwrap();
+    assert_eq!(shown.min, egui::pos2(100.0, 80.0));
+    let host = HostId::new("drop-test").unwrap();
+    let create = [HostEffect::CreateNative { host: host.clone(), section: SectionId::new("drop-section").unwrap() }];
+    adapter.prepare(&create).unwrap();
+    adapter.commit(&create);
+    adapter.place(&ctx, &instance, shown);
+    let builder = adapter.builder(&ctx, &host, &instance, "Panel".into(), preferred, bounds).unwrap();
+    assert_eq!(builder.position, Some(shown.min));
+    assert_eq!(builder.inner_size, Some(egui::vec2(360.0, 440.0)));
+    // Past the monitor's edge: shown and opened at the same kept-on-screen place.
+    let edge = adapter.landing(&ctx, &instance, egui::pos2(900.0, 700.0), preferred, bounds).unwrap();
+    assert!(edge.max.x <= 1000.0 && edge.max.y <= 800.0, "{edge:?}");
+    adapter.place(&ctx, &instance, edge);
+    let builder = adapter.builder(&ctx, &host, &instance, "Panel".into(), preferred, bounds).unwrap();
+    assert_eq!(builder.position, Some(edge.min));
+
+    // The drag shows the window itself at the landing, passed through and above
+    // other windows, and the panel's new host keeps that window when it opens.
+    // The landing is the window with the system's frame and title bar around it.
+    let content = egui::vec2(preferred.width, preferred.height);
+    let frame = shown.size() - content;
+    assert!(frame.y > 0.0, "{frame:?}");
+    // Its content has the size the panel has in the app, not one remembered from before.
+    let docked = Size { width: 250.0, height: 355.0 };
+    assert_eq!(adapter.landing(&ctx, &instance, egui::pos2(100.0, 80.0), docked, bounds).unwrap().size(), egui::vec2(250.0, 355.0) + frame);
+    let other = InstanceId::new("other-panel").unwrap();
+    let landing = adapter.landing(&ctx, &other, egui::pos2(100.0, 80.0), preferred, bounds).unwrap();
+    assert_eq!(landing, egui::Rect::from_min_size(egui::pos2(100.0, 80.0), content + frame));
+    let (dropped, window) = adapter.drop_window(&other, "Other".into(), landing);
+    assert_eq!((window.position, window.inner_size), (Some(landing.min), Some(content)));
+    assert_eq!((window.mouse_passthrough, window.window_level, window.active), (Some(true), Some(egui::WindowLevel::AlwaysOnTop), Some(false)));
+    // It is the window Pop out to window opens: the system's own title bar.
+    assert_eq!((window.decorations, window.fullsize_content_view, window.title_shown), (None, None, None));
+    assert_eq!(adapter.drop_window(&other, "Other".into(), landing).0, dropped, "one window for the whole drag");
+    // It is drawn only once the OS has created it, visible but not activated: shown
+    // later, a hidden window would take the app's focus and cancel the drag.
+    assert!(adapter.drop_ready(&ctx, &window).is_err(), "no OS windows where viewports are embedded");
+    let desktop = egui::Context::default();
+    desktop.set_embed_viewports(false);
+    let mut waiting = false;
+    let mut output = desktop.run_ui(egui::RawInput::default(), |ui| waiting = adapter.drop_ready(ui.ctx(), &window) == Ok(false));
+    output.textures_delta.clear();
+    assert!(waiting);
+    assert_eq!(
+        output.viewport_output.get(&dropped).map(|viewport| (viewport.builder.visible, viewport.builder.active)),
+        Some((Some(true), Some(false)))
+    );
+    let mut created = egui::RawInput::default();
+    created.viewports.entry(dropped).or_default().native_pixels_per_point = Some(2.0);
+    desktop.run_ui(created, |ui| assert_eq!(adapter.drop_ready(ui.ctx(), &window), Ok(true))).textures_delta.clear();
+    assert_eq!(window.visible, Some(true));
+    let opened = HostId::new("drop-opened").unwrap();
+    let create = [HostEffect::CreateNative { host: opened.clone(), section: SectionId::new("opened-section").unwrap() }];
+    adapter.prepare(&create).unwrap();
+    adapter.commit(&create);
+    assert_eq!(adapter.adopt(&opened, &instance), None, "only the dropped panel's host keeps the window");
+    assert_eq!(adapter.adopt(&opened, &other), Some(dropped));
+    assert_eq!(adapter.viewport_id(&opened), Some(dropped));
+    adapter.place(&ctx, &other, landing);
+    let window = adapter.builder(&ctx, &opened, &other, "Other".into(), preferred, bounds).unwrap();
+    assert_eq!((window.mouse_passthrough, window.window_level), (Some(false), Some(egui::WindowLevel::Normal)));
+    assert_eq!((window.position, window.inner_size), (Some(landing.min), Some(content)));
+    assert_ne!(adapter.drop_window(&other, "Other".into(), landing).0, dropped, "the next drag shows a new window");
+    // The window's content has its card's size, with the window's row of actions
+    // in the header's place: the body keeps its size. A panel from the bottom
+    // strip opens in the shape of a new side column instead.
+    let card = Size { width: 248.0, height: 325.0 };
+    assert_eq!(super::app::drop_window_size(Zone::Left, card, 27.0, 30.0, 250.0, 700.0), Size { width: 248.0, height: 325.0 - 27.0 + 30.0 });
+    assert_eq!(super::app::drop_window_size(Zone::Left, card, 27.0, 0.0, 250.0, 700.0), Size { width: 248.0, height: 325.0 - 27.0 });
+    let strip = Size { width: 1784.0, height: 44.0 };
+    assert_eq!(super::app::drop_window_size(Zone::Bottom, strip, 44.0, 30.0, 250.0, 700.0), Size { width: 250.0, height: 700.0 });
+    // From the bottom strip it stays taller than wide, so its panel keeps a side
+    // card's vertical layout, however short its content.
+    let short = super::app::portrait(Size { width: 266.0, height: 92.0 });
+    assert_eq!(responsive(Zone::Window, short, None).unwrap().0, Flow::Tall, "{short:?}");
+    assert_eq!(super::app::portrait(Size { width: 266.0, height: 500.0 }), Size { width: 266.0, height: 500.0 });
+    // Its height then follows the panel's measured content when the panel sizes to
+    // its content; unmeasured or filling, it does not.
+    let measured = |policy, height| AllocationMetricsFixture {
+        revision: 1,
+        policies: [(id("other"), policy)].into_iter().collect(),
+        width: None,
+        narrow_height: height,
+        wide_height: height,
+    };
+    let sized = measured(SideHeightPolicy::Content, 330.0);
+    assert_eq!(super::app::content_height(Some(&sized), &id("other"), 250.0, 60.0), Some(330.0));
+    assert_eq!(super::app::content_height(Some(&measured(SideHeightPolicy::Fill, 330.0)), &id("other"), 250.0, 60.0), None);
+    assert_eq!(super::app::content_height(Some(&measured(SideHeightPolicy::Content, MAX_LOGICAL)), &id("other"), 250.0, 60.0), None);
+    assert_eq!(super::app::content_height(None, &id("other"), 250.0, 60.0), None);
+}
+
+#[test]
+fn raw_host_paints_a_panel_dragged_out_of_the_bottom_strip_as_a_side_card_for_its_window() {
+    let mut h = PanelMountHarness::new(true).unwrap();
+    // Another panel already fills the left column.
+    h.dispatch(vec![
+        fixture_open("fixture.log", "one", "one", Zone::Left, 0).unwrap(),
+        fixture_open("fixture.editor", "editor", "editor-section", Zone::Bottom, 1).unwrap(),
+    ])
+    .unwrap();
+    let mut raw = RawPanelHost::new(h, 1.0);
+    raw.inner_origin = Some(egui::pos2(200.0, 100.0));
+    raw.host.set_live_drag(true);
+    raw.frame(Vec::new(), false);
+    let strip = raw.host.frame().unwrap().layout.sections.iter().find(|card| card.instance == id("editor")).unwrap().clone();
+    let one = raw.host.frame().unwrap().layout.sections.iter().find(|card| card.instance == id("one")).unwrap().clone();
+    assert_eq!(strip.zone, Zone::Bottom);
+    let start = raw.at(HostControlTarget::Pointer(HostPointerTarget::Header { instance: id("editor") }));
+    let outside = egui::pos2(1500.0, 400.0);
+    raw.pointer(start, true, false);
+    raw.frame(vec![egui::Event::PointerMoved(outside)], false);
+    raw.frame(vec![egui::Event::PointerMoved(outside)], false);
+    assert!(raw.host.window_landing_preview().is_some(), "past the edge, the Window target is offered");
+    // Its body is laid out once as the side card the app's left edge would dock it
+    // as: a new column of the full height, not the space left under another panel.
+    // Its window's preview shows that paint.
+    let side = raw.host.leaving_side_card().expect("a panel from the bottom strip is painted as a side card").clone();
+    assert!(side.zone.side() && !side.inline && side.body.is_some(), "{side:?}");
+    assert!(side.outer.size.width < strip.outer.size.width, "{side:?}");
+    assert!(
+        side.outer.origin.y <= one.outer.origin.y + 0.5 && side.outer.size.height >= one.outer.size.height - 0.5,
+        "{side:?} is not stacked under {one:?}"
+    );
+    let target = egui::Rect::from_min_size(egui::pos2(8.0, 40.0), egui::vec2(side.outer.size.width, side.outer.size.height));
+    let mut output = egui::Context::default()
+        .run_ui(egui::RawInput::default(), |ui| raw.host.window_card().expect("the side card's paint goes with it").paint(ui, target));
+    output.textures_delta.clear();
+    assert!(output.shapes.iter().any(|shape| matches!(shape.shape, egui::Shape::Text(_))), "{:?}", output.shapes);
+    // Back over the app, it is the strip again.
+    raw.frame(vec![egui::Event::PointerMoved(start)], false);
+    raw.frame(vec![egui::Event::PointerMoved(start)], false);
+    assert!(raw.host.leaving_side_card().is_none());
+    raw.frame(
+        vec![egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }],
+        false,
+    );
+}
+
+#[test]
+fn raw_host_drags_a_panel_out_to_a_desktop_window_keeping_its_editor() {
+    let mut h = PanelMountHarness::new(true).unwrap();
+    open_editor(&mut h);
+    let key = editor_key(&h);
+    h.probe.edit(&key, |state| state.draft = "torn-off draft".into()).unwrap();
+    let mut raw = RawPanelHost::new(h, 1.0);
+    // As in the app by default: live paint hides the panel leaving the app.
+    raw.host.set_live_drag(true);
+    raw.frame(Vec::new(), false);
+    let docked = raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().location.clone();
+    let start = raw.at(HostControlTarget::Pointer(HostPointerTarget::Header { instance: id("editor") }));
+    let card = raw.host.frame().unwrap().layout.sections.iter().find(|card| card.instance == id("editor")).unwrap().outer;
+    let outside = egui::pos2(1500.0, 400.0);
+
+    // Where the platform does not report the app window's screen place, there is no
+    // Window target: a drag past the edge keeps the panel in the app.
+    raw.pointer(start, true, false);
+    raw.frame(vec![egui::Event::PointerMoved(outside)], false);
+    assert!(raw.host.window_landing_preview().is_none());
+    raw.pointer(outside, false, false);
+    raw.frame(Vec::new(), false);
+    assert_eq!(raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().location, docked);
+    raw.inner_origin = Some(egui::pos2(200.0, 100.0));
+    raw.frame(Vec::new(), false);
+
+    // Out: the host offers the window's place, opens it only once shown, and hands
+    // the shown rectangle to the desktop adapter.
+    raw.pointer(start, true, false);
+    raw.frame(vec![egui::Event::PointerMoved(outside)], false);
+    let (instance, corner) = raw.host.window_landing_preview().expect("past the edge, the Window target is offered");
+    assert_eq!(instance, id("editor"));
+    // On the screen, the grabbed point of the header stays under the pointer.
+    assert_eq!(corner, Point { x: 200.0 + outside.x - (start.x - card.origin.x), y: 100.0 + outside.y - (start.y - card.origin.y) });
+    // Its preview window shows the panel itself, from this frame's paint, in the window's content.
+    let target = egui::Rect::from_min_size(egui::pos2(8.0, 40.0), egui::vec2(360.0, 440.0));
+    let mut output = egui::Context::default()
+        .run_ui(egui::RawInput::default(), |ui| raw.host.window_card().expect("the panel's paint goes with it").paint(ui, target));
+    output.textures_delta.clear();
+    let painted = output.shapes;
+    assert!(painted.iter().any(|shape| matches!(shape.shape, egui::Shape::Text(_))), "{painted:?}");
+    assert!(painted.iter().all(|shape| target.contains_rect(shape.clip_rect)), "{painted:?}");
+    // The window's title bar shows the title: the copy leaves out the docked header.
+    let title = raw.content.runtime.instance_presentation(&id("editor")).unwrap().title;
+    assert!(!painted.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == title)), "{painted:?}");
+    let shown = LogicalRect { origin: corner, size: Size { width: 376.0, height: 488.0 } };
+    raw.host.confirm_window_shown(corner, shown);
+    raw.frame(
+        vec![egui::Event::PointerButton { pos: outside, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE }],
+        false,
+    );
+    raw.frame(Vec::new(), false);
+    assert_eq!(raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().location.zone(), Zone::Window);
+    assert_eq!(raw.host.take_window_landing(), Some((id("editor"), shown)));
+    assert!(raw.host.window_card().is_none(), "the preview ends with the drag");
+    let state = raw.content.probe.state(&key).unwrap();
+    assert_eq!((state.draft.as_str(), state.transaction_live), ("torn-off draft", true));
+    assert_eq!((state.applies, state.cancels), (0, 0));
+
+    // Closing the window docks the panel where it was, as after Pop out to window.
+    let host = match &raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().location {
+        SectionLocation::Window { host, .. } => host.clone(),
+        other => panic!("{other:?}"),
+    };
+    raw.content.dispatch(vec![Mutation::NativeClose { host }]).unwrap();
+    raw.frame(Vec::new(), false);
+    assert_eq!(raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().location, docked);
+    let state = raw.content.probe.state(&key).unwrap();
+    assert_eq!((state.draft.as_str(), state.transaction_live), ("torn-off draft", true));
 }

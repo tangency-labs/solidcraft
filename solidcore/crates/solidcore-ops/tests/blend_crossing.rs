@@ -460,3 +460,190 @@ fn rounds_whose_rails_cross_past_their_edges_ends_on_a_sphere_are_refused() {
         }
     }
 }
+
+/// SolidCraft #21417: a 230 x 96 x 18 slab with a slot cut down 13 mm from z = 18
+/// (`(55, 2) -> (55 + skew, 11) -> (225, 11) -> (225, 2)`) and a trench cut 20 mm toward -X from
+/// x = 54 (`y` in `[0.75, 12.25]`, `z` in `[11.25, 19]`), leaving a ~1 mm wide land between them on
+/// z = 18.
+fn skewed_land_part(skew: f64, trench_tilt: f64, with_hole: bool) -> (Body, [usize; 2]) {
+    all_fixes();
+    let base = make_box([0.0, 0.0, 0.0], [230.0, 96.0, 18.0]).unwrap();
+    let slot_pts = [
+        [55.0, 2.0, 18.0],
+        [55.0 + skew, 11.0, 18.0],
+        [225.0, 11.0, 18.0],
+        [225.0, 2.0, 18.0],
+    ];
+    let slot_curves: Vec<Curve> = (0..4)
+        .map(|i| Curve::Line {
+            start: slot_pts[i],
+            end: slot_pts[(i + 1) % 4],
+        })
+        .collect();
+    let slot = extrude(
+        &slot_curves,
+        [0.0, 0.0, -1.0],
+        13.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let with_slot = boolean(base, slot, BooleanOp::Subtract).unwrap().unwrap();
+    let trench = if trench_tilt == 0.0 {
+        make_box([34.0, 0.75, 11.25], [20.0, 11.5, 7.75]).unwrap()
+    } else {
+        let pt = |u: f64, v: f64| [54.0 + u * trench_tilt, u, v];
+        let corners = [
+            pt(0.75, 11.25),
+            pt(0.75, 19.0),
+            pt(12.25, 19.0),
+            pt(12.25, 11.25),
+        ];
+        let curves: Vec<Curve> = (0..4)
+            .map(|i| Curve::Line {
+                start: corners[i],
+                end: corners[(i + 1) % 4],
+            })
+            .collect();
+        // Extrude along the tilted plane's normal toward -X.
+        extrude(
+            &curves,
+            [-1.0, trench_tilt, 0.0],
+            20.0,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap()
+    };
+    let mut part = boolean(with_slot, trench, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    if with_hole {
+        let hole = make_cylinder([54.5, 6.5, 5.0], 0.25, 14.0).unwrap();
+        part = boolean(part, hole, BooleanOp::Subtract).unwrap().unwrap();
+    }
+    let trench_mid = [54.0 + 6.5 * trench_tilt, 6.5, 18.0];
+    let edges = [
+        edge_at(&part, [55.0 + 0.5 * skew, 6.5, 18.0]),
+        edge_at(&part, trench_mid),
+    ];
+    (part, edges)
+}
+
+#[test]
+fn chamfers_consuming_a_skewed_land_are_refused_with_fit() {
+    // Expected closed fits: `narrow_width * cos(theta) / (1 + cos(theta))`,
+    // with `cos(theta) = 9 / sqrt(81 + skew^2)`.
+    let cases = [
+        (0.0, 0.5),
+        (1.4e-14, 0.5),
+        (1e-10, 0.5),
+        (1e-6, 0.5),
+        (1e-5, 0.5),
+        (1e-4, 0.5),
+        (1e-3, 0.499_999_998_456_793_9),
+        (-1e-6, 0.499_999_5),
+        (1.0, 0.498_466_243_236_750_5),
+    ];
+    for (skew, expected_fit) in cases {
+        let (part, edges) = skewed_land_part(skew, 0.0, false);
+        for d in [0.9, 1.0] {
+            let c = part.copy().unwrap();
+            let err = blend(&c, Blend::Chamfer, &edges, &[d], &[], Corners::Filled).unwrap_err();
+            let Error::TooLarge {
+                size,
+                kind: FitKind::Distance,
+                face: Some(_),
+                why: Some(RoomReason::BandsOverlap),
+                ..
+            } = err
+            else {
+                panic!("skew={skew:e} d={d}: expected TooLarge(BandsOverlap), got {err:?}");
+            };
+            assert!(
+                (size - expected_fit).abs() <= 1e-9,
+                "skew={skew:e} d={d}: fit {size} vs {expected_fit}"
+            );
+        }
+        // Control below the limit still builds a valid closed solid.
+        let control = if skew == 1.0 { 0.498 } else { 0.49 };
+        let c = part.copy().unwrap();
+        blend(&c, Blend::Chamfer, &edges, &[control], &[], Corners::Filled)
+            .unwrap_or_else(|e| panic!("skew={skew:e} d={control}: {e:?}"));
+        assert!(
+            c.check(CheckLevel::All).unwrap().is_valid(),
+            "skew={skew:e} d={control} invalid"
+        );
+    }
+}
+
+#[test]
+fn chamfers_on_a_land_with_tilted_trench_plane_or_hole_are_refused_with_fit() {
+    for tilt in [1e-15, 1e-12, 1e-10] {
+        let (part, edges) = skewed_land_part(0.0, tilt, false);
+        let c = part.copy().unwrap();
+        let err = blend(&c, Blend::Chamfer, &edges, &[1.0], &[], Corners::Filled).unwrap_err();
+        let Error::TooLarge {
+            size,
+            kind: FitKind::Distance,
+            face: Some(_),
+            why: Some(RoomReason::BandsOverlap),
+            ..
+        } = err
+        else {
+            panic!("tilt={tilt:e}: expected TooLarge(BandsOverlap), got {err:?}");
+        };
+        assert!((size - 0.5).abs() <= 1e-7, "tilt={tilt:e}: fit {size}");
+    }
+    let (part, edges) = skewed_land_part(1e-6, 0.0, true);
+    let c = part.copy().unwrap();
+    let err = blend(&c, Blend::Chamfer, &edges, &[1.0], &[], Corners::Filled).unwrap_err();
+    let Error::TooLarge {
+        size,
+        kind: FitKind::Distance,
+        face: Some(_),
+        why: Some(RoomReason::BandsOverlap),
+        ..
+    } = err
+    else {
+        panic!("hole: expected TooLarge(BandsOverlap), got {err:?}");
+    };
+    assert!((size - 0.5).abs() <= 1e-9, "hole: fit {size}");
+
+    // Hole covering the narrow end (`y = 2`) of a tapered land (`skew = 1.0`,
+    // width `1 + (y - 2) / 9`): the lower end of the bisector is off-face, so
+    // the contact moves to the on-face hole rim at `y = 2.5` (`width = 1 + 0.5 / 9`).
+    let (base_taper, _) = skewed_land_part(1.0, 0.0, false);
+    let end_hole = make_cylinder([54.5, 2.0, 5.0], 0.5, 14.0).unwrap();
+    let holed_end = boolean(base_taper, end_hole, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let holed_edges = [
+        edge_at(&holed_end, [55.5, 6.5, 18.0]),
+        edge_at(&holed_end, [54.0, 6.5, 18.0]),
+    ];
+    let err = blend(
+        &holed_end,
+        Blend::Chamfer,
+        &holed_edges,
+        &[1.0],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap_err();
+    let Error::TooLarge {
+        size,
+        kind: FitKind::Distance,
+        face: Some(_),
+        why: Some(RoomReason::BandsOverlap),
+        ..
+    } = err
+    else {
+        panic!("end hole: expected TooLarge(BandsOverlap), got {err:?}");
+    };
+    // At y ~ 2.5 the land is ~1.0556 wide, so the on-face bisector fit is ~0.526 mm
+    // (strictly above the y = 2 cap fit 0.4985 mm, and well below 1.0 mm).
+    assert!(size > 0.52 && size < 0.54, "end hole: fit {size}");
+}

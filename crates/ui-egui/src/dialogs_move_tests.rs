@@ -2476,3 +2476,46 @@ fn a_faces_own_edges_and_rims_keep_its_points() {
         assert!(matches!(h.app.viewport.woken.item, Some(Sel::Face { .. })) && woken_has(&h, corner), "{edge:?}: {:?}", h.app.viewport.woken);
     }
 }
+
+/// A Free Move that turns the bodies turns them about the bodies' own centre and saves that
+/// pivot, so the X/Y/Z distances it shows are the ones the feature stores, and the edit shows
+/// them again (#10656).
+#[test]
+fn a_free_move_keeps_the_pivot_it_turns_about() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20})).unwrap();
+    h.app.start("solid.move");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+        if let Kind::Move { rx, ry, rz, .. } = &mut d.kind {
+            (*rx, *ry, *rz) = ("10 deg".into(), "10 deg".into(), "10 deg".into());
+        }
+    }
+    h.settle();
+    let d = h.app.dialog.clone().unwrap();
+    let p = params(&h.app, &d).unwrap();
+    // The turn is about the bodies' centre, and the distances are the ones that were typed:
+    // the feature stores a turn about a point, not a turn about the world origin and a shift.
+    assert_eq!(p["origin"], json!(["10 mm", "10 mm", "10 mm"]), "the pivot is saved: {p}");
+    assert_eq!(p["translate"], json!(["0 mm", "0 mm", "0 mm"]), "the distances are the ones typed: {p}");
+    // The bodies turn on the spot: their centre does not move.
+    let m = transform(&h.app, &p).unwrap();
+    let centre = Vec3::new(10.0, 10.0, 10.0);
+    assert!((apply_point(&m, centre) - centre).len() < 1e-6, "the bodies turn on the spot: {m:?}");
+    // The edit shows the same distances, and saving it again does not move the bodies.
+    let id = h.app.run("solid.move", p.clone()).unwrap()["feature"].as_u64().unwrap();
+    let before = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().bounds();
+    let d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    if let Kind::Move { x, y, z, .. } = &d.kind {
+        assert_eq!((x.as_str(), y.as_str(), z.as_str()), ("0 mm", "0 mm", "0 mm"), "the edit shows the stored distances");
+    }
+    for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    let after = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().bounds();
+    assert!(
+        (after.min - before.min).len() < 1e-6 && (after.max - before.max).len() < 1e-6,
+        "saving the edit again does not move the bodies: {before:?} -> {after:?}"
+    );
+}

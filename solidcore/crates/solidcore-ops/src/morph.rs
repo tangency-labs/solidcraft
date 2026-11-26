@@ -2,18 +2,20 @@
 //!
 //! Maps a target body's geometry relative to a base reference surface onto a target reference
 //! surface using [`solidcore::deform::deform_brep_by_surface`]. Ops validates record indices,
-//! converts through `solidcore-convert`, sequences the kernel call, and converts the result
-//! back to a [`solidcore_record::brep::Brep`]; all geometric computation lives in `solidcore`.
+//! converts through `solidcore-convert`, sequences the kernel call, enforces the result
+//! contract via [`crate::body::finish`], and converts the result back to a
+//! [`solidcore_record::brep::Brep`]; all geometric computation lives in `solidcore`.
 
 use solidcore::deform::{
-    deform_brep_by_surface, DeformOptions, MapMode as CoreMapMode,
-    ProjectionMode as CoreProjectionMode, SurfaceToSurfaceOptions,
+    deform_brep_by_surface, is_valid_direction as core_is_valid_direction, DeformOptions,
+    MapMode as CoreMapMode, ProjectionMode as CoreProjectionMode, SurfaceToSurfaceOptions,
 };
 use solidcore::geom::vector3d::Vec3;
 use solidcore::topology::FaceId;
 use solidcore_convert::brep::{to_kernel, to_record, Unsupported};
 use solidcore_record::brep::Brep as Record;
 
+use crate::body::{finish, refused, Expect};
 use crate::error::status;
 use crate::order;
 use crate::session::run;
@@ -73,13 +75,20 @@ impl Default for MorphOptions {
     }
 }
 
+/// Whether `dir` is a valid finite non-zero direction vector for directional morph projection.
+#[must_use]
+pub fn is_valid_direction(dir: [f64; 3]) -> bool {
+    core_is_valid_direction(Vec3::new(dir[0], dir[1], dir[2]))
+}
+
 /// Morph `target` (a solid or sheet B-rep record) by mapping `base`'s face `base_face_idx`
 /// onto `control`'s face `control_face_idx`.
 ///
 /// # Errors
 ///
 /// Returns [`Error::Argument`] if any face index is out of range or options are invalid,
-/// [`Error::Record`] if a record cannot be converted, or the kernel's failure status.
+/// [`Error::Record`] if a record cannot be converted, [`Error::NotSolidBecause`] if a solid
+/// input produces an invalid or non-outward result, or the kernel's failure status.
 pub fn morph_by_surface(
     target: &Record,
     base: &Record,
@@ -90,27 +99,27 @@ pub fn morph_by_surface(
 ) -> Result<Record> {
     let mut refusal: Option<Error> = None;
     let out = run("morph::by_surface", |k| {
-        let (target_brep, target_order) = match to_kernel(k, target, true) {
+        let (mut target_brep, target_order) = match to_kernel(k, target, true) {
             Ok(pair) => pair,
             Err(Unsupported::Kernel(e)) => return Err(e),
-            Err(_) => {
-                refusal = Some(Error::Argument);
+            Err(e) => {
+                refusal = Some(refused(e));
                 return Ok(None);
             }
         };
         let (mut base_brep, base_order) = match to_kernel(k, base, true) {
             Ok(pair) => pair,
             Err(Unsupported::Kernel(e)) => return Err(e),
-            Err(_) => {
-                refusal = Some(Error::Argument);
+            Err(e) => {
+                refusal = Some(refused(e));
                 return Ok(None);
             }
         };
         let (mut control_brep, control_order) = match to_kernel(k, control, true) {
             Ok(pair) => pair,
             Err(Unsupported::Kernel(e)) => return Err(e),
-            Err(_) => {
-                refusal = Some(Error::Argument);
+            Err(e) => {
+                refusal = Some(refused(e));
                 return Ok(None);
             }
         };
@@ -148,6 +157,8 @@ pub fn morph_by_surface(
             }
         };
 
+        let expect = Expect::of(k, &mut target_brep)?;
+
         let projection = match options.projection {
             MorphProjection::Normal => CoreProjectionMode::Normal,
             MorphProjection::Direction(d) => {
@@ -174,7 +185,7 @@ pub fn morph_by_surface(
             faces: face_ids,
         };
 
-        let mut deformed = match deform_brep_by_surface(
+        let deformed = match deform_brep_by_surface(
             k,
             &target_brep,
             &mut base_brep,
@@ -191,12 +202,20 @@ pub fn morph_by_surface(
             }
         };
 
-        match to_record(k, &mut deformed) {
+        let mut finished = match finish(k, deformed, expect)? {
+            Ok(b) => b,
+            Err(e) => {
+                refusal = Some(e);
+                return Ok(None);
+            }
+        };
+
+        match to_record(k, &mut finished) {
             Ok((rec, _)) => Ok(Some(rec)),
             Err(Unsupported::Kernel(e)) => Err(e),
-            Err(_) => {
-                refusal = Some(Error::Argument);
-                return Ok(None);
+            Err(e) => {
+                refusal = Some(refused(e));
+                Ok(None)
             }
         }
     })?;

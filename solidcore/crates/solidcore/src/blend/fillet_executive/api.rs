@@ -1,4 +1,4 @@
-//! Public fillet entry points: fillet B-rep edges through one live fillet session.
+//! Public fillet entry points: fillet B-rep edges through live fillet sessions.
 //!
 //! Upstream: `source/SM_API/src/SmApiBrep.cpp` (`SmApiFilletEdges` 2049-2087,
 //! `SmApiFilletEdgesPerEdge` 2094-2135, `SmApiVariableRadiusFillet` 2142-2178,
@@ -63,7 +63,9 @@
 //! ([`is_radius_supported`]). No recursion.
 
 use super::p1::is_radius_supported;
+use super::p3::{FitKind, FitSize, NoRoomReason};
 use super::session::FilletSession;
+use crate::blend::blend_corner::separate_ends::{plan, SectionKind, SeparateEndPlan};
 use crate::blend::fillet_executive::p2::SurfaceFilletOptions;
 use crate::blend::fillet_geom::p1::FilletSolverId;
 use crate::blend::fillet_solver::p1::{
@@ -213,6 +215,18 @@ pub fn fillet_edges(
     }
     supported_size(radius, brep)?;
     keeping_a_solid_closed(k, brep, |k, brep| {
+        let kind = match xsect_type {
+            0 => Some((SectionKind::Chamfer, FilletSurfaceGeneratorType::Linear)),
+            2 => None,
+            _ => Some((SectionKind::Round, FilletSurfaceGeneratorType::Circular)),
+        };
+        if let Some((kind, section)) = kind {
+            if try_separate_ends(k, brep, edges, &[radius], kind, |k, brep, picks, sizes| {
+                constant_group(k, brep, picks, sizes, section, continuity, thumbweight)
+            })? {
+                return Ok(());
+            }
+        }
         {
             let mut session = FilletSession::new(k, brep)?;
             session
@@ -257,6 +271,20 @@ pub fn fillet_edges_per_edge(
         supported_size(radius, brep)?;
     }
     keeping_a_solid_closed(k, brep, |k, brep| {
+        if let Some(&section) = xsect_types.first() {
+            let kind = match section {
+                FilletSurfaceGeneratorType::Linear => Some(SectionKind::Chamfer),
+                FilletSurfaceGeneratorType::Circular => Some(SectionKind::Round),
+                _ => None,
+            };
+            if let Some(kind) = kind.filter(|_| xsect_types.iter().all(|&s| s == section)) {
+                if try_separate_ends(k, brep, edges, radii, kind, |k, brep, picks, sizes| {
+                    constant_group(k, brep, picks, sizes, section, continuity, thumbweight)
+                })? {
+                    return Ok(());
+                }
+            }
+        }
         {
             let mut session = FilletSession::new(k, brep)?;
             session
@@ -272,6 +300,72 @@ pub fn fillet_edges_per_edge(
         }?;
         stitch_and_orient(k, brep, &StitchAndOrientOptions::default())
     })
+}
+
+/// Use the corner plan for two independent groups, inside the API's whole-body transaction.
+fn try_separate_ends(
+    k: &mut Kernel,
+    b: &mut Brep,
+    edges: &[EdgeId],
+    sizes: &[f64],
+    kind: SectionKind,
+    mut pass: impl FnMut(&mut Kernel, &mut Brep, &[EdgeId], &[f64]) -> Result<()>,
+) -> Result<bool> {
+    match plan(k, b, edges, sizes, kind)? {
+        SeparateEndPlan::NotApplicable => Ok(false),
+        SeparateEndPlan::Limited { size, edge } => {
+            supported_size(size, b)?;
+            Err(SolidError::FilletRefused {
+                operation: OP,
+                code: crate::error::SM_ERR,
+                entity: Some(EntityRef::Edge(edge)),
+                reason: Some(NoRoomReason::RailLeavesFace),
+                fit: FitSize {
+                    size,
+                    edge: Some(edge),
+                    kind: FitKind::Radius,
+                },
+            })
+        }
+        SeparateEndPlan::Ends(groups) => {
+            let before = k.blend_face_log.clone();
+            let result = groups
+                .build(k, b, edges, sizes, |k, b, picks, widths| {
+                    Ok(pass(k, b, picks, widths))
+                })
+                .and_then(std::convert::identity);
+            if result.is_err() {
+                k.blend_face_log = before;
+            }
+            result.map(|()| true)
+        }
+    }
+}
+
+fn constant_group(
+    k: &mut Kernel,
+    b: &mut Brep,
+    edges: &[EdgeId],
+    sizes: &[f64],
+    section: FilletSurfaceGeneratorType,
+    continuity: u32,
+    thumbweight: f64,
+) -> Result<()> {
+    {
+        let mut session = FilletSession::new(k, b)?;
+        session.prepare_per_edge_constant_radius(
+            k,
+            edges,
+            sizes,
+            &[section],
+            continuity,
+            thumbweight,
+        )?;
+        session.do_fillet(k)?;
+    }
+    stitch_and_orient(k, b, &StitchAndOrientOptions::default())?;
+    b.refresh_cached_topology();
+    Ok(())
 }
 
 /// `SmApiVariableRadiusFillet`: fillet `edges` of `brep` with a radius running
@@ -1111,6 +1205,75 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    fn post_foot(k: &mut Kernel) -> (Brep, [EdgeId; 2]) {
+        use crate::boolean::api_brep::{boolean_difference, boolean_union};
+        use crate::primitive::api_primitives::create_box;
+        use crate::topology::{edge, vertex};
+
+        let plate = create_box(k, Vec3::ZERO, 50.0, 50.0, 4.0).unwrap();
+        let post = create_box(k, Vec3::new(0.0, 0.0, 4.0), 10.0, 10.0, 30.0).unwrap();
+        let cut = create_box(k, Vec3::new(10.0, 10.0, -1.0), 5.0, 5.0, 6.0).unwrap();
+        let joined = boolean_union(k, plate, post).unwrap();
+        let body = boolean_difference(k, joined, cut).unwrap();
+        let edges = [Vec3::new(10.0, 5.0, 4.0), Vec3::new(5.0, 10.0, 4.0)].map(|at| {
+            body.edge_list()
+                .iter()
+                .copied()
+                .find(|&e| {
+                    let (Some(a), Some(z)) = edge::start_end_vertices(&body, e).unwrap() else {
+                        return false;
+                    };
+                    let a = vertex::point(&body, a).unwrap();
+                    let z = vertex::point(&body, z).unwrap();
+                    let midpoint = a + (z - a) * 0.5;
+                    (midpoint - at).length() < 1e-9
+                })
+                .unwrap()
+        });
+        (body, edges)
+    }
+
+    #[test]
+    fn joint_post_foot_blends_at_the_limit_in_the_kernel_api() {
+        for (section, code, area) in [
+            (FilletSurfaceGeneratorType::Linear, 0, 0.5),
+            (FilletSurfaceGeneratorType::Circular, 1, 1.0 - PI / 4.0),
+        ] {
+            for per_edge in [false, true] {
+                let mut k = Kernel {
+                    fixes: crate::kernel::UpstreamFixes::all(),
+                    ..Kernel::default()
+                };
+                let (mut body, edges) = post_foot(&mut k);
+                let blend = |k: &mut Kernel, b: &mut Brep, picks: &[EdgeId], size| {
+                    if per_edge {
+                        fillet_edges_per_edge(k, b, picks, &[size; 2], &[section; 2], 1, 1.0)
+                    } else {
+                        fillet_edges(k, b, picks, size, code, 1, 1.0)
+                    }
+                };
+                let limit = 5.0_f64;
+                let before = shape(&body);
+                let got = blend(&mut k, &mut body, &edges, limit.next_up());
+                assert!(
+                    matches!(got, Err(SolidError::FilletRefused { fit, .. }) if fit.size == limit),
+                    "{section:?}, per_edge={per_edge}: {got:?}",
+                );
+                assert_eq!(shape(&body), before);
+
+                for size in [limit.next_down(), limit] {
+                    let (mut attempt, picks) = post_foot(&mut k);
+                    blend(&mut k, &mut attempt, &picks, size).unwrap();
+                    assert!(is_manifold_solid(&attempt).unwrap());
+                    crate::topology::integrity::check(&attempt).unwrap();
+                    let want = 12_900.0 + 20.0 * size * size * area;
+                    let got = volume(&k, &mut attempt);
+                    assert!((got - want).abs() <= 1e-9 * want, "{got} vs {want}");
+                }
+            }
+        }
     }
 
     #[test]

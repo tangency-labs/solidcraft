@@ -995,7 +995,7 @@ fn a_step_header_read_alone_is_the_whole_files() {
     assert!(files.len() > 30, "{} files", files.len());
     for p in files {
         let bytes = std::fs::read(&p).unwrap();
-        let Ok(ex) = solidcore_record::step::p21::parse(&crate::step_text(&bytes)) else { continue };
+        let Ok(ex) = solidcraft_kernel::services::step::p21::parse(&crate::step_text(&bytes)) else { continue };
         let got = super::step_producer(&bytes);
         assert_eq!((got.system, got.preprocessor, got.description), (ex.originating_system, ex.preprocessor, ex.description), "{}", p.display());
     }
@@ -1264,6 +1264,390 @@ fn a_placed_parts_centre_is_checked_in_its_own_coordinates() {
     assert!(!records.warnings.iter().chain(&warnings).any(|w| w.contains("the file states")), "{warnings:?}");
 }
 
+// Export through cadmpeg. Expected boxes, volumes, names and colours come from the designs'
+// own dimensions and looks; nothing is taken from SolidCraft's output.
+
+/// A box `size` with its corner at `at`, as a new body in component `component`.
+fn add_box(doc: &mut solidcraft_doc::Document, at: solidcore_record::Vec3, size: [f64; 3], component: u64) {
+    let id = doc
+        .add_feature(
+            solidcraft_doc::FeatureKind::Box {
+                corner: solidcraft_doc::point_expr(at),
+                length: size[0].to_string().into(),
+                width: size[1].to_string().into(),
+                height: size[2].to_string().into(),
+                operation: solidcraft_doc::Operation::NewBody,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(id).unwrap().component = component;
+}
+
+/// A 6 mm cylinder 15 mm high standing at x = 80 mm, as a new body.
+fn add_cylinder(doc: &mut solidcraft_doc::Document) {
+    doc.add_feature(
+        solidcraft_doc::FeatureKind::Cylinder {
+            base: solidcraft_doc::point_expr(solidcore_record::Vec3::new(80.0, 0.0, 0.0)),
+            axis: solidcraft_doc::dir_expr(solidcore_record::Vec3::Z),
+            radius: "6".into(),
+            height: "15".into(),
+            operation: solidcraft_doc::Operation::NewBody,
+            references: Vec::new(),
+        },
+        None,
+    )
+    .unwrap();
+}
+
+fn evaluated(doc: &solidcraft_doc::Document) -> solidcraft_doc::Model {
+    let mut model = solidcraft_doc::Model::new();
+    model.evaluate(doc);
+    model
+}
+
+/// `doc` exported through cadmpeg as `file` in `format`, every body, at standard quality.
+fn exported(doc: &solidcraft_doc::Document, file: &str, format: crate::Format) -> Result<(Vec<u8>, Vec<String>), String> {
+    let model = evaluated(doc);
+    let world = solidcraft_doc::world_state(doc, &model.state()).unwrap();
+    cadmpeg_export(doc, &model.state(), &world, &[], &crate::CadmpegOptions::default(), file, crate::MeshQuality::Standard, format)
+}
+
+/// Each imported body's volume and box (`[min, max]`), sorted, rounded to a micrometre.
+fn solids(sf: &crate::StepFeature) -> Vec<(i64, [i64; 6])> {
+    let mut out: Vec<(i64, [i64; 6])> = sf
+        .import
+        .bodies
+        .iter()
+        .map(|b| {
+            let m = solidcraft_kernel::measure(&b.body).unwrap();
+            let bb = [m.bbox.min.x, m.bbox.min.y, m.bbox.min.z, m.bbox.max.x, m.bbox.max.y, m.bbox.max.z];
+            ((m.volume * 1e3).round() as i64, bb.map(|v| (v * 1e3).round() as i64))
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+fn solid(volume: f64, bb: [f64; 6]) -> (i64, [i64; 6]) {
+    ((volume * 1e3).round() as i64, bb.map(|v| (v * 1e3).round() as i64))
+}
+
+/// An imported body's box, in micrometres.
+fn body_box(b: &solidcraft_kernel::ImportedBody) -> [i64; 6] {
+    let bb = solidcraft_kernel::measure(&b.body).unwrap().bbox;
+    [bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z].map(|v| (v * 1e3).round() as i64)
+}
+
+/// A Rhino file as cadmpeg reads it back.
+fn rhino_model(bytes: &[u8]) -> cadmpeg_ir::document::CadIr {
+    let (format, decoded) = convert::decode_at("x.3dm", "3dm", bytes, &["rhino"], cadmpeg_core::decode::DecodeDepth::Full).unwrap();
+    assert_eq!(format, "rhino");
+    decoded.into_parts().0
+}
+
+/// A frame holding a needle placed twice: the first needle turned a quarter about Z and moved
+/// 100 mm along X, the second moved 50 mm along Y. Each box is 10 × 20 × 30 mm; the needle's
+/// corner is at x = 5 mm in its component.
+fn galvanometer() -> solidcraft_doc::Document {
+    use solidcore_record::Vec3;
+    let mut doc = solidcraft_doc::Document::new("Galvanometer");
+    let frame = doc.add_component(Some("Frame"), 0).unwrap();
+    let needle = doc.add_component(Some("Needle"), frame).unwrap();
+    add_box(&mut doc, Vec3::ZERO, [10.0, 20.0, 30.0], frame);
+    add_box(&mut doc, Vec3::new(5.0, 0.0, 0.0), [10.0, 20.0, 30.0], needle);
+    let turned = solidcraft_doc::rigid(Vec3::new(100.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2);
+    doc.occurrences.iter_mut().find(|o| o.component == needle).unwrap().transform = turned;
+    doc.add_occurrence(needle, frame, solidcraft_doc::rigid(Vec3::new(0.0, 50.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).unwrap();
+    doc
+}
+
+/// Where the galvanometer's three boxes are: a quarter turn about Z takes the needle's x 5..15,
+/// y 0..20 to x -20..-0, y 5..15, then 100 mm along X.
+fn galvanometer_solids() -> Vec<(i64, [i64; 6])> {
+    let mut want = vec![
+        solid(6000.0, [0.0, 0.0, 0.0, 10.0, 20.0, 30.0]),
+        solid(6000.0, [80.0, 5.0, 0.0, 100.0, 15.0, 30.0]),
+        solid(6000.0, [5.0, 50.0, 0.0, 15.0, 70.0, 30.0]),
+    ];
+    want.sort();
+    want
+}
+
+/// A 10 × 20 × 30 mm box exports to Rhino as an exact solid, named after the body, and reads back
+/// through both of SolidCraft's Rhino readers as that box, with nothing reported lost.
+#[test]
+fn a_box_exports_to_rhino_and_reads_back() {
+    let mut doc = solidcraft_doc::Document::new("Block");
+    add_box(&mut doc, solidcore_record::Vec3::ZERO, [10.0, 20.0, 30.0], 0);
+    let (bytes, warnings) = exported(&doc, "block.3dm", crate::Format::Rhino).unwrap();
+    assert!(bytes.starts_with(b"3D Geometry File Format "), "{:?}", bytes.get(..32));
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let name = evaluated(&doc).state().bodies[0].name.clone();
+    for reader in READERS {
+        let sf = read(&bytes, "block.3dm", reader);
+        assert_eq!(solids(&sf), vec![solid(6000.0, [0.0, 0.0, 0.0, 10.0, 20.0, 30.0])], "{reader:?}");
+        // `Body1` reads as a placeholder, so by default the body is named after the file; the
+        // records keep the object's own name.
+        assert_eq!(sf.body_names, vec!["block".to_string()], "{reader:?}");
+        if reader == crate::StepReader::Cadmpeg {
+            let own = crate::step_import_feature_read(&bytes, "block.3dm", crate::StepNames::Solid, reader).unwrap();
+            assert_eq!(own.body_names, vec![name.clone()]);
+        }
+    }
+    let ir = rhino_model(&bytes);
+    let names: Vec<_> = ir.model.bodies.iter().filter_map(|b| b.name.clone()).collect();
+    assert_eq!(names, vec![name]);
+}
+
+/// A body's look is its colour in the Rhino file, sRGB as SolidCraft keeps it (a Rhino colour is
+/// the bytes themselves); a cylinder, whose round faces cadmpeg's Rhino writer cannot write
+/// exactly yet, is written as its mesh, with warnings naming it, and that mesh spans the
+/// cylinder: radius 6 mm, 15 mm high, at x = 80 mm.
+#[test]
+fn rhino_export_keeps_colours_and_writes_a_cylinder_as_its_mesh() {
+    let mut doc = solidcraft_doc::Document::new("Parts");
+    add_box(&mut doc, solidcore_record::Vec3::ZERO, [10.0, 20.0, 30.0], 0);
+    add_cylinder(&mut doc);
+    let names: Vec<String> = evaluated(&doc).state().bodies.iter().map(|b| b.name.clone()).collect();
+    doc.appearances.bodies.insert(names[0].clone(), solidcraft_doc::appearance::Look::custom([255, 128, 0], 1.0));
+    doc.appearances.bodies.insert(names[1].clone(), solidcraft_doc::appearance::Look::custom([0, 64, 255], 1.0));
+    let (bytes, warnings) = exported(&doc, "parts.3dm", crate::Format::Rhino).unwrap();
+    let cylinder = &names[1];
+    assert!(warnings.iter().any(|w| w.starts_with(&format!("{cylinder}: written as its mesh only"))), "{warnings:?}");
+    assert!(warnings.iter().any(|w| w.starts_with(&format!("{cylinder}: written as a mesh without its name or colour"))), "{warnings:?}");
+    let ir = rhino_model(&bytes);
+    let block = ir.model.bodies.iter().find(|b| b.name.as_deref() == Some(names[0].as_str())).unwrap();
+    let c = block.color.unwrap();
+    assert_eq!([c.r(), c.g(), c.b(), c.a()], [1.0, 128.0 / 255.0, 0.0, 1.0]);
+    let [mesh] = ir.model.tessellations.as_slice() else { panic!("one mesh: {}", ir.model.tessellations.len()) };
+    let mut lo = [f64::INFINITY; 3];
+    let mut hi = [f64::NEG_INFINITY; 3];
+    for p in mesh.vertices() {
+        let p = p.get();
+        for (k, v) in [p.x, p.y, p.z].into_iter().enumerate() {
+            lo[k] = lo[k].min(v);
+            hi[k] = hi[k].max(v);
+        }
+    }
+    for (got, want) in lo.iter().chain(&hi).zip([74.0, -6.0, 0.0, 86.0, 6.0, 15.0]) {
+        // Within the mesh's chord tolerance (2e-4 of the cylinder's 22.6 mm diagonal).
+        assert!((got - want).abs() < 0.01, "{lo:?} {hi:?}");
+    }
+    // The box reads back through SolidCraft's readers. The mesh is not a solid: SolidCraft's own
+    // Rhino reader leaves it out, and cadmpeg's brings it in as a mesh body spanning the cylinder.
+    for reader in READERS {
+        let sf = read(&bytes, "parts.3dm", reader);
+        let mut got = solids(&sf);
+        if reader == crate::StepReader::Cadmpeg {
+            let mesh = sf.import.bodies.iter().position(|b| b.body.is_mesh()).unwrap_or_else(|| panic!("no mesh body: {got:?}"));
+            let m = solidcraft_kernel::measure(&sf.import.bodies[mesh].body).unwrap();
+            let bb = [m.bbox.min.x, m.bbox.min.y, m.bbox.min.z, m.bbox.max.x, m.bbox.max.y, m.bbox.max.z];
+            for (got, want) in bb.iter().zip([74.0, -6.0, 0.0, 86.0, 6.0, 15.0]) {
+                assert!((got - want).abs() < 0.01, "{bb:?}");
+            }
+            got.retain(|s| s.1 != bb.map(|v| (v * 1e3).round() as i64));
+        }
+        assert_eq!(got, vec![solid(6000.0, [0.0, 0.0, 0.0, 10.0, 20.0, 30.0])], "{reader:?}");
+    }
+}
+
+/// A hidden body Rhino writes as its exact shape is hidden in the file; a hidden cylinder, which
+/// cadmpeg's Rhino writer writes as a mesh with no visibility, is said to be written shown.
+#[test]
+fn a_hidden_body_rhino_writes_as_a_mesh_is_said_to_be_shown() {
+    let mut doc = solidcraft_doc::Document::new("Parts");
+    add_box(&mut doc, solidcore_record::Vec3::ZERO, [10.0, 20.0, 30.0], 0);
+    add_cylinder(&mut doc);
+    let model = evaluated(&doc);
+    let names: Vec<String> = model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    let world = solidcraft_doc::world_state(&doc, &model.state()).unwrap();
+    let options =
+        crate::CadmpegOptions { hidden: crate::Hidden { bodies: names.iter().cloned().collect(), ..Default::default() }, ..Default::default() };
+    let (bytes, warnings) =
+        cadmpeg_export(&doc, &model.state(), &world, &[], &options, "parts.3dm", crate::MeshQuality::Standard, crate::Format::Rhino).unwrap();
+    let shown = |name: &str| warnings.iter().any(|w| w.starts_with(&format!("{name}: hidden, but written shown")));
+    assert!(shown(&names[1]), "{warnings:?}");
+    assert!(!shown(&names[0]), "{warnings:?}");
+    let ir = rhino_model(&bytes);
+    let block = ir.model.bodies.iter().find(|b| b.name.as_deref() == Some(names[0].as_str())).unwrap();
+    assert_eq!(block.visible, Some(false));
+}
+
+/// Rhino has no assemblies here, so every body of the galvanometer is written where the design
+/// shows it, with a warning, and reads back there.
+#[test]
+fn an_assembly_exports_to_rhino_where_the_design_shows_it() {
+    let (bytes, warnings) = exported(&galvanometer(), "galvanometer.3dm", crate::Format::Rhino).unwrap();
+    assert!(warnings.iter().any(|w| w.contains("components and placements are not written")), "{warnings:?}");
+    for reader in READERS {
+        let sf = read(&bytes, "galvanometer.3dm", reader);
+        assert_eq!(solids(&sf), galvanometer_solids(), "{reader:?}");
+    }
+}
+
+/// FreeCAD is refused with why: cadmpeg 0.6.12 only writes back a FreeCAD file it read. A design
+/// with nothing to write, an unknown body and a format cadmpeg does not write here are refused;
+/// odd names and placements never panic.
+#[test]
+fn cadmpeg_export_refuses_what_it_cannot_write() {
+    let mut doc = solidcraft_doc::Document::new("Block");
+    add_box(&mut doc, solidcore_record::Vec3::ZERO, [10.0, 20.0, 30.0], 0);
+    let e = exported(&doc, "block.FCStd", crate::Format::FreeCad).unwrap_err();
+    assert!(e.contains("FreeCAD files cannot be exported yet"), "{e}");
+    let e = exported(&doc, "block.obj", crate::Format::Obj).unwrap_err();
+    assert!(e.contains("not written through cadmpeg"), "{e}");
+    // The plain export says the same of FreeCAD, and sends Rhino to `file.export`.
+    let state = evaluated(&doc).state();
+    let painted = doc.painted(&state);
+    let e = crate::export(&painted, &[], crate::Format::FreeCad, "Block").unwrap_err().to_string();
+    assert!(e.contains("FreeCAD files cannot be exported yet"), "{e}");
+    let e = crate::export(&painted, &[], crate::Format::Rhino, "Block").unwrap_err().to_string();
+    assert!(e.contains("use file.export"), "{e}");
+    assert!(exported(&solidcraft_doc::Document::new("Empty"), "empty.3dm", crate::Format::Rhino).is_err());
+    let model = evaluated(&doc);
+    let st = model.state();
+    assert!(
+        cadmpeg_export(
+            &doc,
+            &st,
+            &st,
+            &["Nothing".into()],
+            &crate::CadmpegOptions::default(),
+            "x.3dm",
+            crate::MeshQuality::Standard,
+            crate::Format::Rhino
+        )
+        .is_err()
+    );
+    let mut odd = solidcraft_doc::Document::new("\0\u{7}  ");
+    add_box(&mut odd, solidcore_record::Vec3::new(1e9, -1e9, 0.0), [1e-3, 1e6, 1.0], 0);
+    let r = std::panic::catch_unwind(|| exported(&odd, "\0.3dm", crate::Format::Rhino));
+    assert!(r.is_ok(), "an odd design panicked");
+}
+
+/// `bytes`, an IGES file, read by cadmpeg's IGES decoder into records and an Import feature, as
+/// a STEP file is with the cadmpeg reader (there is no cadmpeg IGES import route yet).
+fn iges_by_cadmpeg(bytes: &[u8]) -> crate::StepFeature {
+    let (format, decoded) = convert::decode_at("x.igs", "igs", bytes, &["iges"], cadmpeg_core::decode::DecodeDepth::Full).unwrap();
+    assert_eq!(format, "iges");
+    let records = cadir_records(&decoded.into_parts().0, "x", "", true);
+    let read = crate::RecordsRead { records, warnings: Vec::new(), freecad: false, preprocessor: String::new(), description: String::new() };
+    crate::records_import_feature(read, "x.igs", crate::StepNames::default()).unwrap()
+}
+
+/// An imported body's colour: its own, else the one colour every face of it has (cadmpeg's STEP
+/// writer styles a body's faces, each with the body's colour).
+fn colour_of(b: &solidcraft_kernel::ImportedBody) -> Option<[f32; 3]> {
+    b.color.or_else(|| {
+        let faces = &b.body.paint()?.faces;
+        let first = faces.first()?.color;
+        (faces.len() == b.body.face_count() && faces.iter().all(|f| f.color == first)).then_some(first)
+    })
+}
+
+/// A 10 × 20 × 30 mm box and a cylinder of radius 6 mm, 15 mm high at x = 80 mm (volume
+/// π·36·15), coloured #0040FF.
+fn box_and_cylinder() -> (solidcraft_doc::Document, Vec<(i64, [i64; 6])>) {
+    let mut doc = solidcraft_doc::Document::new("Parts");
+    add_box(&mut doc, solidcore_record::Vec3::ZERO, [10.0, 20.0, 30.0], 0);
+    add_cylinder(&mut doc);
+    let names: Vec<String> = evaluated(&doc).state().bodies.iter().map(|b| b.name.clone()).collect();
+    doc.appearances.bodies.insert(names[1].clone(), solidcraft_doc::appearance::Look::custom([0, 64, 255], 1.0));
+    let mut want =
+        vec![solid(6000.0, [0.0, 0.0, 0.0, 10.0, 20.0, 30.0]), solid(std::f64::consts::PI * 36.0 * 15.0, [74.0, -6.0, 0.0, 86.0, 6.0, 15.0])];
+    want.sort();
+    (doc, want)
+}
+
+/// cadmpeg writes STEP (AP242 edition 1, as SolidCraft's own writer declares) and IGES 5.3 from
+/// the design: a box with a coloured cylinder, and the galvanometer (a part placed twice). Each
+/// file reads back through SolidCraft's own reader and through cadmpeg's, every solid with the
+/// volume and box the design's dimensions give, the cylinder in its colour. STEP keeps the
+/// assembly: each needle under Galvanometer › Frame › Needle; IGES has none here, so its bodies
+/// are where the design shows them, with a warning.
+#[test]
+fn cadmpeg_writes_step_and_iges_that_both_readers_read_back() {
+    let (parts, parts_want) = box_and_cylinder();
+    let blue = [0.0, 64.0 / 255.0, 1.0];
+    for (label, doc, want) in [("parts", parts, parts_want), ("galvanometer", galvanometer(), galvanometer_solids())] {
+        for (file, format) in [("x.step", crate::Format::Step), ("x.igs", crate::Format::Iges)] {
+            let (bytes, warnings) = exported(&doc, file, format).unwrap_or_else(|e| panic!("{label} {file}: {e}"));
+            let assembly = label == "galvanometer";
+            let flattened = warnings.iter().any(|w| w.contains("components and placements are not written"));
+            assert_eq!(flattened, assembly && format == crate::Format::Iges, "{label} {file}: {warnings:?}");
+            // STEP names the components but not the solids; nothing else is reported lost.
+            let unnamed = warnings.iter().any(|w| w.contains("the bodies' names are not written"));
+            assert_eq!(unnamed, format == crate::Format::Step, "{label} {file}: {warnings:?}");
+            assert_eq!(warnings.len(), usize::from(flattened) + usize::from(unnamed), "{label} {file}: {warnings:?}");
+            let ours = crate::step_import_feature_read(&bytes, file, crate::StepNames::default(), crate::StepReader::SolidCraft).unwrap();
+            assert_eq!(solids(&ours), want, "{label} {file}: SolidCraft's reader");
+            let theirs = match format {
+                crate::Format::Step => {
+                    crate::step_import_feature_read(&bytes, file, crate::StepNames::default(), crate::StepReader::Cadmpeg).unwrap()
+                }
+                _ => iges_by_cadmpeg(&bytes),
+            };
+            assert_eq!(solids(&theirs), want, "{label} {file}: cadmpeg's reader");
+            let theirs: Vec<_> = theirs.import.bodies.iter().map(|b| (colour_of(b), b.path.clone(), body_box(b))).collect();
+            if format == crate::Format::Step {
+                assert!(ours.import.schema.contains("AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF"), "{}", ours.import.schema);
+            }
+            let ours: Vec<_> = ours.import.bodies.iter().map(|b| (colour_of(b), b.path.clone(), body_box(b))).collect();
+            for (reader, bodies) in [("SolidCraft", ours), ("cadmpeg", theirs)] {
+                if !assembly {
+                    // Names need not survive a writer: the cylinder is the body with its box.
+                    let cylinder = bodies
+                        .iter()
+                        .find(|(_, _, bb)| *bb == [74_000, -6_000, 0, 86_000, 6_000, 15_000])
+                        .unwrap_or_else(|| panic!("{label} {file} {reader}: no cylinder body: {bodies:?}"));
+                    let colour = cylinder.0.unwrap_or_else(|| panic!("{label} {file} {reader}: the cylinder is not coloured"));
+                    for (got, want) in colour.iter().zip(blue) {
+                        assert!((f64::from(*got) - want).abs() < 1e-3, "{label} {file} {reader}: the cylinder's colour: {colour:?}");
+                    }
+                    assert_eq!(
+                        bodies.iter().filter(|(c, _, _)| c.is_some()).count(),
+                        1,
+                        "{label} {file} {reader}: only the cylinder is coloured: {bodies:?}"
+                    );
+                } else if format == crate::Format::Step {
+                    let needles = bodies.iter().filter(|(_, p, _)| p.iter().map(String::as_str).eq(["Galvanometer", "Frame", "Needle"])).count();
+                    assert_eq!(needles, 2, "{label} {file} {reader}: {bodies:?}");
+                }
+            }
+        }
+    }
+}
+
+/// STEP written by cadmpeg has no mesh beside the exact shape, so a face's own look is bound to
+/// its B-rep face: a grey box with a red top face reads back, through both readers, with one red
+/// face and the others grey.
+#[test]
+fn cadmpeg_step_keeps_a_faces_own_colour() {
+    let mut doc = solidcraft_doc::Document::new("Block");
+    add_box(&mut doc, solidcore_record::Vec3::ZERO, [10.0, 20.0, 30.0], 0);
+    let body = evaluated(&doc).state().bodies[0].name.clone();
+    doc.appearances.bodies.insert(body.clone(), solidcraft_doc::appearance::Look::custom([128, 128, 128], 1.0));
+    doc.appearances.faces.push(solidcraft_doc::appearance::FaceLook {
+        body,
+        point: solidcore_record::Vec3::new(5.0, 10.0, 30.0),
+        look: solidcraft_doc::appearance::Look::custom([255, 0, 0], 1.0),
+        name: None,
+        strict_name: false,
+        certificate: None,
+    });
+    let (bytes, warnings) = exported(&doc, "x.step", crate::Format::Step).unwrap();
+    assert!(warnings.iter().all(|w| w.contains("the bodies' names are not written")), "{warnings:?}");
+    for reader in [crate::StepReader::SolidCraft, crate::StepReader::Cadmpeg] {
+        let read = crate::step_import_feature_read(&bytes, "x.step", crate::StepNames::default(), reader).unwrap();
+        let [b] = read.import.bodies.as_slice() else { panic!("{reader:?}: one body") };
+        let faces = &b.body.paint().unwrap_or_else(|| panic!("{reader:?}: no paint")).faces;
+        let red = faces.iter().filter(|f| f.color[0] > 0.99 && f.color[1] < 0.01 && f.color[2] < 0.01).count();
+        assert_eq!(red, 1, "{reader:?}: {faces:?}");
+    }
+}
+
 /// A part an AP242 file gives as triangles alone: a 1 cm tetrahedron, as a TRIANGULATED_SURFACE_SET
 /// in a TESSELLATED_SHAPE_REPRESENTATION, in centimetres.
 const TETRAHEDRON_PART: &str = "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME('tetrahedron','',(''),(''),'','','');\n\
@@ -1393,4 +1777,79 @@ fn product_names_come_in_trimmed() {
     assert_eq!(tree_of(&theirs), tree_of(&ours));
     let tree = tree_of(&theirs);
     assert!(tree.get(1).is_some_and(|l| l.starts_with("1 cylinder_placed [") && l.contains("/cylinder_placed|")), "{tree:?}");
+}
+
+/// A body with an exact B-rep whose display mesh cannot be made is written as its B-rep alone,
+/// with a warning naming it; the meshes' size cap stays fatal, and so does a failed mesh of a body
+/// with no exact shape, which has nothing else to be written as.
+#[test]
+fn a_failed_display_mesh_keeps_the_exact_body() {
+    use cadir_out::{Unmeshed, kept_without_mesh};
+    let mut warnings = Vec::new();
+    let failed = || Err(Unmeshed::Failed("could not be meshed: no face meshed".into()));
+    assert!(matches!(kept_without_mesh(failed(), true, "Body1", &mut warnings), Ok(None)));
+    assert_eq!(warnings, vec!["Body1: its mesh was not written (could not be meshed: no face meshed), so the file's writer meshes it".to_string()]);
+    let e = kept_without_mesh(failed(), false, "Body1", &mut warnings).err();
+    assert_eq!(e.as_deref(), Some("Body1: could not be meshed: no face meshed"));
+    let large = Err(Unmeshed::TooLarge("Body1: the meshes are too large for the file".into()));
+    let e = kept_without_mesh(large, true, "Body1", &mut warnings).err();
+    assert_eq!(e.as_deref(), Some("Body1: the meshes are too large for the file"));
+    assert_eq!(warnings.len(), 1);
+    assert!(kept_without_mesh(Ok(solidcraft_geom::Mesh::default()), false, "Body1", &mut warnings).unwrap().is_some());
+}
+
+/// In a meshes-only export, a body whose mesh fails is written as its exact shape, when it has
+/// one; a mesh body has none, a mesh that passes the size cap stays fatal, and an export with exact
+/// shapes keeps its own rule.
+#[test]
+fn a_meshes_only_export_falls_back_to_the_exact_shape() {
+    use cadir_out::{Unmeshed, shape_instead};
+    let failed = Err(Unmeshed::Failed("no face meshed".into()));
+    let large = Err(Unmeshed::TooLarge("too large".into()));
+    assert!(shape_instead(&failed, true, false));
+    assert!(!shape_instead(&failed, true, true));
+    assert!(!shape_instead(&failed, false, false));
+    assert!(!shape_instead(&large, true, false));
+    assert!(!shape_instead(&Ok(solidcraft_geom::Mesh::default()), true, false));
+}
+
+/// cadmpeg's single-precision loss is kept quiet for a mesh beside an exact B-rep, and for a mesh
+/// alone whose rounding is within the weld distance; it is said for a mesh alone so far from the
+/// origin for its size that its points round past it. A 1 mm triangle at x = 1e9 mm: single
+/// precision rounds there to within 1e9 · 2⁻²⁴ ≈ 60 mm, past its weld distance of 1e-6 mm.
+#[test]
+fn single_precision_is_said_for_a_mesh_alone_that_it_moves() {
+    use cadmpeg_ir::ids::BodyId;
+    use cadmpeg_ir::math::Point3;
+    use cadmpeg_ir::tessellation::{Tessellation, TessellationId, TessellationMesh};
+    use cadmpeg_ir::topology::{Body, BodyKind};
+    let triangle = |at: f64, body: Option<&str>| {
+        let positions = vec![Point3::new(at, 0.0, 0.0), Point3::new(at + 1.0, 0.0, 0.0), Point3::new(at, 1.0, 0.0)];
+        let lanes = TessellationMesh::from_list_lanes(positions, vec![[0, 1, 2]], None).unwrap();
+        let id = TessellationId::try_from("test:model:tessellation#0".to_string()).unwrap();
+        Tessellation::new(id, lanes, Vec::new()).unwrap().with_body(body.map(|b| BodyId::try_from(b.to_string()).unwrap()))
+    };
+    let body = |id: &str, regions: Vec<cadmpeg_ir::ids::RegionId>| Body {
+        id: BodyId::try_from(id.to_string()).unwrap(),
+        kind: BodyKind::General,
+        regions,
+        transform: None,
+        name: None,
+        color: None,
+        visible: None,
+    };
+    let with = |t: Tessellation, b: Option<Body>| {
+        let mut ir = cadmpeg_ir::document::CadIr::empty();
+        ir.model.tessellations.push(t);
+        ir.model.bodies.extend(b);
+        ir
+    };
+    let region = cadmpeg_ir::ids::RegionId::try_from("test:model:region#0".to_string()).unwrap();
+    // Alone, near the origin and far from it.
+    assert!(!export::mesh_only_rounds(&with(triangle(10.0, None), None)));
+    assert!(export::mesh_only_rounds(&with(triangle(1e9, None), None)));
+    // A bound mesh of a body with no regions is the body's only geometry too.
+    assert!(export::mesh_only_rounds(&with(triangle(1e9, Some("test:model:body#0")), Some(body("test:model:body#0", Vec::new())))));
+    // Beside an exact B-rep, the B-rep keeps double precision.
+    assert!(!export::mesh_only_rounds(&with(triangle(1e9, Some("test:model:body#0")), Some(body("test:model:body#0", vec![region])))));
 }

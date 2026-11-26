@@ -102,8 +102,17 @@ pub enum SolverFailure {
     },
     /// The edge bounds no material (no use of it lies in a loop of a shell of a region
     /// that is not a void, as a sheet's edge), so it is neither concave nor convex: a case
-    /// the concavity test does not handle ([`ErrorKind::Unsupported`]).
+    /// the concavity test does not handle ([`ErrorKind::Unsupported`]). Also the answer,
+    /// as before #19829, for an edge with no such use and a loop use without a shell or in
+    /// a shell without a region (`edge_bounds_material_linked`).
     EdgeBoundsNoMaterial {
+        /// The edge.
+        edge: crate::topology::EdgeId,
+    },
+    /// The cache of the curve of `edge`, an edge of the caller's body the solver is loaded on,
+    /// could not be built: the cache's error is the failure's cause, and decides whether it
+    /// is a defect or a refusal ([`ErrorKind::Failed`]); status `SM_ERR_NULL_POINTER`.
+    EdgeCurveCacheNotBuilt {
         /// The edge.
         edge: crate::topology::EdgeId,
     },
@@ -502,6 +511,7 @@ impl SolverFailure {
             Self::CrossingDoesNotDropOnEndSection => ErrorKind::NotFound,
             Self::CrossingOffEndSection { .. } => ErrorKind::NotWithinTolerance,
             Self::EdgeBoundsNoMaterial { .. } => ErrorKind::Unsupported,
+            Self::EdgeCurveCacheNotBuilt { .. } => ErrorKind::Failed,
             Self::EdgeCurveNotBSpline { .. } => ErrorKind::Unsupported,
             Self::EdgeEndOnAxis { .. } => ErrorKind::Degenerate,
             Self::EdgeMiddleDoesNotDropOnRail => ErrorKind::NotFound,
@@ -591,6 +601,7 @@ impl SolverFailure {
             Self::CrossingDoesNotDropOnEndSection => SM_ERR,
             Self::CrossingOffEndSection { .. } => SM_ERR,
             Self::EdgeBoundsNoMaterial { .. } => SM_ERR,
+            Self::EdgeCurveCacheNotBuilt { .. } => SM_ERR_NULL_POINTER,
             Self::EdgeCurveNotBSpline { .. } => SM_ERR_NULL_POINTER,
             Self::EdgeEndOnAxis { .. } => SM_ERR,
             Self::EdgeMiddleDoesNotDropOnRail => SM_ERR,
@@ -724,6 +735,11 @@ impl core::fmt::Display for SolverFailure {
             Self::EdgeBoundsNoMaterial { edge } => write!(
                 f,
                 "edge {} bounds no material, so it is neither concave nor convex",
+                edge.index()
+            ),
+            Self::EdgeCurveCacheNotBuilt { edge } => write!(
+                f,
+                "the cache of the curve of edge {} could not be built",
                 edge.index()
             ),
             Self::EdgeCurveNotBSpline { edge, kind } => write!(

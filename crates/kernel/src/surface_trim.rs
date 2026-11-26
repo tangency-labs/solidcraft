@@ -1,7 +1,7 @@
-//! Trim: a surface body cut where a tool meets it (a plane, another body's face, or sketch
-//! curves swept onto it or dropped square onto it), keeping the side of a point or the regions
-//! points pick; and Mutual Trim: two surfaces cut by each other, each keeping its picked side,
-//! extended to meet first when one stops short of the other.
+//! Trim: a surface body cut where a tool meets it (a plane, another body's face or complete
+//! bounded sheet, or sketch curves swept onto it or dropped square onto it), keeping the side
+//! of a point or the regions points pick; and Mutual Trim: two surfaces cut by each other, each
+//! keeping its picked side, extended to meet first when one stops short of the other.
 
 use solidcore_record::{Plane, Seg2, Vec3};
 use solidcraft_geom::brep::eval::CurveEval;
@@ -53,6 +53,30 @@ impl TrimKeep<'_> {
 /// pieces on the side of `keep` are kept. The result's history is over `[body]`.
 pub fn trim(body: &Body, tool: &SplitTool, keep: Vec3) -> Result<Body> {
     trim_keep(body, tool, TrimKeep::Side(keep))
+}
+
+/// Trim by the complete bounded cutting sheet, keeping the connected regions picked by
+/// `keep`. A multi-face sheet has no single global side: `Side` picks its connected region,
+/// as it does for a tool of several sketch curves. The result's history is over `[body]`.
+pub fn trim_sheet_keep(body: &Body, sheet: &Body, keep: TrimKeep) -> Result<Body> {
+    body.require_brep("trim")?;
+    sheet.require_brep("a trim tool")?;
+    keep.check()?;
+    if std::ptr::eq(body, sheet) {
+        return Err(KernelError::Invalid("a surface cannot trim itself".into()));
+    }
+    if !body.is_surface() || !sheet.is_surface() {
+        return Err(KernelError::Invalid("a whole-sheet trim takes two surface bodies".into()));
+    }
+    crate::guard("trim sheet", || {
+        let (target, order) = crate::splitface::tagged("trim sheet", body)?;
+        let tool = crate::native::smlib_body(sheet)?;
+        let points: Vec<[f64; 3]> = keep.points().iter().map(|p| [p.x, p.y, p.z]).collect();
+        let result = target.trim_sheet(&tool, &points).map_err(|e| KernelError::smlib("trim sheet", e))?;
+        let (mut out, history) = crate::splitface::brought_back("trim sheet", body, &order, &result)?;
+        out.regularization_protected = true;
+        Ok(out.with_checked_history(Some(history), &crate::record::counts(&[body])))
+    })
 }
 
 /// A surface body trimmed by a tool, keeping what `keep` says. Each kept face is the face it is
@@ -260,6 +284,7 @@ fn nearest_boundary_edge(x: &Body, side: &ToolSide) -> Result<Vec3> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::PointClass::{OnBoundary, Outside};
     use crate::history::{Change, FaceOrigin};
     use crate::{extrude_sheet, measure, patch_region, stitch};
     use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
@@ -306,6 +331,86 @@ mod tests {
             h.faces.iter().all(|f| f.change == Change::Modified && matches!(f.origins.as_slice(), [FaceOrigin::Face { operand: 0, .. }])),
             "{h:?}"
         );
+    }
+
+    /// A bent cutter crosses the square along y=3 for x=0..5 and y=3+0.4(x-5)
+    /// for x=5..10. Its lower region is 5*3 + 5*(3+5)/2 = 35, upper 65.
+    #[test]
+    fn whole_sheet_trim_uses_every_face_with_its_boundaries() {
+        let square = rect(&Plane::XY, 0.0, 0.0, 10.0, 10.0);
+        let chain =
+            vec![Seg2::Line { a: Vec2::new(-5.0, 3.0), b: Vec2::new(5.0, 3.0) }, Seg2::Line { a: Vec2::new(5.0, 3.0), b: Vec2::new(15.0, 7.0) }];
+        let cutter = extrude_sheet(&Plane::XY, &[chain], -5.0, 5.0).unwrap();
+        assert_eq!(cutter.face_count(), 2);
+        for (point, expected) in [(Vec3::new(2.0, 1.0, 0.0), 35.0), (Vec3::new(2.0, 9.0, 0.0), 65.0)] {
+            let trimmed = trim_sheet_keep(&square, &cutter, TrimKeep::Side(point)).unwrap();
+            assert!(rel(area(&trimmed), expected) < 1e-9, "{} vs {expected}", area(&trimmed));
+            let history = trimmed.history().unwrap();
+            assert_eq!(history.operands, 1);
+            assert!(history.faces.iter().all(|f| matches!(f.origins.as_slice(), [FaceOrigin::Face { operand: 0, face: 0 }])));
+        }
+        // In reverse, the original join remains traversable above the horizontal cut.
+        let across = rect(&Plane::XY, -10.0, -10.0, 20.0, 20.0);
+        let top = trim_sheet_keep(&cutter, &across, TrimKeep::Side(Vec3::new(2.0, 3.0, 2.0))).unwrap();
+        assert_eq!(top.face_count(), 2);
+        let expected = 5.0 * (10.0 + 116.0_f64.sqrt());
+        assert!(rel(area(&top), expected) < 1e-9, "{} vs {expected}", area(&top));
+    }
+
+    /// A roof of two faces cuts the four walls of a closed square extrusion. Its height
+    /// is 5 for x=0..5 and 5+0.2(x-5) for x=5..10. The two y walls contribute
+    /// 2*(5*5+5*(5+6)/2), the x walls 10*5+10*6: lower area 215, upper 400-215=185.
+    #[test]
+    fn whole_sheet_trim_keeps_regions_across_a_closed_targets_seams() {
+        let outline = Loop2::polygon(&[Vec2::ZERO, Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0), Vec2::new(0.0, 10.0)]);
+        let walls = extrude_sheet(&Plane::XY, &[outline.segs], 0.0, 10.0).unwrap();
+        let xz = Plane::new(Vec3::ZERO, Vec3::X, Vec3::Z).unwrap();
+        let roof =
+            vec![Seg2::Line { a: Vec2::new(-5.0, 5.0), b: Vec2::new(5.0, 5.0) }, Seg2::Line { a: Vec2::new(5.0, 5.0), b: Vec2::new(15.0, 7.0) }];
+        let cutter = extrude_sheet(&xz, &[roof], -15.0, 5.0).unwrap();
+        assert_eq!((walls.face_count(), cutter.face_count()), (4, 2));
+        for (point, expected) in [(Vec3::new(0.0, 5.0, 2.0), 215.0), (Vec3::new(0.0, 5.0, 8.0), 185.0)] {
+            let trimmed = trim_sheet_keep(&walls, &cutter, TrimKeep::Side(point)).unwrap();
+            assert_eq!(trimmed.face_count(), 4);
+            assert!(rel(area(&trimmed), expected) < 1e-9, "{} vs {expected}", area(&trimmed));
+        }
+    }
+
+    /// The cubic continuation has x=4+12u, y=3+12u²-8u³ and is tangent to the line.
+    /// At x=10, u=1/2, so the lower area is 4*3 +
+    /// 12*[3u+4u³-2u⁴] from 0 to 1/2 = 34.5; the complement is 65.5.
+    #[test]
+    fn whole_sheet_trim_follows_a_spline_and_its_tangent_line() {
+        let square = rect(&Plane::XY, 0.0, 0.0, 10.0, 10.0);
+        let chain = vec![
+            Seg2::Line { a: Vec2::new(-5.0, 3.0), b: Vec2::new(4.0, 3.0) },
+            Seg2::Cubic { p0: Vec2::new(4.0, 3.0), p1: Vec2::new(8.0, 3.0), p2: Vec2::new(12.0, 7.0), p3: Vec2::new(16.0, 7.0) },
+        ];
+        let cutter = extrude_sheet(&Plane::XY, &[chain], -5.0, 5.0).unwrap();
+        assert_eq!(cutter.face_count(), 2);
+        // area() exposes an estimated quadrature accuracy, not a certified error bound.
+        // Instead, certify the retained trim against polynomial points at u=1/8,1/4,3/8
+        // and points on each side at x=7, where the exact boundary is y=3.625.
+        let boundary = [Vec3::new(5.5, 3.171875, 0.0), Vec3::new(7.0, 3.625, 0.0), Vec3::new(8.5, 4.265625, 0.0)];
+        let sides = [Vec3::new(7.0, 3.5, 0.0), Vec3::new(7.0, 3.75, 0.0)];
+        for (point, expected) in [(Vec3::new(2.0, 1.0, 0.0), [OnBoundary, Outside]), (Vec3::new(2.0, 9.0, 0.0), [Outside, OnBoundary])] {
+            let trimmed = trim_sheet_keep(&square, &cutter, TrimKeep::Side(point)).unwrap();
+            assert_eq!(trimmed.face_count(), 1);
+            assert_eq!(trimmed.classify_points(&boundary).unwrap(), [OnBoundary; 3]);
+            assert_eq!(trimmed.classify_points(&sides).unwrap(), expected);
+        }
+        // In reverse, z=0 halves the straight extrusion: the same generatrix length L
+        // gives original area 10L and kept area 5L, exactly half, with both faces retained.
+        let across = rect(&Plane::XY, -10.0, -10.0, 20.0, 20.0);
+        let top = trim_sheet_keep(&cutter, &across, TrimKeep::Side(Vec3::new(0.0, 3.0, 2.0))).unwrap();
+        assert_eq!(top.face_count(), 2);
+        for (x, y) in [(0.0, 3.0), (7.0, 3.625)] {
+            let points = [Vec3::new(x, y, -2.0), Vec3::new(x, y, 0.0), Vec3::new(x, y, 2.0), Vec3::new(x, y, 5.0)];
+            assert_eq!(top.classify_points(&points).unwrap(), [Outside, OnBoundary, OnBoundary, OnBoundary]);
+        }
+        let (lo, hi) = top.ops_body().unwrap().0.bounds().unwrap();
+        let tolerance = top.record().tolerance;
+        assert!(lo[2].abs() <= tolerance && (hi[2] - 5.0).abs() <= tolerance, "{lo:?}..{hi:?}");
     }
 
     /// A spline tool face (an extruded cubic: its surface ends where the face does, so there is
@@ -547,5 +652,27 @@ mod tests {
         let two = extrude_sheet(&Plane::XY, &[chain], 0.0, 5.0).unwrap();
         let e = mutual_trim(&a, &two, TrimKeep::Side(Vec3::ZERO), TrimKeep::Side(Vec3::ZERO), true).unwrap_err().to_string();
         assert!(e.contains("not supported yet"), "{e}");
+    }
+
+    /// The normal of each face of `b`, from its display triangles' winding (each face is flat).
+    fn normals(b: &Body) -> Vec<Vec3> {
+        b.faces(0.01).unwrap().iter().map(|f| f.plane_normal.unwrap()).collect()
+    }
+
+    /// A wall (the line y = 0 from x = 0 to 10, swept 10 up z) turned over with Reverse Normal
+    /// trims at x = 5 as the wall does, keeping half its 100 (#13640), and the half kept faces as
+    /// the turned wall did. Its normal is ±y, the other way from the wall's.
+    #[test]
+    fn a_turned_wall_trims_and_keeps_its_side() {
+        let wall = extrude_sheet(&Plane::XY, &[vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(10.0, 0.0) }]], 0.0, 10.0).unwrap();
+        let turned = crate::reverse_faces(&wall, &[]).unwrap();
+        let [n] = normals(&turned)[..] else { panic!("one face") };
+        let [m] = normals(&wall)[..] else { panic!("one face") };
+        assert!(n.dot(m) < -1.0 + 1e-9 && n.y.abs() > 1.0 - 1e-9, "{n:?} vs {m:?}");
+        let cut = SplitTool::Plane(Plane::new(Vec3::new(5.0, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap());
+        let half = trim(&turned, &cut, Vec3::new(1.0, 0.0, 5.0)).unwrap();
+        assert!(rel(area(&half), 50.0) < 1e-9, "{}", area(&half));
+        assert!(normals(&half).iter().all(|k| k.dot(n) > 1.0 - 1e-9), "{:?} vs {n:?}", normals(&half));
+        assert!(measure(&half).unwrap().bbox.max.x < 5.0 + 1e-9);
     }
 }

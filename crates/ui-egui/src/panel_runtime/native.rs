@@ -13,6 +13,8 @@ use super::NativeHostAdapter;
 
 const MAX_MONITORS: usize = 64;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(2);
+/// A window's OS frame and title bar before the OS has reported its own.
+const DEFAULT_DECORATION: egui::Vec2 = egui::vec2(16.0, 48.0);
 
 /// Physical monitor bounds and DPI from the desktop window service.
 pub struct NativeMonitor {
@@ -48,6 +50,13 @@ struct DesktopState {
     placement: BTreeMap<InstanceId, Placement>,
     monitors: Vec<NativeMonitor>,
     monitors_updated: Option<Instant>,
+    /// A drag asked where a window would land since the last refresh: the
+    /// monitors are needed before any panel window is open.
+    landing_asked: bool,
+    /// The window a drag shows for a panel; the panel's window keeps it on release.
+    drop: Option<(InstanceId, egui::ViewportId)>,
+    /// When this drag started asking the OS for that window.
+    drop_startup: Option<Instant>,
 }
 
 /// Both the layout runtime and the UI use the same desktop registration table.
@@ -59,7 +68,9 @@ impl DesktopNativeAdapter {
         let now = Instant::now();
         {
             let state = self.0.borrow();
-            if state.hosts.is_empty() || state.monitors_updated.is_some_and(|last| now.duration_since(last) < Duration::from_secs(1)) {
+            if (state.hosts.is_empty() && !state.landing_asked)
+                || state.monitors_updated.is_some_and(|last| now.duration_since(last) < Duration::from_secs(1))
+            {
                 return;
             }
         }
@@ -71,6 +82,7 @@ impl DesktopNativeAdapter {
         let mut state = self.0.borrow_mut();
         state.monitors = monitors;
         state.monitors_updated = Some(now);
+        state.landing_asked = false;
     }
 
     pub fn owns(&self, host: &HostId, section: &SectionId) -> bool {
@@ -114,7 +126,14 @@ impl DesktopNativeAdapter {
         let registration = state.hosts.get(host)?;
         let min = egui::vec2(min.width, min.height);
         let max = egui::vec2(max.width, max.height);
-        let builder = egui::ViewportBuilder::default().with_title(title).with_min_inner_size(min).with_max_inner_size(max).with_visible(true);
+        // The window a drag showed becomes an ordinary window again here.
+        let builder = crate::window_chrome::popout_viewport(egui::ViewportBuilder::default(), ctx.viewport_id())
+            .with_title(title)
+            .with_min_inner_size(min)
+            .with_max_inner_size(max)
+            .with_visible(true)
+            .with_mouse_passthrough(false)
+            .with_window_level(egui::WindowLevel::Normal);
         if registration.ready {
             return Some(builder);
         }
@@ -148,24 +167,12 @@ impl DesktopNativeAdapter {
             })
             .or_else(|| state.monitors.iter().find(|m| m.primary))
             .or_else(|| state.monitors.first());
-        let Some(monitor) = monitor else {
+        let decoration = state.decoration(instance);
+        let Some((size, position)) = monitor.and_then(|monitor| fit(monitor, ctx.zoom_factor() * monitor.scale, size, min, decoration, offset))
+        else {
             return Some(builder.with_inner_size(size));
         };
-        let scale = ctx.zoom_factor() * monitor.scale;
-        if !scale.is_finite() || scale <= 0.0 {
-            return Some(builder.with_inner_size(size));
-        }
-        let area = monitor.bounds.size() / scale;
-        if !area.is_finite() {
-            return Some(builder.with_inner_size(size));
-        }
-        let decoration = saved.map_or(egui::vec2(16.0, 48.0), |saved| saved.decoration);
-        let size = size.min((area - decoration).max(min));
-        let travel = (area - size - decoration).max(egui::Vec2::ZERO);
-        let offset = offset.unwrap_or(travel / 2.0).clamp(egui::Vec2::ZERO, travel);
-        let position = (monitor.bounds.min.to_vec2() / scale + offset).to_pos2();
-        let builder = builder.with_inner_size(size);
-        Some(if position.is_finite() { builder.with_position(position) } else { builder })
+        Some(builder.with_inner_size(size).with_position(position))
     }
 
     /// Ask the integration to create the OS window first. Immediate viewports
@@ -177,10 +184,7 @@ impl DesktopNativeAdapter {
         let mut state = self.0.borrow_mut();
         let registration = state.hosts.get_mut(host).ok_or_else(|| error(Rule::MissingTarget, "native host absent"))?;
         let viewport = registration.viewport;
-        let ready = ctx.input(|input| {
-            input.raw.viewports.get(&viewport).and_then(|info| info.native_pixels_per_point).is_some_and(|scale| scale.is_finite() && scale > 0.0)
-        });
-        if ready {
+        if has_os_window(ctx, viewport) {
             registration.ready = true;
             registration.startup = None;
             return Ok(true);
@@ -216,21 +220,161 @@ impl DesktopNativeAdapter {
         };
         let outer = outer.filter(|rect| rect.is_finite() && rect.is_positive() && rect.size().max_elem() <= MAX_LOGICAL);
         let decoration = outer.map_or(egui::Vec2::ZERO, |rect| (rect.size() - size).max(egui::Vec2::ZERO));
-        let monitor = outer.zip(scale).and_then(|(outer, scale)| {
-            let scale = ctx.zoom_factor() * scale;
-            if !scale.is_finite() || scale <= 0.0 {
-                return None;
-            }
-            let center = (outer.center().to_vec2() * scale).to_pos2();
-            let monitor = state.monitors.iter().find(|monitor| monitor.bounds.contains(center))?;
-            let offset = outer.min.to_vec2() - monitor.bounds.min.to_vec2() / scale;
-            Some(MonitorPlacement { name: monitor.name.clone(), origin: monitor.bounds.min, offset })
-        });
-        if state.placement.len() >= MAX_INSTANCES && !state.placement.contains_key(instance) {
-            state.placement.pop_first();
-        }
-        state.placement.insert(instance.clone(), Placement { size, decoration, monitor });
+        let monitor = outer.zip(scale).and_then(|(outer, scale)| monitor_placement(&state.monitors, outer, |_| ctx.zoom_factor() * scale));
+        state.remember(instance, Placement { size, decoration, monitor });
     }
+
+    /// The outer screen rectangle a panel's window opens at when a drag puts its
+    /// corner at `corner`: at `size` (see `app::drop_window_size`) within
+    /// `bounds`, kept on the monitor under it exactly as `builder` keeps it.
+    pub fn landing(&self, ctx: &egui::Context, instance: &InstanceId, corner: egui::Pos2, size: Size, bounds: (Size, Size)) -> Option<egui::Rect> {
+        let mut state = self.0.borrow_mut();
+        state.landing_asked = true;
+        let state = &*state;
+        let (min, max) = (egui::vec2(bounds.0.width, bounds.0.height), egui::vec2(bounds.1.width, bounds.1.height));
+        let size = egui::vec2(size.width, size.height).clamp(min, max);
+        let decoration = state.decoration(instance);
+        let wanted = egui::Rect::from_min_size(corner, size + decoration);
+        let scale = |monitor: &NativeMonitor| ctx.zoom_factor() * monitor.scale;
+        // The monitor under the window's centre, else the nearest one.
+        let area = |monitor: &NativeMonitor| egui::Rect::from_min_size(monitor.bounds.min / scale(monitor), monitor.bounds.size() / scale(monitor));
+        let nearest =
+            state.monitors.iter().min_by(|a, b| area(a).distance_sq_to_pos(wanted.center()).total_cmp(&area(b).distance_sq_to_pos(wanted.center())));
+        let placed = nearest.and_then(|monitor| fit(monitor, scale(monitor), size, min, decoration, Some(corner - area(monitor).min)));
+        let rect = placed.map_or(wanted, |(size, corner)| egui::Rect::from_min_size(corner, size + decoration));
+        (rect.is_finite() && rect.is_positive() && rect.size().max_elem() <= MAX_LOGICAL).then_some(rect)
+    }
+
+    /// Open the panel's next window at `outer`, the rectangle a drag showed.
+    pub fn place(&self, ctx: &egui::Context, instance: &InstanceId, outer: egui::Rect) {
+        let mut state = self.0.borrow_mut();
+        let decoration = state.decoration(instance);
+        let size = outer.size() - decoration;
+        if !outer.is_finite() || size.min_elem() <= 0.0 || size.max_elem() > MAX_LOGICAL {
+            return;
+        }
+        let monitor = monitor_placement(&state.monitors, outer, |monitor| ctx.zoom_factor() * monitor.scale);
+        state.remember(instance, Placement { size, decoration, monitor });
+    }
+
+    /// The window a drag shows at `outer` for `instance`: the same window it
+    /// will open in, but passed through by the pointer, above other windows and
+    /// not activated while the drag lasts.
+    pub fn drop_window(&self, instance: &InstanceId, title: String, outer: egui::Rect) -> (egui::ViewportId, egui::ViewportBuilder) {
+        let mut state = self.0.borrow_mut();
+        let viewport = match &state.drop {
+            Some((shown, viewport)) if shown == instance => *viewport,
+            _ => {
+                state.drop_startup = None;
+                next_viewport_id(("solidcraft-panel-drop", instance))
+            }
+        };
+        state.drop = Some((instance.clone(), viewport));
+        let builder = egui::ViewportBuilder::default()
+            .with_title(title)
+            .with_position(outer.min)
+            .with_inner_size(outer.size() - state.decoration(instance))
+            .with_visible(true)
+            .with_mouse_passthrough(true)
+            .with_window_level(egui::WindowLevel::AlwaysOnTop)
+            .with_active(false);
+        (viewport, builder)
+    }
+
+    /// Like `ready`, for the window a drag shows, but it is created visible and
+    /// not activated: on macOS, showing a hidden window makes it the key window,
+    /// and the app's focus loss would cancel the drag. Until it exists it is not
+    /// drawn, so release keeps the panel in the app; after the startup time this
+    /// drag stops asking for it.
+    pub fn drop_ready(&self, ctx: &egui::Context, builder: &egui::ViewportBuilder) -> PanelResult<bool> {
+        if ctx.embed_viewports() {
+            return Err(error(Rule::Capability, "native viewports unavailable"));
+        }
+        let mut state = self.0.borrow_mut();
+        let viewport = state.drop.as_ref().ok_or_else(|| error(Rule::MissingTarget, "no window is being dragged"))?.1;
+        if has_os_window(ctx, viewport) {
+            state.drop_startup = None;
+            return Ok(true);
+        }
+        if state.drop_startup.get_or_insert_with(Instant::now).elapsed() >= STARTUP_TIMEOUT {
+            return Err(error(Rule::Lifecycle, "desktop panel window did not open"));
+        }
+        drop(state);
+        ctx.show_viewport_deferred(viewport, builder.clone(), |_, _| {});
+        ctx.request_repaint_after(Duration::from_millis(30));
+        Ok(false)
+    }
+
+    /// No drag shows a window now: the next one asks the OS afresh.
+    pub fn end_drop(&self) {
+        self.0.borrow_mut().drop_startup = None;
+    }
+
+    /// The panel dropped as `instance` opened as `host`: that host keeps the
+    /// window the drag showed, so no second window opens.
+    pub fn adopt(&self, host: &HostId, instance: &InstanceId) -> Option<egui::ViewportId> {
+        let mut state = self.0.borrow_mut();
+        let viewport = state.drop.as_ref().filter(|(shown, _)| shown == instance)?.1;
+        let registration = state.hosts.get_mut(host)?;
+        registration.viewport = viewport;
+        registration.startup = None;
+        registration.ready = false;
+        state.drop = None;
+        state.drop_startup = None;
+        Some(viewport)
+    }
+}
+
+impl DesktopState {
+    /// The OS frame around a panel's content: as last seen for it, else a typical one.
+    fn decoration(&self, instance: &InstanceId) -> egui::Vec2 {
+        self.placement.get(instance).map_or(DEFAULT_DECORATION, |saved| saved.decoration)
+    }
+
+    fn remember(&mut self, instance: &InstanceId, placement: Placement) {
+        if self.placement.len() >= MAX_INSTANCES && !self.placement.contains_key(instance) {
+            self.placement.pop_first();
+        }
+        self.placement.insert(instance.clone(), placement);
+    }
+}
+
+/// A window's inner size and outer corner on `monitor`: as large as fits, at
+/// `offset` from the monitor's corner where it fits, else centred.
+fn fit(
+    monitor: &NativeMonitor,
+    scale: f32,
+    size: egui::Vec2,
+    min: egui::Vec2,
+    decoration: egui::Vec2,
+    offset: Option<egui::Vec2>,
+) -> Option<(egui::Vec2, egui::Pos2)> {
+    let area = monitor.bounds.size() / scale;
+    if !scale.is_finite() || scale <= 0.0 || !area.is_finite() {
+        return None;
+    }
+    let size = size.min((area - decoration).max(min));
+    let travel = (area - size - decoration).max(egui::Vec2::ZERO);
+    let offset = offset.unwrap_or(travel / 2.0).clamp(egui::Vec2::ZERO, travel);
+    let corner = (monitor.bounds.min.to_vec2() / scale + offset).to_pos2();
+    corner.is_finite().then_some((size, corner))
+}
+
+/// The monitor under the centre of `outer` (logical points), and the window's
+/// offset on it. `scale` gives a monitor's points-to-pixels factor.
+fn monitor_placement(monitors: &[NativeMonitor], outer: egui::Rect, scale: impl Fn(&NativeMonitor) -> f32) -> Option<MonitorPlacement> {
+    monitors.iter().find_map(|monitor| {
+        let scale = scale(monitor);
+        if !scale.is_finite() || scale <= 0.0 {
+            return None;
+        }
+        let center = (outer.center().to_vec2() * scale).to_pos2();
+        monitor.bounds.contains(center).then(|| MonitorPlacement {
+            name: monitor.name.clone(),
+            origin: monitor.bounds.min,
+            offset: outer.min.to_vec2() - monitor.bounds.min.to_vec2() / scale,
+        })
+    })
 }
 
 impl NativeHostAdapter for DesktopNativeAdapter {
@@ -298,8 +442,15 @@ impl NativeHostAdapter for DesktopNativeAdapter {
     }
 }
 
-fn next_viewport_id(host: &HostId) -> egui::ViewportId {
+/// Egui knows the viewport's OS window: an immediate viewport can draw in it.
+fn has_os_window(ctx: &egui::Context, viewport: egui::ViewportId) -> bool {
+    ctx.input(|input| {
+        input.raw.viewports.get(&viewport).and_then(|info| info.native_pixels_per_point).is_some_and(|scale| scale.is_finite() && scale > 0.0)
+    })
+}
+
+fn next_viewport_id(seed: impl std::hash::Hash + std::fmt::Debug) -> egui::ViewportId {
     static NEXT_VIEWPORT: AtomicU64 = AtomicU64::new(0);
     let generation = NEXT_VIEWPORT.fetch_add(1, Ordering::Relaxed);
-    egui::ViewportId::from_hash_of(("solidcraft-panel-window", host, generation))
+    egui::ViewportId::from_hash_of(("solidcraft-panel-window", seed, generation))
 }

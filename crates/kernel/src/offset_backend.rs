@@ -1,8 +1,8 @@
 //! Shell, offset faces, draft and thicken through SMLib: the body goes to SMLib as its schema 4
 //! record, tagged as operand 0, SMLib runs the operation, and the result comes back with SMLib's own
 //! history, renumbered into the body's and the result's face and edge order (as
-//! `crate::smlib_boolean` does for booleans). A result SMLib's own check refuses is an
-//! error, never a body, unless the evaluation's validation mode skips the check
+//! `crate::smlib_boolean` does for booleans). Where the evaluation's validation mode checks
+//! each step, a result SMLib's own check refuses is an error, never a body
 //! (`crate::validation`).
 //!
 //! SMLib's tags travel through the copies its offset makes, so a shell's inner wall and a
@@ -65,6 +65,9 @@ fn refused(op: &str, wall: Option<f64>, e: SmError) -> KernelError {
         SmError::NoMatch { point } => KernelError::Invalid(format!("{op}: no face at selection point {}", point + 1)),
         SmError::Ambiguous { point } => KernelError::Invalid(format!("{op}: selection point {} is as near to two faces", point + 1)),
         SmError::Unsupported => KernelError::Failed(format!("not supported yet: SMLib {op} for this geometry")),
+        // A face the operation cannot handle, named for what it is (a draft's face that is neither
+        // a plane nor a cone or cylinder, #18541).
+        SmError::Refused(solidcore_ops::Error::Unsupported(why)) => KernelError::Failed(format!("not supported yet: {op}: {why}")),
         // A tangent blend that cannot follow the moved faces, in solidcore's words (#18575).
         SmError::BlendsNotFollowed { exact: false, why } => KernelError::Failed(format!("not supported yet: SMLib {op}: {why}")),
         SmError::BlendsNotFollowed { exact: true, why } => {
@@ -86,9 +89,9 @@ fn points(p: &[Vec3]) -> Vec<[f64; 3]> {
 
 /// Runs `op` on `b` in SMLib, tagged as operand 0, and brings the result back with SMLib's
 /// history over `[b]` (none where an order cannot be matched). `wall`: the operation's wall
-/// thickness, for its refusals. SMLib's check of the result runs here unless the evaluation's
-/// validation mode leaves it to the feature's end or skips it (`crate::validation`), as for
-/// booleans, blends and sweeps (#17601).
+/// thickness, for its refusals. SMLib's check of the result runs here when the evaluation's
+/// validation mode checks each step, and is left to the feature's end when it checks each
+/// feature (`crate::validation`), as for booleans, blends and sweeps (#17601).
 pub(crate) fn run(
     name: &str,
     b: &Body,
@@ -237,7 +240,8 @@ pub(crate) fn thicken(b: &Body, thickness: f64, symmetric: bool) -> Result<Body>
 /// [`crate::draft`] through SMLib: the faces under the points `at` (flat, parallel to `pull`)
 /// tilted by `angle` about their lines on `neutral`, leaning in going along `pull`; the faces
 /// around them extended or trimmed to meet them. A tilted face is the face itself (Modified).
-/// A face SMLib can't draft (not flat, or not parallel to the pull) is "not supported yet".
+/// A face SMLib can't draft (neither flat nor a cone or cylinder about the pull, or a plane not
+/// parallel to it) is "not supported yet", naming which.
 pub(crate) fn draft(b: &Body, at: &[Vec3], neutral: &solidcore_record::Plane, pull: Vec3, angle: f64) -> Result<Body> {
     if !angle.is_finite() || angle.abs() >= std::f64::consts::FRAC_PI_2 - 1e-3 {
         return Err(KernelError::Invalid("draft angle must be between −90° and 90°".into()));

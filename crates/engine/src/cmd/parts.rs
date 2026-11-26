@@ -42,7 +42,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("fastener")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<InsertedPart>)
-        .params("the Insert Part dialog's command (same as parts.insert): family, size, length?, at?|point?+direction? (from the shank's tip toward the head), flip?, name?"),
+        .params("the Insert Part dialog's command (same as parts.insert): family, size, length?, at?|point?+direction? (from the shank's tip toward the head), flip?, name?, material?"),
     CommandSpec::new("parts.insert", "Insert Part", crate::checked!("parts.insert", insert_atomic)).begins_edit()
         .icon("fastener")
         .contract(&INSERT_CONTRACT)
@@ -57,7 +57,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          them (one component, placed and seated once per pick) | point?: [x,y,z] with direction?: [x,y,z] (no joint: the part's seating plane, under a head or \
          the bottom of a nut, washer or bearing, the top of a set screw, pin or countersunk head, goes to point, and direction is its +z, from the shank's tip toward the head; default [0,0,1], \
          head up, shank down -z); flip?: bool (default false: turned over, head into the material with at, +z against direction \
-         with point); name? → component, occurrence, joint?, directions (each placement's head direction in the world, the one \
+         with point); material?: physical material (default \"Steel\"); name? → component, occurrence, joint?, directions (each placement's head direction in the world, the one \
          chosen), and with at: occurrences, joints (one per pick, in pick order)",
         ),
     CommandSpec::new("parts.seats", "Resolve Fastener Seats", crate::checked!("parts.seats", resolve_seats))
@@ -1164,6 +1164,16 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     let c = run(s, "component.create", json!({"name": name, "grounded": false}))?;
     let (comp, occ) = (c["component"].as_u64().unwrap_or(0), c["occurrence"].as_u64().unwrap_or(0));
     build(s, &sh, None)?;
+    let material_name = str_(p, "material").unwrap_or("Steel");
+    let canonical = s.doc.material_name(material_name).ok_or_else(|| bad(cmd, format!("unknown material `{material_name}` (see material.list)")))?;
+    let bodies: Vec<String> = s.model.state().bodies.iter().filter(|b| s.doc.model_body_component(b) == comp).map(|b| b.name.clone()).collect();
+    for name in bodies {
+        if canonical == solidcraft_doc::DEFAULT_MATERIAL {
+            s.doc_mut().materials.remove(&name);
+        } else {
+            s.doc_mut().materials.insert(name, canonical.clone());
+        }
+    }
     s.doc_mut().parts.insert(comp, solidcraft_doc::StandardPart { family: family.clone(), size: size.clone(), length: shape_len(&sh) });
     set_identity(s, comp, identity(&family, &size, &sh), None);
     run(s, "component.activate", json!({"component": active}))?;
@@ -1521,6 +1531,10 @@ fn resize(s: &mut Session, p: &Value) -> Result<Value> {
     let active = s.active_component;
     run(s, "component.activate", json!({"component": comp}))?;
     build(s, &sh, body_name.as_deref())?;
+    let bodies: Vec<String> = s.model.state().bodies.iter().filter(|b| s.doc.model_body_component(b) == comp).map(|b| b.name.clone()).collect();
+    for name in bodies {
+        s.doc_mut().materials.entry(name).or_insert_with(|| "Steel".to_string());
+    }
     let added = s.doc.marker.unwrap_or(position).saturating_sub(position);
     // Keep the rollback boundary among the surviving features. If it was inside the
     // part's feature block, leave the same number of replacement features active.
@@ -2552,5 +2566,43 @@ mod tests {
         assert_eq!(s.undo.len(), crate::MAX_UNDO);
         assert_eq!(s.undo.first().map(|step| step.label.as_str()), Some("Earlier step 1"));
         assert_eq!(s.undo.last().map(|step| step.label.as_str()), Some("Change Part Size"));
+    }
+
+    #[test]
+    fn inserted_fastener_defaults_to_steel_and_accepts_custom_material() {
+        let mut s = Session::default();
+        let part = run(&mut s, "parts.fastener", json!({"family":"socket_head_cap_screw","size":"M5","length":16}));
+        let Some(comp) = part["component"].as_u64() else { panic!("component id missing") };
+        let Some(body_name) = s.model.state().bodies.iter().find(|b| s.doc.model_body_component(b) == comp).map(|b| b.name.clone()) else {
+            panic!("part body missing")
+        };
+        assert_eq!(s.doc.body_material(&body_name), "Steel");
+        assert!((s.doc.density(&body_name) - 7.85).abs() < 1e-6);
+
+        // BOM reports Steel
+        let bom = run(&mut s, "assembly.bom", json!({"mass": true}));
+        let Some(rows) = bom["rows"].as_array() else { panic!("rows missing") };
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["material"], "Steel");
+        let Some(mass) = rows[0]["mass_g"].as_f64() else { panic!("mass_g missing") };
+        assert!(mass > 4.0 && mass < 5.0, "M5x16 steel screw mass should be ~4.42g, got {mass}");
+
+        // Insert with explicit material (Brass)
+        let brass_part = run(&mut s, "parts.insert", json!({"family":"washer","size":"M8","material":"Brass"}));
+        let Some(brass_comp) = brass_part["component"].as_u64() else { panic!("brass component missing") };
+        let Some(brass_body) = s.model.state().bodies.iter().find(|b| s.doc.model_body_component(b) == brass_comp).map(|b| b.name.clone()) else {
+            panic!("brass body missing")
+        };
+        assert_eq!(s.doc.body_material(&brass_body), "Brass");
+
+        // Resizing preserves material
+        run(&mut s, "parts.resize", json!({"component": brass_comp, "size": "M10"}));
+        let Some(resized_body) = s.model.state().bodies.iter().find(|b| s.doc.model_body_component(b) == brass_comp).map(|b| b.name.clone()) else {
+            panic!("resized body missing")
+        };
+        assert_eq!(s.doc.body_material(&resized_body), "Brass");
+
+        // Unknown material error
+        assert!(s.execute("parts.insert", &json!({"family":"hex_nut","size":"M6","material":"Vibranium"})).is_err());
     }
 }

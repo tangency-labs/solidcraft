@@ -216,6 +216,9 @@ pub enum ContentSlot {
 pub trait FramePanelContent {
     fn header_action_context_menu(&mut self, _instance: &InstanceId, _at: egui::Pos2) {}
 
+    /// A header action was clicked: a button that opens a menu anchors it at `button`.
+    fn header_action_clicked(&mut self, _instance: &InstanceId, _action: &ControlId, _button: egui::Rect) {}
+
     fn render(
         &mut self,
         slot: ContentSlot,

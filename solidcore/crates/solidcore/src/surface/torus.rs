@@ -2093,6 +2093,24 @@ fn tube_ends_zero_deg(scaled_zero: f64, minor: f64) -> f64 {
     }
 }
 
+/// Not upstream: the content digest ([`crate::geom::content`]).
+impl crate::geom::content::Content for Torus {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            base,
+            major_radius,
+            minor_radius,
+            inside_out,
+        } = self;
+        d.tag(0x70);
+        base.content(d)?;
+        d.f64(*major_radius);
+        d.f64(*minor_radius);
+        d.bool(*inside_out);
+        Some(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

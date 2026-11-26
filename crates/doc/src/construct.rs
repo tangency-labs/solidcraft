@@ -41,6 +41,15 @@ pub enum GeoRef {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         name: Option<String>,
     },
+    /// An edge on one occurrence. The body name and pick point are in the definition's frame.
+    PlacedEdge {
+        body: crate::BodyName,
+        path: Vec<u64>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        author_path: Vec<u64>,
+        at: Vec3,
+        name: String,
+    },
     /// A body face: the one named `name`, else the one at `at`.
     Face {
         at: Vec3,
@@ -114,6 +123,9 @@ pub enum PointDef {
     EdgeAndPlane { edge: GeoRef, plane: GeoRef },
     /// At a fraction `t` (0…1) of the way along an edge or sketch curve.
     AlongPath { path: GeoRef, t: crate::Expr },
+    /// At the average (the centroid) of two or more points (vertices, sketch points or points),
+    /// whatever their order.
+    Average { points: Vec<GeoRef> },
 }
 
 /// Resolved construction geometry, kept in the model state by feature.
@@ -363,6 +375,52 @@ fn edge_pick<'a>(st: &'a ModelState, at: Vec3, name: &Option<String>) -> Result<
         Some((d, b, i, pts)) if pts.len() >= 2 && d <= 1e-3 + 1e-2 * pts.iter().fold(0.0, |m: f64, p| m.max(p.len())).max(1.0) => Ok((b, i, pts)),
         _ => Err(bad(format!("no edge at {at}"))),
     }
+}
+
+fn named_edge<'a>(st: &'a ModelState, at: Vec3, name: &str) -> Option<(&'a ModelBody, crate::name_lookup::EdgeHit)> {
+    let mut named = bodies(st).filter_map(|body| crate::name_lookup::locate_edge(body, name, at).ok().map(|hit| (body, hit)));
+    let first = named.next()?;
+    // Older references have only a world point to distinguish placements of the same edge.
+    let on_edge = |(body, hit): &(&ModelBody, crate::name_lookup::EdgeHit)| {
+        let reach = (body.body.size() * 2e-3).max(1e-3);
+        kernel::edge_distance(&body.body, hit.edge, at).ok().flatten().is_some_and(|distance| distance <= reach)
+    };
+    if on_edge(&first) { Some(first) } else { named.find(on_edge).or(Some(first)) }
+}
+
+/// The body, edge index and current point of an edge found by its persistent name.
+pub fn named_edge_pick(st: &ModelState, at: Vec3, name: &str) -> Option<(String, usize, Vec3)> {
+    let (body, hit) = named_edge(st, at, name)?;
+    Some((body.name.clone(), hit.edge, hit.point))
+}
+
+fn indexed_edge_points(body: &ModelBody, index: usize) -> Option<Vec<Vec3>> {
+    let tolerance = (body.body.size() * 1e-3).max(1e-3);
+    body.body.edges(tolerance).ok()?.into_iter().nth(index).map(|edge| edge.points)
+}
+
+fn placed_edge<'a>(
+    doc: &Document,
+    st: &'a ModelState,
+    body: &str,
+    path: &[u64],
+    at: Vec3,
+    name: &str,
+) -> Result<(&'a ModelBody, crate::Mat, crate::name_lookup::EdgeHit)> {
+    let body = st.body(body).filter(|body| !body.body.is_mesh()).ok_or_else(|| DocError::reselect(name))?;
+    let frame = doc.path_transform(doc.model_body_component(body), path).ok_or_else(|| DocError::reselect(name))?;
+    let frame = doc.model_body_offset(body).map_or(frame, |offset| crate::mat_mul(&frame, offset));
+    let hit = crate::name_lookup::locate_edge(body, name, at).map_err(|_| DocError::reselect(name))?;
+    Ok((body, frame, hit))
+}
+
+/// The placed edge's world body name, edge index and current point for selection refill.
+pub fn placed_edge_pick(doc: &Document, st: &ModelState, geo: &GeoRef) -> Option<(String, usize, Vec3)> {
+    let GeoRef::PlacedEdge { body, path, at, name, .. } = geo else { return None };
+    let (body, frame, hit) = placed_edge(doc, st, body.as_ref(), path, *at, name).ok()?;
+    let world_name = doc.world_body_name(st, &body.name, doc.model_body_component(body), path);
+    let point = solidcraft_kernel::services::affine::apply_point(&frame, hit.point.into());
+    Some((world_name, hit.edge, point.into()))
 }
 
 /// The closest point on a polyline to `target`, projecting onto each segment rather than
@@ -711,13 +769,40 @@ pub fn sketch_point_position(st: &ModelState, sketch: u64, point: &str) -> Optio
     ss.sketch.wires.get(ss.sketch.wire_index(wire)?)?.fit.get(index).copied()
 }
 
+/// The point a Scale grows its bodies about, from its pick as the model is now: a flat face's
+/// middle, a hole's or shaft's round end nearest the pick (a round edge's centre), else the point
+/// [`point`] finds. A named face or edge that is gone fails, asking for it to be picked again.
+pub(crate) fn scale_point(ctx: &Ctx, g: &GeoRef) -> Result<Vec3> {
+    match g {
+        GeoRef::Face { at, name } => {
+            let (b, fi, p) = face_of(ctx.st, *at, name)?;
+            if let Some(c) = kernel::cylinder_face_at(&b.body, p) {
+                let s = solidcraft_kernel::services::affine::distance_along(c.axis_point.into(), c.axis.vec().into(), p.into());
+                let end = if (s - c.start).abs() <= (c.end - s).abs() { c.start } else { c.end };
+                return Ok(c.axis_point + c.axis * end);
+            }
+            let tol = (b.body.size() * 2e-3).max(1e-3);
+            let f = b.body.faces(tol).ok().and_then(|fs| fs.into_iter().find(|f| f.index == fi));
+            match f {
+                Some(f) if f.plane_normal.is_some() && f.centroid.is_finite() => Ok(f.centroid),
+                _ => Err(bad("this face has no centre to scale about: pick a flat or round face, a vertex or a point")),
+            }
+        }
+        _ => point(ctx, g),
+    }
+}
+
 /// An edge or face of the model as a line: along a straight edge, through the centre of a
 /// circular edge along its normal, or the axis of a cylinder, cone or torus face.
+fn line_of_edge(body: &ModelBody, index: usize, points: &[Vec3]) -> Result<(Vec3, Vec3)> {
+    as_line(points).or_else(|| edge_circle(body, index, points)).ok_or_else(|| bad("the edge is neither straight nor circular"))
+}
+
 fn model_line(st: &ModelState, g: &GeoRef) -> Result<(Vec3, Vec3)> {
     match g {
         GeoRef::Edge { at, name } => {
             let (b, i, pts) = edge_pick(st, *at, name)?;
-            as_line(&pts).or_else(|| edge_circle(b, i, &pts)).ok_or_else(|| bad("the edge is neither straight nor circular"))
+            line_of_edge(b, i, &pts)
         }
         GeoRef::Face { at, name } => {
             let (b, fi, _) = face_of(st, *at, name)?;
@@ -740,9 +825,22 @@ pub const MODEL_AXIS_REFS: &str = "pick a straight or circular edge, or a cylind
 /// oriented the same way however the edge or surface runs (its largest component positive), so
 /// the feature keeps its turn when an edit rebuilds the edge reversed.
 pub fn model_axis(st: &ModelState, g: &GeoRef) -> Result<(Vec3, Vec3)> {
-    let (o, d) = model_line(st, g)?;
-    let d = d.normalized().filter(|_| o.is_finite()).ok_or_else(|| bad("the axis has no direction"))?;
-    Ok((o, canonical_dir(d)))
+    oriented_axis(model_line(st, g)?)
+}
+
+/// Coil's model axis. Keep the index of a named edge even when its pick is on a shared vertex.
+pub fn coil_model_axis(st: &ModelState, geo: &GeoRef) -> Result<(Vec3, Vec3)> {
+    let GeoRef::Edge { at, name: Some(name) } = geo else { return model_axis(st, geo) };
+    let (body, hit) = named_edge(st, *at, name).ok_or_else(|| DocError::reselect(name))?;
+    let points = indexed_edge_points(body, hit.edge).ok_or_else(|| DocError::reselect(name))?;
+    oriented_axis(line_of_edge(body, hit.edge, &points)?)
+}
+
+fn oriented_axis((origin, direction): (Vec3, Vec3)) -> Result<(Vec3, Vec3)> {
+    let direction = solidcraft_kernel::services::affine::unit_axis_direction(direction.into(), solidcraft_geom::EPS)
+        .filter(|_| origin.is_finite())
+        .ok_or_else(|| bad("the axis has no direction"))?;
+    Ok((origin, direction.into()))
 }
 
 /// [`model_axis`] for references that may name a component's origin datum: the datum is placed
@@ -758,6 +856,21 @@ pub fn model_axis_in(doc: Option<&Document>, st: &ModelState, g: &GeoRef, compon
                 _ => Err(bad("the datum is not an axis (pick the X, Y or Z of a component)")),
             }
         }
+        GeoRef::PlacedEdge { body, path, author_path, at, name } => {
+            let doc = doc.ok_or_else(|| bad("resolve the edge through its occurrence"))?;
+            let (body, frame, hit) = placed_edge(doc, st, body.as_ref(), path, *at, name)?;
+            let points = indexed_edge_points(body, hit.edge).ok_or_else(|| DocError::reselect(name))?;
+            let (origin, direction) = line_of_edge(body, hit.edge, &points)?;
+            let author = if author_path.is_empty() {
+                doc.component_transform(component)
+            } else {
+                doc.path_transform(component, author_path).ok_or_else(|| DocError::reselect(name.as_str()))?
+            };
+            let inverse = solidcraft_kernel::services::affine::inverse(&author).map_err(|_| bad("the feature's component frame is invalid"))?;
+            let (origin, direction) = solidcraft_kernel::services::affine::placed_axis(&frame, &inverse, origin.into(), direction.into())
+                .map_err(|_| bad("the axis has no direction"))?;
+            Ok((origin.into(), direction.into()))
+        }
         // A construction axis by name: where it is on each evaluation, so what turns about it follows it.
         GeoRef::Axis { name } => crate::eval::construction_axis_in(doc, st, name, component),
         _ => model_axis(st, g),
@@ -767,12 +880,7 @@ pub fn model_axis_in(doc: Option<&Document>, st: &ModelState, g: &GeoRef, compon
 /// `d` or `-d`, whichever has its largest component (the first of equal ones) positive: how
 /// [`model_axis`] orients an axis, for a preview of one to point the same way.
 pub fn canonical_dir(d: Vec3) -> Vec3 {
-    let c = [d.x, d.y, d.z];
-    let big = c.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
-    match c.iter().find(|v| v.abs() >= big - 1e-9) {
-        Some(v) if *v < 0.0 => -d,
-        _ => d,
-    }
+    solidcraft_kernel::services::affine::canonical_axis_direction(d.into()).into()
 }
 
 /// The direction of a straight line a feature is turned parallel to: a straight model edge, a
@@ -869,7 +977,8 @@ fn along(ctx: &Ctx, g: &GeoRef, t: f64) -> Result<(Vec3, Vec3)> {
 
 /// A picked edge or sketch curve as the path segments that are its curve exactly, from the end
 /// the drawn curve starts at: a body edge's record curve ([`kernel::edge_path`]), a planar sketch
-/// curve's exact pieces, a 3D sketch curve's arc, spline, line or linked exact curves. Only a
+/// curve's exact pieces, a 3D sketch curve's arc, spline (through its fit points or over its
+/// control points), line or linked exact curves. Only a
 /// curve that exists as points alone runs along them: an intersection edge (its record holds no
 /// exact curve, only the surfaces and a leader near it), a 3D curve known only as its points
 /// (projected onto a face, iso curves), a spline above the exact pieces' degree.
@@ -899,6 +1008,9 @@ fn path_segs(ctx: &Ctx, g: &GeoRef) -> Result<Vec<kernel::PathSeg>> {
                 if let Some(arc) = &wire.arc {
                     let angle = solidcraft_sketch::arc_sweep(arc);
                     return Ok(vec![kernel::PathSeg::Arc { a: arc.start, center: arc.center, axis: arc.normal, angle }]);
+                }
+                if let Some(c) = wire.control_curve() {
+                    return Ok(kernel::curve_path(&c.curve, c.interval)?);
                 }
                 if wire.fit.len() >= 3 {
                     let spline = kernel::PathPiece::Spline { fit: wire.fit.clone(), reversed: false };
@@ -1123,6 +1235,16 @@ pub(crate) fn resolve_point(ctx: &Ctx, d: &PointDef) -> Result<Vec3> {
         PointDef::AlongPath { path, t } => {
             let t = Document::eval_in(ctx.vals, t, Kind::Unitless)?;
             along(ctx, path, t).map(|(p, _)| p)
+        }
+        PointDef::Average { points } => {
+            if points.len() < 2 {
+                return Err(DocError::Invalid("a point at the average of points needs two or more points".into()));
+            }
+            let mut sum = Vec3::new(0.0, 0.0, 0.0);
+            for p in points {
+                sum += point(ctx, p)?;
+            }
+            Ok(sum * (1.0 / points.len() as f64))
         }
     }
 }
@@ -1376,6 +1498,7 @@ impl PointDef {
             PointDef::At { point } => vec![point],
             PointDef::Center { of } => vec![of],
             PointDef::TwoEdges { a, b } => vec![a, b],
+            PointDef::Average { points } => points.iter().collect(),
             PointDef::ThreePlanes { a, b, c } => vec![a, b, c],
             PointDef::EdgeAndPlane { edge, plane } => vec![edge, plane],
             PointDef::AlongPath { path, .. } => vec![path],
@@ -1387,6 +1510,7 @@ impl PointDef {
             PointDef::At { point } => vec![point],
             PointDef::Center { of } => vec![of],
             PointDef::TwoEdges { a, b } => vec![a, b],
+            PointDef::Average { points } => points.iter_mut().collect(),
             PointDef::ThreePlanes { a, b, c } => vec![a, b, c],
             PointDef::EdgeAndPlane { edge, plane } => vec![edge, plane],
             PointDef::AlongPath { path, .. } => vec![path],

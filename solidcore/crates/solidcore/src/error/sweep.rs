@@ -10,21 +10,21 @@
 //!
 //! | Rust                                  | Status difftest compares |
 //! |---------------------------------------|--------------------------|
-//! | [`SweepFailure::RailPastStationCap`]  | `SM_ERR`                 |
-//! | [`SweepFailure::LoftSectionsTooLarge`] | `SM_ERR`                |
-//! | [`SweepFailure::LoftMatchTooLarge`]   | `SM_ERR`                 |
-//! | [`SweepFailure::NullTarget`]          | `SM_ERR_NULL_POINTER`    |
-//! | [`SweepFailure::NullProfileCurve`]    | `SM_ERR_NULL_POINTER`    |
-//! | [`SweepFailure::EdgeWithoutCurve`]    | `SM_ERR_NULL_POINTER` (or the site's) |
-//! | [`SweepFailure::FaceWithoutSurface`]  | `SM_ERR_NULL_POINTER`    |
 //! | [`SweepFailure::BrepWithoutInfiniteRegion`] | `SM_ERR_NULL_POINTER` |
-//! | [`SweepFailure::UntaggedSilhouetteEdge`] | `SM_ERR_NULL_POINTER` |
-//! | [`SweepFailure::FaceCopyByFullTurn`]  | `SM_ERR_NULL_POINTER`    |
-//! | [`SweepFailure::UntaggedFace`]        | `SM_ERR_NULL_POINTER`    |
-//! | [`SweepFailure::UntaggedEdge`]        | `SM_ERR_NULL_POINTER`    |
-//! | [`SweepFailure::MergeOtherBodyConsumed`] | `SM_ERR_NULL_POINTER` |
-//! | [`SweepFailure::SweptEdgeCurveDropped`] | `SM_ERR_NULL_POINTER`  |
 //! | [`SweepFailure::Defect`]              | `SM_ERR` (or the site's, through `with_status`) |
+//! | [`SweepFailure::EdgeWithoutCurve`]    | `SM_ERR_NULL_POINTER` (or the site's) |
+//! | [`SweepFailure::FaceCopyByFullTurn`]  | `SM_ERR_NULL_POINTER`    |
+//! | [`SweepFailure::FaceWithoutSurface`]  | `SM_ERR_NULL_POINTER`    |
+//! | [`SweepFailure::LoftMatchTooLarge`]   | `SM_ERR`                 |
+//! | [`SweepFailure::LoftSectionsTooLarge`] | `SM_ERR`                |
+//! | [`SweepFailure::MergeOtherBodyConsumed`] | `SM_ERR_NULL_POINTER` |
+//! | [`SweepFailure::NullProfileCurve`]    | `SM_ERR_NULL_POINTER`    |
+//! | [`SweepFailure::NullTarget`]          | `SM_ERR_NULL_POINTER`    |
+//! | [`SweepFailure::RailPastStationCap`]  | `SM_ERR`                 |
+//! | [`SweepFailure::SweptEdgeCurveDropped`] | `SM_ERR_NULL_POINTER`  |
+//! | [`SweepFailure::UntaggedEdge`]        | `SM_ERR_NULL_POINTER`    |
+//! | [`SweepFailure::UntaggedFace`]        | `SM_ERR_NULL_POINTER`    |
+//! | [`SweepFailure::UntaggedSilhouetteEdge`] | `SM_ERR_NULL_POINTER` |
 //! | every other cause                     | `SM_ERR` (or the site's, through `with_status`) |
 //!
 //! [`SweepFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
@@ -48,38 +48,38 @@ pub(crate) const MERGE_OTHER_CONSUMED: &str =
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SweepRecord {
-    /// Each has a swept image of its own dimension (`GetToSame`).
-    SweptImage,
-    /// Each is the image of a swept entity (`GetFromSame`).
-    ImageOfSwept,
     /// Each comes from sweeping an entity of one dimension lower (`GetFromLower`).
     FromLowerSweep,
     /// Each has a swept image of one dimension higher (`GetToHigher`).
     HigherSweptImage,
+    /// Each is the image of a swept entity (`GetFromSame`).
+    ImageOfSwept,
+    /// Each has a swept image of its own dimension (`GetToSame`).
+    SweptImage,
 }
 
 /// The kind of a topology sweep entity ([`SweepFailure::SweepImageOfOtherKind`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SweptKind {
-    /// A vertex.
-    Vertex,
     /// An edge.
     Edge,
     /// A face.
     Face,
     /// A region.
     Region,
+    /// A vertex.
+    Vertex,
 }
 
 /// The step on a profile curve that failed ([`SweepFailure::ProfileCurveStepFailed`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ProfileCurveStep {
-    /// Its canonical NURBS form.
-    Nurbs,
     /// Its copy for a cap.
     Copy,
+    /// Its canonical NURBS form.
+    Nurbs,
     /// Its placement at a cap.
     Place,
 }
@@ -88,121 +88,40 @@ pub enum ProfileCurveStep {
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum SweepFailure {
-    /// A railed loft's guided edges were asked within `asked` of their rails, and at the most
-    /// wires asked, `wires`, the bound proved was still `reached`.
-    RailPastStationCap {
-        /// The tolerance asked.
-        asked: f64,
-        /// The largest bound proved between a rail and the skin at the cap.
-        reached: f64,
-        /// The wires (sections and stations) at the cap.
-        wires: usize,
-    },
-    /// Two loft sections too large to pair: the band their pairing is searched in
-    /// ([`crate::sweep::loft_sections`]) would have no room within its cells, with `first` and
-    /// `second` segments. Sections of equal counts up to `largest` segments pair.
-    LoftSectionsTooLarge {
-        /// The first section's segments.
-        first: usize,
-        /// The second section's segments.
-        second: usize,
-        /// The most segments two sections of equal counts may have.
-        largest: usize,
-    },
-    /// Loft sections whose match ([`crate::sweep::loft_sections`]) would give a section
-    /// `segments` segments, more than the caller's bound `most`.
-    LoftMatchTooLarge {
-        /// The segments the section would get (at least).
-        segments: usize,
-        /// The caller's bound.
-        most: usize,
-    },
-    /// The caller's sweep targets name a null entity: an entry of a target array, or the
-    /// B-rep to sweep. [`ErrorKind::InvalidInput`].
-    NullTarget,
-    /// A profile curve the caller passed is null. [`ErrorKind::InvalidInput`].
-    NullProfileCurve,
-    /// An edge of the caller's profile has no curve. [`ErrorKind::InvalidInput`].
-    EdgeWithoutCurve {
-        /// The edge.
-        edge: EdgeId,
-    },
-    /// A face of the caller's profile has no surface. [`ErrorKind::InvalidInput`].
-    FaceWithoutSurface {
-        /// The face.
-        face: FaceId,
-    },
+    /// A base edge to make in a face has a curve whose two ends are within tolerance of one
+    /// face vertex. [`ErrorKind::InvalidInput`].
+    BaseCurveEndsCoincide,
+    /// The base sweep geometry, which only its translational and rotational kinds extend,
+    /// builds no geometry and has no copy. [`ErrorKind::Unsupported`].
+    BaseGeometryBuildsNothing,
     /// A B-rep the sweep reads or builds into has no infinite region (a B-rep made without
     /// one). [`ErrorKind::InvalidInput`].
     BrepWithoutInfiniteRegion {
         /// The B-rep.
         brep: EntityRef,
     },
-    /// A tagging sweep of a whole B-rep copies each swept edge's tag to its images, and an
-    /// edge of the silhouette it sweeps has none: the silhouette's edges come from the
-    /// hidden-curve scene's faces, which carry no tags, so tagging them is not supported.
+    /// The edge's curve is tangent to the translation somewhere, where the surface it
+    /// sweeps degenerates. [`ErrorKind::Degenerate`].
+    CurveTangentToSweep,
+    /// A curve the sweep needs as a B-spline is of a kind with no B-spline form.
     /// [`ErrorKind::Unsupported`].
-    UntaggedSilhouetteEdge {
-        /// The edge.
-        edge: EdgeId,
+    CurveWithoutBSplineForm {
+        /// The curve's edge, where it has one.
+        entity: Option<EntityRef>,
     },
-    /// A face to copy by a rotation of a full turn: its image is the face itself, so the
-    /// rotation gives no surface to copy. [`ErrorKind::InvalidInput`].
-    FaceCopyByFullTurn,
-    /// A face given to a tagging face copy (`TopologySweep::sweep_face_same` with tagging on)
-    /// has no tag: `tag_profile` was not run on it. [`ErrorKind::InvalidInput`].
-    UntaggedFace {
-        /// The face.
-        face: FaceId,
+    /// The cylinder piece a profile line parallel to the screw axis sweeps built `faces`
+    /// faces, not one: the line is too short to bound a face. [`ErrorKind::Degenerate`].
+    CylinderPieceNotOneFace {
+        /// The faces it built.
+        faces: usize,
     },
-    /// An edge given to a tagging edge sweep (`TopologySweep::sweep_edges_higher` with
-    /// tagging on) has no tag: `tag_profile` was not run on it. [`ErrorKind::InvalidInput`].
-    /// (An untagged silhouette edge of a whole-B-rep sweep is
-    /// [`SweepFailure::UntaggedSilhouetteEdge`].)
-    UntaggedEdge {
-        /// The edge.
-        edge: EdgeId,
-    },
-    /// A store call on a sweep merge whose other body an earlier union or merge consumed
-    /// (deleted, or merged into the primary): the caller's use of a spent merge, as an
-    /// unknown or released merge is. [`ErrorKind::InvalidInput`].
-    MergeOtherBodyConsumed,
-    /// A same-dimension image recorded in the sweep's maps (which a caller can fill through
-    /// `TopologySweep::set_same` or the public maps) is of another kind than the entity it
-    /// is the image of. [`ErrorKind::InvalidInput`].
-    SweepImageOfOtherKind {
-        /// The recorded image.
-        image: EntityRef,
-        /// The kind it should have: its original's.
-        expected: SweptKind,
-        /// The kind it has.
-        found: SweptKind,
-    },
-    /// A face the caller asked to sweep was already swept in this sweep (it is listed
-    /// twice, or as the image of another). [`ErrorKind::InvalidInput`].
-    FaceAlreadySwept,
-    /// The sweep moves an entity `moved`, less than the `least` its tolerance needs
-    /// (twice the tolerance for a translation, the vertex tolerance for a rotation).
-    /// [`ErrorKind::InvalidInput`].
-    SweepTooShort {
-        /// How far the sweep moves the entity.
-        moved: f64,
-        /// The least move its tolerance needs.
-        least: f64,
-    },
-    /// A repeated rotation turns `degrees` in all, more than a full turn.
-    /// [`ErrorKind::InvalidInput`].
-    RotationPastFullTurn {
-        /// The degrees turned.
-        degrees: f64,
-    },
-    /// A point to rotate is `distance` from the rotation axis, within the `least` that
-    /// gives it a direction away from the axis. [`ErrorKind::InvalidInput`].
-    PointOnRotationAxis {
-        /// The point's distance from the axis.
-        distance: f64,
-        /// The least distance that gives a direction.
-        least: f64,
+    /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
+    /// `why` names the step that failed and why that is the kernel's fault, not the
+    /// geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its site
+    /// says otherwise.
+    Defect {
+        /// The step that failed, and why that is the kernel's fault.
+        why: &'static str,
     },
     /// A profile edge crosses the rotation axis: its curve meets the axis away from its
     /// ends, or runs along only part of the axis between its ends.
@@ -217,26 +136,43 @@ pub enum SweepFailure {
         /// The tolerance.
         tolerance: f64,
     },
-    /// A base edge to make in a face has a curve whose two ends are within tolerance of one
-    /// face vertex. [`ErrorKind::InvalidInput`].
-    BaseCurveEndsCoincide,
+    /// An edge of the caller's profile has no curve. [`ErrorKind::InvalidInput`].
+    EdgeWithoutCurve {
+        /// The edge.
+        edge: EdgeId,
+    },
+    /// A face the caller asked to sweep was already swept in this sweep (it is listed
+    /// twice, or as the image of another). [`ErrorKind::InvalidInput`].
+    FaceAlreadySwept,
+    /// A face to copy by a rotation of a full turn: its image is the face itself, so the
+    /// rotation gives no surface to copy. [`ErrorKind::InvalidInput`].
+    FaceCopyByFullTurn,
     /// Two vertices of the face a base edge is made in are within tolerance of one end of
     /// the edge's curve. [`ErrorKind::InvalidInput`].
     FaceVerticesCoincide,
-    /// A profile curve's NURBS form has `dim` coordinates, not three.
-    /// [`ErrorKind::InvalidInput`].
-    ProfileCurveNotThreeDimensional {
-        /// Its dimension.
-        dim: u64,
+    /// A face of the caller's profile has no surface. [`ErrorKind::InvalidInput`].
+    FaceWithoutSurface {
+        /// The face.
+        face: FaceId,
     },
-    /// The base sweep geometry, which only its translational and rotational kinds extend,
-    /// builds no geometry and has no copy. [`ErrorKind::Unsupported`].
-    BaseGeometryBuildsNothing,
-    /// A curve the sweep needs as a B-spline is of a kind with no B-spline form.
-    /// [`ErrorKind::Unsupported`].
-    CurveWithoutBSplineForm {
-        /// The curve's edge, where it has one.
-        entity: Option<EntityRef>,
+    /// Loft sections whose match ([`crate::sweep::loft_sections`]) would give a section
+    /// `segments` segments, more than the caller's bound `most`.
+    LoftMatchTooLarge {
+        /// The segments the section would get (at least).
+        segments: usize,
+        /// The caller's bound.
+        most: usize,
+    },
+    /// Two loft sections too large to pair: the band their pairing is searched in
+    /// ([`crate::sweep::loft_sections`]) would have no room within its cells, with `first` and
+    /// `second` segments. Sections of equal counts up to `largest` segments pair.
+    LoftSectionsTooLarge {
+        /// The first section's segments.
+        first: usize,
+        /// The second section's segments.
+        second: usize,
+        /// The most segments two sections of equal counts may have.
+        largest: usize,
     },
     /// Both entities a stitch would merge already carry the same sweep record, so neither
     /// can be kept for the other. [`ErrorKind::Unsupported`].
@@ -244,6 +180,10 @@ pub enum SweepFailure {
         /// The record both carry.
         record: SweepRecord,
     },
+    /// A store call on a sweep merge whose other body an earlier union or merge consumed
+    /// (deleted, or merged into the primary): the caller's use of a spent merge, as an
+    /// unknown or released merge is. [`ErrorKind::InvalidInput`].
+    MergeOtherBodyConsumed,
     /// A profile line perpendicular to the rotation axis within the angle tolerance whose
     /// ends' feet on the axis are `apart`, more than `eps`: the plane it sweeps is not
     /// defined. [`ErrorKind::Unsupported`].
@@ -253,8 +193,78 @@ pub enum SweepFailure {
         /// The tolerance.
         eps: f64,
     },
+    /// A profile curve the caller passed is null. [`ErrorKind::InvalidInput`].
+    NullProfileCurve,
+    /// The caller's sweep targets name a null entity: an entry of a target array, or the
+    /// B-rep to sweep. [`ErrorKind::InvalidInput`].
+    NullTarget,
+    /// A point to rotate is `distance` from the rotation axis, within the `least` that
+    /// gives it a direction away from the axis. [`ErrorKind::InvalidInput`].
+    PointOnRotationAxis {
+        /// The point's distance from the axis.
+        distance: f64,
+        /// The least distance that gives a direction.
+        least: f64,
+    },
+    /// A profile curve's NURBS form has `dim` coordinates, not three.
+    /// [`ErrorKind::InvalidInput`].
+    ProfileCurveNotThreeDimensional {
+        /// Its dimension.
+        dim: u64,
+    },
+    /// A step on a profile curve failed; the error it chains says why.
+    /// [`ErrorKind::Failed`].
+    ProfileCurveStepFailed {
+        /// The step.
+        step: ProfileCurveStep,
+    },
+    /// A railed loft's guided edges were asked within `asked` of their rails, and at the most
+    /// wires asked, `wires`, the bound proved was still `reached`.
+    RailPastStationCap {
+        /// The tolerance asked.
+        asked: f64,
+        /// The largest bound proved between a rail and the skin at the cap.
+        reached: f64,
+        /// The wires (sections and stations) at the cap.
+        wires: usize,
+    },
+    /// The revolved curve sweeps no face (a curve along the axis sweeps none).
+    /// [`ErrorKind::Degenerate`].
+    RevolutionSweepsNoFace,
+    /// A repeated rotation turns `degrees` in all, more than a full turn.
+    /// [`ErrorKind::InvalidInput`].
+    RotationPastFullTurn {
+        /// The degrees turned.
+        degrees: f64,
+    },
+    /// A same-dimension image recorded in the sweep's maps (which a caller can fill through
+    /// `TopologySweep::set_same` or the public maps) is of another kind than the entity it
+    /// is the image of. [`ErrorKind::InvalidInput`].
+    SweepImageOfOtherKind {
+        /// The recorded image.
+        image: EntityRef,
+        /// The kind it should have: its original's.
+        expected: SweptKind,
+        /// The kind it has.
+        found: SweptKind,
+    },
+    /// The sweep moves an entity `moved`, less than the `least` its tolerance needs
+    /// (twice the tolerance for a translation, the vertex tolerance for a rotation).
+    /// [`ErrorKind::InvalidInput`].
+    SweepTooShort {
+        /// How far the sweep moves the entity.
+        moved: f64,
+        /// The least move its tolerance needs.
+        least: f64,
+    },
     /// The swept body is not a closed manifold solid. [`ErrorKind::Unsupported`].
     SweptBodyNotManifoldSolid,
+    /// The face builder dropped the swept edge's own curve as degenerate or coincident
+    /// with another. [`ErrorKind::Degenerate`].
+    SweptEdgeCurveDropped,
+    /// The surface an edge sweeps has no boundary curves left to trim it.
+    /// [`ErrorKind::Degenerate`].
+    SweptFaceWithoutBoundary,
     /// The plane a line perpendicular to the axis sweeps and the revolution of that line
     /// have normals whose cosine is `dot`, below 0.8 in size, at their domains' first
     /// corners. [`ErrorKind::Degenerate`].
@@ -262,37 +272,27 @@ pub enum SweepFailure {
         /// The cosine between the normals.
         dot: f64,
     },
-    /// The edge's curve is tangent to the translation somewhere, where the surface it
-    /// sweeps degenerates. [`ErrorKind::Degenerate`].
-    CurveTangentToSweep,
-    /// The cylinder piece a profile line parallel to the screw axis sweeps built `faces`
-    /// faces, not one: the line is too short to bound a face. [`ErrorKind::Degenerate`].
-    CylinderPieceNotOneFace {
-        /// The faces it built.
-        faces: usize,
+    /// An edge given to a tagging edge sweep (`TopologySweep::sweep_edges_higher` with
+    /// tagging on) has no tag: `tag_profile` was not run on it. [`ErrorKind::InvalidInput`].
+    /// (An untagged silhouette edge of a whole-B-rep sweep is
+    /// [`SweepFailure::UntaggedSilhouetteEdge`].)
+    UntaggedEdge {
+        /// The edge.
+        edge: EdgeId,
     },
-    /// The surface an edge sweeps has no boundary curves left to trim it.
-    /// [`ErrorKind::Degenerate`].
-    SweptFaceWithoutBoundary,
-    /// The face builder dropped the swept edge's own curve as degenerate or coincident
-    /// with another. [`ErrorKind::Degenerate`].
-    SweptEdgeCurveDropped,
-    /// The revolved curve sweeps no face (a curve along the axis sweeps none).
-    /// [`ErrorKind::Degenerate`].
-    RevolutionSweepsNoFace,
-    /// A step on a profile curve failed; the error it chains says why.
-    /// [`ErrorKind::Failed`].
-    ProfileCurveStepFailed {
-        /// The step.
-        step: ProfileCurveStep,
+    /// A face given to a tagging face copy (`TopologySweep::sweep_face_same` with tagging on)
+    /// has no tag: `tag_profile` was not run on it. [`ErrorKind::InvalidInput`].
+    UntaggedFace {
+        /// The face.
+        face: FaceId,
     },
-    /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
-    /// `why` names the step that failed and why that is the kernel's fault, not the
-    /// geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its site
-    /// says otherwise.
-    Defect {
-        /// The step that failed, and why that is the kernel's fault.
-        why: &'static str,
+    /// A tagging sweep of a whole B-rep copies each swept edge's tag to its images, and an
+    /// edge of the silhouette it sweeps has none: the silhouette's edges come from the
+    /// hidden-curve scene's faces, which carry no tags, so tagging them is not supported.
+    /// [`ErrorKind::Unsupported`].
+    UntaggedSilhouetteEdge {
+        /// The edge.
+        edge: EdgeId,
     },
 }
 
@@ -301,42 +301,42 @@ impl SweepFailure {
     /// a null or missing input, `SM_ERR` otherwise.
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::NullTarget
-            | Self::NullProfileCurve
-            | Self::EdgeWithoutCurve { .. }
-            | Self::FaceWithoutSurface { .. }
-            | Self::BrepWithoutInfiniteRegion { .. }
-            | Self::UntaggedSilhouetteEdge { .. }
-            | Self::FaceCopyByFullTurn
-            | Self::UntaggedFace { .. }
-            | Self::UntaggedEdge { .. }
-            | Self::MergeOtherBodyConsumed
-            | Self::SweptEdgeCurveDropped => SM_ERR_NULL_POINTER,
-            Self::RailPastStationCap { .. }
-            | Self::LoftSectionsTooLarge { .. }
-            | Self::LoftMatchTooLarge { .. }
-            | Self::FaceAlreadySwept
-            | Self::SweepImageOfOtherKind { .. }
-            | Self::SweepTooShort { .. }
-            | Self::RotationPastFullTurn { .. }
-            | Self::PointOnRotationAxis { .. }
+            Self::BaseCurveEndsCoincide
+            | Self::BaseGeometryBuildsNothing
+            | Self::CurveTangentToSweep
+            | Self::CurveWithoutBSplineForm { .. }
+            | Self::CylinderPieceNotOneFace { .. }
+            | Self::Defect { .. }
             | Self::EdgeCrossesRotationAxis
             | Self::EdgeEndsOffCurve { .. }
-            | Self::BaseCurveEndsCoincide
+            | Self::FaceAlreadySwept
             | Self::FaceVerticesCoincide
-            | Self::ProfileCurveNotThreeDimensional { .. }
-            | Self::BaseGeometryBuildsNothing
-            | Self::CurveWithoutBSplineForm { .. }
+            | Self::LoftMatchTooLarge { .. }
+            | Self::LoftSectionsTooLarge { .. }
             | Self::MergeOfTwoSweptEntities { .. }
             | Self::NearlyPerpendicularLine { .. }
-            | Self::SweptBodyNotManifoldSolid
-            | Self::SweptSurfaceNormalsDisagree { .. }
-            | Self::CurveTangentToSweep
-            | Self::CylinderPieceNotOneFace { .. }
-            | Self::SweptFaceWithoutBoundary
-            | Self::RevolutionSweepsNoFace
+            | Self::PointOnRotationAxis { .. }
+            | Self::ProfileCurveNotThreeDimensional { .. }
             | Self::ProfileCurveStepFailed { .. }
-            | Self::Defect { .. } => SM_ERR,
+            | Self::RailPastStationCap { .. }
+            | Self::RevolutionSweepsNoFace
+            | Self::RotationPastFullTurn { .. }
+            | Self::SweepImageOfOtherKind { .. }
+            | Self::SweepTooShort { .. }
+            | Self::SweptBodyNotManifoldSolid
+            | Self::SweptFaceWithoutBoundary
+            | Self::SweptSurfaceNormalsDisagree { .. } => SM_ERR,
+            Self::BrepWithoutInfiniteRegion { .. }
+            | Self::EdgeWithoutCurve { .. }
+            | Self::FaceCopyByFullTurn
+            | Self::FaceWithoutSurface { .. }
+            | Self::MergeOtherBodyConsumed
+            | Self::NullProfileCurve
+            | Self::NullTarget
+            | Self::SweptEdgeCurveDropped
+            | Self::UntaggedEdge { .. }
+            | Self::UntaggedFace { .. }
+            | Self::UntaggedSilhouetteEdge { .. } => SM_ERR_NULL_POINTER,
         }
     }
 
@@ -344,42 +344,42 @@ impl SweepFailure {
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
-            Self::RailPastStationCap { .. } => ErrorKind::NotWithinTolerance,
-            Self::NullTarget
-            | Self::NullProfileCurve
-            | Self::EdgeWithoutCurve { .. }
-            | Self::FaceWithoutSurface { .. }
+            Self::BaseCurveEndsCoincide
             | Self::BrepWithoutInfiniteRegion { .. }
-            | Self::FaceCopyByFullTurn
-            | Self::UntaggedFace { .. }
-            | Self::UntaggedEdge { .. }
-            | Self::MergeOtherBodyConsumed
-            | Self::FaceAlreadySwept
-            | Self::SweepImageOfOtherKind { .. }
-            | Self::SweepTooShort { .. }
-            | Self::RotationPastFullTurn { .. }
-            | Self::PointOnRotationAxis { .. }
             | Self::EdgeCrossesRotationAxis
             | Self::EdgeEndsOffCurve { .. }
-            | Self::BaseCurveEndsCoincide
+            | Self::EdgeWithoutCurve { .. }
+            | Self::FaceAlreadySwept
+            | Self::FaceCopyByFullTurn
             | Self::FaceVerticesCoincide
-            | Self::ProfileCurveNotThreeDimensional { .. } => ErrorKind::InvalidInput,
-            Self::LoftSectionsTooLarge { .. }
-            | Self::LoftMatchTooLarge { .. }
-            | Self::BaseGeometryBuildsNothing
+            | Self::FaceWithoutSurface { .. }
+            | Self::MergeOtherBodyConsumed
+            | Self::NullProfileCurve
+            | Self::NullTarget
+            | Self::PointOnRotationAxis { .. }
+            | Self::ProfileCurveNotThreeDimensional { .. }
+            | Self::RotationPastFullTurn { .. }
+            | Self::SweepImageOfOtherKind { .. }
+            | Self::SweepTooShort { .. }
+            | Self::UntaggedEdge { .. }
+            | Self::UntaggedFace { .. } => ErrorKind::InvalidInput,
+            Self::BaseGeometryBuildsNothing
             | Self::CurveWithoutBSplineForm { .. }
+            | Self::LoftMatchTooLarge { .. }
+            | Self::LoftSectionsTooLarge { .. }
             | Self::MergeOfTwoSweptEntities { .. }
             | Self::NearlyPerpendicularLine { .. }
-            | Self::UntaggedSilhouetteEdge { .. }
-            | Self::SweptBodyNotManifoldSolid => ErrorKind::Unsupported,
-            Self::SweptSurfaceNormalsDisagree { .. }
-            | Self::CurveTangentToSweep
+            | Self::SweptBodyNotManifoldSolid
+            | Self::UntaggedSilhouetteEdge { .. } => ErrorKind::Unsupported,
+            Self::CurveTangentToSweep
             | Self::CylinderPieceNotOneFace { .. }
-            | Self::SweptFaceWithoutBoundary
+            | Self::RevolutionSweepsNoFace
             | Self::SweptEdgeCurveDropped
-            | Self::RevolutionSweepsNoFace => ErrorKind::Degenerate,
-            Self::ProfileCurveStepFailed { .. } => ErrorKind::Failed,
+            | Self::SweptFaceWithoutBoundary
+            | Self::SweptSurfaceNormalsDisagree { .. } => ErrorKind::Degenerate,
             Self::Defect { .. } => ErrorKind::StageFailed,
+            Self::ProfileCurveStepFailed { .. } => ErrorKind::Failed,
+            Self::RailPastStationCap { .. } => ErrorKind::NotWithinTolerance,
         }
     }
 
@@ -401,10 +401,10 @@ impl SweepFailure {
 impl core::fmt::Display for SweepRecord {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(match self {
-            Self::SweptImage => "a swept image",
-            Self::ImageOfSwept => "the record of being a swept entity's image",
             Self::FromLowerSweep => "the record of coming from a lower-dimension sweep",
             Self::HigherSweptImage => "a higher-dimension swept image",
+            Self::ImageOfSwept => "the record of being a swept entity's image",
+            Self::SweptImage => "a swept image",
         })
     }
 }
@@ -412,10 +412,10 @@ impl core::fmt::Display for SweepRecord {
 impl core::fmt::Display for SweptKind {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(match self {
-            Self::Vertex => "vertex",
             Self::Edge => "edge",
             Self::Face => "face",
             Self::Region => "region",
+            Self::Vertex => "vertex",
         })
     }
 }
@@ -424,10 +424,10 @@ impl SweptKind {
     /// The kind's name with its indefinite article ("a vertex", "an edge").
     const fn with_article(self) -> &'static str {
         match self {
-            Self::Vertex => "a vertex",
             Self::Edge => "an edge",
             Self::Face => "a face",
             Self::Region => "a region",
+            Self::Vertex => "a vertex",
         }
     }
 }
@@ -435,8 +435,8 @@ impl SweptKind {
 impl core::fmt::Display for ProfileCurveStep {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(match self {
-            Self::Nurbs => "NURBS form",
             Self::Copy => "copy for a cap",
+            Self::Nurbs => "NURBS form",
             Self::Place => "placement at a cap",
         })
     }

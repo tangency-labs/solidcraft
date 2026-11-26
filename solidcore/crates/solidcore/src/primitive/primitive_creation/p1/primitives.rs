@@ -870,7 +870,11 @@ impl PrimitiveCreation {
         let domain = Extent2d::from_bounds(0.0, 0.0, 360.0, height);
         match cylinder.adjust_step_uv_domain(k, &domain) {
             Ok(()) => {}
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             Err(e) => {
                 return Err(Failure::new(OP, PrimitiveFailure::CylinderDomainNotSet)
                     .caused_by(e)

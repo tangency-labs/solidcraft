@@ -118,6 +118,10 @@ pub const HEBREW_FALLBACK: &str = "hebrew_fallback";
 /// digits and Latin text, so each Arabic word is one shaped run (see [`solidcraft_ui_text::bidi`]).
 pub const ARABIC_FALLBACK: &str = "arabic_fallback";
 
+/// Name of the Georgian fallback entry in [`egui::FontDefinitions`], placed before Hack: egui's
+/// built-in faces have no Asomtavruli or Mtavruli, and only Hack's monospace Mkhedruli.
+pub const GEORGIAN_FALLBACK: &str = "georgian_fallback";
+
 /// egui's built-in monospace face, also the last fallback of every sans family (#2955).
 pub const SYMBOL_FALLBACK: &str = "Hack";
 
@@ -265,15 +269,15 @@ impl CjkFontLoader {
 /// epaint centres each face's own line height in the row, so glyphs from two faces of very
 /// different height (Meiryo ≈ 2.0 em, Microsoft YaHei ≈ 1.4 em) sit at different heights
 /// inside one word. One face for the whole word keeps them on one baseline.
-/// Thai, Hebrew and Arabic come last whatever the language: no other face draws them. Arabic
+/// Thai, Hebrew, Arabic and Georgian come last whatever the language: no other face draws them. Arabic
 /// goes first for `ar` instead: a CJK font such as Arial Unicode also has Arabic letters, without
 /// the shaping data that joins them.
-pub fn fallback_order(language: &str) -> [&'static str; 6] {
+pub fn fallback_order(language: &str) -> [&'static str; 7] {
     match language {
-        "zh" | "zh-TW" => [CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK],
-        "ko" => [HANGUL_FALLBACK, CJK_FALLBACK, CHINESE_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK],
-        "ar" => [ARABIC_FALLBACK, CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK],
-        _ => [CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK],
+        "zh" | "zh-TW" => [CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK],
+        "ko" => [HANGUL_FALLBACK, CJK_FALLBACK, CHINESE_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK],
+        "ar" => [ARABIC_FALLBACK, CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, GEORGIAN_FALLBACK],
+        _ => [CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK],
     }
 }
 

@@ -644,8 +644,8 @@ fn a_fit_with_no_block_is_the_borders() {
     }
 }
 
-/// The base view on a real sheet, its built-in block 180 x 49 mm on the border's lower-right corner
-/// (230 to 410 across, 10 to 59 up): at 2:1 the 100 x 20 view at (210, 70) would reach down to 50, so
+/// The base view on a real sheet, its built-in block 180 x 61 mm on the border's lower-right corner
+/// (230 to 410 across, 10 to 71 up): at 2:1 the 100 x 20 view at (210, 82) would reach down to 62, so
 /// it is 1:1, and listed as nothing. Over the block no scale will do, and that says so; with a scale
 /// given it goes there and is listed, as ever. A sheet with no block fits as the border says, however
 /// small, and a block the paper can't hold is refused where it's set.
@@ -653,9 +653,9 @@ fn a_fit_with_no_block_is_the_borders() {
 fn a_base_view_fits_around_the_sheets_block() {
     let mut s = block_drawing();
     run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": "built-in"}));
-    let (off, _) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "position_mm": [210, 70]}));
+    let (off, _) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "position_mm": [210, 82]}));
     assert_eq!(off["scale"]["text"], "1:1", "{off}");
-    assert_box(&off, [160.0, 60.0], [260.0, 80.0]);
+    assert_box(&off, [160.0, 72.0], [260.0, 92.0]);
     assert!(off.get("outside").is_none(), "{off}");
     let (roomy, _) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "position_mm": [210, 148.5]}));
     assert_eq!(roomy["scale"]["text"], "2:1", "{roomy}");
@@ -2603,6 +2603,27 @@ fn an_exploded_view_takes_what_measures_its_parts_where_it_draws_them() {
     assert!(near_value(&run(&mut s, "drawing.dimension.inspect", json!({"dimension": on_above})), 70.0));
 }
 
+/// A projected view's centre annotation blocks its parent from exploding until the follower
+/// explicitly chooses the assembled design for itself.
+#[test]
+fn a_centre_line_on_a_follower_blocks_an_exploded_parent() {
+    let (mut s, parent, [first, _], apart) = exploded_pair();
+    let (_, above) = create(&mut s, PROJECTED, json!({"parent": ids::encode(parent), "side": "above", "place": {"at": [150, 250]}}));
+    let line = run(
+        &mut s,
+        "drawing.center_line.add",
+        json!({"view": ids::encode(above), "a": {"point": [0, 0, 0], "path": [first]}, "b": {"point": [10, 0, 0], "path": [first]}, "overshoot_mm": 2.0}),
+    )["line"]
+        .clone();
+    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    let error = edit_refused(&mut s, parent, json!({"exploded": apart}));
+    assert!(error.contains("exploded view with centre annotations"), "{error}");
+    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    edit_view(&mut s, above, json!({"exploded": "assembled"}));
+    edit_view(&mut s, parent, json!({"exploded": apart}));
+    assert_eq!(run(&mut s, "drawing.center_line.inspect", json!({"line": line}))["status"], "ok");
+}
+
 /// A shaded view's pictures are rendered from the design as it places its parts, so an exploded view
 /// can't be shaded yet. Whichever setting would make one, the exploded choice, a style or following a
 /// shaded parent, it is refused and changes nothing, on the view itself or on a view that follows it;
@@ -3498,6 +3519,57 @@ fn a_left_out_part_says_where_each_kind_of_setter_set_it() {
     assert_eq!((set_on(SetBy::This), set_on(SetBy::Default)), (String::new(), String::new()));
 }
 
+/// A posed view reads a different placement, so centre references cannot be added there or kept
+/// visible when a saved file combines them; an attempted edit is refused without changing the file.
+#[test]
+fn posed_views_refuse_and_report_centre_annotations() {
+    let (mut s, view, _) = hinge_pair();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let (_, other) = create(&mut s, BASE, json!({"sheet": sheet, "view": "top", "scale": "1:1", "position_mm": [250, 150]}));
+    let line =
+        run(&mut s, "drawing.center_line.add", json!({"view": ids::encode(view), "a": [0, 0, 0], "b": [40, 0, 0], "overshoot_mm": 2.0}))["line"]
+            .clone();
+    let pose = json!({"pose": [{"joint": "Hinge", "values": [90]}]});
+    let before = s.drawing("test").unwrap().clone();
+    let error = edit_refused(&mut s, view, pose.clone());
+    assert!(error.contains("position of its own") && error.contains("centre annotations"), "{error}");
+    assert_eq!(s.drawing("test").unwrap().clone(), before);
+    edit_view(&mut s, other, pose);
+    for (cmd, params) in [
+        ("drawing.center_line.add", json!({"view": ids::encode(other), "a": [0, 0, 0], "b": [40, 0, 0], "overshoot_mm": 2.0})),
+        ("drawing.center_mark.add", json!({"view": ids::encode(other), "edge": [0, 0, 0], "overshoot_mm": 2.0})),
+    ] {
+        let error = s.execute(cmd, &params).unwrap_err().to_string();
+        assert!(error.contains("position of its own"), "{error}");
+    }
+    // Files can contain the combination even though commands refuse it.
+    let mut drawing = (**s.drawing("test").unwrap()).clone();
+    let saved_pose = drawing.views.iter().find(|v| v.id == other).unwrap().settings.pose.clone();
+    let target = drawing.views.iter_mut().find(|v| v.id == view).unwrap();
+    Arc::make_mut(target).settings.pose = saved_pose;
+    s.doc_mut().put_drawing(Arc::new(drawing));
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": sheet}));
+    assert!(
+        scene["annotation_failures"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["object"] == line && f["reason"].as_str().unwrap().contains("position of its own")),
+        "{scene}"
+    );
+    let check = run(&mut s, "drawing.check", json!({"sheet": sheet}));
+    assert!(
+        check["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["kind"] == "failed" && f["object"]["kind"] == "centre_line" && f["object"]["id"] == line),
+        "{check}"
+    );
+    let inspected = run(&mut s, "drawing.center_line.inspect", json!({"line": line}));
+    assert!(inspected["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("position of its own")), "{inspected}");
+}
+
 /// A view placed apart from its projection place is given the first free letter (#13044), as
 /// `projected`, `edit` and `move_to_sheet` place it; a base view and a view lined up with its parent
 /// get none, and a view lined up again keeps its own. A copy that doesn't need a letter never takes
@@ -4254,8 +4326,9 @@ fn nothing_on_a_flat_pattern_view_points_at_the_model() {
 }
 
 /// A bend up is ISO 128's long dash and dot (type 04), a bend down its long dash and two dots (type
-/// 05): dashes 20 widths of the narrow line, gaps 3, dots 1, in every line group. In the 0.35 mm group
-/// a bend up is 3.6, 0.54, 0.18, 0.54 mm. Each, narrow, is a stroke the scene takes across an A0 sheet.
+/// 05), with ISO 128-20 Table 3's lengths: long dashes 24 widths of the narrow line, gaps 3, dots 0.5,
+/// in every line group. In the 0.35 mm group a bend up is 4.32, 0.54, 0.09, 0.54 mm. Each, narrow, is a
+/// stroke the scene takes across an A0 sheet.
 #[test]
 fn bend_lines_are_long_dashes_with_one_and_two_dots_in_every_group() {
     use solidcraft_geom::paper::{Dashes, Group, Item, ObjectKind, Scene};
@@ -4263,8 +4336,8 @@ fn bend_lines_are_long_dashes_with_one_and_two_dots_in_every_group() {
     let path = vec![solidcore_record::Seg2::Line { a: Vec2::new(10.0, 10.0), b: Vec2::new(1180.0, 830.0) }];
     for group in groups {
         let d = LineKind::Thin.width_mm(group);
-        assert_eq!(bend_dashes_mm(true, group), vec![20.0 * d, 3.0 * d, d, 3.0 * d], "{group:?}");
-        assert_eq!(bend_dashes_mm(false, group), vec![20.0 * d, 3.0 * d, d, 3.0 * d, d, 3.0 * d], "{group:?}");
+        assert_eq!(bend_dashes_mm(true, group), vec![24.0 * d, 3.0 * d, 0.5 * d, 3.0 * d], "{group:?}");
+        assert_eq!(bend_dashes_mm(false, group), vec![24.0 * d, 3.0 * d, 0.5 * d, 3.0 * d, 0.5 * d, 3.0 * d], "{group:?}");
         let items = [true, false].map(|up| Item::Stroke {
             path: path.clone(),
             closed: false,
@@ -4274,9 +4347,32 @@ fn bend_lines_are_long_dashes_with_one_and_two_dots_in_every_group() {
         let scene = Scene::new(Vec2::new(1189.0, 841.0), vec![Group { object: 1, kind: ObjectKind::View, items: items.to_vec() }]);
         scene.validate().unwrap_or_else(|e| panic!("{group:?}: {e}"));
     }
-    for (got, want) in bend_dashes_mm(true, LineGroup::Mm0_35).iter().zip([3.6, 0.54, 0.18, 0.54]) {
+    for (got, want) in bend_dashes_mm(true, LineGroup::Mm0_35).iter().zip([4.32, 0.54, 0.09, 0.54]) {
         assert!((got - want).abs() < 1e-12, "{got} {want}");
     }
+}
+
+/// Each bend line's chain-line pattern starts so its long dash is centred on the line: at half the
+/// line's length the pattern is halfway along its first, long dash.
+#[test]
+fn a_bend_line_has_its_long_dash_at_its_middle() {
+    let mut s = sheet_plate();
+    with_the_model(&mut s, |s| {
+        run(s, "sheet.flange", json!({"edges": [[50, 60, 2]], "height": 20, "flip": true}));
+    });
+    let (id, _) = flat_view(&mut s, json!({"sheet": "Sheet 1", "scale": "1:1"}));
+    let d = s.drawing("test").unwrap();
+    let built = crate::drawing_scene::build(&s, d, d.view(id).unwrap().sheet).unwrap();
+    let mut bends = 0;
+    for item in built.scene.groups.iter().filter(|g| g.object == id).flat_map(|g| &g.items) {
+        let solidcraft_geom::paper::Item::Stroke { path, pattern: Some(dashes), .. } = item else { continue };
+        let period: f64 = dashes.lengths_mm.iter().sum();
+        let length: f64 = path.iter().map(solidcore_record::Seg2::length).sum();
+        let off = ((dashes.phase_mm + length / 2.0).rem_euclid(period) - dashes.lengths_mm[0] / 2.0).abs();
+        assert!(off.min(period - off) < 1e-9, "a {length} mm bend line: {dashes:?}");
+        bends += 1;
+    }
+    assert_eq!(bends, 2, "one bend line up, one down");
 }
 
 /// A bend up and a bend down are drawn in two line types, ISO 128's long dash and dot and its long
@@ -4706,6 +4802,21 @@ fn a_flat_view_is_the_same_after_saving_and_opening() {
     let ((lines, status), (was, before)) = (flat_strokes(&opened, id), flat_strokes(&s, id));
     assert_eq!(status.name(), "drawn", "{status:?}");
     assert_eq!((lines, status.name()), (was, before.name()));
+}
+
+/// A drawn full section keeps a centre line on its drawn parent.
+#[test]
+fn a_drawn_section_keeps_a_parent_views_centre_line() {
+    let (mut s, [front, ..]) = three_views();
+    let cut = with_section(&mut s, front);
+    let added = run(&mut s, "drawing.center_line.add", json!({"view": ids::encode(front), "a": [0, 0, 0], "b": [100, 0, 0], "overshoot_mm": 2.0}));
+    let line = ids::decode(added["line"].as_str().unwrap()).unwrap();
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    let state = scene["views"].as_array().unwrap().iter().find(|v| v["view"] == json!(ids::encode(cut))).unwrap();
+    assert_eq!(state["status"], "drawn", "{state}");
+    assert!(state["reason"].is_null(), "{state}");
+    assert!(scene["scene"]["groups"].as_array().unwrap().iter().any(|g| g["object"] == json!(line) && g["kind"] == "centre_line"));
 }
 
 /// `drawing.view.section` makes a section view of a saved view along the cutting line it is given,

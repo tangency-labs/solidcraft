@@ -1,8 +1,8 @@
 use serde_json::{Value, json};
 
 use super::{
-    SameLookParams, SelectAllParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectItem, SelectMode,
-    SelectSetParams, SelectSetResult, SharpEdgesParams, read_item,
+    SameLookParams, SelectAllParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectInvertParams, SelectItem,
+    SelectMode, SelectSetParams, SelectSetResult, SharpEdgesParams, read_item,
 };
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
@@ -157,6 +157,7 @@ fn the_schemas_take_what_the_handler_reads() {
     check(input_schema_for::<SelectSetParams>(), &cases);
     check(input_schema_for::<SelectClearParams>(), &[(json!({}), true), (json!({"add": true}), false)]);
     check(input_schema_for::<SelectAllParams>(), &[(json!({}), true), (json!({"what": "faces"}), false)]);
+    check(input_schema_for::<SelectInvertParams>(), &[(json!({}), true), (json!({"kind": "face"}), false)]);
     check(
         input_schema_for::<SameLookParams>(),
         &[

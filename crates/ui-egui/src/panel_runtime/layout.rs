@@ -270,6 +270,10 @@ pub struct HostMetrics {
     /// joins compact cards; resize handles retain their own positive width.
     pub gap: f32,
     pub sash_width: f32,
+    /// Docked sashes draw `sash_width` but grab this wide; zero grabs only what is drawn.
+    pub docked_grab_width: f32,
+    /// Zero keeps a floating card's single bottom-right handle.
+    pub floating_grab_reach: f32,
     pub control_extent: f32,
     pub tab_min_width: f32,
     /// Single-row Wide composition threshold, bounded by the shared contract.
@@ -277,6 +281,11 @@ pub struct HostMetrics {
     pub inline_title_width: f32,
     pub min_viewport: Size,
 }
+
+pub(super) const DOCKED_GRAB_WIDTH: f32 = 8.0;
+/// A floating card's handles reach this far out of its border, and inward as far
+/// as the content inset on that axis, so content and scrollbars keep their presses.
+pub(super) const FLOATING_GRAB_REACH: f32 = 4.0;
 
 impl Default for HostMetrics {
     fn default() -> Self {
@@ -287,6 +296,8 @@ impl Default for HostMetrics {
             footer_height: t.form_footer_height,
             gap: t.space_4,
             sash_width: t.space_4,
+            docked_grab_width: 0.0,
+            floating_grab_reach: 0.0,
             control_extent: t.control_height,
             tab_min_width: t.control_height * 2.0,
             inline_max_height: (t.control_height * 2.0 + t.space_4).min(88.0),
@@ -314,6 +325,12 @@ impl HostMetrics {
         }
         if !self.gap.is_finite() || !(0.0..=256.0).contains(&self.gap) {
             return Err(error(Rule::Bounds, "invalid host gap"));
+        }
+        if !self.docked_grab_width.is_finite() || !(0.0..=DOCKED_GRAB_WIDTH).contains(&self.docked_grab_width) {
+            return Err(error(Rule::Bounds, "invalid docked grab width"));
+        }
+        if !self.floating_grab_reach.is_finite() || !(0.0..=FLOATING_GRAB_REACH).contains(&self.floating_grab_reach) {
+            return Err(error(Rule::Bounds, "invalid floating grab reach"));
         }
         if !self.inline_max_height.is_finite() || !(0.0..=88.0).contains(&self.inline_max_height) {
             return Err(error(Rule::Bounds, "invalid inline row threshold"));
@@ -576,6 +593,8 @@ pub struct HostGeometryPolicy {
     pub default_opaque: bool,
     pub effective_surfaces: BTreeMap<SectionId, PanelSurface>,
     pub(crate) hidden_header_actions: BTreeMap<InstanceId, BTreeSet<ControlId>>,
+    /// Actions that sit at the header's right end, beside the menu, also in a one-row header.
+    pub(crate) trailing_header_actions: BTreeMap<InstanceId, BTreeSet<ControlId>>,
     pub(crate) header_title_widths: BTreeMap<InstanceId, f32>,
     /// Panels whose content takes the title's place in the header, with the narrowest width
     /// that content takes (`ContentSlot::Title`).
@@ -596,6 +615,7 @@ impl PartialEq for HostGeometryPolicy {
             && self.default_opaque == other.default_opaque
             && self.effective_surfaces == other.effective_surfaces
             && self.hidden_header_actions == other.hidden_header_actions
+            && self.trailing_header_actions == other.trailing_header_actions
             && self.header_title_widths == other.header_title_widths
             && self.header_content == other.header_content
             && self.tab_title_widths == other.tab_title_widths
@@ -620,6 +640,7 @@ impl Default for HostGeometryPolicy {
             default_opaque: true,
             effective_surfaces: BTreeMap::new(),
             hidden_header_actions: BTreeMap::new(),
+            trailing_header_actions: BTreeMap::new(),
             header_title_widths: BTreeMap::new(),
             header_content: BTreeMap::new(),
             tab_title_widths: BTreeMap::new(),
@@ -638,6 +659,8 @@ pub struct HostControl {
     pub bounds: LogicalRect,
     pub role: InputRole,
     pub accessible_name: String,
+    /// What a handle draws; `bounds` is the grab area around it.
+    pub ink: LogicalRect,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -827,7 +850,8 @@ impl HostLayout {
             return Err(error(Rule::Bounds, "render viewport must fill its domain"));
         }
         for bounds in &self.input {
-            if !self.painted.iter().any(|paint| paint.contains_rect(*bounds)) {
+            let grab = self.controls.iter().any(|control| control.bounds == *bounds && control.bounds != control.ink);
+            if !grab && !self.painted.iter().any(|paint| paint.contains_rect(*bounds)) {
                 return Err(error(Rule::Bounds, "host input outside paint"));
             }
         }
@@ -841,7 +865,10 @@ impl HostLayout {
             if !targets.insert(&control.target) {
                 return Err(error(Rule::DuplicateId, "duplicate typed host target"));
             }
-            if !self.painted.iter().any(|paint| paint.contains_rect(control.bounds)) {
+            if !self.capacity.contains_rect(control.bounds)
+                || !control.bounds.contains_rect(control.ink)
+                || !self.painted.iter().any(|paint| paint.contains_rect(control.ink))
+            {
                 return Err(error(Rule::Bounds, "host control outside paint"));
             }
         }
@@ -1269,7 +1296,11 @@ fn append_section(
         rect(outer.origin.x, outer.origin.y, outer.size.width, if inline { outer.size.height } else { metrics.header_height.min(outer.size.height) });
     let visible_actions = spec.header_actions.iter().filter(|action| header_action_visible(policy, instance, &action.id));
     let action_count = visible_actions.clone().count();
-    let primary_count = 1 + usize::from(collapsible) + usize::from(spec.features.hot_closable);
+    let trailing = |action: &&HeaderActionSpec| policy.trailing_header_actions.get(instance).is_some_and(|ids| ids.contains(&action.id));
+    // A one-row header with actions at its right end keeps the collapse button's place empty, so
+    // they line up with those of a taller header that takes its place (the 1D and 2D History).
+    let hold_collapse = !collapsible && visible_actions.clone().any(|action| trailing(&action));
+    let primary_count = 1 + usize::from(collapsible || hold_collapse) + usize::from(spec.features.hot_closable);
     let control_count = action_count + primary_count;
     let split = !side_strip
         && !inline
@@ -1289,7 +1320,9 @@ fn append_section(
     let extent = metrics.control_extent.min(header.size.height).min(header.size.width / control_count as f32);
     let primary_extent = if split { metrics.control_extent.min(header.size.height).min(header.size.width / primary_count as f32) } else { extent };
     let header_controls = if split { primary_count } else { control_count };
-    let edge_margin = ((header.size.height - primary_extent) / 2.0).min((header.size.width - header_controls as f32 * primary_extent).max(0.0));
+    // Held to a standard header's height, so a one-row header's right end lines up with it.
+    let margin_height = if hold_collapse { metrics.header_height.min(header.size.height) } else { header.size.height };
+    let edge_margin = ((margin_height - primary_extent) / 2.0).max(0.0).min((header.size.width - header_controls as f32 * primary_extent).max(0.0));
     let mut cursor = if out.direction == Direction::Ltr { right(header) - edge_margin } else { header.origin.x + edge_margin };
     let take = |cursor: &mut f32, row: LogicalRect, extent: f32| {
         let x = if out.direction == Direction::Ltr { *cursor - extent } else { *cursor };
@@ -1299,6 +1332,9 @@ fn append_section(
     };
     let close = spec.features.hot_closable.then(|| take(&mut cursor, header, primary_extent));
     let collapse = collapsible.then(|| take(&mut cursor, header, primary_extent));
+    if hold_collapse {
+        take(&mut cursor, header, primary_extent);
+    }
     let menu = take(&mut cursor, header, primary_extent);
     let mut actions = Vec::new();
     let mut strip_bottom = bottom(header);
@@ -1324,10 +1360,13 @@ fn append_section(
         let title_x = if out.direction == Direction::Ltr { leading } else { leading - title_width };
         let title = positive_rect(title_x, header.origin.y, title_width, header.size.height);
         leading += if out.direction == Direction::Ltr { title_width } else { -title_width };
-        for action in visible_actions.clone() {
+        for action in visible_actions.clone().filter(|action| !trailing(action)) {
             let x = if out.direction == Direction::Ltr { leading } else { leading - extent };
             actions.push((action.id.clone(), rect(x, header.origin.y + (header.size.height - extent) / 2.0, extent, extent)));
             leading += if out.direction == Direction::Ltr { extent } else { -extent };
+        }
+        for action in visible_actions.clone().filter(|action| trailing(action)).collect::<Vec<_>>().into_iter().rev() {
+            actions.push((action.id.clone(), take(&mut cursor, header, extent)));
         }
         let content = if out.direction == Direction::Ltr {
             positive_rect(leading, header.origin.y, cursor - leading, header.size.height)
@@ -1464,8 +1503,17 @@ fn append_section(
     out.occlusion.extend(&painted);
     out.input.extend(&painted);
     add_control(out, HostPointerTarget::Surface { instance: instance.clone() }, outer, InputRole::Surface, "ui.panel_host.surface");
+    let floating_open = section.location.zone() == Zone::Floating && !section.collapsed && metrics.floating_grab_reach > 0.0;
     if let Some(title) = title {
         add_control(out, HostPointerTarget::Header { instance: instance.clone() }, title, InputRole::Header, "ui.panel_host.header");
+    }
+    // Handles over the header sit above the draggable title and below every other header control.
+    if floating_open {
+        for (edge, grab) in
+            floating_resize_handles(outer, header, metrics.floating_grab_reach).into_iter().filter(|(_, grab)| touches_header(*grab, header))
+        {
+            add_floating_handle(out, section, edge, grab, outer, metrics.sash_width);
+        }
     }
     add_control(out, HostPointerTarget::Menu { instance: instance.clone() }, menu, InputRole::Action, "ui.panel_host.menu");
     if let Some(collapse) = collapse {
@@ -1484,16 +1532,22 @@ fn append_section(
     if let Some(bounds) = tab_overflow {
         add_control(out, HostPointerTarget::TabOverflow { section: section.id.clone() }, bounds, InputRole::Action, "ui.panel_host.overflow");
     }
-    // Workspace paints the card's resize response last, above header/content.
-    // Reverse geometric hit-testing must choose the same owner at their edges.
-    let edge = match section.location.zone() {
-        Zone::Floating => HostResizeEdge::BottomRight,
-        Zone::Bottom => HostResizeEdge::Top,
-        Zone::Left => HostResizeEdge::Right,
-        _ => HostResizeEdge::Left,
-    };
+    // Docked sashes and the floating handles clear of the header are painted last, above content;
+    // reverse hit-testing must choose the same owner at their edges.
     let (min, max) = tab_bounds(proposed, service.registry(), section)?;
-    if !section.collapsed && !(section.location.zone() == Zone::Bottom && min.height == max.height) {
+    if floating_open {
+        for (edge, grab) in
+            floating_resize_handles(outer, header, metrics.floating_grab_reach).into_iter().filter(|(_, grab)| !touches_header(*grab, header))
+        {
+            add_floating_handle(out, section, edge, grab, outer, metrics.sash_width);
+        }
+    } else if !section.collapsed && !(section.location.zone() == Zone::Bottom && min.height == max.height) {
+        let edge = match section.location.zone() {
+            Zone::Floating => HostResizeEdge::BottomRight,
+            Zone::Bottom => HostResizeEdge::Top,
+            Zone::Left => HostResizeEdge::Right,
+            _ => HostResizeEdge::Left,
+        };
         add_control(
             out,
             HostPointerTarget::Resize { section: section.id.clone(), edge },
@@ -1597,9 +1651,10 @@ fn append_sashes(out: &mut HostLayout, proposed: &Layout) -> PanelResult<()> {
                     out.painted.push(bounds);
                     out.occlusion.push(bounds);
                     out.input.push(bounds);
-                    add_control(
+                    add_grab_control(
                         out,
                         HostPointerTarget::Sash { first: first.clone(), second: second.clone() },
+                        centre_widen(bounds, out.metrics.docked_grab_width),
                         bounds,
                         InputRole::Sash,
                         "ui.panel_host.sash",
@@ -1612,9 +1667,77 @@ fn append_sashes(out: &mut HostLayout, proposed: &Layout) -> PanelResult<()> {
 }
 
 fn add_control(out: &mut HostLayout, target: HostPointerTarget, bounds: LogicalRect, role: InputRole, name: &str) {
-    if let Some(bounds) = intersect_rect(bounds, out.capacity) {
-        out.controls.push(HostControl { target, bounds, role, accessible_name: name.into() });
+    add_grab_control(out, target, bounds, bounds, role, name);
+}
+
+/// A handle grabs `grab` and draws `ink`. Grab beyond the painted card still
+/// consumes the pointer, so hit-testing and input regions agree.
+fn add_grab_control(out: &mut HostLayout, target: HostPointerTarget, grab: LogicalRect, ink: LogicalRect, role: InputRole, name: &str) {
+    if let Some(bounds) = intersect_rect(grab, out.capacity) {
+        let ink = intersect_rect(ink, bounds).unwrap_or(bounds);
+        if grab != ink && !out.painted.iter().any(|paint| paint.contains_rect(bounds)) {
+            out.input.push(bounds);
+            out.occlusion.push(bounds);
+        }
+        out.controls.push(HostControl { target, bounds, role, accessible_name: name.into(), ink });
     }
+}
+
+/// Widen a thin handle across its short axis, centred. A sash may only reach
+/// into the cards by less than their content inset.
+fn centre_widen(ink: LogicalRect, grab: f32) -> LogicalRect {
+    if ink.size.width <= ink.size.height {
+        let width = ink.size.width.max(grab);
+        rect(ink.origin.x - (width - ink.size.width) / 2.0, ink.origin.y, width, ink.size.height)
+    } else {
+        let height = ink.size.height.max(grab);
+        rect(ink.origin.x, ink.origin.y - (height - ink.size.height) / 2.0, ink.size.width, height)
+    }
+}
+
+fn resize_name(edge: HostResizeEdge) -> &'static str {
+    match edge {
+        HostResizeEdge::Left => "ui.panel_host.resize_left",
+        HostResizeEdge::Right => "ui.panel_host.resize_right",
+        HostResizeEdge::Top => "ui.panel_host.resize_top",
+        HostResizeEdge::Bottom => "ui.panel_host.resize_bottom",
+        HostResizeEdge::TopLeft => "ui.panel_host.resize_top_left",
+        HostResizeEdge::TopRight => "ui.panel_host.resize_top_right",
+        HostResizeEdge::BottomLeft => "ui.panel_host.resize_bottom_left",
+        HostResizeEdge::BottomRight => "ui.panel_host.resize",
+    }
+}
+
+fn add_floating_handle(out: &mut HostLayout, section: &Section, edge: HostResizeEdge, grab: LogicalRect, outer: LogicalRect, sash_width: f32) {
+    let ink = intersect_rect(grab, resize_rect(outer, edge, sash_width)).unwrap_or(grab);
+    add_grab_control(out, HostPointerTarget::Resize { section: section.id.clone(), edge }, grab, ink, InputRole::Sash, resize_name(edge));
+}
+
+/// The inward reach on each axis is capped by the tokens `render_slot` insets by.
+/// Side bands start below the header.
+fn floating_resize_handles(outer: LogicalRect, header: LogicalRect, reach: f32) -> [(HostResizeEdge, LogicalRect); 8] {
+    let t = solidcraft_theme::Tokens::get();
+    let (in_x, in_y) = (reach.min(t.space_4), reach.min(t.space_2));
+    let (x, y) = (outer.origin.x, outer.origin.y);
+    let (r, b) = (right(outer), bottom(outer));
+    let side_top = bottom(header).max(y + reach);
+    let along_w = (outer.size.width - 2.0 * in_x).max(0.0);
+    let along_h = (b - in_y - side_top).max(0.0);
+    let (wide, high) = (reach + in_x, reach + in_y);
+    [
+        (HostResizeEdge::Left, rect(x - reach, side_top, wide, along_h)),
+        (HostResizeEdge::Right, rect(r - in_x, side_top, wide, along_h)),
+        (HostResizeEdge::Top, rect(x + in_x, y - reach, along_w, 2.0 * reach)),
+        (HostResizeEdge::Bottom, rect(x + in_x, b - in_y, along_w, high)),
+        (HostResizeEdge::TopLeft, rect(x - reach, y - reach, wide, 2.0 * reach)),
+        (HostResizeEdge::TopRight, rect(r - in_x, y - reach, wide, 2.0 * reach)),
+        (HostResizeEdge::BottomLeft, rect(x - reach, b - in_y, wide, high)),
+        (HostResizeEdge::BottomRight, rect(r - in_x, b - in_y, wide, high)),
+    ]
+}
+
+fn touches_header(grab: LogicalRect, header: LogicalRect) -> bool {
+    intersect_rect(grab, header).is_some_and(|shared| shared.size.width > 0.0 && shared.size.height > 0.0)
 }
 
 fn resize_rect(outer: LogicalRect, edge: HostResizeEdge, thickness: f32) -> LogicalRect {
@@ -1625,6 +1748,9 @@ fn resize_rect(outer: LogicalRect, edge: HostResizeEdge, thickness: f32) -> Logi
         HostResizeEdge::Right => rect(right(outer) - width, outer.origin.y, width, outer.size.height),
         HostResizeEdge::Top => rect(outer.origin.x, outer.origin.y, outer.size.width, height),
         HostResizeEdge::Bottom => rect(outer.origin.x, bottom(outer) - height, outer.size.width, height),
+        HostResizeEdge::TopLeft => rect(outer.origin.x, outer.origin.y, width, height),
+        HostResizeEdge::TopRight => rect(right(outer) - width, outer.origin.y, width, height),
+        HostResizeEdge::BottomLeft => rect(outer.origin.x, bottom(outer) - height, width, height),
         HostResizeEdge::BottomRight => rect(right(outer) - width, bottom(outer) - height, width, height),
     }
 }
@@ -1641,4 +1767,14 @@ pub(super) fn right(bounds: LogicalRect) -> f32 {
 }
 pub(super) fn bottom(bounds: LogicalRect) -> f32 {
     bounds.origin.y + bounds.size.height
+}
+
+/// Takes back the input and occlusion a control's grab claimed beyond its drawn handle.
+pub(super) fn release_grab(controls: &[HostControl], target: &HostPointerTarget, input: &mut Vec<LogicalRect>, occlusion: &mut Vec<LogicalRect>) {
+    let Some(control) = controls.iter().find(|control| control.target == *target && control.bounds != control.ink) else { return };
+    for regions in [input, occlusion] {
+        if let Some(index) = regions.iter().position(|rect| *rect == control.bounds) {
+            regions.remove(index);
+        }
+    }
 }

@@ -42,7 +42,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::offset::OffsetFailure;
 use crate::error::topology::TopologyFailure;
-use crate::error::{EntityRef, Failure, Result, SolidError};
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::expansion as exact;
@@ -448,9 +448,12 @@ fn radial_sweep(
     Ok((tool, inner))
 }
 
-/// `what` is missing (upstream `SM_ERR_NULL_POINTER`).
-fn null(what: &'static str) -> SolidError {
-    SolidError::topology_missing(OP, what)
+/// A defect ([`TopologyFailure::Defect`]) with the status `SM_ERR_NULL_POINTER` of the
+/// `NER` it replaces.
+fn broken(why: &'static str) -> SolidError {
+    Failure::new(OP, TopologyFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
 }
 
 /// `SmBrep::LocalOperation(rFaces, rNewSurfaces)`: `surfaces[i]` becomes the surface of
@@ -493,7 +496,13 @@ pub fn local_operation(
 ) -> Result<()> {
     use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
     if surfaces.len() < faces.len() {
-        return Err(null("a surface for every face"));
+        return Err(SolidError::topology(
+            OP,
+            TopologyFailure::TooFewSurfaces {
+                faces: faces.len(),
+                surfaces: surfaces.len(),
+            },
+        ));
     }
     // (not upstream) a refusal or a failure leaves `b` as it came in, the caches its
     // surfaces had included (the operation runs on its copy), and the caller's
@@ -546,7 +555,8 @@ fn local_operation_on(
     let mut moving = Vec::new();
     for &face in &all_faces {
         let index = faces.iter().position(|&f| f == face);
-        let own = face_ops::surface(b, face)?.ok_or_else(|| null("the face's surface"))?;
+        let own = face_ops::surface(b, face)?
+            .ok_or_else(|| SolidError::topology(OP, TopologyFailure::FaceWithoutSurface))?;
         if let Some(new) = index.and_then(|i| given.get(i)).and_then(Option::as_ref) {
             if !is_own_surface(own, new) {
                 moving.push(face);
@@ -556,14 +566,17 @@ fn local_operation_on(
     let mut continued = continued_planes(k, b, &all_faces, &moving)?;
     for &face in &all_faces {
         let index = faces.iter().position(|&f| f == face);
-        let own = face_ops::surface(b, face)?.ok_or_else(|| null("the face's surface"))?;
+        let own = face_ops::surface(b, face)?
+            .ok_or_else(|| SolidError::topology(OP, TopologyFailure::FaceWithoutSurface))?;
         let replacement = match index {
-            Some(index) if moving.contains(&face) => Some(
-                given
-                    .get_mut(index)
-                    .and_then(Option::take)
-                    .ok_or_else(|| null("the face's given surface"))?,
-            ),
+            Some(index) if moving.contains(&face) => {
+                Some(given.get_mut(index).and_then(Option::take).ok_or_else(|| {
+                    broken(
+                        "a moving face's given surface is gone, though only faces given a \
+                             surface move and each takes its own once",
+                    )
+                })?)
+            }
             _ => continued.remove(&face),
         };
         let surface = if let Some(mut new) = replacement {
@@ -612,6 +625,15 @@ fn local_operation_on(
             // when surface normals oppose - reverse the input surface's orientation
             if old_normal.dot(new_normal) < 0.0 {
                 new.reverse(k, SurfParamType::U)?;
+            }
+            // (not upstream, #21188) a cone moved toward its axis keeps the face's
+            // parameters at S + d n, and its apex can pass the image of an edge: that edge
+            // then lifts onto no surface and is lost. The same cone is the face's own moved
+            // along its axis and run on to its apex, on which the face's loops lift whole
+            if let Some(reanchored) =
+                moved_cone_past_its_apex(k, old, &new, &b.face(face)?.uv_domain, b.tolerance())?
+            {
+                new = reanchored;
             }
             // (not upstream) a face that meets itself across seams keeps its UV loops on
             // the surface it takes (turned as it will be): each seam's two lines must lift
@@ -1421,11 +1443,9 @@ fn keeps_seams(k: &Kernel, b: &mut Brep, face: FaceId, surface: &Surface) -> Res
             let line = if let Some(c) = eu1::uv_trim_curve(b, u)?.0 {
                 uv_line(k, c)?
             } else {
-                if scratch.is_none() {
-                    scratch = Some(b.clone_standing_for_self()?);
-                }
-                let Some(s) = scratch.as_mut() else {
-                    return Err(null("the scratch copy of the B-rep"));
+                let s = match &mut scratch {
+                    Some(s) => s,
+                    slot => slot.insert(b.clone_standing_for_self()?),
                 };
                 let _ = get_or_create_uv_trim_curve(k, s, u, false, false, true)?;
                 match eu1::uv_trim_curve(s, u)?.0 {
@@ -1766,6 +1786,100 @@ fn net_moved_translation(
         .iter()
         .all(|c| c.is_finite())
         .then_some(translation)
+}
+
+/// (not upstream, #21188) The moved cone `new` of a face on the cone `own`, as `own` moved
+/// along its axis onto it and run on to its apex, where the face's UV domain runs past `new`'s
+/// apex.
+///
+/// A cone's offset keeps the face's parameters, at `S + d n`, and is truncated at its new apex
+/// ([`Cone::create_offset_surface`]). Moved toward its axis by more than an edge's radius over
+/// the cosine of the semi-angle, that edge's image `r - d cos θ` has passed the axis: it lifts
+/// onto no surface past the apex, and the moved face is built without it, its loop open (a
+/// countersink's cone between a hole r 2 and a well r 4, moved 2.9 off the material: the
+/// hole's circle at `2 - 2.9 cos 45° < 0`). The same cone is `own` moved along its axis by the
+/// distance between their apexes ([`Cone::moved_along_axis_to_apex`], built as the offset's
+/// truncation is, its apex exactly on the axis). There each of the face's parameters keeps the
+/// radius it has on `own`: the face's whole domain lies on the cone and each edge lifts onto
+/// the circle of its own radius (for a neighbour on the same axis, the circle the neighbour
+/// meets the cone in). The edges are rebuilt from there where the new surfaces meet, as every
+/// moved face's are.
+///
+/// `None`, and the cone used as it came, unless both are cones with apexes (not cylinders)
+/// without a procedural definition, the face's domain is inside `own`'s and not inside
+/// `new`'s, and the moved cone holds the face's domain and, at nine points of it, is `own`
+/// moved along its axis and lies on `new`'s own nappe, within `tolerance`.
+///
+/// [`Cone::create_offset_surface`]: crate::surface::cone::Cone::create_offset_surface
+/// [`Cone::moved_along_axis_to_apex`]: crate::surface::cone::Cone::moved_along_axis_to_apex
+///
+/// # Errors
+///
+/// Those of the apexes, the construction and the evaluations.
+fn moved_cone_past_its_apex(
+    k: &Kernel,
+    own: &Surface,
+    new: &Surface,
+    face_domain: &crate::geom::extent2d::Extent2d,
+    tolerance: f64,
+) -> Result<Option<Surface>> {
+    use crate::geom::vector2d::Point2;
+
+    if own.procedural_definition().is_some() || new.procedural_definition().is_some() {
+        return Ok(None);
+    }
+    let (SurfaceKind::Cone(own_cone), SurfaceKind::Cone(new_cone)) = (own.kind(), new.kind())
+    else {
+        return Ok(None);
+    };
+    if own_cone.cylinder
+        || new_cone.cylinder
+        || face_domain.is_contained_by(&new.natural_uv_domain_with_nurb(k)?, EFF_ZERO)
+        || !face_domain.is_contained_by(&own.natural_uv_domain_with_nurb(k)?, EFF_ZERO)
+    {
+        return Ok(None);
+    }
+    let (own_apex, new_apex) = (own_cone.apex(k)?, new_cone.apex(k)?);
+    if own_apex.is_cylinder || new_apex.is_cylinder {
+        return Ok(None);
+    }
+    let Some(implicit::Implicit::Cone {
+        origin,
+        axis,
+        radius,
+        tan_angle,
+    }) = AnalyticSupport::of(new).map(|label| label.implicit())
+    else {
+        return Ok(None);
+    };
+    // `own` moved along its own axis by the distance between the apexes
+    let own_axis = own_cone.rev.position.z_axis();
+    let shift = (new_apex.point - own_apex.point).dot(own_axis);
+    let Some(moved) = own_cone.moved_along_axis_to_apex(k, shift)? else {
+        return Ok(None);
+    };
+    let moved = Surface::from(moved);
+    if !face_domain.is_contained_by(&moved.natural_uv_domain_with_nurb(k)?, EFF_ZERO) {
+        return Ok(None);
+    }
+    // it is: at nine points of the face's domain, `own`'s point moved by the shift, on
+    // `new`'s own nappe (where its radius `r + t X . a` is positive)
+    let (u, v) = (face_domain.u_interval(), face_domain.v_interval());
+    for s in [0.0, 0.5, 1.0] {
+        for t in [0.0, 0.5, 1.0] {
+            let uv = Point2::new(u.evaluate(s), v.evaluate(t));
+            let p = moved.evaluate_point(k, uv)?;
+            let from = own.evaluate_point(k, uv)? + shift * own_axis;
+            let x = p - origin;
+            let along = x.dot(axis);
+            let r = radius + tan_angle * along;
+            let off = (x - along * axis).length() - r;
+            if !(p.distance(from) <= tolerance && r > tolerance && off.abs() <= tolerance) {
+                return Ok(None);
+            }
+        }
+    }
+    Ok(Some(moved))
 }
 
 /// The face's own surface moved along its normal onto `given`'s plane, when `given` is a
@@ -2344,11 +2458,14 @@ mod tests {
             local_operation(&mut k, b, &[face], Vec::new(), notes)
         });
         let e = r.unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.operation(), OP);
         assert_eq!(
             e.topology_failure(),
-            Some(&TopologyFailure::Missing("a surface for every face"))
+            Some(&TopologyFailure::TooFewSurfaces {
+                faces: 1,
+                surfaces: 0,
+            })
         );
     }
 
@@ -2424,7 +2541,7 @@ mod tests {
         assert!((v - 32000.0).abs() <= 1e-9 * 32000.0, "{v}");
     }
 
-    /// Second review, finding 11: with the exact analytic mate opt-in, the analytic copies
+    /// Second review, finding 11: with the exact analytic mate (WR-495), the analytic copies
     /// of the faces' surfaces are extended by each face's derived reach (not five offset
     /// distances, 2.5 times the body's bounding radius in a local operation): a cylinder's
     /// top raised 0.5 meets its side on the exact circle there, a sound solid of the
@@ -2433,7 +2550,6 @@ mod tests {
     fn a_raised_cylinder_top_mates_on_its_exact_circle_within_the_derived_reach() {
         use crate::primitive::api_primitives as ap;
         let mut k = Kernel::default();
-        k.fixes.offset_analytic_mate_edges = true;
         let mut b = ap::create_cylinder(&mut k, Point3::ZERO, 5.0, 20.0).unwrap();
         let top = box_top(&k, &b);
         let raised = Surface::from(Plane::from_normal(Vec3::new(0.0, 0.0, 20.5), Vec3::Z));
@@ -3641,7 +3757,7 @@ mod tests {
                 assert!(reports.add_unique_delete_duplicate(report(t, owner)));
             }
             validation::BrepCheck {
-                pointers_status: crate::error::SM_SUCCESS,
+                pointers: validation::PointerCheck::Passed,
                 pointer_reports: AssertArray::new(),
                 assert_valid: Some(tests.is_empty()),
                 reports,
@@ -3703,7 +3819,7 @@ mod tests {
     }
 
     /// The fix sets the tangent-edge cases run with: none (the kernel's default) and every
-    /// one (as an application turns them on, `offset_analytic_mate_edges` among them).
+    /// one (as an application turns them on).
     fn tangent_edge_fixes() -> [UpstreamFixes; 2] {
         [UpstreamFixes::default(), UpstreamFixes::all()]
     }

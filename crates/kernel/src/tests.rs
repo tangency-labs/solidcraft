@@ -1377,6 +1377,35 @@ fn mesh_bodies_move_measure_and_refuse_solid_ops() {
     assert_eq!(hit(&sheet, Vec3::new(2.0, 2.0, -4.0), Vec3::Z), Some((4.0, Vec3::new(0.0, 0.0, -1.0))));
 }
 
+/// `Body::face_line_hit` on the Ø40 × 40 cylinder about +Z, exactly, in closed form.
+/// - A line through the axis meets the side at the same distance both ways, (±20, 0, 20): the tie
+///   goes to the meeting ahead along the direction, whichever way the line points.
+/// - A line lying on the side (a ruling, here at 33° and on the side's seam) is no single place
+///   on it: `None`, not a failure. Each end meets it once, on its rim, at z = 0 and z = 40.
+#[test]
+fn a_line_meets_a_cylinders_face_ahead_on_a_tie_and_not_at_all_along_it() {
+    let b = cylinder(Vec3::ZERO, Vec3::Z, 20.0, 40.0).unwrap();
+    let side = (0..b.face_count()).find(|&f| matches!(face_surface(&b, f), Some(FaceSurface::Cylinder { .. }))).unwrap();
+    let ends: Vec<usize> = (0..b.face_count()).filter(|&f| f != side).collect();
+    assert_eq!(ends.len(), 2);
+    let centre = Vec3::new(0.0, 0.0, 20.0);
+    for (dir, ahead) in [(Vec3::X, Vec3::new(20.0, 0.0, 20.0)), (-Vec3::X, Vec3::new(-20.0, 0.0, 20.0))] {
+        let got = b.face_line_hit(side, centre, dir).unwrap().unwrap();
+        assert!(got.dist(ahead) < 1e-9, "along {dir:?}: {got:?}, not {ahead:?}");
+    }
+    for a in [33f64.to_radians(), crate::build::SEAM_ANGLE] {
+        let rim = Vec3::new(20.0 * a.cos(), 20.0 * a.sin(), 0.0);
+        for (z, dir) in [(30.0, -Vec3::Z), (10.0, Vec3::Z)] {
+            let on = rim + Vec3::new(0.0, 0.0, z);
+            assert_eq!(b.face_line_hit(side, on, dir).unwrap(), None, "at {a} rad, z = {z}");
+            let mut met: Vec<Vec3> = ends.iter().filter_map(|&f| b.face_line_hit(f, on, dir).unwrap()).collect();
+            met.sort_by(|p, q| p.z.total_cmp(&q.z));
+            assert_eq!(met.len(), 2, "at {a} rad, z = {z}: {met:?}");
+            assert!(met[0].dist(rim) < 1e-9 && met[1].dist(rim + Vec3::new(0.0, 0.0, 40.0)) < 1e-9, "at {a} rad, z = {z}: {met:?}");
+        }
+    }
+}
+
 #[test]
 fn concave_fillet() {
     // An L made of a base and a wall (one solid), fillet the inside corner.
@@ -3686,4 +3715,68 @@ fn iso_line_across_a_round_hole_stops_at_both_sides() {
         let point = CurveEval::new(curve).unwrap().point(range[end]).unwrap();
         assert!((point.dist(center) - 5.0).abs() < 1e-7);
     }
+}
+
+#[test]
+fn ray_meets_exact_bounds_culls_misses_and_keeps_hits_for_solid_and_mesh() {
+    let solid = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    assert!(solid.ray_meets_exact_bounds(Vec3::new(5.0, 5.0, 50.0), Vec3::new(0.0, 0.0, -1.0)));
+    assert!(solid.ray_meets_exact_bounds(Vec3::new(5.0, 5.0, 5.0), Vec3::X));
+    assert!(!solid.ray_meets_exact_bounds(Vec3::new(5.0, 5.0, 50.0), Vec3::Z));
+    assert!(!solid.ray_meets_exact_bounds(Vec3::new(25.0, 5.0, 50.0), Vec3::new(0.0, 0.0, -1.0)));
+
+    let mesh = mesh_body(&[Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0)], &[[0, 1, 2]]).unwrap();
+    assert!(mesh.ray_meets_exact_bounds(Vec3::new(2.0, 2.0, 10.0), Vec3::new(0.0, 0.0, -1.0)));
+    assert!(!mesh.ray_meets_exact_bounds(Vec3::new(25.0, 2.0, 10.0), Vec3::new(0.0, 0.0, -1.0)));
+}
+
+/// #21519: a panic the mesher catches is one a crash report marks recovered. Two loops with
+/// corners 1e-9 apart stop the triangulation library on an assertion; the mesher's own guard
+/// catches it and returns an internal error, but the crash reports read [`guarded`], which did
+/// not count the mesher's guard, so a caught panic was reported as a crash.
+#[test]
+fn a_panic_the_mesher_catches_counts_as_guarded() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let loops = vec![
+        vec![
+            [1.999999999609, 4.000000000408],
+            [2.999999999249, 5.77e-10],
+            [1.000000000478, 2.000000000614],
+            [1.000000000991, 1.000000000228],
+            [2.000000000482, 3.99999999949],
+            [1.999999999672, -9.53e-10],
+            [3.000000000364, 0.99999999994],
+            [-1.05e-10, 3.999999999914],
+            [1.999999999286, 1.000000000788],
+        ],
+        vec![
+            [4.000000000261, 1.999999999246],
+            [1.999999999553, -4.57e-10],
+            [1.999999999469, 1.000000000877],
+            [3.999999999666, 2.000000000137],
+            [3.76e-10, 2.99999999915],
+            [4.000000000737, 3.000000000668],
+            [1.000000000447, 1.000000000422],
+            [0.999999999585, 0.999999999164],
+            [0.999999999585, 3.000000000598],
+        ],
+    ];
+    let me = std::thread::current().id();
+    let (panics, unguarded) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+    let (p, u) = (panics.clone(), unguarded.clone());
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |_| {
+        if std::thread::current().id() == me {
+            p.fetch_add(1, Ordering::SeqCst);
+            if !guarded() {
+                u.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+    }));
+    let result = solidcore_tess::triangulate_planar(&loops);
+    std::panic::set_hook(prev);
+    assert!(matches!(&result, Err(solidcore_tess::TessError::Internal(m)) if m.contains("previous_region")), "{result:?}");
+    assert_eq!(panics.load(Ordering::SeqCst), 1, "the triangulation library panics once");
+    assert_eq!(unguarded.load(Ordering::SeqCst), 0, "the panic is inside a guard the crash reports see");
 }

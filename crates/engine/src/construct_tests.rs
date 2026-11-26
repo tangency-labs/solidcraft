@@ -431,6 +431,41 @@ fn point_through_two_edges() {
 }
 
 #[test]
+fn point_at_the_average_of_points_takes_any_number_in_any_order_and_follows_them() {
+    let mut s = part();
+    // two vertices: halfway between them
+    run(&mut s, "construct.point.average", json!({"points": [{"vertex": [0.5, 0.5, 0.5]}, {"vertex": [39, 29, 19]}], "name": "M"}));
+    assert!(near(point(&s, "M"), Vec3::new(20.0, 15.0, 10.0)), "{:?}", point(&s, "M"));
+    // three points, given in either order: their centroid
+    let corners = [json!({"vertex": [0.5, 0.5, 0.5]}), json!({"vertex": [39, 0.5, 0.5]}), json!({"vertex": [0.5, 29, 0.5]})];
+    run(&mut s, "construct.point.average", json!({"points": corners, "name": "C"}));
+    let reversed: Vec<Value> = corners.iter().rev().cloned().collect();
+    run(&mut s, "construct.point.average", json!({"points": reversed, "name": "R"}));
+    let centroid = Vec3::new(40.0 / 3.0, 10.0, 0.0);
+    assert!(near(point(&s, "C"), centroid), "{:?}", point(&s, "C"));
+    assert!(near(point(&s, "R"), centroid), "{:?}", point(&s, "R"));
+    // four points, one a construction point that moves: the average follows it
+    run(&mut s, "construct.point.vertex", json!({"point": {"point": [0, 0, 0]}, "name": "A"}));
+    let points = json!([{"construct_point": "A"}, {"point": [10, 20, 30]}, {"point": [10, 0, 0]}, {"point": [0, 20, 30]}]);
+    run(&mut s, "construct.point.average", json!({"points": points, "name": "N"}));
+    assert!(near(point(&s, "N"), Vec3::new(5.0, 10.0, 15.0)), "{:?}", point(&s, "N"));
+    run(&mut s, "timeline.redefine", json!({"feature": "A", "command": "construct.point.vertex", "params": {"point": {"point": [-20, 0, 0]}}}));
+    assert!(near(point(&s, "N"), Vec3::new(0.0, 10.0, 15.0)), "{:?}", point(&s, "N"));
+    // saved as `{type: "average", points}`, and reopened where it was
+    let saved = s.doc.to_json();
+    assert!(saved.contains(r#""type":"average""#) || saved.contains(r#""type": "average""#), "{saved}");
+    let bytes = crate::io::write_design_container(&s.doc).unwrap();
+    let reopened = Session::new(crate::io::read_design(&bytes).unwrap());
+    assert!(near(point(&reopened, "N"), Vec3::new(0.0, 10.0, 15.0)), "{:?}", point(&reopened, "N"));
+    // fewer than two points, or no list, is refused and adds nothing
+    let features = s.doc.features.len();
+    for params in [json!({}), json!({"points": []}), json!({"points": [{"point": [1, 2, 3]}]}), json!({"points": {"point": [1, 2, 3]}})] {
+        assert!(s.execute("construct.point.average", &params).is_err(), "{params}");
+    }
+    assert_eq!(s.doc.features.len(), features);
+}
+
+#[test]
 fn point_through_three_planes() {
     let mut s = part();
     run(
@@ -1171,6 +1206,43 @@ fn construction_on_a_moved_body_moves_with_it() {
     assert!(near(point(&s, "PinTop"), Vec3::new(30.0, 0.0, 0.0)), "{:?}", point(&s, "PinTop"));
     let (o, d) = axis(&s, "Tether");
     assert!(on_line(o, d, Vec3::new(0.0, 0.0, 20.0)) && on_line(o, d, Vec3::new(0.0, 50.0, 20.0)), "{o:?} {d:?}");
+}
+
+/// `view.plane_size` is one undo step saved with the design; `extent: null` undoes the size.
+#[test]
+fn a_construction_plane_keeps_the_size_it_is_given() {
+    let mut s = part();
+    let made = run(&mut s, "construct.plane.offset", json!({"base":"XY","offset":5,"name":"Lid"}));
+    let id = made["feature"].as_u64().unwrap_or_else(|| s.doc.find_feature("Lid").unwrap().id);
+    let undo = s.undo.len();
+    run(&mut s, "view.plane_size", json!({"plane":"Lid","extent":[-5,-2,45,32]}));
+    assert_eq!(s.doc.plane_extents.get(&id), Some(&[-5.0, -2.0, 45.0, 32.0]));
+    assert_eq!(s.undo.len(), undo + 1);
+    let saved = s.doc.to_json();
+    let back = solidcraft_doc::Document::from_json(&saved).unwrap();
+    assert_eq!(back.plane_extents.get(&id), Some(&[-5.0, -2.0, 45.0, 32.0]));
+    assert!(near(plane(&s, "Lid").origin, Vec3::new(0.0, 0.0, 5.0)));
+    for bad in [
+        json!({"plane":"Lid","extent":[0,0,0,10]}),
+        json!({"plane":"Lid","extent":[0,0,10]}),
+        json!({"plane":"Nope","extent":[0,0,1,1]}),
+        json!({"plane":"Lid","extent":[0,0,1e9,1]}),
+        json!({"plane":"Lid"}),
+        json!({"plane":"Lid","extent":[-5,-2,45,32]}),
+    ] {
+        assert!(s.execute("view.plane_size", &bad).is_err(), "{bad}");
+    }
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.plane_extents.is_empty());
+    run(&mut s, "edit.redo", json!({}));
+    run(&mut s, "view.plane_size", json!({"plane":"Lid","extent":null}));
+    assert!(s.doc.plane_extents.is_empty());
+    // Deleting a plane drops its size; undo brings both back.
+    run(&mut s, "view.plane_size", json!({"plane":"Lid","extent":[-5,-2,45,32]}));
+    run(&mut s, "timeline.delete", json!({"feature":"Lid"}));
+    assert!(s.doc.plane_extents.is_empty());
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.plane_extents.get(&id), Some(&[-5.0, -2.0, 45.0, 32.0]));
 }
 
 /// #11469: a tangent plane picked on an inserted STL said only "no face at …", as if the pick

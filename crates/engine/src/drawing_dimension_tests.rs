@@ -12,12 +12,12 @@ use solidcraft_doc::appearance::face_index_at;
 use solidcraft_doc::drawing::dimension::{
     Candidate, Dimension, DimensionKind, LabelKind, MAX_CANDIDATES, ModelEdge, ModelFace, ModelPoint, Resolved, Silhouette, Status, TextPlace,
 };
+use solidcraft_doc::drawing::measure::{LinearDirection, Reading, SilhouetteSide};
 use solidcraft_doc::drawing::view::{View, ViewKind, ViewPlace};
 use solidcraft_doc::drawing::{Drawing, Source, Units};
 use solidcraft_doc::drawing_view::{Looking, ViewDirection, ViewOverrides};
 use solidcraft_doc::ids::IdSource;
 use solidcraft_doc::naming::{edge_names, face_names};
-use solidcraft_geom::drawing_measure::{LinearDirection, Reading, SilhouetteSide};
 use solidcraft_geom::drawing_sheet::{Orientation, PaperSize, Sheet};
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide};
 use solidcraft_geom::prelude::*;

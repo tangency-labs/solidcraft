@@ -1380,7 +1380,7 @@ fn corner_round(b: &Body, r4: f64, corpus: bool) -> Result<(), Error> {
 ///   The rail and the lobe's edge END there, 3.9e-8 apart: the rounds meet, they do not cross
 ///   (the corner round's material is at x >= -36, z <= 5, the foot round's at x <= -36,
 ///   z >= 5; they share only the side's segment from R to W on z = 5).
-///   - Without the corpus's fixes the round builds, as it does past W by more
+///   - The round builds, with the corpus's fixes or without them, as it does past W by more
 ///     ([`a_corner_round_whose_rail_ends_past_the_top_under_the_foot_round_builds`]): valid at
 ///     the full check, its rails on edges and its cap edge on z = 5 next to R, and the
 ///     kernel's certified enclosure of its volume, at most [`NEXT_TO_W_ENCLOSURE`] wide, holds
@@ -1391,9 +1391,13 @@ fn corner_round(b: &Body, r4: f64, corpus: bool) -> Result<(), Error> {
 ///     from R) under the vertex's tolerance, and the lobe's edge kept 4.6e-5 under a trim that
 ///     upstream's corner fix (`sm_FixUVTrimCurves`) had moved 1e-3 off its curve, uncovered.
 ///     Its tolerance now covers its trim (#18166), and the joint at R is seen.
-///   - With them it is still refused as crossing at R, as on main. By the geometry above that
-///     refusal is a false one (the rounds meet at R); it is pinned here as main's outcome so
-///     that a change to it is seen, not as the right answer.
+///     The clean-up after filleting leaves the target's own edges and faces (WR-459, the
+///     default since #21270): the rail and the lobe's edge then keep their tolerances
+///     (4e-5, 4.6e-5) and end at that vertex, left at W with its tolerance 2e-3, 1e-3 from
+///     where they meet at R. They meet at the vertex all the same: within its tolerance, the
+///     zone in which the topology has its edges meet (`boundary_crossings`), so that is
+///     their joint, as the geometry above says, not a crossing (#21270: refused as crossing
+///     at R before, the false refusal this test pinned as main's outcome with the corpus).
 /// - 5e-6 past it, within the body's tolerance (1e-5), R is not past W: the rail ends on the
 ///   top's edge as on main, and the round builds valid (its volume, MEASURED, 1.4e-5 from the
 ///   closed form, which the end at W within the tolerance does not bound).
@@ -1406,8 +1410,7 @@ fn a_corner_round_whose_rail_meets_the_top_next_to_w_builds_where_the_rounds_mee
         let b = arm_boss_foot_only();
         let before = b.volume(1e-9).unwrap();
         match (corpus, corner_round(&b, r4, corpus)) {
-            (true, Err(Error::RoundsCross { .. })) => {}
-            (false, Ok(())) => {
+            (_, Ok(())) => {
                 let report = b.check(CheckLevel::All).unwrap();
                 assert!(report.is_valid(), "r4 {r4} corpus {corpus}: {report}");
                 let expected = before + 5.0 * r4 * r4 * (1.0 - PI / 4.0);
@@ -2997,26 +3000,19 @@ fn slot_roots_rolling_over_one_seam_from_both_sides_are_not_apart() {
 }
 
 /// #19242: the slots of [`slot_roots_beside_a_hole_s_seam_round_in_one_fillet`] and
-/// [`slot_roots_on_both_sides_of_a_hole_s_seam_build_apart_or_are_refused_overlapping`] with
-/// SolidCraft's fixes less `fillet_refuse_overlapping_bands`, as a solidcore caller that never
-/// turns it on runs them. The round that rolls over the seam is taken as apart although
-/// another round stands on the wall it rolls onto, so only the bands' check compares the two;
-/// it runs without its fix too. Where the bands overlap (the second slot's near side 8 or 9
-/// degrees past the seam) the fillet is refused as having no room, as with the fix on (with
-/// the check skipped, the overlap surfaced later as "no fillet B-rep edge matches the fillet
-/// edge"). Where they don't, the fillet builds, valid, the same volume as with the fix on to
-/// 1e-9.
+/// [`slot_roots_on_both_sides_of_a_hole_s_seam_build_apart_or_are_refused_overlapping`]. The
+/// round that rolls over the seam is taken as apart although another round stands on the wall
+/// it rolls onto, so only the bands' check compares the two (it always runs: WR-542 is no
+/// longer a flag). Where the bands overlap (the second slot's near side 8 or 9 degrees past the
+/// seam) the fillet is refused as having no room (with the check skipped, the overlap surfaced
+/// later as "no fillet B-rep edge matches the fillet edge"). Where they don't, the fillet
+/// builds, valid.
 #[test]
-fn slot_roots_beside_a_hole_s_seam_have_their_bands_checked_without_the_bands_fix() {
+fn slot_roots_beside_a_hole_s_seam_have_their_bands_checked() {
     let r = 0.5;
-    let with_fix_off = || {
-        let names = solidcraft_fixes::solidcraft_fix_names()
-            .into_iter()
-            .filter(|&name| name != "fillet_refuse_overlapping_bands");
-        session::set_thread_fixes(names).unwrap();
-    };
     let one_slot = |deg: f64| (vec![deg], 2, true);
     let two_slots = |past: f64| (vec![14.8, -(past + slot_half_angle())], 4, past > 10.0);
+    fixes();
     for (slots, n, builds) in [
         one_slot(14.8),
         one_slot(-14.8),
@@ -3025,38 +3021,22 @@ fn slot_roots_beside_a_hole_s_seam_have_their_bands_checked_without_the_bands_fi
         two_slots(12.0),
         two_slots(20.0),
     ] {
-        let run = |fix_on: bool| {
-            if fix_on {
-                fixes();
-            } else {
-                with_fix_off();
-            }
-            let b = slotted_hole(&slots);
-            let mut edges = Vec::new();
-            for &deg in &slots {
-                edges.extend(slot_roots(&b, deg));
-            }
-            blend(&b, Blend::Round, &edges, &vec![r; n], &[], Corners::Filled).map(|_| {
-                let report = b.check(CheckLevel::All).unwrap();
-                assert!(
-                    report.is_valid(),
-                    "slots {slots:?}, fix on {fix_on}: {report}"
-                );
-                b.volume(1e-9).unwrap()
-            })
-        };
-        let on = run(true);
-        let off = run(false);
-        match (on, off) {
-            (Err(Error::NoRoom), Err(Error::NoRoom)) if !builds => {}
-            (Ok(on), Ok(off)) if builds => assert!(
-                (on - off).abs() <= 1e-9 * on,
-                "slots {slots:?}: volume {off} with the fix off, {on} with it on"
-            ),
-            (on, off) => panic!("slots {slots:?}: fix on {on:?}, fix off {off:?}"),
+        let b = slotted_hole(&slots);
+        let mut edges = Vec::new();
+        for &deg in &slots {
+            edges.extend(slot_roots(&b, deg));
+        }
+        let result = blend(&b, Blend::Round, &edges, &vec![r; n], &[], Corners::Filled).map(|_| {
+            let report = b.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "slots {slots:?}: {report}");
+            b.volume(1e-9).unwrap()
+        });
+        match result {
+            Err(Error::NoRoom) if !builds => {}
+            Ok(v) if builds => assert!(v.is_finite() && v > 0.0, "slots {slots:?}: volume {v}"),
+            other => panic!("slots {slots:?}: {other:?}"),
         }
     }
-    fixes();
 }
 
 /// The tube's radius, the Root rounds' radius, the fin's thickness and the height of its top.
