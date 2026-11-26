@@ -14,7 +14,7 @@
     <definitions>
       <definition name="SUPPORTED_SolidCraft_0_44" displayName="$(string.SUPPORTED_SolidCraft_0_44)" />
       <definition name="SUPPORTED_SolidCraft_0_46" displayName="$(string.SUPPORTED_SolidCraft_0_46)" />
-      <definition name="SUPPORTED_SolidCraft_0_48" displayName="$(string.SUPPORTED_SolidCraft_0_48)" />
+      <definition name="SUPPORTED_SolidCraft_0_51" displayName="$(string.SUPPORTED_SolidCraft_0_51)" />
     </definitions>
   </supportedOn>
   <categories>
@@ -190,7 +190,7 @@
     </policy>
     <policy name="ThemeFile" class="Both" displayName="$(string.ThemeFile)" explainText="$(string.ThemeFile_Explain)" presentation="$(presentation.ThemeFile)" key="Software\Policies\SolidCraft">
       <parentCategory ref="SolidCraft" />
-      <supportedOn ref="SUPPORTED_SolidCraft_0_48" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_51" />
       <elements>
         <text id="ThemeFile" valueName="ThemeFile" maxLength="4096" required="true" />
       </elements>

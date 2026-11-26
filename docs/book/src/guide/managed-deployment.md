@@ -35,7 +35,7 @@ can run it.
 | Allow Open with EasyPrint | `AllowEasyPrint` | `REG_DWORD` | `0`: SolidCraft offers no EasyPrint and sends no model to Printables, whoever asks. `1` or not set: people can use it after agreeing once. SolidCraft 0.46 or later. |
 | Allow problem reports | `AllowProblemReports` | `REG_DWORD` | `0`: no problem report opens or is sent, to SolidCraft's ticket server or GitHub. Help, About SolidCraft, **Copy diagnostic information** still copies the details. `1` or not set: people can send reports. SolidCraft 0.46 or later. |
 | Add SolidCraft to AI apps | `ConnectAiApps` | `REG_DWORD` | `1`: SolidCraft adds its MCP server to the AI apps on the computer at start. `0`: it adds none and takes out the entries it added. SolidCraft 0.46 or later. |
-| Theme file | `ThemeFile` | `REG_SZ` | The full path of a SolidCraft theme file (`.json`) everyone follows, up to 4096 characters on one line. See [A theme for everyone](#a-theme-for-everyone). SolidCraft 0.48 or later. |
+| Theme file | `ThemeFile` | `REG_SZ` | The full path of a SolidCraft theme file (`.json`) everyone follows, up to 4096 characters on one line. See [A theme for everyone](#a-theme-for-everyone). SolidCraft 0.51 or later. |
 
 On Windows the values live in the key `Software\Policies\SolidCraft`:
 

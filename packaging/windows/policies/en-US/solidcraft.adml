@@ -7,7 +7,7 @@
       <string id="SolidCraft">SolidCraft</string>
       <string id="SUPPORTED_SolidCraft_0_44">SolidCraft 0.44 or later</string>
       <string id="SUPPORTED_SolidCraft_0_46">SolidCraft 0.46 or later</string>
-      <string id="SUPPORTED_SolidCraft_0_48">SolidCraft 0.48 or later</string>
+      <string id="SUPPORTED_SolidCraft_0_51">SolidCraft 0.51 or later</string>
       <string id="CheckForUpdates">Check for updates</string>
       <string id="CheckForUpdates_Explain">Controls whether SolidCraft asks GitHub for the latest release at start and once a day.
 
