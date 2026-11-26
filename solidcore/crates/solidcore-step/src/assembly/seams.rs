@@ -301,17 +301,6 @@ fn turned(p: Vec3, o: Vec3, k: Vec3, angle: f64) -> Vec3 {
     o + x * c + k.cross(x) * s + k * (k.dot(x) * (1.0 - c))
 }
 
-/// `v`'s direction square to unit `z`, as a record frame's x axis beside `z` must be (unit and
-/// square within a few ulps, `solidcore::geom::axis2_placement::axes_are_orthonormal`); `None`
-/// along `z`. One projection off `z` leaves a component along it of the rounding of `v`'s whole
-/// length, which normalising a short remainder (`v` near `z`, as a seam's end near a pole has
-/// it) makes many ulps of the direction; a second projection of that remainder leaves only its
-/// own rounding (Kahan's "twice is enough", Parlett, The Symmetric Eigenvalue Problem, §6.9).
-fn square_to(z: Vec3, v: Vec3) -> Option<Vec3> {
-    let once = v - z * v.dot(z);
-    (once - z * once.dot(z)).normalized()
-}
-
 /// A revolution's profile turned by `angle`: the meridian there, with the profile's parameter.
 fn meridian(profile: &BCurve, o: Vec3, k: Vec3, angle: f64) -> R<BCurve> {
     let turn = |h: &[f64; 4]| {
@@ -715,12 +704,13 @@ impl Assembly<'_> {
             Kind::Sphere(r) => {
                 // The sphere's own meridian through the end further from the axis: angle 0 on the
                 // equator, π/2 at the upper pole, so its angle is the surface's latitude and its
-                // quarters the surface's. Its frame is the record's, unit and square to rounding
-                // ([`square_to`]).
-                let z = ax.z.normalized().ok_or("a sphere with no axis")?;
+                // quarters the surface's. Its frame is unit and square to rounding, as the
+                // record's check asks ([`crate::kernel::square_frame`]): one projection off the
+                // axis leaves along it the rounding of the whole offset, which a short remainder
+                // (an end near a pole) makes many ulps of its direction.
                 let (da, db) = (pa - ax.origin, pb - ax.origin);
-                let (ra, rb) = (da - z * da.dot(z), db - z * db.dot(z));
-                let x = square_to(z, if ra.len() >= rb.len() { ra } else { rb }).ok_or("a seam along the sphere's axis")?;
+                let (ra, rb) = (da - ax.z * da.dot(ax.z), db - ax.z * db.dot(ax.z));
+                let (z, x) = crate::kernel::square_frame(ax.z, if ra.len() >= rb.len() { da } else { db }).ok_or("a seam along the sphere's axis")?;
                 let latitude = |d: Vec3| d.dot(z).atan2(d.dot(x));
                 let (ta, tb) = (latitude(da), latitude(db));
                 if !(ta.abs() <= 0.5 * PI + 1e-9 && tb.abs() <= 0.5 * PI + 1e-9) {
@@ -739,9 +729,8 @@ impl Assembly<'_> {
                 // seam runs from the loop the face lies above (`a`'s, running +u) up the tube to
                 // `b`: the face's side of the circle, whichever half that is. Its frame is
                 // unit and square to rounding, as the sphere's meridian's.
-                let z = ax.z.normalized().ok_or("a torus with no axis")?;
                 let da = pa - ax.origin;
-                let x = square_to(z, da).ok_or("a torus seam on its axis")?;
+                let (z, x) = crate::kernel::square_frame(ax.z, da).ok_or("a torus seam on its axis")?;
                 let centre = ax.origin + x * *major;
                 let tube = |p: Vec3| {
                     let d = p - centre;
@@ -759,12 +748,10 @@ impl Assembly<'_> {
                 // torus's u. The face lies to the left of its loops in (u, v), so from the loop
                 // running round the tube up (+v) it lies towards −u: the seam runs from `a` back
                 // round the axis to `b`, the edge from `b` to `a`.
-                let z = ax.z.normalized().ok_or("a torus with no axis")?;
                 let da = pa - ax.origin;
+                let (z, x) = crate::kernel::square_frame(ax.z, da).ok_or("a torus seam on its axis")?;
                 let h = da.dot(z);
-                let radial = da - z * h;
-                let r = radial.len();
-                let x = square_to(z, radial).ok_or("a torus seam on its axis")?;
+                let r = (da - z * h).len();
                 let y = z.cross(x);
                 let db = pb - ax.origin;
                 let back = (-(db.dot(y).atan2(db.dot(x)))).rem_euclid(TAU);
