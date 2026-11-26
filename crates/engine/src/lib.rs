@@ -3950,6 +3950,9 @@ impl Session {
         self.checked_sheet_sketch_owner(&self.view_context, computed.active_sheet_sketch.as_deref(), &computed.doc)?;
         computed.sketching_view = owner;
         self.plugin_state.user.pending_user_settings = std::mem::take(&mut computed.plugin_state.user.pending_user_settings);
+        // The files a caller named while the worker ran (Insert Design, opening a KiCad board) stay
+        // its own choice for Update Links in the window's session.
+        self.plugin_state.linked_files.extend(std::mem::take(&mut computed.plugin_state.linked_files));
         // Audited direct-mutation jobs may not have passed through execute. Their
         // accepted document is still a new committed state with a fresh token.
         let newer = match (design_revision_generation(&computed.design_revision), design_revision_generation(&self.design_revision)) {
