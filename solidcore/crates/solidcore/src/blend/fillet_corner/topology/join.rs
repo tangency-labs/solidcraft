@@ -522,16 +522,18 @@ fn rolled_sides(
 /// square to the edges. Each blend's foot on this side at V is its exact station at V's
 /// parameter on its edge (`SetbackFs::station` on its own supports, the solver's faces at
 /// offset 0 as set up, extended as the trace extends them: no extension of the trace to its
-/// rails has run yet), classified against that blend's own face (`point_classify`). Where
-/// one blend's foot lies inside its face and the other's outside its own (beyond the seam),
-/// and the two feet are farther apart than the solver's 3D tolerance (the support's sag off
-/// the face beyond: the rails would meet on no section at the seam crossings), the Join
+/// rails has run yet). Where the two feet are farther apart than the solvers' 3D tolerance
+/// (the support's sag off the face beyond), and exactly one blend is native there: its foot
+/// dropped on its own support classified inside its face (`point_classify`), and the other
+/// blend's foot dropped on that same support inside it too (beyond the seam from the other's
+/// own face; a point outside, on a boundary or not classified is no evidence), the Join
 /// ends on V's station plane on this side: the side's edge is taken out of `between` and
 /// the native blend's face returned for it, and the Join is deferred (its vertices and
 /// edges after the classification, whose roll-over makes the other blend's piece on the face
 /// beyond). Anywhere else (a foot on a face's boundary, as where the seam lies in the
-/// station plane; both feet on or both off their faces; feet within the tolerance; a station
-/// not found) nothing is decided and the side keeps today's end.
+/// station plane; feet within the tolerance; neither or both blends native; a station not
+/// found or any step's ordinary failure) nothing is decided and the side keeps today's end;
+/// only a cancellation or an unported step is passed on.
 ///
 /// # Errors
 /// A reviewed `Defect` without a live solver; those of the topology queries, the tangency
@@ -554,7 +556,7 @@ fn setback_seam_sides(
     use crate::surface::surface::Surface;
     use crate::topology::edge;
     let mut out = [None, None];
-    let (Some(vertex), [Some(id0), Some(id1)], [eu_b0, eu_b1]) = (vertex, ids, solver_eus) else {
+    let (Some(vertex), [Some(id0), Some(id1)], [_, _]) = (vertex, ids, solver_eus) else {
         return Ok(out);
     };
     let setback = |id: &FilletSolverId| match solvers.get(id.0 as usize) {
@@ -566,22 +568,56 @@ fn setback_seam_sides(
     };
     let tangency = live(solvers, Some(*id0))?.tangency_tolerance;
     let vertex_point = target.vertex(vertex)?.point;
-    // blend `fs`'s foot at V on its face `face` (on edge use `eu`'s edge): its point and
-    // whether it lies inside the face (`Some(true)`), outside it (`Some(false)`), or neither
+    // an ordinary failure of a step below leaves the side undecided (today's Join); a
+    // cancellation or an unported step stops here
+    let soft = |r: Result<bool>| -> Result<bool> {
+        match r {
+            Ok(v) => Ok(v),
+            Err(e) if e.is_unported_or_cancelled() => Err(e),
+            Err(_) => Ok(false),
+        }
+    };
+    // whether `point` drops onto the support of blend `fs` on face `face` inside the face
+    // (`PointClassType::Face`; outside, on its boundary or not classified: `false`)
+    let inside = |target: &mut Brep,
+                  fs: &crate::blend::fillet_standard_solver::setback::SetbackFs,
+                  face: FaceId,
+                  point: crate::math::Point3|
+     -> Result<bool> {
+        let rail = fs
+            .curve_based
+            .solver
+            .find_index_of_rail_on_face(target, Some(face))?;
+        let domains = fs.trace_domains(k)?;
+        let Some(domain) = domains.get(rail) else {
+            return Ok(false);
+        };
+        let support = Surface::from(fs.curve_based.solver.rail(rail)?.surface.clone());
+        let found =
+            surface_global_point_solve(k, &support, None, domain, point, crate::math::EFF_ZERO_SQ)?;
+        let Some(&uv) = found.first() else {
+            return Ok(false);
+        };
+        let mut pc = PointClassification::new(fs.curve_based.solver.approx_tol_3d);
+        point_classify(
+            k,
+            target,
+            face,
+            uv,
+            &mut pc,
+            PointClassifyOptions::default(),
+        )?;
+        Ok(pc.point_class() == PointClassType::Face)
+    };
+    // blend `fs`'s foot at V on its face `face`: its exact station at V's parameter on the
+    // blend's edge, on its own supports; `None` where it is not found
     let foot = |target: &mut Brep,
                 fs: &mut crate::blend::fillet_standard_solver::setback::SetbackFs,
-                eu: EdgeuseId,
                 face: FaceId|
-     -> Result<Option<(crate::math::Point3, bool)>> {
-        let Some(e) = eu1::edge(target, eu)? else {
-            return Ok(None);
-        };
-        let ivl = edge::interval(target, e)?;
-        let s = if edge::start_vertex(target, e)? == Some(vertex) {
-            ivl.min()
-        } else {
-            ivl.max()
-        };
+     -> Result<Option<crate::math::Point3>> {
+        // V's parameter on the solver's edge curve (an edge's interval need not be its
+        // curve's parameter: a chain's edges carry their own)
+        let s = fs.station_of(k, vertex_point)?;
         let domains = fs.trace_domains(k)?;
         let mut uvs = [crate::math::Point2::new(0.0, 0.0); 2];
         for (rail, slot) in uvs.iter_mut().enumerate() {
@@ -602,33 +638,31 @@ fn setback_seam_sides(
             };
             *slot = uv;
         }
-        let Ok(Some(station)) = fs.station(k, s, uvs, &domains) else {
+        let Some(station) = fs.station(k, s, uvs, &domains)? else {
             return Ok(None);
         };
         let rail = fs
             .curve_based
             .solver
             .find_index_of_rail_on_face(target, Some(face))?;
-        let Some(f) = station.feet.get(rail) else {
-            return Ok(None);
-        };
-        let tol = fs.curve_based.solver.approx_tol_3d;
-        let mut pc = PointClassification::new(tol);
-        point_classify(
-            k,
-            target,
-            face,
-            f.uv,
-            &mut pc,
-            PointClassifyOptions::default(),
-        )?;
-        Ok(match pc.point_class() {
-            PointClassType::Face => Some((f.point, true)),
-            PointClassType::Unknown => Some((f.point, false)),
-            _ => None,
-        })
+        Ok(station.feet.get(rail).map(|f| f.point))
+    };
+    let soft_foot = |target: &mut Brep,
+                     fs: &mut crate::blend::fillet_standard_solver::setback::SetbackFs,
+                     face: FaceId|
+     -> Result<Option<crate::math::Point3>> {
+        match foot(target, fs, face) {
+            Ok(p) => Ok(p),
+            Err(e) if e.is_unported_or_cancelled() => Err(e),
+            Err(_) => Ok(None),
+        }
     };
     let (mut fs0, mut fs1) = (fs0, fs1);
+    let tol = fs0
+        .curve_based
+        .solver
+        .approx_tol_3d
+        .max(fs1.curve_based.solver.approx_tol_3d);
     for (s, (slot, faces)) in out.iter_mut().zip(side).enumerate() {
         let Some([only]) = between.get(s).map(Vec::as_slice) else {
             continue;
@@ -644,25 +678,30 @@ fn setback_seam_sides(
         if fa == fb
             || !bounds.contains(&fa)
             || !bounds.contains(&fb)
-            || !test_manifold_tangent_rollover(k, target, seam, tangency)?.0
+            || !soft(test_manifold_tangent_rollover(k, target, seam, tangency).map(|t| t.0))?
         {
             continue;
         }
-        let (Some((pa, in_a)), Some((pb, in_b))) = (
-            foot(target, &mut fs0, *eu_b0, fa)?,
-            foot(target, &mut fs1, *eu_b1, fb)?,
+        let (Some(pa), Some(pb)) = (
+            soft_foot(target, &mut fs0, fa)?,
+            soft_foot(target, &mut fs1, fb)?,
         ) else {
             continue;
         };
-        let tol = fs0
-            .curve_based
-            .solver
-            .approx_tol_3d
-            .max(fs1.curve_based.solver.approx_tol_3d);
-        if in_a == in_b || pa.distance(pb) <= tol {
+        // feet within the tolerance: no split is needed, today's Join
+        if pa.distance(pb) <= tol {
             continue;
         }
-        *slot = Some(if in_a { fa } else { fb });
+        // the native blend: its foot inside its own face, the other's foot dropping inside it
+        // too (beyond the seam from the other's face); exactly one of the two may be
+        let a_native = soft(inside(target, &fs0, fa, pa))? && soft(inside(target, &fs0, fa, pb))?;
+        let b_native = soft(inside(target, &fs1, fb, pb))? && soft(inside(target, &fs1, fb, pa))?;
+        let native = match (a_native, b_native) {
+            (true, false) => fa,
+            (false, true) => fb,
+            _ => continue,
+        };
+        *slot = Some(native);
         if let Some(b) = between.get_mut(s) {
             b.clear();
         }

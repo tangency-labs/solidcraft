@@ -1505,13 +1505,15 @@ mod tests {
         }
 
         /// The enclosure front's slanted chain chamfered by equal setbacks 0.02, small enough that
-        /// no Join waits for a roll-over: at the side vertices V = (+-50, 30, 12) the round's foot at
-        /// V lies off the cylinder face only by the cylinder's sag over the foot's drop below the
-        /// seam, (0.02 * 0.8 / sqrt(1.64))^2 / (2 * 10) = 7.8e-6, within the solvers' 3D tolerance
-        /// (4e-5), so the Join keeps its ends where the rails cross the seam, as before
-        /// (`join::setback_seam_sides` decides nothing, the Join is not deferred). The rails' seam
-        /// crossings then meet within the tolerance: the solid is closed with one chamfer of
-        /// setbacks per edge, five (no rail runs off its face, so no roll-over piece).
+        /// no Join waits for a roll-over. At the side vertices V = (+-50, 30, 12) the round's
+        /// cylinder foot leaves the cylinder face across the seam a little before V, at
+        /// ε = 0.00124939 rad (200 (1 - cos ε) + 156.25 tan² ε = 0.02²), and at V it lies off the
+        /// side face only by the cylinder's sag over its drop below the seam,
+        /// (0.02 · 0.8 / sqrt(1.64))² / (2 · 10) = 7.8e-6, within the solvers' 3D (and zone)
+        /// tolerance 4e-5: `join::setback_seam_sides` decides nothing, the Join is not deferred
+        /// and keeps its ends where the rails cross the seam. This test guards today's result
+        /// (it passes without the deferral): a closed solid with one chamfer of setbacks per
+        /// edge, five.
         #[test]
         fn the_enclosure_front_chain_with_setbacks_below_the_seams_sag_is_joined_on_the_seams() {
             let d = [0.02, 0.02];

@@ -3888,9 +3888,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             if access.edges_deferred(corner)? {
                 continue;
             }
-            if !self.corner_edges(k, access, corner)? {
-                return Ok(());
-            }
+            self.corner_edges(k, access, corner)?;
         }
         Ok(())
     }
@@ -3915,45 +3913,38 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             if !access.edges_deferred(corner)? {
                 continue;
             }
-            if !self.corner_edges(k, access, corner)? {
-                return Ok(());
-            }
+            self.corner_edges(k, access, corner)?;
         }
         Ok(())
     }
 
     /// One corner's tangent topology adjustment, vertices and edges, for
-    /// [`Self::calculate_corner_edges`] and [`Self::calculate_deferred_corner_edges`]: `true` to
-    /// go on with the next corner; `false` where a failure was noted on the corner
-    /// (`corner_vertex_failure`) and the pass ends, as it always has.
+    /// [`Self::calculate_corner_edges`] and [`Self::calculate_deferred_corner_edges`].
     ///
     /// # Errors
-    /// A refusal the corner noted, or a failure that is not noted.
+    /// A failure noted on the corner (`corner_vertex_failure`, which always fails the pass),
+    /// a refusal the corner noted, or a failure that is not noted.
     fn corner_edges(
         &mut self,
         k: &mut Kernel,
         access: &mut impl CornerEdgeAccess<O>,
         corner: O,
-    ) -> Result<bool> {
+    ) -> Result<()> {
         if let Err(stage) = caught(access.edges_adjust_tangent(k, corner, self))? {
-            return self
-                .corner_vertex_failure(
-                    access,
-                    corner,
-                    "Fillet Corner Error: Topology Adjustment Failure",
-                    stage,
-                )
-                .map(|()| false);
+            return self.corner_vertex_failure(
+                access,
+                corner,
+                "Fillet Corner Error: Topology Adjustment Failure",
+                stage,
+            );
         }
         if let Err(stage) = caught_but_refusal(access.vertices_calculate(k, corner, self))? {
-            return self
-                .corner_vertex_failure(
-                    access,
-                    corner,
-                    "Fillet Corner Error: Vertex Computation Failure",
-                    stage,
-                )
-                .map(|()| false);
+            return self.corner_vertex_failure(
+                access,
+                corner,
+                "Fillet Corner Error: Vertex Computation Failure",
+                stage,
+            );
         }
         let noted_before = self.error.code;
         if let Err(stage) = caught(access.edges_calculate(k, corner, self))? {
@@ -3964,16 +3955,14 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             {
                 return Err(failure_after(stage));
             }
-            return self
-                .corner_vertex_failure(
-                    access,
-                    corner,
-                    "Fillet Corner Error: Corner Edge Computation Failure",
-                    stage,
-                )
-                .map(|()| false);
+            return self.corner_vertex_failure(
+                access,
+                corner,
+                "Fillet Corner Error: Corner Edge Computation Failure",
+                stage,
+            );
         }
-        Ok(true)
+        Ok(())
     }
 
     /// Trim every solver's rails after all corner boundary geometry is complete.
