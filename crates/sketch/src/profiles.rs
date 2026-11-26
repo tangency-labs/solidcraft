@@ -2100,6 +2100,20 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
         e.u = find(&mut short, e.u);
         e.v = find(&mut short, e.v);
     }
+    // A line or short arc whose ends merged into one node within `tol` is a zero-length
+    // self-loop (such as a micro-step between MERGE_TOL and tol): left in the graph, its two
+    // half-edges break the face walk around the enclosing loop. Longer self-loops (a full
+    // circle cut at one point, or a lone piece > tol bridged only by ENDPOINT_JOIN_TOL) stay.
+    edges.retain(|e| {
+        if e.u != e.v {
+            return true;
+        }
+        match e.seg {
+            Seg2::Line { a, b } => a.dist(b) > tol,
+            Seg2::Arc { radius, sweep, .. } => radius * sweep.abs() > tol,
+            _ => true,
+        }
+    });
     let n = nodes.len();
     // One edge where pieces overlap, then prune dangling edges.
     let twins = without_overlaps(&edges, tol);
@@ -2707,20 +2721,33 @@ pub fn distinct_curves(ids: &[String]) -> Vec<String> {
     out
 }
 
-fn same_seg(a: &Seg2, b: &Seg2, tol: f64) -> bool {
+/// Whether `a` and `b` represent the same shared boundary segment: their endpoints meet within
+/// `end_tol`, while their carriers (line or circle) stay within `carrier_tol` so parallel walls
+/// of a narrow gap or sliver (> `carrier_tol` apart) are never falsely cancelled against each
+/// other.
+fn same_seg(a: &Seg2, b: &Seg2, end_tol: f64, carrier_tol: f64) -> bool {
+    let on_line = |p: Vec2, q: Vec2, pt: Vec2| -> bool {
+        let u = q - p;
+        let len = u.len();
+        len <= 1e-12 || (pt - p).cross(u).abs() <= carrier_tol * len
+    };
     match (*a, *b) {
-        (Seg2::Line { a: p, b: q }, Seg2::Line { a: r, b: s }) => p.dist(r) <= tol && q.dist(s) <= tol,
+        (Seg2::Line { a: p, b: q }, Seg2::Line { a: r, b: s }) => {
+            p.dist(r) <= end_tol
+                && q.dist(s) <= end_tol
+                && (end_tol <= carrier_tol || (on_line(p, q, r) && on_line(p, q, s) && on_line(r, s, p) && on_line(r, s, q)))
+        }
         (Seg2::Arc { center: c1, radius: r1, .. }, Seg2::Arc { center: c2, radius: r2, .. }) => {
-            c1.dist(c2) <= tol
-                && (r1 - r2).abs() <= tol
-                && a.start().dist(b.start()) <= tol
-                && a.end().dist(b.end()) <= tol
-                && a.mid().dist(b.mid()) <= tol
+            c1.dist(c2) <= carrier_tol
+                && (r1 - r2).abs() <= carrier_tol
+                && a.start().dist(b.start()) <= end_tol
+                && a.end().dist(b.end()) <= end_tol
+                && a.mid().dist(b.mid()) <= end_tol
         }
         // Free-form segments (text outlines, ellipses, splines): the same curve when they run
         // through the same points.
         (Seg2::Line { .. } | Seg2::Arc { .. }, _) | (_, Seg2::Line { .. } | Seg2::Arc { .. }) => false,
-        _ => [0.0, 0.25, 0.5, 0.75, 1.0].iter().all(|t| a.point_at(*t).dist(b.point_at(*t)) <= tol),
+        _ => [0.0, 0.25, 0.5, 0.75, 1.0].iter().all(|t| a.point_at(*t).dist(b.point_at(*t)) <= end_tol),
     }
 }
 
@@ -2818,33 +2845,50 @@ pub fn merge_regions(regions: &[Region2]) -> Vec<Region2> {
     // whose corners are that close are one shared boundary: a tangent touch splits into two
     // corners a few hundredths of a micron apart, each region taking its own (#12612).
     let tol = ENDPOINT_JOIN_TOL;
-    // Every boundary segment oriented with the region on its left.
+    // Every boundary segment oriented with the region on its left, tagged with its source loop so
+    // opposite sides of a single narrow loop (e.g. a sliver <= ENDPOINT_JOIN_TOL wide) never
+    // cancel against each other.
     let mut segs: Vec<Seg2> = Vec::new();
+    let mut loop_ids: Vec<usize> = Vec::new();
+    let mut next_loop_id = 0usize;
     for r in regions {
-        segs.extend(r.outer.ccw().segs);
+        let outer = r.outer.ccw().segs;
+        loop_ids.extend(std::iter::repeat_n(next_loop_id, outer.len()));
+        segs.extend(outer);
+        next_loop_id += 1;
         for h in &r.holes {
-            segs.extend(h.ccw().reversed().segs);
+            let hole = h.ccw().reversed().segs;
+            loop_ids.extend(std::iter::repeat_n(next_loop_id, hole.len()));
+            segs.extend(hole);
+            next_loop_id += 1;
         }
     }
     if segs.len() > MAX_EDGES {
         return regions.to_vec();
     }
-    // Drop pairs that run against each other (shared boundaries).
+    // Drop pairs that run against each other (shared boundaries and exact slits).
+    // Pass 1 matches exact opposite segments within MERGE_TOL first (including zero-width slits
+    // within a single loop, e.g. a ring cut by a radial seam, while leaving slivers wider than
+    // MERGE_TOL intact); Pass 2 catches tangent-touch splits between distinct loops up to
+    // ENDPOINT_JOIN_TOL on the same carrier (#12612).
     let mut alive = vec![true; segs.len()];
     let mut shared = false;
-    for i in 0..segs.len() {
-        if !alive.get(i).copied().unwrap_or(false) {
-            continue;
-        }
-        for j in (i + 1)..segs.len() {
-            if alive.get(j).copied().unwrap_or(false)
-                && let (Some(a), Some(b)) = (segs.get(i), segs.get(j))
-                && same_seg(a, &b.reversed(), tol)
-            {
-                alive[i] = false;
-                alive[j] = false;
-                shared = true;
-                break;
+    for (end_tol, distinct_loops_only) in [(MERGE_TOL, false), (tol, true)] {
+        for i in 0..segs.len() {
+            if !alive.get(i).copied().unwrap_or(false) {
+                continue;
+            }
+            for j in (i + 1)..segs.len() {
+                if alive.get(j).copied().unwrap_or(false)
+                    && (!distinct_loops_only || loop_ids.get(i) != loop_ids.get(j))
+                    && let (Some(a), Some(b)) = (segs.get(i), segs.get(j))
+                    && same_seg(a, &b.reversed(), end_tol, MERGE_TOL)
+                {
+                    alive[i] = false;
+                    alive[j] = false;
+                    shared = true;
+                    break;
+                }
             }
         }
     }
@@ -2856,14 +2900,15 @@ pub fn merge_regions(regions: &[Region2]) -> Vec<Region2> {
     let ends: Vec<Vec2> = segs.iter().zip(&alive).filter(|(_, a)| !**a).flat_map(|(s, _)| [s.start(), s.end()]).collect();
     let rejoin = |s: &Seg2, t: &Seg2| match (*s, *t) {
         (Seg2::Line { a, b }, Seg2::Line { a: b2, b: c }) => {
-            b.dist(b2) <= tol
+            b.dist(b2) <= MERGE_TOL
                 && ends.iter().any(|e| e.dist(b) <= tol)
                 && (b - a).normalized().zip((c - b).normalized()).is_some_and(|(u, v)| u.dot(v) > 1.0 - 1e-12)
         }
         _ => false,
     };
     let rest: Vec<Seg2> = segs.iter().zip(&alive).filter(|(_, a)| **a).map(|(s, _)| *s).collect();
-    // Chain into loops, taking the sharpest left turn where several continue.
+    // Chain into loops, preferring exact-corner continuations before bridging up to `tol` and
+    // taking the sharpest left turn where several continue at the same corner.
     let mut used = vec![false; rest.len()];
     let mut loops: Vec<Loop2> = Vec::new();
     for start in 0..rest.len() {
@@ -2883,10 +2928,12 @@ pub fn merge_regions(regions: &[Region2]) -> Vec<Region2> {
             let seg = corner.map_or(seg, |p| started_at(seg, p));
             lp.push(seg);
             let end = seg.end();
-            if let Some(first) = rest.get(start)
-                && end.dist(first.start()) <= tol
-                && lp.len() > 1
-            {
+            let close_dist = rest.get(start).map_or(f64::INFINITY, |first| end.dist(first.start()));
+            let best_next_dist = (0..rest.len())
+                .filter(|k| !used.get(*k).copied().unwrap_or(true))
+                .filter_map(|k| rest.get(k).map(|s| s.start().dist(end)))
+                .fold(f64::INFINITY, f64::min);
+            if close_dist <= tol && lp.len() > 1 && (close_dist <= MERGE_TOL || close_dist <= best_next_dist + MERGE_TOL) {
                 if let Some(first) = lp.first_mut() {
                     *first = started_at(*first, end);
                 }
@@ -2894,8 +2941,9 @@ pub fn merge_regions(regions: &[Region2]) -> Vec<Region2> {
             }
             corner = Some(end);
             let back = (-seg.end_tangent()).angle();
+            let next_tol = (best_next_dist + MERGE_TOL).min(tol);
             let next = (0..rest.len())
-                .filter(|k| !used.get(*k).copied().unwrap_or(true) && rest.get(*k).is_some_and(|s| s.start().dist(end) <= tol))
+                .filter(|k| !used.get(*k).copied().unwrap_or(true) && rest.get(*k).is_some_and(|s| s.start().dist(end) <= next_tol))
                 .min_by(|x, y| {
                     let d = |k: usize| rest.get(k).map(|s| (back - s.start_tangent().angle()).rem_euclid(TAU)).unwrap_or(TAU);
                     d(*x).total_cmp(&d(*y))
@@ -2905,10 +2953,12 @@ pub fn merge_regions(regions: &[Region2]) -> Vec<Region2> {
                 None => break,
             }
         }
-        // A loop that encloses nothing (pieces running back over themselves) is no boundary.
-        if !lp.is_empty() && lp.first().zip(lp.last()).is_some_and(|(f, l)| l.end().dist(f.start()) <= tol) {
+        // A loop that encloses nothing (pieces running back over themselves, or a lone straight
+        // line shorter than `tol`) is no boundary.
+        let is_single_line = lp.len() == 1 && matches!(lp.first(), Some(Seg2::Line { .. }));
+        if !lp.is_empty() && !is_single_line && lp.first().zip(lp.last()).is_some_and(|(f, l)| l.end().dist(f.start()) <= tol) {
             let lp = Loop2 { segs: rejoined(lp, &rejoin) };
-            if lp.signed_area().abs() > 1e-9 {
+            if area_about_start(&lp.segs).abs() > 1e-9 {
                 loops.push(lp);
             }
         }
@@ -3578,6 +3628,34 @@ mod tests {
             let segs = &p.region.outer.segs;
             assert!(segs.iter().filter(|s| matches!(s, Seg2::Line { .. })).count() <= 2, "{segs:?}");
             assert!(p.region.outer.joints().all(|(a, b)| a.end().dist(b.start()) < 1e-9), "{segs:?}");
+        }
+    }
+
+    /// A closed contour with a micro-step between MERGE_TOL (1e-6) and the node-merge tolerance
+    /// (1e-5) used to keep the collapsed step as a zero-length self-loop (`u == v`), which broke
+    /// the half-edge face walk and dropped the entire profile.
+    #[test]
+    fn micro_step_between_merge_tol_and_node_tol_keeps_enclosing_profile() {
+        for step in [2e-6, 5e-6, 8e-6] {
+            let mut sk = Sketch::new();
+            let pts = [
+                Vec2::new(0.0, 0.0),
+                Vec2::new(30.0, 0.0),
+                Vec2::new(30.0, 30.0),
+                Vec2::new(0.0, 30.0),
+                Vec2::new(0.0, 16.0),
+                Vec2::new(-step, 16.0),
+                Vec2::new(-step, 14.0),
+                Vec2::new(0.0, 14.0),
+            ];
+            let ids: Vec<usize> = pts.iter().map(|&p| sk.add_point(p, None).unwrap()).collect();
+            for i in 0..ids.len() {
+                sk.add_curve(CurveKind::Line { a: ids[i], b: ids[(i + 1) % ids.len()] }, None).unwrap();
+            }
+            let profiles = find_profiles(&sk);
+            assert_eq!(profiles.len(), 1, "step {step}: expected 1 profile, got {}", profiles.len());
+            assert!((profiles[0].area - 900.0).abs() < 1e-3, "step {step}: area={}", profiles[0].area);
+            assert!(profiles[0].region.outer.joints().all(|(a, b)| a.end().dist(b.start()) < 1e-9), "step {step}: open joint");
         }
     }
 }
