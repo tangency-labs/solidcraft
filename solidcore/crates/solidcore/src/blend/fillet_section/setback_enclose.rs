@@ -258,15 +258,20 @@ fn inside_piece(u: &[f64], k: usize, x: Ivl, side: i32) -> bool {
     (side > 0 || a <= x.lo) && (side < 0 || x.hi <= b)
 }
 
-/// Whether `[lo, hi]` lies in the closed knot span `[u_k, u_{k+1}]`, to its rounding.
-fn inside_span(u: &[f64], k: usize, lo: f64, hi: f64) -> bool {
+/// Whether `[lo, hi]` lies in the closed knot span `[u_k, u_{k+1}]` of a curve of degree
+/// `p` with `n` control points, to its rounding, the first piece continued below the
+/// domain's start and the last above its end.
+fn inside_span(u: &[f64], p: usize, n: usize, k: usize, lo: f64, hi: f64) -> bool {
     let (a, b) = (knot(u, k as isize), knot(u, k as isize + 1));
     // a span between two of the piece's knots is held by an interval rounded outward, a few
     // ulps past them: on those the piece's polynomial is the edge's continuation (at a knot
-    // the edge is continuous, past its ends it is the extension the leader stores), so the
-    // proof stands for the piece's own s. Anything more crosses into another piece.
+    // the edge is continuous), so the proof stands for the piece's own s. Anything more
+    // crosses into another piece, except past a domain end: no piece lies there, and the
+    // definition evaluates its leader past its ends as the end piece continued (its
+    // out-of-bounds evaluation, as `derivs_over` continues the end pieces), so the end
+    // piece's polynomial there is the definition's own edge
     let slack = |x: f64| 8.0 * f64::EPSILON * x.abs().max(1.0);
-    a - slack(a) <= lo && hi <= b + slack(b)
+    (k == p || a - slack(a) <= lo) && (k + 1 >= n || hi <= b + slack(b))
 }
 
 /// A failed evaluation proves nothing (`Ok(None)`); a cancel ends the operation.
@@ -379,7 +384,7 @@ fn chebyshev<const N: usize>(
 fn edge_models(edge: &NurbsCurve, at: Span) -> Result<Option<[V3<Ft>; 3]>> {
     let piece = span(&edge.u, edge.p, edge.n, at.m);
     let s = at.interval();
-    if !inside_span(&edge.u, piece, s.lo, s.hi) {
+    if !inside_span(&edge.u, edge.p, edge.n, piece, s.lo, s.hi) {
         return Ok(None);
     }
     let Some(d) = proved(curve_derivs_tm(edge, at.m, at.delta, 2, piece))? else {
@@ -2033,6 +2038,49 @@ mod tests {
         assert!(enclose_foot(&k, &fl, &edge, 2.0, inside, x)
             .unwrap()
             .is_some());
+    }
+
+    /// A span reaching past the edge's end runs on its end piece continued, which is the
+    /// definition's own edge there (its leader is evaluated past its ends as itself): a
+    /// rational quadratic's every parameter maps onto its conic, so past the quarter rim's end
+    /// the edge is still the circle of radius 5, and the foot on the plate at setback 6 is at
+    /// radius 11 along its radial, as inside. A station at an end vertex lies there: the
+    /// vertex dropped on the extended edge lands some tens of ulps past the end (6.7e-15 at
+    /// the side vertex of the enclosure front's chain with rounds of 6), past the rounding
+    /// slack a knot inside the edge allows.
+    #[test]
+    fn a_span_past_the_edge_s_end_is_the_end_piece_continued() {
+        let k = Kernel::default();
+        let edge = rim(90.0);
+        let end = knot(&edge.u, edge.n as isize);
+        for past in [1e-14, 1e-3] {
+            let at = Span {
+                m: end - 0.01 + 0.5 * past,
+                delta: 0.01 + 0.5 * past,
+            };
+            let (_, r) = radial(&edge, at.m);
+            let plate = station(
+                &k,
+                &plane(),
+                &edge,
+                6.0,
+                at,
+                [11.0 * r[0], 11.0 * r[1], 0.0],
+                r,
+            );
+            assert_eq!(
+                (plate.crossing, plate.first),
+                (Proof::Holds, Proof::Holds),
+                "{past}"
+            );
+            for t in [-1.0, 0.0, 1.0] {
+                let (_, rt) = radial(&edge, at.m + at.delta * t);
+                assert!(
+                    holds(at_t(plate.foot.point, t), [11.0 * rt[0], 11.0 * rt[1], 0.0]),
+                    "{past} at {t}"
+                );
+            }
+        }
     }
 
     /// A hole of radius 5 in a plate z = 0, chamfered 6: on the plate the foot is at radius
