@@ -1311,7 +1311,9 @@ impl OffsetSurface {
     /// differentiates the offset, which fails where the base's normal turns fast: at
     /// the pole an extension stops at ([`extend_as_itself`], `oriented`), where every
     /// point past it is evaluated, it gave the reversed normal. `None` where the base
-    /// does not extend as itself or the point is not on an extension.
+    /// does not extend as itself or the point is not on an extension, and where the offset
+    /// grows no extension or nests offsets deeper than [`Self::nested_base`] takes (no base
+    /// that extends as itself: the generic body answers there, as it did).
     fn as_itself_normal(
         &self,
         k: &Kernel,
@@ -1320,8 +1322,13 @@ impl OffsetSurface {
         u_side: Side,
         v_side: Side,
     ) -> Result<Option<Vec3>> {
-        let (base, _) = self.nested_base(OP_EVAL)?;
-        if !self.allow_extension || !extends_as_itself(k, base) {
+        if !self.allow_extension {
+            return Ok(None);
+        }
+        let Ok((base, _)) = self.nested_base(OP_EVAL) else {
+            return Ok(None);
+        };
+        if !extends_as_itself(k, base) {
             return Ok(None);
         }
         let (use_ext, uv, _) = self.select_surface(k, ext, base, uv)?;
@@ -5021,12 +5028,6 @@ mod tests {
         Surface::from(rev)
     }
 
-    /// #21288 (review): the offset 2 of the sphere r 5 between latitudes -30 and 40 is the
-    /// sphere r 7 however far past its generator's ends it is evaluated. Its extension
-    /// stops at the poles (and the points past them are taken at the pole): carried on
-    /// through a pole the generator circle comes back down the far meridian, the surface's
-    /// normal reversed, and the offset there lay inside at r 3 (0.9 domains and more past
-    /// latitude 40, the pole 50 deg on).
     /// #21288 (review): a horn torus's tube only touches its axis, so its offset's
     /// extension does not stop there (a stop is where the generator circle crosses the
     /// axis); the offset 1 of the torus R 4 r 4 past it is its point 1 out along the
@@ -5084,6 +5085,12 @@ mod tests {
         }
     }
 
+    /// #21288 (review): the offset 2 of the sphere r 5 between latitudes -30 and 40 is the
+    /// sphere r 7 however far past its generator's ends it is evaluated. Its extension
+    /// stops at the poles (and the points past them are taken at the pole): carried on
+    /// through a pole the generator circle comes back down the far meridian, the surface's
+    /// normal reversed, and the offset there lay inside at r 3 (0.9 domains and more past
+    /// latitude 40, the pole 50 deg on).
     #[test]
     fn sphere_offset_extension_stops_at_its_poles() {
         use crate::surface::sphere::{Sphere, SphereOptions};
