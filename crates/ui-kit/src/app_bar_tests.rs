@@ -1076,6 +1076,7 @@ const TAB_HANDLES: TabHandles<'static> = TabHandles {
     view_more: "t:vmore",
     switcher: "t:switcher",
     view_collapse: "t:vcollapse",
+    file_drop: "t:file_drop",
 };
 
 const VIEW_MENU: [TabMenuRow<'static>; 4] = [
@@ -1330,6 +1331,20 @@ fn app_bar_document_and_view_tabs_use_the_shared_hover_and_held_cursors() {
         let (_, dragged) = rig.frame_output(vec![egui::Event::PointerMoved(at + vec2(20.0, 0.0))]);
         assert_eq!(dragged.platform_output.cursor_icon, drag_cursor(true));
         rig.frame(vec![event(false)]);
+    }
+}
+
+/// The × on a design tab is a button, not part of the tab's drag handle: over it the pointer is the
+/// plain arrow, on the shown design's tab and on the others alike.
+#[test]
+fn a_design_tabs_close_button_shows_the_arrow_not_the_drag_hand() {
+    for close in ["t:close:0", "t:close:1"] {
+        let rig = TabsRig::new();
+        let at = rig.at(close);
+        for _ in 0..3 {
+            let (_, output) = rig.frame_output(vec![egui::Event::PointerMoved(at)]);
+            assert_eq!(output.platform_output.cursor_icon, egui::CursorIcon::Default, "{close}");
+        }
     }
 }
 

@@ -936,7 +936,7 @@ fn a_hole_on_a_cones_side_drills_along_its_normal() {
     run(&mut s, "solid.hole", json!({"position": [7.5, 0, 10], "diameter": 4, "depth": 4, "name": "H"})).unwrap();
     let f = s.doc.find_feature("H").unwrap();
     let solidcraft_doc::FeatureKind::Hole { direction, .. } = &f.kind else { panic!("not a hole") };
-    let d = direction.0;
+    let d = solidcraft_doc::literal_dir(direction).unwrap();
     assert!((d.x + 0.8).abs() < 1e-6 && d.y.abs() < 1e-6 && (d.z + 0.6).abs() < 1e-6, "{d:?}");
 }
 

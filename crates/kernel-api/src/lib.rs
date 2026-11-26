@@ -22,13 +22,19 @@ use serde::{Deserialize, Serialize};
 use solidcore_record::brep::Brep;
 use solidcore_record::brep::history::History;
 
+pub mod affine;
 pub mod cell_grid;
 pub mod exchange;
+pub mod frames;
 pub mod modelling;
+pub mod projection;
 
+pub use affine::{Affine, AffineRefused, AxisRefusal, Matrix, OffsetQuad, SquareFaceLevel};
 pub use cell_grid::{CellGrid, CellGridLimits};
 pub use exchange::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWritten, Exchange};
+pub use frames::{Frames, GussetFailure, MemberRefusal, PathFailure, PathRefusal, TrimRefusal, TrimTarget};
 pub use modelling::{Axis2, BoolOp, ChamferSide, FilletTurn, Modelling, Primitive};
+pub use projection::{ProjectionRefused, Projections};
 
 /// A kernel's stable name: what build features, the support matrix and reports call it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -75,6 +81,13 @@ pub enum OpKind {
     CellGrid,
     /// The exchange helpers: a STEP string, CADIR read and written ([`Exchange`]).
     Exchange,
+    /// Frame-stock paths, member trims and gusset plates ([`Frames`]).
+    Frames,
+    /// Planar projection: sketch curves between planes, edges read in a plane, outlines tidied
+    /// ([`Projections`]).
+    Projection,
+    /// Placement maths: affine maps, axes and reaches ([`Affine`]).
+    Affine,
 }
 
 impl OpKind {
@@ -94,6 +107,9 @@ impl OpKind {
         OpKind::OffsetFaces,
         OpKind::CellGrid,
         OpKind::Exchange,
+        OpKind::Frames,
+        OpKind::Projection,
+        OpKind::Affine,
     ];
 
     /// The operation's stable name, as the support matrix and route files spell it.
@@ -113,6 +129,9 @@ impl OpKind {
             OpKind::OffsetFaces => "offset_faces",
             OpKind::CellGrid => "cell_grid",
             OpKind::Exchange => "exchange",
+            OpKind::Frames => "frames",
+            OpKind::Projection => "projection",
+            OpKind::Affine => "affine",
         }
     }
 
