@@ -7057,8 +7057,8 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
 }
 
 impl SessionObjects<'_> {
-    /// Not the fork's (#2784): whether a blend's band reaches across a face it rolls on to
-    /// another blended edge of that face that shares no vertex with its own (the two rims of
+    /// Not the fork's (#2784): whether a blend's band reaches across a curved face it rolls on
+    /// to another blended edge of that face that shares no vertex with its own (the two rims of
     /// a disc no higher than the blends). The band check (`BandsClearOtherRails`) drops a
     /// sample of a rail that lies off the face, so a rail on the far edge or past it, with
     /// each band taking the whole face, went on to a build that failed. The middle of the
@@ -7091,6 +7091,15 @@ impl SessionObjects<'_> {
                 continue;
             };
             for (face, curve_a, kept_a) in rails_a {
+                // a plane's bands are judged by the planar band check, which names its own
+                // reason (`BandsOverlap`): only a curved face is judged here
+                let planar =
+                    crate::topology::face::p2::surface(self.target, *face)?.is_some_and(|s| {
+                        matches!(s.kind(), crate::surface::surface::SurfaceKind::Plane(_))
+                    });
+                if planar {
+                    continue;
+                }
                 let p = curve_a.evaluate_point(k, kept_a.evaluate(0.5))?;
                 let on_a = drop_onto_edge(k, curve_ea, ivl_ea, p)?;
                 if !on_a.success {

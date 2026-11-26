@@ -15,7 +15,7 @@ use solidcore::blend::fillet_executive::api::{
     fillet_edges, fillet_edges_per_edge, variable_radius_fillet,
 };
 use solidcore::blend::fillet_executive::session::FilletSession;
-use solidcore::blend::fillet_executive::NoRoomReason;
+use solidcore::blend::fillet_executive::{FitKind, NoRoomReason};
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::blend::fillet_standard_solver::p1::FilletLaw;
 use solidcore::math::Point3;
@@ -102,20 +102,7 @@ fn issue_1073_the_default_kernels_overlapping_bands_are_refused() {
         ),
     ];
     for (name, fillet) in wrappers {
-        let (mut b, result, solid) = round_with(false, fillet);
-        if name == "fillet_edges" {
-            // #2784: the rounds take what each takes alone, meeting in a ridge on each end
-            result.unwrap();
-            assert!(solid, "{name}");
-            let k = kernel(false);
-            let want = rounded_ends_volume(14.0, 6.0, 10.0, 3.5, 2.0);
-            let v = volume_of(&k, &mut b);
-            assert!(
-                (v - want).abs() <= 1e-6 * want,
-                "{name}: volume {v}, want {want}"
-            );
-            continue;
-        }
+        let (b, result, _) = round_with(false, fillet);
         match result {
             Err(SolidError::FilletRefused {
                 reason: Some(NoRoomReason::BandsOverlap),
@@ -138,7 +125,7 @@ fn issue_1073_the_default_kernels_overlapping_bands_are_refused() {
                 );
                 assert!(!error.is_defect(), "{name}: {error:?}");
             }
-            other => panic!("{name}: expected a refusal, got {other:?}"),
+            other => panic!("{name}: expected BandsOverlap, got {other:?}"),
         }
         assert!(is_manifold_solid(&b).unwrap(), "{name}");
         assert_eq!(b.face_list().len(), 6, "{name}");
@@ -184,20 +171,26 @@ fn issue_1073_rounds_that_fit_are_kept() {
 /// right after the trace), naming 3, where the bands meet at the face's middle; the
 /// named radius builds a solid.
 #[test]
-fn issue_1073_rounds_past_the_face_build_where_they_meet() {
-    // #2784: past r = 3 the two rounds on each 6 mm end take what each takes alone and meet
-    // in a ridge; the post is the box less each corner's round (`rounded_ends_volume`)
-    for r in [3.0, 3.03, 3.0625, 3.5, 4.0] {
-        let (mut b, result, solid) = round(true, r);
-        result.unwrap();
-        assert!(solid, "r = {r}: not a solid");
-        let k = kernel(true);
-        let want = rounded_ends_volume(14.0, 6.0, 10.0, r, 2.0);
-        let v = volume_of(&k, &mut b);
+fn issue_1073_rounds_past_the_face_are_refused() {
+    for r in [3.03, 3.0625, 3.5, 4.0] {
+        let (_, result, _) = round(true, r);
+        let fit = match result {
+            Err(SolidError::FilletRefused {
+                reason: Some(NoRoomReason::BandsOverlap),
+                fit,
+                ..
+            }) => fit,
+            other => panic!("r = {r}: expected BandsOverlap, got {other:?}"),
+        };
+        assert_eq!(fit.kind, FitKind::Radius, "r = {r}");
         assert!(
-            (v - want).abs() <= 1e-6 * want,
-            "r = {r}: volume {v}, want {want}"
+            (fit.size - 3.0).abs() <= 1e-9 * 3.0,
+            "r = {r}: fit {}",
+            fit.size
         );
+        let (_, built, solid) = round(true, fit.size);
+        built.unwrap();
+        assert!(solid, "r = {r}: the fit {} is not a solid", fit.size);
     }
 }
 
@@ -208,32 +201,4 @@ fn issue_1073_all_edges_that_fit_are_kept() {
     let all: Vec<_> = b.edges().ids().collect();
     fillet_edges(&mut k, &mut b, &all, 2.5, 1, 1, 1.0).unwrap();
     assert!(is_manifold_solid(&b).unwrap());
-}
-
-/// The volume of an `l` x `w` x `h` box whose vertical edges at `ends` of its two ends (1 or
-/// 2) are rounded `r`, each round taking what it takes alone: at `s` in from an end, each
-/// corner's round keeps `y` past `r - sqrt(r^2 - (r - s)^2)` from its side, so the two
-/// rounds on a `w` face keep what is left between them (none where they cross); Simpson's
-/// rule over the end, the rest a plain block.
-fn rounded_ends_volume(l: f64, w: f64, h: f64, r: f64, ends: f64) -> f64 {
-    let kept = |s: f64| {
-        let off = r - (r * r - (r - s) * (r - s)).max(0.0).sqrt();
-        (w - 2.0 * off).max(0.0)
-    };
-    let n: u32 = 400_000;
-    let step = r / f64::from(n);
-    let mut sum = kept(0.0) + kept(r);
-    for i in 1..n {
-        sum += kept(step * f64::from(i)) * if i % 2 == 1 { 4.0 } else { 2.0 };
-    }
-    h * ((l - ends * r) * w + ends * sum * step / 3.0)
-}
-
-fn volume_of(k: &Kernel, b: &mut Brep) -> f64 {
-    let store = solidcore::geom::attribute::AttributeStore::default();
-    let attrs = solidcore::mass::integrator::properties::PropertyAttributes {
-        store: &store,
-        key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
-    };
-    solidcore::mass::integrator::properties::brep_volume(k, b, 1e-7, &attrs).unwrap()
 }

@@ -398,49 +398,59 @@ fn a_chamfer_the_trim_keeps_nothing_of_names_where_it_stays_on_its_faces() {
 
 /// A disc 10 across and 1 high, its top and bottom rims blended by `d` (`xsect` 1 a round,
 /// 0 a chamfer): each band takes `d` off the side, so past half its height the two bands
-/// meet, and from its height on each takes the whole side.
-fn disc_rims(k: &mut Kernel, d: f64, xsect: u32) -> (solidcore::Result<()>, Brep) {
+/// overlap, and from its height on each takes the whole side.
+fn disc_rims(k: &mut Kernel, d: f64, xsect: u32) -> solidcore::Result<()> {
     let mut b = create_cylinder(k, Point3::ZERO, 5.0, 1.0).unwrap();
-    let got = blend(
+    blend(
         k,
         &mut b,
         &[Point3::new(-5.0, 0.0, 0.0), Point3::new(-5.0, 0.0, 1.0)],
         d,
         xsect,
-    );
-    (got, b)
+    )
 }
 
-/// The disc less both rims' blends, each taking what it takes alone: at `u` in from the
-/// side's foot of the blend (`5 - d`), the bottom blend keeps `z` above `u` (chamfer) or
-/// `d - sqrt(d^2 - u^2)` (round), the top one the mirror; the section kept there is what
-/// both keep, swept round the axis (Pappus).
-fn disc_rims_volume(d: f64, xsect: u32) -> f64 {
-    let kept = |u: f64| {
-        let lift = if xsect == 0 {
-            u
-        } else {
-            d - (d * d - u * u).max(0.0).sqrt()
-        };
-        let low = lift.max(0.0);
-        let high = (1.0 - lift).min(1.0);
-        2.0 * PI * (5.0 - d + u) * (high - low).max(0.0)
-    };
-    PI * (5.0 - d) * (5.0 - d) + simpson(kept, 0.0, d, 200_000)
-}
-
-/// #2784: both rims of a disc blended past half its height, up to its height and beyond,
-/// were refused (bands overlapping) or failed inside the build (`not a closed solid`). A
-/// solid exists: each rim's blend takes off what it takes alone, the side face goes, and
-/// the two blends meet in a sharp ridge. They now build it, for a round as for a chamfer.
+/// #2784: both rims of a disc blended by its height or more were sent on to the build, which
+/// failed inside it (`not a closed solid`). Past half the height they are refused, naming half
+/// the height (where the bands meet), for a round as for a chamfer.
 #[test]
-fn rims_taking_a_disc_s_whole_side_build_what_each_takes_alone() {
+fn rims_taking_a_disc_s_whole_side_are_refused_with_a_size() {
     for xsect in [1, 0] {
-        for d in [0.5, 0.75, 1.0, 1.5, 4.0] {
+        for d in [0.75, 1.0, 1.5, 4.0] {
             let mut k = kernel();
-            let (got, mut b) = disc_rims(&mut k, d, xsect);
-            assert!(got.is_ok(), "xsect {xsect}, d {d}: {got:?}");
-            assert_one_sound_solid(&mut k, &mut b, disc_rims_volume(d, xsect), 1e-6);
+            let (reason, fit, kind) = refusal(disc_rims(&mut k, d, xsect));
+            let want = if d < 1.0 {
+                NoRoomReason::BandsOverlap
+            } else {
+                NoRoomReason::FaceConsumed
+            };
+            assert_eq!(reason, Some(want), "xsect {xsect}, d {d}");
+            assert_eq!(kind, FitKind::Radius, "xsect {xsect}, d {d}");
+            assert!((fit - 0.5).abs() <= 1e-9, "xsect {xsect}, d {d}: fit {fit}");
         }
+    }
+}
+
+/// The named size builds: the disc less, by Pappus, each rim's section swept round the axis
+/// (a round's spandrel `r^2 (1 - pi/4)` with its centroid `r (10 - 3 pi) / (12 - 3 pi)` in
+/// from the rim, a chamfer's triangle `r^2 / 2` with its centroid `r / 3` in).
+#[test]
+fn rims_taking_a_disc_s_whole_side_build_at_the_named_size() {
+    let r = 0.5;
+    let round =
+        r * r * (1.0 - PI / 4.0) * 2.0 * PI * (5.0 - r * (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI));
+    let chamfer = r * r / 2.0 * 2.0 * PI * (5.0 - r / 3.0);
+    for (xsect, cut) in [(1, round), (0, chamfer)] {
+        let mut k = kernel();
+        let mut b = create_cylinder(&mut k, Point3::ZERO, 5.0, 1.0).unwrap();
+        blend(
+            &mut k,
+            &mut b,
+            &[Point3::new(-5.0, 0.0, 0.0), Point3::new(-5.0, 0.0, 1.0)],
+            r,
+            xsect,
+        )
+        .unwrap();
+        assert_one_sound_solid(&mut k, &mut b, 25.0 * PI - 2.0 * cut, 1e-7);
     }
 }
