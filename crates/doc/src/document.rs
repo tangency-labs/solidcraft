@@ -4869,6 +4869,7 @@ pub struct Document {
     /// Named texts the words of sketch texts can be built from ([`crate::text_params`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub text_params: Vec<crate::text_params::TextParam>,
+    #[serde(deserialize_with = "crate::format::deserialize_features")]
     pub features: Vec<Feature>,
     /// Timeline marker: features at or after this index are rolled back (not evaluated).
     #[serde(default, skip_serializing_if = "Option::is_none")]

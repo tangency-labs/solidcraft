@@ -80,65 +80,70 @@ pub(crate) fn validate_rules_value(rules: &Value) -> Result<()> {
         return Err(invalid("too many rules"));
     }
     for rule in rules {
-        let rule = rule.as_object().ok_or_else(|| invalid("rule must be an object"))?;
-        for (key, limit) in [("id", 64), ("name", 128)] {
-            let value = rule.get(key).and_then(Value::as_str).ok_or_else(|| invalid("rule id and name are required"))?;
-            if value.trim().is_empty() || value.chars().count() > limit {
-                return Err(invalid("rule id or name is empty or too long"));
-            }
+        validate_rule_value(rule)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_rule_value(rule: &Value) -> Result<()> {
+    let rule = rule.as_object().ok_or_else(|| invalid("rule must be an object"))?;
+    for (key, limit) in [("id", 64), ("name", 128)] {
+        let value = rule.get(key).and_then(Value::as_str).ok_or_else(|| invalid("rule id and name are required"))?;
+        if value.trim().is_empty() || value.chars().count() > limit {
+            return Err(invalid("rule id or name is empty or too long"));
         }
-        if let Some(unit) = rule.get("length_unit") {
-            let unit =
-                unit.as_str().filter(|unit| matches!(*unit, "mm" | "cm" | "m" | "in" | "ft")).ok_or_else(|| invalid("invalid rule length unit"))?;
-            let _ = unit;
+    }
+    if let Some(unit) = rule.get("length_unit") {
+        let unit =
+            unit.as_str().filter(|unit| matches!(*unit, "mm" | "cm" | "m" | "in" | "ft")).ok_or_else(|| invalid("invalid rule length unit"))?;
+        let _ = unit;
+    }
+    let mut pending = vec![(rule.get("condition").ok_or_else(|| invalid("condition required"))?, 1usize)];
+    let mut count = 0;
+    while let Some((condition, depth)) = pending.pop() {
+        count += 1;
+        if depth > MAX_DEPTH || count > MAX_NODES {
+            return Err(invalid("condition nesting or node limit exceeded"));
         }
-        let mut pending = vec![(rule.get("condition").ok_or_else(|| invalid("condition required"))?, 1usize)];
-        let mut count = 0;
-        while let Some((condition, depth)) = pending.pop() {
-            count += 1;
-            if depth > MAX_DEPTH || count > MAX_NODES {
-                return Err(invalid("condition nesting or node limit exceeded"));
-            }
-            let kind = condition.get("type").and_then(Value::as_str).ok_or_else(|| invalid("condition type required"))?;
-            match kind {
-                "all" | "any" => {
-                    let children = condition.get("conditions").and_then(Value::as_array).ok_or_else(|| invalid("conditions must be an array"))?;
-                    if children.is_empty() || children.len() > MAX_NODES {
-                        return Err(invalid("condition group is empty or too large"));
-                    }
-                    pending.extend(children.iter().map(|child| (child, depth + 1)));
+        let kind = condition.get("type").and_then(Value::as_str).ok_or_else(|| invalid("condition type required"))?;
+        match kind {
+            "all" | "any" => {
+                let children = condition.get("conditions").and_then(Value::as_array).ok_or_else(|| invalid("conditions must be an array"))?;
+                if children.is_empty() || children.len() > MAX_NODES {
+                    return Err(invalid("condition group is empty or too large"));
                 }
-                "not" => pending.push((condition.get("condition").ok_or_else(|| invalid("nested condition required"))?, depth + 1)),
-                "parameter" => {
-                    check_parameter(condition.get("parameter"))?;
-                    check_expression(condition.get("expression"))?;
-                }
-                "always" | "suppression" => {}
-                _ => return Err(invalid("unknown condition type")),
+                pending.extend(children.iter().map(|child| (child, depth + 1)));
+            }
+            "not" => pending.push((condition.get("condition").ok_or_else(|| invalid("nested condition required"))?, depth + 1)),
+            "parameter" => {
+                check_parameter(condition.get("parameter"))?;
+                check_expression(condition.get("expression"))?;
+            }
+            "always" | "suppression" => {}
+            _ => return Err(invalid("unknown condition type")),
+        }
+    }
+    let effect = rule.get("effect").ok_or_else(|| invalid("effect required"))?;
+    if effect.get("type").and_then(Value::as_str) != Some("drive_suppression") {
+        check_parameter(effect.get("parameter"))?;
+    }
+    match effect.get("type").and_then(Value::as_str) {
+        Some("drive_parameter") => check_expression(effect.get("expression"))?,
+        Some("parameter_range") => {
+            check_expression(effect.get("minimum"))?;
+            check_expression(effect.get("maximum"))?;
+        }
+        Some("allow_parameter_values") => {
+            let expressions = effect.get("expressions").and_then(Value::as_array).ok_or_else(|| invalid("allowed values must be an array"))?;
+            if expressions.is_empty() || expressions.len() > 128 {
+                return Err(invalid("allowed values are empty or too many"));
+            }
+            for expression in expressions {
+                check_expression(Some(expression))?;
             }
         }
-        let effect = rule.get("effect").ok_or_else(|| invalid("effect required"))?;
-        if effect.get("type").and_then(Value::as_str) != Some("drive_suppression") {
-            check_parameter(effect.get("parameter"))?;
-        }
-        match effect.get("type").and_then(Value::as_str) {
-            Some("drive_parameter") => check_expression(effect.get("expression"))?,
-            Some("parameter_range") => {
-                check_expression(effect.get("minimum"))?;
-                check_expression(effect.get("maximum"))?;
-            }
-            Some("allow_parameter_values") => {
-                let expressions = effect.get("expressions").and_then(Value::as_array).ok_or_else(|| invalid("allowed values must be an array"))?;
-                if expressions.is_empty() || expressions.len() > 128 {
-                    return Err(invalid("allowed values are empty or too many"));
-                }
-                for expression in expressions {
-                    check_expression(Some(expression))?;
-                }
-            }
-            Some("drive_suppression") => {}
-            _ => return Err(invalid("unknown effect type")),
-        }
+        Some("drive_suppression") => {}
+        _ => return Err(invalid("unknown effect type")),
     }
     Ok(())
 }

@@ -243,6 +243,7 @@ use serde_json::Value;
 
 #[path = "format_stream.rs"]
 mod stream;
+pub(crate) use stream::deserialize_features;
 
 use crate::{DocError, Document, Result};
 
@@ -580,7 +581,9 @@ pub fn read(s: &str) -> Result<Document> {
             }
         };
         stream::validate_raw_streaming(s)?;
-        let d: Document = serde_json::from_str(s).map_err(|e| DocError::Invalid(format!("design file: {e}")))?;
+        let d: Document =
+            stream::with_streaming_features(|| crate::json_budget::from_str_bounded_typed(s, crate::json_budget::MAX_VALUE_MEMORY_BYTES))
+                .map_err(|e| DocError::Invalid(format!("design file: {e}")))?;
         return finish_decode(d, drawings, Vec::new());
     }
     let mut v = crate::json_budget::from_str_bounded(s, crate::json_budget::MAX_VALUE_MEMORY_BYTES)

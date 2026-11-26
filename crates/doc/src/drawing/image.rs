@@ -355,9 +355,12 @@ pub(super) fn take_back(v: &mut serde_json::Value) {
 }
 
 /// Typed equivalent of [`take_back`] for direct streaming deserialization (no whole-document
-/// `serde_json::Value` tree).
+/// `serde_json::Value` tree). Restores set-aside image fields before falling back to any legacy
+/// `images` / `sheet_images` lists so superseded legacy entries are never decoded first.
 pub(super) fn take_back_typed(
     drawing: &mut Drawing,
+    legacy_images: Option<&serde_json::value::RawValue>,
+    legacy_sheet_images: Option<&serde_json::value::RawValue>,
     image_files: Option<&serde_json::value::RawValue>,
     placed_images: Option<&serde_json::value::RawValue>,
     logo_cells: Option<&serde_json::value::RawValue>,
@@ -368,6 +371,12 @@ pub(super) fn take_back_typed(
         }
         if logo_cells.is_some() {
             return Err(DocError::Invalid(format!("unknown field `{LOGOS}`")));
+        }
+        if let Some(raw) = legacy_images {
+            drawing.images = serde_json::from_str(raw.get()).map_err(|e| DocError::Invalid(e.to_string()))?;
+        }
+        if let Some(raw) = legacy_sheet_images {
+            drawing.sheet_images = serde_json::from_str(raw.get()).map_err(|e| DocError::Invalid(e.to_string()))?;
         }
         return Ok(());
     };
@@ -451,10 +460,14 @@ pub(super) fn take_back_typed(
     if !files_out.is_empty() {
         drawing.images = super::by_id::ById::default();
         drawing.images.extend(files_out);
+    } else if let Some(raw) = legacy_images {
+        drawing.images = serde_json::from_str(raw.get()).map_err(|e| DocError::Invalid(e.to_string()))?;
     }
     if !placed_out.is_empty() {
         drawing.sheet_images = super::by_id::ById::default();
         drawing.sheet_images.extend(placed_out);
+    } else if let Some(raw) = legacy_sheet_images {
+        drawing.sheet_images = serde_json::from_str(raw.get()).map_err(|e| DocError::Invalid(e.to_string()))?;
     }
     Ok(())
 }

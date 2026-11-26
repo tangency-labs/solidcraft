@@ -31,14 +31,16 @@ pub const MAX_VALUE_MEMORY_BYTES: usize = 256 << 20;
 pub const MAX_SMALL_VALUE_BYTES: usize = 4 << 20;
 
 /// Estimated heap memory budget for opaque importer options carried by a design link.
-pub const MAX_OPTIONS_VALUE_BYTES: usize = 16 << 20;
+/// Sized so any valid options payload up to the 1 MiB plugin JSON write limit (`MAX_JSON_BYTES`)
+/// always reopens even under worst-case `BTreeMap` `LeafNode` expansion (~100× for 1-entry objects).
+pub const MAX_OPTIONS_VALUE_BYTES: usize = 128 << 20;
 
 const VALUE_SIZE: usize = std::mem::size_of::<Value>();
 /// A non-empty `BTreeMap<String, Value>` allocates a `LeafNode` of 11 key/value pairs (~632 B).
 const MAP_FIRST_ENTRY_OVERHEAD: usize = 640;
-const MAP_EXTRA_ENTRY_OVERHEAD: usize = 64;
-/// A non-empty `Vec<Value>` initially allocates capacity 4 (4 × 32 B = 128 B).
-const SEQ_FIRST_ELEM_OVERHEAD: usize = 128;
+/// Amortized per-entry `BTreeMap<String, Value>` node overhead (covers the `(String, Value)` slot
+/// and split `LeafNode`/internal node overhead).
+const MAP_EXTRA_ENTRY_OVERHEAD: usize = 96;
 
 fn charge<E: de::Error>(remaining: &mut usize, bytes: usize) -> std::result::Result<(), E> {
     if bytes > *remaining {
@@ -51,6 +53,7 @@ fn charge<E: de::Error>(remaining: &mut usize, bytes: usize) -> std::result::Res
 /// Deserialize a `serde_json::Value` from `s`, aborting before heap usage can exceed `budget`.
 pub fn from_str_bounded(s: &str, budget: usize) -> std::result::Result<Value, serde_json::Error> {
     let mut remaining = budget;
+    charge::<serde_json::Error>(&mut remaining, VALUE_SIZE)?;
     let mut de = serde_json::Deserializer::from_str(s);
     let value = BoundedValueSeed(&mut remaining).deserialize(&mut de)?;
     de.end()?;
@@ -60,6 +63,7 @@ pub fn from_str_bounded(s: &str, budget: usize) -> std::result::Result<Value, se
 /// Deserialize a `serde_json::Value` from UTF-8 `bytes`, aborting before heap usage can exceed `budget`.
 pub fn from_slice_bounded(bytes: &[u8], budget: usize) -> std::result::Result<Value, serde_json::Error> {
     let mut remaining = budget;
+    charge::<serde_json::Error>(&mut remaining, VALUE_SIZE)?;
     let mut de = serde_json::Deserializer::from_slice(bytes);
     let value = BoundedValueSeed(&mut remaining).deserialize(&mut de)?;
     de.end()?;
@@ -69,6 +73,7 @@ pub fn from_slice_bounded(bytes: &[u8], budget: usize) -> std::result::Result<Va
 /// Deserialize a `serde_json::Value` with an explicit estimated heap byte budget.
 pub fn deserialize_bounded_value<'de, D: Deserializer<'de>>(deserializer: D, budget: usize) -> std::result::Result<Value, D::Error> {
     let mut remaining = budget;
+    charge::<D::Error>(&mut remaining, VALUE_SIZE)?;
     BoundedValueSeed(&mut remaining).deserialize(deserializer)
 }
 
@@ -76,6 +81,17 @@ pub fn deserialize_bounded_value<'de, D: Deserializer<'de>>(deserializer: D, bud
 pub fn deserialize_bounded_map<'de, D: Deserializer<'de>>(deserializer: D, budget: usize) -> std::result::Result<Map<String, Value>, D::Error> {
     let mut remaining = budget;
     deserializer.deserialize_map(BoundedMapVisitor(&mut remaining))
+}
+
+/// Deserialize a typed value directly from JSON text while bounding any untyped `deserialize_any`
+/// buffering (such as serde's `Content` buffers for `#[serde(flatten)]` and internally tagged
+/// enums) to `budget` estimated heap bytes.
+pub fn from_str_bounded_typed<'de, T: de::Deserialize<'de>>(s: &'de str, budget: usize) -> std::result::Result<T, serde_json::Error> {
+    let mut remaining = budget;
+    let mut de = serde_json::Deserializer::from_str(s);
+    let value = T::deserialize(BudgetedDeserializer { inner: &mut de, remaining: &mut remaining, in_any: false })?;
+    de.end()?;
+    Ok(value)
 }
 
 /// Serde `deserialize_with` helper for [`crate::LinkImporter::options`].
@@ -101,37 +117,32 @@ impl<'de> Visitor<'de> for BoundedValueSeed<'_> {
     }
 
     fn visit_bool<E: de::Error>(self, value: bool) -> std::result::Result<Value, E> {
-        charge(self.0, VALUE_SIZE)?;
         Ok(Value::Bool(value))
     }
 
     fn visit_i64<E: de::Error>(self, value: i64) -> std::result::Result<Value, E> {
-        charge(self.0, VALUE_SIZE)?;
         Ok(Value::Number(value.into()))
     }
 
     fn visit_u64<E: de::Error>(self, value: u64) -> std::result::Result<Value, E> {
-        charge(self.0, VALUE_SIZE)?;
         Ok(Value::Number(value.into()))
     }
 
     fn visit_f64<E: de::Error>(self, value: f64) -> std::result::Result<Value, E> {
-        charge(self.0, VALUE_SIZE)?;
         serde_json::Number::from_f64(value).map(Value::Number).ok_or_else(|| E::custom("non-finite JSON number"))
     }
 
     fn visit_str<E: de::Error>(self, value: &str) -> std::result::Result<Value, E> {
-        charge(self.0, VALUE_SIZE.saturating_add(value.len()))?;
+        charge(self.0, value.len())?;
         Ok(Value::String(value.to_owned()))
     }
 
     fn visit_string<E: de::Error>(self, value: String) -> std::result::Result<Value, E> {
-        charge(self.0, VALUE_SIZE.saturating_add(value.len()))?;
+        charge(self.0, value.len())?;
         Ok(Value::String(value))
     }
 
     fn visit_none<E: de::Error>(self) -> std::result::Result<Value, E> {
-        charge(self.0, VALUE_SIZE)?;
         Ok(Value::Null)
     }
 
@@ -140,27 +151,62 @@ impl<'de> Visitor<'de> for BoundedValueSeed<'_> {
     }
 
     fn visit_unit<E: de::Error>(self) -> std::result::Result<Value, E> {
-        charge(self.0, VALUE_SIZE)?;
         Ok(Value::Null)
     }
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Value, A::Error> {
-        charge(self.0, VALUE_SIZE)?;
         let mut vec = Vec::new();
-        let mut first = true;
-        while let Some(elem) = seq.next_element_seed(BoundedValueSeed(self.0))? {
-            if first {
-                charge(self.0, SEQ_FIRST_ELEM_OVERHEAD)?;
-                first = false;
+        let mut accounted_cap = 0usize;
+        while let Some(elem) = seq.next_element_seed(BoundedValueSeed(&mut *self.0))? {
+            if vec.len() == vec.capacity() {
+                let next_cap = if vec.capacity() == 0 { 4 } else { vec.capacity().saturating_mul(2) };
+                let delta = next_cap.saturating_sub(accounted_cap).saturating_mul(VALUE_SIZE);
+                charge(self.0, delta)?;
+                accounted_cap = next_cap;
             }
             vec.push(elem);
+            if vec.capacity() > accounted_cap {
+                let delta = (vec.capacity() - accounted_cap).saturating_mul(VALUE_SIZE);
+                charge(self.0, delta)?;
+                accounted_cap = vec.capacity();
+            }
         }
         Ok(Value::Array(vec))
     }
 
     fn visit_map<A: MapAccess<'de>>(self, map: A) -> std::result::Result<Value, A::Error> {
-        charge(self.0, VALUE_SIZE)?;
         BoundedMapVisitor(self.0).visit_map(map).map(Value::Object)
+    }
+}
+
+struct BoundedKeySeed<'a> {
+    remaining: &'a mut usize,
+    overhead: usize,
+}
+
+impl<'de> DeserializeSeed<'de> for BoundedKeySeed<'_> {
+    type Value = String;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> std::result::Result<String, D::Error> {
+        deserializer.deserialize_str(self)
+    }
+}
+
+impl Visitor<'_> for BoundedKeySeed<'_> {
+    type Value = String;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a JSON object key within memory budget")
+    }
+
+    fn visit_str<E: de::Error>(self, v: &str) -> std::result::Result<String, E> {
+        charge(self.remaining, self.overhead.saturating_add(v.len()))?;
+        Ok(v.to_owned())
+    }
+
+    fn visit_string<E: de::Error>(self, v: String) -> std::result::Result<String, E> {
+        charge(self.remaining, self.overhead.saturating_add(v.len()))?;
+        Ok(v)
     }
 }
 
@@ -176,18 +222,489 @@ impl<'de> Visitor<'de> for BoundedMapVisitor<'_> {
     fn visit_map<A: MapAccess<'de>>(self, mut access: A) -> std::result::Result<Map<String, Value>, A::Error> {
         let mut map = Map::new();
         let mut first = true;
-        while let Some(key) = access.next_key::<String>()? {
-            let overhead = if first {
-                first = false;
+        loop {
+            let overhead = if first { MAP_FIRST_ENTRY_OVERHEAD } else { MAP_EXTRA_ENTRY_OVERHEAD };
+            let Some(key) = access.next_key_seed(BoundedKeySeed { remaining: &mut *self.0, overhead })? else { break };
+            first = false;
+            let value = access.next_value_seed(BoundedValueSeed(&mut *self.0))?;
+            map.insert(key, value);
+        }
+        Ok(map)
+    }
+}
+
+struct BudgetedDeserializer<'a, D> {
+    inner: D,
+    remaining: &'a mut usize,
+    in_any: bool,
+}
+
+struct BudgetedSeed<'a, S> {
+    inner: S,
+    remaining: &'a mut usize,
+    in_any: bool,
+}
+
+impl<'de, S: DeserializeSeed<'de>> DeserializeSeed<'de> for BudgetedSeed<'_, S> {
+    type Value = S::Value;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> std::result::Result<S::Value, D::Error> {
+        self.inner.deserialize(BudgetedDeserializer { inner: deserializer, remaining: self.remaining, in_any: self.in_any })
+    }
+}
+
+struct BudgetedVisitor<'a, V> {
+    inner: V,
+    remaining: &'a mut usize,
+    in_any: bool,
+}
+
+struct BudgetedSeqAccess<'a, A> {
+    inner: A,
+    remaining: &'a mut usize,
+    in_any: bool,
+    len: usize,
+    cap: usize,
+}
+
+impl<'de, A: SeqAccess<'de>> SeqAccess<'de> for BudgetedSeqAccess<'_, A> {
+    type Error = A::Error;
+
+    fn next_element_seed<T: DeserializeSeed<'de>>(&mut self, seed: T) -> std::result::Result<Option<T::Value>, A::Error> {
+        let saved = *self.remaining;
+        let res = self.inner.next_element_seed(BudgetedSeed { inner: seed, remaining: &mut *self.remaining, in_any: self.in_any })?;
+        if !self.in_any {
+            *self.remaining = saved;
+        } else if res.is_some() {
+            if self.len == self.cap {
+                let next_cap = if self.cap == 0 { 4 } else { self.cap.saturating_mul(2) };
+                let delta = next_cap.saturating_sub(self.cap).saturating_mul(VALUE_SIZE);
+                charge(self.remaining, delta)?;
+                self.cap = next_cap;
+            }
+            self.len += 1;
+        }
+        Ok(res)
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        self.inner.size_hint()
+    }
+}
+
+struct BudgetedMapAccess<'a, A> {
+    inner: A,
+    remaining: &'a mut usize,
+    in_any: bool,
+    first: bool,
+}
+
+impl<'de, A: MapAccess<'de>> MapAccess<'de> for BudgetedMapAccess<'_, A> {
+    type Error = A::Error;
+
+    fn next_key_seed<K: DeserializeSeed<'de>>(&mut self, seed: K) -> std::result::Result<Option<K::Value>, A::Error> {
+        let res = self.inner.next_key_seed(BudgetedSeed { inner: seed, remaining: &mut *self.remaining, in_any: self.in_any })?;
+        if self.in_any && res.is_some() {
+            let overhead = if self.first {
+                self.first = false;
                 MAP_FIRST_ENTRY_OVERHEAD
             } else {
                 MAP_EXTRA_ENTRY_OVERHEAD
             };
-            charge(self.0, overhead.saturating_add(key.len()))?;
-            let value = access.next_value_seed(BoundedValueSeed(self.0))?;
-            map.insert(key, value);
+            charge(self.remaining, overhead)?;
         }
-        Ok(map)
+        Ok(res)
+    }
+
+    fn next_value_seed<V: DeserializeSeed<'de>>(&mut self, seed: V) -> std::result::Result<V::Value, A::Error> {
+        self.inner.next_value_seed(BudgetedSeed { inner: seed, remaining: &mut *self.remaining, in_any: self.in_any })
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        self.inner.size_hint()
+    }
+}
+
+struct BudgetedEnumAccess<'a, A> {
+    inner: A,
+    remaining: &'a mut usize,
+    in_any: bool,
+}
+
+impl<'de, 'a, A: de::EnumAccess<'de>> de::EnumAccess<'de> for BudgetedEnumAccess<'a, A> {
+    type Error = A::Error;
+    type Variant = BudgetedVariantAccess<'a, A::Variant>;
+
+    fn variant_seed<V: DeserializeSeed<'de>>(self, seed: V) -> std::result::Result<(V::Value, Self::Variant), A::Error> {
+        let (val, variant) = self.inner.variant_seed(BudgetedSeed { inner: seed, remaining: &mut *self.remaining, in_any: self.in_any })?;
+        Ok((val, BudgetedVariantAccess { inner: variant, remaining: self.remaining, in_any: self.in_any }))
+    }
+}
+
+struct BudgetedVariantAccess<'a, A> {
+    inner: A,
+    remaining: &'a mut usize,
+    in_any: bool,
+}
+
+impl<'de, A: de::VariantAccess<'de>> de::VariantAccess<'de> for BudgetedVariantAccess<'_, A> {
+    type Error = A::Error;
+
+    fn unit_variant(self) -> std::result::Result<(), A::Error> {
+        self.inner.unit_variant()
+    }
+
+    fn newtype_variant_seed<T: DeserializeSeed<'de>>(self, seed: T) -> std::result::Result<T::Value, A::Error> {
+        self.inner.newtype_variant_seed(BudgetedSeed { inner: seed, remaining: self.remaining, in_any: self.in_any })
+    }
+
+    fn tuple_variant<V: Visitor<'de>>(self, len: usize, visitor: V) -> std::result::Result<V::Value, A::Error> {
+        self.inner.tuple_variant(len, BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: self.in_any })
+    }
+
+    fn struct_variant<V: Visitor<'de>>(self, fields: &'static [&'static str], visitor: V) -> std::result::Result<V::Value, A::Error> {
+        self.inner.struct_variant(fields, BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: self.in_any })
+    }
+}
+
+impl<'de, V: Visitor<'de>> Visitor<'de> for BudgetedVisitor<'_, V> {
+    type Value = V::Value;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.inner.expecting(f)
+    }
+
+    fn visit_bool<E: de::Error>(self, v: bool) -> std::result::Result<V::Value, E> {
+        self.inner.visit_bool(v)
+    }
+
+    fn visit_i8<E: de::Error>(self, v: i8) -> std::result::Result<V::Value, E> {
+        self.inner.visit_i8(v)
+    }
+
+    fn visit_i16<E: de::Error>(self, v: i16) -> std::result::Result<V::Value, E> {
+        self.inner.visit_i16(v)
+    }
+
+    fn visit_i32<E: de::Error>(self, v: i32) -> std::result::Result<V::Value, E> {
+        self.inner.visit_i32(v)
+    }
+
+    fn visit_i64<E: de::Error>(self, v: i64) -> std::result::Result<V::Value, E> {
+        self.inner.visit_i64(v)
+    }
+
+    fn visit_u8<E: de::Error>(self, v: u8) -> std::result::Result<V::Value, E> {
+        self.inner.visit_u8(v)
+    }
+
+    fn visit_u16<E: de::Error>(self, v: u16) -> std::result::Result<V::Value, E> {
+        self.inner.visit_u16(v)
+    }
+
+    fn visit_u32<E: de::Error>(self, v: u32) -> std::result::Result<V::Value, E> {
+        self.inner.visit_u32(v)
+    }
+
+    fn visit_u64<E: de::Error>(self, v: u64) -> std::result::Result<V::Value, E> {
+        self.inner.visit_u64(v)
+    }
+
+    fn visit_f32<E: de::Error>(self, v: f32) -> std::result::Result<V::Value, E> {
+        self.inner.visit_f32(v)
+    }
+
+    fn visit_f64<E: de::Error>(self, v: f64) -> std::result::Result<V::Value, E> {
+        self.inner.visit_f64(v)
+    }
+
+    fn visit_char<E: de::Error>(self, v: char) -> std::result::Result<V::Value, E> {
+        self.inner.visit_char(v)
+    }
+
+    fn visit_str<E: de::Error>(self, v: &str) -> std::result::Result<V::Value, E> {
+        if self.in_any {
+            charge(self.remaining, v.len())?;
+        }
+        self.inner.visit_str(v)
+    }
+
+    fn visit_borrowed_str<E: de::Error>(self, v: &'de str) -> std::result::Result<V::Value, E> {
+        if self.in_any {
+            charge(self.remaining, v.len())?;
+        }
+        self.inner.visit_borrowed_str(v)
+    }
+
+    fn visit_string<E: de::Error>(self, v: String) -> std::result::Result<V::Value, E> {
+        if self.in_any {
+            charge(self.remaining, v.len())?;
+        }
+        self.inner.visit_string(v)
+    }
+
+    fn visit_bytes<E: de::Error>(self, v: &[u8]) -> std::result::Result<V::Value, E> {
+        if self.in_any {
+            charge(self.remaining, v.len())?;
+        }
+        self.inner.visit_bytes(v)
+    }
+
+    fn visit_borrowed_bytes<E: de::Error>(self, v: &'de [u8]) -> std::result::Result<V::Value, E> {
+        if self.in_any {
+            charge(self.remaining, v.len())?;
+        }
+        self.inner.visit_borrowed_bytes(v)
+    }
+
+    fn visit_byte_buf<E: de::Error>(self, v: Vec<u8>) -> std::result::Result<V::Value, E> {
+        if self.in_any {
+            charge(self.remaining, v.len())?;
+        }
+        self.inner.visit_byte_buf(v)
+    }
+
+    fn visit_none<E: de::Error>(self) -> std::result::Result<V::Value, E> {
+        self.inner.visit_none()
+    }
+
+    fn visit_some<D: Deserializer<'de>>(self, deserializer: D) -> std::result::Result<V::Value, D::Error> {
+        self.inner.visit_some(BudgetedDeserializer { inner: deserializer, remaining: self.remaining, in_any: self.in_any })
+    }
+
+    fn visit_unit<E: de::Error>(self) -> std::result::Result<V::Value, E> {
+        self.inner.visit_unit()
+    }
+
+    fn visit_newtype_struct<D: Deserializer<'de>>(self, deserializer: D) -> std::result::Result<V::Value, D::Error> {
+        self.inner.visit_newtype_struct(BudgetedDeserializer { inner: deserializer, remaining: self.remaining, in_any: self.in_any })
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, seq: A) -> std::result::Result<V::Value, A::Error> {
+        self.inner.visit_seq(BudgetedSeqAccess { inner: seq, remaining: self.remaining, in_any: self.in_any, len: 0, cap: 0 })
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, map: A) -> std::result::Result<V::Value, A::Error> {
+        let saved = *self.remaining;
+        let res = self.inner.visit_map(BudgetedMapAccess { inner: map, remaining: &mut *self.remaining, in_any: self.in_any, first: true });
+        if !self.in_any {
+            *self.remaining = saved;
+        }
+        res
+    }
+
+    fn visit_enum<A: de::EnumAccess<'de>>(self, data: A) -> std::result::Result<V::Value, A::Error> {
+        self.inner.visit_enum(BudgetedEnumAccess { inner: data, remaining: self.remaining, in_any: self.in_any })
+    }
+}
+
+impl<'de, D: Deserializer<'de>> Deserializer<'de> for BudgetedDeserializer<'_, D> {
+    type Error = D::Error;
+
+    fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        self.inner.deserialize_any(BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: true })
+    }
+
+    fn deserialize_bool<V: Visitor<'de>>(self, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        if self.in_any {
+            self.inner.deserialize_bool(BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: true })
+        } else {
+            self.inner.deserialize_bool(visitor)
+        }
+    }
+
+    fn deserialize_i8<V: Visitor<'de>>(self, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        if self.in_any {
+            self.inner.deserialize_i8(BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: true })
+        } else {
+            self.inner.deserialize_i8(visitor)
+        }
+    }
+
+    fn deserialize_i16<V: Visitor<'de>>(self, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        if self.in_any {
+            self.inner.deserialize_i16(BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: true })
+        } else {
+            self.inner.deserialize_i16(visitor)
+        }
+    }
+
+    fn deserialize_i32<V: Visitor<'de>>(self, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        if self.in_any {
+            self.inner.deserialize_i32(BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: true })
+        } else {
+            self.inner.deserialize_i32(visitor)
+        }
+    }
+
+    fn deserialize_i64<V: Visitor<'de>>(self, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        if self.in_any {
+            self.inner.deserialize_i64(BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: true })
+        } else {
+            self.inner.deserialize_i64(visitor)
+        }
+    }
+
+    fn deserialize_u8<V: Visitor<'de>>(self, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        if self.in_any {
+            self.inner.deserialize_u8(BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: true })
+        } else {
+            self.inner.deserialize_u8(visitor)
+        }
+    }
+
+    fn deserialize_u16<V: Visitor<'de>>(self, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        if self.in_any {
+            self.inner.deserialize_u16(BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: true })
+        } else {
+            self.inner.deserialize_u16(visitor)
+        }
+    }
+
+    fn deserialize_u32<V: Visitor<'de>>(self, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        if self.in_any {
+            self.inner.deserialize_u32(BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: true })
+        } else {
+            self.inner.deserialize_u32(visitor)
+        }
+    }
+
+    fn deserialize_u64<V: Visitor<'de>>(self, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        if self.in_any {
+            self.inner.deserialize_u64(BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: true })
+        } else {
+            self.inner.deserialize_u64(visitor)
+        }
+    }
+
+    fn deserialize_f32<V: Visitor<'de>>(self, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        if self.in_any {
+            self.inner.deserialize_f32(BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: true })
+        } else {
+            self.inner.deserialize_f32(visitor)
+        }
+    }
+
+    fn deserialize_f64<V: Visitor<'de>>(self, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        if self.in_any {
+            self.inner.deserialize_f64(BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: true })
+        } else {
+            self.inner.deserialize_f64(visitor)
+        }
+    }
+
+    fn deserialize_char<V: Visitor<'de>>(self, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        if self.in_any {
+            self.inner.deserialize_char(BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: true })
+        } else {
+            self.inner.deserialize_char(visitor)
+        }
+    }
+
+    fn deserialize_str<V: Visitor<'de>>(self, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        if self.in_any {
+            self.inner.deserialize_str(BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: true })
+        } else {
+            self.inner.deserialize_str(visitor)
+        }
+    }
+
+    fn deserialize_string<V: Visitor<'de>>(self, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        if self.in_any {
+            self.inner.deserialize_string(BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: true })
+        } else {
+            self.inner.deserialize_string(visitor)
+        }
+    }
+
+    fn deserialize_bytes<V: Visitor<'de>>(self, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        if self.in_any {
+            self.inner.deserialize_bytes(BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: true })
+        } else {
+            self.inner.deserialize_bytes(visitor)
+        }
+    }
+
+    fn deserialize_byte_buf<V: Visitor<'de>>(self, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        if self.in_any {
+            self.inner.deserialize_byte_buf(BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: true })
+        } else {
+            self.inner.deserialize_byte_buf(visitor)
+        }
+    }
+
+    fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        self.inner.deserialize_option(BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: self.in_any })
+    }
+
+    fn deserialize_unit<V: Visitor<'de>>(self, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        if self.in_any {
+            self.inner.deserialize_unit(BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: true })
+        } else {
+            self.inner.deserialize_unit(visitor)
+        }
+    }
+
+    fn deserialize_unit_struct<V: Visitor<'de>>(self, name: &'static str, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        if self.in_any {
+            self.inner.deserialize_unit_struct(name, BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: true })
+        } else {
+            self.inner.deserialize_unit_struct(name, visitor)
+        }
+    }
+
+    fn deserialize_newtype_struct<V: Visitor<'de>>(self, name: &'static str, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        self.inner.deserialize_newtype_struct(name, BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: self.in_any })
+    }
+
+    fn deserialize_seq<V: Visitor<'de>>(self, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        self.inner.deserialize_seq(BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: self.in_any })
+    }
+
+    fn deserialize_tuple<V: Visitor<'de>>(self, len: usize, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        self.inner.deserialize_tuple(len, BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: self.in_any })
+    }
+
+    fn deserialize_tuple_struct<V: Visitor<'de>>(self, name: &'static str, len: usize, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        self.inner.deserialize_tuple_struct(name, len, BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: self.in_any })
+    }
+
+    fn deserialize_map<V: Visitor<'de>>(self, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        self.inner.deserialize_map(BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: self.in_any })
+    }
+
+    fn deserialize_struct<V: Visitor<'de>>(
+        self,
+        name: &'static str,
+        fields: &'static [&'static str],
+        visitor: V,
+    ) -> std::result::Result<V::Value, D::Error> {
+        self.inner.deserialize_struct(name, fields, BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: self.in_any })
+    }
+
+    fn deserialize_enum<V: Visitor<'de>>(
+        self,
+        name: &'static str,
+        variants: &'static [&'static str],
+        visitor: V,
+    ) -> std::result::Result<V::Value, D::Error> {
+        self.inner.deserialize_enum(name, variants, BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: self.in_any })
+    }
+
+    fn deserialize_identifier<V: Visitor<'de>>(self, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        if self.in_any {
+            self.inner.deserialize_identifier(BudgetedVisitor { inner: visitor, remaining: self.remaining, in_any: true })
+        } else {
+            self.inner.deserialize_identifier(visitor)
+        }
+    }
+
+    fn deserialize_ignored_any<V: Visitor<'de>>(self, visitor: V) -> std::result::Result<V::Value, D::Error> {
+        self.inner.deserialize_ignored_any(visitor)
+    }
+
+    fn is_human_readable(&self) -> bool {
+        self.inner.is_human_readable()
     }
 }
 
@@ -998,5 +1515,64 @@ mod tests {
     #[test]
     fn bounded_value_rejects_trailing_garbage() {
         assert!(from_str_bounded("{} trailing", 1 << 20).is_err());
+    }
+
+    #[test]
+    fn bounded_value_accounts_for_vec_capacity_growth() {
+        // 5-element Vec<Value> grows from cap 4 to cap 8 (8 * VALUE_SIZE = 256 B) plus root VALUE_SIZE (32 B).
+        assert!(from_str_bounded("[0,1,2,3,4]", VALUE_SIZE * 8).is_err());
+        assert!(from_str_bounded("[0,1,2,3,4]", VALUE_SIZE * 9).is_ok());
+    }
+
+    #[test]
+    fn bounded_value_rejects_oversized_map_key_before_allocating() {
+        let key = "k".repeat(2048);
+        let json = format!(r#"{{"{key}":0}}"#);
+        assert!(from_str_bounded(&json, 1024).unwrap_err().to_string().contains("memory budget"));
+    }
+
+    #[test]
+    fn options_budget_accepts_worst_case_one_mib_json() {
+        // Worst-case expansion under 1 MiB JSON: repeated 7-byte 1-entry objects `{"":0},`.
+        let count = (1024 * 1024 - 2) / 7;
+        let mut s = String::with_capacity(1024 * 1024);
+        s.push('[');
+        for i in 0..count {
+            if i > 0 {
+                s.push(',');
+            }
+            s.push_str(r#"{"":0}"#);
+        }
+        s.push(']');
+        assert!(s.len() <= 1024 * 1024);
+        assert!(from_str_bounded(&s, MAX_OPTIONS_VALUE_BYTES).is_ok());
+    }
+
+    #[test]
+    fn bounded_typed_rejects_flattened_expansion_bomb() {
+        #[derive(serde::Deserialize)]
+        #[serde(tag = "type", rename_all = "snake_case")]
+        enum Inner {
+            Ping { v: u64 },
+        }
+        #[derive(serde::Deserialize)]
+        struct Outer {
+            id: u64,
+            #[serde(flatten)]
+            inner: Inner,
+        }
+        let mut bomb = String::from(r#"{"id":1,"type":"ping","v":2,"junk":["#);
+        for i in 0..5_000 {
+            if i > 0 {
+                bomb.push(',');
+            }
+            bomb.push_str(r#"{"":0}"#);
+        }
+        bomb.push_str("]}");
+        let err = from_str_bounded_typed::<Outer>(&bomb, 1 << 20).err().unwrap();
+        assert!(err.to_string().contains("memory budget"), "{err}");
+        let ok = from_str_bounded_typed::<Outer>(r#"{"id":1,"type":"ping","v":2}"#, 1 << 20).unwrap();
+        assert_eq!(ok.id, 1);
+        assert!(matches!(ok.inner, Inner::Ping { v: 2 }));
     }
 }

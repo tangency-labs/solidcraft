@@ -105,14 +105,19 @@ pub(crate) fn validate_columns_value(columns: &Value) -> Result<()> {
         return Err(DocError::Invalid("too many configuration columns".into()));
     }
     for column in columns {
-        if let Some(target) = column.get("face_appearance") {
-            validate_face_target_json(target)?;
-        }
-        if let Some(id) = column.get("component_appearance")
-            && id.as_u64().is_none_or(|id| id == 0)
-        {
-            return Err(DocError::Invalid("configuration component ID must be nonzero".into()));
-        }
+        validate_column_value(column)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_column_value(column: &Value) -> Result<()> {
+    if let Some(target) = column.get("face_appearance") {
+        validate_face_target_json(target)?;
+    }
+    if let Some(id) = column.get("component_appearance")
+        && id.as_u64().is_none_or(|id| id == 0)
+    {
+        return Err(DocError::Invalid("configuration component ID must be nonzero".into()));
     }
     Ok(())
 }

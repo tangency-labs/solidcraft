@@ -4,6 +4,7 @@
 //! [`super::check_raw`] + [`super::validate_body_transfers`] directly over the JSON text without
 //! building a whole-document `serde_json::Value` tree.
 
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -11,7 +12,9 @@ use serde::de::{self, DeserializeSeed, Deserializer, IgnoredAny, MapAccess, SeqA
 use serde_json::{Value, value::RawValue};
 
 use crate::format::MAX_REAL;
-use crate::json_budget::{BorrowedKey, MAX_SMALL_VALUE_BYTES, NumberDepthSeed, check_numbers_str, from_str_bounded};
+use crate::json_budget::{
+    BorrowedKey, MAX_SMALL_VALUE_BYTES, MAX_VALUE_MEMORY_BYTES, NumberDepthSeed, check_numbers_str, from_str_bounded, from_str_bounded_typed,
+};
 use crate::{DocError, Result};
 
 /// Keys that [`crate::face_anchor::validate_face_anchors_json`] skips when walking for face anchors.
@@ -397,19 +400,15 @@ impl<'de> Visitor<'de> for ConfigsSeed<'_> {
                 }
             }
         }
-        if let Some(raw) = raw_rules {
-            let val = from_str_bounded(raw.get(), MAX_SMALL_VALUE_BYTES)
-                .map_err(|_| fail::<A::Error>(self.error, DocError::Invalid("configuration rules: too many rules".into())))?;
-            if let Err(err) = crate::config::validate_rules_value(&val) {
-                return Err(fail(self.error, err));
-            }
+        if let Some(raw) = raw_rules
+            && let Err(err) = validate_rules_str(raw.get())
+        {
+            return Err(fail(self.error, err));
         }
-        if let Some(raw) = raw_columns {
-            let val = from_str_bounded(raw.get(), MAX_SMALL_VALUE_BYTES)
-                .map_err(|_| fail::<A::Error>(self.error, DocError::Invalid("too many configuration columns".into())))?;
-            if let Err(err) = crate::config::validate_columns_value(&val) {
-                return Err(fail(self.error, err));
-            }
+        if let Some(raw) = raw_columns
+            && let Err(err) = validate_columns_str(raw.get())
+        {
+            return Err(fail(self.error, err));
         }
         Ok(())
     }
@@ -786,9 +785,7 @@ fn validate_profile_slice(s: &str) -> Result<()> {
     if !s.contains("whole_boundaries") && !s.contains("offset_boundaries") && !s.contains("\\u") {
         return Ok(());
     }
-    let val = from_str_bounded(s, MAX_SMALL_VALUE_BYTES)
-        .map_err(|_| DocError::Invalid("damaged design: invalid analytic offset topology or boundary reference".into()))?;
-    crate::format_offsets::validate_profile_selection(&val)
+    validate_profile_selection_str(s)
 }
 
 fn validate_sections_slice(s: &str) -> Result<()> {
@@ -943,19 +940,7 @@ fn validate_body_transfer_slices(
 ) -> Result<()> {
     let invalid = || DocError::Invalid("damaged design: body transfer needs bounded unique bodies, components and a rigid placement".into());
     let bodies_raw = bodies.ok_or_else(invalid)?;
-    if bodies_raw.get().len() > 1_000_000 {
-        return Err(invalid());
-    }
-    let bodies_list: Vec<String> = serde_json::from_str(bodies_raw.get()).map_err(|_| invalid())?;
-    if bodies_list.is_empty() || bodies_list.len() > 1000 {
-        return Err(invalid());
-    }
-    let mut names = BTreeSet::new();
-    for body in &bodies_list {
-        if body.trim().is_empty() || body.len() > 512 || body.chars().any(char::is_control) || !names.insert(body.as_str()) {
-            return Err(invalid());
-        }
-    }
+    validate_body_transfer_names_str(bodies_raw.get())?;
     let _from: u64 = serde_json::from_str(from.ok_or_else(invalid)?.get()).map_err(|_| invalid())?;
     let to_id: u64 = serde_json::from_str(to.ok_or_else(invalid)?.get()).map_err(|_| invalid())?;
     let owner: u64 = match component {
@@ -1011,9 +996,7 @@ impl SketchSummary<'_> {
         }
         // 3. validate_freeform_chain_offsets
         if let Some(raw) = self.freeform_chain_offsets {
-            let records = from_str_bounded(raw.get(), MAX_SMALL_VALUE_BYTES)
-                .map_err(|_| DocError::Invalid("damaged design: invalid trimmed chain offset metadata".into()))?;
-            super::validate_freeform_chain_offsets_value(&records)?;
+            validate_freeform_chain_offsets_str(raw.get())?;
         }
         // 4. validate_sketch_sizes
         if let Some(raw) = plane {
@@ -1024,9 +1007,7 @@ impl SketchSummary<'_> {
         }
         // 5. format_offsets
         if let Some(raw) = self.offsets {
-            let offsets = from_str_bounded(raw.get(), MAX_SMALL_VALUE_BYTES)
-                .map_err(|_| DocError::Invalid("damaged design: invalid analytic offset topology or boundary reference".into()))?;
-            crate::format_offsets::validate_sketch_offsets(&offsets, total_offset_roles)?;
+            validate_sketch_offsets_str(raw.get(), total_offset_roles)?;
         }
         // 6. validate_wires
         if let Some(err) = self.wires_err {
@@ -2015,9 +1996,7 @@ impl<'de> Visitor<'de> for SketchLinksSeed<'_, 'de> {
                     }
                     if let Some(pins) = check.sketch_placements {
                         let invalid = || DocError::Invalid("damaged design: invalid captured sketch projection placement".into());
-                        let valid_pins =
-                            serde_json::from_str::<Vec<&RawValue>>(pins.get()).is_ok_and(|list| list.len() <= crate::project::MAX_SKETCH_PLACEMENTS);
-                        if !valid_pins {
+                        if !is_bounded_array(pins.get(), crate::project::MAX_SKETCH_PLACEMENTS) {
                             self.summary.versioned_err = Some(invalid());
                             continue;
                         }
@@ -2411,4 +2390,1240 @@ impl<'de> Visitor<'de> for CoordSeed<'_> {
         NumberDepthSeed { noun: "design", depth: self.depth, error: self.error }.visit_map(map)?;
         Ok(false)
     }
+}
+
+/// Stream-validate `configs.rules` element by element so valid rule lists up to
+/// [`crate::config::MAX_RULES`] never exceed a single-value budget while bounding each rule.
+fn validate_rules_str(s: &str) -> Result<()> {
+    struct RulesVisitor<'a> {
+        error: &'a mut Option<DocError>,
+    }
+    impl<'de> Visitor<'de> for RulesVisitor<'_> {
+        type Value = ();
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("configuration rules array")
+        }
+        fn visit_bool<E: de::Error>(self, _: bool) -> std::result::Result<(), E> {
+            Err(fail(self.error, DocError::Invalid("configuration rules: rules must be an array".into())))
+        }
+        fn visit_i64<E: de::Error>(self, _: i64) -> std::result::Result<(), E> {
+            Err(fail(self.error, DocError::Invalid("configuration rules: rules must be an array".into())))
+        }
+        fn visit_u64<E: de::Error>(self, _: u64) -> std::result::Result<(), E> {
+            Err(fail(self.error, DocError::Invalid("configuration rules: rules must be an array".into())))
+        }
+        fn visit_f64<E: de::Error>(self, _: f64) -> std::result::Result<(), E> {
+            Err(fail(self.error, DocError::Invalid("configuration rules: rules must be an array".into())))
+        }
+        fn visit_str<E: de::Error>(self, _: &str) -> std::result::Result<(), E> {
+            Err(fail(self.error, DocError::Invalid("configuration rules: rules must be an array".into())))
+        }
+        fn visit_unit<E: de::Error>(self) -> std::result::Result<(), E> {
+            Err(fail(self.error, DocError::Invalid("configuration rules: rules must be an array".into())))
+        }
+        fn visit_none<E: de::Error>(self) -> std::result::Result<(), E> {
+            Err(fail(self.error, DocError::Invalid("configuration rules: rules must be an array".into())))
+        }
+        fn visit_map<A: MapAccess<'de>>(self, _: A) -> std::result::Result<(), A::Error> {
+            Err(fail(self.error, DocError::Invalid("configuration rules: rules must be an array".into())))
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<(), A::Error> {
+            let mut count = 0usize;
+            while let Some(raw) = seq.next_element::<&'de RawValue>()? {
+                count += 1;
+                if count > crate::config::MAX_RULES {
+                    return Err(fail(self.error, DocError::Invalid("configuration rules: too many rules".into())));
+                }
+                let val = from_str_bounded(raw.get(), MAX_SMALL_VALUE_BYTES).map_err(|_| {
+                    fail::<A::Error>(self.error, DocError::Invalid("configuration rules: condition nesting or node limit exceeded".into()))
+                })?;
+                if let Err(err) = crate::config::validate_rule_value(&val) {
+                    return Err(fail(self.error, err));
+                }
+            }
+            Ok(())
+        }
+    }
+    let mut error = None;
+    let mut de = serde_json::Deserializer::from_str(s);
+    let res = de.deserialize_any(RulesVisitor { error: &mut error }).and_then(|()| de.end());
+    if let Some(err) = error {
+        return Err(err);
+    }
+    res.map_err(|_| DocError::Invalid("configuration rules: rules must be an array".into()))
+}
+
+/// Stream-validate `configs.columns` element by element.
+fn validate_columns_str(s: &str) -> Result<()> {
+    struct ColumnsVisitor<'a> {
+        error: &'a mut Option<DocError>,
+    }
+    impl<'de> Visitor<'de> for ColumnsVisitor<'_> {
+        type Value = ();
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("configuration columns array")
+        }
+        fn visit_bool<E: de::Error>(self, _: bool) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_i64<E: de::Error>(self, _: i64) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_u64<E: de::Error>(self, _: u64) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_f64<E: de::Error>(self, _: f64) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_str<E: de::Error>(self, _: &str) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_unit<E: de::Error>(self) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_none<E: de::Error>(self) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<(), A::Error> {
+            while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+            Ok(())
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<(), A::Error> {
+            let mut count = 0usize;
+            while let Some(raw) = seq.next_element::<&'de RawValue>()? {
+                count += 1;
+                if count > crate::config::MAX_COLUMNS {
+                    return Err(fail(self.error, DocError::Invalid("too many configuration columns".into())));
+                }
+                let val = from_str_bounded(raw.get(), MAX_SMALL_VALUE_BYTES)
+                    .map_err(|_| fail::<A::Error>(self.error, DocError::Invalid("invalid or oversized configuration face target".into())))?;
+                if let Err(err) = crate::config::validate_column_value(&val) {
+                    return Err(fail(self.error, err));
+                }
+            }
+            Ok(())
+        }
+    }
+    let mut error = None;
+    let mut de = serde_json::Deserializer::from_str(s);
+    let res = de.deserialize_any(ColumnsVisitor { error: &mut error }).and_then(|()| de.end());
+    if let Some(err) = error {
+        return Err(err);
+    }
+    res.map_err(|_| DocError::Invalid("too many configuration columns".into()))
+}
+
+fn invalid_offset_ref() -> DocError {
+    DocError::Invalid("damaged design: invalid analytic offset topology or boundary reference".into())
+}
+
+struct BoundedIdSeed;
+
+impl<'de> DeserializeSeed<'de> for BoundedIdSeed {
+    type Value = String;
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<String, D::Error> {
+        struct V;
+        impl Visitor<'_> for V {
+            type Value = String;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a bounded identifier string")
+            }
+            fn visit_str<E: de::Error>(self, v: &str) -> std::result::Result<String, E> {
+                if v.is_empty() || v.len() > 512 || v.chars().any(char::is_control) {
+                    return Err(E::custom("invalid identifier"));
+                }
+                Ok(v.to_owned())
+            }
+            fn visit_string<E: de::Error>(self, v: String) -> std::result::Result<String, E> {
+                if v.is_empty() || v.len() > 512 || v.chars().any(char::is_control) {
+                    return Err(E::custom("invalid identifier"));
+                }
+                Ok(v)
+            }
+        }
+        d.deserialize_str(V)
+    }
+}
+
+struct OptStrSeed;
+
+impl<'de> DeserializeSeed<'de> for OptStrSeed {
+    type Value = Option<String>;
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<Option<String>, D::Error> {
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = Option<String>;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("optional string")
+            }
+            fn visit_str<E: de::Error>(self, v: &str) -> std::result::Result<Option<String>, E> {
+                Ok(Some(v.to_owned()))
+            }
+            fn visit_string<E: de::Error>(self, v: String) -> std::result::Result<Option<String>, E> {
+                Ok(Some(v))
+            }
+            fn visit_bool<E: de::Error>(self, _: bool) -> std::result::Result<Option<String>, E> {
+                Ok(None)
+            }
+            fn visit_i64<E: de::Error>(self, _: i64) -> std::result::Result<Option<String>, E> {
+                Ok(None)
+            }
+            fn visit_u64<E: de::Error>(self, _: u64) -> std::result::Result<Option<String>, E> {
+                Ok(None)
+            }
+            fn visit_f64<E: de::Error>(self, _: f64) -> std::result::Result<Option<String>, E> {
+                Ok(None)
+            }
+            fn visit_unit<E: de::Error>(self) -> std::result::Result<Option<String>, E> {
+                Ok(None)
+            }
+            fn visit_none<E: de::Error>(self) -> std::result::Result<Option<String>, E> {
+                Ok(None)
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Option<String>, A::Error> {
+                while seq.next_element::<IgnoredAny>()?.is_some() {}
+                Ok(None)
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<Option<String>, A::Error> {
+                while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+                Ok(None)
+            }
+        }
+        d.deserialize_any(V)
+    }
+}
+
+/// Stream-validate a `profiles` selection (`whole_boundaries` or `offset_boundaries`) directly
+/// without allocating a `serde_json::Value` tree, preserving the full [`crate::profile_refs::MAX_WHOLE_CURVES`]
+/// contract.
+fn validate_profile_selection_str(s: &str) -> Result<()> {
+    struct OuterVisitor<'a>(&'a mut Option<DocError>);
+    impl<'de> Visitor<'de> for OuterVisitor<'_> {
+        type Value = ();
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("profile selection")
+        }
+        fn visit_bool<E: de::Error>(self, _: bool) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_i64<E: de::Error>(self, _: i64) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_u64<E: de::Error>(self, _: u64) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_f64<E: de::Error>(self, _: f64) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_str<E: de::Error>(self, _: &str) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_unit<E: de::Error>(self) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_none<E: de::Error>(self) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<(), A::Error> {
+            while seq.next_element::<IgnoredAny>()?.is_some() {}
+            Ok(())
+        }
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<(), A::Error> {
+            let mut kind: Option<String> = None;
+            let mut profiles: Option<&'de RawValue> = None;
+            let mut associations: Option<&'de RawValue> = None;
+            let mut other_key = false;
+            while let Some(key) = map.next_key::<BorrowedKey<'de>>()? {
+                match key.0.as_ref() {
+                    "type" => kind = map.next_value_seed(OptStrSeed)?,
+                    "profiles" => profiles = Some(map.next_value::<&'de RawValue>()?),
+                    "associations" => associations = Some(map.next_value::<&'de RawValue>()?),
+                    _ => {
+                        other_key = true;
+                        map.next_value::<IgnoredAny>()?;
+                    }
+                }
+            }
+            match kind.as_deref() {
+                Some("whole_boundaries") => {
+                    if other_key || associations.is_some() {
+                        return Err(fail(self.0, invalid_offset_ref()));
+                    }
+                    let Some(raw) = profiles else {
+                        return Err(fail(self.0, invalid_offset_ref()));
+                    };
+                    if let Err(err) = validate_whole_profiles_str(raw.get()) {
+                        return Err(fail(self.0, err));
+                    }
+                }
+                Some("offset_boundaries") => {
+                    if other_key || profiles.is_some() {
+                        return Err(fail(self.0, invalid_offset_ref()));
+                    }
+                    let Some(raw) = associations else {
+                        return Err(fail(self.0, invalid_offset_ref()));
+                    };
+                    if let Err(err) = validate_offset_associations_str(raw.get()) {
+                        return Err(fail(self.0, err));
+                    }
+                }
+                _ => {}
+            }
+            Ok(())
+        }
+    }
+    let mut error = None;
+    let mut de = serde_json::Deserializer::from_str(s);
+    let res = de.deserialize_any(OuterVisitor(&mut error)).and_then(|()| de.end());
+    if let Some(err) = error {
+        return Err(err);
+    }
+    res.map_err(|_| invalid_offset_ref())
+}
+
+fn parse_whole_loop(s: &str, total: &mut usize) -> Result<Vec<String>> {
+    struct LoopVisitor<'a>(&'a mut usize);
+    impl<'de> Visitor<'de> for LoopVisitor<'_> {
+        type Value = Vec<String>;
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("whole boundary loop")
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Vec<String>, A::Error> {
+            let mut ids = Vec::new();
+            while let Some(id) = seq.next_element_seed(BoundedIdSeed)? {
+                if ids.len() >= crate::profile_refs::MAX_WHOLE_LOOP_CURVES {
+                    return Err(de::Error::custom("loop exceeds curve limit"));
+                }
+                *self.0 = self.0.saturating_add(1);
+                if *self.0 > crate::profile_refs::MAX_WHOLE_CURVES {
+                    return Err(de::Error::custom("selection exceeds curve limit"));
+                }
+                ids.push(id);
+            }
+            if ids.is_empty() {
+                return Err(de::Error::custom("empty loop"));
+            }
+            ids.sort();
+            if ids.windows(2).any(|pair| pair[0] == pair[1]) {
+                return Err(de::Error::custom("duplicate curve in loop"));
+            }
+            Ok(ids)
+        }
+    }
+    let mut de = serde_json::Deserializer::from_str(s);
+    de.deserialize_seq(LoopVisitor(total)).and_then(|ids| de.end().map(|()| ids)).map_err(|_| invalid_offset_ref())
+}
+
+fn validate_whole_profiles_str(s: &str) -> Result<()> {
+    struct HolesVisitor<'a> {
+        outer: &'a [String],
+        total: &'a mut usize,
+    }
+    impl<'de> Visitor<'de> for HolesVisitor<'_> {
+        type Value = Vec<Vec<String>>;
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("profile holes array")
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Vec<Vec<String>>, A::Error> {
+            let mut holes = Vec::new();
+            while let Some(raw) = seq.next_element::<&'de RawValue>()? {
+                if holes.len() >= 128 {
+                    return Err(de::Error::custom("too many holes"));
+                }
+                let hole = parse_whole_loop(raw.get(), self.total).map_err(|_| de::Error::custom("invalid hole"))?;
+                if hole.iter().any(|curve| self.outer.binary_search(curve).is_ok()) {
+                    return Err(de::Error::custom("hole shares curve with outer"));
+                }
+                holes.push(hole);
+            }
+            holes.sort();
+            if holes.windows(2).any(|pair| pair[0] == pair[1]) {
+                return Err(de::Error::custom("duplicate hole"));
+            }
+            Ok(holes)
+        }
+    }
+    struct ProfileSeed<'a> {
+        total: &'a mut usize,
+    }
+    impl<'de> DeserializeSeed<'de> for ProfileSeed<'_> {
+        type Value = (Vec<String>, Vec<Vec<String>>);
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<Self::Value, D::Error> {
+            struct V<'a>(&'a mut usize);
+            impl<'de> Visitor<'de> for V<'_> {
+                type Value = (Vec<String>, Vec<Vec<String>>);
+                fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    f.write_str("whole profile object")
+                }
+                fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<Self::Value, A::Error> {
+                    let mut outer_raw: Option<&'de RawValue> = None;
+                    let mut holes_raw: Option<&'de RawValue> = None;
+                    while let Some(key) = map.next_key::<BorrowedKey<'de>>()? {
+                        match key.0.as_ref() {
+                            "outer" => outer_raw = Some(map.next_value::<&'de RawValue>()?),
+                            "holes" => holes_raw = Some(map.next_value::<&'de RawValue>()?),
+                            _ => return Err(de::Error::custom("unexpected profile key")),
+                        }
+                    }
+                    let (Some(outer_raw), Some(holes_raw)) = (outer_raw, holes_raw) else {
+                        return Err(de::Error::custom("missing outer or holes"));
+                    };
+                    let outer = parse_whole_loop(outer_raw.get(), self.0).map_err(|_| de::Error::custom("invalid outer"))?;
+                    let mut holes_de = serde_json::Deserializer::from_str(holes_raw.get());
+                    let holes = holes_de
+                        .deserialize_seq(HolesVisitor { outer: &outer, total: self.0 })
+                        .and_then(|h| holes_de.end().map(|()| h))
+                        .map_err(|_| de::Error::custom("invalid holes"))?;
+                    Ok((outer, holes))
+                }
+            }
+            d.deserialize_map(V(self.total))
+        }
+    }
+    struct ProfilesVisitor;
+    impl<'de> Visitor<'de> for ProfilesVisitor {
+        type Value = ();
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("whole_boundaries profiles array")
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<(), A::Error> {
+            let mut count = 0usize;
+            let mut total = 0usize;
+            let mut identities = BTreeSet::new();
+            while let Some(identity) = seq.next_element_seed(ProfileSeed { total: &mut total })? {
+                count += 1;
+                if count > 128 || !identities.insert(identity) {
+                    return Err(de::Error::custom("too many or duplicate profiles"));
+                }
+            }
+            if count == 0 {
+                return Err(de::Error::custom("empty profiles"));
+            }
+            Ok(())
+        }
+    }
+    let mut de = serde_json::Deserializer::from_str(s);
+    de.deserialize_seq(ProfilesVisitor).and_then(|()| de.end()).map_err(|_| invalid_offset_ref())
+}
+
+fn validate_offset_associations_str(s: &str) -> Result<()> {
+    struct AssocVisitor;
+    impl<'de> Visitor<'de> for AssocVisitor {
+        type Value = ();
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("offset_boundaries associations array")
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<(), A::Error> {
+            let mut seen = BTreeSet::new();
+            while let Some(id) = seq.next_element_seed(BoundedIdSeed)? {
+                if seen.len() >= 128 || !seen.insert(id) {
+                    return Err(de::Error::custom("too many or duplicate associations"));
+                }
+            }
+            if seen.is_empty() {
+                return Err(de::Error::custom("empty associations"));
+            }
+            Ok(())
+        }
+    }
+    let mut de = serde_json::Deserializer::from_str(s);
+    de.deserialize_seq(AssocVisitor).and_then(|()| de.end()).map_err(|_| invalid_offset_ref())
+}
+
+/// Stream-validate `body_transfer.bodies` enforcing limits on decoded names (count `1..=1000`,
+/// decoded byte length `<= 512`, non-empty, no control characters, unique) rather than raw JSON
+/// spelling length.
+fn validate_body_transfer_names_str(s: &str) -> Result<()> {
+    struct BodyNameSeed;
+    impl<'de> DeserializeSeed<'de> for BodyNameSeed {
+        type Value = String;
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<String, D::Error> {
+            struct V;
+            impl Visitor<'_> for V {
+                type Value = String;
+                fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    f.write_str("a bounded body name")
+                }
+                fn visit_str<E: de::Error>(self, v: &str) -> std::result::Result<String, E> {
+                    if v.trim().is_empty() || v.len() > 512 || v.chars().any(char::is_control) {
+                        return Err(E::custom("invalid body name"));
+                    }
+                    Ok(v.to_owned())
+                }
+                fn visit_string<E: de::Error>(self, v: String) -> std::result::Result<String, E> {
+                    if v.trim().is_empty() || v.len() > 512 || v.chars().any(char::is_control) {
+                        return Err(E::custom("invalid body name"));
+                    }
+                    Ok(v)
+                }
+            }
+            d.deserialize_str(V)
+        }
+    }
+    struct BodiesVisitor;
+    impl<'de> Visitor<'de> for BodiesVisitor {
+        type Value = ();
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("body_transfer bodies array")
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<(), A::Error> {
+            let mut names = BTreeSet::new();
+            while let Some(name) = seq.next_element_seed(BodyNameSeed)? {
+                if names.len() >= 1000 || !names.insert(name) {
+                    return Err(de::Error::custom("too many or duplicate bodies"));
+                }
+            }
+            if names.is_empty() {
+                return Err(de::Error::custom("empty bodies"));
+            }
+            Ok(())
+        }
+    }
+    let invalid = || DocError::Invalid("damaged design: body transfer needs bounded unique bodies, components and a rigid placement".into());
+    let mut de = serde_json::Deserializer::from_str(s);
+    de.deserialize_seq(BodiesVisitor).and_then(|()| de.end()).map_err(|_| invalid())
+}
+
+/// Stream-validate `sketch.freeform_chain_offsets` one record at a time so valid lists of up to
+/// 128 large chain offset records never hit a whole-array `Value` budget.
+fn validate_freeform_chain_offsets_str(s: &str) -> Result<()> {
+    let invalid = || DocError::Invalid("damaged design: invalid trimmed chain offset metadata".into());
+    struct ChainVisitor;
+    impl<'de> Visitor<'de> for ChainVisitor {
+        type Value = ();
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("freeform_chain_offsets array")
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<(), A::Error> {
+            let mut count = 0usize;
+            let mut outputs = BTreeSet::new();
+            while let Some(raw) = seq.next_element::<&'de RawValue>()? {
+                count += 1;
+                if count > 128 {
+                    return Err(de::Error::custom("too many chain offset records"));
+                }
+                let record = from_str_bounded(raw.get(), MAX_SMALL_VALUE_BYTES).map_err(|_| de::Error::custom("record exceeds budget"))?;
+                let Some(object) = record.as_object() else {
+                    return Err(de::Error::custom("record must be an object"));
+                };
+                if object.len() != 3 || object.keys().any(|key| !matches!(key.as_str(), "sources" | "outputs" | "distance")) {
+                    return Err(de::Error::custom("unexpected record keys"));
+                }
+                let Some(sources) = record.get("sources").and_then(Value::as_array) else {
+                    return Err(de::Error::custom("missing sources"));
+                };
+                let Some(made) = record.get("outputs").and_then(Value::as_array) else {
+                    return Err(de::Error::custom("missing outputs"));
+                };
+                if sources.is_empty() || sources.len() > 512 || made.is_empty() || made.len() > 512 {
+                    return Err(de::Error::custom("sources or outputs out of range"));
+                }
+                for source in sources {
+                    let Some(pair) = source.as_array() else {
+                        return Err(de::Error::custom("source must be array"));
+                    };
+                    if pair.len() != 2 {
+                        return Err(de::Error::custom("source pair length"));
+                    }
+                    let Some(id) = pair[0].as_str() else {
+                        return Err(de::Error::custom("source id must be string"));
+                    };
+                    if id.is_empty() || id.len() > 512 || id.chars().any(char::is_control) || pair[1].as_bool().is_none() {
+                        return Err(de::Error::custom("invalid source entry"));
+                    }
+                }
+                for output in made {
+                    let Some(id) = output.as_str() else {
+                        return Err(de::Error::custom("output id must be string"));
+                    };
+                    if id.is_empty() || id.len() > 512 || id.chars().any(char::is_control) || !outputs.insert(id.to_owned()) {
+                        return Err(de::Error::custom("invalid or duplicate output"));
+                    }
+                }
+                let Some(distance) = record.get("distance").and_then(Value::as_f64) else {
+                    return Err(de::Error::custom("missing distance"));
+                };
+                if !distance.is_finite() || !(1e-9..=MAX_REAL).contains(&distance.abs()) {
+                    return Err(de::Error::custom("distance out of range"));
+                }
+            }
+            Ok(())
+        }
+    }
+    let mut de = serde_json::Deserializer::from_str(s);
+    de.deserialize_seq(ChainVisitor).and_then(|()| de.end()).map_err(|_| invalid())
+}
+
+/// Stream-validate `sketch.offsets` directly without building a whole-subtree `serde_json::Value`,
+/// matching [`crate::format_offsets::validate_sketch_offsets`] exactly (up to 128 topology groups,
+/// 512 roles per group, 20,000 roles per sketch, 1,000,000 roles per design, plus any offsets
+/// without topology).
+fn validate_sketch_offsets_str(s: &str, total_roles: &mut usize) -> Result<()> {
+    struct RoleInfo {
+        output: String,
+        start: String,
+        end: String,
+        retired: bool,
+    }
+    struct FlagsVisitor;
+    impl<'de> Visitor<'de> for FlagsVisitor {
+        type Value = ();
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("offset role flags object")
+        }
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<(), A::Error> {
+            let (mut c, mut cl, mut r, mut fx) = (false, false, false, false);
+            while let Some(key) = map.next_key::<BorrowedKey<'de>>()? {
+                match key.0.as_ref() {
+                    "construction" => {
+                        let _: bool = map.next_value()?;
+                        c = true;
+                    }
+                    "centerline" => {
+                        let _: bool = map.next_value()?;
+                        cl = true;
+                    }
+                    "reversed" => {
+                        let _: bool = map.next_value()?;
+                        r = true;
+                    }
+                    "fixed" => {
+                        let _: bool = map.next_value()?;
+                        fx = true;
+                    }
+                    _ => return Err(de::Error::custom("unexpected flag key")),
+                }
+            }
+            if !(c && cl && r && fx) {
+                return Err(de::Error::custom("missing flag key"));
+            }
+            Ok(())
+        }
+    }
+    struct RoleSeed;
+    impl<'de> DeserializeSeed<'de> for RoleSeed {
+        type Value = RoleInfo;
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<RoleInfo, D::Error> {
+            struct V;
+            impl<'de> Visitor<'de> for V {
+                type Value = RoleInfo;
+                fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    f.write_str("offset role object")
+                }
+                fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<RoleInfo, A::Error> {
+                    let mut output = None;
+                    let mut start = None;
+                    let mut end = None;
+                    let mut is_arc = None;
+                    let mut retired = None;
+                    while let Some(key) = map.next_key::<BorrowedKey<'de>>()? {
+                        match key.0.as_ref() {
+                            "output" => output = Some(map.next_value_seed(BoundedIdSeed)?),
+                            "start" => start = Some(map.next_value_seed(BoundedIdSeed)?),
+                            "end" => end = Some(map.next_value_seed(BoundedIdSeed)?),
+                            "kind" => {
+                                let k = map.next_value::<BorrowedKey<'de>>()?;
+                                is_arc = match k.0.as_ref() {
+                                    "line" => Some(false),
+                                    "arc" => Some(true),
+                                    _ => return Err(de::Error::custom("invalid role kind")),
+                                };
+                            }
+                            "retired" => retired = Some(map.next_value::<bool>()?),
+                            "flags" => {
+                                let raw = map.next_value::<&'de RawValue>()?;
+                                let mut fde = serde_json::Deserializer::from_str(raw.get());
+                                fde.deserialize_map(FlagsVisitor).and_then(|()| fde.end()).map_err(|_| de::Error::custom("invalid flags"))?;
+                            }
+                            _ => return Err(de::Error::custom("unexpected role key")),
+                        }
+                    }
+                    let (Some(output), Some(start), Some(end), Some(is_arc), Some(retired)) = (output, start, end, is_arc, retired) else {
+                        return Err(de::Error::custom("missing role field"));
+                    };
+                    if retired && !is_arc {
+                        return Err(de::Error::custom("only arc roles may be retired"));
+                    }
+                    Ok(RoleInfo { output, start, end, retired })
+                }
+            }
+            d.deserialize_map(V)
+        }
+    }
+    fn parse_sources(s: &str) -> Result<Vec<String>> {
+        struct PairSeed;
+        impl<'de> DeserializeSeed<'de> for PairSeed {
+            type Value = String;
+            fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<String, D::Error> {
+                struct V;
+                impl<'de> Visitor<'de> for V {
+                    type Value = String;
+                    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                        f.write_str("offset source pair")
+                    }
+                    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<String, A::Error> {
+                        let Some(id) = seq.next_element_seed(BoundedIdSeed)? else {
+                            return Err(de::Error::custom("missing source id"));
+                        };
+                        let Some(_flag) = seq.next_element::<bool>()? else {
+                            return Err(de::Error::custom("missing source bool"));
+                        };
+                        if seq.next_element::<IgnoredAny>()?.is_some() {
+                            return Err(de::Error::custom("extra source pair element"));
+                        }
+                        Ok(id)
+                    }
+                }
+                d.deserialize_seq(V)
+            }
+        }
+        struct SourcesVisitor;
+        impl<'de> Visitor<'de> for SourcesVisitor {
+            type Value = Vec<String>;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("offset sources array")
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Vec<String>, A::Error> {
+                let mut out = Vec::new();
+                while let Some(id) = seq.next_element_seed(PairSeed)? {
+                    if out.len() >= 512 {
+                        return Err(de::Error::custom("too many sources"));
+                    }
+                    out.push(id);
+                }
+                Ok(out)
+            }
+        }
+        let mut de = serde_json::Deserializer::from_str(s);
+        de.deserialize_seq(SourcesVisitor).and_then(|v| de.end().map(|()| v)).map_err(|_| invalid_offset_ref())
+    }
+    fn parse_roles(s: &str) -> Result<Vec<RoleInfo>> {
+        struct RolesVisitor;
+        impl<'de> Visitor<'de> for RolesVisitor {
+            type Value = Vec<RoleInfo>;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("offset roles array")
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Vec<RoleInfo>, A::Error> {
+                let mut out = Vec::new();
+                while let Some(role) = seq.next_element_seed(RoleSeed)? {
+                    if out.len() >= 512 {
+                        return Err(de::Error::custom("too many roles"));
+                    }
+                    out.push(role);
+                }
+                Ok(out)
+            }
+        }
+        let mut de = serde_json::Deserializer::from_str(s);
+        de.deserialize_seq(RolesVisitor).and_then(|v| de.end().map(|()| v)).map_err(|_| invalid_offset_ref())
+    }
+    fn parse_active(s: &str) -> Result<Vec<String>> {
+        struct ActiveVisitor;
+        impl<'de> Visitor<'de> for ActiveVisitor {
+            type Value = Vec<String>;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("offset outputs array")
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Vec<String>, A::Error> {
+                let mut out = Vec::new();
+                while let Some(id) = seq.next_element_seed(BoundedIdSeed)? {
+                    if out.len() >= 512 {
+                        return Err(de::Error::custom("too many active outputs"));
+                    }
+                    out.push(id);
+                }
+                Ok(out)
+            }
+        }
+        let mut de = serde_json::Deserializer::from_str(s);
+        de.deserialize_seq(ActiveVisitor).and_then(|v| de.end().map(|()| v)).map_err(|_| invalid_offset_ref())
+    }
+    struct TopoData<'de> {
+        version: u64,
+        id: String,
+        roles_raw: &'de RawValue,
+    }
+    fn parse_topology<'de>(s: &'de str) -> Result<TopoData<'de>> {
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = TopoData<'de>;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("offset topology object")
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<TopoData<'de>, A::Error> {
+                let mut version = None;
+                let mut id = None;
+                let mut roles_raw = None;
+                while let Some(key) = map.next_key::<BorrowedKey<'de>>()? {
+                    match key.0.as_ref() {
+                        "version" => version = Some(map.next_value::<u64>()?),
+                        "id" => id = Some(map.next_value_seed(BoundedIdSeed)?),
+                        "roles" => roles_raw = Some(map.next_value::<&'de RawValue>()?),
+                        _ => return Err(de::Error::custom("unexpected topology key")),
+                    }
+                }
+                let (Some(version), Some(id), Some(roles_raw)) = (version, id, roles_raw) else {
+                    return Err(de::Error::custom("missing topology field"));
+                };
+                Ok(TopoData { version, id, roles_raw })
+            }
+        }
+        let mut de = serde_json::Deserializer::from_str(s);
+        de.deserialize_map(V).and_then(|t| de.end().map(|()| t)).map_err(|_| invalid_offset_ref())
+    }
+    struct OffsetState<'a> {
+        total_roles: &'a mut usize,
+        sketch_roles: usize,
+        groups: BTreeSet<String>,
+        outputs: BTreeSet<String>,
+        point_owners: BTreeMap<String, String>,
+    }
+    struct OffsetItemSeed<'a, 'b>(&'a mut OffsetState<'b>);
+    impl<'de> DeserializeSeed<'de> for OffsetItemSeed<'_, '_> {
+        type Value = ();
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<(), D::Error> {
+            d.deserialize_any(self)
+        }
+    }
+    impl<'de> Visitor<'de> for OffsetItemSeed<'_, '_> {
+        type Value = ();
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("sketch offset entry")
+        }
+        fn visit_bool<E: de::Error>(self, _: bool) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_i64<E: de::Error>(self, _: i64) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_u64<E: de::Error>(self, _: u64) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_f64<E: de::Error>(self, _: f64) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_str<E: de::Error>(self, _: &str) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_unit<E: de::Error>(self) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_none<E: de::Error>(self) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<(), A::Error> {
+            while seq.next_element::<IgnoredAny>()?.is_some() {}
+            Ok(())
+        }
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<(), A::Error> {
+            let mut topology: Option<&'de RawValue> = None;
+            let mut closed: Option<&'de RawValue> = None;
+            let mut distance: Option<&'de RawValue> = None;
+            let mut sources: Option<&'de RawValue> = None;
+            let mut outputs: Option<&'de RawValue> = None;
+            while let Some(key) = map.next_key::<BorrowedKey<'de>>()? {
+                match key.0.as_ref() {
+                    "topology" => topology = Some(map.next_value::<&'de RawValue>()?),
+                    "closed" => closed = Some(map.next_value::<&'de RawValue>()?),
+                    "distance" => distance = Some(map.next_value::<&'de RawValue>()?),
+                    "sources" => sources = Some(map.next_value::<&'de RawValue>()?),
+                    "outputs" => outputs = Some(map.next_value::<&'de RawValue>()?),
+                    _ => {
+                        map.next_value::<IgnoredAny>()?;
+                    }
+                }
+            }
+            let Some(topo_raw) = topology.filter(|raw| raw.get() != "null") else {
+                return Ok(());
+            };
+            let state = self.0;
+            if state.groups.len() >= 128 {
+                return Err(de::Error::custom("too many offset groups"));
+            }
+            let topo = parse_topology(topo_raw.get()).map_err(|_| de::Error::custom("invalid topology"))?;
+            if !state.groups.insert(topo.id.clone())
+                || topo.version != 1
+                || !closed.is_some_and(|raw| serde_json::from_str::<bool>(raw.get()) == Ok(true))
+            {
+                return Err(de::Error::custom("invalid topology header"));
+            }
+            let dist = distance.and_then(|raw| serde_json::from_str::<f64>(raw.get()).ok()).ok_or_else(|| de::Error::custom("missing distance"))?;
+            if !dist.is_finite() || dist.abs() <= 1e-9 || dist.abs() >= 1e9 {
+                return Err(de::Error::custom("distance out of range"));
+            }
+            let sources = parse_sources(sources.ok_or_else(|| de::Error::custom("missing sources"))?.get())
+                .map_err(|_| de::Error::custom("invalid sources"))?;
+            let roles = parse_roles(topo.roles_raw.get()).map_err(|_| de::Error::custom("invalid roles"))?;
+            let active =
+                parse_active(outputs.ok_or_else(|| de::Error::custom("missing outputs"))?.get()).map_err(|_| de::Error::custom("invalid outputs"))?;
+            if roles.is_empty() || roles.len() > 512 || roles.len() != sources.len() || active.len() > roles.len() {
+                return Err(de::Error::custom("role/source/active length mismatch"));
+            }
+            *state.total_roles = state.total_roles.saturating_add(roles.len());
+            state.sketch_roles = state.sketch_roles.saturating_add(roles.len());
+            if *state.total_roles > 1_000_000 || state.sketch_roles > 20_000 {
+                return Err(de::Error::custom("too many offset roles"));
+            }
+            let mut active_index = 0usize;
+            let mut source_ids = BTreeSet::new();
+            for (source, role) in sources.iter().zip(&roles) {
+                if !source_ids.insert(source.as_str())
+                    || source == &role.output
+                    || !state.outputs.insert(role.output.clone())
+                    || role.start == role.end
+                {
+                    return Err(de::Error::custom("duplicate or conflicting offset ids"));
+                }
+                for point in [&role.start, &role.end] {
+                    if point == &role.output
+                        || point == source
+                        || state.point_owners.insert(point.clone(), topo.id.clone()).is_some_and(|owner| owner != topo.id)
+                    {
+                        return Err(de::Error::custom("conflicting offset point owner"));
+                    }
+                }
+                if !role.retired {
+                    if active.get(active_index).is_none_or(|id| id != &role.output) {
+                        return Err(de::Error::custom("active output mismatch"));
+                    }
+                    active_index += 1;
+                }
+            }
+            if active_index != active.len() || active_index < 3 {
+                return Err(de::Error::custom("too few active offset outputs"));
+            }
+            Ok(())
+        }
+    }
+    struct OffsetsVisitor<'a, 'b>(&'a mut OffsetState<'b>);
+    impl<'de> Visitor<'de> for OffsetsVisitor<'_, '_> {
+        type Value = ();
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("sketch.offsets array")
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<(), A::Error> {
+            while seq.next_element_seed(OffsetItemSeed(&mut *self.0))?.is_some() {}
+            Ok(())
+        }
+    }
+    let mut state = OffsetState { total_roles, sketch_roles: 0, groups: BTreeSet::new(), outputs: BTreeSet::new(), point_owners: BTreeMap::new() };
+    let mut de = serde_json::Deserializer::from_str(s);
+    de.deserialize_seq(OffsetsVisitor(&mut state)).and_then(|()| de.end()).map_err(|_| invalid_offset_ref())?;
+    if state.groups.iter().any(|group| state.outputs.contains(group) || state.point_owners.contains_key(group))
+        || state.outputs.iter().any(|output| state.point_owners.contains_key(output))
+    {
+        return Err(invalid_offset_ref());
+    }
+    Ok(())
+}
+
+/// Returns `true` iff `s` is a JSON array with at most `max` elements, without allocating a `Vec`.
+fn is_bounded_array(s: &str, max: usize) -> bool {
+    struct BoundSeq(usize);
+    impl<'de> Visitor<'de> for BoundSeq {
+        type Value = ();
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("bounded JSON array")
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<(), A::Error> {
+            let mut count = 0usize;
+            while seq.next_element::<IgnoredAny>()?.is_some() {
+                count += 1;
+                if count > self.0 {
+                    return Err(de::Error::custom("array exceeds bound"));
+                }
+            }
+            Ok(())
+        }
+    }
+    let mut de = serde_json::Deserializer::from_str(s);
+    de.deserialize_seq(BoundSeq(max)).and_then(|()| de.end()).is_ok()
+}
+
+thread_local! {
+    static STREAMING_FEATURES: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Run `f` with streaming, bounded feature deserialization enabled for [`crate::Document::features`].
+pub(super) fn with_streaming_features<T>(f: impl FnOnce() -> T) -> T {
+    struct Guard(bool);
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            STREAMING_FEATURES.with(|flag| flag.set(self.0));
+        }
+    }
+    let prev = STREAMING_FEATURES.with(|flag| flag.replace(true));
+    let _guard = Guard(prev);
+    f()
+}
+
+fn peek_feature_type(s: &str) -> Option<String> {
+    struct V;
+    impl<'de> Visitor<'de> for V {
+        type Value = Option<String>;
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("feature object")
+        }
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<Option<String>, A::Error> {
+            let mut kind = None;
+            while let Some(key) = map.next_key::<BorrowedKey<'de>>()? {
+                if key.0.as_ref() == "type" {
+                    kind = map.next_value_seed(OptStrSeed)?;
+                } else {
+                    map.next_value::<IgnoredAny>()?;
+                }
+            }
+            Ok(kind)
+        }
+    }
+    let mut de = serde_json::Deserializer::from_str(s);
+    de.deserialize_map(V).and_then(|k| de.end().map(|()| k)).ok().flatten()
+}
+
+/// Deserialize `Document.features` without unbounded `#[serde(flatten)]` / `Content` buffering on
+/// the current-version streaming path. Large feature variants (`sketch`, `import`, `mesh_import`)
+/// decode directly into typed wire structs; all other variants decode under [`from_str_bounded_typed`].
+pub(crate) fn deserialize_features<'de, D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Vec<crate::Feature>, D::Error> {
+    if !STREAMING_FEATURES.with(Cell::get) {
+        return serde::Deserialize::deserialize(deserializer);
+    }
+
+    #[derive(serde::Deserialize)]
+    struct SketchWire {
+        id: u64,
+        name: String,
+        #[serde(default)]
+        suppressed: bool,
+        #[serde(default)]
+        body_names: Vec<String>,
+        #[serde(default)]
+        param_names: Vec<String>,
+        #[serde(default)]
+        component: u64,
+        #[serde(default)]
+        edge_refs: Vec<crate::EdgeRef>,
+        #[serde(default)]
+        edge_names: Vec<String>,
+        #[serde(default)]
+        face_names: Vec<String>,
+        #[serde(default)]
+        participants: Vec<String>,
+        #[serde(default)]
+        shell_piece_order: bool,
+        #[serde(default)]
+        kernel_piece_order: bool,
+        #[serde(default)]
+        least_face_piece_order: bool,
+        #[serde(default)]
+        pattern_names_in_order: bool,
+        #[serde(default)]
+        inserted: bool,
+        #[serde(default)]
+        link_faces: Vec<Vec<String>>,
+        #[serde(default)]
+        link_threads: Vec<Vec<crate::ThreadInfo>>,
+        #[serde(default)]
+        touching: crate::document::Touching,
+        #[serde(default)]
+        profile_frame: Option<crate::Mat>,
+        plane: crate::PlaneRef,
+        sketch: solidcraft_sketch::Sketch,
+    }
+    impl From<SketchWire> for crate::Feature {
+        fn from(w: SketchWire) -> Self {
+            Self {
+                id: w.id,
+                name: w.name,
+                suppressed: w.suppressed,
+                body_names: w.body_names,
+                param_names: w.param_names,
+                component: w.component,
+                edge_refs: w.edge_refs,
+                edge_names: w.edge_names,
+                face_names: w.face_names,
+                participants: w.participants,
+                shell_piece_order: w.shell_piece_order,
+                kernel_piece_order: w.kernel_piece_order,
+                least_face_piece_order: w.least_face_piece_order,
+                pattern_names_in_order: w.pattern_names_in_order,
+                inserted: w.inserted,
+                link_faces: w.link_faces,
+                link_threads: w.link_threads,
+                touching: w.touching,
+                profile_frame: w.profile_frame,
+                kind: crate::FeatureKind::Sketch { plane: w.plane, sketch: w.sketch },
+            }
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    struct ImportWire {
+        id: u64,
+        name: String,
+        #[serde(default)]
+        suppressed: bool,
+        #[serde(default)]
+        body_names: Vec<String>,
+        #[serde(default)]
+        param_names: Vec<String>,
+        #[serde(default)]
+        component: u64,
+        #[serde(default)]
+        edge_refs: Vec<crate::EdgeRef>,
+        #[serde(default)]
+        edge_names: Vec<String>,
+        #[serde(default)]
+        face_names: Vec<String>,
+        #[serde(default)]
+        participants: Vec<String>,
+        #[serde(default)]
+        shell_piece_order: bool,
+        #[serde(default)]
+        kernel_piece_order: bool,
+        #[serde(default)]
+        least_face_piece_order: bool,
+        #[serde(default)]
+        pattern_names_in_order: bool,
+        #[serde(default)]
+        inserted: bool,
+        #[serde(default)]
+        link_faces: Vec<Vec<String>>,
+        #[serde(default)]
+        link_threads: Vec<Vec<crate::ThreadInfo>>,
+        #[serde(default)]
+        touching: crate::document::Touching,
+        #[serde(default)]
+        profile_frame: Option<crate::Mat>,
+        file: String,
+        step: std::sync::Arc<str>,
+        #[serde(default)]
+        components: Vec<solidcraft_kernel::StepNode>,
+        #[serde(default)]
+        skip: Vec<u64>,
+        #[serde(default)]
+        records: Option<std::sync::Arc<solidcraft_kernel::ImportRecords>>,
+    }
+    impl From<ImportWire> for crate::Feature {
+        fn from(w: ImportWire) -> Self {
+            Self {
+                id: w.id,
+                name: w.name,
+                suppressed: w.suppressed,
+                body_names: w.body_names,
+                param_names: w.param_names,
+                component: w.component,
+                edge_refs: w.edge_refs,
+                edge_names: w.edge_names,
+                face_names: w.face_names,
+                participants: w.participants,
+                shell_piece_order: w.shell_piece_order,
+                kernel_piece_order: w.kernel_piece_order,
+                least_face_piece_order: w.least_face_piece_order,
+                pattern_names_in_order: w.pattern_names_in_order,
+                inserted: w.inserted,
+                link_faces: w.link_faces,
+                link_threads: w.link_threads,
+                touching: w.touching,
+                profile_frame: w.profile_frame,
+                kind: crate::FeatureKind::Import { file: w.file, step: w.step, components: w.components, skip: w.skip, records: w.records },
+            }
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    struct MeshImportWire {
+        id: u64,
+        name: String,
+        #[serde(default)]
+        suppressed: bool,
+        #[serde(default)]
+        body_names: Vec<String>,
+        #[serde(default)]
+        param_names: Vec<String>,
+        #[serde(default)]
+        component: u64,
+        #[serde(default)]
+        edge_refs: Vec<crate::EdgeRef>,
+        #[serde(default)]
+        edge_names: Vec<String>,
+        #[serde(default)]
+        face_names: Vec<String>,
+        #[serde(default)]
+        participants: Vec<String>,
+        #[serde(default)]
+        shell_piece_order: bool,
+        #[serde(default)]
+        kernel_piece_order: bool,
+        #[serde(default)]
+        least_face_piece_order: bool,
+        #[serde(default)]
+        pattern_names_in_order: bool,
+        #[serde(default)]
+        inserted: bool,
+        #[serde(default)]
+        link_faces: Vec<Vec<String>>,
+        #[serde(default)]
+        link_threads: Vec<Vec<crate::ThreadInfo>>,
+        #[serde(default)]
+        touching: crate::document::Touching,
+        #[serde(default)]
+        profile_frame: Option<crate::Mat>,
+        file: String,
+        meshes: Vec<crate::MeshData>,
+    }
+    impl From<MeshImportWire> for crate::Feature {
+        fn from(w: MeshImportWire) -> Self {
+            Self {
+                id: w.id,
+                name: w.name,
+                suppressed: w.suppressed,
+                body_names: w.body_names,
+                param_names: w.param_names,
+                component: w.component,
+                edge_refs: w.edge_refs,
+                edge_names: w.edge_names,
+                face_names: w.face_names,
+                participants: w.participants,
+                shell_piece_order: w.shell_piece_order,
+                kernel_piece_order: w.kernel_piece_order,
+                least_face_piece_order: w.least_face_piece_order,
+                pattern_names_in_order: w.pattern_names_in_order,
+                inserted: w.inserted,
+                link_faces: w.link_faces,
+                link_threads: w.link_threads,
+                touching: w.touching,
+                profile_frame: w.profile_frame,
+                kind: crate::FeatureKind::MeshImport { file: w.file, meshes: w.meshes },
+            }
+        }
+    }
+
+    struct FeaturesVecVisitor;
+    impl<'de> Visitor<'de> for FeaturesVecVisitor {
+        type Value = Vec<crate::Feature>;
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("a sequence of features")
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Vec<crate::Feature>, A::Error> {
+            let mut features = Vec::new();
+            while let Some(raw) = seq.next_element::<&'de RawValue>()? {
+                let feature = match peek_feature_type(raw.get()).as_deref() {
+                    Some("sketch") => from_str_bounded_typed::<SketchWire>(raw.get(), MAX_VALUE_MEMORY_BYTES)
+                        .map(crate::Feature::from)
+                        .map_err(de::Error::custom)?,
+                    Some("import") => from_str_bounded_typed::<ImportWire>(raw.get(), MAX_VALUE_MEMORY_BYTES)
+                        .map(crate::Feature::from)
+                        .map_err(de::Error::custom)?,
+                    Some("mesh_import") => from_str_bounded_typed::<MeshImportWire>(raw.get(), MAX_VALUE_MEMORY_BYTES)
+                        .map(crate::Feature::from)
+                        .map_err(de::Error::custom)?,
+                    _ => from_str_bounded_typed::<crate::Feature>(raw.get(), MAX_VALUE_MEMORY_BYTES).map_err(de::Error::custom)?,
+                };
+                features.push(feature);
+            }
+            Ok(features)
+        }
+    }
+    deserializer.deserialize_seq(FeaturesVecVisitor)
 }

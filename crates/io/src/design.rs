@@ -1336,10 +1336,16 @@ fn read_document_within<R: Read + Seek>(reader: &mut PackageReader<R>, record_bo
     let text = std::str::from_utf8(&bytes).map_err(invalid)?;
     let newer = newer_container || solidcraft_doc::format::says_newer(text);
 
+    let check_empty_mesh = |mesh: &MeshData| {
+        if !mesh.positions.is_empty() || !mesh.triangles.is_empty() {
+            return Err(invalid("ambiguous embedded mesh and blob"));
+        }
+        Ok(())
+    };
     let mut doc = if newer {
-        read_newer_document(reader, &bytes, container, newer_container, record_bodies)?
+        read_newer_document(reader, &bytes, container, newer_container, record_bodies, &check_empty_mesh)?
     } else {
-        read_known_document(reader, &bytes, text, record_bodies)?
+        read_known_document(reader, &bytes, text, record_bodies, &check_empty_mesh)?
     };
     let (drawings, kept) = drawing::read(reader)?;
     doc.drawings = drawings;
@@ -1369,7 +1375,13 @@ fn read_document_within<R: Read + Seek>(reader: &mut PackageReader<R>, record_bo
 
 /// Fast, zero-DOM container document reader for designs this build knows: extracts only the tiny
 /// blob-reference fields from `document.json` without allocating a whole-document `Value` tree.
-fn read_known_document<R: Read + Seek>(reader: &mut PackageReader<R>, bytes: &[u8], text: &str, record_bodies: usize) -> Result<Document> {
+fn read_known_document<R: Read + Seek>(
+    reader: &mut PackageReader<R>,
+    bytes: &[u8],
+    text: &str,
+    record_bodies: usize,
+    check_empty_mesh: &impl Fn(&MeshData) -> Result<()>,
+) -> Result<Document> {
     check_hdr_manifest(bytes)?;
     check_texture_manifest(bytes)?;
     let refs = extract_container_refs(bytes)?;
@@ -1403,9 +1415,7 @@ fn read_known_document<R: Read + Seek>(reader: &mut PackageReader<R>, bytes: &[u
             }
             FeatureKind::MeshImport { meshes, .. } => {
                 for (mi, mesh) in meshes.iter_mut().enumerate() {
-                    if !mesh.positions.is_empty() || !mesh.triangles.is_empty() {
-                        return Err(invalid("ambiguous embedded mesh and blob"));
-                    }
+                    check_empty_mesh(mesh)?;
                     let mesh_name =
                         fref.and_then(|r| r.meshes.get(&mi)).map(String::as_str).ok_or_else(|| invalid("missing `mesh_blob` reference"))?;
                     decode_mesh(reader.blob_named(mesh_name, "mesh")?, mesh)?;
@@ -1448,6 +1458,7 @@ fn read_newer_document<R: Read + Seek>(
     container: Value,
     newer_container: bool,
     record_bodies: usize,
+    check_empty_mesh: &impl Fn(&MeshData) -> Result<()>,
 ) -> Result<Document> {
     let mut metadata: Value =
         solidcraft_doc::json_budget::from_slice_bounded(bytes, solidcraft_doc::json_budget::MAX_VALUE_MEMORY_BYTES).map_err(invalid)?;
@@ -1509,9 +1520,7 @@ fn read_newer_document<R: Read + Seek>(
             }
             FeatureKind::MeshImport { meshes, .. } => {
                 for (index, mesh) in meshes.iter_mut().enumerate() {
-                    if !mesh.positions.is_empty() || !mesh.triangles.is_empty() {
-                        return Err(invalid("ambiguous embedded mesh and blob"));
-                    }
+                    check_empty_mesh(mesh)?;
                     let value = value.get("meshes").and_then(|v| v.get(index)).ok_or_else(|| invalid("missing mesh metadata"))?;
                     decode_mesh(reader.blob(value, "mesh_blob", "mesh")?, mesh)?;
                 }
@@ -1724,9 +1733,7 @@ fn extract_container_refs(bytes: &[u8]) -> Result<ContainerRefs> {
                     let mut out = BTreeMap::new();
                     let mut idx = 0usize;
                     while let Some(item) = seq.next_element_seed(MeshItemSeed)? {
-                        if let Some(blob) = item
-                            && out.len() < 65_536
-                        {
+                        if let Some(blob) = item {
                             out.insert(idx, blob);
                         }
                         idx += 1;
@@ -1935,9 +1942,7 @@ fn extract_container_refs(bytes: &[u8]) -> Result<ContainerRefs> {
                     let mut out = BTreeMap::new();
                     let mut idx = 0usize;
                     while let Some(item) = seq.next_element_seed(CanvasItemSeed)? {
-                        if let Some(blob) = item
-                            && out.len() < 65_536
-                        {
+                        if let Some(blob) = item {
                             out.insert(idx, blob);
                         }
                         idx += 1;
@@ -2041,7 +2046,7 @@ fn extract_container_refs(bytes: &[u8]) -> Result<ContainerRefs> {
                     let mut out = BTreeMap::new();
                     let mut idx = 0usize;
                     while let Some(item) = seq.next_element_seed(CloudItemSeed)? {
-                        if !item.is_empty() && out.len() < 65_536 {
+                        if !item.is_empty() {
                             out.insert(idx, item);
                         }
                         idx += 1;

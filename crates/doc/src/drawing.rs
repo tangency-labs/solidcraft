@@ -522,7 +522,7 @@ impl Drawing {
             return Self::read_value(v, Some(s));
         }
         Self::check_raw_streaming(s)?;
-        let wire: DrawingWire<'_> = serde_json::from_str(s).map_err(damaged)?;
+        let wire: DrawingWire<'_> = crate::json_budget::from_str_bounded_typed(s, crate::json_budget::MAX_VALUE_MEMORY_BYTES).map_err(damaged)?;
         let mut d = wire.into_drawing()?;
         d = Self::finish_decode(d)?;
         Ok(Drawing { format: DRAWING.format_string(DRAWING.current()), format_pending: DRAWING.pending_names(), ..d })
@@ -1182,10 +1182,10 @@ struct DrawingWire<'a> {
     dimensions: Vec<Arc<Dimension>>,
     #[serde(default)]
     balloons: ById<Balloon>,
-    #[serde(default)]
-    images: ById<ImageFile>,
-    #[serde(default)]
-    sheet_images: ById<SheetImage>,
+    #[serde(borrow, default)]
+    images: Option<&'a serde_json::value::RawValue>,
+    #[serde(borrow, default)]
+    sheet_images: Option<&'a serde_json::value::RawValue>,
     #[serde(default)]
     tables: ById<SheetTable>,
     #[serde(default)]
@@ -1232,8 +1232,8 @@ impl DrawingWire<'_> {
             views: self.views,
             dimensions: self.dimensions,
             balloons: self.balloons,
-            images: self.images,
-            sheet_images: self.sheet_images,
+            images: ById::default(),
+            sheet_images: ById::default(),
             tables: self.tables,
             notes: self.notes,
             centre_marks: self.centre_marks,
@@ -1245,7 +1245,7 @@ impl DrawingWire<'_> {
             patterns: self.patterns,
             newer_file: None,
         };
-        image::take_back_typed(&mut d, self.image_files, self.placed_images, self.logo_cells).map_err(damaged)?;
+        image::take_back_typed(&mut d, self.images, self.sheet_images, self.image_files, self.placed_images, self.logo_cells).map_err(damaged)?;
         Ok(d)
     }
 }
