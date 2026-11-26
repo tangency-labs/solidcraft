@@ -409,6 +409,21 @@ sense are proved in rounded interval arithmetic or refused (`DraftRefusal`). The
 or cone with a `DraftDefinition` (bound 0, re-certified by `lies_on`), applied by the local
 operation (`solidcore-ops/src/offset.rs`, `draft`).
 
+**A complete radial wall drafted inward.** Where the one drafted face is a whole cylinder or cone
+about the pull (its UV box's four sides its whole boundary, bare planes across both rims, one
+material region and no cavity), the draft removes the set W = { r_new(z) ≤ ρ ≤ r_old(z) } over
+the wall's slab by the boolean difference B − W [5] (`contract_complete_cone`,
+`topology/brep/local_operation.rs`). The drafted cone must be the old one's axis and slab to the
+body's tolerance (`coaxial_slab`: the axes' offset and tilt over the slab, the seams' twist, the
+drafted net's end rows on the old end planes), both radii positive and r_new nowhere past r_old;
+both are affine in height, so their ends decide. An end where r_new is below r_old by more than the
+tolerance gets an annular cap drawn on the old end plane, in the old frame; the other end is the
+hinge. The boolean cuts every wall W passes through, so holes or pockets the drafted side reaches
+break out through it, where the local operation's offset faces would cross loops it cannot
+resolve (`LoopCrossing::Unmerged`, `offset_executive/crossing_loops.rs`). Only the static entry
+point (`local_operation_simple`) takes this path; a partial wall, a plane, or a draft that moves a
+wall outward still goes through the local operation.
+
 **A draft into another shell.** A cone or cylinder drafted about the pull sweeps, at each height h
 above its hinge circle, the points whose ψ = atan t − atan((ρ − r0) / h) lies between 0 and the
 lean (`largest_clear_angle`, `offset/draft.rs`). A cavity's wall (or another lump) bounded by cones,
@@ -438,6 +453,21 @@ stitch:
 5. **A solid** goes to `shell_difference`: an inset is the input minus the offset, an outset the
    offset minus the input, by the manifold boolean configured with the input's tolerance and 20°
    (`configure_operands`).
+
+`shell_brep_simple` (`offset_executive/p2.rs`), the entry every caller's shell goes through,
+first turns the seam of each cone or cylinder face whose loops are a band and holes about its
+axis to the middle of the widest angle the holes leave free (`offset/shell_seams.rs`): the
+offset keeps each face's loops, so a hole whose offset grows past a seam its rim did not reach
+would cross an edge nothing splits. The faces the shell keeps get their seams
+back afterwards. A face that is not such a band is left, and the reason is kept as a value
+(`Leave`), not as an error. A turn that is tried and fails is a failure: the face keeps the
+seam it had, and the turn's typed cause goes into the shell's `SeamReport`
+(`shell_brep_simple_reporting`). It does not refuse the shell, because a seam turn moves no
+point of the body. If a turn before the shell fails, the shell builds, or is refused, exactly
+as it would without that turn. If a turn back fails, the result is the same valid body, with
+that face's seam left on the turned ruling. An inward closed shell refused for a thin feature
+(`offset/thin_features.rs`) takes off together every feature with a face whose inset collapses,
+then each other feature on its own.
 
 Ops (`solidcore-ops/src/offset.rs`) calls this as `SmApiShellBrepFull` with convex edges extended,
 results merged, the offset solid made and the sheet's side walls merged. `thicken` with
