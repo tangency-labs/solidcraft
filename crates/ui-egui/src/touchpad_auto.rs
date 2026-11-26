@@ -33,8 +33,9 @@ pub(crate) fn device(events: &[egui::Event]) -> Option<Device> {
 
 /// Follows the device in use; called once a frame before navigation reads the preset. A choice
 /// made in Preferences, turning the setting off, or a scripted press ends a borrowed Touchpad
-/// preset. While the Preferences dialog is open nothing switches, so it shows what it saves.
-pub(crate) fn follow(app: &mut SolveApp, device: Option<Device>, buttons_down: bool) {
+/// preset. While the Preferences dialog is open nothing switches, so it shows what it saves, and
+/// nothing switches in the middle of a drag (`held`: a button held from an earlier frame).
+pub(crate) fn follow(app: &mut SolveApp, device: Option<Device>, held: bool) {
     if app.touchpad_borrowed.is_some() && app.preferences.nav != TOUCHPAD_NAV {
         app.touchpad_borrowed = None;
     }
@@ -44,12 +45,11 @@ pub(crate) fn follow(app: &mut SolveApp, device: Option<Device>, buttons_down: b
         }
         return;
     }
-    if app.prefs_window.shell.snapshot().is_some() {
+    if held || app.prefs_window.shell.snapshot().is_some() {
         return;
     }
     match device {
-        // Not in the middle of a drag: a press that starts one comes from the mouse anyway.
-        Some(Device::Touchpad) if !buttons_down && app.preferences.nav != TOUCHPAD_NAV => {
+        Some(Device::Touchpad) if app.preferences.nav != TOUCHPAD_NAV => {
             app.touchpad_borrowed = Some(std::mem::replace(&mut app.preferences.nav, TOUCHPAD_NAV.into()));
         }
         Some(Device::Mouse) => {
@@ -149,10 +149,37 @@ mod tests {
         app.preferences.touchpad_auto_preset = false;
         follow(&mut app, None, false);
         assert_eq!(app.preferences.nav, "blender");
-        // Someone who chose the Touchpad preset keeps it whatever the mouse does.
+        // A wheel notch in the middle of a drag waits for the drag to end.
         app.preferences.touchpad_auto_preset = true;
+        follow(&mut app, Some(Device::Touchpad), false);
+        follow(&mut app, Some(Device::Mouse), true);
+        assert_eq!(app.preferences.nav, TOUCHPAD_NAV, "never in the middle of a drag, either way");
+        follow(&mut app, Some(Device::Mouse), false);
+        assert_eq!(app.preferences.nav, "blender");
+        // Someone who chose the Touchpad preset keeps it whatever the mouse does.
         app.preferences.nav = TOUCHPAD_NAV.into();
         follow(&mut app, Some(Device::Mouse), false);
         assert_eq!(app.preferences.nav, TOUCHPAD_NAV);
+    }
+
+    #[test]
+    fn a_borrow_never_reaches_the_file_through_the_preferences_dialog_or_outlives_a_load() {
+        let mut app = app();
+        follow(&mut app, Some(Device::Touchpad), false);
+        // Preferences opened while borrowed: its held snapshot has the borrowed preset.
+        crate::prefs::open_at(&mut app, crate::prefs::PAGE_NAVIGATION);
+        let ctx = egui::Context::default();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| crate::prefs::show(&mut app, ui.ctx()));
+        out.textures_delta.clear();
+        assert!(app.prefs_window.shell.snapshot().is_some(), "the dialog holds a snapshot");
+        assert_eq!(saved_nav_in_file(&app), "fusion");
+        // Loading settings that choose Touchpad ends the borrow: the loaded choice is kept.
+        let mut loaded: serde_json::Value = serde_json::from_str(&app.prefs()).unwrap_or_default();
+        loaded["preferences"]["nav"] = TOUCHPAD_NAV.into();
+        loaded["preferences"]["touchpad_auto_preset"] = false.into();
+        app.load_prefs(&loaded.to_string());
+        follow(&mut app, None, false);
+        assert_eq!(app.preferences.nav, TOUCHPAD_NAV);
+        assert_eq!(saved_nav(&app), None);
     }
 }

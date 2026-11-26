@@ -1632,12 +1632,6 @@ impl SolveApp {
         {
             obj.insert(panel_runtime::PREFERENCES_KEY.into(), layout);
         }
-        // A Touchpad preset borrowed while the touchpad is in use is never saved (#22442).
-        if let Some(chosen) = touchpad_auto::saved_nav(self)
-            && let Some(prefs) = v.get_mut("preferences").and_then(Value::as_object_mut)
-        {
-            prefs.insert("nav".into(), json!(chosen));
-        }
         // While the Preferences dialog is open the file holds what Cancel would restore: a change
         // that was never applied must not reach disk through the periodic save, a quit or a
         // window close (#9730). One change covers every writer — desktop save and on_exit, the
@@ -1648,6 +1642,13 @@ impl SolveApp {
             for (key, value) in held {
                 obj.insert(key, value);
             }
+        }
+        // A Touchpad preset borrowed while the touchpad is in use is never saved (#22442),
+        // nor through the overlay's snapshot taken while it was borrowed.
+        if let Some(chosen) = touchpad_auto::saved_nav(self)
+            && let Some(prefs) = v.get_mut("preferences").and_then(Value::as_object_mut)
+        {
+            prefs.insert("nav".into(), json!(chosen));
         }
         // A setting the organization's policy sets is saved with the person's own value.
         policy::keep_own(self, &mut v);
@@ -1731,6 +1732,7 @@ impl SolveApp {
             }
             self.ui.layout = p.layout;
             self.preferences = p;
+            self.touchpad_borrowed = None;
         }
         // 0.43 removed the cube navigator (#17003), and a cube saved before reads as the signed
         // axes. Said once: the next save keeps the axes, so the note doesn't come back (#19749).
@@ -4634,8 +4636,9 @@ impl SolveApp {
         ui_kit::install_keyboard_focus(ctx);
         // A setting the organization's policy sets keeps its value, whatever changed it.
         policy::enforce(self);
-        let (device, buttons_down) = ctx.input(|i| (touchpad_auto::device(&i.events), i.pointer.any_down()));
-        touchpad_auto::follow(self, device, buttons_down);
+        // Held from an earlier frame: a press in this frame starts a drag, it isn't in one.
+        let (device, held) = ctx.input(|i| (touchpad_auto::device(&i.events), i.pointer.any_down() && !i.pointer.any_pressed()));
+        touchpad_auto::follow(self, device, held);
         // Shortcuts run here, before `ui` installs the language scope: a tool started by its
         // key must build its translated hint in the user's language, not in English.
         let _language = solidcraft_ui_text::scope(&self.preferences.language);
