@@ -826,11 +826,9 @@ impl OffsetExecutive {
         // edge closed to a point where the faces either side meet (a draft that just
         // reaches where its neighbours converge). It is squeezed out like a closed edge
         // above; `closed_faces` takes it only where its edge on the face across closed
-        // with it. Only a straight edge: its curve keeps its old ends (the vertices moved,
-        // not the curve), and a straight edge between two vertices at one point is that
-        // point, where a curved one whose ends meet can still bound the face.
+        // with it. Only a straight edge (`squeezes_to_its_vertex`).
         if self.operation() == OffsetOperation::LocalOperation
-            && curve.is_line(5, tol)?.is_some()
+            && squeezes_to_its_vertex(&trimmed, tol)?
             && self.squeeze_closed_edge(
                 kernel,
                 original,
@@ -1324,6 +1322,20 @@ impl OffsetExecutive {
         }
         Ok(())
     }
+}
+
+/// (#1126) Whether an edge on `curve` whose two vertices met at a gap may be squeezed into
+/// that point: only a straight one. Its curve keeps its old ends (the vertices moved, not
+/// the curve), and a straight edge between two vertices at one point is that point, where a
+/// curved one whose ends meet can still bound the face. Certified over the whole curve (its
+/// control points within `tol` of one line, so the curve is), not at samples, between which
+/// a curve can bend.
+///
+/// # Errors
+///
+/// Those of the control polygon query.
+fn squeezes_to_its_vertex(curve: &Curve, tol: f64) -> Result<bool> {
+    crate::topology::brep::trim_extend::is_straight(curve, tol)
 }
 
 /// The point where three planes `(point, normal)` meet; `None` where two are parallel.
@@ -3401,5 +3413,110 @@ mod tests {
         );
         let part = curved_area_vector(origin, &polyline).unwrap().unwrap();
         assert!((part.twice_area - Vec3::new(0.0, 0.0, -2.0)).length() <= 1.0e-14);
+    }
+
+    /// The plane curve `(t, y(t), 0)` on `[0, 1]` as one Bézier curve of `y`'s degree, `y`
+    /// given by its power coefficients `a_0..a_n` (`n >= 1`): control points
+    /// `(i / n, Σ_(j <= i) C(i, j) / C(n, j) a_j, 0)`.
+    fn plane_bezier(a: &[f64]) -> BSplineCurve {
+        let n = a.len() - 1;
+        let choose = |n: usize, k: usize| -> f64 {
+            (0..k).fold(1.0, |acc, i| acc * (n - i) as f64 / (i + 1) as f64)
+        };
+        let points: Vec<[f64; 3]> = (0..=n)
+            .map(|i| {
+                let y = (0..=i).map(|j| choose(i, j) / choose(n, j) * a[j]).sum();
+                [i as f64 / n as f64, y, 0.0]
+            })
+            .collect();
+        let knots: Vec<f64> = [0.0, 1.0]
+            .iter()
+            .flat_map(|&k| std::iter::repeat_n(k, n + 1))
+            .collect();
+        spline(&points, n, &knots)
+    }
+
+    /// The power coefficients of the product of the polynomials `factors` (each by its power
+    /// coefficients).
+    fn product(factors: &[Vec<f64>]) -> Vec<f64> {
+        factors.iter().fold(vec![1.0], |acc, f| {
+            let mut out = vec![0.0; acc.len() + f.len() - 1];
+            for (i, &x) in acc.iter().enumerate() {
+                for (j, &y) in f.iter().enumerate() {
+                    out[i + j] += x * y;
+                }
+            }
+            out
+        })
+    }
+
+    /// Review r4712105683: straightness is certified over the whole curve, not at samples.
+    /// With `q(t) = t (t - 1/4) (t - 1/2) (t - 3/4) (t - 1)`, `(t, 256 q, 0)` meets the chord at
+    /// the quarters and `(t, 10^4 q^2, 0)` does too, tangent to it there, yet both leave it
+    /// between (by about `0.82` and `0.10` at `t = 1/8`): neither is squeezed. A degree 1
+    /// line and a cubic with collinear, unevenly spaced control points are straight.
+    #[test]
+    fn a_curve_bending_between_samples_is_not_squeezed() {
+        let tol = 1.0e-6;
+        let q: Vec<Vec<f64>> = [0.0, 0.25, 0.5, 0.75, 1.0]
+            .iter()
+            .map(|&r| vec![-r, 1.0])
+            .collect();
+        // `scale q^power`
+        let scaled = |scale: f64, power: usize| {
+            let mut factors = vec![vec![scale]];
+            for _ in 0..power {
+                factors.extend(q.iter().cloned());
+            }
+            product(&factors)
+        };
+        for (name, a, bulge) in [
+            ("256 q", scaled(256.0, 1), 0.82),
+            ("1e4 q^2", scaled(1.0e4, 2), 0.10),
+        ] {
+            let c = plane_bezier(&a);
+            let y = c.evaluate_point(0.125).unwrap().y;
+            assert!((y.abs() - bulge).abs() < 0.01, "{name}: {y} at t = 1/8");
+            let straight = squeezes_to_its_vertex(&Curve::from(c), tol).unwrap();
+            assert!(!straight, "{name} bends between its samples");
+        }
+        let line = spline(
+            &[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+            1,
+            &[0.0, 0.0, 1.0, 1.0],
+        );
+        let cubic = spline(
+            &[
+                [0.0, 0.0, 0.0],
+                [0.1, 0.0, 0.0],
+                [0.7, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+            ],
+            3,
+            &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        );
+        for (name, c) in [("line", line), ("collinear cubic", cubic)] {
+            let straight = squeezes_to_its_vertex(&Curve::from(c), tol).unwrap();
+            assert!(straight, "a {name} is straight");
+        }
+    }
+
+    /// Review r4712105664: an edge whose vertices met is squeezed out only where it is
+    /// straight; an arc between the same ends can still bound the face.
+    #[test]
+    fn only_a_straight_edge_is_squeezed_into_its_vertex() {
+        let tol = 1.0e-6;
+        let arc = spline(
+            &[[0.0, 0.0, 0.0], [0.5, 0.2, 0.0], [1.0, 0.0, 0.0]],
+            2,
+            &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        );
+        let chord = spline(
+            &[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+            1,
+            &[0.0, 0.0, 1.0, 1.0],
+        );
+        assert!(!squeezes_to_its_vertex(&Curve::from(arc), tol).unwrap());
+        assert!(squeezes_to_its_vertex(&Curve::from(chord), tol).unwrap());
     }
 }
