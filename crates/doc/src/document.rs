@@ -1937,7 +1937,7 @@ pub enum FeatureKind {
     },
     /// A spline on a shaft, in a bore, or both (#17693): tooth spaces cut into the picked round faces, or, with
     /// no face picked, a new splined shaft and hub at the origin. The teeth come from the kernel's tooth outlines
-    /// (`solidcraft_kernel::services::shaft_spline`), so every number here is one of their inputs and stays a parameter.
+    /// (`solidcraft_kernel::shaft_spline`), so every number here is one of their inputs and stays a parameter.
     ShaftSpline {
         /// A point on the outside of the shaft the tooth spaces are cut into.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4014,9 +4014,9 @@ pub fn literal_dir(d: &DirExpr) -> Option<Vec3> {
 
 /// `v` as a unit direction, however short it is: scaled by its largest component first, so
 /// only a vector that is exactly zero (or not finite) has none (#18822). The kernel makes it
-/// unit (`solidcore_ops::unit_direction`).
+/// unit (`solidcraft_kernel::points::unit_direction`).
 pub fn unit_direction(v: Vec3) -> Option<Vec3> {
-    solidcraft_kernel::services::unit_direction([v.x, v.y, v.z]).map(Vec3::from)
+    solidcraft_kernel::points::unit_direction([v.x, v.y, v.z]).map(Vec3::from)
 }
 
 fn z_axis_expr() -> DirExpr {
