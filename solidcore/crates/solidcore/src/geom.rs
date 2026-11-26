@@ -15,6 +15,7 @@ pub mod certified;
 pub mod check_memo;
 pub mod content;
 pub mod context;
+pub mod curve_sweep;
 pub(crate) mod expansion;
 pub mod extent1d;
 pub mod extent2d;

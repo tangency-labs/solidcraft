@@ -16,7 +16,7 @@ use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
 use super::check::whole;
-use super::types::{FaceRefs, FeatureCommon, PlaneParam, Point3, SketchRef, ToolFace, feature_common};
+use super::types::{FaceRefs, FeatureCommon, PlaneParam, Point3, SketchRef, StringList, ToolFace, feature_common};
 
 /// Cut a body into pieces along a plane, a face of another body (its surface extended), or a
 /// straight sketch line (along the sketch's normal). Each piece becomes a body.
@@ -61,9 +61,9 @@ pub struct SplitBodyParams {
     pub common: FeatureCommon,
 }
 
-/// Divide faces of a body along a plane, a face of another body (its surface extended), or a
-/// sketch's curves (along the sketch's normal), without cutting the body: each face becomes
-/// several, and the body keeps its shape.
+/// Divide faces of a body along a plane, a face of another body (its surface extended), a
+/// sketch's curves (along the sketch's normal) or a sketch's 3D curves (along the faces' normal
+/// at them), without cutting the body: each face becomes several, and the body keeps its shape.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct SplitFaceParams {
@@ -85,6 +85,17 @@ pub struct SplitFaceParams {
     /// extended past its ends.
     #[serde(default)]
     pub loops: Option<bool>,
+    /// With `sketch`: ids of its 3D curves (drawn lines, arcs and splines, included edges,
+    /// intersection curves) that split instead of its planar curves, each on its own, an open one
+    /// extended past its ends along its end tangents. Default: the planar curves, or every 3D
+    /// curve of a sketch that has no planar curves.
+    #[serde(default)]
+    pub wires: Option<StringList>,
+    /// With `sketch`: a non-zero direction `[x, y, z]` to sweep the curves along. Default: a
+    /// planar curve along the sketch's normal, a 3D curve along the mean normal of the faces at
+    /// it. A direction lying along the face all the way along a 3D curve is refused.
+    #[serde(default)]
+    pub direction: Option<Point3>,
     /// The plane to split along. Read when neither `tool` nor `sketch` is given; then it is
     /// required.
     #[serde(default)]

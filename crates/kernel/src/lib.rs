@@ -111,6 +111,8 @@ mod outline_tests;
 mod par;
 #[cfg(test)]
 mod split_cone_tests;
+#[cfg(test)]
+mod split_curves3d_tests;
 pub use par::KERNEL_STACK;
 pub use par::for_each_on_threads;
 pub use par::kernel_thread;
@@ -502,7 +504,6 @@ pub use solidcraft_smlib::stop::Stop;
 /// stops with it (a sketch solve).
 pub use solidcraft_smlib::stop::token as stop_token;
 pub use solidcraft_smlib::trace as smlib_trace;
-pub use splitface::SplitTool;
 pub use splitface::face_split_if_on_face;
 pub use splitface::has_cap_at;
 pub use splitface::split_at_facing_side;
@@ -512,6 +513,7 @@ pub use splitface::split_body_by_sheet_where_it_cuts;
 pub use splitface::split_faces;
 pub use splitface::split_faces_with_map;
 pub use splitface::{FieldKind, PieceSides, split_piece_sides};
+pub use splitface::{SplitTool, SweptCurve, curves3d_tool};
 pub use step::step_export;
 pub use step::step_export_with_face_ids;
 pub use step_in::HealedBody;

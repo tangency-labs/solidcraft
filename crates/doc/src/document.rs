@@ -1477,8 +1477,9 @@ pub enum FeatureKind {
         def: PointDef,
     },
     /// Split faces (at the given points) where a tool meets them, the solid unchanged: a plane,
-    /// a face of a body (`tool`, its surface extended) or a sketch's curves (`sketch`, swept
-    /// along its normal). The pieces are named after the face (`#k`).
+    /// a face of a body (`tool`, its surface extended), a sketch's curves (`sketch`, swept
+    /// along its normal) or a sketch's 3D curves (`wires`, swept along `direction` or the
+    /// faces' normal at each curve). The pieces are named after the face (`#k`).
     SplitFace {
         faces: Vec<FacePick>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1492,6 +1493,17 @@ pub enum FeatureKind {
         /// only. Off (each curve on its own, an open one extended past its ends) in older designs.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         loops: bool,
+        /// With `sketch`: the ids of its 3D curves that split, each on its own (an open one
+        /// extended past its ends along its end tangents), instead of its planar curves. Empty
+        /// (as in older designs): the planar curves, or every 3D curve of a sketch that has no
+        /// planar curves.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        wires: Vec<String>,
+        /// With `sketch`: the direction the curves are swept along. None (as in older designs):
+        /// a planar curve along the sketch's normal, a 3D curve along the mean normal of the
+        /// faces at it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        direction: Option<Dir>,
     },
     /// Scale bodies about a point (uniform, or per axis).
     Scale {

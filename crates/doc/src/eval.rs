@@ -1476,6 +1476,73 @@ impl ModelState {
     }
 }
 
+/// Whether Split Face by sketch `id` with no 3D curves named splits with its 3D curves: it has
+/// no planar curves to split with (construction geometry aside) and has 3D curves. A sketch
+/// with planar curves splits with them, as it always has.
+fn sketch_splits_with_wires(st: &ModelState, id: u64) -> bool {
+    st.sketch(id).is_some_and(|ss| !ss.sketch.wires.is_empty() && ss.sketch.curves.iter().all(|c| c.construction))
+}
+
+/// The 3D curves `ids` of `ss` (every one when empty), each as its exact segments end to end for
+/// Split Face: a drawn arc as its arc, a drawn control point spline as its B-spline's spans, a
+/// drawn spline through three or more points as its spans, a drawn line as itself, a linked curve
+/// held exactly (an included edge or sketch curve, an intersection curve) as its curves. A point,
+/// and a curve known only as points (projected onto a face, an iso curve), is refused: its sweep
+/// would not be the curve's.
+fn split_wires(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<Vec<kernel::PathSeg>>> {
+    let picked: Vec<&solidcraft_sketch::Wire> = if ids.is_empty() {
+        ss.sketch.wires.iter().collect()
+    } else {
+        ids.iter()
+            .map(|id| {
+                ss.sketch
+                    .wire_index(id)
+                    .and_then(|i| ss.sketch.wires.get(i))
+                    .ok_or_else(|| DocError::Unknown(format!("3D curve `{id}` in sketch `{}`", ss.name)))
+            })
+            .collect::<Result<_>>()?
+    };
+    if picked.is_empty() {
+        return Err(DocError::Invalid(format!("sketch `{}` has no 3D curves to split with", ss.name)));
+    }
+    let mut out = Vec::with_capacity(picked.len());
+    for w in picked {
+        let segs = match w {
+            solidcraft_sketch::Wire { arc: Some(arc), .. } => {
+                vec![kernel::PathSeg::Arc { a: arc.start, center: arc.center, axis: arc.normal, angle: solidcraft_sketch::arc_sweep(arc) }]
+            }
+            w if w.control.is_some() => {
+                let c = w.control_curve().ok_or_else(|| DocError::Invalid(format!("3D control point spline `{}` has no curve", w.id)))?;
+                kernel::curve_path(&c.curve, c.interval)?
+            }
+            w if w.fit.len() >= 3 => kernel::PathPiece::Spline { fit: w.fit.clone(), reversed: false }.spans()?.unwrap_or_default(),
+            solidcraft_sketch::Wire { fit, .. } if fit.len() == 2 => match fit.as_slice() {
+                [a, b] => vec![kernel::PathSeg::Line { a: *a, b: *b }],
+                _ => Vec::new(),
+            },
+            w if !w.exact.is_empty() => {
+                let mut segs = Vec::new();
+                for c in &w.exact {
+                    segs.extend(kernel::curve_path(&c.curve, c.interval)?);
+                }
+                segs
+            }
+            w if w.fit.len() == 1 => return Err(DocError::Invalid(format!("3D point `{}` cannot split a face: pick a curve", w.id))),
+            w => {
+                return Err(DocError::Invalid(format!(
+                    "not supported yet: splitting along 3D curve `{}`, which is known only as points (a projected or iso curve)",
+                    w.id
+                )));
+            }
+        };
+        if segs.is_empty() {
+            return Err(DocError::Invalid(format!("3D curve `{}` has no segments to split with", w.id)));
+        }
+        out.push(segs);
+    }
+    Ok(out)
+}
+
 /// The role of each face of `split` (Split Face's result, `from` the face of the body before
 /// each came from) that is a piece of one of the faces `picked`: which side of the tool it lies
 /// on (`+`/`-` of a plane or a tool face, `in`/`out` of a closed sketch curve, `left`/`right` of
@@ -16416,7 +16483,7 @@ fn eval_feature_kind(
             }
             apply_traced(doc, st, f, made, *operation, &[])
         }
-        FeatureKind::SplitFace { faces, body, plane, tool, sketch, loops } => {
+        FeatureKind::SplitFace { faces, body, plane, tool, sketch, loops, wires, direction } => {
             let i = body_at(st, body, &crate::plain(faces))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let mut picked: Vec<usize> = Vec::new();
@@ -16433,6 +16500,13 @@ fn eval_feature_kind(
                     let face = crate::appearance::face_index_at(tb, t.point.0)
                         .ok_or_else(|| DocError::Invalid(format!("no face of `{}` at the tool point", t.body)))?;
                     kernel::SplitTool::Face { body: &tb.body, face }
+                }
+                (None, Some(sid)) if !wires.is_empty() || sketch_splits_with_wires(st, sid.0) => {
+                    let ss = st.sketch(sid.0).ok_or_else(|| DocError::Unknown(format!("sketch {sid}")))?;
+                    // The 3D curves in this feature's frame, each as its exact segments.
+                    let ss = path_in_frame(doc, ss, f.component)?;
+                    let picked_wires = split_wires(&ss, wires)?;
+                    kernel::curves3d_tool(&mb.body, &picked, picked_wires, direction.map(|d| d.0))?
                 }
                 (None, Some(sid)) => {
                     let ss = st.sketch(sid.0).ok_or_else(|| DocError::Unknown(format!("sketch {sid}")))?;
@@ -16451,7 +16525,7 @@ fn eval_feature_kind(
                     if curves.is_empty() {
                         return Err(DocError::Invalid(format!("sketch `{}` has no curves to split with", ss.name)));
                     }
-                    kernel::SplitTool::Curves { plane: ss.plane, curves, along: None }
+                    kernel::SplitTool::Curves { plane: ss.plane, curves, along: direction.map(|d| d.0) }
                 }
                 (None, None) => kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?),
             };
