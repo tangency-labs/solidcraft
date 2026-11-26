@@ -292,12 +292,13 @@ pub fn can_open_options(id: &str) -> bool {
     Tool::for_command(id).is_some() || matches!(id, "drawing.sheet.add" | "drawing.sheet.set" | "drawing.set")
 }
 
-/// Dismiss the current Drawing inspector without touching source or drawing data.
+/// Dismiss the current Drawing inspector without touching source or drawing data. The Drawing
+/// Settings window is not the inspector: it stays beside it, and closes itself when Drawing, its
+/// tab or its drawing goes.
 pub fn close_panel(app: &mut SolveApp) -> bool {
     let open = app.drawing_workspace.settings_open
         || app.drawing_workspace.options.is_some()
         || app.drawing_workspace.add_sheet.is_some()
-        || app.drawing_workspace.drawing_settings.is_some()
         || app.drawing_workspace.first_sheet.is_some();
     app.drawing_workspace.settings_open = false;
     app.drawing_workspace.sheet_menu = None;
@@ -312,7 +313,6 @@ pub fn close_panel(app: &mut SolveApp) -> bool {
     app.drawing_workspace.dimension_edit = None;
     app.drawing_workspace.shown_for = None;
     app.drawing_workspace.add_sheet = None;
-    app.drawing_workspace.drawing_settings = None;
     app.drawing_workspace.first_sheet = None;
     app.drawing_workspace.settings = None;
     open
@@ -320,13 +320,14 @@ pub fn close_panel(app: &mut SolveApp) -> bool {
 
 /// Esc with the panel open: a tool's or a double-click's panel closes (true), and the selection
 /// stays for the next Esc. The panel that shows the selected object's options is not a step of its
-/// own: Esc clears the selection, as in a sketch, and the panel goes with it.
+/// own: Esc clears the selection, as in a sketch, and the panel goes with it. With no panel open,
+/// Esc closes the Drawing Settings window.
 pub(crate) fn escape_panel(app: &mut SolveApp) -> bool {
     let state = &app.drawing_workspace;
     if state.shown_for.is_some() && state.options.and_then(Tool::object) == state.shown_for {
         return false;
     }
-    close_panel(app)
+    close_panel(app) || app.drawing_workspace.drawing_settings.take().is_some()
 }
 
 /// The one view, dimension or note selected shows its options in the right panel, where a tool
@@ -2463,6 +2464,37 @@ mod tests {
         assert_eq!(open_drawing_settings(&h), Some((h.app.session.uid, drawing)));
     }
 
+    /// Drawing Settings is a window of its own, not the right panel: picking one object and then
+    /// another shows each one's options in the panel, and the window stays open beside them.
+    #[test]
+    fn selecting_objects_keeps_drawing_settings_open_beside_their_options() {
+        use serde_json::json;
+
+        let mut h = drawing_open(json!({}));
+        let drawing = the_drawing(&h).id;
+        let note = |h: &mut Harness, at: [f64; 2]| {
+            let added = h.app.run("drawing.note.add", json!({"anchor":{"sheet":"Sheet 1"},"at":at,"content":"Deburr"})).unwrap();
+            solidcraft_engine::doc::ids::decode(added["note"].as_str().unwrap()).unwrap()
+        };
+        let (first, second) = (note(&mut h, [50.0, 50.0]), note(&mut h, [120.0, 80.0]));
+        h.step(&json!({"start":"drawing.set"})).unwrap();
+        h.frames(2);
+        for object in [first, second] {
+            h.app.session.selection = vec![solidcraft_engine::Sel::Drawing { drawing, object }];
+            h.frames(3);
+            assert_eq!(h.app.drawing_workspace.options.and_then(Tool::object), Some(object), "the panel shows the picked note's options");
+            assert_eq!(open_drawing_settings(&h), Some((h.app.session.uid, drawing)), "the window stays open");
+        }
+        // Esc clears the selection and its options first, then closes the window.
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.session.selection.is_empty() && h.app.drawing_workspace.options.is_none());
+        assert!(open_drawing_settings(&h).is_some());
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.frames(2);
+        assert_eq!(open_drawing_settings(&h), None, "a second Esc closes the window");
+    }
+
     /// `ui.start` of `drawing.set` (the palette's and agents' way) opens the window. It belongs to the
     /// drawing it opened on: it closes when another drawing opens, and when its own drawing closes.
     #[test]
@@ -2500,8 +2532,8 @@ mod tests {
 
         let mut h = drawing_open(json!({"font":"No Such Family Q7","language":"fr-CA"}));
         assert!(start(&mut h.app, "drawing.set"));
-        h.frames(3);
-        // The note is looked up on a worker (the font folders, read cold): wait for it.
+        // The note is looked up on a worker (the font folders, read cold) that the window starts in
+        // its first frame, inside `settle`'s last frames: `settle` alone still waits for it.
         h.settle();
         assert!(crate::scenario::rect_of("dialog:note:drawing_settings_font_note").is_some(), "the font's note shows");
         assert!(h.widget("fr-CA").is_some(), "the language shows its own tag, not English");
