@@ -5,7 +5,10 @@ use solidcraft_engine::doc::drawing::{
     dimension::DimensionKind,
     table::{Kind, MassFormat, PartsList},
 };
-use solidcraft_engine::doc::drawing_view::{HiddenBodies, HiddenBody};
+use solidcraft_engine::doc::drawing_view::{HiddenBodies, OccurrencePaths};
+use solidcraft_engine::drawing_view::Filter;
+
+use super::view_bodies::{Bodies, Row};
 use solidcraft_engine::doc::ids;
 use solidcraft_engine::geom::{
     drawing_sheet::{DrawingBorderProfile, Orientation, PaperSize, Sheet as Paper, SheetSize},
@@ -202,44 +205,80 @@ pub(super) struct ViewEdit {
     view: u64,
     scale: String,
     style: VisualStyle,
-    /// The bodies the view leaves out one by one (#22107), read once as the panel opens: each with
-    /// its row's label and whether it is still left out (unticked).
-    hidden: Vec<HiddenRow>,
-    /// The list is the parent view's, not the view's own.
+    /// The components and bodies the view's source places, each ticked when the view draws it
+    /// (#22107). Read once as the panel opens, and again when what it was read from changes.
+    bodies: Option<Bodies>,
+    /// The view's lists are its parent's, not its own.
     inherited: bool,
-    /// The view's list the rows were read from: when the view's list changes under the open panel
-    /// (Hide in This View, Undo), the rows are read again.
-    read_from: Option<HiddenBodies>,
+    /// What the list was read from: the model's revision and the view's source, `hide` and
+    /// `hide_bodies`. Hide in This View, Undo or a model change under the open panel reads it again.
+    read_from: Option<ReadFrom>,
 }
 
-/// One body in Edit View's "Hidden in this view" list.
-struct HiddenRow {
-    body: HiddenBody,
-    label: String,
-    hidden: bool,
+#[derive(PartialEq)]
+struct ReadFrom {
+    revision: u64,
+    source: Option<OccurrencePaths>,
+    hide: Option<OccurrencePaths>,
+    hide_bodies: Option<HiddenBodies>,
 }
 
-/// The rows for the bodies a view leaves out: the body's name, and for a body of a component the
-/// component's name after it, as the Browser names them.
-fn hidden_rows(app: &SolveApp, bodies: &[HiddenBody]) -> Vec<HiddenRow> {
-    bodies
+/// The list for view `view`: the bodies `drawing.view.inspect` says its design places, those its
+/// source keeps, ticked as its `hide` and `hide_bodies` leave them. A component is named as the
+/// Browser names its occurrence.
+fn read_bodies(app: &mut SolveApp, view: u64, from: &ReadFrom) -> Option<Bodies> {
+    let read = app.session.execute("drawing.view.inspect", &json!({"view": ids::encode(view)})).ok()?;
+    let source = Filter::new(from.source.as_deref(), &[], &[]);
+    let listed: Vec<(Vec<u64>, String)> = read["bodies"]
+        .as_array()?
         .iter()
-        .map(|body| {
-            let component = (!body.path.is_empty()).then(|| app.session.occurrence_placement(&body.path).ok()).flatten();
-            let label = match component {
-                Some(placement) => format!("{} · {}", body.body, placement.name),
-                None => body.body.clone(),
-            };
-            HiddenRow { body: body.clone(), label, hidden: true }
-        })
-        .collect()
+        .filter_map(|body| Some((serde_json::from_value::<Vec<u64>>(body["path"].clone()).ok()?, body["body"].as_str()?.to_owned())))
+        .filter(|(path, body)| source.keeps(path, body))
+        .collect();
+    let session = &app.session;
+    let name = |path: &[u64]| session.occurrence_placement(path).map(|placement| placement.name).unwrap_or_default();
+    Some(Bodies::new(listed, from.hide.as_deref().unwrap_or_default(), from.hide_bodies.as_deref().unwrap_or_default(), name))
 }
 
-/// What Apply sends for the list, when it changed: the bodies still unticked, as the view's own
-/// list. Ticking every body back sends `[]`, the view's own choice to hide none, so a parent's list
-/// doesn't come back in its place.
-fn hidden_bodies_to_send(rows: &[HiddenRow]) -> Option<Vec<HiddenBody>> {
-    rows.iter().any(|row| !row.hidden).then(|| rows.iter().filter(|row| row.hidden).map(|row| row.body.clone()).collect())
+/// Edit View's "Bodies in this view": a tick for each component and body of the view's source,
+/// indented under its component. A long list scrolls in about eight rows, so Apply and OK stay in
+/// a small window; only the rows in sight are laid out.
+fn bodies_list(ui: &mut egui::Ui, view: u64, list: &mut Bodies, inherited: bool) {
+    let t = Tokens::get();
+    ui_kit::section_heading(ui, tr("ui.drawing_panel.bodies_in_view"));
+    if inherited {
+        ui_kit::text(ui, &format!("ⓘ {}", tr("ui.drawing_panel.from_parent")), ui_kit::Text::Note("ui.drawing_panel.from_parent"));
+    }
+    ui_kit::text(ui, tr("ui.drawing_panel.bodies_in_view_hint"), ui_kit::Text::Hint("ui.drawing_panel.bodies_in_view_hint"));
+    let height = t.control_height;
+    let rows = list.rows.clone();
+    egui::ScrollArea::vertical().id_salt(("drawing:edit:bodies", view)).max_height(height * 8.0).show_rows(ui, height, rows.len(), |ui, range| {
+        for row in rows.get(range).unwrap_or_default() {
+            ui.horizontal(|ui| {
+                ui.set_height(height);
+                match row {
+                    Row::Component { path, label, depth } => {
+                        ui.add_space(t.space_12 * *depth as f32);
+                        let (all, any) = list.component(path);
+                        let mut drawn = all;
+                        if ui_kit::checkbox_indeterminate(ui, label, &mut drawn, any && !all).changed() {
+                            list.set_component(path, drawn);
+                        }
+                    }
+                    Row::Body { index, depth } => {
+                        ui.add_space(t.space_12 * *depth as f32);
+                        if let Some(body) = list.bodies.get_mut(*index) {
+                            ui_kit::checkbox(ui, &body.body, &mut body.drawn);
+                        }
+                    }
+                }
+            });
+        }
+    });
+    for gone in &list.unmatched {
+        let text = solidcraft_ui_text::format("ui.drawing_panel.not_found", &[("body", &gone.body)]);
+        ui_kit::text(ui, &format!("⚠ {text}"), ui_kit::Text::Note("ui.drawing_panel.not_found"));
+    }
 }
 
 pub(super) fn view_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Option<u64>) -> bool {
@@ -263,23 +302,33 @@ pub(super) fn view_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Optio
             Some(id) => drawing.view(id).filter(|view| Some(view.sheet) == sheet),
             None => drawing.views.iter().find(|view| Some(view.sheet) == sheet).map(|view| view.as_ref()),
         }?;
-        drawing.resolve_view(view.id).ok().map(|settings| (view.id, settings.scale.value, settings.visual_style.value, settings.hide_bodies))
+        drawing.resolve_view(view.id).ok().map(|settings| {
+            // A list the view takes from its parent says so, but one the drawing's default gives (none) doesn't.
+            let inherited = [settings.hide.set_by, settings.hide_bodies.set_by].iter().any(|by| matches!(by, SetBy::Parent(_)));
+            let from = ReadFrom {
+                revision: app.session.revision,
+                source: settings.occurrences.value,
+                hide: settings.hide.value,
+                hide_bodies: settings.hide_bodies.value,
+            };
+            (view.id, settings.scale.value, settings.visual_style.value, from, inherited)
+        })
     });
-    let Some((view, scale, style, hide_bodies)) = resolved else {
+    let Some((view, scale, style, from, inherited)) = resolved else {
         return ui_kit::button(ui, tr("ui.cancel"), Button::Normal).clicked();
     };
     let mut edit = app.drawing_workspace.view_edit.take().filter(|edit| edit.view == view).unwrap_or_else(|| ViewEdit {
         view,
         scale: scale.to_string(),
         style,
-        hidden: Vec::new(),
+        bodies: None,
         inherited: false,
         read_from: None,
     });
-    if edit.read_from != hide_bodies.value {
-        edit.hidden = hidden_rows(app, hide_bodies.value.as_deref().unwrap_or_default());
-        edit.inherited = hide_bodies.set_by != SetBy::This;
-        edit.read_from = hide_bodies.value.clone();
+    if edit.read_from.as_ref() != Some(&from) {
+        edit.bodies = read_bodies(app, view, &from);
+        edit.inherited = inherited;
+        edit.read_from = Some(from);
     }
     let styles = VisualStyle::ALL;
     let labels = [
@@ -299,22 +348,19 @@ pub(super) fn view_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Optio
         }
         ui_kit::section_heading(ui, tr("ui.scale"));
         ui_kit::text_row(ui, tr("ui.scale"), &mut edit.scale, "1:1");
-        let valid = edit.scale.trim().parse::<Scale>().is_ok();
-        if !edit.hidden.is_empty() {
-            ui_kit::section_heading(ui, tr("ui.drawing_panel.hidden_in_view"));
-            if edit.inherited {
-                ui_kit::text(ui, &format!("ⓘ {}", tr("ui.drawing_panel.from_parent")), ui_kit::Text::Note("ui.drawing_panel.from_parent"));
+        let mut valid = edit.scale.trim().parse::<Scale>().is_ok();
+        // A list of one body has nothing to choose, unless the view leaves something out already.
+        if let Some(list) =
+            edit.bodies.as_mut().filter(|list| list.bodies.len() > 1 || list.bodies.iter().any(|b| !b.drawn) || !list.unmatched.is_empty())
+        {
+            bodies_list(ui, view, list, edit.inherited);
+            if list.none_drawn() {
+                valid = false;
+                ui_kit::text(ui, tr("ui.drawing_panel.tick_one"), ui_kit::Text::Error("ui.drawing_panel.tick_one"));
+            } else if list.too_many() {
+                valid = false;
+                ui_kit::text(ui, tr("ui.drawing_panel.too_many"), ui_kit::Text::Error("ui.drawing_panel.too_many"));
             }
-            ui_kit::text(ui, tr("ui.drawing_panel.hidden_in_view_hint"), ui_kit::Text::Hint("ui.drawing_panel.hidden_in_view_hint"));
-            // A long list scrolls in about eight rows, so Apply and OK stay in a small window.
-            let room = Tokens::get().control_height * 8.0;
-            egui::ScrollArea::vertical().id_salt(("drawing:edit:hidden", view)).max_height(room).show(ui, |ui| {
-                for row in &mut edit.hidden {
-                    let mut drawn = !row.hidden;
-                    ui_kit::checkbox(ui, &row.label, &mut drawn);
-                    row.hidden = !drawn;
-                }
-            });
         }
         ui.separator();
         ui.horizontal(|ui| {
@@ -337,8 +383,14 @@ pub(super) fn view_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Optio
     if edit.style != style {
         settings.insert("visual_style".into(), json!(edit.style));
     }
-    if let Some(bodies) = hidden_bodies_to_send(&edit.hidden) {
-        settings.insert("hide_bodies".into(), json!(bodies));
+    if let Some(list) = &edit.bodies {
+        let (hide, hide_bodies) = list.changes();
+        if let Some(hide) = hide {
+            settings.insert("hide".into(), json!(hide));
+        }
+        if let Some(hide_bodies) = hide_bodies {
+            settings.insert("hide_bodies".into(), json!(hide_bodies));
+        }
     }
     app.drawing_workspace.view_edit = Some(edit);
     if (!apply && !ok) || settings.is_empty() {

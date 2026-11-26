@@ -20,6 +20,7 @@ pub(crate) mod note;
 mod panels;
 pub(crate) mod placement;
 pub(crate) mod print;
+mod view_bodies;
 
 use panels::Tool;
 

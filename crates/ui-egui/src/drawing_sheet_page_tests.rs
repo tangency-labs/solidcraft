@@ -2848,11 +2848,12 @@ fn right_click_on_a_line_hides_its_body_in_that_view() {
     h.call("ui.menu", json!({"close": true}));
 }
 
-/// Edit View lists the bodies a view leaves out one by one (#22107). A projected view shows its
-/// parent's list as the parent's; ticking a body there and Apply draws it again in that view only,
-/// in one undo step, and the view's own list hides none.
+/// Edit View lists the bodies of a view's source with a tick each (#22107). A projected view shows
+/// its parent's choice as the parent's; ticking a body there and Apply draws it again in that view
+/// only, in one undo step, and the view's own list hides none. Unticking a body leaves it out on
+/// its own; with every body unticked Apply is off and the panel says why.
 #[test]
-fn edit_view_lists_hidden_bodies_and_a_tick_draws_one_again() {
+fn edit_view_lists_the_bodies_and_a_tick_chooses_what_it_draws() {
     let (mut h, view) = carcass_and_door_sheet();
     let encode = solidcraft_engine::doc::ids::encode;
     let door = solidcraft_engine::doc::drawing_view::HiddenBody { path: Vec::new(), body: "Door".into() };
@@ -2864,7 +2865,8 @@ fn edit_view_lists_hidden_bodies_and_a_tick_draws_one_again() {
 
     crate::drawing_workspace::edit_object(&mut h.app, "view", top);
     h.frames(4);
-    assert!(h.widget("Tick a body to draw it again.").is_some(), "the list shows");
+    assert!(h.widget("Untick a body or a component to leave it out of this view.").is_some(), "the list shows");
+    assert!(h.widget("Carcass").is_some(), "with every body of the source, the drawn ones too");
     assert!(h.widget("ⓘ From the parent view").is_some(), "and says the list is the parent's");
     let tick = h.widget("Door").expect("the door has a row");
     h.step(&json!({"click": tick})).unwrap();
@@ -2876,5 +2878,26 @@ fn edit_view_lists_hidden_bodies_and_a_tick_draws_one_again() {
     assert_eq!(hidden_bodies(&h, top), Some(Vec::new()), "the projected view's own list hides none");
     assert_eq!(hidden_bodies(&h, view), Some(vec![door]), "its parent still leaves the door out");
     assert_eq!(h.app.session.undo.len(), undo + 1, "in one undo step");
-    assert!(h.widget("Tick a body to draw it again.").is_none(), "with nothing left out the list goes");
+    assert!(h.widget("ⓘ From the parent view").is_none(), "the list is the view's own now");
+
+    // Unticking the carcass in the base view leaves it out on its own, the door already being out.
+    crate::drawing_workspace::edit_object(&mut h.app, "view", view);
+    h.frames(4);
+    let tick = h.widget("Carcass").expect("the carcass has a row");
+    h.step(&json!({"click": tick})).unwrap();
+    h.frames(2);
+    assert!(h.widget("Tick at least one body.").is_some(), "with nothing ticked the panel says why");
+    let undo = h.app.session.undo.len();
+    let apply = h.widget("Apply").unwrap();
+    h.step(&json!({"click": apply})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.session.undo.len(), undo, "and Apply is off");
+    let tick = h.widget("Door").unwrap();
+    h.step(&json!({"click": tick})).unwrap();
+    h.frames(2);
+    let apply = h.widget("Apply").unwrap();
+    h.step(&json!({"click": apply})).unwrap();
+    settle(&mut h);
+    let carcass = solidcraft_engine::doc::drawing_view::HiddenBody { path: Vec::new(), body: "Carcass".into() };
+    assert_eq!(hidden_bodies(&h, view), Some(vec![carcass]), "the carcass is left out, the door drawn again");
 }
