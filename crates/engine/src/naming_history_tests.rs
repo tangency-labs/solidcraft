@@ -1017,6 +1017,21 @@ fn a_round_saved_on_a_start_offset_caps_edge_stays_on_the_edge_it_was_picked_on(
     let (com, cylinders) = lid_rounds(&named_now, &[("parting_z", "wall + pcb_below + pcb_above + 9 mm")]);
     assert!((com - 26.347).abs() < 1e-3, "centre of mass z {com}");
     assert!(at_z(&cylinders, 28.21), "{cylinders:?}");
+
+    // The same round, the lid turned half a turn about the y axis through its box's centre by a
+    // Move before it: the box is the one the pick was made on, but the pick, not updated, lies on
+    // the other cap's edge, named alike but for its number. The body moved, so the name decides:
+    // the round follows `top#2` down to the bottom edge (centre of mass at z 40.8 - 20.347).
+    let mut turned = named_now.clone();
+    let turn = json!({"command": "timeline.add", "params": {"feature": {
+        "bodies": ["Lid"], "id": 50, "name": "TurnLid", "translate": ["0", "0", "0"], "rotate_axis": [0.0, 1.0, 0.0],
+        "origin": ["0", "0", "20.4 mm"], "angle": "180 deg", "suppressed": false, "type": "move"}}});
+    let commands = turned["commands"].as_array_mut().unwrap();
+    let at = commands.iter().position(|c| c["params"]["feature"]["id"] == 45).expect("the fillet");
+    commands.insert(at, turn);
+    let (com, cylinders) = lid_rounds(&turned, &[]);
+    assert!((com - 20.453).abs() < 1e-3, "centre of mass z {com}");
+    assert!(at_z(&cylinders, 18.59), "{cylinders:?}");
 }
 
 /// The volumes of the design's bodies, by name.
