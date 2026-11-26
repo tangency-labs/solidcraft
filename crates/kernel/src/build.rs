@@ -165,7 +165,7 @@ pub fn canonical_revolve_axis(plane: &Plane, region: &Region2, axis_origin: Vec2
 /// This legacy API preserves its historical sweep sign behavior.
 pub fn revolve(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "revolve");
-    revolved(plane, regions, axis_origin, axis_dir, angle)
+    revolved(plane, regions, axis_origin, axis_dir, angle, None)
 }
 
 /// [`revolve`] for bodies that are final (new bodies, not a boolean's tools), with each planar
@@ -173,7 +173,22 @@ pub fn revolve(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: 
 /// cap, so this is [`revolve`].
 pub fn revolve_whole(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "revolve_whole");
-    revolved(plane, regions, axis_origin, axis_dir, angle)
+    revolved(plane, regions, axis_origin, axis_dir, angle, None)
+}
+
+/// [`revolve`] with each run of free-form segments (conics, Béziers) that `one_curve` says are pieces of one curve
+/// (a spline's spans) turned as that one curve into one face, as [`extrude_whole_sides`] sweeps them into one wall.
+/// For tools whose faces must not multiply with the spans of the curves they are drawn with (#17693).
+pub fn revolve_whole_sides(
+    plane: &Plane,
+    regions: &[Region2],
+    axis_origin: Vec2,
+    axis_dir: Vec2,
+    angle: f64,
+    one_curve: &dyn Fn(&Seg2, &Seg2) -> bool,
+) -> Result<Vec<Body>> {
+    let _span = solidcraft_profile::span("kernel", "revolve_whole_sides");
+    revolved(plane, regions, axis_origin, axis_dir, angle, Some(one_curve))
 }
 
 /// How near the axis (mm) a profile corner between two lines goes onto it when revolved. A sketch
@@ -182,8 +197,16 @@ pub fn revolve_whole(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis
 /// ten-thousandth of a millimetre is far below any shape someone draws on purpose.
 const AXIS_SNAP: f64 = 1e-4;
 
-/// Each region revolved through SMLib ([`crate::smlib_sweeps::revolve`]).
-fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
+/// Each region revolved through SMLib ([`crate::smlib_sweeps::revolve`]), with the runs of segments `one_curve`
+/// says are one curve turned as one curve each (none: each segment on its own).
+fn revolved(
+    plane: &Plane,
+    regions: &[Region2],
+    axis_origin: Vec2,
+    axis_dir: Vec2,
+    angle: f64,
+    one_curve: Option<&dyn Fn(&Seg2, &Seg2) -> bool>,
+) -> Result<Vec<Body>> {
     let angle = finite(angle, "angle")?;
     if angle.abs() < 1e-6 {
         return Err(KernelError::Invalid("revolve angle is zero".into()));
@@ -248,7 +271,27 @@ fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec
         let c = plane.to_world(far.1);
         let radial = (c - o) - axis * (c - o).dot(axis);
         let angle = if axis.cross(radial).dot(plane.normal()) < 0.0 { -angle } else { angle };
-        out.push(crate::smlib_sweeps::revolve(plane, &crate::smlib_sweeps::pieces(given.oriented().loops()), o, axis, angle)?);
+        let Some(one_curve) = one_curve else {
+            out.push(crate::smlib_sweeps::revolve(plane, &crate::smlib_sweeps::pieces(given.oriented().loops()), o, axis, angle)?);
+            continue;
+        };
+        // Pieces of one curve: free-form segments of one degree that the caller says are one curve. Each loop
+        // starts where such a run starts, so no run wraps round its end.
+        let joins = |s: &Seg2, t: &Seg2| free_form_degree(s).is_some_and(|d| free_form_degree(t) == Some(d)) && one_curve(s, t);
+        let numbered = given.oriented().map_loops(|l| l.starting_a_run(joins));
+        let mut swept = crate::smlib_sweeps::pieces(numbered.loops());
+        let mut k = 0;
+        for l in numbered.loops() {
+            for i in 1..l.lp.segs.len() {
+                if let (Some(s), Some(t)) = (l.lp.segs.get(i - 1), l.lp.segs.get(i))
+                    && let Some(x) = swept.get_mut(k + i)
+                {
+                    x.joins_previous = joins(s, t);
+                }
+            }
+            k += l.lp.segs.len();
+        }
+        out.push(crate::smlib_sweeps::revolve(plane, &swept, o, axis, angle)?);
     }
     Ok(out)
 }
@@ -1596,4 +1639,15 @@ pub fn plane_rise(sketch: &Plane, plane: &Plane, regions: &[Region2]) -> Result<
 /// loops ([`solidcore_ops::prism::plane_gap`]).
 pub fn plane_gap(sketch: &Plane, from: &Plane, to: &Plane, regions: &[Region2]) -> Result<(f64, f64)> {
     solidcore_ops::prism::plane_gap(sketch, from, to, regions).map_err(|e| KernelError::Invalid(e.to_string()))
+}
+
+/// `plane` moved by `by` along `sketch`'s normal ([`solidcore_ops::prism::plane_raised`]).
+pub fn plane_raised(sketch: &Plane, plane: &Plane, by: f64) -> Result<Plane> {
+    solidcore_ops::prism::plane_raised(sketch, plane, by).map_err(|e| KernelError::Invalid(e.to_string()))
+}
+
+/// Which side of `from` and of `to` holds what lies between them along `travel`, `true` for the
+/// side each plane's normal points to ([`solidcore_ops::prism::slab_sides`]).
+pub fn slab_sides(travel: Vec3, from: &Plane, to: &Plane) -> Result<(bool, bool)> {
+    solidcore_ops::prism::slab_sides(travel, from, to).map_err(|e| KernelError::Invalid(e.to_string()))
 }

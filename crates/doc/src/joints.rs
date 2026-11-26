@@ -2472,9 +2472,10 @@ fn nearby_pose(tree: &Tree, groups: &[Group], asm: &Assembly, linked: &BTreeSet<
 /// actuator in line with the path of its tip pin) a part's motion vanishes to first order, so the
 /// pose alone counts 0. The tree's count stands where a loop group is over the solver's caps or
 /// the work runs out.
-fn loop_dof(tree: &Tree, closing: &[u64], asm: &Assembly, vals: &Values, dof: &mut BTreeMap<u64, usize>) {
+fn loop_dof(tree: &Tree, closing: &[u64], asm: &Assembly, vals: &Values, dof: &mut BTreeMap<u64, usize>) -> BTreeSet<u64> {
+    let mut recomputed = BTreeSet::new();
     if closing.len() > MAX_CLOSING {
-        return;
+        return recomputed;
     }
     let linked = set_values(asm);
     let mut groups = loop_groups(tree, closing, asm, &linked);
@@ -2512,7 +2513,7 @@ fn loop_dof(tree: &Tree, closing: &[u64], asm: &Assembly, vals: &Values, dof: &m
         }
         counted += 1;
         if counted > MAX_DOF_OCCURRENCES || spent > MAX_LOOP_WORK {
-            return;
+            return recomputed;
         }
         if reach.values.len() > MAX_LOOP_VALUES {
             continue;
@@ -2520,7 +2521,9 @@ fn loop_dof(tree: &Tree, closing: &[u64], asm: &Assembly, vals: &Values, dof: &m
         let scale = loop_scale(tree, &reach.around, vals);
         let Some(free) = free_motion(tree, asm, vals, near.as_ref(), &mut spent, &reach, scale, Watched::Occurrence(*occ)) else { continue };
         dof.insert(*occ, free.min(6));
+        recomputed.insert(*occ);
     }
+    recomputed
 }
 
 /// The values that move what a tree path leads to, and the loops those values are held by.
@@ -3066,15 +3069,41 @@ pub fn solve_holding_with_analysis(doc: &Document, st: &ModelState, held: &Held,
     let mut vals = joint_values(asm);
     // The rigid groups' joints, after the design's own.
     let held_contents = doc.rigid_group_joints();
-    let Built { tree, mut placed, closing, mut dof, pattern_placed } = build(doc, st, &held_contents, &vals, &mut sol);
+    let Built { mut tree, mut placed, closing, mut dof, pattern_placed } = build(doc, st, &held_contents, &vals, &mut sol);
     let mut stuck = BTreeSet::new();
     if !closing.is_empty() {
         (sol.values, stuck) = close_loops(&tree, &closing, asm, held, &mut vals);
         if !sol.values.is_empty() {
             placed = tree.place(&vals);
-            for &(copy, _) in &pattern_placed {
-                let world = solved_world(doc, &placed, copy);
-                placed.insert(copy, world);
+            if !pattern_placed.is_empty() {
+                let index = OccurrenceIndex::new(doc);
+                let mut ordered: Vec<u64> = pattern_placed.iter().map(|&(copy, _)| copy).collect();
+                ordered.sort_by_key(|&copy| (index.depth(copy), copy));
+                // Refresh pattern copies parent-first and re-place downstream joints until no copy
+                // moves, so copies contained inside joint-dependent descendants of earlier copies
+                // also pick up the refreshed ancestor transforms.
+                for _ in 0..=ordered.len() {
+                    let prev: Vec<Option<Mat>> = ordered.iter().map(|copy| tree.fixed.get(copy).copied()).collect();
+                    for &copy in &ordered {
+                        placed.remove(&copy);
+                    }
+                    let mut changed = false;
+                    for (&copy, old) in ordered.iter().zip(prev) {
+                        let world = index.solved_world(&placed, copy);
+                        if old.is_none_or(|m| {
+                            let (dt, da) = mismatch(&m, &world);
+                            dt > 1e-12 || da > 1e-12
+                        }) {
+                            changed = true;
+                        }
+                        placed.insert(copy, world);
+                        tree.fixed.insert(copy, world);
+                    }
+                    placed = tree.place(&vals);
+                    if !changed {
+                        break;
+                    }
+                }
             }
         }
     }
@@ -3103,10 +3132,37 @@ pub fn solve_holding_with_analysis(doc: &Document, st: &ModelState, held: &Held,
     }
     if analysis != Analysis::Placement {
         if !closing.is_empty() {
-            loop_dof(&tree, &closing, asm, &vals, &mut dof);
-            for &(copy, seed) in &pattern_placed {
-                if let Some(&seed_dof) = dof.get(&seed) {
-                    dof.insert(copy, seed_dof);
+            let recomputed = loop_dof(&tree, &closing, asm, &vals, &mut dof);
+            if !pattern_placed.is_empty() {
+                // Reconcile pattern copies and propagate deltas to unrecomputed descendants to a
+                // fixed point so chained copies inherit their seed's final DOF without
+                // double-subtracting from counts that `loop_dof` measured independently.
+                for _ in 0..=pattern_placed.len() {
+                    let mut delta: BTreeMap<u64, isize> = BTreeMap::new();
+                    for &(copy, seed) in &pattern_placed {
+                        if let (Some(&old_dof), Some(&seed_dof)) = (dof.get(&copy), dof.get(&seed))
+                            && old_dof != seed_dof
+                        {
+                            dof.insert(copy, seed_dof);
+                            delta.insert(copy, seed_dof as isize - old_dof as isize);
+                        }
+                    }
+                    if delta.is_empty() {
+                        break;
+                    }
+                    for &occ in &tree.order {
+                        if recomputed.contains(&occ) {
+                            continue;
+                        }
+                        if let Some(&(parent, _, _)) = tree.parent.get(&occ)
+                            && let Some(&d) = delta.get(&parent)
+                        {
+                            if let Some(entry) = dof.get_mut(&occ) {
+                                *entry = entry.saturating_add_signed(d).min(6);
+                            }
+                            delta.insert(occ, d);
+                        }
+                    }
                 }
             }
         }
@@ -3142,24 +3198,58 @@ struct Built<'a> {
     pattern_placed: Vec<(u64, u64)>,
 }
 
-/// World transform of `occ` using already-solved ancestor transforms in `placed` when present,
-/// falling back to stored local transforms.
-fn solved_world(doc: &Document, placed: &BTreeMap<u64, Mat>, occ: u64) -> Mat {
-    let mut m = IDENTITY;
-    let mut cur = occ;
-    for _ in 0..crate::assembly::MAX_PLACEMENT_DEPTH {
-        if let Some(&w) = placed.get(&cur) {
-            return mat_mul(&w, &m);
+/// Reusable index of `Document::occurrences` by occurrence id and first occurrence per component,
+/// avoiding repeated linear scans when placing component-pattern copies.
+struct OccurrenceIndex<'a> {
+    by_id: std::collections::HashMap<u64, &'a crate::Occurrence>,
+    first_of: std::collections::HashMap<u64, u64>,
+}
+
+impl<'a> OccurrenceIndex<'a> {
+    fn new(doc: &'a Document) -> Self {
+        let mut by_id = std::collections::HashMap::with_capacity(doc.occurrences.len());
+        let mut first_of = std::collections::HashMap::new();
+        for o in &doc.occurrences {
+            by_id.insert(o.id, o);
+            first_of.entry(o.component).or_insert(o.id);
         }
-        let Some(o) = doc.occurrences.iter().find(|o| o.id == cur) else { break };
-        m = mat_mul(&o.transform, &m);
-        if o.parent == 0 {
-            break;
-        }
-        let Some(p) = doc.occurrence_of(o.parent) else { break };
-        cur = p.id;
+        Self { by_id, first_of }
     }
-    m
+
+    fn depth(&self, occ: u64) -> usize {
+        let (mut cur, mut d) = (occ, 0usize);
+        for _ in 0..crate::assembly::MAX_PLACEMENT_DEPTH {
+            let Some(o) = self.by_id.get(&cur) else { break };
+            if o.parent == 0 {
+                break;
+            }
+            d += 1;
+            let Some(&p) = self.first_of.get(&o.parent) else { break };
+            cur = p;
+        }
+        d
+    }
+
+    /// World transform of `occ` computed from its stored local transform and its already-solved
+    /// ancestor chain in `placed` (never reading `placed.get(&occ)` itself).
+    fn solved_world(&self, placed: &BTreeMap<u64, Mat>, occ: u64) -> Mat {
+        let Some(o) = self.by_id.get(&occ) else { return IDENTITY };
+        let mut m = o.transform;
+        let mut parent = o.parent;
+        for _ in 0..crate::assembly::MAX_PLACEMENT_DEPTH {
+            if parent == 0 {
+                break;
+            }
+            let Some(&p_id) = self.first_of.get(&parent) else { break };
+            if let Some(&w) = placed.get(&p_id) {
+                return mat_mul(&w, &m);
+            }
+            let Some(po) = self.by_id.get(&p_id) else { break };
+            m = mat_mul(&po.transform, &m);
+            parent = po.parent;
+        }
+        m
+    }
 }
 
 /// Lay out the joint graph: the spanning tree out from the fixed occurrences (the root, grounded
@@ -3369,6 +3459,7 @@ fn build<'a>(doc: &'a Document, st: &'a ModelState, held_contents: &'a [Joint], 
     let pattern_seeds = doc.pattern_occurrence_seeds();
     let mut pattern_placed: Vec<(u64, u64)> = Vec::new();
     if !pattern_seeds.is_empty() {
+        let occ_index = OccurrenceIndex::new(doc);
         loop {
             let newly_placed: Vec<(u64, u64)> = pattern_seeds
                 .iter()
@@ -3380,7 +3471,7 @@ fn build<'a>(doc: &'a Document, st: &'a ModelState, held_contents: &'a [Joint], 
             }
             for (copy, seed) in newly_placed {
                 let Some(seed_depth) = depths.get(&seed).copied() else { continue };
-                let world = solved_world(doc, &placed, copy);
+                let world = occ_index.solved_world(&placed, copy);
                 placed.insert(copy, world);
                 tree.fixed.insert(copy, world);
                 depths.insert(copy, seed_depth);

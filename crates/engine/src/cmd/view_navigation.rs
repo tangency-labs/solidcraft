@@ -651,11 +651,10 @@ fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
             .filter(|v| v.is_finite() && v.len() <= 2.0)
             .and_then(|v| v.normalized())
             .ok_or_else(|| bad(cmd, "direction must be a finite nonzero vector of length at most 2"))?;
-        let heading = cam.yaw;
-        cam = cam.looking_from(cam.from_frame(dir));
-        if dir.x.abs() < 1e-9 && dir.y.abs() < 1e-9 {
-            cam.yaw = square_heading(heading);
-        }
+        // The view turns the shortest way, so how the screen is turned carries over; a view
+        // along an axis squares up to a quarter turn (#21480).
+        let along_an_axis = [dir.x, dir.y, dir.z].iter().filter(|c| c.abs() > 1e-9).count() == 1;
+        cam = cam.turned_to(cam.from_frame(dir), along_an_axis);
     } else {
         use std::f64::consts::FRAC_PI_2;
         let (r, u, b) = cam.basis();
@@ -753,24 +752,6 @@ fn continuous(mut cam: Camera, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "motion produced an invalid camera"));
     }
     typed_reply(cmd, NavigateResult { camera: cam, fit: false, continuous: Some(true), param_warnings: Vec::new() })
-}
-
-/// At a halfway tie prefer the heading nearer the front plan view.
-pub(crate) fn square_heading(yaw: f64) -> f64 {
-    if !yaw.is_finite() {
-        return 0.0;
-    }
-    let q = std::f64::consts::FRAC_PI_2;
-    let lo = (yaw / q).floor() * q;
-    let hi = lo + q;
-    if ((yaw - lo) - (hi - yaw)).abs() < 1e-6 {
-        let off_front = |a: f64| ((a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI).abs();
-        if off_front(lo) <= off_front(hi) { lo } else { hi }
-    } else if yaw - lo < hi - yaw {
-        lo
-    } else {
-        hi
-    }
 }
 
 #[cfg(test)]
@@ -1238,6 +1219,38 @@ mod tests {
             }
             assert_eq!(s.doc.to_json(), before);
             assert!(s.undo.is_empty());
+        }
+    }
+
+    /// #21480: a direction chosen on a navigator turns the view the shortest way, so how the
+    /// screen is turned carries over. A direction along an axis squares up; a slanted one keeps
+    /// the exact tilt. The issue's case: from Front rolled 90°, Top keeps world X where it was.
+    #[test]
+    fn a_chosen_direction_turns_the_view_the_shortest_way() {
+        use std::f64::consts::{FRAC_PI_2, PI};
+        let mut s = Session::default();
+        let mut look = |cam: Camera, dir: [f64; 3]| -> Camera {
+            let result = navigate(&mut s, &json!({"camera": cam, "direction": dir})).unwrap();
+            serde_json::from_value(result["camera"].clone()).unwrap()
+        };
+        let rolled = Camera { yaw: 0.0, pitch: 0.0, roll: FRAC_PI_2, ..Default::default() };
+        // Rolled on its side, world X runs up the screen, and still does after the turn.
+        let (_, up, _) = rolled.basis();
+        assert!(up.cross(Vec3::X).len() < 1e-9, "{up:?}");
+        let (_, u, b) = look(rolled, [0.0, 0.0, 1.0]).basis();
+        assert!(b.dist(Vec3::Z) < 1e-9 && u.dist(up) < 1e-9, "{u:?} {b:?}");
+        for up in [UpAxis::Z, UpAxis::Y] {
+            for (yaw, pitch) in [(0.0, 0.0), (-0.785, 0.615), (0.4, FRAC_PI_2), (2.0, -FRAC_PI_2)] {
+                for roll in [0.0, FRAC_PI_2, PI, 0.3, -0.7] {
+                    let cam = Camera { up, yaw, pitch, roll, ..Default::default() };
+                    for dir in [[0.0, 0.0, 1.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [1.0, 1.0, 1.0], [0.0, 0.3, -0.9]] {
+                        let along_an_axis = dir.iter().filter(|c| **c != 0.0).count() == 1;
+                        let to = look(cam, dir);
+                        let want = cam.turned_to(cam.from_frame(Vec3::new(dir[0], dir[1], dir[2])), along_an_axis);
+                        assert_eq!(to, want, "{dir:?} from {cam:?}");
+                    }
+                }
+            }
         }
     }
 

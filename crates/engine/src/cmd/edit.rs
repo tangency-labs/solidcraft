@@ -169,7 +169,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&MOVE_MANY_CONTRACT)
         .output(output_schema_for::<TimelineMoved>)
         .params(
-        "features?: [id|name], groups?: [folder ids], group?: folder id, position: insertion slot, active?: bool (true = the moved contents end up before the history marker, false = behind it; other features keep their state); atomically changes folder membership and moves all selected contents as one block",
+        "features?: [id|name], groups?: [folder ids], group?: folder id, position: insertion slot, active?: bool (true = the moved contents end up before the history marker, false = behind it; other features keep their state); atomically changes folder membership and moves all selected contents as one block; refused when a feature that worked would fail, unless allow_errors?: bool (default false): then made, and broken: [{feature, error}] lists the features it broke",
     ),
     CommandSpec::new("timeline.rollback", "Move Timeline Marker", crate::checked!("timeline.rollback", rollback))
         .icon("rollback")
@@ -648,6 +648,9 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     // Features that work now; any of them failing after the delete is reported (a later
     // feature that names a deleted body, #267).
     let worked: std::collections::BTreeSet<u64> = s.model.results.iter().filter(|r| r.error.is_none() && !r.skipped).map(|r| r.id).collect();
+    // Pin surviving features' evaluated body names before deleting, so disambiguated names
+    // (e.g. `VIS (3)`) do not slide down into freed suffixes.
+    s.pin_body_names();
     let mut removed_capture_joints = std::collections::BTreeSet::new();
     for &id in &ids {
         if let Some(f) = s.doc.feature(id)
@@ -1116,17 +1119,25 @@ fn move_many(s: &mut Session, p: &Value) -> Result<Value> {
     sort_group_features(&mut next);
     let slot = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?;
     let active = active_param(p, cmd)?;
-    let (mut next, ordered, _, checked) = reorder_features(s, next, &moving, slot, false, cmd)?;
-    let marker = next.marker;
-    place_marker(s, &mut next, &moving, active, cmd)?;
-    let checked = checked.filter(|_| next.marker == marker);
+    let allow = allow_errors(p, cmd)?;
+    let (next, ordered, broken, checked) = reorder_features(s, next, &moving, slot, active, allow, cmd)?;
     if next != *s.doc {
         if let Some(model) = checked {
             s.model = model;
         }
         *s.doc_mut() = next;
     }
-    reply(cmd, TimelineMoved { features: ordered, groups, group: target, position: slot, param_warnings: Vec::new() })
+    reply(
+        cmd,
+        TimelineMoved {
+            features: ordered,
+            groups,
+            group: target,
+            position: slot,
+            broken: allow.then(|| broken_features(&broken)),
+            param_warnings: Vec::new(),
+        },
+    )
 }
 
 fn rollback(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1278,6 +1289,9 @@ fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
                 && joints.iter().all(|id| s.doc.assembly.joints.iter().any(|joint| joint.id == *id && joint.suppressed)))
         }
     };
+    if want {
+        s.pin_body_names();
+    }
     let keep = if want { counted_names_from(s, &ids) } else { Vec::new() };
     // One command, so one undo step however many features it changes.
     let doc = s.doc_mut();
@@ -2862,11 +2876,7 @@ fn reorder_many(s: &mut Session, p: &Value) -> Result<Value> {
     let slot = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?;
     let active = active_param(p, cmd)?;
     let allow = allow_errors(p, cmd)?;
-    let (mut next, ordered, broken, checked) = reorder_features(s, (*s.doc).clone(), &ids, slot, allow, cmd)?;
-    let marker = next.marker;
-    place_marker(s, &mut next, &ordered, active, cmd)?;
-    // The checked results stand only when placing the marker left the design as they were made for.
-    let checked = checked.filter(|_| next.marker == marker);
+    let (next, ordered, broken, checked) = reorder_features(s, (*s.doc).clone(), &ids, slot, active, allow, cmd)?;
     if next != *s.doc {
         if let Some(model) = checked {
             s.model = model;
@@ -2878,12 +2888,13 @@ fn reorder_many(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// The reordered design, the moved features in order, and the model the move was checked on
-/// (none when the order didn't change), for the caller to keep (#6186).
+/// (none when neither the order nor the history marker changed), for the caller to keep (#6186).
 fn reorder_features(
     s: &Session,
     mut next: solidcraft_doc::Document,
     ids: &[u64],
     slot: usize,
+    active: Option<bool>,
     allow_errors: bool,
     cmd: &str,
 ) -> Result<(solidcraft_doc::Document, Vec<u64>, Vec<(String, String)>, Option<solidcraft_doc::Model>)> {
@@ -2911,14 +2922,16 @@ fn reorder_features(
     next.features.splice(insert_at..insert_at, moving);
     sort_group_features(&mut next);
     require_contiguous_groups(&next, cmd)?;
-    if unchanged {
+    let marker = next.marker;
+    place_marker(s, &mut next, &ordered, active, cmd)?;
+    if unchanged && next.marker == marker {
         return Ok((next, ordered, Vec::new(), None));
     }
     // From the session's own results: the features before the first one moved are kept, not
     // evaluated again from an empty model (#6186).
     let mut after = s.model.clone();
     after.evaluate(&next);
-    let broken = newly_broken(&s.model, &after);
+    let broken = if unchanged { Vec::new() } else { newly_broken_in_history(&s.doc, &s.model, &next, &after) };
     if !broken.is_empty() && !allow_errors {
         let list: Vec<String> = broken.iter().map(|(name, error)| format!("{name} ({error})")).collect();
         return Err(bad(cmd, format!("moving the selected features there breaks {}", list.join("; "))));
@@ -3149,6 +3162,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         .chain(super::features_more::COMMANDS)
         .chain(super::cell_grid::COMMANDS)
         .chain(super::tab_slot::COMMANDS)
+        .chain(super::shaft_spline::COMMANDS)
         .chain(super::construct::COMMANDS)
         .chain(super::surface::COMMANDS)
         .chain(super::surface_boundary::COMMANDS)
@@ -3158,6 +3172,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
             "sheet.flange"
                 | "sheet.hem"
                 | "sheet.perforate"
+                | "sheet.hardware"
                 | "sheet.fold"
                 | "sheet.path_flange"
                 | "sheet.tab"
@@ -3254,6 +3269,13 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && parameters.get("designation").is_none_or(|d| d.is_null() || d.as_str().is_some_and(|d| d.trim().is_empty()))
     {
         parameters.entry("old_auto_size").or_insert_with(|| json!(true));
+    }
+    // Press-in hardware's hole is redefined by the command that made it: the Hole command would
+    // drop the hardware it names and leave a plain hole of its size (#17752).
+    if let FeatureKind::Hole { hardware: Some(h), .. } = &old.kind
+        && cid == "solid.hole"
+    {
+        return Err(bad(cmd, format!("this hole is the mounting hole of an {} {}: redefine it with `sheet.hardware`", h.thread, h.kind.label())));
     }
     // A hole saved before a sketch on a derived plane started its holes at that plane keeps
     // starting at the surface when it is edited (#11538).

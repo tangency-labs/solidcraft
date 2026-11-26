@@ -43,6 +43,7 @@ pub mod error;
 pub mod kernel;
 pub mod limits;
 pub mod math;
+pub mod mesh_reconstruction;
 pub mod topology;
 
 pub mod blend;
@@ -67,6 +68,7 @@ pub mod query;
 pub mod surface;
 pub mod sweep;
 pub mod tab_slot;
+pub mod teeth;
 pub mod weld_symbol;
 
 pub use error::EntityRef;

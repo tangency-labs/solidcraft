@@ -287,6 +287,7 @@ prefs_plugins	false
 prefs_shortcuts	false
 prefs_sketch	false
 prefs_tools	false
+press_in_hardware	false
 presspull	false
 print_face	false
 project	false
@@ -327,6 +328,7 @@ select_sketch	false
 send	false
 settings	false
 settings_profile	false
+shaft_spline	false
 sheet	false
 sheet_rules	false
 sheet_tab	false
