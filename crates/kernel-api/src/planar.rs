@@ -27,6 +27,9 @@ pub trait Planar: Backend {
     /// Whether the unit direction `dir` at `p` is square to the radius from `centre`, within a
     /// millionth; `false` where `p` is on `centre`.
     fn is_square_to_radius(&self, centre: [f64; 2], p: [f64; 2], dir: [f64; 2]) -> bool;
+    /// Whether `p` lies on the line through `origin` along `dir`, within `tol` of it; `false`
+    /// where `dir` is of no length.
+    fn on_line(&self, p: [f64; 2], origin: [f64; 2], dir: [f64; 2], tol: f64) -> bool;
     /// The centre of the circle through `a`, `b` and `c`; `None` for points on one line.
     fn circumcentre(&self, a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> Option<[f64; 2]>;
     /// The circle through `s`, `e` and `t`: its centre, radius and the sweep (radians) of the arc

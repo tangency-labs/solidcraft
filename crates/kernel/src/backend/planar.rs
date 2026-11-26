@@ -28,6 +28,10 @@ impl Planar for Solidcore {
         sketch_arc::is_square_to_radius(centre, p, dir)
     }
 
+    fn on_line(&self, p: [f64; 2], origin: [f64; 2], dir: [f64; 2], tol: f64) -> bool {
+        sketch_arc::on_line(p, origin, dir, tol)
+    }
+
     fn circumcentre(&self, a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> Option<[f64; 2]> {
         sketch_arc::circumcentre(a, b, c)
     }
