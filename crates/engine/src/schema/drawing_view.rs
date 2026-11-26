@@ -805,6 +805,18 @@ pub struct ChoicesResult {
     pub scale: Vec<String>,
 }
 
+/// One body a view's design places, as `drawing.view.inspect` lists it (#22107).
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ViewBodyResult {
+    /// The occurrences that place it, from the design's root: `[]` for the design's own bodies.
+    pub path: Vec<u64>,
+    /// Its definition's body name.
+    pub body: String,
+    /// Whether the view draws it: false when its source doesn't choose it, a `hide` path covers it,
+    /// or `hide_bodies` names it.
+    pub drawn: bool,
+}
+
 /// What `drawing.view.inspect` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct InspectResult {
@@ -831,6 +843,10 @@ pub struct InspectResult {
     /// every entry matches.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub unmatched: Vec<HiddenBodyParam>,
+    /// Every body its design places, in the order the design places them, before its source, `hide` and
+    /// `hide_bodies` leave any out, each by the key `hide_bodies` names it by, with whether it draws it
+    /// now. Empty when the design places nothing it can read (`extents.provenance` says why).
+    pub bodies: Vec<ViewBodyResult>,
     pub reference_shown_percent: f64,
     /// Where it sits on its sheet: its extents grown by `reference_shown_percent`, at its scale,
     /// with the model's middle on its centre; a placeholder 20 mm each way when there's nothing to measure.

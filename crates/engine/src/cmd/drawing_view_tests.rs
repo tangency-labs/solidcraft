@@ -5419,7 +5419,7 @@ fn a_snapshots_hide_bodies_leaves_out_one_body() {
 }
 
 /// `hide_bodies` on a saved view (#22107): made with it, the base view fits the carcass alone;
-/// inspect says where it comes from; a projected view follows it, naming its parent, until it sets its
+/// inspect says where it comes from and lists every body with whether it draws it; a projected view follows it, naming its parent, until it sets its
 /// own (`[]` hides nothing); `null` follows again; an edit is one undo step; a copy alone keeps it. A
 /// body the design doesn't place is refused by name and changes nothing.
 #[test]
@@ -5433,6 +5433,9 @@ fn a_saved_views_hide_bodies_follows_its_chain() {
     let inspected = inspect_view(&mut s, view);
     assert_eq!(inspected["settings"]["hide_bodies"], json!({"value": door, "from": "this", "set": door}), "{inspected}");
     assert!(inspected.get("unmatched").is_none(), "{inspected}");
+    // Every body the design places, before what the view leaves out, and whether it draws it.
+    let every_body = json!([{"path": [], "body": "Carcass", "drawn": true}, {"path": [], "body": "Door", "drawn": false}]);
+    assert_eq!(inspected["bodies"], every_body, "{inspected}");
 
     let (_, side) = create(&mut s, PROJECTED, json!({"parent": ids::encode(view), "side": "above", "place": {"at": [200, 250]}}));
     assert!((width(&mut s, side) - 100.0).abs() < 1e-6, "it follows its parent");
@@ -5481,6 +5484,8 @@ fn a_renamed_hidden_body_is_unmatched() {
     run(&mut s, "drawing.open", json!({"drawing": drawing}));
     let inspected = inspect_view(&mut s, view);
     assert_eq!(inspected["unmatched"], json!([{"path": [], "body": "Door"}]), "{inspected}");
+    let gate = json!([{"path": [], "body": "Carcass", "drawn": true}, {"path": [], "body": "Gate", "drawn": true}]);
+    assert_eq!(inspected["bodies"], gate, "the renamed body is listed by its new name, drawn: {inspected}");
     assert!((width(&mut s, view) - 220.0).abs() < 1e-6, "the renamed body is drawn again");
     run(&mut s, "drawing.close", json!({}));
     run(&mut s, "body.rename", json!({"body": "Gate", "name": "Door"}));

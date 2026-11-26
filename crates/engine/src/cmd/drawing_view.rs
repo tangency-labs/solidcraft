@@ -91,7 +91,7 @@ use crate::schema::drawing_view::{
     MeasureParam, MeasurementResult, MoveParams, OutsideResult, PathSegResult, PictureResult, PieceResult, PlaceParam, PoseParam, PoseResult,
     ProjectedParams, ProjectionForParams, ProjectionForResult, ScaleResult, SceneResult, SectionParams, SettingResult, SettingsResult,
     SnapshotParams, SnapshotResult, SourceResult, StandardParams, StandardResult, StudyPoseParam, StudyStepResult, ThreadPieceResult, ThreadResult,
-    ToSheetResult, ViewLineParam, ViewMoveParams, ViewMoveResult, ViewResult, ViewSet,
+    ToSheetResult, ViewBodyResult, ViewLineParam, ViewMoveParams, ViewMoveResult, ViewResult, ViewSet,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -167,7 +167,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .contract(&INSPECT_CONTRACT)
         .output(output_schema_for::<InspectResult>)
         .params(concat!(
-            "view: a saved view's id → {view, sheet, kind: base|projected|flat, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, visual_style, reference_style, reference_hides_model, tangent_edges, occurrences (null: every body), exploded (\"assembled\" or {view: id}), pose (\"designed\", {joints: [...]} as saved, in radians and mm, or {study: {id, step}}; with drawn?, skipped? and study? for a position of its own), configuration (\"active\" or {row: id}, with drawn: {id, name} or null, and errors?), hide: {value, from: this|parent|default, parent?, set}, hide_bodies: as hide, [{path, body}] or null}, unmatched?: [the hide_bodies entries that name no body the design places there now, as {path, body}: renamed or deleted since], reference_shown_percent, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|exact (a flat pattern view's)|placeholder, provenance (a placeholder's reason: past_walk_limit, no_bodies, not_placed, nothing_chosen, no_exploded_view, not_posed, no_configuration, not_configured, no_flat or cut_away; a flat pattern view's: flat_pattern)} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], centre_marks: [its manual marks' ids], centre_lines: [its manual lines' ids], choices: {visual_style, scale}}. Read-only; ",
+            "view: a saved view's id → {view, sheet, kind: base|projected|flat, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, visual_style, reference_style, reference_hides_model, tangent_edges, occurrences (null: every body), exploded (\"assembled\" or {view: id}), pose (\"designed\", {joints: [...]} as saved, in radians and mm, or {study: {id, step}}; with drawn?, skipped? and study? for a position of its own), configuration (\"active\" or {row: id}, with drawn: {id, name} or null, and errors?), hide: {value, from: this|parent|default, parent?, set}, hide_bodies: as hide, [{path, body}] or null}, unmatched?: [the hide_bodies entries that name no body the design places there now, as {path, body}: renamed or deleted since], bodies: [{path, body, drawn}: every body its design places, before source, hide and hide_bodies, and whether the view draws it now], reference_shown_percent, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|exact (a flat pattern view's)|placeholder, provenance (a placeholder's reason: past_walk_limit, no_bodies, not_placed, nothing_chosen, no_exploded_view, not_posed, no_configuration, not_configured, no_flat or cut_away; a flat pattern view's: flat_pattern)} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], centre_marks: [its manual marks' ids], centre_lines: [its manual lines' ids], choices: {visual_style, scale}}. Read-only; ",
             "a view of another configuration evaluates a copy of the design; ",
             "the design is unchanged.",
         )),
@@ -705,13 +705,17 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let placed = crate::drawing_view::on_sheet_from(&mut sessions, d, view.id, INSPECT)?;
     let pose = pose_result(s, &mut sessions, &resolved, view.settings.pose.clone());
     let configuration = configuration_result(&mut sessions, &resolved, view.settings.configuration);
+    // Every body its session places, before what it leaves out: one pass, one filter look-up a body.
+    let all = crate::drawing_view::shown_by(&mut sessions, &resolved);
+    let filter = Filter::of_view(&resolved);
+    let bodies: Vec<ViewBodyResult> = all
+        .as_ref()
+        .map(|set| {
+            set.bodies.iter().map(|b| ViewBodyResult { path: b.path.clone(), body: b.body.clone(), drawn: filter.keeps(&b.path, &b.body) }).collect()
+        })
+        .unwrap_or_default();
     let hidden = resolved.hide_bodies.value.as_deref().unwrap_or_default();
-    let unmatched = if hidden.is_empty() {
-        Vec::new()
-    } else {
-        let all = crate::drawing_view::shown_by(&mut sessions, &resolved);
-        crate::drawing_view::unmatched(&all, hidden).into_iter().map(HiddenBodyParam::from).collect()
-    };
+    let unmatched = crate::drawing_view::unmatched(&all, hidden).into_iter().map(HiddenBodyParam::from).collect();
     let own = &view.settings;
     let reply = InspectResult {
         view: ids::encode(view.id),
@@ -741,6 +745,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             configuration,
         },
         unmatched,
+        bodies,
         reference_shown_percent: view.reference_shown_percent,
         boundary_mm: BoxResult { min: placed.boundary.min.into(), max: placed.boundary.max.into() },
         extents: extents_result(&placed.extents, placed.unmeasured, resolved.flat.is_some()),
