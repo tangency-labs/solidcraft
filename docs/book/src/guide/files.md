@@ -239,7 +239,7 @@ treated as PrusaSlicer 3, and any other entry is left as it is.
 
 ### Send to App
 
-**Insert → Files → Send to App** (also in the File menu and the body context menu) sends the
+**Insert → Files → Send to App** (also in the File menu) sends the
 design to any program you add, in a format that program takes. Unlike Send to Slicer, the list is
 yours: choose **Add app…**, pick the program, give it a name, and say which formats it takes (3MF,
 3MF with face tags, STEP, STL, or **SolidCraft design (.sc)**, a copy of the whole design) and which
