@@ -1794,9 +1794,9 @@ fn break_link(app: &SolveApp, sk: &solidcraft_engine::sketch::Sketch, ents: &[St
 fn alignment_items(selection: &[Sel]) -> Vec<Item> {
     let Some(points) = crate::selection::alignment_points(selection) else { return Vec::new() };
     vec![
-        act("ui.horizontalConstraint", "Horizontal Constraint", "c_hv")
+        act("ui.horizontalConstraint", "Horizontal Constraint", "c_horizontal")
             .with(json!({"points": points, "mode": "horizontal", "if_redundant": "refuse"})),
-        act("ui.verticalConstraint", "Vertical Constraint", "c_hv").with(json!({"points": points, "mode": "vertical", "if_redundant": "refuse"})),
+        act("ui.verticalConstraint", "Vertical Constraint", "c_vertical").with(json!({"points": points, "mode": "vertical", "if_redundant": "refuse"})),
     ]
 }
 
@@ -2080,11 +2080,11 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     {
         // #617: the point can also be aligned with the line (a circle's centre with a square's edge).
         align.push(
-            act("ui.horizontalConstraint", "Horizontal Constraint", "c_hv")
+            act("ui.horizontalConstraint", "Horizontal Constraint", "c_horizontal")
                 .with(json!({"points": points, "mode": "horizontal", "if_redundant": "refuse"})),
         );
         align.push(
-            act("ui.verticalConstraint", "Vertical Constraint", "c_hv").with(json!({"points": points, "mode": "vertical", "if_redundant": "refuse"})),
+            act("ui.verticalConstraint", "Vertical Constraint", "c_vertical").with(json!({"points": points, "mode": "vertical", "if_redundant": "refuse"})),
         );
     }
     let mut c: Vec<Item> = solidcraft_engine::command_specs()
