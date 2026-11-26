@@ -4864,7 +4864,7 @@ impl SolveApp {
     fn apply_look(&mut self, ctx: &egui::Context) {
         // The view's own dark or light only changes tokens, not egui's visuals: no restyle.
         solidcraft_theme::set_viewport_dark(self.preferences.viewport_theme.dark());
-        solidcraft_theme::set_viewport_background(self.preferences.viewport_background);
+        solidcraft_theme::set_viewport_background(self.preferences.viewport_background_colours());
         if !self.styled || solidcraft_theme::is_dark() != self.ui.dark || solidcraft_theme::vision() != self.preferences.color_vision {
             solidcraft_theme::set_dark(self.ui.dark);
             solidcraft_theme::set_vision(self.preferences.color_vision);
@@ -5134,7 +5134,7 @@ impl SolveApp {
         } else if view_window_drag::unanchored(self, ui.ctx(), self.docs.views.active().id) {
             self.viewport.rect = Some(ui.max_rect());
             let t = solidcraft_theme::Tokens::get();
-            solidcraft_viewport_egui::paint_background(ui.painter(), ui.max_rect(), t.viewport_top, t.viewport_bottom);
+            solidcraft_viewport_egui::paint_background(ui.painter(), ui.max_rect(), t.viewport_top, t.viewport_middle, t.viewport_bottom);
         } else if render_workspace::active(self) {
             // The model view is not drawn, so no shown dimension can be double-clicked.
             dim_view::set_model_drawn(Vec::new());
