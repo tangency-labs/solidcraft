@@ -994,10 +994,12 @@ fn revolved_edge_almost_square_to_the_axis_reads_back() {
 }
 
 /// A profile arc that bows out of its chord by less than a micrometre (radius 140, chord 0.01,
-/// sagitta 9e-8) revolves into a body that measures and splits (#15385). Before, Revolve wrote
-/// its face as a torus whose NURBS form the torus recogniser does not find (a tube swept over
-/// 4e-3 degrees), so the body did not read back ("a NURBS form that is not its analytic
-/// surface") and Split Body failed with it. The profile is a cylinder of radius 20 up to the arc
+/// sagitta 9e-8) revolves into a body that measures and splits (#15385). Revolve writes its face
+/// as a torus whose NURBS form SMLib's torus test does not find (a tube swept over 4e-3 degrees).
+/// The flat reader refused that face ("a NURBS form that is not its analytic surface"), so the
+/// body did not read back and Split Body failed with it; it now reads it back as the arrays' own
+/// torus where the kernel proves it on the form, or as the form itself
+/// (`Torus::from_label_unless_found_stands`). The profile is a cylinder of radius 20 up to the arc
 /// and a cone to the apex at 40: its volume is theirs less the arc's segment swept round the
 /// axis (Pappus, 7.5e-8 mm3). Split 10 along the axis, the lower half is the cylinder of height
 /// 10. The 1e-6 relative bound is that of `revolved_edge_almost_square_to_the_axis_reads_back`.

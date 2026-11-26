@@ -25,9 +25,7 @@
 //! layout gives. Any other curve, or a construction that fails, gives `None` and the
 //! caller keeps the upstream surface. A cone lower than `Cone::MIN_HEIGHT` along the axis
 //! gives `None` too (tangency-labs/solidcraft#17085): `Cone::is_nurb_surface_cone` refuses a
-//! cone that low as a disk, so a body that kept it would not read back. So does a torus that
-//! `Torus::is_nurb_surface_torus` does not find in its NURB (tangency-labs/solidcraft#15385: an
-//! arc that bows out of its chord by less than a micrometre). A whole turn then
+//! cone that low as a disk, so a body that kept it would not read back. A whole turn then
 //! keeps its surface of revolution; a partial turn keeps its B-spline surface, run through
 //! `copy_and_add_analytics` when analytics are asked for. No recursion.
 
@@ -39,7 +37,7 @@ use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
-use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
+use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::surface::cone::Cone;
 use crate::surface::sphere::{Sphere, SphereOptions};
@@ -513,20 +511,6 @@ fn candidate(
         },
     )?;
     torus.make_nurb(k)?;
-    // a tube swept too little for `Torus::is_nurb_surface_torus` to find in its NURB (an arc
-    // that bows out of its chord by less than a micrometre) would not read back: the caller
-    // keeps its own surface (tangency-labs/solidcraft#15385)
-    let Some(nurb) = torus.base().base().gw_nurb() else {
-        return Ok(None);
-    };
-    let found = ignored(Torus::is_nurb_surface_torus(
-        k,
-        &BSplineSurface::from_gw_nurb(nurb),
-        1.0,
-    ))?;
-    if found.flatten().is_none() {
-        return Ok(None);
-    }
     Ok(Some((Surface::from(torus), !rising)))
 }
 
@@ -1052,44 +1036,6 @@ mod tests {
                     assert!(pole.x.hypot(pole.y) <= 1e-12, "{off} {u} {v}: {pole:?}");
                 }
             }
-        }
-    }
-
-    /// tangency-labs/solidcraft#15385: a profile arc of radius 140, 160 from the axis, that
-    /// bows out of its chord by less than a micrometre (a sweep of 4e-3 or 4e-2 degrees) gives
-    /// no torus: `Torus::is_nurb_surface_torus` does not find a tube swept that little in its
-    /// NURB, so a body with it does not read back. The caller keeps its own surface. Deeper
-    /// arcs of the same circle still give the torus, and every torus given is found in its NURB.
-    #[test]
-    fn a_torus_its_recogniser_does_not_find_keeps_the_surface_of_revolution() {
-        use crate::surface::surface::SurfaceKind;
-        let k = Kernel::default();
-        let sweep = |deg: f64| {
-            let c = arc(
-                Vec3::new(160.0, 0.0, 0.0),
-                -Vec3::X,
-                Vec3::Z,
-                140.0,
-                -deg / 2.0,
-                deg / 2.0,
-            );
-            analytic_revolution(&k, &c, Vec3::ZERO, Vec3::Z, 360.0, 1e-6, None).unwrap()
-        };
-        for deg in [4.1e-3, 4.1e-2] {
-            assert!(sweep(deg).is_none(), "{deg}");
-        }
-        for deg in [1.0, 30.0] {
-            let s = sweep(deg).unwrap_or_else(|| panic!("{deg}: no torus"));
-            let SurfaceKind::Torus(t) = s.kind() else {
-                panic!("{deg}: {}", kind(&s))
-            };
-            let nurb = BSplineSurface::from_gw_nurb(t.base().base().gw_nurb().unwrap());
-            assert!(
-                Torus::is_nurb_surface_torus(&k, &nurb, 1.0)
-                    .unwrap()
-                    .is_some(),
-                "{deg}"
-            );
         }
     }
 }
