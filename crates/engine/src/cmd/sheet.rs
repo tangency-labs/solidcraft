@@ -247,7 +247,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              text?: cut|etch (default cut: letters that text cut through the sheet are cut contours on layer TEXT; etch: single contours on layer ETCH and the sheet keeps its material there; text machined to a depth is always on ETCH), \
              bend_notes?: bool (default false: a note beside each bend line on layer BEND_NOTES, `B1 UP 90° R1`, its angle the included angle \
               when the body's rule has angle_display: included), note_height?: mm (default 3), \
-             hardware_notes?: bool (default false: the file is the sheet and its mounting holes, with no mention of the press-in hardware; true: a note beside each press-in hardware hole on layer HARDWARE, `M3 nut`, as high as note_height, with layers: roles), \
+             hardware_notes?: bool (default false: the file is the sheet and its mounting holes, with no mention of the press-in hardware; true: a note beside each press-in hardware hole on layer HARDWARE, `M3 nut`, as high as note_height, with layers: roles; left out with markings: false), \
              bend_lines?: bool (default true; false leaves BEND_UP and BEND_DOWN out, for a cutter that would cut them), \
              markings?: bool (default true; false leaves the letter contours on TEXT/ETCH and the bend notes out, for a cutter that would etch them), \
              layers?: roles|single|cut (default roles, the layers below; single: every entity on layer 0; cut: the cut contours on layer 0, the bend lines and notes on their own layers, so a cutter has one cut layer and a bender still sees the bends), \
@@ -1995,8 +1995,9 @@ impl FlatDrawing {
         cut_layers.sort();
         let bend_lines = if o.no_bend_lines { 0 } else { self.bends.len() };
         let bead_notes = if o.bend_notes.is_some() { self.beads.iter().filter(|b| b.note.is_some()).count() } else { 0 };
-        let bend_text = if o.bend_notes.is_some() { self.bends.len() } else { 0 };
-        let hardware_text = if o.hardware_notes.is_some() { self.hardware.len() } else { 0 };
+        let bend_text = if o.bend_notes.is_some() && !o.no_markings { self.bends.len() } else { 0 };
+        // Hardware notes are text too: a file without markings has none.
+        let hardware_text = if o.hardware_notes.is_some() && !o.no_markings { self.hardware.len() } else { 0 };
         let mut notes_asked = Vec::new();
         if bend_text + bead_notes > 0 {
             notes_asked.push("bend_notes");
@@ -2085,7 +2086,9 @@ impl FlatDrawing {
             }
         }
         // The hardware's notes, each beside its hole on layer HARDWARE, as a bend's note is.
-        if let Some(height) = o.hardware_notes {
+        if let Some(height) = o.hardware_notes
+            && !o.no_markings
+        {
             for (c, r, text) in &self.hardware {
                 let layer = dxf_layer(&mut file, "HARDWARE", o)?;
                 let at = solidcraft_kernel::affine::note_beside((*c, *r), height);

@@ -2006,6 +2006,9 @@ fn a_press_in_hardware_hole_is_noted_beside_it_on_its_own_layer() {
     // The note's height is the caller's, as a bend note's is.
     let tall = entities(&export(&mut s, json!({"hardware_notes": true, "note_height": 5})));
     assert!(tall.iter().filter(|e| e.0 == "TEXT").all(|e| note_layout(e).0 == 5.0));
+    // Notes are text: `markings: false` leaves them out, and their layer with them.
+    let bare = export(&mut s, json!({"hardware_notes": true, "markings": false}));
+    assert!(entities(&bare).iter().all(|e| e.0 != "TEXT") && !layer_table(&bare).contains_key("HARDWARE"));
     // On a single layer a note would sit with the cut contours: none.
     let single = export(&mut s, json!({"hardware_notes": true, "layers": "single"}));
     assert!(entities(&single).iter().all(|e| e.0 != "TEXT") && !layer_table(&single).contains_key("HARDWARE"));
