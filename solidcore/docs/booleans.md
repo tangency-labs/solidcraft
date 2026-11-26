@@ -889,7 +889,9 @@ What the port does today:
     at the zeros, and where that is within the tolerance the band between the curves is
     one contact, as the cap rule reads a closed crossing (WR-79). D is proved on
     enclosures (`curve_runs_along`) and at most a thousand times the tolerance; θ is read
-    at samples, as the cap rule reads it.
+    at samples, as the cap rule reads it, and so is the band's middle, which must lie within
+    the tolerance of both surfaces (a separation that is not quadratic across the band
+    refuses). An enclosure of the separation over the whole band is open.
   - A point with no curve classified onto a circle edge of one body and a line edge of the
     other in its plane, the line a hair inside the circle, is their touch
     (`touch_of_edges`, `line_touch`, `proto_topology/p3.rs`), as two such circles' is.

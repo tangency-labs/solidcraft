@@ -1110,6 +1110,10 @@ fn a_cusp_swept_onto_a_coaxial_cylinder_cuts_whatever_the_sketch_rounding() {
         (33, 1e-9),
     ] {
         let tools = cusp_tools(&block, seed, noise);
+        // the tools lie inside the block, touching its back face and each other: the cut
+        // removes their volumes, no more and no less
+        let removed: f64 = tools.iter().map(volume).sum();
+        let expected = volume(&block.body) - removed;
         for order in [[1usize, 0], [0, 1]] {
             let mut body = block.body.copy().unwrap();
             for k in order {
@@ -1127,6 +1131,12 @@ fn a_cusp_swept_onto_a_coaxial_cylinder_cuts_whatever_the_sketch_rounding() {
                 report.is_valid(),
                 "seed {seed}, tools {order:?}: {}",
                 report.text
+            );
+            // written to accept: a NaN volume fails
+            let v = volume(&body);
+            assert!(
+                (v - expected).abs() <= 1e-6 * expected,
+                "seed {seed}, tools {order:?}: volume {v} against {expected} ({removed} removed)"
             );
         }
     }

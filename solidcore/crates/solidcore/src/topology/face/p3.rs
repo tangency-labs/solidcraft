@@ -2510,8 +2510,11 @@ fn cap_centre_samples(
 /// ([`curve_runs_along`](crate::intersect::curve_class::p3::curve_runs_along)) at one and
 /// a half times the largest distance of [`CAP_SAMPLES`] points of either from the other,
 /// and at most a thousand times `tol` (the largest a local tolerance may be). `θ` is read
-/// at the same samples of both curves, as the cap rule reads it. `false` when a curve
-/// cannot be evaluated or a point dropped, or either reading fails.
+/// at the same samples of both curves, as the cap rule reads it, and at each sample the
+/// band's middle (halfway to the other curve) must lie within `tol` of both surfaces
+/// together, which a separation larger between the curves than the quadratic refuses.
+/// These are readings, not an enclosure of the separation over the whole band (open). `false`
+/// when a curve cannot be evaluated or a point dropped, or either reading fails.
 ///
 /// # Errors
 ///
@@ -2562,6 +2565,22 @@ fn crossing_beside_tangent_samples(
                 return Ok(false);
             }
             apart = apart.max(near.distance);
+            // the band's middle: the surfaces there within `tol` of each other (a point of
+            // one within the sum of the two gaps of the other), so a separation that is not
+            // quadratic across the band (larger between the curves than at them) refuses
+            let mid = (point + to.evaluate_point(k, near.parameter)?) * 0.5;
+            let mut band = 0.0;
+            for (surface, domain) in surfaces {
+                let drop =
+                    surface.drop_point::<NoObject>(k, mid, domain, &DropPointOptions::default())?;
+                if !drop.success {
+                    return Ok(false);
+                }
+                band += drop.gap;
+            }
+            if band.is_nan() || band > tol {
+                return Ok(false);
+            }
             let mut normals = [Vec3::new(0.0, 0.0, 0.0); 2];
             for ((surface, domain), normal) in surfaces.iter().zip(normals.iter_mut()) {
                 let drop = surface.drop_point::<NoObject>(

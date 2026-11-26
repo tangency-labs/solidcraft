@@ -4266,6 +4266,7 @@ impl Surface {
             // SmSphere::GlobalSurfaceIntersect: its special cases, else the base
             // SmSurface::GlobalSurfaceIntersect of this surface
             SurfaceKind::Sphere(s) => s.global_surface_intersect_with_into(
+                Some(self),
                 k,
                 uv_domain,
                 other,
