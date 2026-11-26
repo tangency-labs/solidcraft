@@ -41,7 +41,7 @@ pub mod vec;
 
 pub use collapse::{Collapse, OntoKnots};
 pub use curve::{CurveEval, CurveJet};
-pub use geometry::{Curve, Curve2, Frame, Surface};
+pub use geometry::{Curve, Curve2, Curve2Eval, Frame, Surface};
 pub use spline::{
     EvalCurve, EvalSurface, Partials, MAX_EVAL_KNOTS, MAX_EVAL_POINTS, MAX_PARTIAL_ORDER,
     MAX_SPLINE_DEGREE,

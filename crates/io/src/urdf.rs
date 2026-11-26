@@ -51,6 +51,8 @@ pub struct UrdfOptions {
     pub mimic: bool,
     /// The design's decals, each written as a textured mesh in a visual of its component's links.
     pub decals: Vec<UrdfDecal>,
+    /// How closely the link meshes follow curved faces. Default: standard.
+    pub quality: crate::MeshQuality,
 }
 
 /// A decal for [`urdf`]: an image on a quad in its component's frame. It becomes a COLLADA mesh
@@ -441,7 +443,7 @@ fn parts(
         let mut shared = true;
         let mut fitted = Vec::new();
         for b in st.bodies.iter().filter(|b| doc.model_body_component(b) == c) {
-            let (mut m, notes) = export_mesh_noted(&b.body, crate::MeshQuality::Standard)?;
+            let (mut m, notes) = export_mesh_noted(&b.body, options.quality)?;
             out.warnings.extend(notes.into_iter().map(|n| format!("body `{}`: {n}", b.name)));
             if let Some(o) = doc.model_body_offset(b) {
                 for p in &mut m.positions {
@@ -1176,7 +1178,7 @@ pub(crate) fn metres(m: &Mesh) -> Mesh {
 /// altogether.
 pub(crate) fn decal_dae(name: &str, corners: &[Vec3; 4], image: &str) -> Option<String> {
     // The quad lifted clear of the face on both sides, from the kernel.
-    let (normal, front, back) = solidcraft_kernel::services::affine::offset_quad(corners.map(|p| [p.x, p.y, p.z]), DECAL_LIFT_MM)?;
+    let (normal, front, back) = solidcraft_kernel::affine::offset_quad(corners.map(|p| [p.x, p.y, p.z]), DECAL_LIFT_MM)?;
     let normal = Vec3::new(normal[0], normal[1], normal[2]);
     let metres = |[x, y, z]: [f64; 3]| Vec3::new(x, y, z) * 1e-3;
     let positions = front.into_iter().chain(back).map(|p| triple(metres(p))).collect::<Vec<_>>().join(" ");

@@ -382,12 +382,8 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         crate::links::run(ui.ctx(), id);
                     }
                     app_bar::BarAction::HidePill { id } => {
-                        // A pill the organization's policy shows stays: say why instead.
-                        if crate::links::by_id(id).is_some_and(|link| app.policy.locks(link.pref)) {
-                            app.set_status(solidcraft_ui_text::tr("policy.set_by_organization").to_string(), false);
-                        } else {
-                            crate::app_bar_custom::run(app, &json!({"item":if id == "kofi" { "donate" } else { id },"action":"hide"}));
-                        }
+                        // `run` refuses a pill the organization's policy shows, and says why.
+                        crate::app_bar_custom::run(app, &json!({"item":if id == "kofi" { "donate" } else { id },"action":"hide"}));
                     }
                     app_bar::BarAction::Version => ui.ctx().open_url(egui::OpenUrl::new_tab(&url)),
                     app_bar::BarAction::App { id } => run_overflow_control(app, id),
@@ -772,6 +768,7 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(row("export_glb", &format!("{}…", app.tr("ui.export_glb")), "", "export", shown));
     rows.push(row("export_usd", &format!("{}…", app.tr("ui.export_usd")), "", "export", shown));
     rows.push(row("file.export_urdf", app.tr_label("Export URDF…"), &key("file.export_urdf"), "export", shown));
+    rows.push(row("file.export_mjcf", app.tr_label("Export MJCF…"), &key("file.export_mjcf"), "export", shown));
     rows.push(row("file.export_sdf", app.tr_label("Export SDF Model…"), &key("file.export_sdf"), "export", shown));
     rows.push(row("export_json", app.tr_label("Export Design as JSON…"), "", "export", true));
     // Each installed export slot is a format of its own, labelled with the plugin's name.
@@ -807,6 +804,22 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
         rows.push(row(&item.command, &item.label, "", &item.icon, shown || item.importer));
     }
     rows
+}
+
+/// The File menu row that starts command `id` the way the menu does (a picker for the file), for
+/// commands that need a path or a format and so can't start with no values. Command search starts
+/// these through the menu (#9734).
+pub(crate) fn file_menu_row(id: &str) -> Option<&'static str> {
+    Some(match id {
+        "file.export_stl" => "file.export_stl",
+        "file.export_3mf" => "file.export_3mf",
+        "file.export_step" => "file.export_step",
+        "file.export_obj" => "file.export_obj",
+        "file.export_urdf" => "file.export_urdf",
+        "file.save_as" => "save_as",
+        "doc.open" => "open",
+        _ => return None,
+    })
 }
 
 /// The File menu row of an export slot: this, then its `plugin_id.entry`.
@@ -848,6 +861,7 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         "file.export_view_dxf" => FileAction::Command("file.export_view_dxf").run(app),
         "file.export_obj" => FileAction::Command("file.export_obj").run(app),
         "file.export_urdf" => FileAction::Command("file.export_urdf").run(app),
+        "file.export_mjcf" => FileAction::Command("file.export_mjcf").run(app),
         "file.export_sdf" => FileAction::Command("file.export_sdf").run(app),
         "document.metadata" => FileAction::Command("document.metadata").run(app),
         "drawing.print" => app.start(id),
@@ -998,7 +1012,11 @@ pub(crate) fn download_design(app: &mut SolveApp) {
 }
 
 pub(crate) fn export(app: &mut SolveApp, ext: &str) {
-    export_as(app, ext, None);
+    match ext {
+        // MJCF is saved as the usual `.xml`, which alone does not name the format.
+        "mjcf" => export_as(app, "xml", Some("mjcf")),
+        _ => export_as(app, ext, None),
+    }
 }
 
 /// Each format's own export command, started from its key, command search or the File menu,
@@ -1015,6 +1033,7 @@ pub(crate) fn start_export(app: &mut SolveApp, id: &str) -> bool {
         "file.export_step" => ("step", false),
         "file.export_obj" => ("obj", false),
         "file.export_urdf" => ("urdf", false),
+        "file.export_mjcf" => ("mjcf", false),
         "file.export_sdf" => ("sdf", false),
         "file.export_stl" => ("stl", true),
         "file.export_3mf" => ("3mf", true),
@@ -3699,6 +3718,27 @@ mod header_report_tests {
         crate::dialogs::cancel(&mut h.app);
     }
 
+    /// File › Export MJCF… offers the usual `.xml` name and writes MuJoCo's format there, which a
+    /// `.xml` path alone would not pick (#20786).
+    #[test]
+    fn file_menu_exports_mjcf_as_an_xml_file() {
+        let mut h = crate::scenario::Harness::new();
+        let offered = std::rc::Rc::new(std::cell::RefCell::new(Vec::<(String, Vec<String>)>::new()));
+        let (seen, dir) = (offered.clone(), h.dir.clone());
+        h.app.services.pick_save = Some(Box::new(move |name, extensions| {
+            seen.borrow_mut().push((name.to_string(), extensions.iter().map(|e| e.to_string()).collect()));
+            Box::pin(std::future::ready(Some(dir.join(name).to_string_lossy().into_owned())))
+        }));
+        h.app.run("solid.box", json!({"length":2,"width":3,"height":4})).unwrap();
+        h.app.session.doc_mut().name = "Bracket".into();
+        run_file_row(&mut h.app, "file.export_mjcf");
+        h.frames(3);
+        h.settle();
+        assert_eq!(offered.borrow().last().cloned(), Some(("Bracket.xml".to_string(), vec!["xml".to_string()])));
+        let xml = std::fs::read_to_string(h.dir.join("Bracket.xml")).unwrap();
+        assert!(xml.contains("<mujoco"), "an MJCF model is written: {xml}");
+    }
+
     /// What an exporter leaves out is said on the status line, and each warning stays in Messages
     /// once the chip has faded; an export with nothing left out still says just where it went.
     #[test]
@@ -5042,8 +5082,9 @@ mod dropdown_tests {
             assert!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.box").is_none(), "grid {grid}: unpinned");
             pick(&mut h, "Pin to Shortcuts");
             assert!(h.app.sbox.pinned.iter().any(|p| p == "solid.box"), "grid {grid}: a shortcut");
-            // The pin shown on the pointed-at row or icon pins it, and again unpins it. A grid
-            // icon's pin takes clicks only after the pointer has rested on it for ribbon::PIN_DELAY.
+            // The pin shown on the pointed-at icon pins it and again unpins it. A grid icon's pin
+            // takes clicks only after the pointer has rested on it for ribbon::PIN_DELAY. A row has
+            // no pin (#11853): its ⋯ menu does it.
             for pinned in [true, false] {
                 h.step(&json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
                 h.frames(4);
@@ -5053,10 +5094,19 @@ mod dropdown_tests {
                     assert!(crate::scenario::handle_at("dropdown_pin:solid.box").is_none(), "no pin to click straight away");
                     h.frames((ribbon::PIN_DELAY * 60.0) as usize + 5);
                 }
-                h.step(&json!({"click":{"handle":"dropdown_pin:solid.box"}})).unwrap();
+                if grid {
+                    h.step(&json!({"click":{"handle":"dropdown_pin:solid.box"}})).unwrap();
+                } else {
+                    h.frames((ribbon::PIN_DELAY * 60.0) as usize + 5);
+                    assert!(crate::scenario::handle_at("dropdown_pin:solid.box").is_none(), "a row never shows a pin by default");
+                    h.step(&json!({"click":{"handle":"dropdown_more:solid.box"}})).unwrap();
+                    h.frames(3);
+                    let item = if pinned { "Pin to Toolbar" } else { "Remove from Toolbar" };
+                    h.step(&json!({"widget": item})).unwrap_or_else(|e| panic!("{item} in the row's ⋯ menu: {e}"));
+                }
                 h.frames(3);
                 h.step(&json!({"key":"Escape"})).unwrap();
-                assert_eq!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.box").is_some(), pinned, "grid {grid}: the hover pin");
+                assert_eq!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.box").is_some(), pinned, "grid {grid}");
             }
             assert!(h.app.session.doc.features.is_empty(), "grid {grid}: pinning does not run the command");
         }
@@ -6137,6 +6187,75 @@ mod app_bar_tests {
         assert!(h.app.dialog.is_none() && h.app.tool.is_none());
         assert!(!h.app.preferences.show_donate_button && !h.app.preferences.show_discord_button && !h.app.preferences.ai_toolbar_button);
         assert_eq!((h.app.session.doc.to_json(), h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), before);
+    }
+
+    #[test]
+    fn a_pill_the_policy_shows_stays_on_the_bar_through_every_hide() {
+        let _language = solidcraft_ui_text::scope("en");
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.language = "en".into();
+        h.call("ui.resize", json!({"width":1920,"height":720}));
+        h.app.preferences.show_discord_button = true;
+        h.app.policy = crate::policy::Policy::from_json(r#"{"ShowDonateButton": 1}"#);
+        crate::policy::enforce(&mut h.app);
+        h.app.toolbar_custom.reset_app_bar();
+        h.frames(3);
+        assert!(crate::scenario::rect_of("titlebar:kofi").is_some(), "the policy shows the pill");
+        let refused = "Set by your organization";
+        let hide_row = |app: &crate::SolveApp, id: &str| {
+            crate::app_bar_custom::items(app, Some(id))
+                .into_iter()
+                .find(|row| row.params == Some(json!({"item":id,"action":"hide"})))
+                .unwrap()
+                .enabled
+        };
+        assert!(!hide_row(&h.app, "donate"), "the right-click Hide row is off");
+        assert!(hide_row(&h.app, "discord"));
+        // The pill's ×, the edit menu's Hide (also Delete and dragging it off) and a preset that
+        // leaves it out: each keeps the pill and says why.
+        h.step(&json!({"click":{"handle":"titlebar:kofi:hide"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("titlebar:kofi").is_some());
+        assert!(h.app.status.as_ref().is_some_and(|s| s.0.contains(refused)), "{:?}", h.app.status);
+        h.app.status = None;
+        crate::app_bar_custom::run(&mut h.app, &json!({"item":"donate","action":"hide"}));
+        assert!(h.app.status.as_ref().is_some_and(|s| s.0.contains(refused)), "{:?}", h.app.status);
+        assert!(h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "donate").unwrap().shown, "the saved layout is unchanged");
+        crate::app_bar_custom::preset(&mut h.app, ui_kit::app_bar_items::Preset::Minimal);
+        h.frames(3);
+        assert!(crate::scenario::rect_of("titlebar:kofi").is_some(), "a preset that hides it does not");
+        assert!(crate::scenario::rect_of("titlebar:discord").is_none(), "the preset still hides the unlocked pill");
+        // In customize mode, Delete on the focused pill and dragging it off the bar keep it too.
+        h.app.toolbar_custom.reset_app_bar();
+        h.app.start("ui.appBarCustomize");
+        h.frames(4);
+        let at = crate::scenario::handle_at("appbar:edit:donate").unwrap();
+        h.step(&json!({"click":[at.x,at.y]})).unwrap();
+        h.step(&json!({"key":"Delete"})).unwrap();
+        h.frames(3);
+        assert!(h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "donate").unwrap().shown, "Delete keeps it");
+        let at = crate::scenario::rect_of("appbar:edit:donate").unwrap().center();
+        let press =
+            |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        h.frame_with(vec![press(at, true)]);
+        let away = pos2(at.x, 650.0);
+        h.frame_with(vec![egui::Event::PointerMoved(away)]);
+        h.frame_with(vec![press(away, false)]);
+        h.frames(30);
+        assert!(h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "donate").unwrap().shown, "dragging it off keeps it");
+        assert!(crate::scenario::rect_of("appbar:edit:donate").is_some(), "it is back on the bar");
+        h.step(&json!({"click":{"handle":"appbar:done"}})).unwrap();
+        h.frames(3);
+        // A pill the policy does not lock hides as before.
+        h.app.toolbar_custom.reset_app_bar();
+        h.frames(3);
+        h.app.status = None;
+        h.step(&json!({"click":{"handle":"titlebar:discord:hide"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("titlebar:discord").is_none());
+        assert!(h.app.status.as_ref().is_none_or(|s| !s.0.contains(refused)), "{:?}", h.app.status);
+        assert!(h.app.preferences.show_discord_button, "bar hiding edits the placement only");
     }
 
     #[test]

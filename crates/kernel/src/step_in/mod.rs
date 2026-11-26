@@ -872,8 +872,8 @@ impl Reader {
         let reader = solidcore_step::read::Reader::new(&self.ex, u.units);
         let e = self.ex.get(item).ok_or_else(|| format!("missing entity #{item}"))?;
         if matches!(e.name(), "CARTESIAN_TRANSFORMATION_OPERATOR_3D" | "CARTESIAN_TRANSFORMATION_OPERATOR_3D_NON_UNIFORM") {
-            let p = e.params();
-            let o = reader.point(p.get(4).and_then(Param::as_ref_id).ok_or("transformation without origin")?)?;
+            let p = solidcore_record::step::product::operator_attributes(e);
+            let o = reader.point(p.get(2).and_then(Param::as_ref_id).ok_or("transformation without origin")?)?;
             let direction = |i: usize, global: [f64; 3]| -> R<[f64; 3]> {
                 match p.get(i) {
                     None | Some(Param::Null) => Ok(global),
@@ -887,9 +887,9 @@ impl Reader {
                     Some(v) => v.as_f64().filter(|x| x.is_finite() && *x != 0.0).ok_or_else(|| "invalid transformation scale".into()),
                 }
             };
-            let sx = scale(5, 1.0)?;
-            let (sy, sz) = (scale(7, sx)?, scale(8, sx)?);
-            let (x, y, z) = (direction(2, [1.0, 0.0, 0.0])?, direction(3, [0.0, 1.0, 0.0])?, direction(6, [0.0, 0.0, 1.0])?);
+            let sx = scale(3, 1.0)?;
+            let (sy, sz) = (scale(5, sx)?, scale(6, sx)?);
+            let (x, y, z) = (direction(0, [1.0, 0.0, 0.0])?, direction(1, [0.0, 1.0, 0.0])?, direction(4, [0.0, 0.0, 1.0])?);
             let col = |d: [f64; 3], s: f64| [d[0] * s, d[1] * s, d[2] * s, 0.0];
             let m = [col(x, sx), col(y, sy), col(z, sz), [o[0], o[1], o[2], 1.0]];
             if !m.iter().flatten().all(|x| x.is_finite()) {
@@ -1622,12 +1622,19 @@ const KEEP_SMALL_BYTES: usize = 1 << 20;
 /// threads, and what it finds is in [`ImportReport::current`] once every check has ended
 /// ([`ImportReport::checks`]). [`step_import`] waits for them instead.
 pub fn step_import_shared(text: &str) -> Result<std::sync::Arc<StepImport>> {
+    step_import_shared_with_workers(text, parallel::workers())
+}
+
+/// [`step_import_shared`] with at most `workers` inner worker threads for solid conversion and
+/// background checks, used when a caller decodes multiple independent imports in parallel so
+/// nested parallelism stays bounded while preserving background check semantics on native targets.
+pub fn step_import_shared_with_workers(text: &str, workers: usize) -> Result<std::sync::Arc<StepImport>> {
     let (key, heal) = (text_key(text), crate::heals_tolerance_defects());
     if let Some(imp) = recent(key, heal) {
         return Ok(imp);
     }
     let _span = solidcraft_profile::span("import", "step.import");
-    StepReading::new(text)?.finish_shared()
+    StepReading::with_workers_mode(text, workers.max(1), cfg!(target_arch = "wasm32"))?.finish_shared()
 }
 
 /// The import the recent imports still hold for `key`, read healing its parts or not (`heal`).
@@ -1757,6 +1764,10 @@ impl StepReading {
     }
 
     fn with_workers(text: &str, workers: usize) -> Result<StepReading> {
+        Self::with_workers_mode(text, workers, workers <= 1)
+    }
+
+    fn with_workers_mode(text: &str, workers: usize, single: bool) -> Result<StepReading> {
         let _span = solidcraft_profile::span("import", "step.read_structure");
         let key = text_key(text);
         let watch = crate::watch::current();
@@ -1829,7 +1840,6 @@ impl StepReading {
                 });
             }
         }
-        let single = workers <= 1;
         Ok(StepReading { rd, tree, key, small: text.len() <= KEEP_SMALL_BYTES, single, heal: crate::heals_tolerance_defects() })
     }
 

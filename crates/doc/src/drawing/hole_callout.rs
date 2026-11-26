@@ -46,7 +46,7 @@ use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
 use solidcraft_kernel::PointClass;
-use solidcraft_kernel::services::affine;
+use solidcraft_kernel::affine;
 
 use crate::expr::{Kind, Value};
 use crate::{DocError, Document, Feature, FeatureKind, HoleKind, Mat, Model, ModelState, Result, display_units};

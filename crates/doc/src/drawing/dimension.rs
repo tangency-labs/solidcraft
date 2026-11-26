@@ -695,6 +695,15 @@ impl<'a> Reference<'a> {
             Reference::Face(face) => &face.path,
         }
     }
+
+    /// Its body's name, as its definition names it.
+    pub fn body(self) -> &'a str {
+        match self {
+            Reference::Edge(edge) => &edge.body,
+            Reference::Point(point) => &point.body,
+            Reference::Face(face) => &face.body,
+        }
+    }
 }
 
 /// How a command names an edge (or a face) to measure, before it is saved by name
@@ -791,7 +800,7 @@ impl Document {
         let mut square: Vec<(usize, f64)> = Vec::new();
         for f in 0..b.body.face_count() {
             let Some(plane) = b.body.planar_face(f) else { continue };
-            match solidcraft_kernel::services::affine::square_plane_offset(&frame, plane.origin.into(), plane.normal().into(), axis) {
+            match solidcraft_kernel::affine::square_plane_offset(&frame, plane.origin.into(), plane.normal().into(), axis) {
                 Ok(Some(offset)) => square.push((f, offset)),
                 Ok(None) => {}
                 Err(why) => return Err(axis_refusal(why)),
@@ -827,7 +836,7 @@ impl Document {
         let state = model.state();
         let b = state.bodies.iter().find(|b| b.name == body && !b.body.is_mesh())?;
         let frame = self.body_frame_at(b, path).ok()?;
-        let along_one = solidcraft_kernel::services::affine::along_own_axes(&frame, axis.into()).ok()?;
+        let along_one = solidcraft_kernel::affine::along_own_axes(&frame, axis.into()).ok()?;
         if along_one { body_extent(b, &frame, axis.into()).ok() } else { None }
     }
 
@@ -1350,13 +1359,19 @@ impl<'a> Lookup<'a> {
         let pieces = body.body.planar_edges(&local, &[*index]).pop().flatten().ok_or_else(face_on)?;
         let not_round = || Status::Unmeasurable(format!("edge `{}` isn't a circle or an arc", edge.name));
         // A spline piece is no arc: only the pieces the kernel gives as segments can be one.
-        let segs: Option<Vec<Seg2>> = pieces
-            .into_iter()
-            .map(|piece| match piece {
-                crate::kernel::PlanarPiece::Seg(seg) => Some(seg),
-                crate::kernel::PlanarPiece::Spline(_) => None,
-            })
-            .collect();
+        let segments = |pieces: Vec<crate::kernel::PlanarPiece>| -> Option<Vec<Seg2>> {
+            pieces
+                .into_iter()
+                .map(|piece| match piece {
+                    crate::kernel::PlanarPiece::Seg(seg) => Some(seg),
+                    crate::kernel::PlanarPiece::Spline(_) => None,
+                })
+                .collect()
+        };
+        // An edge held only as a spline, such as where a countersink meets its bore (#22308), is
+        // still the circle of a cylinder it bounds when the view looks along that cylinder's axis:
+        // the kernel's certified circular reading of it.
+        let segs = segments(pieces).or_else(|| body.body.cylinder_edge_projection(&local, *index).and_then(segments));
         let (radius, points) = segs.as_deref().and_then(one_arc).ok_or_else(not_round)?;
         Ok((radius, points.map(|p| apply_point(&found.frame, local.to_world(p)))))
     }
@@ -1600,17 +1615,17 @@ impl<'a> Lookup<'a> {
 /// frame (any length), by solidcore's `extent_along`. Tight when `axis` runs along the body's own axes.
 fn body_extent(b: &ModelBody, frame: &Mat, axis: [f64; 3]) -> Result<f64> {
     let bounds = b.body.exact_bounds().map_err(|e| DocError::Invalid(e.to_string()))?;
-    solidcraft_kernel::services::affine::extent_along(bounds.min.into(), bounds.max.into(), frame, axis).map_err(axis_refusal)
+    solidcraft_kernel::affine::extent_along(bounds.min.into(), bounds.max.into(), frame, axis).map_err(axis_refusal)
 }
 
 /// The refusal of one of solidcore's axis ops, in the words of a dimension on a view.
-fn axis_refusal(why: solidcraft_kernel::services::Error) -> DocError {
-    use solidcraft_kernel::services::affine::{REFUSED_FLAT_MAP, REFUSED_ZERO_AXIS};
+fn axis_refusal(why: solidcraft_kernel::affine::AxisRefusal) -> DocError {
+    use solidcraft_kernel::affine::AxisRefusal;
     DocError::Invalid(
         match why {
-            solidcraft_kernel::services::Error::Refused { reason: REFUSED_ZERO_AXIS, .. } => "the view's axis is zero",
-            solidcraft_kernel::services::Error::Refused { reason: REFUSED_FLAT_MAP, .. } => "the occurrence its body is placed through flattens it",
-            _ => "the body's box is not finite",
+            AxisRefusal::ZeroAxis => "the view's axis is zero",
+            AxisRefusal::FlatMap => "the occurrence its body is placed through flattens it",
+            AxisRefusal::NotFinite => "the body's box is not finite",
         }
         .into(),
     )
