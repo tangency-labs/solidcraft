@@ -2251,3 +2251,36 @@ fn plated_hole_walls_take_the_pads_colour() {
     let faces: usize = imported.bodies.iter().filter_map(|b| b.body.paint()).map(|p| p.faces.len()).sum();
     assert_eq!(faces, painted.len());
 }
+
+/// A plated half-hole on the board's edge paints its wall, though the edge cuts it as chords whose
+/// middles fall inside it; a plated hole 0.001 mm clear of the edge paints its own wall and not the
+/// board's side, whose middle passes that close to it.
+#[test]
+fn a_plated_half_hole_paints_its_wall_and_a_hole_near_the_edge_only_its_own() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "Module:Castellated" (layer "F.Cu") (at 5 0)
+        (pad "1" thru_hole circle (at 0 0) (size 1.6 1.6) (drill 1) (layers "*.Cu" "*.Mask")))
+      (footprint "Connector:Pin" (layer "F.Cu") (at 10 8.999)
+        (pad "1" thru_hole circle (at 0 0) (size 2.4 2.4) (drill 2) (layers "*.Cu" "*.Mask"))))"#;
+    let board = parse_kicad_board(source.as_bytes(), "edge.kicad_pcb").unwrap();
+    let bodies = board_bodies(&board, 1.6, true).unwrap().0;
+    let [body] = bodies.as_slice() else { panic!("one board body") };
+    let painted: HashSet<usize> = body.paint().map(|p| p.faces.iter().map(|f| f.face).collect()).unwrap_or_default();
+    // In the board's frame Y is KiCad's turned over: the half-hole is about (5, 0), the near hole
+    // about (10, -8.999), and the board's side the near hole almost touches is y = -10.
+    let (half, near) = (Vec2::new(5.0, 0.0), Vec2::new(10.0, -8.999));
+    let dist = |p: Vec2, q: Vec2| (p.x - q.x).hypot(p.y - q.y);
+    let (mut half_walls, mut near_walls) = (0, 0);
+    for (face, source) in body.face_sources().expect("an extrusion knows its faces").iter().enumerate() {
+        let Some(solidcraft_kernel::FaceSource::ExtrudeSide { segment, .. }) = source else { continue };
+        let (a, m, b) = (segment.start(), segment.mid(), segment.end());
+        let side = matches!(segment, Seg2::Line { .. }) && dist(a, b) > 2.0;
+        let on_half = !side && [a, m, b].iter().all(|p| (dist(*p, half) - 0.5).abs() < 0.03);
+        let on_near = !side && [a, m, b].iter().all(|p| (dist(*p, near) - 1.0).abs() < 0.03);
+        half_walls += usize::from(on_half);
+        near_walls += usize::from(on_near);
+        assert_eq!(painted.contains(&face), on_half || on_near, "face {face} {segment:?}");
+    }
+    assert!(half_walls > 0 && near_walls > 0, "both holes have walls: {half_walls} {near_walls}");
+}

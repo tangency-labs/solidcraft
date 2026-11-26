@@ -14,7 +14,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_doc::Mat;
 use solidcraft_geom::prelude::*;
 
@@ -1536,9 +1536,7 @@ fn board_bodies(board: &KicadBoard, thickness: f64, plating: bool) -> Result<(Ve
                 .iter()
                 .enumerate()
                 .filter(|(_, source)| match source {
-                    Some(solidcraft_kernel::FaceSource::ExtrudeSide { segment, .. }) => {
-                        plated.iter().any(|drill| on_drill_wall(drill, segment.mid()))
-                    }
+                    Some(solidcraft_kernel::FaceSource::ExtrudeSide { segment, .. }) => plated.iter().any(|drill| on_drill_wall(drill, segment)),
                     _ => false,
                 })
                 .map(|(face, _)| solidcraft_kernel::FacePaint { face, color: PAD_COLOR, opacity: 1.0, name: None })
@@ -1549,11 +1547,14 @@ fn board_bodies(board: &KicadBoard, thickness: f64, plating: bool) -> Result<(Ve
     Ok((bodies, holes_lost, notes))
 }
 
-/// Does `p` lie on a drill's wall? A drill is a stadium, a round one with no straight part. A
-/// slot's ends are drawn as chords (see [`slot_loop`]), whose middles fall a little inside its wall;
-/// the kernel's test allows for that.
-fn on_drill_wall(drill: &KicadDrill, p: Vec2) -> bool {
-    solidcraft_kernel::services::board_drill::on_hole_wall(drill.center, drill.size, drill.angle, [p.x, p.y])
+/// Does the side `segment` lie on a drill's wall? A drill is a stadium, a round one with no straight
+/// part. Its ends and its middle must all be on the wall: a side that only passes near a drill is
+/// not. A half-hole is cut as chords of [`CURVE_TOLERANCE`] (see [`notch_loop`]) and a slot's ends
+/// are drawn as chords (see [`slot_loop`]), whose middles fall a little inside the wall; the
+/// kernel's test allows for that.
+fn on_drill_wall(drill: &KicadDrill, segment: &Seg2) -> bool {
+    let points = [segment.start(), segment.mid(), segment.end()].map(|p| [p.x, p.y]);
+    solidcraft_kernel::services::board_drill::side_on_hole_wall(drill.center, drill.size, drill.angle, &points, CURVE_TOLERANCE)
 }
 
 /// The board substrate as exact solids, exported as a STEP file: the engine adds it as an Import

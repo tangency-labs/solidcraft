@@ -68,6 +68,35 @@ pub fn hole_reaches_loops(
 /// input is on no wall.
 #[must_use]
 pub fn on_hole_wall(center: [f64; 2], size: [f64; 2], angle: f64, point: [f64; 2]) -> bool {
+    wall_gap(center, size, angle, point)
+        .is_some_and(|(gap, radius)| gap <= (radius * 0.006).max(1e-6))
+}
+
+/// Whether a side of a board's outline lies on the wall of a drilled hole: every one of `points`
+/// (its ends and its middle, say) is on the wall of [`on_hole_wall`], within `chord` or that
+/// test's slack, whichever is larger. `chord` takes in a wall drawn as chords, whose middles fall
+/// inside it by up to the chords' sag. No points, or a non-finite or negative input, is on no wall.
+#[must_use]
+pub fn side_on_hole_wall(
+    center: [f64; 2],
+    size: [f64; 2],
+    angle: f64,
+    points: &[[f64; 2]],
+    chord: f64,
+) -> bool {
+    if !chord.is_finite() || chord < 0.0 {
+        return false;
+    }
+    !points.is_empty()
+        && points.iter().all(|&point| {
+            wall_gap(center, size, angle, point)
+                .is_some_and(|(gap, radius)| gap <= (radius * 0.006).max(chord).max(1e-6))
+        })
+}
+
+/// How far `point` is from the wall of the hole of [`on_hole_wall`], with the hole's radius; `None`
+/// for a non-finite or negative input.
+fn wall_gap(center: [f64; 2], size: [f64; 2], angle: f64, point: [f64; 2]) -> Option<(f64, f64)> {
     let [width, height] = size;
     let finite = center
         .iter()
@@ -76,7 +105,7 @@ pub fn on_hole_wall(center: [f64; 2], size: [f64; 2], angle: f64, point: [f64; 2
         .all(|v| v.is_finite())
         && angle.is_finite();
     if !finite || width < 0.0 || height < 0.0 {
-        return false;
+        return None;
     }
     let radius = width.min(height) * 0.5;
     let half = (width.max(height) - width.min(height)) * 0.5;
@@ -88,8 +117,7 @@ pub fn on_hole_wall(center: [f64; 2], size: [f64; 2], angle: f64, point: [f64; 2
     let c = Vec2::from_array(center);
     let axis = Vec2::new(along.cos(), along.sin()) * half;
     let distance = point_segment_distance(Vec2::from_array(point), c - axis, c + axis);
-    let slack = (radius * 0.006).max(1e-6);
-    (distance - radius).abs() <= slack
+    Some(((distance - radius).abs(), radius))
 }
 
 fn cross(a: Vec2, b: Vec2) -> f64 {
@@ -223,6 +251,37 @@ mod tests {
             [1.0, 1.0],
             0.0,
             [f64::INFINITY, 0.0]
+        ));
+    }
+
+    #[test]
+    fn a_side_is_on_a_hole_wall_only_when_all_of_it_is() {
+        // A 2 mm hole 1.001 from the edge y = 0: the edge's middle (0, 0) is 0.001 off its wall,
+        // but the edge's ends are not on it.
+        let edge = [[-20.0, 0.0], [0.0, 0.0], [20.0, 0.0]];
+        assert!(!side_on_hole_wall(
+            [0.0, -1.001],
+            [2.0, 2.0],
+            0.0,
+            &edge,
+            0.02
+        ));
+        // A 1 mm half-hole cut as chords of 0.02 mm sag: a 30° chord's middle is 0.017 inside.
+        let (a, b) = (15_f64.to_radians(), 45_f64.to_radians());
+        let (p, q) = (
+            [0.5 * a.cos(), 0.5 * a.sin()],
+            [0.5 * b.cos(), 0.5 * b.sin()],
+        );
+        let chord = [p, [(p[0] + q[0]) * 0.5, (p[1] + q[1]) * 0.5], q];
+        assert!(side_on_hole_wall([0.0, 0.0], [1.0, 1.0], 0.0, &chord, 0.02));
+        assert!(!side_on_hole_wall([0.0, 0.0], [1.0, 1.0], 0.0, &chord, 0.0));
+        assert!(!side_on_hole_wall([0.0, 0.0], [1.0, 1.0], 0.0, &[], 0.02));
+        assert!(!side_on_hole_wall(
+            [0.0, 0.0],
+            [1.0, 1.0],
+            0.0,
+            &chord,
+            f64::NAN
         ));
     }
 
