@@ -481,6 +481,49 @@ fn pocket_export_button_uses_the_picker_and_preserves_depth_layers() {
     }
 }
 
+/// The ribbon's Export DXF dialog offers the layers (single, one per role, one cut layer) and the
+/// hardware notes: choosing a cut layer and the notes sends `layers: "cut"` and
+/// `hardware_notes: true` to `sheet.export_dxf`, which the written file shows (the notes on layer
+/// HARDWARE, the bend lines on their own layer).
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn export_dxf_dialog_offers_the_layers_and_the_hardware_notes() {
+    let mut h = crate::scenario::Harness::new();
+    for (command, params) in [
+        ("sketch.create", json!({"plane":"XY","name":"Base"})),
+        ("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[100,60]})),
+        ("sketch.finish", json!({})),
+        ("sheet.flange", json!({"sketch":"Base"})),
+        ("sheet.flange", json!({"edges":[[50,0,2.5]],"height":20})),
+        ("sheet.hardware", json!({"kind":"nut","thread":"M3","position":[30,30,2.5]})),
+    ] {
+        h.app.run(command, params).unwrap();
+    }
+    let path = h.dir.join("layers.dxf");
+    let chosen = path.to_string_lossy().into_owned();
+    h.app.services.pick_save = Some(Box::new(move |_, _| Box::pin(std::future::ready(Some(chosen.clone())))));
+    h.app.start("sheet.export_dxf");
+    h.frames(2);
+    assert_eq!(DXF_LAYERS.map(|(l, ..)| l), [DxfLayers::Single, DxfLayers::Roles, DxfLayers::Cut], "the row's choices, in order");
+    let Some(Kind::Sheet(Sm::ExportDxf { options, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("export dialog") };
+    assert_eq!((DXF_LAYERS[options.layers].0, options.hardware_notes), (DxfLayers::Roles, false), "the defaults");
+    for name in ["Single layer", "One per role", "One cut layer"] {
+        h.step(&json!({"click": {"handle": "dialog:sheet_dxf:layers"}})).unwrap();
+        assert!(h.step(&json!({"click": {"handle": format!("dialog:DXF layers:{name}")}})).is_ok(), "{name} is a choice");
+    }
+    h.step(&json!({"click": {"handle": "dialog:sheet_dxf:hardware_notes"}})).unwrap();
+    let Some(Kind::Sheet(Sm::ExportDxf { options, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("export dialog") };
+    assert_eq!((DXF_LAYERS[options.layers].0, options.hardware_notes), (DxfLayers::Cut, true));
+    h.step(&json!({"click": {"handle": "dialog:Export DXF…"}})).unwrap();
+    h.frames(2);
+    let dxf = std::fs::read_to_string(&path).expect("the dialog's save writes the picked file");
+    let lines: Vec<&str> = dxf.lines().map(str::trim).collect();
+    let has = |layer: &str| lines.contains(&layer);
+    assert!(has("HARDWARE") && has("BEND_UP"), "hardware notes and the bend lines keep their layers");
+    assert!(!has("OUTLINE") && !has("CUT"), "the cut contours are on layer 0");
+    assert!(lines.windows(2).any(|w| w == ["8", "0"]));
+}
+
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn bend_table_picker_writes_the_current_body() {
