@@ -192,6 +192,14 @@ impl FilletSolver {
         self.trace_across = across;
     }
 
+    /// How far (3D) the trace's base surface domains reach past their own at least along
+    /// the filleted edge (`0` = by the extension factor alone), and which parameter
+    /// directions of each base surface (`[surface][u, v]`) run along the edge.
+    pub fn set_trace_reach_along(&mut self, reach: f64, along: [[bool; 2]; 2]) {
+        self.trace_reach_along = reach;
+        self.trace_along = along;
+    }
+
     /// How far the trace extends a base surface's domain past `domain`, in each parameter
     /// direction: the fork's `GetDomainExtension` (`FilletSolver::reaching_extension`),
     /// and in a direction the surface turns back on itself in, no further than where its
@@ -259,14 +267,15 @@ impl FilletSolver {
             return Ok(size);
         };
         // `!( m_dTraceReach > 0.0 )`: a NaN reach returns too
-        let reaches = self.trace_reach > 0.0;
-        if !reaches {
+        let across_reaches = self.trace_reach > 0.0;
+        let along_reaches = self.trace_reach_along > 0.0;
+        if !across_reaches && !along_reaches {
             return Ok(size);
         }
         let Some(ends) = domain_ends(k, surface, domain)? else {
             return Ok(size);
         };
-        // which of the solver's base surfaces this is: its directions across the edge
+        // which of the solver's base surfaces this is: its directions across / along the edge
         let mut which = None;
         for (index, slot) in self.surfaces.iter().enumerate() {
             if let Some(slot) = slot {
@@ -275,20 +284,33 @@ impl FilletSolver {
                 }
             }
         }
-        let across = which
-            .and_then(|index| self.trace_across.get(index))
-            .copied()
-            .unwrap_or([true, true]);
-        let [across_u, across_v] = across;
         let uv_size = domain.size();
         let [u_min, u_max, v_min, v_max] = ends;
         let d3d_u = u_min.distance(u_max);
         let d3d_v = v_min.distance(v_max);
-        if across_u && d3d_u > EFF_ZERO_SQRT {
-            size.x = smos_max(size.x, self.trace_reach * uv_size.x / d3d_u);
+        if across_reaches {
+            let [across_u, across_v] = which
+                .and_then(|index| self.trace_across.get(index))
+                .copied()
+                .unwrap_or([true, true]);
+            if across_u && d3d_u > EFF_ZERO_SQRT {
+                size.x = smos_max(size.x, self.trace_reach * uv_size.x / d3d_u);
+            }
+            if across_v && d3d_v > EFF_ZERO_SQRT {
+                size.y = smos_max(size.y, self.trace_reach * uv_size.y / d3d_v);
+            }
         }
-        if across_v && d3d_v > EFF_ZERO_SQRT {
-            size.y = smos_max(size.y, self.trace_reach * uv_size.y / d3d_v);
+        if along_reaches {
+            let [along_u, along_v] = which
+                .and_then(|index| self.trace_along.get(index))
+                .copied()
+                .unwrap_or([true, true]);
+            if along_u && d3d_u > EFF_ZERO_SQRT {
+                size.x = smos_max(size.x, self.trace_reach_along * uv_size.x / d3d_u);
+            }
+            if along_v && d3d_v > EFF_ZERO_SQRT {
+                size.y = smos_max(size.y, self.trace_reach_along * uv_size.y / d3d_v);
+            }
         }
         Ok(size)
     }

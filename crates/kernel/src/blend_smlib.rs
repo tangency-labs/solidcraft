@@ -879,4 +879,70 @@ mod tests {
         let run_on = fillet(&b, &[vertical], 2.0, FilletTurn::Mitre).unwrap();
         assert!(volume(&run_on) < volume(&b));
     }
+
+    /// Issue #22190: a 3x45° profile chamfer meeting an obliquely sloped outer wall (~168°
+    /// corner) joined with a rectangular boss flush under the bottom flat, then R1 filleted
+    /// on the chamfer's end edges. At the sloped corner the top-face rail end projects
+    /// `cot(theta) = 61/13 ≈ 4.69 mm` past the chamfer vertex — farther than the chamfer's
+    /// 4.24 mm span — so both base-surface trace extension and cylinder axial extension must
+    /// account for oblique end reach along the filleted edge.
+    #[test]
+    fn oblique_chamfer_end_fillet_after_joined_boss_succeeds() {
+        use crate::BoolOp;
+        use solidcore_record::{Loop2, Plane, Region2, Vec2};
+
+        let make_bar = |len: f64| -> Body {
+            let pts = [Vec2::new(-24.0, 40.0), Vec2::new(0.0, 3.0), Vec2::new(3.0, 0.0), Vec2::new(45.0, 0.0), Vec2::new(45.0, 40.0)];
+            crate::extrude(&Plane::XY, &[Region2 { outer: Loop2::polygon(&pts), holes: vec![] }], 0.0, len).unwrap().remove(0)
+        };
+        let make_boss = |y_top: f64, bevel45: bool, len: f64| -> Body {
+            let h = 1.5;
+            let pts = if bevel45 {
+                [Vec2::new(3.0, y_top), Vec2::new(3.0 + h, y_top - h), Vec2::new(11.6, y_top - h), Vec2::new(11.6, y_top)]
+            } else {
+                [Vec2::new(3.0, y_top), Vec2::new(3.0, y_top - h), Vec2::new(11.6, y_top - h), Vec2::new(11.6, y_top)]
+            };
+            crate::extrude(&Plane::XY, &[Region2 { outer: Loop2::polygon(&pts), holes: vec![] }], 0.0, len).unwrap().remove(0)
+        };
+
+        // Exact cross-section area of bar + rectangular boss:
+        // bar = 45*40 + 0.5*24*37 - 0.5*3*3 = 2239.5; boss = 8.6*1.5 = 12.9; total = 2252.4.
+        // One R1 end fillet along the 3*sqrt(2) chamfer removes:
+        //   3*sqrt(2)*(1 - pi/4) + (cot(theta_top) - cot(45°))*(5/6 - pi/4)
+        // where cot(theta_top) = 61/13 and cot(45°) = 1 (vertical boss wall at x = 3).
+        let one_end_removal = 3.0 * 2.0_f64.sqrt() * QUARTER + (48.0 / 13.0) * (5.0 / 6.0 - std::f64::consts::FRAC_PI_4);
+
+        // Short bar (len = 50), flush rectangular boss, single end edge.
+        let joined_50 = crate::boolean(&make_bar(50.0), &make_boss(0.0, false, 50.0), BoolOp::Union).unwrap().unwrap();
+        let r50 = fillet(&joined_50, &[Vec3::new(1.5, 1.5, 50.0)], 1.0, FilletTurn::Mitre).unwrap();
+        let v50 = crate::validity(&r50);
+        assert!(v50.record.is_ok(), "{:?}", v50.record);
+        assert!(matches!(v50.smlib, Some(crate::SmlibCheck::Valid)), "{:?}", v50.smlib);
+        let want_50 = 2252.4 * 50.0 - one_end_removal;
+        assert!((volume(&r50) - want_50).abs() < 1e-3, "got {}, want {want_50}", volume(&r50));
+
+        // Full-length bar (len = 300), flush rectangular boss, both chamfer end edges.
+        let joined_300 = crate::boolean(&make_bar(300.0), &make_boss(0.0, false, 300.0), BoolOp::Union).unwrap().unwrap();
+        let r300 = fillet(&joined_300, &[Vec3::new(1.5, 1.5, 300.0), Vec3::new(1.5, 1.5, 0.0)], 1.0, FilletTurn::Mitre).unwrap();
+        let v300 = crate::validity(&r300);
+        assert!(v300.record.is_ok(), "{:?}", v300.record);
+        assert!(matches!(v300.smlib, Some(crate::SmlibCheck::Valid)), "{:?}", v300.smlib);
+        let want_300 = 2252.4 * 300.0 - 2.0 * one_end_removal;
+        assert!((volume(&r300) - want_300).abs() < 1e-2, "got {}, want {want_300}", volume(&r300));
+
+        // 45° beveled boss shifted by -5e-7 under the flat (single edge and tangent chain).
+        let joined_bevel = crate::boolean(&make_bar(50.0), &make_boss(-5e-7, true, 50.0), BoolOp::Union).unwrap().unwrap();
+        let seed = Vec3::new(1.5, 1.5, 50.0);
+        let single = fillet(&joined_bevel, &[seed], 1.0, FilletTurn::Mitre).unwrap();
+        let vs = crate::validity(&single);
+        assert!(vs.record.is_ok(), "{:?}", vs.record);
+        assert!(matches!(vs.smlib, Some(crate::SmlibCheck::Valid)), "{:?}", vs.smlib);
+        assert!(volume(&single) < volume(&joined_bevel));
+        let chain = crate::tangent_chain(&joined_bevel, &[seed]).unwrap();
+        let chained = fillet(&joined_bevel, &chain, 1.0, FilletTurn::Mitre).unwrap();
+        let vc = crate::validity(&chained);
+        assert!(vc.record.is_ok(), "{:?}", vc.record);
+        assert!(matches!(vc.smlib, Some(crate::SmlibCheck::Valid)), "{:?}", vc.smlib);
+        assert!(volume(&chained) < volume(&joined_bevel));
+    }
 }

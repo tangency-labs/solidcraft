@@ -36,7 +36,7 @@ use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::Surface;
 use crate::topology::edgeuse::p1 as eu;
 use crate::topology::edgeuse::p3::get_or_create_uv_trim_curve;
-use crate::topology::{edge, Brep};
+use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, VertexId};
 
 const OP: &str = "blend::fillet_executive::session::trace_reach::extend_trace_to_its_rails";
 
@@ -56,6 +56,89 @@ fn smos_min(a: f64, b: f64) -> f64 {
     } else {
         b
     }
+}
+
+/// Unit tangent of `edge_id` leaving `vertex_id`, or `None` when `edge_id` is not
+/// incident on `vertex_id` or its end tangent cannot be evaluated or unitized.
+fn leaving_tangent(
+    k: &Kernel,
+    target: &Brep,
+    edge_id: EdgeId,
+    vertex_id: VertexId,
+) -> Result<Option<Vec3>> {
+    let (start_v, end_v) = edge::start_end_vertices(target, edge_id)?;
+    let at_start = if start_v == Some(vertex_id) {
+        true
+    } else if end_v == Some(vertex_id) {
+        false
+    } else {
+        return Ok(None);
+    };
+    let raw = match edge::end_tangent(k, target, edge_id, at_start) {
+        Ok(t) => t,
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => return Ok(None),
+    };
+    let dir = if at_start { raw } else { -raw };
+    match dir.unitize() {
+        Ok(unit) => Ok(Some(unit)),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => Ok(None),
+    }
+}
+
+/// How far past an end vertex a rail can project along `edge_id` when a side edge of
+/// one of `edge_id`'s faces leaves that vertex obliquely backward (past the end of
+/// `edge_id` at an obtuse interior corner). Returns `0.0` when no side edge runs
+/// backward past either end vertex (orthogonal or acute corners, or a closed edge).
+fn oblique_end_reach(
+    k: &Kernel,
+    target: &Brep,
+    edge_id: EdgeId,
+    edge_faces: [Option<FaceId>; 2],
+    d_rail: f64,
+    radius: f64,
+) -> Result<f64> {
+    if edge::is_closed(target, edge_id)? {
+        return Ok(0.0);
+    }
+    let (Some(start_v), Some(end_v)) = edge::start_end_vertices(target, edge_id)? else {
+        return Ok(0.0);
+    };
+    if start_v == end_v {
+        return Ok(0.0);
+    }
+    let [face0, face1] = edge_faces;
+    let min_sin = (PI / 180.0).sin();
+    let mut max_along = 0.0_f64;
+    for v in [start_v, end_v] {
+        let Some(t_fil) = leaving_tangent(k, target, edge_id, v)? else {
+            continue;
+        };
+        for side in vertex::edges(target, v, None)? {
+            if side == edge_id || edge::is_closed(target, side)? {
+                continue;
+            }
+            let shares_face = edge::is_connected_to_face(target, side, face0)?
+                || edge::is_connected_to_face(target, side, face1)?;
+            if !shares_face {
+                continue;
+            }
+            let Some(t_side) = leaving_tangent(k, target, side, v)? else {
+                continue;
+            };
+            let cos_back = t_side.dot(-t_fil);
+            let sin_theta = t_side.cross(t_fil).length();
+            if cos_back > 0.0 && sin_theta > min_sin {
+                max_along = smos_max(max_along, d_rail * (cos_back / sin_theta));
+            }
+        }
+    }
+    Ok(if max_along > 0.0 {
+        2.0 * max_along + radius
+    } else {
+        0.0
+    })
 }
 
 /// `sm_ExtendTraceToItsRails(pFS)` (fork, WR-609/WR-610): sets the solver's trace reach
@@ -173,12 +256,39 @@ pub(crate) fn extend_trace_to_its_rails(
         return Ok(());
     }
     let reach = (2.0 / (angle / 2.0).tan() + 1.0) * radius;
+    let [eu0, eu1] = edgeuses;
+    let edge_faces = [
+        match eu0 {
+            Some(id) => eu::face(target, id)?,
+            None => None,
+        },
+        match eu1 {
+            Some(id) => eu::face(target, id)?,
+            None => None,
+        },
+    ];
+    let along_reach = oblique_end_reach(
+        k,
+        target,
+        edge_id,
+        edge_faces,
+        radius / (angle / 2.0).tan(),
+        radius,
+    )?;
 
-    // Each base surface's parameter directions that run across the edge (not mostly along
-    // it, by the edge's direction on it in 3D proportions), and whether the default reaches.
+    // Each base surface's parameter directions that run across or along the edge (by the
+    // edge's direction on it in 3D proportions), and whether the default reaches.
     let mut across = [[true, true], [true, true]];
+    let mut along_dirs = [[true, true], [true, true]];
+    let mut d3d_all = [[0.0_f64; 2]; 2];
     let mut short = false;
-    for ((surface, row), edgeuse) in bases.into_iter().zip(across.iter_mut()).zip(edgeuses) {
+    for ((((surface, row), along_row), d3d_slot), edgeuse) in bases
+        .into_iter()
+        .zip(across.iter_mut())
+        .zip(along_dirs.iter_mut())
+        .zip(d3d_all.iter_mut())
+        .zip(edgeuses)
+    {
         let domain: Extent2d = surface.natural_uv_domain_with_nurb(k)?;
         let mid = domain.mid();
         let ends: [Point3; 4] = [
@@ -189,6 +299,7 @@ pub(crate) fn extend_trace_to_its_rails(
         ];
         let [u_min, u_max, v_min, v_max] = ends;
         let d3d = [u_min.distance(u_max), v_min.distance(v_max)];
+        *d3d_slot = d3d;
         let uv_size = domain.size();
         for d in d3d {
             if d > EFF_ZERO_SQRT && factor * d < reach {
@@ -221,13 +332,28 @@ pub(crate) fn extend_trace_to_its_rails(
         ];
         let len = (along[0] * along[0] + along[1] * along[1]).sqrt();
         if len > 0.0 {
-            for (flag, a) in row.iter_mut().zip(along) {
-                *flag = a.abs() / len < 0.9;
+            for ((flag, along_flag), a) in row.iter_mut().zip(along_row.iter_mut()).zip(along) {
+                let ratio = a.abs() / len;
+                *flag = ratio < 0.9;
+                *along_flag = ratio > 0.1;
             }
         }
     }
     if short {
         solver.base_mut().set_trace_reach(reach, across);
+    }
+    if along_reach > 0.0 {
+        let along_short = d3d_all.into_iter().zip(along_dirs).any(|(d_pair, flags)| {
+            d_pair
+                .into_iter()
+                .zip(flags)
+                .any(|(d, is_along)| is_along && d > EFF_ZERO_SQRT && factor * d < along_reach)
+        });
+        if along_short {
+            solver
+                .base_mut()
+                .set_trace_reach_along(along_reach, along_dirs);
+        }
     }
     Ok(())
 }
@@ -292,5 +418,94 @@ mod tests {
             "{result:?}"
         );
         assert_eq!(solver.base().trace_reach, 0.0);
+    }
+
+    #[test]
+    fn oblique_end_corner_sets_along_edge_trace_reach() {
+        use crate::curve::curve::Curve;
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::sweep::api_brep::create_linear_sweep;
+
+        let mut k = Kernel::default();
+        k.fixes.fillet_trace_reaches_rails = true;
+
+        // Orthogonal box corner: no side edge runs backward past either end vertex.
+        let mut bx = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 20.0, 30.0).unwrap();
+        let box_edge = bx
+            .edges()
+            .ids()
+            .find(|&e| {
+                let ivl = edge::interval(&bx, e).unwrap();
+                let c = edge::curve(&bx, e).unwrap().unwrap();
+                [ivl.min(), ivl.max()].into_iter().all(|t| {
+                    let p = c.evaluate_point(&k, t).unwrap();
+                    p.z == 30.0 && p.x == 0.0
+                })
+            })
+            .unwrap();
+        let mut box_session = FilletSession::new(&mut k, &mut bx).unwrap();
+        box_session
+            .prepare_constant_radius_edges(&mut k, &[box_edge], 1.0, 1, 1, 1.0)
+            .unwrap();
+        let Some(&FilletObject::Solver(box_sid)) = box_session.executive().solvers.first() else {
+            panic!("no solver");
+        };
+        let box_objects = &mut box_session.objects;
+        let box_solver = box_objects.solvers[box_sid.0 as usize].as_mut().unwrap();
+        extend_trace_to_its_rails(&k, box_objects.target, box_solver).unwrap();
+        assert_eq!(box_solver.base().trace_reach_along, 0.0);
+
+        // Extruded polygon with a 3x45° chamfer meeting a sloped outer wall (-24,40)-(0,3):
+        // cot(theta) = 61/13 ≈ 4.6923, exceeding half the chamfer's 4.2426 length.
+        let pts = [
+            Point3::new(-24.0, 40.0, 0.0),
+            Point3::new(0.0, 3.0, 0.0),
+            Point3::new(3.0, 0.0, 0.0),
+            Point3::new(45.0, 0.0, 0.0),
+            Point3::new(45.0, 40.0, 0.0),
+        ];
+        let segs: Vec<Curve> = (0..pts.len())
+            .map(|i| {
+                Curve::from(
+                    BSplineCurve::create_line_segment(3, pts[i], pts[(i + 1) % pts.len()]).unwrap(),
+                )
+            })
+            .collect();
+        let refs: Vec<Option<&Curve>> = segs.iter().map(Some).collect();
+        let mut bar =
+            create_linear_sweep(&mut k, &refs, Vec3::new(0.0, 0.0, 1.0), 50.0, true).unwrap();
+        let chamfer_top = bar
+            .edges()
+            .ids()
+            .find(|&e| {
+                let ivl = edge::interval(&bar, e).unwrap();
+                let c = edge::curve(&bar, e).unwrap().unwrap();
+                let mid = c.evaluate_point(&k, ivl.evaluate(0.5)).unwrap();
+                (mid.x - 1.5).abs() < 1e-4
+                    && (mid.y - 1.5).abs() < 1e-4
+                    && (mid.z - 50.0).abs() < 1e-4
+            })
+            .unwrap();
+        let mut session = FilletSession::new(&mut k, &mut bar).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &[chamfer_top], 1.0, 1, 1, 1.0)
+            .unwrap();
+        let Some(&FilletObject::Solver(sid)) = session.executive().solvers.first() else {
+            panic!("no solver");
+        };
+        let objects = &mut session.objects;
+        let solver = objects.solvers[sid.0 as usize].as_mut().unwrap();
+        extend_trace_to_its_rails(&k, objects.target, solver).unwrap();
+        let expected_min = 2.0 * (61.0 / 13.0) + 1.0 - 1e-6;
+        assert!(
+            solver.base().trace_reach_along >= expected_min,
+            "trace_reach_along = {}, expected >= {expected_min}",
+            solver.base().trace_reach_along
+        );
+        assert!(
+            solver.base().trace_along.iter().flatten().any(|&flag| flag),
+            "trace_along = {:?}",
+            solver.base().trace_along
+        );
     }
 }

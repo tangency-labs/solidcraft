@@ -595,8 +595,13 @@ fn run_side_edge_on_along_its_line(
     let reach = {
         let factor_reach = solver.surface_extension_factor * length;
         // smos_Max
-        if solver.trace_reach > factor_reach {
+        let base_reach = if solver.trace_reach > solver.trace_reach_along {
             solver.trace_reach
+        } else {
+            solver.trace_reach_along
+        };
+        if base_reach > factor_reach {
+            base_reach
         } else {
             factor_reach
         }
@@ -1102,9 +1107,20 @@ impl FilletSolver {
 
         // get extension vectors along each rail curve and the center curve
         let f = s.surface_extension_factor;
-        let ext0 = f * (end_pnt0 - start_pnt0);
-        let ext1 = f * (end_pnt1 - start_pnt1);
-        let center_ext = f * (center1 - center0);
+        let span = center1.distance(center0);
+        let ext_factor = if s.trace_reach_along > 0.0 && span > EFF_ZERO_SQRT {
+            let along_f = s.trace_reach_along / span;
+            if along_f > f {
+                along_f
+            } else {
+                f
+            }
+        } else {
+            f
+        };
+        let ext0 = ext_factor * (end_pnt0 - start_pnt0);
+        let ext1 = ext_factor * (end_pnt1 - start_pnt1);
+        let center_ext = ext_factor * (center1 - center0);
 
         // when extending the start of the fillet
         if s.extend_before {
