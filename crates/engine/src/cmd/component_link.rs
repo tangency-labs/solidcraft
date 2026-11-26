@@ -2314,7 +2314,7 @@ enum TargetLink {
 }
 
 enum EvalOutcome {
-    Done(std::result::Result<EvaluatedLink, String>),
+    Done(std::result::Result<Box<EvaluatedLink>, String>),
     NeedsSequential,
 }
 
@@ -2520,6 +2520,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         s.doc.links.iter().filter(|(c, _)| only.as_ref().is_none_or(|o| o.contains(c))).map(|(c, l)| (*c, l.clone())).collect();
     let own = s.path.clone();
     let validation = s.validation();
+    let doc_before_update = s.doc.clone();
 
     // Phase 1: classify target links and snapshot `before` states upfront before any mutation.
     let mut targets: Vec<TargetLink> = Vec::with_capacity(links.len());
@@ -2648,7 +2649,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
     } else if eval_jobs.len() > 1 {
         let par_results = map_link_work(&eval_jobs, |job| {
             if job.step_names.is_some() {
-                return EvalOutcome::Done(eval_job_sequential(job, validation));
+                return EvalOutcome::Done(eval_job_sequential(job, validation).map(Box::new));
             }
             let source = Source::File(job.file.clone());
             let (part_doc, saved) = match parse_design_bytes(&source, &job.bytes) {
@@ -2663,13 +2664,13 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
                 return EvalOutcome::NeedsSequential;
             }
             let res = evaluate_parsed_design(&source, &job.bytes, part_doc, saved, job.configuration, validation, false)
-                .map(|(linked, _)| EvaluatedLink::from_linked(linked))
+                .map(|(linked, _)| Box::new(EvaluatedLink::from_linked(linked)))
                 .map_err(|e| e.to_string());
             EvalOutcome::Done(res)
         });
         for (job, outcome) in eval_jobs.into_iter().zip(par_results) {
             let res = match outcome {
-                Some(EvalOutcome::Done(res)) => res,
+                Some(EvalOutcome::Done(res)) => res.map(|eval| *eval),
                 Some(EvalOutcome::NeedsSequential) | None => eval_job_sequential(&job, validation),
             };
             evaluated.insert(job.key, res.map(|eval| (job.file, eval)));
@@ -2887,7 +2888,6 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
     }
 
     // Phase 4: ONE refresh for all mutated links, then rebind faces for every changed link.
-    let doc_before_refresh = s.doc.clone();
     if needs_first_refresh {
         #[cfg(test)]
         UPDATE_LINKS_REFRESHES.with(|n| n.set(n.get() + 1));
@@ -2936,7 +2936,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         #[cfg(test)]
         UPDATE_LINKS_REFRESHES.with(|n| n.set(n.get() + 1));
         s.refresh();
-    } else if !std::sync::Arc::ptr_eq(&doc_after_rebind, &s.doc) || (!needs_first_refresh && !std::sync::Arc::ptr_eq(&doc_before_refresh, &s.doc)) {
+    } else if !std::sync::Arc::ptr_eq(&doc_after_rebind, &s.doc) || (!needs_first_refresh && !std::sync::Arc::ptr_eq(&doc_before_update, &s.doc)) {
         s.revision += 1;
     }
 
@@ -5433,18 +5433,15 @@ mod tests {
 
             let build_assembly = || -> (Session, Vec<u64>, Option<(u64, u64)>) {
                 let mut s = Session::default();
-                let mut comps = Vec::new();
-                comps.push(run(&mut s, "component.insert_design", json!({"path": plate_path, "name": "PlateA"}))["component"].as_u64().unwrap());
-                comps.push(
+                let mut comps = vec![
+                    run(&mut s, "component.insert_design", json!({"path": plate_path, "name": "PlateA"}))["component"].as_u64().unwrap(),
                     run(&mut s, "component.insert_design", json!({"path": plate_path, "name": "PlateB", "translate": [100, 0, 0]}))["component"]
                         .as_u64()
                         .unwrap(),
-                );
-                comps.push(
                     run(&mut s, "component.insert_design", json!({"path": plate_path, "name": "PlateC", "translate": [200, 0, 0]}))["component"]
                         .as_u64()
                         .unwrap(),
-                );
+                ];
                 run(&mut s, "occurrence.ground", json!({"occurrence": "PlateA:1", "grounded": true}));
                 run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 20, "base": [0, 50, 0], "operation": "new", "body_name": "PinBody"}));
                 run(&mut s, "component.create", json!({"name": "Pin", "parent": "root", "activate": false}));
