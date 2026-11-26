@@ -1602,8 +1602,9 @@ fn the_check_of_a_long_coil_cut_stops_on_cancel() {
 /// The volume is the rod's (Pappus over its polygon) less the thread's part inside it,
 /// integrated over the screw motion (volume element r dr du dphi; the chord of the profile at
 /// each radius, an exact integral along x, adaptive in r): 3430.968886633128 mm³, to 1e-12.
-/// The walls lie within the sweep's tolerance of their screw surfaces, so the cut's volume is
-/// within its area times that tolerance of it.
+/// The coil's walls lie within the sweep's tolerance of their screw surfaces, so the cut's
+/// volume is within the coil's area times that tolerance of it. Both end discs of the rod stay
+/// whole (the cut lost the one at x = 0).
 #[test]
 fn a_right_handed_coil_cut_on_a_rod_builds_like_its_twin() {
     use solidcore_ops::sweep::screw_sweep;
@@ -1692,22 +1693,39 @@ fn a_right_handed_coil_cut_on_a_rod_builds_like_its_twin() {
         let coil = Body::from_record(&swept.unwrap().to_record().unwrap().0, true)
             .unwrap()
             .0;
+        // only the coil's walls stray from their surfaces, by the tolerance at most, and the
+        // cut keeps no more of them than the coil has
+        let bound = coil.area(1e-8).unwrap() * tolerance;
         let r = boolean(stock, coil, BooleanOp::Subtract)
             .unwrap_or_else(|e| panic!("flip {flip}: {e:?}"))
             .unwrap();
         let report = r.check(CheckLevel::All).unwrap();
-        let (v, area) = (volume(&r), r.area(1e-8).unwrap());
+        let v = volume(&r);
         let counts = r.counts().unwrap();
         eprintln!(
-            "flip {flip}: volume {v} area {area} counts {counts:?} {}",
+            "flip {flip}: volume {v} bound {bound} counts {counts:?} {}",
             report.text
         );
         assert!(report.is_valid(), "flip {flip}: {}", report.text);
         assert_eq!(r.solid_count().unwrap(), 1, "flip {flip}");
-        assert!(
-            (v - exact).abs() <= area * tolerance,
-            "flip {flip}: {v} vs {exact}"
-        );
+        assert!((v - exact).abs() <= bound, "flip {flip}: {v} vs {exact}");
+        // the rod's end discs, both whole: the coil's caps lie outside the rod (the start
+        // cap past its end, the end cap over the groove, whose radius is under the root's)
+        let (record, order) = r.to_record().unwrap();
+        let discs: Vec<(f64, f64)> = (0..record.faces.len())
+            .filter_map(|i| match &record.faces[i].surface {
+                Surface::Plane { origin, .. } | Surface::PlaneThrough { origin, .. } => {
+                    Some((origin[0], r.face_area(&order, i, 1e-10).unwrap()))
+                }
+                _ => None,
+            })
+            .collect();
+        let disc = PI * 3.375 * 3.375;
+        assert_eq!(discs.len(), 2, "flip {flip}: {discs:?}");
+        for (x, a) in &discs {
+            assert!(*x == 0.0 || *x == 72.0, "flip {flip}: {discs:?}");
+            assert!((a - disc).abs() <= 1e-9 * disc, "flip {flip}: {discs:?}");
+        }
         counts
     };
     // the twin first: it built before this change too
