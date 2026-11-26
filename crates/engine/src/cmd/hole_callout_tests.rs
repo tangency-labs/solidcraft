@@ -694,3 +694,153 @@ fn a_tapped_hole_under_a_recess_gives_its_thread_depth_from_the_start_face() {
     assert!((c["callout"]["thread_depth"].as_f64().unwrap_or(f64::NAN) - 12.975).abs() < 1e-9, "{c}");
     assert_eq!(lines(&c), ["M8 ↧ 12.98", "Ø6.80 ↧ 20.00", "⌵ Ø12.75 × 90.00°"]);
 }
+
+// A later feature that moves or covers the face a hole starts on, or closes a through hole, leaves
+// the hole's own faces as they were (#17009): the callout says it failed instead of reading the
+// old depth or THRU.
+
+#[test]
+fn a_hole_whose_start_face_a_later_feature_moves_or_covers_reads_failed() {
+    let moved = "a later feature moved or covered the face the hole starts on";
+    let block = |s: &mut Session| {
+        run(s, "solid.box", json!({"length": 60, "width": 30, "height": 20, "body_name": "Block"}));
+        run(s, "solid.hole", json!({"position": [15, 15, 20], "diameter": 6, "depth": 10, "name": "H"}));
+        assert_eq!(lines(&callout(s, "H")), ["Ø6.00 ↧ 10.00"]);
+    };
+    // A 30 x 30 cut 4 deep lowers the top round the hole to z = 16: the hole is 6 deep now.
+    let mut s = Session::default();
+    block(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [30, 30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 4, "direction": "negative", "operation": "cut"}));
+    assert!(!solid_at(&s, 20.0, 20.0, 18.0) && solid_at(&s, 20.0, 20.0, 14.0));
+    let c = callout(&mut s, "H");
+    assert_eq!((&c["status"], &c["reason"]), (&json!("failed"), &json!(moved)), "{c}");
+    // The top pulled up 5: the hole is 15 deep from it now.
+    let mut p = Session::default();
+    block(&mut p);
+    run(&mut p, "solid.press_pull", json!({"face": [45, 15, 20], "distance": 5}));
+    assert!(solid_at(&p, 45.0, 15.0, 24.0));
+    let c = callout(&mut p, "H");
+    assert_eq!((&c["status"], &c["reason"]), (&json!("failed"), &json!(moved)), "{c}");
+    // A boss joined over it buries the hole.
+    let mut b = Session::default();
+    block(&mut b);
+    run(&mut b, "solid.box", json!({"length": 20, "width": 20, "height": 5, "corner": [5, 5, 20], "operation": "join"}));
+    let c = callout(&mut b, "H");
+    assert_eq!((&c["status"], &c["reason"]), (&json!("failed"), &json!(moved)), "{c}");
+}
+
+#[test]
+fn a_through_hole_a_later_join_closes_reads_failed_and_another_body_below_does_not() {
+    let plate = |s: &mut Session| {
+        run(s, "solid.box", json!({"length": 60, "width": 30, "height": 8, "body_name": "Plate"}));
+        run(s, "solid.hole", json!({"position": [15, 15, 8], "diameter": 6, "name": "H"}));
+    };
+    let mut s = Session::default();
+    plate(&mut s);
+    // A plate of its own under it, apart: the hole still goes through its plate.
+    run(&mut s, "solid.box", json!({"length": 60, "width": 30, "height": 5, "corner": [0, 0, -20], "body_name": "Below"}));
+    assert_eq!(lines(&callout(&mut s, "H")), ["Ø6.00 THRU"]);
+    // A slab joined underneath closes the exit: the hole is blind, 8 deep.
+    run(&mut s, "solid.box", json!({"length": 60, "width": 30, "height": 5, "corner": [0, 0, -5], "operation": "join"}));
+    assert!(solid_at(&s, 15.0, 15.0, -1.0));
+    let c = callout(&mut s, "H");
+    assert_eq!(c["status"], "failed", "{c}");
+    assert_eq!(c["reason"], "a later feature closed the hole or put material on its axis: it is now blind, 8.00 mm deep", "{c}");
+    // A boss joined on top buries it.
+    let mut b = Session::default();
+    plate(&mut b);
+    run(&mut b, "solid.box", json!({"length": 20, "width": 20, "height": 5, "corner": [5, 5, 8], "operation": "join"}));
+    let c = callout(&mut b, "H");
+    assert_eq!(c["status"], "failed", "{c}");
+    assert_eq!(c["reason"], "a later feature moved or covered the face the hole starts on", "{c}");
+}
+
+#[test]
+fn a_radial_hole_in_a_cylinder_reads_its_depth() {
+    // Drilled where the evaluation puts it, on the round face: nothing after it changes it.
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 50}));
+    run(&mut s, "solid.hole", json!({"position": [20, 0, 25], "diameter": 6, "depth": 8, "name": "Radial"}));
+    let c = callout(&mut s, "Radial");
+    assert_eq!(c["status"], "resolved", "{c}");
+    assert_eq!(lines(&c), ["Ø6.00 ↧ 8.00"]);
+}
+
+#[test]
+fn a_hole_a_pattern_or_mirror_copies_is_not_supported_yet() {
+    let copies = [
+        ("solid.pattern.rectangular", json!({"features": ["H"], "dir1": [1, 0, 0], "count1": 4, "spacing1": 20})),
+        ("solid.mirror", json!({"features": ["H"], "plane": "YZ"})),
+        ("solid.pattern.rectangular", json!({"bodies": ["Plate"], "dir1": [0, 0, 1], "count1": 2, "spacing1": 20})),
+    ];
+    for (id, params) in copies {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 100, "width": 30, "height": 8, "corner": [-50, 0, 0], "body_name": "Plate"}));
+        run(&mut s, "solid.hole", json!({"position": [-40, 15, 8], "diameter": 6, "name": "H"}));
+        assert_eq!(lines(&callout(&mut s, "H")), ["Ø6.00 THRU"]);
+        run(&mut s, id, params.clone());
+        let c = callout(&mut s, "H");
+        assert_eq!(c["status"], "failed", "{id} {params}: {c}");
+        assert!(c["reason"].as_str().is_some_and(|r| r.starts_with("not supported yet") && r.contains("pattern or mirror")), "{id} {params}: {c}");
+    }
+}
+
+#[test]
+fn two_holes_of_one_feature_in_two_plates_read_their_own_plates_on_one_line() {
+    // PlateB's top is flush with PlateA's: one feature drills 2 deep into both, blind in PlateA and
+    // through PlateB (1.5 thick).
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 8, "body_name": "PlateA"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 1.5, "corner": [100, 0, 6.5], "body_name": "PlateB"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 8], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [10, 15], "id": "q1"}));
+    run(&mut s, "sketch.point", json!({"point": [110, 15], "id": "q2"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"sketch": "Pts", "points": ["q1", "q2"], "diameter": 6, "depth": 2, "targets": ["PlateA", "PlateB"], "name": "Pair"}),
+    );
+    let read = |s: &mut Session| (lines(&callout_with(s, "Pair", Some("q1"), json!({}))), lines(&callout_with(s, "Pair", Some("q2"), json!({}))));
+    let both = (vec!["2× Ø6.00 ↧ 2.00".to_string()], vec!["2× Ø6.00 THRU".to_string()]);
+    assert_eq!(read(&mut s), both);
+    // PlateB moved under PlateA's hole: both holes on one line, each still its own plate's.
+    run(&mut s, "solid.move", json!({"bodies": ["PlateB"], "translate": [-100, 0, 0]}));
+    assert_eq!(read(&mut s), both);
+    // PlateA split through q1's bore: both halves keep half of it, still blind 2 deep.
+    run(&mut s, "solid.split_body", json!({"body": "PlateA", "plane": {"origin": [10, 0, 0], "normal": [1, 0, 0]}}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    assert_eq!(read(&mut s), both);
+}
+
+#[test]
+fn a_hole_at_a_corner_of_its_part_still_reads() {
+    // Most of the rim is off the plate: the start face is checked where the hole's wall is.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 30, "height": 8, "body_name": "Plate"}));
+    run(&mut s, "solid.hole", json!({"position": [2, 2, 8], "diameter": 6, "name": "Corner"}));
+    let c = callout(&mut s, "Corner");
+    assert_eq!(c["status"], "resolved", "{c}");
+    assert_eq!(lines(&c), ["Ø6.00 THRU"]);
+}
+
+#[test]
+fn a_later_feature_elsewhere_on_the_start_face_leaves_the_callout_resolved() {
+    // A second hole 20 mm away and a fillet on the far top edge change the face the first hole
+    // starts on, but not where it starts it: both callouts still read.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 30, "height": 20, "body_name": "Block"}));
+    run(&mut s, "solid.hole", json!({"position": [15, 15, 20], "diameter": 6, "depth": 10, "name": "H"}));
+    run(&mut s, "solid.hole", json!({"position": [35, 15, 20], "diameter": 6, "name": "Next"}));
+    run(&mut s, "solid.fillet", json!({"body": "Block", "radius": 2, "edges": [[60, 15, 20]]}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    assert!(!solid_at(&s, 59.9, 15.0, 19.9));
+    for (name, expected) in [("H", "Ø6.00 ↧ 10.00"), ("Next", "Ø6.00 THRU")] {
+        let c = callout(&mut s, name);
+        assert_eq!(c["status"], "resolved", "{name}: {c}");
+        assert_eq!(lines(&c), [expected], "{name}: {c}");
+    }
+}

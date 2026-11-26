@@ -21,7 +21,11 @@
 //!   flat floor is no longer at its depth, was changed by a later feature that kept its faces'
 //!   names (an offset face, a scale), and reads as failed too; a drill point's cone and the
 //!   counterbore or countersink are not checked. The depth is the feature's, measured from the
-//!   face the hole starts on. A later `solid.move` of the hole's body is followed, so the hole is
+//!   face the hole starts on, which must still start it just outside its widest rim: a hole whose
+//!   start face a later cut, press-pull or boss moved or covered reads as failed. So does a
+//!   through hole with anything of its body on its axis as far as it drills (a later join that
+//!   closed it), and a hole that a later pattern or mirror copies (the copies are not counted
+//!   yet). A later `solid.move` of the hole's body is followed, so the hole is
 //!   looked for where the move put it, and `start` and `direction` are in the frame of the model
 //!   as it is now (of the hole's own component, the same for every placement of it). A body
 //!   moved any other way reads as failed.
@@ -38,7 +42,7 @@
 //!   words in the drawing's content language. Nothing is read from a view, and nothing is saved.
 //!
 //! Holes made by other features, and the copies a pattern or a mirror makes of a hole, are not
-//! supported yet.
+//! supported yet: a hole that is copied reads as failed, not supported yet.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -247,7 +251,19 @@ pub fn resolve(doc: &Document, model: &Model, hole: &HoleRef) -> Result<Resoluti
     let (vals, _) = crate::eval::evaluation_values(doc);
     let before = model.state_before(f.id);
     let motion = |body: &str| later_motion(doc, model, &vals, f.id, body);
-    measure(doc, &vals, &before, &own, &model.state(), f, index, &motion)
+    let copied = |body: &str| later_copy(doc, model, f.id, body);
+    measure(doc, &vals, &before, &own, &model.state(), f, index, &motion, &copied)
+}
+
+/// Whether a Pattern or Mirror after feature `id` copies its holes: one that replays the feature
+/// (also through a pattern or mirror it replays) or copies the body `body` they are in.
+fn later_copy(doc: &Document, model: &Model, id: u64, body: &str) -> bool {
+    let Some(i) = model.results.iter().position(|r| r.id == id) else { return false };
+    model.results.iter().skip(i + 1).filter(|r| !r.skipped && r.error.is_none()).any(|r| {
+        let Some(g) = doc.feature(r.id).filter(|g| !g.suppressed) else { return false };
+        let (FeatureKind::Pattern { features, bodies, .. } | FeatureKind::Mirror { features, bodies, .. }) = &g.kind else { return false };
+        bodies.iter().any(|b| *b == body) || crate::eval::replayed_sources(doc, features).iter().any(|s| s.id == id)
+    })
 }
 
 /// The rigid motion the Move features after feature `id` give the body `body`, in order: what
@@ -313,6 +329,7 @@ fn measure(
     f: &Feature,
     index: usize,
     motion: &dyn Fn(&str) -> Result<Mat>,
+    copied: &dyn Fn(&str) -> bool,
 ) -> Result<Resolution> {
     let FeatureKind::Hole { diameter, depth, hole, thread, thread_depth, to, .. } = &f.kind else {
         return Err(DocError::Invalid("not a hole".into()));
@@ -414,10 +431,52 @@ fn measure(
     if now.changed {
         return Ok(Resolution::Failed { reason: "a later feature changed the hole: its diameter or depth no longer is the feature's".into() });
     }
+    if copied(&made.body) {
+        return Ok(Resolution::Failed { reason: "not supported yet: the copies a pattern or mirror makes of a hole are not counted".into() });
+    }
+    // The face the hole starts on still starts it, just outside its widest rim (the counterbore's
+    // or countersink's): a later cut, press-pull or boss there keeps the hole's faces at the old
+    // depth. A ray along the hole from above the rim, on either side where the bore's wall faces,
+    // meets the start face first among the bodies with the hole's faces (a split hole is in two),
+    // as far down as it did just after the hole. It starts twice the rim's radius up, above a
+    // start face curved round the hole (a hole in a cylinder).
+    let rim = match form {
+        Form::Counterbore { diameter, .. } | Form::Countersink { diameter, .. } => diameter / 2.0,
+        Form::Simple | Form::Drilled { .. } => 0.0,
+    }
+    .max(r);
+    let rim = rim + 1e-3 * (1.0 + rim);
+    let start_hit = |st: &ModelState, from: Vec3, along: Vec3| {
+        first_face(st, &bore, from, along).filter(|(_, name)| !start_face.is_empty() && *name == start_face).map(|(hit, _)| hit)
+    };
+    let beside = made
+        .outward
+        .into_iter()
+        .flat_map(|u| [1.0, -1.0].map(|side| at + u * (side * rim) - dir * (2.0 * rim)))
+        .find_map(|from| start_hit(&own, from, dir).map(|hit| (from, hit)));
+    let Some((from, hit)) = beside else {
+        return Ok(Resolution::Failed { reason: "could not check the face the hole starts on: it is not just outside the hole's rim".into() });
+    };
+    let still = start_hit(after, crate::apply_point(&m, from), direction).is_some_and(|now| (now - hit).abs() <= 1e-4 * (1.0 + hit));
+    if !still {
+        return Ok(Resolution::Failed { reason: "a later feature moved or covered the face the hole starts on".into() });
+    }
     let extent = match depth {
         Some(depth) if now.floor => Extent::Blind { depth },
         _ => Extent::Through,
     };
+    // A through hole has nothing of its body on its axis, as far as it drills (through all, or
+    // its depth): a later feature closed it or put material in its way.
+    let below = 1e-3 * (1.0 + r);
+    if matches!(extent, Extent::Through)
+        && let Some((hit, _)) = first_face(after, &bore, start + direction * below, direction)
+        && depth.is_none_or(|depth| hit + below < depth)
+    {
+        let deep = hit + below;
+        return Ok(Resolution::Failed {
+            reason: format!("a later feature closed the hole or put material on its axis: it is now blind, {deep:.2} mm deep"),
+        });
+    }
     let callout = HoleCallout {
         count: spots.len(),
         diameter,
@@ -450,6 +509,8 @@ struct Bore {
     /// Its wall is not of the feature's diameter, or its flat floor not at the feature's depth: a
     /// later feature changed it and kept its faces' names (an offset face, a scale).
     changed: bool,
+    /// The unit direction from the axis out to a spot on its wall, across the axis.
+    outward: Option<Vec3>,
 }
 
 /// Whether the hole drilled at `at` along `dir` (of radius `r`) starts in a sheet-metal body of
@@ -517,7 +578,7 @@ fn cosine(a: Vec3, b: Vec3) -> f64 {
 fn bore_floor(st: &ModelState, prefix: &str, at: Vec3, dir: Vec3, r: f64, depth: Option<f64>) -> Option<Bore> {
     use solidcraft_kernel::FaceSurface;
     let (mut wall, mut floor, mut changed) = (false, false, false);
-    let mut body = None;
+    let (mut body, mut outward) = (None, None);
     for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
         let names = crate::naming::face_names(b);
         if !names.iter().any(|n| n.starts_with(prefix)) {
@@ -558,11 +619,32 @@ fn bore_floor(st: &ModelState, prefix: &str, at: Vec3, dir: Vec3, r: f64, depth:
                 floor = true;
             } else {
                 wall = true;
+                // Out from the axis towards this spot of the wall.
+                if off > r * 0.5 {
+                    outward.get_or_insert((v - dir * along) * (1.0 / off));
+                }
             }
             body.get_or_insert_with(|| b.name.clone());
         }
     }
-    body.filter(|_| wall || floor).map(|body| Bore { floor, body, changed })
+    body.filter(|_| wall || floor).map(|body| Bore { floor, body, changed, outward })
+}
+
+/// The first face met by the ray from `from` along `along` among the bodies of `st` that have a
+/// face of the bore whose names start with `prefix`, as its distance and its name.
+fn first_face(st: &ModelState, prefix: &str, from: Vec3, along: Vec3) -> Option<(f64, String)> {
+    st.bodies
+        .iter()
+        .filter(|b| !b.body.is_mesh())
+        .filter_map(|b| {
+            let names = crate::naming::face_names(b);
+            if !names.iter().any(|n| n.starts_with(prefix)) {
+                return None;
+            }
+            let (hit, face) = b.body.raycast_face(from, along)?;
+            Some((hit, names.get(face).cloned().unwrap_or_default()))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
 }
 
 /// The callout's text, one line each, the count on the first: for a thread of its own depth,
