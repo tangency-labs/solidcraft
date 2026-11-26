@@ -1030,7 +1030,7 @@ fn at_vertices(body: &crate::ModelBody, plane: &Plane, e: usize, g: &mut [LinkGe
 pub fn resolved_edge_name(st: &ModelState, r: &Resolved) -> Option<String> {
     let (LinkSource::Edge { body, .. }, Some(index)) = (&r.source, r.edge_index) else { return None };
     let body = st.body(body).filter(|body| !body.body.is_mesh())?;
-    crate::naming::edge_names(body).get(index).filter(|name| !name.is_empty()).cloned()
+    crate::naming::edge_name_index(body).names.get(index).filter(|name| !name.is_empty()).cloned()
 }
 
 /// The persistent name of the vertex a `Vertex` reference resolved to, for its link to keep and
@@ -1038,7 +1038,7 @@ pub fn resolved_edge_name(st: &ModelState, r: &Resolved) -> Option<String> {
 pub fn resolved_vertex_name(st: &ModelState, r: &Resolved) -> Option<String> {
     let (LinkSource::Vertex { body, .. }, Some(index)) = (&r.source, r.vertex_index) else { return None };
     let body = st.body(body).filter(|body| !body.body.is_mesh())?;
-    crate::naming::vertex_names(body).get(index).filter(|name| !name.is_empty()).cloned()
+    crate::naming::vertex_name_index(body).names.get(index).filter(|name| !name.is_empty()).cloned()
 }
 
 fn lost(reference: &str) -> DocError {
@@ -1275,7 +1275,7 @@ pub fn resolve_face_indices(
             // Each edge's pieces as the link has them: a circle whose two edges fit to the same
             // half is made whole again across all of them (`merge_split_circles`), keeping which
             // edge each is of. Each edge is read as `projected_edges_named` reads it.
-            let names = crate::naming::edge_names(body);
+            let edges_named = crate::naming::edge_name_index(body);
             let mut owner = Vec::new();
             let mut flat = Vec::new();
             for (k, (e, exact)) in edges.iter().zip(exact_edges(body, plane, &edges)?).enumerate() {
@@ -1288,7 +1288,7 @@ pub fn resolve_face_indices(
             *out = edges
                 .iter()
                 .map(|e| {
-                    let name = names.get(*e).cloned().unwrap_or_default();
+                    let name = edges_named.names.get(*e).cloned().unwrap_or_default();
                     let faces_exact = mesh.edge_faces.get(*e).is_some_and(|fs| fs.iter().all(|f| crate::naming::face_name_exact(body, *f as usize)));
                     EdgePieces { exact: !name.is_empty() && faces_exact, name, geom: Vec::new() }
                 })
@@ -1726,7 +1726,7 @@ pub fn omitted_edges(body: &crate::ModelBody, omit: &[String]) -> Result<std::co
     if omit.len() > solidcraft_sketch::MAX_LINK_OMIT {
         return Err(DocError::Invalid("too many deleted projection members".into()));
     }
-    let keys: Vec<String> = crate::naming::edge_names(body).iter().map(|n| omit_name(n)).collect();
+    let keys: Vec<String> = crate::naming::edge_name_index(body).names.iter().map(|n| omit_name(n)).collect();
     let mut skip = std::collections::BTreeSet::new();
     for name in omit {
         let key = omit_name(name);
@@ -2163,7 +2163,7 @@ pub fn pick_planar_face(st: &ModelState, body: Option<&str>, at: Vec3) -> std::r
     let Some((name, index, plane, b)) = found.first() else {
         return Err("no planar face of the model passes through that point".into());
     };
-    if !found.iter().all(|(_, _, p, _)| solidcraft_kernel::services::constraint::same_plane(p, plane)) {
+    if !found.iter().all(|(_, _, p, _)| solidcraft_kernel::planar::same_plane(p, plane)) {
         return Err("that point lies where faces on different planes meet: pick a point inside one planar face".into());
     }
     let face = crate::naming::face_names(b).get(*index).cloned().ok_or_else(|| "that face has no name to keep it by".to_string())?;

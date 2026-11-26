@@ -483,6 +483,11 @@ fn infer_emboss_selection(
             solidcraft_doc::apply_vector(&inverse, displayed.plane.y),
         )
         .ok_or_else(|| bad(cmd, "invalid cylinder sketch frame"))?;
+        // Profiles drawn on one flat face of this body are raised from it like any emboss with
+        // no face, not taken as a wrap onto a round beside it (#21195).
+        if profiles_lie_on_one_flat_face(&raw.body, &plane, &regions) {
+            continue;
+        }
         if let Some((_, at)) =
             solidcraft_kernel::infer_cylinder_emboss(&raw.body, &plane, &regions, if deboss { -d } else { d }).map_err(|e| bad(cmd, e.to_string()))?
         {
@@ -498,6 +503,51 @@ fn infer_emboss_selection(
     }
     Ok(chosen)
 }
+/// Points along the profiles' outlines and holes checked by [`profiles_lie_on_one_flat_face`],
+/// at most: past this the profiles are left to the wall search, as before #21195.
+const FLAT_FACE_POINTS_MAX: usize = 20_000;
+
+/// Whether one flat face of `body` holds every profile: a face in the sketch's `plane` (the
+/// kernel's [`solidcraft_kernel::Body::face_square_level`], at the face's own tolerance) that
+/// every sampled point of every profile's outline and holes lies on (one call of
+/// [`solidcraft_kernel::Body::classify_points_with_normals`] naming that face). The kernel
+/// decides both; this only chooses which face to ask about. A stopgap until Emboss chooses its
+/// target in one place (#21423).
+///
+/// Only the outlines and holes are sampled, not the area inside them: a profile whose outline
+/// lies on the face while its inside crosses a hole in the face is still taken.
+fn profiles_lie_on_one_flat_face(body: &solidcraft_kernel::Body, plane: &solidcore_record::Plane, regions: &[solidcore_record::Region2]) -> bool {
+    use solidcraft_kernel::points::{ClassifiedPoint, PointNormalFace};
+    if body.is_mesh() {
+        return false;
+    }
+    let mut points = Vec::new();
+    for region in regions {
+        for ring in std::iter::once(&region.outer).chain(&region.holes) {
+            for p in ring.polyline(1e-4) {
+                if points.len() >= FLAT_FACE_POINTS_MAX {
+                    return false;
+                }
+                points.push(plane.to_world(p));
+            }
+        }
+    }
+    if points.is_empty() {
+        return false;
+    }
+    (0..body.face_count()).any(|face| {
+        // In the sketch's plane: square to its normal, at no distance from its origin.
+        let Ok(Some(level)) = body.face_square_level(face, plane.normal(), plane.origin) else { return false };
+        if level.level.abs() > level.tolerance {
+            return false;
+        }
+        // A point off the face is refused as an argument; any refusal leaves the face out, so
+        // the profiles go on to the wall search as before rather than failing here.
+        body.classify_points_with_normals(&points, Some(PointNormalFace::Index(face)))
+            .is_ok_and(|classes| classes.iter().all(|c| matches!(c, ClassifiedPoint::On { face: f, .. } if *f == face)))
+    })
+}
+
 fn face_points(s: &Session, p: &Value, k: &str, cmd: &str) -> Result<Vec<Vec3>> {
     let a = p.get(k).and_then(Value::as_array).ok_or_else(|| bad(cmd, format!("`{k}` must list points [x, y, z] or face names")))?;
     if a.is_empty() || a.len() > 1000 {
