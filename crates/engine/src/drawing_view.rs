@@ -737,7 +737,8 @@ pub fn not_drawable_apart(view: &ResolvedView) -> Option<&'static str> {
 }
 
 /// Why flat pattern view `view` can't be drawn, if it can't: it draws one body's flat, so it is never
-/// exploded or posed, and a configuration of its own needs that configuration's flat, not read yet.
+/// exploded or posed and doesn't follow the browser's eyes, and a configuration of its own needs that
+/// configuration's flat, not read yet.
 /// Nothing for a view of the model.
 pub fn not_drawable_flat(view: &ResolvedView) -> Option<&'static str> {
     if view.flat.is_none() {
@@ -748,6 +749,8 @@ pub fn not_drawable_flat(view: &ResolvedView) -> Option<&'static str> {
         Some("a flat pattern view has no position: it draws one body's flat")
     } else if view.configuration.value != ViewConfiguration::Active {
         Some("not supported yet: a flat pattern view of a configuration of its own")
+    } else if view.shows.value == Shows::Design {
+        Some("a flat pattern view draws its body's flat whatever the browser shows: it can't show only what the design shows")
     } else {
         None
     }

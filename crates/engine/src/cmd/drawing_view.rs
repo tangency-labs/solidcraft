@@ -179,7 +179,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .output(output_schema_for::<EditResult>)
         .params(concat!(
             "view: a saved view's id; ",
-            "set: {scale?, visual_style?, reference_style?, reference_hides_model?, tangent_edges?, line_group?: an ISO 128 line group by its wide line (0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2), source?: {occurrences: [[ids…]]}, hide?: [[ids…]], hide_bodies?: [{path, body}], shows?: all|design (design is refused on a view of a linked design) as drawing.view.snapshot's, exploded?, pose?, configuration?: as drawing.view.base's: each a value, or null to follow the parent (a base view keeps a scale; a base view's line group follows its sheet's, then its drawing's); reference_shown_percent?; view?: a base view's direction; place?: {at: [x, y]} or {aligned: n}; linked?: a projected view's display settings all following its parent (true) or all its own, as they are now (false)} → {view, changed: [fields], followers: [the views projected from it whose settings changed with it], outside?: [it and the views lined up with it, when it moved or changed size and their boundary leaves the sheet's drawing space or lies over its title block, none moved back in]}. One undo step; ",
+            "set: {scale?, visual_style?, reference_style?, reference_hides_model?, tangent_edges?, line_group?: an ISO 128 line group by its wide line (0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2), source?: {occurrences: [[ids…]]}, hide?: [[ids…]], hide_bodies?: [{path, body}], shows?: all|design (design is refused on a view of a linked design or a flat pattern view) as drawing.view.snapshot's, exploded?, pose?, configuration?: as drawing.view.base's: each a value, or null to follow the parent (a base view keeps a scale; a base view's line group follows its sheet's, then its drawing's); reference_shown_percent?; view?: a base view's direction; place?: {at: [x, y]} or {aligned: n}; linked?: a projected view's display settings all following its parent (true) or all its own, as they are now (false)} → {view, changed: [fields], followers: [the views projected from it whose settings changed with it], outside?: [it and the views lined up with it, when it moved or changed size and their boundary leaves the sheet's drawing space or lies over its title block, none moved back in]}. One undo step; ",
             "no model is evaluated, but to check a new source, hide or hide_bodies, a view of another configuration evaluates a copy of the design; ",
             "the design is unchanged.",
         )),
@@ -729,7 +729,8 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let d = s.drawing(INSPECT)?;
     let view = find(d, request.view.0, INSPECT)?;
     let resolved = d.resolve_view(view.id).map_err(|e| bad(INSPECT, e.to_string()))?;
-    // With shows: design, a body the design hides isn't drawn either.
+    // With shows: design, a body the design hides isn't drawn either: the set the sheet draws from,
+    // the design as it places its parts, as for every view of a configuration of its own.
     let drawn = crate::drawing_view::DrawnView::new(s, resolved.clone());
     let mut sessions = ViewSessions::new(s);
     let placed = crate::drawing_view::on_sheet_from(&mut sessions, d, view.id, INSPECT)?;
@@ -845,7 +846,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let descendants: Vec<u64> = s.drawing(EDIT)?.with_projected(&BTreeSet::from([id])).into_iter().filter(|v| *v != id).collect();
     let apart = found.exploded.is_some() || found.pose.is_some() || found.configuration.is_some();
-    if apart || set.visual_style.is_some() || set.reference_style.is_some() || set.linked.is_some() {
+    if apart || set.visual_style.is_some() || set.reference_style.is_some() || set.linked.is_some() || set.shows.is_some() {
         let mut staged = Drawing::clone(s.drawing(EDIT)?);
         change(&mut staged, id, set, &found)?;
         check_apart(&staged, std::iter::once(id).chain(descendants.iter().copied()), EDIT)?;

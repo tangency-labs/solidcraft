@@ -4275,9 +4275,10 @@ fn a_round_hole_is_one_circle_on_a_flat_view() {
     assert_eq!(solid.iter().copied().filter(circle).count(), 1, "{solid:?}");
 }
 
-/// A flat pattern view draws one body's flat, so it is never exploded or posed, and it doesn't draw a
-/// configuration of its own yet. Edit refuses each and changes nothing. In a drawing saved so by hand,
-/// the edit rule refuses it too, and the sheet draws no lines for the view and says why.
+/// A flat pattern view draws one body's flat, so it is never exploded or posed, it doesn't follow the
+/// browser's eyes (#22107), and it doesn't draw a configuration of its own yet. Edit refuses each and
+/// changes nothing. In a drawing saved so by hand, the edit rule refuses it too, and the sheet draws no
+/// lines for the view and says why.
 #[test]
 fn a_flat_pattern_view_is_never_exploded_posed_or_configured() {
     let mut s = sheet_plate();
@@ -4292,10 +4293,17 @@ fn a_flat_pattern_view_is_never_exploded_posed_or_configured() {
     let e = edit_refused(&mut s, id, json!({"configuration": "Wide"}));
     assert!(e.contains(configured), "{e}");
     assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record.clone(), steps));
-    let cases: [(fn(&mut solidcraft_doc::drawing_view::ViewOverrides), &str); 3] = [
+    let e = edit_refused(&mut s, id, json!({"shows": "design"}));
+    assert!(e.contains("whatever the browser shows"), "{e}");
+    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record.clone(), steps));
+    let cases: [(fn(&mut solidcraft_doc::drawing_view::ViewOverrides), &str); 4] = [
         (|o| o.exploded = Some(Exploded::View(1)), "a flat pattern view is never exploded: it draws one body's flat"),
         (|o| o.pose = Some(Pose::Study(StudyStep { id: 1, step: 0 })), "a flat pattern view has no position: it draws one body's flat"),
         (|o| o.configuration = Some(ViewConfiguration::Row(1)), configured),
+        (
+            |o| o.shows = Some(solidcraft_doc::drawing_view::Shows::Design),
+            "a flat pattern view draws its body's flat whatever the browser shows: it can't show only what the design shows",
+        ),
     ];
     for (set, why) in cases {
         s.edit_drawing(EDIT, |d| {

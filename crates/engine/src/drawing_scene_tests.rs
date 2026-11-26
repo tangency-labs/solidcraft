@@ -5192,7 +5192,10 @@ fn automatic_marks_distinguish_placed_occurrences_and_exclusions() {
         s.drawing("test").unwrap().views.iter().find(|v| matches!(v.kind, ViewKind::Projected { parent, .. } if parent == front)).unwrap().id;
     let resolved = s.drawing("test").unwrap().resolve_view(projected).unwrap();
     let shown = crate::drawing_view::shown(&s).unwrap();
-    assert_eq!(shown.of_view(&resolved).bodies.iter().map(|body| body.path.clone()).collect::<Vec<_>>(), vec![vec![first]]);
+    assert_eq!(
+        shown.of_view(&crate::drawing_view::DrawnView::own(resolved)).bodies.iter().map(|body| body.path.clone()).collect::<Vec<_>>(),
+        vec![vec![first]]
+    );
     assert!(s.execute("drawing.auto_center_mark.exclude", &json!({"view": view, "edge": {"point": [166,0,10], "path": [second]}})).is_err());
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(automatic(&settled(&mut s, sheet).scene).len(), 2);
