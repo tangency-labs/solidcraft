@@ -8781,7 +8781,15 @@ fn blend_bodies(st: &ModelState, f: &Feature, body: &Option<crate::BodyName>, pt
 /// The edges `idx` of blend `f` found on body `mb`: by name, where the edge was stored with one.
 /// A name that no longer finds exactly its edge fails the blend, asking for the edge to be picked
 /// again; so does a name a build stored for the wrong body (see `trusted_edge_name`).
-fn blend_edges_on(mb: &ModelBody, f: &Feature, edges: &[crate::Position], idx: &[usize], warning: &mut Option<String>) -> Result<Vec<Vec3>> {
+/// `placed`: an earlier feature can have moved the body whole ([`bodies_placed_before`]).
+fn blend_edges_on(
+    mb: &ModelBody,
+    f: &Feature,
+    edges: &[crate::Position],
+    idx: &[usize],
+    placed: bool,
+    warning: &mut Option<String>,
+) -> Result<Vec<Vec3>> {
     let pick = |i: usize| edges.get(i).map(|p| p.0).unwrap_or(Vec3::ZERO);
     if !f.edge_names.iter().any(|n| !n.is_empty()) {
         let pts: Vec<Vec3> = idx.iter().map(|i| pick(*i)).collect();
@@ -8807,12 +8815,14 @@ fn blend_edges_on(mb: &ModelBody, f: &Feature, edges: &[crate::Position], idx: &
             }
             continue;
         };
-        // The body changed since the pick: the pick may now sit at an end of the edge.
-        let moved = f.edge_refs.get(i).is_some_and(|r| {
+        // The body changed since the pick: the pick may now sit at an end of the edge. `None`: no
+        // box was saved with the pick.
+        let moved_since = f.edge_refs.get(i).map(|r| {
             let now = mb.mesh().bounds();
             let tight = (mb.body.size() * 2e-3).max(1e-3);
             now.min.dist(r.min) > tight || now.max.dist(r.max) > tight
         });
+        let moved = moved_since.unwrap_or(false);
         let named = trusted_edge_name(f, i, p);
         let Some(hit) = named.and_then(|n| crate::name_lookup::locate_projected_edge(mb, n, p).ok()) else {
             // #21997: the saved whole closed edge can now exist as the pieces a whole-turn
@@ -8824,6 +8834,14 @@ fn blend_edges_on(mb: &ModelBody, f: &Feature, edges: &[crate::Position], idx: &
             out.extend(pieces.iter().map(|hit| if moved { off_the_ends(mb, hit.edge, hit.point) } else { hit.point }));
             notes.push(format!("the saved edge `{stored}` now exists as {} pieces; every piece is blended", pieces.len()));
             continue;
+        };
+        // On the body the pick was made on, a pick off the named edge and on one named alike but for
+        // its faces' tie numbers is that edge: the numbers moved, not the edge (#22230). An
+        // unchanged box does not show the body unmoved where an earlier feature places it whole.
+        let hit = match (hit.on_point, moved_since) {
+            (false, Some(false)) if !placed => crate::name_lookup::retied_edge(mb, &mb.mesh(), stored, hit.edge, p)
+                .map_or(hit, |edge| crate::name_lookup::EdgeHit { edge, point: p, verified: false, on_point: true }),
+            _ => hit,
         };
         if let Some(note) = hit.note(stored) {
             notes.push(note);
@@ -8838,6 +8856,19 @@ fn blend_edges_on(mb: &ModelBody, f: &Feature, edges: &[crate::Position], idx: &
         *warning = Some(notes.join("; "));
     }
     Ok(out)
+}
+
+/// Whether a feature of `doc` before `f` (or `f` not found in it) places bodies whole: a Move
+/// or an Align, or a pattern or mirror of bodies. Such a step can move a body and keep its box
+/// (half a turn about an axis through the box's centre), so the box saved with a pick does not
+/// show that the body has not moved since (#22230).
+fn bodies_placed_before(doc: &Document, f: &Feature) -> bool {
+    let Some(end) = doc.feature_index(f.id) else { return true };
+    doc.features.iter().take(end).filter(|g| !g.suppressed).any(|g| match &g.kind {
+        FeatureKind::Move { .. } | FeatureKind::Align { .. } => true,
+        FeatureKind::Pattern { bodies, .. } | FeatureKind::Mirror { bodies, .. } => !bodies.is_empty(),
+        _ => false,
+    })
 }
 
 /// A point on edge `edge` of a body for the kernel to find it by: `p`, unless it lies at an end
@@ -16992,10 +17023,11 @@ fn eval_feature_kind(
             let mut radius_of: BTreeMap<(usize, [u64; 3]), (usize, f64)> = BTreeMap::new();
             // (pick, the blended edge's middle, its radius), for pattern and mirror copies.
             let mut by_pick: Vec<(usize, Vec3, f64)> = Vec::new();
+            let placed = bodies_placed_before(doc, f);
             for (ti, idx) in &groups {
                 let Some(mb) = st.bodies.get(*ti) else { return Err(DocError::Invalid("body".into())) };
                 let mut w = None;
-                let resolved = blend_edges_on(mb, f, edges, idx, &mut w)?;
+                let resolved = blend_edges_on(mb, f, edges, idx, placed, &mut w)?;
                 if let Some(all) = &each_r {
                     if resolved.len() != idx.len() {
                         return Err(DocError::Invalid(
