@@ -1,9 +1,9 @@
 //! What a face measures on the surface behind it (#9086), and around it (#12048).
 //!
 //! A curved face's area is the area of the surface it lies on: a cylinder's band is
-//! r·θ·h and a whole sphere 4πr². A piece of a sphere cut by planes is worked out from
-//! its edges by Gauss–Bonnet (#22556). The display mesh's triangles run inside a curve,
-//! so their sum falls short of it.
+//! r·θ·h and a whole sphere 4πr². A face on a sphere, cut or whole, takes the kernel's
+//! exact face area (#22556). The display mesh's triangles run inside a curve, so their
+//! sum falls short of it.
 //!
 //! A flat face's area is the area its exact edges enclose (#12372): its outer loop's area
 //! less its holes'. The display mesh's polygon for a round hole runs inside the circle, so
