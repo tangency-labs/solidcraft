@@ -1857,7 +1857,7 @@ fn an_embedded_model_that_changed_or_is_missing_is_reported() {
         (model "kicad-embed://gone.step")))"#;
     let imported = embedded_import(no_data);
     let warnings = &imported.feature.warnings;
-    assert!(warnings.iter().any(|w| w.starts_with("box.step: ") && w.contains("does not hold its data")), "{warnings:?}");
+    assert!(warnings.iter().any(|w| w.starts_with("box.step: ") && w.contains("holds no data")), "{warnings:?}");
     assert!(warnings.iter().any(|w| w.starts_with("gone.step: ") && w.contains("not in the board file")), "{warnings:?}");
 }
 

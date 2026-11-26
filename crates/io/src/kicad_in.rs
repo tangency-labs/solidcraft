@@ -1733,6 +1733,7 @@ struct EmbeddedCache {
 /// The model file a `kicad-embed://<name>` path stands for. `Err` says in a few words why the
 /// board's own copy cannot be used: missing, not a model, not stored with data, disagreeing
 /// checksums, or damaged data.
+/// Each reason is under 60 characters: `load_failure` cuts a reason there, so it reads whole.
 fn embedded_model(board: &KicadBoard, name: &str, cache: &mut EmbeddedCache) -> std::result::Result<KicadModelFile, String> {
     let path = format!("{EMBED_SCHEME}{name}");
     if let Some(done) = cache.files.get(name) {
@@ -1752,7 +1753,7 @@ fn unpack_embedded(board: &KicadBoard, name: &str, cache: &mut EmbeddedCache) ->
         return Err("the embedded file is not a 3D model".into());
     }
     let Some(data) = entries.iter().find_map(|f| f.data.as_deref()) else {
-        return Err("the board file lists the embedded file but does not hold its data".into());
+        return Err("the board holds no data for the embedded file".into());
     };
     // KiCad's checksum algorithm is not part of its published file format, so it cannot be
     // recomputed here; the checksums the board records for one file (each footprint's and the
@@ -1761,7 +1762,7 @@ fn unpack_embedded(board: &KicadBoard, name: &str, cache: &mut EmbeddedCache) ->
     if let Some(first) = sums.next()
         && sums.any(|other| !other.eq_ignore_ascii_case(first))
     {
-        return Err("the embedded file's checksums disagree, so it changed after it was embedded".into());
+        return Err("the embedded file's checksums disagree".into());
     }
     let packed = decode_base64(data).ok_or_else(|| "the embedded file is corrupt (its data is not base64)".to_string())?;
     let room = MAX_EMBEDDED_FILE_BYTES.min(MAX_EMBEDDED_TOTAL_BYTES.saturating_sub(cache.total));
@@ -1775,7 +1776,7 @@ fn unpack_zstd(packed: &[u8], limit: usize) -> std::result::Result<Vec<u8>, Stri
     use std::io::Read;
     let decoder = ruzstd::decoding::StreamingDecoder::new(packed).map_err(|_| "the embedded file is corrupt (not compressed data)".to_string())?;
     let mut out = Vec::new();
-    decoder.take(limit as u64 + 1).read_to_end(&mut out).map_err(|_| "the embedded file is corrupt (its compressed data is damaged)".to_string())?;
+    decoder.take(limit as u64 + 1).read_to_end(&mut out).map_err(|_| "the embedded file is corrupt (damaged data)".to_string())?;
     if out.len() > limit {
         return Err(format!("the embedded file is too large (limit {} MB unpacked)", MAX_EMBEDDED_FILE_BYTES >> 20));
     }
