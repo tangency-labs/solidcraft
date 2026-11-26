@@ -81,6 +81,7 @@ pub mod conditions;
 pub mod dialog;
 pub mod images;
 mod input;
+pub mod layout;
 mod schema_order;
 mod schema_refs;
 pub mod swatches;
@@ -631,8 +632,18 @@ pub struct FilePermission {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "lowercase", deny_unknown_fields)]
 pub enum UiSlot {
-    Menu { name: String },
-    Ribbon { name: String },
+    Menu {
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+    },
+    Ribbon {
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model_group: Option<bool>,
+    },
 }
 
 fn empty_input_schema() -> Value {
@@ -692,6 +703,9 @@ pub struct Entry {
     /// A long job: it runs for up to [`JOB_DEADLINE_SECONDS`] instead of the runtime's `deadline_ms`,
     /// and shows its progress in the app's operations.
     pub job: bool,
+    /// Whether this entry appears in the Model tab's default Plugins group. None follows slot placement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_group: Option<bool>,
 }
 
 impl Entry {
@@ -746,6 +760,8 @@ struct DeclaredEntry {
     slots: Vec<UiSlot>,
     #[serde(default)]
     job: bool,
+    #[serde(default)]
+    model_group: Option<bool>,
 }
 impl From<EntryDeclaration> for Entry {
     fn from(value: EntryDeclaration) -> Self {
@@ -763,6 +779,7 @@ impl From<EntryDeclaration> for Entry {
                 dialog_hook: false,
                 slots: Vec::new(),
                 job: false,
+                model_group: None,
             },
             EntryDeclaration::Declared(value) => Self {
                 name: value.name,
@@ -789,6 +806,7 @@ impl From<EntryDeclaration> for Entry {
                 dialog_hook: value.dialog_hook,
                 slots: value.slots,
                 job: value.job,
+                model_group: value.model_group,
             },
         }
     }
@@ -971,12 +989,15 @@ impl RuntimeManifest {
             {
                 return Err(invalid(format!("{field}.x-solidcraft-field-order"), "must be \"declared\" when present"));
             }
+            layout::validate(&entry.input_schema, &field)?;
             validate_list_inputs(&entry.input_schema, &field)?;
             directory_read_fields(&entry.input_schema)?;
             conditions::validate_conditions(&entry.input_schema)?;
             if entry.slots.len() > 16
                 || entry.slots.iter().any(|slot| match slot {
-                    UiSlot::Menu { name } | UiSlot::Ribbon { name } => !plain(name, 80),
+                    UiSlot::Menu { name, label } | UiSlot::Ribbon { name, label, .. } => {
+                        !plain(name, 80) || label.as_ref().is_some_and(|l| !plain(l, 80))
+                    }
                 })
             {
                 return Err(invalid("runtime.entries.slots", "requires at most 16 named menu or ribbon slots"));

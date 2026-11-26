@@ -312,10 +312,12 @@ pub(in crate::cmd) fn capture_positions(s: &mut Session, plane: &PlaneRef) -> Re
             .iter_mut()
             .find(|occurrence| occurrence.id == *id)
             .ok_or_else(|| bad("sketch attachment", "pending author/source path disappeared"))?;
+        let prev = occurrence.transform;
         occurrence.transform = *matrix;
+        occurrence.adjust_base_for_direct_move(&prev, matrix);
     }
     for (id, _) in changes {
-        s.pending_moves.remove(&id);
+        s.clear_pending_move(id);
     }
     Ok(())
 }
