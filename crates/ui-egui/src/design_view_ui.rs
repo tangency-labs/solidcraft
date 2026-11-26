@@ -66,13 +66,13 @@ pub(crate) fn window_menu_rows<'a>(app: &SolveApp, entries: &'a [(String, String
     let current = app.view_windows.current_window();
     let mut new = MOVE_TO_WINDOW_MENU.children[0];
     if !crate::view_windows::can_create(app) {
-        new.disabled_tip = Some(app.tr("multi_window.too_many"));
+        new.disabled_tip = Some(tr!(app, "multi_window.too_many"));
     }
-    [new, TabMenuRow::heading(app.tr("multi_window.open_windows")).separated()]
+    [new, TabMenuRow::heading(tr!(app, "multi_window.open_windows")).separated()]
         .into_iter()
         .chain(entries.iter().map(|(id, label)| {
             let here = window_menu_target(id) == Some(current);
-            let label = if here { app.tr("view_layout.this_window") } else { label };
+            let label = if here { tr!(app, "view_layout.this_window") } else { label };
             TabMenuRow { checked: here, ..TabMenuRow::new(id, label, "").with_icon(solidcraft_ui_kit::icons::window_icon(here), None) }
         }))
         .collect()
@@ -223,7 +223,6 @@ fn view_menu(app: &mut SolveApp, index: usize, id: &str) -> bool {
 
 pub(crate) fn window_layout(app: &SolveApp) -> solidcraft_ui_kit::view_layout_menu::LayoutMenu {
     use solidcraft_ui_kit::view_layout_menu::{LayoutMenu, LayoutText, LayoutView, LayoutWindow};
-    use solidcraft_ui_text::tr;
     use solidcraft_views::CameraLinkMode;
 
     let choices = crate::view_windows::window_choices(app);
@@ -258,26 +257,26 @@ pub(crate) fn window_layout(app: &SolveApp) -> solidcraft_ui_kit::view_layout_me
     let matching_saved = crate::view_setups::matching_name(app);
     LayoutMenu {
         text: LayoutText {
-            heading: tr("view_layout.heading").to_owned(),
-            summary_single: tr("view_layout.summary_single").to_owned(),
-            summary: tr("view_layout.summary").to_owned(),
-            this_window: tr("view_layout.this_window").to_owned(),
-            show: tr("view_layout.show").to_owned(),
-            bring: tr("view_layout.bring").to_owned(),
-            windows: tr("view_layout.windows").to_owned(),
-            link: tr("view_layout.link").to_owned(),
-            off: tr("view_layout.off").to_owned(),
-            orientation: tr("view_layout.orientation").to_owned(),
-            zoom: tr("view_layout.zoom").to_owned(),
-            both: tr("view_layout.both").to_owned(),
-            new_cells: tr("view_layout.new_cells").to_owned(),
-            detach: tr("view_layout.detach").to_owned(),
-            equal: tr("view_layout.equal").to_owned(),
-            reset: tr("view_layout.reset").to_owned(),
-            clean: tr("view_layout.clean").to_owned(),
-            save: tr("view_layout.save").to_owned(),
-            saved: tr("view_layout.saved").to_owned(),
-            manage: tr("view_layout.manage").to_owned(),
+            heading: tr!("view_layout.heading").to_owned(),
+            summary_single: template!("view_layout.summary_single").to_owned(),
+            summary: template!("view_layout.summary").to_owned(),
+            this_window: tr!("view_layout.this_window").to_owned(),
+            show: tr!("view_layout.show").to_owned(),
+            bring: tr!("view_layout.bring").to_owned(),
+            windows: template!("view_layout.windows").to_owned(),
+            link: tr!("view_layout.link").to_owned(),
+            off: tr!("view_layout.off").to_owned(),
+            orientation: tr!("view_layout.orientation").to_owned(),
+            zoom: tr!("view_layout.zoom").to_owned(),
+            both: tr!("view_layout.both").to_owned(),
+            new_cells: tr!("view_layout.new_cells").to_owned(),
+            detach: tr!("view_layout.detach").to_owned(),
+            equal: tr!("view_layout.equal").to_owned(),
+            reset: tr!("view_layout.reset").to_owned(),
+            clean: tr!("view_layout.clean").to_owned(),
+            save: tr!("view_layout.save").to_owned(),
+            saved: tr!("view_layout.saved").to_owned(),
+            manage: tr!("view_layout.manage").to_owned(),
         },
         saved,
         matching_saved,
@@ -388,9 +387,9 @@ pub(crate) fn move_to_window(app: &mut SolveApp, view: u64, window: serde_json::
 
 pub(crate) fn show_move_error(app: &mut SolveApp, reason: String) {
     let message = match reason.as_str() {
-        "last_view_of_main_window" => app.tr("multi_window.last_view").to_owned(),
-        "too_many_windows" => app.tr("multi_window.too_many").to_owned(),
-        "windows_unavailable" => app.tr("multi_window.unavailable").to_owned(),
+        "last_view_of_main_window" => tr!(app, "multi_window.last_view").to_owned(),
+        "too_many_windows" => tr!(app, "multi_window.too_many").to_owned(),
+        "windows_unavailable" => tr!(app, "multi_window.unavailable").to_owned(),
         _ => reason,
     };
     app.set_status(message, true);
@@ -403,17 +402,17 @@ fn open_new_window(app: &mut SolveApp, view: Option<&str>) {
     let name = crate::i18n::tr_name(&documents::tab_name(app, &app.session));
     let path = app.session.path.clone().filter(|_| !new_window::needs_save_first(app.session.path.as_deref(), app.session.is_dirty()));
     let Some(path) = path else {
-        app.set_status(solidcraft_ui_text::format("ui.new_window.save_first", &[("name", &name)]), false);
+        app.set_status(tr!("ui.new_window.save_first", name = &name), false);
         return;
     };
     match new_window::open_in_new_window(Path::new(&path), view) {
         Ok(()) => {
             documents::close(app, app.docs.active, true);
-            app.set_status(solidcraft_ui_text::format("ui.new_window.opened", &[("name", &name)]), false);
+            app.set_status(tr!("ui.new_window.opened", name = &name), false);
         }
         Err(error) => {
-            let reason = if error == "ui.new_window.unsupported" { solidcraft_ui_text::tr(&error).to_string() } else { error };
-            app.set_status(solidcraft_ui_text::format("ui.new_window.failed", &[("error", &reason)]), true);
+            let reason = if error == "ui.new_window.unsupported" { solidcraft_ui_text::tr_by_id(&error).to_string() } else { error };
+            app.set_status(tr!("ui.new_window.failed", error = &reason), true);
         }
     }
 }
@@ -424,7 +423,7 @@ pub fn closing_detail(views: usize) -> String {
     if views < 2 {
         return String::new();
     }
-    solidcraft_ui_text::format("design_view.close_design_detail", &[("n", &views.to_string())])
+    tr!("design_view.close_design_detail", n = &views.to_string())
 }
 
 /// A band over a view saying something the user may act on, in the words shown.
@@ -448,10 +447,10 @@ pub enum NoticeChoice {
 /// back, Close view (secondary) lets the view go.
 pub fn deleted_sheet_notice(sheet: &str) -> Notice {
     Notice {
-        title: solidcraft_ui_text::format("design_view.sheet_deleted", &[("name", sheet)]),
-        body: solidcraft_ui_text::tr("design_view.sheet_deleted_body").to_string(),
-        primary: solidcraft_ui_text::tr("design_view.undo_delete").to_string(),
-        secondary: solidcraft_ui_text::tr("design_view.close_view").to_string(),
+        title: tr!("design_view.sheet_deleted", name = sheet),
+        body: tr!("design_view.sheet_deleted_body").to_string(),
+        primary: tr!("design_view.undo_delete").to_string(),
+        secondary: tr!("design_view.close_view").to_string(),
     }
 }
 
@@ -459,10 +458,10 @@ pub fn deleted_sheet_notice(sheet: &str) -> Notice {
 /// Save (primary) writes them, Follow live (secondary) makes the sheet show them.
 pub fn stale_source_notice(design: &str) -> Notice {
     Notice {
-        title: solidcraft_ui_text::format("design_view.source_unsaved", &[("name", design)]),
+        title: tr!("design_view.source_unsaved", name = design),
         body: String::new(),
-        primary: solidcraft_ui_text::format("design_view.save_design", &[("name", design)]),
-        secondary: solidcraft_ui_text::tr("design_view.follow_live").to_string(),
+        primary: tr!("design_view.save_design", name = design),
+        secondary: tr!("design_view.follow_live").to_string(),
     }
 }
 

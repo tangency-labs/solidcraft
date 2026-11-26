@@ -486,7 +486,7 @@ fn fold_browser(h: &mut Harness, collapsed: bool) {
 
 /// The header's action as assistive technology reports it: on or off.
 fn header_action_on(h: &Harness) -> Option<bool> {
-    let label = solidcraft_ui_text::tr("ui.browser_search_hint");
+    let label = solidcraft_ui_text::tr_by_id("ui.browser_search_hint");
     let nodes = &h.output.accesskit_update.as_ref()?.nodes;
     let (_, node) = nodes.iter().find(|(_, n)| n.role() == egui::accesskit::Role::Button && n.label() == Some(label))?;
     node.toggled().map(|on| on == egui::accesskit::Toggled::True)
@@ -1057,7 +1057,7 @@ fn no_match_offers_to_end_the_search() {
     search(&mut h, "washer");
     pick_kind(&mut h, "sketch");
     assert_eq!(total(&h), 0);
-    assert!(h.widget(solidcraft_ui_text::tr("ui.browser_search_none")).is_some(), "it says no matches");
+    assert!(h.widget(solidcraft_ui_text::tr_by_id("ui.browser_search_none")).is_some(), "it says no matches");
     assert!(h.widget("Nothing named “washer”").is_none());
 }
 

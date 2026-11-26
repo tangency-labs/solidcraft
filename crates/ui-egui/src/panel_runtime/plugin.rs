@@ -279,7 +279,7 @@ impl PanelController for PluginController {
         if current && self.panel().is_ok() {
             Availability::Available
         } else {
-            Availability::Unavailable { reason: solidcraft_ui_text::tr("ui.plugin_dialog_disabled").into() }
+            Availability::Unavailable { reason: tr!("ui.plugin_dialog_disabled").into() }
         }
     }
     fn update(&mut self, _owner: &ContentOwner, _services: &mut ContentServices<'_>) -> PanelResult<()> {
@@ -291,7 +291,7 @@ impl PanelController for PluginController {
             title: panel
                 .as_ref()
                 .map(|panel| {
-                    let title = format!("{} · {} · {}", solidcraft_ui_text::tr("ui.plugin_panel_badge"), panel.plugin_name, panel.panel.title);
+                    let title = format!("{} · {} · {}", tr!("ui.plugin_panel_badge"), panel.plugin_name, panel.panel.title);
                     if title.len() <= 256 {
                         title
                     } else {
@@ -306,9 +306,9 @@ impl PanelController for PluginController {
                         short
                     }
                 })
-                .unwrap_or_else(|| solidcraft_ui_text::tr("ui.plugin_panel_badge").into()),
+                .unwrap_or_else(|| tr!("ui.plugin_panel_badge").into()),
             icon: crate::plugin_images::GENERIC.into(),
-            status: Some(solidcraft_ui_text::tr("ui.plugin_panel_badge").into()),
+            status: Some(tr!("ui.plugin_panel_badge").into()),
             attention: false,
             actions: Vec::new(),
         }
@@ -323,7 +323,7 @@ impl PanelController for PluginController {
         }
         let panel = self.panel()?;
         if panel.ui_version != model::UI_VERSION {
-            ui.label(solidcraft_ui_text::tr("ui.plugin_panel_newer"));
+            ui.label(tr!("ui.plugin_panel_newer"));
             return Ok(());
         }
         self.availability(&context.owner, services.models).require()?;
@@ -399,7 +399,7 @@ fn value_text(value: Option<&model::UiValue>, unit: Option<&str>, units: &str) -
 
 pub(super) fn draw(ui: &mut egui::Ui, panel: &PanelSnapshot, index: u32, actions: &mut Actions, units: &str, depth: usize) {
     if depth == 0 && panel.ui_version != model::UI_VERSION {
-        ui.label(solidcraft_ui_text::tr("ui.plugin_panel_newer"));
+        ui.label(tr!("ui.plugin_panel_newer"));
         return;
     }
     if depth >= model::MAX_WIDGETS {
@@ -450,7 +450,7 @@ pub(super) fn draw(ui: &mut egui::Ui, panel: &PanelSnapshot, index: u32, actions
         model::Widget::ItemList(spec) => {
             let rows = panel.data.rows(&spec.bind);
             if rows.is_empty() {
-                ui.label(solidcraft_ui_text::tr("ui.plugin_panel_empty"));
+                ui.label(tr!("ui.plugin_panel_empty"));
             }
             let selected_id = ui.scope_id().with("plugin-list-selection");
             let mut selected = ui.ctx().data_mut(|data| data.get_temp::<String>(selected_id));
@@ -489,7 +489,7 @@ pub(super) fn draw(ui: &mut egui::Ui, panel: &PanelSnapshot, index: u32, actions
             ui.label(format!("{:.0} %", fraction * 100.0));
         }
         model::Widget::ItemTree(_) | model::Widget::Chart(_) | model::Widget::Unknown => {
-            ui.label(solidcraft_ui_text::tr("ui.plugin_panel_newer"));
+            ui.label(tr!("ui.plugin_panel_newer"));
         }
     });
 }
@@ -505,7 +505,7 @@ fn table(ui: &mut egui::Ui, panel: &PanelSnapshot, spec: &model::TableSpec, acti
         ui,
         &format!("plugin:{}:{}:{}", panel.plugin, panel.panel.id, spec.bind),
         &columns,
-        solidcraft_ui_text::tr("ui.plugin_panel_empty"),
+        tr!("ui.plugin_panel_empty"),
         |ui, table| {
             table.headers(ui, |_, _| false);
             egui::ScrollArea::vertical().id_salt("plugin-table").show_rows(ui, crate::ui_kit::table_row_height(), rows.len(), |ui, range| {

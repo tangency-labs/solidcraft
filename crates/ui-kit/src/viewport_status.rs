@@ -429,7 +429,7 @@ pub fn viewport_status_summary(
                         response
                     },
                     |ui| {
-                        super::Menu::heading(ui, solidcraft_ui_text::tr("ui.viewport_status_summary_heading"));
+                        super::Menu::heading(ui, solidcraft_ui_text::tr_by_id("ui.viewport_status_summary_heading"));
                         for item in items {
                             ui.push_id(&item.id, |ui| {
                                 ui.horizontal(|ui| {
@@ -479,7 +479,7 @@ pub fn viewport_status_summary(
                             });
                         }
                         super::Menu::separator(ui);
-                        let label = solidcraft_ui_text::tr("ui.viewport_status_summary_clear");
+                        let label = solidcraft_ui_text::tr_by_id("ui.viewport_status_summary_clear");
                         let mut footer = super::MenuItem::new("viewport_status_clear_all", label, "");
                         // Display hint only. Native popup Escape closes the list without dispatch.
                         footer.shortcut = "Esc";

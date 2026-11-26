@@ -8,9 +8,9 @@ const ACCENTS: [&str; 8] = ["#3b82f6", "#22c55e", "#14b8a6", "#8b5cf6", "#ec4899
 fn accent_row(app: &mut SolveApp, ui: &mut egui::Ui) {
     let accepted = accent_accepted(active_theme_file(app));
     ui.add_enabled_ui(accepted, |ui| {
-        ui_kit::row(ui, app.tr("prefs.accent"), |ui| {
+        ui_kit::row(ui, tr!(app, "prefs.accent"), |ui| {
             let own = app.preferences.accent.is_empty();
-            let chip = ui_kit::choice_chip(ui, "accent_theme", app.tr("prefs.accent_theme"), own);
+            let chip = ui_kit::choice_chip(ui, "accent_theme", tr!(app, "prefs.accent_theme"), own);
             crate::scenario::publish_target("prefs:accent:theme", chip.rect);
             if chip.clicked() {
                 app.preferences.accent.clear();
@@ -36,7 +36,7 @@ fn accent_row(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
     });
     if !accepted {
-        ui.label(egui::RichText::new(app.tr("prefs.accent_locked")).weak());
+        ui.label(egui::RichText::new(tr!(app, "prefs.accent_locked")).weak());
     }
 }
 
@@ -45,26 +45,23 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     ui_kit::settings_page(ui, |ui| {
         ui_kit::settings_heading_with_tag(
             ui,
-            app.tr("prefs.structure.appearance"),
-            app.tr("prefs.structure.appearance_note"),
+            tr!(app, "prefs.structure.appearance"),
+            tr!(app, "prefs.structure.appearance_note"),
             Some(crate::settings_profiles::tag),
         );
-        let count = solidcraft_ui_text::format("prefs.appearance.theme_count", &[("count", &theme_choices(app).len().to_string())]);
-        ui_kit::settings_section_count(ui, "theme", app.tr("ui.theme"), Some(&count), |ui| {
+        let count = tr!("prefs.appearance.theme_count", count = &theme_choices(app).len().to_string());
+        ui_kit::settings_section_count(ui, "theme", tr!(app, "ui.theme"), Some(&count), |ui| {
             theme_row(app, ui);
             theme_options_row(app, ui);
         });
-        ui_kit::settings_section(ui, "viewport_logo", app.tr("prefs.appearance.viewport_logo"), |ui| {
+        ui_kit::settings_section(ui, "viewport_logo", tr!(app, "prefs.appearance.viewport_logo"), |ui| {
             // The 3D view in the theme's colours, or the Light or Dark theme's (#4146).
             ui_kit::settings_form(ui, t.space_24 * 6.0 + t.space_6, |ui| {
                 // The view's background: the theme's gradient, one colour of the user's (#7688), or a
                 // gradient of the user's, top colour then bottom, with an optional colour halfway (#9230).
-                let label = app.tr("prefs.viewport_background");
-                let labels = [
-                    solidcraft_ui_text::tr("prefs.viewport_background_theme"),
-                    solidcraft_ui_text::tr("prefs.viewport_background_colour"),
-                    solidcraft_ui_text::tr("prefs.viewport_background_gradient"),
-                ];
+                let label = tr!(app, "prefs.viewport_background");
+                let labels =
+                    [tr!("prefs.viewport_background_theme"), tr!("prefs.viewport_background_colour"), tr!("prefs.viewport_background_gradient")];
                 let segments_width =
                     (labels.iter().map(|label| ui_kit::ContentWidth::name(ui, label)).fold(0.0, f32::max) + t.space_16) * labels.len() as f32;
                 let label_width = (t.space_24 * 6.0 + t.space_6).min(ui.available_width() * 0.6);
@@ -90,7 +87,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     }
                     ui.add_enabled_ui(saved.is_some(), |ui| {
                         ui_kit::settings_control_width(ui, t.space_24 * 4.0, |ui| {
-                            let response = ui_kit::cell_editor(ui, key.with("edit"), &mut hex, app.tr("color.hex_hint"), false);
+                            let response = ui_kit::cell_editor(ui, key.with("edit"), &mut hex, tr!(app, "color.hex_hint"), false);
                             crate::scenario::publish_target("prefs:viewport_background_hex", response.rect);
                             if response.changed()
                                 && let Some(colour) = crate::dialogs_appearance::parse_color(&json!(hex))
@@ -133,7 +130,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                             ui_kit::color_field(ui, top);
                             // The middle colour starts halfway between the two.
                             let mut middle = prefs.viewport_background_middle.is_some();
-                            if ui_kit::checkbox(ui, solidcraft_ui_text::tr("prefs.viewport_background_middle"), &mut middle).changed() {
+                            if ui_kit::checkbox(ui, tr!("prefs.viewport_background_middle"), &mut middle).changed() {
                                 let halfway = std::array::from_fn(|k| ((u16::from(top[k]) + u16::from(bottom[k])) / 2) as u8);
                                 prefs.viewport_background_middle = middle.then_some(halfway);
                             }
@@ -144,10 +141,10 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         })
                     });
                 }
-                let label = app.tr("prefs.appearance.viewport_colours");
+                let label = tr!(app, "prefs.appearance.viewport_colours");
                 ui_kit::row(ui, label, |ui| {
                     let views = crate::theme::ViewportTheme::ALL;
-                    let labels = [app.tr("prefs.appearance.theme_own"), app.tr("ui.light"), app.tr("ui.dark")];
+                    let labels = [tr!(app, "prefs.appearance.theme_own"), tr!(app, "ui.light"), tr!(app, "ui.dark")];
                     let mut selected = views.iter().position(|v| *v == app.preferences.viewport_theme).unwrap_or(0);
                     if ui_kit::settings_segments(ui, label, &mut selected, &labels)
                         && let Some(view) = views.get(selected)
@@ -158,14 +155,14 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         if let Some(at) = crate::scenario::handle_at(&format!("dialog:{label}:{caption}")) {
                             let id = view.id();
                             crate::scenario::publish_handle(&format!("prefs:viewport_theme:{id}"), at);
-                            crate::scenario::publish_handle(&format!("dialog:{}:{}", app.tr("prefs.viewport"), app.tr(view.label_id())), at);
+                            crate::scenario::publish_handle(&format!("dialog:{}:{}", tr!(app, "prefs.viewport"), app.tr_by_id(view.label_id())), at);
                         }
                     }
                 });
                 // A picture of the user's behind the model.
-                let label = app.tr("prefs.background_image");
+                let label = tr!(app, "prefs.background_image");
                 ui_kit::row(ui, label, |ui| {
-                    if ui_kit::button(ui, app.tr("prefs.background_choose"), ui_kit::Button::Normal).clicked() {
+                    if ui_kit::button(ui, tr!(app, "prefs.background_choose"), ui_kit::Button::Normal).clicked() {
                         app.pick_open_for(&["png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff"], |app, path| {
                             if let Some(path) = path {
                                 app.preferences.background_image = path;
@@ -177,9 +174,9 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     }
                 });
                 // The logo in the theme's own logo colours or in its accent.
-                let label = app.tr("prefs.logo");
+                let label = tr!(app, "prefs.logo");
                 ui_kit::row(ui, label, |ui| {
-                    let labels = [solidcraft_ui_text::tr("prefs.logo_theme"), solidcraft_ui_text::tr("prefs.logo_accent")];
+                    let labels = [tr!("prefs.logo_theme"), tr!("prefs.logo_accent")];
                     let mut selected = usize::from(app.preferences.logo_accent);
                     if ui_kit::settings_segments(ui, label, &mut selected, &labels) {
                         app.preferences.logo_accent = selected == 1;
@@ -192,13 +189,13 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 crate::policy::row(ui, locked, |ui| follow_row(app, ui));
             });
         });
-        ui_kit::settings_section(ui, "scale", app.tr("prefs.scale_text"), |ui| {
+        ui_kit::settings_section(ui, "scale", tr!(app, "prefs.scale_text"), |ui| {
             ui_kit::settings_pair(
                 ui,
                 |ui| {
                     ui_kit::settings_form(ui, 0.0, |ui| {
-                        ui_kit::row(ui, app.tr("prefs.appearance.interface_scale"), |ui| {
-                            let response = ui_kit::named_control(ui, app.tr("prefs.appearance.interface_scale"), |ui| {
+                        ui_kit::row(ui, tr!(app, "prefs.appearance.interface_scale"), |ui| {
+                            let response = ui_kit::named_control(ui, tr!(app, "prefs.appearance.interface_scale"), |ui| {
                                 ui_kit::slider(
                                     ui,
                                     &mut app.preferences.ui_scale,
@@ -206,7 +203,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                                     ui_kit::Slider { step: Some(0.05), format: |v| format!("{:.0} %", v * 100.0), ..Default::default() },
                                 )
                             })
-                            .backing_on_hover_text(app.tr("prefs.scale_note"));
+                            .backing_on_hover_text(tr!(app, "prefs.scale_note"));
                             crate::scenario::publish_target("prefs:scale", response.rect);
                         });
                     });
@@ -216,7 +213,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                             let percent = format!("{:.0}", value * 100.0);
                             let chip = ui_kit::button(
                                 ui,
-                                locale.format("prefs.structure.scale_percent", &[("percent", &percent)]),
+                                tr!(locale, "prefs.structure.scale_percent", percent = &percent),
                                 if (app.preferences.ui_scale - value).abs() < 0.001 { ui_kit::Button::SmallSelected } else { ui_kit::Button::Small },
                             );
                             crate::scenario::publish_target(&format!("prefs:scale_preset:{percent}"), chip.rect);
@@ -231,18 +228,18 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             );
             ui_kit::divider(ui, "scale_font");
             if !cfg!(target_arch = "wasm32") {
-                ui_kit::settings_font_row(ui, solidcraft_ui_text::tr("prefs.font"), |ui, part| {
+                ui_kit::settings_font_row(ui, tr!("prefs.font"), |ui, part| {
                     if part == 0 {
                         ui_font_row(app, ui);
                         return;
                     }
-                    if ui_kit::button(ui, app.tr("prefs.choose_font"), ui_kit::Button::Normal).clicked() {
+                    if ui_kit::button(ui, tr!(app, "prefs.choose_font"), ui_kit::Button::Normal).clicked() {
                         app.pick_open_for(&["ttf", "otf", "ttc"], |app, path| {
                             if let Some(path) = path {
                                 if crate::fonts::ui_font(&path).is_some() {
                                     app.preferences.ui_font = path;
                                 } else {
-                                    app.set_status(solidcraft_ui_text::tr("prefs.font_unreadable"), true);
+                                    app.set_status(tr!("prefs.font_unreadable"), true);
                                 }
                             }
                         });
@@ -251,27 +248,29 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         app.preferences.ui_font.clear();
                     }
                 });
-                ui.scope(|ui| ui_kit::font_specimen(ui, app.tr("prefs.font_sample"))).response.backing_on_hover_text(app.tr("prefs.font_fallback"));
+                ui.scope(|ui| ui_kit::font_specimen(ui, tr!(app, "prefs.font_sample")))
+                    .response
+                    .backing_on_hover_text(tr!(app, "prefs.font_fallback"));
             }
         });
-        ui_kit::settings_section(ui, "colour_vision", app.tr("ui.colour_vision"), |ui| {
+        ui_kit::settings_section(ui, "colour_vision", tr!(app, "ui.colour_vision"), |ui| {
             let mode = app.preferences.color_vision;
             ui_kit::settings_form(ui, t.form_label_width, |ui| {
-                ui_kit::settings_row_help(ui, app.tr("ui.colour_vision_mode"), app.tr("prefs.appearance.colour_vision_help"), |ui| {
+                ui_kit::settings_row_help(ui, tr!(app, "ui.colour_vision_mode"), tr!(app, "prefs.appearance.colour_vision_help"), |ui| {
                     let modes = solidcraft_theme::ColorVision::ALL;
-                    let labels: Vec<_> = modes.iter().map(|m| solidcraft_ui_text::tr(m.label_id())).collect();
+                    let labels: Vec<_> = modes.iter().map(|m| solidcraft_ui_text::tr_by_id(m.label_id())).collect();
                     let mut selected = modes.iter().position(|m| *m == mode).unwrap_or(0);
-                    if ui_kit::settings_segments(ui, app.tr("ui.colour_vision_mode"), &mut selected, &labels)
+                    if ui_kit::settings_segments(ui, tr!(app, "ui.colour_vision_mode"), &mut selected, &labels)
                         && let Some(mode) = modes.get(selected)
                     {
                         app.preferences.color_vision = *mode;
                     }
-                    if let Some(rect) = crate::scenario::rect_of(&format!("dialog:segments:{}", app.tr("ui.colour_vision_mode"))) {
+                    if let Some(rect) = crate::scenario::rect_of(&format!("dialog:segments:{}", tr!(app, "ui.colour_vision_mode"))) {
                         crate::scenario::publish_target("prefs:color_vision", rect);
                     }
                     for mode in solidcraft_theme::ColorVision::ALL {
                         if let Some(at) =
-                            crate::scenario::handle_at(&format!("dialog:{}:{}", app.tr("ui.colour_vision_mode"), app.tr(mode.label_id())))
+                            crate::scenario::handle_at(&format!("dialog:{}:{}", tr!(app, "ui.colour_vision_mode"), app.tr_by_id(mode.label_id())))
                         {
                             crate::scenario::publish_handle(&format!("prefs:color_vision:{}", mode.id()), at);
                         }
@@ -295,47 +294,47 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_page(ui, |ui| {
         ui_kit::settings_heading_with_tag(
             ui,
-            app.tr("prefs.structure.layout"),
-            app.tr("prefs.structure.layout_note"),
+            tr!(app, "prefs.structure.layout"),
+            tr!(app, "prefs.structure.layout_note"),
             Some(crate::settings_profiles::tag),
         );
         super::panel_layout::show(app, ui);
         // Retain the section key for existing reveal/open callers.
-        ui_kit::settings_section(ui, "layout", app.tr("prefs.layout_page.window"), |ui| {
+        ui_kit::settings_section(ui, "layout", tr!(app, "prefs.layout_page.window"), |ui| {
             ui_kit::settings_pair(
                 ui,
                 |ui| {
                     ui_kit::settings_form(ui, t.form_label_width + t.space_16, |ui| {
-                        ui_kit::row(ui, app.tr("ui.panel_layout.panel_style"), |ui| {
+                        ui_kit::row(ui, tr!(app, "ui.panel_layout.panel_style"), |ui| {
                             let mut selected = usize::from(app.ui.layout == crate::ui_kit::LayoutMode::Docked);
                             if ui_kit::segmented(
                                 ui,
                                 &mut selected,
-                                &[solidcraft_ui_text::tr("ui.layout_floating"), solidcraft_ui_text::tr("ui.layout_compact")],
+                                &[tr!("ui.layout_floating"), tr!("ui.layout_compact")],
                                 ui_kit::Segments { intrinsic: true, ..Default::default() },
                             ) {
                                 let _ = app.run("view.layout", json!({"mode": if selected == 1 { "compact" } else { "floating" }}));
                             }
                         });
-                        ui_kit::row(ui, app.tr("prefs.toolbar"), |ui| {
+                        ui_kit::row(ui, tr!(app, "prefs.toolbar"), |ui| {
                             let mut selected = usize::from(!app.preferences.ribbon_labels);
                             if ui_kit::segmented(
                                 ui,
                                 &mut selected,
-                                &[app.tr("prefs.labels"), app.tr("prefs.icons_only")],
+                                &[tr!(app, "prefs.labels"), tr!(app, "prefs.icons_only")],
                                 ui_kit::Segments { intrinsic: true, ..Default::default() },
                             ) {
                                 app.preferences.ribbon_labels = selected == 0;
                             }
                         });
-                        let response = setting::legacy_surface_toolbar(app, ui).backing_on_hover_text(app.tr("prefs.legacy_surface_toolbar_hint"));
+                        let response = setting::legacy_surface_toolbar(app, ui).backing_on_hover_text(tr!(app, "prefs.legacy_surface_toolbar_hint"));
                         crate::scenario::publish_target("prefs:legacy_surface_toolbar", response.rect);
-                        ui_kit::row(ui, app.tr("prefs.menus"), |ui| {
+                        ui_kit::row(ui, tr!(app, "prefs.menus"), |ui| {
                             let mut selected = usize::from(app.preferences.ribbon_icon_grid);
                             if ui_kit::segmented(
                                 ui,
                                 &mut selected,
-                                &[app.tr("prefs.menu_list"), app.tr("prefs.menu_grid")],
+                                &[tr!(app, "prefs.menu_list"), tr!(app, "prefs.menu_grid")],
                                 ui_kit::Segments { intrinsic: true, ..Default::default() },
                             ) {
                                 app.preferences.ribbon_icon_grid = selected == 1;
@@ -343,39 +342,45 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         });
                         let response = setting::construct_menu_groups(app, ui);
                         crate::scenario::publish_target("prefs:construct_menu_groups", response.rect);
-                        ui_kit::row(ui, app.tr("prefs.toast_place"), |ui| {
+                        ui_kit::row(ui, tr!(app, "prefs.toast_place"), |ui| {
                             let places = [crate::viewport::ToastPlace::Corner, crate::viewport::ToastPlace::Centre];
                             let mut selected = places.iter().position(|p| *p == app.preferences.toast_place).unwrap_or(0);
                             if ui_kit::segmented(
                                 ui,
                                 &mut selected,
-                                &[app.tr("prefs.bottom_right"), app.tr("prefs.bottom_centre")],
+                                &[tr!(app, "prefs.bottom_right"), tr!(app, "prefs.bottom_centre")],
                                 ui_kit::Segments { intrinsic: true, ..Default::default() },
                             ) && let Some(place) = places.get(selected)
                             {
                                 app.preferences.toast_place = *place;
                             }
                         });
-                        let row = app.tr("prefs.toast_place");
+                        let row = tr!(app, "prefs.toast_place");
                         for (label, key) in [("prefs.bottom_right", "corner"), ("prefs.bottom_centre", "centre")] {
-                            if let Some(at) = crate::scenario::handle_at(&format!("dialog:{row}:{}", app.tr(label))) {
+                            if let Some(at) = crate::scenario::handle_at(&format!("dialog:{row}:{}", app.tr_by_id(label))) {
                                 crate::scenario::publish_handle(&format!("prefs:toast_place:{key}"), at);
                             }
                         }
-                        layout_check(ui, app.tr("prefs.status_bar"), app.tr("prefs.status_bar_note"), &mut app.preferences.status_bar, "status_bar");
+                        layout_check(
+                            ui,
+                            tr!(app, "prefs.status_bar"),
+                            tr!(app, "prefs.status_bar_note"),
+                            &mut app.preferences.status_bar,
+                            "status_bar",
+                        );
                         // The operations under way, with their Cancel, in the view's corner.
                         layout_check(
                             ui,
-                            app.tr("prefs.operations_panel"),
-                            app.tr("prefs.operations_panel_note"),
+                            tr!(app, "prefs.operations_panel"),
+                            tr!(app, "prefs.operations_panel_note"),
                             &mut app.preferences.operations_panel,
                             "operations_panel",
                         );
                         // The design waits for a file being opened or inserted, as before.
                         layout_check(
                             ui,
-                            app.tr("prefs.file_operations_wait"),
-                            app.tr("prefs.file_operations_wait_note"),
+                            tr!(app, "prefs.file_operations_wait"),
+                            tr!(app, "prefs.file_operations_wait_note"),
                             &mut app.preferences.file_operations_wait,
                             "file_operations_wait",
                         );
@@ -386,64 +391,64 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         history_in_browser: app.preferences.history_in_browser,
                     }
                 },
-                |ui, state| ui_kit::layout_preview(ui, state, solidcraft_ui_text::tr("prefs.layout_note")),
+                |ui, state| ui_kit::layout_preview(ui, state, tr!("prefs.layout_note")),
             );
             layout_check(
                 ui,
-                app.tr("prefs.keep_work_on_tab_switch"),
-                app.tr("prefs.keep_work_on_tab_switch_note"),
+                tr!(app, "prefs.keep_work_on_tab_switch"),
+                tr!(app, "prefs.keep_work_on_tab_switch_note"),
                 &mut app.preferences.keep_work_on_tab_switch,
                 "keep_work_on_tab_switch",
             );
             layout_check(
                 ui,
-                app.tr("prefs.remember_toolbar_tab"),
-                app.tr("prefs.remember_toolbar_tab_note"),
+                tr!(app, "prefs.remember_toolbar_tab"),
+                tr!(app, "prefs.remember_toolbar_tab_note"),
                 &mut app.preferences.remember_toolbar_tab,
                 "remember_toolbar_tab",
             );
             layout_check(
                 ui,
-                app.tr("prefs.tab_double_click_renames"),
-                app.tr("prefs.tab_double_click_renames_note"),
+                tr!(app, "prefs.tab_double_click_renames"),
+                tr!(app, "prefs.tab_double_click_renames_note"),
                 &mut app.preferences.tab_double_click_renames,
                 "tab_double_click_renames",
             );
             windows_smooth_window_drag_row(app, ui, WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE);
             layout_check(
                 ui,
-                app.tr("prefs.show_window_controls"),
-                app.tr("prefs.show_window_controls_help"),
+                tr!(app, "prefs.show_window_controls"),
+                tr!(app, "prefs.show_window_controls_help"),
                 &mut app.preferences.show_window_controls,
                 "show_window_controls",
             );
             layout_check(
                 ui,
-                app.tr("window_ribbon.ribbon"),
-                app.tr("window_ribbon.preference_help"),
+                tr!(app, "window_ribbon.ribbon"),
+                tr!(app, "window_ribbon.preference_help"),
                 &mut app.preferences.pop_out_window_defaults.ribbon,
                 "pop_out_ribbon",
             );
             ui.add_enabled_ui(app.preferences.pop_out_window_defaults.ribbon, |ui| {
                 layout_check(
                     ui,
-                    app.tr("window_ribbon.auto_hide"),
-                    app.tr("window_ribbon.auto_hide_help"),
+                    tr!(app, "window_ribbon.auto_hide"),
+                    tr!(app, "window_ribbon.auto_hide_help"),
                     &mut app.preferences.pop_out_window_defaults.ribbon_auto_hide,
                     "pop_out_ribbon_auto_hide",
                 );
             });
             layout_check(
                 ui,
-                app.tr("window_panels.other_panels"),
-                app.tr("window_panels.workspace_panels"),
+                tr!(app, "window_panels.other_panels"),
+                tr!(app, "window_panels.workspace_panels"),
                 &mut app.preferences.pop_out_window_defaults.panels,
                 "pop_out_other_panels",
             );
             ui_kit::settings_form(ui, t.form_label_width + t.space_24 * 3.0, |ui| {
                 use solidcraft_views::{CardHeaders, TopBar};
-                let labels = [app.tr("window_options.always"), app.tr("window_topbar.edge")];
-                ui_kit::settings_row_help(ui, app.tr("window_topbar.top_bar"), app.tr("window_topbar.preference_help"), |ui| {
+                let labels = [tr!(app, "window_options.always"), tr!(app, "window_topbar.edge")];
+                ui_kit::settings_row_help(ui, tr!(app, "window_topbar.top_bar"), tr!(app, "window_topbar.preference_help"), |ui| {
                     let options = &mut app.preferences.pop_out_window_defaults;
                     let mut selection = usize::from(options.top_bar == TopBar::Edge);
                     if ui_kit::segmented(ui, &mut selection, &labels, ui_kit::Segments { intrinsic: true, ..Default::default() })
@@ -452,8 +457,8 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         options.top_bar = *state;
                     }
                 });
-                let labels = [app.tr("window_options.always"), app.tr("window_options.on_hover"), app.tr("window_options.hidden")];
-                ui_kit::settings_row_help(ui, app.tr("window_options.card_headers"), app.tr("window_options.card_headers_help"), |ui| {
+                let labels = [tr!(app, "window_options.always"), tr!(app, "window_options.on_hover"), tr!(app, "window_options.hidden")];
+                ui_kit::settings_row_help(ui, tr!(app, "window_options.card_headers"), tr!(app, "window_options.card_headers_help"), |ui| {
                     let options = &mut app.preferences.pop_out_window_defaults;
                     let mut selection = CardHeaders::ALL.iter().position(|state| *state == options.card_headers).unwrap_or_default();
                     if ui_kit::segmented(ui, &mut selection, &labels, ui_kit::Segments { intrinsic: true, ..Default::default() })
@@ -464,7 +469,7 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
             ui_kit::settings_form(ui, t.form_label_width + t.space_24 * 3.0, |ui| {
-                ui_kit::settings_row_help(ui, app.tr("window_size.interface_size"), app.tr("window_size.default_help"), |ui| {
+                ui_kit::settings_row_help(ui, tr!(app, "window_size.interface_size"), tr!(app, "window_size.default_help"), |ui| {
                     use solidcraft_views::InterfaceSize;
                     let options = &mut app.preferences.pop_out_window_defaults;
                     let labels = InterfaceSize::ALL.map(|size| format!("{}%", u16::from(size)));
@@ -479,23 +484,23 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
             layout_check(
                 ui,
-                app.tr("window_options.keep_on_top"),
-                app.tr("window_options.keep_on_top_help"),
+                tr!(app, "window_options.keep_on_top"),
+                tr!(app, "window_options.keep_on_top_help"),
                 &mut app.preferences.pop_out_window_defaults.keep_on_top,
                 "pop_out_keep_on_top",
             );
         });
-        if let Some(rect) = crate::scenario::rect_of(&format!("dialog:section:{}", app.tr("prefs.layout_page.window"))) {
-            crate::scenario::publish_target(&format!("dialog:section:{}", app.tr("prefs.layout")), rect);
+        if let Some(rect) = crate::scenario::rect_of(&format!("dialog:section:{}", tr!(app, "prefs.layout_page.window"))) {
+            crate::scenario::publish_target(&format!("dialog:section:{}", tr!(app, "prefs.layout")), rect);
         }
-        ui_kit::settings_section(ui, "design_tabs", app.tr("prefs.layout_page.design_tabs"), |ui| {
+        ui_kit::settings_section(ui, "design_tabs", tr!(app, "prefs.layout_page.design_tabs"), |ui| {
             ui_kit::settings_form(ui, t.form_label_width + t.space_24 * 3.0, |ui| {
-                ui_kit::settings_row_help(ui, app.tr("prefs.design_views_as_tabs"), app.tr("prefs.design_views_as_tabs_note"), |ui| {
+                ui_kit::settings_row_help(ui, tr!(app, "prefs.design_views_as_tabs"), tr!(app, "prefs.design_views_as_tabs_note"), |ui| {
                     let mut selected = usize::from(!app.preferences.design_views_as_tabs);
                     if ui_kit::segmented(
                         ui,
                         &mut selected,
-                        &[app.tr("prefs.design_views_tabs"), app.tr("prefs.design_views_switcher")],
+                        &[tr!(app, "prefs.design_views_tabs"), tr!(app, "prefs.design_views_switcher")],
                         ui_kit::Segments { intrinsic: true, ..Default::default() },
                     ) {
                         app.preferences.design_views_as_tabs = selected == 0;
@@ -504,8 +509,8 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
             layout_check(
                 ui,
-                app.tr("prefs.show_design_view_switcher"),
-                app.tr("prefs.show_design_view_switcher_note"),
+                tr!(app, "prefs.show_design_view_switcher"),
+                tr!(app, "prefs.show_design_view_switcher_note"),
                 &mut app.preferences.show_design_view_switcher,
                 "show_design_view_switcher",
             );
@@ -513,82 +518,82 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_target("prefs:workspace_follows_view", response.rect);
             layout_check(
                 ui,
-                app.tr("prefs.clear_view_tabs"),
-                app.tr("prefs.clear_view_tabs.help"),
+                tr!(app, "prefs.clear_view_tabs"),
+                tr!(app, "prefs.clear_view_tabs.help"),
                 &mut app.preferences.clear_view_tabs,
                 "clear_view_tabs",
             );
             layout_check(
                 ui,
-                app.tr("prefs.design_sub_tab_sheets"),
-                app.tr("prefs.design_sub_tab_sheets_note"),
+                tr!(app, "prefs.design_sub_tab_sheets"),
+                tr!(app, "prefs.design_sub_tab_sheets_note"),
                 &mut app.preferences.design_sub_tab_sheets,
                 "design_sub_tab_sheets",
             );
             layout_check(
                 ui,
-                app.tr("prefs.design_sub_tab_render"),
-                app.tr("prefs.design_sub_tab_render_note"),
+                tr!(app, "prefs.design_sub_tab_render"),
+                tr!(app, "prefs.design_sub_tab_render_note"),
                 &mut app.preferences.design_sub_tab_render,
                 "design_sub_tab_render",
             );
             layout_check(
                 ui,
-                app.tr("prefs.design_reuse_views"),
-                app.tr("prefs.design_reuse_views_note"),
+                tr!(app, "prefs.design_reuse_views"),
+                tr!(app, "prefs.design_reuse_views_note"),
                 &mut app.preferences.design_reuse_views,
                 "design_reuse_views",
             );
             layout_check(
                 ui,
-                app.tr("prefs.design_reopen_views"),
-                app.tr("prefs.design_reopen_views_note"),
+                tr!(app, "prefs.design_reopen_views"),
+                tr!(app, "prefs.design_reopen_views_note"),
                 &mut app.preferences.design_reopen_views,
                 "design_reopen_views",
             );
         });
-        ui_kit::settings_section(ui, "panels", app.tr("prefs.layout_page.panels"), |ui| {
+        ui_kit::settings_section(ui, "panels", tr!(app, "prefs.layout_page.panels"), |ui| {
             layout_check(
                 ui,
-                app.tr("prefs.live_panel_drag_preview"),
-                app.tr("prefs.live_panel_drag_preview_help"),
+                tr!(app, "prefs.live_panel_drag_preview"),
+                tr!(app, "prefs.live_panel_drag_preview_help"),
                 &mut app.preferences.live_panel_drag_preview,
                 "live_panel_drag_preview",
             );
             layout_check(
                 ui,
-                app.tr("prefs.history_in_browser"),
-                app.tr("prefs.history_in_browser_note"),
+                tr!(app, "prefs.history_in_browser"),
+                tr!(app, "prefs.history_in_browser_note"),
                 &mut app.preferences.history_in_browser,
                 "history_in_browser",
             );
-            layout_check(ui, app.tr("parts_library.show"), app.tr("parts_library.show_help"), &mut app.preferences.library_open, "library_open");
+            layout_check(ui, tr!(app, "parts_library.show"), tr!(app, "parts_library.show_help"), &mut app.preferences.library_open, "library_open");
             // The Browser tree panel can be closed from its own host menu; this control brings it
             // back (#16058).
-            let browser_label = app.tr("prefs.layout_page.browser_tree");
-            let browser_help = app.tr("prefs.layout_page.browser_tree_note");
+            let browser_label = tr!(app, "prefs.layout_page.browser_tree");
+            let browser_help = tr!(app, "prefs.layout_page.browser_tree_note");
             browser_tree_check(ui, app, browser_label, browser_help);
             ui_kit::settings_form(ui, t.form_label_width + t.space_24 * 3.0, |ui| {
-                ui_kit::settings_row_help(ui, app.tr("prefs.history_sketches"), app.tr("prefs.history_sketches_note"), |ui| {
+                ui_kit::settings_row_help(ui, tr!(app, "prefs.history_sketches"), tr!(app, "prefs.history_sketches_note"), |ui| {
                     let mut selected = usize::from(app.preferences.history_sketches == HistorySketches::UnderFeature);
                     if ui_kit::segmented(
                         ui,
                         &mut selected,
-                        &[app.tr("prefs.history_sketches_in_order"), app.tr("prefs.history_sketches_under_feature")],
+                        &[tr!(app, "prefs.history_sketches_in_order"), tr!(app, "prefs.history_sketches_under_feature")],
                         ui_kit::Segments { intrinsic: true, ..Default::default() },
                     ) {
                         app.preferences.history_sketches = if selected == 1 { HistorySketches::UnderFeature } else { HistorySketches::InOrder };
                     }
                 });
                 for (key, label) in [("in_order", "prefs.history_sketches_in_order"), ("under_feature", "prefs.history_sketches_under_feature")] {
-                    if let Some(rect) = crate::scenario::rect_of(&format!("dialog:{}:{}", app.tr("prefs.history_sketches"), app.tr(label))) {
+                    if let Some(rect) = crate::scenario::rect_of(&format!("dialog:{}:{}", tr!(app, "prefs.history_sketches"), app.tr_by_id(label))) {
                         crate::scenario::publish_target(&format!("prefs:history_sketches:{key}"), rect);
-                        crate::scenario::publish_target(&format!("dialog:Sketches:{}", app.tr(label)), rect);
+                        crate::scenario::publish_target(&format!("dialog:Sketches:{}", app.tr_by_id(label)), rect);
                     }
                 }
-                ui_kit::row(ui, app.tr("prefs.bodies_folders"), |ui| {
+                ui_kit::row(ui, tr!(app, "prefs.bodies_folders"), |ui| {
                     let modes = BodiesFolders::ALL;
-                    let labels: Vec<_> = modes.iter().map(|m| app.tr(m.label_id())).collect();
+                    let labels: Vec<_> = modes.iter().map(|m| app.tr_by_id(m.label_id())).collect();
                     let mut selected = modes.iter().position(|m| *m == app.preferences.browser_bodies_folders).unwrap_or(0);
                     if ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments { intrinsic: true, ..Default::default() })
                         && let Some(mode) = modes.get(selected)
@@ -596,9 +601,9 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         app.preferences.browser_bodies_folders = *mode;
                     }
                     if let Some(rect) =
-                        crate::scenario::rect_of(&format!("dialog:{}:{}", app.tr("prefs.bodies_folders"), app.tr("prefs.bodies_folders_several")))
+                        crate::scenario::rect_of(&format!("dialog:{}:{}", tr!(app, "prefs.bodies_folders"), tr!(app, "prefs.bodies_folders_several")))
                     {
-                        crate::scenario::publish_target(&format!("dialog:{}:Several bodies only", app.tr("prefs.bodies_folders")), rect);
+                        crate::scenario::publish_target(&format!("dialog:{}:Several bodies only", tr!(app, "prefs.bodies_folders")), rect);
                     }
                 });
             });
@@ -606,58 +611,58 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             check_columns(
                 ui,
                 app,
-                Some("ui.history_title"),
+                Some(msg!("ui.history_title")),
                 &[
                     Check {
-                        label: "prefs.layout_page.play_history",
-                        help: "prefs.history_play_button_note",
+                        label: msg!("prefs.layout_page.play_history"),
+                        help: msg!("prefs.history_play_button_note"),
                         key: "history_play_button",
                         value: |p| &mut p.history_play_button,
                     },
                     // A design's joints as one button in the History, from the second joint (#8884).
                     Check {
-                        label: "prefs.history_group_joints",
-                        help: "prefs.history_group_joints_note",
+                        label: msg!("prefs.history_group_joints"),
+                        help: msg!("prefs.history_group_joints_note"),
                         key: "history_group_joints",
                         value: |p| &mut p.history_group_joints,
                     },
                     // Folds in the History bar, and a folder for a STEP insert's items (#8885).
                     Check {
-                        label: "prefs.history_bar_groups",
-                        help: "prefs.history_bar_groups_note",
+                        label: msg!("prefs.history_bar_groups"),
+                        help: msg!("prefs.history_bar_groups_note"),
                         key: "history_bar_groups",
                         value: |p| &mut p.history_bar_groups,
                     },
                     Check {
-                        label: "prefs.layout_page.origin_bodies",
-                        help: "prefs.history_origin_bodies_note",
+                        label: msg!("prefs.layout_page.origin_bodies"),
+                        help: msg!("prefs.history_origin_bodies_note"),
                         key: "history_origin_bodies",
                         value: |p| &mut p.timeline_origin_bodies,
                     },
                     // A folder's icon from its features (#12514).
                     Check {
-                        label: "prefs.history_folder_kind_icon",
-                        help: "prefs.history_folder_kind_icon_note",
+                        label: msg!("prefs.history_folder_kind_icon"),
+                        help: msg!("prefs.history_folder_kind_icon_note"),
                         key: "history_folder_kind_icon",
                         value: |p| &mut p.history_folder_kind_icon,
                     },
                     // The History controls' steps (#11430).
                     Check {
-                        label: "prefs.history_steps_component",
-                        help: "prefs.history_steps_component_note",
+                        label: msg!("prefs.history_steps_component"),
+                        help: msg!("prefs.history_steps_component_note"),
                         key: "history_steps_component",
                         value: |p| &mut p.history_steps_component,
                     },
                     Check {
-                        label: "prefs.history_last_stops_at_component",
-                        help: "prefs.history_last_stops_at_component_note",
+                        label: msg!("prefs.history_last_stops_at_component"),
+                        help: msg!("prefs.history_last_stops_at_component_note"),
                         key: "history_last_stops_at_component",
                         value: |p| &mut p.history_last_stops_at_component,
                     },
                     // What a feature's menu does with several selected features.
                     Check {
-                        label: "prefs.feature_menus_act_on_selection",
-                        help: "prefs.feature_menus_act_on_selection_note",
+                        label: msg!("prefs.feature_menus_act_on_selection"),
+                        help: msg!("prefs.feature_menus_act_on_selection_note"),
                         key: "feature_menus_act_on_selection",
                         value: |p| &mut p.feature_menus_act_on_selection,
                     },
@@ -666,45 +671,45 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             check_columns(
                 ui,
                 app,
-                Some("ui.browser_title"),
+                Some(msg!("ui.browser_title")),
                 &[
                     Check {
-                        label: "prefs.browser_components_open",
-                        help: "prefs.browser_components_open_note",
+                        label: msg!("prefs.browser_components_open"),
+                        help: msg!("prefs.browser_components_open_note"),
                         key: "browser_components_open",
                         value: |p| &mut p.browser_components_open,
                     },
                     // Folders and placements start closed and open only on request (#8768).
                     Check {
-                        label: "prefs.browser_rows_start_closed",
-                        help: "prefs.browser_rows_start_closed_note",
+                        label: msg!("prefs.browser_rows_start_closed"),
+                        help: msg!("prefs.browser_rows_start_closed_note"),
                         key: "browser_rows_start_closed",
                         value: |p| &mut p.browser_rows_start_closed,
                     },
                     Check {
-                        label: "prefs.browser_eye_left",
-                        help: "prefs.browser_eye_left_note",
+                        label: msg!("prefs.browser_eye_left"),
+                        help: msg!("prefs.browser_eye_left_note"),
                         key: "browser_eye_left",
                         value: |p| &mut p.browser_eye_left,
                     },
                     Check {
-                        label: "prefs.browser_body_features",
-                        help: "prefs.browser_body_features_note",
+                        label: msg!("prefs.browser_body_features"),
+                        help: msg!("prefs.browser_body_features_note"),
                         key: "browser_body_features",
                         value: |p| &mut p.browser_body_features,
                     },
                 ],
             );
         });
-        ui_kit::settings_section(ui, "dialogs", app.tr("prefs.dialogs"), |ui| {
+        ui_kit::settings_section(ui, "dialogs", tr!(app, "prefs.dialogs"), |ui| {
             ui_kit::settings_form(ui, t.form_label_width + t.space_24, |ui| {
-                ui_kit::row(ui, app.tr("prefs.layout_page.ok_cancel"), |ui| {
+                ui_kit::row(ui, tr!(app, "prefs.layout_page.ok_cancel"), |ui| {
                     let placements = [crate::ui_kit::DialogButtons::Bottom, crate::ui_kit::DialogButtons::Top];
                     let mut selected = placements.iter().position(|p| *p == app.preferences.dialog_buttons).unwrap_or(0);
                     if ui_kit::segmented(
                         ui,
                         &mut selected,
-                        &[app.tr("prefs.bottom"), app.tr("prefs.top")],
+                        &[tr!(app, "prefs.bottom"), tr!(app, "prefs.top")],
                         ui_kit::Segments { intrinsic: true, ..Default::default() },
                     ) && let Some(placement) = placements.get(selected)
                     {
@@ -712,23 +717,23 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 });
                 // Handles that don't depend on the language, by the saved value.
-                let row = app.tr("prefs.layout_page.ok_cancel");
+                let row = tr!(app, "prefs.layout_page.ok_cancel");
                 for (label, key) in [("prefs.bottom", "bottom"), ("prefs.top", "top")] {
-                    if let Some(at) = crate::scenario::handle_at(&format!("dialog:{row}:{}", app.tr(label))) {
+                    if let Some(at) = crate::scenario::handle_at(&format!("dialog:{row}:{}", app.tr_by_id(label))) {
                         crate::scenario::publish_handle(&format!("prefs:dialog_buttons:{key}"), at);
-                        crate::scenario::publish_handle(&format!("dialog:{}:{}", app.tr("prefs.dialog_buttons"), app.tr(label)), at);
+                        crate::scenario::publish_handle(&format!("dialog:{}:{}", tr!(app, "prefs.dialog_buttons"), app.tr_by_id(label)), at);
                     }
                 }
             });
             layout_check(
                 ui,
-                app.tr("prefs.layout_page.view_corner"),
-                app.tr("prefs.view_confirm_corner_note"),
+                tr!(app, "prefs.layout_page.view_corner"),
+                tr!(app, "prefs.view_confirm_corner_note"),
                 &mut app.preferences.view_confirm_corner,
                 "view_confirm_corner",
             );
         });
-        ui_kit::settings_section(ui, "toolbar_tabs", app.tr("prefs.toolbar_tabs"), |ui| {
+        ui_kit::settings_section(ui, "toolbar_tabs", tr!(app, "prefs.toolbar_tabs"), |ui| {
             ui.horizontal_wrapped(|ui| {
                 for tab in crate::workspace::choosable_tabs() {
                     let label = crate::toolbar::ribbon_label(app, tab);
@@ -744,46 +749,51 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 None,
                 &[
                     Check {
-                        label: "prefs.sketch_tab_always",
-                        help: "prefs.sketch_tab_always_note",
+                        label: msg!("prefs.sketch_tab_always"),
+                        help: msg!("prefs.sketch_tab_always_note"),
                         key: "sketch_tab_always",
                         value: |p| &mut p.sketch_tab_always,
                     },
                     Check {
-                        label: "prefs.layout_page.active_commands",
-                        help: "prefs.persistent_ribbon_pressed_help",
+                        label: msg!("prefs.layout_page.active_commands"),
+                        help: msg!("prefs.persistent_ribbon_pressed_help"),
                         key: "persistent_ribbon_pressed",
                         value: |p| &mut p.persistent_ribbon_pressed,
                     },
-                    Check { label: "prefs.ribbon_reveal", help: "prefs.ribbon_reveal_note", key: "ribbon_reveal", value: |p| &mut p.ribbon_reveal },
                     Check {
-                        label: "prefs.ribbon_tabs_only",
-                        help: "prefs.ribbon_tabs_only_note",
+                        label: msg!("prefs.ribbon_reveal"),
+                        help: msg!("prefs.ribbon_reveal_note"),
+                        key: "ribbon_reveal",
+                        value: |p| &mut p.ribbon_reveal,
+                    },
+                    Check {
+                        label: msg!("prefs.ribbon_tabs_only"),
+                        help: msg!("prefs.ribbon_tabs_only_note"),
                         key: "ribbon_tabs_only",
                         value: |p| &mut p.ribbon_tabs_only,
                     },
                     Check {
-                        label: "prefs.layout_page.pinned_menus",
-                        help: "ui.ribbon_menus_skip_pinned",
+                        label: msg!("prefs.layout_page.pinned_menus"),
+                        help: msg!("ui.ribbon_menus_skip_pinned"),
                         key: "ribbon_menus_skip_pinned",
                         value: |p| &mut p.ribbon_menus_skip_pinned,
                     },
                     Check {
-                        label: "prefs.layout_page.hover_panel_menus",
-                        help: "prefs.layout_page.hover_panel_menus_help",
+                        label: msg!("prefs.layout_page.hover_panel_menus"),
+                        help: msg!("prefs.layout_page.hover_panel_menus_help"),
                         key: "ribbon_menus_follow_hover",
                         value: |p| &mut p.ribbon_menus_follow_hover,
                     },
                     // Pinned constraints as small cells in the Constrain grid.
                     Check {
-                        label: "prefs.pinned_constraints_in_grid",
-                        help: "prefs.pinned_constraints_in_grid_note",
+                        label: msg!("prefs.pinned_constraints_in_grid"),
+                        help: msg!("prefs.pinned_constraints_in_grid_note"),
                         key: "pinned_constraints_in_grid",
                         value: |p| &mut p.pinned_constraints_in_grid,
                     },
                     Check {
-                        label: "prefs.command_search_centred",
-                        help: "prefs.command_search_centred_note",
+                        label: msg!("prefs.command_search_centred"),
+                        help: msg!("prefs.command_search_centred_note"),
                         key: "command_search_centred",
                         value: |p| &mut p.command_search_centred,
                     },
@@ -794,19 +804,19 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
 }
 
-/// One box of a [`check_columns`] group: its label and hover help as message ids, its handle
+/// One box of a [`check_columns`] group: its label and hover help as messages, its handle
 /// (`prefs:<key>`), and the preference it turns on and off.
 struct Check {
-    label: &'static str,
-    help: &'static str,
+    label: solidcraft_ui_text::Msg,
+    help: solidcraft_ui_text::Msg,
     key: &'static str,
     value: fn(&mut Prefs) -> &mut bool,
 }
 
 /// Checkboxes in even columns, so they line up instead of wrapping like words (#16542): two
 /// columns when the widest label fits twice, one in a narrow window, every cell as wide as its
-/// column. A dim caption (a message id) names the group.
-fn check_columns(ui: &mut egui::Ui, app: &mut SolveApp, caption: Option<&'static str>, checks: &[Check]) {
+/// column. A dim caption names the group.
+fn check_columns(ui: &mut egui::Ui, app: &mut SolveApp, caption: Option<solidcraft_ui_text::Msg>, checks: &[Check]) {
     use ui_kit::settings_search;
 
     if settings_search::suppress_chrome(ui) {
@@ -858,8 +868,8 @@ pub(super) fn windows_smooth_window_drag_row(app: &mut SolveApp, ui: &mut egui::
     }
     layout_check(
         ui,
-        app.tr("prefs.windows_smooth_window_drag"),
-        app.tr("prefs.windows_smooth_window_drag_help"),
+        tr!(app, "prefs.windows_smooth_window_drag"),
+        tr!(app, "prefs.windows_smooth_window_drag_help"),
         &mut app.preferences.windows_smooth_window_drag,
         "windows_smooth_window_drag",
     );

@@ -1152,7 +1152,7 @@ fn cell_grid_takes_the_profiles_of_one_sketch() {
     d.take_box(&h.app.session, picks.clone(), false);
     assert_eq!(d.inputs[0].items, [Sel::Profile { sketch: second, index: 0 }]);
     d.inputs[0].items = picks;
-    assert_eq!(apply_commands(&h.app, &d).unwrap_err(), String::from(h.app.tr("error.cell_grid_one_sketch")));
+    assert_eq!(apply_commands(&h.app, &d).unwrap_err(), String::from(tr!(h.app, "error.cell_grid_one_sketch")));
 }
 /// The anchor takes a construction point as well as a vertex: the command gets its point; a
 /// pick that names no point in the model is refused.
@@ -1169,7 +1169,7 @@ fn cell_grid_anchor_takes_a_construction_point() {
     let commands = apply_commands(&h.app, &d).unwrap();
     assert_eq!(commands[0].1.get("anchor"), Some(&crate::selection::point_value(Vec3::new(5.0, 7.0, 0.0))), "{commands:?}");
     d.inputs[2].items = vec![Sel::ConstructionPoint { name: "Nowhere".into() }];
-    assert_eq!(apply_commands(&h.app, &d).unwrap_err(), String::from(h.app.tr("error.cell_grid_anchor")));
+    assert_eq!(apply_commands(&h.app, &d).unwrap_err(), String::from(tr!(h.app, "error.cell_grid_anchor")));
 }
 
 /// A construction point in a moved component is the anchor where the view shows it: the session's
@@ -3294,7 +3294,7 @@ fn pattern_says_why_a_clicked_sketch_is_not_taken() {
     assert!(crate::dialogs::missing_pick(crate::dialogs::SKETCH_NOT_OBJECT), "shown as what to pick, with no Create Issue");
     let _japanese = solidcraft_ui_text::scope("ja");
     assert!(!solidcraft_ui_text::tr_label(crate::dialogs::SKETCH_NOT_OBJECT).is_ascii(), "the hint reads in the user's language");
-    assert!(!solidcraft_ui_text::tr("ui.pattern_object_type_tip").is_ascii(), "so does the Object Type tooltip");
+    assert!(!solidcraft_ui_text::tr_by_id("ui.pattern_object_type_tip").is_ascii(), "so does the Object Type tooltip");
 }
 
 /// Features stored with bare numbers edit with their units written out, as the Plastic ones do

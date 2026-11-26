@@ -300,7 +300,7 @@ fn collision_rows(
             }
             if a.check.is_some() {
                 // The check runs off the window thread: Cancel where the button was.
-                if crate::ui_kit::button(ui, solidcraft_ui_text::tr("ui.cancel"), crate::ui_kit::Button::Normal).clicked() {
+                if crate::ui_kit::button(ui, tr!("ui.cancel"), crate::ui_kit::Button::Normal).clicked() {
                     // Its thread finishes the check; the reply is left unread.
                     a.check = None;
                 }
@@ -320,7 +320,7 @@ fn collision_rows(
             let seconds = ((crate::now_ms() - c.started) / 1000.0).floor().max(0.0);
             ui.horizontal(|ui| {
                 ui.add(egui::Spinner::new().size(t.font_small));
-                ui.label(RichText::new(solidcraft_ui_text::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))])).color(t.text_dim));
+                ui.label(RichText::new(tr!("dialog.computing", seconds = &format!("{seconds:.0}"))).color(t.text_dim));
             });
         }
     });
@@ -330,7 +330,7 @@ fn collision_rows(
             ui.vertical(|ui| {
                 ui.vertical(|ui| {
                     if hits.is_empty() {
-                        ui.label(RichText::new(solidcraft_ui_text::tr("motion.no_collisions")).color(t.text_dim));
+                        ui.label(RichText::new(tr!("motion.no_collisions")).color(t.text_dim));
                     }
                     for (i, c) in hits.iter().enumerate() {
                         let steps: Vec<String> = c["steps"]
@@ -343,8 +343,7 @@ fn collision_rows(
                             })
                             .collect();
                         let name = |k: &str| c[k].as_str().unwrap_or_default().to_string();
-                        let text =
-                            solidcraft_ui_text::format("motion.collision", &[("a", &name("a")), ("b", &name("b")), ("steps", &steps.join(", "))]);
+                        let text = tr!("motion.collision", a = &name("a"), b = &name("b"), steps = &steps.join(", "));
                         // A click shows where they first collide.
                         let link = ui.link(RichText::new(text).color(t.error));
                         crate::scenario::publish_handle(&format!("motion:collision:{i}"), link.rect.center());
@@ -356,7 +355,7 @@ fn collision_rows(
                     }
                     if v["truncated"] == true {
                         let to = v["checked_to"].as_f64().map(|x| x.round().to_string()).unwrap_or_default();
-                        ui.label(RichText::new(solidcraft_ui_text::format("motion.checked_to", &[("step", &to)])).color(t.warning));
+                        ui.label(RichText::new(tr!("motion.checked_to", step = &to)).color(t.warning));
                     }
                 });
             });

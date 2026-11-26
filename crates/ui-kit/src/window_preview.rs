@@ -77,7 +77,7 @@ fn miniature(painter: &Painter, window: Rect, scale: f32, menu: &WindowMenu<'_>,
             painter.text(
                 tab.center(),
                 egui::Align2::CENTER_CENTER,
-                solidcraft_ui_text::tr(label),
+                solidcraft_ui_text::tr_by_id(label),
                 crate::type_face::semibold(t.font_body * scale),
                 t.app_bar_text,
             );

@@ -542,7 +542,7 @@ fn forget(app: &mut SolveApp, now: f64) {
                 // The next one waiting goes at once.
                 app.usage.last_delete_try = None;
                 if app.usage.store.forget.is_empty() {
-                    let text = app.tr("prefs.privacy.delete_done").to_string();
+                    let text = tr!(app, "prefs.privacy.delete_done").to_string();
                     app.set_status(text, false);
                 }
             }
@@ -655,11 +655,11 @@ pub fn notice_toast(app: &mut SolveApp, ui: &egui::Ui, free: egui::Rect) -> Opti
     }
     use crate::ui_kit::toast::Action;
     const ACTIONS: [NoticeAction; 2] = [NoticeAction::Settings, NoticeAction::Ok];
-    let labels = [app.tr("usage.settings").to_string(), app.tr("usage.ok").to_string()];
+    let labels = [tr!(app, "usage.settings").to_string(), tr!(app, "usage.ok").to_string()];
     let actions = [(labels[0].as_str(), Action::Secondary), (labels[1].as_str(), Action::Primary)];
     // No countdown: it stays until OK, or until sharing is turned off.
     let extras = crate::ui_kit::toast::Extras { close: Some("toast:usage_stats:close"), ..Default::default() };
-    let text = app.tr("usage.notice").to_string();
+    let text = tr!(app, "usage.notice").to_string();
     let toast = crate::viewport::paint_toast_ext(ui, free, text, crate::ui_kit::toast::Lead::Dot(false), &actions, extras)?;
     crate::scenario::publish_rect("toast:usage_stats", toast.rect);
     for (index, button) in toast.buttons.iter().enumerate() {

@@ -119,7 +119,7 @@ pub(crate) fn scope(app: &SolveApp, d: &Dialog, cmds: &mut [(String, Value)]) ->
             continue;
         }
         if ticked.is_empty() {
-            return Err(solidcraft_ui_text::tr("dialog.no_cut_body").to_string());
+            return Err(tr!("dialog.no_cut_body").to_string());
         }
         if let Some(map) = p.as_object_mut() {
             map.insert("targets".into(), Value::from(ticked.clone()));

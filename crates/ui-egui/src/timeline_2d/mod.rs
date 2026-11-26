@@ -22,7 +22,7 @@ pub(crate) fn option_items(app: &SolveApp) -> Vec<crate::ui_kit::Item> {
     use crate::prefs::Timeline2dUnsuppressMode::{RestoreState, UnsuppressAll};
     use crate::ui_kit::Item;
     let p = &app.preferences;
-    let tr = solidcraft_ui_text::tr;
+    let tr = solidcraft_ui_text::tr_by_id;
     let mode = |mode: crate::prefs::Timeline2dUnsuppressMode, key: &str| {
         let item = Item::action("ui.timeline2dUnsuppress", tr(key), "suppress").with(json!({ "mode": mode }));
         if p.timeline_2d_unsuppress_mode == mode { item.key("current") } else { item }

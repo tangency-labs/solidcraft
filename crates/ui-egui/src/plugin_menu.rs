@@ -1099,14 +1099,14 @@ pub(crate) fn rows(app: &SolveApp) -> Vec<crate::app_bar::FileRow> {
     use crate::app_bar::{FileItem, FileRow};
     let item = |id: String, label: String, enabled: bool| FileRow::Item(FileItem { id, label, key: String::new(), icon: String::new(), enabled });
     let mut rows = vec![
-        item(INSTALL.into(), app.tr("ui.plugin_menu_install").into(), true),
-        item(LAST_REPORT.into(), app.tr("ui.plugin_menu_last_report").into(), app.import_report.is_some()),
+        item(INSTALL.into(), tr!(app, "ui.plugin_menu_install").into(), true),
+        item(LAST_REPORT.into(), tr!(app, "ui.plugin_menu_last_report").into(), app.import_report.is_some()),
         FileRow::Separator,
     ];
     if app.plugin_menu.listed.iter().all(|plugin| plugin.entries.is_empty()) {
-        rows.push(item("empty".into(), app.tr("ui.plugin_menu_empty").into(), false));
+        rows.push(item("empty".into(), tr!(app, "ui.plugin_menu_empty").into(), false));
     } else if !app.plugin_menu.listed.iter().any(|p| shown(app, p)) {
-        rows.push(item("empty".into(), app.tr("ui.plugin_menu_all_off").into(), false));
+        rows.push(item("empty".into(), tr!(app, "ui.plugin_menu_all_off").into(), false));
     }
     // A plugin turned off in Preferences › Plugins is left out; the others keep their index.
     for (p, plugin) in app.plugin_menu.listed.iter().enumerate().filter(|(_, p)| shown(app, p) && !p.entries.is_empty()) {
@@ -1782,17 +1782,17 @@ fn open_form_with_guard(
                 })
                 .flatten()
         })
-        .ok_or_else(|| app.tr("ui.plugin_edit_unknown").to_owned())?;
+        .ok_or_else(|| tr!(app, "ui.plugin_edit_unknown").to_owned())?;
     if serde_json::to_vec(values).map_err(|e| e.to_string())?.len() > solidcraft_engine::plugin::MAX_JSON_BYTES {
-        return Err(app.tr("ui.plugin_edit_unknown").into());
+        return Err(tr!(app, "ui.plugin_edit_unknown").into());
     }
     // An explicit edit request must never overwrite somebody's unsubmitted form.
     if app.plugin_menu.dialogs.iter().any(|d| d.plugin.id == plugin_id && d.entry == entry_name && d.session == app.session.uid) {
-        return Err(app.tr("ui.plugin_edit_already_open").into());
+        return Err(tr!(app, "ui.plugin_edit_already_open").into());
     }
     open_entry(app, p, e);
     let changed = guard.document_id != app.session.document_id || guard.revision != app.session.design_revision();
-    let Some(dialog) = app.plugin_menu.dialogs.last_mut() else { return Err(app.tr("ui.plugin_edit_unknown").into()) };
+    let Some(dialog) = app.plugin_menu.dialogs.last_mut() else { return Err(tr!(app, "ui.plugin_edit_unknown").into()) };
     dialog.form_guard = Some(guard);
     dialog.changed = changed;
     // Opening a populated form only validates inputs. Preview is an explicit request.
@@ -2011,19 +2011,19 @@ impl EntryDialog {
             )
         });
         let Some(checked) = checked else {
-            return [("params".into(), app.tr("ui.plugin_edit_checking").to_owned())].into();
+            return [("params".into(), tr!(app, "ui.plugin_edit_checking").to_owned())].into();
         };
         let mut errors: std::collections::BTreeMap<String, String> = checked
             .into_iter()
             .map(|(key, error)| {
                 let text = match error {
-                    solidcraft_engine::schema::plugin::FormFieldError::MissingPick => app.tr("ui.plugin_edit_missing_pick").to_owned(),
+                    solidcraft_engine::schema::plugin::FormFieldError::MissingPick => tr!(app, "ui.plugin_edit_missing_pick").to_owned(),
                     solidcraft_engine::schema::plugin::FormFieldError::InvalidValue { reason } if reason == "validation worker stopped" => {
-                        app.tr("ui.plugin_start_failed").to_owned()
+                        tr!(app, "ui.plugin_start_failed").to_owned()
                     }
                     solidcraft_engine::schema::plugin::FormFieldError::InvalidValue { .. } => {
                         let label = fields.iter().find(|(field, _)| field.key == key).map(|(field, _)| field.label.as_str()).unwrap_or(&key);
-                        solidcraft_ui_text::format("ui.plugin_dialog_invalid", &[("field", label)])
+                        tr!("ui.plugin_dialog_invalid", field = label)
                     }
                 };
                 (key, text)
@@ -2031,7 +2031,7 @@ impl EntryDialog {
             .collect();
         for (field, input) in fields.iter().filter(|(f, _)| sends_field(f)) {
             if params(&[(field.clone(), input.clone())]).is_err() {
-                errors.entry(field.key.clone()).or_insert_with(|| solidcraft_ui_text::format("ui.plugin_dialog_invalid", &[("field", &field.label)]));
+                errors.entry(field.key.clone()).or_insert_with(|| tr!("ui.plugin_dialog_invalid", field = &field.label));
             }
         }
         errors
@@ -2150,7 +2150,7 @@ fn poll_file(dialog: &mut EntryDialog) {
     let reply = match job.reply.try_recv() {
         Ok(reply) => reply,
         Err(std::sync::mpsc::TryRecvError::Empty) => return,
-        Err(std::sync::mpsc::TryRecvError::Disconnected) => Err(solidcraft_ui_text::tr("ui.plugin_no_result").into()),
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => Err(tr!("ui.plugin_no_result").into()),
     };
     dialog.file_job = None;
     if generation != dialog.file_generation {
@@ -2167,7 +2167,7 @@ fn poll_file(dialog: &mut EntryDialog) {
     };
     let Some(mut fields) = form(&result.schema) else {
         dialog.file_failed = true;
-        dialog.error = Some(solidcraft_ui_text::tr("ui.plugin_dialog_unsupported").into());
+        dialog.error = Some(tr!("ui.plugin_dialog_unsupported").into());
         return;
     };
     // An edited value survives an update if the new choices still offer it. Header defaults
@@ -2403,34 +2403,34 @@ impl EntryDialog {
     /// The parameters to run with, or why Run is off (in words for the dialog).
     pub(crate) fn ready(&self, app: &SolveApp) -> Result<Value, String> {
         if self.session != app.session.uid {
-            return Err(app.tr("ui.plugin_dialog_other_design").into());
+            return Err(tr!(app, "ui.plugin_dialog_other_design").into());
         }
         if !shown(app, &self.plugin) {
-            return Err(app.tr("ui.plugin_dialog_disabled").into());
+            return Err(tr!(app, "ui.plugin_dialog_disabled").into());
         }
         let missing = missing_groups(app, &self.plugin);
         if !missing.is_empty() {
-            return Err(solidcraft_ui_text::format("ui.plugin_dialog_needs_groups", &[("groups", &missing.join(", "))]));
+            return Err(tr!("ui.plugin_dialog_needs_groups", groups = &missing.join(", ")));
         }
         if self.file_job.is_some()
             || (self.source.is_some()
                 && !self.file_failed
                 && (self.file.is_none() || (self.has_hook && self.hook_values.as_ref() != Some(&dialog_values(self)))))
         {
-            return Err(app.tr("ui.plugin_dialog_reading_file").into());
+            return Err(app.tr_by_id("ui.plugin_dialog_reading_file").into());
         }
         if self.file_failed {
             return Err(self.error.clone().unwrap_or_default());
         }
-        let Some(fields) = &self.fields else { return Err(app.tr("ui.plugin_dialog_unsupported").into()) };
+        let Some(fields) = &self.fields else { return Err(tr!(app, "ui.plugin_dialog_unsupported").into()) };
         if self.form_guard.is_some()
             && let Some(error) = self.field_errors(app).values().next()
         {
             return Err(error.clone());
         }
         let mut values = params(fields).map_err(|problem| match problem {
-            Problem::Missing(label) => solidcraft_ui_text::format("ui.plugin_dialog_missing", &[("field", &label)]),
-            Problem::Invalid(label) => solidcraft_ui_text::format("ui.plugin_dialog_invalid", &[("field", &label)]),
+            Problem::Missing(label) => tr!("ui.plugin_dialog_missing", field = &label),
+            Problem::Invalid(label) => tr!("ui.plugin_dialog_invalid", field = &label),
         })?;
         if let (Some(values), Some(extra)) = (values.as_object_mut(), self.prefill_extra.as_ref().and_then(Value::as_object)) {
             values.extend(extra.clone());
@@ -2648,7 +2648,7 @@ fn queue(app: &mut SolveApp, id: u64, request: Value, consent: Option<solidcraft
 /// Panel actions enter the same namespaced command queue as the control channel.
 pub(crate) fn run_panel(app: &mut SolveApp, command: String, params: Value) -> Result<(), String> {
     if app.plugin_menu.panel_runs.len() >= 16 {
-        return Err(app.tr("prefs.plugin_busy").into());
+        return Err(tr!(app, "prefs.plugin_busy").into());
     }
     let (request, reply) = solidcraft_control::ControlRequest::new("engine.execute", json!({"command":command,"params":params}));
     app.plugin_menu.pending.push((request.serial, app.session.uid));
@@ -2674,7 +2674,7 @@ pub(crate) fn check_dispatch(app: &mut SolveApp, req: &solidcraft_control::Contr
     } else {
         app.plugin_menu.pending.remove(at);
         app.plugin_menu.folder_consents.remove(&req.serial);
-        Err(app.tr("ui.plugin_dialog_other_design").into())
+        Err(tr!(app, "ui.plugin_dialog_other_design").into())
     }
 }
 
@@ -2690,12 +2690,12 @@ pub(crate) fn poll(app: &mut SolveApp) {
         match reply.try_recv() {
             Ok(value) => {
                 if value.get("ok") != Some(&Value::Bool(true)) {
-                    let error = value.get("error").and_then(Value::as_str).unwrap_or_else(|| solidcraft_ui_text::tr("ui.plugin_no_result"));
-                    app.set_status(solidcraft_ui_text::format("ui.plugin_dialog_failed", &[("error", error)]), true);
+                    let error = value.get("error").and_then(Value::as_str).unwrap_or_else(|| tr!("ui.plugin_no_result"));
+                    app.set_status(tr!("ui.plugin_dialog_failed", error = error), true);
                 }
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => app.plugin_menu.panel_runs.push(reply),
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => app.set_status(app.tr("ui.plugin_no_result").to_owned(), true),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => app.set_status(tr!(app, "ui.plugin_no_result").to_owned(), true),
         }
     }
     let ids: Vec<u64> = app.plugin_menu.dialogs.iter().map(|d| d.id).collect();
@@ -2726,7 +2726,7 @@ fn poll_dialog(app: &mut SolveApp, id: u64) {
         None => match running.reply.try_recv() {
             Ok(reply) => reply,
             Err(std::sync::mpsc::TryRecvError::Empty) => return,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => json!({"ok":false,"error":solidcraft_ui_text::tr("ui.plugin_no_result")}),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => json!({"ok":false,"error":tr!("ui.plugin_no_result")}),
         },
     };
     app.plugin_menu.folder_consents.remove(&running.serial);
@@ -2734,7 +2734,7 @@ fn poll_dialog(app: &mut SolveApp, id: u64) {
         dialog.running = None;
         let error = reply["error"].as_str().unwrap_or_default();
         let error = error.strip_prefix("plugin: ").unwrap_or(error);
-        dialog.error = Some(solidcraft_ui_text::format("ui.plugin_dialog_failed", &[("error", error)]));
+        dialog.error = Some(tr!("ui.plugin_dialog_failed", error = error));
         return;
     }
     // A successful entry can request forms containing picks from its own design. Hold
@@ -2768,7 +2768,7 @@ fn poll_dialog(app: &mut SolveApp, id: u64) {
         let notes: Vec<String> =
             reply.pointer("/result/warnings").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(String::from).collect();
         app.plugin_menu.dialogs.remove(at);
-        let mut done = solidcraft_ui_text::format("plugin_export.done", &[("path", &path)]);
+        let mut done = tr!("plugin_export.done", path = &path);
         for note in notes {
             done = std::format!("{done} · {note}");
         }
@@ -2790,7 +2790,7 @@ fn poll_dialog(app: &mut SolveApp, id: u64) {
         open_requested_forms(app, &reply, source_guard);
         return;
     }
-    let mut done = solidcraft_ui_text::format("ui.plugin_dialog_done", &[("entry", &dialog.label)]);
+    let mut done = tr!("ui.plugin_dialog_done", entry = &dialog.label);
     if let Some(last_warn) = reply
         .pointer("/result/messages")
         .and_then(Value::as_array)
@@ -2810,7 +2810,7 @@ fn open_requested_forms(app: &mut SolveApp, reply: &Value, source_guard: Option<
     if let Some(forms) = reply.pointer("/result/forms").and_then(Value::as_array) {
         let Some(guard) = source_guard else {
             if !forms.is_empty() {
-                app.set_status(app.tr("ui.plugin_no_result").to_owned(), true);
+                app.set_status(tr!(app, "ui.plugin_no_result").to_owned(), true);
             }
             return;
         };
@@ -2841,7 +2841,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
         if let Some((field, listed)) = claim
             && !start_picking_listed(app, id, field, listed)
         {
-            app.set_status(app.tr("ui.plugin_dialog_finish_tool").to_owned(), true);
+            app.set_status(tr!(app, "ui.plugin_dialog_finish_tool").to_owned(), true);
         }
         if run_it
             && let Err(error) = run_dialog(app, id)
@@ -2905,7 +2905,8 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     } else {
         "ui.plugin_dialog_run"
     };
-    let (run_label, close_label) = (app.tr(run_key).to_owned(), app.tr(if dialog.read { "ui.close" } else { "ui.cancel" }).to_owned());
+    let (run_label, close_label) =
+        (app.tr_by_id(run_key).to_owned(), (if dialog.read { tr!(app, "ui.close") } else { tr!(app, "ui.cancel") }).to_owned());
     let mut browse = None;
     let mut choose_file = false;
     // This dialog's picker, when the viewport picks into its fields: drawn here, then put back.
@@ -2923,25 +2924,25 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
                     .map(|f| f.name.as_str())
                     .unwrap_or_else(|| Path::new(source).file_name().and_then(|n| n.to_str()).unwrap_or_default());
                 ui_kit::text(ui, name, ui_kit::Text::Note("plugin_file"));
-                let change = ui_kit::button(ui, app.tr("ui.plugin_dialog_change_file"), ui_kit::Button::Normal);
+                let change = ui_kit::button(ui, app.tr_by_id("ui.plugin_dialog_change_file"), ui_kit::Button::Normal);
                 crate::scenario::publish_target("plugin_dialog:change_file", change.rect);
                 choose_file = change.clicked();
                 if dialog.file_job.is_some() {
-                    ui_kit::status_line(ui, app.tr("ui.plugin_dialog_reading_file"), ui_kit::StatusTone::Dim);
+                    ui_kit::status_line(ui, app.tr_by_id("ui.plugin_dialog_reading_file"), ui_kit::StatusTone::Dim);
                 }
             }
             browse = body(app, ui, dialog, ready.as_ref().err(), &mut picker, &mut claim);
             if dialog.opens.is_some() && dialog.fields.is_some() {
                 ui.horizontal_wrapped(|ui| {
                     let reset = ui
-                        .add_enabled_ui(!running, |ui| ui_kit::button(ui, app.tr("ui.plugin_importer_restore_defaults"), ui_kit::Button::Normal))
+                        .add_enabled_ui(!running, |ui| ui_kit::button(ui, tr!(app, "ui.plugin_importer_restore_defaults"), ui_kit::Button::Normal))
                         .inner;
                     crate::scenario::publish_target("plugin_dialog:defaults", reset.rect);
                     if reset.clicked() {
                         restore_defaults(dialog);
                     }
                     let remember =
-                        ui.add_enabled_ui(!running, |ui| ui_kit::checkbox(ui, app.tr("ui.plugin_importer_remember"), &mut dialog.remember)).inner;
+                        ui.add_enabled_ui(!running, |ui| ui_kit::checkbox(ui, tr!(app, "ui.plugin_importer_remember"), &mut dialog.remember)).inner;
                     crate::scenario::publish_target("plugin_dialog:remember", remember.rect);
                 });
             }
@@ -3043,7 +3044,7 @@ fn follow_units(fields: &mut [(Field, Input)]) {
 /// A field's help link, under its row: opens the plugin's `https` page in the browser.
 fn help_link(app: &SolveApp, ui: &mut egui::Ui, key: &str, url: &str) {
     let t = solidcraft_theme::Tokens::get();
-    let link = ui_kit::row(ui, "", |ui| ui.hyperlink_to(egui::RichText::new(app.tr("ui.plugin_dialog_help")).size(t.font_small), url));
+    let link = ui_kit::row(ui, "", |ui| ui.hyperlink_to(egui::RichText::new(tr!(app, "ui.plugin_dialog_help")).size(t.font_small), url));
     crate::scenario::publish_target(&format!("plugin_dialog:help:{key}"), link.rect);
 }
 
@@ -3067,21 +3068,21 @@ fn body(
     let missing = missing_groups(app, plugin);
     let other_design = dialog.session != app.session.uid;
     if other_design {
-        ui_kit::status_line(ui, app.tr("ui.plugin_dialog_other_design"), ui_kit::StatusTone::Warning);
+        ui_kit::status_line(ui, tr!(app, "ui.plugin_dialog_other_design"), ui_kit::StatusTone::Warning);
     } else if !shown(app, plugin) {
-        ui_kit::status_line(ui, app.tr("ui.plugin_dialog_disabled"), ui_kit::StatusTone::Warning);
+        ui_kit::status_line(ui, tr!(app, "ui.plugin_dialog_disabled"), ui_kit::StatusTone::Warning);
     } else if !missing.is_empty() {
-        let asks = solidcraft_ui_text::format("ui.plugin_dialog_needs_groups", &[("groups", &missing.join(", "))]);
+        let asks = tr!("ui.plugin_dialog_needs_groups", groups = &missing.join(", "));
         ui_kit::status_line(ui, &asks, ui_kit::StatusTone::Warning);
     }
     let editable = dialog.running.is_none() && dialog.file_job.is_none();
     let mut browse = None;
     match dialog.fields.as_mut() {
         None => {
-            ui_kit::status_line(ui, app.tr("ui.plugin_dialog_unsupported"), ui_kit::StatusTone::Warning);
+            ui_kit::status_line(ui, tr!(app, "ui.plugin_dialog_unsupported"), ui_kit::StatusTone::Warning);
         }
         Some(fields) if fields.is_empty() => {
-            ui_kit::text(ui, app.tr("ui.plugin_dialog_no_inputs"), ui_kit::Text::Note("plugin_no_inputs"));
+            ui_kit::text(ui, tr!(app, "ui.plugin_dialog_no_inputs"), ui_kit::Text::Note("plugin_no_inputs"));
         }
         Some(fields) => {
             follow_units(fields);
@@ -3145,7 +3146,7 @@ fn body(
                         ui_kit::status_line(ui, error, ui_kit::StatusTone::Error);
                     }
                     if field.grant_read {
-                        ui_kit::text(ui, app.tr("ui.plugin_dialog_folder_read_once"), ui_kit::Text::Note("plugin_folder_read_once"));
+                        ui_kit::text(ui, tr!(app, "ui.plugin_dialog_folder_read_once"), ui_kit::Text::Note("plugin_folder_read_once"));
                     }
                     if let Some(url) = field.layout.help.as_deref() {
                         help_link(app, ui, &field.key, url);
@@ -3164,26 +3165,26 @@ fn body(
             && preview_commands(app).is_some_and(|(id, _, _)| id == dialog.id)
             && let Some(error) = &app.preview.error
         {
-            ui_kit::status_line(ui, &solidcraft_ui_text::format("ui.plugin_dialog_preview_failed", &[("error", error)]), ui_kit::StatusTone::Dim);
+            ui_kit::status_line(ui, &tr!("ui.plugin_dialog_preview_failed", error = error), ui_kit::StatusTone::Dim);
         }
     }
     if dialog.changed {
         let key = if dialog.revalidated { "ui.plugin_edit_revalidated" } else { "ui.plugin_edit_changed" };
-        ui_kit::status_line(ui, app.tr(key), ui_kit::StatusTone::Warning);
+        ui_kit::status_line(ui, app.tr_by_id(key), ui_kit::StatusTone::Warning);
     }
     if let Some(hook) = &dialog.hook {
         if hook.note {
-            ui_kit::status_line(ui, app.tr("ui.plugin_hook_unavailable"), ui_kit::StatusTone::Dim);
+            ui_kit::status_line(ui, tr!(app, "ui.plugin_hook_unavailable"), ui_kit::StatusTone::Dim);
         } else if hook.pending.is_some() && crate::now_ms() - hook.changed_at >= 500.0 {
             // A fast hook shows no status line, so the rows under the fields do not move.
-            ui_kit::status_line(ui, app.tr("ui.plugin_hook_waiting"), ui_kit::StatusTone::Dim);
+            ui_kit::status_line(ui, tr!(app, "ui.plugin_hook_waiting"), ui_kit::StatusTone::Dim);
         }
     }
     if dialog.picks_cleared {
-        ui_kit::status_line(ui, app.tr("ui.plugin_dialog_picks_cleared"), ui_kit::StatusTone::Warning);
+        ui_kit::status_line(ui, tr!(app, "ui.plugin_dialog_picks_cleared"), ui_kit::StatusTone::Warning);
     }
     if dialog.running.as_ref().is_some_and(|running| running.received.is_none()) {
-        ui_kit::status_line(ui, app.tr("ui.plugin_dialog_running"), ui_kit::StatusTone::Dim);
+        ui_kit::status_line(ui, tr!(app, "ui.plugin_dialog_running"), ui_kit::StatusTone::Dim);
     } else if let Some(error) = &dialog.error {
         ui_kit::status_line(ui, error, ui_kit::StatusTone::Error);
     } else if let Some(why) = why_not
@@ -3195,7 +3196,7 @@ fn body(
         ui_kit::status_line(ui, why, ui_kit::StatusTone::Dim);
     }
     if let Some(result) = &dialog.result {
-        ui_kit::text(ui, app.tr("ui.plugin_dialog_result"), ui_kit::Text::Note("plugin_result"));
+        ui_kit::text(ui, tr!(app, "ui.plugin_dialog_result"), ui_kit::Text::Note("plugin_result"));
         ui_kit::read_only_text(ui, result);
     }
     browse
@@ -3235,7 +3236,7 @@ fn selection_row(
         }
     }
     if !field.required && field.prefilled {
-        let unset = ui_kit::button(ui, app.tr("ui.plugin_edit_unset"), ui_kit::Button::Normal);
+        let unset = ui_kit::button(ui, tr!(app, "ui.plugin_edit_unset"), ui_kit::Button::Normal);
         crate::scenario::publish_handle(&format!("plugin_dialog:unset:{}", field.key), unset.rect.center());
         if unset.clicked() {
             picks.clear();
@@ -3280,8 +3281,8 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
         }
         (Kind::Number { unit, .. } | Kind::Integer { unit, .. }, Input::Typed(text)) => {
             let hint = match (field.required, unit) {
-                (true, Some(unit)) => format!("{} ({unit})", app.tr("ui.plugin_dialog_required_hint")),
-                (true, None) => app.tr("ui.plugin_dialog_required_hint").to_owned(),
+                (true, Some(unit)) => format!("{} ({unit})", tr!(app, "ui.plugin_dialog_required_hint")),
+                (true, None) => tr!(app, "ui.plugin_dialog_required_hint").to_owned(),
                 (false, Some(unit)) => unit.clone(),
                 (false, None) => String::new(),
             };
@@ -3292,9 +3293,9 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
             // Until something is chosen the dropdown leads with "Choose…", which is not a value.
             let invalid = chosen.is_some_and(|i| !field.available.contains(&i));
             let choose = if invalid {
-                chosen.and_then(|i| titles.get(i)).cloned().unwrap_or_else(|| app.tr("ui.plugin_dialog_choose").to_owned())
+                chosen.and_then(|i| titles.get(i)).cloned().unwrap_or_else(|| tr!(app, "ui.plugin_dialog_choose").to_owned())
             } else {
-                app.tr("ui.plugin_dialog_choose").to_owned()
+                tr!(app, "ui.plugin_dialog_choose").to_owned()
             };
             let lead = chosen.is_none() || invalid;
             let shown: Vec<&str> = lead
@@ -3342,7 +3343,7 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
                             titles: &titles,
                             textures: &tiles,
                             choose: &choose,
-                            search_hint: app.tr("ui.plugin_swatch_search"),
+                            search_hint: tr!(app, "ui.plugin_swatch_search"),
                             preview: field.pictured,
                         },
                     )
@@ -3370,12 +3371,12 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
         }
         (Kind::Text { .. }, Input::Text(text)) if field.font => ui_kit::row(ui, &label, |ui| font_field_row(ui, field, text)),
         (Kind::Text { directory: true, .. }, Input::Text(text)) => {
-            let hint = if field.required { app.tr("ui.plugin_dialog_required_hint") } else { "" };
+            let hint = if field.required { tr!(app, "ui.plugin_dialog_required_hint") } else { "" };
             // The browser build has no folder picker, so Browse is not offered there.
             let can_browse = !cfg!(target_arch = "wasm32") && app.services.pick_folder.is_some();
             ui_kit::row(ui, &label, |ui| {
                 if can_browse {
-                    let browse_label = app.tr("ui.plugin_dialog_browse");
+                    let browse_label = tr!(app, "ui.plugin_dialog_browse");
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let button = ui_kit::button(ui, browse_label, ui_kit::Button::Normal);
                         browse = button.clicked();
@@ -3389,7 +3390,7 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
             })
         }
         (Kind::Text { .. }, Input::Text(text)) => {
-            let hint = if field.required { app.tr("ui.plugin_dialog_required_hint") } else { "" };
+            let hint = if field.required { tr!(app, "ui.plugin_dialog_required_hint") } else { "" };
             ui_kit::row(ui, &label, |ui| ui_kit::text_field_reserving(ui, text, hint, 0.0).1)
         }
         _ => ui.response(),
@@ -3419,14 +3420,14 @@ fn font_field_row(ui: &mut egui::Ui, field: &Field, text: &mut String) -> egui::
     let id = format!("plugin_font_{}", field.key);
     let state = ui.make_persistent_id(egui::IdSalt::new(&id)).with("filter");
     let mut filter = ui.data(|data| data.get_temp::<String>(state)).unwrap_or_default();
-    let current = if text.is_empty() { solidcraft_ui_text::tr("ui.plugin_dialog_choose") } else { text.as_str() };
+    let current = if text.is_empty() { tr!("ui.plugin_dialog_choose") } else { text.as_str() };
     if let Some(chosen) = ui_kit::searchable_dropdown_fitting(
         ui,
         &id,
         current,
         &mut filter,
         &options,
-        families.is_none().then(|| solidcraft_ui_text::tr("sketch_text.loading_fonts")),
+        families.is_none().then(|| tr!("sketch_text.loading_fonts")),
         true, // Keep font selection keys inside the popup.
     ) {
         *text = chosen;

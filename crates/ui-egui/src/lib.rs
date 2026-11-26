@@ -7,6 +7,16 @@
 //! right of the viewport, the command palette and a bottom or left-sidebar feature timeline.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
+// `msg!`: a message named by its id, checked against the English catalog when this crate
+// compiles and turned into its number, in every module.
+#[macro_use]
+extern crate solidcraft_ui_text_macros;
+
+/// The message macros, for the apps: a crate that reads messages with them depends on this one,
+/// so it is compiled again when this crate's build script sees the catalogs change, and its
+/// numbers are counted in the list of ids the tables here were made for.
+pub use solidcraft_ui_text_macros::{msg, template, tr};
+
 use crate::ui_kit::recent_colors;
 
 pub mod access;
@@ -1377,8 +1387,19 @@ impl SolveApp {
     }
 
     /// Translate text using the active language preference.
-    pub fn tr<'a>(&self, text: &'a str) -> &'a str {
-        solidcraft_ui_text::Locale::for_language(&self.preferences.language).text(text)
+    pub fn tr(&self, msg: solidcraft_ui_text::Msg) -> &'static str {
+        solidcraft_ui_text::Locale::for_language(&self.preferences.language).tr(msg)
+    }
+
+    /// The message with the id `id` in the active language, for an id built at run time. An id
+    /// written in the code is `tr!(app, "id")`, which checks it against the English catalog.
+    pub fn tr_by_id<'a>(&self, id: &'a str) -> &'a str {
+        solidcraft_ui_text::Locale::for_language(&self.preferences.language).text(id)
+    }
+
+    /// A message with its placeholders' values (`msg!("id", name = value)`), in the active language.
+    pub fn fill<const N: usize>(&self, filled: solidcraft_ui_text::Filled<'_, N>) -> String {
+        solidcraft_ui_text::Locale::for_language(&self.preferences.language).fill(filled)
     }
 
     /// Translate a display label supplied by the engine, without changing its identifier.
@@ -1473,7 +1494,7 @@ impl SolveApp {
     pub fn gpu_unavailable(&mut self) {
         self.viewport.gpu_unavailable = true;
         self.viewport.gpu_preparing = false;
-        let text = self.tr("starting.view_unavailable").to_owned();
+        let text = tr!(self, "starting.view_unavailable").to_owned();
         self.set_status(text, true);
     }
 
@@ -1722,7 +1743,7 @@ impl SolveApp {
         // 0.43 removed the cube navigator (#17003), and a cube saved before reads as the signed
         // axes. Said once: the next save keeps the axes, so the note doesn't come back (#19749).
         if v.pointer("/preferences/navigator_style").and_then(Value::as_str) == Some("cube") {
-            let note = self.tr("ui.navigator.cube_removed").to_string();
+            let note = tr!(self, "ui.navigator.cube_removed").to_string();
             self.set_status(note, false);
         }
         // Before a design given at start opens: its paths follow the network preferences.
@@ -1805,7 +1826,7 @@ impl SolveApp {
             || solidcraft_engine::plugin::resolve_call(&self.session, id, &params).map_err(|e| e.to_string())?.is_some()
         {
             let key = if cfg!(target_arch = "wasm32") { "ui.plugins_desktop" } else { "ui.plugin_standalone" };
-            return Err(self.tr(key).into());
+            return Err(self.tr_by_id(key).into());
         }
         if solidcraft_engine::panels::commands::is_command(id) {
             return self.run_panel_command(id, &params).map_err(solidcraft_engine::panels::commands::error_text);
@@ -2111,7 +2132,7 @@ impl SolveApp {
                 "timeline.redefine" if v.get("rolled_back").and_then(Value::as_bool) == Some(true) => {
                     let feature = v.get("feature").and_then(Value::as_u64).and_then(|f| self.session.doc.feature(f));
                     let name = feature.map(|f| f.name.clone()).unwrap_or_default();
-                    self.set_status(solidcraft_ui_text::format("timeline.edited_rolled_back", &[("name", &name)]), false);
+                    self.set_status(tr!("timeline.edited_rolled_back", name = &name), false);
                 }
                 _ => {}
             }
@@ -2321,7 +2342,7 @@ impl SolveApp {
                 // Frames of a gesture (a continuous view move, a part dragged by its joints) are
                 // not echoed one by one.
                 if v.get("continuous").and_then(Value::as_bool) != Some(true) {
-                    self.session.echo(language.format("ui.command_done", &[("command", label)]));
+                    self.session.echo(tr!(language, "ui.command_done", command = label));
                 }
                 if id == "sketch.move" {
                     released_status(self, language, v);
@@ -2335,7 +2356,7 @@ impl SolveApp {
                     && let Some(path) = v.get("path").and_then(Value::as_str)
                 {
                     let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                    self.set_status(language.format("drawing.template_saved_as_scdwg", &[("name", &name)]), false);
+                    self.set_status(tr!(language, "drawing.template_saved_as_scdwg", name = &name), false);
                 }
                 if matches!(id, "joint.create" | "joint.as_built" | "joint.edit" | "assembly.constraint.create" | "assembly.constraint.edit") {
                     joint_conflict_status(self, language, v);
@@ -2392,10 +2413,10 @@ impl SolveApp {
                                     .and_then(Value::as_str)
                                     .or_else(|| signature.get("fingerprint").and_then(Value::as_str))
                                     .unwrap_or("");
-                                self.tr("ui.design_saved_signed").replace("{path}", &p).replace("{key}", key)
+                                tr!(self, "ui.design_saved_signed", path = &p, key = key)
                             }
-                            None if earlier => self.tr("ui.design_saved_earlier_signature").replace("{path}", &p),
-                            None => self.tr("ui.design_saved").replace("{path}", &p),
+                            None if earlier => tr!(self, "ui.design_saved_earlier_signature", path = &p),
+                            None => tr!(self, "ui.design_saved", path = &p),
                         };
                         self.set_status(saved, false);
                     }
@@ -2421,7 +2442,7 @@ impl SolveApp {
     /// none was started yet: the status line says so.
     pub fn repeat_last(&mut self) -> bool {
         let Some((id, _)) = self.last_command.clone() else {
-            self.set_status(self.tr("ui.repeat_nothing").to_string(), false);
+            self.set_status(tr!(self, "ui.repeat_nothing").to_string(), false);
             return false;
         };
         self.start(&id);
@@ -2515,7 +2536,7 @@ impl SolveApp {
         let mut seen = std::collections::BTreeSet::new();
         components.retain(|component| self.session.doc.links.contains_key(component) && seen.insert(*component));
         if components.is_empty() {
-            self.set_status(self.tr("ui.break_link_select_first"), false);
+            self.set_status(tr!(self, "ui.break_link_select_first"), false);
             return;
         }
         let mut broken: Vec<String> = Vec::new();
@@ -2527,7 +2548,7 @@ impl SolveApp {
             }
             broken.push(name);
         }
-        self.set_status(solidcraft_ui_text::format("ui.break_link_done", &[("name", &broken.join(", "))]), false);
+        self.set_status(tr!("ui.break_link_done", name = &broken.join(", ")), false);
     }
 
     /// Ground (or, when every one is already grounded, unground) the selected placements, the
@@ -2560,7 +2581,7 @@ impl SolveApp {
         let mut seen = std::collections::BTreeSet::new();
         targets.retain(|(occurrence, _)| seen.insert(*occurrence));
         if targets.is_empty() {
-            self.set_status(self.tr("ui.ground_select_first"), false);
+            self.set_status(tr!(self, "ui.ground_select_first"), false);
             return;
         }
         let grounded = !targets.iter().all(|(_, grounded)| *grounded);
@@ -2706,7 +2727,7 @@ impl SolveApp {
         // selected it says what to pick instead of running with no features.
         if id == "timeline.delete" {
             if delete::nothing_to_delete(self) && self.tree.picked_timeline_groups.is_empty() {
-                self.set_status(self.tr("ui.delete_select_first"), false);
+                self.set_status(tr!(self, "ui.delete_select_first"), false);
             } else if !timeline_left::delete_selected_folders(self) {
                 delete::delete_selection(self);
             }
@@ -2720,7 +2741,7 @@ impl SolveApp {
         if id == "timeline.dependents" {
             let selected = timeline::selected_feature_ids(self);
             if selected.is_empty() {
-                self.set_status(self.tr("ui.dependents_select_first"), false);
+                self.set_status(tr!(self, "ui.dependents_select_first"), false);
                 return;
             }
             for feature_id in selected {
@@ -2745,7 +2766,7 @@ impl SolveApp {
                 })
                 .collect();
             if dimensions.is_empty() {
-                self.set_status(self.tr("ui.toggle_dimension_select_first"), false);
+                self.set_status(tr!(self, "ui.toggle_dimension_select_first"), false);
                 return;
             }
             for constraint in dimensions {
@@ -2957,7 +2978,7 @@ impl SolveApp {
         }
         // Send to Slicer always asks which slicer (the dialog pre-selects the last one).
         if matches!(id, "file.send_to_slicer" | "file.open_in_easyprint") && !dialogs_save_mesh::available(self) {
-            self.set_status(self.tr("ui.send_to_slicer_unavailable").to_string(), true);
+            self.set_status(tr!(self, "ui.send_to_slicer_unavailable").to_string(), true);
             self.restore_command_tab();
             return;
         }
@@ -3012,7 +3033,7 @@ impl SolveApp {
         }
         // The picked section is placed (chord, pivot, position, angle, previewed) before OK adds it.
         if id == "sketch.insert_airfoil" {
-            self.pick_file(solidcraft_ui_text::tr("insert_airfoil.filter"), &["dat"], |app, path| {
+            self.pick_file(tr!("insert_airfoil.filter"), &["dat"], |app, path| {
                 if let Some(path) = path {
                     dialogs_insert_airfoil::open(app, path);
                 }
@@ -3268,7 +3289,7 @@ impl SolveApp {
                 self.session.mark_sketch_entered_by_person();
                 self.start("sketch.line3d");
                 if self.tool.as_ref().is_some_and(|tool| tool.cmd == "sketch.line3d") {
-                    let hint = self.tr("sketch.hint.create3d").to_owned();
+                    let hint = tr!(self, "sketch.hint.create3d").to_owned();
                     self.set_tool_hint(hint);
                 }
             } else {
@@ -3374,7 +3395,7 @@ impl SolveApp {
         if id == "component.move_features" {
             let features = timeline::selected_feature_ids(self);
             if features.is_empty() {
-                let hint = self.tr("ui.move_features_needs_features").to_owned();
+                let hint = tr!(self, "ui.move_features_needs_features").to_owned();
                 self.set_status(hint, true);
                 self.restore_command_tab();
             } else if self.run(id, json!({ "features": features })).is_err() {
@@ -3538,7 +3559,7 @@ impl SolveApp {
     /// they wait for it.
     pub(crate) fn close_editor_for_history(&mut self) -> Result<(), String> {
         if self.pending_feature_edit.is_some() {
-            let why = solidcraft_ui_text::tr("ui.history_waits_for_editor").to_string();
+            let why = tr!("ui.history_waits_for_editor").to_string();
             self.set_status(why.clone(), true);
             return Err(why);
         }
@@ -3579,7 +3600,7 @@ impl SolveApp {
                         FeatureKind::CapturePosition { .. } => language.text("cmd.component_capture_position"),
                         _ => f.kind.base_name(),
                     };
-                    self.set_status(language.format("ui.feature_nothing_to_edit", &[("kind", kind)]), false);
+                    self.set_status(tr!(language, "ui.feature_nothing_to_edit", kind = kind), false);
                 }
             }
         }
@@ -3922,19 +3943,19 @@ impl SolveApp {
             let change = changes.first().filter(|_| format <= reads);
             let format = format.to_string();
             match (drawing, change) {
-                (None, Some(change)) => solidcraft_ui_text::format("document.newer_file_change", &[("format", &format), ("change", change)]),
-                (None, None) => solidcraft_ui_text::format("document.newer_file", &[("format", &format), ("reads", &reads.to_string())]),
+                (None, Some(change)) => tr!("document.newer_file_change", format = &format, change = change),
+                (None, None) => tr!("document.newer_file", format = &format, reads = &reads.to_string()),
                 (Some(name), Some(change)) => {
-                    solidcraft_ui_text::format("document.newer_drawing_change", &[("drawing", name), ("format", &format), ("change", change)])
+                    tr!("document.newer_drawing_change", drawing = name, format = &format, change = change)
                 }
                 (Some(name), None) => {
-                    solidcraft_ui_text::format("document.newer_drawing", &[("drawing", name), ("format", &format), ("reads", &reads.to_string())])
+                    tr!("document.newer_drawing", drawing = name, format = &format, reads = &reads.to_string())
                 }
             }
         };
         let mut status = self.session.doc.newer_file.as_ref().map(|file| {
             for what in &file.not_understood {
-                let text = solidcraft_ui_text::format("document.newer_file_not_read", &[("what", what)]);
+                let text = tr!("document.newer_file_not_read", what = what);
                 self.messages.push(&text, false, now_ms());
             }
             notice(file.format, file.reads_up_to, &file.unknown_changes, None)
@@ -3942,7 +3963,7 @@ impl SolveApp {
         for drawing in &self.session.doc.drawings {
             let Some(file) = &drawing.newer_file else { continue };
             for what in &file.not_understood {
-                let text = solidcraft_ui_text::format("document.newer_drawing_not_read", &[("drawing", &drawing.name), ("what", what)]);
+                let text = tr!("document.newer_drawing_not_read", drawing = &drawing.name, what = what);
                 self.messages.push(&text, false, now_ms());
             }
             let text = notice(file.format, file.reads_up_to, &file.unknown_changes, Some(&drawing.name));
@@ -4012,18 +4033,14 @@ impl SolveApp {
                     .split(|c: char| c == ',' || c.is_ascii_whitespace())
                     .filter(|entry| !entry.is_empty())
                     .any(|entry| entry.eq_ignore_ascii_case(fingerprint));
-                if trusted {
-                    solidcraft_ui_text::format("ui.open_signature_valid", &[("key", &key)])
-                } else {
-                    solidcraft_ui_text::format("ui.open_signature_valid_untrusted", &[("key", fingerprint)])
-                }
+                if trusted { tr!("ui.open_signature_valid", key = &key) } else { tr!("ui.open_signature_valid_untrusted", key = fingerprint) }
             }
-            "not_covered" => solidcraft_ui_text::tr("ui.open_signature_not_covered").to_string(),
+            "not_covered" => tr!("ui.open_signature_not_covered").to_string(),
             "invalid" => {
                 let reason = signature.get("reason").and_then(serde_json::Value::as_str).unwrap_or("");
-                solidcraft_ui_text::format("ui.open_signature_invalid", &[("reason", reason)])
+                tr!("ui.open_signature_invalid", reason = reason)
             }
-            "unsupported" => solidcraft_ui_text::tr("ui.open_signature_unsupported").to_string(),
+            "unsupported" => tr!("ui.open_signature_unsupported").to_string(),
             _ => return,
         };
         self.set_status(text, status == "invalid");
@@ -5354,9 +5371,12 @@ fn unground_joint_status(app: &mut SolveApp, language: solidcraft_ui_text::Local
         let (Some(joint), Some(reason)) = (problem.get("name").and_then(Value::as_str), problem.get("why").and_then(Value::as_str)) else {
             continue;
         };
-        let msg = language.format(
+        let msg = tr!(
+            language,
             "joint.unground_issue",
-            &[("occurrence", &occurrence), ("joint", &language.given_name(joint)), ("reason", &language.diagnostic(reason))],
+            occurrence = &occurrence,
+            joint = &language.given_name(joint),
+            reason = &language.diagnostic(reason)
         );
         app.session.echo(msg.clone());
         app.set_status(msg, false);
@@ -5381,12 +5401,12 @@ fn joint_conflict_status(app: &mut SolveApp, language: solidcraft_ui_text::Local
     let name = language.given_name(&joint.name);
     let (a, b) = (joint.a.occurrence, joint.b.occurrence);
     let msg = match (grounded(a), grounded(b)) {
-        (Some(ga), Some(gb)) if a != b => language.format("joint.moves_neither", &[("joint", &name), ("a", &ga), ("b", &gb)]),
+        (Some(ga), Some(gb)) if a != b => tr!(language, "joint.moves_neither", joint = &name, a = &ga, b = &gb),
         // The root's own bodies never move: a grounded part joined to them is held the same way.
-        (Some(g), None) | (None, Some(g)) if a == 0 || b == 0 => language.format("joint.moves_neither_root", &[("joint", &name), ("occurrence", &g)]),
+        (Some(g), None) | (None, Some(g)) if a == 0 || b == 0 => tr!(language, "joint.moves_neither_root", joint = &name, occurrence = &g),
         _ => {
             let reason = conflict.get("why").and_then(Value::as_str).unwrap_or_default();
-            language.format("joint.does_not_hold", &[("joint", &name), ("reason", &language.diagnostic(reason))])
+            tr!(language, "joint.does_not_hold", joint = &name, reason = &language.diagnostic(reason))
         }
     };
     app.set_status(msg, true);

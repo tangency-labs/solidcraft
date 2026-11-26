@@ -10,6 +10,7 @@ use solidcraft_engine::geom::drawing_view::ProjectedSide;
 use solidcraft_engine::geom::paper::Scene;
 use solidcraft_engine::render::VisualStyle;
 use solidcraft_theme::Tokens;
+use solidcraft_ui_text::tr_by_id;
 
 use crate::{SolveApp, drawing_sheet_page::Marks, ui_kit};
 
@@ -129,21 +130,20 @@ impl Placement {
     }
 
     pub(super) fn fields(&mut self, ui: &mut egui::Ui, doc: &Document) {
-        let tr = solidcraft_ui_text::tr;
-        ui_kit::section_heading(ui, tr("ui.drawing_panel.orientation"));
+        ui_kit::section_heading(ui, tr!("ui.drawing_panel.orientation"));
         ui_kit::text(
             ui,
-            tr(if self.parent.is_some() { "ui.drawing_placement.projected" } else { "ui.drawing_placement.base" }),
+            tr_by_id(if self.parent.is_some() { "ui.drawing_placement.projected" } else { "ui.drawing_placement.base" }),
             ui_kit::Text::Note("drawing_placement"),
         );
         if self.parent.is_none() {
-            ui_kit::text(ui, tr("ui.drawing_panel.face_pick"), ui_kit::Text::Note("base_view_face_pick"));
+            ui_kit::text(ui, tr!("ui.drawing_panel.face_pick"), ui_kit::Text::Note("base_view_face_pick"));
         }
         ui.add_enabled_ui(self.parent.is_none(), |ui| {
             ui.horizontal_wrapped(|ui| {
                 for (index, (orientation, label)) in ORIENTATIONS.iter().enumerate() {
                     let style = if index == self.orientation { ui_kit::Button::SmallSelected } else { ui_kit::Button::Small };
-                    let response = ui_kit::button(ui, tr(label), style);
+                    let response = ui_kit::button(ui, tr_by_id(label), style);
                     crate::scenario::publish_target(&format!("drawing:placement:orientation:{orientation}"), response.rect);
                     if response.clicked() {
                         self.orientation = index;
@@ -151,9 +151,9 @@ impl Placement {
                 }
             });
             ui.add_enabled_ui(false, |ui| {
-                ui_kit::choice_row(ui, tr("ui.drawing_panel.saved_view"), "base_view_saved", &mut 0, &[tr("ui.drawing_panel.none")]);
+                ui_kit::choice_row(ui, tr!("ui.drawing_panel.saved_view"), "base_view_saved", &mut 0, &[tr!("ui.drawing_panel.none")]);
             });
-            ui_kit::section_heading(ui, tr("ui.drawing_panel.view"));
+            ui_kit::section_heading(ui, tr!("ui.drawing_panel.view"));
             let choices = sources(doc);
             let mut chosen = choices.iter().position(|(_, path)| *path == self.source).unwrap_or(0);
             let labels: Vec<String> = choices
@@ -166,14 +166,14 @@ impl Placement {
                 })
                 .collect();
             let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
-            ui_kit::choice_row(ui, tr("ui.drawing_panel.model"), "base_view_model", &mut chosen, &labels);
+            ui_kit::choice_row(ui, tr!("ui.drawing_panel.model"), "base_view_model", &mut chosen, &labels);
             self.source = choices.get(chosen).and_then(|(_, path)| path.clone());
-            ui_kit::choice_row(ui, tr("ui.scale"), "base_view_scale", &mut self.scale, &SCALES);
-            let styles = ["ui.drawing_panel.visible", "ui.drawing_panel.hidden"].map(tr);
-            ui_kit::choice_row(ui, tr("ui.drawing_panel.visual_style"), "base_view_style", &mut self.style, &styles);
+            ui_kit::choice_row(ui, tr!("ui.scale"), "base_view_scale", &mut self.scale, &SCALES);
+            let styles = ["ui.drawing_panel.visible", "ui.drawing_panel.hidden"].map(tr_by_id);
+            ui_kit::choice_row(ui, tr!("ui.drawing_panel.visual_style"), "base_view_style", &mut self.style, &styles);
         });
         if self.parent.is_none() {
-            super::panels::pending(ui, tr("ui.drawing_panel.standard_views"));
+            super::panels::pending(ui, tr!("ui.drawing_panel.standard_views"));
         }
     }
 

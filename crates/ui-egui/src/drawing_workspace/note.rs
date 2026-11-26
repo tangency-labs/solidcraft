@@ -47,10 +47,6 @@ pub(super) struct Draft {
 /// How finely a preview's letters are flattened, on paper.
 const PREVIEW_TOLERANCE_MM: f64 = 0.01;
 
-fn tr(key: &'static str) -> &'static str {
-    solidcraft_ui_text::tr(key)
-}
-
 fn ready(text: &str) -> bool {
     !text.trim().is_empty() && text.len() <= MAX_TEXT_BYTES
 }
@@ -75,17 +71,17 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Option<u64
         let mut valid = false;
         if let Some(draft) = app.drawing_workspace.note.as_mut() {
             if draft.fields {
-                ui_kit::text(ui, tr("ui.drawing_note.fields"), ui_kit::Text::Note("drawing_note_fields"));
+                ui_kit::text(ui, tr!("ui.drawing_note.fields"), ui_kit::Text::Note("drawing_note_fields"));
                 valid = true;
             } else {
-                let field = ui_kit::multiline_text_field(ui, tr("ui.drawing_panel.text"), ui.scope_id().with("note_text"), &mut draft.text);
+                let field = ui_kit::multiline_text_field(ui, tr!("ui.drawing_panel.text"), ui.scope_id().with("note_text"), &mut draft.text);
                 crate::scenario::publish_rect("drawing:note:text", field.rect);
                 valid = ready(&draft.text);
             }
-            let mut labels = ALIGNS.map(|(_, _, key, _)| tr(key)).to_vec();
+            let mut labels = ALIGNS.map(|(_, _, key, _)| solidcraft_ui_text::tr_by_id(key)).to_vec();
             let mut targets = ALIGNS.map(|(.., target)| target).to_vec();
             if draft.legacy {
-                labels.push(tr("ui.drawing_note.align_saved"));
+                labels.push(tr!("ui.drawing_note.align_saved"));
                 targets.push("drawing:note:align:saved");
             }
             // The entry for the layout a note was saved with is selected until another is chosen; choosing
@@ -93,20 +89,20 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Option<u64
             let saved = ALIGNS.len();
             let shown = draft.align.and_then(|shown| ALIGNS.iter().position(|(align, ..)| *align == shown)).unwrap_or(saved);
             let mut index = shown;
-            ui_kit::row(ui, tr("ui.drawing_note.align"), |ui| {
+            ui_kit::row(ui, tr!("ui.drawing_note.align"), |ui| {
                 ui_kit::segmented(ui, &mut index, &labels, ui_kit::Segments { targets: &targets, ..Default::default() })
             });
             if index != shown {
                 draft.align = ALIGNS.get(index).map(|(align, ..)| *align);
             }
             if selected.is_none() {
-                ui_kit::text(ui, tr("ui.drawing_note.place"), ui_kit::Text::Note("drawing_note_place"));
+                ui_kit::text(ui, tr!("ui.drawing_note.place"), ui_kit::Text::Note("drawing_note_place"));
             }
         }
         ui.separator();
         ui.horizontal(|ui| {
-            let cancel = ui_kit::button(ui, tr("ui.cancel"), Button::Normal).clicked();
-            let save = selected.is_some() && ui.add_enabled_ui(valid, |ui| ui_kit::button(ui, tr("ui.heading_ok"), Button::Normal)).inner.clicked();
+            let cancel = ui_kit::button(ui, tr!("ui.cancel"), Button::Normal).clicked();
+            let save = selected.is_some() && ui.add_enabled_ui(valid, |ui| ui_kit::button(ui, tr!("ui.heading_ok"), Button::Normal)).inner.clicked();
             (cancel, save)
         })
         .inner

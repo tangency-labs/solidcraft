@@ -48,7 +48,7 @@ pub(crate) fn message(app: &SolveApp, error: &str) -> String {
         "invalid_layout_name" => "view_layout.error_name",
         _ => return error.to_owned(),
     };
-    app.tr(key).to_owned()
+    app.tr_by_id(key).to_owned()
 }
 
 pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
@@ -61,17 +61,17 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
         ui.set_width(340.0);
         match &state.editor {
             Editor::Manage => {
-                ui.heading(app.tr("view_layout.manage_title"));
+                ui.heading(tr!(app, "view_layout.manage_title"));
                 egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
                     for name in &names {
                         ui.push_id(name, |ui| {
                             ui.horizontal(|ui| {
                                 ui.add(egui::Label::new(name).truncate());
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if ui_kit::button(ui, app.tr("ui.delete"), ui_kit::Button::Small).clicked() {
+                                    if ui_kit::button(ui, tr!(app, "ui.delete"), ui_kit::Button::Small).clicked() {
                                         command = Some(("tab.layout.remove", json!({"name": name})));
                                     }
-                                    if ui_kit::button(ui, app.tr("view_layout.rename"), ui_kit::Button::Small).clicked() {
+                                    if ui_kit::button(ui, tr!(app, "view_layout.rename"), ui_kit::Button::Small).clicked() {
                                         state.editor = Editor::Rename(name.clone());
                                         state.text.clone_from(name);
                                         state.first = true;
@@ -82,24 +82,24 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         });
                     }
                 });
-                dismiss = ui_kit::button(ui, app.tr("ui.close"), ui_kit::Button::Primary).clicked();
+                dismiss = ui_kit::button(ui, tr!(app, "ui.close"), ui_kit::Button::Primary).clicked();
             }
             Editor::Save | Editor::Rename(_) => {
                 let save = matches!(&state.editor, Editor::Save);
-                ui.heading(app.tr(if save { "view_layout.save_title" } else { "view_layout.rename_title" }));
-                let (entered, field) = ui_kit::text_field_reserving(ui, &mut state.text, app.tr("view_layout.name"), 0.0);
+                ui.heading(if save { tr!(app, "view_layout.save_title") } else { tr!(app, "view_layout.rename_title") });
+                let (entered, field) = ui_kit::text_field_reserving(ui, &mut state.text, tr!(app, "view_layout.name"), 0.0);
                 if let Some((cut, _)) = state.text.char_indices().nth(64) {
                     state.text.truncate(cut);
                 }
-                field.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, app.tr("view_layout.name")));
+                field.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, tr!(app, "view_layout.name")));
                 if state.first {
                     field.request_focus();
                     state.first = false;
                 }
                 ui.horizontal(|ui| {
-                    dismiss = ui_kit::button(ui, app.tr("ui.cancel"), ui_kit::Button::Small).clicked();
+                    dismiss = ui_kit::button(ui, tr!(app, "ui.cancel"), ui_kit::Button::Small).clicked();
                     let submit = ui.add_enabled_ui(!state.text.trim().is_empty(), |ui| {
-                        ui_kit::button(ui, app.tr(if save { "ui.save" } else { "view_layout.rename" }), ui_kit::Button::Primary)
+                        ui_kit::button(ui, if save { tr!(app, "ui.save") } else { tr!(app, "view_layout.rename") }, ui_kit::Button::Primary)
                     });
                     if !state.text.trim().is_empty() && (submit.inner.clicked() || entered) {
                         command = Some(match &state.editor {

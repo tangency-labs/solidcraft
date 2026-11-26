@@ -1069,7 +1069,7 @@ fn kept_axis_line(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
 pub fn kept_axis_note(ui: &mut egui::Ui, inputs: &[SelInput], extra: &serde_json::Map<String, Value>) {
     if kept_axis(inputs, extra).is_some() {
         let key = if extra.contains_key("about") { "dialog.move_kept_edge" } else { "dialog.move_kept_axis" };
-        let text = solidcraft_ui_text::tr(key);
+        let text = solidcraft_ui_text::tr_by_id(key);
         ui.add(egui::Label::new(egui::RichText::new(text).color(solidcraft_theme::Tokens::get().text_dim)).wrap());
     }
 }

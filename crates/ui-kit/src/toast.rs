@@ -203,7 +203,7 @@ fn close_button(ui: &egui::Ui, rect: Rect, id: egui::Id, left: Option<f32>) -> e
     }
     let ink = if lit && ui.is_enabled() { t.text } else { t.text_dim };
     crate::icons::paint_ink(painter, Rect::from_center_size(centre, vec2(t.space_10, t.space_10)), "close", ink);
-    let label = solidcraft_ui_text::tr("ui.close");
+    let label = solidcraft_ui_text::tr_by_id("ui.close");
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
     if response.hovered() && ui.is_enabled() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);

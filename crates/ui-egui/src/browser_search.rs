@@ -260,11 +260,11 @@ fn kinds_present(app: &SolveApp) -> Vec<Kind> {
 
 fn kind_label(kind: Kind) -> &'static str {
     match kind {
-        Kind::Component => solidcraft_ui_text::tr("ui.browser_search_components"),
-        Kind::Body => solidcraft_ui_text::tr("ui.bodies"),
-        Kind::Sketch => solidcraft_ui_text::tr("ui.sketches"),
-        Kind::Construction => solidcraft_ui_text::tr("ui.browser_search_construction"),
-        Kind::Joint => solidcraft_ui_text::tr("ui.joints"),
+        Kind::Component => tr!("ui.browser_search_components"),
+        Kind::Body => tr!("ui.bodies"),
+        Kind::Sketch => tr!("ui.sketches"),
+        Kind::Construction => tr!("ui.browser_search_construction"),
+        Kind::Joint => tr!("ui.joints"),
     }
 }
 
@@ -325,11 +325,11 @@ pub(crate) fn field_row(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect)
     );
     // One id wherever it is drawn: a field that moves into the header keeps the keyboard.
     let id = egui::Id::unique("browser_search_field");
-    let end = solidcraft_ui_text::tr("ui.browser_search_end");
+    let end = tr!("ui.browser_search_end");
     let search = crate::ui_kit::SearchBox::frame(ui, frame, id, t.radius_sm, Some(end), "browser");
     let button = t.space_24;
     let trailing = 2.0 * button + t.space_2;
-    let hint = solidcraft_ui_text::tr("ui.browser_search_hint");
+    let hint = tr!("ui.browser_search_hint");
     let field = search.editor(ui, &mut app.tree.search.text, hint, MAX_PATTERN_CHARS, trailing);
     crate::scenario::publish_handle("browser:search", field.rect.center());
     crate::scenario::publish_rect("browser:search", field.rect);
@@ -338,7 +338,7 @@ pub(crate) fn field_row(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect)
     }
     // Esc in the field ends the search and closes it (egui gives up the focus on Esc).
     let escaped = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape));
-    field.backing_on_hover_text(solidcraft_ui_text::tr("ui.browser_search_tip"));
+    field.backing_on_hover_text(tr!("ui.browser_search_tip"));
     let magnifier = search.magnifier.as_ref().is_some_and(egui::Response::clicked);
     if let Some(m) = &search.magnifier {
         crate::scenario::publish_handle("browser:magnifier", m.rect.center());
@@ -346,7 +346,7 @@ pub(crate) fn field_row(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect)
     let at =
         |n: f32| egui::Rect::from_center_size(egui::pos2(frame.right() - t.space_2 - button * (n - 0.5), frame.center().y), vec2(button, button));
     kind_filter(app, ui, at(2.0));
-    let clear = crate::ui_kit::icon_button_at(ui, at(1.0), "close", solidcraft_ui_text::tr("ui.browser_search_clear"));
+    let clear = crate::ui_kit::icon_button_at(ui, at(1.0), "close", tr!("ui.browser_search_clear"));
     crate::scenario::publish_handle("browser:search:clear", clear.rect.center());
     if clear.clicked() || escaped || magnifier {
         app.tree.search.clear();
@@ -357,9 +357,9 @@ pub(crate) fn field_row(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect)
 /// ticked or not, and All kinds to clear them; a badge on the button counts the kinds ticked.
 fn kind_filter(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect) {
     let ticked = app.tree.search.kinds.len();
-    let filter = crate::ui_kit::filter_button_at(ui, rect, "find_kinds", solidcraft_ui_text::tr("ui.browser_search_kinds"), ticked, |ui| {
+    let filter = crate::ui_kit::filter_button_at(ui, rect, "find_kinds", tr!("ui.browser_search_kinds"), ticked, |ui| {
         // Only while the list is open: the field is there on every frame.
-        let all = crate::ui_kit::text_button(ui, solidcraft_ui_text::tr("ui.browser_search_all_kinds"), ticked > 0);
+        let all = crate::ui_kit::text_button(ui, tr!("ui.browser_search_all_kinds"), ticked > 0);
         crate::scenario::publish_handle("browser:search:kind:all", all.rect.center());
         if all.clicked() {
             app.tree.search.kinds.clear();
@@ -422,7 +422,7 @@ pub(crate) fn results(app: &mut SolveApp, ui: &mut egui::Ui) {
                 &solidcraft_ui_text::format(key, &[("count", &hid.to_string())]),
                 crate::ui_kit::Text::Note("browser_search_hid"),
             );
-            let r = crate::ui_kit::text_button(ui, solidcraft_ui_text::tr("ui.undo"), true);
+            let r = crate::ui_kit::text_button(ui, tr!("ui.undo"), true);
             crate::scenario::publish_handle("browser:search:undo", r.rect.center());
             if r.clicked() {
                 let _ = app.run("edit.undo", json!({}));
@@ -432,17 +432,17 @@ pub(crate) fn results(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         crate::ui_kit::text(ui, &count, crate::ui_kit::Text::Note("browser_search_count"));
         // What it selects: the listed matches.
-        let label = solidcraft_ui_text::format("ui.browser_select_all", &[("count", &listed.to_string())]);
+        let label = tr!("ui.browser_select_all", count = &listed.to_string());
         let r = crate::ui_kit::text_button(ui, &label, true);
         crate::scenario::publish_handle("browser:search:select-all", r.rect.center());
         crate::scenario::publish_rect("browser:search:select-all", r.rect);
-        if r.backing_on_hover_text(solidcraft_ui_text::tr("ui.browser_select_all_tip")).clicked() {
+        if r.backing_on_hover_text(tr!("ui.browser_select_all_tip")).clicked() {
             select_found(app);
         }
-        let r = crate::ui_kit::text_button(ui, solidcraft_ui_text::tr("ui.browser_hide_others"), hide);
+        let r = crate::ui_kit::text_button(ui, tr!("ui.browser_hide_others"), hide);
         crate::scenario::publish_handle("browser:search:hide-others", r.rect.center());
         crate::scenario::publish_rect("browser:search:hide-others", r.rect);
-        if r.backing_on_hover_text(solidcraft_ui_text::tr("ui.browser_hide_others_tip")).clicked() {
+        if r.backing_on_hover_text(tr!("ui.browser_hide_others_tip")).clicked() {
             hide_others(app);
         }
     });
@@ -457,13 +457,13 @@ fn nothing_found(app: &mut SolveApp, ui: &mut egui::Ui) {
         let text = app.tree.search.text.trim();
         // With kinds ticked, another kind may still have the name: say only that none matched.
         let said = if text.is_empty() || !app.tree.search.kinds.is_empty() {
-            solidcraft_ui_text::tr("ui.browser_search_none").to_string()
+            tr!("ui.browser_search_none").to_string()
         } else {
-            solidcraft_ui_text::format("ui.browser_search_nothing_named", &[("text", text)])
+            tr!("ui.browser_search_nothing_named", text = text)
         };
         crate::ui_kit::text(ui, &said, crate::ui_kit::Text::Note("browser_search_none"));
-        crate::ui_kit::text(ui, solidcraft_ui_text::tr("ui.browser_search_wildcards"), crate::ui_kit::Text::Note("browser_search_wildcards"));
-        let r = crate::ui_kit::button(ui, solidcraft_ui_text::tr("ui.browser_search_end"), crate::ui_kit::Button::Small);
+        crate::ui_kit::text(ui, tr!("ui.browser_search_wildcards"), crate::ui_kit::Text::Note("browser_search_wildcards"));
+        let r = crate::ui_kit::button(ui, tr!("ui.browser_search_end"), crate::ui_kit::Button::Small);
         crate::scenario::publish_handle("browser:search:end", r.rect.center());
         if r.clicked() {
             app.tree.search.clear();

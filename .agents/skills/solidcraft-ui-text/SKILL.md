@@ -9,7 +9,7 @@ SolidCraft embeds its translations and works offline. The long form is `docs/loc
 
 ## Adding a message
 1. Add the id and English text in a new pending file (next section); `assets/locales/en.json` itself is only edited to change an existing message. Ids are stable: keep them when you change wording.
-2. Use `app.tr("ui.some_id")` for static messages and `Locale::format` for whole sentences with named placeholders. Translate the whole sentence, punctuation included, so a translator can reorder arguments. Use stable ids directly for new messages, not the English-label adapter (`app.tr_label`), which exists for older tables.
+2. Read it with `tr!("ui.some_id")` (`tr!(app, ..)`: the app's language), placeholders by name: `tr!("ui.saved", path = &path)`; the compiler checks both. A run-time id uses `tr_by_id`. Translate whole sentences, punctuation included, so a translator can reorder arguments. Avoid the English-label adapter (`app.tr_label`), for old tables.
 3. Command labels live under `cmd.<command id>`; `cargo xtask i18n --add-missing` writes the ones that are missing into `en.json`.
 4. Add the UK spelling to `assets/locales/en-GB.json` when the US spelling differs (Centre, Colour, Licence, ...). That file holds only the differing messages.
 5. New labels need `en`, `ar`, `he`, `ja`, `vi`, `zh`, `de` and `ko`. The complete catalogs (`ar`, `he`, `ja`, `vi`, `zh`) require every English key; others fall back to English. `cargo xtask i18n` reports gaps; tests reject gaps in complete catalogs.

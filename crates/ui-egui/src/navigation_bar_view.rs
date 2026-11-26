@@ -186,13 +186,13 @@ fn set_projection(app: &mut SolveApp, perspective: bool) {
 fn isolate_show_rows(app: &SolveApp) -> Vec<(String, String, bool)> {
     let mut rows: Vec<(String, String, bool)> = crate::viewport::ISOLATE_SHOWS
         .iter()
-        .map(|(show, id, label)| ((*id).to_owned(), app.tr(label).to_owned(), app.preferences.isolate_others == *show))
+        .map(|(show, id, label)| ((*id).to_owned(), app.tr_by_id(label).to_owned(), app.preferences.isolate_others == *show))
         .collect();
     // Whether clicks select the parts drawn, only while they are drawn.
     if app.preferences.isolate_others != solidcraft_engine::schema::view_navigation::IsolateShow::Hidden {
         let pick = app.preferences.isolate_others_pick;
-        rows.push(("pick:select".into(), app.tr("ui.isolate_pick_select_row").to_owned(), pick));
-        rows.push(("pick:through".into(), app.tr("ui.isolate_pick_through_row").to_owned(), !pick));
+        rows.push(("pick:select".into(), tr!(app, "ui.isolate_pick_select_row").to_owned(), pick));
+        rows.push(("pick:through".into(), tr!(app, "ui.isolate_pick_through_row").to_owned(), !pick));
     }
     rows
 }
@@ -224,17 +224,17 @@ fn activate(app: &mut SolveApp, slot: &Slot) {
 /// The slot's hover text: a hidden slot's reason, the setting a menu holds, the sketch's lock, or its name.
 fn tip(app: &SolveApp, slot: &Slot, hidden: Option<&str>, key: bool) -> String {
     if let Some(hidden) = hidden {
-        app.tr(hidden).to_owned()
+        app.tr_by_id(hidden).to_owned()
     } else if let Some(value) = current_value(app, slot) {
-        solidcraft_ui_text::format("navbar.value_tip", &[("name", app.tr(slot.label)), ("value", value)])
+        tr!("navbar.value_tip", name = app.tr_by_id(slot.label), value = value)
     } else if slot.id == ISOLATE && isolating(app) {
-        app.tr("navbar.unisolate").to_owned()
+        tr!(app, "navbar.unisolate").to_owned()
     } else if slot.id == "projection" && projection_locked(app) {
-        app.tr("nav.perspective.sketch").to_owned()
+        tr!(app, "nav.perspective.sketch").to_owned()
     } else if slot.id == "zoom" && key {
-        app.tr("navbar.zoom_hold_tip").to_owned()
+        tr!(app, "navbar.zoom_hold_tip").to_owned()
     } else {
-        app.tr(slot.label).to_owned()
+        app.tr_by_id(slot.label).to_owned()
     }
 }
 
@@ -253,7 +253,7 @@ fn slot_view(app: &SolveApp, bar: &BarLayout, slot: &'static Slot, index: usize,
         // While isolating, the icon of what a click does: all four circles filled.
         icon: if slot.id == ISOLATE && isolating(app) { "unisolate" } else { slot.current_icon(crate::navigation_slots::value(&app.ui, slot)) },
         text: slot_text(app, slot).to_owned(),
-        name: app.tr(slot.label).to_owned(),
+        name: app.tr_by_id(slot.label).to_owned(),
         tip: tip(app, slot, hidden, key.is_some()),
         key,
         selected: editing.is_none() && selected(app, slot.id),
@@ -329,11 +329,11 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             .collect(),
         more: measured.more,
         labels: BarLabels {
-            more: app.tr("navbar.more").to_owned(),
-            customise: app.tr("navbar.custom.customise").to_owned(),
-            hide: app.tr("navbar.custom.hide").to_owned(),
-            reset: app.tr("navbar.custom.reset").to_owned(),
-            remove: app.tr("navbar.custom.remove_bar").to_owned(),
+            more: tr!(app, "navbar.more").to_owned(),
+            customise: tr!(app, "navbar.custom.customise").to_owned(),
+            hide: tr!(app, "navbar.custom.hide").to_owned(),
+            reset: tr!(app, "navbar.custom.reset").to_owned(),
+            remove: tr!(app, "navbar.custom.remove_bar").to_owned(),
         },
     };
     let zoom = crate::drawing_sheet_page::zoom_percent(app, ui.ctx());
@@ -408,7 +408,7 @@ fn run(app: &mut SolveApp, ctx: &egui::Context, action: NavAction) {
 }
 
 pub(crate) fn current_style(app: &SolveApp) -> &str {
-    app.tr(match app.ui.visual_style {
+    app.tr_by_id(match app.ui.visual_style {
         1 => "navbar.style.shaded",
         2 => "navbar.style.wireframe",
         3 => "navbar.style.shaded_with_hidden_edges",
@@ -420,7 +420,7 @@ pub(crate) fn current_style(app: &SolveApp) -> &str {
 fn current_value<'a>(app: &'a SolveApp, slot: &Slot) -> Option<&'a str> {
     match slot.id {
         "visual_style" => Some(current_style(app)),
-        "selection_mode" => Some(app.tr(crate::selection_mode::label_id(app.ui.pick_mode))),
+        "selection_mode" => Some(app.tr_by_id(crate::selection_mode::label_id(app.ui.pick_mode))),
         _ => None,
     }
 }
@@ -428,7 +428,7 @@ fn current_value<'a>(app: &'a SolveApp, slot: &Slot) -> Option<&'a str> {
 pub(crate) fn slot_text<'a>(app: &'a SolveApp, slot: &Slot) -> &'a str {
     match current_value(app, slot) {
         Some(value) if app.preferences.navigation_bar.menu_display(slot.id) == MenuDisplay::IconAndValue => value,
-        _ => app.tr(slot.label),
+        _ => app.tr_by_id(slot.label),
     }
 }
 
@@ -455,9 +455,9 @@ fn menu(app: &SolveApp, id: &str, zoom: f32) -> Menu {
     match id {
         SHEET_ZOOM => Menu {
             entries: vec![
-                MenuEntry::Percent { value: (zoom * 10.0).round() as u32, label: app.tr("ui.sheet_page.zoom").into(), target: "sheet:zoom".into() },
-                MenuEntry::Row(MenuRow::new("actual", app.tr("ui.sheet_page.actual_size"), "zoom", "sheet:actual_size")),
-                MenuEntry::Row(MenuRow::new("fit", app.tr("ui.sheet_page.fit"), "fit", "sheet:fit")),
+                MenuEntry::Percent { value: (zoom * 10.0).round() as u32, label: tr!(app, "ui.sheet_page.zoom").into(), target: "sheet:zoom".into() },
+                MenuEntry::Row(MenuRow::new("actual", tr!(app, "ui.sheet_page.actual_size"), "zoom", "sheet:actual_size")),
+                MenuEntry::Row(MenuRow::new("fit", tr!(app, "ui.sheet_page.fit"), "fit", "sheet:fit")),
             ],
             close_on_pick: true,
         },
@@ -472,13 +472,13 @@ fn menu(app: &SolveApp, id: &str, zoom: f32) -> Menu {
 /// runs `select.mode` and closes the menu.
 fn selection_menu(app: &SolveApp) -> Menu {
     use solidcraft_engine::PickMode;
-    let mut entries = vec![MenuEntry::Heading(app.tr("navbar.selection.heading").to_owned())];
+    let mut entries = vec![MenuEntry::Heading(tr!(app, "navbar.selection.heading").to_owned())];
     for (mode, icon) in crate::navigation_slots::selection_mode_icons() {
         if mode == PickMode::Sketch {
             entries.push(MenuEntry::Separator);
         }
         let id = crate::selection_mode::id(mode);
-        let mut row = MenuRow::new(&id, app.tr(crate::selection_mode::label_id(mode)), icon, format!("nav:selection:{id}"));
+        let mut row = MenuRow::new(&id, app.tr_by_id(crate::selection_mode::label_id(mode)), icon, format!("nav:selection:{id}"));
         row.selected = app.ui.pick_mode == mode;
         entries.push(MenuEntry::Row(row));
     }
@@ -496,24 +496,24 @@ fn pick_filters_row(app: &SolveApp) -> MenuRow {
         row.indent = indent;
         MenuEntry::Row(row)
     };
-    let mut entries = vec![MenuEntry::Heading(app.tr("navbar.filters_solid").to_owned())];
+    let mut entries = vec![MenuEntry::Heading(tr!(app, "navbar.filters_solid").to_owned())];
     entries.extend(crate::selection_mode::SOLID_FILTERS.iter().map(|(id, label)| filter(id, solidcraft_ui_text::tr_label(label), false)));
-    entries.extend([MenuEntry::Separator, MenuEntry::Heading(app.tr("navbar.filters_sketch").to_owned())]);
-    entries.extend(crate::selection_mode::SKETCH_FILTERS.iter().map(|(id, key, indent)| filter(id, app.tr(key), *indent)));
+    entries.extend([MenuEntry::Separator, MenuEntry::Heading(tr!(app, "navbar.filters_sketch").to_owned())]);
+    entries.extend(crate::selection_mode::SKETCH_FILTERS.iter().map(|(id, key, indent)| filter(id, app.tr_by_id(key), *indent)));
     entries.extend([
         MenuEntry::Separator,
-        MenuEntry::Heading(app.tr("navbar.filters_shape").to_owned()),
+        MenuEntry::Heading(tr!(app, "navbar.filters_shape").to_owned()),
         MenuEntry::Segments {
             id: "shape".into(),
-            options: vec![app.tr("navbar.shape_rectangle").to_owned(), app.tr("navbar.shape_lasso").to_owned()],
+            options: vec![tr!(app, "navbar.shape_rectangle").to_owned(), tr!(app, "navbar.shape_lasso").to_owned()],
             selected: usize::from(app.ui.lasso_select),
             targets: vec!["nav:shape:rectangle".into(), "nav:shape:lasso".into()],
         },
         MenuEntry::Separator,
-        MenuEntry::Row(MenuRow::new("filters_reset", app.tr("navbar.filters_reset"), "reset", "nav:filter:reset")),
+        MenuEntry::Row(MenuRow::new("filters_reset", tr!(app, "navbar.filters_reset"), "reset", "nav:filter:reset")),
     ]);
-    let mut row = MenuRow::new("pick_filters", app.tr("navbar.pick_filters"), "filter", "nav:selection:pick_filters");
-    row.detail = (off > 0).then(|| solidcraft_ui_text::format("navbar.filters_off", &[("count", &off.to_string())]));
+    let mut row = MenuRow::new("pick_filters", tr!(app, "navbar.pick_filters"), "filter", "nav:selection:pick_filters");
+    row.detail = (off > 0).then(|| tr!("navbar.filters_off", count = &off.to_string()));
     row.submenu = entries;
     row.keep_open = true;
     row
@@ -527,7 +527,7 @@ fn style_menu(app: &SolveApp) -> Menu {
         .map(|(index, (style, _))| {
             let mut row = MenuRow::new(
                 *style,
-                app.tr(&format!("navbar.style.{style}")),
+                app.tr_by_id(&format!("navbar.style.{style}")),
                 crate::navigation_slots::visual_style_icon(index as u8),
                 format!("nav:style:{style}"),
             );
@@ -536,9 +536,9 @@ fn style_menu(app: &SolveApp) -> Menu {
         })
         .collect();
     entries.push(MenuEntry::Separator);
-    let mut later = MenuRow::new("translucent", app.tr("navbar.translucent"), "style_translucent", "");
+    let mut later = MenuRow::new("translucent", tr!(app, "navbar.translucent"), "style_translucent", "");
     later.enabled = false;
-    later.detail = Some(app.tr("navbar.later").to_owned());
+    later.detail = Some(tr!(app, "navbar.later").to_owned());
     entries.push(MenuEntry::Row(later));
     Menu { entries, close_on_pick: true }
 }
@@ -550,20 +550,20 @@ fn display_menu(app: &SolveApp) -> Menu {
         row.selected = selected;
         row
     };
-    let mut entries = vec![MenuEntry::Heading(app.tr("navbar.graphics").to_owned())];
+    let mut entries = vec![MenuEntry::Heading(tr!(app, "navbar.graphics").to_owned())];
     let current = crate::prefs::graphics_preset(&app.preferences);
-    let mut preset = MenuRow::new("preset", app.tr("navbar.preset"), "", "view:graphics_preset");
-    preset.detail = Some(app.tr(&format!("ui.graphics_{current}")).to_owned());
+    let mut preset = MenuRow::new("preset", tr!(app, "navbar.preset"), "", "view:graphics_preset");
+    preset.detail = Some(app.tr_by_id(&format!("ui.graphics_{current}")).to_owned());
     preset.submenu = [("performance", "ui.graphics_performance"), ("quality", "ui.graphics_quality")]
         .into_iter()
-        .map(|(id, label)| MenuEntry::Row(row(id, app.tr(label), "", &format!("view:graphics_preset:{id}"), current == id)))
+        .map(|(id, label)| MenuEntry::Row(row(id, app.tr_by_id(label), "", &format!("view:graphics_preset:{id}"), current == id)))
         .collect();
-    entries.extend([MenuEntry::Row(preset), MenuEntry::Separator, MenuEntry::Heading(app.tr("navbar.show").to_owned())]);
+    entries.extend([MenuEntry::Row(preset), MenuEntry::Separator, MenuEntry::Heading(tr!(app, "navbar.show").to_owned())]);
     for id in ["grid", "ground_shadow", "ambient_occlusion"] {
         let Some(slot) = navigation_bar::find(id) else { continue };
         entries.push(MenuEntry::Row(row(
             slot.id,
-            app.tr(slot.label),
+            app.tr_by_id(slot.label),
             slot.current_icon(crate::navigation_slots::value(&app.ui, slot)),
             &format!("view:{id}"),
             selected(app, slot.id),
@@ -575,41 +575,41 @@ fn display_menu(app: &SolveApp) -> Menu {
         "projected" => "ui.ground_shadow_projected",
         _ => "ui.ground_shadow_ellipse",
     };
-    let mut style = MenuRow::new("ground_shadow_style", app.tr("ui.ground_shadow_style"), "", "view:ground_shadow_style");
-    style.detail = Some(app.tr(key).to_owned());
+    let mut style = MenuRow::new("ground_shadow_style", tr!(app, "ui.ground_shadow_style"), "", "view:ground_shadow_style");
+    style.detail = Some(app.tr_by_id(key).to_owned());
     style.submenu = [("off", "ui.ground_shadow_off"), ("ellipse", "ui.ground_shadow_ellipse"), ("projected", "ui.ground_shadow_projected")]
         .into_iter()
-        .map(|(value, label)| MenuEntry::Row(row(value, app.tr(label), "", &format!("view:ground_shadow:{value}"), mode == value)))
+        .map(|(value, label)| MenuEntry::Row(row(value, app.tr_by_id(label), "", &format!("view:ground_shadow:{value}"), mode == value)))
         .collect();
     entries.push(MenuEntry::Row(style));
     let mut axes = row(
         "origin_axes_across_view",
-        app.tr("prefs.origin_axes_across_view"),
+        tr!(app, "prefs.origin_axes_across_view"),
         "origin",
         "view:origin_axes_across_view",
         app.preferences.origin_axes_across_view,
     );
-    axes.tip = Some(app.tr("prefs.origin_axes_across_view_help").to_owned());
+    axes.tip = Some(tr!(app, "prefs.origin_axes_across_view_help").to_owned());
     entries.push(MenuEntry::Row(axes));
     // The scale bar in the view's bottom left corner (#375).
-    let mut scale_bar = row("scale_bar", app.tr("view.scale_bar"), "measure", "view:scale_bar_toggle", app.preferences.scale_bar);
-    scale_bar.tip = Some(app.tr("view.scale_bar_help").to_owned());
+    let mut scale_bar = row("scale_bar", tr!(app, "view.scale_bar"), "measure", "view:scale_bar_toggle", app.preferences.scale_bar);
+    scale_bar.tip = Some(tr!(app, "view.scale_bar_help").to_owned());
     entries.push(MenuEntry::Row(scale_bar));
     // The Browser tree panel closes from its own host menu, which left no way back (#16058).
-    let mut browser = row("browser_tree", app.tr("cmd.view_browser"), "list", "view:browser_tree", crate::browser::panel_open(app));
-    browser.tip = Some(app.tr("help.view.browser").to_owned());
+    let mut browser = row("browser_tree", tr!(app, "cmd.view_browser"), "list", "view:browser_tree", crate::browser::panel_open(app));
+    browser.tip = Some(tr!(app, "help.view.browser").to_owned());
     entries.push(MenuEntry::Row(browser));
-    entries.extend([MenuEntry::Separator, MenuEntry::Heading(app.tr("navbar.projection_heading").to_owned())]);
+    entries.extend([MenuEntry::Separator, MenuEntry::Heading(tr!(app, "navbar.projection_heading").to_owned())]);
     for (perspective, key) in [(false, "navbar.orthographic"), (true, "navbar.perspective")] {
         let mut item = row(
             key,
-            app.tr(key),
+            app.tr_by_id(key),
             "perspective",
             if perspective { "view:projection" } else { "view:orthographic" },
             !app.ui.auto_ortho_faces && app.ui.perspective == perspective,
         );
         item.enabled = !projection_locked(app);
-        item.tip = projection_locked(app).then(|| app.tr("nav.perspective.sketch").to_owned());
+        item.tip = projection_locked(app).then(|| tr!(app, "nav.perspective.sketch").to_owned());
         entries.push(MenuEntry::Row(item));
     }
     entries.push(MenuEntry::Separator);
@@ -620,12 +620,12 @@ fn display_menu(app: &SolveApp) -> Menu {
         entries.push(MenuEntry::Row(row(id, solidcraft_ui_text::tr_label(label), "select", &format!("view:{id}"), on)));
     }
     // The View angles readout under the orientation gizmo (#6032).
-    let mut angles = row("view_angles", app.tr("ui.view_angles"), "select", "view:view_angles", app.preferences.show_view_angles);
-    angles.tip = Some(app.tr("ui.view_angles_help").to_owned());
-    entries.extend([MenuEntry::Row(angles), MenuEntry::Separator, MenuEntry::Heading(app.tr("navbar.assistant").to_owned())]);
-    entries.push(MenuEntry::Row(row("agent_cursor", app.tr("navbar.agent_cursor"), "select", "view:agent_cursor", app.ui.agent_cursor.show)));
+    let mut angles = row("view_angles", tr!(app, "ui.view_angles"), "select", "view:view_angles", app.preferences.show_view_angles);
+    angles.tip = Some(tr!(app, "ui.view_angles_help").to_owned());
+    entries.extend([MenuEntry::Row(angles), MenuEntry::Separator, MenuEntry::Heading(tr!(app, "navbar.assistant").to_owned())]);
+    entries.push(MenuEntry::Row(row("agent_cursor", tr!(app, "navbar.agent_cursor"), "select", "view:agent_cursor", app.ui.agent_cursor.show)));
     if crate::agent_chat::shown(app) {
-        entries.push(MenuEntry::Row(row("agent_chat", app.tr("navbar.agent_chat"), "agent_chat", "view:agent_chat", app.agent_chat.open)));
+        entries.push(MenuEntry::Row(row("agent_chat", tr!(app, "navbar.agent_chat"), "agent_chat", "view:agent_chat", app.agent_chat.open)));
     }
     Menu { entries, close_on_pick: false }
 }
@@ -716,7 +716,7 @@ mod tests {
             let caps = if render { NavCaps::RENDER } else { NavCaps::MODEL };
             let view = slot_views(&app, &bar, Some((caps, render))).into_iter().find(|view| view.id == "selection_mode").unwrap();
             assert_eq!(view.hidden, render);
-            assert_eq!(view.tip, if render { app.tr("navbar.custom.hidden_render") } else { "Selection mode · Faces & edges" }, "{render}");
+            assert_eq!(view.tip, if render { tr!(app, "navbar.custom.hidden_render") } else { "Selection mode · Faces & edges" }, "{render}");
         }
     }
 

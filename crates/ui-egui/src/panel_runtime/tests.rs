@@ -484,7 +484,7 @@ fn future_application_panel_record_is_retained_without_legacy_reimport() {
     app.load_prefs(&serde_json::json!({"panel_layout":future,"preferences":{"browser_width":777.0}}).to_string());
     assert_eq!(preferences_value(&app), Some(future.clone()));
     super::specimen::control_specimen(&mut app, &serde_json::json!({"preset":"docks","remember":true})).unwrap();
-    assert_eq!(app.status.as_ref().map(|status| status.0.as_str()), Some(app.tr("prefs.panel_layout.recovery")));
+    assert_eq!(app.status.as_ref().map(|status| status.0.as_str()), Some(app.tr_by_id("prefs.panel_layout.recovery")));
     prepare_preference_fixture(&mut app);
     let value = preferences_value(&app).unwrap();
     assert_eq!(value.get("rejected"), Some(&future));
@@ -650,7 +650,7 @@ fn saved_production_layout_retries_small_startup_without_a_recovery_notice() {
         h.call("ui.resize", serde_json::json!({"width":200,"height":100}));
         *h.app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         h.app.load_prefs(&saved);
-        let recovery = h.app.tr("prefs.panel_layout.recovery").to_string();
+        let recovery = h.app.tr_by_id("prefs.panel_layout.recovery").to_string();
         h.frame();
         let runtime = h.app.panel_runtime.as_ref().unwrap();
         assert_eq!(runtime.last_error().unwrap().rule, Rule::NoSpace);
@@ -14555,7 +14555,7 @@ fn plugin_panels_unknown_widgets_draw_a_newer_host_placeholder() {
     panel.panel.layout.nodes = vec![solidcraft_engine::plugin::ui::Node { widget: solidcraft_engine::plugin::ui::Widget::Unknown }];
     let ctx = crate::fonts::test_context();
     let output = crate::test_support::frame(&ctx, Default::default(), |ui| super::plugin::draw(ui, &panel, 0, &mut Vec::new(), "in", 0));
-    assert!(crate::test_support::text_shapes(&output).any(|shape| shape.galley.job.text == solidcraft_ui_text::tr("ui.plugin_panel_newer")));
+    assert!(crate::test_support::text_shapes(&output).any(|shape| shape.galley.job.text == tr!("ui.plugin_panel_newer")));
 }
 
 #[test]
@@ -14574,7 +14574,10 @@ fn production_browser_and_history_mount_existing_content_once_and_preserve_combi
             assert_eq!(crate::scenario::handle_at(&format!("timeline:{name}")).is_some(), !combined);
         }
         if combined {
-            assert!(rows.iter().any(|row| row.0 == solidcraft_ui_text::tr("ui.history_title")), "combined History keeps its real Browser folder");
+            assert!(
+                rows.iter().any(|row| row.0 == solidcraft_ui_text::tr_by_id("ui.history_title")),
+                "combined History keeps its real Browser folder"
+            );
         } else {
             let history = frame.layout.sections.iter().find(|card| card.instance == id("history")).unwrap();
             assert!(history.inline, "Bottom History uses the generic one-row composition");
@@ -15016,7 +15019,7 @@ fn universal_chrome_controls_have_real_accessible_widgets_and_stable_ids_at_both
                     };
                     assert_eq!(node.role(), expected_role, "the actual widget role follows its typed target: {control:?}");
                     if matches!(&control.target, HostControlTarget::Pointer(HostPointerTarget::Menu { .. })) {
-                        assert_eq!(control.accessible_name, solidcraft_ui_text::tr("ui.panel_host.menu"));
+                        assert_eq!(control.accessible_name, solidcraft_ui_text::tr_by_id("ui.panel_host.menu"));
                     }
                 }
             }
@@ -15173,8 +15176,8 @@ fn universal_inline_specimen_uses_one_total_row_with_real_content_and_shared_con
     assert!(runtime.layout().registry().get(&instance.kind).unwrap().header_actions.is_empty(), "the inline log declares no custom or debug actions");
     assert!(frame.controls.iter().any(|control| matches!(control.target, HostControlTarget::Pointer(HostPointerTarget::Menu { .. }))));
     assert!(frame.controls.iter().any(|control| matches!(control.target, HostControlTarget::Pointer(HostPointerTarget::Collapse { .. }))));
-    assert!(h.widget(solidcraft_ui_text::tr("ui.panel_fixture.inline")).is_some());
-    assert!(h.widget(solidcraft_ui_text::tr("ui.panel_fixture.caption")).is_none());
+    assert!(h.widget(solidcraft_ui_text::tr_by_id("ui.panel_fixture.inline")).is_some());
+    assert!(h.widget(solidcraft_ui_text::tr_by_id("ui.panel_fixture.caption")).is_none());
 }
 
 #[test]

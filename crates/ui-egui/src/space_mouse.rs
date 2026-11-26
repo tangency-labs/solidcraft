@@ -240,16 +240,16 @@ pub fn button_name(device: &str, number: u8, long: bool) -> String {
     let printed = device_ids(device).and_then(|(vendor, product)| solidcraft_space_mouse::buttons::printed(vendor, product, number));
     let printed = printed.map(|printed| match printed {
         Printed::Text(text) => text.to_owned(),
-        Printed::Roll => solidcraft_ui_text::tr("ui.3d_mouse_view_roll").to_string(),
+        Printed::Roll => tr!("ui.3d_mouse_view_roll").to_string(),
         // Not "Rotation lock": that is the checkbox in the same section, which the key switches.
-        Printed::Lock => solidcraft_ui_text::tr("ui.3d_mouse_key_lock").to_string(),
+        Printed::Lock => tr!("ui.3d_mouse_key_lock").to_string(),
     });
     let number = number.to_string();
     match (printed, long) {
         (Some(key), false) => key,
-        (Some(key), true) => solidcraft_ui_text::format("ui.3d_mouse_key_held", &[("key", &key)]),
-        (None, false) => solidcraft_ui_text::format("ui.3d_mouse_button", &[("number", &number)]),
-        (None, true) => solidcraft_ui_text::format("ui.3d_mouse_button_long", &[("number", &number)]),
+        (Some(key), true) => tr!("ui.3d_mouse_key_held", key = &key),
+        (None, false) => tr!("ui.3d_mouse_button", number = &number),
+        (None, true) => tr!("ui.3d_mouse_button_long", number = &number),
     }
 }
 
@@ -912,14 +912,14 @@ mod tests {
         assert_eq!(button_name("smed 256f:c633", 176, false), "Space");
         // Names that are not printed come from the text catalog, which a unit test does not load:
         // compare with the same lookup (the Preferences test checks the English text).
-        assert_eq!(button_name("smed 256f:c633", 3, true), solidcraft_ui_text::format("ui.3d_mouse_key_held", &[("key", "T")]));
+        assert_eq!(button_name("smed 256f:c633", 3, true), tr!("ui.3d_mouse_key_held", key = "T"));
         assert_eq!(button_name("hid 046d:c62b", 23, false), "Esc");
         // The keys that carry a symbol are named in the user's language.
-        assert_eq!(button_name("smed 256f:c633", 9, false), solidcraft_ui_text::tr("ui.3d_mouse_view_roll").to_string());
-        assert_eq!(button_name("hid 046d:c62b", 27, false), solidcraft_ui_text::tr("ui.3d_mouse_key_lock").to_string());
-        assert_eq!(button_name("smed 256f:c633", 4, false), solidcraft_ui_text::format("ui.3d_mouse_button", &[("number", "4")]));
-        assert_eq!(button_name("spacenavd", 3, false), solidcraft_ui_text::format("ui.3d_mouse_button", &[("number", "3")]));
-        assert_eq!(button_name("spacenavd", 3, true), solidcraft_ui_text::format("ui.3d_mouse_button_long", &[("number", "3")]));
+        assert_eq!(button_name("smed 256f:c633", 9, false), tr!("ui.3d_mouse_view_roll").to_string());
+        assert_eq!(button_name("hid 046d:c62b", 27, false), tr!("ui.3d_mouse_key_lock").to_string());
+        assert_eq!(button_name("smed 256f:c633", 4, false), tr!("ui.3d_mouse_button", number = "4"));
+        assert_eq!(button_name("spacenavd", 3, false), tr!("ui.3d_mouse_button", number = "3"));
+        assert_eq!(button_name("spacenavd", 3, true), tr!("ui.3d_mouse_button_long", number = "3"));
     }
 
     #[test]

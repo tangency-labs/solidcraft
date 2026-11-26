@@ -3688,7 +3688,7 @@ fn object_type_row(d: &mut Dialog, ui: &mut egui::Ui, s: &Session) {
     let mut ty = cur;
     let choices: &[&str] = if components { &["Bodies", "Features", "Components"] } else { &["Bodies", "Features"] };
     // What the kinds are, and that a sketch is neither (#10057).
-    choice_row(ui, "Object Type", "pat_obj", &mut ty, choices).backing_on_hover_text(solidcraft_ui_text::tr("ui.pattern_object_type_tip"));
+    choice_row(ui, "Object Type", "pat_obj", &mut ty, choices).backing_on_hover_text(tr!("ui.pattern_object_type_tip"));
     if ty != cur {
         let from_bodies = cur == 0;
         inp.accept = match ty {
@@ -3954,7 +3954,7 @@ pub(crate) fn component_origin_label(s: &Session, names: crate::prefs::OriginPla
     let (path, item) = solidcraft_engine::origins::item(name)?;
     let placement =
         path.iter().filter_map(|id| s.doc.occurrences.iter().find(|o| o.id == *id).map(|o| o.name.as_str())).collect::<Vec<_>>().join(" / ");
-    Some(solidcraft_ui_text::format("dialog.component_origin", &[("placement", &placement), ("item", names.label(item))]))
+    Some(tr!("dialog.component_origin", placement = &placement, item = names.label(item)))
 }
 
 /// A picked item as its chip shows it. A round edge or face says what it stands for in `inp`:
@@ -3967,14 +3967,12 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
         return label;
     }
     let axis = inp.accept == selection::AXIS_PICKS && round_axis(s, item).is_some();
-    let sketch_name = |id| {
-        s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_else(|| solidcraft_ui_text::format("browser.sketch_name", &[("number", &id.to_string())]))
-    };
+    let sketch_name = |id| s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_else(|| tr!("browser.sketch_name", number = &id.to_string()));
     // Another sketch's point (a Sphere's centre, #9403), named as Select Other names it.
     let external_point = |sketch: u64, id: &str| {
         let state = crate::open_meshing::session_world(s);
         let point = state.sketch(sketch).map_or_else(|| id.to_string(), |ss| crate::select_other::point_label(&ss.sketch, id));
-        solidcraft_ui_text::format("dialog.selection_external_point", &[("point", &point), ("sketch", &sketch_name(sketch))])
+        tr!("dialog.selection_external_point", point = &point, sketch = &sketch_name(sketch))
     };
     match item {
         Sel::SketchCurve { id, .. } => id.clone(),
@@ -3987,16 +3985,15 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
                 None => id.clone(),
             },
         },
-        Sel::SketchMidpoint { id } => solidcraft_ui_text::format("dialog.selection_midpoint", &[("id", id)]),
+        Sel::SketchMidpoint { id } => tr!("dialog.selection_midpoint", id = id),
         Sel::ExternalSketchCurve { sketch, id } => {
-            solidcraft_ui_text::format("dialog.selection_external_curve", &[("sketch", &sketch_name(*sketch)), ("id", id)])
+            tr!("dialog.selection_external_curve", sketch = &sketch_name(*sketch), id = id)
         }
         Sel::ExternalSketchPoint { sketch, id } | Sel::PlacedSketchPoint { sketch, id, .. } => external_point(*sketch, id),
-        Sel::SketchConstraint { id } => solidcraft_ui_text::format("dialog.selection_constraint", &[("id", id)]),
-        Sel::Profile { sketch, index } => solidcraft_ui_text::format(
-            "dialog.selection_profile",
-            &[("sketch", &sketch_name(*sketch)), ("number", &index.saturating_add(1).to_string())],
-        ),
+        Sel::SketchConstraint { id } => tr!("dialog.selection_constraint", id = id),
+        Sel::Profile { sketch, index } => {
+            tr!("dialog.selection_profile", sketch = &sketch_name(*sketch), number = &index.saturating_add(1).to_string())
+        }
         Sel::Plane { name } => names.label(name).to_string(),
         Sel::Axis { name } | Sel::ConstructionPoint { name } | Sel::Body { name } => name.clone(),
         Sel::Face { body, index, .. } if axis => format!("{body} · face {index} axis"),
@@ -4182,25 +4179,25 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                                         .and_then(Value::as_u64)
                                         .and_then(|id| s.doc.feature(id))
                                         .map(|feature| feature.name.clone())
-                                        .unwrap_or_else(|| solidcraft_ui_text::tr("dialog.missing_alignment_reference").into());
+                                        .unwrap_or_else(|| tr!("dialog.missing_alignment_reference").into());
                                     reference.get("curve").and_then(Value::as_str).map_or_else(|| name.clone(), |curve| format!("{name} / {curve}"))
                                 })
                         } else if stored_reference.is_some() && matches!(d.kind, Kind::Section { .. }) {
-                            solidcraft_ui_text::tr("ui.viewport_status_section_plane").into()
+                            tr!("ui.viewport_status_section_plane").into()
                         } else if stored_reference.is_some() && matches!(d.kind, Kind::OffsetPlane { .. }) {
-                            solidcraft_ui_text::tr("sketch_panel.plane_fixed").into()
+                            tr!("sketch_panel.plane_fixed").into()
                         } else if custom_axis || stored_reference.is_some() {
-                            solidcraft_ui_text::tr("dialog.custom_axis").into()
+                            tr!("dialog.custom_axis").into()
                         } else if !inp.multi {
                             inp.items.first().map(|item| selection_label(s, names, d, inp, item)).unwrap_or_default()
                         } else {
                             let count = if i == 0 { shell_count.or(frame_rows).unwrap_or(inp.items.len()) } else { inp.items.len() };
-                            solidcraft_ui_text::format("dialog.selected_count", &[("count", &count.to_string())])
+                            tr!("dialog.selected_count", count = &count.to_string())
                         },
                     )
                     .color(t.on_accent)
                 } else {
-                    RichText::new(solidcraft_ui_text::tr("dialog.select")).color(t.text)
+                    RichText::new(tr!("dialog.select")).color(t.text)
                 };
                 let selected_text = text.text().strip_prefix("↖ ").unwrap_or_else(|| text.text());
                 let prompt = if !filled && inp.label == "Edges" { tr("Select edges") } else { selected_text };
@@ -4232,7 +4229,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                         hint(inp).to_string()
                     }
                 } else if let Some(id) = inp.tip {
-                    solidcraft_ui_text::tr(id).to_string()
+                    solidcraft_ui_text::tr_by_id(id).to_string()
                 } else {
                     format!("{} (click to pick into this input)", hint(inp))
                 };
@@ -4452,7 +4449,7 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
     // Under the fold in a short window, a new note scrolls into view once, as a refusal does.
     let note_shown_id = egui::Id::unique("sc_dialog_pick_refused_shown");
     if let Some(id) = d.pick_refused.filter(|_| d.error.is_none() && app.preview.error.is_none()) {
-        let note = crate::ui_kit::text(ui, solidcraft_ui_text::tr(id), crate::ui_kit::Text::Hint("pick_refused"));
+        let note = crate::ui_kit::text(ui, solidcraft_ui_text::tr_by_id(id), crate::ui_kit::Text::Hint("pick_refused"));
         crate::scenario::publish_rect("dialog:pick_refused", note.rect);
         if ui.data(|m| m.get_temp::<&'static str>(note_shown_id)) != Some(id) {
             ui.scroll_to_rect(note.rect, None);
@@ -4484,13 +4481,13 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
                 ui.horizontal(|ui| {
                     let ready = solidcraft_engine::find_command(crate::refused_part::REPAIR).map(|c| c.info(&app.session));
                     let enabled = ready.as_ref().is_some_and(|i| i.enabled);
-                    let repair = crate::ui_kit::button(ui, solidcraft_ui_text::tr("refused.repair"), crate::ui_kit::Button::Enabled(enabled));
+                    let repair = crate::ui_kit::button(ui, tr!("refused.repair"), crate::ui_kit::Button::Enabled(enabled));
                     crate::scenario::publish_handle("dialog:repair_part", repair.rect.center());
                     if repair.clicked() {
                         crate::refused_part::repair(app, &part.body);
                     }
                     if part.face.is_some() {
-                        let show = crate::ui_kit::button(ui, solidcraft_ui_text::tr("refused.show_face"), crate::ui_kit::Button::Normal);
+                        let show = crate::ui_kit::button(ui, tr!("refused.show_face"), crate::ui_kit::Button::Normal);
                         crate::scenario::publish_handle("dialog:show_face", show.rect.center());
                         if show.clicked() {
                             crate::refused_part::show_face(app, &part);
@@ -4533,9 +4530,9 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
                 }
                 ui.horizontal(|ui| {
                     if plain.is_some() {
-                        let copy = crate::ui_kit::button(ui, tr("ui.copy_details"), crate::ui_kit::Button::Normal);
+                        let copy = crate::ui_kit::button(ui, tr!("ui.copy_details"), crate::ui_kit::Button::Normal);
                         crate::scenario::publish_handle("dialog:copy_details", copy.rect.center());
-                        if copy.backing_on_hover_text(tr("ui.copy_details_tip")).clicked() {
+                        if copy.backing_on_hover_text(tr!("ui.copy_details_tip")).clicked() {
                             ui.ctx().copy_text(error.clone());
                         }
                     }
@@ -4588,7 +4585,7 @@ pub(crate) fn fillet_plain_error(error: &str, setback_in_field: bool) -> Option<
     if let Some((_, rest)) = error.split_once(solidcraft_engine::kernel::SETBACK_AT_LEAST)
         && let Some(least) = rest.split_once(" mm").map(|(n, _)| n.trim()).filter(|n| n.parse::<f64>().is_ok())
     {
-        return Some(FilletRefusal::Plain(solidcraft_ui_text::format("ui.fillet_error_setback_short", &[("least", &format!("{least} mm"))])));
+        return Some(FilletRefusal::Plain(tr!("ui.fillet_error_setback_short", least = &format!("{least} mm"))));
     }
     let too_large = error.contains("larger than the faces beside its edges allow");
     // The kernel tried smaller radii down to its least and none built: no radius is the cause, so
@@ -4601,13 +4598,13 @@ pub(crate) fn fillet_plain_error(error: &str, setback_in_field: bool) -> Option<
         || error.contains("kernel internal error")
         || error.contains("the rounds would leave openings");
     if none_fits {
-        Some(FilletRefusal::Plain(tr("ui.fillet_error_no_radius").to_string()))
+        Some(FilletRefusal::Plain(tr!("ui.fillet_error_no_radius").to_string()))
     } else if too_large {
-        Some(FilletRefusal::Plain(tr("ui.fillet_error_too_large").to_string()))
+        Some(FilletRefusal::Plain(tr!("ui.fillet_error_too_large").to_string()))
     } else if corner && kernel {
-        Some(FilletRefusal::Plain(tr("ui.fillet_error_corner").to_string()))
+        Some(FilletRefusal::Plain(tr!("ui.fillet_error_corner").to_string()))
     } else if kernel {
-        Some(FilletRefusal::Plain(tr("ui.fillet_error_failed").to_string()))
+        Some(FilletRefusal::Plain(tr!("ui.fillet_error_failed").to_string()))
     } else {
         None
     }
@@ -5272,11 +5269,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 
     let raw_title = title_of(&d);
     let translated_title = tr(raw_title);
-    let heading = if d.editing.is_some() {
-        solidcraft_ui_text::format("dialog.edit_title", &[("title", translated_title)])
-    } else {
-        translated_title.to_string()
-    };
+    let heading = if d.editing.is_some() { tr!("dialog.edit_title", title = translated_title) } else { translated_title.to_string() };
     let frame = crate::ui_kit::Panel::feature_frame(ctx, app.ui.layout, side);
     // OK is offered once the inputs make a feature.
     let has_ok = !matches!(d.kind, Kind::Sketch | Kind::Measure { .. });
@@ -5387,7 +5380,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 }
                 let text = app.applying.as_ref().map(|job| {
                     let seconds = ((crate::now_ms() - job.started) / 1000.0).floor().max(0.0);
-                    solidcraft_ui_text::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))])
+                    tr!("dialog.computing", seconds = &format!("{seconds:.0}"))
                 });
                 crate::ui_kit::ComputeStatus { text, busy: app.applying.is_some() || app.preview.busy, applying: app.applying.is_some() }
             };
@@ -5954,7 +5947,7 @@ pub(crate) fn confirm(app: &mut SolveApp) {
     match app.dialog.as_mut() {
         Some(d) if enter_applies(d) => d.confirm = true,
         _ => {
-            let text = app.tr("ui.dialog_ok_none").to_owned();
+            let text = tr!(app, "ui.dialog_ok_none").to_owned();
             app.set_status(text, false);
         }
     }
@@ -5994,7 +5987,7 @@ pub(crate) fn right_click(app: &mut SolveApp) {
 
 /// The hint a right-click shows while `input` is empty and needed.
 fn pick_first(input: &SelInput) -> String {
-    solidcraft_ui_text::format("dialog.right_click_pick", &[("input", tr(input.label))])
+    tr!("dialog.right_click_pick", input = tr(input.label))
 }
 
 /// Close the dialog without applying it (Esc, Cancel). An edit puts the timeline marker back.
@@ -6816,7 +6809,7 @@ fn link_status(app: &SolveApp, cmd: &str, reply: &Value) -> Option<String> {
         None if curves.is_empty() => points.len(),
         None => 0,
     };
-    let command = solidcraft_ui_text::tr(if cmd == "sketch.intersect" { "ui.intersect" } else { "ui.project" });
+    let command = solidcraft_ui_text::tr_by_id(if cmd == "sketch.intersect" { "ui.intersect" } else { "ui.project" });
     let counted = |id: &str, n: usize| solidcraft_ui_text::format(id, &[("command", command), ("count", &n.to_string())]);
     let mut text = match (curves.len(), lone) {
         (0, 0) => return None,
@@ -6824,19 +6817,17 @@ fn link_status(app: &SolveApp, cmd: &str, reply: &Value) -> Option<String> {
         (n, 0) => counted("ui.sketch_links_added_curves", n),
         (0, 1) => counted("ui.sketch_links_added_point", 1),
         (0, n) => counted("ui.sketch_links_added_points", n),
-        (c, p) => solidcraft_ui_text::format(
+        (c, p) => tr!(
             "ui.sketch_links_added_curves_and_points",
-            &[
-                ("command", command),
-                ("curves", &counted(if c == 1 { "ui.sketch_links_curve_count_one" } else { "ui.sketch_links_curve_count" }, c)),
-                ("points", &counted(if p == 1 { "ui.sketch_links_point_count_one" } else { "ui.sketch_links_point_count" }, p)),
-            ],
+            command = command,
+            curves = &counted(if c == 1 { "ui.sketch_links_curve_count_one" } else { "ui.sketch_links_curve_count" }, c),
+            points = &counted(if p == 1 { "ui.sketch_links_point_count_one" } else { "ui.sketch_links_point_count" }, p)
         ),
     };
     let linked = links.iter().any(|l| l.get("link").is_some_and(|l| !l.is_null()));
     if linked && sketch.is_some_and(|sk| sk.view.hide_projected) {
         text.push(' ');
-        text.push_str(&solidcraft_ui_text::format("ui.sketch_links_hidden", &[("option", solidcraft_ui_text::tr("ui.show_projected_geometries"))]));
+        text.push_str(&tr!("ui.sketch_links_hidden", option = tr!("ui.show_projected_geometries")));
     }
     Some(text)
 }
@@ -8077,10 +8068,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::Material { index, editor } => {
             if editor.editing() {
-                return Err(solidcraft_ui_text::tr("material.editor.save_or_discard").to_string());
+                return Err(tr!("material.editor.save_or_discard").to_string());
             }
             need(0, "bodies")?;
-            let name = s.doc.material_names().get(*index).cloned().ok_or_else(|| solidcraft_ui_text::tr("material.selection.choose").to_string())?;
+            let name = s.doc.material_names().get(*index).cloned().ok_or_else(|| tr!("material.selection.choose").to_string())?;
             ("material.assign", json!({"bodies": sels(d, 0).body_names(), "material": name}))
         }
         Kind::Section { offset, flip, hatch, add, edit } => {
@@ -11548,7 +11539,7 @@ mod right_click_tests {
         let mut h = Harness::new();
         crate::keymap::bind(&mut h.app, "ui.dialog_ok", "F9", false).unwrap();
         h.step(&json!({"key": "F9"})).unwrap();
-        assert_eq!(h.app.status.as_ref().map(|(text, _, _)| text.as_str()), Some(h.app.tr("ui.dialog_ok_none")));
+        assert_eq!(h.app.status.as_ref().map(|(text, _, _)| text.as_str()), Some(tr!(h.app, "ui.dialog_ok_none")));
         let mut h = mirror();
         h.app.preferences.right_click_confirms = false;
         let bound = h.call("ui.shortcut", json!({"command": "ui.dialog_ok", "key": "F9"}));

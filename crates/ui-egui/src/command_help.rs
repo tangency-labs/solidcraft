@@ -396,7 +396,7 @@ pub fn help(command: &str) -> Option<String> {
         return None;
     }
     let key = format!("help.{command}");
-    let text = solidcraft_ui_text::tr(&key);
+    let text = solidcraft_ui_text::tr_by_id(&key);
     (text != key).then(|| text.to_owned())
 }
 

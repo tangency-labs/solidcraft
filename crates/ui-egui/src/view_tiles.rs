@@ -473,12 +473,12 @@ fn zones_for_kind(views: &ViewSet, view: u64, kind: solidcraft_views::ViewKind, 
 }
 
 fn dock_label(views: &ViewSet, placement: Placement, shown: bool, blocked: bool) -> String {
-    use solidcraft_ui_text::{format, tr};
+    use solidcraft_ui_text::format;
     if blocked {
-        return tr("multi_window.drag_small").to_owned();
+        return tr!("multi_window.drag_small").to_owned();
     }
     let (target, key) = match placement {
-        Placement::Empty(_) => return tr("multi_window.drag_fill").to_owned(),
+        Placement::Empty(_) => return tr!("multi_window.drag_fill").to_owned(),
         Placement::Replace(target) => (target, if shown { "multi_window.drag_swap" } else { "multi_window.drag_replace" }),
         Placement::Split { target, edge } => (
             target,
@@ -544,7 +544,7 @@ pub(crate) fn placement_overlay(app: &mut SolveApp, ctx: &egui::Context) {
             .show(ctx, |ui| {
                 let rect = Rect::from_min_size(ui.next_widget_position(), size);
                 let response =
-                    crate::ui_kit::button_at(ui, "view_placement_zone", rect, solidcraft_ui_text::tr(label), crate::ui_kit::Button::Normal);
+                    crate::ui_kit::button_at(ui, "view_placement_zone", rect, solidcraft_ui_text::tr_by_id(label), crate::ui_kit::Button::Normal);
                 if response.hovered() || response.has_focus() {
                     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("view_tile_preview")));
                     paint_preview(&painter, zone.rect);
@@ -807,7 +807,7 @@ fn sketch_header_name(app: &SolveApp, id: u64) -> Option<String> {
     let view = app.docs.views.get(id)?;
     view.editing.as_ref()?;
     let name = crate::sketch_view::name(app, id)?;
-    Some(solidcraft_ui_text::format("sketch_mode.view_name", &[("view", &view.name), ("sketch", &name)]))
+    Some(tr!("sketch_mode.view_name", view = &view.name, sketch = &name))
 }
 
 /// A card lifted off the focused view: its soft shadow, frame, and optional header.
@@ -903,7 +903,7 @@ fn card_chrome(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, cell: Rect, heade
     button(2.0, CardAction::Remove);
     let rect = button_rect(cell, 3.0);
     let response = ui.interact(rect, ui.scope_id().with(("card_view_menu", id)), Sense::click());
-    let tip = app.tr("view_menu.open");
+    let tip = tr!(app, "view_menu.open");
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tip));
     let open = response.clicked() || response.has_focus() && ui.input(|i| i.modifiers.shift && i.key_pressed(egui::Key::F10));
     let response = response.backing_on_hover_text(tip);
@@ -960,10 +960,10 @@ fn view_title_drag(app: &mut SolveApp, ui: &egui::Ui, id: u64, title: Rect) -> b
     crate::scenario::publish_rect(&format!("view:title:{id}"), title);
     let response = ui.interact(title, ui.scope_id().with(("view_title_drag", id)), Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::Grab);
     if let Some((_, state)) = crate::drawing_sheet_page::view_badge(app, id, ui.ctx())
-        && state == app.tr("sheet_views.fit")
+        && state == tr!(app, "sheet_views.fit")
     {
         let name = app.docs.views.get(id).map_or("", |view| view.name.as_str());
-        let label = solidcraft_ui_text::format("sheet_views.fitted", &[("name", name)]);
+        let label = tr!("sheet_views.fitted", name = name);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), label.as_str()));
     }
     if response.drag_started_by(egui::PointerButton::Primary) {
@@ -971,9 +971,8 @@ fn view_title_drag(app: &mut SolveApp, ui: &egui::Ui, id: u64, title: Rect) -> b
         crate::view_window_drag::start_header(app, ui.ctx(), id, origin);
     }
     if let Some(name) = sketch_header_name(app, id) {
-        let name = crate::sketch_view::owner_label(app, id)
-            .map_or(name.clone(), |owner| solidcraft_ui_text::format("sketch_mode.view_name", &[("view", &name), ("sketch", &owner)]));
-        let name = solidcraft_ui_text::format("sketch_mode.announcement", &[("view", &name)]);
+        let name = crate::sketch_view::owner_label(app, id).map_or(name.clone(), |owner| tr!("sketch_mode.view_name", view = &name, sketch = &owner));
+        let name = tr!("sketch_mode.announcement", view = &name);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name.as_str()));
     }
     response.clicked()

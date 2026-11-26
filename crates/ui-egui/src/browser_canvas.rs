@@ -38,13 +38,13 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     let (pivot, at) = crate::shell::floating_editor_anchor(app, ctx);
     let (picks, straighten, name) = (m.picks_points(), m.straighten, c.id);
     let (ok, cancel) = if m.trace {
-        (solidcraft_ui_text::tr("ui.trace"), solidcraft_ui_text::tr("ui.cancel"))
+        (tr!("ui.trace"), tr!("ui.cancel"))
     } else if straighten {
-        (solidcraft_ui_text::tr("ui.straighten"), solidcraft_ui_text::tr("ui.cancel"))
+        (tr!("ui.straighten"), tr!("ui.cancel"))
     } else if picks {
-        (solidcraft_ui_text::tr_label("Calibrate"), solidcraft_ui_text::tr("ui.cancel"))
+        (solidcraft_ui_text::tr_label("Calibrate"), tr!("ui.cancel"))
     } else {
-        ("", solidcraft_ui_text::tr("ui.close"))
+        ("", tr!("ui.close"))
     };
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_canvas_panel"), "canvas", &title)
         .placed(pivot, at)
@@ -53,15 +53,13 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         .show(ctx, true, |ui| {
             if m.trace {
                 ui_kit::text(ui, &hint_text(&m), ui_kit::Text::Note("trace_hint"));
-                ui_kit::row(ui, solidcraft_ui_text::tr("browser.trace_tolerance"), |ui| {
-                    ui_kit::slider(ui, &mut m.tolerance, 0.0..=100.0, Default::default())
-                });
+                ui_kit::row(ui, tr!("browser.trace_tolerance"), |ui| ui_kit::slider(ui, &mut m.tolerance, 0.0..=100.0, Default::default()));
                 if !m.tolerance.is_finite() {
                     m.tolerance = 20.0;
                 }
                 m.tolerance = m.tolerance.clamp(0.0, 100.0);
             } else if picks {
-                ui_kit::text(ui, solidcraft_ui_text::tr(hint(&m)), ui_kit::Text::Note("calibrate_hint"));
+                ui_kit::text(ui, solidcraft_ui_text::tr_by_id(hint(&m)), ui_kit::Text::Note("calibrate_hint"));
                 for (label, p) in [("Point A", &mut m.a), ("Point B", &mut m.b)] {
                     ui_kit::row(ui, solidcraft_ui_text::tr_label(label), |ui| {
                         let [x, y] = p;
@@ -72,17 +70,13 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                     });
                 }
                 if straighten {
-                    let options = [
-                        solidcraft_ui_text::tr("browser.straighten_horizontal"),
-                        solidcraft_ui_text::tr("browser.straighten_vertical"),
-                        solidcraft_ui_text::tr("ui.angle"),
-                    ];
+                    let options = [tr!("browser.straighten_horizontal"), tr!("browser.straighten_vertical"), tr!("ui.angle")];
                     let targets = ["straighten:horizontal", "straighten:vertical", "straighten:angle"];
-                    ui_kit::row(ui, solidcraft_ui_text::tr("browser.straighten_angle"), |ui| {
+                    ui_kit::row(ui, tr!("browser.straighten_angle"), |ui| {
                         ui_kit::segmented(ui, &mut m.direction, &options, ui_kit::Segments { targets: &targets, ..Default::default() })
                     });
                     if m.direction == 2 {
-                        ui_kit::row(ui, solidcraft_ui_text::tr("ui.angle"), |ui| ui_kit::angle_field(ui, &mut m.angle));
+                        ui_kit::row(ui, tr!("ui.angle"), |ui| ui_kit::angle_field(ui, &mut m.angle));
                         if !m.angle.is_finite() {
                             m.angle = 0.0;
                         }
@@ -93,11 +87,11 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                     m.distance = m.distance.clamp(0.001, 1e6);
                 }
             } else if c.anchor.is_some() {
-                if ui_kit::checkbox_row(ui, "canvas_follow_frame", solidcraft_ui_text::tr("browser.canvas_follow_frame"), true) {
+                if ui_kit::checkbox_row(ui, "canvas_follow_frame", tr!("browser.canvas_follow_frame"), true) {
                     follow = Some(false);
                 }
                 // Its sketch's points place, turn and size it: only its look is edited here.
-                ui_kit::text(ui, solidcraft_ui_text::tr("browser.canvas_anchored"), ui_kit::Text::Note("canvas_anchored"));
+                ui_kit::text(ui, tr!("browser.canvas_anchored"), ui_kit::Text::Note("canvas_anchored"));
                 let (mut op, mut flip) = (c.opacity, c.flip);
                 let mut changed =
                     ui_kit::row(ui, solidcraft_ui_text::tr_label("Opacity"), |ui| ui_kit::slider(ui, &mut op, 0.0..=1.0, Default::default()))
@@ -110,7 +104,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                     edit = Some(json!({ "canvas": name, "opacity": op, "flip": flip }));
                 }
             } else {
-                if ui_kit::checkbox_row(ui, "canvas_follow_frame", solidcraft_ui_text::tr("browser.canvas_follow_frame"), false) {
+                if ui_kit::checkbox_row(ui, "canvas_follow_frame", tr!("browser.canvas_follow_frame"), false) {
                     follow = Some(true);
                 }
                 let (mut x, mut y, mut w, mut ang, mut op, mut flip) = (c.center.x, c.center.y, c.width, c.angle.to_degrees(), c.opacity, c.flip);
@@ -157,7 +151,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     }
     if action == ui_kit::Action::Ok && m.trace {
         if !m.picked_both {
-            app.set_status(solidcraft_ui_text::tr("browser.trace_click"), false);
+            app.set_status(tr!("browser.trace_click"), false);
             app.tree.canvas_panel = Some(m);
             return;
         }
@@ -192,7 +186,7 @@ pub(crate) fn hint_text(panel: &crate::browser::CanvasPanel) -> String {
     if panel.trace && panel.picked_both {
         return solidcraft_ui_text::format(hint(panel), &[("count", &panel.points.len().to_string())]);
     }
-    solidcraft_ui_text::tr(hint(panel)).to_string()
+    solidcraft_ui_text::tr_by_id(hint(panel)).to_string()
 }
 
 /// The message id of the card's hint (and the status line) for what the user does next.
@@ -251,7 +245,7 @@ pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2, add: bool) ->
         // Ctrl+click adds one more region (up to what `canvas.to_sketch` takes); a plain click picks
         // that one alone.
         if add && panel.picked_both && panel.points.len() >= MAX_TRACE_POINTS {
-            app.set_status(solidcraft_ui_text::format("browser.trace_limit", &[("max", &MAX_TRACE_POINTS.to_string())]), true);
+            app.set_status(tr!("browser.trace_limit", max = &MAX_TRACE_POINTS.to_string()), true);
             return true;
         }
         if !add || !panel.picked_both {
@@ -480,11 +474,11 @@ mod tests {
         let status = |h: &crate::scenario::Harness| h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
         assert!(super::click(&mut h.app, &proj, screen(c.center.x - 15.0, c.center.y - 5.0), false));
         assert_eq!(super::hint(h.app.tree.canvas_panel.as_ref().unwrap()), "browser.straighten_click_b");
-        assert_eq!(status(&h), crate::i18n::tr_diagnostic(solidcraft_ui_text::tr("browser.straighten_click_b")));
+        assert_eq!(status(&h), crate::i18n::tr_diagnostic(tr!("browser.straighten_click_b")));
         assert!(super::click(&mut h.app, &proj, screen(c.center.x + 15.0, c.center.y + 5.0), false));
         // With both points picked, the card and the status line ask for the direction, not Point A.
         assert_eq!(super::hint(h.app.tree.canvas_panel.as_ref().unwrap()), "browser.straighten_choose");
-        assert_eq!(status(&h), crate::i18n::tr_diagnostic(solidcraft_ui_text::tr("browser.straighten_choose")));
+        assert_eq!(status(&h), crate::i18n::tr_diagnostic(solidcraft_ui_text::tr_by_id("browser.straighten_choose")));
         let picked = h.app.tree.canvas_panel.clone().unwrap();
         let rise = (picked.b[1] - picked.a[1]).atan2(picked.b[0] - picked.a[0]).to_degrees();
         assert!((rise - 18.43).abs() < 1.0, "{picked:?}");

@@ -70,9 +70,9 @@ pub(crate) struct LinkBadge {
 
 impl LinkBadge {
     pub(crate) fn tooltip(&self) -> String {
-        let source = format!("{} {}", solidcraft_ui_text::tr("ui.link_source"), self.file);
+        let source = format!("{} {}", tr!("ui.link_source"), self.file);
         match self.note {
-            Some(note) => format!("{source}\n{}", solidcraft_ui_text::tr(note)),
+            Some(note) => format!("{source}\n{}", solidcraft_ui_text::tr_by_id(note)),
             None => source,
         }
     }

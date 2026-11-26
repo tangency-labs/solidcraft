@@ -474,7 +474,7 @@ fn navigation_bar_display_menu_runs_grid_and_shadow_commands() {
         let after = if id == "view.grid" { h.app.ui.show_grid } else { h.app.ui.ground_shadow };
         assert_eq!(after, !before);
         let language = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language);
-        let echo = language.format("ui.command_done", &[("command", language.label(crate::command_label(id)))]);
+        let echo = tr!(language, "ui.command_done", command = language.label(crate::command_label(id)));
         assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "{id} was not run");
     }
 }
@@ -490,7 +490,7 @@ fn the_view_menu_brings_the_browser_tree_back() {
     h.settle();
     assert!(!crate::browser::panel_open(&h.app), "the tree starts closed");
     let language = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language);
-    let echo = language.format("ui.command_done", &[("command", language.label(crate::command_label("view.browser")))]);
+    let echo = tr!(language, "ui.command_done", command = language.label(crate::command_label("view.browser")));
     h.step(&json!({"click":{"handle":"nav:view"}})).unwrap();
     assert!(crate::scenario::rect_of("view:browser_tree").is_some(), "the View menu has the Browser tree row");
     for open in [true, false] {
@@ -549,7 +549,7 @@ fn origin_axes_display_menu_and_preferences_share_an_opt_in_setting() {
         h.step(&json!({"click":{"handle":"view:origin_axes_across_view"}})).unwrap();
         assert_eq!(h.app.preferences.origin_axes_across_view, enabled);
         let language = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language);
-        let echo = language.format("ui.command_done", &[("command", language.label(crate::command_label("view.origin_axes_across_view")))]);
+        let echo = tr!(language, "ui.command_done", command = language.label(crate::command_label("view.origin_axes_across_view")));
         assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "the Display menu runs the command");
     }
     h.step(&json!({"click":{"handle":"nav:view"}})).unwrap();

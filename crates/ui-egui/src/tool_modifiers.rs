@@ -146,7 +146,7 @@ impl ModifierCombo {
     pub fn shown_label(self) -> String {
         let platform = Platform::host();
         if self == Self::CTRL_ALT {
-            return solidcraft_ui_text::format("ui.modifiers_either", &[("first", ctrl_name_for(platform)), ("second", alt_name_for(platform))]);
+            return tr!("ui.modifiers_either", first = ctrl_name_for(platform), second = alt_name_for(platform));
         }
         if self == Self::NONE {
             return solidcraft_ui_text::tr_label("None").to_string();
@@ -205,10 +205,10 @@ impl PreviewModifier {
 
     pub fn shown_label(self, platform: Platform, app: &crate::SolveApp) -> &'static str {
         if self == Self::PrimaryAtLeast {
-            app.tr(match platform {
-                Platform::Mac => "prefs.preview_reselect_primary_at_least_mac",
-                Platform::Other => "prefs.preview_reselect_primary_at_least",
-            })
+            match platform {
+                Platform::Mac => tr!(app, "prefs.preview_reselect_primary_at_least_mac"),
+                Platform::Other => tr!(app, "prefs.preview_reselect_primary_at_least"),
+            }
         } else {
             app.tr_label(self.label(platform))
         }

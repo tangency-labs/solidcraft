@@ -233,7 +233,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let shared = shared_occurrences(app, &p.params);
     // A drawing's delete takes views with it, not features: the list is headed so.
     let of_drawing = p.params["items"].as_array().is_some_and(|items| items.iter().any(|item| item["type"] == "drawing"));
-    let also = if of_drawing { solidcraft_ui_text::tr("delete.views_too") } else { solidcraft_ui_text::tr_label("These features will be deleted:") };
+    let also = if of_drawing { tr!("delete.views_too") } else { solidcraft_ui_text::tr_label("These features will be deleted:") };
     let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_delete_confirm"), "delete", solidcraft_ui_text::tr_label("Delete"))
         .tone(ui_kit::Tone::Danger)
         .actions("Delete", "Cancel", None)
@@ -257,11 +257,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 }
                 if names.len() > MAX_LISTED {
                     let more = (names.len() - MAX_LISTED).to_string();
-                    ui_kit::text(
-                        ui,
-                        &solidcraft_ui_text::format("delete.and_more", &[("count", &more)]),
-                        ui_kit::Text::Report(&format!("{key}:more"), error),
-                    );
+                    ui_kit::text(ui, &tr!("delete.and_more", count = &more), ui_kit::Text::Report(&format!("{key}:more"), error));
                 }
             }
         });

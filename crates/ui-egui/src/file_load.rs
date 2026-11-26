@@ -601,7 +601,7 @@ pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
 /// file would be read with whatever else was uploaded before.
 pub(crate) fn insert_board(app: &mut SolveApp, path: &str, web: bool) {
     if web && !solidcraft_engine::io::is_zip_path(path) {
-        app.set_status(solidcraft_ui_text::tr("ui.insert_pcb.web_zip"), true);
+        app.set_status(tr!("ui.insert_pcb.web_zip"), true);
         return;
     }
     let mut request = Request::new(path, Kind::Insert);
@@ -728,7 +728,7 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
                 let (command, params) = request.command();
                 let r = app.run(command, params);
                 if r.is_ok() && !request.path.is_empty() {
-                    app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", &request.path)]), false);
+                    app.set_status(tr!("ui.saved_to", path = &request.path), false);
                 }
                 r
             }
@@ -919,8 +919,8 @@ fn linked_signing_note(path: &str) -> Option<String> {
     let summary = solidcraft_engine::io::read_design_provenance_summary_file(path)?;
     let name = std::path::Path::new(path).file_name().map_or_else(|| path.to_string(), |name| name.to_string_lossy().into_owned());
     Some(match &summary.signer {
-        Some(signer) => solidcraft_ui_text::format("ui.insert_signed", &[("name", &name), ("key", signer)]),
-        None => solidcraft_ui_text::format("ui.insert_signed_unknown", &[("name", &name)]),
+        Some(signer) => tr!("ui.insert_signed", name = &name, key = signer),
+        None => tr!("ui.insert_signed_unknown", name = &name),
     })
 }
 
@@ -1713,9 +1713,9 @@ pub(crate) fn show_refusal(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(refusal) = app.file_load.refusals.front().cloned() else { return };
     let solidcraft_engine::plugin::HostError::Unsupported { reason } = &refusal.error else { return };
     let (closed, action) =
-        crate::ui_kit::Confirm::new(egui::Id::unique("sc_import_refusal"), "status_warning", app.tr("plugin_import.refused_title"))
+        crate::ui_kit::Confirm::new(egui::Id::unique("sc_import_refusal"), "status_warning", tr!(app, "plugin_import.refused_title"))
             .tone(crate::ui_kit::Tone::Warning)
-            .actions(app.tr("ui.heading_ok"), "", None)
+            .actions(tr!(app, "ui.heading_ok"), "", None)
             .show(ctx, true, |ui| {
                 crate::ui_kit::text(ui, &refusal.plugin, crate::ui_kit::Text::Report("plugin", false));
                 crate::ui_kit::text(ui, reason, crate::ui_kit::Text::Report("message", false));
@@ -1825,7 +1825,7 @@ fn behind(app: &mut SolveApp, mut running: Running) {
                 recovered_behind(app, uid, id, dir.as_deref());
             }
             let name = std::path::Path::new(&request.path).file_name().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-            app.set_status(solidcraft_ui_text::format("file_load.opened_behind", &[("name", &name)]), false);
+            app.set_status(tr!("file_load.opened_behind", name = &name), false);
             request.answer(Ok(made.result));
         }
         Err(e) => {
@@ -1891,7 +1891,7 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
             }
             Ok(made) if request.kind.exports() && (!request.sheet_in_reply() || !running.cancelled()) => {
                 if !request.path.is_empty() {
-                    app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", &request.path)]), false);
+                    app.set_status(tr!("ui.saved_to", path = &request.path), false);
                 }
                 request.answer(Ok(made.result));
             }
@@ -1920,7 +1920,7 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                     panel.depth = app.session.undo.len();
                 }
                 let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
-                app.set_status(language.format("ui.command_done", &[("command", language.command(id, crate::command_label(id)))]), false);
+                app.set_status(tr!(language, "ui.command_done", command = language.command(id, crate::command_label(id))), false);
                 // A design it could not read is said as when that was all it was asked.
                 if let Some(f) = r.as_ref().ok().and_then(|v| v["failed"].as_array()).and_then(|f| f.first()) {
                     let (name, why) = (f["name"].as_str().unwrap_or_default(), f["error"].as_str().unwrap_or_default());
@@ -1989,7 +1989,7 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                 } else {
                     app.set_status(
                         if made.result.get("read_only").and_then(Value::as_bool) == Some(true) {
-                            solidcraft_ui_text::tr("document.opened_read_only").to_string()
+                            tr!("document.opened_read_only").to_string()
                         } else if let Some(summary) = crate::timeline::import_warning_status(app, &made.result) {
                             summary
                         } else {
@@ -2120,7 +2120,7 @@ fn load_steps(
     let count = |key: &str, done: usize, total: usize| {
         Some(solidcraft_ui_text::format(key, &[("done", &(done + 1).min(total).to_string()), ("total", &total.to_string())]))
     };
-    let percent = |d: usize, t: usize| Some(solidcraft_ui_text::format("file_load.step_percent", &[("percent", &(d * 100 / t.max(1)).to_string())]));
+    let percent = |d: usize, t: usize| Some(tr!("file_load.step_percent", percent = &(d * 100 / t.max(1)).to_string()));
     let (current, detail) = match (phase, work) {
         (1.., _) => (2, None),
         (_, Some(("reading", d, t))) if cad => (0, percent(d, t)),
@@ -2152,10 +2152,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Kind::Recover { .. } => r.request.path.clone(),
         // The linked design being read again, once the worker is on one.
         Kind::UpdateLinks => match r.progress.item() {
-            Some((name, i, n)) => solidcraft_ui_text::format(
-                "file_load.link_item",
-                &[("name", &name), ("done", &(i + 1).min(n).to_string()), ("total", &n.to_string())],
-            ),
+            Some((name, i, n)) => tr!("file_load.link_item", name = &name, done = &(i + 1).min(n).to_string(), total = &n.to_string()),
             None => app.session.doc.name.clone(),
         },
         Kind::ReloadCloud => app.session.doc.name.clone(),
@@ -2201,9 +2198,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let title = if cancelled && export {
         solidcraft_ui_text::tr_label("dxf.cancelling")
     } else if cancelled {
-        solidcraft_ui_text::tr("file_load.waiting")
+        tr!("file_load.waiting")
     } else {
-        solidcraft_ui_text::tr(match r.request.kind {
+        solidcraft_ui_text::tr_by_id(match r.request.kind {
             Kind::Insert | Kind::InsertDesign => "file_load.inserting",
             Kind::Open => "file_load.opening",
             Kind::Recover { .. } => "file_load.recovering",
@@ -2224,7 +2221,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let (closed, action) = ui_kit::Window::new(card_id, icon, title)
         .cards(((cover.width() - 16.0) / solidcraft_theme::Tokens::get().form_card_width).clamp(0.5, 1.3))
         .placed(egui::Align2::CENTER_TOP, top)
-        .actions("", solidcraft_ui_text::tr("ui.cancel"), None)
+        .actions("", tr!("ui.cancel"), None)
         .show(ctx, true, |ui| {
             if !name.is_empty() {
                 ui_kit::text(ui, &format!("{name}…"), ui_kit::Text::Report("name", false));
@@ -2233,8 +2230,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 let w = ui.available_width();
                 ui.image((preview.id(), egui::vec2(w, w * 200.0 / 320.0)));
                 let note = match r.built {
-                    Some(built) => solidcraft_ui_text::format("file_load.built", &[("built", &built.to_string()), ("total", &total.to_string())]),
-                    None => solidcraft_ui_text::tr("file_load.preview_note").to_string(),
+                    Some(built) => tr!("file_load.built", built = &built.to_string(), total = &total.to_string()),
+                    None => tr!("file_load.preview_note").to_string(),
                 };
                 ui_kit::text(ui, &note, ui_kit::Text::Note("preview"));
             }
@@ -2245,30 +2242,23 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 let cad = matches!(r.request.kind, Kind::Open | Kind::Insert)
                     && (solidcraft_engine::io::is_step_path(&r.request.path) || solidcraft_engine::io::is_iges_path(&r.request.path));
                 let (labels, current, detail) = load_steps(cad, phase, r.progress.work(), (done, total));
-                let labels = labels.map(solidcraft_ui_text::tr);
+                let labels = labels.map(solidcraft_ui_text::tr_by_id);
                 ui_kit::steps(ui, "file_load", &labels, current, detail.as_deref());
             } else {
                 let status = if cancelled && export {
                     solidcraft_ui_text::tr_label("dxf.cancel_wait").to_string()
                 } else if cancelled {
-                    solidcraft_ui_text::tr("file_load.stopping").to_string()
+                    tr!("file_load.stopping").to_string()
                 } else {
                     match (phase, work) {
                         (_, work) if r.request.kind == Kind::ExportDxf => crate::dialogs_view_dxf::progress_text(work),
                         (_, work) if r.request.kind == Kind::ExportSheet => sheet_progress_text(work),
-                        (_, Some(("reading", d, t))) => {
-                            solidcraft_ui_text::format("file_load.reading_percent", &[("percent", &(d * 100 / t.max(1)).to_string())])
-                        }
-                        (_, Some((_, d, t))) => {
-                            solidcraft_ui_text::format("file_load.converting", &[("done", &(d + 1).to_string()), ("total", &t.to_string())])
-                        }
-                        (1, _) => solidcraft_ui_text::tr("file_load.preparing_view").to_string(),
-                        (2, _) => solidcraft_ui_text::tr("file_load.preparing_thumbnail").to_string(),
-                        _ if total > 0 => solidcraft_ui_text::format(
-                            "file_load.rebuilding",
-                            &[("done", &(done + 1).min(total).to_string()), ("total", &total.to_string())],
-                        ),
-                        _ => solidcraft_ui_text::tr("file_load.reading").to_string(),
+                        (_, Some(("reading", d, t))) => tr!("file_load.reading_percent", percent = &(d * 100 / t.max(1)).to_string()),
+                        (_, Some((_, d, t))) => tr!("file_load.converting", done = &(d + 1).to_string(), total = &t.to_string()),
+                        (1, _) => tr!("file_load.preparing_view").to_string(),
+                        (2, _) => tr!("file_load.preparing_thumbnail").to_string(),
+                        _ if total > 0 => tr!("file_load.rebuilding", done = &(done + 1).min(total).to_string(), total = &total.to_string()),
+                        _ => tr!("file_load.reading").to_string(),
                     }
                 };
                 ui_kit::steps(ui, "file_load", &[status.as_str()], 0, None);

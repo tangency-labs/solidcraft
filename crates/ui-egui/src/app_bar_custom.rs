@@ -46,16 +46,16 @@ pub(crate) fn items(app: &SolveApp, id: Option<&str>) -> Vec<Item> {
             ("right", "app_bar.move_right", "redo"),
         ] {
             rows.push(
-                Item::action("ui.appBarEdit", app.tr(key), icon)
+                Item::action("ui.appBarEdit", app.tr_by_id(key), icon)
                     .on_if(action != "hide" || (app_bar_items::can_remove(id) && !locked(app, id)))
                     .with(json!({"item":id,"action":action})),
             );
         }
         rows.push(Item::sep());
     }
-    rows.push(Item::action("ui.appBarCustomize", app.tr("cmd.ui.appBarCustomize"), "settings"));
+    rows.push(Item::action("ui.appBarCustomize", tr!(app, "cmd.ui.appBarCustomize"), "settings"));
     if id.is_none() {
-        rows.push(Item::action("ui.appBarReset", app.tr("cmd.ui.appBarReset"), "restore"));
+        rows.push(Item::action("ui.appBarReset", tr!(app, "cmd.ui.appBarReset"), "restore"));
     }
     rows
 }
@@ -67,7 +67,7 @@ pub(crate) fn locked(app: &SolveApp, id: &str) -> bool {
 pub(crate) fn run(app: &mut SolveApp, p: &Value) {
     let id = p.get("item").and_then(Value::as_str).unwrap_or("");
     if p.get("action").and_then(Value::as_str) == Some("hide") && locked(app, id) {
-        app.set_status(solidcraft_ui_text::tr("policy.set_by_organization").to_string(), false);
+        app.set_status(tr!("policy.set_by_organization").to_string(), false);
         return;
     }
     let defaults = defaults(app);
@@ -409,7 +409,7 @@ fn label_icon(app: &SolveApp, id: &str) -> (String, String) {
         _ if id.starts_with("space:") => ("app_bar.space", "help"),
         _ => return (id.into(), "help".into()),
     };
-    (app.tr(key).into(), icon.into())
+    (app.tr_by_id(key).into(), icon.into())
 }
 fn control<'a>(app: &'a SolveApp, id: &'a str, version: &'a str) -> Control<'a> {
     match id {
@@ -418,8 +418,8 @@ fn control<'a>(app: &'a SolveApp, id: &'a str, version: &'a str) -> Control<'a> 
         "space" => Control::Space,
         _ if id.starts_with("separator:") => Control::Separator,
         _ if id.starts_with("space:") => Control::Space,
-        "file" => Control::File { label: app.tr("ui.file"), enabled: true, open: false },
-        "report" => Control::Report { label: app.tr("ui.report_a_bug"), labelled: true },
+        "file" => Control::File { label: tr!(app, "ui.file"), enabled: true, open: false },
+        "report" => Control::Report { label: tr!(app, "ui.report_a_bug"), labelled: true },
         "version" => Control::Version(version),
         "assistant" => Control::Assistant { state: crate::toolbar::assistant_state(app), open: app.agent_chat.open },
         "donate" | "discord" => {
@@ -428,12 +428,12 @@ fn control<'a>(app: &'a SolveApp, id: &'a str, version: &'a str) -> Control<'a> 
                     data: app_bar::Pill {
                         id: link.id,
                         icon: link.icon,
-                        label: if link.named { app.tr(link.button) } else { "" },
+                        label: if link.named { app.tr_by_id(link.button) } else { "" },
                         labelled: link.named,
-                        tip: app.tr(link.tip),
-                        hide_tip: app.tr("app_bar.hide_tip"),
-                        name: app.tr(link.name),
-                        hide_name: app.tr(link.hide_name),
+                        tip: app.tr_by_id(link.tip),
+                        hide_tip: tr!(app, "app_bar.hide_tip"),
+                        name: app.tr_by_id(link.name),
+                        hide_name: app.tr_by_id(link.hide_name),
                         fill: link.fill,
                         ink: solidcraft_theme::Tokens::get().on_accent,
                     },
@@ -510,7 +510,7 @@ fn tile(app: &mut SolveApp, ui: &mut egui::Ui, id: &str, version: &str) {
                 let badge = app_bar::tray_badge(ui, cell);
                 crate::scenario::publish_rect(&format!("appbar:badge:{id}"), badge);
                 ui.interact(badge, ui.scope_id().with(("badge", id)), Sense::hover())
-                    .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, app.tr("app_bar.on_bar")));
+                    .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, tr!(app, "app_bar.on_bar")));
             }
         }
         if response.has_focus() {
@@ -545,8 +545,9 @@ fn tile(app: &mut SolveApp, ui: &mut egui::Ui, id: &str, version: &str) {
 
 fn header(app: &mut SolveApp, ui: &mut egui::Ui, width: f32) -> bool {
     let t = solidcraft_theme::Tokens::get();
-    let options = [app.tr("app_bar.default"), app.tr("app_bar.minimal"), app.tr("app_bar.full"), app.tr("app_bar.compact"), app.tr("app_bar.custom")];
-    let done_label = app.tr("app_bar.done");
+    let options =
+        [tr!(app, "app_bar.default"), tr!(app, "app_bar.minimal"), tr!(app, "app_bar.full"), tr!(app, "app_bar.compact"), tr!(app, "app_bar.custom")];
+    let done_label = tr!(app, "app_bar.done");
     let done_width =
         ui.painter().layout_no_wrap(done_label.into(), FontId::proportional(t.font_label), t.on_accent).size().x + (t.space_12 + t.space_6) * 2.0;
     let segment_gap = t.space_8;
@@ -559,12 +560,12 @@ fn header(app: &mut SolveApp, ui: &mut egui::Ui, width: f32) -> bool {
     let controls_width = presets_width + t.space_24 + done_width;
     let title_width = (width - controls_width - t.space_24 - t.space_2).max(0.0);
     let title_height = t.font_heading + t.space_4;
-    let subtitle = app.tr("app_bar.subtitle");
+    let subtitle = tr!(app, "app_bar.subtitle");
     let subtitle_height = ui.painter().layout(subtitle.into(), FontId::proportional(t.font_small), t.form_dim, title_width).size().y;
     let height = (title_height + t.space_4 + subtitle_height + t.space_8).max(32.0);
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     let title = Rect::from_min_size(rect.min, vec2(title_width, title_height));
-    ui_kit::paint_text(ui, title, app.tr("app_bar.title"), FontId::proportional(t.font_heading), t.text, false);
+    ui_kit::paint_text(ui, title, tr!(app, "app_bar.title"), FontId::proportional(t.font_heading), t.text, false);
     crate::scenario::publish_rect("appbar:header:title", title);
     let sub = Rect::from_min_max(pos2(rect.left(), title.bottom() + t.space_4), pos2(title.right(), rect.bottom()));
     let mut sub_ui = ui.new_child(egui::UiBuilder::new().max_rect(sub).layout(egui::Layout::top_down(egui::Align::Min)));
@@ -639,7 +640,7 @@ fn section(app: &mut SolveApp, ui: &mut egui::Ui, width: f32, key: &str, ids: &[
     let (rect, _) = ui.allocate_exact_size(vec2(width, section_height(width, ids.len())), Sense::hover());
     crate::scenario::publish_rect(&format!("appbar:section:{key}"), rect);
     let heading = Rect::from_min_size(rect.min, vec2(width, t.control_height));
-    ui_kit::paint_text(ui, heading, app.tr(key), FontId::proportional(t.font_button), t.text, false);
+    ui_kit::paint_text(ui, heading, app.tr_by_id(key), FontId::proportional(t.font_button), t.text, false);
     let per_row = tiles_per_row(width);
     for (i, id) in ids.iter().enumerate() {
         let at = rect.min
@@ -711,21 +712,21 @@ fn footer(app: &mut SolveApp, ui: &mut egui::Ui, width: f32) {
     let t = solidcraft_theme::Tokens::get();
     let font = FontId::proportional(t.font_small);
     let measure = |s: &str| ui.painter().layout_no_wrap(s.into(), font.clone(), t.text).size().x;
-    let reset_width = measure(app.tr("app_bar.reset"));
-    let check_width = measure(app.tr("app_bar.check_hint"));
-    let keys_width = measure(app.tr("app_bar.keyboard_hint"));
+    let reset_width = measure(tr!(app, "app_bar.reset"));
+    let check_width = measure(tr!(app, "app_bar.check_hint"));
+    let keys_width = measure(tr!(app, "app_bar.keyboard_hint"));
     let (row, _) = ui.allocate_exact_size(vec2(width, 32.0), Sense::hover());
     let flank = reset_width.max(check_width).min(width / 3.0);
     let reset_rect = Rect::from_min_max(row.min, pos2(row.left() + reset_width.min(flank), row.bottom()));
-    let reset = app_bar::tray_link(ui, reset_rect, app.tr("app_bar.reset"));
+    let reset = app_bar::tray_link(ui, reset_rect, tr!(app, "app_bar.reset"));
     crate::scenario::publish_target("appbar:reset", reset.rect);
     if reset.clicked() {
         app.start("ui.appBarReset");
     }
     let keys_rect = Rect::from_center_size(row.center(), vec2(keys_width.min((width - flank * 2.0 - t.space_16).max(0.0)), row.height()));
     let check_rect = Rect::from_min_max(pos2(row.right() - check_width.min(flank), row.top()), row.max);
-    ui_kit::paint_text(ui, keys_rect, app.tr("app_bar.keyboard_hint"), font.clone(), t.form_dim, false);
-    ui_kit::paint_text(ui, check_rect, app.tr("app_bar.check_hint"), font, t.form_dim, false);
+    ui_kit::paint_text(ui, keys_rect, tr!(app, "app_bar.keyboard_hint"), font.clone(), t.form_dim, false);
+    ui_kit::paint_text(ui, check_rect, tr!(app, "app_bar.check_hint"), font, t.form_dim, false);
     crate::scenario::publish_rect("appbar:footer:keys", keys_rect);
     crate::scenario::publish_rect("appbar:footer:check", check_rect);
 }
@@ -796,7 +797,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 divider(ui, content_width);
                 footer(app, ui, content_width);
                 if removing {
-                    ui_kit::assistant_badge(ui, app.tr("app_bar.release"), ui_kit::AssistantTone::Working);
+                    ui_kit::assistant_badge(ui, tr!(app, "app_bar.release"), ui_kit::AssistantTone::Working);
                 }
             });
             crate::scenario::publish_rect("appbar:tray", card.response.rect);
@@ -858,7 +859,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 |ui| {
                     Container::show_backing(ui, host.frame(ctx, t.dialog_bg, ui_kit::frame::Side::Left).inner_margin(t.space_8), |ui| {
                         ui.set_max_width(320.0);
-                        ui_kit::text(ui, app.tr("app_bar.file_required"), ui_kit::Text::Note("appbar_file_required"));
+                        ui_kit::text(ui, tr!(app, "app_bar.file_required"), ui_kit::Text::Note("appbar_file_required"));
                     });
                 },
             );

@@ -271,11 +271,7 @@ impl Product {
         if self == Self::Assistant {
             let waiting = app.agent_chat.waiting();
             let state = app.agent_chat.state();
-            presentation.status = Some(if waiting > 0 {
-                solidcraft_ui_text::format("ui.assistant_waiting", &[("count", &waiting.to_string())])
-            } else {
-                state.label().into()
-            });
+            presentation.status = Some(if waiting > 0 { tr!("ui.assistant_waiting", count = &waiting.to_string()) } else { state.label().into() });
             presentation.attention = waiting > 0
                 || matches!(state, crate::agent_chat::State::NeedsAuth | crate::agent_chat::State::Exited | crate::agent_chat::State::Failed);
         }
@@ -283,7 +279,7 @@ impl Product {
             presentation.title = crate::drawing_workspace::inspector_title(app).into();
         }
         if self == Self::Browser && crate::drawing_workspace::active(app) && app.session.drawing("drawing.inspect").is_ok() {
-            presentation.status = Some(app.tr("ui.drawing_browser_one_drawing").into());
+            presentation.status = Some(tr!(app, "ui.drawing_browser_one_drawing").into());
         }
         presentation.actions = match self {
             Self::History | Self::Timeline2d => crate::ui_kit::HistoryTransport::shown(app.preferences.history_play_button)
@@ -301,7 +297,7 @@ impl Product {
                 .chain(self.header_actions().into_iter().filter(|spec| [TIMELINE_SETTINGS, TIMELINE_VIEW].contains(&spec.id.0.as_str())).map(
                     |spec| RuntimeAction {
                         id: spec.id,
-                        label: solidcraft_ui_text::tr(&spec.label_key).into(),
+                        label: solidcraft_ui_text::tr_by_id(&spec.label_key).into(),
                         enabled: true,
                         disabled_reason: None,
                         pressed: None,
@@ -310,7 +306,7 @@ impl Product {
                 .collect(),
             Self::Assistant => vec![RuntimeAction {
                 id: ControlId("new-chat".into()),
-                label: solidcraft_ui_text::tr("ui.agent_chat_new").into(),
+                label: tr!("ui.agent_chat_new").into(),
                 enabled: true,
                 disabled_reason: None,
                 pressed: None,
@@ -323,7 +319,7 @@ impl Product {
             .into_iter()
             .map(|(id, key, pressed)| RuntimeAction {
                 id: ControlId(id.into()),
-                label: solidcraft_ui_text::tr(key).into(),
+                label: solidcraft_ui_text::tr_by_id(key).into(),
                 enabled: true,
                 disabled_reason: None,
                 pressed: Some(pressed),
@@ -337,7 +333,7 @@ impl Product {
                         .enumerate()
                         .map(|(index, action)| RuntimeAction {
                             id: action.id,
-                            label: solidcraft_ui_text::tr(&action.label_key).into(),
+                            label: solidcraft_ui_text::tr_by_id(&action.label_key).into(),
                             enabled: true,
                             disabled_reason: None,
                             pressed: Some(mode == index),
@@ -354,7 +350,7 @@ impl Product {
                 inspector::shared_remove_available(app)
                     .then(|| RuntimeAction {
                         id: ControlId("remove".into()),
-                        label: solidcraft_ui_text::tr("render.inspector_remove").into(),
+                        label: tr!("render.inspector_remove").into(),
                         enabled: true,
                         disabled_reason: None,
                         pressed: None,
@@ -368,7 +364,7 @@ impl Product {
                     .into_iter()
                     .map(|action| RuntimeAction {
                         id: action.id,
-                        label: solidcraft_ui_text::tr(&action.label_key).into(),
+                        label: solidcraft_ui_text::tr_by_id(&action.label_key).into(),
                         enabled: true,
                         disabled_reason: None,
                         pressed: None,
@@ -379,7 +375,7 @@ impl Product {
                 presentation.status = Some(crate::browser_search::body_count(app));
                 vec![RuntimeAction {
                     id: ControlId("magnifier".into()),
-                    label: solidcraft_ui_text::tr("ui.browser_search_hint").into(),
+                    label: tr!("ui.browser_search_hint").into(),
                     enabled: true,
                     disabled_reason: None,
                     pressed: Some(crate::browser_search::bar_shown(app)),
@@ -393,9 +389,9 @@ impl Product {
                         let enabled = action.id.0 != "design-folder" || app.session.path.is_some();
                         RuntimeAction {
                             id: action.id,
-                            label: solidcraft_ui_text::tr(&action.label_key).into(),
+                            label: solidcraft_ui_text::tr_by_id(&action.label_key).into(),
                             enabled,
-                            disabled_reason: (!enabled).then(|| solidcraft_ui_text::tr("parts_library.design_folder").into()),
+                            disabled_reason: (!enabled).then(|| tr!("parts_library.design_folder").into()),
                             pressed: None,
                         }
                     })
@@ -407,7 +403,7 @@ impl Product {
     }
     fn empty_presentation(self) -> PanelPresentation {
         PanelPresentation {
-            title: solidcraft_ui_text::tr(self.title_key()).into(),
+            title: solidcraft_ui_text::tr_by_id(self.title_key()).into(),
             icon: self.icon().into(),
             status: None,
             attention: false,
@@ -1351,7 +1347,7 @@ impl PanelController for ProductionController {
         }) {
             Availability::Available
         } else {
-            Availability::Unavailable { reason: solidcraft_ui_text::tr("ui.panel_host.rule.availability").into() }
+            Availability::Unavailable { reason: tr!("ui.panel_host.rule.availability").into() }
         }
     }
     fn update(&mut self, _owner: &ContentOwner, _services: &mut ContentServices<'_>) -> PanelResult<()> {

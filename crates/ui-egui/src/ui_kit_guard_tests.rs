@@ -1060,7 +1060,7 @@ mod checkbox_in_use {
                     if name == "preferences" {
                         // Find the redesigned Layout checkbox by its current visible label.
                         crate::prefs::open_at(&mut app, crate::prefs::PAGE_LAYOUT);
-                        app.prefs_window.shell.filter = app.tr("prefs.layout_page.active_commands").to_string();
+                        app.prefs_window.shell.filter = app.tr_by_id("prefs.layout_page.active_commands").to_string();
                     }
                     let mut textures = HashMap::new();
                     let mut final_output = None;
@@ -1492,8 +1492,8 @@ fn message_id_guard_finds_host_ids_but_skips_kit_vocabulary_and_tests() {
     let names = host_message_ids();
     assert!(names.contains("prefs.blur_off") && !names.contains("ui.undo") && !names.contains("Invert"));
     let source = r#"
-        fn host() -> &'static str { solidcraft_ui_text::tr("prefs.blur_off") }
-        fn kit() -> &'static str { solidcraft_ui_text::tr("ui.undo") }
+        fn host() -> &'static str { solidcraft_ui_text::tr_by_id("prefs.blur_off") }
+        fn kit() -> &'static str { solidcraft_ui_text::tr_by_id("ui.undo") }
         fn handle() -> String { format!("prefs:blur_cost:{}", "ai.prefs.pointer_preview_hidden") }
         #[cfg(test)]
         mod tests { fn sample() -> &'static str { "sketch_text.bold" } }

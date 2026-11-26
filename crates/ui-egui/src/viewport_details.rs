@@ -9,11 +9,11 @@ use solidcraft_engine::{
     status_items::{StatusItem, StatusSetting},
 };
 
-fn tr(id: &str) -> String {
-    solidcraft_ui_text::tr(id).to_owned()
+fn tr(msg: solidcraft_ui_text::Msg) -> String {
+    solidcraft_ui_text::tr(msg).to_owned()
 }
 fn field(id: &str, label: &str, value: DetailValue) -> DetailSetting {
-    DetailSetting { id: id.into(), label: tr(label), value, enabled: true, stacked: false }
+    DetailSetting { id: id.into(), label: solidcraft_ui_text::tr_by_id(label).to_owned(), value, enabled: true, stacked: false }
 }
 fn length(app: &SolveApp, value: f64) -> DetailValue {
     DetailValue::Length { value, units: app.session.doc.units.clone(), decimals: app.preferences.length_decimals }
@@ -41,7 +41,7 @@ fn record_id(row: &ContinuityDetail) -> String {
     json!([row.body, row.edge]).to_string()
 }
 fn record_label(row: &ContinuityDetail) -> String {
-    solidcraft_ui_text::format("ui.details_seam", &[("body", &row.body), ("edge", &row.edge.to_string())])
+    msg!("ui.details_seam", body = &row.body, edge = &row.edge.to_string()).tr()
 }
 fn selected<'a>(app: &SolveApp, rows: &'a [ContinuityDetail]) -> Option<&'a ContinuityDetail> {
     app.viewport_status.selected_record.as_ref().and_then(|id| rows.iter().find(|row| record_id(row) == *id)).or_else(|| rows.first())
@@ -64,19 +64,19 @@ pub(crate) fn description(app: &SolveApp, effect: &StatusItem) -> Details {
     let mut details = Details::default();
     match effect.setting {
         StatusSetting::Draft { pull, angle_deg } => {
-            details.caption = Some(tr("ui.details_draft_caption"));
+            details.caption = Some(tr(msg!("ui.details_draft_caption")));
             details.settings = vec![field("pull", "ui.details_pull", axis(pull)), field("angle", "ui.details_angle", DetailValue::Angle(angle_deg))];
         }
         StatusSetting::Zebra { stripes } => {
-            details.caption = Some(tr("ui.details_zebra_caption"));
+            details.caption = Some(tr(msg!("ui.details_zebra_caption")));
             details.settings.push(field("stripes", "ui.details_stripes", DetailValue::Slider { value: stripes, min: 1.0, max: 200.0 }));
         }
         StatusSetting::Accessibility { direction } => {
-            details.caption = Some(tr("ui.details_access_caption"));
+            details.caption = Some(tr(msg!("ui.details_access_caption")));
             details.settings.push(field("direction", "ui.details_direction", axis(direction)));
         }
         StatusSetting::Curvature { radius_mm } => {
-            details.caption = Some(tr("ui.details_curvature_caption"));
+            details.caption = Some(tr(msg!("ui.details_curvature_caption")));
             details.settings.push(field("radius", "ui.details_radius", length(app, radius_mm)));
         }
         StatusSetting::Section { origin_mm, normal, hatch } => {
@@ -94,13 +94,13 @@ pub(crate) fn description(app: &SolveApp, effect: &StatusItem) -> Details {
         StatusSetting::Isolate { .. } => {
             let shows = crate::viewport::ISOLATE_SHOWS;
             let selected = shows.iter().position(|(show, _, _)| *show == app.preferences.isolate_others).unwrap_or(0);
-            let options = shows.iter().map(|(_, _, label)| tr(label)).collect();
+            let options = shows.iter().map(|(_, _, label)| solidcraft_ui_text::tr_by_id(label).to_owned()).collect();
             // "Other parts display as" is longer than the label column: above its choice.
             details.settings.push(DetailSetting { stacked: true, ..field("show", "ui.isolate_show", DetailValue::Choice { selected, options }) });
             // Whether clicks select the parts drawn, only while they are drawn.
             if app.preferences.isolate_others != solidcraft_engine::schema::view_navigation::IsolateShow::Hidden {
                 let selected = usize::from(!app.preferences.isolate_others_pick);
-                let options = vec![tr("ui.isolate_pick_select"), tr("ui.isolate_pick_through")];
+                let options = vec![tr!("ui.isolate_pick_select").to_owned(), tr!("ui.isolate_pick_through").to_owned()];
                 details.settings.push(DetailSetting { stacked: true, ..field("pick", "ui.isolate_pick", DetailValue::Choice { selected, options }) });
             }
         }
@@ -130,7 +130,7 @@ fn continuity_description(app: &SolveApp, details: &mut Details) {
     use solidcraft_engine::status_details::ContinuityVerdict as V;
     let rows = app.session.continuity_details();
     let Some(row) = selected(app, &rows) else { return };
-    details.caption = Some(tr("ui.details_continuity_caption"));
+    details.caption = Some(tr(msg!("ui.details_continuity_caption")));
     let index = rows.iter().position(|other| record_id(other) == record_id(row)).unwrap_or(0);
     let (scale, unit) = crate::prefs::unit_scale(&app.session.doc.units);
     details.settings = vec![
@@ -144,7 +144,7 @@ fn continuity_description(app: &SolveApp, details: &mut Details) {
         setting.enabled = row.current;
     }
     if !row.current {
-        details.caption = Some(tr("ui.details_continuity_stale"));
+        details.caption = Some(tr(msg!("ui.details_continuity_stale")));
     }
     let t = solidcraft_theme::Tokens::get();
     for (label, colour, count) in [
@@ -155,13 +155,13 @@ fn continuity_description(app: &SolveApp, details: &mut Details) {
         details.key.push(DetailKey {
             colour,
             pattern: label == "ui.details_sharp_gap",
-            label: tr(label),
+            label: solidcraft_ui_text::tr_by_id(label).to_owned(),
             value: count.to_string(),
             numeric: false,
             pattern_colour: (label == "ui.details_sharp_gap").then_some(t.continuity[3]),
         });
     }
-    details.findings_title = tr("ui.details_worst_seams");
+    details.findings_title = tr(msg!("ui.details_worst_seams"));
     details.findings_count = Some(rows.len().to_string());
     let mut findings: Vec<_> = rows.iter().collect();
     findings.sort_by(|a, b| {
@@ -179,7 +179,7 @@ fn continuity_description(app: &SolveApp, details: &mut Details) {
             DetailFinding { id: record_id(row), label: record_label(row), value, warning: row.verdict != V::Smooth, target: row.current }
         })
         .collect();
-    details.actions.push(("copy".into(), tr("ui.details_copy_list")));
+    details.actions.push(("copy".into(), tr(msg!("ui.details_copy_list"))));
 }
 
 /// Rebuild a complete command from current Session values for every single-field edit.
@@ -336,7 +336,7 @@ pub(crate) fn legacy_legends(app: &SolveApp, ui: &mut egui::Ui, viewport: egui::
             .into_iter()
             .map(|order| DetailKey {
                 colour: crate::viewport::continuity_color(&t, order),
-                label: tr(crate::sketch_tools::order_class(order)),
+                label: solidcraft_ui_text::tr_by_id(crate::sketch_tools::order_class(order)).to_owned(),
                 pattern: order.is_none(),
                 value: String::new(),
                 numeric: false,

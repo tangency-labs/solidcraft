@@ -15,7 +15,7 @@ use solidcraft_engine::{Sel, Session};
 use crate::dialogs::{Dialog, Kind, combo, edge_sel, face_sel, form_row, object_point, plane_sel, put, set_object_accepting};
 use crate::selection::{Accept, EDGES, FACES, PLANES, SelInput};
 use crate::ui_kit::{choice_row, expr_row, hint_row, text_row};
-use solidcraft_ui_text::tr;
+use solidcraft_ui_text::tr_by_id;
 
 /// Common metric pitch presets besides the coarse one, not an exhaustive catalogue of standard
 /// diameter/pitch pairs; the current pitch is included separately, custom pairs remain editable.
@@ -189,7 +189,7 @@ pub(crate) fn hole_rows(
                 drill_enter = submitted;
             }
             None => {
-                ui.label(tr("thread.select_size"));
+                ui.label(tr!("thread.select_size"));
             }
         }
     });
@@ -451,7 +451,7 @@ pub(crate) fn rows(
     if !f.sizes().is_empty() {
         size_rows(ui, f, designation, suggested);
     }
-    let hint = solidcraft_ui_text::format("thread.fits_the_face", &[("example", &example(f))]);
+    let hint = tr!("thread.fits_the_face", example = &example(f));
     let (submitted, changed) = text_row(ui, "Designation", designation, &hint);
     enter |= submitted;
     if let Some(at) = crate::scenario::handle_at("dialog:Designation") {
@@ -500,10 +500,10 @@ pub(crate) fn rows(
             let mut both = o.tip == ThreadTip::Both;
             crate::ui_kit::checkbox_grid(ui, &mut [("Chamfer both ends", &mut both)], 2);
             o.tip = if both { ThreadTip::Both } else { ThreadTip::Start };
-            enter |= hint_row(ui, "Chamfer Angle", &mut o.chamfer_angle, tr("ui.iso_4753"));
+            enter |= hint_row(ui, "Chamfer Angle", &mut o.chamfer_angle, tr!("ui.iso_4753"));
             // ISO 4753's depth is for ISO metric threads; the other forms give theirs.
             let depth = if f == ThreadForm::Metric { "ui.iso_4753" } else { "thread.chamfer_depth_needed" };
-            enter |= hint_row(ui, "Chamfer Depth", &mut o.chamfer_depth, tr(depth));
+            enter |= hint_row(ui, "Chamfer Depth", &mut o.chamfer_depth, tr_by_id(depth));
         }
         enter |= end_rows(ui, &mut o.ease_out);
     });
@@ -519,7 +519,7 @@ pub(crate) fn end_rows(ui: &mut egui::Ui, ease: &mut Ease) -> bool {
     if !ease.fade {
         return false;
     }
-    let hint = if ease.short { tr("thread.fade_short") } else { tr("thread.fade_standard") };
+    let hint = if ease.short { tr!("thread.fade_short") } else { tr!("thread.fade_standard") };
     hint_row(ui, "Fade Length", &mut ease.length, hint)
 }
 

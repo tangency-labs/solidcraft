@@ -505,7 +505,7 @@ fn detect_in(dirs: &[PathBuf], home: Option<&Path>, limit: Duration) -> Detectio
         }
         let mut result = if k.reports_version { probe(&path, limit) } else { Probe::default() };
         if let Some(version) = result.old_node.as_deref() {
-            result.problem = Some(solidcraft_ui_text::format("ui.agent_chat_node_too_old", &[("version", version)]));
+            result.problem = Some(tr!("ui.agent_chat_node_too_old", version = version));
             if uses_env_node(&path)
                 && let Some(node) = compatible_node(dirs, limit)
             {

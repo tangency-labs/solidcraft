@@ -136,74 +136,80 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 }
 
 pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut CellGrid, _: &[SelInput]) -> bool {
-    choice_row(ui, app.tr("ui.cell_grid.mode"), "cell_grid_mode", &mut c.mode, &[app.tr("ui.cell_grid.cut"), app.tr("ui.cell_grid.raised")]);
+    choice_row(ui, tr!(app, "ui.cell_grid.mode"), "cell_grid_mode", &mut c.mode, &[tr!(app, "ui.cell_grid.cut"), tr!(app, "ui.cell_grid.raised")]);
     choice_row(
         ui,
-        app.tr("Shape"),
+        tr!(app, "Shape"),
         "cell_grid_shape",
         &mut c.shape,
-        &[app.tr("ui.cell_grid.hexagon"), app.tr("ui.perforate_square"), app.tr("ui.cell_grid.triangle"), app.tr("ui.circle"), app.tr("ui.polygon")],
+        &[
+            tr!(app, "ui.cell_grid.hexagon"),
+            tr!(app, "ui.perforate_square"),
+            tr!(app, "ui.cell_grid.triangle"),
+            tr!(app, "ui.circle"),
+            tr!(app, "ui.polygon"),
+        ],
     );
     let mut enter = false;
     if SHAPES.get(c.shape) == Some(&"polygon") {
-        enter |= expr_row(ui, app.tr("ui.cell_grid.sides"), &mut c.sides);
+        enter |= expr_row(ui, tr!(app, "ui.cell_grid.sides"), &mut c.sides);
     }
     if c.on_dots() {
         choice_row(
             ui,
-            app.tr("ui.cell_grid.dot_grid"),
+            tr!(app, "ui.cell_grid.dot_grid"),
             "cell_grid_dot_grid",
             &mut c.dot_grid,
-            &[app.tr("ui.cell_grid.hexagonal"), app.tr("ui.perforate_square")],
+            &[tr!(app, "ui.cell_grid.hexagonal"), tr!(app, "ui.perforate_square")],
         );
     }
-    enter |= expr_row(ui, app.tr("ui.cell_grid.size"), &mut c.size);
-    enter |= expr_row(ui, app.tr("ui.cell_grid.web"), &mut c.web);
+    enter |= expr_row(ui, tr!(app, "ui.cell_grid.size"), &mut c.size);
+    enter |= expr_row(ui, tr!(app, "ui.cell_grid.web"), &mut c.web);
     if c.raised() {
         c.through_all = false;
     } else {
-        row(ui, app.tr("ui.cell_grid.through_all"), |ui| check(ui, &mut c.through_all));
+        row(ui, tr!(app, "ui.cell_grid.through_all"), |ui| check(ui, &mut c.through_all));
     }
     if !c.through_all {
-        enter |= expr_row(ui, app.tr("ui.depth"), &mut c.depth);
+        enter |= expr_row(ui, tr!(app, "ui.depth"), &mut c.depth);
     }
     choice_row(
         ui,
-        app.tr("ui.direction"),
+        tr!(app, "ui.direction"),
         "cell_grid_direction",
         &mut c.direction,
-        &[app.tr("ui.cell_grid.positive"), app.tr("ui.cell_grid.negative"), app.tr("ui.symmetric")],
+        &[tr!(app, "ui.cell_grid.positive"), tr!(app, "ui.cell_grid.negative"), tr!(app, "ui.symmetric")],
     );
     choice_row(
         ui,
-        app.tr("ui.cell_grid.clip"),
+        tr!(app, "ui.cell_grid.clip"),
         "cell_grid_clip",
         &mut c.clip,
-        &[app.tr("ui.cell_grid.whole"), app.tr("ui.snap"), app.tr("ui.cell_grid.free")],
+        &[tr!(app, "ui.cell_grid.whole"), tr!(app, "ui.snap"), tr!(app, "ui.cell_grid.free")],
     );
     choice_row(
         ui,
-        app.tr("ui.cell_grid.keepout_clip"),
+        tr!(app, "ui.cell_grid.keepout_clip"),
         "cell_grid_keepout_clip",
         &mut c.keepout_clip,
-        &[app.tr("ui.cell_grid.same_as_clip"), app.tr("ui.cell_grid.whole"), app.tr("ui.snap"), app.tr("ui.cell_grid.free")],
+        &[tr!(app, "ui.cell_grid.same_as_clip"), tr!(app, "ui.cell_grid.whole"), tr!(app, "ui.snap"), tr!(app, "ui.cell_grid.free")],
     );
     if c.takes_snap_inset() {
-        enter |= expr_row(ui, app.tr("ui.cell_grid.snap_inset"), &mut c.snap_inset);
+        enter |= expr_row(ui, tr!(app, "ui.cell_grid.snap_inset"), &mut c.snap_inset);
     }
     if c.takes_margin() {
-        enter |= expr_row(ui, app.tr("Margin"), &mut c.margin);
+        enter |= expr_row(ui, tr!(app, "Margin"), &mut c.margin);
     }
-    enter |= expr_row(ui, app.tr("ui.angle"), &mut c.angle);
+    enter |= expr_row(ui, tr!(app, "ui.angle"), &mut c.angle);
     enter
 }
 
 pub fn commands(app: &SolveApp, c: &CellGrid, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let picked = crate::selection::items(inputs, PROFILES_INPUT).profiles();
-    let Some(sketch) = picked.first().map(|(sketch, _)| *sketch) else { return Err(app.tr("error.cell_grid_profiles").into()) };
+    let Some(sketch) = picked.first().map(|(sketch, _)| *sketch) else { return Err(tr!(app, "error.cell_grid_profiles").into()) };
     // The command fills one sketch: profiles of a second sketch are refused, not dropped.
     if picked.iter().any(|(s, _)| *s != sketch) {
-        return Err(app.tr("error.cell_grid_one_sketch").into());
+        return Err(tr!(app, "error.cell_grid_one_sketch").into());
     }
     let profiles: Vec<usize> = picked.iter().map(|(_, index)| *index).collect();
     let mut p = json!({
@@ -257,7 +263,7 @@ pub fn commands(app: &SolveApp, c: &CellGrid, inputs: &[SelInput], extra: &Map<S
                 args.insert("anchor".into(), kept.cloned().unwrap_or_default());
             }
             Some(pick) => {
-                let point = anchor_point(app, pick).ok_or_else(|| app.tr("error.cell_grid_anchor").to_string())?;
+                let point = anchor_point(app, pick).ok_or_else(|| tr!(app, "error.cell_grid_anchor").to_string())?;
                 args.insert("anchor".into(), crate::selection::point_value(point));
             }
             None => {}

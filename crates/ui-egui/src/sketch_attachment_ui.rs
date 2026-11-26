@@ -140,20 +140,16 @@ pub fn face_plane(app: &SolveApp, selection: &Sel) -> Option<Value> {
 /// name, or the plane it's offset from, turned from or flipped from (#5103).
 pub(crate) fn plane_description(doc: &solidcraft_engine::doc::Document, plane: &PlaneRef) -> String {
     fn describe(doc: &solidcraft_engine::doc::Document, plane: &PlaneRef, depth: usize) -> String {
-        let base = |b: &PlaneRef| if depth < 8 { describe(doc, b, depth + 1) } else { solidcraft_ui_text::tr("sketch_panel.plane_fixed").to_owned() };
+        let base = |b: &PlaneRef| if depth < 8 { describe(doc, b, depth + 1) } else { tr!("sketch_panel.plane_fixed").to_owned() };
         match plane {
-            PlaneRef::Origin { name } => solidcraft_ui_text::format("sketch_panel.plane_origin", &[("plane", name)]),
+            PlaneRef::Origin { name } => tr!("sketch_panel.plane_origin", plane = name),
             PlaneRef::Construction { feature, .. } => {
-                doc.feature(feature.0).map(|f| f.name.clone()).unwrap_or_else(|| solidcraft_ui_text::tr("sketch_panel.plane_fixed").to_owned())
+                doc.feature(feature.0).map(|f| f.name.clone()).unwrap_or_else(|| tr!("sketch_panel.plane_fixed").to_owned())
             }
-            PlaneRef::Offset { base: b, distance } => {
-                solidcraft_ui_text::format("sketch_panel.plane_offset", &[("plane", &base(b)), ("distance", distance)])
-            }
-            PlaneRef::AtAngle { base: b, angle, .. } => {
-                solidcraft_ui_text::format("sketch_panel.plane_angle", &[("plane", &base(b)), ("angle", angle)])
-            }
-            PlaneRef::Flipped { base: b, .. } => solidcraft_ui_text::format("sketch_panel.plane_flipped", &[("plane", &base(b))]),
-            _ => solidcraft_ui_text::tr("sketch_panel.plane_fixed").to_owned(),
+            PlaneRef::Offset { base: b, distance } => tr!("sketch_panel.plane_offset", plane = &base(b), distance = distance),
+            PlaneRef::AtAngle { base: b, angle, .. } => tr!("sketch_panel.plane_angle", plane = &base(b), angle = angle),
+            PlaneRef::Flipped { base: b, .. } => tr!("sketch_panel.plane_flipped", plane = &base(b)),
+            _ => tr!("sketch_panel.plane_fixed").to_owned(),
         }
     }
     describe(doc, plane, 0)
@@ -226,7 +222,7 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     let frame = ui_kit::Panel::feature_frame(ctx, app.ui.layout, side);
     let spec = solidcraft_engine::find_command("sketch.redefine");
     let command = spec.as_ref().map_or("", |s| solidcraft_ui_text::tr_command(s.id, s.label));
-    let title = solidcraft_ui_text::format("sketch_panel.redefine_title", &[("command", command), ("name", name)]);
+    let title = tr!("sketch_panel.redefine_title", command = command, name = name);
     let panel = ui_kit::Panel::new(&title, egui::Id::unique("sc_redefine"), anchor, drag_bounds, side, frame);
     let mut painted = false;
     let response = panel.window(ctx).show(ctx, |ui| {
@@ -254,8 +250,7 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                 );
                 let saved_plane = match &status {
                     FaceAttachmentStatus::Healthy { plane, target, path } => {
-                        let attached =
-                            solidcraft_ui_text::format("sketch_panel.attached", &[("body", &target.body), ("path", &path_label(app, path))]);
+                        let attached = tr!("sketch_panel.attached", body = &target.body, path = &path_label(app, path));
                         ui_kit::value_row(ui, "Attachment", &attached);
                         Some(*plane)
                     }
@@ -302,11 +297,11 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                         draft.error = None;
                     }
                     if available && let Some(path) = &draft.author_path {
-                        ui.label(solidcraft_ui_text::format("sketch_panel.author", &[("path", &path_label(app, path))]));
+                        ui.label(tr!("sketch_panel.author", path = &path_label(app, path)));
                     }
                 }
                 ui_kit::row(ui, "Plane", |ui| {
-                    let text = if draft.candidate.is_some() { draft.label.as_str() } else { solidcraft_ui_text::tr("dialog.select") };
+                    let text = if draft.candidate.is_some() { draft.label.as_str() } else { tr!("dialog.select") };
                     let response = ui_kit::selection_field(ui, text, ui_kit::Selection { active: true, filled: draft.candidate.is_some() });
                     if response
                         .backing_on_hover_text(solidcraft_ui_text::tr_label(
@@ -322,9 +317,7 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                     // The command takes the plane's id; the button and the choice show its name.
                     for plane in crate::prefs::OriginPlaneNames::PLANES {
                         let label = app.preferences.origin_plane_names.label(plane);
-                        if ui_kit::button(ui, solidcraft_ui_text::format("sketch_panel.use_plane", &[("plane", label)]), ui_kit::Button::Normal)
-                            .clicked()
-                        {
+                        if ui_kit::button(ui, tr!("sketch_panel.use_plane", plane = label), ui_kit::Button::Normal).clicked() {
                             draft.choose(json!(plane), label.into());
                         }
                     }
@@ -380,7 +373,7 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                     if let Some(plane) = later_plane(&app.session.doc, sketch, draft.candidate.as_ref()) {
                         ui_kit::text(
                             ui,
-                            &solidcraft_ui_text::format("sketch_panel.redefine_moves_sketch", &[("sketch", name), ("plane", &plane)]),
+                            &tr!("sketch_panel.redefine_moves_sketch", sketch = name, plane = &plane),
                             ui_kit::Text::Hint("moves_sketch"),
                         );
                     }

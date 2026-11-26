@@ -8,7 +8,7 @@
 
 use serde_json::{Map, Value};
 
-use solidcraft_ui_text::{format as trf, tr, tr_command};
+use solidcraft_ui_text::{format as trf, tr_command};
 
 /// Steps of a batch named before "and N more".
 const MAX_STEPS: usize = 4;
@@ -63,14 +63,14 @@ fn tool_summary(tool: &str, a: Option<&Map<String, Value>>, result: Option<&Valu
         "save" => {
             let file = s("path").or_else(|| result.and_then(|r| r.get("path")).and_then(Value::as_str)).and_then(file_name);
             match file {
-                Some(f) if done => Some(trf("ui.ai_tool_sum_saved", &[("file", &f)])),
+                Some(f) if done => Some(tr!("ui.ai_tool_sum_saved", file = &f)),
                 f => Some(words([Some(label("file.save")?.to_string()), f])),
             }
         }
         "export" => Some(words([Some(label("file.export")?.to_string()), s("path").and_then(file_name)])),
         "open" => Some(words([Some(label("doc.open")?.to_string()), s("path").and_then(file_name)])),
         // The control channel's own calls: the picture is the point, never where it was left.
-        "ui.screenshot" | "ui_screenshot" | "screenshot" => Some(tr("ui.ai_tool_sum_screenshot").to_string()),
+        "ui.screenshot" | "ui_screenshot" | "screenshot" => Some(tr!("ui.ai_tool_sum_screenshot").to_string()),
         "new_design" => Some(words([Some(label("file.new")?.to_string()), s("name").map(word)])),
         "set_parameter" => {
             let value = a.and_then(|a| a.get("value").or_else(|| a.get("expression"))).and_then(|v| length(v, u));
@@ -92,11 +92,11 @@ fn tool_summary(tool: &str, a: Option<&Map<String, Value>>, result: Option<&Valu
 fn command(id: &str, p: Option<&Map<String, Value>>, result: Option<&Value>, u: Units) -> Option<String> {
     let mut text = label(id)?.to_string();
     if let Some(p) = p {
-        let size = size(p, u).or_else(|| p.get("distance").and_then(|v| length(v, u)).map(|d| trf("ui.ai_tool_sum_by", &[("value", &d)])));
+        let size = size(p, u).or_else(|| p.get("distance").and_then(|v| length(v, u)).map(|d| tr!("ui.ai_tool_sum_by", value = &d)));
         text = words([Some(text), subject(p), size]);
         let mut extras = Vec::new();
         if let Some(r) = p.get("radius").and_then(|v| length(v, u)) {
-            extras.push(trf("ui.ai_tool_sum_radius", &[("value", &r)]));
+            extras.push(tr!("ui.ai_tool_sum_radius", value = &r));
         }
         if let Some(d) = p.get("diameter").and_then(|v| length(v, u)) {
             extras.push(format!("⌀ {d}"));
@@ -131,10 +131,10 @@ fn batch(steps: &[Value], done: bool, u: Units) -> Option<String> {
     });
     let mut text = parts.next()?;
     for next in parts {
-        text = trf("ui.ai_tool_sum_then", &[("first", &text), ("next", &next)]);
+        text = tr!("ui.ai_tool_sum_then", first = &text, next = &next);
     }
     if steps.len() > MAX_STEPS {
-        text = trf("ui.ai_tool_sum_more", &[("steps", &text), ("count", &(steps.len() - MAX_STEPS).to_string())]);
+        text = tr!("ui.ai_tool_sum_more", steps = &text, count = &(steps.len() - MAX_STEPS).to_string());
     }
     Some(text)
 }
@@ -165,7 +165,7 @@ fn measure(body: Option<&str>, result: Option<&Value>, done: bool, u: Units) -> 
             None => return plain(),
         },
     };
-    Some(trf("ui.ai_tool_sum_measured", &[("what", &what)]))
+    Some(tr!("ui.ai_tool_sum_measured", what = &what))
 }
 
 /// What a command works on: a sketch, body or target by name, or how many edges, faces or bodies.

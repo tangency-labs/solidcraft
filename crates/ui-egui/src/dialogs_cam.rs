@@ -135,7 +135,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut CamForm, inputs: &[Se
     }
     crate::ui_kit::options(ui, "cam_options", &mut [("Other side", &mut f.flip)]);
     form_row(ui, "Animate", |ui| {
-        let label = solidcraft_ui_text::tr(if f.animate { "ui.joint_stop" } else { "ui.joint_play" });
+        let label = if f.animate { tr!("ui.joint_stop") } else { tr!("ui.joint_play") };
         let r = crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal)
             .backing_on_hover_text(solidcraft_ui_text::tr_label("Play the joint's motion in the view"));
         crate::scenario::publish_handle("dialog:Animate", r.rect.center());

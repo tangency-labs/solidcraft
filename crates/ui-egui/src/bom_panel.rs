@@ -180,7 +180,7 @@ fn cell<R>(ui: &mut egui::Ui, width: f32, add: impl FnOnce(&mut egui::Ui) -> R) 
 
 /// The label of one of [`edit_keys`].
 fn field_label(key: &str) -> &str {
-    metadata::key(key).map_or(key, |k| solidcraft_ui_text::tr(k.label))
+    metadata::key(key).map_or(key, |k| solidcraft_ui_text::tr_by_id(k.label))
 }
 
 /// The fields a row opens with: its part properties, then its static material (what the row says
@@ -336,7 +336,7 @@ fn options(ui: &mut egui::Ui, d: &mut BomPanel) {
     });
     ui.scope(|ui| {
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-        let response = crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("bom.group_children"), &mut d.group_children);
+        let response = crate::ui_kit::checkbox(ui, tr!("bom.group_children"), &mut d.group_children);
         crate::panel_runtime::register_content_focus(ui.ctx(), &response);
     });
     if was != (d.top, d.by_definition, d.group_children) {

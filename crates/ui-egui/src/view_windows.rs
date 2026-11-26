@@ -537,10 +537,8 @@ pub(crate) fn drag_window(
     let origin = bounds.min + egui::vec2(rect.x, rect.y) * scale;
     let outline = egui::Rect::from_min_size(origin, egui::vec2(rect.w, rect.h) * scale);
     let number = target.and_then(|target| displays.iter().position(|display| std::ptr::eq(display, target)));
-    let label = number.map_or_else(
-        || app.tr("multi_window.drag_display").to_owned(),
-        |index| solidcraft_ui_text::format("multi_window.display_number", &[("n", &(index + 1).to_string())]),
-    );
+    let label = number
+        .map_or_else(|| tr!(app, "multi_window.drag_display").to_owned(), |index| tr!("multi_window.display_number", n = &(index + 1).to_string()));
     let placement = WindowPlacement {
         display: target.map(|display| display.name.clone()),
         x: rect.x,
@@ -572,7 +570,7 @@ fn collect_choices(app: &SolveApp) -> Vec<WindowChoice> {
         displays
             .iter()
             .position(|entry| display == Some(entry.name.as_str()))
-            .map(|index| solidcraft_ui_text::format("multi_window.display_number", &[("n", &(index + 1).to_string())]))
+            .map(|index| tr!("multi_window.display_number", n = &(index + 1).to_string()))
     };
     let root_display = app.view_windows.root_rect.zip(app.view_windows.root_scale).and_then(|(rect, scale)| {
         let position = (rect.center().to_vec2() * scale).to_pos2();
@@ -1205,13 +1203,8 @@ fn window_menu(app: &mut SolveApp, ui: &mut Ui, id: WindowId, anchor: egui::Resp
         solidcraft_views::CardHeaders::Hidden => CardHeaders::Hidden,
     };
     let current = app.view_windows.choices.iter().find(|choice| choice.id == id).and_then(|choice| choice.display.as_deref());
-    let labels: Vec<_> = app
-        .view_windows
-        .displays
-        .iter()
-        .enumerate()
-        .map(|(index, _)| solidcraft_ui_text::format("window_menu.display_number", &[("n", &(index + 1).to_string())]))
-        .collect();
+    let labels: Vec<_> =
+        app.view_windows.displays.iter().enumerate().map(|(index, _)| tr!("window_menu.display_number", n = &(index + 1).to_string())).collect();
     let displays: Vec<_> = app
         .view_windows
         .displays
@@ -1222,29 +1215,28 @@ fn window_menu(app: &mut SolveApp, ui: &mut Ui, id: WindowId, anchor: egui::Resp
         .collect();
     let title = window_name(app, id);
     let interface_sizes = solidcraft_views::InterfaceSize::ALL.map(u16::from);
-    let tr = solidcraft_ui_text::tr;
     let text = kit::WindowText {
-        preview: tr("window_menu.preview").to_owned(),
-        show_here: tr("window_menu.show_here").to_owned(),
-        window: tr("window_menu.window").to_owned(),
-        keep_on_top: tr("window_options.keep_on_top").to_owned(),
-        ribbon: tr("window_ribbon.ribbon").to_owned(),
-        auto_hide: tr("window_ribbon.auto_hide").to_owned(),
-        auto_hide_unavailable: tr("window_ribbon.auto_hide_unavailable").to_owned(),
-        other_panels: tr("window_panels.other_panels").to_owned(),
-        workspace_panels: tr("window_panels.workspace_panels").to_owned(),
-        top_bar: tr("window_topbar.top_bar").to_owned(),
-        always: tr("window_options.always").to_owned(),
-        edge: tr("window_topbar.edge").to_owned(),
-        card_headers: tr("window_options.card_headers").to_owned(),
-        on_hover: tr("window_options.on_hover").to_owned(),
-        hidden: tr("window_options.hidden").to_owned(),
-        move_to_display: tr("window_menu.move_to_display").to_owned(),
-        interface_size: tr("window_size.interface_size").to_owned(),
-        rename: tr("window_menu.rename").to_owned(),
-        use_default: tr("window_menu.use_default").to_owned(),
-        return_views: tr("multi_window.return_views").to_owned(),
-        close_window: tr("multi_window.close_window").to_owned(),
+        preview: tr!("window_menu.preview").to_owned(),
+        show_here: tr!("window_menu.show_here").to_owned(),
+        window: tr!("window_menu.window").to_owned(),
+        keep_on_top: tr!("window_options.keep_on_top").to_owned(),
+        ribbon: tr!("window_ribbon.ribbon").to_owned(),
+        auto_hide: tr!("window_ribbon.auto_hide").to_owned(),
+        auto_hide_unavailable: tr!("window_ribbon.auto_hide_unavailable").to_owned(),
+        other_panels: tr!("window_panels.other_panels").to_owned(),
+        workspace_panels: tr!("window_panels.workspace_panels").to_owned(),
+        top_bar: tr!("window_topbar.top_bar").to_owned(),
+        always: tr!("window_options.always").to_owned(),
+        edge: tr!("window_topbar.edge").to_owned(),
+        card_headers: tr!("window_options.card_headers").to_owned(),
+        on_hover: tr!("window_options.on_hover").to_owned(),
+        hidden: tr!("window_options.hidden").to_owned(),
+        move_to_display: tr!("window_menu.move_to_display").to_owned(),
+        interface_size: tr!("window_size.interface_size").to_owned(),
+        rename: tr!("window_menu.rename").to_owned(),
+        use_default: tr!("window_menu.use_default").to_owned(),
+        return_views: tr!("multi_window.return_views").to_owned(),
+        close_window: tr!("multi_window.close_window").to_owned(),
     };
     let menu = WindowMenu {
         text: &text,
@@ -1306,8 +1298,8 @@ fn show_window_rename(app: &mut SolveApp, ctx: &Context, id: WindowId) {
     let Some((mut name, first)) = ctx.data(|data| data.get_temp::<(String, bool)>(key)) else { return };
     let modal = Container::new(ctx, Surface::Window).modal(key).show(ctx, |ui| {
         ui.set_width(280.0);
-        ui.heading(app.tr("window_menu.rename"));
-        let (keys, field) = crate::ui_kit::text_field_reserving(ui, &mut name, app.tr("window_menu.name"), 0.0);
+        ui.heading(tr!(app, "window_menu.rename"));
+        let (keys, field) = crate::ui_kit::text_field_reserving(ui, &mut name, tr!(app, "window_menu.name"), 0.0);
         if let Some((cut, _)) = name.char_indices().nth(solidcraft_views::MAX_NAME) {
             name.truncate(cut);
         }
@@ -1315,8 +1307,8 @@ fn show_window_rename(app: &mut SolveApp, ctx: &Context, id: WindowId) {
             field.request_focus();
         }
         ui.horizontal(|ui| {
-            let cancel = crate::ui_kit::button(ui, app.tr("ui.cancel"), crate::ui_kit::Button::Normal).clicked();
-            let apply = crate::ui_kit::button(ui, app.tr("ui.apply"), crate::ui_kit::Button::Enabled(!name.trim().is_empty())).clicked();
+            let cancel = crate::ui_kit::button(ui, tr!(app, "ui.cancel"), crate::ui_kit::Button::Normal).clicked();
+            let apply = crate::ui_kit::button(ui, tr!(app, "ui.apply"), crate::ui_kit::Button::Enabled(!name.trim().is_empty())).clicked();
             (cancel, apply || keys && !name.trim().is_empty())
         })
         .inner
@@ -1426,7 +1418,7 @@ fn window_bar(app: &mut SolveApp, ui: &mut Ui, id: WindowId, rect: egui::Rect, c
     let content = layout.content;
     let brand_end = crate::app_bar::paint_brand(ui.painter(), content, &solidcraft_look::glyphs::brand_mark, Some("SolidCraft"));
     let menu = egui::Rect::from_center_size(egui::pos2(content.right() - 17.0, content.center().y), egui::Vec2::splat(26.0));
-    let menu_tip = app.tr("multi_window.window_menu");
+    let menu_tip = tr!(app, "multi_window.window_menu");
     let response = ui.interact(menu, bar_menu_id(ui.ctx()), egui::Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, menu_tip));
     if chrome.bar_focus && ui.is_visible() && !ui.is_sizing_pass() {
@@ -1518,10 +1510,10 @@ fn overlay_bar(app: &mut SolveApp, ui: &mut Ui, id: WindowId, canvas: egui::Rect
         host.area(layer.id.with("grip_area")).order(layer.order).fixed_pos(grip.min).constrain(false).show(ui.ctx(), |ui| {
             ui.set_min_size(grip.size());
             let response = ui.interact(grip, grip_id, egui::Sense::click());
-            let label = app.tr("window_topbar.show");
+            let label = tr!(app, "window_topbar.show");
             response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
             ui.painter().rect_filled(grip, 5, t.text_dim.gamma_multiply(0.5));
-            let response = response.backing_on_hover_text(app.tr("window_topbar.show_help"));
+            let response = response.backing_on_hover_text(tr!(app, "window_topbar.show_help"));
             if response.clicked() {
                 response.request_focus();
             }
@@ -1865,7 +1857,7 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
                 documents::put_view_window(app, tab, window);
                 if app.now - start >= 2.0 {
                     let _ = close(app, id, false);
-                    app.set_status(solidcraft_ui_text::format("multi_window.open_failed", &[("design", &app.session.doc.name)]), true);
+                    app.set_status(tr!("multi_window.open_failed", design = &app.session.doc.name), true);
                     ctx.send_viewport_cmd_to(os_id, ViewportCommand::Close);
                 } else {
                     ctx.show_viewport_deferred(os_id, builder, |_, _| {});
@@ -2089,7 +2081,7 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
                 let _ = close(app, id, !refused);
             }
             if refused {
-                app.set_status(solidcraft_ui_text::format("multi_window.open_failed", &[("design", &app.session.doc.name)]), true);
+                app.set_status(tr!("multi_window.open_failed", design = &app.session.doc.name), true);
             }
             ctx.send_viewport_cmd_to(os_id, ViewportCommand::Close);
             retired.extend(host.viewport.window_scene_slots());

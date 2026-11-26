@@ -8,8 +8,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
         ui_kit::settings_heading_with_tag(
             ui,
-            app.tr("prefs.navigation"),
-            app.tr("prefs.structure.navigation_note"),
+            tr!(app, "prefs.navigation"),
+            tr!(app, "prefs.structure.navigation_note"),
             Some(crate::settings_profiles::tag),
         );
         mouse(app, ui, t);
@@ -26,7 +26,7 @@ pub(super) fn mapping_rows(app: &SolveApp) -> Vec<(Vec<String>, String)> {
         let button = button_label(button);
         let mut names = Vec::new();
         if keys.shift {
-            names.push(solidcraft_ui_text::tr("prefs.shift"));
+            names.push(tr!("prefs.shift"));
         }
         if keys.ctrl {
             names.push("Ctrl/Cmd");
@@ -40,7 +40,7 @@ pub(super) fn mapping_rows(app: &SolveApp) -> Vec<(Vec<String>, String)> {
             NavMode::Pan => "prefs.gesture_pan",
             NavMode::Zoom => "prefs.gesture_zoom",
         };
-        (names.into_iter().map(str::to_owned).collect::<Vec<_>>(), solidcraft_ui_text::tr(action).to_string())
+        (names.into_iter().map(str::to_owned).collect::<Vec<_>>(), solidcraft_ui_text::tr_by_id(action).to_string())
     };
     let mut gestures: Vec<_> = nav_preset(&app.preferences.nav)
         .bindings
@@ -64,13 +64,13 @@ pub(super) fn mapping_rows(app: &SolveApp) -> Vec<(Vec<String>, String)> {
     }));
     gestures.extend([
         (
-            vec![app.tr("prefs.wheel").to_owned()],
-            app.tr(if app.preferences.zoom_to_cursor { "prefs.zoom_toward_cursor" } else { "prefs.gesture_zoom" }).to_owned(),
+            vec![tr!(app, "prefs.wheel").to_owned()],
+            (if app.preferences.zoom_to_cursor { tr!(app, "prefs.zoom_toward_cursor") } else { tr!(app, "prefs.gesture_zoom") }).to_owned(),
         ),
-        (vec![app.tr("prefs.left_click").to_owned()], app.tr("prefs.select").to_owned()),
+        (vec![tr!(app, "prefs.left_click").to_owned()], tr!(app, "prefs.select").to_owned()),
         (
-            vec![app.tr("prefs.right_click").to_owned()],
-            app.tr(if app.preferences.mouse_gestures.enabled && app.preferences.nav == crate::mouse_gesture::MOUSE_MODE {
+            vec![tr!(app, "prefs.right_click").to_owned()],
+            app.tr_by_id(if app.preferences.mouse_gestures.enabled && app.preferences.nav == crate::mouse_gesture::MOUSE_MODE {
                 "prefs.context_menu_ring"
             } else {
                 "prefs.context_menu"
@@ -80,27 +80,27 @@ pub(super) fn mapping_rows(app: &SolveApp) -> Vec<(Vec<String>, String)> {
     ]);
     if app.preferences.nav == TOUCHPAD_NAV {
         gestures.extend([
-            (vec![app.tr("prefs.shift").to_owned()], app.tr("prefs.gesture_pan").to_owned()),
-            (vec!["Alt/Option".to_owned()], app.tr("prefs.gesture_orbit").to_owned()),
+            (vec![tr!(app, "prefs.shift").to_owned()], tr!(app, "prefs.gesture_pan").to_owned()),
+            (vec!["Alt/Option".to_owned()], tr!(app, "prefs.gesture_orbit").to_owned()),
         ]);
     }
     gestures
 }
 
 fn mouse(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
-    ui_kit::settings_section(ui, "mouse", app.tr("prefs.mouse_heading"), |ui| {
+    ui_kit::settings_section(ui, "mouse", tr!(app, "prefs.mouse_heading"), |ui| {
         let help = if app.preferences.nav == TOUCHPAD_NAV {
-            app.tr("nav.touchpad.help").to_owned()
+            tr!(app, "nav.touchpad.help").to_owned()
         } else if !app.preferences.free_orbit && app.preferences.nav != OPENSCAD_NAV {
-            format!("{} {}", app.tr("prefs.extra_navigation"), app.tr("prefs.orbit_snap"))
+            format!("{} {}", tr!(app, "prefs.extra_navigation"), tr!(app, "prefs.orbit_snap"))
         } else {
-            app.tr("prefs.extra_navigation").to_owned()
+            tr!(app, "prefs.extra_navigation").to_owned()
         };
         let gestures = mapping_rows(app);
         ui_kit::settings_mouse_mapping(ui, &gestures, |ui| {
-            let width = ui_kit::ContentWidth::label(ui, app.tr("prefs.mouse_mapping")) + t.space_16 + t.space_4;
+            let width = ui_kit::ContentWidth::label(ui, tr!(app, "prefs.mouse_mapping")) + t.space_16 + t.space_4;
             ui_kit::settings_form(ui, width, |ui| {
-                ui_kit::settings_row_help(ui, app.tr("prefs.mouse_mapping"), &help, |ui| {
+                ui_kit::settings_row_help(ui, tr!(app, "prefs.mouse_mapping"), &help, |ui| {
                     ui_kit::settings_control_width(ui, t.space_24 * 9.0 + t.space_4, |ui| {
                         let response = ui_kit::dropdown_menu(ui, "pref_nav", nav_preset(&app.preferences.nav).translated_label(), |ui| {
                             for preset in NAV_PRESETS {
@@ -119,27 +119,27 @@ fn mouse(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 });
             });
         });
-        let touch = setting::touchscreen_navigation(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.touchscreen.help"));
+        let touch = setting::touchscreen_navigation(app, ui).backing_on_hover_text(tr!("nav.touchscreen.help"));
         crate::scenario::publish_target("prefs:touchscreen_navigation", touch.rect);
         if app.preferences.nav == "maya" {
-            let axis = setting::maya_horizontal_zoom(app, ui).backing_on_hover_text(app.tr("nav.maya_horizontal_zoom.help"));
+            let axis = setting::maya_horizontal_zoom(app, ui).backing_on_hover_text(tr!(app, "nav.maya_horizontal_zoom.help"));
             crate::scenario::publish_target("prefs:maya_horizontal_zoom", axis.rect);
         }
         if nav_preset(&app.preferences.nav).bindings.iter().any(|b| b.button == NavButton::Right && b.mode == NavMode::Orbit) {
-            let response = setting::right_drag_orbits(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.right_drag_orbits.help"));
+            let response = setting::right_drag_orbits(app, ui).backing_on_hover_text(tr!("nav.right_drag_orbits.help"));
             crate::scenario::publish_target("prefs:right_drag_orbits", response.rect);
         }
-        let keeps = setting::nav_drag_keeps_mode(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.drag_keeps_mode.help"));
+        let keeps = setting::nav_drag_keeps_mode(app, ui).backing_on_hover_text(tr!("nav.drag_keeps_mode.help"));
         crate::scenario::publish_target("prefs:nav_drag_keeps_mode", keeps.rect);
-        let wrap = setting::orbit_cursor_wrap(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.orbit_cursor_wrap.help"));
+        let wrap = setting::orbit_cursor_wrap(app, ui).backing_on_hover_text(tr!("nav.orbit_cursor_wrap.help"));
         crate::scenario::publish_target("prefs:orbit_cursor_wrap", wrap.rect);
-        let unrolls = setting::upright_orbit_unrolls(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.upright_orbit_unrolls.help"));
+        let unrolls = setting::upright_orbit_unrolls(app, ui).backing_on_hover_text(tr!("nav.upright_orbit_unrolls.help"));
         crate::scenario::publish_target("prefs:upright_orbit_unrolls", unrolls.rect);
-        let mark = setting::mark_orbit_point(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.mark_orbit_point.help"));
+        let mark = setting::mark_orbit_point(app, ui).backing_on_hover_text(tr!("nav.mark_orbit_point.help"));
         crate::scenario::publish_target("prefs:mark_orbit_point", mark.rect);
-        setting::radial_context_menu(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("prefs.navigation.radial_help"));
+        setting::radial_context_menu(app, ui).backing_on_hover_text(tr!("prefs.navigation.radial_help"));
         setting::quick_menu_after_selection(app, ui);
-        let label = app.tr("Middle double-click");
+        let label = tr!(app, "Middle double-click");
         let width = ui_kit::ContentWidth::label(ui, label);
         ui_kit::settings_form(ui, width, |ui| {
             ui_kit::row(ui, label, |ui| {
@@ -163,11 +163,11 @@ fn mouse(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
 }
 
 fn orbit(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
-    ui_kit::settings_section(ui, "orbit_pivot", app.tr("ui.orbit_around"), |ui| {
+    ui_kit::settings_section(ui, "orbit_pivot", tr!(app, "ui.orbit_around"), |ui| {
         let options = [
-            ui_kit::PictureChoice { key: "Origin", label: app.tr("ui.origin"), figure: ui_kit::paint_orbit_origin },
-            ui_kit::PictureChoice { key: "View center", label: app.tr("ui.view_centre"), figure: ui_kit::paint_orbit_centre },
-            ui_kit::PictureChoice { key: "Under the cursor", label: app.tr("prefs.under_cursor"), figure: ui_kit::paint_orbit_cursor },
+            ui_kit::PictureChoice { key: "Origin", label: tr!(app, "ui.origin"), figure: ui_kit::paint_orbit_origin },
+            ui_kit::PictureChoice { key: "View center", label: tr!(app, "ui.view_centre"), figure: ui_kit::paint_orbit_centre },
+            ui_kit::PictureChoice { key: "Under the cursor", label: tr!(app, "prefs.under_cursor"), figure: ui_kit::paint_orbit_cursor },
         ];
         let selected = match app.preferences.orbit_around {
             OrbitAround::Origin => 0,
@@ -177,7 +177,7 @@ fn orbit(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         if let Some(index) = ui_kit::settings_picture_choices_sized(
             ui,
             "orbit_around",
-            app.tr("ui.orbit_around"),
+            tr!(app, "ui.orbit_around"),
             &options,
             selected,
             true,
@@ -195,13 +195,13 @@ fn orbit(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             }
         }
     });
-    ui_kit::settings_section(ui, "orbit_style", app.tr("prefs.navigation.orbit_style"), |ui| {
-        let label = app.tr("ui.orbit");
-        let help = app.tr("nav.free_orbit.snap_help");
+    ui_kit::settings_section(ui, "orbit_style", tr!(app, "prefs.navigation.orbit_style"), |ui| {
+        let label = tr!(app, "ui.orbit");
+        let help = tr!(app, "nav.free_orbit.snap_help");
         let width = ui_kit::ContentWidth::label(ui, label) + t.space_16 + t.space_4;
         ui_kit::settings_form(ui, width, |ui| {
             ui_kit::settings_row_help(ui, label, help, |ui| {
-                let options = [solidcraft_ui_text::tr("prefs.navigation.turntable"), solidcraft_ui_text::tr("prefs.navigation.free")];
+                let options = [tr!("prefs.navigation.turntable"), tr!("prefs.navigation.free")];
                 crate::ui_kit::settings_search::note_choices(ui, &options);
                 let mut selected = usize::from(app.preferences.free_orbit);
                 let response = ui.scope(|ui| {
@@ -226,16 +226,16 @@ fn orbit(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             });
         });
         ui.add_enabled_ui(app.preferences.free_orbit, |ui| {
-            let response = setting::free_orbit_upright(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.free_orbit_upright.help"));
+            let response = setting::free_orbit_upright(app, ui).backing_on_hover_text(tr!("nav.free_orbit_upright.help"));
             crate::scenario::publish_target("prefs:free_orbit_upright", response.rect);
         });
-        let label = app.tr("nav.free_orbit_key.label");
+        let label = tr!(app, "nav.free_orbit_key.label");
         let width = ui_kit::ContentWidth::label(ui, label) + t.space_16 + t.space_4;
         ui_kit::settings_form(ui, width, |ui| {
-            ui_kit::settings_row_help(ui, label, app.tr("nav.free_orbit_key.help"), |ui| {
+            ui_kit::settings_row_help(ui, label, tr!(app, "nav.free_orbit_key.help"), |ui| {
                 let current = FreeOrbitKey::of(app);
                 let name = |key: FreeOrbitKey| match key {
-                    FreeOrbitKey::Off => solidcraft_ui_text::tr("nav.buttons.no_key"),
+                    FreeOrbitKey::Off => tr!("nav.buttons.no_key"),
                     FreeOrbitKey::Alt => "Alt/Option",
                     FreeOrbitKey::Ctrl => "Ctrl/Cmd",
                 };
@@ -255,14 +255,14 @@ fn orbit(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
 }
 
 fn wheel(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
-    ui_kit::settings_section(ui, "wheel_trackpad", app.tr("prefs.wheel_trackpad"), |ui| {
+    ui_kit::settings_section(ui, "wheel_trackpad", tr!(app, "prefs.wheel_trackpad"), |ui| {
         let available = ui.available_width();
         let gap = t.space_24 + t.space_8;
         let natural = [
             ["ui.zoom_to_the_cursor", "ui.reverse_zoom_direction", "ui.reverse_horizontal_pan_direction", "ui.reverse_vertical_pan_direction"],
             ["ui.smooth_wheel_zoom", "ui.two_finger_scroll_pans", "ui.reverse_trackpad_orbit_direction", "prefs.zoom_stop_at_model"],
         ]
-        .map(|labels| labels.into_iter().map(|id| ui_kit::ContentWidth::label(ui, app.tr(id)) + t.space_24).fold(0.0, f32::max));
+        .map(|labels| labels.into_iter().map(|id| ui_kit::ContentWidth::label(ui, app.tr_by_id(id)) + t.space_24).fold(0.0, f32::max));
         let beside = available >= natural[0] + natural[1] + gap;
         let left = if beside { (available - gap) * natural[0] / (natural[0] + natural[1]).max(1.0) } else { available };
         let right = if beside { available - gap - left } else { available };
@@ -278,17 +278,13 @@ fn wheel(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 setting::smooth_wheel_zoom(app, ui);
                 let touchpad = app.preferences.nav == TOUCHPAD_NAV;
                 ui.add_enabled_ui(!touchpad, |ui| {
-                    let response = ui_kit::checkbox(ui, solidcraft_ui_text::tr("ui.two_finger_scroll_pans"), &mut app.preferences.trackpad_pan)
-                        .backing_on_hover_text(if touchpad {
-                            solidcraft_ui_text::tr("nav.touchpad.scroll")
-                        } else {
-                            solidcraft_ui_text::tr("ui.trackpad_pan_tip")
-                        });
+                    let response = ui_kit::checkbox(ui, tr!("ui.two_finger_scroll_pans"), &mut app.preferences.trackpad_pan)
+                        .backing_on_hover_text(if touchpad { tr!("nav.touchpad.scroll") } else { tr!("ui.trackpad_pan_tip") });
                     crate::scenario::publish_target("prefs:trackpad_pan", response.rect);
                 });
                 setting::orbit_reverse(app, ui);
                 setting::trackpad_twist_turns(app, ui);
-                let response = setting::zoom_stop_at_model(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("prefs.zoom_stop_at_model_tip"));
+                let response = setting::zoom_stop_at_model(app, ui).backing_on_hover_text(tr!("prefs.zoom_stop_at_model_tip"));
                 crate::scenario::publish_target("prefs:zoom_stop_at_model", response.rect);
             });
         });
@@ -296,11 +292,11 @@ fn wheel(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         if cfg!(target_arch = "wasm32") {
             labels.push("prefs.browser_scroll_wheel");
         }
-        let label_width = labels.into_iter().map(|id| ui_kit::ContentWidth::label(ui, app.tr(id))).fold(0.0, f32::max);
+        let label_width = labels.into_iter().map(|id| ui_kit::ContentWidth::label(ui, app.tr_by_id(id))).fold(0.0, f32::max);
         ui_kit::settings_form(ui, label_width, |ui| {
             setting::wheel_zoom_speed(app, ui);
             if cfg!(target_arch = "wasm32") {
-                ui_kit::row(ui, app.tr("prefs.browser_scroll_wheel"), |ui| {
+                ui_kit::row(ui, tr!(app, "prefs.browser_scroll_wheel"), |ui| {
                     let choice = &mut app.preferences.browser_scroll_wheel;
                     let label_id = |value| match value {
                         BrowserScrollWheel::Automatic => "prefs.browser_scroll_wheel.automatic",
@@ -308,33 +304,34 @@ fn wheel(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         BrowserScrollWheel::AlwaysPan => "prefs.browser_scroll_wheel.always_pan",
                     };
                     ui_kit::settings_control_width(ui, t.space_24 * 7.0 + t.space_12, |ui| {
-                        let response = ui_kit::dropdown_menu(ui, "pref_browser_scroll_wheel", solidcraft_ui_text::tr(label_id(*choice)), |ui| {
-                            for (id, value) in [
-                                ("automatic", BrowserScrollWheel::Automatic),
-                                ("always_zoom", BrowserScrollWheel::AlwaysZoom),
-                                ("always_pan", BrowserScrollWheel::AlwaysPan),
-                            ] {
-                                if ui_kit::list_picker(ui, id, solidcraft_ui_text::tr(label_id(value)), *choice == value).clicked() {
-                                    *choice = value;
+                        let response =
+                            ui_kit::dropdown_menu(ui, "pref_browser_scroll_wheel", solidcraft_ui_text::tr_by_id(label_id(*choice)), |ui| {
+                                for (id, value) in [
+                                    ("automatic", BrowserScrollWheel::Automatic),
+                                    ("always_zoom", BrowserScrollWheel::AlwaysZoom),
+                                    ("always_pan", BrowserScrollWheel::AlwaysPan),
+                                ] {
+                                    if ui_kit::list_picker(ui, id, solidcraft_ui_text::tr_by_id(label_id(value)), *choice == value).clicked() {
+                                        *choice = value;
+                                    }
                                 }
-                            }
-                        })
-                        .backing_on_hover_text(solidcraft_ui_text::tr("prefs.browser_scroll_wheel.help"));
+                            })
+                            .backing_on_hover_text(tr!("prefs.browser_scroll_wheel.help"));
                         crate::scenario::publish_target("prefs:browser_scroll_wheel", response.rect);
                     });
                 });
             }
-            ui_kit::row(ui, app.tr("prefs.trackpad_zoom_modifier"), |ui| {
+            ui_kit::row(ui, tr!(app, "prefs.trackpad_zoom_modifier"), |ui| {
                 let platform = crate::tool_modifiers::Platform::of(ui.ctx());
                 let choice = &mut app.preferences.trackpad_zoom_modifier;
                 ui_kit::settings_control_width(ui, t.space_24 * 7.0 + t.space_12, |ui| {
                     let response =
-                        ui_kit::dropdown_menu(ui, "pref_trackpad_zoom_modifier", solidcraft_ui_text::tr(choice.label_id(platform)), |ui| {
+                        ui_kit::dropdown_menu(ui, "pref_trackpad_zoom_modifier", solidcraft_ui_text::tr_by_id(choice.label_id(platform)), |ui| {
                             for (index, value) in TrackpadZoomModifier::ALL.into_iter().enumerate() {
                                 if ui_kit::list_picker(
                                     ui,
                                     &format!("trackpad_zoom_modifier_{index}"),
-                                    solidcraft_ui_text::tr(value.label_id(platform)),
+                                    solidcraft_ui_text::tr_by_id(value.label_id(platform)),
                                     *choice == value,
                                 )
                                 .clicked()
@@ -343,7 +340,7 @@ fn wheel(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                                 }
                             }
                         })
-                        .backing_on_hover_text(solidcraft_ui_text::tr("prefs.trackpad_zoom_modifier.help"));
+                        .backing_on_hover_text(tr!("prefs.trackpad_zoom_modifier.help"));
                     crate::scenario::publish_target("prefs:trackpad_zoom_modifier", response.rect);
                 });
             });
@@ -357,15 +354,15 @@ fn paint_signed_axes(p: &egui::Painter, rect: egui::Rect) {
 }
 
 fn view(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
-    ui_kit::settings_section(ui, "navigation_view", app.tr("ui.tab_view"), |ui| {
+    ui_kit::settings_section(ui, "navigation_view", tr!(app, "ui.tab_view"), |ui| {
         let options = [
-            ui_kit::PictureChoice { key: "Signed axes", label: app.tr("prefs.navigation.axes_signed"), figure: paint_signed_axes },
+            ui_kit::PictureChoice { key: "Signed axes", label: tr!(app, "prefs.navigation.axes_signed"), figure: paint_signed_axes },
             ui_kit::PictureChoice { key: "Custom", label: solidcraft_ui_text::tr_label("Custom"), figure: ui_kit::paint_navigation_custom },
         ];
         if let Some(index) = ui_kit::settings_picture_choices_sized(
             ui,
             "navigator",
-            app.tr("View navigator"),
+            tr!(app, "View navigator"),
             &options,
             NavigatorStyle::ALL.iter().position(|s| *s == app.preferences.navigator_style).unwrap_or_default(),
             true,
@@ -382,14 +379,14 @@ fn view(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             crate::scenario::publish_target("prefs:navigator", all);
         }
         if app.preferences.navigator_style == NavigatorStyle::Custom && app.view_gizmo.shape.is_none() {
-            ui_kit::text(ui, app.tr("view_gizmo.pick_body_hint"), ui_kit::Text::Note("navigator_body_hint"));
+            ui_kit::text(ui, tr!(app, "view_gizmo.pick_body_hint"), ui_kit::Text::Note("navigator_body_hint"));
         }
         setting::look_at_anim(app, ui);
         let width =
-            ["ui.animation_speed", "prefs.home_fit_size"].into_iter().map(|id| ui_kit::ContentWidth::label(ui, app.tr(id))).fold(0.0, f32::max);
+            ["ui.animation_speed", "prefs.home_fit_size"].into_iter().map(|id| ui_kit::ContentWidth::label(ui, app.tr_by_id(id))).fold(0.0, f32::max);
         ui_kit::settings_form(ui, width, |ui| {
             setting::look_at_speed(app, ui);
-            let (label, note) = (app.tr("prefs.home_fit_size").to_owned(), app.tr("prefs.home_fit_size_note").to_owned());
+            let (label, note) = (tr!(app, "prefs.home_fit_size").to_owned(), tr!(app, "prefs.home_fit_size_note").to_owned());
             ui_kit::row(ui, &label, |ui| {
                 let response = ui_kit::slider(
                     ui,
@@ -401,19 +398,19 @@ fn view(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 response.backing_on_hover_text(note);
             });
         });
-        let (label, note) = (app.tr("prefs.navigator_fit").to_owned(), app.tr("prefs.navigator_fit_note").to_owned());
+        let (label, note) = (tr!(app, "prefs.navigator_fit").to_owned(), tr!(app, "prefs.navigator_fit_note").to_owned());
         let response = ui_kit::checkbox(ui, &label, &mut app.preferences.navigator_fit).backing_on_hover_text(note);
         crate::scenario::publish_target("prefs:navigator_fit", response.rect);
-        let (label, help) = (app.tr("prefs.navigator_turn_around").to_owned(), app.tr("prefs.navigator_turn_around_help").to_owned());
+        let (label, help) = (tr!(app, "prefs.navigator_turn_around").to_owned(), tr!(app, "prefs.navigator_turn_around_help").to_owned());
         let response = ui_kit::checkbox(ui, &label, &mut app.preferences.navigator_turn_around).backing_on_hover_text(help);
         crate::scenario::publish_target("prefs:navigator_turn_around", response.rect);
-        let (label, note) = (app.tr("prefs.keep_hover_while_navigating").to_owned(), app.tr("prefs.keep_hover_while_navigating_note").to_owned());
+        let (label, note) = (tr!(app, "prefs.keep_hover_while_navigating").to_owned(), tr!(app, "prefs.keep_hover_while_navigating_note").to_owned());
         let response = ui_kit::checkbox(ui, &label, &mut app.preferences.keep_hover_while_navigating).backing_on_hover_text(note);
         crate::scenario::publish_target("prefs:keep_hover_while_navigating", response.rect);
-        let (label, note) = (app.tr("prefs.invert_navigator_arrows").to_owned(), app.tr("prefs.invert_navigator_arrows_note").to_owned());
+        let (label, note) = (tr!(app, "prefs.invert_navigator_arrows").to_owned(), tr!(app, "prefs.invert_navigator_arrows_note").to_owned());
         let response = ui_kit::checkbox(ui, &label, &mut app.preferences.invert_navigator_arrows).backing_on_hover_text(note);
         crate::scenario::publish_target("prefs:invert_navigator_arrows", response.rect);
-        let (label, note) = (app.tr("prefs.invert_curved_roll_arrows").to_owned(), app.tr("prefs.invert_curved_roll_arrows_note").to_owned());
+        let (label, note) = (tr!(app, "prefs.invert_curved_roll_arrows").to_owned(), tr!(app, "prefs.invert_curved_roll_arrows_note").to_owned());
         let response = ui_kit::checkbox(ui, &label, &mut app.preferences.invert_curved_roll_arrows).backing_on_hover_text(note);
         crate::scenario::publish_target("prefs:invert_curved_roll_arrows", response.rect);
         setting::browser_arrow_keys(app, ui);
@@ -423,7 +420,7 @@ fn view(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
 /// One row per mouse button: what dragging it does, with an optional key held. The side buttons
 /// are here too; a plain click on one still goes Back.
 fn button_rows(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
-    ui_kit::settings_inline_note(ui, app.tr("nav.buttons.help"));
+    ui_kit::settings_inline_note(ui, tr!(app, "nav.buttons.help"));
     // The further buttons (6 and up) of a mouse with many have a row once they are mapped.
     let buttons: Vec<NavButton> = NavButton::ALL.into_iter().chain(NavButton::mapped_numbered(&app.preferences)).collect();
     let width = buttons.iter().map(|b| ui_kit::ContentWidth::label(ui, &button_label(*b))).fold(0.0, f32::max) + t.space_16 + t.space_4;
@@ -433,11 +430,17 @@ fn button_rows(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 let side = button.is_side();
                 let current = nav_choice(&app.preferences, button);
                 let action_text = match current {
-                    None => solidcraft_ui_text::tr(if side { "nav.buttons.nothing" } else { "nav.buttons.as_preset" }),
-                    Some(NavChoice { mode: Some(NavMode::Orbit), .. }) => solidcraft_ui_text::tr("prefs.gesture_orbit"),
-                    Some(NavChoice { mode: Some(NavMode::Pan), .. }) => solidcraft_ui_text::tr("prefs.gesture_pan"),
-                    Some(NavChoice { mode: Some(NavMode::Zoom), .. }) => solidcraft_ui_text::tr("prefs.gesture_zoom"),
-                    Some(NavChoice { mode: None, .. }) => solidcraft_ui_text::tr("nav.buttons.nothing"),
+                    None => {
+                        if side {
+                            tr!("nav.buttons.nothing")
+                        } else {
+                            tr!("nav.buttons.as_preset")
+                        }
+                    }
+                    Some(NavChoice { mode: Some(NavMode::Orbit), .. }) => tr!("prefs.gesture_orbit"),
+                    Some(NavChoice { mode: Some(NavMode::Pan), .. }) => tr!("prefs.gesture_pan"),
+                    Some(NavChoice { mode: Some(NavMode::Zoom), .. }) => tr!("prefs.gesture_zoom"),
+                    Some(NavChoice { mode: None, .. }) => tr!("nav.buttons.nothing"),
                 };
                 let keys = current.map_or(NavKeys::NONE, |c| c.keys);
                 let mut next: Option<Option<NavChoice>> = None;
@@ -456,7 +459,7 @@ fn button_rows(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                                     continue;
                                 }
                                 let on = current.map(|c| c.mode) == pick;
-                                if ui_kit::list_picker(ui, label, solidcraft_ui_text::tr(label), on).clicked() {
+                                if ui_kit::list_picker(ui, label, solidcraft_ui_text::tr_by_id(label), on).clicked() {
                                     next = Some(pick.map(|mode| NavChoice { keys, mode }));
                                 }
                             }
@@ -468,8 +471,8 @@ fn button_rows(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         ui_kit::settings_control_width(ui, t.space_24 * 4.0, |ui| {
                             let response = ui_kit::dropdown_menu(ui, ("pref_nav_button_keys", button.id()), &key_text, |ui| {
                                 for (pick, label) in [
-                                    (NavKeys::NONE, solidcraft_ui_text::tr("nav.buttons.no_key")),
-                                    (NavKeys { shift: true, ctrl: false, alt: false }, solidcraft_ui_text::tr("prefs.shift")),
+                                    (NavKeys::NONE, tr!("nav.buttons.no_key")),
+                                    (NavKeys { shift: true, ctrl: false, alt: false }, tr!("prefs.shift")),
                                     (NavKeys { shift: false, ctrl: true, alt: false }, "Ctrl/Cmd"),
                                     (NavKeys { shift: false, ctrl: false, alt: true }, "Alt/Option"),
                                 ] {
@@ -491,7 +494,7 @@ fn button_rows(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             });
         }
     });
-    let reset = ui_kit::button(ui, app.tr("nav.buttons.reset"), ui_kit::Button::Enabled(!app.preferences.nav_button_map.is_empty()));
+    let reset = ui_kit::button(ui, tr!(app, "nav.buttons.reset"), ui_kit::Button::Enabled(!app.preferences.nav_button_map.is_empty()));
     crate::scenario::publish_target("prefs:nav_button_reset", reset.rect);
     if reset.clicked() && !app.preferences.nav_button_map.is_empty() {
         app.preferences.nav_button_map.clear();
@@ -505,16 +508,16 @@ pub(super) fn button_label(button: NavButton) -> String {
         NavButton::Right => "prefs.button_right",
         NavButton::Extra1 => "nav.buttons.extra1",
         NavButton::Extra2 => "nav.buttons.extra2",
-        NavButton::Numbered(n) => return solidcraft_ui_text::format("nav.buttons.numbered", &[("number", &n.to_string())]),
+        NavButton::Numbered(n) => return tr!("nav.buttons.numbered", number = &n.to_string()),
     };
-    solidcraft_ui_text::tr(id).to_owned()
+    solidcraft_ui_text::tr_by_id(id).to_owned()
 }
 
 /// The held keys a choice needs, as the second drop-down shows them.
 fn key_label(keys: NavKeys) -> String {
     let mut parts = Vec::new();
     if keys.shift {
-        parts.push(solidcraft_ui_text::tr("prefs.shift"));
+        parts.push(tr!("prefs.shift"));
     }
     if keys.ctrl {
         parts.push("Ctrl/Cmd");
@@ -522,5 +525,5 @@ fn key_label(keys: NavKeys) -> String {
     if keys.alt {
         parts.push("Alt/Option");
     }
-    if parts.is_empty() { solidcraft_ui_text::tr("nav.buttons.no_key").to_owned() } else { parts.join("+") }
+    if parts.is_empty() { tr!("nav.buttons.no_key").to_owned() } else { parts.join("+") }
 }

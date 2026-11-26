@@ -346,7 +346,7 @@ fn a_picked_part_needs_the_face_its_teeth_start_from() {
         (Picks { shaft: Some(&sel), shaft_start: Some(&start), bore: Some(&sel), bore_start: None }, "shaft_spline.need_bore_start"),
     ] {
         let refused = s.command_params(doc, picks).expect_err("a picked part without its start face");
-        assert_eq!((refused.key.as_deref(), refused.words.as_str()), (None, tr(words)), "{picks:?}");
+        assert_eq!((refused.key.as_deref(), refused.words.as_str()), (None, tr_by_id(words)), "{picks:?}");
         // The teeth are drawn all the same: the drawing does not wait for the start face.
         assert!(s.params_for(doc, picks).is_ok(), "{picks:?}");
     }

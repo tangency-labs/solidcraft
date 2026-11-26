@@ -21,12 +21,12 @@ fn layer_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut editor = std::mem::take(&mut app.render_workspace.view.inspector.effects);
     let before = app.render_workspace.view.studio.aging.clone();
     let mut stack = before.clone();
-    let title = app.tr("render.wear_layers").to_string();
+    let title = tr!(app, "render.wear_layers").to_string();
     ui_kit::section(ui, "render_wear_layers", &title, true, |ui| {
-        let add = ui_kit::dropdown_menu(ui, "render_aging_add", app.tr("render.aging_add"), |ui| {
+        let add = ui_kit::dropdown_menu(ui, "render_aging_add", tr!(app, "render.aging_add"), |ui| {
             for kind in AgingKind::ALL {
                 let id = format!("aging-add-{}", kind.code());
-                if ui_kit::list_picker(ui, &id, app.tr(kind.key()), false).clicked() {
+                if ui_kit::list_picker(ui, &id, app.tr_by_id(kind.key()), false).clicked() {
                     match stack.push(AgingLayer::preset(kind)) {
                         Ok(()) => editor.selected_aging = stack.len() - 1,
                         Err(error) => app.set_status(error.to_string(), true),
@@ -42,12 +42,12 @@ fn layer_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         editor.selected_aging = editor.selected_aging.min(stack.len().saturating_sub(1));
         for index in 0..stack.len() {
             let Some(layer) = stack.get_mut(index) else { continue };
-            let label = format!("{} · {}", index + 1, app.tr(layer.kind.key()));
+            let label = format!("{} · {}", index + 1, app.tr_by_id(layer.kind.key()));
             let eye_target = format!("render:aging-layer:{index}:enabled");
             let actions = [ui_kit::TreeAction {
                 icon: if layer.enabled { "eye" } else { "suppress" },
                 hover_only: false,
-                label: app.tr("render.layer_enabled"),
+                label: tr!(app, "render.layer_enabled"),
                 reason: None,
                 target: &eye_target,
             }];
@@ -79,16 +79,16 @@ fn layer_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     });
     if let Some(layer) = stack.get_mut(editor.selected_aging) {
-        let title = app.tr("render.wear_selected_layer").to_string();
+        let title = tr!(app, "render.wear_selected_layer").to_string();
         ui_kit::section(ui, "render_wear_selected_layer", &title, true, |ui| {
-            let response = ui_kit::checkbox(ui, app.tr("render.layer_enabled"), &mut layer.enabled);
+            let response = ui_kit::checkbox(ui, tr!(app, "render.layer_enabled"), &mut layer.enabled);
             crate::scenario::publish_target("render:aging-enabled", response.rect);
             number(app, ui, "render.layer_strength", &mut layer.strength, 0.0..=1.0, 0.01, "");
             number(app, ui, "render.aging_coverage", &mut layer.coverage, 0.0..=1.0, 0.01, "");
             number(app, ui, "render.aging_scale", &mut layer.scale_mm, 0.01..=100000.0, 0.1, " mm");
-            let response = ui_kit::row(ui, app.tr("render.effects_seed"), |ui| ui_kit::number_field(ui, &mut layer.seed, 0..=65535, 1.0, ""));
+            let response = ui_kit::row(ui, tr!(app, "render.effects_seed"), |ui| ui_kit::number_field(ui, &mut layer.seed, 0..=65535, 1.0, ""));
             crate::scenario::publish_target("render:aging-seed", response.rect);
-            let response = ui_kit::row(ui, app.tr("render.aging_color"), |ui| ui_kit::color_field(ui, &mut layer.color_srgb));
+            let response = ui_kit::row(ui, tr!(app, "render.aging_color"), |ui| ui_kit::color_field(ui, &mut layer.color_srgb));
             crate::scenario::publish_target("render:aging-color", response.rect);
             number(app, ui, "render.aging_roughness", &mut layer.roughness, 0.02..=1.0, 0.01, "");
             number(app, ui, "render.aging_metallic", &mut layer.metallic, 0.0..=1.0, 0.01, "");
@@ -98,13 +98,13 @@ fn layer_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
                 SurfaceClass::Metal => "render.aging_class_metal",
                 SurfaceClass::Dielectric => "render.aging_class_dielectric",
             };
-            let class = ui_kit::dropdown_menu(ui, "render_aging_class", app.tr(current), |ui| {
+            let class = ui_kit::dropdown_menu(ui, "render_aging_class", app.tr_by_id(current), |ui| {
                 for (value, key) in [
                     (SurfaceClass::AnyOpaque, "render.aging_class_any"),
                     (SurfaceClass::Metal, "render.aging_class_metal"),
                     (SurfaceClass::Dielectric, "render.aging_class_dielectric"),
                 ] {
-                    if ui_kit::list_picker(ui, key, app.tr(key), layer.surface_class == value).clicked() {
+                    if ui_kit::list_picker(ui, key, app.tr_by_id(key), layer.surface_class == value).clicked() {
                         layer.surface_class = value;
                         ui.close();
                     }
@@ -112,28 +112,28 @@ fn layer_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
             crate::scenario::publish_target("render:aging-class", class.rect);
         });
-        let title = app.tr("render.aging_target").to_string();
+        let title = tr!(app, "render.aging_target").to_string();
         ui_kit::section(ui, "render_aging_target_section", &title, true, |ui| {
-            if ui_kit::button(ui, app.tr("render.aging_refresh_targets"), ui_kit::Button::Normal).clicked() {
+            if ui_kit::button(ui, tr!(app, "render.aging_refresh_targets"), ui_kit::Button::Normal).clicked() {
                 match materials::read_targets(app) {
                     Ok(targets) => editor.targets = targets,
                     Err(error) => app.set_status(error, true),
                 }
             }
-            let search_label = app.tr("render.aging_target_search").to_string();
+            let search_label = tr!(app, "render.aging_target_search").to_string();
             ui_kit::bounded_cell_editor(ui, ui.scope_id().with("aging_target_search"), &mut editor.search, &search_label, false, 128);
             let selected = layer.target.as_ref().map_or_else(
-                || app.tr("render.aging_all_bodies").to_string(),
+                || tr!(app, "render.aging_all_bodies").to_string(),
                 |identity| {
                     editor.targets.iter().find(|target| target.stable_target.as_ref() == Some(identity)).map_or_else(
-                        || format!("{}: {}", identity.definition, app.tr("render.material_target_missing")),
+                        || format!("{}: {}", identity.definition, tr!(app, "render.material_target_missing")),
                         |target| target.name.clone(),
                     )
                 },
             );
-            ui_kit::row(ui, app.tr("render.wear_applies_to"), |ui| {
+            ui_kit::row(ui, tr!(app, "render.wear_applies_to"), |ui| {
                 let target = ui_kit::dropdown_menu(ui, "render_aging_target", &selected, |ui| {
-                    if ui_kit::list_picker(ui, "aging-target-all", app.tr("render.aging_all_bodies"), layer.target.is_none()).clicked() {
+                    if ui_kit::list_picker(ui, "aging-target-all", tr!(app, "render.aging_all_bodies"), layer.target.is_none()).clicked() {
                         layer.target = None;
                         ui.close();
                     }
@@ -152,7 +152,7 @@ fn layer_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
                             if let Some(identity) = &target.stable_target {
                                 layer.target = Some(identity.clone());
                             } else {
-                                app.set_status(app.tr("render.material_target_missing").to_string(), true);
+                                app.set_status(tr!(app, "render.material_target_missing").to_string(), true);
                             }
                             ui.close();
                         }
@@ -160,7 +160,7 @@ fn layer_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
                 crate::scenario::publish_target("render:aging-target", target.rect);
             });
-            studio::vector(ui, app.tr("render.aging_origin"), &mut layer.origin_mm, -1e9..=1e9, 1.0);
+            studio::vector(ui, tr!(app, "render.aging_origin"), &mut layer.origin_mm, -1e9..=1e9, 1.0);
             note(app, ui, "render.aging_target_help");
         });
     }

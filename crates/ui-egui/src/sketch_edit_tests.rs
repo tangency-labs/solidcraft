@@ -1369,7 +1369,7 @@ fn sheet_sketch_mode_owns_one_sheet_view_and_never_turns_its_camera() {
     assert_eq!(app.session.editing_view(), Some(view));
     assert_eq!(app.docs.views.get(view).unwrap().editing.unwrap().sketch, sketch);
     assert_eq!(app.ui.tab, "SKETCH");
-    assert_eq!(crate::sketch_view::owner_label(&app, view).as_deref(), Some(app.tr("sketch_sheet.on_sheet")));
+    assert_eq!(crate::sketch_view::owner_label(&app, view).as_deref(), Some(tr!(app, "sketch_sheet.on_sheet")));
     assert_eq!(app.cam, before);
     assert!(app.pre_sketch_cam.is_none());
     app.run("sketch.line", json!({"points":[[10,10],[20,10]]})).unwrap();
@@ -1516,8 +1516,8 @@ fn sheet_sketch_drawing_view_owner_is_distinct_from_the_sheet_tile_id() {
     let drawing = app.session.doc.drawing(drawing).unwrap();
     let record = drawing.view(view).unwrap();
     let name = crate::drawing_workspace::browser::view_name(&app, drawing, record, 1);
-    assert_eq!(name, app.tr("cmd.view_front"), "an unlabelled base view uses its canonical named projection");
-    assert_eq!(crate::sketch_view::owner_label(&app, tile).unwrap(), solidcraft_ui_text::format("sketch_sheet.on_view", &[("view", &name)]));
+    assert_eq!(name, tr!(app, "cmd.view_front"), "an unlabelled base view uses its canonical named projection");
+    assert_eq!(crate::sketch_view::owner_label(&app, tile).unwrap(), tr!("sketch_sheet.on_view", view = &name));
     let mut custom = record.clone();
     let mut label = solidcraft_engine::doc::drawing::view::ViewLabel::new("A".into());
     label.name = "View A".into();
@@ -1525,10 +1525,7 @@ fn sheet_sketch_drawing_view_owner_is_distinct_from_the_sheet_tile_id() {
     assert_eq!(crate::drawing_workspace::browser::view_name(&app, drawing, &custom, 1), "View A");
     custom.label = None;
     custom.id = 0;
-    assert_eq!(
-        crate::drawing_workspace::browser::view_name(&app, drawing, &custom, 3),
-        solidcraft_ui_text::format("ui.drawing_browser_view", &[("number", "3")])
-    );
+    assert_eq!(crate::drawing_workspace::browser::view_name(&app, drawing, &custom, 3), tr!("ui.drawing_browser_view", number = "3"));
 }
 
 #[test]

@@ -23,7 +23,7 @@ use solidcraft_engine::doc::{Document, Expr, Feature, FeatureKind, SplineCorner,
 use solidcraft_engine::schema::shaft_spline::MasterSplineParam;
 use solidcraft_engine::{Sel, Session};
 use solidcraft_theme::Tokens;
-use solidcraft_ui_text::{format, tr};
+use solidcraft_ui_text::{format, tr_by_id};
 
 use crate::SolveApp;
 use crate::dialogs::{CHAMFER_TYPES, Dialog, Kind, face_sel, face_sel_on, form_row, named_refill, shown_expr};
@@ -82,10 +82,10 @@ fn face_in(inputs: &[SelInput], i: usize) -> Option<&Sel> {
 fn face_point(sel: &Sel, label: &str) -> Result<Value, Bad> {
     match sel {
         Sel::Face { index, .. } if *index == usize::MAX => {
-            Err(Bad { key: None, words: solidcraft_engine::doc::DocError::reselect(tr(label)).to_string() })
+            Err(Bad { key: None, words: solidcraft_engine::doc::DocError::reselect(tr_by_id(label)).to_string() })
         }
         Sel::Face { point, .. } => Ok(pt(*point)),
-        _ => Err(Bad { key: None, words: solidcraft_engine::doc::DocError::reselect(tr(label)).to_string() }),
+        _ => Err(Bad { key: None, words: solidcraft_engine::doc::DocError::reselect(tr_by_id(label)).to_string() }),
     }
 }
 
@@ -620,7 +620,7 @@ impl Spline {
         let teeth_text = self.value("teeth");
         let teeth = read(doc, teeth_text, Unit::Number).map_err(|why| bad("teeth", TEETH_LABEL, &why))?;
         if !(teeth >= 0.0 && teeth.fract() == 0.0 && teeth <= f64::from(u32::MAX)) {
-            return Err(Bad { key: Some("teeth".into()), words: format("shaft_spline.not_whole", &[("label", tr(TEETH_LABEL))]) });
+            return Err(Bad { key: Some("teeth".into()), words: tr!("shaft_spline.not_whole", label = tr_by_id(TEETH_LABEL)) });
         }
         p["teeth"] = json!(teeth as u64);
         if self.kind != 0 {
@@ -643,7 +643,7 @@ impl Spline {
         // Keeping the shaft's diameter: the preview gets the number that fits, worked out after
         // the other rows, so a row that is not a value is named before this one.
         if fitting {
-            let v = self.fitted(doc, picks).ok_or_else(|| bad(fitted.key, fitted.label, tr("shaft_spline.empty")))?;
+            let v = self.fitted(doc, picks).ok_or_else(|| bad(fitted.key, fitted.label, tr!("shaft_spline.empty")))?;
             p[fitted.key] = json!(v);
         }
         Ok(p)
@@ -734,7 +734,7 @@ impl Spline {
                 (Some(start), _) => p[start_key] = face_point(start, start_label)?,
                 (None, Some((_, at))) => p[start_key] = pt(*at),
                 (None, None) if flag(self.start_optional) || flag(self.not_round) => {}
-                (None, None) => return Err(Bad { key: None, words: tr(needed).to_string() }),
+                (None, None) => return Err(Bad { key: None, words: tr_by_id(needed).to_string() }),
             }
         }
         if picks.shaft.is_some() && self.cutter {
@@ -942,11 +942,11 @@ fn work_key(params: &Result<Value, Bad>) -> String {
 /// A row's text as the command's number: a length in mm, an angle in degrees, or a plain number.
 fn read(doc: &Document, text: &str, unit: Unit) -> Result<f64, String> {
     if text.trim().is_empty() {
-        return Err(tr("shaft_spline.empty").to_string());
+        return Err(tr!("shaft_spline.empty").to_string());
     }
     let v = crate::length_input::eval(doc, text, value_kind(unit)).map_err(|e| e.to_string())?;
     let v = if unit == Unit::Angle { v.to_degrees() } else { v };
-    if v.is_finite() { Ok(v) } else { Err(tr("shaft_spline.empty").to_string()) }
+    if v.is_finite() { Ok(v) } else { Err(tr!("shaft_spline.empty").to_string()) }
 }
 
 /// Whether a row's text is a plain number 0, with or without a unit ("0", "0 mm", "0.0in"): no chamfer. An
@@ -969,7 +969,7 @@ fn value_kind(unit: Unit) -> ValueKind {
 
 /// A row's value that is not a value, in words.
 fn bad(key: &str, label: &str, why: &str) -> Bad {
-    Bad { key: Some(key.to_string()), words: format("shaft_spline.not_a_value", &[("label", tr(label)), ("why", why)]) }
+    Bad { key: Some(key.to_string()), words: tr!("shaft_spline.not_a_value", label = tr_by_id(label), why = why) }
 }
 
 /// The pick inputs: the outside of a shaft and a bore, one round face each, both optional, and after each the
@@ -1202,7 +1202,7 @@ fn number_row(ui: &mut egui::Ui, s: &mut Spline, f: Field, flagged: bool) -> boo
     form_row(ui, f.label, |ui| {
         let (enter, response) = crate::ui_kit::checked_field(ui, text, "", flagged);
         let centre = response.rect.center();
-        response.backing_on_hover_text(tr(f.help));
+        response.backing_on_hover_text(tr_by_id(f.help));
         crate::scenario::publish_handle(&format!("dialog:shaft_spline:{}", f.key), centre);
         enter
     })
@@ -1229,7 +1229,7 @@ fn choice(ui: &mut egui::Ui, label: &str, id: &str, selected: &mut usize, option
 fn chamfer_type_row(ui: &mut egui::Ui, selected: &mut usize, rows: &ChamferRows) {
     let response = crate::ui_kit::choice_row(ui, "shaft_spline.chamfer_type", &format!("ss_{}", rows.choice), selected, &CHAMFER_TYPES);
     let centre = response.rect.center();
-    response.backing_on_hover_text(tr("shaft_spline.chamfer_type_help"));
+    response.backing_on_hover_text(tr!("shaft_spline.chamfer_type_help"));
     crate::scenario::publish_handle(&format!("dialog:shaft_spline:{}", rows.choice), centre);
 }
 
@@ -1245,9 +1245,9 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, s: &mut Spline, inputs: &[SelInpu
     if picks.shaft.is_some() {
         let fitted = s.fitted(doc, picks);
         form_row(ui, "", |ui| {
-            let r = crate::ui_kit::checkbox(ui, tr("shaft_spline.fit_shaft"), &mut s.fit);
+            let r = crate::ui_kit::checkbox(ui, tr!("shaft_spline.fit_shaft"), &mut s.fit);
             let rect = r.rect;
-            r.backing_on_hover_text(tr("shaft_spline.fit_shaft_help"));
+            r.backing_on_hover_text(tr!("shaft_spline.fit_shaft_help"));
             crate::scenario::publish_handle("dialog:shaft_spline:fit", rect.center());
         });
         if !s.fit
@@ -1363,9 +1363,9 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, s: &mut Spline, inputs: &[SelInpu
     if picks.shaft.is_some()
         && let Some(e) = crate::ui_kit::section(ui, "ss_groove", "shaft_spline.groove_end", false, |ui| {
             form_row(ui, "", |ui| {
-                let r = crate::ui_kit::checkbox(ui, tr("shaft_spline.cutter_round"), &mut s.cutter);
+                let r = crate::ui_kit::checkbox(ui, tr!("shaft_spline.cutter_round"), &mut s.cutter);
                 let rect = r.rect;
-                r.backing_on_hover_text(tr("shaft_spline.cutter_round_help"));
+                r.backing_on_hover_text(tr!("shaft_spline.cutter_round_help"));
                 crate::scenario::publish_handle("dialog:shaft_spline:cutter", rect.center());
             });
             if s.cutter { number_row(ui, s, CUTTER, is(CUTTER.key)) } else { false }
@@ -1375,9 +1375,9 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, s: &mut Spline, inputs: &[SelInpu
     }
     if let Some(e) = crate::ui_kit::section(ui, "ss_master", "shaft_spline.master", false, |ui| {
         form_row(ui, "", |ui| {
-            let r = crate::ui_kit::checkbox(ui, tr("shaft_spline.master_cut"), &mut s.master);
+            let r = crate::ui_kit::checkbox(ui, tr!("shaft_spline.master_cut"), &mut s.master);
             let rect = r.rect;
-            r.backing_on_hover_text(tr("shaft_spline.master_help"));
+            r.backing_on_hover_text(tr!("shaft_spline.master_help"));
             if is("master_spline") {
                 let t = Tokens::get();
                 ui.painter().rect_stroke(rect, t.control_radius, Stroke::new(1.5, t.warning), egui::StrokeKind::Inside);
@@ -1474,7 +1474,7 @@ fn caption(doc: &Document, p: &SplinePreview, view: View) -> String {
             let id = if m.form == MasterSplineParam::ToothOut { "shaft_spline.caption_tooth_out" } else { "shaft_spline.caption_wide_tooth" };
             format(id, &[("angle", &plain(m.angle, 3)), ("turn", &plain(m.turn, 3))])
         }
-        (View::Teeth, _) => format("shaft_spline.caption_teeth", &[("side", &mm(n.side_clearance_each)), ("tip", &mm(n.tip_gap))]),
+        (View::Teeth, _) => tr!("shaft_spline.caption_teeth", side = &mm(n.side_clearance_each), tip = &mm(n.tip_gap)),
         _ => {
             let args = [
                 ("major", mm(n.shaft_major_diameter)),
@@ -1631,7 +1631,7 @@ pub fn paint(painter: &egui::Painter, rect: Rect, p: &SplinePreview, view: View,
             let font = egui::FontId::proportional(t.font_small);
             if labelled.iter().all(|y| (y - end.y).abs() > t.font_small) {
                 labelled.push(end.y);
-                painter.text(pos2(end.x - 2.0, end.y - 1.0), egui::Align2::RIGHT_BOTTOM, tr(circle_name(*which)), font, quiet);
+                painter.text(pos2(end.x - 2.0, end.y - 1.0), egui::Align2::RIGHT_BOTTOM, tr_by_id(circle_name(*which)), font, quiet);
             }
         }
     }

@@ -354,7 +354,7 @@ pub fn merge_selected_lines(app: &mut SolveApp) {
     let curves: Vec<String> =
         app.session.selection.iter().filter_map(|s| if let Sel::SketchCurve { id, .. } = s { Some(id.clone()) } else { None }).collect();
     if curves.len() < 2 {
-        let hint = app.tr("ui.merge_lines_pick").to_owned();
+        let hint = tr!(app, "ui.merge_lines_pick").to_owned();
         app.set_status(hint, false);
         return;
     }
@@ -754,11 +754,11 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document, two_parallel_lines: 
         }
         Mod::Divide { count } => {
             enter |= quantity(ui, doc, "Segments", count, 2, DIVIDE_MAX);
-            ui_kit::text(ui, solidcraft_ui_text::tr("sketch.divide_hint"), ui_kit::Text::Note("divide"));
+            ui_kit::text(ui, tr!("sketch.divide_hint"), ui_kit::Text::Note("divide"));
         }
         Mod::Equation { form, x, y, start, end, tolerance, range_unit, radians_trig } => {
             let note = if *radians_trig { "ui.equation_angles_legacy" } else { "ui.equation_angles_degrees" };
-            ui_kit::text(ui, solidcraft_ui_text::tr(note), ui_kit::Text::Note("equation"));
+            ui_kit::text(ui, solidcraft_ui_text::tr_by_id(note), ui_kit::Text::Note("equation"));
             ui_kit::choice_row(ui, "Form", "equation_form", form, &EQUATION_FORMS);
             if *form == 0 {
                 enter |= number(ui, "x(t)", x);
@@ -769,9 +769,9 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document, two_parallel_lines: 
             enter |= number(ui, "Start", start);
             enter |= number(ui, "End", end);
             enter |= number(ui, "Tolerance", tolerance);
-            ui_kit::checkbox_grid(ui, &mut [(solidcraft_ui_text::tr("ui.equation_variable_unit"), range_unit)], 1);
+            ui_kit::checkbox_grid(ui, &mut [(tr!("ui.equation_variable_unit"), range_unit)], 1);
             if *range_unit {
-                ui_kit::text(ui, solidcraft_ui_text::tr("ui.equation_note_range"), ui_kit::Text::Note("equation_range"));
+                ui_kit::text(ui, tr!("ui.equation_note_range"), ui_kit::Text::Note("equation_range"));
             }
         }
         Mod::Corner { chamfer, ctype, size, distance2, angle, flip } => {

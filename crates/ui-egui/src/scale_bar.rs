@@ -60,7 +60,7 @@ pub(crate) fn bar(mm_per_point: f64, units: &str, longest: f32) -> Option<Bar> {
 /// The bar's label: the length, and in a perspective view where that length holds.
 pub(crate) fn label(bar: &Bar, perspective: bool) -> String {
     let length = format!("{} {}", bar.value, bar.unit);
-    if perspective { solidcraft_ui_text::format("view.scale_bar_at_centre", &[("length", &length)]) } else { length }
+    if perspective { tr!("view.scale_bar_at_centre", length = &length) } else { length }
 }
 
 /// Draw the scale bar in the bottom left corner of `view`, moved clear of `taken` (panels, the

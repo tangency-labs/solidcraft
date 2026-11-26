@@ -96,7 +96,7 @@ fn prefilled_validation_runs_off_thread_and_discards_changed_inputs() {
     dialog.validation_gate = Some(Arc::new(std::sync::Mutex::new(wait)));
     dialog.preview = false;
     // This returns while the worker waits on the channel: the window can edit or cancel.
-    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap_err(), h.app.tr("ui.plugin_edit_checking"));
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap_err(), tr!(h.app, "ui.plugin_edit_checking"));
     let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
     dialog.fields.as_mut().unwrap().iter_mut().find(|(f, _)| f.key == "depth").unwrap().1 = Input::Number(9.0);
     dialog.validation_gate = None;
@@ -197,7 +197,7 @@ fn validation_worker_disconnect_retries_and_field_errors_stay_cached() {
         validation.cached = None;
         validation.running = Some(Checking { key: key.clone(), progress: Default::default(), reply });
     }
-    assert_eq!(dialog.field_errors(&h.app)["params"], h.app.tr("ui.plugin_start_failed"));
+    assert_eq!(dialog.field_errors(&h.app)["params"], tr!(h.app, "ui.plugin_start_failed"));
     checked_prefill(&h.app);
     assert!(!dialog.field_errors(&h.app).contains_key("params"), "a stopped worker must be retryable without editing inputs");
     let errors = [("edges".into(), solidcraft_engine::schema::plugin::FormFieldError::MissingPick)].into();
@@ -357,8 +357,8 @@ fn design_change_notice_only_requests_another_apply_after_stale_reply() {
     let output = output.unwrap();
     let immediate = "The design changed. Review the inputs against the current design.";
     assert!(crate::test_support::text_shapes(&output).any(|t| t.galley.text() == immediate));
-    assert!(crate::test_support::text_shapes(&output).any(|t| t.galley.text() == h.app.tr("ui.plugin_edit_checking")));
-    assert!(!crate::test_support::text_shapes(&output).any(|t| t.galley.text() == h.app.tr("ui.plugin_edit_revalidated")));
+    assert!(crate::test_support::text_shapes(&output).any(|t| t.galley.text() == tr!(h.app, "ui.plugin_edit_checking")));
+    assert!(!crate::test_support::text_shapes(&output).any(|t| t.galley.text() == tr!(h.app, "ui.plugin_edit_revalidated")));
     dialog.validation_gate = None;
     release.send(()).unwrap();
     h.app.plugin_menu.dialogs.push(dialog);
@@ -370,7 +370,7 @@ fn design_change_notice_only_requests_another_apply_after_stale_reply() {
     let output = form_frame(&h.ctx, |ui| {
         show_dialog(&mut h.app, ui.ctx(), &mut dialog);
     });
-    assert!(crate::test_support::text_shapes(&output).any(|t| t.galley.text() == h.app.tr("ui.plugin_edit_revalidated")));
+    assert!(crate::test_support::text_shapes(&output).any(|t| t.galley.text() == tr!(h.app, "ui.plugin_edit_revalidated")));
     let id = dialog.id;
     h.app.plugin_menu.dialogs.push(dialog);
     run_dialog(&mut h.app, id).unwrap();
@@ -378,7 +378,7 @@ fn design_change_notice_only_requests_another_apply_after_stale_reply() {
     let output = form_frame(&h.ctx, |ui| {
         show_dialog(&mut h.app, ui.ctx(), &mut dialog);
     });
-    assert!(!crate::test_support::text_shapes(&output).any(|t| t.galley.text() == h.app.tr("ui.plugin_edit_revalidated")));
+    assert!(!crate::test_support::text_shapes(&output).any(|t| t.galley.text() == tr!(h.app, "ui.plugin_edit_revalidated")));
 }
 
 #[test]
@@ -391,7 +391,7 @@ fn empty_forms_draw_checking_and_worker_failure_status() {
     open_form(&mut h.app, "empty", "empty", &json!({})).unwrap();
     let mut dialog = h.app.plugin_menu.dialogs.pop().unwrap();
     for key in ["ui.plugin_edit_checking", "ui.plugin_start_failed"] {
-        let why = h.app.tr(key).to_owned();
+        let why = h.app.tr_by_id(key).to_owned();
         let output = form_frame(&h.ctx, |ui| {
             let _ = body(&h.app, ui, &mut dialog, Some(&why), &mut None, &mut None);
         });
@@ -492,7 +492,7 @@ fn edit_form_renders_prefilled_values_and_missing_pick_error() {
             assert_eq!(picks(&h)[0].len(), 1);
             assert!(dialog.field_errors(&h.app).is_empty());
             assert!(crate::test_support::text_shapes(&output).any(|t| t.galley.text().contains("7.5")), "prefilled depth is drawn");
-            let selected = solidcraft_ui_text::format("dialog.selected_count", &[("count", "1")]);
+            let selected = tr!("dialog.selected_count", count = "1");
             assert!(
                 crate::test_support::text_shapes(&output).any(|t| t.galley.text() == selected.strip_prefix("↖ ").unwrap_or(&selected)),
                 "stored picks are drawn in the shared pick control"
@@ -500,7 +500,7 @@ fn edit_form_renders_prefilled_values_and_missing_pick_error() {
         } else {
             assert!(dialog.ready(&h.app).is_err());
             assert!(
-                crate::test_support::text_shapes(&output).any(|t| t.galley.text() == h.app.tr("ui.plugin_edit_missing_pick")),
+                crate::test_support::text_shapes(&output).any(|t| t.galley.text() == tr!(h.app, "ui.plugin_edit_missing_pick")),
                 "field error is drawn"
             );
             assert!(dialog.field_errors(&h.app).contains_key("edges"));
@@ -2275,7 +2275,7 @@ fn the_menu_lists_install_then_entries_with_a_submenu_for_several() {
     assert!(matches!(&empty[0], FileRow::Item(i) if i.id == INSTALL));
     assert!(matches!(&empty[1], FileRow::Item(i) if i.id == LAST_REPORT && !i.enabled), "no import yet: nothing to show again");
     assert!(matches!(&empty[2], FileRow::Separator));
-    assert!(matches!(&empty[3], FileRow::Item(i) if i.label == app.tr("ui.plugin_menu_empty") && !i.enabled));
+    assert!(matches!(&empty[3], FileRow::Item(i) if i.label == app.tr_by_id("ui.plugin_menu_empty") && !i.enabled));
     app.plugin_menu.listed = vec![
         listed("gears", vec![entry("spur", "edit", json!([{"kind":"menu","name":"Spur Gear"}]))]),
         listed("tools", vec![entry("measure", "read", json!([])), entry("tidy", "edit", json!([{"kind":"ribbon","name":"x"}]))]),
@@ -2365,7 +2365,7 @@ fn each_plugin_command_has_its_own_menu_row_and_ribbon_button_and_a_disabled_plu
 
     app.preferences.disabled_plugins.insert("tools".into());
     assert!(ribbon_buttons(&app).is_empty());
-    assert!(matches!(&rows(&app)[3], FileRow::Item(i) if i.label == app.tr("ui.plugin_menu_all_off") && !i.enabled));
+    assert!(matches!(&rows(&app)[3], FileRow::Item(i) if i.label == app.tr_by_id("ui.plugin_menu_all_off") && !i.enabled));
 }
 
 #[test]
@@ -2463,8 +2463,11 @@ fn file_plugins_row_opens_preferences_on_the_plugins_page() {
             _ => None,
         })
         .expect("File has a Plugins… row");
-    assert_eq!(item.label, format!("{}…", app.tr("ui.plugins")));
-    assert!(!rows.iter().any(|r| matches!(r, crate::app_bar::FileRow::Sub { label, .. } if label == app.tr("ui.plugins"))), "no Plugins submenu");
+    assert_eq!(item.label, format!("{}…", app.tr_by_id("ui.plugins")));
+    assert!(
+        !rows.iter().any(|r| matches!(r, crate::app_bar::FileRow::Sub { label, .. } if label == app.tr_by_id("ui.plugins"))),
+        "no Plugins submenu"
+    );
     crate::toolbar::run_file_row(&mut app, "plugins.preferences");
     assert!(app.prefs_window.shell.open);
 }
@@ -2620,7 +2623,7 @@ fn the_selection_fills_only_the_first_field_and_a_design_change_clears_the_picks
     h.frames(2);
     assert!(picks(&h).iter().all(Vec::is_empty), "references into the old model are dropped");
     assert!(h.app.plugin_menu.dialog().unwrap().picks_cleared);
-    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app), Err(solidcraft_ui_text::format("ui.plugin_dialog_missing", &[("field", "Edges")])));
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app), Err(tr!("ui.plugin_dialog_missing", field = "Edges")));
     // Turning the view changes nothing.
     h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
     h.frames(2);
@@ -2667,7 +2670,7 @@ fn an_open_tool_keeps_the_viewport_until_it_is_done() {
     h.step(&json!({"click":{"handle":"plugin_dialog:field:edges"}})).unwrap();
     h.frames(2);
     assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Fillet { .. })), "the click asks; it does not cancel Fillet");
-    assert_eq!(h.app.status.as_ref().map(|(text, _, error)| (text.as_str(), *error)), Some((h.app.tr("ui.plugin_dialog_finish_tool"), true)));
+    assert_eq!(h.app.status.as_ref().map(|(text, _, error)| (text.as_str(), *error)), Some((h.app.tr_by_id("ui.plugin_dialog_finish_tool"), true)));
     // Fillet is done: the field picks once clicked.
     h.app.dialog = None;
     h.frames(2);
@@ -2733,7 +2736,7 @@ fn a_directory_field_browses_a_folder_and_an_outside_folder_stays_ungranted() {
     h.app.preferences.plugin_grants.insert("files".into(), grants);
     open_entry(&mut h.app, 0, 0);
     h.frames(2);
-    let browse = h.app.tr("ui.plugin_dialog_browse").to_owned();
+    let browse = tr!(h.app, "ui.plugin_dialog_browse").to_owned();
     assert!(h.widgets(&browse).is_empty(), "without a folder picker, Browse is not shown");
     assert!(!h.widgets("Folder").is_empty(), "the folder field stays a text box");
     let folder_text = |h: &crate::scenario::Harness| match &h
@@ -3334,7 +3337,7 @@ mod native {
         // Another tab, then Run: refused at once, nothing queued.
         crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
         assert_ne!(h.app.session.uid, first);
-        assert_eq!(run(&mut h.app), Err(h.app.tr("ui.plugin_dialog_other_design").to_string()));
+        assert_eq!(run(&mut h.app), Err(h.app.tr_by_id("ui.plugin_dialog_other_design").to_string()));
         assert!(h.app.control_held.is_empty());
         // Back on its design it runs; a switch while the request waits in the queue refuses it.
         crate::documents::switch(&mut h.app, 0);
@@ -3344,7 +3347,7 @@ mod native {
         let other = h.app.session.doc.clone();
         settle(&mut h);
         let error = h.app.plugin_menu.dialog().and_then(|d| d.error.clone()).expect("refused in the dialog");
-        assert!(error.contains(h.app.tr("ui.plugin_dialog_other_design")), "{error}");
+        assert!(error.contains(h.app.tr_by_id("ui.plugin_dialog_other_design")), "{error}");
         assert!(std::sync::Arc::ptr_eq(&other, &h.app.session.doc), "the other design is untouched");
         crate::documents::switch(&mut h.app, 0);
         assert!(h.app.session.undo.is_empty(), "nor is its own");
@@ -4439,7 +4442,7 @@ fn annotated_folder_fields_grant_only_edited_visible_values_for_the_internal_req
     h.app.services.pick_folder = Some(Box::new(|_| Box::pin(std::future::pending())));
     open_entry(&mut h.app, 0, 0);
     h.frames(2);
-    let note = h.app.tr("ui.plugin_dialog_folder_read_once").to_owned();
+    let note = tr!(h.app, "ui.plugin_dialog_folder_read_once").to_owned();
     assert!(!h.widgets(&note).is_empty(), "the field explains the run-only read permission");
     assert!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).is_err(), "a default is not consent");
     let id = h.app.plugin_menu.dialog().unwrap().id;

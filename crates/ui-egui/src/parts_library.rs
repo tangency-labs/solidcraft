@@ -208,7 +208,7 @@ pub fn set_folder(app: &mut SolveApp, folder: &str) {
 /// Ask for the folder with the host's dialog.
 pub fn choose_folder(app: &mut SolveApp) {
     if app.services.pick_folder.is_none() {
-        app.set_status(solidcraft_ui_text::tr("parts_library.no_picker").to_string(), true);
+        app.set_status(solidcraft_ui_text::tr_by_id("parts_library.no_picker").to_string(), true);
         return;
     }
     let current = app.preferences.library_folder.clone();
@@ -448,7 +448,7 @@ fn insert_allowing(app: &mut SolveApp, path: &Path, at: Vec3, hosts: &[String]) 
             app.insert_path_async(&p);
             Ok(())
         }
-        _ => Err(solidcraft_ui_text::format("parts_library.not_a_part", &[("path", &p)])),
+        _ => Err(tr!("parts_library.not_a_part", path = &p)),
     }
 }
 
@@ -470,7 +470,7 @@ pub fn view_drop(app: &mut SolveApp, ui: &egui::Ui, rect: egui::Rect, proj: &cra
         match insert(app, &d.0, at) {
             Ok(()) => {
                 let name = d.0.file_stem().map_or_else(String::new, |s| s.to_string_lossy().to_string());
-                app.set_status(solidcraft_ui_text::format("parts_library.inserted", &[("name", &name)]), false);
+                app.set_status(tr!("parts_library.inserted", name = &name), false);
             }
             Err(e) => app.set_status(e, true),
         }
@@ -542,7 +542,7 @@ pub(crate) fn toggle(app: &mut SolveApp) {
 
 /// The button's name, for its tooltip and the app bar's overflow menu.
 pub(crate) fn toggle_label(app: &SolveApp) -> &'static str {
-    solidcraft_ui_text::tr(if app.preferences.library_open { "parts_library.hide" } else { "parts_library.show" })
+    if app.preferences.library_open { tr!("parts_library.hide") } else { tr!("parts_library.show") }
 }
 
 /// The app bar's documents button (`|||`): shows and hides the parts library. Returns whether it is
@@ -630,7 +630,6 @@ fn filtered(app: &SolveApp) -> Vec<Entry> {
 /// shows.
 fn contents(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Acts) -> f32 {
     let t = Tokens::get();
-    let tr = solidcraft_ui_text::tr;
     let top = ui.cursor().top();
     let Some(root) = root(app) else {
         no_folder(app, ui, acts);
@@ -641,7 +640,7 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Acts) -> f32 {
     breadcrumb(app, ui, &root, &here, acts);
     search(app, ui, acts);
     let mut size = LibrarySize::ALL.iter().position(|s| *s == app.preferences.library_size).unwrap_or(1);
-    let labels: Vec<&str> = LibrarySize::ALL.iter().map(|s| tr(s.label_id())).collect();
+    let labels: Vec<&str> = LibrarySize::ALL.iter().map(|s| solidcraft_ui_text::tr_by_id(s.label_id())).collect();
     if crate::ui_kit::segmented(
         ui,
         &mut size,
@@ -663,15 +662,15 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Acts) -> f32 {
         let out = list.show(ui, |ui| placeholders(app, ui));
         hidden = (out.content_size.y - out.inner_rect.height()).max(0.0);
     } else if app.parts_library.entries.is_empty() {
-        state(ui, "folder", None, tr("parts_library.empty"));
-        if crate::ui_kit::button(ui, tr("parts_library.choose_another"), crate::ui_kit::Button::Normal).clicked() {
+        state(ui, "folder", None, tr!("parts_library.empty"));
+        if crate::ui_kit::button(ui, tr!("parts_library.choose_another"), crate::ui_kit::Button::Normal).clicked() {
             acts.choose = true;
         }
     } else {
         let entries = filtered(app);
         if entries.is_empty() {
-            state(ui, "folder", Some(t.form_dim), tr("parts_library.no_match"));
-            let clear = crate::ui_kit::button(ui, tr("parts_library.clear_search"), crate::ui_kit::Button::Normal);
+            state(ui, "folder", Some(t.form_dim), tr!("parts_library.no_match"));
+            let clear = crate::ui_kit::button(ui, tr!("parts_library.clear_search"), crate::ui_kit::Button::Normal);
             crate::scenario::publish_handle("library:clear_search", clear.rect.center());
             if clear.clicked() {
                 app.parts_library.filter.clear();
@@ -720,14 +719,13 @@ fn fade_out_below(ui: &egui::Ui, list: egui::Rect, panel: egui::Color32) {
 
 /// No folder chosen yet.
 fn no_folder(app: &SolveApp, ui: &mut egui::Ui, acts: &mut Acts) {
-    let tr = solidcraft_ui_text::tr;
-    state(ui, "folder", None, tr("parts_library.no_folder"));
-    let b = crate::ui_kit::button(ui, tr("parts_library.choose"), crate::ui_kit::Button::Primary);
+    state(ui, "folder", None, tr!("parts_library.no_folder"));
+    let b = crate::ui_kit::button(ui, tr!("parts_library.choose"), crate::ui_kit::Button::Primary);
     crate::scenario::publish_handle("library:choose", b.rect.center());
     if b.clicked() {
         acts.choose = true;
     }
-    if crate::ui_kit::button(ui, tr("parts_library.design_folder"), crate::ui_kit::Button::Enabled(app.session.path.is_some())).clicked() {
+    if crate::ui_kit::button(ui, tr!("parts_library.design_folder"), crate::ui_kit::Button::Enabled(app.session.path.is_some())).clicked() {
         acts.design_folder = true;
     }
 }
@@ -735,15 +733,14 @@ fn no_folder(app: &SolveApp, ui: &mut egui::Ui, acts: &mut Acts) {
 /// A folder that can't be read: its message, Try again and another folder. The breadcrumb keeps
 /// its path.
 fn unreadable(ui: &mut egui::Ui, error: &str, acts: &mut Acts) {
-    let tr = solidcraft_ui_text::tr;
     let t = Tokens::get();
-    state(ui, "folder", Some(t.error), tr("parts_library.unreadable"));
+    state(ui, "folder", Some(t.error), tr!("parts_library.unreadable"));
     ui.label(egui::RichText::new(error).size(t.font_small).color(t.text_dim));
     ui.horizontal(|ui| {
-        if crate::ui_kit::button(ui, tr("parts_library.try_again"), crate::ui_kit::Button::Primary).clicked() {
+        if crate::ui_kit::button(ui, tr!("parts_library.try_again"), crate::ui_kit::Button::Primary).clicked() {
             acts.refresh = true;
         }
-        if crate::ui_kit::button(ui, tr("parts_library.choose_another"), crate::ui_kit::Button::Normal).clicked() {
+        if crate::ui_kit::button(ui, tr!("parts_library.choose_another"), crate::ui_kit::Button::Normal).clicked() {
             acts.choose = true;
         }
     });
@@ -774,7 +771,6 @@ fn item_count(app: &SolveApp) -> String {
 /// an ellipsis stands for the levels between, named in its tooltip) and the item count on the right.
 fn breadcrumb(app: &SolveApp, ui: &mut egui::Ui, root: &Path, here: &Path, acts: &mut Acts) {
     let t = Tokens::get();
-    let tr = solidcraft_ui_text::tr;
     let name = |p: &Path| p.file_name().map_or_else(|| p.to_string_lossy().to_string(), |n| n.to_string_lossy().to_string());
     let count = item_count(app);
     let levels: Vec<String> =
@@ -783,8 +779,8 @@ fn breadcrumb(app: &SolveApp, ui: &mut egui::Ui, root: &Path, here: &Path, acts:
         ui.spacing_mut().item_spacing.x = t.space_4;
         let counted = ui.painter().layout_no_wrap(count.clone(), egui::FontId::proportional(t.font_small), t.text_dim).size().x;
         if here != root {
-            let up =
-                crate::ui_kit::compact_button(ui, crate::ui_kit::MOVE_UP, tr("parts_library.up"), true, false).on_hover_text(tr("parts_library.up"));
+            let up = crate::ui_kit::compact_button(ui, crate::ui_kit::MOVE_UP, tr!("parts_library.up"), true, false)
+                .on_hover_text(tr!("parts_library.up"));
             crate::scenario::publish_handle("library:up", up.rect.center());
             if up.clicked() {
                 acts.enter = here.parent().map(Path::to_path_buf).filter(|p| p.starts_with(root)).or_else(|| Some(root.to_path_buf()));
@@ -797,7 +793,7 @@ fn breadcrumb(app: &SolveApp, ui: &mut egui::Ui, root: &Path, here: &Path, acts:
             if levels.is_empty() { room } else { room * 0.5 },
             crate::workspace::tab_accent(&t, "MODEL"),
         )
-        .on_hover_text(format!("{}\n{}", tr("parts_library.choose_another"), root.to_string_lossy()));
+        .on_hover_text(format!("{}\n{}", tr!("parts_library.choose_another"), root.to_string_lossy()));
         crate::scenario::publish_handle("library:folder", folder.rect.center());
         if folder.clicked() {
             acts.choose = true;
@@ -825,7 +821,7 @@ fn breadcrumb(app: &SolveApp, ui: &mut egui::Ui, root: &Path, here: &Path, acts:
 /// F5 reads the folder again.
 fn search(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Acts) {
     let id = egui::Id::unique("library_search");
-    let r = crate::ui_kit::search_field(ui, id, &mut app.parts_library.filter, solidcraft_ui_text::tr("parts_library.search"));
+    let r = crate::ui_kit::search_field(ui, id, &mut app.parts_library.filter, tr!("parts_library.search"));
     crate::scenario::publish_handle("library:search", r.rect.center());
     let over = app.parts_library.shown.is_some_and(|c| ui.ctx().pointer_hover_pos().is_some_and(|p| c.contains(p)));
     let nothing_focused = ui.ctx().memory(|m| m.focused().is_none());
@@ -887,7 +883,6 @@ fn placeholders(app: &SolveApp, ui: &mut egui::Ui) {
 /// The `rows` of `entries` in sight: cards in the size's columns, or names.
 fn list_view(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Acts, entries: &[Entry], rows: std::ops::Range<usize>) {
     let t = Tokens::get();
-    let tr = solidcraft_ui_text::tr;
     let grid = app.parts_library.grid;
     let dragging = egui::DragAndDrop::payload::<Dragged>(ui.ctx()).map(|d| d.0.clone());
     let columns = grid.map_or(1, |g| g.columns);
@@ -971,14 +966,14 @@ fn list_view(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Acts, entries: &[
                     acts.open = Some(e.path.clone());
                 }
                 crate::ui_kit::Menu::context(&r, |ui| {
-                    let insert = if e.kind == Kind::Design { tr("parts_library.insert") } else { tr("parts_library.import") };
+                    let insert = if e.kind == Kind::Design { tr!("parts_library.insert") } else { tr!("parts_library.import") };
                     let i = crate::ui_kit::MenuItem::new("library:menu_insert", insert, "").show(ui);
                     crate::scenario::publish_handle("library:menu_insert", i.rect.center());
                     if i.clicked() {
                         acts.insert = Some(e.path.clone());
                         ui.close();
                     }
-                    let o = crate::ui_kit::MenuItem::new("library:menu_open", tr("parts_library.open"), "").show(ui);
+                    let o = crate::ui_kit::MenuItem::new("library:menu_open", tr!("parts_library.open"), "").show(ui);
                     crate::scenario::publish_handle("library:menu_open", o.rect.center());
                     if o.clicked() {
                         acts.open = Some(e.path.clone());
@@ -992,8 +987,7 @@ fn list_view(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Acts, entries: &[
 
 /// The kit's catalog footer: the hint's first sentence, the whole hint on hover.
 fn footer(ui: &mut egui::Ui) {
-    let tr = solidcraft_ui_text::tr;
-    crate::ui_kit::catalog_footer_with_tip(ui, tr("parts_library.hint_short"), tr("parts_library.hint"));
+    crate::ui_kit::catalog_footer_with_tip(ui, tr!("parts_library.hint_short"), tr!("parts_library.hint"));
 }
 
 /// Esc while the search has the focus is the search's own, whatever runs before the card this frame.
@@ -1449,7 +1443,7 @@ mod tests {
         }
         assert!(h.app.parts_library.error.is_some(), "unreadable");
         h.frames(2);
-        assert!(h.widget(solidcraft_ui_text::tr("parts_library.try_again")).is_some(), "Try again");
+        assert!(h.widget(tr!("parts_library.try_again")).is_some(), "Try again");
         assert_eq!(h.app.preferences.library_folder, gone.to_string_lossy(), "the path is kept");
     }
 

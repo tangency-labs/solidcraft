@@ -223,7 +223,7 @@ pub fn command(id: &str, params: &Value, undo_left: usize) -> Verdict {
             |key: &str| params.get(key).and_then(Value::as_str).unwrap_or_default().chars().filter(|c| !c.is_control()).take(200).collect::<String>();
         let path = shown("path");
         let entry = shown("entry");
-        return Verdict::Ask(solidcraft_ui_text::format("ui.plugin_run_consent", &[("entry", &entry), ("path", &path)]));
+        return Verdict::Ask(tr!("ui.plugin_run_consent", entry = &entry, path = &path));
     }
     // Files, and commands that replace or reload the whole design.
     let file_command = id.starts_with("file.") || id.starts_with("doc.") || matches!(id, "render.export" | "render.start");

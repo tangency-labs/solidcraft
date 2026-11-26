@@ -46,7 +46,7 @@ fn fields(h: &Harness) -> Vec<(&'static str, String)> {
 /// ("Section size"), not the command's parameter name.
 fn assert_shown(h: &Harness, fields: &[(&str, String)]) {
     for (key, text) in fields {
-        let label = solidcraft_ui_text::tr(crate::dialogs::primitive_label(key));
+        let label = solidcraft_ui_text::tr_by_id(crate::dialogs::primitive_label(key));
         assert!(label.starts_with(char::is_uppercase) && !label.contains('_'), "the {key} row is labelled {label:?}");
         let nodes = &h.output.accesskit_update.as_ref().unwrap().nodes;
         assert!(
@@ -1332,7 +1332,7 @@ fn the_point_input_of_the_box_sphere_and_torus_takes_snap_points() {
 /// Whether the open dialog's Body Name row can be typed in (#20776): it is always there for a
 /// feature that can make a body, greyed out unless the operation is New Body.
 fn shows_body_name(h: &Harness) -> bool {
-    let label = solidcraft_ui_text::tr("ui.body_name");
+    let label = tr!("ui.body_name");
     h.output
         .accesskit_update
         .as_ref()
@@ -1409,7 +1409,7 @@ fn coil_dialog_sizes_by_any_two_of_height_pitch_and_revolutions() {
         cmds.into_iter().find(|(id, _)| id == "solid.coil").map(|(_, p)| p).unwrap()
     };
     let shows = |h: &Harness, label: &str| {
-        let label = solidcraft_ui_text::tr(label);
+        let label = solidcraft_ui_text::tr_by_id(label);
         h.output
             .accesskit_update
             .as_ref()

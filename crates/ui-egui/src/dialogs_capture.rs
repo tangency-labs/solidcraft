@@ -7,7 +7,7 @@ use crate::{
 };
 use serde_json::{Map, Value, json};
 use solidcraft_engine::doc::{CapturedJoint, CapturedOccurrenceMove, Document, Mat, MoveSpace, expr::Kind as ValueKind, joints::JointKind};
-use solidcraft_ui_text::tr;
+use solidcraft_ui_text::tr_by_id;
 use std::collections::BTreeMap;
 
 /// Editable draft for one [`CapturedOccurrenceMove`] inside a `CapturePosition` timeline feature.
@@ -174,7 +174,7 @@ pub fn rows(_app: &SolveApp, ui: &mut egui::Ui, c: &mut CapturePosition) -> bool
     let mut enter = false;
     let mut has_move_angle = false;
     if !c.moves.is_empty() {
-        let comp_label = tr("render.pick_component");
+        let comp_label = tr!("render.pick_component");
         if c.moves.len() > 1 {
             c.selected_move = c.selected_move.min(c.moves.len().saturating_sub(1));
             let labels: Vec<&str> = c.moves.iter().map(|m| m.label.as_str()).collect();
@@ -185,38 +185,38 @@ pub fn rows(_app: &SolveApp, ui: &mut egui::Ui, c: &mut CapturePosition) -> bool
         if let Some(m) = c.moves.get_mut(c.selected_move) {
             choice_row(
                 ui,
-                tr("ui.capture_position.space"),
+                tr!("ui.capture_position.space"),
                 "capture_move_space",
                 &mut m.space,
                 &["ui.capture_position.local", "ui.capture_position.world"],
             );
-            enter |= expr_row(ui, tr("ui.x_distance"), &mut m.x);
-            enter |= expr_row(ui, tr("ui.y_distance"), &mut m.y);
-            enter |= expr_row(ui, tr("Z Distance"), &mut m.z);
+            enter |= expr_row(ui, tr!("ui.x_distance"), &mut m.x);
+            enter |= expr_row(ui, tr!("ui.y_distance"), &mut m.y);
+            enter |= expr_row(ui, tr_by_id("Z Distance"), &mut m.z);
             if m.rotation.is_some() {
-                ui_kit::text(ui, tr("ui.capture_position.rotation_preserved"), ui_kit::Text::Hint("capture_rot"));
+                ui_kit::text(ui, tr!("ui.capture_position.rotation_preserved"), ui_kit::Text::Hint("capture_rot"));
             } else {
                 if let Some(angle) = &mut m.angle {
                     has_move_angle = true;
-                    enter |= expr_row(ui, tr("ui.angle"), angle);
+                    enter |= expr_row(ui, tr!("ui.angle"), angle);
                 }
                 if m.has_origin {
-                    ui_kit::section(ui, "capture_origin", tr("ui.origin"), false, |ui| {
-                        enter |= expr_row(ui, tr("ui.capture_position.origin_x"), &mut m.ox);
-                        enter |= expr_row(ui, tr("ui.capture_position.origin_y"), &mut m.oy);
-                        enter |= expr_row(ui, tr("ui.capture_position.origin_z"), &mut m.oz);
+                    ui_kit::section(ui, "capture_origin", tr!("ui.origin"), false, |ui| {
+                        enter |= expr_row(ui, tr!("ui.capture_position.origin_x"), &mut m.ox);
+                        enter |= expr_row(ui, tr!("ui.capture_position.origin_y"), &mut m.oy);
+                        enter |= expr_row(ui, tr!("ui.capture_position.origin_z"), &mut m.oz);
                     });
                 }
                 if let Some([ax, ay, az]) = m.rotate_axis {
-                    ui_kit::value_row(ui, tr("ui.axis"), &format!("{ax:.4}, {ay:.4}, {az:.4}"));
+                    ui_kit::value_row(ui, tr!("ui.axis"), &format!("{ax:.4}, {ay:.4}, {az:.4}"));
                 }
             }
         }
     }
     if !c.joints.is_empty() {
         let default_open = c.moves.is_empty();
-        ui_kit::section(ui, "capture_joints", tr("ui.joints"), default_open, |ui| {
-            let joint_label = tr("cmd.joint_create");
+        ui_kit::section(ui, "capture_joints", tr!("ui.joints"), default_open, |ui| {
+            let joint_label = tr!("cmd.joint_create");
             if c.joints.len() > 1 {
                 c.selected_joint = c.selected_joint.min(c.joints.len().saturating_sub(1));
                 let labels: Vec<String> = c.joints.iter().map(|j| crate::dialogs_assembly::joint_choice(&j.name, j.kind)).collect();
@@ -228,7 +228,7 @@ pub fn rows(_app: &SolveApp, ui: &mut egui::Ui, c: &mut CapturePosition) -> bool
             if let Some(j) = c.joints.get_mut(c.selected_joint) {
                 for (i, val) in j.dofs.iter_mut().enumerate() {
                     let key = j.dof_labels.get(i).copied().unwrap_or("Value");
-                    let label = tr(key);
+                    let label = tr_by_id(key);
                     if key == "ui.angle" && has_move_angle {
                         enter |= ui_kit::expr_row_as(ui, label, "joint:Angle", val);
                     } else {
@@ -294,7 +294,7 @@ pub fn commands(app: &SolveApp, c: &CapturePosition) -> Result<Vec<(String, Valu
                 if text.is_empty() {
                     return Err("enter a joint value".into());
                 }
-                let label = tr(j.dof_labels.get(i).copied().unwrap_or("Value"));
+                let label = tr_by_id(j.dof_labels.get(i).copied().unwrap_or("Value"));
                 crate::length_input::no_definition(text, label)?;
                 let kind = if j.is_angle.get(i).copied().unwrap_or(false) { ValueKind::Angle } else { ValueKind::Length };
                 let v = app.session.doc.eval(text, kind).map_err(|e| e.to_string())?;

@@ -85,10 +85,10 @@ const FINE_TURN_STEP_DEG: f64 = 1.0;
 /// Sections kept laid out: the view's (with `locate`) and the dialog's (without), and a few more.
 const CACHED: usize = 4;
 /// The tooltips.
-const DOT_TIP: &str = "ui.frame_hot_point_tip";
-const MARKER_TIP: &str = "ui.frame_locate_tip";
+const DOT_TIP: solidcraft_ui_text::Msg = msg!("ui.frame_hot_point_tip");
+const MARKER_TIP: solidcraft_ui_text::Msg = msg!("ui.frame_locate_tip");
 const ARROW_TIPS: [&str; 2] = ["ui.frame_arrow_a_tip", "ui.frame_arrow_b_tip"];
-const ROTATE_TIP: &str = "ui.frame_rotate_tip";
+const ROTATE_TIP: solidcraft_ui_text::Msg = msg!("ui.frame_rotate_tip");
 /// The arrows' letters, as in the dialog's Offset A and Offset B, and their handles' names.
 const ARROW_LETTERS: [&str; 2] = ["A", "B"];
 const ARROW_HANDLES: [&str; 2] = ["frame_anchor:arrow_a", "frame_anchor:arrow_b"];
@@ -813,7 +813,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         crate::scenario::publish_handle(handle, a.grip);
         DRAWN.with(|h| h.borrow_mut().push(a.grip));
         if hovered && !dragging {
-            r.clone().backing_on_hover_text(app.tr(tip));
+            r.clone().backing_on_hover_text(app.tr_by_id(tip));
         }
         if hovered || dragging {
             ctx.set_cursor_icon(if dragging { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Move });

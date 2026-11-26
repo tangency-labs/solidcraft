@@ -196,9 +196,9 @@ pub fn rows(ui: &mut egui::Ui, p: &mut Place) {
     });
     // What X and Y place: the drawing's middle, or the file's own origin so the drawing keeps the
     // coordinates it was drawn at (#22057).
-    form_row(ui, solidcraft_ui_text::tr("ui.insert_drawing.place_by"), |ui| {
+    form_row(ui, tr!("ui.insert_drawing.place_by"), |ui| {
         let mut selected = usize::from(p.align == Align::Origin);
-        let labels = [solidcraft_ui_text::tr("ui.insert_drawing.middle"), solidcraft_ui_text::tr("ui.insert_drawing.file_origin")];
+        let labels = [tr!("ui.insert_drawing.middle"), tr!("ui.insert_drawing.file_origin")];
         let targets = ["dialog:insert:middle", "dialog:insert:origin"];
         if crate::ui_kit::segmented(ui, &mut selected, &labels, crate::ui_kit::Segments { targets: &targets, ..Default::default() }) {
             p.align = if selected == 1 { Align::Origin } else { Align::Middle };
@@ -231,8 +231,8 @@ pub fn rows(ui: &mut egui::Ui, p: &mut Place) {
         let r = crate::ui_kit::number_field(ui, &mut p.angle, -360.0..=360.0, 1.0, "\u{b0}");
         crate::scenario::publish_handle("dialog:insert:angle", r.rect.center());
     });
-    crate::ui_kit::with_row_label_tooltip(ui, solidcraft_ui_text::tr("ui.insert_simplify_tip"), |ui| {
-        form_row(ui, solidcraft_ui_text::tr("ui.insert_simplify"), |ui| {
+    crate::ui_kit::with_row_label_tooltip(ui, tr!("ui.insert_simplify_tip"), |ui| {
+        form_row(ui, tr!("ui.insert_simplify"), |ui| {
             let r = crate::ui_kit::number_field(ui, &mut p.simplify, 0.0..=MAX_SIMPLIFY_MM, 0.01, " mm");
             crate::scenario::publish_handle("dialog:insert:simplify", r.rect.center());
         });

@@ -194,7 +194,7 @@ fn backend_trial(graphics: &GraphicsSettings) -> Option<(BackendAttempt, bool)> 
 pub(super) fn backend_reverted_note(requested: &str, previous: &str) -> String {
     let requested = solidcraft_ui_egui::prefs::graphics_backend_label(requested);
     let previous = solidcraft_ui_egui::prefs::graphics_backend_label(previous);
-    solidcraft_ui_text::format("prefs.graphics_api_start_reverted", &[("requested", &requested), ("previous", &previous)])
+    solidcraft_ui_egui::tr!("prefs.graphics_api_start_reverted", requested = &requested, previous = &previous)
 }
 
 /// Prepare a UI-selected API before any adapter is opened. Safe mode, an explicit environment

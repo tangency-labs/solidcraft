@@ -31,7 +31,7 @@ pub(crate) struct ExportForm {
 }
 
 fn tr(id: &'static str) -> &'static str {
-    solidcraft_ui_text::tr(id)
+    solidcraft_ui_text::tr_by_id(id)
 }
 
 /// The `drawing.export` parameters for `form` on the sheet `sheet`, without the path.
@@ -84,17 +84,17 @@ pub(super) fn panel(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let sheets = app.session.drawing("drawing.inspect").map(|d| d.sheets.len()).unwrap_or_default();
     let (cancel, go) = super::inset(ui, |ui| {
         let labels = FORMATS.map(|(label, _, _)| tr(label));
-        let r = ui_kit::choice_row(ui, tr("ui.drawing_export.format"), "drawing:export:format", &mut form.format, &labels);
+        let r = ui_kit::choice_row(ui, tr!("ui.drawing_export.format"), "drawing:export:format", &mut form.format, &labels);
         crate::scenario::publish_handle("drawing:export:format", r.rect.center());
         if FORMATS[form.format.min(FORMATS.len() - 1)].1 == "pdf" {
             let mut pages = usize::from(form.all_sheets);
-            let options = [tr("ui.drawing_export.this_sheet"), tr("ui.drawing_export.all_sheets")];
-            let r = ui_kit::choice_row(ui, tr("ui.drawing_export.sheets"), "drawing:export:sheets", &mut pages, &options);
+            let options = [tr!("ui.drawing_export.this_sheet"), tr!("ui.drawing_export.all_sheets")];
+            let r = ui_kit::choice_row(ui, tr!("ui.drawing_export.sheets"), "drawing:export:sheets", &mut pages, &options);
             crate::scenario::publish_handle("drawing:export:sheets", r.rect.center());
             form.all_sheets = pages == 1;
             let mut text = usize::from(form.text_outlines);
-            let options = [tr("ui.drawing_export.text_real"), tr("ui.drawing_export.text_outlines")];
-            let r = ui_kit::choice_row(ui, tr("ui.drawing_export.text"), "drawing:export:text", &mut text, &options);
+            let options = [tr!("ui.drawing_export.text_real"), tr!("ui.drawing_export.text_outlines")];
+            let r = ui_kit::choice_row(ui, tr!("ui.drawing_export.text"), "drawing:export:text", &mut text, &options);
             crate::scenario::publish_handle("drawing:export:text", r.rect.center());
             form.text_outlines = text == 1;
             let note = if form.all_sheets && sheets > 1 { "ui.drawing_export.pdf_pages" } else { "ui.drawing_export.pdf_note" };
@@ -107,9 +107,9 @@ pub(super) fn panel(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         ui.separator();
         ui.horizontal(|ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let go = ui_kit::button(ui, tr("ui.drawing_export.export"), Button::Normal);
+                let go = ui_kit::button(ui, tr!("ui.drawing_export.export"), Button::Normal);
                 crate::scenario::publish_handle("drawing:export:go", go.rect.center());
-                let cancel = ui_kit::button(ui, tr("ui.cancel"), Button::Normal).clicked();
+                let cancel = ui_kit::button(ui, tr!("ui.cancel"), Button::Normal).clicked();
                 (cancel, go.clicked())
             })
             .inner

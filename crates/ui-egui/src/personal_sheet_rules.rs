@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use crate::dialogs::{Dialog, Kind};
 use crate::dialogs_sheet::{ANGLE_DISPLAYS, BEND_RELIEF_SHAPES, RELIEF_SHAPES, RULE_FIELDS, Sm, design_rules};
 use crate::ui_kit::{self, Text};
-use solidcraft_ui_text::tr;
+use solidcraft_ui_text::tr_by_id;
 
 const MAX_RULES: usize = 64;
 /// The longest rule name `sheet.manage_rules` takes.
@@ -401,13 +401,13 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, library: &mut Library, doc
     let id = panel_id();
     let mut state = if reset { PanelState::default() } else { ui.ctx().data_mut(|data| data.get_temp::<PanelState>(id)).unwrap_or_default() };
     ui_kit::section(ui, "personal_sheet_rules", "sheet.personal_rules.title", false, |ui| {
-        ui.label(tr("sheet.personal_rules.scope"));
+        ui.label(tr!("sheet.personal_rules.scope"));
         crate::dialogs::form_row(ui, "sheet.personal_rules.rule", |ui| {
             let before = library.find(&state.selected).map_or(0, |index| index + 1);
             let mut selected = before;
             let dirty = library.modified(&state.selected, sm, doc);
             let display = library.find(&state.selected).and_then(|index| library.0.get(index)).map_or_else(
-                || tr("sheet.personal_rules.select").to_string(),
+                || tr!("sheet.personal_rules.select").to_string(),
                 |rule| {
                     if dirty { format!("* {}", rule.name) } else { rule.name.clone() }
                 },
@@ -416,12 +416,12 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, library: &mut Library, doc
             let width = (ui.available_width() - height - ui.spacing().item_spacing.x).max(1.0);
             ui.allocate_ui_with_layout(egui::vec2(width, height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 let response = ui_kit::dropdown_menu(ui, "personal_sheet_rule_choice", &display, |ui| {
-                    let placeholder = ui_kit::list_picker(ui, "personal_sheet_rules_select", tr("sheet.personal_rules.select"), selected == 0);
+                    let placeholder = ui_kit::list_picker(ui, "personal_sheet_rules_select", tr!("sheet.personal_rules.select"), selected == 0);
                     if placeholder.clicked() {
                         selected = 0;
                     }
                     crate::scenario::publish_handle(
-                        &format!("dialog:sheet.personal_rules.rule:{}", tr("sheet.personal_rules.select")),
+                        &format!("dialog:sheet.personal_rules.rule:{}", tr!("sheet.personal_rules.select")),
                         placeholder.rect.center(),
                     );
                     for (index, rule) in library.0.iter().enumerate() {
@@ -433,7 +433,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, library: &mut Library, doc
                     }
                 });
                 response.widget_info(|| {
-                    let mut info = egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), tr("sheet.personal_rules.rule"));
+                    let mut info = egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), tr!("sheet.personal_rules.rule"));
                     info.current_text_value = Some(display.clone());
                     info
                 });
@@ -448,7 +448,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, library: &mut Library, doc
             let modified = library.modified(&state.selected, sm, doc);
             ui.add_enabled_ui(modified, |ui| {
                 let (rect, _) = ui.allocate_exact_size(egui::vec2(height, height), egui::Sense::hover());
-                let save = ui_kit::icon_button_at(ui, rect, "save", tr("sheet.personal_rules.overwrite"));
+                let save = ui_kit::icon_button_at(ui, rect, "save", tr!("sheet.personal_rules.overwrite"));
                 crate::scenario::publish_target("dialog:sheet.personal_rules:overwrite", save.rect);
                 if save.clicked() {
                     state.error = library.overwrite(&state.selected, sm, doc).err();
@@ -465,31 +465,31 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, library: &mut Library, doc
             response.clicked()
         };
         ui.horizontal_wrapped(|ui| {
-            if button(ui, "save", tr("sheet.personal_rules.save"), true) {
+            if button(ui, "save", tr!("sheet.personal_rules.save"), true) {
                 state.prompt = Some(NamePrompt { name: shown_name(sm, doc), renaming: false });
                 state.error = None;
                 state.confirming_delete = false;
             }
-            if button(ui, "rename", tr("sheet.personal_rules.rename"), chosen.is_some()) {
+            if button(ui, "rename", tr!("sheet.personal_rules.rename"), chosen.is_some()) {
                 state.prompt = Some(NamePrompt { name: state.selected.clone(), renaming: true });
                 state.error = None;
                 state.confirming_delete = false;
             }
-            if button(ui, "delete", tr("sheet.personal_rules.delete"), chosen.is_some()) {
+            if button(ui, "delete", tr!("sheet.personal_rules.delete"), chosen.is_some()) {
                 state.confirming_delete = true;
                 state.error = None;
             }
         });
         if state.confirming_delete {
-            ui.label(tr("sheet.personal_rules.delete_prompt"));
+            ui.label(tr!("sheet.personal_rules.delete_prompt"));
             ui.horizontal_wrapped(|ui| {
-                if button(ui, "confirm_delete", tr("sheet.personal_rules.confirm_delete"), true) {
+                if button(ui, "confirm_delete", tr!("sheet.personal_rules.confirm_delete"), true) {
                     if let Some(index) = library.find(&state.selected) {
                         library.0.remove(index);
                     }
                     state = PanelState::default();
                 }
-                if ui_kit::button(ui, tr("ui.cancel"), ui_kit::Button::Normal).clicked() {
+                if ui_kit::button(ui, tr!("ui.cancel"), ui_kit::Button::Normal).clicked() {
                     state.confirming_delete = false;
                 }
             });
@@ -497,7 +497,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, library: &mut Library, doc
         if state.prompt.is_none()
             && let Some(error) = state.error
         {
-            ui_kit::text(ui, tr(error), Text::Report("personal_sheet_rules_error", true));
+            ui_kit::text(ui, tr_by_id(error), Text::Report("personal_sheet_rules_error", true));
         }
     });
     ui.ctx().data_mut(|data| data.insert_temp(id, state));
@@ -517,18 +517,20 @@ pub(crate) fn name_prompt(ctx: &egui::Context, d: &mut Dialog, library: &mut Lib
     let id = panel_id();
     let mut state = ctx.data_mut(|data| data.get_temp::<PanelState>(id)).unwrap_or_default();
     let Some(mut prompt) = state.prompt.take() else { return false };
-    let title = tr(if prompt.renaming { "sheet.personal_rules.rename" } else { "sheet.personal_rules.save" });
+    let title = tr_by_id(if prompt.renaming { "sheet.personal_rules.rename" } else { "sheet.personal_rules.save" });
     let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("personal_sheet_rule_name"), "save", title)
-        .actions(if prompt.renaming { tr("sheet.personal_rules.rename") } else { solidcraft_ui_text::tr_label("Save") }, "Cancel", None)
+        .actions(if prompt.renaming { tr!("sheet.personal_rules.rename") } else { solidcraft_ui_text::tr_label("Save") }, "Cancel", None)
         .show(ctx, true, |ui| {
-            ui_kit::row(ui, "sheet.personal_rules.name", |ui| ui_kit::focused_text_field(ui, &mut prompt.name, tr("sheet.personal_rules.name_hint")));
+            ui_kit::row(ui, "sheet.personal_rules.name", |ui| {
+                ui_kit::focused_text_field(ui, &mut prompt.name, tr!("sheet.personal_rules.name_hint"))
+            });
             // Keep an over-long name for a clear error, but bound what the prompt holds.
             if prompt.name.len() > MAX_EXPRESSION {
                 let end = prompt.name.char_indices().map(|(index, _)| index).take_while(|index| *index <= MAX_EXPRESSION).last().unwrap_or(0);
                 prompt.name.truncate(end);
             }
             if let Some(error) = state.error {
-                ui_kit::text(ui, tr(error), Text::Report("personal_sheet_rules_name_error", true));
+                ui_kit::text(ui, tr_by_id(error), Text::Report("personal_sheet_rules_name_error", true));
             }
         });
     ctx.input_mut(|input| {

@@ -636,7 +636,7 @@ impl AppPanelRuntime {
                     Ok(false) => return Ok(()),
                     Err(reason) => {
                         self.recover_unopened_window(&app.session, host, &section)?;
-                        app.set_status(solidcraft_ui_text::tr(super::rule_key(reason.rule)).to_owned(), true);
+                        app.set_status(solidcraft_ui_text::tr_by_id(super::rule_key(reason.rule)).to_owned(), true);
                         return Err(reason);
                     }
                     Ok(true) => {
@@ -1422,7 +1422,7 @@ fn window_size(size: Size, (min, max): (Size, Size)) -> Size {
 
 pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
     if let Err(reason) = ensure_production(app) {
-        app.set_status(solidcraft_ui_text::tr(super::rule_key(reason.rule)).to_owned(), true);
+        app.set_status(solidcraft_ui_text::tr_by_id(super::rule_key(reason.rule)).to_owned(), true);
         if let Some(integration) = &mut app.panel_runtime {
             integration.last_error = Some(reason);
         }
@@ -1496,7 +1496,7 @@ pub(crate) fn show_desktop_windows(app: &mut crate::SolveApp, ctx: &egui::Contex
     let shown = integration.show_desktop_windows(app, ctx, enabled, &mut drawn);
     crate::context_menu::close_unshown_window(app, &drawn);
     if let Err(reason) = shown {
-        app.set_status(solidcraft_ui_text::tr(super::rule_key(reason.rule)).to_owned(), true);
+        app.set_status(solidcraft_ui_text::tr_by_id(super::rule_key(reason.rule)).to_owned(), true);
         integration.last_error = Some(reason);
     }
     app.panel_runtime = Some(integration);

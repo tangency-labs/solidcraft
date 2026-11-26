@@ -94,14 +94,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(prompt) = app.link_folders_prompt.iter().find(|p| p.session == app.session.uid) else { return };
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
     let folders = prompt.folders.join(", ");
-    let detail = solidcraft_ui_text::format("linked_files.other_folders_detail", &[("folders", &folders)]);
-    let (closed, action) =
-        ui_kit::Confirm::new(egui::Id::unique("sc_link_folders_prompt"), "help", solidcraft_ui_text::tr("linked_files.other_folders_title"))
-            .actions(solidcraft_ui_text::tr("linked_files.other_folders_load"), solidcraft_ui_text::tr("linked_files.other_folders_not_now"), None)
-            .selected(ui_kit::Action::Cancel)
-            .show(ctx, true, |ui| {
-                ui_kit::text(ui, &detail, ui_kit::Text::Report("link_folders_prompt", false));
-            });
+    let detail = tr!("linked_files.other_folders_detail", folders = &folders);
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_link_folders_prompt"), "help", tr!("linked_files.other_folders_title"))
+        .actions(tr!("linked_files.other_folders_load"), tr!("linked_files.other_folders_not_now"), None)
+        .selected(ui_kit::Action::Cancel)
+        .show(ctx, true, |ui| {
+            ui_kit::text(ui, &detail, ui_kit::Text::Report("link_folders_prompt", false));
+        });
     let mut chosen = match action {
         ui_kit::Action::Ok => Some(Answer::Load),
         ui_kit::Action::Cancel => Some(Answer::NotNow),

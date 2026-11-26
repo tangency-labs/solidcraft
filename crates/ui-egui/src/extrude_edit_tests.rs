@@ -1843,7 +1843,7 @@ fn editing_symmetric_extrude_toggles_symmetric_offset() {
 fn extrude_body_name_row_shows_for_new_body_and_a_typed_name_is_sent() {
     use crate::dialogs::{Kind, apply_commands};
     let shows = |h: &Harness| {
-        let label = solidcraft_ui_text::tr("ui.body_name");
+        let label = tr!("ui.body_name");
         h.output
             .accesskit_update
             .as_ref()

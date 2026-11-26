@@ -12,7 +12,7 @@ use crate::SolveApp;
 use crate::plugin_shaders::{Loaded, Pending};
 use crate::ui_kit::tint::{self, Ask};
 
-const UNREADABLE: &str = "prefs.ui_tint_failed";
+const UNREADABLE: solidcraft_ui_text::Msg = msg!("prefs.ui_tint_failed");
 
 /// A tint's compute pipeline and the host's bindings (group 0).
 pub(crate) struct Pipeline {
@@ -118,7 +118,7 @@ pub(crate) fn begin(app: &mut SolveApp, ctx: &egui::Context) {
         tint::set_on(ctx, false);
         if app.plugin_tint.loading.as_ref().is_none_or(|(k, _)| *k != key) {
             let Some(folder) = crate::plugin_shaders::folder_of(app, &key) else {
-                fail(app, &key, solidcraft_ui_text::tr("prefs.background_shader_missing"));
+                fail(app, &key, tr!("prefs.background_shader_missing"));
                 return;
             };
             let pending: Pending = Arc::default();

@@ -948,7 +948,7 @@ mod web {
                             files::pick_from_disk(&self.files, Intent::Open);
                         }
                         if ui_kit::button(ui, "Insert from computer…", ui_kit::Button::Normal)
-                            .backing_on_hover_text(solidcraft_ui_text::tr("web.files.insert_drawings_hint"))
+                            .backing_on_hover_text(solidcraft_ui_egui::tr!("web.files.insert_drawings_hint"))
                             .clicked()
                         {
                             files::pick_from_disk(&self.files, Intent::Insert);
@@ -1002,7 +1002,7 @@ mod web {
                                         let design = solidcraft_engine::io::is_design_path(&e.name);
                                         if !design
                                             && ui_kit::button(ui, "Insert", ui_kit::Button::Small)
-                                                .backing_on_hover_text(solidcraft_ui_text::tr("web.files.insert_stored_drawings_hint"))
+                                                .backing_on_hover_text(solidcraft_ui_egui::tr!("web.files.insert_stored_drawings_hint"))
                                                 .clicked()
                                         {
                                             act = Some(("insert", e.name.clone()));
@@ -1358,7 +1358,7 @@ mod web {
             UNSAVED.with(|u| u.set(self.asks_before_unload()));
             if self.launch.embed {
                 ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Chrome).edge("embed_header", ui_kit::Edge::Top).show(ui, |ui| {
-                    if ui_kit::button(ui, solidcraft_ui_text::tr("web.open_full"), ui_kit::Button::Normal).clicked()
+                    if ui_kit::button(ui, solidcraft_ui_egui::tr!("web.open_full"), ui_kit::Button::Normal).clicked()
                         && let (Some(window), Some(url)) = (web_sys::window(), &self.full_url)
                     {
                         let _ = window.open_with_url_and_target_and_features(url, "_blank", "noopener");

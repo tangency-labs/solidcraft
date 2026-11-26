@@ -492,7 +492,7 @@ fn a_note_saved_before_alignments_has_its_own_choice_in_the_notes_panel() {
         }
         let widget = crate::scenario::rect_of("dialog:widget:Alignment")?.center();
         click(h, widget);
-        solidcraft_ui_registry::handle_at(&format!("dialog:Alignment:{}", solidcraft_ui_text::tr(key)))
+        solidcraft_ui_registry::handle_at(&format!("dialog:Alignment:{}", solidcraft_ui_text::tr_by_id(key)))
     };
     let ok = |h: &mut Harness| {
         let at = crate::scenario::rect_of("dialog:button::OK").expect("OK is drawn").center();
@@ -1195,7 +1195,7 @@ fn dimension_tool_refuses_an_outline_and_an_edge_saying_why() {
     click_paper(&mut h, 115.0, 180.0);
     assert!(matches!(picked_shapes(&h.app)[..], [Shape::Straight(_)]), "only the outline stays picked: {:?}", picked_shapes(&h.app));
     let status = h.app.status.as_ref().map(|(text, _, _)| text.clone()).unwrap_or_default();
-    assert_eq!(status, solidcraft_ui_text::tr("ui.drawing_dimension_tool.measures_nothing"));
+    assert_eq!(status, tr!("ui.drawing_dimension_tool.measures_nothing"));
     click_paper(&mut h, 100.0, 180.0);
     assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().dimensions.len(), before + 1, "the outline alone still places its Ø");
 }
@@ -1843,10 +1843,7 @@ fn navigation_cancels_a_view_move_before_release() {
             h.frames(2);
             assert!(h.ctx.input(|input| input.pointer.primary_down()));
             let offset = at.paper(preview) - at.paper(from);
-            let label = solidcraft_ui_text::format(
-                "ui.drawing_view_selection.offset",
-                &[("x", &format!("{:+.1}", offset.x)), ("y", &format!("{:+.1}", offset.y))],
-            );
+            let label = tr!("ui.drawing_view_selection.offset", x = &format!("{:+.1}", offset.x), y = &format!("{:+.1}", offset.y));
             assert!(texts(&h.shapes).contains(&label), "a view-move preview is painted");
             assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), (doc.clone(), undo));
             h.app.run("view.tool", json!({"tool": tool})).unwrap();

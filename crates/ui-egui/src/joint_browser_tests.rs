@@ -671,7 +671,7 @@ fn a_constraint_row_shows_its_rule() {
     use solidcraft_engine::doc::joints::{Constraint, JointKind};
     let (icon, tip) = crate::dialogs_assembly::joint_look(JointKind::Planar, Some(Constraint::Mate));
     assert_eq!(icon, "constraint_mate");
-    assert_eq!(tip, solidcraft_ui_text::format("constrain.row_tip", &[("rule", crate::dialogs_constrain::label(Constraint::Mate))]));
+    assert_eq!(tip, tr!("constrain.row_tip", rule = crate::dialogs_constrain::label(Constraint::Mate)));
     assert!(!tip.to_lowercase().contains("planar"), "{tip}");
     assert_eq!(crate::dialogs_assembly::joint_look(JointKind::Planar, None), ("joint", "Planar joint".to_string()));
     let mut icons = std::collections::BTreeSet::new();

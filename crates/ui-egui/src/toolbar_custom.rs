@@ -410,7 +410,7 @@ pub fn quick_add(app: &mut SolveApp, id: &str) -> Result<(), String> {
         return Ok(());
     }
     if list.len() >= MAX_QUICK_ACCESS {
-        return Err(solidcraft_ui_text::format("ui.quick_access_full", &[("count", &MAX_QUICK_ACCESS.to_string())]));
+        return Err(tr!("ui.quick_access_full", count = &MAX_QUICK_ACCESS.to_string()));
     }
     list.push(spec.id.to_string());
     let layout = app.toolbar_custom.app_bar.clone();
@@ -547,7 +547,7 @@ pub fn command_items(app: &SolveApp, id: &str) -> Vec<Item> {
 pub fn toolbar_items(app: &SolveApp) -> Vec<Item> {
     let mut v = Vec::new();
     if !crate::render_workspace::active(app) {
-        v.push(Item::heading(app.tr("prefs.toolbar_tabs")));
+        v.push(Item::heading(tr!(app, "prefs.toolbar_tabs")));
         for tab in crate::workspace::choosable_tabs() {
             let on = crate::workspace::tab_turned_on(app, tab);
             // The row reads as the tab does, in every language.
@@ -670,11 +670,7 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
                 ctx,
                 true,
                 |ui| {
-                    ui_kit::text(
-                        ui,
-                        &solidcraft_ui_text::format("toolbar.customize_note", &[("tab", app.tr_label(&tab))]),
-                        ui_kit::Text::Note("customize"),
-                    );
+                    ui_kit::text(ui, &tr!("toolbar.customize_note", tab = app.tr_label(&tab)), ui_kit::Text::Note("customize"));
                     egui::ScrollArea::vertical()
                         .max_height(
                             (ctx.content_rect().height() - solidcraft_theme::Tokens::get().control_height * 8.0)
@@ -703,7 +699,7 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
                     let reset = ui_kit::button(ui, solidcraft_ui_text::tr_label("Reset Toolbar"), ui_kit::Button::Normal);
                     crate::scenario::publish_target("customize:reset", reset.rect);
                     reset_tab |= reset.clicked();
-                    let reset_all = ui_kit::button(ui, app.tr("toolbar.reset_all_tabs"), ui_kit::Button::Normal);
+                    let reset_all = ui_kit::button(ui, tr!(app, "toolbar.reset_all_tabs"), ui_kit::Button::Normal);
                     crate::scenario::publish_target("customize:reset_all", reset_all.rect);
                     ask_all |= reset_all.clicked();
                 },
@@ -736,9 +732,9 @@ fn confirm_reset_all(app: &mut SolveApp, ctx: &egui::Context) {
     let (closed, action) =
         ui_kit::Confirm::new(egui::Id::unique("sc_toolbar_reset_confirm"), "restore", solidcraft_ui_text::tr_label("Reset Toolbar"))
             .tone(ui_kit::Tone::Warning)
-            .actions(app.tr("toolbar.reset"), "Cancel", None)
+            .actions(tr!(app, "toolbar.reset"), "Cancel", None)
             .show(ctx, true, |ui| {
-                ui_kit::text(ui, app.tr("toolbar.reset_all_tabs_confirm"), ui_kit::Text::Report("reset", false));
+                ui_kit::text(ui, tr!(app, "toolbar.reset_all_tabs_confirm"), ui_kit::Text::Report("reset", false));
             });
     match action {
         ui_kit::Action::Ok => {

@@ -250,23 +250,22 @@ impl Timeline2DState {
         features: &[(usize, &str, &str)], // (step_1_based, name, component_name)
         is_active: bool,
     ) -> String {
-        use solidcraft_ui_text::{format, tr};
-        let status = tr(if is_active { "ui.timeline_2d_group_tip_active" } else { "ui.timeline_2d_group_tip_inactive" });
+        let status = if is_active { tr!("ui.timeline_2d_group_tip_active") } else { tr!("ui.timeline_2d_group_tip_inactive") };
         let count = features.len().to_string();
         let step_range = match features {
-            [] => tr("ui.timeline_2d_group_tip_no_steps").to_string(),
-            [(step, ..)] => format("ui.timeline_2d_group_tip_step", &[("step", &format!("{step:02}"))]),
+            [] => tr!("ui.timeline_2d_group_tip_no_steps").to_string(),
+            [(step, ..)] => tr!("ui.timeline_2d_group_tip_step", step = &format!("{step:02}")),
             [(first, ..), .., (last, ..)] => {
-                format("ui.timeline_2d_group_tip_steps", &[("first", &format!("{first:02}")), ("last", &format!("{last:02}"))])
+                tr!("ui.timeline_2d_group_tip_steps", first = &format!("{first:02}"), last = &format!("{last:02}"))
             }
         };
-        let title = format("ui.timeline_2d_group_tip_title", &[("name", group_name), ("count", &count)]);
-        let mut tip = format!("{title}\n{step_range} • {status}\n\n{}\n", tr("ui.timeline_2d_group_tip_features"));
+        let title = tr!("ui.timeline_2d_group_tip_title", name = group_name, count = &count);
+        let mut tip = format!("{title}\n{step_range} • {status}\n\n{}\n", tr!("ui.timeline_2d_group_tip_features"));
         for (step, name, comp) in features {
             tip.push_str(&format!("  • [{step:02}] {name} ({comp})\n"));
         }
         tip.push('\n');
-        tip.push_str(tr("ui.timeline_2d_group_tip_hint"));
+        tip.push_str(tr!("ui.timeline_2d_group_tip_hint"));
         tip
     }
 }

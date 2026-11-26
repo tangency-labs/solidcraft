@@ -68,8 +68,7 @@ pub fn offer_row(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
         return;
     }
     let label = solidcraft_ui_text::tr_label("New Sketch");
-    let button =
-        crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal).backing_on_hover_text(solidcraft_ui_text::tr("dialog.new_sketch_hint"));
+    let button = crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal).backing_on_hover_text(tr!("dialog.new_sketch_hint"));
     crate::scenario::publish_handle("dialog:new_sketch", button.rect.center());
     if button.clicked() {
         d.new_sketch = true;
@@ -126,7 +125,7 @@ pub fn tick(app: &mut SolveApp) {
         if !std::mem::replace(&mut inline.told, true) {
             let label = solidcraft_engine::find_command(inline.command).map_or("", |c| c.label);
             let label = solidcraft_ui_text::tr_label(label).to_string();
-            app.set_status(solidcraft_ui_text::format("dialog.new_sketch_return", &[("command", &label)]), false);
+            app.set_status(tr!("dialog.new_sketch_return", command = &label), false);
         }
         return;
     }

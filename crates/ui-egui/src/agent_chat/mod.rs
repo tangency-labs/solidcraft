@@ -51,7 +51,7 @@ use context::Context;
 
 use crate::{ControlRequest, SolveApp};
 use backend::{ChatBackend, Event, PermissionOption, PromptPart, ToolStatus};
-use solidcraft_ui_text::{format as trf, tr};
+use solidcraft_ui_text::tr_by_id;
 
 pub(crate) use panel::finish_shared;
 pub(crate) use panel::owns_keyboard_input;
@@ -108,7 +108,7 @@ impl State {
         }
     }
     pub(crate) fn label(self) -> &'static str {
-        tr(match self {
+        tr_by_id(match self {
             State::Off => "ui.agent_chat_state_off",
             State::Starting => "ui.agent_chat_state_starting",
             State::Ready => "ui.agent_chat_state_ready",
@@ -820,7 +820,7 @@ impl AgentChat {
                 let _language = solidcraft_ui_text::scope(language);
                 let _ = tx.send(job());
             })
-            .map_err(|e| trf("ui.agent_chat_file_error", &[("name", &name), ("error", &e.to_string())]))?;
+            .map_err(|e| tr!("ui.agent_chat_file_error", name = &name, error = &e.to_string()))?;
         let id = self.next_file_id();
         self.loading.push(Loading { id, name: name.clone(), what: Reading::File(rx) });
         Ok(name)
@@ -845,11 +845,11 @@ impl AgentChat {
     /// its tools did not start (an endpoint agent whose MCP start failed; the error is in the chat).
     pub(crate) fn no_design_hint(&self) -> &'static str {
         if self.tools_port.is_none() {
-            tr("ui.agent_chat_no_control")
+            tr!("ui.agent_chat_no_control")
         } else if self.tools_bridged {
-            tr("ui.agent_chat_tools_not_started")
+            tr!("ui.agent_chat_tools_not_started")
         } else {
-            tr("ui.agent_chat_no_design_hint")
+            tr!("ui.agent_chat_no_design_hint")
         }
     }
     #[cfg(test)]
@@ -900,7 +900,7 @@ impl AgentChat {
     }
     /// Say that the agent refused a model, and in its words why.
     fn model_refused(&mut self, model: &str, error: &str) {
-        let text = trf("ui.agent_chat_model_rejected", &[("model", model), ("error", error)]);
+        let text = tr!("ui.agent_chat_model_rejected", model = model, error = error);
         self.notice(text.chars().take(MODELS_NOTE_CAP).collect::<String>(), true);
     }
     fn notice(&mut self, text: impl Into<String>, error: bool) {
@@ -930,7 +930,7 @@ impl AgentChat {
                 *a = Some(false);
             }
             if let Item::Permission { answer: a @ None, .. } = i {
-                *a = Some(tr("ui.agent_chat_cancel").to_string());
+                *a = Some(tr!("ui.agent_chat_cancel").to_string());
             }
         }
     }
@@ -942,7 +942,7 @@ impl AgentChat {
             return;
         }
         let label =
-            option.and_then(|o| options.iter().find(|x| x.id == o)).map_or_else(|| tr("ui.agent_chat_cancel").to_string(), |o| o.name.clone());
+            option.and_then(|o| options.iter().find(|x| x.id == o)).map_or_else(|| tr!("ui.agent_chat_cancel").to_string(), |o| o.name.clone());
         *answer = Some(label);
         let key = *key;
         if let Some(b) = self.backend.as_mut() {
@@ -1090,8 +1090,7 @@ impl AgentChat {
             }
             // Formatted here: the listing's thread has no language of its own.
             Event::ModelsNote(error) => {
-                self.models_note =
-                    error.map(|error| trf("ui.agent_chat_models_failed", &[("error", &error)]).chars().take(MODELS_NOTE_CAP).collect());
+                self.models_note = error.map(|error| tr!("ui.agent_chat_models_failed", error = &error).chars().take(MODELS_NOTE_CAP).collect());
             }
             Event::ModelRejected(message) => {
                 let refused = self.model.clone();
@@ -1147,8 +1146,8 @@ impl AgentChat {
                 match reason.as_str() {
                     "" | "auth" | "error" => {}
                     // Not a missing tool: the answer ran out of room, or the model declined (#9495).
-                    "max_tokens" => self.notice(tr("ui.agent_chat_reply_cut_off").to_string(), false),
-                    "refusal" => self.notice(tr("ui.agent_chat_reply_declined").to_string(), false),
+                    "max_tokens" => self.notice(tr!("ui.agent_chat_reply_cut_off").to_string(), false),
+                    "refusal" => self.notice(tr!("ui.agent_chat_reply_declined").to_string(), false),
                     _ => self.notice(format!("({reason})"), false),
                 }
                 return Some(Outcome::TurnEnd);
@@ -1174,7 +1173,7 @@ impl AgentChat {
                 }
                 let last: Vec<String> = tail.into_iter().rev().take(6).collect::<Vec<_>>().into_iter().rev().collect();
                 let detail = if last.is_empty() { String::new() } else { format!("\n{}", last.join("\n")) };
-                self.notice(format!("{}{detail}", tr("ui.agent_chat_exited")), true);
+                self.notice(format!("{}{detail}", tr!("ui.agent_chat_exited")), true);
                 self.stop_backend(false);
                 return Some(Outcome::TurnEnd);
             }
@@ -1250,17 +1249,17 @@ pub(crate) fn assistant_mark(app: &SolveApp) -> AssistantMark {
 
 pub(crate) fn assistant_tip(app: &SolveApp, mark: AssistantMark) -> String {
     let state = match mark {
-        AssistantMark::Quiet => tr("ui.agent_chat_state_off").to_string(),
-        AssistantMark::Ready => tr("ui.agent_chat_state_ready").to_string(),
-        AssistantMark::Busy => tr("ui.agent_chat_state_busy").to_string(),
-        AssistantMark::NeedsAuth => tr("ui.agent_chat_state_auth").to_string(),
-        AssistantMark::Stopped => tr("ui.agent_chat_state_exited").to_string(),
-        AssistantMark::Waiting(count) => trf("ui.assistant_waiting", &[("count", &count.to_string())]),
-        AssistantMark::NoDesign => tr("ui.agent_chat_state_no_design").to_string(),
+        AssistantMark::Quiet => tr!("ui.agent_chat_state_off").to_string(),
+        AssistantMark::Ready => tr!("ui.agent_chat_state_ready").to_string(),
+        AssistantMark::Busy => tr!("ui.agent_chat_state_busy").to_string(),
+        AssistantMark::NeedsAuth => tr!("ui.agent_chat_state_auth").to_string(),
+        AssistantMark::Stopped => tr!("ui.agent_chat_state_exited").to_string(),
+        AssistantMark::Waiting(count) => tr!("ui.assistant_waiting", count = &count.to_string()),
+        AssistantMark::NoDesign => tr!("ui.agent_chat_state_no_design").to_string(),
     };
     let name = match crate::keymap::display_for(app, "ui.assistant") {
-        Some(key) => format!("{} ({key})", tr("ui.assistant")),
-        None => tr("ui.assistant").to_string(),
+        Some(key) => format!("{} ({key})", tr!("ui.assistant")),
+        None => tr!("ui.assistant").to_string(),
     };
     match mark {
         AssistantMark::NoDesign => format!("{name} — {state}\n{}", app.agent_chat.no_design_hint()),
@@ -1310,7 +1309,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
         match app.services.secrets.as_ref().map(|s| s.get(&entry.id)) {
             Some(Ok(k)) => k,
             Some(Err(e)) => {
-                app.agent_chat.notice(trf("ui.ai_keychain_error", &[("error", &e)]), true);
+                app.agent_chat.notice(tr!("ui.ai_keychain_error", error = &e), true);
                 app.agent_chat.state = Some(State::Failed);
                 return;
             }
@@ -1333,9 +1332,9 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let cli = find_cli();
     if chat.tools_port.is_none() {
-        chat.notice(tr("ui.agent_chat_no_control"), true);
+        chat.notice(tr!("ui.agent_chat_no_control"), true);
     } else if cli.is_none() {
-        chat.notice(tr("ui.agent_chat_no_cli"), true);
+        chat.notice(tr!("ui.agent_chat_no_cli"), true);
     }
     // Found, but it failed when asked its version (#9034): say why and how to reinstall it before
     // the system's own message arrives. It is still started, in case it only lacks `--version`.
@@ -1349,7 +1348,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
     let wake = ctx.clone();
     let start = backend::StartContext { cwd: working_dir(), bridge, tools: chat.tools_tx.clone(), wake: Box::new(move || wake.request_repaint()) };
     let started: Result<Box<dyn ChatBackend>, String> = match entry.kind {
-        agents::Kind::Acp if entry.argv.is_empty() => Err(tr("ui.agent_chat_none_found").to_string()),
+        agents::Kind::Acp if entry.argv.is_empty() => Err(tr!("ui.agent_chat_none_found").to_string()),
         agents::Kind::Acp => acp_client::AcpBackend::start(&entry.argv, start).map(|b| Box::new(b) as Box<dyn ChatBackend>),
         kind @ (agents::Kind::Api | agents::Kind::Anthropic) => match http {
             Some(http) => {
@@ -1371,7 +1370,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
                 )
                 .map(|b| Box::new(b) as Box<dyn ChatBackend>)
             }
-            None => Err(tr("ui.ai_no_http").to_string()),
+            None => Err(tr!("ui.ai_no_http").to_string()),
         },
     };
     match started {
@@ -1399,7 +1398,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
             chat.agent.clear();
         }
         Err(e) => {
-            chat.notice(trf("ui.agent_chat_failed_start", &[("error", &e)]), true);
+            chat.notice(tr!("ui.agent_chat_failed_start", error = &e), true);
             chat.state = Some(State::Failed);
         }
     }
@@ -1437,7 +1436,7 @@ fn connect_at_start(app: &mut SolveApp, ctx: &egui::Context) {
     let last = app.preferences.agent_last.clone();
     if !last.is_empty() {
         if !agents::entries(app).iter().any(|e| e.id == last) {
-            app.agent_chat.notice(trf("ui.agent_chat_last_missing", &[("agent", &last)]), true);
+            app.agent_chat.notice(tr!("ui.agent_chat_last_missing", agent = &last), true);
             app.agent_chat.state = Some(State::Failed);
             return;
         }
@@ -1828,7 +1827,7 @@ pub fn send(app: &mut SolveApp, ctx: &egui::Context, text: String) {
         if app.agent_chat.input.trim().is_empty() {
             app.agent_chat.input = text;
         }
-        app.agent_chat.notice(tr("ui.agent_chat_files_loading"), false);
+        app.agent_chat.notice(tr!("ui.agent_chat_files_loading"), false);
         return;
     }
     let text: String = text.chars().take(MAX_PROMPT).collect();
@@ -1843,7 +1842,7 @@ pub fn send(app: &mut SolveApp, ctx: &egui::Context, text: String) {
             app.agent_chat.input = text;
         }
         // The files stay on the chips for when there is room.
-        app.agent_chat.notice(tr("ui.agent_chat_queue_full"), false);
+        app.agent_chat.notice(tr!("ui.agent_chat_queue_full"), false);
         return;
     }
     let image = app.agent_chat.attach_view && app.agent_chat.images;
@@ -1940,7 +1939,7 @@ fn send_queue(app: &mut SolveApp, ctx: &egui::Context, interrupted: bool) {
     if files.len() > attach::MAX_FILES {
         let left: Vec<String> = files.split_off(attach::MAX_FILES).into_iter().map(|f| f.name).collect();
         let max = attach::MAX_FILES.to_string();
-        chat.notice(trf("ui.agent_chat_files_left_out", &[("max", &max), ("files", &left.join(", "))]), true);
+        chat.notice(tr!("ui.agent_chat_files_left_out", max = &max, files = &left.join(", ")), true);
     }
     let text = texts.join("\n\n");
     let text: String = text.chars().take(MAX_PROMPT).collect();
@@ -2135,12 +2134,12 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
 /// file is imported into the design at once, as its own component, and the message says so.
 pub fn attach_path(app: &mut SolveApp, path: &str) -> std::result::Result<String, String> {
     if app.agent_chat.files() >= attach::MAX_FILES {
-        return Err(trf("ui.agent_chat_files_max", &[("max", &attach::MAX_FILES.to_string())]));
+        return Err(tr!("ui.agent_chat_files_max", max = &attach::MAX_FILES.to_string()));
     }
     let p = std::path::Path::new(path);
     let file = if attach::kind(p) == attach::Kind::Cad {
         if !p.is_file() {
-            return Err(trf("ui.agent_chat_file_not_a_file", &[("name", path)]));
+            return Err(tr!("ui.agent_chat_file_not_a_file", name = path));
         }
         // Imported now, as a dropped file is; it joins the message once the import is in, so the
         // agent is told it was added only when it was. A full queue is refused at once.
@@ -2148,7 +2147,7 @@ pub fn attach_path(app: &mut SolveApp, path: &str) -> std::result::Result<String
         let (tx, rx) = std::sync::mpsc::channel();
         let mut request = crate::file_load::Request::new(path, crate::file_load::Kind::Insert);
         request.reply = Some(tx);
-        crate::file_load::begin_request(app, request).map_err(|e| trf("ui.agent_chat_import_failed", &[("name", &name), ("error", &e)]))?;
+        crate::file_load::begin_request(app, request).map_err(|e| tr!("ui.agent_chat_import_failed", name = &name, error = &e))?;
         return Ok(app.agent_chat.importing(name, rx));
     } else {
         // A picture is decoded and a PDF read off the window thread: a large one takes long enough
@@ -2157,7 +2156,7 @@ pub fn attach_path(app: &mut SolveApp, path: &str) -> std::result::Result<String
         if matches!(attach::kind(p), attach::Kind::Picture | attach::Kind::Pdf) {
             // A missing file is said at once; reading and decoding wait for the worker.
             if !p.is_file() {
-                return Err(trf("ui.agent_chat_file_not_a_file", &[("name", &attach::name_of(p))]));
+                return Err(tr!("ui.agent_chat_file_not_a_file", name = &attach::name_of(p)));
             }
             let path = p.to_path_buf();
             return app.agent_chat.load(attach::name_of(p), move || attach::read(&path));
@@ -2170,7 +2169,7 @@ pub fn attach_path(app: &mut SolveApp, path: &str) -> std::result::Result<String
 /// Add a picture from the clipboard (RGBA rows, as the system gives them) to the next message.
 pub fn attach_rgba(app: &mut SolveApp, width: usize, height: usize, rgba: &[u8]) -> std::result::Result<String, String> {
     if app.agent_chat.files() >= attach::MAX_FILES {
-        return Err(trf("ui.agent_chat_files_max", &[("max", &attach::MAX_FILES.to_string())]));
+        return Err(tr!("ui.agent_chat_files_max", max = &attach::MAX_FILES.to_string()));
     }
     let n = app.agent_chat.pasted + 1;
     let name = format!("pasted picture {n}.png");
@@ -2192,7 +2191,7 @@ pub fn attach_rgba(app: &mut SolveApp, width: usize, height: usize, rgba: &[u8])
 /// Attach the picture on the clipboard, if it holds one.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn paste_picture(app: &mut SolveApp) -> std::result::Result<String, String> {
-    let image = arboard::Clipboard::new().and_then(|mut c| c.get_image()).map_err(|_| tr("ui.agent_chat_no_picture").to_string())?;
+    let image = arboard::Clipboard::new().and_then(|mut c| c.get_image()).map_err(|_| tr!("ui.agent_chat_no_picture").to_string())?;
     attach_rgba(app, image.width, image.height, &image.bytes)
 }
 
@@ -2244,7 +2243,7 @@ fn interrupt(app: &mut SolveApp) {
     }
     for i in &mut app.agent_chat.items {
         if let Item::Permission { answer: a @ None, .. } = i {
-            *a = Some(tr("ui.agent_chat_cancel").to_string());
+            *a = Some(tr!("ui.agent_chat_cancel").to_string());
         }
     }
 }
@@ -2314,7 +2313,7 @@ fn on_permission(app: &mut SolveApp, key: u64, title: String, kind: Option<&str>
             if let Some(b) = app.agent_chat.backend.as_mut() {
                 b.answer_permission(key, Some(&option));
             }
-            app.agent_chat.push(Item::Notice { text: trf("ui.ai_auto_allowed", &[("title", &title), ("why", tr(why))]), error: false });
+            app.agent_chat.push(Item::Notice { text: tr!("ui.ai_auto_allowed", title = &title, why = tr_by_id(why)), error: false });
         }
         _ => app.agent_chat.push(Item::Permission { key, title, options, answer: None }),
     }
@@ -2381,7 +2380,7 @@ fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
         && turn.start.is(&session.doc)
         && (!turn.replied || turn.edit_requested)
     {
-        let warning = tr("ui.agent_chat_no_tool_call").to_string();
+        let warning = tr!("ui.agent_chat_no_tool_call").to_string();
         chat.turn_warning = Some(warning.clone());
         chat.notice(warning, false);
     }
@@ -2404,7 +2403,7 @@ fn merge_turn(undo: &mut Vec<solidcraft_engine::Snapshot>, turn: &Turn) -> usize
     let (Some(start_doc), Some(start)) = (turn.start.get::<solidcraft_engine::doc::Document>(), turn.start_undo.get::<UndoMark>()) else {
         return 0;
     };
-    merge_undo(undo, &start_doc, &start, &trf("ui.agent_chat_undo_label", &[("message", &turn.label)]))
+    merge_undo(undo, &start_doc, &start, &tr!("ui.agent_chat_undo_label", message = &turn.label))
 }
 
 /// Merge the undo steps made since `start_doc` (with the history at `start`) into one, labelled
@@ -2532,7 +2531,7 @@ fn pump_tools(app: &mut SolveApp) {
                         turn.limit_told = true;
                         refuse(req, format!("the limit of {limit} changes for one message is reached: tell the user what is left to do"));
                         if first {
-                            app.agent_chat.notice(trf("ui.agent_chat_limit", &[("limit", &limit.to_string())]), false);
+                            app.agent_chat.notice(tr!("ui.agent_chat_limit", limit = &limit.to_string()), false);
                         }
                         continue;
                     }
@@ -2548,7 +2547,7 @@ fn pump_tools(app: &mut SolveApp) {
                 chat.held.push(Held { id, req, since: crate::now_ms() });
             }
             gate::Verdict::Refuse(e) => {
-                app.agent_chat.notice(trf("ui.agent_chat_refused", &[("reason", &e)]), false);
+                app.agent_chat.notice(tr!("ui.agent_chat_refused", reason = &e), false);
                 refuse(req, e);
             }
             // A mistyped id: the agent hears what the engine would have said, and nothing runs.
@@ -2577,16 +2576,16 @@ pub(crate) fn take_loaded(app: &mut SolveApp, ctx: &egui::Context) {
             Reading::File(rx) => match rx.try_recv() {
                 Ok(read) => Some(read),
                 Err(TryRecvError::Empty) => None,
-                Err(TryRecvError::Disconnected) => Some(Err(trf("ui.agent_chat_file_error", &[("name", &name), ("error", "stopped")]))),
+                Err(TryRecvError::Disconnected) => Some(Err(tr!("ui.agent_chat_file_error", name = &name, error = "stopped"))),
             },
             Reading::Import(rx) => match rx.try_recv() {
                 Ok(answer) if answer["ok"].as_bool() == Some(true) => Some(Ok(attach::Attachment::imported(name))),
                 Ok(answer) => {
                     let why = answer["error"].as_str().unwrap_or_default().to_string();
-                    Some(Err(trf("ui.agent_chat_import_failed", &[("name", &name), ("error", &why)])))
+                    Some(Err(tr!("ui.agent_chat_import_failed", name = &name, error = &why)))
                 }
                 Err(TryRecvError::Empty) => None,
-                Err(TryRecvError::Disconnected) => Some(Err(trf("ui.agent_chat_import_failed", &[("name", &name), ("error", "stopped")]))),
+                Err(TryRecvError::Disconnected) => Some(Err(tr!("ui.agent_chat_import_failed", name = &name, error = "stopped"))),
             },
         };
         match done {
@@ -2740,7 +2739,7 @@ pub fn custom_models_accepted(app: &SolveApp) -> bool {
 /// The model pickers' search hint: one that takes a typed model id says so (#14369), since
 /// the list holds only the models the agent reported.
 pub(crate) fn model_search_hint(custom: bool) -> &'static str {
-    tr(if custom { "ui.agent_chat_model_search_or_id" } else { "ui.agent_chat_model_search" })
+    tr_by_id(if custom { "ui.agent_chat_model_search_or_id" } else { "ui.agent_chat_model_search" })
 }
 
 /// A typed model (the pickers' custom row). A listed id goes the usual way, others by the agent's
@@ -2877,7 +2876,7 @@ pub fn model_rows(models: &[acp::ModelInfo]) -> Vec<(String, Option<String>, Str
 
 /// The provider a model is listed under: its own, or "Other" when the agent names none.
 fn provider_of(m: &acp::ModelInfo) -> String {
-    model_provider(m).map_or_else(|| tr("ui.agent_chat_provider_other").to_string(), |(p, _)| p)
+    model_provider(m).map_or_else(|| tr!("ui.agent_chat_provider_other").to_string(), |(p, _)| p)
 }
 
 /// The providers of the agent's models in the order the agent lists them, each with how many

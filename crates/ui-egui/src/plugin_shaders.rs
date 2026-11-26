@@ -13,7 +13,7 @@ use solidcraft_engine::plugin::shader::STATE_BINDING;
 use crate::SolveApp;
 
 /// The status line's message when a background can't be drawn.
-const UNREADABLE: &str = "prefs.background_shader_failed";
+const UNREADABLE: solidcraft_ui_text::Msg = msg!("prefs.background_shader_failed");
 
 pub(crate) struct Loaded {
     pub(crate) wgsl: String,
@@ -429,7 +429,7 @@ fn announce(app: &mut SolveApp, key: &str, notes: &[String]) {
     if notes.is_empty() {
         return;
     }
-    let message = format!("{}: {}: {}", solidcraft_ui_text::tr("prefs.background_picture_fallback"), shown(key), notes.join("; "));
+    let message = format!("{}: {}: {}", tr!("prefs.background_picture_fallback"), shown(key), notes.join("; "));
     log::warn!("{message}");
     app.set_status(message, true);
 }
@@ -452,7 +452,7 @@ pub(crate) fn choose_picture(app: &mut SolveApp, picture: &str, path: String) ->
     let mut pictures = app.preferences.background_shader_pictures.clone();
     pictures.insert(picture.to_owned(), path.clone());
     if !valid_pictures(&pictures) {
-        return Err(solidcraft_ui_text::format("prefs.background_picture_refused", &[("picture", &path)]));
+        return Err(tr!("prefs.background_picture_refused", picture = &path));
     }
     app.preferences.background_shader_pictures = pictures;
     Ok(())
@@ -491,7 +491,7 @@ pub(crate) fn forget(app: &mut SolveApp, plugin: &str) {
 /// The chosen background's plugin is missing or off: say so once, not every frame.
 fn missing(app: &mut SolveApp, key: &str) {
     app.plugin_shaders.failed = Some(key.to_owned());
-    let message = format!("{} {}: {}", solidcraft_ui_text::tr(UNREADABLE), shown(key), solidcraft_ui_text::tr("prefs.background_shader_missing"));
+    let message = format!("{} {}: {}", solidcraft_ui_text::tr(UNREADABLE), shown(key), tr!("prefs.background_shader_missing"));
     log::warn!("{message}");
     app.set_status(message, true);
 }

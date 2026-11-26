@@ -70,18 +70,18 @@ pub(crate) fn filter_selection(session: &solidcraft_engine::Session, owner: (u64
 pub(crate) fn resolve(app: &SolveApp, subject: Option<&str>) -> Result<(u64, u64), String> {
     if let Some(subject) = subject {
         if let Some((drawing, sheet)) = subject.split_once('/') {
-            let drawing = ids::decode(drawing).ok_or_else(|| app.tr("sheet_views.missing").to_owned())?;
-            let sheet = ids::decode(sheet).ok_or_else(|| app.tr("sheet_views.missing").to_owned())?;
+            let drawing = ids::decode(drawing).ok_or_else(|| tr!(app, "sheet_views.missing").to_owned())?;
+            let sheet = ids::decode(sheet).ok_or_else(|| tr!(app, "sheet_views.missing").to_owned())?;
             if app.session.doc.drawing(drawing).is_some_and(|record| record.sheets.iter().any(|record| record.id == sheet)) {
                 return Ok((drawing, sheet));
             }
-            return Err(app.tr("sheet_views.missing").to_owned());
+            return Err(tr!(app, "sheet_views.missing").to_owned());
         }
-        let sheet = ids::decode(subject).ok_or_else(|| app.tr("sheet_views.missing").to_owned())?;
+        let sheet = ids::decode(subject).ok_or_else(|| tr!(app, "sheet_views.missing").to_owned())?;
         let mut owners = app.session.doc.drawings.iter().filter(|drawing| drawing.sheets.iter().any(|record| record.id == sheet));
-        let owner = owners.next().ok_or_else(|| app.tr("sheet_views.missing").to_owned())?;
+        let owner = owners.next().ok_or_else(|| tr!(app, "sheet_views.missing").to_owned())?;
         if owners.next().is_some() {
-            return Err(app.tr("sheet_views.ambiguous").to_owned());
+            return Err(tr!(app, "sheet_views.ambiguous").to_owned());
         }
         return Ok((owner.id, sheet));
     }
@@ -90,7 +90,7 @@ pub(crate) fn resolve(app: &SolveApp, subject: Option<&str>) -> Result<(u64, u64
         .and_then(|id| app.session.doc.drawing(id))
         .or_else(|| app.session.doc.drawings.first())
         .and_then(|drawing| drawing.sheets.first().map(|sheet| (drawing.id, sheet.id)))
-        .ok_or_else(|| app.tr("sheet_views.missing").to_owned())
+        .ok_or_else(|| tr!(app, "sheet_views.missing").to_owned())
 }
 
 /// Borrow a Sheet receiver without committing a selection or focus transition.
@@ -146,13 +146,13 @@ fn open_local(app: &mut SolveApp, drawing: u64, sheet: u64, new: bool, beside: b
     if (app.preferences.workspace_follows_view || app.preferences.design_sub_tab_sheets)
         && crate::view_windows::layout_views(app).len() >= solidcraft_views::MAX_VIEWS
     {
-        return Err(app.tr("sheet_views.limit").to_owned());
+        return Err(tr!(app, "sheet_views.limit").to_owned());
     }
     let previous = app.docs.views.active().id;
     let tiled = app.docs.views.is_tiled();
     let window = app.view_windows.current_window();
     let reply = app.run("tab.view.open", serde_json::json!({"kind":"sheet","subject":subject,"reuse":false,"window":window}))?;
-    let id = reply.get("id").and_then(serde_json::Value::as_u64).ok_or_else(|| app.tr("sheet_views.missing").to_owned())?;
+    let id = reply.get("id").and_then(serde_json::Value::as_u64).ok_or_else(|| tr!(app, "sheet_views.missing").to_owned())?;
     // Drawing keeps the whole free sheet area (docs/design/drawing-ui D05, D07, D22): a new
     // Sheet becomes the view shown. Only where the person has tiled views does the existing
     // ground keep its place, with the Sheet in a neighbouring card.

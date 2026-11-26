@@ -613,7 +613,11 @@ fn the_sketch_page_switches_dimension_values_to_a_window() {
     let mut h = Harness::new();
     h.call("ui.prefs", json!({"open": "Sketch"}));
     h.frames(4);
-    let handle = format!("dialog:{}:{}", solidcraft_ui_text::tr("prefs.dimension_values"), solidcraft_ui_text::tr("prefs.dimension_values_window"));
+    let handle = format!(
+        "dialog:{}:{}",
+        solidcraft_ui_text::tr_by_id("prefs.dimension_values"),
+        solidcraft_ui_text::tr_by_id("prefs.dimension_values_window")
+    );
     crate::prefs::reveal_preference(&mut h, &handle);
     h.step(&json!({"click":{"handle": handle}})).unwrap();
     h.frames(2);
@@ -2580,7 +2584,7 @@ fn the_status_after_a_dimension_is_in_the_interface_language() {
     type_value(&mut h, "width = 30");
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(h.app.session.doc.param("width").is_some(), "{:?}", h.app.status);
-    assert_eq!(status(&h), Some((pl.format("sketch.dimension_applied_renamed", &[("name", "width")]), false)));
+    assert_eq!(status(&h), Some((tr!(pl, "sketch.dimension_applied_renamed", name = "width"), false)));
     // A dimension the sketch already determines is added as a driven one.
     let mut h = polish(line([20., 0.]));
     h.app.run("sketch.dimension", json!({"entities":["l1"],"value":"20 mm"})).unwrap();

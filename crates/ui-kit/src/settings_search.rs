@@ -940,7 +940,7 @@ mod tests {
         // The kit's own test catalog holds the setting's current and former labels.
         crate::test_support::install_catalog();
         let _language = solidcraft_ui_text::scope("de");
-        let label = solidcraft_ui_text::tr("prefs.sketch.state_icons");
+        let label = solidcraft_ui_text::tr_by_id("prefs.sketch.state_icons");
         assert!(matches_text("Skizzensymbole", &[label]), "{label} is the former Skizzensymbole in der Farbe ihres Zustands");
         assert!(!matches_text("Qqqq", &[label]));
     }

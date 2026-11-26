@@ -733,9 +733,9 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     geometry.frames(3);
     context_rows(&mut geometry, "home:recent:", &mut requested);
     click(&mut geometry, "appbar:file");
-    geometry.step(&json!({"widget":geometry.app.tr("ui.open_recent")})).expect("click Open Recent submenu");
+    geometry.step(&json!({"widget":geometry.app.tr_by_id("ui.open_recent")})).expect("click Open Recent submenu");
     geometry.frames(20);
-    assert!(geometry.widget(geometry.app.tr("ui.clear_recent")).is_some(), "the recent-design submenu must be open");
+    assert!(geometry.widget(geometry.app.tr_by_id("ui.clear_recent")).is_some(), "the recent-design submenu must be open");
     collect(&mut geometry, "File recent designs", &mut requested);
     escape(&mut geometry);
     // Populate actual document slots, then click the same overflow launcher as a person.

@@ -63,35 +63,35 @@ pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 /// The dialog's shape, size, placement and bolt pattern rows; true when Enter was pressed.
 pub fn rows(app: &SolveApp, ui: &mut egui::Ui, p: &mut Plate) -> bool {
     let mut enter = false;
-    choice_row(ui, app.tr("ui.plate_shape"), "plate_shape", &mut p.shape, &[app.tr("ui.rectangle"), app.tr("ui.plate_round")]);
+    choice_row(ui, tr!(app, "ui.plate_shape"), "plate_shape", &mut p.shape, &[tr!(app, "ui.rectangle"), tr!(app, "ui.plate_round")]);
     if p.shape == 0 {
-        enter |= expr_row(ui, app.tr("ui.plate_width"), &mut p.width);
-        enter |= expr_row(ui, app.tr("ui.plate_height"), &mut p.height);
+        enter |= expr_row(ui, tr!(app, "ui.plate_width"), &mut p.width);
+        enter |= expr_row(ui, tr!(app, "ui.plate_height"), &mut p.height);
     } else {
-        enter |= expr_row(ui, app.tr("ui.diameter"), &mut p.diameter);
+        enter |= expr_row(ui, tr!(app, "ui.diameter"), &mut p.diameter);
     }
-    enter |= expr_row(ui, app.tr("ui.thickness"), &mut p.thickness);
-    enter |= expr_row(ui, app.tr("ui.offset"), &mut p.offset);
-    enter |= expr_row(ui, app.tr("ui.plate_x_offset"), &mut p.x_offset);
-    enter |= expr_row(ui, app.tr("ui.plate_y_offset"), &mut p.y_offset);
-    enter |= expr_row(ui, app.tr("ui.angle"), &mut p.angle);
+    enter |= expr_row(ui, tr!(app, "ui.thickness"), &mut p.thickness);
+    enter |= expr_row(ui, tr!(app, "ui.offset"), &mut p.offset);
+    enter |= expr_row(ui, tr!(app, "ui.plate_x_offset"), &mut p.x_offset);
+    enter |= expr_row(ui, tr!(app, "ui.plate_y_offset"), &mut p.y_offset);
+    enter |= expr_row(ui, tr!(app, "ui.angle"), &mut p.angle);
     choice_row(
         ui,
-        app.tr("ui.plate_holes"),
+        tr!(app, "ui.plate_holes"),
         "plate_holes",
         &mut p.pattern,
-        &[app.tr("ui.plate_none"), app.tr("ui.plate_rect_pattern"), app.tr("ui.plate_circle_pattern")],
+        &[tr!(app, "ui.plate_none"), tr!(app, "ui.plate_rect_pattern"), tr!(app, "ui.plate_circle_pattern")],
     );
     if p.pattern != 0 {
-        enter |= expr_row(ui, app.tr("ui.plate_hole_diameter"), &mut p.hole_diameter);
+        enter |= expr_row(ui, tr!(app, "ui.plate_hole_diameter"), &mut p.hole_diameter);
         if p.pattern == 1 {
-            enter |= expr_row(ui, app.tr("ui.plate_pitch_x"), &mut p.pitch_x);
-            enter |= expr_row(ui, app.tr("ui.plate_pitch_y"), &mut p.pitch_y);
+            enter |= expr_row(ui, tr!(app, "ui.plate_pitch_x"), &mut p.pitch_x);
+            enter |= expr_row(ui, tr!(app, "ui.plate_pitch_y"), &mut p.pitch_y);
         } else {
-            enter |= expr_row(ui, app.tr("ui.plate_bolt_circle"), &mut p.pitch_diameter);
+            enter |= expr_row(ui, tr!(app, "ui.plate_bolt_circle"), &mut p.pitch_diameter);
             let count = |text: &str| text.parse::<f64>().ok();
-            enter |= count_row(ui, app.tr("ui.plate_count"), &mut p.count, &crate::ui_kit::Count { min: 2, max: 128, eval: &count });
-            enter |= expr_row(ui, app.tr("ui.plate_pattern_angle"), &mut p.pattern_angle);
+            enter |= count_row(ui, tr!(app, "ui.plate_count"), &mut p.count, &crate::ui_kit::Count { min: 2, max: 128, eval: &count });
+            enter |= expr_row(ui, tr!(app, "ui.plate_pattern_angle"), &mut p.pattern_angle);
         }
     }
     enter
@@ -99,7 +99,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, p: &mut Plate) -> bool {
 
 /// The `frame.plate` call the dialog's face and values make, or the message saying what is missing.
 pub fn commands(app: &SolveApp, p: &Plate, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
-    let [Sel::Face { body, index, point }] = crate::selection::items(inputs, 0) else { return Err(app.tr("error.plate_support").into()) };
+    let [Sel::Face { body, index, point }] = crate::selection::items(inputs, 0) else { return Err(tr!(app, "error.plate_support").into()) };
     let mut args = json!({"face":point,"body":body,"index":index,"thickness":p.thickness,"offset":p.offset,"x_offset":p.x_offset,"y_offset":p.y_offset,"angle":p.angle});
     match p.shape {
         0 => {
@@ -110,15 +110,15 @@ pub fn commands(app: &SolveApp, p: &Plate, inputs: &[SelInput], extra: &Map<Stri
             args["shape"] = json!("round");
             args["diameter"] = json!(p.diameter);
         }
-        _ => return Err(app.tr("error.plate_shape").into()),
+        _ => return Err(tr!(app, "error.plate_shape").into()),
     }
     args["holes"] = match p.pattern {
         0 => json!({"pattern":"none"}),
         1 => json!({"pattern":"rectangle","diameter":p.hole_diameter,"pitch_x":p.pitch_x,"pitch_y":p.pitch_y}),
         2 => {
-            json!({"pattern":"circle","diameter":p.hole_diameter,"pitch_diameter":p.pitch_diameter,"count":p.count.trim().parse::<u32>().map_err(|_| app.tr("error.plate_count"))?,"angle":p.pattern_angle})
+            json!({"pattern":"circle","diameter":p.hole_diameter,"pitch_diameter":p.pitch_diameter,"count":p.count.trim().parse::<u32>().map_err(|_| tr!(app, "error.plate_count"))?,"angle":p.pattern_angle})
         }
-        _ => return Err(app.tr("error.plate_pattern").into()),
+        _ => return Err(tr!(app, "error.plate_pattern").into()),
     };
     if let Value::Object(object) = &mut args {
         for (key, value) in extra {

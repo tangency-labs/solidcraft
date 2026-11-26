@@ -744,7 +744,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 .filter(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
                 .map(|f| act("ui.editSketch", &f.name, "sketch").with(json!({"sketch": f.id})))
                 .collect();
-            if items.is_empty() { vec![act("ui.editSketch", app.tr("ui.edit_sketch_empty"), "sketch").on(false)] } else { items }
+            if items.is_empty() { vec![act("ui.editSketch", tr!(app, "ui.edit_sketch_empty"), "sketch").on(false)] } else { items }
         }
         Target::VisualStyle => crate::navigation_slots::VISUAL_STYLES
             .iter()
@@ -758,7 +758,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             .collect(),
         Target::SelectionMode => crate::navigation_slots::selection_mode_icons()
             .map(|(mode, icon)| {
-                let label = app.tr(crate::selection_mode::label_id(mode));
+                let label = app.tr_by_id(crate::selection_mode::label_id(mode));
                 let mut item = cmd(app, "select.mode", label).with(json!({"mode": mode})).key(if app.ui.pick_mode == mode { "current" } else { "" });
                 item.icon = icon.into();
                 item
@@ -1438,7 +1438,7 @@ fn replace_sketch_item(app: &SolveApp, id: u64) -> Item {
     if !item.children.is_empty() {
         item.children.push(Item::sep());
     }
-    item.children.push(act("ui.replaceSketchFromFile", app.tr("ui.replace_sketch.from_file"), "open").with(json!({ "sketch": id })));
+    item.children.push(act("ui.replaceSketchFromFile", tr!(app, "ui.replace_sketch.from_file"), "open").with(json!({ "sketch": id })));
     item
 }
 
@@ -1455,7 +1455,7 @@ fn replace_sketch_from_file(app: &mut SolveApp, sketch: u64, at: Pos2) {
             }
         };
         match sketches.as_slice() {
-            [] => app.set_status(app.tr("ui.replace_sketch.no_sketches").to_string(), true),
+            [] => app.set_status(tr!(app, "ui.replace_sketch.no_sketches").to_string(), true),
             [(from, _)] => drop(app.run("sketch.replace", json!({ "sketch": sketch, "from": from, "file": path }))),
             _ => open_for(app, at, Target::ReplaceSketchFile { sketch, path, sketches }),
         }
@@ -2129,9 +2129,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
             .is_some_and(|c| c.link.is_none() && matches!(c.kind, CurveKind::Spline { control: true, .. }))
         && !ss.sketch.curves.iter().any(|c| c.spline_control_polygon_of.as_deref() == Some(curve.as_str()))
     {
-        v.push(
-            cmd(app, "sketch.spline.control_polygon", solidcraft_ui_text::tr("cmd.sketch_spline_control_polygon")).with(json!({ "curve": curve })),
-        );
+        v.push(cmd(app, "sketch.spline.control_polygon", tr!("cmd.sketch_spline_control_polygon")).with(json!({ "curve": curve })));
     }
     // #6502: a selected fit point spline shows its tangent handles and a drag stores them; the
     // spline, or one of its tangent guides, puts edited handles back where they started.
@@ -2512,8 +2510,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             };
             // The design is open here, so its file's place is already the user's choice. Its saved
             // file is read beside the window, as a picked one is (#11593).
-            let note = (p.get("unsaved").and_then(Value::as_bool) == Some(true))
-                .then(|| solidcraft_ui_text::format("ui.insert_design.saved_file", &[("name", name)]));
+            let note = (p.get("unsaved").and_then(Value::as_bool) == Some(true)).then(|| tr!("ui.insert_design.saved_file", name = name));
             app.insert_design_async(path, note);
         }
         "ui.insertBrowse" => app.pick_design_to_insert(),
@@ -2930,20 +2927,20 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 let calibrate = item.id == "ui.calibrateCanvas";
                 app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(app, c, calibrate));
                 if calibrate {
-                    app.set_status(solidcraft_ui_text::tr("browser.calibrate_click_a"), false);
+                    app.set_status(tr!("browser.calibrate_click_a"), false);
                 }
             }
         }
         "ui.traceCanvasRegion" => {
             if let Some(c) = id_of(&p, "canvas") {
                 app.tree.canvas_panel = Some(crate::browser::CanvasPanel::trace(app, c));
-                app.set_status(solidcraft_ui_text::tr("browser.trace_click"), false);
+                app.set_status(tr!("browser.trace_click"), false);
             }
         }
         "ui.straightenCanvas" => {
             if let Some(c) = id_of(&p, "canvas") {
                 app.tree.canvas_panel = Some(crate::browser::CanvasPanel::straighten(app, c));
-                app.set_status(solidcraft_ui_text::tr("browser.straighten_click_a"), false);
+                app.set_status(tr!("browser.straighten_click_a"), false);
             }
         }
         "ui.newGroup" | "ui.ungroup" | "ui.groupSelected" => crate::browser::group_action(app, &item.id, &p),
@@ -2976,18 +2973,15 @@ fn sketches_to_parts(app: &mut SolveApp, p: Value) {
     let mut why: Vec<String> = Vec::new();
     for kept in out.get("kept").and_then(Value::as_array).into_iter().flatten() {
         let code = kept.get("code").and_then(Value::as_str).unwrap_or_default();
-        let reason = solidcraft_ui_text::tr(&format!("browser.sketches_to_parts_{code}")).to_string();
+        let reason = solidcraft_ui_text::tr_by_id(&format!("browser.sketches_to_parts_{code}")).to_string();
         if !why.contains(&reason) {
             why.push(reason);
         }
     }
     let message = if why.is_empty() {
-        solidcraft_ui_text::format("browser.sketches_to_parts_moved", &[("moved", &count("moved"))])
+        tr!("browser.sketches_to_parts_moved", moved = &count("moved"))
     } else {
-        solidcraft_ui_text::format(
-            "browser.sketches_to_parts_result",
-            &[("moved", &count("moved")), ("stayed", &count("stayed")), ("why", &why.join("; "))],
-        )
+        tr!("browser.sketches_to_parts_result", moved = &count("moved"), stayed = &count("stayed"), why = &why.join("; "))
     };
     app.set_status(message, false);
 }
@@ -3019,13 +3013,13 @@ pub(crate) fn remove_history_report(app: &mut SolveApp, out: &Value) {
     let count = removed.len().to_string();
     let notes: Vec<String> = out.get("notes").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
     let message = if !broken.is_empty() {
-        solidcraft_ui_text::format("browser.remove_history_broken", &[("removed", &count), ("features", &broken.join(", "))])
+        tr!("browser.remove_history_broken", removed = &count, features = &broken.join(", "))
     } else if !notes.is_empty() {
-        solidcraft_ui_text::format("browser.remove_history_unmoved", &[("removed", &count), ("notes", &notes.join("; "))])
+        tr!("browser.remove_history_unmoved", removed = &count, notes = &notes.join("; "))
     } else if !kept.is_empty() {
-        solidcraft_ui_text::format("browser.remove_history_kept", &[("removed", &count), ("features", &kept.join(", "))])
+        tr!("browser.remove_history_kept", removed = &count, features = &kept.join(", "))
     } else {
-        solidcraft_ui_text::format("browser.remove_history_done", &[("removed", &count)])
+        tr!("browser.remove_history_done", removed = &count)
     };
     app.set_status(message, !broken.is_empty() || !notes.is_empty());
 }
@@ -3316,7 +3310,7 @@ fn browser_took_the_click(app: &mut SolveApp) -> bool {
     if app.menu.browser_menu != BrowserMenu::Taken {
         return false;
     }
-    app.set_status(app.tr("ui.context_menu_browser_took").to_owned(), false);
+    app.set_status(tr!(app, "ui.context_menu_browser_took").to_owned(), false);
     true
 }
 
@@ -3429,7 +3423,7 @@ pub fn dismiss_if_browser_took(app: &mut SolveApp) {
     }
     restore_picked(app, at);
     close(app);
-    app.set_status(app.tr("ui.context_menu_browser_took").to_owned(), false);
+    app.set_status(tr!(app, "ui.context_menu_browser_took").to_owned(), false);
 }
 
 fn open_target(app: &mut SolveApp, at: Pos2, target: Target) {
@@ -4155,7 +4149,7 @@ fn workspace_style(item: &Item) -> Option<crate::ui_kit::WorkspaceStyle> {
 
 /// The kit's workspace menu over SolidCraft's workspaces (`items` of [`Target::Workspace`]).
 pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<usize>, height: f32) -> Option<Item> {
-    let menu = crate::ui_kit::WorkspaceMenu { items, style: &workspace_style, footer: solidcraft_ui_text::tr("ui.workspace_footer") };
+    let menu = crate::ui_kit::WorkspaceMenu { items, style: &workspace_style, footer: tr!("ui.workspace_footer") };
     crate::ui_kit::workspace_menu(ui, &menu, key_row, height)
 }
 

@@ -1,6 +1,6 @@
 //! Shared review composition for operations that replace saved rendering state.
 use super::{Action, Confirm, Sphere, Text, checkbox, list_frame, sphere_thumbnail, text};
-use solidcraft_ui_text::tr;
+use solidcraft_ui_text::tr_by_id;
 
 /// Content varies; the card, impact rows, acknowledgement and modal actions do not.
 pub struct ReviewAndApply<'a> {
@@ -24,7 +24,7 @@ pub struct ReviewAndApply<'a> {
 impl ReviewAndApply<'_> {
     pub fn show(&self, ctx: &egui::Context, valid: bool, acknowledged: &mut bool, content: impl FnOnce(&mut egui::Ui)) -> (bool, Action) {
         Confirm::new(egui::Id::unique("render_review_apply"), "inspect", self.title)
-            .actions(self.apply, tr("ui.cancel"), self.secondary)
+            .actions(self.apply, tr_by_id("ui.cancel"), self.secondary)
             .secondary_left()
             .show(ctx, valid && *acknowledged, |ui| self.content(ui, acknowledged, content))
     }

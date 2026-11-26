@@ -71,8 +71,8 @@ impl State {
     /// Returning the original event requests reopening through the existing sketch-edit path.
     pub(crate) fn show(&mut self, ui: &Ui, free: Rect, obstacles: &[Rect], document: u64, window: WindowId) -> Option<SketchFinishEvent> {
         let notice = self.notices.get_mut(&(document, window))?;
-        let message = solidcraft_ui_text::format("sketch_finish.finished", &[("name", &notice.event.name)]);
-        let action = solidcraft_ui_text::tr("sketch_finish.edit");
+        let message = tr!("sketch_finish.finished", name = &notice.event.name);
+        let action = tr!("sketch_finish.edit");
         let t = solidcraft_theme::Tokens::get();
         let size = crate::ui_kit::measure_inline_notice(ui, &message, action, free.width());
         let free = notice_band(free, size, obstacles, t.space_8);

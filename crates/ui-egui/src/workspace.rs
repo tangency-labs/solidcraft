@@ -208,7 +208,7 @@ pub(crate) fn switcher_available(app: &crate::SolveApp) -> bool {
 fn focus_workspace(app: &mut crate::SolveApp, workspace: &str) -> Result<(), String> {
     use solidcraft_views::ViewKind;
     if !switcher_available(app) {
-        return Err(solidcraft_ui_text::tr("workspace_focus.finish_operation").into());
+        return Err(tr!("workspace_focus.finish_operation").into());
     }
     let kind = match workspace {
         "design" => ViewKind::Model,
@@ -265,7 +265,7 @@ fn focus_workspace(app: &mut crate::SolveApp, workspace: &str) -> Result<(), Str
     let reply = app.run("tab.view.open", serde_json::json!({"kind":kind.key(), "subject":subject, "reuse":false, "window":origin}))?;
     let id = reply.get("id").and_then(serde_json::Value::as_u64).unwrap_or_else(|| app.docs.views.active().id);
     if !app.docs.views.get(id).is_some_and(|view| view.kind == kind) {
-        return Err(solidcraft_ui_text::tr("workspace_focus.view_unavailable").into());
+        return Err(tr!("workspace_focus.view_unavailable").into());
     }
     if was_tiled && !app.docs.views.tiles().is_some_and(|tiles| tiles.contains(id)) {
         crate::documents::change_views(app, |views| {
@@ -2678,7 +2678,7 @@ mod tests {
                 assert!(!painted(&h, "Finish Sketch"));
                 if away == sheet {
                     assert!(crate::drawing_workspace::inspector_visible(&h.app));
-                    assert!(painted(&h, h.app.tr("cmd.drawing_sheet_set")), "the focused Sheet's property inspector paints instead");
+                    assert!(painted(&h, tr!(h.app, "cmd.drawing_sheet_set")), "the focused Sheet's property inspector paints instead");
                     h.app.preferences.workspace_follows_view = false;
                     assert!(crate::sketch_palette::editing(&h.app), "legacy switching retains the old global palette condition");
                     h.app.preferences.workspace_follows_view = true;

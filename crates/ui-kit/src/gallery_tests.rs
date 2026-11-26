@@ -1525,7 +1525,7 @@ pub const ELEMENTS: &[Element] = &[
     element!("table_groups", |ui, s| {
         table_custom(ui, "groups", &[Column::new("Name", 1.0).flex(), Column::new("Value", 1.0).flex()], "Empty", |ui, table| {
             table.headers(ui, |_, _| false);
-            if table.group(ui, "parameters", solidcraft_ui_text::tr("ui.table.gallery.parameters"), 2, &mut s.checked).clicked() {
+            if table.group(ui, "parameters", solidcraft_ui_text::tr_by_id("ui.table.gallery.parameters"), 2, &mut s.checked).clicked() {
                 ui.ctx().request_repaint();
             }
             if s.checked {
@@ -1538,7 +1538,7 @@ pub const ELEMENTS: &[Element] = &[
             }
             let key = ui.scope_id().with("gallery_collapsed_group");
             let mut open = ui.data_mut(|data| *data.get_temp_mut_or(key, false));
-            table.group(ui, "configurations", solidcraft_ui_text::tr("ui.table.gallery.configurations"), 1, &mut open);
+            table.group(ui, "configurations", solidcraft_ui_text::tr_by_id("ui.table.gallery.configurations"), 1, &mut open);
             ui.data_mut(|data| data.insert_temp(key, open));
             if open {
                 table.row(ui, "Default", false, |row| {

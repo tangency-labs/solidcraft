@@ -127,7 +127,7 @@ impl State {
         let answer = match pending.receiver.try_recv() {
             Ok(answer) => answer,
             Err(mpsc::TryRecvError::Empty) => return,
-            Err(mpsc::TryRecvError::Disconnected) => Err(solidcraft_ui_text::tr("render.live.worker_stopped").into()),
+            Err(mpsc::TryRecvError::Disconnected) => Err(tr!("render.live.worker_stopped").into()),
         };
         let generation = pending.generation;
         let cancelled = pending.cancelled.load(Ordering::Acquire);
@@ -153,7 +153,7 @@ impl State {
         let result = (|| -> Result<Option<Picture>, String> {
             let status = job.handle.status().map_err(|e| e.to_string())?;
             if status.job != job.handle.id() || status.scene_generation != job.revision {
-                return Err(solidcraft_ui_text::tr("render.error_provisional_identity").into());
+                return Err(tr!("render.error_provisional_identity").into());
             }
             if let Some(error) = &status.error {
                 return Err(error.to_string());
@@ -170,7 +170,7 @@ impl State {
                     || info.executor != status.resolved.executor
                     || (info.width, info.height) != (status.request.width, status.request.height)
                 {
-                    return Err(solidcraft_ui_text::tr("render.error_provisional_identity").to_string());
+                    return Err(tr!("render.error_provisional_identity").to_string());
                 }
                 let image = super::decode_render_image(png, info.width, info.height, limits, ctx.input(|i| i.max_texture_side))?;
                 Ok(Picture {
@@ -203,7 +203,7 @@ impl State {
                     || preview.info.samples_per_pixel >= job.target
                     || preview.info.adaptive != adaptive
                 {
-                    return Err(solidcraft_ui_text::tr("render.error_provisional_identity").into());
+                    return Err(tr!("render.error_provisional_identity").into());
                 }
                 return load(&preview.info.frame, preview.png(), preview.info.frame_sequence, preview.info.samples_per_pixel, false, adaptive)
                     .map(Some);
@@ -212,7 +212,7 @@ impl State {
                 return Err(reason.into());
             }
             if matches!(status.progress.phase, Phase::Cancelled | Phase::Failed) {
-                return Err(solidcraft_ui_text::tr("render.live.stopped").into());
+                return Err(tr!("render.live.stopped").into());
             }
             Ok(None)
         })();
@@ -283,11 +283,11 @@ pub(crate) fn projection_rect(app: &SolveApp, rect: Rect) -> Rect {
 fn request(app: &mut SolveApp) -> Result<Value, String> {
     super::image_host(app, app.render_workspace.view.method)?;
     if app.session.model.is_stale() {
-        return Err(app.tr("render.image_scene_stale").into());
+        return Err(tr!(app, "render.image_scene_stale").into());
     }
     let old_size = [app.render_workspace.view.draft.width, app.render_workspace.view.draft.height];
     if old_size.contains(&0) {
-        return Err(app.tr("render.live.invalid_size").into());
+        return Err(tr!(app, "render.live.invalid_size").into());
     }
     // A labelled low-resolution live copy must not make invalid authored output
     // dimensions/sampling appear valid. Refuse original intent before scaling.
@@ -300,7 +300,7 @@ fn request(app: &mut SolveApp) -> Result<Value, String> {
     let old_primary = app.render_workspace.view.raytrace.primary_samples;
     let old_reflection_samples = app.render_workspace.view.raytrace.reflections.as_ref().map(|options| options.samples);
     let viewport =
-        app.viewport.rect.filter(|rect| rect.is_finite() && rect.is_positive()).ok_or_else(|| app.tr("render.live.waiting_canvas").to_string())?;
+        app.viewport.rect.filter(|rect| rect.is_finite() && rect.is_positive()).ok_or_else(|| tr!(app, "render.live.waiting_canvas").to_string())?;
     let canvas = super::shot::render_rect(app, viewport);
     let live_size = size(app, canvas);
     app.render_workspace.view.draft.width = live_size[0];
@@ -357,7 +357,7 @@ fn capture(app: &SolveApp, identity: &Identity, generation: u64) -> Result<Pendi
         .spawn(move || {
             let result = solidcraft_engine::io::vfs::scoped(scope, || {
                 if stop.load(Ordering::Acquire) {
-                    return Err(solidcraft_ui_text::tr("render.live.stopped").to_string());
+                    return Err(tr!("render.live.stopped").to_string());
                 }
                 let reply = owner.execute("render.start", &request).map_err(|e| e.to_string())?;
                 let id = serde_json::from_value(reply["job"].clone()).map_err(|e| format!("{e}"))?;
@@ -583,7 +583,7 @@ pub(crate) fn has_picture(app: &SolveApp) -> bool {
 /// The selected draft method cannot rename pixels produced by another executor.
 pub(crate) fn source_note(app: &SolveApp) -> (String, &'static str) {
     let Some(picture) = app.render_workspace.live.picture.as_ref().filter(|_| has_picture(app)) else {
-        return (app.tr("render.stage_preview_note").into(), "render.preview_lighting_help");
+        return (tr!(app, "render.stage_preview_note").into(), "render.preview_lighting_help");
     };
     let method_matches = matches!(
         (picture.executor.as_str(), app.render_workspace.view.method),
@@ -595,8 +595,8 @@ pub(crate) fn source_note(app: &SolveApp) -> (String, &'static str) {
 
 pub(super) fn source_text(app: &SolveApp, executor: &str, current: bool) -> String {
     let method = match executor {
-        "cpu-raytrace" => app.tr("render.method_cpu"),
-        "gpu-path" => app.tr("render.method_gpu"),
+        "cpu-raytrace" => tr!(app, "render.method_cpu"),
+        "gpu-path" => tr!(app, "render.method_gpu"),
         _ => executor,
     };
     solidcraft_ui_text::format(if current { "render.live.source_current" } else { "render.live.source_outdated" }, &[("method", method)])
@@ -608,55 +608,51 @@ pub(crate) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let state = &app.render_workspace.live;
     let status = if app.render_workspace.view.live_paused {
-        app.tr(if state.picture.as_ref().is_some_and(|picture| picture.generation != state.generation) {
+        app.tr_by_id(if state.picture.as_ref().is_some_and(|picture| picture.generation != state.generation) {
             "render.live.paused_outdated"
         } else {
             "render.live.paused"
         })
         .to_string()
     } else if let Some(error) = &state.error {
-        solidcraft_ui_text::format("render.live.refused", &[("reason", error)])
+        tr!("render.live.refused", reason = error)
     } else if let Some(picture) = &state.picture {
         if picture.generation == state.generation && !state.suspended {
             if let Some(adaptive) = picture.adaptive {
-                solidcraft_ui_text::format(
+                tr!(
                     "render.live.adaptive",
-                    &[
-                        ("width", &picture.size[0].to_string()),
-                        ("height", &picture.size[1].to_string()),
-                        ("progress", &super::adaptive_preview_label(app, adaptive)),
-                    ],
+                    width = &picture.size[0].to_string(),
+                    height = &picture.size[1].to_string(),
+                    progress = &super::adaptive_preview_label(app, adaptive)
                 )
             } else {
                 let target = state.running.as_ref().map_or(picture.samples, |job| job.target);
-                solidcraft_ui_text::format(
+                tr!(
                     "render.live.samples",
-                    &[
-                        ("current", &picture.samples.to_string()),
-                        ("target", &target.to_string()),
-                        ("width", &picture.size[0].to_string()),
-                        ("height", &picture.size[1].to_string()),
-                    ],
+                    current = &picture.samples.to_string(),
+                    target = &target.to_string(),
+                    width = &picture.size[0].to_string(),
+                    height = &picture.size[1].to_string()
                 )
             }
         } else {
-            app.tr("render.live.updating").into()
+            tr!(app, "render.live.updating").into()
         }
     } else {
-        app.tr("render.live.updating").into()
+        tr!(app, "render.live.updating").into()
     };
     let paused = app.render_workspace.view.live_paused;
-    let label = app.tr(if paused { "render.live.resume" } else { "render.live.pause" }).to_string();
+    let label = (if paused { tr!(app, "render.live.resume") } else { tr!(app, "render.live.pause") }).to_string();
     let response = ui_kit::button(ui, &label, ui_kit::Button::Normal);
     crate::scenario::publish_target("render:live:pause", response.rect);
     if response.clicked() {
         let _ = app.run("view.render_live", json!({"paused":!paused}));
     }
     let max_width = ui.available_width().min(solidcraft_theme::Tokens::get().control_height * 10.0);
-    let mut help = format!("{status}\n\n{}", app.tr("render.live.quality_help"));
+    let mut help = format!("{status}\n\n{}", tr!(app, "render.live.quality_help"));
     if app.render_workspace.live.picture.as_ref().is_some_and(|picture| picture.adaptive.is_some()) {
         help.push_str("\n\n");
-        help.push_str(app.tr("render.adaptive.preview_help"));
+        help.push_str(tr!(app, "render.adaptive.preview_help"));
     }
     let note = ui_kit::StageBar::note_bounded(ui, &status, max_width).backing_on_hover_text(help);
     crate::scenario::publish_target("render:live:status", note.rect);

@@ -368,7 +368,7 @@ pub(crate) fn export_slots(app: &SolveApp) -> Vec<(String, String)> {
         for entry in plugin.entries.iter().filter(|e| e.kind == solidcraft_engine::plugin::EntryKind::Exporter) {
             let label = if entry.label.is_empty() { plugin.name.as_str() } else { entry.label.as_str() };
             let extensions = entry.extensions.iter().map(|e| format!(".{e}")).collect::<Vec<_>>().join(", ");
-            let label = solidcraft_ui_text::format("plugin_export.menu", &[("format", label), ("extensions", &extensions)]);
+            let label = tr!("plugin_export.menu", format = label, extensions = &extensions);
             rows.push((format!("{}.{}", plugin.id, entry.name), label));
         }
     }

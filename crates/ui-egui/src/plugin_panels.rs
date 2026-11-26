@@ -11,7 +11,7 @@ use solidcraft_engine::plugin::shader::{Shader, ShaderKind};
 use crate::SolveApp;
 use crate::plugin_shaders::Pending;
 
-const UNREADABLE: &str = "prefs.panel_shader_failed";
+const UNREADABLE: solidcraft_ui_text::Msg = msg!("prefs.panel_shader_failed");
 
 struct Active {
     key: String,
@@ -164,7 +164,7 @@ pub(crate) fn forget(app: &mut SolveApp, plugin: &str) {
 
 fn missing(app: &mut SolveApp, key: &str) {
     app.plugin_panels.failed = Some(key.to_owned());
-    let message = format!("{} {key}: {}", solidcraft_ui_text::tr(UNREADABLE), solidcraft_ui_text::tr("prefs.background_shader_missing"));
+    let message = format!("{} {key}: {}", solidcraft_ui_text::tr(UNREADABLE), tr!("prefs.background_shader_missing"));
     log::warn!("{message}");
     app.set_status(message, true);
 }

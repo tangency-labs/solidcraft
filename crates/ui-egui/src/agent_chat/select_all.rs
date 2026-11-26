@@ -11,7 +11,6 @@
 use egui::{Event, Key, Modifiers};
 
 use super::{AgentChat, Item, markdown, markdown_view};
-use solidcraft_ui_text::tr;
 
 /// The messages Select All takes: what the user sent and what the assistant answered.
 fn message(item: &Item) -> Option<(bool, &str)> {
@@ -28,9 +27,9 @@ pub(super) fn transcript_text(items: &[Item]) -> String {
     let mut out = Vec::new();
     for (user, text) in items.iter().filter_map(message) {
         let (who, body) = if user {
-            (tr("ui.agent_chat_transcript_user"), text.trim_end().to_owned())
+            (tr!("ui.agent_chat_transcript_user"), text.trim_end().to_owned())
         } else {
-            (tr("ui.agent_chat_transcript_assistant"), markdown_view::plain_text(&markdown::parse(text)))
+            (tr!("ui.agent_chat_transcript_assistant"), markdown_view::plain_text(&markdown::parse(text)))
         };
         out.push(format!("{who}\n{body}"));
     }

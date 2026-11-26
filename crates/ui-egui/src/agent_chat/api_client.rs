@@ -582,7 +582,7 @@ fn responses_body(model: &str, input: Value, effort: Option<&str>) -> Value {
 
 /// Retain native output items in their original order for the next stateless request.
 fn responses_reply(body: &Value) -> Result<Reply, String> {
-    let invalid = || solidcraft_ui_text::tr("ui.ai_invalid_responses_reply").to_string();
+    let invalid = || tr!("ui.ai_invalid_responses_reply").to_string();
     let complete = match body.get("status").and_then(Value::as_str) {
         Some("completed") => true,
         Some("incomplete") => false,
@@ -744,7 +744,7 @@ pub struct ApiBackend {
 impl ApiBackend {
     pub fn start(cfg: ApiConfig, ctx: StartContext) -> Result<ApiBackend, String> {
         if cfg.key.is_some() && !super::agents::key_allowed_for(&cfg.base_url, cfg.protocol == Protocol::OpenAi && cfg.allow_insecure_http) {
-            return Err(solidcraft_ui_text::tr("ui.ai_key_needs_https").to_string());
+            return Err(tr!("ui.ai_key_needs_https").to_string());
         }
         // One stable session ID per chat for OpenCode Go's routing and prompt cache.
         let session_id = new_session_id();
@@ -1030,14 +1030,14 @@ impl Worker {
                 Err(e) if context_full(&e) => {
                     let removed = drop_oldest_turn(&mut self.history);
                     if removed == 0 {
-                        self.emit(Event::Error(format!("{e}\n{}", solidcraft_ui_text::tr("ui.agent_chat_context_full_new_chat"))));
+                        self.emit(Event::Error(format!("{e}\n{}", tr!("ui.agent_chat_context_full_new_chat"))));
                         self.emit(Event::TurnEnded { reason: "error".into() });
                         return;
                     }
                     if self.cfg.protocol == Protocol::Anthropic {
                         drop_finished_thinking(&mut self.history);
                     }
-                    self.emit(Event::Text { thought: true, text: solidcraft_ui_text::tr("ui.agent_chat_context_trimmed").to_owned() });
+                    self.emit(Event::Text { thought: true, text: tr!("ui.agent_chat_context_trimmed").to_owned() });
                     continue;
                 }
                 Err(e) => {
@@ -1427,7 +1427,7 @@ impl Worker {
 
 /// What the chat says when a request ran out of time: the limit, and where to raise it.
 pub fn timed_out(limit_s: u64) -> String {
-    solidcraft_ui_text::format("ui.ai_request_timed_out", &[("seconds", &limit_s.to_string())])
+    tr!("ui.ai_request_timed_out", seconds = &limit_s.to_string())
 }
 
 /// A failed request as people read it: one that ran into the endpoint's request timeout (the
@@ -1441,10 +1441,10 @@ pub fn http_error(status: u16, body: &Value) -> String {
     let detail =
         body.pointer("/error/message").or_else(|| body.get("error")).and_then(Value::as_str).unwrap_or("").chars().take(300).collect::<String>();
     let what = match status {
-        401 | 403 => solidcraft_ui_text::tr("ui.ai_http_key"),
-        404 => solidcraft_ui_text::tr("ui.ai_http_not_found"),
-        429 => solidcraft_ui_text::tr("ui.ai_http_busy"),
-        413 => solidcraft_ui_text::tr("ui.ai_http_too_large"),
+        401 | 403 => tr!("ui.ai_http_key"),
+        404 => tr!("ui.ai_http_not_found"),
+        429 => tr!("ui.ai_http_busy"),
+        413 => tr!("ui.ai_http_too_large"),
         _ => "",
     };
     format!(
@@ -1833,7 +1833,7 @@ fn anthropic_headers(base_url: &str, key: Option<&str>) -> Result<Vec<(String, S
     let mut headers = vec![("anthropic-version".to_string(), ANTHROPIC_VERSION.to_string())];
     if let Some(k) = key {
         if !super::agents::key_safe_for(base_url) {
-            return Err(solidcraft_ui_text::tr("ui.ai_key_needs_https").to_string());
+            return Err(tr!("ui.ai_key_needs_https").to_string());
         }
         headers.push(("x-api-key".to_string(), k.to_string()));
     }
@@ -1860,7 +1860,7 @@ pub fn anthropic_model_list(http: &HttpFn, base_url: &str, key: Option<&str>) ->
 pub fn test_anthropic_endpoint(http: &HttpFn, base_url: &str, key: Option<&str>, model: &str) -> Result<String, String> {
     let model = model.trim();
     if model.is_empty() {
-        return Err(solidcraft_ui_text::tr("ui.ai_need_model").to_string());
+        return Err(tr!("ui.ai_need_model").to_string());
     }
     let mut headers = anthropic_headers(base_url, key)?;
     headers.push(("Content-Type".to_string(), "application/json".to_string()));
@@ -1877,7 +1877,7 @@ pub fn test_anthropic_endpoint(http: &HttpFn, base_url: &str, key: Option<&str>,
     if status != 200 {
         return Err(http_error(status, &v));
     }
-    Ok(solidcraft_ui_text::format("ui.ai_test_answered", &[("model", model)]))
+    Ok(tr!("ui.ai_test_answered", model = model))
 }
 
 /// A tool call's result as text for the model, and whether it failed.
@@ -1943,7 +1943,7 @@ fn chat_capable(row: &Value) -> bool {
 /// error, so the picker says so and asks again later.
 fn listed_models(body: &Value, name_key: &str) -> Result<Vec<(String, Option<String>)>, String> {
     let Some(entries) = body.get("data").and_then(Value::as_array) else {
-        return Err(solidcraft_ui_text::tr("ui.agent_chat_models_not_a_list").to_string());
+        return Err(tr!("ui.agent_chat_models_not_a_list").to_string());
     };
     let mut seen = std::collections::HashSet::new();
     Ok(entries
@@ -1978,7 +1978,7 @@ pub fn model_list(http: &HttpFn, base_url: &str, key: Option<&str>, allow_insecu
     let mut headers = Vec::new();
     if let Some(k) = key {
         if !super::agents::key_allowed_for(base_url, allow_insecure_http) {
-            return Err(solidcraft_ui_text::tr("ui.ai_key_needs_https").to_string());
+            return Err(tr!("ui.ai_key_needs_https").to_string());
         }
         headers.push(("Authorization".to_string(), format!("Bearer {k}")));
     }
@@ -1990,7 +1990,7 @@ pub fn test_endpoint(http: &HttpFn, base_url: &str, key: Option<&str>, model: &s
     let mut headers = Vec::new();
     if let Some(k) = key {
         if !super::agents::key_allowed_for(base_url, allow_insecure_http) {
-            return Err(solidcraft_ui_text::tr("ui.ai_key_needs_https").to_string());
+            return Err(tr!("ui.ai_key_needs_https").to_string());
         }
         headers.push(("Authorization".to_string(), format!("Bearer {k}")));
     }
@@ -2013,12 +2013,12 @@ pub fn test_responses_endpoint(
 ) -> Result<String, String> {
     let model = model.trim();
     if model.is_empty() {
-        return Err(solidcraft_ui_text::tr("ui.ai_need_model").to_string());
+        return Err(tr!("ui.ai_need_model").to_string());
     }
     let mut headers = vec![("Content-Type".into(), "application/json".into())];
     if let Some(key) = key {
         if !super::agents::key_allowed_for(base_url, allow_insecure_http) {
-            return Err(solidcraft_ui_text::tr("ui.ai_key_needs_https").to_string());
+            return Err(tr!("ui.ai_key_needs_https").to_string());
         }
         headers.push(("Authorization".into(), format!("Bearer {key}")));
     }
@@ -2033,7 +2033,7 @@ pub fn test_responses_endpoint(
         return Err(http_error(status, &value));
     }
     responses_reply(&value)?;
-    Ok(solidcraft_ui_text::format("ui.ai_test_answered", &[("model", model)]))
+    Ok(tr!("ui.ai_test_answered", model = model))
 }
 
 #[cfg(test)]
@@ -2303,7 +2303,7 @@ mod tests {
         b.prompt(&[PromptPart::Text("three".into())]);
         let events = wait_for_turn(&mut b);
         assert!(!events.iter().any(|e| matches!(e, Event::Error(_))), "{events:?}");
-        let note = solidcraft_ui_text::tr("ui.agent_chat_context_trimmed");
+        let note = tr!("ui.agent_chat_context_trimmed");
         assert!(events.iter().any(|e| matches!(e, Event::Text { thought: true, text } if text == note)), "{events:?}");
         assert!(matches!(events.last(), Some(Event::TurnEnded { reason }) if reason.is_empty()), "{events:?}");
         let asked: Vec<String> = seen.lock().unwrap().last().unwrap()["messages"]
@@ -2318,7 +2318,7 @@ mod tests {
         // Too long on its own: nothing older goes on dropping, and the message says what to do.
         b.prompt(&[PromptPart::Text("huge".into())]);
         let events = wait_for_turn(&mut b);
-        let hint = solidcraft_ui_text::tr("ui.agent_chat_context_full_new_chat");
+        let hint = tr!("ui.agent_chat_context_full_new_chat");
         assert!(events.iter().any(|e| matches!(e, Event::Error(e) if e.starts_with("HTTP 400") && e.ends_with(hint))), "{events:?}");
         assert!(matches!(events.last(), Some(Event::TurnEnded { reason }) if reason == "error"), "{events:?}");
         assert!(context_full("HTTP 413: too large") && !context_full("HTTP 400 (unknown model)") && !context_full("HTTP 500 (context window)"));
@@ -3025,7 +3025,7 @@ mod tests {
         let list = anthropic_model_list(&http, "https://api.aimlapi.com/v1", Some("k")).unwrap();
         assert_eq!(list.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), chat);
         let video = test_endpoint(&http, "https://api.aimlapi.com/v1", Some("k"), "heygen/avatar-6", false).unwrap();
-        assert_eq!(video, solidcraft_ui_text::format("ui.ai_test_no_model", &[("count", "3"), ("model", "heygen/avatar-6")]));
+        assert_eq!(video, tr!("ui.ai_test_no_model", count = "3", model = "heygen/avatar-6"));
     }
 
     /// A listing without `type`, or with a bare word there (Anthropic's `"type": "model"`), is
@@ -3051,7 +3051,7 @@ mod tests {
     /// picker says why and asks again later; a list with nothing in it is a list.
     #[test]
     fn an_answer_that_is_no_model_list_is_an_error() {
-        let expected = solidcraft_ui_text::tr("ui.agent_chat_models_not_a_list").to_string();
+        let expected = solidcraft_ui_text::tr_by_id("ui.agent_chat_models_not_a_list").to_string();
         let page: HttpFn = Arc::new(|_: &HttpRequest| Ok((200, b"<!doctype html><html><body>Control UI</body></html>".to_vec())));
         assert_eq!(model_list(&page, "http://localhost:18789/v1", None, false).unwrap_err(), expected);
         assert_eq!(anthropic_model_list(&page, "http://localhost:18789/v1", None).unwrap_err(), expected);

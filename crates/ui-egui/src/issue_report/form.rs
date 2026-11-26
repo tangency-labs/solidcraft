@@ -47,7 +47,7 @@ pub(super) fn open_github(draft: &mut Draft, ctx: &egui::Context, path: &str) {
         if !copy_needed {
             copy_screenshot(draft, ctx);
             // The window's note names the GitHub form; the issue's own wording says "this box".
-            draft.note = solidcraft_ui_text::tr("ui.report_screenshot_copied").to_string();
+            draft.note = tr!("ui.report_screenshot_copied").to_string();
             ctx.open_url(egui::OpenUrl::new_tab(url));
             draft.opened_github = true;
             return;
@@ -65,7 +65,7 @@ pub(super) fn open_github(draft: &mut Draft, ctx: &egui::Context, path: &str) {
                     draft.note = solidcraft_ui_text::format(key, &[("file", path)]);
                 }
                 Err(error) => {
-                    draft.note = solidcraft_ui_text::format("ui.report_screenshot_save_failed", &[("error", &super::limited(&error, 1000))]);
+                    draft.note = tr!("ui.report_screenshot_save_failed", error = &super::limited(&error, 1000));
                 }
             }
         }
@@ -117,14 +117,14 @@ fn restore_answers(app: &mut SolveApp, draft: &mut Draft, ui: &mut Ui) {
         ui.scroll_to_cursor(Some(egui::Align::Min));
         draft.focus_requested = true;
     }
-    ui_kit::text(ui, solidcraft_ui_text::tr("ui.report_saved_answers"), ui_kit::Text::Note("saved-answers"));
+    ui_kit::text(ui, tr!("ui.report_saved_answers"), ui_kit::Text::Note("saved-answers"));
     ui.horizontal_wrapped(|ui| {
-        if ui_kit::button(ui, solidcraft_ui_text::tr("ui.report_restore_answers"), ui_kit::Button::Normal).clicked()
+        if ui_kit::button(ui, tr!("ui.report_restore_answers"), ui_kit::Button::Normal).clicked()
             && let Some(answers) = app.issue_report.earlier.take()
         {
             answers.restore(draft);
         }
-        if ui_kit::button(ui, solidcraft_ui_text::tr("ui.report_discard_answers"), ui_kit::Button::Normal).clicked() {
+        if ui_kit::button(ui, tr!("ui.report_discard_answers"), ui_kit::Button::Normal).clicked() {
             app.issue_report.earlier = None;
             draft.focus_requested = false;
         }

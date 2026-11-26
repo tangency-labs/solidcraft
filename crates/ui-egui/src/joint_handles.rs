@@ -187,7 +187,7 @@ pub(crate) fn sync(app: &mut SolveApp) {
 
 pub(crate) fn start(app: &mut SolveApp) {
     let Some(occurrence) = selected_occurrence(app) else {
-        app.set_status(app.tr("joint_move.select").to_string(), false);
+        app.set_status(tr!(app, "joint_move.select").to_string(), false);
         return;
     };
     if begin(app, occurrence) {
@@ -245,9 +245,9 @@ impl Blocked {
 
     fn reason(&self, app: &SolveApp) -> String {
         if self.conflicts.is_empty() {
-            app.tr("joint_move.fixed").to_string()
+            tr!(app, "joint_move.fixed").to_string()
         } else {
-            solidcraft_ui_text::format("joint_move.conflict", &[("joint", &self.conflicts.join(", "))])
+            tr!("joint_move.conflict", joint = &self.conflicts.join(", "))
         }
     }
 }
@@ -263,15 +263,15 @@ pub(crate) fn show_warning(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let (closed, action) =
-        crate::ui_kit::Confirm::new(egui::Id::unique("sc_joint_move_blocked"), "status_warning", app.tr("joint_move.blocked_title"))
+        crate::ui_kit::Confirm::new(egui::Id::unique("sc_joint_move_blocked"), "status_warning", tr!(app, "joint_move.blocked_title"))
             .tone(crate::ui_kit::Tone::Warning)
-            .actions(app.tr("ui.heading_ok"), "", None)
+            .actions(tr!(app, "ui.heading_ok"), "", None)
             .show(ctx, true, |ui| {
                 if !blocked.part.is_empty() {
                     crate::ui_kit::text(ui, &blocked.part, crate::ui_kit::Text::Report("part", false));
                 }
                 crate::ui_kit::text(ui, &reason, crate::ui_kit::Text::Report("reason", false));
-                crate::ui_kit::text(ui, app.tr(hint), crate::ui_kit::Text::Hint("remedy"));
+                crate::ui_kit::text(ui, app.tr_by_id(hint), crate::ui_kit::Text::Hint("remedy"));
             });
     app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window");
     if closed || action != crate::ui_kit::Action::None {
@@ -666,11 +666,11 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
                     };
                     ui.set_min_width(200.0);
                     ui.set_max_width(240.0);
-                    ui.label(app.tr(if d.axis.angular { "joint_move.rotation" } else { "joint_move.distance" }));
+                    ui.label(if d.axis.angular { tr!(app, "joint_move.rotation") } else { tr!(app, "joint_move.distance") });
                     ui.label(egui::RichText::new(value).strong());
                     if d.axis.angular {
                         let step = if d.fine { app.preferences.joint_rotation_fine } else { app.preferences.joint_rotation_coarse };
-                        ui.label(format!("{} {step}°", app.tr("joint_move.step")));
+                        ui.label(format!("{} {step}°", tr!(app, "joint_move.step")));
                     }
                 });
             });
@@ -681,11 +681,11 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     host.area(egui::Id::unique("joint_move_help")).fixed_pos(proj.rect.left_bottom() + vec2(16.0, -148.0)).show(ui.ctx(), |ui| {
         let frame = host.frame(ui.ctx(), tk.overlay, crate::frame::Side::Right).inner_margin(tk.space_8);
         Container::show_backing(ui, frame, |ui| {
-            ui.label(app.tr("joint_move.help"));
+            ui.label(tr!(app, "joint_move.help"));
             if mode.axes.iter().any(|a| a.angular) {
-                ui.label(app.tr("joint_move.precision"));
+                ui.label(tr!(app, "joint_move.precision"));
             }
-            done = crate::ui_kit::button(ui, app.tr("joint_move.done"), crate::ui_kit::Button::Normal).clicked();
+            done = crate::ui_kit::button(ui, tr!(app, "joint_move.done"), crate::ui_kit::Button::Normal).clicked();
         });
     });
     if done {
@@ -1110,7 +1110,7 @@ mod tests {
         assert_eq!(blocked.conflicts, conflicting);
         let reason = blocked.reason(&h.app);
         assert!(reason.contains("conflicts") && conflicting.iter().all(|n| reason.contains(n)), "{reason}");
-        assert_ne!(reason, h.app.tr("joint_move.fixed"));
+        assert_ne!(reason, h.app.tr_by_id("joint_move.fixed"));
         assert!(crate::scenario::rect_of("dialog:window").is_some());
         h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
         h.frames(2);

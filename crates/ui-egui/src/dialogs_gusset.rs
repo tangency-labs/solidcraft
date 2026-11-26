@@ -46,15 +46,15 @@ pub fn start(_: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 }
 /// Draw the dimensions and side icons; report Enter from the expression fields.
 pub fn rows(app: &SolveApp, ui: &mut egui::Ui, g: &mut Gusset) -> bool {
-    choice_row(ui, app.tr("ui.gusset.profile"), "gusset_profile", &mut g.profile, &[app.tr("ui.gusset.triangle"), app.tr("ui.gusset.clipped")]);
-    let mut enter = expr_row(ui, app.tr("ui.gusset.leg1"), &mut g.leg1);
-    enter |= expr_row(ui, app.tr("ui.gusset.leg2"), &mut g.leg2);
-    enter |= expr_row(ui, app.tr("ui.thickness"), &mut g.thickness);
+    choice_row(ui, tr!(app, "ui.gusset.profile"), "gusset_profile", &mut g.profile, &[tr!(app, "ui.gusset.triangle"), tr!(app, "ui.gusset.clipped")]);
+    let mut enter = expr_row(ui, tr!(app, "ui.gusset.leg1"), &mut g.leg1);
+    enter |= expr_row(ui, tr!(app, "ui.gusset.leg2"), &mut g.leg2);
+    enter |= expr_row(ui, tr!(app, "ui.thickness"), &mut g.thickness);
     if g.profile == 1 {
-        enter |= expr_row(ui, app.tr("ui.gusset.clip"), &mut g.clip);
+        enter |= expr_row(ui, tr!(app, "ui.gusset.clip"), &mut g.clip);
     }
-    enter |= expr_row(ui, app.tr("ui.gusset.relief"), &mut g.relief);
-    enter |= expr_row(ui, app.tr("ui.gusset.offset"), &mut g.offset);
+    enter |= expr_row(ui, tr!(app, "ui.gusset.relief"), &mut g.relief);
+    enter |= expr_row(ui, tr!(app, "ui.gusset.offset"), &mut g.offset);
     // Visual order follows the two sides around the joint plane; stored placement values
     // retain the command's center/positive/negative order.
     let mut selected = match g.placement {
@@ -63,11 +63,11 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, g: &mut Gusset) -> bool {
         _ => 1,
     };
     let choices = [
-        IconSegment { key: app.tr("ui.gusset.negative"), icon: "gusset_side_negative", tip: app.tr("ui.gusset.negative").into() },
-        IconSegment { key: app.tr("ui.gusset.center"), icon: "gusset_side_center", tip: app.tr("ui.gusset.center").into() },
-        IconSegment { key: app.tr("ui.gusset.positive"), icon: "gusset_side_positive", tip: app.tr("ui.gusset.positive").into() },
+        IconSegment { key: tr!(app, "ui.gusset.negative"), icon: "gusset_side_negative", tip: tr!(app, "ui.gusset.negative").into() },
+        IconSegment { key: tr!(app, "ui.gusset.center"), icon: "gusset_side_center", tip: tr!(app, "ui.gusset.center").into() },
+        IconSegment { key: tr!(app, "ui.gusset.positive"), icon: "gusset_side_positive", tip: tr!(app, "ui.gusset.positive").into() },
     ];
-    row(ui, app.tr("ui.gusset.placement"), |ui| {
+    row(ui, tr!(app, "ui.gusset.placement"), |ui| {
         if segmented_icons(ui, &mut selected, &choices, &[]) {
             g.placement = match selected {
                 0 => 2,
@@ -82,14 +82,14 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, g: &mut Gusset) -> bool {
 pub fn commands(app: &SolveApp, g: &Gusset, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let mut supports = Vec::new();
     for i in 0..2 {
-        let [Sel::Face { body, index, point }] = crate::selection::items(inputs, i) else { return Err(app.tr("error.gusset_support").into()) };
+        let [Sel::Face { body, index, point }] = crate::selection::items(inputs, i) else { return Err(tr!(app, "error.gusset_support").into()) };
         supports.push(json!({"face":point,"body":body,"index":index}));
     }
     let placement = match g.placement {
         0 => "center",
         1 => "positive",
         2 => "negative",
-        _ => return Err(app.tr("error.gusset_support").into()),
+        _ => return Err(tr!(app, "error.gusset_support").into()),
     };
     // Keep a stored zero expression when editing another field; choosing the triangle
     // otherwise clears the clipping distance.

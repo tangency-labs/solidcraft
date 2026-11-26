@@ -88,14 +88,14 @@ pub fn start(app: &mut SolveApp, offer: Offer) {
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(steps) = app.install_steps else { return };
     let (lines, after) = steps.messages();
-    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_install_steps"), "web", solidcraft_ui_text::tr("install.title"))
-        .actions("", solidcraft_ui_text::tr("install.done"), None)
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_install_steps"), "web", tr!("install.title"))
+        .actions("", tr!("install.done"), None)
         .show(ctx, true, |ui| {
-            ui_kit::text(ui, solidcraft_ui_text::tr("install.steps_intro"), ui_kit::Text::Report("intro", false));
+            ui_kit::text(ui, tr!("install.steps_intro"), ui_kit::Text::Report("intro", false));
             for (i, id) in lines.iter().enumerate() {
-                ui_kit::text(ui, &format!("{}. {}", i + 1, solidcraft_ui_text::tr(id)), ui_kit::Text::Report(&format!("step:{i}"), false));
+                ui_kit::text(ui, &format!("{}. {}", i + 1, solidcraft_ui_text::tr_by_id(id)), ui_kit::Text::Report(&format!("step:{i}"), false));
             }
-            ui_kit::text(ui, solidcraft_ui_text::tr(after), ui_kit::Text::Note("after"));
+            ui_kit::text(ui, solidcraft_ui_text::tr_by_id(after), ui_kit::Text::Note("after"));
         });
     if closed || action != ui_kit::Action::None {
         app.install_steps = None;
@@ -123,7 +123,7 @@ mod tests {
     fn file_menu_item(h: &mut Harness) -> bool {
         h.ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu"), true));
         h.frames(2);
-        h.widget(solidcraft_ui_text::tr(ITEM)).is_some()
+        h.widget(solidcraft_ui_text::tr_by_id(ITEM)).is_some()
     }
 
     #[test]
@@ -138,7 +138,7 @@ mod tests {
 
         offer.set(Some(Offer::Prompt));
         assert!(file_menu_item(&mut h), "offered: File has Install app…");
-        assert_eq!(h.step(&json!({ "widget": solidcraft_ui_text::tr(ITEM) })), Ok(()));
+        assert_eq!(h.step(&json!({ "widget": solidcraft_ui_text::tr_by_id(ITEM) })), Ok(()));
         assert_eq!(prompts.get(), 1, "a click shows the browser's prompt");
         assert_eq!(h.app.install_steps, None, "no steps window for a browser with a prompt");
 
@@ -152,7 +152,7 @@ mod tests {
         host(&mut h, Rc::new(Cell::new(Some(Offer::Prompt))), Rc::new(Cell::new(0)));
         h.frames(2);
         assert!(handle_at("titlebar:install").is_none());
-        assert!(h.widget(solidcraft_ui_text::tr(ITEM)).is_none(), "only in the File menu");
+        assert!(h.widget(solidcraft_ui_text::tr_by_id(ITEM)).is_none(), "only in the File menu");
     }
 
     #[test]
@@ -163,11 +163,11 @@ mod tests {
         h.frames(3);
         host(&mut h, Rc::new(Cell::new(Some(Offer::Steps(Steps::Dock)))), prompts.clone());
         assert!(file_menu_item(&mut h));
-        assert_eq!(h.step(&json!({ "widget": solidcraft_ui_text::tr(ITEM) })), Ok(()));
+        assert_eq!(h.step(&json!({ "widget": solidcraft_ui_text::tr_by_id(ITEM) })), Ok(()));
         assert_eq!(h.app.install_steps, Some(Steps::Dock), "a click opens the steps");
         assert_eq!(prompts.get(), 0, "Safari has no prompt");
         h.frames(2);
-        assert_eq!(h.step(&json!({ "widget": solidcraft_ui_text::tr("install.done") })), Ok(()));
+        assert_eq!(h.step(&json!({ "widget": solidcraft_ui_text::tr_by_id("install.done") })), Ok(()));
         assert_eq!(h.app.install_steps, None, "Done closes the steps");
     }
 

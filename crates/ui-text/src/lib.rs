@@ -14,6 +14,9 @@ use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 pub mod bidi;
+pub mod numbered;
+
+pub use numbered::{Filled, Msg};
 
 /// A catalog's messages: stable id → text.
 pub type Messages = BTreeMap<String, String>;
@@ -29,50 +32,65 @@ pub const SHARED_ENGLISH: &str = include_str!("../locales/en.json");
 pub struct Catalog {
     pub id: &'static str,
     pub name: &'static str,
-    /// The catalog as JSON, for one made with [`Catalog::new`]. Empty for a packed one: read
-    /// [`Catalog::json`], which serves both.
+    /// The catalog as JSON. May be empty for one with a table ([`Catalog::numbered`]).
     pub source: &'static str,
-    /// The catalog's JSON, deflated (zlib), for one made with [`Catalog::packed`].
-    packed: &'static [u8],
+    /// The catalog's table of numbered texts ([`numbered`]) deflated (zlib), or empty when the
+    /// host has none.
+    packed_table: &'static [u8],
+    /// [`Self::packed_table`] inflated, the first time it is read.
+    table: OnceLock<Vec<u8>>,
     messages: OnceLock<Messages>,
     /// The messages in display order, for a catalog with right-to-left text (see [`bidi`]).
     shown: OnceLock<Option<Messages>>,
     /// English text → the ids with that text, for resolving a source label (see [`Locale::label`]).
     label_ids: OnceLock<BTreeMap<&'static str, Vec<&'static str>>>,
+    /// The ids, sorted: a message's place among them is its number in a table ([`numbered`]).
+    ids: OnceLock<Vec<&'static str>>,
+    /// The [`numbered::fingerprint`] of [`Self::ids`].
+    ids_fingerprint: OnceLock<u32>,
 }
 
 impl Catalog {
     pub const fn new(id: &'static str, name: &'static str, source: &'static str) -> Self {
-        Self { id, name, source, packed: &[], messages: OnceLock::new(), shown: OnceLock::new(), label_ids: OnceLock::new() }
-    }
-
-    /// A catalog embedded compressed: `packed` is its JSON as a zlib stream. It is inflated when
-    /// the catalog is first read, so a program that embeds many languages carries each at about
-    /// a quarter of its size and unpacks only the ones it shows (the chosen one and English).
-    pub const fn packed(id: &'static str, name: &'static str, packed: &'static [u8]) -> Self {
-        Self { id, name, source: "", packed, messages: OnceLock::new(), shown: OnceLock::new(), label_ids: OnceLock::new() }
-    }
-
-    /// The catalog as JSON, inflated if it was packed. A packed catalog that does not inflate to
-    /// text is logged and reads as empty.
-    pub fn json(&self) -> Cow<'static, str> {
-        if self.packed.is_empty() {
-            return Cow::Borrowed(self.source);
+        Self {
+            id,
+            name,
+            source,
+            packed_table: &[],
+            table: OnceLock::new(),
+            messages: OnceLock::new(),
+            shown: OnceLock::new(),
+            label_ids: OnceLock::new(),
+            ids: OnceLock::new(),
+            ids_fingerprint: OnceLock::new(),
         }
-        let mut json = String::new();
-        match std::io::Read::read_to_string(&mut flate2::read::ZlibDecoder::new(self.packed), &mut json) {
-            Ok(_) => Cow::Owned(json),
-            Err(error) => {
-                log::error!("invalid packed {} message catalog: {error}", self.id);
-                Cow::Borrowed("{}")
-            }
+    }
+
+    /// [`Catalog::new`] with the catalog's table of numbered texts ([`numbered::encode`], made by
+    /// a build script of the same messages), deflated (zlib). A catalog with a table is read from
+    /// it, by id as by number, so only the English one needs its JSON too (for the ids, and for
+    /// the labels that are found by their English text): the others may give an empty `source`.
+    /// The table is inflated when the catalog is first read, so a program that embeds many
+    /// languages carries each at a fraction of its size and unpacks only the ones it shows.
+    pub const fn numbered(id: &'static str, name: &'static str, source: &'static str, packed_table: &'static [u8]) -> Self {
+        Self {
+            id,
+            name,
+            source,
+            packed_table,
+            table: OnceLock::new(),
+            messages: OnceLock::new(),
+            shown: OnceLock::new(),
+            label_ids: OnceLock::new(),
+            ids: OnceLock::new(),
+            ids_fingerprint: OnceLock::new(),
         }
     }
 
     /// The messages in reading order, as the catalog holds them. An invalid catalog is logged and
     /// reads as empty.
     pub fn messages(&'static self) -> &'static Messages {
-        self.messages.get_or_init(|| match serde_json::from_str(&self.json()) {
+        self.messages.get_or_init(|| match serde_json::from_str(if self.source.is_empty() { "{}" } else { self.source }) {
             Ok(messages) => messages,
             Err(error) => {
                 log::error!("invalid embedded {} message catalog: {error}", self.id);
@@ -107,6 +125,40 @@ impl Catalog {
             }
             ids
         })
+    }
+
+    /// The ids, sorted by their bytes.
+    pub(crate) fn ids(&'static self) -> &'static [&'static str] {
+        self.ids.get_or_init(|| self.messages().keys().map(String::as_str).collect())
+    }
+
+    /// The [`numbered::fingerprint`] of the ids.
+    pub(crate) fn ids_fingerprint(&'static self) -> u32 {
+        *self.ids_fingerprint.get_or_init(|| numbered::fingerprint(self.ids().iter().copied()))
+    }
+
+    /// The table of numbered texts, inflated the first time it is read; empty when the catalog has
+    /// none. A table that does not inflate is logged and reads as empty, so its messages fall back
+    /// to English.
+    fn table(&'static self) -> &'static [u8] {
+        self.table.get_or_init(|| {
+            if self.packed_table.is_empty() {
+                return Vec::new();
+            }
+            let mut table = Vec::new();
+            match std::io::Read::read_to_end(&mut flate2::read::ZlibDecoder::new(self.packed_table), &mut table) {
+                Ok(_) => table,
+                Err(error) => {
+                    log::error!("invalid packed {} message table: {error}", self.id);
+                    Vec::new()
+                }
+            }
+        })
+    }
+
+    /// The id of `msg`, when it was numbered among this catalog's ids.
+    fn id_of(&'static self, msg: Msg) -> Option<&'static str> {
+        self.ids().get(msg.place_in(self.ids_fingerprint())?).copied()
     }
 
     /// The language's own name as the language list draws it.
@@ -282,9 +334,19 @@ impl Locale {
         self.0.display_name()
     }
 
-    /// Stable message ID → translation → English → ID, in display order (see [`bidi`]).
+    /// This catalog's own text for `id`, as it is shown: from its table when it has one, else from
+    /// its JSON. No fall back to English.
+    fn own(self, id: &str) -> Option<&'static str> {
+        if self.0.packed_table.is_empty() {
+            return self.0.shown().get(id).map(String::as_str);
+        }
+        numbered::lookup(self.0.table(), Msg::of(id)?)
+    }
+
+    /// The message with the id `id`: in this language, then in English, then the id itself. For
+    /// an id built at run time; one written in the code is `tr!("id")`, which checks it.
     pub fn text(self, id: &str) -> &str {
-        self.0.shown().get(id).or_else(|| english().messages().get(id)).map_or(id, String::as_str)
+        self.own(id).or_else(|| english().messages().get(id).map(String::as_str)).unwrap_or(id)
     }
 
     /// Translate source labels from engine/UI tables, preserving unknown labels.
@@ -293,13 +355,13 @@ impl Locale {
         let english = english();
         // Stable IDs are authoritative. An untranslated legacy ID identical to its
         // English caption can still use another translated ID for that source label.
-        if english.messages().get(label).is_some_and(|text| text != label || self.0.messages().contains_key(label)) {
+        if english.messages().get(label).is_some_and(|text| text != label || self.own(label).is_some()) {
             return self.text(label);
         }
         if let Some(candidates) = english.label_ids().get(label) {
             // Preserve the old last-ID preference among available translations. A new
             // English-only alias must not hide a translation that already exists here.
-            if let Some(text) = candidates.iter().rev().find_map(|id| self.0.shown().get(*id)) {
+            if let Some(text) = candidates.iter().rev().find_map(|id| self.own(id)) {
                 return text;
             }
             if let Some(id) = candidates.last() {
@@ -334,11 +396,37 @@ impl Locale {
     pub fn format(self, id: &str, args: &[(&str, &str)]) -> String {
         interpolate(self.text(id), args)
     }
+
+    /// The message `msg` in this language: what `tr!(locale, "id")` calls.
+    pub fn tr(self, msg: Msg) -> &'static str {
+        self.message(msg)
+    }
+
+    /// A message with its placeholders' values (`msg!("id", name = value)`), in this language.
+    pub fn fill<const N: usize>(self, filled: Filled<'_, N>) -> String {
+        filled.fill_in(self)
+    }
+
+    /// The message `msg` in this language, then in English, then its id, as [`Self::text`] gives.
+    ///
+    /// A catalog with a table is read from it. One without (`Catalog::new`, another host's) is
+    /// read by the id, which the English catalog's ids give back from the place; so is a message
+    /// no table has, which reads as its id. A message numbered among other ids than the installed
+    /// English catalog's, or read before any is installed, reads as the id the macro kept.
+    pub fn message(self, msg: Msg) -> &'static str {
+        if let Some(text) = numbered::lookup(self.0.table(), msg).or_else(|| numbered::lookup(english().table(), msg)) {
+            return text;
+        }
+        match english().id_of(msg) {
+            Some(id) => self.text(id),
+            None => msg.unread(),
+        }
+    }
 }
 
 /// One-pass substitution: argument values are literal, even when they contain braces.
 /// Missing arguments remain visible rather than crashing or silently removing text.
-fn interpolate(template: &str, args: &[(&str, &str)]) -> String {
+pub(crate) fn interpolate(template: &str, args: &[(&str, &str)]) -> String {
     let mut output = String::with_capacity(template.len());
     let mut remaining = template;
     while let Some((before, after)) = remaining.split_once('{') {
@@ -425,7 +513,14 @@ pub fn language() -> &'static str {
     locale().0.id
 }
 
-pub fn tr(id: &str) -> &str {
+/// The message `msg` (from `msg!`; `tr!("id")` says both) in this thread's language.
+pub fn tr(msg: Msg) -> &'static str {
+    locale().tr(msg)
+}
+
+/// The message with the id `id` in this thread's language, for an id built at run time. An id
+/// written in the code is `tr!("id")`, which checks it against the English catalog.
+pub fn tr_by_id(id: &str) -> &str {
     locale().text(id)
 }
 
@@ -472,31 +567,42 @@ mod tests {
         install(LOCALES);
     }
 
-    fn deflated(json: &str) -> &'static [u8] {
+    fn deflated(bytes: &[u8]) -> &'static [u8] {
         let mut packer = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
-        std::io::Write::write_all(&mut packer, json.as_bytes()).unwrap();
+        std::io::Write::write_all(&mut packer, bytes).unwrap();
         Box::leak(packer.finish().unwrap().into_boxed_slice())
     }
 
-    /// A packed catalog reads as the JSON it was packed from.
+    /// A catalog with only a deflated table, as the app embeds all but English, reads its texts
+    /// from it by id and by number, and English where the table lacks one.
     #[test]
-    fn a_packed_catalog_reads_as_its_json() {
-        let json = r#"{"ui.cancel":"キャンセル","dialog.selected_count":"{count} 件を選択"}"#;
-        let packed: &'static Catalog = Box::leak(Box::new(Catalog::packed("ja", "日本語", deflated(json))));
-        let plain: &'static Catalog = Box::leak(Box::new(Catalog::new("ja", "日本語", json)));
-        assert_eq!(packed.json(), json);
-        assert_eq!(packed.messages(), plain.messages());
-        assert_eq!(packed.messages().get("ui.cancel").map(String::as_str), Some("キャンセル"));
-        assert_eq!(plain.json(), json);
+    fn a_catalog_reads_its_deflated_table() {
+        installed();
+        let ja = |id: &str| match id {
+            "ui.cancel" => Some("キャンセル"),
+            "dialog.selected_count" => Some("{count} 件を選択"),
+            _ => None,
+        };
+        let table = numbered::encode(ENGLISH.ids(), ja).unwrap();
+        let catalog: &'static Catalog = Box::leak(Box::new(Catalog::numbered("ja", "日本語", "", deflated(&table))));
+        let ja = Locale::new(catalog);
+        assert_eq!(ja.text("ui.cancel"), "キャンセル");
+        assert_eq!(ja.tr(Msg::of("ui.cancel").unwrap()), "キャンセル");
+        assert_eq!(ja.fill(Filled::checked(Msg::of("dialog.selected_count").unwrap(), [("count", "2")])), "2 件を選択");
+        assert_eq!(ja.text("ui.open"), "Open");
     }
 
-    /// Bytes that are no zlib stream, or one cut short, read as an empty catalog and never panic.
+    /// Bytes that are no zlib stream, or one cut short, read as no table: English, never a panic.
     #[test]
-    fn a_broken_packed_catalog_reads_as_empty() {
-        let whole = deflated(r#"{"ui.cancel":"Cancel"}"#);
+    fn a_broken_deflated_table_reads_as_english() {
+        installed();
+        let table = numbered::encode(ENGLISH.ids(), |id| (id == "ui.cancel").then_some("Abbrechen")).unwrap();
+        let whole = deflated(&table);
         for broken in [&b"not a zlib stream"[..], &whole[..whole.len() / 2], &[0xff; 4]] {
-            let catalog: &'static Catalog = Box::leak(Box::new(Catalog::packed("en", "English", broken)));
-            assert!(catalog.messages().is_empty());
+            let catalog: &'static Catalog = Box::leak(Box::new(Catalog::numbered("de", "Deutsch", "", broken)));
+            let de = Locale::new(catalog);
+            assert_eq!(de.text("ui.cancel"), "Cancel");
+            assert_eq!(de.tr(Msg::of("ui.cancel").unwrap()), "Cancel");
         }
     }
 
@@ -530,7 +636,23 @@ mod tests {
         installed();
         assert_eq!(Locale::for_language("de").text("ui.no_such_message"), "ui.no_such_message");
         assert_eq!(Locale::for_language("de").label("original unknown caption"), "original unknown caption");
-        assert_eq!(tr("ui.no_such_message"), "ui.no_such_message");
+        assert_eq!(tr_by_id("ui.no_such_message"), "ui.no_such_message");
+    }
+
+    /// Catalogs without tables (another host's, made with `Catalog::new`) answer a numbered
+    /// message as they answer its id.
+    #[test]
+    fn a_numbered_message_reads_from_catalogs_without_tables() {
+        installed();
+        let de = Locale::for_language("de");
+        let msg = |id| Msg::of(id).unwrap();
+        assert_eq!(de.tr(msg("ui.cancel")), "Abbrechen");
+        assert_eq!(de.tr(msg("ui.only_english")), "Only in English");
+        assert_eq!(de.fill(Filled::checked(msg("dialog.selected_count"), [("count", "2")])), "2 ausgewählt");
+        assert!(Msg::of("ui.no_such_message").is_none());
+        // Numbered among other ids: nothing says which message it is but the id the build kept.
+        assert_eq!(de.tr(Msg::checked(0, 1, "ui.kept")), "ui.kept");
+        assert_eq!(de.tr(Msg::checked(0, 1, "")), "");
     }
 
     #[test]
@@ -565,12 +687,12 @@ mod tests {
         {
             let _de = scope("de");
             assert_eq!(language(), "de");
-            assert_eq!(tr("ui.cancel"), "Abbrechen");
+            assert_eq!(tr_by_id("ui.cancel"), "Abbrechen");
             assert_eq!(tr_label("Profile"), "Profil");
             {
                 let _labels = resolved_labels();
                 assert_eq!(tr_label("Profile"), "Profile");
-                assert_eq!(tr("ui.cancel"), "Abbrechen", "stable catalog messages remain translated");
+                assert_eq!(tr_by_id("ui.cancel"), "Abbrechen", "stable catalog messages remain translated");
             }
             assert_eq!(tr_label("Profile"), "Profil");
             {
@@ -581,7 +703,7 @@ mod tests {
             assert_eq!(format("dialog.selected_count", &[("count", "3")]), "3 ausgewählt");
         }
         assert_eq!(language(), "en");
-        assert_eq!(tr("ui.cancel"), "Cancel");
+        assert_eq!(tr_by_id("ui.cancel"), "Cancel");
     }
 
     #[test]

@@ -46,7 +46,7 @@ pub fn start(_: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 pub fn rows(app: &SolveApp, ui: &mut egui::Ui, k: &mut Pulley) -> bool {
     let was = k.profile;
     let names: Vec<&str> = PROFILES.iter().map(|p| p.1).collect();
-    choice_row(ui, app.tr("ui.pulley.profile"), "pulley_profile", &mut k.profile, &names);
+    choice_row(ui, tr!(app, "ui.pulley.profile"), "pulley_profile", &mut k.profile, &names);
     // A new profile brings its own belt width, unless one was typed.
     if k.profile != was
         && let (Some(old), Some(new)) = (PROFILES.get(was), PROFILES.get(k.profile))
@@ -56,27 +56,27 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, k: &mut Pulley) -> bool {
     }
     let doc = &app.session.doc;
     let eval = |text: &str| doc.eval(text.trim(), ValueKind::Unitless).ok();
-    let mut enter = count_row(ui, app.tr("ui.pulley.teeth"), &mut k.teeth, &Count { min: 10, max: 200, eval: &eval });
-    enter |= expr_row_positive(ui, app.tr("ui.pulley.belt_width"), &mut k.belt_width);
-    row(ui, app.tr("ui.pulley.flanges"), |ui| check(ui, &mut k.flanges));
-    row(ui, app.tr("ui.pulley.bore"), |ui| check(ui, &mut k.bore));
+    let mut enter = count_row(ui, tr!(app, "ui.pulley.teeth"), &mut k.teeth, &Count { min: 10, max: 200, eval: &eval });
+    enter |= expr_row_positive(ui, tr!(app, "ui.pulley.belt_width"), &mut k.belt_width);
+    row(ui, tr!(app, "ui.pulley.flanges"), |ui| check(ui, &mut k.flanges));
+    row(ui, tr!(app, "ui.pulley.bore"), |ui| check(ui, &mut k.bore));
     if k.bore {
-        enter |= expr_row_positive(ui, app.tr("ui.pulley.bore_diameter"), &mut k.bore_diameter);
-        enter |= expr_row_positive(ui, app.tr("ui.pulley.bore_offset"), &mut k.bore_offset);
+        enter |= expr_row_positive(ui, tr!(app, "ui.pulley.bore_diameter"), &mut k.bore_diameter);
+        enter |= expr_row_positive(ui, tr!(app, "ui.pulley.bore_offset"), &mut k.bore_offset);
     }
     enter
 }
 
 /// A field's value in mm (or a plain number), as the document evaluates it.
 fn value(app: &SolveApp, text: &str, kind: ValueKind, label: &str) -> Result<f64, String> {
-    crate::length_input::eval(&app.session.doc, text, kind).map_err(|e| format!("{}: {e}", app.tr(label)))
+    crate::length_input::eval(&app.session.doc, text, kind).map_err(|e| format!("{}: {e}", app.tr_by_id(label)))
 }
 
 pub fn commands(app: &SolveApp, k: &Pulley) -> Result<Vec<(String, Value)>, String> {
     let profile = PROFILES.get(k.profile).map_or("gt2", |p| p.0);
     let teeth = value(app, &k.teeth, ValueKind::Unitless, "ui.pulley.teeth")?.round();
     if !(10.0..=200.0).contains(&teeth) {
-        return Err(format!("{}: {teeth}", app.tr("ui.pulley.teeth")));
+        return Err(format!("{}: {teeth}", tr!(app, "ui.pulley.teeth")));
     }
     let mut params = json!({
         "profile": profile,

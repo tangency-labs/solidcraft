@@ -908,7 +908,7 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
     ui.allocate_ui(vec2(dimension(width), height), |ui| {
         ui.set_min_height(height);
         if let Some(model) = custom {
-            search_heading(ui, solidcraft_ui_text::tr("ui.agent_chat_custom_heading"), t.space_16);
+            search_heading(ui, solidcraft_ui_text::tr_by_id("ui.agent_chat_custom_heading"), t.space_16);
             let text = solidcraft_ui_text::format("ui.agent_chat_model_custom", &[("model", &compact(model, SEARCH_LABEL_CAP))]);
             let row = search_row(ui, &text, false);
             solidcraft_ui_registry::publish_target(&format!("{}:custom", p.handles), row.rect);
@@ -917,7 +917,7 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
             }
         }
         if !visible.is_empty() {
-            search_heading(ui, solidcraft_ui_text::tr("ui.agent_chat_models_heading"), t.space_16);
+            search_heading(ui, solidcraft_ui_text::tr_by_id("ui.agent_chat_models_heading"), t.space_16);
             // Rows of one height, group headings too: only those in view are laid out.
             let list = (ui.available_height() - note_height).max(row_height);
             egui::ScrollArea::vertical()
@@ -1750,10 +1750,10 @@ fn expand_cell_button(ui: &mut Ui, id: egui::Id, rect: egui::Rect, handle: &str,
     let button = ui
         .scope_builder(egui::UiBuilder::new().id_salt(id.with("expand_button")).max_rect(button_rect), |ui| {
             ui.set_clip_rect(ui.clip_rect().intersect(rect.shrink(t.control_border_stroke(t.control_border).width.max(1.0))));
-            super::compact_button(ui, "…", solidcraft_ui_text::tr("ui.expand_text_editor"), true, open)
+            super::compact_button(ui, "…", solidcraft_ui_text::tr_by_id("ui.expand_text_editor"), true, open)
         })
         .inner;
-    button.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), solidcraft_ui_text::tr("ui.expand_text_editor")));
+    button.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), solidcraft_ui_text::tr_by_id("ui.expand_text_editor")));
     solidcraft_ui_registry::publish_target(&format!("{handle}:expand"), button.rect);
     button
 }

@@ -24,7 +24,7 @@ fn unground_joint_issues_reach_status_and_messages_in_the_saved_language() {
         let locale = solidcraft_ui_text::Locale::for_language(language);
         let expected: Vec<String> = [("Foot joint", "the face no longer exists"), ("Brace joint", "the other joints give a different placement")]
             .iter()
-            .map(|(joint, reason)| locale.format("joint.unground_issue", &[("occurrence", "Part:1"), ("joint", joint), ("reason", reason)]))
+            .map(|(joint, reason)| tr!(locale, "joint.unground_issue", occurrence = "Part:1", joint = joint, reason = reason))
             .collect();
         assert_eq!(h.app.session.log.iter().skip(1).collect::<Vec<_>>(), expected.iter().collect::<Vec<_>>());
         assert_eq!(h.app.messages.iter().map(|m| (&m.text, m.error)).collect::<Vec<_>>(), expected.iter().map(|m| (m, false)).collect::<Vec<_>>());

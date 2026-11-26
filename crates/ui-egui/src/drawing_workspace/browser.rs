@@ -150,7 +150,7 @@ fn show_objects(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, shee
         ("title-block", "ui.drawing_browser_title_block", "drawing_edit_table", sheet.title_block.is_some()),
     ] {
         if present {
-            let label = app.tr(label).to_string();
+            let label = app.tr_by_id(label).to_string();
             row(rows, &format!("{key}:{kind}"), Row { depth: 2, label: &label, icon, name: true, ..Row::default() }, NodeMenu::None);
         }
     }
@@ -168,8 +168,8 @@ fn show_objects(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, shee
         for (index, object) in ids.into_iter().enumerate() {
             let table_kind = (kind == "table").then(|| drawing.tables.by_id(object)).flatten().map(|table| &table.kind);
             let (label, editor) = match table_kind {
-                Some(table::Kind::PartsList(_)) => (app.tr("ui.drawing_browser_parts_list").to_string(), Some("parts_list")),
-                Some(table::Kind::Revision) => (app.tr("ui.drawing_browser_revision_table").to_string(), None),
+                Some(table::Kind::PartsList(_)) => (tr!(app, "ui.drawing_browser_parts_list").to_string(), Some("parts_list")),
+                Some(table::Kind::Revision) => (tr!(app, "ui.drawing_browser_revision_table").to_string(), None),
                 None => {
                     let msg = format!("ui.drawing_browser_{kind}");
                     let label = solidcraft_ui_text::format(&msg, &[("number", &(index + 1).to_string())]);
@@ -277,7 +277,7 @@ pub(crate) fn view_name(app: &SolveApp, drawing: &Drawing, view: &View, number: 
             NamedView::Right => "cmd.view_right",
             _ => "cmd.view_isometric",
         };
-        return app.tr(key).to_string();
+        return app.tr_by_id(key).to_string();
     }
-    solidcraft_ui_text::format("ui.drawing_browser_view", &[("number", &number.to_string())])
+    tr!("ui.drawing_browser_view", number = &number.to_string())
 }

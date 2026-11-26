@@ -59,7 +59,7 @@ pub fn paint(
                     let size = egui::Vec2::splat(Tokens::get().form_close_size);
                     if section.collapsed {
                         let (id, bounds) = ui.allocate_space(size);
-                        let label = solidcraft_ui_text::tr("ui.panel_host.expand");
+                        let label = solidcraft_ui_text::tr_by_id("ui.panel_host.expand");
                         let response = ui_kit::panel_host_disclosure(ui, id, bounds, label, true, true, environment.motion == Motion::Reduced);
                         if response.clicked() {
                             action = Some(WindowAction::Expand(section.id.clone()));

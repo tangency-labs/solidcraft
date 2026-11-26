@@ -4,7 +4,7 @@
 //! panel both edit a finish through [`editor`].
 
 use crate::ui_kit;
-use solidcraft_ui_text::tr;
+use solidcraft_ui_text::tr_by_id;
 
 /// The message ids of the common finishes, in the order the list shows them. Each message is the
 /// finish as it is written into the design (a colour or grade stays in the text).
@@ -21,7 +21,7 @@ const COMMON: [&str; 8] = [
 
 /// The common finishes in the current language, in the order the list shows them.
 pub fn common() -> impl Iterator<Item = &'static str> {
-    COMMON.iter().map(|id| tr(id))
+    COMMON.iter().map(|id| tr_by_id(id))
 }
 
 /// The common finishes as they are written into a design (what a pick stores), in the list's order:
@@ -40,7 +40,7 @@ pub fn common_values() -> Vec<String> {
 pub fn editor(ui: &mut egui::Ui, id: &str, value: &mut String) -> bool {
     let was = value.clone();
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        ui_kit::compact_dropdown_menu(ui, ("sc_finish_common", id), tr("ui.finish.pick"), |ui| {
+        ui_kit::compact_dropdown_menu(ui, ("sc_finish_common", id), tr!("ui.finish.pick"), |ui| {
             for (i, (finish, stored)) in common().zip(common_values()).enumerate() {
                 let option = ui_kit::list_picker(ui, &format!("finish_common_{i}"), finish, *value == stored);
                 crate::scenario::publish_handle(&format!("dialog:Finish:{finish}"), option.rect.center());
@@ -94,7 +94,7 @@ mod tests {
             for (id, value) in COMMON.iter().zip(&stored) {
                 let reading = catalog.messages().get(*id).or_else(|| english.messages().get(*id)).unwrap();
                 assert_eq!(value, reading, "{language} {id}");
-                shown_differs |= tr(id) != reading;
+                shown_differs |= tr_by_id(id) != reading;
             }
             assert!(shown_differs, "{language}: some finish is drawn in display order, or this test proves nothing");
         }

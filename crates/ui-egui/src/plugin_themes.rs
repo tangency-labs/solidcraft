@@ -2,8 +2,6 @@
 //! Read again only when a plugin is installed, removed or switched, never per frame. When the
 //! chosen theme is no longer offered, the default theme is turned on with one status line.
 
-use solidcraft_ui_text::{format, tr};
-
 use crate::SolveApp;
 
 /// What the offer was read from: the switches and the installed packages. A change to either reads
@@ -55,7 +53,7 @@ pub(crate) fn sync(app: &mut SolveApp) {
         let theme = id.rsplit('/').next().unwrap_or_default().to_owned();
         app.preferences.theme = "dark".into();
         app.ui.dark = true;
-        app.set_status(format("prefs.plugin_theme_unavailable", &[("name", theme.as_str())]), true);
+        app.set_status(tr!("prefs.plugin_theme_unavailable", name = theme.as_str()), true);
     }
     for (slot, default) in [(&mut app.preferences.theme_day, "light"), (&mut app.preferences.theme_night, "dark")] {
         if removed(slot, &plugins) {
@@ -95,5 +93,5 @@ pub(crate) fn name(folder: &str, source: &str, id: &str) -> String {
 
 /// The card's line naming a plugin's themes.
 pub(crate) fn hint(names: &[&str]) -> String {
-    tr("prefs.plugin_themes").replace("{names}", &names.join(", "))
+    tr!("prefs.plugin_themes", names = &names.join(", "))
 }

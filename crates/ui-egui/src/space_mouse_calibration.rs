@@ -188,15 +188,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let done = matches!(result, Some(Ok(_)));
     let text = |ui: &mut egui::Ui, text: &str, key: &str| crate::ui_kit::text(ui, text, crate::ui_kit::Text::Report(key, false));
     let (closed, action) =
-        crate::ui_kit::Window::new(egui::Id::unique("sc_space_mouse_calibration"), "settings", app.tr("ui.3d_mouse_calibrate_title"))
-            .actions(if done { app.tr("ui.save") } else { "" }, app.tr("ui.cancel"), None)
+        crate::ui_kit::Window::new(egui::Id::unique("sc_space_mouse_calibration"), "settings", tr!(app, "ui.3d_mouse_calibrate_title"))
+            .actions(if done { tr!(app, "ui.save") } else { "" }, tr!(app, "ui.cancel"), None)
             .show_with_left(
                 ctx,
                 done,
                 |ui| {
-                    text(ui, app.tr(prompt), "prompt");
+                    text(ui, app.tr_by_id(prompt), "prompt");
                     if let Some(axis) = weak {
-                        crate::ui_kit::text(ui, app.tr(axis), crate::ui_kit::Text::Heading("weak_axis"));
+                        crate::ui_kit::text(ui, app.tr_by_id(axis), crate::ui_kit::Text::Heading("weak_axis"));
                     }
                     // The device doesn't behave like the kind picked: say so, and offer the other.
                     if let Some(other) = mismatch {
@@ -204,8 +204,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                             Kind::Trackball => ("ui.3d_mouse_looks_like_trackball", "ui.3d_mouse_switch_trackball"),
                             Kind::ReturnToCenter => ("ui.3d_mouse_looks_like_cap", "ui.3d_mouse_switch_cap"),
                         };
-                        crate::ui_kit::text(ui, app.tr(hint), crate::ui_kit::Text::Hint("space_mouse_kind_mismatch"));
-                        if crate::ui_kit::button(ui, app.tr(switch), crate::ui_kit::Button::Normal).clicked() {
+                        crate::ui_kit::text(ui, app.tr_by_id(hint), crate::ui_kit::Text::Hint("space_mouse_kind_mismatch"));
+                        if crate::ui_kit::button(ui, app.tr_by_id(switch), crate::ui_kit::Button::Normal).clicked() {
                             chosen = Some(other);
                         }
                     }
@@ -215,7 +215,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                             for (kind, label) in KINDS {
                                 ui.vertical(|ui| {
                                     crate::space_mouse_model::rest(ui, kind);
-                                    if crate::ui_kit::button(ui, app.tr(label), crate::ui_kit::Button::Normal).clicked() {
+                                    if crate::ui_kit::button(ui, app.tr_by_id(label), crate::ui_kit::Button::Normal).clicked() {
                                         chosen = Some(kind);
                                     }
                                 });
@@ -240,28 +240,30 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         }
                     }
                     // The device's six raw axes as they come, so the jitter at rest is there to see.
-                    crate::ui_kit::text(ui, app.tr("ui.3d_mouse_reading"), crate::ui_kit::Text::Note("space_mouse_reading"));
+                    crate::ui_kit::text(ui, tr!(app, "ui.3d_mouse_reading"), crate::ui_kit::Text::Note("space_mouse_reading"));
                     reading_grid(ui, raw);
                     // A reassignment made in Preferences stays on top of whatever this records.
                     if app.preferences.space_mouse_axis_source != crate::space_mouse::SAME_AXES {
-                        crate::ui_kit::text(ui, app.tr("ui.3d_mouse_axes_reassigned"), crate::ui_kit::Text::Note("space_mouse_axes_reassigned"));
+                        crate::ui_kit::text(ui, tr!(app, "ui.3d_mouse_axes_reassigned"), crate::ui_kit::Text::Note("space_mouse_axes_reassigned"));
                     }
-                    crate::ui_kit::row(ui, app.tr("ui.3d_mouse_dead_zone"), |ui| {
-                        dead_zone_slider(ui, &mut dead_zone).backing_on_hover_text(app.tr("ui.3d_mouse_dead_zone_tip"));
+                    crate::ui_kit::row(ui, tr!(app, "ui.3d_mouse_dead_zone"), |ui| {
+                        dead_zone_slider(ui, &mut dead_zone).backing_on_hover_text(tr!(app, "ui.3d_mouse_dead_zone_tip"));
                     });
                 },
                 |ui| {
                     ui.horizontal(|ui| {
                         back = ui
-                            .add_enabled_ui(stage != Stage::Choose, |ui| crate::ui_kit::button(ui, app.tr("ui.back"), crate::ui_kit::Button::Normal))
+                            .add_enabled_ui(stage != Stage::Choose, |ui| {
+                                crate::ui_kit::button(ui, tr!(app, "ui.back"), crate::ui_kit::Button::Normal)
+                            })
                             .inner
                             .clicked();
                         skip = can_skip
-                            && crate::ui_kit::button(ui, app.tr("ui.3d_mouse_skip"), crate::ui_kit::Button::Normal)
-                                .backing_on_hover_text(app.tr("ui.3d_mouse_skip_tip"))
+                            && crate::ui_kit::button(ui, tr!(app, "ui.3d_mouse_skip"), crate::ui_kit::Button::Normal)
+                                .backing_on_hover_text(tr!(app, "ui.3d_mouse_skip_tip"))
                                 .clicked();
                         over = matches!(result, Some(Err(_)))
-                            && crate::ui_kit::button(ui, app.tr("ui.start_over"), crate::ui_kit::Button::Normal).clicked();
+                            && crate::ui_kit::button(ui, tr!(app, "ui.start_over"), crate::ui_kit::Button::Normal).clicked();
                     });
                 },
             );

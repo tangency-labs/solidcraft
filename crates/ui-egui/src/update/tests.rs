@@ -975,7 +975,7 @@ fn unavailable_preferences_show_disabled_update_controls_and_real_values() {
                     assert_eq!(controls[0].1.toggled(), Some(if checked { Toggled::True } else { Toggled::False }));
                 }
             }
-            let reason = solidcraft_ui_text::tr("update.check_unavailable");
+            let reason = solidcraft_ui_text::tr_by_id("update.check_unavailable");
             assert_eq!(tree.nodes.iter().filter(|(_, node)| node.role() == Role::Label && node.value() == Some(reason)).count(), 1);
             let texts: Vec<_> = h
                 .shapes
@@ -985,12 +985,9 @@ fn unavailable_preferences_show_disabled_update_controls_and_real_values() {
             assert!(texts.contains(&reason), "{kind:?}: the unavailable reason is painted");
             assert!(h.widget("Up to date").is_none(), "unavailability is not a successful check");
             let note = match &kind {
-                InstallKind::Web => solidcraft_ui_text::tr("update.prefs_web").to_string(),
-                InstallKind::Flatpak(id) => solidcraft_ui_text::format(
-                    "update.prefs_flatpak",
-                    &[("version", current_version()), ("command", &format!("flatpak update {id}"))],
-                ),
-                _ => solidcraft_ui_text::format("update.prefs_dev", &[("version", current_version())]),
+                InstallKind::Web => solidcraft_ui_text::tr_by_id("update.prefs_web").to_string(),
+                InstallKind::Flatpak(id) => tr!("update.prefs_flatpak", version = current_version(), command = &format!("flatpak update {id}")),
+                _ => tr!("update.prefs_dev", version = current_version()),
             };
             assert!(
                 tree.nodes.iter().any(|(_, node)| node.role() == Role::Button && node.label() == Some(note.as_str()) && !node.is_disabled()),
@@ -1035,7 +1032,7 @@ fn general_updates_show_real_status_and_time_and_check_now_uses_the_existing_fee
             assert_eq!(controls[0].1.toggled(), Some(egui::accesskit::Toggled::False));
         }
     }
-    let checked = solidcraft_ui_text::format("prefs.general.last_check", &[("time", &solidcraft_engine::crash::utc(1_700_000_000))]);
+    let checked = tr!("prefs.general.last_check", time = &solidcraft_engine::crash::utc(1_700_000_000));
     assert!(h.widget(&checked).is_some(), "the persisted check time is shown");
     let button = crate::scenario::rect_of("prefs:check_now").unwrap();
     h.step(&json!({"click":[button.center().x, button.center().y]})).unwrap();

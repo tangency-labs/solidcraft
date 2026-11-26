@@ -701,7 +701,7 @@ pub(crate) fn row_labels(s: &Session, names: crate::prefs::OriginPlaneNames, d: 
     let labels = rows.iter().map(|r| match r.as_slice() {
         [a, b] => {
             n += 1;
-            solidcraft_ui_text::format("frame.path_pair_row", &[("n", &n.to_string()), ("a", &label(a)), ("b", &label(b))])
+            tr!("frame.path_pair_row", n = &n.to_string(), a = &label(a), b = &label(b))
         }
         r => r.first().map(label).unwrap_or_default(),
     });
@@ -778,7 +778,7 @@ fn take_back(d: &mut Dialog, (items, path, refs, pair_ids): Back, why: &str) {
     if let Kind::Frame(m) = &mut d.kind {
         (m.path, m.refs, m.pair_ids) = (path, refs, pair_ids);
     }
-    d.error = Some(solidcraft_ui_text::format("frame.pick_refused", &[("reason", tr(why))]));
+    d.error = Some(tr!("frame.pick_refused", reason = tr(why)));
 }
 
 /// After the live preview is updated: the pick that completed a tube ([`refusal`]) is taken back
@@ -919,7 +919,7 @@ pub(crate) fn take_out(app: &mut SolveApp, sel: &Sel) -> bool {
 
 /// Is this the dialog's word that it took a pick back? Guidance, not a failure to report.
 pub(crate) fn refused_pick(error: &str) -> bool {
-    error.starts_with(&solidcraft_ui_text::format("frame.pick_refused", &[("reason", "")]))
+    error.starts_with(&tr!("frame.pick_refused", reason = ""))
 }
 
 /// After the path changed: a last point waiting for its partner asks for it.
@@ -1067,7 +1067,7 @@ fn read_override(o: &Value) -> Option<frame::CornerOverride> {
 }
 
 fn corner_label(n: usize) -> String {
-    solidcraft_ui_text::format("ui.frame_corner_number", &[("n", &n.to_string())])
+    tr!("ui.frame_corner_number", n = &n.to_string())
 }
 
 /// Under Corner Overrides, one row for each picked corner, "Corner n" in pick order: its type (as it
@@ -1245,10 +1245,10 @@ fn group_rows(ui: &mut egui::Ui, m: &mut Member, inputs: &mut [SelInput]) {
     // paint and click targets stay inside the row at the default dialog width.
     let lines = count + 1 + usize::from(count > 1);
     let height = row_height() * lines as f32 + ui.spacing().item_spacing.y * (lines - 1) as f32;
-    sized_row(ui, solidcraft_ui_text::tr("ui.frame_member.groups"), height, |ui| {
+    sized_row(ui, tr!("ui.frame_member.groups"), height, |ui| {
         ui.vertical(|ui| {
             for k in 0..count {
-                let label = solidcraft_ui_text::format("ui.frame_member.group", &[("number", &(k + 1).to_string())]);
+                let label = tr!("ui.frame_member.group", number = &(k + 1).to_string());
                 let style = if k == m.current { Button::SmallSelected } else { Button::Small };
                 ui.horizontal(|ui| {
                     if button(ui, label, style).clicked() && k != m.current {
@@ -1256,9 +1256,9 @@ fn group_rows(ui: &mut egui::Ui, m: &mut Member, inputs: &mut [SelInput]) {
                     }
                 });
             }
-            ui.horizontal(|ui| add = button(ui, solidcraft_ui_text::tr("ui.frame_member.new_group"), Button::Small).clicked());
+            ui.horizontal(|ui| add = button(ui, tr!("ui.frame_member.new_group"), Button::Small).clicked());
             if count > 1 {
-                ui.horizontal(|ui| remove = button(ui, solidcraft_ui_text::tr("ui.frame_member.remove_group"), Button::Small).clicked());
+                ui.horizontal(|ui| remove = button(ui, tr!("ui.frame_member.remove_group"), Button::Small).clicked());
             }
         });
     });
@@ -1279,7 +1279,7 @@ fn member_rows(app: &SolveApp, ui: &mut egui::Ui, m: &mut Member, inputs: &mut [
         form_row(ui, "All Lines", |ui| check(ui, &mut m.all));
     }
     group_rows(ui, m, inputs);
-    let continuous_label = app.tr("ui.frame.continuous").to_string();
+    let continuous_label = tr!(app, "ui.frame.continuous").to_string();
     form_row(ui, &continuous_label, |ui| check(ui, &mut m.continuous));
     let picked = !crate::selection::items(inputs, 1).is_empty();
     if let Some(sketch) = m.whole.filter(|_| !picked) {
@@ -1621,7 +1621,7 @@ fn flat_commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<St
     }
     if m.continuous {
         if m.all {
-            return Err(app.tr("ui.frame.continuous_requires_selection").into());
+            return Err(tr!(app, "ui.frame.continuous_requires_selection").into());
         }
         p["continuous"] = json!(true);
     }
@@ -1950,7 +1950,7 @@ pub fn trim_rows(ui: &mut egui::Ui, t: &mut Trim) -> bool {
     choice_row(ui, "ui.frame_trim.end", "frame_trim_end", &mut t.end, &ends);
     let enter = hint_row(ui, "Gap", &mut t.gap, "0 mm");
     if !t.kept.is_empty() {
-        let label = solidcraft_ui_text::format("ui.frame_trim.more_targets", &[("count", &t.kept.len().to_string())]);
+        let label = tr!("ui.frame_trim.more_targets", count = &t.kept.len().to_string());
         form_row(ui, "ui.frame_trim.keep", |ui| crate::ui_kit::checkbox(ui, &label, &mut t.keep));
     }
     enter
@@ -1970,13 +1970,13 @@ fn member_body(app: &SolveApp, pick: &Sel) -> Option<String> {
 pub fn trim_commands(app: &SolveApp, t: &Trim, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let mut members: Vec<String> = Vec::new();
     for pick in crate::selection::items(inputs, 0) {
-        let body = member_body(app, pick).ok_or_else(|| solidcraft_ui_text::tr("ui.frame_trim.pick_members").to_string())?;
+        let body = member_body(app, pick).ok_or_else(|| tr!("ui.frame_trim.pick_members").to_string())?;
         if !members.contains(&body) {
             members.push(body);
         }
     }
     if members.is_empty() {
-        return Err(solidcraft_ui_text::tr("ui.frame_trim.pick_members_first").to_string());
+        return Err(tr!("ui.frame_trim.pick_members_first").to_string());
     }
     let mut to: Vec<Value> = Vec::new();
     for pick in crate::selection::items(inputs, 1) {
@@ -1997,7 +1997,7 @@ pub fn trim_commands(app: &SolveApp, t: &Trim, inputs: &[SelInput], extra: &Map<
                 "plane": crate::sketch_attachment_ui::face_plane(app, face).unwrap_or_else(|| json!({"face": [point.x, point.y, point.z]}))
             }),
             (None, Sel::Plane { name }) => json!({"plane": name}),
-            _ => return Err(solidcraft_ui_text::tr("ui.frame_trim.target_kinds").to_string()),
+            _ => return Err(tr!("ui.frame_trim.target_kinds").to_string()),
         };
         if !to.contains(&target) {
             to.push(target);
@@ -2007,7 +2007,7 @@ pub fn trim_commands(app: &SolveApp, t: &Trim, inputs: &[SelInput], extra: &Map<
         to.extend(t.kept.iter().cloned());
     }
     if to.is_empty() {
-        return Err(solidcraft_ui_text::tr("ui.frame_trim.pick_targets").to_string());
+        return Err(tr!("ui.frame_trim.pick_targets").to_string());
     }
     let mut p = json!({"members": members, "to": to});
     if let Some((end, _)) = ENDS.get(t.end).filter(|_| t.end != 0) {

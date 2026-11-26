@@ -15,7 +15,6 @@ use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 use serde_json::Value;
-use solidcraft_ui_text::format;
 
 use crate::SolveApp;
 use crate::plugins::Plugin;
@@ -192,7 +191,7 @@ fn poll_check(app: &mut SolveApp) {
 pub(crate) fn start(app: &mut SolveApp, ctx: &egui::Context, plugin: &Plugin) {
     let Some(offer) = offered(app, plugin).cloned() else { return };
     if app.plugin_updates.download.is_some() || app.plugin_updates.pending.is_some() || crate::plugins::busy(app) {
-        app.set_status(app.tr("prefs.plugin_busy").to_owned(), true);
+        app.set_status(tr!(app, "prefs.plugin_busy").to_owned(), true);
         return;
     }
     let (Some(download), Some(dir)) = (app.services.http_download.clone(), app.session.plugin_state.plugins_dir()) else { return };
@@ -205,7 +204,7 @@ pub(crate) fn start(app: &mut SolveApp, ctx: &egui::Context, plugin: &Plugin) {
         ctx.request_repaint();
     });
     if spawned.is_ok() {
-        app.set_status(format("plugin_update.downloading", &[("plugin", &plugin.name), ("version", &version)]), false);
+        app.set_status(tr!("plugin_update.downloading", plugin = &plugin.name, version = &version), false);
         app.plugin_updates.download = Some(Download { id: plugin.id.clone(), name: plugin.name.clone(), version, done });
     }
 }
@@ -243,7 +242,7 @@ fn poll_download(app: &mut SolveApp) {
             app.plugin_updates.pending = Some(Pending { id: download.id, version: download.version, path: path.clone() });
             crate::plugin_install::review(app, path.to_string_lossy().into_owned());
         }
-        Err(error) => app.set_status(format("plugin_update.failed", &[("plugin", &download.name), ("error", &error)]), true),
+        Err(error) => app.set_status(tr!("plugin_update.failed", plugin = &download.name, error = &error), true),
     }
 }
 

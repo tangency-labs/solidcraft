@@ -59,14 +59,14 @@ pub(super) fn snapshot_with_lens(app: &SolveApp, lens: Option<solidcraft_engine:
 fn snapshot_with_lens_override(app: &SolveApp, lens: Option<Option<solidcraft_engine::render::job::ThinLens>>) -> Result<RenderSetup, String> {
     cpu::validate_progressive_image(app)?;
     if has_unportable_bindings(app) {
-        return Err(app.tr("render.setup_runtime_unsupported").to_string());
+        return Err(tr!(app, "render.setup_runtime_unsupported").to_string());
     }
     let mut setup = draft(app)?;
     if let Some(lens) = lens {
         match &mut setup.job {
             Some(RenderJob::CpuRaytrace { options, .. }) => options.lens = lens,
             Some(RenderJob::GpuPath { options, .. }) => options.lens = lens,
-            _ => return Err(app.tr("render.shot_lens_raytrace_reason").into()),
+            _ => return Err(tr!(app, "render.shot_lens_raytrace_reason").into()),
         }
     }
     validate_snapshot(app, setup)
@@ -77,7 +77,7 @@ fn snapshot_with_lens_override(app: &SolveApp, lens: Option<Option<solidcraft_en
 pub(super) fn image_snapshot(app: &SolveApp) -> Result<RenderSetup, String> {
     cpu::validate_progressive_image(app)?;
     if has_runtime_bindings(app) {
-        return Err(app.tr("render.setup_runtime_unsupported").into());
+        return Err(tr!(app, "render.setup_runtime_unsupported").into());
     }
     let mut setup = draft(app)?;
     materials::overlay_saved(app, &mut setup)?;
@@ -87,7 +87,7 @@ pub(super) fn image_snapshot(app: &SolveApp) -> Result<RenderSetup, String> {
 fn validate_snapshot(app: &SolveApp, setup: RenderSetup) -> Result<RenderSetup, String> {
     // Preserve unsupported legacy intent visibly instead of erasing it while upgrading a setup.
     if setup.environment_rotation != 0.0 || setup.environment_intensity != 1.0 {
-        return Err(app.tr("render.setup_legacy_environment").to_string());
+        return Err(tr!(app, "render.setup_legacy_environment").to_string());
     }
     setup.validate().map_err(|error| error.to_string())?;
     if hdr::active(app).is_some_and(|target| hdr::input(app, target).embedded()) {
@@ -146,7 +146,7 @@ pub(super) fn draft(app: &SolveApp) -> Result<RenderSetup, String> {
                     },
                     hdr: if view.cpu.environment == cpu::Environment::Hdr {
                         Some(CpuHdrEnvironment {
-                            resource: view.cpu.hdr.resource().ok_or_else(|| app.tr("render.hdr_inspect_required").to_string())?,
+                            resource: view.cpu.hdr.resource().ok_or_else(|| tr!(app, "render.hdr_inspect_required").to_string())?,
                             rotation_rad: view.cpu.rotation_rad,
                             intensity: view.cpu.intensity,
                             samples: view.cpu.samples,
@@ -201,7 +201,7 @@ pub(super) fn draft(app: &SolveApp) -> Result<RenderSetup, String> {
                     },
                     hdr: if studio.environment == studio::Environment::Hdr {
                         Some(GpuHdrEnvironment {
-                            resource: studio.hdr.resource().ok_or_else(|| app.tr("render.hdr_inspect_required").to_string())?,
+                            resource: studio.hdr.resource().ok_or_else(|| tr!(app, "render.hdr_inspect_required").to_string())?,
                             rotation_rad: studio.rotation_rad,
                             intensity: studio.intensity,
                             assume_linear_srgb: studio.assume_linear_srgb,
@@ -733,18 +733,18 @@ fn save_with_camera(app: &mut SolveApp, save_camera: bool) -> Result<(), String>
         let mut params = serde_json::json!({"name":name,"path":path,"expected_sha256":digest});
         match &mut setup.job {
             Some(RenderJob::CpuRaytrace { options, .. }) => {
-                let environment = options.hdr.take().ok_or_else(|| app.tr("render.hdr_inspect_required").to_string())?;
+                let environment = options.hdr.take().ok_or_else(|| tr!(app, "render.hdr_inspect_required").to_string())?;
                 params["rotation_rad"] = serde_json::json!(environment.rotation_rad);
                 params["intensity"] = serde_json::json!(environment.intensity);
                 params["samples"] = serde_json::json!(environment.samples);
             }
             Some(RenderJob::GpuPath { options, .. }) => {
-                let environment = options.hdr.take().ok_or_else(|| app.tr("render.hdr_inspect_required").to_string())?;
+                let environment = options.hdr.take().ok_or_else(|| tr!(app, "render.hdr_inspect_required").to_string())?;
                 params["rotation_rad"] = serde_json::json!(environment.rotation_rad);
                 params["intensity"] = serde_json::json!(environment.intensity);
                 params["assume_linear_srgb"] = serde_json::json!(environment.assume_linear_srgb);
             }
-            _ => return Err(app.tr("render.hdr_inspect_required").to_string()),
+            _ => return Err(tr!(app, "render.hdr_inspect_required").to_string()),
         }
         params["set"] = setup_patch(setup, save_camera)?;
         // The expected digest rejects an externally changed file before any resource/setup edit.
@@ -752,7 +752,7 @@ fn save_with_camera(app: &mut SolveApp, save_camera: bool) -> Result<(), String>
     } else {
         app.run("render.settings.set", serde_json::json!({"name":name,"set":setup_patch(setup, save_camera)?}))?;
     }
-    let setup = app.session.doc.render.setups.get(&name).cloned().ok_or_else(|| app.tr("render.setup_save_missing").to_string())?;
+    let setup = app.session.doc.render.setups.get(&name).cloned().ok_or_else(|| tr!(app, "render.setup_save_missing").to_string())?;
     if let Some((target, _, resource)) = capture {
         match target {
             hdr::Target::Cpu => app.render_workspace.view.cpu.hdr = hdr::Input::EmbeddedResource { resource },

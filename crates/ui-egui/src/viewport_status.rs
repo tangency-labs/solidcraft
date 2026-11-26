@@ -67,10 +67,10 @@ pub(crate) fn section_setting(app: &SolveApp, origin: [f64; 3], normal: [f64; 3]
     let distance = crate::prefs::show_mm(app, offset, 1);
     let mut text = match axis {
         Some(axis) => format!("{axis} {distance}"),
-        None => solidcraft_ui_text::format("ui.viewport_status_section_tilted", &[("offset", &distance)]),
+        None => tr!("ui.viewport_status_section_tilted", offset = &distance),
     };
     if hatch {
-        text = solidcraft_ui_text::format("ui.viewport_status_section_hatch", &[("setting", &text)]);
+        text = tr!("ui.viewport_status_section_hatch", setting = &text);
     }
     Some(text)
 }
@@ -98,20 +98,20 @@ pub(crate) fn presentation(app: &SolveApp, effect: &Effect) -> Option<StatusItem
     }
     let command = solidcraft_engine::find_command(&effect.command)?;
     let setting = match effect.setting {
-        StatusSetting::Zebra { stripes } => solidcraft_ui_text::format("ui.viewport_status_stripes", &[("count", &stripes.to_string())]),
+        StatusSetting::Zebra { stripes } => tr!("ui.viewport_status_stripes", count = &stripes.to_string()),
         StatusSetting::Draft { pull, angle_deg } => format!("{} · {angle_deg}°", direction(pull)),
         StatusSetting::Environment => String::new(),
-        StatusSetting::Accessibility { direction: from } => solidcraft_ui_text::format("ui.viewport_status_from", &[("direction", &direction(from))]),
+        StatusSetting::Accessibility { direction: from } => tr!("ui.viewport_status_from", direction = &direction(from)),
         StatusSetting::Curvature { radius_mm } => format!("R {}", crate::prefs::show_mm(app, radius_mm, 1)),
-        StatusSetting::Continuity { edge_count } => solidcraft_ui_text::format("ui.viewport_status_edges", &[("count", &edge_count.to_string())]),
+        StatusSetting::Continuity { edge_count } => tr!("ui.viewport_status_edges", count = &edge_count.to_string()),
         StatusSetting::Section { origin_mm, normal, hatch } => section_setting(app, origin_mm, normal, hatch)?,
-        StatusSetting::Isolate { hidden } => solidcraft_ui_text::format("ui.viewport_status_hidden", &[("count", &hidden.to_string())]),
+        StatusSetting::Isolate { hidden } => tr!("ui.viewport_status_hidden", count = &hidden.to_string()),
     };
     Some(StatusItem {
         id: identity(effect),
         kind: StatusKind::Mode,
         // The pill names the state, "Isolation", rather than the command (#8120).
-        name: if effect.id == StatusId::Isolate { app.tr("ui.isolation").to_owned() } else { crate::toolbar::persistent_button_name(app, command) },
+        name: if effect.id == StatusId::Isolate { tr!(app, "ui.isolation").to_owned() } else { crate::toolbar::persistent_button_name(app, command) },
         setting,
         has_key: if app.preferences.viewport_status_details { effect.has_details() } else { effect.has_key },
         editable: if app.preferences.viewport_status_details { effect.has_details() } else { effect.id == StatusId::Section },

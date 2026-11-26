@@ -4,48 +4,68 @@
 
 use solidcraft_ui_text::{Catalog, Locale};
 
-static ENGLISH: Catalog = Catalog::packed("en", "English", include_bytes!(concat!(env!("OUT_DIR"), "/locales/en.json.z")));
-static ARABIC: Catalog = Catalog::packed("ar", "العربية", include_bytes!(concat!(env!("OUT_DIR"), "/locales/ar.json.z")));
-static BULGARIAN: Catalog = Catalog::packed("bg", "Български", include_bytes!(concat!(env!("OUT_DIR"), "/locales/bg.json.z")));
-static BOSNIAN: Catalog = Catalog::packed("bs", "Bosanski", include_bytes!(concat!(env!("OUT_DIR"), "/locales/bs.json.z")));
-static CATALAN: Catalog = Catalog::packed("ca", "Català", include_bytes!(concat!(env!("OUT_DIR"), "/locales/ca.json.z")));
-static CZECH: Catalog = Catalog::packed("cs", "Čeština", include_bytes!(concat!(env!("OUT_DIR"), "/locales/cs.json.z")));
-static DANISH: Catalog = Catalog::packed("da", "Dansk", include_bytes!(concat!(env!("OUT_DIR"), "/locales/da.json.z")));
-static GERMAN: Catalog = Catalog::packed("de", "Deutsch", include_bytes!(concat!(env!("OUT_DIR"), "/locales/de.json.z")));
+/// A catalog's JSON, for the tests that read it (the catalogs' coverage and wording). The app
+/// reads every catalog but English from its table (`build.rs`, `numbered_tables`), embedded
+/// deflated and inflated when it is first read, so outside tests the JSON is left out of the
+/// program.
+macro_rules! json {
+    ($locale:literal) => {
+        if cfg!(test) { include_str!(concat!(env!("OUT_DIR"), "/locales/", $locale, ".json")) } else { "" }
+    };
+}
+
+static ENGLISH: Catalog = Catalog::numbered(
+    "en",
+    "English",
+    include_str!(concat!(env!("OUT_DIR"), "/locales/en.json")),
+    include_bytes!(concat!(env!("OUT_DIR"), "/locales/en.tbl.z")),
+);
+static ARABIC: Catalog = Catalog::numbered("ar", "العربية", json!("ar"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ar.tbl.z")));
+static BULGARIAN: Catalog = Catalog::numbered("bg", "Български", json!("bg"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/bg.tbl.z")));
+static BOSNIAN: Catalog = Catalog::numbered("bs", "Bosanski", json!("bs"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/bs.tbl.z")));
+static CATALAN: Catalog = Catalog::numbered("ca", "Català", json!("ca"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ca.tbl.z")));
+static CZECH: Catalog = Catalog::numbered("cs", "Čeština", json!("cs"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/cs.tbl.z")));
+static DANISH: Catalog = Catalog::numbered("da", "Dansk", json!("da"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/da.tbl.z")));
+static GERMAN: Catalog = Catalog::numbered("de", "Deutsch", json!("de"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/de.tbl.z")));
 /// English in UK spelling: only the messages whose spelling differs; the rest are English's.
-static ENGLISH_UK: Catalog = Catalog::packed("en-GB", "English (UK)", include_bytes!(concat!(env!("OUT_DIR"), "/locales/en-GB.json.z")));
-static SPANISH: Catalog = Catalog::packed("es", "Español (España)", include_bytes!(concat!(env!("OUT_DIR"), "/locales/es.json.z")));
-static BASQUE: Catalog = Catalog::packed("eu", "Euskara", include_bytes!(concat!(env!("OUT_DIR"), "/locales/eu.json.z")));
-static FINNISH: Catalog = Catalog::packed("fi", "Suomi", include_bytes!(concat!(env!("OUT_DIR"), "/locales/fi.json.z")));
-static FRENCH: Catalog = Catalog::packed("fr", "Français", include_bytes!(concat!(env!("OUT_DIR"), "/locales/fr.json.z")));
-static GALICIAN: Catalog = Catalog::packed("gl", "Galego", include_bytes!(concat!(env!("OUT_DIR"), "/locales/gl.json.z")));
-static HEBREW: Catalog = Catalog::packed("he", "עברית", include_bytes!(concat!(env!("OUT_DIR"), "/locales/he.json.z")));
-static CROATIAN: Catalog = Catalog::packed("hr", "Hrvatski", include_bytes!(concat!(env!("OUT_DIR"), "/locales/hr.json.z")));
-static HUNGARIAN: Catalog = Catalog::packed("hu", "Magyar", include_bytes!(concat!(env!("OUT_DIR"), "/locales/hu.json.z")));
-static INDONESIAN: Catalog = Catalog::packed("id", "Bahasa Indonesia", include_bytes!(concat!(env!("OUT_DIR"), "/locales/id.json.z")));
-static ITALIAN: Catalog = Catalog::packed("it", "Italiano", include_bytes!(concat!(env!("OUT_DIR"), "/locales/it.json.z")));
-static JAPANESE: Catalog = Catalog::packed("ja", "日本語", include_bytes!(concat!(env!("OUT_DIR"), "/locales/ja.json.z")));
-static GEORGIAN: Catalog = Catalog::packed("ka", "ქართული", include_bytes!(concat!(env!("OUT_DIR"), "/locales/ka.json.z")));
-static KOREAN: Catalog = Catalog::packed("ko", "한국어", include_bytes!(concat!(env!("OUT_DIR"), "/locales/ko.json.z")));
-static LAO: Catalog = Catalog::packed("lo", "ພາສາລາວ", include_bytes!(concat!(env!("OUT_DIR"), "/locales/lo.json.z")));
-static LATVIAN: Catalog = Catalog::packed("lv", "Latviešu", include_bytes!(concat!(env!("OUT_DIR"), "/locales/lv.json.z")));
-static MALAY: Catalog = Catalog::packed("ms", "Bahasa Melayu", include_bytes!(concat!(env!("OUT_DIR"), "/locales/ms.json.z")));
-static NORWEGIAN: Catalog = Catalog::packed("nb", "Norsk bokmål", include_bytes!(concat!(env!("OUT_DIR"), "/locales/nb.json.z")));
-static DUTCH: Catalog = Catalog::packed("nl", "Nederlands", include_bytes!(concat!(env!("OUT_DIR"), "/locales/nl.json.z")));
-static POLISH: Catalog = Catalog::packed("pl", "Polski", include_bytes!(concat!(env!("OUT_DIR"), "/locales/pl.json.z")));
-static PORTUGUESE_BR: Catalog = Catalog::packed("pt-BR", "Português (Brasil)", include_bytes!(concat!(env!("OUT_DIR"), "/locales/pt-BR.json.z")));
-static PORTUGUESE_PT: Catalog = Catalog::packed("pt-PT", "Português (Portugal)", include_bytes!(concat!(env!("OUT_DIR"), "/locales/pt-PT.json.z")));
-static ROMANIAN: Catalog = Catalog::packed("ro", "Română", include_bytes!(concat!(env!("OUT_DIR"), "/locales/ro.json.z")));
-static RUSSIAN: Catalog = Catalog::packed("ru", "Русский", include_bytes!(concat!(env!("OUT_DIR"), "/locales/ru.json.z")));
-static SERBIAN: Catalog = Catalog::packed("sr", "Српски", include_bytes!(concat!(env!("OUT_DIR"), "/locales/sr.json.z")));
+static ENGLISH_UK: Catalog =
+    Catalog::numbered("en-GB", "English (UK)", json!("en-GB"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/en-GB.tbl.z")));
+static SPANISH: Catalog = Catalog::numbered("es", "Español (España)", json!("es"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/es.tbl.z")));
+static BASQUE: Catalog = Catalog::numbered("eu", "Euskara", json!("eu"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/eu.tbl.z")));
+static FINNISH: Catalog = Catalog::numbered("fi", "Suomi", json!("fi"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/fi.tbl.z")));
+static FRENCH: Catalog = Catalog::numbered("fr", "Français", json!("fr"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/fr.tbl.z")));
+static GALICIAN: Catalog = Catalog::numbered("gl", "Galego", json!("gl"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/gl.tbl.z")));
+static HEBREW: Catalog = Catalog::numbered("he", "עברית", json!("he"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/he.tbl.z")));
+static CROATIAN: Catalog = Catalog::numbered("hr", "Hrvatski", json!("hr"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/hr.tbl.z")));
+static HUNGARIAN: Catalog = Catalog::numbered("hu", "Magyar", json!("hu"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/hu.tbl.z")));
+static INDONESIAN: Catalog = Catalog::numbered("id", "Bahasa Indonesia", json!("id"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/id.tbl.z")));
+static ITALIAN: Catalog = Catalog::numbered("it", "Italiano", json!("it"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/it.tbl.z")));
+static JAPANESE: Catalog = Catalog::numbered("ja", "日本語", json!("ja"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ja.tbl.z")));
+static GEORGIAN: Catalog = Catalog::numbered("ka", "ქართული", json!("ka"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ka.tbl.z")));
+static KOREAN: Catalog = Catalog::numbered("ko", "한국어", json!("ko"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ko.tbl.z")));
+static LAO: Catalog = Catalog::numbered("lo", "ພາສາລາວ", json!("lo"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/lo.tbl.z")));
+static LATVIAN: Catalog = Catalog::numbered("lv", "Latviešu", json!("lv"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/lv.tbl.z")));
+static MALAY: Catalog = Catalog::numbered("ms", "Bahasa Melayu", json!("ms"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ms.tbl.z")));
+static NORWEGIAN: Catalog = Catalog::numbered("nb", "Norsk bokmål", json!("nb"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/nb.tbl.z")));
+static DUTCH: Catalog = Catalog::numbered("nl", "Nederlands", json!("nl"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/nl.tbl.z")));
+static POLISH: Catalog = Catalog::numbered("pl", "Polski", json!("pl"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/pl.tbl.z")));
+static PORTUGUESE_BR: Catalog =
+    Catalog::numbered("pt-BR", "Português (Brasil)", json!("pt-BR"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/pt-BR.tbl.z")));
+static PORTUGUESE_PT: Catalog =
+    Catalog::numbered("pt-PT", "Português (Portugal)", json!("pt-PT"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/pt-PT.tbl.z")));
+static ROMANIAN: Catalog = Catalog::numbered("ro", "Română", json!("ro"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ro.tbl.z")));
+static RUSSIAN: Catalog = Catalog::numbered("ru", "Русский", json!("ru"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ru.tbl.z")));
+static SERBIAN: Catalog = Catalog::numbered("sr", "Српски", json!("sr"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/sr.tbl.z")));
 /// Serbian in Latin script: the Cyrillic catalog transliterated at build time (`build.rs`).
-static SERBIAN_LATIN: Catalog = Catalog::packed("sr-Latn", "Srpski (latinica)", include_bytes!(concat!(env!("OUT_DIR"), "/locales/sr-Latn.json.z")));
-static SWEDISH: Catalog = Catalog::packed("sv", "Svenska", include_bytes!(concat!(env!("OUT_DIR"), "/locales/sv.json.z")));
-static TURKISH: Catalog = Catalog::packed("tr", "Türkçe", include_bytes!(concat!(env!("OUT_DIR"), "/locales/tr.json.z")));
-static UKRAINIAN: Catalog = Catalog::packed("uk", "Українська", include_bytes!(concat!(env!("OUT_DIR"), "/locales/uk.json.z")));
-static VIETNAMESE: Catalog = Catalog::packed("vi", "Tiếng Việt", include_bytes!(concat!(env!("OUT_DIR"), "/locales/vi.json.z")));
-static CHINESE: Catalog = Catalog::packed("zh", "中文", include_bytes!(concat!(env!("OUT_DIR"), "/locales/zh.json.z")));
-static CHINESE_TRADITIONAL: Catalog = Catalog::packed("zh-TW", "繁體中文", include_bytes!(concat!(env!("OUT_DIR"), "/locales/zh-TW.json.z")));
+static SERBIAN_LATIN: Catalog =
+    Catalog::numbered("sr-Latn", "Srpski (latinica)", json!("sr-Latn"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/sr-Latn.tbl.z")));
+static SWEDISH: Catalog = Catalog::numbered("sv", "Svenska", json!("sv"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/sv.tbl.z")));
+static TURKISH: Catalog = Catalog::numbered("tr", "Türkçe", json!("tr"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/tr.tbl.z")));
+static UKRAINIAN: Catalog = Catalog::numbered("uk", "Українська", json!("uk"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/uk.tbl.z")));
+static VIETNAMESE: Catalog = Catalog::numbered("vi", "Tiếng Việt", json!("vi"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/vi.tbl.z")));
+static CHINESE: Catalog = Catalog::numbered("zh", "中文", json!("zh"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/zh.tbl.z")));
+static CHINESE_TRADITIONAL: Catalog =
+    Catalog::numbered("zh-TW", "繁體中文", json!("zh-TW"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/zh-TW.tbl.z")));
 /// English first (the fallback), then by language id, one per line so that adding a language
 /// doesn't edit a line another addition edits.
 #[rustfmt::skip]
@@ -129,7 +149,7 @@ pub trait LocaleNames {
 /// `Component3`), translated.
 fn default_name(locale: Locale, text: &str) -> Option<String> {
     if text == "Untitled" {
-        return Some(locale.text("ui.untitled").to_string());
+        return Some(tr!(locale, "ui.untitled").to_string());
     }
     for (prefix, id) in [("Sketch", "browser.sketch_name"), ("Body", "browser.body_name"), ("Component", "browser.component_name")] {
         if let Some(number) = text.strip_prefix(prefix)
@@ -149,7 +169,7 @@ impl LocaleNames for Locale {
 
     fn diagnostic(self, text: &str) -> String {
         if let Some((feature, reference)) = solidcraft_engine::doc::reselect_parts(text) {
-            return self.format("diagnostic.reselect_reference", &[("feature", &self.given_name(feature)), ("reference", reference)]);
+            return tr!(self, "diagnostic.reselect_reference", feature = &self.given_name(feature), reference = reference);
         }
         if let Some(lost) = solidcraft_engine::doc::lost_projection_parts(text) {
             let feature = self.given_name(lost.feature);
@@ -170,13 +190,13 @@ impl LocaleNames for Locale {
             && count.parse::<usize>().is_ok_and(|count| count > 0)
         {
             let body = self.given_name(body);
-            let message = self.format("diagnostic.stitch_open_edges", &[("body", &body), ("count", count)]);
+            let message = tr!(self, "diagnostic.stitch_open_edges", body = &body, count = count);
             return format!("{before}{message}{after}");
         }
         // A profile pick with more curves than a design keeps track of, after anything naming
         // the feature or command in front.
         if let Some(before) = text.strip_suffix(solidcraft_engine::doc::WHOLE_PROFILE_TOO_MANY_CURVES) {
-            return format!("{before}{}", self.text("diagnostic.whole_profile_too_many_curves"));
+            return format!("{before}{}", tr!(self, "diagnostic.whole_profile_too_many_curves"));
         }
         const PREFIX: &str = "there is no body to cut or intersect in component '";
         if let Some((before, detail)) = text.split_once(PREFIX)
@@ -185,7 +205,7 @@ impl LocaleNames for Locale {
             && let Some((other, after)) = detail.split_once("' — activate that component or pick the body as a target")
         {
             let (component, body, other) = (self.given_name(component), self.given_name(body), self.given_name(other));
-            let message = self.format("diagnostic.empty_boolean_component", &[("component", &component), ("body", &body), ("other", &other)]);
+            let message = tr!(self, "diagnostic.empty_boolean_component", component = &component, body = &body, other = &other);
             return format!("{before}{message}{after}");
         }
         text.to_string()
@@ -201,16 +221,16 @@ impl LocaleNames for Locale {
             }
         }
         if let Some(count) = text.strip_prefix("Parameters (").and_then(|s| s.strip_suffix(')')) {
-            return self.format("browser.parameters", &[("count", count)]);
+            return tr!(self, "browser.parameters", count = count);
         }
         if let Some(number) = text.strip_prefix("Section ").filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit())) {
-            return self.format("browser.section_plane", &[("number", number)]);
+            return tr!(self, "browser.section_plane", number = number);
         }
         if let Some(count) = text.strip_suffix(" degrees of freedom")
             && !count.is_empty()
             && count.chars().all(|c| c.is_ascii_digit())
         {
-            return self.format("sketch.degrees_of_freedom", &[("count", count)]);
+            return tr!(self, "sketch.degrees_of_freedom", count = count);
         }
         self.label(text).to_string()
     }
@@ -246,7 +266,7 @@ fn point_error_id<'a>(text: &'a str, reason: &str) -> Option<&'a str> {
 /// Translate known engine error messages using i18n keys.
 /// If the error message is not recognized, returns it unchanged.
 pub fn tr_engine_error(error: &str) -> String {
-    use solidcraft_ui_text::{format, tr};
+    use solidcraft_ui_text::{format, tr_by_id};
     // `EngineError::BadParams` carries `invalid parameters for `<command>`: ` in front.
     let text = error.strip_prefix("invalid parameters for `").and_then(|rest| rest.split_once("`: ")).map_or(error, |(_, text)| text);
     for (english, id) in [
@@ -255,7 +275,7 @@ pub fn tr_engine_error(error: &str) -> String {
         ("Boundary Fill did not produce a closed solid cell", "boundary_fill.error.open_cell"),
     ] {
         if text == english {
-            return tr(id).to_string();
+            return tr_by_id(id).to_string();
         }
     }
     if let Some((name, ids)) = text
@@ -263,7 +283,7 @@ pub fn tr_engine_error(error: &str) -> String {
         .and_then(|rest| rest.strip_suffix("; use a numeric component ID"))
         .and_then(|rest| rest.rsplit_once("`; matching IDs: "))
     {
-        return format("component.error.ambiguous_name", &[("name", name), ("ids", ids)]);
+        return tr!("component.error.ambiguous_name", name = name, ids = ids);
     }
     for (prefix, suffix, id) in [
         ("ambiguous contact set `", "; use a numeric contact set ID", "contact.error.ambiguous_name"),
@@ -278,38 +298,38 @@ pub fn tr_engine_error(error: &str) -> String {
         }
     }
     if text == "joint limit minimum must not exceed maximum" {
-        return tr("joint.error.limit_order").to_string();
+        return tr!("joint.error.limit_order").to_string();
     }
     if text == "nothing to break at there" {
-        return tr("sketch.error.nothing_to_break").to_string();
+        return tr!("sketch.error.nothing_to_break").to_string();
     }
     if let Some(name) = text.strip_prefix("sketch `").and_then(|rest| {
         rest.strip_suffix("` comes after this sketch in the timeline, so its geometry cannot be used here. Move the source sketch earlier if its dependencies allow, or use a sketch after it.")
     }) {
-        return format("sketch.error.source_later_in_timeline", &[("name", name)]);
+        return tr!("sketch.error.source_later_in_timeline", name = name);
     }
     if let Some(id) = offset_error_id(
         text,
         " is an offset, and its ends follow its source curves: ",
         " the source curves instead, or break the offset association first",
     ) {
-        return format("sketch.error.offset_trim", &[("id", id)]);
+        return tr!("sketch.error.offset_trim", id = id);
     }
     if let Some(id) = offset_error_id(
         text,
         " is an offset, and its corners follow its source curves: ",
         " the source corners before offsetting, or break the offset association first",
     ) {
-        return format("sketch.error.offset_fillet_chamfer", &[("id", id)]);
+        return tr!("sketch.error.offset_fillet_chamfer", id = id);
     }
     if text == "a closed curve needs two crossings to trim" {
-        return tr("sketch.error.closed_curve_two_crossings").to_string();
+        return tr!("sketch.error.closed_curve_two_crossings").to_string();
     }
     if let Some(id) = point_error_id(text, "projected") {
-        return format("sketch.error.point_is_projected", &[("id", id)]);
+        return tr!("sketch.error.point_is_projected", id = id);
     }
     if let Some(id) = point_error_id(text, "fixed") {
-        return format("sketch.error.point_is_fixed", &[("id", id)]);
+        return tr!("sketch.error.point_is_fixed", id = id);
     }
     error.to_string()
 }
@@ -522,7 +542,7 @@ mod tests {
             let _labels = resolved_labels();
             assert_eq!(tr_label("Profile"), "Profile");
             assert_eq!(tr_label("ui.cancel"), "ui.cancel");
-            assert_ne!(tr("ui.cancel"), "ui.cancel", "stable catalog messages remain translated");
+            assert_ne!(tr_by_id("ui.cancel"), "ui.cancel", "stable catalog messages remain translated");
             {
                 let _nested = resolved_labels();
                 assert_eq!(tr_label("Profile"), "Profile");
@@ -561,7 +581,7 @@ mod tests {
         assert_eq!(tr_name("לוח עליון קטן"), "קטן עליון לוח");
         assert_eq!(tr_name("לוח"), "לוח", "one word is shown as it is");
         assert_eq!(tr_name("Top plate"), "Top plate", "Latin is shown as it is");
-        assert_eq!(tr_name("Body2"), tr("browser.body_name").replace("{number}", "2"), "default names stay translated");
+        assert_eq!(tr_name("Body2"), tr_by_id("browser.body_name").replace("{number}", "2"), "default names stay translated");
         let _arabic = scope("ar");
         assert_eq!(tr_name("لوحة علوية صغيرة"), "صغيرة علوية لوحة");
     }
@@ -603,7 +623,7 @@ mod tests {
         assert_eq!(ENGLISH.messages().get(id).map(String::as_str), Some(english));
         for language in ["en", "ja", "zh", "de", "ko", "es"] {
             let _scope = scope(language);
-            let hint = tr(id);
+            let hint = tr_by_id(id);
             assert_eq!(hint, Locale::for_language(language).text(id));
             assert_ne!(hint, id);
             if ["ja", "zh", "de", "ko"].contains(&language) {
@@ -851,9 +871,9 @@ mod tests {
     #[test]
     fn every_complete_catalog_carries_every_english_message() {
         install();
-        let english: Messages = serde_json::from_str(&ENGLISH.json()).unwrap();
+        let english: Messages = serde_json::from_str(ENGLISH.source).unwrap();
         for catalog in LOCALES.iter().filter(|c| COMPLETE.contains(&c.id)) {
-            let messages: Messages = serde_json::from_str(&catalog.json()).unwrap();
+            let messages: Messages = serde_json::from_str(catalog.source).unwrap();
             let missing: Vec<&str> = english.keys().filter(|id| !messages.contains_key(*id)).map(String::as_str).collect();
             assert!(missing.is_empty(), "{} is missing {} English message(s): {}", catalog.id, missing.len(), missing.join(", "));
         }
@@ -947,40 +967,15 @@ mod tests {
     #[test]
     fn catalogs_have_valid_ids_and_matching_placeholders() {
         install();
-        let english: Messages = serde_json::from_str(&ENGLISH.json()).unwrap();
+        let english: Messages = serde_json::from_str(ENGLISH.source).unwrap();
         let mut ids = BTreeSet::new();
         for catalog in LOCALES {
             assert!(ids.insert(catalog.id), "duplicate locale");
-            let messages: Messages = serde_json::from_str(&catalog.json()).unwrap();
+            let messages: Messages = serde_json::from_str(catalog.source).unwrap();
             assert!(!messages.is_empty());
             for (id, text) in messages {
                 let original = english.get(&id).expect("unknown message ID");
                 assert_eq!(placeholders(&text), placeholders(original), "{}: {id}", catalog.id);
-            }
-        }
-    }
-
-    #[test]
-    fn direct_ui_message_ids_exist_in_english_catalog() {
-        install();
-        // Catch a misspelled key before it is shown verbatim in the UI. Engine-table labels
-        // deliberately use the separate label adapter and fall back to their source text.
-        for source in [
-            include_str!("toolbar.rs"),
-            include_str!("prefs.rs"),
-            include_str!("documents.rs"),
-            include_str!("dialogs.rs"),
-            include_str!("browser.rs"),
-            include_str!("browser_search.rs"),
-            include_str!("sketch_palette.rs"),
-            include_str!("design_properties.rs"),
-            include_str!("home.rs"),
-        ] {
-            for call in [".tr(\"", "i18n::tr(\"", "i18n::format(\"", "ui_text::tr(\"", "ui_text::format(\""] {
-                for tail in source.split(call).skip(1) {
-                    let id = tail.split('"').next().unwrap();
-                    assert!(ENGLISH.messages().contains_key(id), "missing English message: {id}");
-                }
             }
         }
     }
@@ -1074,10 +1069,42 @@ mod tests {
         assert_eq!(Locale::for_language("en").label("motion.plot_quantity"), "Quantity");
     }
 
+    /// A catalog's table reads as its JSON does, in every language, whether a message is named
+    /// by its id or by its place: the text as it is shown (a right-to-left catalog's in display
+    /// order), and English where the language lacks it.
+    #[test]
+    fn a_table_reads_as_the_json_it_was_made_from_in_every_language() {
+        install();
+        let english: Messages = serde_json::from_str(ENGLISH.source).unwrap();
+        let mut read = 0;
+        for catalog in solidcraft_ui_text::locales() {
+            let json: Messages = serde_json::from_str(catalog.source).unwrap();
+            assert!(!json.is_empty(), "{}", catalog.id);
+            let right_to_left = json.values().any(|text| solidcraft_ui_text::bidi::has_rtl(text));
+            let locale = Locale::for_language(catalog.id);
+            for (id, source) in &english {
+                let own =
+                    json.get(id).map(|text| if right_to_left { solidcraft_ui_text::bidi::visual_template(text).into_owned() } else { text.clone() });
+                let expected = own.as_deref().unwrap_or(source);
+                assert_eq!(locale.text(id), expected, "{}: {id}", catalog.id);
+                assert_eq!(locale.message(solidcraft_ui_text::Msg::of(id).unwrap()), expected, "{}: {id}", catalog.id);
+                read += 1;
+            }
+        }
+        assert!(read > 200_000, "{read} messages read");
+        assert!(solidcraft_ui_text::Msg::of("ui.no_such_message").is_none());
+        // `msg!` names the same message, and fills it by the names, in any order.
+        let japanese = Locale::for_language("ja");
+        assert_eq!(japanese.message(msg!("ui.cancel")), japanese.text("ui.cancel"));
+        let _scope = solidcraft_ui_text::scope("ja");
+        assert_eq!(tr!("recovery.days_ago", count = "3"), tr!("recovery.days_ago", count = "3"));
+        assert_eq!(tr!("recovery.restore_row", when = "today", name = "Plate"), tr!("recovery.restore_row", name = "Plate", when = "today"));
+    }
+
     #[test]
     fn every_ui_label_literal_reaches_an_english_catalog_entry() {
         install();
-        let english: Messages = serde_json::from_str(&ENGLISH.json()).unwrap();
+        let english: Messages = serde_json::from_str(ENGLISH.source).unwrap();
         let ids: BTreeSet<&str> = english.keys().map(String::as_str).collect();
         let texts: BTreeSet<&str> = english.values().filter(|text| !text.contains('{')).map(String::as_str).collect();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -1148,7 +1175,7 @@ mod tests {
             // rather than requiring its spelling to differ from English.
             assert!(locale.catalog().messages().contains_key("toolbar.render_studio"));
             assert_eq!(locale.label("STUDIO"), locale.text("toolbar.render_studio"));
-            let english: Messages = serde_json::from_str(&ENGLISH.json()).unwrap();
+            let english: Messages = serde_json::from_str(ENGLISH.source).unwrap();
             for id in english.keys().filter(|id| id.starts_with("render.inspector_")) {
                 assert!(locale.catalog().messages().contains_key(id), "{language}: {id}");
             }
@@ -1268,7 +1295,7 @@ mod tests {
         let _scope = scope("ja");
         let message = "there is no sheet metal body: start one with Flange > Base, or turn a plate into sheet metal with Convert to Sheet Metal (pick its large flat face)";
         let error = format!("invalid parameters for `sheet.flange`: {message}");
-        let translated = tr("sheet.no_body");
+        let translated = tr_by_id("sheet.no_body");
         assert_ne!(translated, "sheet.no_body");
         assert_ne!(translated, message);
         assert_eq!(crate::friendly_error("sheet.flange", &error), format!("{}: {translated}", tr_label("Flange")));
@@ -1322,14 +1349,14 @@ mod tests {
         assert_eq!(it.dynamic("4 degrees of freedom"), "4 gradi di libertà");
         assert_eq!(it.given_name("Fillet"), "Fillet");
         assert_eq!(it.label("solid.extrude"), "solid.extrude");
-        assert_eq!(it.format("document.save_changes", &[("name", "Staffa {v2}")]), "Salvare le modifiche a Staffa {v2}?");
+        assert_eq!(tr!(it, "document.save_changes", name = "Staffa {v2}"), "Salvare le modifiche a Staffa {v2}?");
         // The bottom command-line hint retired with that surface. A live save prompt
         // still proves that a substituted value keeps literal JSON braces intact.
         assert_eq!(
-            it.format("document.save_changes", &[("name", "solid.extrude {\"distance\": 20}")]),
+            tr!(it, "document.save_changes", name = "solid.extrude {\"distance\": 20}"),
             "Salvare le modifiche a solid.extrude {\"distance\": 20}?"
         );
-        assert_eq!(it.format("ui.browser_bodies_other", &[("count", "2")]), "2 corpi");
+        assert_eq!(tr!(it, "ui.browser_bodies_other", count = "2"), "2 corpi");
     }
 
     /// Stable IDs and source labels share the same translations. A broken ID must not
@@ -1423,7 +1450,7 @@ mod tests {
         assert_eq!(es.label("Extrude"), "Extruir");
         assert_eq!(es.label("Fillet"), "Redondeo");
         assert_eq!(es.dynamic("Sketch1"), "Boceto1");
-        assert_eq!(es.format("document.save_changes", &[("name", "Pieza")]), "¿Guardar los cambios de Pieza?");
+        assert_eq!(tr!(es, "document.save_changes", name = "Pieza"), "¿Guardar los cambios de Pieza?");
     }
 
     #[test]
@@ -1436,8 +1463,8 @@ mod tests {
         assert_eq!(ko.label("Extrude"), "돌출");
         assert_eq!(ko.label("CREATE SKETCH"), "스케치 만들기");
         assert_eq!(ko.label("NonExistentKey"), "NonExistentKey");
-        assert_eq!(ko.format("document.save_changes", &[("name", "My {design}")]), "My {design}의 변경 사항을 저장하시겠습니까?");
-        assert_eq!(ko.format("dialog.selected_count", &[("count", "2")]), "↖ 2개 선택됨");
+        assert_eq!(tr!(ko, "document.save_changes", name = "My {design}"), "My {design}의 변경 사항을 저장하시겠습니까?");
+        assert_eq!(tr!(ko, "dialog.selected_count", count = "2"), "↖ 2개 선택됨");
         assert_eq!(ko.dynamic("Sketch1"), "스케치1");
         assert_eq!(ko.dynamic("Body2"), "바디2");
         assert_eq!(ko.dynamic("Component12"), "컴포넌트12");
@@ -1457,8 +1484,8 @@ mod tests {
         assert_eq!(ms.text("ui.preferences"), "Tetapan");
         assert_eq!(ms.label("Extrude"), "Semperit");
         assert_eq!(ms.label("CREATE SKETCH"), "CIPTA LAKARAN");
-        assert_eq!(ms.format("document.save_changes", &[("name", "My {design}")]), "Simpan perubahan pada My {design}?");
-        assert_eq!(ms.format("dialog.selected_count", &[("count", "2")]), "↖ 2 dipilih");
+        assert_eq!(tr!(ms, "document.save_changes", name = "My {design}"), "Simpan perubahan pada My {design}?");
+        assert_eq!(tr!(ms, "dialog.selected_count", count = "2"), "↖ 2 dipilih");
         assert_eq!(ms.dynamic("Sketch1"), "Lakaran1");
         assert_eq!(ms.dynamic("Body2"), "Jasad2");
         assert_eq!(ms.dynamic("Component12"), "Komponen12");
@@ -1480,8 +1507,8 @@ mod tests {
         assert_eq!(ru.label("Extrude"), "Выдавливание");
         assert_eq!(ru.label("CREATE SKETCH"), "СОЗДАТЬ ЭСКИЗ");
         assert_eq!(ru.label("NonExistentKey"), "NonExistentKey");
-        assert_eq!(ru.format("document.save_changes", &[("name", "My {design}")]), "Сохранить изменения в My {design}?");
-        assert_eq!(ru.format("dialog.selected_count", &[("count", "2")]), "↖ Выбрано: 2");
+        assert_eq!(tr!(ru, "document.save_changes", name = "My {design}"), "Сохранить изменения в My {design}?");
+        assert_eq!(tr!(ru, "dialog.selected_count", count = "2"), "↖ Выбрано: 2");
         assert_eq!(ru.dynamic("Sketch1"), "Эскиз1");
         assert_eq!(ru.dynamic("Body2"), "Тело2");
         assert_eq!(ru.dynamic("Component12"), "Компонент12");
@@ -1504,8 +1531,8 @@ mod tests {
         assert_eq!(fr.label("CREATE SKETCH"), "CRÉER UNE ESQUISSE");
         assert_eq!(fr.label("NonExistentKey"), "NonExistentKey");
         // French puts a no-break space before the two-part punctuation marks.
-        assert_eq!(fr.format("document.save_changes", &[("name", "My {design}")]), "Enregistrer les modifications de My {design}\u{a0}?");
-        assert_eq!(fr.format("dialog.selected_count", &[("count", "2")]), "↖ 2 sélectionné(s)");
+        assert_eq!(tr!(fr, "document.save_changes", name = "My {design}"), "Enregistrer les modifications de My {design}\u{a0}?");
+        assert_eq!(tr!(fr, "dialog.selected_count", count = "2"), "↖ 2 sélectionné(s)");
         assert_eq!(fr.dynamic("Sketch1"), "Esquisse1");
         assert_eq!(fr.dynamic("Body2"), "Corps2");
         assert_eq!(fr.dynamic("Component12"), "Composant12");
@@ -1523,8 +1550,8 @@ mod tests {
         assert_eq!(tr.name(), "Türkçe");
         assert!(is_supported("tr"));
         assert_eq!(tr.text("ui.preferences"), "Ayarlar");
-        assert_eq!(tr.format("document.save_changes", &[("name", "My {design}")]), "My {design} içindeki değişiklikler kaydedilsin mi?");
-        assert_eq!(tr.format("dialog.selected_count", &[("count", "2")]), "↖ 2 seçildi");
+        assert_eq!(tr!(tr, "document.save_changes", name = "My {design}"), "My {design} içindeki değişiklikler kaydedilsin mi?");
+        assert_eq!(tr!(tr, "dialog.selected_count", count = "2"), "↖ 2 seçildi");
         assert_eq!(tr.label("NonExistentKey"), "NonExistentKey");
     }
 
@@ -1535,8 +1562,8 @@ mod tests {
         assert_eq!(pt.name(), "Português (Brasil)");
         assert!(is_supported("pt-BR"));
         assert_eq!(pt.text("ui.preferences"), "Preferências");
-        assert_eq!(pt.format("document.save_changes", &[("name", "My {design}")]), "Salvar as alterações em My {design}?");
-        assert_eq!(pt.format("dialog.selected_count", &[("count", "2")]), "↖ 2 selecionados");
+        assert_eq!(tr!(pt, "document.save_changes", name = "My {design}"), "Salvar as alterações em My {design}?");
+        assert_eq!(tr!(pt, "dialog.selected_count", count = "2"), "↖ 2 selecionados");
         assert_eq!(pt.label("NonExistentKey"), "NonExistentKey");
     }
 
@@ -1549,8 +1576,8 @@ mod tests {
         assert_eq!(pt.text("ui.preferences"), "Preferências");
         assert_eq!(pt.text("ui.save"), "Guardar");
         assert_eq!(pt.text("ui.file"), "Ficheiro");
-        assert_eq!(pt.format("document.save_changes", &[("name", "My {design}")]), "Guardar as alterações em My {design}?");
-        assert_eq!(pt.format("dialog.selected_count", &[("count", "2")]), "↖ 2 selecionados");
+        assert_eq!(tr!(pt, "document.save_changes", name = "My {design}"), "Guardar as alterações em My {design}?");
+        assert_eq!(tr!(pt, "dialog.selected_count", count = "2"), "↖ 2 selecionados");
         assert_eq!(pt.label("NonExistentKey"), "NonExistentKey");
     }
 
@@ -1573,9 +1600,9 @@ mod tests {
         assert_eq!(ar.text("ui.new_design"), "جديد تصميم");
         assert_eq!(ar.dynamic("Units: mm"), "mm :الوحدات");
         assert_eq!(ar.dynamic("Sketch1"), "1 رسم");
-        let saved = ar.format("document.save_changes", &[("name", "Bracket")]);
+        let saved = tr!(ar, "document.save_changes", name = "Bracket");
         assert!(saved.starts_with("؟Bracket "), "{saved}");
-        let english: Messages = serde_json::from_str(&ENGLISH.json()).unwrap();
+        let english: Messages = serde_json::from_str(ENGLISH.source).unwrap();
         for id in english.keys() {
             let text = ar.text(id);
             assert!(
@@ -1597,11 +1624,11 @@ mod tests {
         assert_eq!(he.dynamic("Sketch1"), "1סקיצה");
         assert_eq!(he.dynamic("Units: mm"), "mm :יחידות");
         assert_eq!(he.dynamic("Parameters (5)"), "(5) פרמטרים");
-        assert_eq!(he.format("document.save_changes", &[("name", "My {design}")]), "?My {design}ב־ השינויים את לשמור");
+        assert_eq!(tr!(he, "document.save_changes", name = "My {design}"), "?My {design}ב־ השינויים את לשמור");
         assert_eq!(he.given_name("Sketch of bracket"), "Sketch of bracket");
         assert_eq!(he.label("NonExistentKey"), "NonExistentKey");
         // No directional control characters reach egui, which would draw them as boxes.
-        let english: Messages = serde_json::from_str(&ENGLISH.json()).unwrap();
+        let english: Messages = serde_json::from_str(ENGLISH.source).unwrap();
         for id in english.keys() {
             let text = he.text(id);
             assert!(
@@ -1618,8 +1645,8 @@ mod tests {
         assert_eq!(gl.name(), "Galego");
         assert!(is_supported("gl"));
         assert_eq!(gl.text("ui.preferences"), "Preferencias");
-        assert_eq!(gl.format("document.save_changes", &[("name", "My {design}")]), "Gardar os cambios en My {design}?");
-        assert_eq!(gl.format("dialog.selected_count", &[("count", "2")]), "↖ 2 seleccionados");
+        assert_eq!(tr!(gl, "document.save_changes", name = "My {design}"), "Gardar os cambios en My {design}?");
+        assert_eq!(tr!(gl, "dialog.selected_count", count = "2"), "↖ 2 seleccionados");
         assert_eq!(gl.label("Fillet"), "Arredondamento");
         assert_eq!(gl.label("NonExistentKey"), "NonExistentKey");
     }
@@ -1631,8 +1658,8 @@ mod tests {
         assert_eq!(fi.name(), "Suomi");
         assert!(is_supported("fi"));
         assert_eq!(fi.text("ui.preferences"), "Asetukset");
-        assert_eq!(fi.format("document.save_changes", &[("name", "My {design}")]), "Tallennetaanko muutokset tiedostoon My {design}?");
-        assert_eq!(fi.format("dialog.selected_count", &[("count", "2")]), "↖ 2 valittu");
+        assert_eq!(tr!(fi, "document.save_changes", name = "My {design}"), "Tallennetaanko muutokset tiedostoon My {design}?");
+        assert_eq!(tr!(fi, "dialog.selected_count", count = "2"), "↖ 2 valittu");
         assert_eq!(fi.label("Fillet"), "Pyöristys");
         assert_eq!(fi.label("NonExistentKey"), "NonExistentKey");
     }
@@ -1647,8 +1674,8 @@ mod tests {
         assert_eq!(uk.label("Extrude"), "Видавлювання");
         assert_eq!(uk.label("CREATE SKETCH"), "СТВОРИТИ ЕСКІЗ");
         assert_eq!(uk.label("NonExistentKey"), "NonExistentKey");
-        assert_eq!(uk.format("document.save_changes", &[("name", "My {design}")]), "Зберегти зміни в My {design}?");
-        assert_eq!(uk.format("dialog.selected_count", &[("count", "2")]), "↖ Вибрано: 2");
+        assert_eq!(tr!(uk, "document.save_changes", name = "My {design}"), "Зберегти зміни в My {design}?");
+        assert_eq!(tr!(uk, "dialog.selected_count", count = "2"), "↖ Вибрано: 2");
         assert_eq!(uk.dynamic("Sketch1"), "Ескіз1");
         assert_eq!(uk.dynamic("Body2"), "Тіло2");
         assert_eq!(uk.dynamic("Component12"), "Компонент12");
@@ -1669,8 +1696,8 @@ mod tests {
         assert_eq!(vi.label("Extrude"), "Đùn khối");
         assert_eq!(vi.label("CREATE SKETCH"), "TẠO PHÁC THẢO");
         assert_eq!(vi.label("NonExistentKey"), "NonExistentKey");
-        assert_eq!(vi.format("document.save_changes", &[("name", "My {design}")]), "Lưu các thay đổi đối với My {design}?");
-        assert_eq!(vi.format("dialog.selected_count", &[("count", "2")]), "↖ 2 đã chọn");
+        assert_eq!(tr!(vi, "document.save_changes", name = "My {design}"), "Lưu các thay đổi đối với My {design}?");
+        assert_eq!(tr!(vi, "dialog.selected_count", count = "2"), "↖ 2 đã chọn");
         assert_eq!(vi.dynamic("Sketch1"), "Phác thảo1");
         assert_eq!(vi.dynamic("Body2"), "Thân khối2");
         assert_eq!(vi.dynamic("Component12"), "Cụm chi tiết12");
@@ -1686,8 +1713,8 @@ mod tests {
     #[test]
     fn serbian_latin_is_the_cyrillic_catalog_transliterated() {
         install();
-        let cyrillic: Messages = serde_json::from_str(&SERBIAN.json()).unwrap();
-        let latin: Messages = serde_json::from_str(&SERBIAN_LATIN.json()).unwrap();
+        let cyrillic: Messages = serde_json::from_str(SERBIAN.source).unwrap();
+        let latin: Messages = serde_json::from_str(SERBIAN_LATIN.source).unwrap();
         assert_eq!(cyrillic.keys().collect::<Vec<_>>(), latin.keys().collect::<Vec<_>>());
         let cyrillic_left: Vec<&String> = latin.values().filter(|text| text.chars().any(|c| ('\u{400}'..='\u{4ff}').contains(&c))).collect();
         assert!(cyrillic_left.is_empty(), "Cyrillic left in sr-Latn: {cyrillic_left:?}");
@@ -1720,7 +1747,7 @@ mod tests {
             assert_eq!(locale.text("ui.preferences"), preferences);
             assert_eq!(locale.label("Extrude"), extrude);
             assert_eq!(locale.label("NonExistentKey"), "NonExistentKey");
-            assert_eq!(locale.format("document.save_changes", &[("name", "My {design}")]), save);
+            assert_eq!(tr!(locale, "document.save_changes", name = "My {design}"), save);
             assert_eq!(locale.dynamic("Sketch1"), sketch1);
             assert_eq!(locale.dynamic("Sketch of bracket"), "Sketch of bracket");
         }
@@ -1732,14 +1759,14 @@ mod tests {
         let _english = scope("en");
         {
             let _japanese = scope("ja");
-            assert_eq!(tr("ui.preferences"), "環境設定");
+            assert_eq!(tr_by_id("ui.preferences"), "環境設定");
             {
                 let _nested = scope("en");
-                assert_eq!(tr("ui.preferences"), "Preferences");
+                assert_eq!(tr_by_id("ui.preferences"), "Preferences");
             }
-            assert_eq!(tr("ui.preferences"), "環境設定");
+            assert_eq!(tr_by_id("ui.preferences"), "環境設定");
         }
-        assert_eq!(tr("ui.preferences"), "Preferences");
+        assert_eq!(tr_by_id("ui.preferences"), "Preferences");
     }
 
     /// Every `.rs` file under `dir` except test modules (`*_tests.rs`, `tests.rs`).
@@ -2046,7 +2073,7 @@ mod tests {
         let label_file = code.contains("fntr(text:&str)->&str")
             || code.contains("lettr=crate::i18n::tr_label;")
             || code.contains("lettr=solidcraft_ui_text::tr_label;");
-        let id_file = ["usecrate::i18n::tr;", "lettr=crate::i18n::tr;", "usesolidcraft_ui_text::tr;", "lettr=solidcraft_ui_text::tr;"]
+        let id_file = ["usecrate::i18n::tr;", "lettr=crate::i18n::tr;", "usesolidcraft_ui_text::tr;", "lettr=solidcraft_ui_text::tr_by_id;"]
             .iter()
             .any(|pattern| code.contains(pattern))
             || imports_i18n_tr(&code);

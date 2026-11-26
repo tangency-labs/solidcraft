@@ -256,13 +256,13 @@ fn fillet_corner_rows(
         let least = r.and_then(|r| crate::dialogs::fillet_least_setback(ui.ctx(), s, items, &corners, r));
         let warning = least
             .filter(|least| length(&shown).is_some_and(|v| v <= least * (1.0 + 1e-9)))
-            .map(|least| solidcraft_ui_text::format("ui.fillet_setback_least", &[("least", &crate::length_input::shown(&s.doc, least))]));
+            .map(|least| tr!("ui.fillet_setback_least", least = &crate::length_input::shown(&s.doc, least)));
         let mut text = shown.clone();
         let row = ui.scope(|ui| {
-            let hint = solidcraft_ui_text::format("ui.fillet_setback_hint", &[("factor", &factor)]);
+            let hint = tr!("ui.fillet_setback_hint", factor = &factor);
             ui_kit::checked_row(ui, "ui.fillet_setback", &mut text, &hint, warning.as_deref())
         });
-        row.response.backing_on_hover_text(solidcraft_ui_text::format("ui.fillet_setback_tip", &[("factor", &factor)]));
+        row.response.backing_on_hover_text(tr!("ui.fillet_setback_tip", factor = &factor));
         let (accepted, field) = row.inner;
         enter |= accepted;
         if text != shown {
@@ -281,7 +281,7 @@ fn fillet_fit_rows(app: &SolveApp, ui: &mut egui::Ui, extra: &mut serde_json::Ma
     let t = Tokens::get();
     let before = extra.get("fit").cloned();
     let row = ui.scope(|ui| form_row(ui, "ui.fillet_fit", |ui| extra_choice(ui, extra, "fi_fit", "fit", &FILLET_FITS)));
-    row.response.backing_on_hover_text(tr("ui.fillet_fit_tip"));
+    row.response.backing_on_hover_text(tr!("ui.fillet_fit_tip"));
     let fit = row.inner;
     if extra.get("fit") != before.as_ref() {
         settle_fillet_options(extra, "fit", setback);
@@ -305,7 +305,7 @@ fn fillet_fit_rows(app: &SolveApp, ui: &mut egui::Ui, extra: &mut serde_json::Ma
 fn fillet_turn_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, setback: &mut Option<String>) {
     let before = extra.get("turn").cloned();
     let row = ui.scope(|ui| form_row(ui, "ui.fillet_turn", |ui| extra_choice(ui, extra, "fi_turn", "turn", &FILLET_TURNS)));
-    row.response.backing_on_hover_text(tr("ui.fillet_turn_tip"));
+    row.response.backing_on_hover_text(tr!("ui.fillet_turn_tip"));
     if extra.get("turn") != before.as_ref() {
         settle_fillet_options(extra, "turn", setback);
     }
@@ -452,11 +452,8 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         ui_kit::text(ui, &prompt, ui_kit::Text::Hint("tool")).backing_on_hover_text(&prompt);
         if matches!(&d.kind, Kind::SketchModify(k) if k.previews()) {
             let label = d.active_input().map(|input| tr(input.label)).unwrap_or_else(|| tr("Objects"));
-            let step = solidcraft_ui_text::format(
-                "dialog.selection_step",
-                &[("step", &(d.active + 1).to_string()), ("total", &d.inputs.len().to_string()), ("input", label)],
-            );
-            ui_kit::text(ui, &step, ui_kit::Text::Hint("step")).backing_on_hover_text(tr("dialog.selection_guidance"));
+            let step = tr!("dialog.selection_step", step = &(d.active + 1).to_string(), total = &d.inputs.len().to_string(), input = label);
+            ui_kit::text(ui, &step, ui_kit::Text::Hint("step")).backing_on_hover_text(tr!("dialog.selection_guidance"));
         }
     }
     // Trim explains incomplete picks before OK can be pressed, including a whole cutting sheet.
@@ -546,7 +543,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::Sketch => {
             let edge_on = edge_on_origin_planes(&app.cam);
             if !edge_on.is_empty() {
-                let text = solidcraft_ui_text::format("sketch_panel.edge_on_hint", &[("planes", &edge_on.join(", "))]);
+                let text = tr!("sketch_panel.edge_on_hint", planes = &edge_on.join(", "));
                 ui_kit::text(ui, &text, ui_kit::Text::Hint("edge_on"));
             }
             if d.error.is_some() && matches!(d.inputs.first().and_then(|i| i.items.first()), Some(Sel::Face { .. })) {
@@ -557,7 +554,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 );
                 // What the button does, said plainly: the sketch is made on the face's plane as it is
                 // now, and does not follow later edits of the face (#16523).
-                ui_kit::text(ui, solidcraft_ui_text::tr("ui.sketch_use_fixed_plane_explained"), ui_kit::Text::Hint("attachment"));
+                ui_kit::text(ui, tr!("ui.sketch_use_fixed_plane_explained"), ui_kit::Text::Hint("attachment"));
                 if ui_kit::button(ui, tr("Use fixed plane"), ui_kit::Button::Normal).clicked() {
                     d.extra.insert("fixed_plane".into(), json!(true));
                 }
@@ -565,7 +562,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         }
         Kind::SketchIntersect { bodies, projection_link, construction } => {
             let mut selected = if *bodies { 1 } else { 0 };
-            let changed = ui_kit::row(ui, tr("ui.sketch_intersect_selection_filter"), |ui| {
+            let changed = ui_kit::row(ui, tr!("ui.sketch_intersect_selection_filter"), |ui| {
                 ui_kit::segmented(ui, &mut selected, &[tr("Geometry"), tr("Bodies")], Default::default())
             });
             if changed && let Some(input) = d.inputs.first_mut() {
@@ -573,16 +570,15 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 input.accept = if *bodies { BODIES } else { super::INTERSECT_GEOMETRY };
                 input.items.clear();
             }
-            ui_kit::row(ui, tr("ui.sketch_intersect_projection_link"), |ui| ui_kit::checkbox(ui, "", projection_link));
-            ui_kit::row(ui, tr("ui.construction"), |ui| ui_kit::checkbox(ui, "", construction));
+            ui_kit::row(ui, tr!("ui.sketch_intersect_projection_link"), |ui| ui_kit::checkbox(ui, "", projection_link));
+            ui_kit::row(ui, tr!("ui.construction"), |ui| ui_kit::checkbox(ui, "", construction));
         }
         Kind::SketchProject { bodies, projection_link, construction } => {
-            let response =
-                ui_kit::row(ui, solidcraft_ui_text::tr("ui.project_link_tools"), |ui| ui_kit::checkbox(ui, "", &mut app.ui.project_link_tools));
+            let response = ui_kit::row(ui, tr!("ui.project_link_tools"), |ui| ui_kit::checkbox(ui, "", &mut app.ui.project_link_tools));
             crate::scenario::publish_handle("project:link-tools", response.rect.center());
-            response.backing_on_hover_text(solidcraft_ui_text::tr("ui.project_link_tools_note"));
+            response.backing_on_hover_text(tr!("ui.project_link_tools_note"));
             let mut selected = if *bodies { 1 } else { 0 };
-            let changed = ui_kit::row(ui, tr("ui.sketch_intersect_selection_filter"), |ui| {
+            let changed = ui_kit::row(ui, tr!("ui.sketch_intersect_selection_filter"), |ui| {
                 ui_kit::segmented(ui, &mut selected, &[tr("Geometry"), tr("Bodies")], Default::default())
             });
             if changed && let Some(input) = d.inputs.first_mut() {
@@ -594,8 +590,8 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 input.chain_seeds.clear();
                 input.chain_written.clear();
             }
-            ui_kit::row(ui, tr("ui.sketch_intersect_projection_link"), |ui| ui_kit::checkbox(ui, "", projection_link));
-            ui_kit::row(ui, tr("ui.construction"), |ui| ui_kit::checkbox(ui, "", construction));
+            ui_kit::row(ui, tr!("ui.sketch_intersect_projection_link"), |ui| ui_kit::checkbox(ui, "", projection_link));
+            ui_kit::row(ui, tr!("ui.construction"), |ui| ui_kit::checkbox(ui, "", construction));
         }
         Kind::SketchModify(k) => {
             let two_parallel_lines = crate::sketch_modify_ui::picks_two_parallel_lines(app, &d.inputs);
@@ -794,7 +790,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                     }
                     response
                 })
-                .backing_on_hover_text(tr("ui.fillet_type_choices_tip"));
+                .backing_on_hover_text(tr!("ui.fillet_type_choices_tip"));
                 if rtype == 0 {
                     enter |= fillet_corner_rows(ui, &app.session, &mut d.extra, &d.inputs, radius, setback);
                     fillet_fit_rows(app, ui, &mut d.extra, setback);
@@ -817,10 +813,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             ui_kit::section(ui, "fillet_options", "Options", true, |ui| {
                 ui.scope(|ui| ui_kit::checkbox_grid(ui, &mut [("Tangent Chain", chain), ("Preview", &mut d.preview_enabled)], 2))
                     .response
-                    .backing_on_hover_text(tr("ui.fillet_options_tip"));
+                    .backing_on_hover_text(tr!("ui.fillet_options_tip"));
                 ui.scope(|ui| form_row(ui, "ui.fillet_color_edges", |ui| check(ui, &mut app.preferences.hover_edge_lit)))
                     .response
-                    .backing_on_hover_text(tr("ui.fillet_color_edges_tip"));
+                    .backing_on_hover_text(tr!("ui.fillet_color_edges_tip"));
             });
             // The radii along the edge, for the two types that take them.
             if !*chamfer && matches!(rtype, 2 | 4) {
@@ -990,7 +986,7 @@ fn body_name_row(d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let mut enter = false;
     form_row(ui, "ui.body_name", |ui| {
         ui.add_enabled_ui(new_body, |ui| {
-            enter = ui_kit::text_field(ui, &mut name, tr("ui.body_name_hint")).0;
+            enter = ui_kit::text_field(ui, &mut name, tr!("ui.body_name_hint")).0;
         });
     });
     if !new_body {
@@ -1277,11 +1273,11 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Dome { spherical, reverse, .. } => {
             form_row(ui, "Shape", |ui| {
                 let mut i = usize::from(*spherical);
-                let labels = [solidcraft_ui_text::tr("ui.dome_elliptical"), solidcraft_ui_text::tr("ui.dome_spherical")];
+                let labels = [tr!("ui.dome_elliptical"), tr!("ui.dome_spherical")];
                 ui_kit::segmented(ui, &mut i, &labels, Default::default());
                 *spherical = i == 1;
             });
-            ui_kit::options(ui, "feature_options", &mut [(solidcraft_ui_text::tr("ui.dome_reverse"), reverse)]);
+            ui_kit::options(ui, "feature_options", &mut [(tr!("ui.dome_reverse"), reverse)]);
         }
         Kind::Mirror => {
             // Feature replay retains the source operation; Join is for body copies.
@@ -1314,8 +1310,8 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Split { sheet } => {
             let face_tool = d.inputs.get(1).and_then(|inp| inp.items.first()).is_some_and(|sel| matches!(sel, Sel::Face { .. }));
             if face_tool {
-                let options = SPLIT_SHEETS.map(solidcraft_ui_text::tr);
-                choice_row(ui, solidcraft_ui_text::tr("ui.split_body.cut_with"), "split_sheet", sheet, &options);
+                let options = SPLIT_SHEETS.map(solidcraft_ui_text::tr_by_id);
+                choice_row(ui, tr!("ui.split_body.cut_with"), "split_sheet", sheet, &options);
             }
             let more = face_tool && *sheet == 1;
             set_object_accepting(&mut d.inputs, &mut d.active, SPLIT_TOOL_FACES, FACES, more);
@@ -1367,7 +1363,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             if *normal {
                 ui_kit::options(ui, "feature_options", &mut [("Flip", flip)]);
             } else {
-                let extend_label = solidcraft_ui_text::tr("ui.rib_extend_ends");
+                let extend_label = tr!("ui.rib_extend_ends");
                 ui_kit::options(ui, "feature_options", &mut [("Flip", flip), (extend_label, extend)]);
             }
         }
@@ -1383,7 +1379,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             enter |= hint_row(ui, "Offset X", offset_x, tr("none"));
             enter |= hint_row(ui, "Offset Y", offset_y, tr("none"));
             enter |= hint_row(ui, "Angle", angle, tr("none"));
-            ui.add(egui::Label::new(solidcraft_ui_text::tr("ui.emboss_wrap_note")).wrap());
+            ui.add(egui::Label::new(tr!("ui.emboss_wrap_note")).wrap());
         }
         Kind::Align { flip, components, axes: [ax, ay, az], angle } => {
             // Where on the picked face or edge to snap: as picked (a face turns to meet
@@ -1469,7 +1465,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             // the thickness the user typed stays there, and the command carries it.
             choice_row(ui, "Type", "pipe_type", hollow, &PIPE_TYPES);
             let was_wall = (*wall).clone();
-            enter |= hint_row(ui, "Wall", wall, if *hollow == 1 { tr("ui.thickness") } else { tr("solid") });
+            enter |= hint_row(ui, "Wall", wall, if *hollow == 1 { tr!("ui.thickness") } else { tr("solid") });
             if *wall != was_wall {
                 // A thickness in the field is a tube; an empty field is a rod (#18344).
                 *hollow = usize::from(!wall.trim().is_empty());
@@ -1616,7 +1612,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 ui_kit::checkbox_grid(ui, &mut [("ui.combine_offset_round_edges", round_edges)], 1);
                 if *round_edges {
                     // Empty: the rounds take the offset's size, as the hint says.
-                    enter |= hint_row_positive(ui, "ui.combine_offset_radius", radius, tr("ui.combine_offset_radius_hint"));
+                    enter |= hint_row_positive(ui, "ui.combine_offset_radius", radius, tr!("ui.combine_offset_radius_hint"));
                 }
             }
             crate::dialogs::set_combine_offset_faces(&mut d.inputs, &mut d.active, *operation == 2 && *picked_faces);
@@ -1656,11 +1652,11 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             enter |= expr_row(ui, "Distance", offset);
             ui_kit::options(ui, "feature_options", &mut [("Flip", flip), ("Hatch", hatch)]);
             if edit.is_some() {
-                ui_kit::text(ui, tr("section.edit_hint"), ui_kit::Text::Hint("section_edit"));
+                ui_kit::text(ui, tr!("section.edit_hint"), ui_kit::Text::Hint("section_edit"));
             } else if *add {
-                ui_kit::text(ui, tr("section.add_hint"), ui_kit::Text::Hint("section_add"));
+                ui_kit::text(ui, tr!("section.add_hint"), ui_kit::Text::Hint("section_add"));
             } else if section_turns_off(&app.session, d.extra.contains_key("plane"), &d.inputs) {
-                ui_kit::text(ui, tr("section.off_hint"), ui_kit::Text::Hint("section_off"));
+                ui_kit::text(ui, tr!("section.off_hint"), ui_kit::Text::Hint("section_off"));
             }
             saved_section_rows(app, d, ui);
         }
@@ -1703,7 +1699,7 @@ fn saved_section_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
     if names.is_empty() && !live {
         return;
     }
-    ui_kit::text(ui, tr("section.saved_title"), ui_kit::Text::Hint("section_saved"));
+    ui_kit::text(ui, tr!("section.saved_title"), ui_kit::Text::Hint("section_saved"));
     let mut act: Option<(&'static str, Value)> = None;
     for name in &names {
         // A long name or a long translation wraps to the next line instead of widening the card.
@@ -1713,11 +1709,11 @@ fn saved_section_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
             if ui_kit::button(ui, name.as_str(), look).clicked() {
                 act = Some(("inspect.section.show", json!({"section": name})));
             }
-            if ui_kit::button(ui, tr("section.saved_rename"), ui_kit::Button::Small).clicked() {
+            if ui_kit::button(ui, tr!("section.saved_rename"), ui_kit::Button::Small).clicked() {
                 draft.renaming = Some(name.clone());
                 draft.name = name.clone();
             }
-            if ui_kit::button(ui, "×", ui_kit::Button::Small).backing_on_hover_text(tr("section.saved_delete")).clicked() {
+            if ui_kit::button(ui, "×", ui_kit::Button::Small).backing_on_hover_text(tr!("section.saved_delete")).clicked() {
                 act = Some(("inspect.section.delete", json!({"section": name})));
             }
         });
@@ -1730,7 +1726,7 @@ fn saved_section_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
             let label = tr(if renaming.is_some() { "section.saved_rename" } else { "section.saved_save" });
             let ok = !draft.name.trim().is_empty() && (renaming.is_some() || live);
             let clicked = ui_kit::button(ui, label, ui_kit::Button::Enabled(ok)).clicked();
-            let (enter, _) = ui_kit::text_field(ui, &mut draft.name, tr("section.saved_name"));
+            let (enter, _) = ui_kit::text_field(ui, &mut draft.name, tr!("section.saved_name"));
             if (clicked || enter) && ok {
                 act = Some(match renaming {
                     Some(old) => ("inspect.section.rename", json!({"section": old, "name": draft.name})),
@@ -1763,7 +1759,7 @@ fn saved_section_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
 /// The measurement in the dialog: each item's size, then the distance (a pair of round items
 /// offers centre to centre, closest and farthest), its ΔX/Y/Z and the angle between two items.
 fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut Option<Shown>, dual: &mut bool) {
-    let toggle = ui_kit::checkbox(ui, tr("measure.dual_units"), dual);
+    let toggle = ui_kit::checkbox(ui, tr!("measure.dual_units"), dual);
     crate::scenario::publish_handle("measure:dual_units", toggle.rect.center());
     let Some(r) = r else {
         ui_kit::text(ui, tr("pick one or two vertices, edges or faces"), ui_kit::Text::Hint("measure"));
@@ -1786,7 +1782,7 @@ fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut
     for (i, it) in r["items"].as_array().into_iter().flatten().enumerate() {
         let lines = crate::quick_measure::item_lines_with_units(app, it, *dual);
         for (k, line) in lines.into_iter().enumerate() {
-            let label = if k == 0 { solidcraft_ui_text::format("measure.item", &[("number", &(i + 1).to_string())]) } else { String::new() };
+            let label = if k == 0 { tr!("measure.item", number = &(i + 1).to_string()) } else { String::new() };
             // Coordinates need all three values; a fixed-height form cell elides the end.
             let text = if label.is_empty() { line } else { format!("{label}  {line}") };
             ui_kit::text(ui, &text, ui_kit::Text::Report(&format!("measure_item_{i}_{k}"), false));
@@ -1947,7 +1943,7 @@ mod tests {
             }
         }
         let mut h = Harness::new();
-        let hint = solidcraft_ui_text::format("sketch_panel.edge_on_hint", &[("planes", "XZ, YZ")]);
+        let hint = tr!("sketch_panel.edge_on_hint", planes = "XZ, YZ");
         assert!(hint.starts_with("XZ, YZ are seen edge-on"), "{hint}");
         h.step(&json!({"start":"sketch.create"})).unwrap();
         h.frames(2);
@@ -2615,7 +2611,7 @@ mod tests {
             assert!(!coded(solidcraft_ui_text::tr_label(label)), "{label}: {}", solidcraft_ui_text::tr_label(label));
         }
         for (g, tip) in FILLET_CORNERS {
-            assert!(solidcraft_ui_text::tr(tip).contains(g.code()), "the hover text keeps the code for those who know it: {tip}");
+            assert!(solidcraft_ui_text::tr_by_id(tip).contains(g.code()), "the hover text keeps the code for those who know it: {tip}");
         }
         let tip = fillet_corner_tip();
         assert!(tip.contains("rolling") && tip.contains("1.5") && tip.contains("Setback"), "what each corner builds: {tip}");
@@ -2650,7 +2646,7 @@ mod tests {
         // A blend too large for its faces keeps its own words.
         assert_eq!(
             crate::dialogs::fillet_plain_error("the fillet is larger than the faces beside its edges allow", true),
-            Some(crate::dialogs::FilletRefusal::Plain(solidcraft_ui_text::tr("ui.fillet_error_too_large").to_string()))
+            Some(crate::dialogs::FilletRefusal::Plain(solidcraft_ui_text::tr_by_id("ui.fillet_error_too_large").to_string()))
         );
         // One that no smaller radius builds either is not told to try a smaller radius: the kernel
         // tried them down to its least.
@@ -2658,7 +2654,7 @@ mod tests {
                     (down to 0.001 mm: the operation failed: not supported yet: the fillet is larger than the faces beside its edges allow)";
         assert_eq!(
             crate::dialogs::fillet_plain_error(none, false),
-            Some(crate::dialogs::FilletRefusal::Plain(solidcraft_ui_text::tr("ui.fillet_error_no_radius").to_string()))
+            Some(crate::dialogs::FilletRefusal::Plain(solidcraft_ui_text::tr_by_id("ui.fillet_error_no_radius").to_string()))
         );
     }
 

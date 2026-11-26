@@ -196,7 +196,7 @@ impl CommandSearch {
     }
 
     pub fn heading(ui: &mut Ui, label: &str, count: usize) {
-        super::Menu::heading(ui, &format!("{}  {count}", solidcraft_ui_text::tr(label)));
+        super::Menu::heading(ui, &format!("{}  {count}", solidcraft_ui_text::tr_by_id(label)));
     }
 
     pub fn detail(ui: &mut Ui, text: &str) {
@@ -257,7 +257,11 @@ impl CommandSearch {
         let background = ui.painter().add(egui::Shape::Noop);
         egui::Frame::NONE.inner_margin(egui::Margin::symmetric(t.space_14 as i8, t.space_3 as i8)).show(ui, |ui| {
             ui.set_width((width - t.space_14 * 2.0).max(0.0));
-            super::text(ui, solidcraft_ui_text::tr(if command { "search.command_keys" } else { "search.keys" }), super::Text::Note("search_keys"));
+            super::text(
+                ui,
+                solidcraft_ui_text::tr_by_id(if command { "search.command_keys" } else { "search.keys" }),
+                super::Text::Note("search_keys"),
+            );
         });
         let r = Rect::from_min_max(start, pos2(start.x + width, ui.min_rect().bottom()));
         let frame = egui::Frame::NONE.fill(t.dialog_footer).corner_radius(egui::CornerRadius { nw: 0, ne: 0, sw: t.radius_xl, se: t.radius_xl });

@@ -17,7 +17,7 @@ pub fn open_with_default_app(path: &str) -> Result<(), String> {
     loop {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => return Ok(()),
-            Ok(Some(_)) => return Err(solidcraft_ui_text::tr("ui.drawing_print.no_viewer").to_string()),
+            Ok(Some(_)) => return Err(solidcraft_ui_egui::tr!("ui.drawing_print.no_viewer").to_string()),
             Ok(None) if std::time::Instant::now() < until => std::thread::sleep(std::time::Duration::from_millis(20)),
             Ok(None) => {
                 std::thread::spawn(move || child.wait());

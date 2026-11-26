@@ -302,18 +302,18 @@ pub(super) fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     };
     let text = match &refused {
         Some(reason) => solidcraft_ui_text::format(key, &[("reason", reason)]),
-        None => solidcraft_ui_text::tr(key).to_owned(),
+        None => solidcraft_ui_text::tr_by_id(key).to_owned(),
     };
     // The option is for a lone straight edge: what it picks stays the edge's own length without it.
     let straight = app.drawing_workspace.dimension.as_ref().is_some_and(Draft::offers_overall);
     let mut overall = app.drawing_workspace.dimension.as_ref().is_some_and(|draft| draft.overall);
     let close = super::inset(ui, |ui| {
         ui_kit::text(ui, &text, ui_kit::Text::Note(key));
-        if straight && ui_kit::checkbox(ui, solidcraft_ui_text::tr("ui.drawing_dimension_tool.overall"), &mut overall).changed() {
+        if straight && ui_kit::checkbox(ui, tr!("ui.drawing_dimension_tool.overall"), &mut overall).changed() {
             set_overall(app, overall);
         }
         ui.separator();
-        ui_kit::button(ui, solidcraft_ui_text::tr("ui.cancel"), Button::Normal).clicked()
+        ui_kit::button(ui, tr!("ui.cancel"), Button::Normal).clicked()
     });
     if close {
         close_panel(app);
@@ -446,7 +446,7 @@ pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: OnScreen
             || matches!(pick(app, sheet, point, band), Ok(Some((view, ref hit))) if view == d.view && hit.same(only)),
         )
     {
-        app.set_status(solidcraft_ui_text::tr("ui.drawing_dimension_tool.overall_hint"), false);
+        app.set_status(tr!("ui.drawing_dimension_tool.overall_hint"), false);
     }
     if clicked {
         let more = draft.as_ref().is_none_or(|draft| draft.picks.len() < 2);
@@ -465,7 +465,7 @@ pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: OnScreen
         // tilted circle) has no dimension the engine measures: say so rather than pick it.
         let hit = match hit {
             Some((_, picked)) if picked.shape == Shape::Other && !picked.is_outline() => {
-                app.set_status(solidcraft_ui_text::tr("ui.drawing_dimension_tool.curve"), true);
+                app.set_status(tr!("ui.drawing_dimension_tool.curve"), true);
                 None
             }
             hit => hit,
@@ -482,7 +482,7 @@ pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: OnScreen
                     d.picks = picks;
                     d.preview = None;
                 } else {
-                    app.set_status(solidcraft_ui_text::tr("ui.drawing_dimension_tool.measures_nothing"), true);
+                    app.set_status(tr!("ui.drawing_dimension_tool.measures_nothing"), true);
                 }
             }
             // Anywhere else: the dimension the picks make goes where the pointer is.
@@ -491,7 +491,7 @@ pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: OnScreen
                     Ok(_) => draft = None,
                     Err(error) => app.set_status(error, true),
                 },
-                None => app.set_status(solidcraft_ui_text::tr("ui.drawing_dimension_tool.measures_nothing"), true),
+                None => app.set_status(tr!("ui.drawing_dimension_tool.measures_nothing"), true),
             },
             (None, None) => {}
         }

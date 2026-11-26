@@ -4,127 +4,128 @@ use super::*;
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_page(ui, |ui| {
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-        ui_kit::settings_heading(ui, app.tr("prefs.structure.mouse3d"), app.tr("prefs.structure.mouse3d_note"));
+        ui_kit::settings_heading(ui, tr!(app, "prefs.structure.mouse3d"), tr!(app, "prefs.structure.mouse3d_note"));
         device(app, ui);
         orbit(app, ui);
         axes(app, ui);
-        ui_kit::settings_section(ui, "space_mouse_buttons", app.tr("ui.3d_mouse_buttons"), |ui| space_mouse_buttons(app, ui));
+        ui_kit::settings_section(ui, "space_mouse_buttons", tr!(app, "ui.3d_mouse_buttons"), |ui| space_mouse_buttons(app, ui));
         advanced(app, ui);
     });
 }
 
 fn device(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
-    ui_kit::settings_section(ui, "space_mouse_device", app.tr("prefs.navigation.device"), |ui| {
+    ui_kit::settings_section(ui, "space_mouse_device", tr!(app, "prefs.navigation.device"), |ui| {
         // A confirmed input record identifies the device; an open reader alone does not.
-        let card = ui_kit::settings_card(ui, |ui| {
-            let device = app.space_mouse.device.clone();
-            let saved = device.as_ref().is_some_and(|device| app.preferences.space_mouse_calibrations.contains_key(device));
-            let denied = found_but_not_allowed(app.space_mouse.drivers);
-            // Native wrapping labels use the initial row height as their first-line minimum.
-            ui.allocate_ui_with_layout(
-                egui::vec2(ui.available_width(), t.control_height),
-                egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
-                |ui| {
-                    if let Some(device) = &device {
-                        ui_kit::text(ui, device, ui_kit::Text::Inline);
-                        ui_kit::settings_state_badge(ui, app.tr("ui.nav_bridge_connected"), ui_kit::SettingsBadgeTone::Success);
-                        ui_kit::settings_state_badge(
-                            ui,
-                            app.tr(if saved { "ui.3d_mouse_calibrated" } else { "ui.3d_mouse_not_calibrated" }),
-                            if saved { ui_kit::SettingsBadgeTone::Success } else { ui_kit::SettingsBadgeTone::Warning },
-                        );
-                    } else {
-                        let status = app.tr(if denied {
-                            "ui.3d_mouse_denied_short"
-                        } else if waiting_for_a_record(app.space_mouse.drivers) {
-                            "ui.3d_mouse_calibrate_wait"
+        let card =
+            ui_kit::settings_card(ui, |ui| {
+                let device = app.space_mouse.device.clone();
+                let saved = device.as_ref().is_some_and(|device| app.preferences.space_mouse_calibrations.contains_key(device));
+                let denied = found_but_not_allowed(app.space_mouse.drivers);
+                // Native wrapping labels use the initial row height as their first-line minimum.
+                ui.allocate_ui_with_layout(
+                    egui::vec2(ui.available_width(), t.control_height),
+                    egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
+                    |ui| {
+                        if let Some(device) = &device {
+                            ui_kit::text(ui, device, ui_kit::Text::Inline);
+                            ui_kit::settings_state_badge(ui, tr!(app, "ui.nav_bridge_connected"), ui_kit::SettingsBadgeTone::Success);
+                            ui_kit::settings_state_badge(
+                                ui,
+                                if saved { tr!(app, "ui.3d_mouse_calibrated") } else { tr!(app, "ui.3d_mouse_not_calibrated") },
+                                if saved { ui_kit::SettingsBadgeTone::Success } else { ui_kit::SettingsBadgeTone::Warning },
+                            );
                         } else {
-                            "ui.3d_mouse_none"
-                        });
-                        let response = ui_kit::text(ui, status, ui_kit::Text::Report("calibration_status", false))
-                            .backing_on_hover_text(app.tr(if denied { "ui.3d_mouse_denied" } else { "ui.3d_mouse_wiggle" }));
-                        crate::scenario::publish_target("prefs:space_mouse_status", response.rect);
-                    }
-                },
-            );
-            let calibrate_width = ui_kit::ContentWidth::button(ui, app.tr("ui.3d_mouse_calibrate"));
-            let forget_width = ui_kit::ContentWidth::button(ui, app.tr("ui.3d_mouse_forget"));
-            let available = ui.available_width();
-            ui.allocate_ui_with_layout(
-                egui::vec2(available, t.control_height),
-                egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
-                |ui| {
-                    ui.spacing_mut().item_spacing.x = t.space_8;
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(calibrate_width.min(available), t.control_height),
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| {
-                            ui_kit::settings_form(ui, 0.0, |ui| {
-                                ui_kit::row(ui, app.tr("ui.3d_mouse_calibrate"), |ui| {
-                                    ui.add_enabled_ui(app.preferences.space_mouse_enabled && device.is_some(), |ui| {
-                                        let response = ui_kit::button(ui, app.tr("ui.3d_mouse_calibrate"), ui_kit::Button::Normal)
-                                            .backing_on_hover_text(app.tr("ui.3d_mouse_calibrate_tip"))
-                                            .backing_on_disabled_hover_text(app.tr(if device.is_none() {
-                                                "ui.3d_mouse_calibrate_wait"
-                                            } else {
-                                                "ui.3d_mouse_calibrate_tip"
-                                            }));
-                                        crate::scenario::publish_target("prefs:space_mouse_calibrate", response.rect);
-                                        crate::scenario::publish_target(
-                                            &format!("dialog:button:Calibration:{}", app.tr("ui.3d_mouse_calibrate")),
-                                            response.rect,
-                                        );
-                                        if response.clicked() {
-                                            crate::space_mouse_calibration::start(app);
-                                        }
-                                    });
-                                });
+                            let status = app.tr_by_id(if denied {
+                                "ui.3d_mouse_denied_short"
+                            } else if waiting_for_a_record(app.space_mouse.drivers) {
+                                "ui.3d_mouse_calibrate_wait"
+                            } else {
+                                "ui.3d_mouse_none"
                             });
-                        },
-                    );
-                    if saved {
+                            let response = ui_kit::text(ui, status, ui_kit::Text::Report("calibration_status", false))
+                                .backing_on_hover_text(if denied { tr!(app, "ui.3d_mouse_denied") } else { tr!(app, "ui.3d_mouse_wiggle") });
+                            crate::scenario::publish_target("prefs:space_mouse_status", response.rect);
+                        }
+                    },
+                );
+                let calibrate_width = ui_kit::ContentWidth::button(ui, tr!(app, "ui.3d_mouse_calibrate"));
+                let forget_width = ui_kit::ContentWidth::button(ui, tr!(app, "ui.3d_mouse_forget"));
+                let available = ui.available_width();
+                ui.allocate_ui_with_layout(
+                    egui::vec2(available, t.control_height),
+                    egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
+                    |ui| {
+                        ui.spacing_mut().item_spacing.x = t.space_8;
                         ui.allocate_ui_with_layout(
-                            egui::vec2(forget_width.min(available), t.control_height),
+                            egui::vec2(calibrate_width.min(available), t.control_height),
                             egui::Layout::top_down(egui::Align::Min),
                             |ui| {
                                 ui_kit::settings_form(ui, 0.0, |ui| {
-                                    ui_kit::row(ui, app.tr("ui.3d_mouse_forget"), |ui| {
-                                        ui.add_enabled_ui(app.preferences.space_mouse_enabled, |ui| {
-                                            let response = ui_kit::button(ui, app.tr("ui.3d_mouse_forget"), ui_kit::Button::Normal);
-                                            crate::scenario::publish_target("prefs:space_mouse_forget", response.rect);
+                                    ui_kit::row(ui, tr!(app, "ui.3d_mouse_calibrate"), |ui| {
+                                        ui.add_enabled_ui(app.preferences.space_mouse_enabled && device.is_some(), |ui| {
+                                            let response = ui_kit::button(ui, tr!(app, "ui.3d_mouse_calibrate"), ui_kit::Button::Normal)
+                                                .backing_on_hover_text(tr!(app, "ui.3d_mouse_calibrate_tip"))
+                                                .backing_on_disabled_hover_text(app.tr_by_id(if device.is_none() {
+                                                    "ui.3d_mouse_calibrate_wait"
+                                                } else {
+                                                    "ui.3d_mouse_calibrate_tip"
+                                                }));
+                                            crate::scenario::publish_target("prefs:space_mouse_calibrate", response.rect);
                                             crate::scenario::publish_target(
-                                                &format!("dialog:button:Calibration:{}", app.tr("ui.3d_mouse_forget")),
+                                                &format!("dialog:button:Calibration:{}", tr!(app, "ui.3d_mouse_calibrate")),
                                                 response.rect,
                                             );
-                                            if response.clicked()
-                                                && let Some(device) = &device
-                                            {
-                                                app.preferences.space_mouse_calibrations.remove(device);
+                                            if response.clicked() {
+                                                crate::space_mouse_calibration::start(app);
                                             }
                                         });
                                     });
                                 });
                             },
                         );
-                    }
-                },
-            );
-        });
+                        if saved {
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(forget_width.min(available), t.control_height),
+                                egui::Layout::top_down(egui::Align::Min),
+                                |ui| {
+                                    ui_kit::settings_form(ui, 0.0, |ui| {
+                                        ui_kit::row(ui, tr!(app, "ui.3d_mouse_forget"), |ui| {
+                                            ui.add_enabled_ui(app.preferences.space_mouse_enabled, |ui| {
+                                                let response = ui_kit::button(ui, tr!(app, "ui.3d_mouse_forget"), ui_kit::Button::Normal);
+                                                crate::scenario::publish_target("prefs:space_mouse_forget", response.rect);
+                                                crate::scenario::publish_target(
+                                                    &format!("dialog:button:Calibration:{}", tr!(app, "ui.3d_mouse_forget")),
+                                                    response.rect,
+                                                );
+                                                if response.clicked()
+                                                    && let Some(device) = &device
+                                                {
+                                                    app.preferences.space_mouse_calibrations.remove(device);
+                                                }
+                                            });
+                                        });
+                                    });
+                                },
+                            );
+                        }
+                    },
+                );
+            });
         crate::scenario::publish_rect("prefs:space_mouse_device_card", card.response.rect);
-        setting::space_mouse_enabled(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("ui.3d_mouse_hint"));
-        setting::space_mouse_in_view(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("ui.3d_mouse_show_in_view_tip"));
+        setting::space_mouse_enabled(app, ui).backing_on_hover_text(tr!("ui.3d_mouse_hint"));
+        setting::space_mouse_in_view(app, ui).backing_on_hover_text(tr!("ui.3d_mouse_show_in_view_tip"));
         let names = [
-            (SpaceMouseGhost::LeftViewport, app.tr("ui.3d_mouse_ghost_left_viewport").to_owned()),
-            (SpaceMouseGhost::RightViewport, app.tr("ui.3d_mouse_ghost_right_viewport").to_owned()),
-            (SpaceMouseGhost::LeftWindow, app.tr("ui.3d_mouse_ghost_left_window").to_owned()),
+            (SpaceMouseGhost::LeftViewport, tr!(app, "ui.3d_mouse_ghost_left_viewport").to_owned()),
+            (SpaceMouseGhost::RightViewport, tr!(app, "ui.3d_mouse_ghost_right_viewport").to_owned()),
+            (SpaceMouseGhost::LeftWindow, tr!(app, "ui.3d_mouse_ghost_left_window").to_owned()),
         ];
         let label_width = ["prefs.overall_speed", "ui.3d_mouse_ghost_position"]
             .into_iter()
-            .map(|id| ui_kit::ContentWidth::label(ui, app.tr(id)))
+            .map(|id| ui_kit::ContentWidth::label(ui, app.tr_by_id(id)))
             .fold(0.0, f32::max);
         ui_kit::settings_form(ui, label_width, |ui| {
-            ui_kit::row(ui, app.tr("prefs.overall_speed"), |ui| {
+            ui_kit::row(ui, tr!(app, "prefs.overall_speed"), |ui| {
                 ui.add_enabled_ui(app.preferences.space_mouse_enabled, |ui| {
                     let response = ui_kit::slider(
                         ui,
@@ -135,7 +136,7 @@ fn device(app: &mut SolveApp, ui: &mut egui::Ui) {
                     crate::scenario::publish_target("prefs:space_mouse_speed", response.rect);
                 });
             });
-            ui_kit::row(ui, app.tr("ui.3d_mouse_ghost_position"), |ui| {
+            ui_kit::row(ui, tr!(app, "ui.3d_mouse_ghost_position"), |ui| {
                 let (in_view, position) = (app.preferences.space_mouse_in_view, &mut app.preferences.space_mouse_ghost_position);
                 ui.add_enabled_ui(in_view, |ui| {
                     ui_kit::settings_control_width(ui, t.space_24 * 10.0, |ui| {
@@ -156,11 +157,11 @@ fn device(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 fn orbit(app: &mut SolveApp, ui: &mut egui::Ui) {
-    ui_kit::settings_section(ui, "space_mouse_orbit", app.tr("ui.orbit"), |ui| {
-        let orbits = [app.tr("ui.3d_mouse_orbit_traced").to_owned(), app.tr("ui.3d_mouse_orbit_classic").to_owned()];
-        let label = app.tr("ui.3d_mouse_orbit");
-        let help = app.tr("ui.3d_mouse_orbit_tip");
-        let motion_label = app.tr("ui.3d_mouse_motion_model").to_owned();
+    ui_kit::settings_section(ui, "space_mouse_orbit", tr!(app, "ui.orbit"), |ui| {
+        let orbits = [tr!(app, "ui.3d_mouse_orbit_traced").to_owned(), tr!(app, "ui.3d_mouse_orbit_classic").to_owned()];
+        let label = tr!(app, "ui.3d_mouse_orbit");
+        let help = tr!(app, "ui.3d_mouse_orbit_tip");
+        let motion_label = tr!(app, "ui.3d_mouse_motion_model").to_owned();
         let width = [label, motion_label.as_str()].into_iter().map(|l| ui_kit::ContentWidth::label(ui, l)).fold(0.0, f32::max)
             + Tokens::get().space_16
             + Tokens::get().space_4;
@@ -195,8 +196,8 @@ fn orbit(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         });
         ui.add_enabled_ui(app.preferences.space_mouse_enabled, |ui| {
-            setting::space_mouse_sketch_orbit(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("ui.3d_mouse_sketch_orbit_tip"));
-            setting::space_mouse_horizon_lock(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("ui.3d_mouse_horizon_lock_tip"));
+            setting::space_mouse_sketch_orbit(app, ui).backing_on_hover_text(tr!("ui.3d_mouse_sketch_orbit_tip"));
+            setting::space_mouse_horizon_lock(app, ui).backing_on_hover_text(tr!("ui.3d_mouse_horizon_lock_tip"));
         });
     });
 }
@@ -204,8 +205,8 @@ fn orbit(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// The Motion model row: what the cap moves, the model (Object) or the camera (Target camera).
 fn motion(app: &mut SolveApp, ui: &mut egui::Ui, label: &str) {
     use crate::prefs::SpaceMouseMotion;
-    let models = [app.tr("ui.3d_mouse_motion_model_object").to_owned(), app.tr("ui.3d_mouse_motion_model_target_camera").to_owned()];
-    let help = app.tr("ui.3d_mouse_motion_model_tip").to_owned();
+    let models = [tr!(app, "ui.3d_mouse_motion_model_object").to_owned(), tr!(app, "ui.3d_mouse_motion_model_target_camera").to_owned()];
+    let help = tr!(app, "ui.3d_mouse_motion_model_tip").to_owned();
     ui_kit::settings_row_help(ui, label, &help, |ui| {
         crate::ui_kit::settings_search::note_choices(ui, &models.each_ref().map(String::as_str));
         let mut selected = SpaceMouseMotion::ALL.iter().position(|m| *m == app.preferences.space_mouse_motion).unwrap_or(0);
@@ -236,7 +237,7 @@ fn motion(app: &mut SolveApp, ui: &mut egui::Ui, label: &str) {
 }
 
 fn axes(app: &mut SolveApp, ui: &mut egui::Ui) {
-    ui_kit::settings_section(ui, "space_mouse_axes", app.tr("prefs.axes"), |ui| {
+    ui_kit::settings_section(ui, "space_mouse_axes", tr!(app, "prefs.axes"), |ui| {
         // Rows say what they do to the view, through the mapping navigation uses; the choices
         // are the device's calibrated motions. Neither names a kind of device.
         let mapping = app.space_mouse.mapping;
@@ -247,9 +248,9 @@ fn axes(app: &mut SolveApp, ui: &mut egui::Ui) {
                 (text, label == "ui.3d_mouse_view_off")
             })
             .collect();
-        let driven_by = app.tr("ui.3d_mouse_driven_by").to_owned();
-        let off_tip = app.tr("ui.3d_mouse_view_off_tip").to_owned();
-        let motions: Vec<String> = crate::space_mouse::MOTIONS.iter().map(|motion| app.tr(motion).to_owned()).collect();
+        let driven_by = tr!(app, "ui.3d_mouse_driven_by").to_owned();
+        let off_tip = tr!(app, "ui.3d_mouse_view_off_tip").to_owned();
+        let motions: Vec<String> = crate::space_mouse::MOTIONS.iter().map(|motion| app.tr_by_id(motion).to_owned()).collect();
         // The axes are a table of their own: each row is a live meter of the motion that drives that
         // view axis, then its Invert, Speed and the motion choice.
         let enabled = app.preferences.space_mouse_enabled;
@@ -264,10 +265,10 @@ fn axes(app: &mut SolveApp, ui: &mut egui::Ui) {
         let calibration = app.space_mouse.device.as_ref().and_then(|device| app.preferences.space_mouse_calibrations.get(device));
         let meters: [_; 6] = std::array::from_fn(|axis| axis_meter(calibration, raw, app.preferences.space_mouse_axis_source, axis));
         let columns = ui_kit::AxisColumns {
-            axis: solidcraft_ui_text::tr("prefs.axis"),
-            live_input: solidcraft_ui_text::tr("prefs.live_input"),
-            speed: solidcraft_ui_text::tr("prefs.speed"),
-            source: solidcraft_ui_text::tr("prefs.source"),
+            axis: tr!("prefs.axis"),
+            live_input: tr!("prefs.live_input"),
+            speed: tr!("prefs.speed"),
+            source: tr!("prefs.source"),
         };
         ui_kit::settings_axis_header(ui, &columns);
         for (axis, (name, off)) in rows.iter().enumerate() {
@@ -321,7 +322,7 @@ fn axes(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::row(ui, "", |ui| {
             let reassigned = app.preferences.space_mouse_axis_source != crate::space_mouse::SAME_AXES;
             ui.add_enabled_ui(app.preferences.space_mouse_enabled && reassigned, |ui| {
-                let response = ui_kit::button(ui, app.tr("ui.3d_mouse_reset_axes"), ui_kit::Button::Normal);
+                let response = ui_kit::button(ui, tr!(app, "ui.3d_mouse_reset_axes"), ui_kit::Button::Normal);
                 crate::scenario::publish_target("prefs:space_mouse_reset_axes", response.rect);
                 if response.clicked() {
                     app.preferences.space_mouse_axis_source = crate::space_mouse::SAME_AXES;
@@ -332,14 +333,14 @@ fn axes(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 fn advanced(app: &mut SolveApp, ui: &mut egui::Ui) {
-    ui_kit::settings_section(ui, "space_mouse_advanced", app.tr("Advanced"), |ui| {
+    ui_kit::settings_section(ui, "space_mouse_advanced", tr!(app, "Advanced"), |ui| {
         ui_kit::settings_form(ui, FORM_LABEL_WIDTH, |ui| {
             // Only where the reader has seen the choice: Linux, with two of smed, spacenavd and the device there.
             if let Some(present) = app.space_mouse.drivers.filter(|present| present.smed || present.spacenavd || (present.direct && !present.denied))
             {
                 let [label, auto, direct, only_spacenavd, only_direct] =
                     ["driver", "driver_auto", "driver_direct", "driver_only_spacenavd", "driver_only_direct"]
-                        .map(|key| app.tr(&format!("ui.3d_mouse_{key}")).to_owned());
+                        .map(|key| app.tr_by_id(&format!("ui.3d_mouse_{key}")).to_owned());
                 let driver = &mut app.preferences.space_mouse_driver;
                 let there = |choice| match choice {
                     SpaceMouseDriver::Automatic => true,
@@ -390,10 +391,10 @@ fn advanced(app: &mut SolveApp, ui: &mut egui::Ui) {
                 && app.preferences.space_mouse_driver != SpaceMouseDriver::Spacenavd
                 && app.space_mouse.device.as_deref() == Some("spacenavd")
             {
-                hint_under_controls(ui, app.tr("ui.3d_mouse_driver_fallback"), "space_mouse_driver_fallback");
+                hint_under_controls(ui, tr!(app, "ui.3d_mouse_driver_fallback"), "space_mouse_driver_fallback");
             }
             let enabled = app.preferences.space_mouse_enabled;
-            let (label, tip) = (app.tr("ui.3d_mouse_dead_zone").to_owned(), app.tr("ui.3d_mouse_dead_zone_tip").to_owned());
+            let (label, tip) = (tr!(app, "ui.3d_mouse_dead_zone").to_owned(), tr!(app, "ui.3d_mouse_dead_zone_tip").to_owned());
             let device = app.space_mouse.device.clone();
             if let Some(calibration) = device.and_then(|device| app.preferences.space_mouse_calibrations.get_mut(&device)) {
                 ui_kit::row(ui, &label, |ui| {
@@ -417,19 +418,19 @@ fn advanced(app: &mut SolveApp, ui: &mut egui::Ui) {
             if app.space_mouse.restore_pending {
                 // A short question on its own, not in a row (a row has one line's height and cut it off), so
                 // that it wraps to its whole height at any width; the buttons are under it.
-                hint_under_controls(ui, app.tr("ui.3d_mouse_restore_ask"), "space_mouse_restore_ask");
+                hint_under_controls(ui, tr!(app, "ui.3d_mouse_restore_ask"), "space_mouse_restore_ask");
                 ui_kit::row(ui, "", |ui| {
-                    if ui_kit::button(ui, app.tr("ui.3d_mouse_restore"), ui_kit::Button::Normal).clicked() {
+                    if ui_kit::button(ui, tr!(app, "ui.3d_mouse_restore"), ui_kit::Button::Normal).clicked() {
                         restore_space_mouse_defaults(app);
                         app.space_mouse.restore_pending = false;
                     }
-                    if ui_kit::button(ui, app.tr("ui.cancel"), ui_kit::Button::Normal).clicked() {
+                    if ui_kit::button(ui, tr!(app, "ui.cancel"), ui_kit::Button::Normal).clicked() {
                         app.space_mouse.restore_pending = false;
                     }
                 });
             } else {
                 ui_kit::row(ui, "", |ui| {
-                    if ui_kit::button(ui, app.tr("ui.3d_mouse_restore"), ui_kit::Button::Normal).clicked() {
+                    if ui_kit::button(ui, tr!(app, "ui.3d_mouse_restore"), ui_kit::Button::Normal).clicked() {
                         app.space_mouse.restore_pending = true;
                     }
                 });
@@ -444,7 +445,7 @@ fn advanced(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui_kit::divider(ui, "space_mouse_picture");
             // Under each circle's axes, what the view does with them: the rows' own labels.
             let stories = crate::space_mouse::stories(&app.preferences.language, app.space_mouse.mapping, app.preferences.space_mouse_axis_source);
-            let help = solidcraft_ui_text::tr("ui.3d_mouse_circles_help").to_string();
+            let help = tr!("ui.3d_mouse_circles_help").to_string();
             let pads = |ui: &mut egui::Ui| {
                 crate::space_mouse_calibration::dead_zone_pads(ui, calibration, raw, false, &stories);
                 ui_kit::text(ui, &help, ui_kit::Text::Hint("space_mouse_circles_help"));

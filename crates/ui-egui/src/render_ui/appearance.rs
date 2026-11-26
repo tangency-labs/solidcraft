@@ -223,7 +223,7 @@ fn ended(response: &egui::Response, ui: &egui::Ui) -> bool {
 }
 
 pub(in crate::render_workspace) fn scope_label(app: &SolveApp) -> &str {
-    app.tr(match app.session.selection.last() {
+    app.tr_by_id(match app.session.selection.last() {
         Some(Sel::Occurrence { .. }) => "render.pick_component",
         Some(Sel::Face { .. }) => "render.pick_face",
         _ => "render.pick_body",
@@ -275,16 +275,16 @@ pub(in crate::render_workspace) fn remove_is_current(app: &SolveApp) -> bool {
 }
 
 pub(in crate::render_workspace) fn footer_stacked(app: &SolveApp, ui: &egui::Ui) -> bool {
-    ui_kit::icon_label_width(ui, app.tr("render.inspector_save_library"), Some("plus"), false)
+    ui_kit::icon_label_width(ui, tr!(app, "render.inspector_save_library"), Some("plus"), false)
         + ui.spacing().item_spacing.x
-        + ui_kit::icon_label_width(ui, app.tr("render.inspector_reset"), None, false)
+        + ui_kit::icon_label_width(ui, tr!(app, "render.inspector_reset"), None, false)
         > ui.available_width()
 }
 
 pub(in crate::render_workspace) fn footer(app: &mut SolveApp, ui: &mut egui::Ui, stacked: bool) {
     let enabled = app.session.has_selection();
     let draw_save = |app: &mut SolveApp, ui: &mut egui::Ui| {
-        let label = app.tr("render.inspector_save_library");
+        let label = tr!(app, "render.inspector_save_library");
         let response = if ui_kit::icon_label_width(ui, label, Some("plus"), false) > ui.available_width() {
             ui_kit::icon_action(ui, label, "plus", enabled, false)
         } else {
@@ -295,7 +295,7 @@ pub(in crate::render_workspace) fn footer(app: &mut SolveApp, ui: &mut egui::Ui,
         }
     };
     let draw_reset = |app: &mut SolveApp, ui: &mut egui::Ui| {
-        if ui_kit::text_button(ui, app.tr("render.inspector_reset"), enabled).clicked() {
+        if ui_kit::text_button(ui, tr!(app, "render.inspector_reset"), enabled).clicked() {
             reset(app);
         }
     };
@@ -319,7 +319,7 @@ pub(in crate::render_workspace) fn controls(app: &mut SolveApp, ui: &mut egui::U
         return false;
     }
     if app.session.selection.len() > 10_000 {
-        ui_kit::text(ui, app.tr("render.inspector_target_limit"), ui_kit::Text::Note("render.inspector_target_limit"));
+        ui_kit::text(ui, tr!(app, "render.inspector_target_limit"), ui_kit::Text::Note("render.inspector_target_limit"));
         return true;
     }
     let mut view = std::mem::take(&mut app.render_workspace.view.inspector.selection_appearance);
@@ -346,7 +346,7 @@ pub(in crate::render_workspace) fn controls(app: &mut SolveApp, ui: &mut egui::U
         view.revision = None;
         view.all_users = false;
     }
-    let options = [app.tr("render.pick_face"), app.tr("render.pick_body"), app.tr("render.pick_component")].map(str::to_owned);
+    let options = [tr!(app, "render.pick_face"), tr!(app, "render.pick_body"), tr!(app, "render.pick_component")].map(str::to_owned);
     let mut kind = match view.mode {
         0 => 1,
         1 => 0,
@@ -394,7 +394,7 @@ pub(in crate::render_workspace) fn controls(app: &mut SolveApp, ui: &mut egui::U
     // the Surfaces and references editor owns them. They never duplicate optics.
     let resource_kinds = ["surfaces", "materials", "selene_appearances", "physical_profiles"];
     if resource_kinds.iter().any(|kind| super::library::selected_kind(app, kind)) {
-        let title = app.tr("render.inspector_advanced").to_owned();
+        let title = tr!(app, "render.inspector_advanced").to_owned();
         ui_kit::editor_section(ui, "render:appearance:resources", &title, true, |ui| super::library::inspect_kinds(app, ui, &resource_kinds));
     }
     app.render_workspace.view.inspector.selection_appearance = view;
@@ -402,11 +402,11 @@ pub(in crate::render_workspace) fn controls(app: &mut SolveApp, ui: &mut egui::U
 }
 fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targets) -> Result<(), String> {
     if selected.items.len().saturating_add(selected.components.len()) > 10_000 {
-        return Err(app.tr("render.inspector_target_limit").into());
+        return Err(tr!(app, "render.inspector_target_limit").into());
     }
     let chains = chains(app, selected)?;
     let Some(chain) = chains.first() else {
-        ui_kit::text(ui, app.tr("render.inspector_pick_target"), ui_kit::Text::Note("render.inspector_pick_target"));
+        ui_kit::text(ui, tr!(app, "render.inspector_pick_target"), ui_kit::Text::Note("render.inspector_pick_target"));
         return Ok(());
     };
     let default_color = solidcraft_theme::Tokens::get().body;
@@ -453,9 +453,10 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
         view.replacements = dialogs_appearance::replacement_library(app);
     }
     let mut draft = view.draft.clone().unwrap_or_else(|| from.clone());
-    let name = if is_mixed { app.tr("render.tree_mixed").to_owned() } else { from.name.clone() };
-    let source = app.tr(if source_step == LookStep::Material { "render.inspector_material" } else { "render.library_in_design" }).to_owned();
-    let used = solidcraft_ui_text::format("render.inspector_used_by", &[("count", &count.to_string())]);
+    let name = if is_mixed { tr!(app, "render.tree_mixed").to_owned() } else { from.name.clone() };
+    let source =
+        (if source_step == LookStep::Material { tr!(app, "render.inspector_material") } else { tr!(app, "render.library_in_design") }).to_owned();
+    let used = tr!("render.inspector_used_by", count = &count.to_string());
     let replacements = &view.replacements;
     let ids: Vec<_> = (0..replacements.len()).map(|index| index.to_string()).collect();
     let handles: Vec<_> = ids.iter().map(|id| format!("render:appearance:replace:{id}")).collect();
@@ -467,7 +468,8 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
         .collect();
     let mut inspected = None;
     let selected_step = view.inspected.unwrap_or(active);
-    let chain_labels = [app.tr("render.pick_face"), app.tr("render.pick_body"), app.tr("render.pick_component"), app.tr("render.inspector_material")];
+    let chain_labels =
+        [tr!(app, "render.pick_face"), tr!(app, "render.pick_body"), tr!(app, "render.pick_component"), tr!(app, "render.inspector_material")];
     let replacement = ui_kit::sphere_preview_with_source(
         ui,
         "render:appearance:preview",
@@ -487,7 +489,7 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
             crate::scenario::publish_target("render:appearance:chain-menu", response.rect.intersect(ui.clip_rect()));
             response
         },
-        |ui| ui_kit::searchable_icon_dropdown(ui, "spin", app.tr("render.inspector_replace"), &mut view.replace_search, &options),
+        |ui| ui_kit::searchable_icon_dropdown(ui, "spin", tr!(app, "render.inspector_replace"), &mut view.replace_search, &options),
     );
     if let Some(step) = inspected {
         view.inspected = Some(step);
@@ -506,15 +508,15 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
     }
     let step = view.inspected.unwrap_or(mode_step(view.mode));
     let mut scope = usize::from(view.all_users);
-    let all_label = solidcraft_ui_text::format("render.inspector_all_users", &[("count", &count.to_string())]);
+    let all_label = tr!("render.inspector_all_users", count = &count.to_string());
     let this_label = app
-        .tr(match step {
+        .tr_by_id(match step {
             LookStep::Face => "render.inspector_this_face",
             LookStep::Component => "render.inspector_this_component",
             _ => "render.inspector_this_body",
         })
         .to_owned();
-    ui_kit::row(ui, app.tr("render.inspector_applies_to"), |ui| {
+    ui_kit::row(ui, tr!(app, "render.inspector_applies_to"), |ui| {
         ui.add_enabled_ui(replaceable, |ui| {
             ui_kit::segmented(
                 ui,
@@ -527,25 +529,25 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
     view.all_users = scope == 1;
     let edit_targets = targets(app, step);
     let mut commit = false;
-    let edit_title = app.tr("render.inspector_edit").to_owned();
+    let edit_title = tr!(app, "render.inspector_edit").to_owned();
     ui_kit::editor_section(ui, "render:appearance:edit", &edit_title, true, |ui| {
         if is_mixed {
-            ui_kit::text(ui, app.tr("render.inspector_set_all"), ui_kit::Text::Note("render.inspector_set_all"));
+            ui_kit::text(ui, tr!(app, "render.inspector_set_all"), ui_kit::Text::Note("render.inspector_set_all"));
         }
         let editable = step != LookStep::Material && (!edit_targets.items.is_empty() || !edit_targets.components.is_empty());
         ui.add_enabled_ui(editable, |ui| {
-            ui_kit::row(ui, app.tr("render.inspector_colour"), |ui| {
+            ui_kit::row(ui, tr!(app, "render.inspector_colour"), |ui| {
                 let opacity = draft.pbr.is_none().then_some(&mut draft.opacity);
                 let response =
-                    ui_kit::mixed_color_field(ui, &mut draft.color, opacity, mixed(&looks, |l| l.color).then(|| app.tr("render.tree_mixed")));
+                    ui_kit::mixed_color_field(ui, &mut draft.color, opacity, mixed(&looks, |l| l.color).then(|| tr!(app, "render.tree_mixed")));
                 view.dirty |= response.changed();
                 commit |= ended(&response, ui);
             });
             let mut preset = finish_index(&draft);
             let states = if mixed(&looks, |l| l.pbr) { [false; 4] } else { std::array::from_fn(|i| i == preset) };
-            ui_kit::row(ui, app.tr("render.inspector_finish"), |ui| {
-                let labels =
-                    ["render.inspector_matte", "render.inspector_satin", "render.inspector_gloss", "render.inspector_metal"].map(|key| app.tr(key));
+            ui_kit::row(ui, tr!(app, "render.inspector_finish"), |ui| {
+                let labels = ["render.inspector_matte", "render.inspector_satin", "render.inspector_gloss", "render.inspector_metal"]
+                    .map(|key| app.tr_by_id(key));
                 if ui_kit::segmented(
                     ui,
                     &mut preset,
@@ -569,34 +571,34 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
                 ("appearance.metallic", &mut metallic, 0.0..=1.0, mixed(&looks, |l| l.pbr.unwrap_or_default().metallic())),
                 ("appearance.roughness", &mut roughness, 0.045..=1.0, mixed(&looks, |l| l.pbr.unwrap_or_default().roughness())),
             ] {
-                ui_kit::row(ui, app.tr(key), |ui| {
-                    let response = ui_kit::mixed_slider(ui, value, range, mixed.then(|| app.tr("render.tree_mixed")));
+                ui_kit::row(ui, app.tr_by_id(key), |ui| {
+                    let response = ui_kit::mixed_slider(ui, value, range, mixed.then(|| tr!(app, "render.tree_mixed")));
                     view.dirty |= response.changed();
                     optical_edit |= response.changed();
                     commit |= ended(&response, ui);
                 });
             }
-            ui_kit::row(ui, app.tr("render.inspector_opacity"), |ui| {
+            ui_kit::row(ui, tr!(app, "render.inspector_opacity"), |ui| {
                 let response =
-                    ui_kit::mixed_slider(ui, &mut draft.opacity, 0.0..=1.0, mixed(&looks, |l| l.opacity).then(|| app.tr("render.tree_mixed")));
+                    ui_kit::mixed_slider(ui, &mut draft.opacity, 0.0..=1.0, mixed(&looks, |l| l.opacity).then(|| tr!(app, "render.tree_mixed")));
                 view.dirty |= response.changed();
                 commit |= ended(&response, ui);
                 if response.changed() && draft.opacity < 1.0 {
                     draft.pbr = None;
                 }
             });
-            ui_kit::row(ui, app.tr("render.appearance_editor.ior"), |ui| {
+            ui_kit::row(ui, tr!(app, "render.appearance_editor.ior"), |ui| {
                 let response = ui_kit::mixed_scalar_field(
                     ui,
                     &mut ior,
                     1.0..=3.0,
-                    mixed(&looks, |l| l.pbr.unwrap_or_default().dielectric_ior()).then(|| app.tr("render.tree_mixed")),
+                    mixed(&looks, |l| l.pbr.unwrap_or_default().dielectric_ior()).then(|| tr!(app, "render.tree_mixed")),
                 );
                 view.dirty |= response.changed();
                 optical_edit |= response.changed();
                 commit |= ended(&response, ui);
             });
-            ui_kit::text(ui, app.tr("render.inspector_opaque_help"), ui_kit::Text::Note("render.inspector_opaque_help"));
+            ui_kit::text(ui, tr!(app, "render.inspector_opaque_help"), ui_kit::Text::Note("render.inspector_opaque_help"));
             if optical_edit && let Ok(parameters) = PbrParameters::new(metallic, roughness, ior) {
                 p = parameters;
                 draft.pbr = Some(p);

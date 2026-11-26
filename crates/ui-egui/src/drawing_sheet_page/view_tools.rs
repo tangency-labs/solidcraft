@@ -427,10 +427,7 @@ impl Canvas<'_> {
         let corners = [from, pos2(destination.x, from.y), destination];
         self.painter.extend(egui::Shape::dashed_line(&corners, line, t.space_4, t.space_4));
         let offset = after - drag.from;
-        let text = solidcraft_ui_text::format(
-            "ui.drawing_view_selection.offset",
-            &[("x", &format!("{:+.1}", offset.x)), ("y", &format!("{:+.1}", offset.y))],
-        );
+        let text = tr!("ui.drawing_view_selection.offset", x = &format!("{:+.1}", offset.x), y = &format!("{:+.1}", offset.y));
         self.painter.text(destination + egui::vec2(t.space_8, t.space_8), Align2::LEFT_TOP, text, egui::FontId::proportional(t.font_label), t.accent);
     }
 }

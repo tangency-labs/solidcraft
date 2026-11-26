@@ -327,18 +327,17 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                 ui.set_width(width);
                 // The parameter's name, then the check and the cross.
                 let (title, _) = ui.allocate_exact_size(egui::vec2(width, t.control_height), egui::Sense::hover());
-                let name = solidcraft_ui_text::format("dialog.dimension_name", &[("name", &e.param)]);
+                let name = tr!("dialog.dimension_name", name = &e.param);
                 ui.scope_builder(egui::UiBuilder::new().max_rect(title).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
-                    crate::ui_kit::text(ui, &name, crate::ui_kit::Text::Inline)
-                        .backing_on_hover_text(solidcraft_ui_text::tr("dialog.dimension_insert_hint"));
+                    crate::ui_kit::text(ui, &name, crate::ui_kit::Text::Inline).backing_on_hover_text(tr!("dialog.dimension_insert_hint"));
                 });
                 let side = t.control_height;
                 let cancel = Rect::from_min_size(egui::pos2(title.right() - side, title.top()), egui::vec2(side, side));
                 let ok = cancel.translate(egui::vec2(-(side + t.space_2), 0.0));
-                if button(ui, ok, "dimwin:ok", solidcraft_ui_text::tr("ui.heading_ok"), "finish") {
+                if button(ui, ok, "dimwin:ok", tr!("ui.heading_ok"), "finish") {
                     answer = Some(true);
                 }
-                if button(ui, cancel, "dimwin:cancel", solidcraft_ui_text::tr("ui.cancel"), "close") {
+                if button(ui, cancel, "dimwin:cancel", tr!("ui.cancel"), "close") {
                     answer = Some(false);
                     escaped = true;
                 }
@@ -365,7 +364,7 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                             if can_step {
                                 solidcraft_ui_text::format(id, &[("step", &step_text)])
                             } else {
-                                solidcraft_ui_text::tr("dialog.dimension_step_expression").to_string()
+                                tr!("dialog.dimension_step_expression").to_string()
                             }
                         };
                         let up = crate::ui_kit::compact_button(ui, crate::ui_kit::MOVE_UP, &tip("dialog.dimension_step_up"), can_step, false);
@@ -399,11 +398,7 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                 // The user parameters the value names, each in its own field (#16319).
                 let row_state = parameter_fields(app, ui, id, width, e, &rows, row_error.is_some());
                 if !rows.is_empty() {
-                    crate::ui_kit::text(
-                        ui,
-                        solidcraft_ui_text::tr("dialog.dimension_parameters_note"),
-                        crate::ui_kit::Text::Note("dimension_parameters_note"),
-                    );
+                    crate::ui_kit::text(ui, tr!("dialog.dimension_parameters_note"), crate::ui_kit::Text::Note("dimension_parameters_note"));
                 }
                 if let Some(error) = &row_error {
                     crate::ui_kit::text(ui, error, crate::ui_kit::Text::Report("dimension_parameter_error", true));
@@ -516,7 +511,7 @@ fn parameter_fields(app: &SolveApp, ui: &mut egui::Ui, id: egui::Id, width: f32,
         let r = ui
             .scope_builder(egui::UiBuilder::new().max_rect(row).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
                 ui.spacing_mut().item_spacing.x = t.space_4;
-                crate::ui_kit::text(ui, &solidcraft_ui_text::format("dialog.dimension_parameter", &[("name", name)]), crate::ui_kit::Text::Inline);
+                crate::ui_kit::text(ui, &tr!("dialog.dimension_parameter", name = name), crate::ui_kit::Text::Inline);
                 let field = egui::vec2(ui.available_width().max(t.space_24), t.control_height);
                 let r = ui.allocate_ui(field, |ui| crate::ui_kit::cell_editor(ui, field_id, &mut text, "", invalid && changed)).inner;
                 crate::expression_complete::complete(ui, &r, &mut text);

@@ -2303,9 +2303,9 @@ fn picks_on_one_component_say_why_and_offer_components() {
         frame(&mut app, vec![]);
     }
     let out = frame(&mut app, vec![]);
-    let why = solidcraft_ui_text::format("joint.one_component", &[("bodies", "Body1, Body2")]);
+    let why = tr!("joint.one_component", bodies = "Body1, Body2");
     assert!(text_at(&out, &why).is_some(), "the dialog says why");
-    let at = text_at(&out, solidcraft_ui_text::tr("cmd.component_from_bodies")).expect("and offers the way out");
+    let at = text_at(&out, solidcraft_ui_text::tr_by_id("cmd.component_from_bodies")).expect("and offers the way out");
     let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
     frame(&mut app, vec![egui::Event::PointerMoved(at)]);
     frame(&mut app, vec![button(true)]);
@@ -2335,7 +2335,7 @@ fn picks_on_two_grounded_parts_say_the_joint_moves_neither_and_offer_to_unground
         let o = occ(&app, name);
         app.run("occurrence.ground", json!({"occurrence": o, "grounded": true})).unwrap();
     }
-    let why = solidcraft_ui_text::format("joint.moves_neither", &[("joint", "Rigid1"), ("a", "A:1"), ("b", "B:1")]);
+    let why = tr!("joint.moves_neither", joint = "Rigid1", a = "A:1", b = "B:1");
 
     // Made anyway (as a script or the dialog's OK would): Messages says why, as an error.
     app.messages.clear();
@@ -2355,7 +2355,7 @@ fn picks_on_two_grounded_parts_say_the_joint_moves_neither_and_offer_to_unground
     d.pick(&app.session, face_sel(&app.session, Vec3::new(25.0, 5.0, 10.0)).unwrap());
     let Kind::Assembly(Asm::Joint(f)) = &d.kind else { panic!("{:?}", d.kind) };
     // The dialog names the joint it would make (its default name).
-    let why = solidcraft_ui_text::format("joint.moves_neither", &[("joint", "Rigid Joint1"), ("a", "A:1"), ("b", "B:1")]);
+    let why = tr!("joint.moves_neither", joint = "Rigid Joint1", a = "A:1", b = "B:1");
     let held = grounded_sides(&app, f, &d.inputs).expect("both picks are grounded");
     assert_eq!((held.why.as_str(), held.occurrence, held.name.as_str()), (why.as_str(), occ(&app, "B"), "B:1"));
     app.dialog = Some(d);
@@ -2374,7 +2374,7 @@ fn picks_on_two_grounded_parts_say_the_joint_moves_neither_and_offer_to_unground
     }
     let out = frame(&mut app, vec![]);
     assert!(text_at(&out, &why).is_some(), "the dialog says why");
-    let label = solidcraft_ui_text::format("joint.unground_part", &[("occurrence", "B:1")]);
+    let label = tr!("joint.unground_part", occurrence = "B:1");
     let at = text_at(&out, &label).expect("and offers to unground the second part");
     let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
     frame(&mut app, vec![egui::Event::PointerMoved(at)]);
@@ -2418,7 +2418,7 @@ fn grounded_note_covers_datum_picks_the_root_and_edits() {
         held
     };
     let face = |app: &SolveApp, x: f64, y: f64| face_sel(&app.session, Vec3::new(x, y, 10.0)).unwrap();
-    let both = solidcraft_ui_text::format("joint.moves_neither", &[("joint", "Rigid Joint1"), ("a", "A:1"), ("b", "B:1")]);
+    let both = tr!("joint.moves_neither", joint = "Rigid Joint1", a = "A:1", b = "B:1");
 
     // A component plane or axis of a grounded part is a side on that part, as a face is.
     for (a, b) in [
@@ -2431,7 +2431,7 @@ fn grounded_note_covers_datum_picks_the_root_and_edits() {
     }
 
     // The root against a grounded part, in either order: the button frees the part.
-    let root_note = solidcraft_ui_text::format("joint.moves_neither_root", &[("joint", "Rigid Joint1"), ("occurrence", "B:1")]);
+    let root_note = tr!("joint.moves_neither_root", joint = "Rigid Joint1", occurrence = "B:1");
     for (a, b) in [(face(&app, 5.0, 45.0), face(&app, 25.0, 5.0)), (face(&app, 25.0, 5.0), face(&app, 5.0, 45.0))] {
         let held = note(&mut app, a, b).expect("the root never moves");
         assert_eq!((held.why.as_str(), held.occurrence, held.name.as_str()), (root_note.as_str(), occ(&app, "B"), "B:1"));
@@ -2454,7 +2454,7 @@ fn grounded_note_covers_datum_picks_the_root_and_edits() {
     app.messages.clear();
     let r = app.run("joint.edit", json!({"joint": "Rigid1", "offset": 2})).unwrap();
     assert!(r["joint"].as_u64().is_some(), "the edit names its joint: {r}");
-    let why = solidcraft_ui_text::format("joint.moves_neither", &[("joint", "Rigid1"), ("a", "A:1"), ("b", "B:1")]);
+    let why = tr!("joint.moves_neither", joint = "Rigid1", a = "A:1", b = "B:1");
     assert!(texts(&app).contains(&why), "{:?}", texts(&app));
 }
 
@@ -3264,7 +3264,7 @@ fn components_from_bodies_dialog_select_all_cancel_and_ok() {
     assert!(matches!(d.kind, Kind::Assembly(Asm::FromBodies)));
     assert!(apply_commands(&h.app, d).is_err(), "OK requires at least one body");
     assert_eq!(h.app.session.doc, before);
-    h.step(&json!({"widget":solidcraft_ui_text::tr("ui.select_all")})).unwrap();
+    h.step(&json!({"widget":solidcraft_ui_text::tr_by_id("ui.select_all")})).unwrap();
     let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(commands, vec![("component.from_bodies".into(), json!({"bodies":names}))]);
     if let Ok(path) = std::env::var("SOLIDCRAFT_COMPONENTS_DIALOG_EVIDENCE") {
@@ -3291,7 +3291,7 @@ fn components_from_bodies_dialog_select_all_cancel_and_ok() {
     h.step(&json!({"start":"component.from_bodies"})).unwrap();
     let d = h.app.dialog.as_ref().unwrap();
     assert_eq!(d.inputs[0].items.body_names(), vec![names[0].clone()]);
-    h.step(&json!({"widget":solidcraft_ui_text::tr("ui.select_all")})).unwrap();
+    h.step(&json!({"widget":solidcraft_ui_text::tr_by_id("ui.select_all")})).unwrap();
     h.step(&json!({"widget":"OK"})).unwrap();
     assert!(h.app.dialog.is_none());
     for name in &names {
@@ -3346,7 +3346,7 @@ fn find_limits_fills_the_limits_from_where_the_door_meets_the_block() {
         frame(app, vec![button(false)]);
     };
     click(&mut app, &solidcraft_ui_text::tr_label("Limits").to_uppercase());
-    click(&mut app, solidcraft_ui_text::tr("joint.find_limits"));
+    click(&mut app, solidcraft_ui_text::tr_by_id("joint.find_limits"));
     assert_eq!(*app.session.doc, *before, "nothing changes until OK");
     let Some(Kind::Assembly(Asm::Joint(f))) = app.dialog.as_ref().map(|d| &d.kind) else { panic!("the dialog stays open") };
     // The door's face 4 mm off its hinge line meets the block's corner (80, 30) opening, and the

@@ -21,7 +21,7 @@ pub enum TestError {
 impl TestError {
     pub fn message(&self) -> &str {
         match self {
-            Self::AuthRequired => solidcraft_ui_text::tr("ui.agent_chat_state_auth"),
+            Self::AuthRequired => tr!("ui.agent_chat_state_auth"),
             Self::Other(message) => message,
         }
     }

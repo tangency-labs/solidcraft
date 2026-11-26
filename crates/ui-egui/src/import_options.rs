@@ -275,8 +275,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let format = formats::find(ask.values.format).map_or("", |f| solidcraft_ui_text::tr_label(f.label));
     let (title_id, ok) = if ask.insert { ("import_options.title_insert", "ui.insert") } else { ("import_options.title_open", "ui.open") };
     let title = solidcraft_ui_text::format(title_id, &[("format", format)]);
-    let ok = solidcraft_ui_text::tr(ok);
-    let cancel = solidcraft_ui_text::tr("ui.cancel");
+    let ok = solidcraft_ui_text::tr_by_id(ok);
+    let cancel = tr!("ui.cancel");
     // The window widens so its longest label (a KiCad board's copper) is not cut short: the rows'
     // form publishes the width its label column needs beyond the design's (#10620), within the
     // screen.

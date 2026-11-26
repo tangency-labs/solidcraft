@@ -109,8 +109,8 @@ fn flange_window_says_where_the_rule_values_are_changed() {
     // The whole sentence is shown: it wraps over lines rather than being cut to one.
     let line = solidcraft_theme::Tokens::get().font_small * 1.5;
     assert!(note.is_some_and(|r| r.height() > line + solidcraft_theme::Tokens::get().space_4 * 2.0), "{note:?}");
-    let text = solidcraft_ui_text::tr("ui.sheet_flange_rule_values");
-    assert!(text.contains(solidcraft_ui_text::tr("cmd.sheet_manage_rules")), "{text}");
+    let text = tr!("ui.sheet_flange_rule_values");
+    assert!(text.contains(tr!("cmd.sheet_manage_rules")), "{text}");
 }
 
 /// egui wraps a right-to-left note as one string, so the lines of a wrapped Arabic or Hebrew
@@ -130,7 +130,7 @@ fn flange_rule_note_in_arabic_and_hebrew_keeps_its_lines_unwrapped() {
         h.frames(4);
         let lines = {
             let _language = solidcraft_ui_text::scope(language);
-            solidcraft_ui_text::tr("ui.sheet_flange_rule_values").lines().count()
+            tr!("ui.sheet_flange_rule_values").lines().count()
         };
         assert!(lines > 1, "{language}: the note is split at a clause");
         let rows = h

@@ -310,7 +310,7 @@ pub fn show<S: Host>(ctx: &egui::Context, host: &mut S, pages: &[Page<S>], optio
     let mut selected = host.window_ref().section;
     let mut defaults = false;
     let (closed, action) = window.show_pages_with_header(ctx, &mut selected, &list, host, &hooks, |ui| {
-        let button = crate::button(ui, solidcraft_ui_text::tr("prefs.restore_page_defaults"), crate::Button::Normal)
+        let button = crate::button(ui, solidcraft_ui_text::tr_by_id("prefs.restore_page_defaults"), crate::Button::Normal)
             .backing_on_hover_text(labels.restore_defaults_hint);
         solidcraft_ui_registry::publish_target(&format!("{}:defaults", options.prefix), button.rect);
         defaults = button.clicked();
@@ -355,15 +355,15 @@ fn page_path<S>(pages: &[Page<S>], index: usize) -> String {
     let Some(page) = pages.get(index) else { return String::new() };
     let group = pages.get(..=index).and_then(|pages| pages.iter().rev().find_map(|page| page.host().group));
     match group {
-        Some(group) => format!("{} > {}", solidcraft_ui_text::tr(group), solidcraft_ui_text::tr(page.host().label)),
-        None => solidcraft_ui_text::tr(page.host().label).to_owned(),
+        Some(group) => format!("{} > {}", solidcraft_ui_text::tr_by_id(group), solidcraft_ui_text::tr_by_id(page.host().label)),
+        None => solidcraft_ui_text::tr_by_id(page.host().label).to_owned(),
     }
 }
 
 fn search_header<S: Host>(ui: &mut Ui, host: &mut S, options: &Options<'_, S>) {
     let id = search_id(options.id);
     let typed = drive_search(ui, host, id, options.prefix);
-    let field = crate::preferences_search_field(ui, id, &mut host.window().filter, solidcraft_ui_text::tr("prefs.search"), options.prefix);
+    let field = crate::preferences_search_field(ui, id, &mut host.window().filter, solidcraft_ui_text::tr_by_id("prefs.search"), options.prefix);
     if typed {
         place_search_cursor(ui.ctx(), id, host.window_ref().filter.chars().count());
     }
@@ -499,7 +499,7 @@ fn page_body<S: Host>(ui: &mut Ui, host: &mut S, pages: &[Page<S>], options: &Op
         }
         if settings_search::hits(ui) == 0 {
             let t = Tokens::get();
-            ui.label(egui::RichText::new(solidcraft_ui_text::tr("prefs.search_empty")).size(t.font_body).color(t.form_dim));
+            ui.label(egui::RichText::new(solidcraft_ui_text::tr_by_id("prefs.search_empty")).size(t.font_body).color(t.form_dim));
         }
     } else {
         let section = host.window_ref().section;

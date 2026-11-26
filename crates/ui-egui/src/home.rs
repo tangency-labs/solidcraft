@@ -877,10 +877,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let page = start_page::Page {
         id: "home",
-        name: app.tr("ui.start_page").into(),
+        name: tr!(app, "ui.start_page").into(),
         interactive,
         back: Some(start_page::Back {
-            template: app.tr("home.back").into(),
+            template: template!(app, "home.back").into(),
             document: app.session.doc.name.as_str().into(),
             shortcut: "Esc".into(),
             chosen: FileAction::Back,
@@ -891,10 +891,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         title: match app.home.section {
             Section::Start => app.tr_label("Start").into(),
             Section::Recovery => app.tr_label("Recover").into(),
-            Section::Export => app.tr("home.export").into(),
+            Section::Export => tr!(app, "home.export").into(),
         },
         hint: app
-            .tr(match app.home.section {
+            .tr_by_id(match app.home.section {
                 Section::Start => "home.start_hint",
                 Section::Recovery => "home.recovery_hint",
                 Section::Export => "home.export_hint",
@@ -932,15 +932,15 @@ fn rail(app: &SolveApp) -> Vec<start_page::RailItem<'_, FileAction>> {
     let nav: [(&str, start_page::Label<'_>, String, Option<Section>, bool, FileAction); 12] = [
         ("home:start", app.tr_label("Start").into(), String::new(), Some(Section::Start), true, FileAction::Section(Section::Start)),
         ("home:new", app.tr_label("New").into(), format!("{primary}N"), None, true, FileAction::New("preferred")),
-        ("home:open", app.tr("ui.open").into(), format!("{primary}O"), None, true, FileAction::Open),
+        ("home:open", tr!(app, "ui.open").into(), format!("{primary}O"), None, true, FileAction::Open),
         ("home:recover", recover, String::new(), Some(Section::Recovery), true, FileAction::Section(Section::Recovery)),
-        ("home:save", app.tr("ui.save").into(), format!("{primary}S"), None, design, FileAction::Save),
-        ("home:save_as", app.tr("ui.save_as").into(), format!("{primary}{shift}S"), None, design, FileAction::SaveAs),
-        ("home:export", app.tr("home.export").into(), String::new(), Some(Section::Export), design, FileAction::Section(Section::Export)),
-        ("home:properties", app.tr("home.properties").into(), String::new(), None, design, FileAction::Properties),
-        ("home:settings", app.tr("home.settings").into(), format!("{primary},"), None, true, FileAction::Settings),
-        ("home:shortcuts", app.tr("home.shortcuts").into(), String::new(), None, true, FileAction::Shortcuts),
-        ("home:crashes", app.tr("home.crashes").into(), String::new(), None, true, FileAction::Crashes),
+        ("home:save", tr!(app, "ui.save").into(), format!("{primary}S"), None, design, FileAction::Save),
+        ("home:save_as", tr!(app, "ui.save_as").into(), format!("{primary}{shift}S"), None, design, FileAction::SaveAs),
+        ("home:export", tr!(app, "home.export").into(), String::new(), Some(Section::Export), design, FileAction::Section(Section::Export)),
+        ("home:properties", tr!(app, "home.properties").into(), String::new(), None, design, FileAction::Properties),
+        ("home:settings", tr!(app, "home.settings").into(), format!("{primary},"), None, true, FileAction::Settings),
+        ("home:shortcuts", tr!(app, "home.shortcuts").into(), String::new(), None, true, FileAction::Shortcuts),
+        ("home:crashes", tr!(app, "home.crashes").into(), String::new(), None, true, FileAction::Crashes),
         ("home:about", app.tr_label("About SolidCraft").into(), String::new(), None, true, FileAction::About),
     ];
     let mut rail = Vec::with_capacity(nav.len() + 2 + crate::links::LINKS.len() + 1);
@@ -962,7 +962,7 @@ fn rail(app: &SolveApp) -> Vec<start_page::RailItem<'_, FileAction>> {
     for link in crate::links::LINKS {
         rail.push(start_page::RailItem::Entry(start_page::RailEntry {
             id: format!("home:{}", link.id).into(),
-            label: solidcraft_ui_text::tr(link.label).into(),
+            label: solidcraft_ui_text::tr_by_id(link.label).into(),
             shortcut: String::new().into(),
             selected: false,
             enabled: true,
@@ -982,7 +982,7 @@ fn start_body(app: &SolveApp) -> start_page::Start<'_, FileAction> {
             .unwrap_or_else(|| entry.name.as_str().into());
         let single = app.recoverable.len() == 1;
         start_page::Banner {
-            title: solidcraft_ui_text::format("home.recovery_count", &[("count", &app.recoverable.len().to_string())]).into(),
+            title: tr!("home.recovery_count", count = &app.recoverable.len().to_string()).into(),
             before_filename: " · ".into(),
             filename,
             after_filename: format!(" · {}", crate::recovery_ui::ago(entry.saved_at)).into(),
@@ -991,18 +991,18 @@ fn start_body(app: &SolveApp) -> start_page::Start<'_, FileAction> {
             discard: Some(if single {
                 (app.tr_label("Discard").into(), FileAction::Recovery(0, false))
             } else {
-                (app.tr("recovery.discard_all").into(), FileAction::DiscardAllRecovery)
+                (tr!(app, "recovery.discard_all").into(), FileAction::DiscardAllRecovery)
             }),
-            close: Some((app.tr("home.recovery_hide").into(), FileAction::HideRecoveryBanner)),
+            close: Some((tr!(app, "home.recovery_hide").into(), FileAction::HideRecoveryBanner)),
         }
     });
     let shortcut = if cfg!(target_os = "macos") { "⌘O" } else { "Ctrl+O" };
-    let open_hint = solidcraft_ui_text::format("home.open_hint", &[("shortcut", shortcut)]);
+    let open_hint = tr!("home.open_hint", shortcut = shortcut);
     let tiles = [
-        ("home:new_mm", "new", app.tr("home.new_mm"), start_page::Label::from(app.tr("home.new_mm_hint")), true, FileAction::New("mm")),
-        ("home:new_inches", "new", app.tr("home.new_inches"), app.tr("home.new_inches_hint").into(), false, FileAction::New("in")),
-        ("home:open_tile", "open", app.tr("home.open"), open_hint.into(), false, FileAction::Open),
-        ("home:import", "import", app.tr("home.import"), app.tr("home.import_hint").into(), false, FileAction::Import),
+        ("home:new_mm", "new", tr!(app, "home.new_mm"), start_page::Label::from(tr!(app, "home.new_mm_hint")), true, FileAction::New("mm")),
+        ("home:new_inches", "new", tr!(app, "home.new_inches"), tr!(app, "home.new_inches_hint").into(), false, FileAction::New("in")),
+        ("home:open_tile", "open", tr!(app, "home.open"), open_hint.into(), false, FileAction::Open),
+        ("home:import", "import", tr!(app, "home.import"), tr!(app, "home.import_hint").into(), false, FileAction::Import),
     ]
     .into_iter()
     .map(|(id, icon, title, hint, primary, chosen)| start_page::Tile {
@@ -1020,7 +1020,7 @@ fn start_body(app: &SolveApp) -> start_page::Start<'_, FileAction> {
         .enumerate()
         .map(|(index, sample)| start_page::Sample {
             title: app.tr_label(sample.name).into(),
-            description: (if app.home.wanted == Some(index) { app.tr("home.opening") } else { app.tr_label(sample.about) }).into(),
+            description: (if app.home.wanted == Some(index) { tr!(app, "home.opening") } else { app.tr_label(sample.about) }).into(),
             icon: start_page::Icon::Kit("box"),
             thumbnail: texture(app.home.thumbs.get(&format!("sample:{index}")).and_then(Option::as_ref)),
             chosen: FileAction::Sample(index),
@@ -1030,10 +1030,10 @@ fn start_body(app: &SolveApp) -> start_page::Start<'_, FileAction> {
         banner,
         actions_title: app.tr_label("New").into(),
         actions: start_page::Tiles { grid: "home_new", tiles },
-        recent_title: app.tr("home.recent").into(),
-        recent_empty: app.tr("home.recent_empty").into(),
+        recent_title: tr!(app, "home.recent").into(),
+        recent_empty: tr!(app, "home.recent_empty").into(),
         recent,
-        samples_title: app.tr("home.samples").into(),
+        samples_title: tr!(app, "home.samples").into(),
         samples,
     }
 }
@@ -1042,13 +1042,13 @@ fn recent_entry<'a>(app: &'a SolveApp, index: usize, path: &'a str) -> start_pag
     // Keep the extension so plate.step and plate.stl are not both "plate" (#9081).
     let title = std::path::Path::new(path).file_name().map_or_else(|| path.into(), |name| name.to_string_lossy());
     let missing = !available(app, path);
-    let when = if app.session.path.as_deref() == Some(path) { app.tr("home.open_now").to_string() } else { recent_time(app, path) };
+    let when = if app.session.path.as_deref() == Some(path) { tr!(app, "home.open_now").to_string() } else { recent_time(app, path) };
     let shown_path: start_page::Label<'a> = if missing {
-        format!("{} · {}", app.tr("home.missing"), friendly_path(path)).into()
+        format!("{} · {}", tr!(app, "home.missing"), friendly_path(path)).into()
     } else if path.starts_with("/disk/") {
         app.tr_label("On your computer").into()
     } else if path.starts_with("/opfs/") {
-        app.tr("home.in_this_browser").into()
+        tr!(app, "home.in_this_browser").into()
     } else {
         friendly_path(path).into()
     };
@@ -1067,15 +1067,15 @@ fn recent_entry<'a>(app: &'a SolveApp, index: usize, path: &'a str) -> start_pag
     let mut kind = recent_kind(app, path);
     let mut security = None;
     if let Some(Some(summary)) = app.home.signed.get(path) {
-        kind = format!("{kind} · {}", app.tr("home.signed"));
+        kind = format!("{kind} · {}", tr!(app, "home.signed"));
         let trusted = summary
             .fingerprint
             .as_deref()
             .is_some_and(|fingerprint| crate::documents::trusted_fingerprint(&app.preferences.trusted_signing_keys, fingerprint));
         security = Some(match (trusted, &summary.signer, &summary.fingerprint) {
-            (true, Some(signer), _) => app.tr("home.signed_by").replace("{key}", signer),
-            (_, _, Some(fingerprint)) => app.tr("home.signed_by").replace("{key}", fingerprint),
-            _ => app.tr("home.signed_unchecked").to_string(),
+            (true, Some(signer), _) => tr!(app, "home.signed_by", key = signer),
+            (_, _, Some(fingerprint)) => tr!(app, "home.signed_by", key = fingerprint),
+            _ => tr!(app, "home.signed_unchecked").to_string(),
         });
     }
     start_page::Recent {
@@ -1115,7 +1115,7 @@ fn abbreviated_path(path: &str, home: Option<&std::path::Path>) -> String {
 fn recent_kind(app: &SolveApp, path: &str) -> String {
     let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or("");
     if solidcraft_engine::io::is_design_ext(ext) || ext.eq_ignore_ascii_case("json") {
-        return app.tr("home.design_workspace").to_string();
+        return tr!(app, "home.design_workspace").to_string();
     }
     let label = match ext.to_ascii_lowercase().as_str() {
         "step" | "stp" => "STEP",
@@ -1128,7 +1128,7 @@ fn recent_kind(app: &SolveApp, path: &str) -> String {
         "3dm" => "Rhino",
         "usd" | "usda" | "usdc" | "usdz" => "OpenUSD",
         other if !other.is_empty() => return other.to_ascii_uppercase(),
-        _ => return app.tr("home.design_workspace").to_string(),
+        _ => return tr!(app, "home.design_workspace").to_string(),
     };
     label.to_string()
 }
@@ -1142,21 +1142,21 @@ fn recent_time(app: &SolveApp, path: &str) -> String {
 pub(crate) fn recent_time_at(app: &SolveApp, time: u64, now: u64) -> String {
     let seconds = now.saturating_sub(time);
     if seconds < 60 {
-        return app.tr("home.opened_just_now").to_string();
+        return tr!(app, "home.opened_just_now").to_string();
     }
     let (key, count) = if seconds < 3600 {
         ("home.opened_minutes_ago", seconds / 60)
     } else if seconds < 86400 {
         ("home.opened_hours_ago", seconds / 3600)
     } else if seconds < 172800 {
-        return app.tr("home.yesterday").to_string();
+        return tr!(app, "home.yesterday").to_string();
     } else {
         let date = solidcraft_engine::crash::utc(time);
         let date = date.split_once('T').map_or(date.as_str(), |(date, _)| date);
         let mut parts = date.rsplitn(3, '-');
         let day = parts.next().unwrap_or("").trim_start_matches('0');
         let month = parts.next().unwrap_or("");
-        return solidcraft_ui_text::format("home.short_date", &[("day", day), ("month", app.tr(&format!("home.month_{month}")))]);
+        return tr!("home.short_date", day = day, month = app.tr_by_id(&format!("home.month_{month}")));
     };
     solidcraft_ui_text::format(key, &[("count", &count.to_string())])
 }
@@ -1169,20 +1169,18 @@ fn recovery_body(app: &SolveApp) -> start_page::Reviews<'_, FileAction> {
         .enumerate()
         .map(|(index, entry)| start_page::Review {
             title: entry.name.as_str().into(),
-            detail: solidcraft_ui_text::format(
+            detail: tr!(
                 "recovery.detail",
-                &[
-                    ("file", entry.path.as_deref().unwrap_or(app.tr("recovery.never_saved"))),
-                    ("features", &entry.features.to_string()),
-                    ("when", &crate::recovery_ui::ago(entry.saved_at)),
-                ],
+                file = entry.path.as_deref().unwrap_or(tr!(app, "recovery.never_saved")),
+                features = &entry.features.to_string(),
+                when = &crate::recovery_ui::ago(entry.saved_at)
             )
             .into(),
             recover: (app.tr_label("Recover").into(), FileAction::Recovery(index, true)),
             discard: (app.tr_label("Discard").into(), FileAction::Recovery(index, false)),
         })
         .collect();
-    start_page::Reviews { empty: app.tr("home.recovery_empty").into(), items }
+    start_page::Reviews { empty: tr!(app, "home.recovery_empty").into(), items }
 }
 
 fn export_tiles(app: &SolveApp) -> start_page::Tiles<'_, FileAction> {
@@ -1209,9 +1207,9 @@ fn export_tiles(app: &SolveApp) -> start_page::Tiles<'_, FileAction> {
             title: if id == "view_dxf" {
                 app.tr_label("Export Current View as DXF…").into()
             } else {
-                format!("{} {}…", app.tr("home.export"), app.tr_label(format)).into()
+                format!("{} {}…", tr!(app, "home.export"), app.tr_label(format)).into()
             },
-            hint: hint.map_or(format, |key| app.tr(key)).into(),
+            hint: hint.map_or(format, |key| app.tr_by_id(key)).into(),
             primary: false,
             chosen,
         })
@@ -2123,7 +2121,7 @@ mod tests {
     fn the_entry_that_opens_preferences_carries_the_windows_name() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.show(0);
-        assert_eq!(solidcraft_ui_text::tr("home.settings"), solidcraft_ui_text::tr("ui.preferences"), "one name for the window");
+        assert_eq!(solidcraft_ui_text::tr_by_id("home.settings"), solidcraft_ui_text::tr_by_id("ui.preferences"), "one name for the window");
         click_file(&mut h, "home:settings");
         assert!(h.app.prefs_window.shell.open, "the entry opens Preferences");
     }

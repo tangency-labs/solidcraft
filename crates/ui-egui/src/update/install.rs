@@ -158,7 +158,7 @@ impl Progress {
     pub fn message(&self) -> String {
         let selected = self.selected.lock().unwrap_or_else(|e| e.into_inner());
         match selected.as_ref() {
-            None => solidcraft_ui_text::tr("update.refresh_checking").to_string(),
+            None => tr!("update.refresh_checking").to_string(),
             Some((release, fallback)) => solidcraft_ui_text::format(
                 if *fallback { "update.refresh_fallback" } else { "update.refresh_selected" },
                 &[("version", release.version())],

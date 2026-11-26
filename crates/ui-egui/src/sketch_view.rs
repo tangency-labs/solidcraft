@@ -22,14 +22,14 @@ pub(crate) fn owner_label(app: &SolveApp, view: u64) -> Option<String> {
     use solidcraft_engine::doc::drawing::Owner;
     let entry = app.session.active_sheet_sketch.as_ref().filter(|entry| entry.view == Some(view))?;
     match entry.owner {
-        Owner::Sheet(_) => Some(app.tr("sketch_sheet.on_sheet").to_string()),
+        Owner::Sheet(_) => Some(tr!(app, "sketch_sheet.on_sheet").to_string()),
         Owner::View(id) => {
             let drawing = app.session.doc.drawing(entry.drawing)?;
             let view = drawing.view(id)?;
             let number =
                 drawing.views.iter().filter(|candidate| candidate.sheet == view.sheet).position(|candidate| candidate.id == id)?.saturating_add(1);
             let name = crate::drawing_workspace::browser::view_name(app, drawing, view, number);
-            Some(solidcraft_ui_text::format("sketch_sheet.on_view", &[("view", &name)]))
+            Some(tr!("sketch_sheet.on_view", view = &name))
         }
     }
 }
@@ -51,14 +51,14 @@ pub(crate) fn prepare_start(app: &mut SolveApp, explicit: Option<u64>) -> Result
     sync(app)?;
     if explicit.is_none() && !app.session.view_context.descriptors().iter().any(|view| view.kind == ViewKind::Model) {
         if !app.docs.views.active().kind.can_tile() {
-            return Err(app.tr("sketch_mode.model_card_unavailable").into());
+            return Err(tr!(app, "sketch_mode.model_card_unavailable").into());
         }
         let mut next = app.docs.views.clone();
         let previous = next.active().id;
         let id = next.open(ViewKind::Model, None, false);
         next.activate(previous);
         if !next.get(id).is_some_and(|view| view.kind == ViewKind::Model) {
-            return Err(app.tr("sketch_mode.model_card_unavailable").into());
+            return Err(tr!(app, "sketch_mode.model_card_unavailable").into());
         }
         let placed = next.fill_empty(0, id) || next.show_beside(id, solidcraft_views::Edge::Right);
         let placed = placed || {
@@ -69,7 +69,7 @@ pub(crate) fn prepare_start(app: &mut SolveApp, explicit: Option<u64>) -> Result
             park.is_some_and(|park| next.unshow(park) && next.show_beside(id, solidcraft_views::Edge::Right))
         };
         if !placed {
-            return Err(app.tr("sketch_mode.model_card_unavailable").into());
+            return Err(tr!(app, "sketch_mode.model_card_unavailable").into());
         }
         crate::documents::change_views(app, |views| *views = next);
         sync(app)?;
@@ -249,7 +249,7 @@ pub(crate) fn reopen_finished(app: &mut SolveApp, event: solidcraft_engine::Sket
                     .into_iter()
                     .find(|(_, descriptor)| descriptor.id == view)
                     .map(|(_, descriptor)| descriptor.clone());
-                descriptor.ok_or_else(|| app.tr("sketch_sheet.invalid_view").to_string()).and_then(|view| crate::sheet_views::bind(app, &view))
+                descriptor.ok_or_else(|| tr!(app, "sketch_sheet.invalid_view").to_string()).and_then(|view| crate::sheet_views::bind(app, &view))
             } else {
                 // The notice is already an exact drawing/sheet receiver. A closed host is
                 // resolved by prepare_sheet_start; public drawing.open would create an unrelated view.
@@ -421,18 +421,18 @@ pub(crate) fn cancel_refresh(app: &mut SolveApp) {
 pub(crate) fn prepare_sheet_start(app: &mut SolveApp, command: &str, params: &mut serde_json::Value) -> Result<u64, String> {
     let explicit = match params.get("view") {
         None | Some(serde_json::Value::Null) => None,
-        Some(value) => Some(value.as_u64().ok_or_else(|| app.tr("sketch_sheet.invalid_view").to_string())?),
+        Some(value) => Some(value.as_u64().ok_or_else(|| tr!(app, "sketch_sheet.invalid_view").to_string())?),
     };
     if let Some(view) = explicit {
         let descriptor = crate::view_windows::layout_views(app)
             .into_iter()
             .find(|(_, descriptor)| descriptor.id == view && descriptor.kind == ViewKind::Sheet)
             .map(|(_, descriptor)| descriptor.clone())
-            .ok_or_else(|| app.tr("sketch_sheet.invalid_view").to_string())?;
+            .ok_or_else(|| tr!(app, "sketch_sheet.invalid_view").to_string())?;
         crate::sheet_views::bind(app, &descriptor)?;
     }
-    let drawing = app.session.open_drawing.ok_or_else(|| app.tr("sketch_sheet.no_sheet").to_string())?;
-    let record = app.session.doc.drawing(drawing).ok_or_else(|| app.tr("sketch_sheet.no_sheet").to_string())?;
+    let drawing = app.session.open_drawing.ok_or_else(|| tr!(app, "sketch_sheet.no_sheet").to_string())?;
+    let record = app.session.doc.drawing(drawing).ok_or_else(|| tr!(app, "sketch_sheet.no_sheet").to_string())?;
     let decode = |key| params.get(key).and_then(serde_json::Value::as_str).and_then(solidcraft_engine::doc::ids::decode);
     let sheet = if command == "drawing.sketch.edit" {
         decode("sketch").and_then(|id| record.sheet_sketch(id)).and_then(|sketch| record.sketch_sheet(sketch))
@@ -441,7 +441,7 @@ pub(crate) fn prepare_sheet_start(app: &mut SolveApp, command: &str, params: &mu
             record.sheets.iter().any(|sheet| sheet.id == owner).then_some(owner).or_else(|| record.view(owner).map(|view| view.sheet))
         })
     }
-    .ok_or_else(|| app.tr("sketch_sheet.no_sheet").to_string())?;
+    .ok_or_else(|| tr!(app, "sketch_sheet.no_sheet").to_string())?;
     let matches = |id| {
         app.session
             .view_context
@@ -452,7 +452,7 @@ pub(crate) fn prepare_sheet_start(app: &mut SolveApp, command: &str, params: &mu
     };
     let target = if let Some(view) = explicit {
         if !matches(view) {
-            return Err(app.tr("sketch_sheet.invalid_view").into());
+            return Err(tr!(app, "sketch_sheet.invalid_view").into());
         }
         Some(view)
     } else {
@@ -469,7 +469,7 @@ pub(crate) fn prepare_sheet_start(app: &mut SolveApp, command: &str, params: &mu
         .into_iter()
         .find(|(_, descriptor)| descriptor.id == target && descriptor.kind == ViewKind::Sheet)
         .map(|(_, descriptor)| descriptor.clone())
-        .ok_or_else(|| app.tr("sketch_sheet.invalid_view").to_string())?;
+        .ok_or_else(|| tr!(app, "sketch_sheet.invalid_view").to_string())?;
     crate::sheet_views::bind(app, &descriptor)?;
     if let Some(params) = params.as_object_mut() {
         params.insert("view".into(), serde_json::json!(target));
@@ -486,10 +486,10 @@ pub(crate) fn start_sheet(app: &mut SolveApp) -> Result<(), String> {
         .find(|(_, view)| view.id == focused)
         .map(|(_, view)| view.clone())
         .filter(|view| view.kind == ViewKind::Sheet)
-        .ok_or_else(|| app.tr("sketch_sheet.no_sheet").to_string())?;
+        .ok_or_else(|| tr!(app, "sketch_sheet.no_sheet").to_string())?;
     let (drawing, sheet) = crate::sheet_views::resolve(app, view.subject.as_deref())?;
     crate::sheet_views::bind(app, &view)?;
-    let record = app.session.doc.drawing(drawing).ok_or_else(|| app.tr("sketch_sheet.no_sheet").to_string())?;
+    let record = app.session.doc.drawing(drawing).ok_or_else(|| tr!(app, "sketch_sheet.no_sheet").to_string())?;
     let selected = crate::drawing_sheet_page::selected_drawing_view(app).filter(|view| record.view(*view).is_some_and(|view| view.sheet == sheet));
     let owner = selected
         .or_else(|| {

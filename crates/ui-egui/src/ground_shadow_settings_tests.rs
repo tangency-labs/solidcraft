@@ -34,7 +34,7 @@ fn ground_shadow_selector_is_shared_persistent_and_cancelable_without_changing_a
     h.call("ui.key", json!({"key":"Escape"}));
     h.call("ui.prefs", json!({"open":"Graphics","language":"en"}));
     reveal_preference(&mut h, "view:ground_shadow_selector");
-    let label = h.app.tr("ui.ground_shadow_style");
+    let label = tr!(h.app, "ui.ground_shadow_style");
     let label_rect = crate::scenario::rect_of(&format!("dialog:label:{label}")).unwrap();
     let label_font = egui::FontId::proportional(solidcraft_theme::Tokens::get().font_label);
     let text_width = h.ctx.fonts_mut(|fonts| fonts.layout_no_wrap(label.to_owned(), label_font, egui::Color32::WHITE).size().x);

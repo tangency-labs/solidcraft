@@ -510,7 +510,7 @@ fn create3d_in_the_sketch_panel_menu_opens_a_3d_sketch_with_3d_line_and_no_plane
     assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.line3d"), "and 3D Line running: {:?}", h.app.status);
     assert_eq!(h.app.session.undo.len(), undo + 1, "as one undo step");
     assert_eq!(h.app.settled_cam(), before, "the view does not turn: there is no plane to face");
-    let hint = h.app.tr("sketch.hint.create3d").to_owned();
+    let hint = tr!(h.app, "sketch.hint.create3d").to_owned();
     assert_eq!(h.app.status.as_ref().map(|status| status.0.as_str()), Some(hint.as_str()), "the hint says how to leave the plane");
     // The box's top-face vertices are off the plane the sketch rests on: the line keeps them.
     for p in OFF_PLANE {

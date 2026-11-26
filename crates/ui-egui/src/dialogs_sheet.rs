@@ -350,7 +350,7 @@ fn rule_combo(app: &SolveApp, ui: &mut egui::Ui, id: &str, rule: &mut usize) {
 /// changed: the window itself has no thickness or K-factor (#17421).
 fn flange_rule_combo(app: &SolveApp, ui: &mut egui::Ui, rule: &mut usize) {
     rule_combo(app, ui, "sm_rule", rule);
-    let hint = solidcraft_ui_text::tr("ui.sheet_flange_rule_values");
+    let hint = tr!("ui.sheet_flange_rule_values");
     crate::ui_kit::below_row_control(ui, "Rule", ui.available_width(), |ui| {
         crate::ui_kit::text(ui, hint, crate::ui_kit::Text::Note("sheet_flange_rule_values"))
     });
@@ -408,7 +408,7 @@ fn measure_text(app: &SolveApp, name: &str, face: Option<Vec3>, skip: &[Vec3]) -
     let m = solidcraft_engine::doc::measure_sheet_body(mb, face, skip, &solidcraft_engine::doc::IDENTITY).map_err(|e| e.to_string())?;
     let radii: Vec<String> = m.radii.iter().map(|r| format!("R {r:.3}")).collect();
     let bends = if radii.is_empty() { "-".to_string() } else { radii.join(", ") };
-    Ok(solidcraft_ui_text::tr("sheet.recognize_measured").replace("{thickness}", &format!("{:.3}", m.thickness)).replace("{bends}", &bends))
+    Ok(tr!("sheet.recognize_measured", thickness = &format!("{:.3}", m.thickness), bends = &bends))
 }
 
 /// Convert's inputs (#6748): the body (a solid or a surface body), the bend edges, the faces left
@@ -451,7 +451,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
         } => {
             *ty = flange_type(inputs);
             form_row(ui, "Type", |ui| {
-                ui.label(FLANGE_TYPES.get(*ty).copied().map(solidcraft_ui_text::tr).unwrap_or(""));
+                ui.label(FLANGE_TYPES.get(*ty).copied().map(solidcraft_ui_text::tr_by_id).unwrap_or(""));
             });
             match *ty {
                 1 => {
@@ -667,8 +667,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
             }
             if let Some(size) = sizes.get(at) {
                 let (hole, sheet, edge) = (size.hole.to_string(), size.min_sheet.to_string(), size.edge.to_string());
-                let limits =
-                    solidcraft_ui_text::format("ui.hardware_limits", &[("hole", hole.as_str()), ("sheet", sheet.as_str()), ("edge", edge.as_str())]);
+                let limits = tr!("ui.hardware_limits", hole = hole.as_str(), sheet = sheet.as_str(), edge = edge.as_str());
                 crate::ui_kit::status_line(ui, &limits, crate::ui_kit::StatusTone::Dim);
             }
             // What the sheet cannot hold is said as it is previewed: a sheet too thin is refused (the
@@ -697,7 +696,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                 *thin = Some((name, own));
             }
             if let Some((_, Some(t))) = thin.as_ref() {
-                let hint = solidcraft_ui_text::tr("sheet.convert_thin_hint").replace("{thickness}", &format!("{t:.3}"));
+                let hint = tr!("sheet.convert_thin_hint", thickness = &format!("{t:.3}"));
                 crate::ui_kit::status_line(ui, &hint, crate::ui_kit::StatusTone::Dim);
             }
         }

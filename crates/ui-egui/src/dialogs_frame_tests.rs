@@ -3307,7 +3307,7 @@ fn gusset_placement_icons_select_both_sides_and_center_with_exact_bounds() {
     h.frames(3);
     let nodes = &h.output.accesskit_update.as_ref().unwrap().nodes;
     for id in ["ui.gusset.negative", "ui.gusset.center", "ui.gusset.positive"] {
-        assert!(nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::Button && n.label() == Some(h.app.tr(id))), "{id}");
+        assert!(nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::Button && n.label() == Some(h.app.tr_by_id(id))), "{id}");
     }
 }
 

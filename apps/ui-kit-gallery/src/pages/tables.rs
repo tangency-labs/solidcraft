@@ -96,7 +96,7 @@ ui_kit::table_custom(ui, "params", &columns, "No parameters yet", |ui, table| {
         ] {
             // The standalone gallery embeds the folded English catalogue. Keep the specimen
             // name readable while these two new messages are still in a pending catalogue.
-            let translated = solidcraft_ui_text::tr(label);
+            let translated = solidcraft_ui_text::tr_by_id(label);
             state(ui, if translated == label { fallback } else { translated }, |ui| {
                 let state_id = ui.make_persistent_id((id, "selection"));
                 let mut selection = ui.data_mut(|data| data.get_temp::<ui_kit::CellSelection>(state_id)).unwrap_or_else(|| ui_kit::CellSelection {

@@ -255,7 +255,7 @@ fn the_bar_slot_switches_the_mode_and_shows_it() {
         assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "{mode:?}: select.mode was not run");
         let icon = crate::navigation_slots::selection_mode_icons().find(|(m, _)| *m == mode).unwrap().1;
         assert_eq!(slot.current_icon(crate::navigation_slots::value(&h.app.ui, slot)), icon);
-        assert_eq!(crate::navigation_bar_view::slot_text(&h.app, slot), h.app.tr(crate::selection_mode::label_id(mode)));
+        assert_eq!(crate::navigation_bar_view::slot_text(&h.app, slot), h.app.tr_by_id(crate::selection_mode::label_id(mode)));
     }
     // Render picks through its own filter, and an open sketch its own geometry: the slot leaves
     // the bar in both.

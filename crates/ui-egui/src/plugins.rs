@@ -535,7 +535,7 @@ pub(crate) fn busy_message(app: &SolveApp) -> String {
 }
 
 fn busy_message_at(app: &SolveApp, now: web_time::Instant) -> String {
-    let Some(job) = app.prefs_window.plugin_job.as_ref() else { return app.tr("prefs.plugin_busy").to_owned() };
+    let Some(job) = app.prefs_window.plugin_job.as_ref() else { return tr!(app, "prefs.plugin_busy").to_owned() };
     let subject = RUNNING_JOBS.lock().ok().and_then(|jobs| jobs.iter().find(|info| info.key == job.key).and_then(|info| info.subject.clone()));
     let what = match subject {
         Some(subject) => format!("{} ({subject})", job.command),
@@ -591,7 +591,7 @@ fn spawn_package(
     #[cfg(target_arch = "wasm32")]
     {
         let _ = (command, params, scope, level, action);
-        Err(app.tr("ui.plugins_desktop").to_owned())
+        Err(tr!(app, "ui.plugins_desktop").to_owned())
     }
 }
 
@@ -626,7 +626,7 @@ fn tick_at(app: &mut SolveApp, ctx: &egui::Context, wait: bool, now: web_time::I
         if job.command == "plugin.remove"
             || (job.command == "plugin.install" && reply.get("installed").and_then(serde_json::Value::as_bool) == Some(true))
         {
-            let id = reply["id"].as_str().ok_or_else(|| app.tr("prefs.plugin_reply_invalid").to_owned())?;
+            let id = reply["id"].as_str().ok_or_else(|| tr!(app, "prefs.plugin_reply_invalid").to_owned())?;
             if let Some(path) = state.packages.get(id) {
                 app.session.plugin_state.packages.insert(id.into(), path.clone());
             } else {
@@ -738,14 +738,14 @@ pub(crate) fn offload_control(
 
 fn remove_confirmation(app: &mut SolveApp, ctx: &egui::Context) {
     let Some((id, name)) = app.prefs_window.plugin_remove.clone() else { return };
-    let title = solidcraft_ui_text::format("prefs.plugin_remove_title", &[("name", &name)]);
-    let data_label = app.tr("prefs.plugin_remove_user_data").to_owned();
+    let title = tr!("prefs.plugin_remove_title", name = &name);
+    let data_label = tr!(app, "prefs.plugin_remove_user_data").to_owned();
     let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::unique("plugin_remove"), "delete", &title)
         .tone(crate::ui_kit::Tone::Danger)
-        .actions(app.tr("prefs.plugin_remove"), app.tr("prefs.plugin_cancel"), None)
+        .actions(tr!(app, "prefs.plugin_remove"), tr!(app, "prefs.plugin_cancel"), None)
         .selected(crate::ui_kit::Action::Cancel)
         .show(ctx, true, |ui| {
-            ui.add(egui::Label::new(app.tr("prefs.plugin_remove_note")).wrap());
+            ui.add(egui::Label::new(tr!(app, "prefs.plugin_remove_note")).wrap());
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
             let response = crate::ui_kit::checkbox(ui, &data_label, &mut app.prefs_window.plugin_remove_user_data);
             crate::scenario::publish_target("prefs:plugin:remove_user_data", response.rect);
@@ -792,7 +792,7 @@ pub(crate) fn commit_resource_inputs(app: &mut SolveApp) -> Result<(), String> {
     }
     let Some(limits) = parsed_limits(&input) else {
         app.prefs_window.plugin_limit_inputs = Some(input);
-        return Err(app.tr("prefs.plugin_resource_limits_invalid").to_string());
+        return Err(tr!(app, "prefs.plugin_resource_limits_invalid").to_string());
     };
     app.preferences.plugin_max_fuel = limits.max_fuel;
     app.preferences.plugin_max_memory_mib = limits.max_memory_mib;
@@ -805,14 +805,14 @@ pub(crate) fn commit_resource_inputs(app: &mut SolveApp) -> Result<(), String> {
 fn resource_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     let current = host_limits(&app.preferences);
     let mut input = app.prefs_window.plugin_limit_inputs.take().filter(|v| v.applied == current).unwrap_or_else(|| current.into());
-    let (fuel_enter, _) = crate::ui_kit::text_row(ui, app.tr("prefs.plugin_max_fuel"), &mut input.fuel, "");
-    let (memory_enter, _) = crate::ui_kit::text_row(ui, app.tr("prefs.plugin_max_memory"), &mut input.memory, "");
-    let (calls_enter, _) = crate::ui_kit::text_row(ui, app.tr("prefs.plugin_max_host_calls"), &mut input.host_calls, "");
-    let (deadline_enter, _) = crate::ui_kit::text_row(ui, app.tr("prefs.plugin_max_deadline_ms"), &mut input.deadline_ms, "");
+    let (fuel_enter, _) = crate::ui_kit::text_row(ui, tr!(app, "prefs.plugin_max_fuel"), &mut input.fuel, "");
+    let (memory_enter, _) = crate::ui_kit::text_row(ui, tr!(app, "prefs.plugin_max_memory"), &mut input.memory, "");
+    let (calls_enter, _) = crate::ui_kit::text_row(ui, tr!(app, "prefs.plugin_max_host_calls"), &mut input.host_calls, "");
+    let (deadline_enter, _) = crate::ui_kit::text_row(ui, tr!(app, "prefs.plugin_max_deadline_ms"), &mut input.deadline_ms, "");
     if parsed_limits(&input).is_none() {
-        crate::ui_kit::text(ui, app.tr("prefs.plugin_resource_limits_invalid"), crate::ui_kit::Text::Error("plugin_limits"));
+        crate::ui_kit::text(ui, tr!(app, "prefs.plugin_resource_limits_invalid"), crate::ui_kit::Text::Error("plugin_limits"));
     }
-    crate::ui_kit::text(ui, app.tr("prefs.plugin_resource_limits_note"), crate::ui_kit::Text::Hint("plugin_limits"));
+    crate::ui_kit::text(ui, tr!(app, "prefs.plugin_resource_limits_note"), crate::ui_kit::Text::Hint("plugin_limits"));
     app.prefs_window.plugin_limit_inputs = Some(input);
     if (fuel_enter || memory_enter || calls_enter || deadline_enter)
         && let Err(error) = commit_resource_inputs(app)
@@ -846,27 +846,24 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 pub(crate) fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
     crate::ui_kit::settings_page(ui, |ui| {
-        crate::ui_kit::settings_heading(ui, solidcraft_ui_text::tr("ui.plugins"), solidcraft_ui_text::tr("prefs.plugins_intro"));
+        crate::ui_kit::settings_heading(ui, tr!("ui.plugins"), tr!("prefs.plugins_intro"));
         let Some(dir) = dir else {
-            ui.label(solidcraft_ui_text::tr("ui.plugins_desktop"));
+            ui.label(tr!("ui.plugins_desktop"));
             return;
         };
         let plugins = crate::plugin_slots::preferences_inventory(app, dir);
         if plugins.is_empty() {
             // First-time users need the package format and a way to find the guide before
             // global host resource limits, which are rarely useful without a plugin (#18764).
-            let intro =
-                crate::ui_kit::text(ui, solidcraft_ui_text::tr("prefs.plugins_get_started"), crate::ui_kit::Text::Hint("plugins_get_started"));
+            let intro = crate::ui_kit::text(ui, tr!("prefs.plugins_get_started"), crate::ui_kit::Text::Hint("plugins_get_started"));
             crate::scenario::publish_rect("prefs:plugins:get_started", intro.rect);
-            let guide = ui.hyperlink_to(
-                RichText::new(solidcraft_ui_text::tr("prefs.plugins_guide")),
-                "https://github.com/tangency-labs/solidcraft/blob/main/docs/plugins.md",
-            );
+            let guide =
+                ui.hyperlink_to(RichText::new(tr!("prefs.plugins_guide")), "https://github.com/tangency-labs/solidcraft/blob/main/docs/plugins.md");
             crate::scenario::publish_target("prefs:plugins:guide", guide.rect);
             ui.add_space(8.0);
         }
         // Install plugin…: pick a .zip, review what it asks for, install it.
-        let install = crate::ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("plugin_install.menu"), "import", !busy(app), false);
+        let install = crate::ui_kit::icon_label_button(ui, tr!("plugin_install.menu"), "import", !busy(app), false);
         crate::scenario::publish_target("prefs:plugins:install", install.rect);
         if install.clicked() {
             crate::plugin_install::start(app);
@@ -877,56 +874,41 @@ pub(crate) fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Pa
         let searching = crate::ui_kit::settings_search::querying(ui);
         // The page's own box is for browsing Plugins. The dialog search is the filter while it is active.
         if !searching {
-            crate::ui_kit::search_field(
-                ui,
-                ui.scope_id().with("plugins_search"),
-                &mut app.prefs_window.plugin_query,
-                solidcraft_ui_text::tr("ui.plugins_search"),
-            );
+            crate::ui_kit::search_field(ui, ui.scope_id().with("plugins_search"), &mut app.prefs_window.plugin_query, tr!("ui.plugins_search"));
             ui.add_space(8.0);
         }
         let skipped = crate::plugin_slots::skipped(app).to_vec();
         let query = app.prefs_window.plugin_query.clone();
-        crate::ui_kit::settings_list_section(
-            ui,
-            "plugins_installed",
-            solidcraft_ui_text::tr("prefs.plugins_installed"),
-            Some(&plugins.len().to_string()),
-            |ui| {
-                if plugins.is_empty() && (!searching || crate::ui_kit::settings_search::shows_all(ui)) {
-                    crate::ui_kit::text(ui, solidcraft_ui_text::tr("ui.plugins_empty"), crate::ui_kit::Text::Hint("plugins_empty"));
+        crate::ui_kit::settings_list_section(ui, "plugins_installed", tr!("prefs.plugins_installed"), Some(&plugins.len().to_string()), |ui| {
+            if plugins.is_empty() && (!searching || crate::ui_kit::settings_search::shows_all(ui)) {
+                crate::ui_kit::text(ui, tr!("ui.plugins_empty"), crate::ui_kit::Text::Hint("plugins_empty"));
+            }
+            ui.spacing_mut().item_spacing.y = t.space_8;
+            let mut shown = 0usize;
+            for plugin in plugins.iter().filter(|plugin| searching || matches_query(plugin, &query)) {
+                if searching
+                    && !crate::ui_kit::settings_search::shows_all(ui)
+                    && !crate::ui_kit::settings_search::texts_hit(ui, &[&plugin.name, &plugin.id, &plugin.description, &plugin.version])
+                {
+                    continue;
                 }
-                ui.spacing_mut().item_spacing.y = t.space_8;
-                let mut shown = 0usize;
-                for plugin in plugins.iter().filter(|plugin| searching || matches_query(plugin, &query)) {
-                    if searching
-                        && !crate::ui_kit::settings_search::shows_all(ui)
-                        && !crate::ui_kit::settings_search::texts_hit(ui, &[&plugin.name, &plugin.id, &plugin.description, &plugin.version])
-                    {
-                        continue;
-                    }
-                    shown += 1;
-                    if searching {
-                        crate::ui_kit::settings_search::reveal(ui);
-                        crate::ui_kit::settings_search::push_force(ui);
-                    }
-                    plugin_card(app, ui, dir, plugin);
-                    if searching {
-                        crate::ui_kit::settings_search::pop_force(ui);
-                    }
+                shown += 1;
+                if searching {
+                    crate::ui_kit::settings_search::reveal(ui);
+                    crate::ui_kit::settings_search::push_force(ui);
                 }
-                if !searching && !plugins.is_empty() && shown == 0 {
-                    ui.label(solidcraft_ui_text::tr("ui.plugins_none"));
+                plugin_card(app, ui, dir, plugin);
+                if searching {
+                    crate::ui_kit::settings_search::pop_force(ui);
                 }
-            },
-        );
+            }
+            if !searching && !plugins.is_empty() && shown == 0 {
+                ui.label(tr!("ui.plugins_none"));
+            }
+        });
         if !searching && query.trim().is_empty() && !skipped.is_empty() {
             ui.add_space(6.0);
-            ui.label(
-                RichText::new(solidcraft_ui_text::format("ui.plugins_skipped", &[("count", &skipped.len().to_string())]))
-                    .size(t.font_small)
-                    .color(t.text_dim),
-            );
+            ui.label(RichText::new(tr!("ui.plugins_skipped", count = &skipped.len().to_string())).size(t.font_small).color(t.text_dim));
             for skip in skipped.iter().take(8) {
                 let who = if skip.folder.is_empty() { "folder" } else { skip.folder.as_str() };
                 ui.label(RichText::new(format!("{who}: {}", skip.reason)).size(t.font_small).color(t.text_dim));
@@ -934,8 +916,7 @@ pub(crate) fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Pa
         }
         ui.add_space(8.0);
         let was_expanded = app.preferences.plugin_limits_expanded;
-        let advanced =
-            crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("prefs.plugins_advanced_limits"), &mut app.preferences.plugin_limits_expanded);
+        let advanced = crate::ui_kit::checkbox(ui, tr!("prefs.plugins_advanced_limits"), &mut app.preferences.plugin_limits_expanded);
         crate::scenario::publish_target("prefs:plugins:advanced_limits", advanced.rect);
         if was_expanded && !app.preferences.plugin_limits_expanded {
             // Do not leave a hidden, unfinished fuel or memory change pending for Apply.
@@ -944,17 +925,13 @@ pub(crate) fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Pa
         if app.preferences.plugin_limits_expanded {
             resource_controls(app, ui);
         }
-        crate::ui_kit::checkbox(
-            ui,
-            solidcraft_ui_text::tr("prefs.plugin_remember_dialog_position"),
-            &mut app.preferences.plugin_remember_dialog_position,
-        )
-        .on_hover_text(solidcraft_ui_text::tr("prefs.plugin_remember_dialog_position_help"));
+        crate::ui_kit::checkbox(ui, tr!("prefs.plugin_remember_dialog_position"), &mut app.preferences.plugin_remember_dialog_position)
+            .on_hover_text(tr!("prefs.plugin_remember_dialog_position_help"));
         ui.add_space(8.0);
         if !searching {
             ui.horizontal(|ui| {
-                let button = crate::ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("prefs.plugins_show_folder"), "folder", true, false)
-                    .backing_on_hover_text(solidcraft_ui_text::format("ui.plugins_note", &[("path", &path)]));
+                let button = crate::ui_kit::icon_label_button(ui, tr!("prefs.plugins_show_folder"), "folder", true, false)
+                    .backing_on_hover_text(tr!("ui.plugins_note", path = &path));
                 crate::scenario::publish_target("prefs:plugins:folder", button.rect);
                 if button.clicked() {
                     if let Err(e) = std::fs::create_dir_all(dir) {
@@ -973,36 +950,36 @@ pub(crate) fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Pa
 /// What was approved at install for `plugin`'s current package, in plain words: command groups,
 /// folders with their access, fuel and memory. Grants made for another version count for nothing.
 pub(crate) fn approved_text(app: &SolveApp, plugin: &Plugin) -> String {
-    use solidcraft_ui_text::{format, tr};
+    use solidcraft_ui_text::tr_by_id;
     let Some(grants) = app.session.plugin_state.grants.get(&plugin.id).filter(|g| g.package_hash.as_deref() == Some(plugin.approval.as_str())) else {
-        return tr("prefs.plugin_approved_nothing").to_string();
+        return tr!("prefs.plugin_approved_nothing").to_string();
     };
     let mut parts: Vec<String> = grants
         .command_groups
         .iter()
         .map(|group| match group.as_str() {
-            "app" | "doc" | "file" | "plugin" => tr(&std::format!("prefs.plugin_group_short_{group}")).to_string(),
+            "app" | "doc" | "file" | "plugin" => tr_by_id(&std::format!("prefs.plugin_group_short_{group}")).to_string(),
             other => other.to_string(),
         })
         .collect();
     for folder in &grants.folders {
-        let access = tr(match (folder.read, folder.write) {
+        let access = tr_by_id(match (folder.read, folder.write) {
             (true, true) => "prefs.plugin_folder_read_write",
             (false, true) => "prefs.plugin_folder_write",
             _ => "prefs.plugin_folder_read",
         });
-        parts.push(format("prefs.plugin_folder", &[("name", &folder.name), ("access", access)]));
+        parts.push(tr!("prefs.plugin_folder", name = &folder.name, access = access));
     }
     if let Some(fuel) = grants.fuel {
-        parts.push(format("prefs.plugin_approved_fuel", &[("fuel", &fuel.to_string())]));
+        parts.push(tr!("prefs.plugin_approved_fuel", fuel = &fuel.to_string()));
     }
     if let Some(memory) = grants.memory_mib {
-        parts.push(format("prefs.plugin_approved_memory", &[("memory", &memory.to_string())]));
+        parts.push(tr!("prefs.plugin_approved_memory", memory = &memory.to_string()));
     }
     if parts.is_empty() {
-        return tr("prefs.plugin_approved_nothing").to_string();
+        return tr!("prefs.plugin_approved_nothing").to_string();
     }
-    format("prefs.plugin_approved", &[("list", &parts.join(", "))])
+    tr!("prefs.plugin_approved", list = &parts.join(", "))
 }
 
 fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugin) {
@@ -1010,13 +987,13 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
     let mut on = enabled(app, &plugin.id);
     let was_on = on;
     let offer = crate::plugin_updates::offered(app, plugin).map(|offer| offer.version.clone());
-    let update_label = offer.as_ref().map(|version| solidcraft_ui_text::format("plugin_update.button", &[("version", version)]));
+    let update_label = offer.as_ref().map(|version| tr!("plugin_update.button", version = version));
     let labels = ui_kit::PluginCardLabels {
         show_in_folder: solidcraft_ui_text::tr_label("Show in folder"),
-        enabled: solidcraft_ui_text::tr("prefs.plugins_enabled"),
+        enabled: tr!("prefs.plugins_enabled"),
         update: update_label.as_deref(),
     };
-    let remove_label = app.tr("prefs.plugin_remove").to_owned();
+    let remove_label = tr!(app, "prefs.plugin_remove").to_owned();
     let can_remove = !busy(app) && Path::new(&plugin.path) == dir.join(&plugin.id);
     let card = ui
         .push_id(&plugin.id, |ui| {
@@ -1045,7 +1022,7 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
         ui.label(RichText::new(approved).size(t.font_small).color(t.text_dim));
     });
     if let Some(error) = app.session.plugin_state.listener_failures.get(&plugin.id) {
-        let text = solidcraft_ui_text::format("prefs.plugin_listener_failed", &[("error", error)]);
+        let text = tr!("prefs.plugin_listener_failed", error = error);
         ui.horizontal_wrapped(|ui| {
             ui.add_space(t.space_12);
             ui.label(RichText::new(text).size(t.font_small).color(t.text_dim));
@@ -1101,9 +1078,9 @@ fn plugin_settings(app: &mut SolveApp, ui: &mut egui::Ui, plugin: &Plugin, on: b
     if plugin.shaders.is_empty() && plugin.tints.is_empty() && plugin.panels.is_empty() {
         return;
     }
-    let label = app.tr("prefs.background_shader").to_owned();
-    let tint_label = app.tr("prefs.tint_shader").to_owned();
-    let panel_label = app.tr("prefs.panel_shader").to_owned();
+    let label = tr!(app, "prefs.background_shader").to_owned();
+    let tint_label = tr!(app, "prefs.tint_shader").to_owned();
+    let panel_label = tr!(app, "prefs.panel_shader").to_owned();
     ui.indent(("plugin_settings", &plugin.id), |ui| {
         ui.add_enabled_ui(on, |ui| {
             for (key, name) in &plugin.shaders {
@@ -1182,11 +1159,11 @@ fn picture_row(app: &mut SolveApp, ui: &mut egui::Ui, picture: &str, choose: &st
     let shown = chosen
         .as_deref()
         .and_then(|path| Path::new(path).file_name())
-        .map_or_else(|| app.tr("prefs.background_picture_default").to_owned(), |name| name.to_string_lossy().into_owned());
+        .map_or_else(|| tr!(app, "prefs.background_picture_default").to_owned(), |name| name.to_string_lossy().into_owned());
     let row = format!("{choose}: {shown}");
     let picture = picture.to_owned();
     crate::ui_kit::row(ui, &row, |ui| {
-        let pick = crate::ui_kit::button(ui, app.tr("prefs.background_picture_choose"), crate::ui_kit::Button::Normal);
+        let pick = crate::ui_kit::button(ui, tr!(app, "prefs.background_picture_choose"), crate::ui_kit::Button::Normal);
         crate::scenario::publish_target(&format!("prefs:background_picture:{picture}:choose"), pick.rect);
         if pick.clicked() {
             let for_picture = picture.clone();
@@ -1199,7 +1176,7 @@ fn picture_row(app: &mut SolveApp, ui: &mut egui::Ui, picture: &str, choose: &st
             });
         }
         if chosen.is_some() {
-            let clear = crate::ui_kit::button(ui, app.tr("prefs.background_picture_clear"), crate::ui_kit::Button::Ghost);
+            let clear = crate::ui_kit::button(ui, tr!(app, "prefs.background_picture_clear"), crate::ui_kit::Button::Ghost);
             crate::scenario::publish_target(&format!("prefs:background_picture:{picture}:clear"), clear.rect);
             if clear.clicked() {
                 app.preferences.background_shader_pictures.remove(&picture);

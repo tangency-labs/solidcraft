@@ -200,7 +200,7 @@ pub(crate) fn continuity_row_explained(
 
 /// The hover text of a continuity choice: each order's own line, which names its code.
 pub(crate) fn continuity_tip(allowed: &[Continuity]) -> String {
-    allowed.iter().map(|g| solidcraft_ui_text::tr(g.tip_id())).collect::<Vec<_>>().join("\n")
+    allowed.iter().map(|g| solidcraft_ui_text::tr_by_id(g.tip_id())).collect::<Vec<_>>().join("\n")
 }
 
 /// What each dialog's continuity rows offer: the orders its construction builds, from the
@@ -213,7 +213,7 @@ fn patch_orders() -> Vec<Continuity> {
 /// faces meet each other with different curvatures (tangent only: no surface smooth at the corner
 /// has both curvatures there).
 fn patch_continuity_tip() -> String {
-    format!("{}\n{}", continuity_tip(&patch_orders()), solidcraft_ui_text::tr("ui.patch_continuity_corner_tip"))
+    format!("{}\n{}", continuity_tip(&patch_orders()), tr!("ui.patch_continuity_corner_tip"))
 }
 
 fn blend_orders() -> Vec<Continuity> {
@@ -367,7 +367,7 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf, inputs: &mut Vec<SelInput>, active:
             choice_row(ui, "Continuity", "match_order", order, &MATCH_CONTINUITY.map(|(label, _)| label));
         }
         Surf::Stitch { tolerance } => {
-            enter |= hint_row(ui, "Tolerance", tolerance, solidcraft_ui_text::tr("ui.stitch_tolerance_hint"));
+            enter |= hint_row(ui, "Tolerance", tolerance, tr!("ui.stitch_tolerance_hint"));
         }
         Surf::Thicken { thickness, symmetric, operation } => {
             enter |= expr_row(ui, "Thickness", thickness);
@@ -995,12 +995,12 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             ("surface.extend", p)
         }
         Surf::Trim { extend, stitch, direction, face_normal } => {
-            let need_trim = |i: usize, message| {
+            let need_trim = |i: usize, message: solidcraft_ui_text::Msg| {
                 if items(inputs, i).is_empty() { Err(app.tr(message).to_string()) } else { Ok(()) }
             };
-            need_trim(0, "ui.trim_select_surface")?;
-            need_trim(2, "ui.trim_select_keep")?;
-            let body = items(inputs, 0).body_names().into_iter().next().ok_or_else(|| app.tr("ui.trim_select_surface").to_string())?;
+            need_trim(0, msg!("ui.trim_select_surface"))?;
+            need_trim(2, msg!("ui.trim_select_keep"))?;
+            let body = items(inputs, 0).body_names().into_iter().next().ok_or_else(|| tr!(app, "ui.trim_select_surface").to_string())?;
             // One point keeps its side, several the regions they pick.
             let points = |i: usize| -> Option<Value> {
                 let pts: Vec<Value> =
@@ -1011,12 +1011,14 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
                     _ => Some(json!(pts)),
                 }
             };
-            let mut p =
-                Map::from_iter([("body".into(), json!(body)), ("keep".into(), points(2).ok_or_else(|| app.tr("ui.trim_select_keep").to_string())?)]);
+            let mut p = Map::from_iter([
+                ("body".into(), json!(body)),
+                ("keep".into(), points(2).ok_or_else(|| tr!(app, "ui.trim_select_keep").to_string())?),
+            ]);
             if let Some(other) = items(inputs, 3).body_names().into_iter().next() {
-                need_trim(4, "ui.trim_select_other_keep")?;
+                need_trim(4, msg!("ui.trim_select_other_keep"))?;
                 p.insert("with".into(), json!(other));
-                p.insert("keep_with".into(), points(4).ok_or_else(|| app.tr("ui.trim_select_other_keep").to_string())?);
+                p.insert("keep_with".into(), points(4).ok_or_else(|| tr!(app, "ui.trim_select_other_keep").to_string())?);
                 if *extend {
                     p.insert("extend".into(), json!(true));
                 }
@@ -1024,7 +1026,7 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
                     p.insert("stitch".into(), json!(true));
                 }
             } else {
-                need_trim(1, "ui.trim_select_tool")?;
+                need_trim(1, msg!("ui.trim_select_tool"))?;
                 let picks = items(inputs, 1);
                 let curves: Vec<String> =
                     picks.iter().filter_map(|x| if let Sel::SketchCurve { id, .. } = x { Some(id.clone()) } else { None }).collect();
@@ -1037,13 +1039,13 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
                             let (key, t) = tool(app, Some(one))?;
                             p.insert(key.into(), t);
                         }
-                        _ => return Err(app.tr("ui.trim_one_tool").to_string()),
+                        _ => return Err(tr!(app, "ui.trim_one_tool").to_string()),
                     }
                 } else {
                     if curves.len() != picks.len() {
-                        return Err(app.tr("ui.trim_one_tool").to_string());
+                        return Err(tr!(app, "ui.trim_one_tool").to_string());
                     }
-                    let sketch = crate::dialogs::picks_sketch(app, picks, None).ok_or_else(|| app.tr("ui.trim_curve_sketch").to_string())?;
+                    let sketch = crate::dialogs::picks_sketch(app, picks, None).ok_or_else(|| tr!(app, "ui.trim_curve_sketch").to_string())?;
                     let mut c = Map::from_iter([("sketch".into(), json!(sketch)), ("curves".into(), json!(curves))]);
                     // What the dialog does not show is kept as the feature was made (Edit Feature).
                     if *face_normal {

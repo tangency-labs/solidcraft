@@ -106,7 +106,7 @@ fn batch_of(language: Locale, names: &[String], more: bool) -> String {
     if more {
         list.push_str(", …");
     }
-    language.format("ui.agent_tool.batch_of", &[("names", &list)])
+    tr!(language, "ui.agent_tool.batch_of", names = &list)
 }
 
 /// A title an approval or permission card carries (`batch: solid.fillet, solid.chamfer (+2)`,

@@ -741,7 +741,7 @@ pub(crate) fn refused(app: &mut SolveApp) -> bool {
     if app.policy.allows("problem_reports") {
         return false;
     }
-    app.set_status(solidcraft_ui_text::tr("policy.reports_off").to_string(), true);
+    app.set_status(tr!("policy.reports_off").to_string(), true);
     true
 }
 
@@ -756,7 +756,7 @@ fn keep_open_draft(app: &mut SolveApp, new_context: bool) -> bool {
     let state = &mut app.issue_report;
     let Some(draft) = state.draft.as_mut() else { return false };
     if new_context {
-        draft.note = solidcraft_ui_text::tr("ui.report_finish_current").to_string();
+        draft.note = tr!("ui.report_finish_current").to_string();
     }
     true
 }
@@ -3125,10 +3125,13 @@ mod tests {
         let body: serde_json::Value = serde_json::from_slice(drafts[0].body.as_deref().unwrap()).unwrap();
         assert_eq!(body["title"], "The sketch dimension box covers the value");
         // The dialog is now the Thanks box, with the link.
-        assert!(h.widget(solidcraft_ui_text::tr("report.thanks")).is_some(), "Thanks is shown");
-        assert!(h.widget(solidcraft_ui_text::tr("report.copy_link")).is_some() && h.widget(solidcraft_ui_text::tr("report.open_again")).is_some());
+        assert!(h.widget(solidcraft_ui_text::tr_by_id("report.thanks")).is_some(), "Thanks is shown");
+        assert!(
+            h.widget(solidcraft_ui_text::tr_by_id("report.copy_link")).is_some()
+                && h.widget(solidcraft_ui_text::tr_by_id("report.open_again")).is_some()
+        );
         assert!(crate::scenario::handle_at("dialog:ok").is_none(), "no Send any more");
-        assert_eq!(ticket::title_or_default("", ""), solidcraft_ui_text::tr("report.default_title"));
+        assert_eq!(ticket::title_or_default("", ""), solidcraft_ui_text::tr_by_id("report.default_title"));
     }
 
     #[test]
@@ -3140,8 +3143,11 @@ mod tests {
         click_commands_at(&mut h, [f64::from(ok.x), f64::from(ok.y)]);
         h.frames(10);
         assert!(matches!(h.app.tickets.outcome, Some(tickets::Outcome::Failed(_))));
-        assert!(h.widget(solidcraft_ui_text::tr("report.error_title")).is_some(), "the error is shown");
-        assert!(h.widget(solidcraft_ui_text::tr("report.retry")).is_some() && h.widget(solidcraft_ui_text::tr("report.copy_details")).is_some());
+        assert!(h.widget(solidcraft_ui_text::tr_by_id("report.error_title")).is_some(), "the error is shown");
+        assert!(
+            h.widget(solidcraft_ui_text::tr_by_id("report.retry")).is_some()
+                && h.widget(solidcraft_ui_text::tr_by_id("report.copy_details")).is_some()
+        );
         assert_eq!(requests.lock().unwrap().iter().filter(|r| r.url.ends_with("/api/drafts")).count(), 1);
     }
 
@@ -3176,7 +3182,7 @@ mod tests {
         let t = ticket::new_ticket(&mut app, &draft, None);
         assert!(t.from_failure && t.form.kind == payload::Kind::Bug);
         assert!(t.form.title.contains(error.lines().next().unwrap()), "{}", t.form.title);
-        assert!(t.form.description.contains("**Error:**") && t.form.description.contains(solidcraft_ui_text::tr("report.trying_to_do")));
+        assert!(t.form.description.contains("**Error:**") && t.form.description.contains(solidcraft_ui_text::tr_by_id("report.trying_to_do")));
 
         // The preference brings back the GitHub draft for every report; the link for one.
         app.preferences.report_on_github = true;
@@ -3567,7 +3573,7 @@ mod tests {
     #[test]
     fn ticket_report_drops_the_unanswered_question() {
         crate::i18n::install();
-        let q = solidcraft_ui_text::tr("report.trying_to_do");
+        let q = solidcraft_ui_text::tr_by_id("report.trying_to_do");
         let template = format!("**Failed:** Fillet (`solid.fillet`)\n**Error:** radius too large\n\n{q}\n");
         assert_eq!(ticket::without_unanswered(&template), "**Failed:** Fillet (`solid.fillet`)\n**Error:** radius too large\n");
         assert_eq!(ticket::without_unanswered(&format!("{template}  \n\n")), "**Failed:** Fillet (`solid.fillet`)\n**Error:** radius too large\n");
@@ -3581,7 +3587,7 @@ mod tests {
         let (mut app, _, _, _) = ticket_app(true, None);
         // Read again: making the app loads the message catalogs, which a test run alone in its
         // own process has not loaded before.
-        let q = solidcraft_ui_text::tr("report.trying_to_do");
+        let q = solidcraft_ui_text::tr_by_id("report.trying_to_do");
         let mut draft = draft_for(&app, None, Some("radius too large"));
         draft.title_prefix = "Fillet: ".into();
         let mut t = ticket::new_ticket(&mut app, &draft, None);

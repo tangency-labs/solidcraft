@@ -2054,7 +2054,7 @@ impl WorkspacePanelHost {
         for (horizontal, bounds) in scroll_tracks(&frame.layout) {
             let target = HostControlTarget::Scroll { horizontal };
             let id = scoped_id(scope, window, None, &target);
-            let label = solidcraft_ui_text::tr(if horizontal { "ui.panel_host.scroll_horizontal" } else { "ui.panel_host.scroll_vertical" });
+            let label = solidcraft_ui_text::tr_by_id(if horizontal { "ui.panel_host.scroll_horizontal" } else { "ui.panel_host.scroll_vertical" });
             let (visible, total, offset) = if horizontal {
                 (frame.layout.capacity.size.width, frame.layout.extent.width, frame.layout.allocation_environment.scroll.x)
             } else {
