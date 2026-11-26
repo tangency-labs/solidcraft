@@ -232,6 +232,27 @@ fn device_ids(device: &str) -> Option<(u16, u16)> {
     Some((u16::from_str_radix(vendor, 16).ok()?, u16::from_str_radix(product, 16).ok()?))
 }
 
+/// What Preferences calls button `number` of `device`: the name printed on it for a device we have
+/// measured (`T`, `Esc`, `V1`; a symbol key in the user's language), else `Button 3`; a long press's
+/// row adds that it is held.
+pub fn button_name(device: &str, number: u8, long: bool) -> String {
+    use solidcraft_space_mouse::buttons::Printed;
+    let printed = device_ids(device).and_then(|(vendor, product)| solidcraft_space_mouse::buttons::printed(vendor, product, number));
+    let printed = printed.map(|printed| match printed {
+        Printed::Text(text) => text.to_owned(),
+        Printed::Roll => solidcraft_ui_text::tr("ui.3d_mouse_view_roll").to_string(),
+        // Not "Rotation lock": that is the checkbox in the same section, which the key switches.
+        Printed::Lock => solidcraft_ui_text::tr("ui.3d_mouse_key_lock").to_string(),
+    });
+    let number = number.to_string();
+    match (printed, long) {
+        (Some(key), false) => key,
+        (Some(key), true) => solidcraft_ui_text::format("ui.3d_mouse_key_held", &[("key", &key)]),
+        (None, false) => solidcraft_ui_text::format("ui.3d_mouse_button", &[("number", &number)]),
+        (None, true) => solidcraft_ui_text::format("ui.3d_mouse_button_long", &[("number", &number)]),
+    }
+}
+
 fn job_of(action: solidcraft_space_mouse::buttons::Action) -> Option<ButtonJob> {
     use solidcraft_space_mouse::buttons::Action;
     Some(match action {
@@ -819,7 +840,7 @@ mod tests {
     /// The camera math the page applies the motion with (`navigation::device`): `sketch` keeps
     /// the orientation, as editing a sketch does.
     fn navigate(cam: &mut Camera, motion: Motion, seconds: f64, height: f64, sketch: bool) {
-        crate::navigation::device_camera(cam, motion, seconds, height, !sketch, false, None, None);
+        crate::navigation::device_camera(cam, motion, seconds, height, !sketch, false, false, None, None);
     }
 
     /// A window that has run a frame, with or without focus. A context that has never run one
@@ -882,6 +903,23 @@ mod tests {
         assert_eq!(calibration_repaint_after(false, true), Duration::from_millis(100), "a still reading: 10 frames a second");
         assert_eq!(calibration_repaint_after(true, false), Duration::from_millis(250));
         assert_eq!(calibration_repaint_after(false, false), Duration::from_millis(250));
+    }
+
+    /// A measured device's keys are named as printed, short and held; any other button by number.
+    #[test]
+    fn buttons_are_named_as_printed_on_measured_devices() {
+        assert_eq!(button_name("smed 256f:c633", 3, false), "T");
+        assert_eq!(button_name("smed 256f:c633", 176, false), "Space");
+        // Names that are not printed come from the text catalog, which a unit test does not load:
+        // compare with the same lookup (the Preferences test checks the English text).
+        assert_eq!(button_name("smed 256f:c633", 3, true), solidcraft_ui_text::format("ui.3d_mouse_key_held", &[("key", "T")]));
+        assert_eq!(button_name("hid 046d:c62b", 23, false), "Esc");
+        // The keys that carry a symbol are named in the user's language.
+        assert_eq!(button_name("smed 256f:c633", 9, false), solidcraft_ui_text::tr("ui.3d_mouse_view_roll").to_string());
+        assert_eq!(button_name("hid 046d:c62b", 27, false), solidcraft_ui_text::tr("ui.3d_mouse_key_lock").to_string());
+        assert_eq!(button_name("smed 256f:c633", 4, false), solidcraft_ui_text::format("ui.3d_mouse_button", &[("number", "4")]));
+        assert_eq!(button_name("spacenavd", 3, false), solidcraft_ui_text::format("ui.3d_mouse_button", &[("number", "3")]));
+        assert_eq!(button_name("spacenavd", 3, true), solidcraft_ui_text::format("ui.3d_mouse_button_long", &[("number", "3")]));
     }
 
     #[test]
