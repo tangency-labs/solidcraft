@@ -4109,11 +4109,16 @@ fn resolve_explicit_placements(s: &Session, names: Vec<String>, placements: Vec<
     let mut seen: std::collections::BTreeSet<(String, Vec<u64>)> = std::collections::BTreeSet::new();
     for (name, path) in names.into_iter().zip(placements) {
         let (at, _) = s.doc.path_placement(&path).ok_or_else(|| bad(cmd, format!("no placement {path:?}")))?;
-        let own = if let Some(mb) = st.body(&name) {
-            if s.doc.model_body_component(mb) != at {
-                return Err(bad(cmd, format!("placement {path:?} does not show body `{name}`")));
-            }
+        let own = if let Some(mb) = st.bodies.iter().find(|b| b.name == name && s.doc.model_body_component(b) == at) {
             mb.name.clone()
+        } else if let Some((_, own, ..)) = frames.iter().find(|(world, own, component, matched_path, _)| {
+            *component == at
+                && matched_path == &path
+                && (world == &name || qualified_body_name(&occ_names, own, matched_path).as_deref() == Some(name.as_str()))
+        }) {
+            own.clone()
+        } else if st.body(&name).is_some() {
+            return Err(bad(cmd, format!("placement {path:?} does not show body `{name}`")));
         } else if let Some(((_, own, component, matched_path, _), _)) = find_placed_frame(&occ_names, &frames, &name, cmd)? {
             if matched_path != &path {
                 return Err(bad(cmd, format!("body `{name}` is at placement {matched_path:?}, not {path:?}")));
