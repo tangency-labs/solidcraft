@@ -43,7 +43,7 @@ use solidcore::geom::tol::are_same_to_tol;
 use solidcore::kernel::Kernel;
 use solidcore::query::api_queries::face_internal_point;
 use solidcore::topology::brep::p10::merge_curves_on_surface;
-use solidcore::topology::brep::p2::is_sheets;
+use solidcore::topology::brep::p2::{is_manifold_solid, is_sheets};
 use solidcore::topology::brep::p3::{
     brep_copy, brep_copy_mapped, edit_brep, with_kernel_callbacks,
 };
@@ -268,15 +268,19 @@ pub fn split_face_by_curves(
 /// record order, the connected region of each record face (named by the region's lowest
 /// face), and the copy's tolerance. Faces are in one region when they meet at an edge the
 /// imprint did not make; the imprint's common edges delimit the regions. Original face joins
-/// remain traversable unless the cutter meets them. Both operands are unchanged.
+/// remain traversable unless the cutter meets them. With `closed`, `body` may also be one
+/// closed manifold shell (a closed sheet), whose regions are cut the same way. Both operands
+/// are unchanged.
 ///
 /// # Errors
-/// [`Error::Argument`] for the same operand twice or an operand that is not one or more sheets;
-/// [`Error::CurveDoesNotCut`] when no common edge separates two regions; the kernel's errors.
+/// [`Error::Argument`] for the same operand twice or an operand that is not one or more sheets
+/// (nor, with `closed`, a closed manifold body); [`Error::CurveDoesNotCut`] when no common edge
+/// separates two regions; the kernel's errors.
 fn sheet_regions(
     name: &'static str,
     body: &Body,
     sheet: &Body,
+    closed: bool,
 ) -> Result<(Body, Order, Vec<usize>, f64)> {
     fn root(region: &[usize], mut i: usize) -> Result<usize> {
         for _ in 0..=region.len() {
@@ -294,7 +298,7 @@ fn sheet_regions(
     let (cut, common, tolerance) = run_on(name, &[("brep", body), ("sheet", sheet)], |k| {
         let mut a = {
             let b = body.lock();
-            if !is_sheets(k, &b)? {
+            if !(is_sheets(k, &b)? || (closed && is_manifold_solid(&b)?)) {
                 return Ok(Err(Error::Argument));
             }
             brep_copy(k, &b)?
@@ -374,7 +378,7 @@ pub fn trim_sheet(body: &Body, sheet: &Body, points: &[[f64; 3]]) -> Result<Body
     {
         return Err(Error::Argument);
     }
-    let (cut, order, region, tolerance) = sheet_regions("trim_sheet", body, sheet)?;
+    let (cut, order, region, tolerance) = sheet_regions("trim_sheet", body, sheet, false)?;
     // Each region's nearest face decides its distance. Two faces in the same region do not
     // make a pick ambiguous (a point can lie on an original face join). Only the two nearest
     // distinct regions matter. The second nearest distance never increases, so a discarded
@@ -432,14 +436,17 @@ pub fn trim_sheet(body: &Body, sheet: &Body, points: &[[f64; 3]]) -> Result<Body
 /// taken away. The regions are those [`trim_sheet`] picks from (the boolean's common edges
 /// delimit them; the cutter's faces are never extended), in the order of their lowest record
 /// face in the cut copy. Every face of the cut copy is in exactly one region, so the regions
-/// together are the whole of `body`. Both operands and their provenance are preserved.
+/// together are the whole of `body`. `body` may also be closed (a closed sheet: a full turn of
+/// a surface), whose regions are then open sheets. Both operands and their provenance are
+/// preserved.
 ///
 /// # Errors
-/// [`Error::Argument`] for the same operand twice or an operand that is not one or more sheets;
+/// [`Error::Argument`] for the same operand twice, a `sheet` that is not one or more sheets, or
+/// a `body` that is neither that nor a closed manifold body;
 /// [`Error::CurveDoesNotCut`] when the intersection does not separate the target; the kernel's
 /// errors.
 pub fn split_sheet(body: &Body, sheet: &Body) -> Result<Vec<Body>> {
-    let (cut, order, region, _) = sheet_regions("split_sheet", body, sheet)?;
+    let (cut, order, region, _) = sheet_regions("split_sheet", body, sheet, true)?;
     let mut roots: Vec<usize> = region.clone();
     roots.sort_unstable();
     roots.dedup();

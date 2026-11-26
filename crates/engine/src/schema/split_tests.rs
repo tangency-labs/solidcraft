@@ -496,3 +496,38 @@ fn split_body_splits_a_surface_body_into_its_regions() {
     assert!(reopened.model.result(id).unwrap().error.is_none());
     assert!(near(&areas(&reopened), &want), "{:?}", areas(&reopened));
 }
+
+/// #22525: a closed surface body (a full turn of a closed profile, whose shells close) splits
+/// into surface regions too, not as a solid. `Ring` turns the rectangle r 5…10 by 10 high
+/// about Z: walls 2π·10·10 and 2π·5·10, ends 2·π(10² − 5²), 450π mm² in all. The plane y = 2
+/// (`Cut`, a line on XY extruded both ways) cuts it into two arches. Past y = 2 lie the walls'
+/// 10·10·(π − 2·asin 0.2) and 5·10·(π − 2·asin 0.4) and twice the end's part, a segment
+/// r²·acos(2/r) − 2·√(r² − 4) of r = 10 less one of r = 5; the other arch is the rest.
+#[test]
+fn split_body_splits_a_closed_surface_body_into_its_regions() {
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+    run("sketch.create", json!({"plane": "XZ", "name": "R"}));
+    run("sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [10, -10]}));
+    run("sketch.finish", json!({}));
+    run("surface.revolve", json!({"sketch": "R", "axis": {"origin": [0, 0, 0], "dir": [0, 0, 1]}, "body_name": "Ring"}));
+    run("sketch.create", json!({"plane": "XY", "name": "Line"}));
+    run("sketch.line", json!({"points": [[-20, 2], [20, 2]], "ids": ["l1"]}));
+    run("sketch.finish", json!({}));
+    run("surface.extrude", json!({"sketch": "Line", "curves": ["l1"], "distance": 40, "direction": "symmetric", "body_name": "Cut"}));
+    assert!(s.model.state().body("Ring").is_some_and(|b| b.is_closed_sheet()), "the ring is a closed surface body");
+
+    let p = json!({"body": "Ring", "tool": {"body": "Cut", "point": [15, 2, 0]}, "tool_sheet": "body"});
+    s.execute("solid.split_body", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+    let st = s.model.state();
+    let rings: Vec<_> = st.bodies.iter().filter(|b| b.name.starts_with("Ring")).collect();
+    assert!(rings.iter().all(|b| b.is_surface() && b.body.is_surface()), "every piece is an open surface body");
+    let mut areas: Vec<f64> = rings.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().area).collect();
+    areas.sort_by(f64::total_cmp);
+    let pi = std::f64::consts::PI;
+    let segment = |r: f64| r * r * (2.0 / r).acos() - 2.0 * (r * r - 4.0).sqrt();
+    let far = 100.0 * (pi - 2.0 * 0.2f64.asin()) + 50.0 * (pi - 2.0 * 0.4f64.asin()) + 2.0 * (segment(10.0) - segment(5.0));
+    let mut want = [far, 450.0 * pi - far];
+    want.sort_by(f64::total_cmp);
+    assert!(areas.len() == 2 && areas.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-3 * b), "{areas:?} want {want:?}");
+}

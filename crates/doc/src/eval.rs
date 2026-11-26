@@ -16811,8 +16811,9 @@ fn eval_feature_kind(
                                 traced(kernel::split_body_by_faces(&mb.body, &sheet(tb)?, face, &faces)?)?
                             }
                             // Every face of a surface body as it is (#9305). A surface body to
-                            // split takes the arm below, which splits a sheet as well (#22525).
-                            crate::SplitSheet::Body if tool_bodies.is_empty() && !mb.body.is_surface() => {
+                            // split, a closed one too, takes the arm below, which splits a sheet
+                            // as well (#22525).
+                            crate::SplitSheet::Body if tool_bodies.is_empty() && !mb.is_surface() => {
                                 if !tb.body.is_surface() {
                                     return Err(DocError::Invalid(format!("`{}` is not a surface body, so it cannot split as a whole", t.body)));
                                 }
@@ -16858,7 +16859,9 @@ fn eval_feature_kind(
                                     let mut next = Vec::with_capacity(pieces.len() + 1);
                                     let mut cut = false;
                                     for piece in pieces {
-                                        let parts = if piece.body.is_surface() {
+                                        // Every piece of a surface body is one too; a closed
+                                        // sheet's shells close, so the body's kind decides.
+                                        let parts = if mb.is_surface() {
                                             kernel::split_sheet_where_it_cuts(&piece.body, &tool)?
                                         } else {
                                             kernel::split_body_by_sheet_where_it_cuts(&piece.body, &tool, side)?

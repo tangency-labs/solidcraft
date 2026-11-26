@@ -85,7 +85,9 @@ pub fn trim_sheet_keep(body: &Body, sheet: &Body, keep: TrimKeep) -> Result<Body
 /// parts are the whole of `body`. `None` when the sheet separates no region of `body` (it
 /// misses it, only touches it, or ends inside a face): one of several tools may cross only some
 /// of the pieces the others leave. Each part's history is over `[body]`, each face the face of
-/// `body` it is a piece of.
+/// `body` it is a piece of. `body` may be closed: a closed sheet (a full turn of a surface, which
+/// [`Body::is_surface`] cannot tell from a solid) splits into open regions the same way, so the
+/// caller decides that `body` is a surface.
 pub fn split_sheet_where_it_cuts(body: &Body, sheet: &Body) -> Result<Option<Vec<Body>>> {
     let _span = solidcraft_profile::span("kernel", "split_sheet_where_it_cuts");
     body.require_brep("split")?;
@@ -93,7 +95,7 @@ pub fn split_sheet_where_it_cuts(body: &Body, sheet: &Body) -> Result<Option<Vec
     if std::ptr::eq(body, sheet) {
         return Err(KernelError::Invalid("a surface cannot split itself".into()));
     }
-    if !body.is_surface() || !sheet.is_surface() {
+    if !sheet.is_surface() {
         return Err(KernelError::Invalid("a surface body splits only along other surface bodies".into()));
     }
     crate::guard("split sheet", || {
