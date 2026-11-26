@@ -34,5 +34,11 @@
     "ui.agent_tool.documents": "已打开的设计",
     "ui.agent_tool.preferences": "首选项",
     "ui.agent_tool.quit_app": "退出 SolidCraft"
+  },
+  "fr": {
+    "ui.agent_tool.agent_cursor": "Curseur de l’agent",
+    "ui.agent_tool.documents": "Onglets des conceptions",
+    "ui.agent_tool.preferences": "Préférences",
+    "ui.agent_tool.quit_app": "Quitter SolidCraft"
   }
 }

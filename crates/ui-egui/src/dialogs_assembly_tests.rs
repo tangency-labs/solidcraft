@@ -138,7 +138,7 @@ fn coderabbit_review_no_cylinder_circle_marker_uses_edge_axis() {
 #[test]
 fn coderabbit_review_alignment_hover_cache_tracks_rollback() {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     h.app.start("joint.create");
     h.app.dialog.as_mut().unwrap().active = 2;
     h.frames(2);
@@ -597,7 +597,7 @@ fn secondary_alignment_round_origins_zero_then_one_confirmed_hover_leave_and_cli
 #[test]
 fn secondary_alignment_circle_centers_are_automatic_without_technical_mode_widgets() {
     let mut h = crate::scenario::Harness::new();
-    h.app = round_plates();
+    *h.app = round_plates();
     h.app.start("joint.create");
     let mut d = h.app.dialog.take().unwrap();
     for p in [Vec3::new(23.0, 20.0, 9.0), Vec3::new(173.0, 20.0, 9.0)] {
@@ -745,7 +745,7 @@ fn settle_alignment_preview(h: &mut crate::scenario::Harness) {
 #[test]
 fn secondary_alignment_feedback_picks_the_solved_geometry() {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     h.app.start("joint.create");
     let mut d = h.app.dialog.take().unwrap();
     for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
@@ -776,7 +776,7 @@ fn secondary_alignment_feedback_picks_the_solved_geometry() {
 #[test]
 fn secondary_alignment_feedback_invalid_first_pick_keeps_the_last_pose() {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     h.app.start("joint.create");
     let mut d = h.app.dialog.take().unwrap();
     for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
@@ -900,7 +900,7 @@ fn secondary_alignment_feedback_primary_repick_maps_from_preview_to_author_frame
 #[test]
 fn secondary_alignment_circle_hover_survives_preview_and_small_motion_until_real_leave() {
     let mut h = crate::scenario::Harness::new();
-    h.app = round_plates();
+    *h.app = round_plates();
     h.app.start("joint.create");
     let mut d = h.app.dialog.take().unwrap();
     for p in [Vec3::new(23.0, 20.0, 9.0), Vec3::new(173.0, 20.0, 9.0)] {
@@ -933,7 +933,7 @@ fn secondary_alignment_circle_hover_survives_preview_and_small_motion_until_real
 #[test]
 fn secondary_alignment_feedback_stationary_hover_keeps_identity_until_pointer_moves() {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     h.app.start("joint.create");
     h.app.dialog.as_mut().unwrap().active = 2;
     h.frames(2);
@@ -1104,7 +1104,7 @@ fn secondary_alignment_refuses_other_occurrences_and_static_offset_origins() {
 #[test]
 fn secondary_alignment_single_inversion_keeps_component_flip_and_clear_saved_references() {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     h.app.start("joint.create");
     let mut d = h.app.dialog.take().unwrap();
     for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0), Vec3::new(40.0, 20.0, 5.0), Vec3::new(20.0, 10.0, 5.0)] {
@@ -1210,7 +1210,7 @@ fn editing_a_joint_keeps_all_three_offsets() {
 
     let before = app.session.doc.clone();
     let mut harness = crate::scenario::Harness::new();
-    harness.app = app;
+    *harness.app = app;
     harness.app.home.open = false;
     harness.app.dialog = Some(edited);
     harness.settle();
@@ -1394,6 +1394,103 @@ fn a_sketch_point_picked_on_another_copy_of_a_part_holds_that_copy() {
     assert!(q.dist(Vec3::ZERO) < 1e-6, "{q:?}");
     let (at, _) = world.placed_sketch_point(sketch, &[first], "q").unwrap();
     assert!(at.dist(Vec3::new(35.0, 5.0, 10.0)) < 1e-6, "{at:?}");
+}
+
+/// Snapping a joint origin to a sketch circle's centre in the UI stores a persistent
+/// `Snap::SketchPoint` reference rather than baking a static world point, so the joined
+/// component follows parameter changes (#21815).
+#[test]
+fn joint_snapped_to_sketch_circle_center_follows_parameter_change() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("parameters.add", json!({"name": "h", "expression": "100", "unit": "mm"})).unwrap();
+    app.run("component.create", json!({"name": "Post", "parent": "root", "activate": true, "grounded": true})).unwrap();
+    app.run(
+        "solid.box",
+        json!({"length": 20, "width": 20, "height": "h", "corner": [0, 0, 0], "operation": "new", "body_name": "PostBody", "name": "PostBox"}),
+    )
+    .unwrap();
+    app.run("sketch.create", json!({"plane": "YZ", "offset": 20, "name": "HoleSketch"})).unwrap();
+    app.run("sketch.circle.center", json!({"center": [10, 90], "radius": 3})).unwrap();
+    app.run("sketch.dimension", json!({"entities": ["c1"], "type": "diameter", "value": "6"})).unwrap();
+    app.run("sketch.dimension", json!({"entities": ["origin", "c1.center"], "type": "horizontal", "value": "10"})).unwrap();
+    app.run("sketch.dimension", json!({"entities": ["origin", "c1.center"], "type": "vertical", "value": "h - 10"})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("component.create", json!({"name": "Beam", "parent": "root", "activate": true, "grounded": false})).unwrap();
+    app.run(
+        "solid.box",
+        json!({"length": 50, "width": 20, "height": 20, "corner": [20, 0, 80], "operation": "new", "body_name": "BeamBody", "name": "BeamBox"}),
+    )
+    .unwrap();
+    app.run("component.activate", json!({"component": 0})).unwrap();
+
+    let sketch = app.session.doc.find_feature("HoleSketch").unwrap().id;
+    let snap = snap_of(&app.session, &Sel::SketchPoint { id: format!("{sketch}:c1.center") }).unwrap();
+    assert_eq!(snap.param["sketch"], json!(sketch));
+    assert_eq!(snap.param["point"], json!("c1.center"));
+
+    let beam_face = {
+        let st = app.session.world_state().unwrap();
+        let b = st.body("BeamBody").expect("BeamBody");
+        let faces = b.joint_faces().unwrap();
+        let f = faces.iter().find(|f| f.centroid.dist(Vec3::new(20.0, 10.0, 90.0)) < 1e-6).expect("Beam -X face");
+        Sel::Face { body: "BeamBody".into(), index: f.index, point: f.centroid }
+    };
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, Sel::SketchPoint { id: format!("{sketch}:c1.center") });
+    d.pick(&app.session, beam_face);
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    assert_eq!(app.session.doc.assembly.joints.len(), 1);
+    assert!(
+        matches!(&app.session.doc.assembly.joints[0].a.snap, solidcraft_engine::doc::joints::Snap::SketchPoint { sketch: s, point, .. } if *s == sketch && point == "c1.center"),
+        "{:?}",
+        app.session.doc.assembly.joints[0].a.snap
+    );
+
+    // Changing h from 100 mm to 60 mm moves c1.center to [20, 10, 50] and pulls Beam:1 down by 40 mm.
+    app.run("parameters.change", json!({"name": "h", "expression": "60"})).unwrap();
+    let beam_occ = app.session.doc.occurrences.iter().find(|o| o.name == "Beam:1").unwrap().id;
+    let t = solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, beam_occ);
+    let com = solidcraft_engine::doc::apply_point(&t, Vec3::new(45.0, 10.0, 90.0));
+    assert!(com.dist(Vec3::new(45.0, 10.0, 50.0)) < 1e-6, "Beam:1 COM should follow h -> 60 mm: {com:?}");
+
+    // Nonzero lateral offsets (Offset X / Offset Y) must also keep the persistent sketch reference.
+    app.run("joint.delete", json!({"joint": app.session.doc.assembly.joints[0].id})).unwrap();
+    app.run("parameters.change", json!({"name": "h", "expression": "100"})).unwrap();
+    let beam_face2 = {
+        let st = app.session.world_state().unwrap();
+        let b = st.body("BeamBody").expect("BeamBody");
+        let faces = b.joint_faces().unwrap();
+        let f = faces.iter().find(|f| f.plane_normal.is_some_and(|n| n.x < -0.9)).expect("Beam -X face");
+        Sel::Face { body: "BeamBody".into(), index: f.index, point: f.centroid }
+    };
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, Sel::SketchPoint { id: format!("{sketch}:c1.center") });
+    d.pick(&app.session, beam_face2);
+    if let crate::dialogs::Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.offset[0] = "5".into();
+        f.offset[1] = "2".into();
+    }
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    assert!(
+        matches!(&app.session.doc.assembly.joints[0].a.snap, solidcraft_engine::doc::joints::Snap::SketchPoint { sketch: s, point, .. } if *s == sketch && point == "c1.center"),
+        "nonzero lateral offset must keep Snap::SketchPoint: {:?}",
+        app.session.doc.assembly.joints[0].a.snap
+    );
+    let before_t = solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, beam_occ);
+    let before_com = solidcraft_engine::doc::apply_point(&before_t, Vec3::new(45.0, 10.0, 90.0));
+    app.run("parameters.change", json!({"name": "h", "expression": "60"})).unwrap();
+    let after_t = solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, beam_occ);
+    let after_com = solidcraft_engine::doc::apply_point(&after_t, Vec3::new(45.0, 10.0, 90.0));
+    assert!(
+        (after_com - before_com).dist(Vec3::new(0.0, 0.0, -40.0)) < 1e-6,
+        "offset sketch joint should follow h -> 60 mm by -40 mm in Z: before={before_com:?}, after={after_com:?}"
+    );
 }
 
 #[test]
@@ -1836,7 +1933,7 @@ fn a_picked_snap_is_measured_once_not_every_frame() {
     s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [60, 0, 0]})).unwrap();
     s.execute("component.activate", &json!({"component": "root"})).unwrap();
     let mut h = crate::scenario::Harness::new();
-    h.app = SolveApp::new(s, Services::default());
+    *h.app = SolveApp::new(s, Services::default());
     let (plate, peg) = (occ(&h.app, "Plate"), occ(&h.app, "Peg"));
     h.app.run("occurrence.ground", json!({"occurrence": plate, "grounded": true})).unwrap();
     h.app.start("joint.create");
@@ -1924,8 +2021,116 @@ fn as_built_animation_drives_the_new_shared_id_and_handles_exhaustion() {
     assert!(result.is_err() && !matches!(result, Err(solidcraft_engine::EngineError::Internal(..))), "{result:?}");
 }
 
-/// As-built joints and rigid groups take components from body picks; New Component makes one
-/// from bodies when bodies are picked.
+/// Two boxes as separate bodies of the design (Body1, Body2), no component, and the New Component
+/// window opened on `picked` with the Name `name` and Activate `activate`.
+fn new_component_window(picked: &[&str], name: &str, activate: bool) -> (SolveApp, crate::dialogs::Dialog) {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    for x in [0, 40] {
+        app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0], "operation": "new"})).unwrap();
+    }
+    app.session.selection = picked.iter().map(|body| Sel::Body { name: body.to_string() }).collect();
+    app.start("component.create");
+    let mut d = app.dialog.take().unwrap();
+    let Kind::Assembly(Asm::NewComponent { name: typed, activate: active }) = &mut d.kind else { panic!("expected New Component") };
+    *typed = name.into();
+    *active = activate;
+    (app, d)
+}
+
+/// New Component with bodies picked makes ONE component with the typed name, moves the bodies
+/// into it and activates it (#21840), as one undo step whose History is one folder named after
+/// the component.
+#[test]
+fn new_component_with_bodies_picked_puts_them_in_one_named_component() {
+    let (mut app, d) = new_component_window(&["Body1", "Body2"], "Holder", true);
+    let (before, undo) = (app.session.doc.to_json(), app.session.undo.len());
+    crate::dialogs::run_dialog(&mut app, &d).unwrap();
+    let doc = &app.session.doc;
+    assert_eq!(doc.components.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["Holder"]);
+    let holder = occ(&app, "Holder");
+    for body in ["Body1", "Body2"] {
+        assert_eq!(occurrence_of_body(&app.session, body), Some(holder), "{body} is in Holder");
+    }
+    assert_eq!(app.session.active_component, doc.find_component("Holder").unwrap(), "Activate made it active");
+    assert_eq!(app.session.undo.len(), undo + 1, "one undo step");
+    let folders: Vec<_> = doc.timeline_groups.iter().map(|g| (g.name.as_str(), g.features.len())).collect();
+    assert_eq!(folders, [("Holder", 2)], "the two moves are one History folder");
+
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(app.session.doc.to_json(), before, "one Undo takes it all back");
+    assert_eq!(app.session.active_component, 0);
+    app.run("edit.redo", json!({})).unwrap();
+    let holder = occ(&app, "Holder");
+    for body in ["Body1", "Body2"] {
+        assert_eq!(occurrence_of_body(&app.session, body), Some(holder), "Redo puts {body} back in Holder");
+    }
+}
+
+/// With the default name and Activate off, one picked body goes into a new component that is not
+/// made active, and its move is one History item.
+#[test]
+fn new_component_with_a_body_picked_and_activate_off_keeps_the_active_component() {
+    let (mut app, d) = new_component_window(&["Body2"], "", false);
+    let undo = app.session.undo.len();
+    crate::dialogs::run_dialog(&mut app, &d).unwrap();
+    let doc = &app.session.doc;
+    assert_eq!(doc.components.len(), 1, "{:?}", doc.components);
+    let made = &doc.components[0].name;
+    assert_eq!(made, "Component1", "the default name the window shows");
+    assert_eq!(occurrence_of_body(&app.session, "Body2"), Some(occ(&app, made)));
+    assert_eq!(occurrence_of_body(&app.session, "Body1"), Some(0), "the body not picked stays in the design");
+    assert_eq!(app.session.active_component, 0, "Activate off");
+    assert_eq!(app.session.undo.len(), undo + 1);
+    assert!(doc.timeline_groups.is_empty(), "one move needs no folder");
+}
+
+/// A move the engine refuses leaves no empty component and no undo step behind, and the window
+/// gets the reason.
+#[test]
+fn new_component_whose_move_is_refused_leaves_nothing_behind() {
+    let (mut app, d) = new_component_window(&["Body1", "Nope"], "Holder", true);
+    let (before, undo) = (app.session.doc.to_json(), app.session.undo.len());
+    let redo = app.session.redo.len();
+    assert!(crate::dialogs::run_dialog(&mut app, &d).is_err());
+    assert_eq!(app.session.doc.to_json(), before);
+    assert_eq!((app.session.undo.len(), app.session.redo.len()), (undo, redo));
+    assert_eq!(app.session.active_component, 0);
+}
+
+/// A refused move inside an active component, with a body selected and a step to redo, leaves
+/// the design, the undo and redo steps, the active component and the selection as they were.
+#[test]
+fn new_component_refused_inside_a_component_keeps_redo_the_active_component_and_the_selection() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("component.create", json!({"name": "Inner", "activate": true})).unwrap();
+    app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0], "operation": "new"})).unwrap();
+    app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [40, 0, 0], "operation": "new"})).unwrap();
+    app.run("edit.undo", json!({})).unwrap();
+    app.session.selection = vec![Sel::Body { name: "Body1".into() }];
+    app.start("component.create");
+    let mut d = app.dialog.take().unwrap();
+    d.inputs[0].items.push(Sel::Body { name: "Nope".into() });
+    let labels = |steps: &[solidcraft_engine::Snapshot]| steps.iter().map(|step| step.label.clone()).collect::<Vec<_>>();
+    let state = |app: &SolveApp| {
+        let s = &app.session;
+        (s.doc.to_json(), labels(&s.undo), labels(&s.redo), s.active_component, s.active_occurrence_path.clone(), s.selection.clone())
+    };
+    let before = state(&app);
+    assert!(!before.2.is_empty(), "a step to redo");
+    assert_ne!(before.3, 0, "inside Inner");
+    assert!(crate::dialogs::run_dialog(&mut app, &d).is_err());
+    let after = state(&app);
+    assert!(after.0 == before.0, "the design is as it was");
+    assert_eq!(after.1, before.1, "the undo steps");
+    assert_eq!(after.2, before.2, "the redo steps");
+    assert_eq!((after.3, &after.4), (before.3, &before.4), "the active component");
+    assert_eq!(after.5, before.5, "the selection");
+    app.run("edit.redo", json!({})).unwrap();
+    assert!(app.session.model.state().body("Body2").is_some(), "Redo still brings the second box back");
+}
+
+/// As-built joints and rigid groups take components from body picks; New Component with no
+/// bodies picked makes an empty component (with bodies it moves them into the one it makes).
 #[test]
 fn component_picks_become_occurrences() {
     let mut app = two_boxes();
@@ -2113,6 +2318,252 @@ fn picks_on_one_component_say_why_and_offer_components() {
     assert!(text_at(&out, &why).is_none(), "nothing left to say");
 }
 
+/// #12867: a joint between two grounded parts moves neither. The Joint dialog says so under the
+/// picks and offers to unground the second part; after that the note is gone. A joint made
+/// between them anyway says the same in Messages, as an error.
+#[test]
+fn picks_on_two_grounded_parts_say_the_joint_moves_neither_and_offer_to_unground_one() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        s.execute("component.create", &json!({"name": name})).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    for name in ["A", "B"] {
+        let o = occ(&app, name);
+        app.run("occurrence.ground", json!({"occurrence": o, "grounded": true})).unwrap();
+    }
+    let why = solidcraft_ui_text::format("joint.moves_neither", &[("joint", "Rigid1"), ("a", "A:1"), ("b", "B:1")]);
+
+    // Made anyway (as a script or the dialog's OK would): Messages says why, as an error.
+    app.messages.clear();
+    let r = app
+        .run(
+            "joint.create",
+            json!({"type": "rigid", "name": "Rigid1", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 10]}}),
+        )
+        .unwrap();
+    assert!(r["conflicts"].as_array().is_some_and(|c| c.len() == 1), "{r}");
+    assert!(app.messages.iter().any(|m| m.text == why && m.error), "{:?}", app.messages.iter().map(|m| &m.text).collect::<Vec<_>>());
+    app.run("edit.undo", json!({})).unwrap();
+
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(5.0, 5.0, 10.0)).unwrap());
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(25.0, 5.0, 10.0)).unwrap());
+    let Kind::Assembly(Asm::Joint(f)) = &d.kind else { panic!("{:?}", d.kind) };
+    // The dialog names the joint it would make (its default name).
+    let why = solidcraft_ui_text::format("joint.moves_neither", &[("joint", "Rigid Joint1"), ("a", "A:1"), ("b", "B:1")]);
+    let held = grounded_sides(&app, f, &d.inputs).expect("both picks are grounded");
+    assert_eq!((held.why.as_str(), held.occurrence, held.name.as_str()), (why.as_str(), occ(&app, "B"), "B:1"));
+    app.dialog = Some(d);
+    let ctx = crate::fonts::test_context();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    let frame = |app: &mut SolveApp, events: Vec<egui::Event>| {
+        let input = egui::RawInput { screen_rect: Some(screen), events, ..Default::default() };
+        let mut out = ctx.run_ui(input, |ui| crate::dialogs::show(app, ui.ctx()));
+        // Nothing is painted: drop the texture changes (an unapplied delta panics on drop).
+        out.textures_delta.clear();
+        out
+    };
+    // The auto-sized dialog takes a few frames to settle its width.
+    for _ in 0..3 {
+        frame(&mut app, vec![]);
+    }
+    let out = frame(&mut app, vec![]);
+    assert!(text_at(&out, &why).is_some(), "the dialog says why");
+    let label = solidcraft_ui_text::format("joint.unground_part", &[("occurrence", "B:1")]);
+    let at = text_at(&out, &label).expect("and offers to unground the second part");
+    let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+    frame(&mut app, vec![egui::Event::PointerMoved(at)]);
+    frame(&mut app, vec![button(true)]);
+    frame(&mut app, vec![button(false)]);
+    let b = occ(&app, "B");
+    assert!(app.session.doc.occurrences.iter().any(|o| o.id == b && !o.grounded), "B is ungrounded");
+    assert!(app.dialog.is_some(), "the dialog stays open");
+    let out = frame(&mut app, vec![]);
+    assert!(text_at(&out, &why).is_none(), "nothing left to say");
+}
+
+/// #12867: the Joint dialog's note covers every pick a joint takes, not only faces: a grounded
+/// component's plane or axis is a side on that part. The root's own bodies never move, so a
+/// grounded part picked against them gets the note too, and the button ungrounds the part,
+/// whichever was picked first. Editing a joint that doesn't hold says why in Messages too.
+#[test]
+fn grounded_note_covers_datum_picks_the_root_and_edits() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        s.execute("component.create", &json!({"name": name})).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    // A body of the root's own, away from both parts.
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [0, 40, 0]})).unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    for name in ["A", "B"] {
+        let o = occ(&app, name);
+        app.run("occurrence.ground", json!({"occurrence": o, "grounded": true})).unwrap();
+    }
+    let note = |app: &mut SolveApp, a: Sel, b: Sel| {
+        app.start("joint.create");
+        let mut d = app.dialog.take().unwrap();
+        d.pick(&app.session, a);
+        d.pick(&app.session, b);
+        let Kind::Assembly(Asm::Joint(f)) = &d.kind else { panic!("{:?}", d.kind) };
+        let held = grounded_sides(app, f, &d.inputs);
+        app.dialog = None;
+        held
+    };
+    let face = |app: &SolveApp, x: f64, y: f64| face_sel(&app.session, Vec3::new(x, y, 10.0)).unwrap();
+    let both = solidcraft_ui_text::format("joint.moves_neither", &[("joint", "Rigid Joint1"), ("a", "A:1"), ("b", "B:1")]);
+
+    // A component plane or axis of a grounded part is a side on that part, as a face is.
+    for (a, b) in [
+        (Sel::Plane { name: "A/XY".into() }, face(&app, 25.0, 5.0)),
+        (face(&app, 5.0, 5.0), Sel::Axis { name: "B/Z".into() }),
+        (Sel::Plane { name: "A/XZ".into() }, Sel::Axis { name: "B/X".into() }),
+    ] {
+        let held = note(&mut app, a.clone(), b.clone()).unwrap_or_else(|| panic!("{a:?} and {b:?} are both on grounded parts"));
+        assert_eq!((held.why.as_str(), held.occurrence), (both.as_str(), occ(&app, "B")), "{a:?}, {b:?}");
+    }
+
+    // The root against a grounded part, in either order: the button frees the part.
+    let root_note = solidcraft_ui_text::format("joint.moves_neither_root", &[("joint", "Rigid Joint1"), ("occurrence", "B:1")]);
+    for (a, b) in [(face(&app, 5.0, 45.0), face(&app, 25.0, 5.0)), (face(&app, 25.0, 5.0), face(&app, 5.0, 45.0))] {
+        let held = note(&mut app, a, b).expect("the root never moves");
+        assert_eq!((held.why.as_str(), held.occurrence, held.name.as_str()), (root_note.as_str(), occ(&app, "B"), "B:1"));
+    }
+    // A part that can move gets no note.
+    let a = occ(&app, "A");
+    app.run("occurrence.ground", json!({"occurrence": a, "grounded": false})).unwrap();
+    let (root_face, a_face, b_face) = (face(&app, 5.0, 45.0), face(&app, 5.0, 5.0), face(&app, 25.0, 5.0));
+    assert_eq!(note(&mut app, root_face, a_face), None);
+    assert_eq!(note(&mut app, Sel::Plane { name: "A/XY".into() }, b_face), None);
+    app.run("occurrence.ground", json!({"occurrence": a, "grounded": true})).unwrap();
+
+    // An edit that leaves the joint not holding says why in Messages, as a new joint does.
+    let texts = |app: &SolveApp| app.messages.iter().filter(|m| m.error).map(|m| m.text.clone()).collect::<Vec<_>>();
+    app.run(
+        "joint.create",
+        json!({"type": "rigid", "name": "Rigid1", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 10]}}),
+    )
+    .unwrap();
+    app.messages.clear();
+    let r = app.run("joint.edit", json!({"joint": "Rigid1", "offset": 2})).unwrap();
+    assert!(r["joint"].as_u64().is_some(), "the edit names its joint: {r}");
+    let why = solidcraft_ui_text::format("joint.moves_neither", &[("joint", "Rigid1"), ("a", "A:1"), ("b", "B:1")]);
+    assert!(texts(&app).contains(&why), "{:?}", texts(&app));
+}
+
+/// Stand with two bodies and Umbrella with one, both placed at the top level, which is active.
+fn stand_and_umbrella() -> (crate::scenario::Harness, u64, u64) {
+    let mut h = crate::scenario::Harness::new();
+    let component = |h: &mut crate::scenario::Harness, name: &str, corners: &[[f64; 3]]| {
+        let occ = h.app.run("component.create", json!({ "name": name })).unwrap()["occurrence"].as_u64().unwrap();
+        for c in corners {
+            h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": c})).unwrap();
+        }
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        occ
+    };
+    let stand = component(&mut h, "Stand", &[[0.0, 0.0, 0.0], [20.0, 0.0, 0.0]]);
+    let umbrella = component(&mut h, "Umbrella", &[[0.0, 40.0, 0.0]]);
+    h.app.preferences.browser_components_open = true;
+    h.frames(3);
+    (h, stand, umbrella)
+}
+
+fn click_row(h: &mut crate::scenario::Harness, occurrence: u64) {
+    let at = h.call("ui.at", json!({"occurrence": [occurrence], "control": "row"}));
+    assert_eq!(at["ok"], true, "{at}");
+    let clicked = h.call("ui.click", json!({"x": at["result"][0], "y": at["result"][1]}));
+    assert_eq!(clicked["ok"], true, "{clicked}");
+    h.frames(2);
+}
+
+/// The one-component hint As-Built would show now, if any.
+fn as_built_hint(h: &crate::scenario::Harness) -> Option<Vec<String>> {
+    let d = h.app.dialog.as_ref().expect("As-Built is open");
+    let Kind::Assembly(k) = &d.kind else { panic!("{:?}", d.kind) };
+    joint_problem(&h.app, k, &d.inputs).map(|p| p.1)
+}
+
+/// #21842: a component with two bodies picked by its Browser row, or selected when As-Built
+/// starts, is one component: Components stays active with no hint to split it, and the second
+/// component's row then moves on to Position with the two components as a and b.
+#[test]
+fn as_built_takes_a_two_body_component_as_one() {
+    for preselected in [false, true] {
+        let (mut h, stand, umbrella) = stand_and_umbrella();
+        if preselected {
+            h.app.session.selection = vec![Sel::Occurrence { path: vec![stand] }];
+        }
+        h.app.start("joint.as_built");
+        h.frames(2);
+        if !preselected {
+            click_row(&mut h, stand);
+        }
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs[0].items.len(), 2, "both of Stand's bodies");
+        assert_eq!(d.active, 0, "one component: Components stays active (preselected {preselected})");
+        assert_eq!(as_built_hint(&h), None, "nothing to split (preselected {preselected})");
+        click_row(&mut h, umbrella);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.active, 1, "two components: Position is next");
+        let c = apply_commands(&h.app, d).unwrap();
+        assert_eq!(c[0].0, "joint.as_built");
+        assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(stand), json!(umbrella)));
+    }
+}
+
+/// #21842: the hint stays for its own case, the bodies of one component picked one by one, and a
+/// whole-component pick stops hiding it once Components no longer holds that pick or the window
+/// opens again.
+#[test]
+fn as_built_hint_stays_for_bodies_picked_one_by_one() {
+    let (mut h, stand, _) = stand_and_umbrella();
+    let bodies = h.app.session.occurrence_bodies(&[stand], true).unwrap();
+    let pick_bodies = |h: &mut crate::scenario::Harness, names: &[String]| {
+        let mut d = h.app.dialog.take().unwrap();
+        for name in names {
+            d.pick(&h.app.session, Sel::Body { name: name.clone() });
+        }
+        h.app.dialog = Some(d);
+        h.frames(2);
+    };
+    h.app.start("joint.as_built");
+    h.frames(2);
+    pick_bodies(&mut h, &bodies);
+    assert_eq!(as_built_hint(&h), Some(bodies.clone()), "picked one by one: the hint");
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 0, "still one component");
+    // Components cleared, then the same bodies one by one.
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clear();
+    h.frames(2);
+    click_row(&mut h, stand);
+    assert_eq!(as_built_hint(&h), None);
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clear();
+    h.frames(2);
+    pick_bodies(&mut h, &bodies);
+    assert_eq!(as_built_hint(&h), Some(bodies.clone()), "after a clear");
+    // One body taken out and picked again.
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clear();
+    h.frames(2);
+    click_row(&mut h, stand);
+    pick_bodies(&mut h, &bodies[..1]);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "the pick took it out");
+    pick_bodies(&mut h, &bodies[..1]);
+    assert_eq!(as_built_hint(&h), Some(vec![bodies[1].clone(), bodies[0].clone()]), "after a body went out (in pick order)");
+    // A new window: the bodies selected before it opens.
+    h.app.dialog = None;
+    h.app.session.selection = bodies.iter().map(|name| Sel::Body { name: name.clone() }).collect();
+    h.app.start("joint.as_built");
+    h.frames(2);
+    assert_eq!(as_built_hint(&h), Some(bodies.clone()), "a new window");
+}
+
 #[test]
 fn rigid_group_bodies_in_one_component_explain_how_to_separate_them() {
     for component in [None, Some("Part")] {
@@ -2214,7 +2665,7 @@ fn drive_value_takes_the_keyboard() {
 #[test]
 fn drive_slider_previews_intermediate_positions_before_release() {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     let (a, b) = (occ(&h.app, "A"), occ(&h.app, "B"));
     h.app
         .run(
@@ -2278,7 +2729,7 @@ fn drive_slider_previews_intermediate_positions_before_release() {
 #[test]
 fn slider_drag_does_not_open_suggestions_over_the_slider() {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     for name in ["depth", "drop"] {
         h.app.run("parameters.add", json!({"name": name, "expression": "5 mm"})).unwrap();
     }
@@ -2601,7 +3052,7 @@ fn drive_opens_on_the_picked_joint() {
 #[test]
 fn drive_on_a_rigid_joint_says_why_and_offers_edit_joint() {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     let at = |o: &str| json!({"occurrence": o, "point": [25, 10, 5], "z": [1, 0, 0]});
     h.app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": "Glue"})).unwrap();
     let glue = h.app.session.doc.assembly.joints[0].id;
@@ -2624,7 +3075,7 @@ fn drive_on_a_rigid_joint_says_why_and_offers_edit_joint() {
 #[test]
 fn secondary_alignment_review_drive_entry_restores_all_four_inputs() {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     h.app.start("joint.create");
     let mut d = h.app.dialog.take().unwrap();
     for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0), Vec3::new(40.0, 20.0, 5.0), Vec3::new(20.0, 10.0, 5.0)] {
@@ -2656,7 +3107,7 @@ fn secondary_alignment_review_drive_entry_restores_all_four_inputs() {
 #[test]
 fn edit_joint_from_drive_joints_keeps_its_two_sides() {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     let at = |o: &str| json!({"occurrence": o, "point": [25, 10, 5], "z": [1, 0, 0]});
     h.app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": "Glue"})).unwrap();
     let glue = h.app.session.doc.assembly.joints[0].id;
@@ -3018,7 +3469,7 @@ fn interference_checks_off_the_window_thread_and_drops_a_check_of_a_changed_desi
 /// The Joint dialog over two boxes, Component 1 taking a pick, in the harness (a real viewport).
 fn joint_picking_component_1() -> crate::scenario::Harness {
     let mut h = crate::scenario::Harness::new();
-    h.app = two_boxes();
+    *h.app = two_boxes();
     h.app.cam.distance = 160.0;
     h.settle();
     h.app.start("joint.create");
@@ -3632,7 +4083,7 @@ fn measure_still_takes_sketch_curve_picks() {
 #[test]
 fn lateral_offset_controls_do_not_change_assembly_constraint_rules() {
     let mut harness = crate::scenario::Harness::new();
-    harness.app = two_boxes();
+    *harness.app = two_boxes();
     harness.app.home.open = false;
     harness
         .app

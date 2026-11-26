@@ -1,6 +1,6 @@
 //! The UI kit: tokenised dense controls (rows, fields, menus, panels, windows) and the components
 //! built from them (the ribbon, app bar, history bar, navigation bar, Browser, view compass,
-//! preferences window, start page, window chrome and theme files). Everything is drawn from plain data the host
+//! preferences window, start page, window chrome, panel runtime and theme files). Everything is drawn from plain data the host
 //! passes or installs (its icon set, glyphs, tab table, text and built-in themes) and returns what
 //! the user chose; nothing here reads an app's state.
 //! `Panel` owns card composition; rows own aligned label/control columns and retain egui focus.
@@ -17,6 +17,7 @@ pub mod history_bar;
 pub mod nav_bar;
 pub mod nav_bar_layout;
 pub mod navigation_bar;
+pub mod panel_runtime;
 pub mod prefs_window;
 pub mod ribbon;
 pub mod start_page;
@@ -98,6 +99,14 @@ pub mod type_face;
 mod value_focus;
 mod viewport_status;
 mod wheel;
+
+/// The shared rule for chrome that tells views, tiles or windows apart (a tile's header label, an
+/// active-tile or mode marker): it shows only when there is more than one to tell apart. With one
+/// view nothing is drawn; with several, at most a thin neutral marker. New chrome of that kind goes
+/// through this predicate.
+pub fn disambiguates(count: usize) -> bool {
+    count > 1
+}
 
 pub use actions::Button;
 pub use actions::button;
@@ -264,6 +273,7 @@ pub use toast::measure_inline_notice;
 pub use tree::*;
 pub use value_focus::*;
 pub use viewport_status::*;
+pub use wheel::panel_scroll_offset;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod blur_plan_tests;

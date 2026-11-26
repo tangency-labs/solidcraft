@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="780" height="330" viewBox="0 0 780 330">
+  <title>WR-17738-degenerate-edge</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="780" height="330" fill="#ffffff"/>
+    <rect id="panel_A" data-name="panel A" x="15" y="55" width="240" height="200" fill="#f0f0f0"/>
+    <rect id="panel_B" data-name="panel B" x="270" y="55" width="240" height="200" fill="#f0f0f0"/>
+    <rect id="panel_C" data-name="panel C" x="525" y="55" width="240" height="200" fill="#f0f0f0"/>
+    <line id="context_tolerance_bar" data-name="context tolerance bar" x1="35" y1="115" x2="235" y2="115" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 3"/>
+    <line x1="35" y1="109" x2="35" y2="121" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line x1="235" y1="109" x2="235" y2="121" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line id="ridge_A" data-name="ridge A" x1="60" y1="165" x2="210" y2="165" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <circle cx="60" cy="165" r="4" fill="#000000"/>
+    <circle cx="210" cy="165" r="4" fill="#000000"/>
+    <circle id="ball_V1" data-name="ball V1" cx="315" cy="165" r="17" fill="#dce9f5"/>
+    <circle id="ball_V2" data-name="ball V2" cx="465" cy="165" r="17" fill="#dce9f5"/>
+    <line id="ridge_B" data-name="ridge B" x1="315" y1="165" x2="465" y2="165" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <circle cx="315" cy="165" r="4" fill="#000000"/>
+    <circle cx="465" cy="165" r="4" fill="#000000"/>
+    <circle id="ball_M" data-name="ball M" cx="645" cy="165" r="60" fill="#dce9f5"/>
+    <line id="neighbour_1_old" data-name="neighbour 1 old" x1="555" y1="95" x2="615" y2="165" fill="none" stroke="#555555" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line id="neighbour_2_old" data-name="neighbour 2 old" x1="735" y1="235" x2="675" y2="165" fill="none" stroke="#555555" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line id="neighbour_1_re-ended" data-name="neighbour 1 re-ended" x1="555" y1="95" x2="645" y2="165" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 3"/>
+    <line id="neighbour_2_re-ended" data-name="neighbour 2 re-ended" x1="735" y1="235" x2="645" y2="165" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 3"/>
+    <line id="short_edge_C" data-name="short edge C" x1="615" y1="165" x2="675" y2="165" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <circle cx="615" cy="165" r="4" fill="#000000"/>
+    <circle cx="675" cy="165" r="4" fill="#000000"/>
+    <circle id="M" cx="645" cy="165" r="4" fill="#555555"/>
+    <line id="tau_radius" data-name="tau radius" x1="645" y1="165" x2="687" y2="123" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="3 2"/>
+    <text transform="matrix(1 0 0 1 15 32)" x="0" y="0" xml:space="preserve" font-family="Helvetica-Bold, sans-serif" font-size="20" fill="#000000"><tspan x="0" y="0">The healer&apos;s degenerate-edge test</tspan></text>
+    <text transform="matrix(1 0 0 1 25 63)" x="0" y="14" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="14">(a) sampled: a ridge shorter than the</tspan><tspan x="0" y="30.8">context&apos;s 5e-6 is degenerate</tspan></text>
+    <text transform="matrix(1 0 0 1 135 135)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">context approximation tolerance 5e-6</tspan></text>
+    <text transform="matrix(1 0 0 1 25 185)" x="0" y="12" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="12">ridge 4.5e-6, τ_e 5e-7: squeezed into one</tspan><tspan x="0" y="26.4">end; the four edges at the other end now</tspan><tspan x="0" y="40.8">end 4.5e-6 off their vertex</tspan></text>
+    <text transform="matrix(1 0 0 1 280 63)" x="0" y="14" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="14">(b) certified: vertices farther apart</tspan><tspan x="0" y="30.8">than τ_e</tspan></text>
+    <text transform="matrix(1 0 0 1 390 138)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">vertex balls of radius τ_e</tspan></text>
+    <text transform="matrix(1 0 0 1 280 200)" x="0" y="12" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="12">the same ridge is a real edge (SmBrep Edge</tspan><tspan x="0" y="26.4">test 7): kept, the healed body is the record&apos;s</tspan></text>
+    <text transform="matrix(1 0 0 1 535 63)" x="0" y="14" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="14">(c) certified: the whole curve within</tspan><tspan x="0" y="30.8">τ_e of M</tspan></text>
+    <text transform="matrix(1 0 0 1 690 125)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">τ_e</tspan></text>
+    <text transform="matrix(1 0 0 1 640 185)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">M</tspan></text>
+    <text transform="matrix(1 0 0 1 535 275)" x="0" y="12" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="12">squeezed into M; the neighbours (solid) are</tspan><tspan x="0" y="26.4">re-ended at M (dashed)</tspan></text>
+    <text transform="matrix(1 0 0 1 15 285)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">Not to scale.</tspan></text>
+  </g>
+</svg>

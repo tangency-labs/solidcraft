@@ -322,12 +322,13 @@ pub enum ThreadHand {
     Both,
 }
 
-/// A thread form: ISO metric 60°, metric trapezoidal 30°, Acme 29°, metric buttress 3°/30°,
+/// A thread form: ISO metric and Unified inch 60°, metric trapezoidal 30°, Acme 29°, metric buttress 3°/30°,
 /// buttress inch 7°/45°, square, and the 55° and 60° pipe threads.
 #[derive(Clone, Copy, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ThreadForm {
     Metric,
+    Unified,
     Trapezoidal,
     Acme,
     Buttress,
@@ -352,6 +353,7 @@ impl From<&solidcraft_doc::ThreadInfo> for ModelThread {
             internal: t.internal,
             form: match t.form {
                 Form::Metric => ThreadForm::Metric,
+                Form::Unified => ThreadForm::Unified,
                 Form::Trapezoidal => ThreadForm::Trapezoidal,
                 Form::Acme => ThreadForm::Acme,
                 Form::Buttress => ThreadForm::Buttress,
@@ -615,11 +617,15 @@ pub struct ErrorCodeReply {
     /// The kernel routine that failed (a module path), or for kind 0 the library's name of the
     /// error.
     pub operation: String,
+    /// The kernel's class of the error: `refusal` (a fact of the geometry: change the input),
+    /// `defect` (the kernel's fault), `port_failure` (a part of the kernel not ported, or a
+    /// preparation it needs), or `unclassed` (none of them, and every failure of kind 0).
+    pub class: String,
 }
 
 impl From<&solidcraft_kernel::ErrorCode> for ErrorCodeReply {
     fn from(c: &solidcraft_kernel::ErrorCode) -> Self {
-        ErrorCodeReply { call: c.call.clone(), kind: c.kind, operation: c.operation.clone() }
+        ErrorCodeReply { call: c.call.clone(), kind: c.kind, operation: c.operation.clone(), class: c.class.clone() }
     }
 }
 
