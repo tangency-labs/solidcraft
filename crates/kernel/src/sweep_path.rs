@@ -229,8 +229,8 @@ fn frames_toward(tangents: &[Vec3], d: Vec3) -> Result<Vec<[Vec3; 3]>> {
 /// With `turning` (any orientation but parallel) the profile is instead carried by motions that
 /// take the path's direction where it starts onto its direction farther along, so the angle
 /// between its plane and the path stays what it is at the start. `tangents` is then the start
-/// direction alone, and a profile whose plane holds it (to 1e-6 rad) lies along the path
-/// everywhere and sweeps no volume, for example a circle drawn on XZ swept round a coil's end
+/// direction alone, and a profile the path starts in (the caller's test) whose plane holds it
+/// (to 1e-6 rad) lies along the path everywhere and sweeps no volume, for example a circle drawn on XZ swept round a coil's end
 /// section, a circle in XZ.
 pub(crate) fn crossing_check(plane: &Plane, tangents: &[Vec3], turning: bool) -> Result<()> {
     let n = plane.normal().normalized().ok_or_else(|| KernelError::Invalid("sweep frame".into()))?;

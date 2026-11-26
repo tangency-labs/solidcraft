@@ -321,7 +321,7 @@ fn a_twisted_sweep_round_a_closed_path_joins_its_ends() {
 
 /// Turning with the path, a profile keeps its angle to the path all the way, so one whose
 /// plane holds the path's direction where it starts sweeps no volume, round a circle in its own
-/// plane or with a twist: refused with that reason, before SMLib makes a flat solid. The same
+/// plane or with a twist: SMLib can only make a flat solid, and the refusal says why. The same
 /// square across the path sweeps A L (an 8 x 8 square round a circle of radius 30).
 #[test]
 fn a_profile_lying_along_the_path_is_refused_when_it_turns_with_it() {
@@ -343,6 +343,24 @@ fn a_profile_lying_along_the_path_is_refused_when_it_turns_with_it() {
         crate::PathSeg::Arc { a: -a, center: Vec3::ZERO, axis: Vec3::Z, angle: PI },
     ];
     close(volume(&smlib_sweeps::sweep(&xz, &pieces_of(&square), &round, false).unwrap()), 64.0 * TAU * 30.0, 1e-3, "ring");
+}
+
+/// A profile whose plane holds the path's direction at the start but that sits off the path still
+/// sweeps a volume, and is not refused for it: a 2 x 2 rectangle in the plane x = 30 (spanning
+/// y 10 to 12, z -1 to 1) turned once about the Z axis does not overlap itself (a point's radius
+/// r satisfies r^2 = 900 + y^2, so each (r, z) comes from one point). Its volume is the integral
+/// of 2 pi r dr dz over the region, and r dr = y dy, so V = 2 pi (2) (12^2 - 10^2) / 2 = 88 pi.
+#[test]
+fn a_profile_off_the_path_in_a_plane_holding_its_direction_still_sweeps() {
+    let yz = Plane { origin: Vec3::new(30.0, 0.0, 0.0), x: Vec3::Y, y: Vec3::Z };
+    let rect = region(Loop2::polygon(&[Vec2::new(10.0, -1.0), Vec2::new(12.0, -1.0), Vec2::new(12.0, 1.0), Vec2::new(10.0, 1.0)]));
+    let a = Vec3::new(30.0, 0.0, 0.0);
+    let round = [
+        crate::PathSeg::Arc { a, center: Vec3::ZERO, axis: Vec3::Z, angle: PI },
+        crate::PathSeg::Arc { a: -a, center: Vec3::ZERO, axis: Vec3::Z, angle: PI },
+    ];
+    let want = 88.0 * PI;
+    close(volume(&smlib_sweeps::sweep(&yz, &pieces_of(&rect), &round, false).unwrap()), want, 1e-3, "ring");
 }
 
 #[test]
