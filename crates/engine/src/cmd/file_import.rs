@@ -720,7 +720,7 @@ pub(crate) fn add_design_in(s: &mut Session, design: &solidcraft_io::NativeDesig
                         .param(&pn)
                         .map(|x| (x.expr.clone(), x.unit.clone()))
                         .ok_or_else(|| EngineError::Other(format!("import: no parameter {pn}")))?;
-                    c.param = Some(s.doc_mut().new_model_param(&e, &u));
+                    c.param = Some(s.doc_mut().new_model_param(&e, &u)?);
                 }
             }
         }

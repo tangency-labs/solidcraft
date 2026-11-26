@@ -2490,7 +2490,7 @@ mod tests {
         use solidcraft_sketch::{ConstraintKind, Sketch};
         let mut d = Document::new("legacy origin dimensions");
         d.set_param("reach", "25 mm", Some("mm"), None).unwrap();
-        let dim = d.new_model_param("reach", "mm");
+        let dim = d.new_model_param("reach", "mm").unwrap();
         let mut sketch = Sketch::new();
         let end = sketch.add_point(Vec2::new(25.0, 0.0), Some("tip")).unwrap();
         let line = sketch.add_line_pts(0, end, Some("edge")).unwrap();
@@ -2519,9 +2519,9 @@ mod tests {
         use solidcore_record::Vec2;
         use solidcraft_sketch::{ConstraintKind, Sketch};
         let mut d = Document::new("persistent typed dimensions");
-        let heading = d.new_model_param("45 deg", "deg");
-        let sweep = d.new_model_param("180 deg", "deg");
-        let overall = d.new_model_param("10 mm", "mm");
+        let heading = d.new_model_param("45 deg", "deg").unwrap();
+        let sweep = d.new_model_param("180 deg", "deg").unwrap();
+        let overall = d.new_model_param("10 mm", "mm").unwrap();
         let mut sketch = Sketch::new();
         let end = sketch.add_point(Vec2::new(2.0, 2.0), None).unwrap();
         let line = sketch.add_line_pts(0, end, None).unwrap();

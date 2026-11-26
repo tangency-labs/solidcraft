@@ -6086,14 +6086,20 @@ impl Document {
     }
 
     /// Create the next free model parameter `dN` with the given expression and unit.
-    pub fn new_model_param(&mut self, expr_s: &str, unit: &str) -> String {
+    pub fn new_model_param(&mut self, expr_s: &str, unit: &str) -> Result<String> {
+        if self.params.len() >= MAX_PARAMS {
+            return Err(DocError::Invalid("too many parameters".into()));
+        }
         let name = self.next_d_name();
         self.params.push(Param { name: name.clone(), expr: expr_s.into(), unit: unit.into(), comment: String::new(), model: true });
-        name
+        Ok(name)
     }
 
     /// Create a model parameter with a name the caller chose (checked: valid and free).
     pub fn new_named_model_param(&mut self, name: &str, expr_s: &str, unit: &str) -> Result<String> {
+        if self.params.len() >= MAX_PARAMS {
+            return Err(DocError::Invalid("too many parameters".into()));
+        }
         if let Some(why) = Self::param_name_problem(name) {
             return Err(DocError::Invalid(why));
         }

@@ -2494,7 +2494,7 @@ pub(super) fn slot_width_dimension(
 ) -> Result<Option<String>> {
     let Some(e) = driven else { return Ok(None) };
     let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
-    let pname = doc.new_model_param(e, &unit);
+    let pname = doc.new_model_param(e, &unit)?;
     Ok(Some(sk.add_constraint(ConstraintKind::Diameter { c: cap, value: w }, Some(pname))?))
 }
 
@@ -2517,7 +2517,7 @@ fn size_dimension(
     let mk = |v: f64| if diameter { ConstraintKind::Diameter { c, value: v } } else { ConstraintKind::Radius { c, value: v } };
     if !paper {
         let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
-        let pname = doc.new_model_param(e, &unit);
+        let pname = doc.new_model_param(e, &unit)?;
         return Ok(sk.add_constraint(mk(value), Some(pname))?);
     }
     if e.len() > 4096 || e.trim().is_empty() || e.chars().any(char::is_control) {
@@ -4547,7 +4547,7 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
             doc.add_user_param(name, &rhs, Some(&unit), None).map_err(|e| bad(cmd, format!("value: {e}")))?;
         }
         let e = value.as_ref().map(|e| doc.with_design_unit(e, kind)).unwrap_or(default_expr);
-        let pname = doc.new_model_param(&e, &unit);
+        let pname = doc.new_model_param(&e, &unit)?;
         // The value must evaluate.
         let (vals, errs) = doc.param_values();
         if let Some(err) = errs.get(&pname) {

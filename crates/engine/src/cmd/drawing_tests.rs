@@ -3975,7 +3975,7 @@ fn sheet_batch_move_scale_break_trim_and_drag_publish_only_the_selected_drawing(
 #[test]
 fn sheet_batch_extend_and_path_trim_keep_paper_geometry_without_model_pruning() {
     let (mut s, drawing, sketch, _) = sheet_editor();
-    s.doc_mut().new_model_param("10 mm", "mm");
+    s.doc_mut().new_model_param("10 mm", "mm").unwrap();
     run(&mut s, "sketch.line", json!({"points": [[30, 5], [30, 45]], "connect": false, "infer": false}));
     let extending = run(&mut s, "sketch.line", json!({"points": [[5, 25], [15, 25]], "connect": false, "infer": false}))["curves"][0]
         .as_str()

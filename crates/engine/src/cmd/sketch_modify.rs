@@ -2731,7 +2731,7 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
         // A corner symmetric to another is rounded with it (#18075).
         let corners = symmetric_corners(sk, &corners, cmd);
         let released = release_corner_offsets(sk, doc, &corners, cmd)?;
-        let pname = if on_sheet { r_expr.to_string() } else { doc.new_model_param(&r_expr, "mm") };
+        let pname = if on_sheet { r_expr.to_string() } else { doc.new_model_param(&r_expr, "mm")? };
         // The arcs by id: a fillet that takes a whole line removes it, which renumbers the curves.
         let (mut arcs, mut cons, mut kept): (Vec<String>, _, _) = (Vec::new(), Vec::new(), Vec::new());
         for q in &corners {
@@ -4152,7 +4152,7 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
         let eligible = sk.curves.iter().map(|c| c.id.clone()).collect::<std::collections::HashSet<_>>();
         let mut make = |name: Option<&str>, e: &str| match name {
             Some(name) => doc.new_named_model_param(name, e, "mm").map_err(|error| bad(cmd, format!("param: {error}"))),
-            None => Ok(doc.new_model_param(e, "mm")),
+            None => doc.new_model_param(e, "mm").map_err(|error| bad(cmd, format!("param: {error}"))),
         };
         // A chosen name is made before a generated one, so `param2: "d1"` is not taken by the
         // `d1` generated for an unnamed first side.

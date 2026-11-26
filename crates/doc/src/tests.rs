@@ -92,6 +92,25 @@ fn component_lookup_refuses_duplicate_names_and_keeps_explicit_ids() {
     assert_eq!(named.resolve_component("Design").unwrap(), Some(0));
 }
 
+#[test]
+fn model_parameters_respect_the_document_limit() {
+    for named in [false, true] {
+        let mut doc = Document::new("At the limit");
+        doc.params = (0..MAX_PARAMS - 1)
+            .map(|i| Param { name: format!("p{i}"), expr: "1 mm".into(), unit: "mm".into(), comment: String::new(), model: false })
+            .collect();
+        let create = |doc: &mut Document, name: &str| {
+            if named { doc.new_named_model_param(name, "2 mm", "mm") } else { doc.new_model_param("2 mm", "mm") }
+        };
+        create(&mut doc, "dim").unwrap();
+        let before = doc.clone();
+        assert_eq!(doc.params.len(), MAX_PARAMS);
+        assert!(create(&mut doc, "other").unwrap_err().to_string().contains("too many parameters"));
+        assert_eq!(doc, before);
+        assert_eq!(Document::from_json(&doc.to_json()).unwrap().params.len(), MAX_PARAMS);
+    }
+}
+
 /// 40 x 30 rectangle with its width and height driven by `width` / d2.
 fn plate_doc() -> (Document, u64) {
     let mut doc = Document::new("plate");
@@ -106,9 +125,9 @@ fn plate_doc() -> (Document, u64) {
     sk.add_constraint(Horizontal { l: l[2] }, None).unwrap();
     sk.add_constraint(Vertical { l: l[1] }, None).unwrap();
     sk.add_constraint(Vertical { l: l[3] }, None).unwrap();
-    let d1 = doc.new_model_param("width", "mm");
+    let d1 = doc.new_model_param("width", "mm").unwrap();
     sk.add_constraint(Length { l: l[0], value: 40.0 }, Some(d1)).unwrap();
-    let d2 = doc.new_model_param("30 mm", "mm");
+    let d2 = doc.new_model_param("30 mm", "mm").unwrap();
     sk.add_constraint(Length { l: l[1], value: 30.0 }, Some(d2)).unwrap();
     let s = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
     doc.add_feature(

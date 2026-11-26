@@ -982,7 +982,7 @@ pub(super) fn dimension_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Opti
             }
             None => value.as_ref().map(|e| doc.with_design_unit(e, unit_kind)).unwrap_or(default_expr),
         };
-        let pname = doc.new_model_param(&expression, &unit);
+        let pname = doc.new_model_param(&expression, &unit)?;
         let (vals, errs) = doc.param_values();
         if let Some(err) = errs.get(&pname) {
             return Err(bad(cmd, format!("value: {err}")));
@@ -1084,7 +1084,7 @@ pub(super) fn toggle_driven_3d(s: &mut Session, p: &Value, cmd: &str, cid: &str,
                 None
             } else {
                 let (unit, e) = if slot.kind.is_angle() { ("deg".into(), format!("{} deg", v.to_degrees())) } else { doc.design_length(v) };
-                Some(doc.new_model_param(&e, &unit))
+                Some(doc.new_model_param(&e, &unit)?)
             };
         }
         Ok(())
