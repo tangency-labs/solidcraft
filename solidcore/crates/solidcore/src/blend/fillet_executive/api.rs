@@ -214,7 +214,7 @@ pub fn fillet_edges(
         return Err(no_edges());
     }
     supported_size(radius, brep)?;
-    keeping_a_solid_closed(k, brep, |k, brep| {
+    let whole = keeping_a_solid_closed(k, brep, |k, brep| {
         let kind = match xsect_type {
             0 => Some((SectionKind::Chamfer, FilletSurfaceGeneratorType::Linear)),
             2 => None,
@@ -241,7 +241,118 @@ pub fn fillet_edges(
                 .and_then(|()| session.do_fillet(k))
         }?;
         stitch_and_orient(k, brep, &StitchAndOrientOptions::default())
-    })
+    });
+    match whole {
+        Err(
+            refusal @ SolidError::FilletRefused {
+                reason: Some(NoRoomReason::FaceConsumed | NoRoomReason::BandsOverlap),
+                ..
+            },
+        ) => {
+            match blends_apart(k, brep, edges, |k, b, picks| {
+                fillet_edges(k, b, picks, radius, xsect_type, continuity, thumbweight)
+            })? {
+                Some(built) => {
+                    *brep = built;
+                    brep.refresh_cached_topology();
+                    Ok(())
+                }
+                None => Err(refusal),
+            }
+        }
+        other => other,
+    }
+}
+
+/// Not upstream (#2784): blends whose bands meet across a face they share, on edges that
+/// share no vertex (the two rims of a disc blended by its height or more), take off what
+/// each takes alone, and no more: the body they leave is the intersection of the bodies
+/// each group of edges leaves on its own (each group's material removed), as for cuts by
+/// half-spaces. Each group of edges joined by vertices is blended alone on a copy of the
+/// body; the copies are intersected. `None` (the caller keeps its refusal) where the edges
+/// are one group, where an edge is concave (its blend adds material), where a group is
+/// refused alone, or where the intersection fails or is not one closed body.
+///
+/// # Errors
+/// Cancellation and allocation; a group's or the intersection's failure gives `None`.
+fn blends_apart(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    edges: &[EdgeId],
+    mut blend: impl FnMut(&mut Kernel, &mut Brep, &[EdgeId]) -> Result<()>,
+) -> Result<Option<Brep>> {
+    if !is_closed_manifold(brep)? {
+        return Ok(None);
+    }
+    for &e in edges {
+        if crate::blend::fillet_solver::p5::is_concave_edge(k, brep, e)? {
+            return Ok(None);
+        }
+    }
+    // groups of edges joined by shared vertices (a smallest-index union)
+    let mut group: Vec<usize> = (0..edges.len()).collect();
+    let mut ends = Vec::new();
+    for &e in edges {
+        let (a, b) = crate::topology::edge::start_end_vertices(brep, e)?;
+        ends.push([a, b]);
+    }
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for i in 0..edges.len() {
+            for j in 0..edges.len() {
+                let (Some(ei), Some(ej)) = (ends.get(i), ends.get(j)) else {
+                    continue;
+                };
+                let meet = ei.iter().flatten().any(|v| ej.contains(&Some(*v)));
+                let (Some(&gi), Some(&gj)) = (group.get(i), group.get(j)) else {
+                    continue;
+                };
+                if meet && gi != gj {
+                    let low = gi.min(gj);
+                    for g in &mut group {
+                        if *g == gi || *g == gj {
+                            *g = low;
+                        }
+                    }
+                    changed = true;
+                }
+            }
+        }
+    }
+    let mut ids: Vec<usize> = group.clone();
+    ids.sort_unstable();
+    ids.dedup();
+    if ids.len() < 2 {
+        return Ok(None);
+    }
+    let mut result: Option<Brep> = None;
+    for id in ids {
+        k.check_cancelled(OP)?;
+        let picks: Vec<EdgeId> = edges
+            .iter()
+            .zip(&group)
+            .filter(|&(_, &g)| g == id)
+            .map(|(&e, _)| e)
+            .collect();
+        let mut alone = brep.clone_standing_for_self()?;
+        if blend(k, &mut alone, &picks).is_err() {
+            return Ok(None);
+        }
+        result = Some(match result {
+            None => alone,
+            Some(so_far) => {
+                match crate::boolean::api_brep::boolean_intersection(k, so_far, alone) {
+                    Ok(b) => b,
+                    Err(_) => return Ok(None),
+                }
+            }
+        });
+    }
+    match result {
+        Some(b) if is_closed_manifold(&b)? => Ok(Some(b)),
+        _ => Ok(None),
+    }
 }
 
 /// `SmApiFilletEdgesPerEdge`: fillet `edges` of `brep` with a constant radius and
