@@ -204,6 +204,10 @@ const DETACHED: usize = 2;
 /// it, the pose is cancelled and the latest value starts, so only the latest keeps solving.
 const STALE_MOTION_MS: f64 = 500.0;
 
+/// How long a plugin dialog's inputs stay unchanged before its preview runs (#22297). A plugin
+/// preview runs the whole entry, which can take seconds: a quick series of changes costs one run.
+const PLUGIN_QUIET_MS: f64 = 300.0;
+
 /// Picking and feedback use the same placed geometry as the joint preview. The inverse
 /// placement maps a primary re-pick back to the unchanged document's coordinates.
 pub struct JointInteraction {
@@ -241,6 +245,12 @@ pub struct PreviewState {
     /// The running job is a joint pose (see [`motion_key`]): once obsolete, it gets
     /// [`STALE_MOTION_MS`].
     running_motion: bool,
+    /// The running job is a plugin dialog's preview: once obsolete, it is cancelled between the
+    /// plugin's host calls instead of waited for (#22297).
+    running_plugin: bool,
+    /// A plugin dialog's preview inputs (their key) and when they last changed: its run starts
+    /// once they have stood for [`PLUGIN_QUIET_MS`].
+    plugin_inputs: Option<(u64, f64)>,
     /// Bodies the preview stands in for (hidden in the model scene).
     pub replaced: Vec<String>,
     /// What hovering one of them outlines (see [`Built::outlines`]).
@@ -411,6 +421,7 @@ impl PreviewState {
         self.detach();
         self.running_tool = false;
         self.running_stream_key = None;
+        self.plugin_inputs = None;
         self.shown_key = None;
         self.error = None;
         self.plugin_view = None;
@@ -591,6 +602,7 @@ impl PreviewState {
                 self.running_stream_key = None;
                 self.running_tool = false;
                 self.running_motion = false;
+                self.running_plugin = false;
                 // A held slider, a dragged arrow or an animation may advance faster than the
                 // worker. Show completed joint/distance results from the same setup, and tools built for
                 // inputs since changed, then compute the latest. Errors still require an exact
@@ -612,7 +624,12 @@ impl PreviewState {
         // A joint pose for a value the slider has left, still running after `STALE_MOTION_MS`:
         // stop it and start the latest value (#14264).
         let stale_motion = self.running_motion && stream_key.is_some() && now - self.started >= STALE_MOTION_MS;
-        if self.running.as_ref().is_some_and(|(k, _)| *k != key) && (other_setup || stale_motion) && self.detached.len() < DETACHED {
+        // A plugin preview for inputs since changed: its result would only be dropped, and the
+        // plugin stops at its next host call (#22297).
+        if self.running.as_ref().is_some_and(|(k, _)| *k != key)
+            && (other_setup || stale_motion || self.running_plugin)
+            && self.detached.len() < DETACHED
+        {
             self.detach();
         }
     }
@@ -630,6 +647,19 @@ impl PreviewState {
         self.running_tool = false;
         self.running_stream_key = None;
         self.running_motion = false;
+        self.running_plugin = false;
+    }
+
+    /// Whether a plugin preview for inputs `key` may start at `now`: once they have stood for
+    /// [`PLUGIN_QUIET_MS`]. Inputs other than the last ones seen start the wait again.
+    fn plugin_quiet(&mut self, key: u64, now: f64) -> bool {
+        match self.plugin_inputs {
+            Some((k, since)) if k == key => now - since >= PLUGIN_QUIET_MS,
+            _ => {
+                self.plugin_inputs = Some((key, now));
+                false
+            }
+        }
     }
 }
 
@@ -821,8 +851,13 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     insert_preview_bounds(app);
     crate::dialogs_assembly::update_alignment_order(app);
     let pv = &mut app.preview;
-    if pv.running.is_none() && pv.shown_key != Some(key) {
-        pv.started = crate::now_ms();
+    // A plugin preview waits until its inputs stand still (#22297).
+    let now = crate::now_ms();
+    // The inputs are noted even when their result is the one shown: a return to them restarts
+    // the wait for the next change.
+    let waiting = plugin.is_some() && !pv.plugin_quiet(key, now) && pv.shown_key != Some(key);
+    if pv.running.is_none() && pv.shown_key != Some(key) && !waiting {
+        pv.started = now;
         pv.running_stream_key = stream_key;
         pv.running_motion = motion_key(&cmds, app.session.revision, colors).is_some();
         let mut straight = std::mem::take(&mut app.preview.straight);
@@ -843,8 +878,9 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
             crate::plugin_menu::dry_run(&mut scratch, id);
         }
         spawn(&mut app.preview, key, scratch, cmds, colors, tool, PreviewWork { fallback, ..PreviewWork::default() });
+        app.preview.running_plugin = plugin.is_some() && app.preview.running.is_some();
     }
-    app.preview.busy = app.preview.running.is_some();
+    app.preview.busy = app.preview.running.is_some() || waiting;
     // Both worker results and the web's synchronous results are ready before their first draw.
     if app.preview.shown_key == Some(key)
         && app.preview.active
@@ -2256,6 +2292,51 @@ mod tests {
         pv.running_motion = false;
         pv.poll_at(2, Some(42), 1000.0 + 10.0 * STALE_MOTION_MS);
         assert!(pv.running.is_some() && !progress.is_cancelled());
+    }
+
+    /// A plugin preview for inputs since changed is cancelled at once (#22297): its result would
+    /// only be dropped, and the plugin stops at its next host call. The current one keeps running.
+    #[test]
+    fn an_obsolete_plugin_preview_is_cancelled_not_waited_for() {
+        let start = |pv: &mut PreviewState| {
+            let (tx, rx) = std::sync::mpsc::channel::<Job>();
+            let progress = Arc::new(Progress::default());
+            pv.running = Some((1, rx));
+            pv.running_progress = Some(progress.clone());
+            pv.running_plugin = true;
+            pv.started = 1000.0;
+            (tx, progress)
+        };
+        let mut pv = PreviewState::default();
+        let (_tx, progress) = start(&mut pv);
+        pv.poll_at(1, None, 1000.0 + 60_000.0);
+        assert!(pv.running.is_some() && !progress.is_cancelled(), "the current inputs' run is never cancelled");
+        pv.poll_at(2, None, 1001.0);
+        assert!(pv.running.is_none(), "the new inputs need not wait");
+        assert!(progress.is_cancelled(), "the obsolete run is asked to stop");
+        assert_eq!(pv.detached.len(), 1);
+        assert!(!pv.running_plugin);
+        // Any other preview that does not stream still waits for its running job.
+        let mut pv = PreviewState::default();
+        let (_tx, progress) = start(&mut pv);
+        pv.running_plugin = false;
+        pv.poll_at(2, None, 1001.0);
+        assert!(pv.running.is_some() && !progress.is_cancelled());
+    }
+
+    /// A plugin preview starts once its inputs have stood for 300 ms (#22297); other inputs start
+    /// the wait again.
+    #[test]
+    fn a_plugin_preview_waits_until_its_inputs_stand_still() {
+        let mut pv = PreviewState::default();
+        assert!(!pv.plugin_quiet(1, 0.0), "new inputs wait");
+        assert!(!pv.plugin_quiet(1, PLUGIN_QUIET_MS - 1.0));
+        assert!(pv.plugin_quiet(1, PLUGIN_QUIET_MS));
+        assert!(!pv.plugin_quiet(2, PLUGIN_QUIET_MS + 10.0), "a change starts the wait again");
+        assert!(!pv.plugin_quiet(2, 2.0 * PLUGIN_QUIET_MS));
+        assert!(pv.plugin_quiet(2, 2.0 * PLUGIN_QUIET_MS + 10.0));
+        pv.clear();
+        assert!(!pv.plugin_quiet(2, 10_000.0), "a reopened dialog waits again");
     }
 
     #[test]
