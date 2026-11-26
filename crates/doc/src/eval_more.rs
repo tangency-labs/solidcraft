@@ -1336,9 +1336,7 @@ pub(super) fn sheet_eval(
             corner_relief,
             bend_relief_shape,
             corners,
-        }
-            if surface_flange_sheet(st, body, f, edges).is_some() =>
-        {
+        } if surface_flange_sheet(st, body, f, edges).is_some() => {
             if corners.len() > 2000 {
                 return Err(DocError::Invalid("at most 2000 flange corner choices are supported".into()));
             }
