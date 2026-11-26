@@ -20,6 +20,7 @@ use crate::{Error, Result};
 impl Answer for Contact {}
 impl Answer for Vec<Contact> {}
 impl Answer for Vec<Point3> {}
+impl Answer for Verdict {}
 
 /// The bracket of the distance between two bodies' boundaries, at most the width asked.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -141,6 +142,31 @@ impl Body {
             witness: contact.witness.map(|[p, q]| [array(p), array(q)]),
         })
     }
+
+    /// Whether this body and `other` are certified to share no interior volume without
+    /// running a boolean ([`solidcore::query::contact::interiors_disjoint`]): `Some(true)`
+    /// when certified disjoint or pure contact, `Some(false)` when real interior overlap is
+    /// proved, `None` when undecided. Neither body changes.
+    ///
+    /// # Errors
+    /// [`Error::Refused`] for a body without faces; those of the session.
+    pub fn interiors_disjoint(&self, other: &Body) -> Result<Option<bool>> {
+        poisoned(&[self, other])?;
+        let verdict = run_on(
+            "contact::interiors_disjoint",
+            &[("a", self), ("b", other)],
+            |k| {
+                let mut a = copy_of(k, self)?;
+                let mut b = copy_of(k, other)?;
+                c::interiors_disjoint(k, &mut a, &mut b)
+            },
+        )?;
+        Ok(match verdict {
+            Verdict::Yes => Some(true),
+            Verdict::No => Some(false),
+            Verdict::Undecided => None,
+        })
+    }
 }
 
 /// Centroids of `tool`'s planar faces that lie back-to-back on a planar face of
@@ -191,5 +217,15 @@ mod tests {
         let b = make_box([5.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
         let pts = flush_contact_points(&a, &b).unwrap();
         assert!(pts.is_empty(), "{pts:?}");
+    }
+
+    /// Certified non-boolean interior disjointness accepts flush contact and rejects overlap.
+    #[test]
+    fn interiors_disjoint_distinguishes_flush_contact_from_overlap() {
+        let a = make_box([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
+        let flush = make_box([10.0, 0.0, 3e-5], [10.0, 10.0, 10.0]).unwrap();
+        let overlap = make_box([9.9, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
+        assert_eq!(a.interiors_disjoint(&flush).unwrap(), Some(true));
+        assert_eq!(a.interiors_disjoint(&overlap).unwrap(), Some(false));
     }
 }

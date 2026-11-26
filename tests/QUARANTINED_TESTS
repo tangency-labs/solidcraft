@@ -4,8 +4,8 @@
 # KNOWN_FAILING_TESTS; the issue is `#N` and is required; the date is YYYY-MM-DD. Sorted. An entry
 # older than 14 days fails `cargo xtask lists`: fix the test and delete the line, or decide what
 # else to do with it. See "Quarantining a flaky test" in CONTRIBUTING.md.
-solidcraft-engine::cmd::features::patterns_tests::pattern_of_512_hole_cuts_finishes_in_reasonable_time #14587 2026-11-11 times 512 holes against 128 and fails past 13x on loaded runners; the pattern is superlinear
+solidcraft-engine::cmd::features::patterns_tests::pattern_of_512_hole_cuts_finishes_in_reasonable_time #14587 2026-11-26 renewed 2026-11-26 while #14587 is fixed; times 512 holes against 128 and fails past 13x on loaded runners; the pattern is superlinear
 solidcraft-engine::cmd::joints::tests::an_older_design_with_a_to_object_extrude_opens_pinned_to_its_saved_placements #17476 2026-11-17 failed in 4 merge-queue runs that carried a format change and passed on rerun of the same commit; it opens a design saved as format 56, so the pending format changes in the batch decide the outcome
 solidcraft-engine::cmd::joints::tests::an_older_design_with_unplaced_components_opens_with_its_to_object_extrude_pinned #17477 2026-11-17 same flake as #17476, in the other older-design pickle of the same helper; passes on rerun
-solidcraft-ui-egui::render_workspace::tests::native_preparation_disconnected_retirement_holds_unavailable_owner_across_document_reset #15077 2026-11-11 admitted bytes read 0 instead of the held credit on loaded runners (left 0, right 267473)
+solidcraft-ui-egui::render_workspace::tests::native_preparation_disconnected_retirement_holds_unavailable_owner_across_document_reset #15077 2026-11-26 renewed 2026-11-26 while #15077 is fixed; admitted bytes read 0 instead of the held credit on loaded runners (left 0, right 267473)
 solidcraft-ui-egui::viewport::appearance_tests::theme_switches_refresh_cached_viewport_colours_without_remeshing #16468 2026-11-13 flaky across unrelated merge groups
