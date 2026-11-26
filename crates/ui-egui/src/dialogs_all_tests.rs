@@ -1199,6 +1199,7 @@ fn cell_grid_anchor_takes_a_construction_point_of_a_moved_component_where_it_sho
 #[test]
 fn cell_grid_edit_keeps_an_anchor_expression_after_a_parameter_change() {
     let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 62, "width": 62, "height": 3, "body_name": "Plate"})).unwrap();
     h.app.run("parameters.add", json!({"name": "Inset", "expression": "4 mm"})).unwrap();
     h.app.run("sketch.create", json!({"plane": "XY", "name": "Field"})).unwrap();
     h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [62, 62]})).unwrap();
