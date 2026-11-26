@@ -52,7 +52,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&FLANGE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(
-        "base: sketch + profiles? (omitted: nested outlines keep holes; rule?, flip?) | contour: sketch + curves (open chain of lines and tangent arcs) + distance (rule?, flip?, reverse?) | \
+        "base: sketch + profiles? (omitted: nested outlines keep holes; rule?, flip?) | contour: sketch + curves (open chain of lines and tangent arcs) + distance; radius? (default: rule); \
+         orientation?: center|side1|side2 (where the contour lies across the sheet thickness; default side1); \
+         symmetric?: bool (the distance each way across the sketch plane; total width is twice the distance); rule?, flip?, reverse? | \
          edge: edges: [[x,y,z] on top/bottom edges, or {point: [x,y,z], angle?, height?, segments?} for an edge with its own angle and height, \
          or split into 1…64 segments [{from, to, angle?, height?, flip?}] that tile the stretch the sheet still has there (from, to are \
          fractions 0…1 of it, first from 0, last to 1; consecutive segments that match make one bend)] + \
@@ -63,10 +65,11 @@ pub static COMMANDS: &[CommandSpec] = &[
          the bend starting at the edge (bend_outside is the same), half way, the inner virtual sharp on the edge, \
          or the bend's outer face tangent to the edge's face (below 90 deg the bend's end on that face)), flip?, body?, corner_relief_shape?: notch|round|rectangular|tear and corner_relief? (size across): \
          the relief at the corners these flanges make (default: the rule's); \
+         bend_relief_shape?: rectangular|obround|tear (the relief beside a bend's end where the sheet runs on past it; default: the rule's); \
          then?: [{angle?, height, flip?}] further bends (at most 16), each a flange on the far edge of the one before, flip: true turns that bend the other way (edge only); \
          type?: base|edge|contour (default from the inputs); name?, body_name? (the new body). \
          Thickness, K-factor and bend radius come from the rule (sheet.manage_rules); passing them here is refused, \
-         and so is the corner relief on a base or contour flange",
+         and so is the corner or bend relief on a base or contour flange",
     ),
     CommandSpec::new("sheet.path_flange", "Path Flange", crate::checked!("sheet.path_flange", path_flange)).begins_edit()
         .at("SHEET METAL", "CREATE")
@@ -189,6 +192,9 @@ pub static COMMANDS: &[CommandSpec] = &[
          gap: between flanges that meet at a corner, whose ends are closed toward each other at any angle); \
          corner_relief_shape?: notch|round|rectangular|tear (what is cut where two bends meet at a corner of the panel they stand on: round and rectangular a relief \
          `corner_relief` across; tear none, each bend's end is cut straight from the corner to its flange's end; default notch); \
+         bend_relief_shape?: rectangular|obround|tear (the bend relief beside a bend's end where the base runs on: a slot relief_width wide and \
+         relief_depth past the bend line, default rectangular; obround rounds its inner end and needs relief_depth at least half relief_width; \
+         tear removes nothing and cuts the flat pattern along the bend's end); \
          angle_display?: bend|included (how the DXF bend notes read the bend angles: the bend angle, default, or the included angle \
          left between the bend's sides, 180° less it; the bend table gives both, and a flange's `angle` is always the bend angle); \
          active?: bool; delete?: bool; material?: text (the material the rule is for, a label saved with it); \
@@ -455,11 +461,11 @@ fn rule_param(s: &Session, p: &Value, cmd: &str) -> Result<Option<String>> {
 
 /// Sheet values a flange takes from its rule. Passing one to `sheet.flange` is refused rather
 /// than ignored, so a script never gets a part of another thickness than it asked for.
-const RULE_ONLY: [&str; 8] =
-    ["thickness", "k_factor", "bend_radius", "relief_width", "relief_depth", "corner_relief", "corner_relief_shape", "hem_gap"];
+const RULE_ONLY: [&str; 9] =
+    ["thickness", "k_factor", "bend_radius", "relief_width", "relief_depth", "corner_relief", "corner_relief_shape", "bend_relief_shape", "hem_gap"];
 
-/// The two rule values an edge flange may set for itself: the corner relief.
-const EDGE_RELIEF: [&str; 2] = ["corner_relief", "corner_relief_shape"];
+/// The rule values an edge flange may set for itself: the corner relief and the bend relief's shape.
+const EDGE_RELIEF: [&str; 3] = ["corner_relief", "corner_relief_shape", "bend_relief_shape"];
 
 fn flange(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sheet.flange";
@@ -506,6 +512,24 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
             }
             let distance = req_expr(cmd, p, "distance")?;
             check_expr(s, &distance, Kind::Length, cmd, "distance")?;
+            let radius = expr(p, "radius");
+            if let Some(r) = &radius {
+                check_expr(s, r, Kind::Length, cmd, "radius")?;
+            }
+            let raw_orientation = str_(p, "orientation");
+            if p.get("orientation").is_some() && raw_orientation.is_none() {
+                return Err(bad(cmd, "`orientation` must be center, side1 or side2"));
+            }
+            let orientation = match raw_orientation {
+                Some(orientation @ ("center" | "side1" | "side2")) => Some(orientation.to_string()),
+                Some(other) => return Err(bad(cmd, format!("`orientation` must be center, side1 or side2, not `{other}`"))),
+                None => None,
+            };
+            let symmetric = match p.get("symmetric") {
+                None => false,
+                Some(Value::Bool(value)) => *value,
+                Some(_) => return Err(bad(cmd, "`symmetric` must be a boolean")),
+            };
             let rule = rule_param(s, p, cmd)?;
             add_feature(
                 s,
@@ -514,7 +538,10 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                     sketch: SketchId(sketch),
                     curves,
                     distance,
+                    radius,
                     rule,
+                    orientation,
+                    symmetric,
                     flip: bool_(p, "flip").unwrap_or(false),
                     reverse: bool_(p, "reverse").unwrap_or(false),
                 },
@@ -556,6 +583,16 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                 ),
                 None => None,
             };
+            // The bend relief beside these flanges' bend ends, in place of the rule's.
+            let bend_relief_shape = match p.get("bend_relief_shape").filter(|v| !v.is_null()) {
+                Some(v) => Some(
+                    v.as_str()
+                        .and_then(solidcraft_doc::sheet::BendReliefShape::parse)
+                        .map(|shape| shape.name().to_string())
+                        .ok_or_else(|| bad(cmd, "`bend_relief_shape` must be rectangular, obround or tear"))?,
+                ),
+                None => None,
+            };
             let corner_relief = expr(p, "corner_relief");
             if let Some(c) = &corner_relief {
                 check_expr(s, c, Kind::Length, cmd, "corner_relief")?;
@@ -576,6 +613,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                     corner_relief_shape,
                     corner_relief,
                     height_from: height_from.clone(),
+                    bend_relief_shape: bend_relief_shape.clone(),
                 },
             )?;
             // The first bend owns the supplied name. Keep its identity and report the completed chain's result.
@@ -599,6 +637,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                         corner_relief_shape: None,
                         corner_relief: None,
                         height_from: height_from.clone(),
+                        bend_relief_shape: bend_relief_shape.clone(),
                     },
                 )?;
             }
@@ -1105,6 +1144,10 @@ fn rules(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(shape) = p.get("corner_relief_shape").filter(|v| !v.is_null()) {
         let shape = shape.as_str().and_then(solidcraft_doc::sheet::ReliefShape::parse);
         rule.corner_relief_shape = shape.ok_or_else(|| bad(cmd, "`corner_relief_shape` must be notch, round, rectangular or tear"))?.name().into();
+    }
+    if let Some(shape) = p.get("bend_relief_shape").filter(|v| !v.is_null()) {
+        let shape = shape.as_str().and_then(sheet::BendReliefShape::parse);
+        rule.bend_relief_shape = shape.ok_or_else(|| bad(cmd, "`bend_relief_shape` must be rectangular, obround or tear"))?.name().into();
     }
     if let Some(display) = p.get("angle_display").filter(|v| !v.is_null()) {
         let display = display.as_str().and_then(sheet::AngleDisplay::parse);

@@ -346,7 +346,7 @@ impl Members {
         let FeatureKind::FrameMember { corner, corners, gap: own_gap, .. } = &g.kind else {
             return Err(DocError::Invalid("not a frame member feature".into()));
         };
-        let Layout { segments, regions, at, turn, sketch_x, drawn, planes, turns, centre, placing, .. } = layout(doc, vals, g, st)?;
+        let Layout { segments, regions, at, turn, sketch_x, drawn, planes, turns, centre, placing, up, .. } = layout(doc, vals, g, st)?;
         let own_gap = gap_value(vals, own_gap.as_ref(), "`gap`")?;
         let corners = &overrides(*corner, (&segments, &planes, &drawn, sketch_x), corners, Some((vals, own_gap)))?;
         // ponytail: an earlier frame's corner or chain corner that its own Fit Ends left Free is cut here as jointed
@@ -359,7 +359,7 @@ impl Members {
         let lines = member_lines_of(&segments, plan.as_ref().or(crossing.as_ref()));
         let (ats, group_turns, own) = member_placing(&lines, &placing, (at, turn), &turns, centre);
         let (segments, planes, drawn) = pieced(segments, planes, drawn, plan.as_ref().or(crossing.as_ref()))?;
-        let (axes, _) = section_axes(&segments, &planes, plan.as_ref(), &group_turns, &own)?;
+        let (axes, _) = section_axes(&segments, &planes, plan.as_ref(), &group_turns, &own, up)?;
         let inside = regions.first().map(|r| r.interior_point()).ok_or_else(|| DocError::Invalid("the member profile has no area".into()))?;
         let (ends, points) = {
             let placed = placer(&axes, &ats);

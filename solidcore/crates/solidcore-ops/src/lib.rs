@@ -26,7 +26,8 @@
 //! distances and normals), [`contact`] (whether bodies meet, their boundary distance),
 //! [`pick`] (the edge or vertex nearest a point), [`boolean`], [`stitch`], [`prism`] (planar
 //! region booleans and extrusion, prism sections),
-//! [`cell_grid`] (the cells of a grid over a profile).
+//! [`cell_grid`] (the cells of a grid over a profile), [`profile`] (line families clipped to a
+//! region).
 //!
 //! Operations change the body they are given, as the kernel does. An application that keeps
 //! its input copies it first ([`Body::copy`]).
@@ -58,6 +59,7 @@ pub mod curve_knots;
 pub mod curve_plane;
 pub mod cylinder_wall;
 pub mod develop;
+pub mod dome;
 pub mod dxf;
 pub mod error;
 pub mod extend;
@@ -71,7 +73,6 @@ pub mod frame_gusset;
 pub mod frame_member;
 pub mod frame_trim;
 pub mod fuel;
-pub mod hatch;
 pub mod heal;
 pub mod history;
 pub mod hlr;
@@ -79,7 +80,6 @@ pub mod hole_stacks;
 pub mod joint_turn;
 pub mod label;
 pub mod measure;
-pub mod member_turn;
 pub mod mid_joint;
 pub mod mid_sheet;
 pub mod network;
@@ -91,14 +91,18 @@ pub mod pcurve;
 pub mod pick;
 pub mod point_identity;
 pub mod prism;
+pub mod profile;
 pub mod provenance;
 pub mod query;
 pub mod record_check;
+pub mod section_corners;
 pub mod session;
+pub mod sketch_arc;
 pub mod spline_projection;
 pub mod split;
 pub mod step_assembly;
 pub mod stitch;
+pub mod stop;
 pub mod surface;
 pub mod surface_cvs;
 pub mod sweep;
@@ -225,6 +229,8 @@ pub fn reduce_mesh(
 
 #[cfg(test)]
 mod ball_corner_tests;
+#[cfg(test)]
+mod dome_tests;
 #[cfg(test)]
 mod noisy_round_tests;
 #[cfg(test)]
