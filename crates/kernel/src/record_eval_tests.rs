@@ -883,3 +883,20 @@ fn aligned_to_frame_turns_coaxial_surfaces_onto_one_quarter_grid() {
     let plane = Surface::Plane { origin: [0.; 3], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] };
     assert!(form::aligned_to_frame(&plane, &ref_frame, 1e-6).is_none());
 }
+
+/// A cylinder written as a revolution of a line parallel to its axis is curved: not a sketch plane.
+/// The record keeps the cylinder's own NURBS form, so this checks the revolution's planarity only.
+#[test]
+fn a_curved_revolution_face_is_not_a_sketch_plane() {
+    let identity = [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]];
+    let mut b = tube();
+    b.faces[0].surface = Surface::PlacedRevolution {
+        profile: Box::new(Curve::Line { start: [2., 0., 0.], end: [2., 0., 1.] }),
+        origin: [1., 2., 3.],
+        axis: [0., 0., 1.],
+        matrix: identity,
+        forward: true,
+    };
+    let body = crate::Body::from_record(b).expect("a cylinder written as a revolution is a valid record");
+    assert_eq!(body.sketch_plane_of_face(0), crate::SketchPlane::NotFlat);
+}
