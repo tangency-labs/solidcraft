@@ -65,7 +65,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         .manifest
         .runtime
         .as_ref()
-        .and_then(|r| limits.check(&r.limits).err())
+        .and_then(|r| if r.is_importer() { limits.check_importer(&r.limits) } else { limits.check(&r.limits) }.err())
         .map(|error| plugin::PluginFailure { plugin: package.manifest.name.clone(), file: None, exporting: false, error }.text());
     serde_json::to_value(InspectResult {
         granted_capabilities: package.manifest.granted_capabilities(),
@@ -225,6 +225,7 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
                 sketch_exits: vec![],
                 view: None,
                 param_warnings: vec![],
+                messages: vec![],
             })
             .map_err(|e| bad("plugin.run", e.to_string()));
         }

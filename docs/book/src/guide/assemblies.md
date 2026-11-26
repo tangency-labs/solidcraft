@@ -132,9 +132,9 @@ go to the new `.sc` file at its origin, with the parameters they use, and the co
 becomes linked to that file, as **Insert Design** makes it. Its placements and the joints to the
 rest of the assembly stay. Components whose own history builds the same bodies are offered to
 become placements of the new link too (`component.copies`, `component.replace_with_link`).
-The menu offers Extract only for a component that can leave: nothing outside uses its sketches
-or changes its bodies, no bodies were moved into or out of it, and none of its subcomponents is
-joined to the rest of the design.
+A component can leave when nothing outside uses its sketches or changes its bodies, no bodies
+were moved into or out of it, and none of its subcomponents is joined to the rest of the design.
+When it can't, the menu shows Extract greyed out, and hovering it says why.
 
 **Joints** (`joint.create`, J) connect two components by joint origins that snap to faces, edges,
 circles and vertices: rigid, revolute, slider, cylindrical, pin-slot, planar and ball, with
@@ -527,6 +527,15 @@ automatic STEP refresh. Use **Break Link** on the
 component to keep an independent copy, or pass `link: false` to `file.insert_step`. Older designs keep their unlinked imports. The web app keeps independent
 copies because uploaded files have no disk source path.
 
+A file that an installed **importer plugin** reads links the same way: **Insert Design** takes it
+(`component.insert_design` with `path`, and `format` and `options` to choose the importer). The
+link remembers which plugin and version read the file, with its options. **Update Links** asks
+that plugin to read the file again when it changed, and keeps placements, names and joints as
+for any linked part. If the plugin is not installed or is turned off, the link says which plugin
+and version it needs and the component keeps its last bodies. A file read by a plugin is not
+read again by itself when a tab comes back; use **Update Links**. **Break Link** keeps the
+bodies and forgets both the file and the plugin.
+
 An assembly can be saved without the bodies of its linked parts:
 `file.save {linked_bodies: false}` (or `file.save_as`). The file then keeps each link, with its
 placements, joints and face names, and no copy of the part's bodies, so it stays small and a
@@ -638,7 +647,9 @@ uses its first placement; `occurrence.properties` selects a specific instance. R
 measures the complete assembly. A placement that counts as a reference (a bill of materials
 type, below) adds nothing, nor does anything inside it; the component or occurrence measured
 counts whatever its type. Volumes are summed, including overlapping bodies, rather than
-measuring their union. The same workflow is available through `component.properties` and
+measuring their union. A placement's Properties also shows where it sits: **Position** and
+**Rotation** (angle, then axis), with **Frame** choosing between **In parent** and **World**, and
+**Copy matrix** for the matrix `occurrence.move` takes. The same workflow is available through `component.properties` and
 `occurrence.properties`; see
 [placement and measurement details](https://github.com/tangency-labs/solidcraft/blob/main/docs/assembly-properties.md).
 

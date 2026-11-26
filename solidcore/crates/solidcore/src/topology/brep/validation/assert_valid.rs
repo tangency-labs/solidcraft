@@ -726,6 +726,39 @@ pub fn validate_and_update_tolerances(
     Ok(gaps)
 }
 
+/// [`validate_and_update_tolerances`] growing tolerances, with no report list, skipping the
+/// faces it found clean on a body before where the kernel's memo is on (not upstream;
+/// `brep::validate_and_update_remembering`): the same tolerances and the same outputs where it
+/// skips, since a skipped face is one whose tests would grow and report nothing.
+///
+/// # Errors
+/// As [`validate_and_update_tolerances`].
+pub(crate) fn update_tolerances_remembering(
+    k: &mut Kernel,
+    b: &mut Brep,
+    level: u8,
+) -> Result<ToleranceGaps> {
+    let Some(salt) = crate::geom::check_memo::update_salt(k, b, level) else {
+        return validate_and_update_tolerances(k, b, false, None, level);
+    };
+    if level > LEVEL_GIVEN {
+        return Err(super::invalid("invalid assert test level"));
+    }
+    let mut rep = Rep {
+        array: None,
+        level,
+        stitched: false,
+    };
+    let (ok, gaps) = brep::validate_and_update_remembering(k, b, &mut rep, salt)?;
+    if !ok {
+        return Err(SolidError::topology(
+            "topology::brep::validation::validate_and_update_tolerances",
+            crate::error::topology::TopologyFailure::VertexuseWithoutVertex,
+        ));
+    }
+    Ok(gaps)
+}
+
 /// The virtual `AssertValid(pAList, eTestLevel, SM_NO_WALK)` of a curve outside any
 /// B-rep (as the edge and edge-use checks run it on their curves): the checks of
 /// `curve`'s class and, unless `level` is `SM_LEVEL_GIVEN` (4), of its base classes,
