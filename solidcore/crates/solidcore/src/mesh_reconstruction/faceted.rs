@@ -410,8 +410,14 @@ fn face_loops(
         .iter()
         .position(|lp| signed(lp) > 0.)
         .ok_or_else(|| invalid("a planar group's boundary does not enclose it"))?;
-    if outer != 0 {
-        loops.swap(0, outer);
+    if let Some(index) = outer.checked_sub(1) {
+        let (first, remaining) = loops
+            .split_first_mut()
+            .ok_or_else(|| invalid("a planar group has no boundary loops"))?;
+        let outer_loop = remaining
+            .get_mut(index)
+            .ok_or_else(|| invalid("a planar group is missing its outer boundary loop"))?;
+        std::mem::swap(first, outer_loop);
     }
     Ok(loops)
 }
