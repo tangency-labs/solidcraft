@@ -6555,8 +6555,8 @@ fn parallel_pattern_mirror_fillet_scale_move_and_cut_are_deterministic() {
     let run1 = eval_snapshot(&doc);
     let run2 = eval_snapshot(&doc);
     assert_eq!(run1, run2, "parallel cut must be deterministic");
-    for i in 0..3 {
-        assert!((run1[i].2 - 840.0).abs() < 1e-4, "C{i}: {}", run1[i].2);
+    for (i, item) in run1.iter().enumerate().take(3) {
+        assert!((item.2 - 840.0).abs() < 1e-4, "C{i}: {}", item.2);
     }
     assert!((run1[3].2 - 1000.0).abs() < 1e-6, "Far: {}", run1[3].2);
 

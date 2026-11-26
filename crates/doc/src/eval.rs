@@ -8048,7 +8048,7 @@ fn apply_traced_with(
                 jobs.push((ti, into));
             }
             enum CutOutcome {
-                Replace(Traced),
+                Replace(Box<Traced>),
                 Remove,
             }
             let run_one = |&(ti, into): &(usize, Option<Mat>)| -> Result<CutOutcome> {
@@ -8079,7 +8079,7 @@ fn apply_traced_with(
                     return Ok(CutOutcome::Remove);
                 }
                 match acc {
-                    Some(b) => Ok(CutOutcome::Replace(b)),
+                    Some(b) => Ok(CutOutcome::Replace(Box::new(b))),
                     None if op == Operation::Cut && !more::tools_may_cover(&target.body, local_tools) => Err(more::failed_cut(&target.name)),
                     None => Ok(CutOutcome::Remove),
                 }
@@ -8103,7 +8103,7 @@ fn apply_traced_with(
                         if let Some(mb) = state.bodies.get_mut(ti) {
                             let had = if mb.body.is_mesh() { 1 } else { mb.body.record().material_regions().len().max(1) };
                             affected.insert(mb.name.clone(), had);
-                            *mb = mb.remade(b);
+                            *mb = mb.remade(*b);
                         }
                     }
                     CutOutcome::Remove => remove.push(ti),
@@ -17418,7 +17418,7 @@ fn eval_feature_kind(
                 own: Mat,
             }
             enum MirrorOut {
-                Copy(Traced),
+                Copy(Box<Traced>),
                 Combined(Vec<(Body, Option<crate::lineage::Lineage>)>),
             }
             let mut prepped = Vec::with_capacity(bodies.len());
@@ -17472,7 +17472,7 @@ fn eval_feature_kind(
                     let lineages = crate::lineage::Lineage::lumps(&joined.body, joined.lineage.as_ref(), &pieces);
                     Ok(MirrorOut::Combined(pieces.into_iter().zip(lineages).collect()))
                 } else {
-                    Ok(MirrorOut::Copy(mirrored))
+                    Ok(MirrorOut::Copy(Box::new(mirrored)))
                 }
             };
             if !*combine || unique_targets {
@@ -17502,7 +17502,7 @@ fn eval_feature_kind(
                         MirrorOut::Copy(mirrored) => {
                             let name = copy_body_name(st, f, output, &p.mb.name);
                             copy_sheet(st, &p.mb.name, &name, &p.copy);
-                            let mut body = ModelBody::traced_new(name, mirrored, f.id);
+                            let mut body = ModelBody::traced_new(name, *mirrored, f.id);
                             if !placements.is_empty() {
                                 body.mirrored_mesh = placed_mesh::PlacedMesh::mirrored(&p.mb, &body.body, &p.copy).map(Arc::new);
                             }
