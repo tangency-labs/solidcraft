@@ -3596,6 +3596,49 @@ mod corners {
         }
     }
 
+    /// The section faces of corner bodies rebuild from their records, the part dropped first:
+    /// in a 60 degree inside corner, where each bead is cut at the other's wall, and round a
+    /// square outside corner, where a wrap-around joins the beads; flat, convex and concave.
+    /// Each bead's section face keeps its foot blend through the joins; written as its
+    /// record, read back and rebuilt, it has the legs and the sagitta asked, over the whole
+    /// edge. A record holds its face's surface: a cut at a wall is the body's trim of that
+    /// face, which the surface's record does not carry, so this says nothing of the trims.
+    #[test]
+    fn the_section_faces_of_corner_bodies_rebuild_from_their_records() {
+        use solidcore::surface::procedural_blend::convert::{
+            foot_blend_rebuild, foot_blend_to_record,
+        };
+        use solidcore::surface::procedural_blend::record::FootBlendRecord;
+        for (what, theta, cut) in [("cut", 60.0_f64, true), ("wrapped", 90.0, false)] {
+            for h in [0.0, 1.0, -0.5] {
+                let mut k = kernel();
+                let mut part = if cut {
+                    inside(&mut k, theta)
+                } else {
+                    outside(&mut k, theta)
+                };
+                let edges = joints(&k, &part, theta, false);
+                let body = beads(&mut k, &mut part, &edges, h);
+                drop(part);
+                drop(k);
+                let k = kernel();
+                let found = foot_faces(&body);
+                assert_eq!(found.len(), edges.len(), "{what} h {h}");
+                for (_, s) in found {
+                    let rec = foot_blend_to_record(&k, &s).unwrap();
+                    let json = serde_json::to_string(&rec).unwrap();
+                    let back: FootBlendRecord = serde_json::from_str(&json).unwrap();
+                    assert_eq!(back, rec, "{what} h {h}");
+                    let rebuilt = foot_blend_rebuild(&k, &back).unwrap();
+                    let def = rebuilt.procedural_blend().unwrap().foot_blend().unwrap();
+                    assert_eq!(def.legs(), [L; 2], "{what} h {h}");
+                    assert_eq!(def.sagitta(), h, "{what} h {h}");
+                    assert_eq!(def.spans().len(), 1, "{what} h {h}");
+                }
+            }
+        }
+    }
+
     /// Convex and concave beads join in inside corners of 60, 90 and 120 degrees, two on the floor
     /// or three with one up the walls' edge, and every body is sound. Below 90 degrees the two on
     /// the floor are cut at each other's wall and the one up the edge joins both as it is.
