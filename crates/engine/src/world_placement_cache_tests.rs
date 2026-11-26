@@ -541,12 +541,12 @@ fn in_place_features_referencing_moving_part_faces_recompute_zero_features_on_jo
     // Create in-place features on Housing referencing faces of the moving Cap.
     run(&mut session, "component.activate", json!({"component":housing_comp,"occurrence":housing_occ,"path":[housing_occ]}));
     // 1. Face-anchored sketch on Cap's top face (with auto_face border link) + new lug body on Housing.
-    let on_cap = run(&mut session, "sketch.create", json!({"plane":{"face":[0,0,50]},"name":"OnCapFace"}))["sketch"].as_u64().unwrap();
+    let on_cap = run(&mut session, "sketch.create", json!({"plane":{"face":[0,-10,50]},"name":"OnCapFace"}))["sketch"].as_u64().unwrap();
     run(&mut session, "sketch.rectangle.two_point", json!({"p0":[-4,-4],"p1":[4,4]}));
     run(&mut session, "sketch.finish", json!({}));
     run(&mut session, "solid.extrude", json!({"sketch":on_cap,"distance":5,"operation":"new","body_name":"HousingLug"}));
     // 2. Construction plane offset from Cap's top face.
-    run(&mut session, "construct.plane.offset", json!({"base":{"face":[0,0,50]},"offset":5,"name":"CapRefPlane"}));
+    run(&mut session, "construct.plane.offset", json!({"base":{"face":[0,-10,50]},"offset":5,"name":"CapRefPlane"}));
     // 3. To-Object extrude from Housing's XY plane up to Cap's underside at z = 40 (`picked_placements`).
     let to_cap = run(&mut session, "sketch.create", json!({"plane":"XY","name":"UpToCap"}))["sketch"].as_u64().unwrap();
     run(&mut session, "sketch.rectangle.two_point", json!({"p0":[6,6],"p1":[14,14]}));
