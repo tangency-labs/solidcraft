@@ -674,7 +674,7 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
     }
     if pick_custom {
         // Closing the file dialog without a program leaves the choice as it was.
-        app.pick_program(|app, path| app.slicer_menu.picked = path);
+        app.pick_program("Choose your slicer", |app, path| app.slicer_menu.picked = path);
     }
 }
 
@@ -918,7 +918,10 @@ fn app_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
         if crate::ui_kit::button(ui, solidcraft_ui_text::tr("ui.send_app_add"), crate::ui_kit::Button::Small).clicked() && !busy {
             k.app.adding = Some(AddApp::default());
         }
-        if let Some(t) = chosen {
+    });
+    // Remove on a row of its own: beside Add app… it is cut off in a long language.
+    if let Some(t) = chosen {
+        form_row(ui, "", |ui| {
             let tip = solidcraft_ui_text::format("ui.send_app_remove_tip", &[("app", &t.name)]);
             if crate::ui_kit::button(ui, solidcraft_ui_text::tr("ui.send_app_remove"), crate::ui_kit::Button::Small)
                 .backing_on_hover_text(tip)
@@ -928,8 +931,8 @@ fn app_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
                 k.slicer = app.preferences.app_targets.first().map(|a| a.id.clone()).unwrap_or_default();
                 preselect_app_format(app, k);
             }
-        }
-    });
+        });
+    }
     let Some(t) = chosen.filter(|t| app.preferences.app_targets.iter().any(|a| a.id == t.id)) else { return };
     if apps::resolved(t).is_none() {
         crate::ui_kit::text(
@@ -973,7 +976,7 @@ fn add_app_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
     form_row(ui, solidcraft_ui_text::tr("ui.send_app_program"), |ui| {
         let busy = app.file_picker_busy();
         if crate::ui_kit::button(ui, solidcraft_ui_text::tr("ui.send_app_choose"), crate::ui_kit::Button::Small).clicked() && !busy {
-            app.pick_program(|app, path| app.slicer_menu.picked = path);
+            app.pick_program(solidcraft_ui_text::tr("ui.send_app_pick_title"), |app, path| app.slicer_menu.picked = path);
         }
     });
     // The path on a line of its own: the row beside the button is too narrow for it.
@@ -1144,7 +1147,7 @@ mod tests {
         app.start("file.send_to_slicer");
         assert!(app.dialog.is_none(), "no dialog to choose a slicer in");
         assert!(matches!(&app.status, Some((_, _, true))));
-        app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+        app.services.pick_program = Some(Box::new(|_| Box::pin(async { None })));
         assert!(available(&app));
     }
 
@@ -1181,7 +1184,7 @@ mod tests {
     #[test]
     fn the_menu_entries_always_ask_and_a_script_with_a_slicer_does_not() {
         let (mut app, seen, mut params) = app_with_fake_slicer("ask");
-        app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+        app.services.pick_program = Some(Box::new(|_| Box::pin(async { None })));
         app.run("select.set", json!({"items": [{"type": "body", "name": "Part"}]})).unwrap();
         // Last time's slicer is remembered and bodies are selected: still the picker, with it pre-selected.
         let key = params["slicer"].as_str().unwrap().to_string();
@@ -1645,7 +1648,7 @@ mod tests {
         for (name, x) in [("One", 0), ("Two", 20)] {
             h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"operation":"new_body","body_name":name})).unwrap();
         }
-        h.app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+        h.app.services.pick_program = Some(Box::new(|_| Box::pin(async { None })));
         h.app.start("file.send_to_slicer");
         let all = body_picks(&h.app, false);
         h.app.dialog.as_mut().unwrap().inputs[0].items = all;
@@ -1703,7 +1706,7 @@ mod tests {
             h.app.dialog.as_ref().map(|d| d.inputs[0].items.clone()).unwrap_or_default()
         };
         let mut h = crate::scenario::Harness::new();
-        h.app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+        h.app.services.pick_program = Some(Box::new(|_| Box::pin(async { None })));
         h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"operation":"new_body","body_name":"One"})).unwrap();
         let one = vec![Sel::Body { name: "One".into() }];
         assert!(h.app.preferences.export_selects_only_body, "on by default");

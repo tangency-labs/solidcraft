@@ -619,8 +619,9 @@ pub struct Services {
     /// Ask for a file to open. The extensions are the file type the command reads, offered as
     /// the picker's first filter (`&[]`: designs, CAD files and meshes, #1801).
     pub pick_open: Option<Box<dyn Fn(&[&str]) -> FilePickerFuture>>,
-    /// Open a dialog asking for a program (a slicer); `None` when the host has no such dialog.
-    pub pick_program: Option<Box<dyn Fn() -> FilePickerFuture>>,
+    /// Open a dialog asking for a program (a slicer or an app), titled as given; `None` when the
+    /// host has no such dialog.
+    pub pick_program: Option<Box<dyn Fn(&str) -> FilePickerFuture>>,
     pub pick_save: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
     /// Lazy background observation; `needed` arms polling, the return is cached only.
     pub reduce_transparency: Option<Box<dyn Fn(bool) -> Option<bool>>>,

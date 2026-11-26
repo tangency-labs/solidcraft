@@ -24,7 +24,8 @@
     "ui.send_to_app_unavailable": "Send to App needs the desktop app: a browser can't start a program (download the file instead)",
     "cmd.file_send_to_app": "Send to App",
     "cmd.file_apps": "Send to App Targets",
-    "help.file.send_to_app": "Sends the design, or the bodies you pick, to a program you added, in a format it takes, and shows the command it ran. Use it to hand your model to a viewer, a CAM tool or a sync app."
+    "help.file.send_to_app": "Sends the design, or the bodies you pick, to a program you added, in a format it takes, and shows the command it ran. Use it to hand your model to a viewer, a CAM tool or a sync app.",
+    "ui.send_app_pick_title": "Choose the app"
   },
   "de": {
     "ui.send_app_label": "App",
@@ -51,7 +52,8 @@
     "ui.send_to_app_unavailable": "An App senden braucht die Desktop-App: Ein Browser kann kein Programm starten (lade stattdessen die Datei herunter)",
     "cmd.file_send_to_app": "An App senden",
     "cmd.file_apps": "Ziele für An App senden",
-    "help.file.send_to_app": "Sendet den Entwurf oder die gewählten Körper in einem Format, das es annimmt, an ein hinzugefügtes Programm und zeigt den ausgeführten Befehl. Damit gibst du dein Modell an einen Viewer, ein CAM-Werkzeug oder eine Sync-App weiter."
+    "help.file.send_to_app": "Sendet den Entwurf oder die gewählten Körper in einem Format, das es annimmt, an ein hinzugefügtes Programm und zeigt den ausgeführten Befehl. Damit gibst du dein Modell an einen Viewer, ein CAM-Werkzeug oder eine Sync-App weiter.",
+    "ui.send_app_pick_title": "App auswählen"
   },
   "ja": {
     "ui.send_app_label": "アプリ",
@@ -78,7 +80,8 @@
     "ui.send_to_app_unavailable": "「アプリに送る」にはデスクトップ版が必要です。ブラウザーではプログラムを起動できません（代わりにファイルをダウンロードしてください）",
     "cmd.file_send_to_app": "アプリに送る",
     "cmd.file_apps": "アプリに送る: 送り先",
-    "help.file.send_to_app": "デザイン、または選んだボディを、追加したプログラムが受け付ける形式で送り、実行したコマンドを表示します。ビューア、CAM ツール、同期アプリへモデルを渡すときに使います。"
+    "help.file.send_to_app": "デザイン、または選んだボディを、追加したプログラムが受け付ける形式で送り、実行したコマンドを表示します。ビューア、CAM ツール、同期アプリへモデルを渡すときに使います。",
+    "ui.send_app_pick_title": "アプリを選択"
   },
   "zh": {
     "ui.send_app_label": "应用",
@@ -105,7 +108,8 @@
     "ui.send_to_app_unavailable": "“发送到应用”需要桌面版：浏览器无法启动程序（请改为下载文件）",
     "cmd.file_send_to_app": "发送到应用",
     "cmd.file_apps": "发送到应用的目标",
-    "help.file.send_to_app": "把设计或你选的实体，以它接受的格式发送到你添加的程序，并显示所运行的命令。可用来把模型交给查看器、CAM 工具或同步应用。"
+    "help.file.send_to_app": "把设计或你选的实体，以它接受的格式发送到你添加的程序，并显示所运行的命令。可用来把模型交给查看器、CAM 工具或同步应用。",
+    "ui.send_app_pick_title": "选择应用"
   },
   "ko": {
     "ui.send_app_label": "앱",
@@ -132,7 +136,8 @@
     "ui.send_to_app_unavailable": "앱으로 보내기는 데스크톱 앱이 필요합니다. 브라우저는 프로그램을 시작할 수 없습니다(대신 파일을 내려받으세요)",
     "cmd.file_send_to_app": "앱으로 보내기",
     "cmd.file_apps": "앱으로 보내기 대상",
-    "help.file.send_to_app": "설계 또는 고른 바디를 추가한 프로그램이 받는 형식으로 보내고, 실행한 명령을 보여 줍니다. 뷰어, CAM 도구, 동기화 앱으로 모델을 넘길 때 쓰세요."
+    "help.file.send_to_app": "설계 또는 고른 바디를 추가한 프로그램이 받는 형식으로 보내고, 실행한 명령을 보여 줍니다. 뷰어, CAM 도구, 동기화 앱으로 모델을 넘길 때 쓰세요.",
+    "ui.send_app_pick_title": "앱 선택"
   },
   "vi": {
     "ui.send_app_label": "Ứng dụng",
@@ -159,7 +164,8 @@
     "ui.send_to_app_unavailable": "Gửi tới ứng dụng cần bản máy tính: trình duyệt không thể khởi động chương trình (hãy tải tệp xuống)",
     "cmd.file_send_to_app": "Gửi tới ứng dụng",
     "cmd.file_apps": "Đích của Gửi tới ứng dụng",
-    "help.file.send_to_app": "Gửi thiết kế, hoặc các thân bạn chọn, tới một chương trình bạn đã thêm, theo định dạng nó nhận, và hiển thị lệnh đã chạy. Dùng để đưa mô hình sang trình xem, công cụ CAM hoặc ứng dụng đồng bộ."
+    "help.file.send_to_app": "Gửi thiết kế, hoặc các thân bạn chọn, tới một chương trình bạn đã thêm, theo định dạng nó nhận, và hiển thị lệnh đã chạy. Dùng để đưa mô hình sang trình xem, công cụ CAM hoặc ứng dụng đồng bộ.",
+    "ui.send_app_pick_title": "Chọn ứng dụng"
   },
   "ar": {
     "ui.send_app_label": "التطبيق",
@@ -186,7 +192,8 @@
     "ui.send_to_app_unavailable": "الإرسال إلى تطبيق يحتاج إلى تطبيق سطح المكتب: المتصفح لا يستطيع تشغيل برنامج (نزّل الملف بدلاً من ذلك)",
     "cmd.file_send_to_app": "إرسال إلى تطبيق",
     "cmd.file_apps": "أهداف الإرسال إلى تطبيق",
-    "help.file.send_to_app": "يرسل التصميم أو الأجسام التي تختارها إلى برنامج أضفته، بصيغة يقبلها، ويعرض الأمر الذي نُفّذ. استخدمه لتسليم نموذجك إلى عارض أو أداة CAM أو تطبيق مزامنة."
+    "help.file.send_to_app": "يرسل التصميم أو الأجسام التي تختارها إلى برنامج أضفته، بصيغة يقبلها، ويعرض الأمر الذي نُفّذ. استخدمه لتسليم نموذجك إلى عارض أو أداة CAM أو تطبيق مزامنة.",
+    "ui.send_app_pick_title": "اختر التطبيق"
   },
   "he": {
     "ui.send_app_label": "אפליקציה",
@@ -213,6 +220,7 @@
     "ui.send_to_app_unavailable": "שליחה לאפליקציה דורשת את אפליקציית שולחן העבודה: דפדפן לא יכול להפעיל תוכנה (הורד את הקובץ במקום)",
     "cmd.file_send_to_app": "שלח לאפליקציה",
     "cmd.file_apps": "יעדים לשליחה לאפליקציה",
-    "help.file.send_to_app": "שולח את התכנון, או את הגופים שבחרת, לתוכנה שהוספת, בפורמט שהיא מקבלת, ומציג את הפקודה שהורצה. שימושי להעברת הדגם לצופה, לכלי CAM או לאפליקציית סנכרון."
+    "help.file.send_to_app": "שולח את התכנון, או את הגופים שבחרת, לתוכנה שהוספת, בפורמט שהיא מקבלת, ומציג את הפקודה שהורצה. שימושי להעברת הדגם לצופה, לכלי CAM או לאפליקציית סנכרון.",
+    "ui.send_app_pick_title": "בחר אפליקציה"
   }
 }

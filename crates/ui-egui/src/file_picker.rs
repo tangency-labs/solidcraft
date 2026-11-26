@@ -77,11 +77,11 @@ impl SolveApp {
     }
 
     /// Ask for a program (a slicer). Without a host dialog, the answer is a cancel.
-    pub(crate) fn pick_program(&mut self, complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
+    pub(crate) fn pick_program(&mut self, title: &str, complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
         if self.file_picker_busy() {
             return;
         }
-        let future = self.services.pick_program.as_ref().map(|pick| pick());
+        let future = self.services.pick_program.as_ref().map(|pick| pick(title));
         self.begin_picker(future, Box::new(complete));
     }
 
