@@ -128,7 +128,7 @@ use std::borrow::Cow;
 
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::topology::TopologyFailure;
-use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
+use crate::error::{ignore_status, EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::attribute::{AttributeHandle, ObjectKey};
 use crate::geom::context::{
     is_reserved_key, Context, IdentitySlot, MarkLock, MarkType, ALL_MARKS, MAX_BREP_SERIAL,
@@ -3520,6 +3520,27 @@ fn delete_faces_batch_in(
     }
 
     let mut in_brep: BTreeSet<FaceId> = p1::faces(b, None)?.into_iter().collect();
+    // Validate membership and uniqueness for the entire batch before mutating anything.
+    for &f in faces {
+        if !in_brep.remove(&f) {
+            return Err(SolidError::topology(OP, TopologyFailure::NotInBrep));
+        }
+    }
+
+    // Pre-index existing wire edges by owning shell once so multi-region merges pass
+    // explicit wire candidates to `transfer_children` instead of rescanning `edge_list`.
+    let mut shell_wire_edges: BTreeMap<ShellId, Vec<EdgeId>> = BTreeMap::new();
+    for e in p1::edges(b, None)? {
+        if !edge::is_wire(b, e)? {
+            continue;
+        }
+        if let Some(eu) = eu1::primary_edgeuse(b, e)? {
+            if let EdgeuseOwner::Shell(Some(s)) = b.edgeuse(eu)?.owner {
+                shell_wire_edges.entry(s).or_default().push(e);
+            }
+        }
+    }
+
     let keep_wire_set: BTreeSet<EdgeId> = keep_wires
         .map(|ws| ws.iter().copied().collect())
         .unwrap_or_default();
@@ -3535,343 +3556,384 @@ fn delete_faces_batch_in(
     let mut merged_into: BTreeMap<ShellId, ShellId> = BTreeMap::new();
 
     // ---- Phase 1: unlink and destroy all faces ----
-    for &f in faces {
-        if !in_brep.remove(&f) {
-            return Err(SolidError::topology(OP, TopologyFailure::NotInBrep));
-        }
-
-        for e in tt::face_edges(b, f)? {
-            if seen_edges.insert(e) {
-                candidate_edges.push(e);
+    let phase1_res: Result<()> = (|| {
+        for &f in faces {
+            for e in tt::face_edges(b, f)? {
+                if seen_edges.insert(e) {
+                    candidate_edges.push(e);
+                }
             }
-        }
-        for v in face_vertices(b, f)? {
-            if seen_vertices.insert(v) {
-                candidate_vertices.push(v);
-            }
-        }
-
-        ignore_soft(brep_notify(
-            b,
-            env,
-            NotifyOperation::PreEdit,
-            [brep_arg(b), None, None],
-        ))?;
-        ignore_soft(face_notify(
-            b,
-            f,
-            env,
-            NotifyOperation::PreEdit,
-            [arg(EntityRef::Face(f)), None, None],
-        ))?;
-        ignore_soft(brep_notify(
-            b,
-            env,
-            NotifyOperation::RmFromBrep,
-            [arg(EntityRef::Face(f)), brep_arg(b), None],
-        ))?;
-
-        let fu = face2::upward_faceuse(b, f)?.ok_or_else(|| broken_link(FACE_NO_UP_FU))?;
-        let other_fu = eu1::faceuse_mate(b, fu)?.ok_or(null_deref("face use without mate"))?;
-
-        let mut shell = eu1::faceuse_shell(b, fu)?.ok_or_else(|| broken_link(FU_NO_SHELL))?;
-        let mut other_shell = eu1::faceuse_shell(b, other_fu)?;
-
-        // Region merge when the two sides of the face belong to different shells.
-        if Some(shell) != other_shell {
-            let os = other_shell.ok_or(null_deref("face use without shell"))?;
-            let other_region = eu1::shell_region(b, os)?;
-            let other_r = other_region.ok_or(null_deref("shell without region"))?;
-            if other_region == b.infinite_region()
-                || (region_is_void(b, other_r)?
-                    && eu1::shell_region(b, shell)? != b.infinite_region())
-            {
-                (shell, other_shell) = (os, Some(shell));
-            }
-            let os = other_shell.ok_or(null_deref("face use without shell"))?;
-
-            // Flush any deferred face-use removals from both shells before transferring
-            // children so `remove_shell` only sees live face uses.
-            if !removed_faceuses.is_empty() {
-                shell::shell_retain_faceuses(b, os, &removed_faceuses)?;
-                shell::shell_retain_faceuses(b, shell, &removed_faceuses)?;
-            }
-
-            tt::remove_shell(k, b, os, shell)?;
-
-            let surviving =
-                eu1::shell_region(b, shell)?.ok_or(null_deref("shell without region"))?;
-            let del_region = eu1::shell_region(b, os)?.ok_or(null_deref("shell without region"))?;
-            if surviving == del_region {
-                return Err(defect(
-                    "the face's two face uses lie in different shells of one region, though each \
-                     side of a face faces the region its shell bounds",
-                ));
-            }
-            shell::region_remove_shell(b, del_region, os)?;
-            shell::destroy(k, b, os, env)?;
-            merged_into.insert(os, shell);
-            touched_shells.remove(&os);
-
-            for s in region_shells(b, del_region)? {
-                shell::region_remove_shell(b, del_region, s)?;
-                shell::region_post_insert_shell(b, surviving, s)?;
-            }
-            if Some(del_region) == b.infinite_region() {
-                b.set_infinite_region(Some(surviving));
-                region_set_is_void(b, surviving, TRUE)?;
+            for v in face_vertices(b, f)? {
+                if seen_vertices.insert(v) {
+                    candidate_vertices.push(v);
+                }
             }
 
             ignore_soft(brep_notify(
                 b,
                 env,
-                NotifyOperation::MergeInBrep,
-                [
-                    arg(EntityRef::Region(surviving)),
-                    arg(EntityRef::Region(del_region)),
-                    brep_arg(b),
-                ],
+                NotifyOperation::PreEdit,
+                [brep_arg(b), None, None],
+            ))?;
+            ignore_soft(face_notify(
+                b,
+                f,
+                env,
+                NotifyOperation::PreEdit,
+                [arg(EntityRef::Face(f)), None, None],
+            ))?;
+            ignore_soft(brep_notify(
+                b,
+                env,
+                NotifyOperation::RmFromBrep,
+                [arg(EntityRef::Face(f)), brep_arg(b), None],
             ))?;
 
-            b.remove_region_from_list(del_region)?;
-            b.remove_region_record(del_region)?;
-        }
+            let fu = face2::upward_faceuse(b, f)?.ok_or_else(|| broken_link(FACE_NO_UP_FU))?;
+            let other_fu = eu1::faceuse_mate(b, fu)?.ok_or(null_deref("face use without mate"))?;
 
-        touched_shells.insert(shell);
+            let mut shell = eu1::faceuse_shell(b, fu)?.ok_or_else(|| broken_link(FU_NO_SHELL))?;
+            let mut other_shell = eu1::faceuse_shell(b, other_fu)?;
 
-        for lu in eu1::faceuse_loopuses(b, fu, false, None)? {
-            let other_lu = lu1::other_loopuse(b, lu)?.ok_or(null_deref("loop use without mate"))?;
-            let l = lu1::loop_(b, lu)?;
-
-            if lu1::is_vertex_loopuse(b, lu)? {
-                let vu = lu1::vertexuse(b, lu)?.ok_or_else(|| broken_link(LU_NO_VU))?;
-                let v = vertexuse::vertex(b, vu)?.ok_or_else(|| broken_link(VU_NO_VERTEX))?;
-                let other_vu = lu1::vertexuse(b, other_lu)?.ok_or_else(|| broken_link(LU_NO_VU))?;
-                let n_vus = vertex::vertexuses(b, v)?.len();
-                vertex_remove_vertexuse(b, v, other_vu)?;
-                vertex_remove_vertexuse(b, v, vu)?;
-                b.remove_vertexuse_record(other_vu)?;
-                if n_vus == 2 {
-                    // Defer vertex-shell creation to Phase 3/4: Phase 3 will delete this
-                    // isolated shell vertex if it came from a deleted face.
-                    b.vertex_mut(v)?.vertexuses.push(vu);
-                    b.vertexuse_mut(vu)?.owner = VertexuseOwner::Shell(Some(shell));
-                } else {
-                    b.remove_vertexuse_record(vu)?;
+            // Region merge when the two sides of the face belong to different shells.
+            if Some(shell) != other_shell {
+                let os = other_shell.ok_or(null_deref("face use without shell"))?;
+                let other_region = eu1::shell_region(b, os)?;
+                let other_r = other_region.ok_or(null_deref("shell without region"))?;
+                if other_region == b.infinite_region()
+                    || (region_is_void(b, other_r)?
+                        && eu1::shell_region(b, shell)? != b.infinite_region())
+                {
+                    (shell, other_shell) = (os, Some(shell));
                 }
-            } else {
-                for eu in lu1::edgeuses(b, lu, None, None)? {
-                    let mate = eu1::mate(b, eu)?.ok_or_else(|| broken_link(EU_NO_MATE))?;
-                    let e = eu1::edge(b, eu)?.ok_or_else(|| broken_link(EU_NO_EDGE))?;
-                    if eu1::face(b, mate)? != eu1::face(b, eu)? {
-                        return Err(defect(
-                            "an edge use of the face and its mate lie on different faces, though \
-                             an edge use's mate is its edge's use on the face's other side",
-                        ));
-                    }
-                    if edge::is_lamina(b, e)? {
-                        for x in [eu, mate] {
-                            let r = b.edgeuse_mut(x)?;
-                            r.owner = EdgeuseOwner::Shell(Some(shell));
-                            r.ccw = None;
-                            r.cw = None;
-                        }
-                        ignore_soft(eu1::set_uv_trim_curve(
-                            b,
-                            eu,
-                            eu1::UvTrimCurveArg::Null,
-                            0.0,
-                            true,
-                            None,
-                        ))?;
+                let os = other_shell.ok_or(null_deref("face use without shell"))?;
+
+                // Flush any deferred face-use removals from both shells before transferring
+                // children so `transfer_children` only sees live face uses.
+                if !removed_faceuses.is_empty() {
+                    shell::shell_retain_faceuses(b, os, &removed_faceuses)?;
+                    shell::shell_retain_faceuses(b, shell, &removed_faceuses)?;
+                }
+
+                let moved_wires = shell_wire_edges.remove(&os).unwrap_or_default();
+                let wire_candidates: Vec<Option<EdgeId>> =
+                    moved_wires.iter().copied().map(Some).collect();
+                shell::transfer_children(k, b, os, shell, Some(&wire_candidates))?;
+                if !moved_wires.is_empty() {
+                    shell_wire_edges
+                        .entry(shell)
+                        .or_default()
+                        .extend(moved_wires);
+                }
+
+                let surviving =
+                    eu1::shell_region(b, shell)?.ok_or(null_deref("shell without region"))?;
+                let del_region =
+                    eu1::shell_region(b, os)?.ok_or(null_deref("shell without region"))?;
+                if surviving == del_region {
+                    return Err(defect(
+                        "the face's two face uses lie in different shells of one region, though each \
+                         side of a face faces the region its shell bounds",
+                    ));
+                }
+                shell::region_remove_shell(b, del_region, os)?;
+                shell::destroy(k, b, os, env)?;
+                merged_into.insert(os, shell);
+                touched_shells.remove(&os);
+
+                for s in region_shells(b, del_region)? {
+                    shell::region_remove_shell(b, del_region, s)?;
+                    shell::region_post_insert_shell(b, surviving, s)?;
+                }
+                if Some(del_region) == b.infinite_region() {
+                    b.set_infinite_region(Some(surviving));
+                    region_set_is_void(b, surviving, TRUE)?;
+                }
+
+                ignore_soft(brep_notify(
+                    b,
+                    env,
+                    NotifyOperation::MergeInBrep,
+                    [
+                        arg(EntityRef::Region(surviving)),
+                        arg(EntityRef::Region(del_region)),
+                        brep_arg(b),
+                    ],
+                ))?;
+
+                b.remove_region_from_list(del_region)?;
+                b.remove_region_record(del_region)?;
+            }
+
+            touched_shells.insert(shell);
+
+            for lu in eu1::faceuse_loopuses(b, fu, false, None)? {
+                let other_lu =
+                    lu1::other_loopuse(b, lu)?.ok_or(null_deref("loop use without mate"))?;
+                let l = lu1::loop_(b, lu)?;
+
+                if lu1::is_vertex_loopuse(b, lu)? {
+                    let vu = lu1::vertexuse(b, lu)?.ok_or_else(|| broken_link(LU_NO_VU))?;
+                    let v = vertexuse::vertex(b, vu)?.ok_or_else(|| broken_link(VU_NO_VERTEX))?;
+                    let other_vu =
+                        lu1::vertexuse(b, other_lu)?.ok_or_else(|| broken_link(LU_NO_VU))?;
+                    let n_vus = vertex::vertexuses(b, v)?.len();
+                    vertex_remove_vertexuse(b, v, other_vu)?;
+                    vertex_remove_vertexuse(b, v, vu)?;
+                    b.remove_vertexuse_record(other_vu)?;
+                    if n_vus == 2 {
+                        // Defer vertex-shell creation to Phase 3/4: Phase 3 will delete this
+                        // isolated shell vertex if it came from a deleted face.
+                        b.vertex_mut(v)?.vertexuses.push(vu);
+                        b.vertexuse_mut(vu)?.owner = VertexuseOwner::Shell(Some(shell));
                     } else {
-                        edge_remove_edgeuse(b, e, eu)?;
-                        edge_remove_edgeuse(b, e, mate)?;
-                        let (vu1, v1) = eu_vertex(b, eu)?;
-                        vertex_remove_vertexuse(b, v1, vu1)?;
-                        let (vu2, v2) = eu_vertex(b, mate)?;
-                        vertex_remove_vertexuse(b, v2, vu2)?;
-                        crate::topology::edgeuse::p2::destroy(k, b, eu, env)?;
-                        crate::topology::edgeuse::p2::destroy(k, b, mate, env)?;
-                        b.remove_vertexuse_record(vu1)?;
-                        b.remove_vertexuse_record(vu2)?;
+                        b.remove_vertexuse_record(vu)?;
+                    }
+                } else {
+                    for eu in lu1::edgeuses(b, lu, None, None)? {
+                        let mate = eu1::mate(b, eu)?.ok_or_else(|| broken_link(EU_NO_MATE))?;
+                        let e = eu1::edge(b, eu)?.ok_or_else(|| broken_link(EU_NO_EDGE))?;
+                        if eu1::face(b, mate)? != eu1::face(b, eu)? {
+                            return Err(defect(
+                                "an edge use of the face and its mate lie on different faces, though \
+                                 an edge use's mate is its edge's use on the face's other side",
+                            ));
+                        }
+                        if edge::is_lamina(b, e)? {
+                            for x in [eu, mate] {
+                                let r = b.edgeuse_mut(x)?;
+                                r.owner = EdgeuseOwner::Shell(Some(shell));
+                                r.ccw = None;
+                                r.cw = None;
+                            }
+                            ignore_soft(eu1::set_uv_trim_curve(
+                                b,
+                                eu,
+                                eu1::UvTrimCurveArg::Null,
+                                0.0,
+                                true,
+                                None,
+                            ))?;
+                            shell_wire_edges.entry(shell).or_default().push(e);
+                        } else {
+                            edge_remove_edgeuse(b, e, eu)?;
+                            edge_remove_edgeuse(b, e, mate)?;
+                            let (vu1, v1) = eu_vertex(b, eu)?;
+                            vertex_remove_vertexuse(b, v1, vu1)?;
+                            let (vu2, v2) = eu_vertex(b, mate)?;
+                            vertex_remove_vertexuse(b, v2, vu2)?;
+                            crate::topology::edgeuse::p2::destroy(k, b, eu, env)?;
+                            crate::topology::edgeuse::p2::destroy(k, b, mate, env)?;
+                            b.remove_vertexuse_record(vu1)?;
+                            b.remove_vertexuse_record(vu2)?;
+                        }
                     }
                 }
+
+                if let Some(l) = l {
+                    b.face_mut(f)?.loops.retain(|&x| x != l);
+                }
+                let lfu = lu1::faceuse(b, lu)?.ok_or(null_deref("loop use without face use"))?;
+                faceuse_remove_loopuse(b, lfu, lu)?;
+                let ofu =
+                    lu1::faceuse(b, other_lu)?.ok_or(null_deref("loop use without face use"))?;
+                faceuse_remove_loopuse(b, ofu, other_lu)?;
+                if let Some(l) = l {
+                    b.remove_loop_record(l)?;
+                }
+                b.remove_loopuse_record(lu)?;
+                b.remove_loopuse_record(other_lu)?;
             }
 
-            if let Some(l) = l {
-                b.face_mut(f)?.loops.retain(|&x| x != l);
+            for x in [fu, other_fu] {
+                if let Some(face) = eu1::faceuse_face(b, x)? {
+                    face2::set_faceuse(b, face, None)?;
+                }
+                removed_faceuses.insert(x);
             }
-            let lfu = lu1::faceuse(b, lu)?.ok_or(null_deref("loop use without face use"))?;
-            faceuse_remove_loopuse(b, lfu, lu)?;
-            let ofu = lu1::faceuse(b, other_lu)?.ok_or(null_deref("loop use without face use"))?;
-            faceuse_remove_loopuse(b, ofu, other_lu)?;
-            if let Some(l) = l {
-                b.remove_loop_record(l)?;
+            b.remove_faceuse_record(fu)?;
+            b.remove_faceuse_record(other_fu)?;
+
+            let destroy_res = destroy_face_unlisted(b, env, f);
+            if b.face(f).is_err() {
+                deleted_faces.insert(f);
             }
-            b.remove_loopuse_record(lu)?;
-            b.remove_loopuse_record(other_lu)?;
+            destroy_res?;
         }
-
-        for x in [fu, other_fu] {
-            if let Some(face) = eu1::faceuse_face(b, x)? {
-                face2::set_faceuse(b, face, None)?;
-            }
-            removed_faceuses.insert(x);
-        }
-        b.remove_faceuse_record(fu)?;
-        b.remove_faceuse_record(other_fu)?;
-
-        destroy_face_unlisted(b, env, f)?;
-        deleted_faces.insert(f);
-    }
+        Ok(())
+    })();
 
     b.retain_face_list(&deleted_faces);
     for &s in &touched_shells {
-        shell::shell_retain_faceuses(b, s, &removed_faceuses)?;
+        if !merged_into.contains_key(&s) {
+            let retain_res = shell::shell_retain_faceuses(b, s, &removed_faceuses);
+            if phase1_res.is_ok() {
+                retain_res?;
+            }
+        }
     }
+    phase1_res?;
 
     // ---- Phase 2: delete resulting wire edges (excluding keep_wires) ----
     let mut deleted_edges: Vec<EdgeId> = Vec::new();
     let mut deleted_edge_set: BTreeSet<EdgeId> = BTreeSet::new();
 
-    for e in candidate_edges {
-        if keep_wire_set.contains(&e) || !edge::is_wire(b, e)? {
-            continue;
-        }
-        ignore_soft(brep_notify(
-            b,
-            env,
-            NotifyOperation::PreEdit,
-            [brep_arg(b), None, None],
-        ))?;
-        {
-            let this = (env.key_of)(EntityRef::Edge(e));
-            let mut n = NotifyEnv {
-                records: env.records,
-                attributes: env.attributes,
-                context: Some(env.context.as_deref_mut().unwrap_or(&mut k.context)),
-                key_of: env.key_of,
-            };
-            ignore_soft(edge::notify(
-                b,
-                e,
-                &mut n,
-                NotifyOperation::PreEdit,
-                [Some(this), None, None],
-            ))?;
-        }
-        ignore_soft(brep_notify(
-            b,
-            env,
-            NotifyOperation::RmFromBrep,
-            [arg(EntityRef::Edge(e)), brep_arg(b), None],
-        ))?;
-
-        let eu = eu1::primary_edgeuse(b, e)?.ok_or(null_deref("wire edge without edge use"))?;
-        let eu_mate = eu1::mate(b, eu)?.ok_or_else(|| broken_link(EU_NO_MATE))?;
-        let raw_shell = eu1::shell(b, eu)?.ok_or_else(|| broken_link(FU_NO_SHELL))?;
-        let shell = resolve_merged_shell(&merged_into, raw_shell);
-        touched_shells.insert(shell);
-
-        edge_remove_edgeuse(b, e, eu)?;
-        edge_remove_edgeuse(b, e, eu_mate)?;
-
-        let (vu1, v1) = eu_vertex(b, eu)?;
-        vertex_remove_vertexuse(b, v1, vu1)?;
-        let (vu2, v2) = eu_vertex(b, eu_mate)?;
-        vertex_remove_vertexuse(b, v2, vu2)?;
-
-        for (v, vu) in [(v1, vu1), (v2, vu2)] {
-            if vertex::vertexuses(b, v)?.is_empty() {
-                b.vertex_mut(v)?.vertexuses.push(vu);
-                b.vertexuse_mut(vu)?.owner = VertexuseOwner::Shell(Some(shell));
-            } else {
-                b.remove_vertexuse_record(vu)?;
+    let phase2_res: Result<()> = (|| {
+        for e in candidate_edges {
+            if keep_wire_set.contains(&e) || !edge::is_wire(b, e)? {
+                continue;
             }
+            ignore_status(brep_notify(
+                b,
+                env,
+                NotifyOperation::PreEdit,
+                [brep_arg(b), None, None],
+            ))?;
+            {
+                let this = (env.key_of)(EntityRef::Edge(e));
+                let mut n = NotifyEnv {
+                    records: env.records,
+                    attributes: env.attributes,
+                    context: Some(env.context.as_deref_mut().unwrap_or(&mut k.context)),
+                    key_of: env.key_of,
+                };
+                ignore_status(edge::notify(
+                    b,
+                    e,
+                    &mut n,
+                    NotifyOperation::PreEdit,
+                    [Some(this), None, None],
+                ))?;
+            }
+            ignore_status(brep_notify(
+                b,
+                env,
+                NotifyOperation::RmFromBrep,
+                [arg(EntityRef::Edge(e)), brep_arg(b), None],
+            ))?;
+
+            let eu = eu1::primary_edgeuse(b, e)?.ok_or(null_deref("wire edge without edge use"))?;
+            let eu_mate = eu1::mate(b, eu)?.ok_or_else(|| broken_link(EU_NO_MATE))?;
+            let raw_shell = eu1::shell(b, eu)?.ok_or_else(|| broken_link(FU_NO_SHELL))?;
+            let shell = resolve_merged_shell(&merged_into, raw_shell);
+            touched_shells.insert(shell);
+
+            edge_remove_edgeuse(b, e, eu)?;
+            edge_remove_edgeuse(b, e, eu_mate)?;
+
+            let (vu1, v1) = eu_vertex(b, eu)?;
+            vertex_remove_vertexuse(b, v1, vu1)?;
+            let (vu2, v2) = eu_vertex(b, eu_mate)?;
+            vertex_remove_vertexuse(b, v2, vu2)?;
+
+            for (v, vu) in [(v1, vu1), (v2, vu2)] {
+                if vertex::vertexuses(b, v)?.is_empty() {
+                    b.vertex_mut(v)?.vertexuses.push(vu);
+                    b.vertexuse_mut(vu)?.owner = VertexuseOwner::Shell(Some(shell));
+                } else {
+                    b.remove_vertexuse_record(vu)?;
+                }
+            }
+
+            if b.shell(shell)?.members == ShellMembers::Edgeuse(eu)
+                || b.shell(shell)?.members == ShellMembers::Edgeuse(eu_mate)
+            {
+                set_shell_head(b, shell, ShellMembers::Empty)?;
+            }
+
+            let destroy_res = edge::destroy_unlisted(k, b, e, env);
+            if b.edge(e).is_err() {
+                deleted_edge_set.insert(e);
+            }
+            destroy_res?;
+            crate::topology::edgeuse::p2::destroy(k, b, eu, env)?;
+            crate::topology::edgeuse::p2::destroy(k, b, eu_mate, env)?;
+
+            deleted_edges.push(e);
         }
-
-        if b.shell(shell)?.members == ShellMembers::Edgeuse(eu)
-            || b.shell(shell)?.members == ShellMembers::Edgeuse(eu_mate)
-        {
-            set_shell_head(b, shell, ShellMembers::Empty)?;
-        }
-
-        edge::destroy_unlisted(k, b, e, env)?;
-        crate::topology::edgeuse::p2::destroy(k, b, eu, env)?;
-        crate::topology::edgeuse::p2::destroy(k, b, eu_mate, env)?;
-
-        deleted_edges.push(e);
-        deleted_edge_set.insert(e);
-    }
+        Ok(())
+    })();
     b.retain_edge_list(&deleted_edge_set);
+    phase2_res?;
 
     // ---- Phase 3: delete resulting isolated shell vertices ----
     let mut deleted_vertices: Vec<VertexId> = Vec::new();
     let mut deleted_vertex_set: BTreeSet<VertexId> = BTreeSet::new();
 
-    for v in candidate_vertices {
-        if !vertex::is_shell_vertex(b, v)? {
-            continue;
-        }
-        ignore_soft(brep_notify(
-            b,
-            env,
-            NotifyOperation::PreEdit,
-            [brep_arg(b), None, None],
-        ))?;
-        {
-            let this = (env.key_of)(EntityRef::Vertex(v));
-            let key_of = env.key_of;
-            ignore_soft(vertex::notify(
-                b,
-                v,
-                env.records,
-                env.attributes,
-                Some(env.context.as_deref_mut().unwrap_or(&mut k.context)),
-                NotifyOperation::PreEdit,
-                this,
-                [Some(this), None, None],
-                &|vu| key_of(EntityRef::Vertexuse(vu)),
-            ))?;
-        }
-        ignore_soft(brep_notify(
-            b,
-            env,
-            NotifyOperation::RmFromBrep,
-            [arg(EntityRef::Vertex(v)), brep_arg(b), None],
-        ))?;
-
-        let vertexuses = vertex::vertexuses(b, v)?;
-        let Some(&vu) = vertexuses.first() else {
-            b.remove_vertex_record_unlisted(v)?;
-            deleted_vertices.push(v);
-            deleted_vertex_set.insert(v);
-            continue;
-        };
-        let VertexuseOwner::Shell(shell_opt) = b.vertexuse(vu)?.owner else {
-            return Err(null_deref("shell vertex use without a shell"));
-        };
-        let raw_shell = shell_opt.ok_or(null_deref("shell vertex use without a shell"))?;
-        let shell = resolve_merged_shell(&merged_into, raw_shell);
-        if !merged_into.contains_key(&shell) {
-            touched_shells.insert(shell);
-            if b.shell(shell)?.members == ShellMembers::Vertexuse(vu) {
-                set_shell_head(b, shell, ShellMembers::Empty)?;
+    let phase3_res: Result<()> = (|| {
+        for v in candidate_vertices {
+            if !vertex::is_shell_vertex(b, v)? {
+                continue;
             }
+            ignore_status(brep_notify(
+                b,
+                env,
+                NotifyOperation::PreEdit,
+                [brep_arg(b), None, None],
+            ))?;
+            {
+                let this = (env.key_of)(EntityRef::Vertex(v));
+                let key_of = env.key_of;
+                ignore_status(vertex::notify(
+                    b,
+                    v,
+                    env.records,
+                    env.attributes,
+                    Some(env.context.as_deref_mut().unwrap_or(&mut k.context)),
+                    NotifyOperation::PreEdit,
+                    this,
+                    [Some(this), None, None],
+                    &|vu| key_of(EntityRef::Vertexuse(vu)),
+                ))?;
+            }
+            ignore_status(brep_notify(
+                b,
+                env,
+                NotifyOperation::RmFromBrep,
+                [arg(EntityRef::Vertex(v)), brep_arg(b), None],
+            ))?;
+
+            let vertexuses = vertex::vertexuses(b, v)?;
+            let Some(&vu) = vertexuses.first() else {
+                b.remove_vertex_record_unlisted(v)?;
+                deleted_vertices.push(v);
+                deleted_vertex_set.insert(v);
+                continue;
+            };
+            let VertexuseOwner::Shell(shell_opt) = b.vertexuse(vu)?.owner else {
+                return Err(null_deref("shell vertex use without a shell"));
+            };
+            let raw_shell = shell_opt.ok_or(null_deref("shell vertex use without a shell"))?;
+            let shell = resolve_merged_shell(&merged_into, raw_shell);
+            if !merged_into.contains_key(&shell) {
+                touched_shells.insert(shell);
+                if b.shell(shell)?.members == ShellMembers::Vertexuse(vu) {
+                    set_shell_head(b, shell, ShellMembers::Empty)?;
+                }
+            }
+
+            vertex_remove_vertexuse(b, v, vu)?;
+            b.remove_vertex_record_unlisted(v)?;
+            deleted_vertex_set.insert(v);
+            b.remove_vertexuse_record(vu)?;
+
+            deleted_vertices.push(v);
         }
-
-        vertex_remove_vertexuse(b, v, vu)?;
-        b.remove_vertex_record_unlisted(v)?;
-        b.remove_vertexuse_record(vu)?;
-
-        deleted_vertices.push(v);
-        deleted_vertex_set.insert(v);
-    }
+        Ok(())
+    })();
     b.retain_vertex_list(&deleted_vertex_set);
+    phase3_res?;
 
     // ---- Phase 4: reconcile shell connectivity once per touched surviving shell ----
-    reconcile_shells_after_batch(k, b, env, &touched_shells, &merged_into)?;
+    reconcile_shells_after_batch(
+        k,
+        b,
+        env,
+        &touched_shells,
+        &merged_into,
+        &shell_wire_edges,
+        &deleted_edge_set,
+    )?;
 
     Ok((deleted_edges, deleted_vertices))
 }
@@ -3906,33 +3968,38 @@ fn reconcile_shells_after_batch(
     env: &mut NotifyEnv<'_>,
     touched_shells: &std::collections::BTreeSet<ShellId>,
     merged_into: &std::collections::BTreeMap<ShellId, ShellId>,
+    shell_wire_edges: &std::collections::BTreeMap<ShellId, Vec<EdgeId>>,
+    deleted_edges: &std::collections::BTreeSet<EdgeId>,
 ) -> Result<()> {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
 
     if touched_shells.is_empty() {
         return Ok(());
     }
 
-    // One linear scan of live edges and vertices to gather surviving wire edgeuses
-    // and isolated shell vertexuses belonging to touched shells.
+    // Resolve surviving wire edgeuses from the pre-indexed wire map (avoids rescanning
+    // `edge_list`).
     let mut shell_wires: BTreeMap<ShellId, Vec<EdgeuseId>> = BTreeMap::new();
-    for e in p1::edges(b, None)? {
-        if !edge::is_wire(b, e)? {
-            continue;
-        }
-        let Some(eu) = eu1::primary_edgeuse(b, e)? else {
-            continue;
-        };
-        if let EdgeuseOwner::Shell(Some(raw_s)) = b.edgeuse(eu)?.owner {
-            let s = resolve_merged_shell(merged_into, raw_s);
-            if s != raw_s {
-                b.edgeuse_mut(eu)?.owner = EdgeuseOwner::Shell(Some(s));
-                if let Some(mate) = eu1::mate(b, eu)? {
-                    b.edgeuse_mut(mate)?.owner = EdgeuseOwner::Shell(Some(s));
-                }
+    let mut seen_wires: BTreeSet<EdgeId> = BTreeSet::new();
+    for wire_list in shell_wire_edges.values() {
+        for &e in wire_list {
+            if deleted_edges.contains(&e) || !seen_wires.insert(e) || !edge::is_wire(b, e)? {
+                continue;
             }
-            if touched_shells.contains(&s) {
-                shell_wires.entry(s).or_default().push(eu);
+            let Some(eu) = eu1::primary_edgeuse(b, e)? else {
+                continue;
+            };
+            if let EdgeuseOwner::Shell(Some(raw_s)) = b.edgeuse(eu)?.owner {
+                let s = resolve_merged_shell(merged_into, raw_s);
+                if s != raw_s {
+                    b.edgeuse_mut(eu)?.owner = EdgeuseOwner::Shell(Some(s));
+                    if let Some(mate) = eu1::mate(b, eu)? {
+                        b.edgeuse_mut(mate)?.owner = EdgeuseOwner::Shell(Some(s));
+                    }
+                }
+                if touched_shells.contains(&s) {
+                    shell_wires.entry(s).or_default().push(eu);
+                }
             }
         }
     }
@@ -4016,10 +4083,8 @@ fn reconcile_shells_after_batch(
         // `lock`'s mark generation on each call.
         let mut lock = MarkLock::new(core::slice::from_mut(&mut k.context), 0, ALL_MARKS)?;
         let mut marks = Marks::default();
-        let mut visited_fus: std::collections::BTreeSet<FaceuseId> =
-            std::collections::BTreeSet::new();
-        let mut visited_eus: std::collections::BTreeSet<EdgeuseId> =
-            std::collections::BTreeSet::new();
+        let mut visited_fus: BTreeSet<FaceuseId> = BTreeSet::new();
+        let mut visited_eus: BTreeSet<EdgeuseId> = BTreeSet::new();
         let mut components: Vec<(Vec<FaceuseId>, Vec<EdgeuseId>)> = Vec::new();
 
         let walk_res: Result<()> = (|| {
@@ -7949,5 +8014,134 @@ pub(crate) mod test_support {
             .unwrap()
             .lines();
         assert!(lines.is_empty(), "{lines:?}");
+    }
+
+    #[test]
+    fn delete_faces_batch_rejects_missing_or_duplicate_face_without_edits() {
+        use super::{delete_faces_batch, p1, FaceId, Kernel, Point3, SolidError, TopologyFailure};
+        use crate::primitive::api_primitives::create_box;
+        use crate::topology::brep::p2::ArenaNotifyState;
+
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::ZERO, 10.0, 10.0, 10.0).unwrap();
+        b.set_editing_enabled(true);
+        let faces = p1::faces(&b, None).unwrap();
+        let live = faces[0];
+        let missing = FaceId::from_index(9999);
+
+        for invalid_batch in [vec![live, missing], vec![live, live]] {
+            let err = {
+                let mut state = ArenaNotifyState::new(&b);
+                let mut env = state.env(None);
+                delete_faces_batch(&mut k, &mut b, &mut env, &invalid_batch, None)
+            }
+            .unwrap_err();
+            assert_eq!(
+                err,
+                SolidError::topology(super::OP, TopologyFailure::NotInBrep),
+                "unexpected error: {err:?}"
+            );
+            // Every face and its face uses must still be intact and resolvable.
+            assert_eq!(p1::faces(&b, None).unwrap().len(), 6);
+            assert!(b.face(live).is_ok());
+            assert_eq!(p1::edges(&b, None).unwrap().len(), 12);
+            assert_eq!(p1::vertices(&b, None).unwrap().len(), 8);
+        }
+    }
+
+    #[test]
+    fn delete_faces_batch_compacts_edge_list_when_wire_edgeuse_destroy_is_cancelled() {
+        use super::{delete_faces_batch, p1, FaceId, Kernel, Point3, Result, SolidError};
+        use crate::error::EntityRef;
+        use crate::geom::attribute::{
+            ids, Attribute, AttributeHandlers, AttributeView, Behavior, ObjectKey, Placement,
+        };
+        use crate::primitive::api_primitives::create_box;
+        use crate::topology::brep::p2::ArenaNotifyState;
+        use crate::topology::loopuse::notify_ref;
+        use std::collections::BTreeSet;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        #[derive(Clone, Debug)]
+        struct CancelWireEdgeuse {
+            edge_keys: BTreeSet<ObjectKey>,
+            saw_wire_edge: Arc<AtomicBool>,
+        }
+        impl PartialEq for CancelWireEdgeuse {
+            fn eq(&self, other: &Self) -> bool {
+                self.edge_keys == other.edge_keys
+                    && Arc::ptr_eq(&self.saw_wire_edge, &other.saw_wire_edge)
+            }
+        }
+        impl AttributeHandlers for CancelWireEdgeuse {
+            fn destruction(
+                &self,
+                _view: &AttributeView<'_>,
+                deleted: ObjectKey,
+            ) -> Result<Vec<Placement>> {
+                if self.edge_keys.contains(&deleted) {
+                    self.saw_wire_edge.store(true, Ordering::SeqCst);
+                } else if self.saw_wire_edge.load(Ordering::SeqCst) {
+                    return Err(SolidError::cancelled("test::cancel_wire_edgeuse"));
+                }
+                Ok(Vec::new())
+            }
+        }
+
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::ZERO, 10.0, 10.0, 10.0).unwrap();
+        b.set_editing_enabled(true);
+        let side_faces: Vec<FaceId> = p1::faces(&b, None)
+            .unwrap()
+            .into_iter()
+            .filter(|&f| {
+                let bb = crate::query::api_queries::face_bounding_box(&k, &b, f, true).unwrap();
+                (bb.max.z - bb.min.z).abs() > 1.0
+            })
+            .collect();
+        assert_eq!(side_faces.len(), 4);
+
+        let saw_wire_edge = Arc::new(AtomicBool::new(false));
+        let mut state = ArenaNotifyState::new(&b);
+        let edge_keys: BTreeSet<ObjectKey> = p1::edges(&b, None)
+            .unwrap()
+            .into_iter()
+            .map(|e| notify_ref(EntityRef::Edge(e)).key)
+            .collect();
+        let attr_handle = state
+            .attributes
+            .insert(Attribute::application(
+                ids::USER_1,
+                Behavior::Reference,
+                CancelWireEdgeuse {
+                    edge_keys: edge_keys.clone(),
+                    saw_wire_edge: Arc::clone(&saw_wire_edge),
+                },
+            ))
+            .unwrap();
+        for key in edge_keys {
+            state.attributes.add_attribute(key, attr_handle).unwrap();
+        }
+        for (eu, _) in b.edgeuses().iter() {
+            state
+                .attributes
+                .add_attribute(notify_ref(EntityRef::Edgeuse(eu)).key, attr_handle)
+                .unwrap();
+        }
+
+        let err = {
+            let mut env = state.env(None);
+            delete_faces_batch(&mut k, &mut b, &mut env, &side_faces, None)
+        }
+        .unwrap_err();
+        assert!(err.is_cancelled(), "expected Cancelled, got {err:?}");
+        assert!(saw_wire_edge.load(Ordering::SeqCst));
+        // Every edge still listed in `edge_list` must resolve in the arena (the deleted
+        // wire edge was compacted out even on the error exit).
+        for e in p1::edges(&b, None).unwrap() {
+            assert!(b.edge(e).is_ok(), "dangling edge {e:?} left in edge_list");
+        }
+        assert_eq!(p1::edges(&b, None).unwrap().len(), 11);
     }
 }

@@ -736,7 +736,8 @@ pub(crate) fn shell_set_faceuses(
 }
 
 /// Move `faceuses` from `source` to `recipient` in one linear pass, preserving the relative
-/// order of remaining face uses in `source` and appending `faceuses` in order to `recipient`.
+/// order of remaining face uses in `source` and appending unique `faceuses` in order to
+/// `recipient`.
 pub(crate) fn shell_move_faceuses(
     brep: &mut Brep,
     source: ShellId,
@@ -746,18 +747,6 @@ pub(crate) fn shell_move_faceuses(
     if faceuses.is_empty() {
         return Ok(());
     }
-    if source == recipient {
-        for &fu in faceuses {
-            if brep.faceuse(fu)?.shell != Some(source) {
-                return Err(SolidError::topology(
-                    "topology::shell::shell_move_faceuses",
-                    TopologyFailure::FaceUseNotInShell,
-                ));
-            }
-        }
-        return Ok(());
-    }
-    let mut moving = std::collections::BTreeSet::new();
     for &fu in faceuses {
         if brep.faceuse(fu)?.shell != Some(source) {
             return Err(SolidError::topology(
@@ -765,39 +754,11 @@ pub(crate) fn shell_move_faceuses(
                 TopologyFailure::FaceUseNotInShell,
             ));
         }
-        moving.insert(fu);
     }
-    {
-        let members = &mut brep.shell_mut(source)?.members;
-        match members {
-            ShellMembers::Faceuses(list) => {
-                let before = list.len();
-                list.retain(|fu| !moving.contains(fu));
-                if before - list.len() != moving.len() {
-                    return Err(invalid_members());
-                }
-                if list.is_empty() {
-                    *members = ShellMembers::Empty;
-                }
-            }
-            _ => return Err(invalid_members()),
-        }
+    if source == recipient {
+        return Ok(());
     }
-    {
-        let target = &mut brep.shell_mut(recipient)?.members;
-        match target {
-            ShellMembers::Empty => *target = ShellMembers::Faceuses(faceuses.to_vec()),
-            ShellMembers::Faceuses(list) => list.extend_from_slice(faceuses),
-            _ => return Err(invalid_members()),
-        }
-    }
-    for &fu in faceuses {
-        let record = brep.faceuse_mut(fu)?;
-        record.shell = Some(recipient);
-        record.sibling_links = None;
-    }
-    refresh_faceuse_sibling_links(brep, source)?;
-    refresh_faceuse_sibling_links(brep, recipient)
+    move_faceuses_to_shell(brep, faceuses, recipient)
 }
 
 /// Move a shell's vertex, wire edges and face uses to another shell.
