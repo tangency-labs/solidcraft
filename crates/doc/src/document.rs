@@ -1132,8 +1132,9 @@ pub enum FeatureKind {
         #[serde(with = "point_expr")]
         #[walk(placement)]
         base: PointExpr,
-        #[serde(default = "z_axis")]
-        axis: Dir,
+        #[serde(with = "point_expr", default = "z_axis_expr")]
+        #[walk(direction)]
+        axis: DirExpr,
         #[walk(length = "Radius")]
         radius: Expr,
         #[walk(length = "Top radius")]
@@ -1223,7 +1224,9 @@ pub enum FeatureKind {
         #[walk(placement)]
         at: Option<PointExpr>,
         /// Drilling direction (into the material).
-        direction: Dir,
+        #[serde(with = "point_expr")]
+        #[walk(direction)]
+        direction: DirExpr,
         #[walk(length = "Diameter")]
         diameter: Expr,
         /// Depth to the shoulder; `None` = through all.
@@ -1695,6 +1698,12 @@ pub enum FeatureKind {
         #[walk(length = "Gap")]
         gap: Option<Expr>,
     },
+    /// Cope a round tube against the outside envelopes of straight mating round members.
+    FrameCope {
+        member: BodyName,
+        tools: Vec<BodyName>,
+        end: crate::frame_cope::End,
+    },
     /// A separate mounting or end plate, centred on a persistently identified planar face.
     FramePlate {
         plane: PlaneRef,
@@ -1887,8 +1896,9 @@ pub enum FeatureKind {
         #[serde(with = "point_expr")]
         #[walk(placement)]
         base: PointExpr,
-        #[serde(default = "z_axis")]
-        axis: Dir,
+        #[serde(with = "point_expr", default = "z_axis_expr")]
+        #[walk(direction)]
+        axis: DirExpr,
         /// A picked axis, using the same persistent references as Revolve.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         axis_ref: Option<AxisRef>,
@@ -2001,6 +2011,10 @@ pub enum FeatureKind {
         /// virtual sharp (`sheet::HeightFrom`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         height_from: Option<String>,
+        /// The bend relief cut beside the free ends of these flanges' bends, in place of the
+        /// rule's `bend_relief_shape` (rectangular | obround | tear). None follows the rule.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bend_relief_shape: Option<String>,
     },
     /// Flat hems on sheet edges.
     SheetHem {
@@ -3025,6 +3039,8 @@ pub enum ExtendTo {
     Plane(PlaneRef),
     /// The surface of a body's face (extended).
     Face(FaceAt),
+    /// A whole body: where the surface first runs into any of its faces, as they are.
+    Body(BodyName),
     /// The surface's own bounds (natural only): a trim undone.
     Bounds,
 }
@@ -3894,6 +3910,7 @@ impl FeatureKind {
             FeatureKind::FrameGusset { .. } => "GussetFeature",
             FeatureKind::FrameMember { .. } => "FrameMemberFeature",
             FeatureKind::FrameTrim { .. } => "FrameTrimFeature",
+            FeatureKind::FrameCope { .. } => "FrameCopeFeature",
             FeatureKind::FramePlate { .. } => "FramePlateFeature",
             FeatureKind::Emboss { .. } => "EmbossFeature",
             FeatureKind::Boss { .. } => "BossFeature",
@@ -3989,6 +4006,7 @@ impl FeatureKind {
             FeatureKind::FrameGusset { .. } => "frame_gusset",
             FeatureKind::FrameMember { .. } => "frame_member",
             FeatureKind::FrameTrim { .. } => "frame_trim",
+            FeatureKind::FrameCope { .. } => "frame_cope",
             FeatureKind::FramePlate { .. } => "frame_plate",
             FeatureKind::Emboss { .. } => "emboss",
             FeatureKind::Rib { .. } => "rib",
@@ -4088,6 +4106,7 @@ impl FeatureKind {
             "FrameMemberFeature" => "frame_member",
             "FrameTrimFeature" => "frame_trim",
             "GussetFeature" => "frame_gusset",
+            "FrameCopeFeature" => "frame_cope",
             "FramePlateFeature" => "frame_plate",
             "EmbossFeature" => "emboss",
             "BossFeature" => "boss",
@@ -4185,6 +4204,7 @@ impl FeatureKind {
             FeatureKind::FrameGusset { .. } => "Gusset",
             FeatureKind::FrameMember { .. } => "Member",
             FeatureKind::FrameTrim { .. } => "MemberTrim",
+            FeatureKind::FrameCope { .. } => "Cope",
             FeatureKind::FramePlate { .. } => "MountingPlate",
             FeatureKind::Emboss { .. } => "Emboss",
             FeatureKind::Boss { .. } => "Boss",
@@ -4688,6 +4708,10 @@ pub struct Document {
     /// Named views: saved cameras.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub named_views: Vec<NamedView>,
+    /// The camera Home goes to, set with `view.set_home` (#19972); none: the iso view framing
+    /// the model. Its name is not used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home_view: Option<NamedView>,
     /// Named Section Analyses: sets of cutting planes that can be shown again (#20649).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub saved_sections: Vec<crate::saved_sections::SavedSection>,
@@ -5047,6 +5071,7 @@ impl Document {
             timeline_groups: Vec::new(),
             browser_order: Default::default(),
             named_views: Vec::new(),
+            home_view: None,
             saved_sections: Vec::new(),
             plane_extents: std::collections::BTreeMap::new(),
             notes: Vec::new(),

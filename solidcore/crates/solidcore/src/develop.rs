@@ -53,6 +53,7 @@
 //! | [`crossings`]                | `develop::crossings`                 |
 //! | [`curve_through`]            | `develop::curve_through`             |
 //! | [`Refusal`]                  | `DevelopError` (typed: no strings)   |
+//! | [`tear_slit`]                | `crates/doc`'s `tear_slits`          |
 //!
 //! Deviations: none (no upstream counterpart). No recursion: layouts and folds walk the joints
 //! breadth first, each joint once; root isolation, span crossings and refinements run on explicit
@@ -73,6 +74,7 @@ mod refusal;
 mod rigid;
 mod seg;
 mod sheet;
+mod slit;
 
 pub use bead::{
     bead_against, bead_flank_angle, bead_footprint, bead_form, bead_note, bead_outline,
@@ -90,6 +92,7 @@ pub use sheet::{
     Anchor, Bend, Corner, CornerRelief, Cut, Datum, Joint, JointKind, Lap, Panel, Relief, Rip,
     Sheet, Surface, Tail, ZoneEnds,
 };
+pub use slit::tear_slit;
 
 /// The most panels one development takes: a work limit, never a truncation.
 pub const MAX_PANELS: usize = 10_000;

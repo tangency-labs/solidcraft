@@ -2460,6 +2460,45 @@ pub fn edgeuse_binormal_along(
     Ok(part)
 }
 
+/// The part of edge use `eu`'s binormal (pointing into its face) that leads away from `foot`, at
+/// the fraction `fraction` of its edge's interval: along the unit direction from `foot` to the
+/// edge's point there ([`evaluate_binormal`], 3D only). `None` where that point is `foot`, so
+/// nothing leads away from it. Not upstream (whether a face runs on away from a point across one
+/// of its edges).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a `fraction` or `foot` that is not finite, or a binormal that
+/// is not; those of [`evaluate_binormal`].
+pub fn edgeuse_binormal_away_from(
+    k: &Kernel,
+    brep: &mut Brep,
+    eu: EdgeuseId,
+    fraction: f64,
+    foot: Point3,
+) -> Result<Option<f64>> {
+    if !(fraction.is_finite() && [foot.x, foot.y, foot.z].iter().all(|c| c.is_finite())) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a fraction or point that is not finite",
+        ));
+    }
+    let e = brep
+        .edgeuse(eu)?
+        .edge
+        .ok_or_else(|| SolidError::invalid_input(OP, "edge use without an edge"))?;
+    let t = brep.edge(e)?.interval.evaluate(fraction);
+    let at = evaluate_binormal(k, brep, eu, t, true, &BinormalOptions::default())?;
+    let Ok(away) = unit_direction(at.point - foot) else {
+        return Ok(None);
+    };
+    let part = at.binormal.dot(away);
+    if !part.is_finite() {
+        return Err(SolidError::invalid_input(OP, "binormal not finite"));
+    }
+    Ok(Some(part))
+}
+
 #[cfg(test)]
 mod unit_direction_tests {
     use super::*;

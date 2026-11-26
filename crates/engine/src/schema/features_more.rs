@@ -319,7 +319,10 @@ pub struct CoilParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PointExpr3")]
     pub base: Option<PointExpr3>,
-    /// The direction the helix climbs, or an axis reference in the same forms as Revolve. Default: Z.
+    /// The direction the helix climbs: X, Y, Z or `[x, y, z]`, each a number or an expression
+    /// with no unit (`["0", "-sin(t)", "-cos(t)"]`), which the coil follows as the parameters
+    /// change (a parameter added as a plain number is a length: divide it by its unit,
+    /// `"n / 1 mm"`); or an axis reference in the same forms as Revolve. Default: Z.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "CoilAxis")]
     pub axis: Option<CoilAxis>,
