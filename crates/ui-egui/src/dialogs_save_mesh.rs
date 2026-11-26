@@ -957,7 +957,7 @@ fn app_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
         k.app.format = f.1.to_string();
     }
     if k.app.format == "sc" {
-        crate::ui_kit::text(ui, &(solidcraft_ui_text::tr("ui.send_app_sc_note")), crate::ui_kit::Text::Note("send_app_note"));
+        crate::ui_kit::text(ui, solidcraft_ui_text::tr("ui.send_app_sc_note"), crate::ui_kit::Text::Note("send_app_note"));
     }
     // A browser has no folder dialog.
     if app.services.pick_folder.is_some() {
@@ -995,7 +995,7 @@ fn add_app_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
     crate::ui_kit::sized_row(ui, solidcraft_ui_text::tr("ui.send_app_args"), 64.0, |ui| {
         ui.add(egui::TextEdit::multiline(&mut form.args).desired_rows(3).desired_width(f32::INFINITY));
     });
-    crate::ui_kit::text(ui, &(solidcraft_ui_text::tr("ui.send_app_args_hint")), crate::ui_kit::Text::Note("send_app_note"));
+    crate::ui_kit::text(ui, solidcraft_ui_text::tr("ui.send_app_args_hint"), crate::ui_kit::Text::Note("send_app_note"));
     let labels: Vec<&str> = APP_FORMATS.iter().map(|f| f.0).collect();
     // The command this makes, with sample values, before it is added.
     let args: Vec<String> = form.args.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect();
@@ -1017,7 +1017,7 @@ fn add_app_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
                 if i == default {
                     *takes = true;
                 }
-                ui.add_enabled_ui(i != default, |ui| crate::ui_kit::checkbox(ui, *label, takes));
+                ui.add_enabled_ui(i != default, |ui| crate::ui_kit::checkbox(ui, label, takes));
             }
         });
     }
