@@ -1172,6 +1172,28 @@ fn cell_grid_anchor_takes_a_construction_point() {
     assert_eq!(apply_commands(&h.app, &d).unwrap_err(), String::from(h.app.tr("error.cell_grid_anchor")));
 }
 
+/// A construction point in a moved component is the anchor where the view shows it: the session's
+/// world has it placed already, so it is not moved by the placement a second time.
+#[test]
+fn cell_grid_anchor_takes_a_construction_point_of_a_moved_component_where_it_shows() {
+    let mut h = Harness::new();
+    h.app.run("component.create", json!({"name": "Bracket", "grounded": false})).unwrap();
+    h.app.run("construct.point.vertex", json!({"point": {"point": [5, 7, 0]}, "name": "Peg"})).unwrap();
+    let occurrence = h.app.session.doc.occurrences.last().map(|o| o.id).unwrap_or_default();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let sketch = h.app.run("sketch.create", json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 40]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("occurrence.move", json!({"occurrence": occurrence, "translate": [20, 0, 0]})).unwrap();
+    let shown = solidcraft_engine::view::construction_points(&h.app.session).into_iter().find(|(_, n, _)| n == "Peg").map(|(_, _, p)| p).unwrap();
+    assert!((shown.x - 25.0).abs() < 1e-9, "the point is placed by the move: {shown:?}");
+    let mut d = Dialog::for_command(&h.app, "solid.cell_grid").unwrap();
+    d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    d.inputs[2].items = vec![Sel::ConstructionPoint { name: "Peg".into() }];
+    let commands = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(commands[0].1.get("anchor"), Some(&crate::selection::point_value(shown)), "{commands:?}");
+}
+
 form_case!(replace_face, "solid.replace_face", []);
 form_case!(boundary_fill, "solid.boundary_fill", ["Cells", "Operation"]);
 form_case!(align, "solid.align", ["Object Type", "From Snap", "To Snap"]);

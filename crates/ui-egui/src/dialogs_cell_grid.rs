@@ -352,15 +352,11 @@ fn anchor_point(app: &SolveApp, pick: &Sel) -> Option<Vec3> {
         Sel::Vertex { point, .. } => Some(*point),
         Sel::SketchPoint { id } => crate::canvas::sketch_point_at(app, &world, id),
         Sel::ConstructionPoint { name } => {
-            let c = world.construct.iter().find(|c| c.name == *name)?;
-            let solidcraft_engine::doc::construct::ConstructGeom::Point(p) = c.geom else { return None };
-            // A point of a component's construction sits where that component's occurrence is.
-            let component = app.session.doc.feature(c.feature).map_or(0, |f| f.component);
-            let occurrence = if component == 0 { None } else { app.session.doc.occurrence_of(component) };
-            Some(
-                occurrence
-                    .map_or(p, |o| solidcraft_engine::doc::apply_point(&solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, o.id), p)),
-            )
+            // The session's world already has a component's construction where it is placed.
+            let solidcraft_engine::doc::construct::ConstructGeom::Point(p) = world.construct.iter().find(|c| c.name == *name)?.geom else {
+                return None;
+            };
+            Some(p)
         }
         _ => None,
     }
