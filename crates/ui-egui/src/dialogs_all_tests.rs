@@ -1244,18 +1244,19 @@ fn cell_grid_edit_sends_a_re_picked_anchor_even_at_the_point_it_showed() {
         .as_u64()
         .unwrap();
     let mut d = for_feature(&h.app, feature, None).unwrap();
-    let anchor = |d: &Dialog| crate::dialogs_cell_grid::commands(&h.app, &cell_grid(d), &d.inputs, &d.extra).unwrap()[0].1["anchor"].clone();
+    let anchor =
+        |app: &SolveApp, d: &Dialog| crate::dialogs_cell_grid::commands(app, &cell_grid(d), &d.inputs, &d.extra).unwrap()[0].1["anchor"].clone();
     fn cell_grid(d: &Dialog) -> crate::dialogs_cell_grid::CellGrid {
         let Kind::CellGrid(c) = &d.kind else { panic!() };
         c.clone()
     }
-    assert_eq!(anchor(&d)[0], json!("Inset"), "untouched: the expressions stay");
+    assert_eq!(anchor(&h.app, &d)[0], json!("Inset"), "untouched: the expressions stay");
     h.app.run("parameters.change", json!({"name": "Inset", "expression": "9 mm"})).unwrap();
-    assert_eq!(anchor(&d)[0], json!("Inset"), "a parameter change alone keeps them");
+    assert_eq!(anchor(&h.app, &d)[0], json!("Inset"), "a parameter change alone keeps them");
     let shown = Vec3::new(4.0, 2.0, 0.0);
     crate::dialogs::clear_input(&mut d, 2);
     d.pick(&h.app.session, Sel::Vertex { body: String::new(), point: shown });
-    assert_eq!(anchor(&d), crate::selection::point_value(shown), "{:?}", d.extra);
+    assert_eq!(anchor(&h.app, &d), crate::selection::point_value(shown), "{:?}", d.extra);
 }
 
 form_case!(replace_face, "solid.replace_face", []);
