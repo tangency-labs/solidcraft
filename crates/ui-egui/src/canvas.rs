@@ -2759,7 +2759,12 @@ struct AngleTurn {
 /// A face as the base is captured by the engine in the authoring frame, so the square the
 /// preview draws is not one the handle can stand on: the angle box types the angle instead.
 fn angle_plane_turn(app: &SolveApp, d: &Dialog) -> Option<AngleTurn> {
-    let Kind::AnglePlane { angle, direction_only } = &d.kind else { return None };
+    let Kind::AnglePlane { angle, direction_only, through_axis } = &d.kind else { return None };
+    // "Through the axis" moves the plane onto the axis first, so the square the preview draws
+    // is not the base's: the angle box types the angle, as for a face base.
+    if *through_axis && !*direction_only {
+        return None;
+    }
     let base = d.inputs.first().and_then(|i| i.items.first()).and_then(|sel| match sel {
         Sel::Plane { name } => crate::dialogs::plane_by_name(&app.session, name),
         _ => None,
