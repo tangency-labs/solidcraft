@@ -1395,9 +1395,6 @@ fn kicad_options_record(options: &solidcraft_io::KicadOptions) -> Value {
     record
 }
 
-/// A KiCad board read: its contents, the `.kicad_pcb` it came from and that file's bytes.
-type KicadRead = (solidcraft_io::KicadImport, String, Vec<u8>);
-
 /// A KiCad board read: its contents, the `.kicad_pcb` it came from, that file's bytes, and the
 /// folders of the models an agent's folders refused.
 struct KicadRead {
