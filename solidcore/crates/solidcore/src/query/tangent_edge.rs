@@ -3207,7 +3207,7 @@ pub fn side_along(
         // its values at the piece's Chebyshev points (module docs, `poly_range`), which are
         // narrow where it is 0, against the floor of `|F x H| |d|` over the piece
         if degree <= MAX_DEGREE && u.one_cell(piece)? {
-            let mut values = Vec::with_capacity(nodes);
+            let mut values = Vec::new();
             let mut witness = None;
             for t in chebyshev(a, z, nodes) {
                 let Some((f, h)) = factors(&u, Ivl::from(t))? else {
