@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Block</title>
+  <path d="M8 20L8 8L20 8M44 8L56 8L56 20M56 44L56 56L44 56M20 56L8 56L8 44" fill="none" stroke="#6f879c" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M17 22L47 22L41 42L23 42Z" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="32" cy="32" r="3.4" fill="currentColor"/>
+</svg>

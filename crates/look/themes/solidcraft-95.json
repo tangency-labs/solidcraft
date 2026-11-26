@@ -163,6 +163,7 @@
     "sheet_soft": "#b1bbbb",
     "sketch": "#000080",
     "sketch_accent": "#008000",
+    "sketch_block": "#00ffff",
     "sketch_centerline": "#808000",
     "sketch_construction": "#808000",
     "sketch_fixed": "#000000",

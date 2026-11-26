@@ -86,7 +86,7 @@ pub fn delete_selection(app: &mut SolveApp) {
     if crate::dialogs_frame::remove_picked(app) {
         return;
     }
-    if crate::sketch3d::delete_selected(app) || crate::sketch_tools::delete_glyph(app) {
+    if crate::sketch3d::delete_selected(app) || crate::sketch_tools::delete_glyph(app) || crate::sketch_block_tree::delete_picked(app) {
         return;
     }
     let mut params = selection_params(app);

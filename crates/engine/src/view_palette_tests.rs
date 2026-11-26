@@ -206,6 +206,7 @@ const MARK: Palette = Palette {
     sketch_lost: Rgb(37, 38, 39),
     sketch_construction: Rgb(40, 41, 42),
     sketch_centerline: Rgb(43, 44, 45),
+    sketch_block: Rgb(67, 68, 69),
     axes: [Rgb(46, 47, 48), Rgb(49, 50, 51), Rgb(52, 53, 54)],
     cap: Rgb(55, 56, 57),
     hatch: [Rgb(61, 62, 63), Rgb(64, 65, 66)],
@@ -303,6 +304,30 @@ fn each_sketch_state_takes_its_palette_colour() {
     );
 }
 
+/// A sketch block's curves and its axis take the block colour while the block is not fully
+/// constrained, the fully constrained colour once they are, and the finished sketch's colour
+/// outside the sketch; other curves keep theirs.
+#[test]
+fn a_blocks_curves_take_the_block_colour_until_they_are_determined() {
+    let line = |sk: &mut Sketch, y: f64| sk.add_line(Vec2::new(0., y), Vec2::new(2., y), None, None, None).unwrap();
+    let mut sk = Sketch::new();
+    let member = line(&mut sk, 0.);
+    let plain = line(&mut sk, 3.);
+    let id = sk.curves[member].id.clone();
+    sk.make_block(&[id], solidcraft_sketch::BlockScale::Fixed, None, None).unwrap();
+    let axis = sk.curve_index(&sk.blocks[0].axis).unwrap();
+    let colour = |active: bool, determined: bool, i: usize| {
+        let flags = vec![determined; sk.curves.len()];
+        let lines = sketch_lines_in(&sk, &Plane::XY, active, &flags, by_index, &MARK);
+        lines.iter().find(|(pts, _, _)| pts.first().is_some_and(|p| p.x == i as f64)).map(|(_, c, dashed)| (*c, *dashed))
+    };
+    assert_eq!(colour(true, false, member), Some((MARK.sketch_block, false)));
+    assert_eq!(colour(true, false, axis), Some((MARK.sketch_block, true)), "the axis is dashed in the block colour");
+    assert_eq!(colour(true, false, plain), Some((MARK.sketch, false)));
+    assert_eq!(colour(true, true, member), Some((MARK.sketch_fixed, false)));
+    assert_eq!(colour(false, false, member), Some((MARK.sketch_done, false)));
+}
+
 /// Every colour of a scene comes from its palette, except what the design says: a body's
 /// appearance (even one equal to the default grey) and a face's own colour.
 #[test]
@@ -348,6 +373,7 @@ fn every_scene_colour_comes_from_its_palette_and_appearances_stay() {
         MARK.sketch_lost,
         MARK.sketch_construction,
         MARK.sketch_centerline,
+        MARK.sketch_block,
         MARK.isocurve,
     ];
     let all_lines = || marked.grid.iter().chain(&marked.lines);

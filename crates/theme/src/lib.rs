@@ -1411,6 +1411,8 @@ pub struct Tokens {
     pub sketch_lost: Color32,
     pub sketch_construction: Color32,
     pub sketch_centerline: Color32,
+    /// The curves of a sketch block and its axis while the block is not fully constrained.
+    pub sketch_block: Color32,
     /// Sheet metal flat pattern: bend up, bend down.
     pub bend_up: Color32,
     pub bend_down: Color32,
@@ -1690,6 +1692,7 @@ impl Tokens {
             sketch_lost: view.sketch_lost,
             sketch_construction: view.sketch_construction,
             sketch_centerline: view.sketch_centerline,
+            sketch_block: view.sketch_block,
             bend_up: view.bend_up,
             bend_down: view.bend_down,
             interference: view.interference,

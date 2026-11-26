@@ -1120,6 +1120,7 @@ fn feature_row(app: &mut SolveApp, ui: &mut egui::Ui, rows: &mut Rows, index: us
         let depth = group_id.map_or(1, |group| table.depth_of(group) + 2) + usize::from(row_kind == RowKind::Nested);
         crate::sketch_pattern_tree::rows(app, ui, id, depth, "timeline", None, false);
         crate::sketch_link_tree::rows(app, ui, id, depth, "timeline", false);
+        crate::sketch_block_tree::rows(app, ui, id, depth, "timeline", None, false);
     }
     if let Some(listed) = listed.filter(|_| names && fold_open) {
         for child in listed {
@@ -2462,7 +2463,10 @@ mod tests {
             let sketch = matches!(feature.5, TimelineKind::Sketch);
             assert_eq!(
                 sketch && table.has_patterns[index],
-                sketch && (crate::sketch_pattern_tree::has_patterns(app, feature.0) || crate::sketch_link_tree::has_links(app, feature.0))
+                sketch
+                    && (crate::sketch_pattern_tree::has_patterns(app, feature.0)
+                        || crate::sketch_link_tree::has_links(app, feature.0)
+                        || crate::sketch_block_tree::has_blocks(app, feature.0))
             );
         }
         for (at, group) in groups.iter().enumerate() {

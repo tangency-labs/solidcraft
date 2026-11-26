@@ -264,6 +264,7 @@ fn groups(t: &Tokens) -> Vec<Group> {
                 ("sketch_lost", t.sketch_lost),
                 ("sketch_construction", t.sketch_construction),
                 ("sketch_centerline", t.sketch_centerline),
+                ("sketch_block", t.sketch_block),
                 ("preview_sketch", t.preview_sketch),
             ],
             &[("viewport_top", t.viewport_top), ("viewport_bottom", t.viewport_bottom)],
@@ -1061,6 +1062,49 @@ fn shipped_themes_draw_dimensions_in_their_own_readable_colour() {
             failures.push(format!("{id}: dimension vs dimension_driven: {d:.1}"));
         }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Why a sketch block's curves in `sketch_block` would not stand apart in `t`: too little contrast
+/// on the view's ground, or too close to another kind of sketch line or to the dimensions.
+fn block_colour_faults(t: &Tokens) -> Vec<String> {
+    let mut out = Vec::new();
+    for (ground, g) in [("viewport_top", t.viewport_top), ("viewport_bottom", t.viewport_bottom)] {
+        let c = solidcraft_theme::contrast_ratio(t.sketch_block, g);
+        if c < 3.0 {
+            out.push(format!("sketch_block on {ground}: contrast {c:.2}"));
+        }
+    }
+    for (other, o) in [
+        ("sketch", t.sketch),
+        ("sketch_fixed", t.sketch_fixed),
+        ("sketch_locked", t.sketch_locked),
+        ("sketch_conflict", t.sketch_conflict),
+        ("sketch_projected", t.sketch_projected),
+        ("sketch_lost", t.sketch_lost),
+        ("sketch_construction", t.sketch_construction),
+        ("sketch_centerline", t.sketch_centerline),
+        ("dimension", t.dimension),
+    ] {
+        let d = normal(rgb(t.sketch_block), rgb(o));
+        if d < FLOOR {
+            out.push(format!("sketch_block vs {other}: {d:.1}"));
+        }
+    }
+    out
+}
+
+/// A block's curves (#4069) keep a colour of their own in every shipped theme.
+#[test]
+fn shipped_themes_draw_block_curves_in_their_own_readable_colour() {
+    crate::test_support::host_data();
+    use crate::test_support::is_two_colour;
+    use crate::theme_files::{builtin, resolve};
+    let themes = [("light", Tokens::light()), ("dark", Tokens::dark())]
+        .into_iter()
+        .map(|(id, t)| (id.to_string(), t))
+        .chain(builtin().iter().filter(|f| !is_two_colour(&f.id)).map(|f| (f.id.clone(), resolve(f))));
+    let failures: Vec<String> = themes.flat_map(|(id, t)| block_colour_faults(&t).into_iter().map(move |f| format!("{id}: {f}"))).collect();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 

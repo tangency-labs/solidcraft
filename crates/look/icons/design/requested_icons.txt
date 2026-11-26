@@ -29,6 +29,7 @@ bounding_solid	false
 box	false
 break	false
 bug_report	false
+c_block	false
 c_coincident	false
 c_collinear	false
 c_concentric	false

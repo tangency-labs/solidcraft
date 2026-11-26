@@ -293,6 +293,7 @@ impl Tokens {
             sketch_lost: Color32::from_rgb(200, 60, 90),
             sketch_construction: Color32::from_rgb(230, 130, 40),
             sketch_centerline: Color32::from_rgb(200, 110, 60),
+            sketch_block: Color32::from_rgb(0, 80, 95),
             bend_up: Color32::from_rgb(30, 140, 50),
             bend_down: Color32::from_rgb(200, 90, 20),
             // The sheet colours of #4894 (22 and 30 Oct) and the drawing UI design's paper presets
@@ -474,6 +475,7 @@ impl Tokens {
         t.sketch_halo = Color32::from_rgb(28, 32, 40);
         t.sketch_point = Color32::from_rgb(232, 234, 238);
         t.sketch_locked = Color32::from_rgb(96, 204, 116);
+        t.sketch_block = Color32::from_rgb(0, 210, 255);
         // Sketch dimensions: Light's plum, lightened for the dark view (#7861).
         t.dimension = Color32::from_rgb(224, 176, 224);
         t.dimension_driven = Color32::from_rgb(176, 104, 144);

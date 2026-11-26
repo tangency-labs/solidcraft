@@ -1213,6 +1213,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     // Text boxes already drawn this frame, in draw order: a later dimension that would land
     // on one of them steps clear of it (#44).
     let mut placed: Vec<Rect> = Vec::new();
+    let held = crate::sketch_block_canvas::held_set(&ss.sketch);
     for (source, c, is_draft) in constraints {
         if ss.sketch.view.hide_dimensions && !is_draft {
             continue;
@@ -1238,6 +1239,9 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
             crate::viewport::Conflict::glyph_colour(app, &tk)
         } else if is_sel(&c.id) || hover.as_deref() == Some(c.id.as_str()) {
             tk.accent
+        } else if !is_draft && held.contains(c.id.as_str()) {
+            // A block holds it: kept, not solved, until the block is exploded.
+            crate::prefs::dimension_colour(&app.preferences, c.driven).gamma_multiply(crate::sketch_block_canvas::HELD_FADE)
         } else {
             crate::prefs::dimension_colour(&app.preferences, c.driven)
         };

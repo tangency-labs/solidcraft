@@ -1289,6 +1289,8 @@ fn sketch_color(t: &Tokens, c: Rgb) -> [u8; 4] {
         c4(t.sketch_construction)
     } else if c == colors::SKETCH_CENTERLINE {
         c4(t.sketch_centerline)
+    } else if c == colors::SKETCH_BLOCK {
+        c4(t.sketch_block)
     } else {
         rgba(c)
     }
@@ -9143,6 +9145,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             && app.tool.is_none()
             && app.dialog.is_none()
             && (crate::sketch_modify_ui::double_click_pattern(app, p)
+                || crate::sketch_block_canvas::double_click(app, p)
                 || crate::dim_view::double_click(app, p)
                 || crate::dim_view::model_double_click(app, p));
         // Double-click a text (an outline or inside a letter; the first click selected it): edit it.
@@ -11499,6 +11502,7 @@ pub(crate) fn scene_palette(dark: bool, mode: solidcraft_theme::ColorVision) -> 
         sketch_lost: rgb(t.sketch_lost),
         sketch_construction: rgb(t.sketch_construction),
         sketch_centerline: rgb(t.sketch_centerline),
+        sketch_block: rgb(t.sketch_block),
         axes: t.axes().map(rgb),
         cap: rgb(t.section_cap),
         hatch: t.section_hatch.map(rgb),
@@ -13824,6 +13828,7 @@ mod tests {
                 (colors::SKETCH_LOST, p.sketch_lost),
                 (colors::SKETCH_CONSTRUCTION, p.sketch_construction),
                 (colors::SKETCH_CENTERLINE, p.sketch_centerline),
+                (colors::SKETCH_BLOCK, p.sketch_block),
             ] {
                 let [r, g, b, _] = sketch_color(&t, tag);
                 assert_eq!(cpu, Rgb(r, g, b), "dark {dark}, {mode:?}: the window draws {tag:?} in another colour");

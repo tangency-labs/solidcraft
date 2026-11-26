@@ -275,7 +275,9 @@ How each existing command treats a block member:
 - **Canvas:**
   - One block glyph near the origin. `glyph_constraints` already collapses a pattern to one glyph
     (`sketch_tools.rs:2514`).
-  - Members drawn in the block colour, with a light outline while hovered.
+  - Members and the axis drawn in the block colour (theme token `sketch_block`) while they are not
+    fully constrained; once fully constrained they take the fully constrained colour like any
+    other geometry. A light outline shows while the pointer is over a member or the glyph.
   - Held constraints faded.
 - **Strings:** new keys in `assets/locales/pending/sketch-blocks.json` (the required locales) and a
   glossary entry for *block*.

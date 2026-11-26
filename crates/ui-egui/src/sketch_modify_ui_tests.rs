@@ -1472,3 +1472,129 @@ fn construction_switches_a_selected_point_and_the_menu_offers_it() {
     let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
     assert!(!items.iter().any(|i| i.id == "sketch.construction"), "the origin is not offered Normal / Construction");
 }
+
+/// Sketch blocks (#4069): Make Block from the ribbon takes the selected curves; a member's menu,
+/// the block's glyph and its Browser row open Edit Block, which sends only what changed; a click
+/// on the row then Delete explodes the block, and the row's Delete Block deletes it whole.
+#[test]
+fn blocks_are_made_edited_exploded_and_deleted_from_the_ribbon_menu_glyph_and_browser() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Blocks"})).unwrap();
+    let sid = h.app.session.active_sketch.unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[20,0],[20,10],[0,10],[0,0]],"ids":["b1","b2","b3","b4"]})).unwrap();
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.view", json!({"view": "fit"}));
+    let curves = ["b1", "b2", "b3", "b4"];
+    h.app.session.selection = curves.iter().map(|id| Sel::SketchCurve { id: (*id).into(), sketch: None }).collect();
+    h.app.session.selection.push(Sel::SketchPoint { id: "b3.start".into() });
+    h.app.start("sketch.block");
+    let d = h.app.dialog.as_mut().expect("Make Block opens its window");
+    assert_eq!(d.inputs[0].items.len(), 4, "the selected curves are the members");
+    assert_eq!(d.inputs[1].items.len(), 1, "the selected point is the origin");
+    match &mut d.kind {
+        Kind::SketchModify(Mod::Block { name, free, editing: false }) => {
+            *name = " Dove ".into();
+            *free = true;
+        }
+        other => panic!("not Make Block: {other:?}"),
+    }
+    let d = h.app.dialog.clone().unwrap();
+    let cmds = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(cmds[0].0, "sketch.block");
+    assert_eq!(cmds[0].1["curves"], json!(curves));
+    assert_eq!((&cmds[0].1["scale"], &cmds[0].1["name"]), (&json!("free"), &json!("Dove")));
+    assert!(cmds[0].1["origin"].is_string(), "{}", cmds[0].1);
+    let made = h.app.run(&cmds[0].0, cmds[0].1.clone()).unwrap();
+    let block = made["block"].as_str().unwrap().to_string();
+    let corner = {
+        let sk = h.app.session.doc.sketch(sid).unwrap();
+        let at = |id: &str| sk.resolve_point(id).and_then(|i| sk.point(i)).unwrap();
+        (at(made["origin"].as_str().unwrap()), at("b3.start"))
+    };
+    assert!(corner.0.dist(corner.1) < 1e-9, "the block's origin is on the picked point: {corner:?}");
+    h.app.dialog = None;
+
+    // A member's menu: Edit, Select and Explode Block.
+    h.app.session.selection = vec![Sel::SketchCurve { id: "b2".into(), sketch: None }];
+    h.settle();
+    let menu = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+    for id in ["ui.editBlock", "ui.selectBlock", "sketch.explode_block"] {
+        assert!(menu.iter().any(|item| item.id == id && item.enabled), "{id} in {:?}", menu.iter().map(|i| &i.id).collect::<Vec<_>>());
+    }
+    let select = menu.iter().find(|item| item.id == "ui.selectBlock").unwrap();
+    crate::context_menu::run_item(&mut h.app, select, egui::pos2(0.0, 0.0));
+    assert_eq!(h.app.session.selection.len(), 4, "Select Block selects every member");
+    let edit = menu.iter().find(|item| item.id == "ui.editBlock").unwrap();
+    let before = h.app.session.doc.to_json();
+    crate::context_menu::run_item(&mut h.app, edit, egui::pos2(0.0, 0.0));
+    assert_eq!(h.app.session.doc.to_json(), before, "opening Edit Block commits nothing");
+    let d = h.app.dialog.as_mut().expect("Edit Block opens its window");
+    assert!(matches!(&d.kind, Kind::SketchModify(Mod::Block { name, free: true, editing: true }) if name == "Dove"), "{:?}", d.kind);
+    assert_eq!(d.extra["block"], json!(block));
+    d.inputs[0].items.retain(|sel| !matches!(sel, Sel::SketchCurve { id, .. } if id == "b4"));
+    let d = h.app.dialog.clone().unwrap();
+    let cmds = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(cmds[0].0, "sketch.block_edit");
+    assert_eq!((&cmds[0].1["block"], &cmds[0].1["remove"], &cmds[0].1["add"]), (&json!(block), &json!(["b4"]), &json!([])));
+    h.app.dialog = None;
+
+    // The glyph beside the block's origin opens Edit Block on a double-click.
+    h.app.session.selection.clear();
+    h.settle();
+    let at = crate::scenario::handle_at(&format!("sketch:block-glyph:{block}")).expect("the block has a glyph");
+    assert!(crate::sketch_block_canvas::double_click(&mut h.app, at));
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::SketchModify(Mod::Block { editing: true, .. }))));
+    h.app.dialog = None;
+
+    // The Browser row: a click selects the members, and Delete then explodes the block.
+    h.frames(6);
+    let row = format!("browser:sketch-block:{sid}:{block}");
+    assert!(crate::scenario::handle_at(&row).is_some(), "the block is listed under its sketch");
+    h.step(&json!({"click":{"handle":row}})).unwrap();
+    assert_eq!(h.app.session.selection.len(), 4, "a click on the row selects the members");
+    h.step(&json!({"key":"Delete"})).unwrap();
+    h.frames(3);
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert!(sk.blocks.is_empty(), "Delete on the row explodes the block");
+    assert!(curves.iter().all(|c| sk.curve_index(c).is_some()), "its curves stay");
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(h.app.session.doc.sketch(sid).unwrap().blocks.len(), 1);
+
+    // A row pick the document has moved on from: Delete deletes the selection as usual.
+    h.frames(3);
+    h.step(&json!({"click":{"handle":format!("browser:sketch-block:{sid}:{block}")}})).unwrap();
+    let members = h.app.session.selection.clone();
+    h.app.run("sketch.explode_block", json!({"block": block})).unwrap();
+    h.app.session.selection = members;
+    h.step(&json!({"key":"Delete"})).unwrap();
+    h.frames(3);
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert!(curves.iter().all(|c| sk.curve_index(c).is_none()), "Delete deleted the selected curves: {:?}", h.app.status);
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(h.app.session.doc.sketch(sid).unwrap().blocks.len(), 1);
+
+    // Members of two blocks selected: the menu offers the first one's items once.
+    h.app.run("sketch.line", json!({"points":[[40,0],[50,0]],"ids":["o1"]})).unwrap();
+    h.app.run("sketch.block", json!({"curves":["o1"]})).unwrap();
+    h.app.session.selection = ["b2", "o1"].iter().map(|id| Sel::SketchCurve { id: (*id).into(), sketch: None }).collect();
+    let menu = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+    let edits: Vec<_> = menu.iter().filter(|item| item.id == "ui.editBlock").collect();
+    assert_eq!(edits.len(), 1, "one Edit Block");
+    assert_eq!(edits[0].params.as_ref().unwrap()["block"], json!(block));
+    h.app.session.selection.clear();
+
+    // The row's Delete Block deletes the block with its members and its axis.
+    let target = crate::context_menu::Target::SketchBlock { sketch: sid, block: block.clone() };
+    let items = crate::context_menu::items(&h.app, &target);
+    let delete = items.iter().find(|item| item.id == "sketch.delete").expect("Delete Block");
+    assert_eq!(delete.label, "Delete Block");
+    crate::context_menu::run_item(&mut h.app, delete, egui::pos2(0.0, 0.0));
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert!(sk.blocks.iter().all(|b| b.id != block), "Delete Block removes the block");
+    assert!(curves.iter().all(|c| sk.curve_index(c).is_none()), "and its members");
+    assert!(sk.curve_index(made["axis"].as_str().unwrap()).is_none(), "and its axis");
+    assert_eq!(sk.blocks.len(), 1, "the other block stays");
+}

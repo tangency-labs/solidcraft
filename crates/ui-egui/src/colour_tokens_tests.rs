@@ -425,6 +425,7 @@ fn every_engine_colour_tag_is_placed() {
         "SKETCH_LOST",
         "SKETCH_CONSTRUCTION",
         "SKETCH_CENTERLINE",
+        "SKETCH_BLOCK",
         "AXIS_X",
         "AXIS_Y",
         "AXIS_Z",

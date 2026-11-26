@@ -159,6 +159,10 @@ pub enum Mod {
     /// `sketch.point.divide` (#8969): the curves picked are each divided into `count` pieces of equal
     /// length by points held at their shares of it.
     Divide { count: String },
+    /// `sketch.block`, or `sketch.block_edit` on the block the window's `block` extra names
+    /// (`editing`): the block's name and whether its scale is free. The Curves input holds its
+    /// members; Make Block also takes an optional Origin point.
+    Block { name: String, free: bool, editing: bool },
 }
 
 impl Mod {
@@ -188,6 +192,8 @@ impl Mod {
             Mod::Corner { .. } => "CHAMFER",
             Mod::Equation { .. } => "EQUATION CURVE",
             Mod::Divide { .. } => "DIVIDE CURVE",
+            Mod::Block { editing: false, .. } => "MAKE BLOCK",
+            Mod::Block { .. } => "EDIT BLOCK",
         }
     }
 
@@ -210,7 +216,7 @@ impl Mod {
             Mod::PatternCirc { angle, .. } => Some(("Angle", ValueKind::Angle, angle)),
             Mod::Corner { chamfer: false, size, .. } => Some(("Radius", ValueKind::Length, size)),
             Mod::Corner { size, .. } => Some(("Distance", ValueKind::Length, size)),
-            Mod::Equation { .. } | Mod::Divide { .. } => None,
+            Mod::Equation { .. } | Mod::Divide { .. } | Mod::Block { .. } => None,
         }
     }
 }
@@ -250,7 +256,9 @@ fn inputs(k: &Mod) -> Vec<SelInput> {
         // point (#1824), for both.
         Mod::Corner { .. } => vec![SelInput::new("Corners", SKETCH_POINTS | CURVES, true)],
         Mod::Equation { .. } => Vec::new(),
-        Mod::Divide { .. } => vec![SelInput::new("Curves", CURVES, true)],
+        Mod::Divide { .. } | Mod::Block { editing: true, .. } => vec![SelInput::new("Curves", CURVES, true)],
+        // The origin is optional: without it the block's origin goes at its curves' box centre.
+        Mod::Block { .. } => vec![SelInput::new("Curves", CURVES, true), SelInput::new("ui.block_origin", SKETCH_POINTS, false)],
     }
 }
 
@@ -319,6 +327,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             radians_trig: false,
         },
         "sketch.point.divide" => Mod::Divide { count: "4".into() },
+        "sketch.block" => Mod::Block { name: String::new(), free: false, editing: false },
         _ => return None,
     };
     let i = inputs(&k);
@@ -505,6 +514,32 @@ pub fn edit_pattern(app: &mut SolveApp, id: &str) -> bool {
     true
 }
 
+/// The member curve ids of block `id` in the sketch being edited.
+fn block_members(app: &SolveApp, id: &str) -> Option<Vec<String>> {
+    let state = crate::open_meshing::session_world(&app.session);
+    let sk = &state.sketch(app.session.active_sketch?)?.sketch;
+    sk.blocks.iter().find(|b| b.id == id).map(|b| b.curves.clone())
+}
+
+/// Open Edit Block on block `id` of the sketch being edited, with its name, scale and members.
+/// OK runs `sketch.block_edit` on it.
+pub fn edit_block(app: &mut SolveApp, id: &str) -> bool {
+    let Some(sid) = app.session.active_sketch else { return false };
+    let state = crate::open_meshing::session_world(&app.session);
+    let Some(block) = state.sketch(sid).and_then(|s| s.sketch.blocks.iter().find(|b| b.id == id)) else { return false };
+    let kind =
+        Mod::Block { name: block.name.clone().unwrap_or_default(), free: block.scale == solidcraft_engine::sketch::BlockScale::Free, editing: true };
+    let members = block.curves.iter().map(|c| Sel::SketchCurve { id: c.clone(), sketch: None }).collect();
+    let mut dialog = Dialog::new(Kind::SketchModify(kind.clone()), inputs(&kind));
+    if let Some(input) = dialog.inputs.first_mut() {
+        input.items = members;
+    }
+    dialog.extra.insert("block".into(), json!(id));
+    app.tool = None;
+    app.dialog = Some(dialog);
+    true
+}
+
 pub fn double_click_pattern(app: &mut SolveApp, pos: Pos2) -> bool {
     let Some(glyph) = crate::sketch_tools::glyph_at(pos) else { return false };
     let Some(sid) = app.session.active_sketch else { return false };
@@ -609,6 +644,8 @@ pub(crate) fn command(k: &Mod) -> &'static str {
         Mod::Corner { .. } => "sketch.chamfer.equal_distance",
         Mod::Equation { .. } => "sketch.equation_curve",
         Mod::Divide { .. } => "sketch.point.divide",
+        Mod::Block { editing: false, .. } => "sketch.block",
+        Mod::Block { .. } => "sketch.block_edit",
     }
 }
 
@@ -755,6 +792,14 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document, two_parallel_lines: 
         Mod::Divide { count } => {
             enter |= quantity(ui, doc, "Segments", count, 2, DIVIDE_MAX);
             ui_kit::text(ui, solidcraft_ui_text::tr("sketch.divide_hint"), ui_kit::Text::Note("divide"));
+        }
+        Mod::Block { name, free, .. } => {
+            enter |= ui_kit::text_row(ui, "Name", name, "").0;
+            let mut scale = usize::from(*free);
+            let options = [solidcraft_ui_text::tr("ui.block_scale_fixed"), solidcraft_ui_text::tr("ui.block_scale_free")];
+            ui_kit::choice_row(ui, "Scale", "block_scale", &mut scale, &options);
+            *free = scale == 1;
+            ui_kit::text(ui, solidcraft_ui_text::tr("ui.block_scale_note"), ui_kit::Text::Note("block_scale"));
         }
         Mod::Equation { form, x, y, start, end, tolerance, range_unit, radians_trig } => {
             let note = if *radians_trig { "ui.equation_angles_legacy" } else { "ui.equation_angles_degrees" };
@@ -1235,6 +1280,29 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 }
             }
             ("sketch.pattern.rectangular", p)
+        }
+        Mod::Block { name, free, editing } => {
+            let curves = curve_ids(inputs, 0);
+            if curves.is_empty() {
+                return Err("Select the sketch curves of the block first".into());
+            }
+            let scale = if *free { "free" } else { "fixed" };
+            if !*editing {
+                let mut p = json!({"curves": curves, "scale": scale});
+                if !name.trim().is_empty() {
+                    p["name"] = json!(name.trim());
+                }
+                if let Some(origin) = picked_point(&app.session, inputs, 1) {
+                    p["origin"] = json!(origin);
+                }
+                ("sketch.block", p)
+            } else {
+                let block = extra.get("block").and_then(Value::as_str).ok_or("Select the block to edit first")?;
+                let members = block_members(app, block).ok_or("That block is no longer in the sketch")?;
+                let add: Vec<&String> = curves.iter().filter(|c| !members.contains(c)).collect();
+                let remove: Vec<&String> = members.iter().filter(|m| !curves.contains(m)).collect();
+                ("sketch.block_edit", json!({"scale": scale, "name": name.trim(), "add": add, "remove": remove}))
+            }
         }
         Mod::Divide { count } => {
             let curves = curve_ids(inputs, 0);

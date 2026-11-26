@@ -1290,6 +1290,11 @@ pub fn active_glyph_deletion(app: &SolveApp, id: &str) -> Vec<solidcraft_engine:
     }
 }
 
+/// The side of the glyphs drawn this frame, in screen pixels.
+pub(crate) fn glyph_px_now() -> f32 {
+    GLYPH_PX.with(Cell::get)
+}
+
 /// The constraint glyph under a screen position (its constraint id).
 pub fn glyph_at(pos: Pos2) -> Option<String> {
     let reach = GLYPH_PX.with(Cell::get) * 0.6;
@@ -2538,16 +2543,23 @@ fn sketch_px_per_mm(plane: &Plane, proj: &Proj) -> Option<f32> {
 }
 
 fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Pos2>) {
-    let Some(sid) = active_sketch(app) else { return };
+    let Some(sid) = active_sketch(app) else {
+        crate::sketch_block_canvas::clear();
+        return;
+    };
     // While a dimension's value is typed, the glyphs sit where that value puts their geometry.
     let st = crate::dim_view::preview_world(app).unwrap_or_else(|| crate::open_meshing::session_world(&app.session));
-    let Some(ss) = st.sketch(sid) else { return };
+    let Some(ss) = st.sketch(sid) else {
+        crate::sketch_block_canvas::clear();
+        return;
+    };
     // The badge's side, from Preferences › Sketch (#10794); 15 px at the default.
     let glyph = glyph_px(app.preferences.constraint_glyph_scale);
     let scale = glyph / GLYPH;
     GLYPH_PX.with(|g| g.set(glyph));
     if ss.sketch.view.hide_constraints {
         GLYPHS.with(|g| g.borrow_mut().clear());
+        crate::sketch_block_canvas::clear();
         return;
     }
     // Zoomed out far enough: fixed-size glyphs would dominate the sketch (#8980), unless the
@@ -2556,6 +2568,7 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
         && !constraint_glyphs_visible_at_scale(scale, app.preferences.hide_constraint_glyphs_zoomed_out, || sketch_span_px(ss, proj))
     {
         GLYPHS.with(|g| g.borrow_mut().clear());
+        crate::sketch_block_canvas::clear();
         return;
     }
     let tk = solidcraft_theme::Tokens::get();
@@ -2625,6 +2638,7 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
             }
         }
     }
+    let held = crate::sketch_block_canvas::held_set(&ss.sketch);
     let mut drawn: Vec<(String, Pos2)> = Vec::new();
     for (id, sp, base) in &placed {
         let Some(c) = ss.sketch.constraints.iter().find(|c| &c.id == id) else { continue };
@@ -2641,6 +2655,8 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
             tk.accent
         } else if redundant {
             tk.glyph_text.gamma_multiply(0.45)
+        } else if crate::sketch_block_canvas::held(&held, &group) {
+            tk.glyph_text.gamma_multiply(crate::sketch_block_canvas::HELD_FADE)
         } else {
             tk.glyph_text
         };
@@ -2668,6 +2684,8 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
         }
         drawn.push((id.clone(), *sp));
     }
+    let taken: Vec<Pos2> = drawn.iter().map(|(_, p)| *p).collect();
+    crate::sketch_block_canvas::paint(app, ss, painter, proj, glyph, hover, &taken);
     if let (Some((id, at_glyph)), Some(h)) = (hovered_at, hover)
         && let Some(c) = ss.sketch.constraints.iter().find(|c| c.id == id)
     {

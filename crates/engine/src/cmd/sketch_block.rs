@@ -18,7 +18,8 @@ const EDIT_CONTRACT: TypedContract<BlockEditParams> = TypedContract::new();
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.block", "Make Block", crate::checked!("sketch.block", make_block))
         .in_sketch_part()
-        .icon("sketch")
+        .at("SKETCH", "MODIFY")
+        .icon("c_block")
         .enabled(in_sketch)
         .from_selection(from_selection)
         .contract(&BLOCK_CONTRACT)
@@ -28,14 +29,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         ),
     CommandSpec::new("sketch.explode_block", "Explode Block", crate::checked!("sketch.explode_block", explode_block))
         .in_sketch_part()
-        .icon("sketch")
+        .icon("c_block")
         .enabled(in_sketch)
         .contract(&EXPLODE_CONTRACT)
         .output(output_schema_for::<ExplodeBlockResult>)
         .params("block: id. Turns the block back into plain geometry, its axis staying as a plain construction line. Its held constraints that hold where the geometry is now drive again (a free block's dimensions that are plain numbers scale with it first); the others (a turned block's horizontals, a resized block's dimensions driven by parameters) are removed. Returns curves (the former members), restored and dropped (constraint ids)"),
     CommandSpec::new("sketch.block_edit", "Edit Block", crate::checked!("sketch.block_edit", edit_block))
         .in_sketch_part()
-        .icon("sketch")
+        .icon("c_block")
         .enabled(in_sketch)
         .contract(&EDIT_CONTRACT)
         .output(output_schema_for::<BlockResult>)

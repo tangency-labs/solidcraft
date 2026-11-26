@@ -298,6 +298,9 @@ pub struct TreeState {
     pub picked_canvases: Vec<u64>,
     /// Joints picked in the tree (a hidden one shows highlighted while it is picked).
     pub picked_joints: Vec<u64>,
+    /// A sketch block's row clicked in the tree, while the selection is still what that click
+    /// made: Delete explodes the block (`sketch_block_tree::delete_picked`).
+    pub(crate) picked_block: Option<crate::sketch_block_tree::Picked>,
     /// Motion links picked in the tree, as `joint.list` numbers them (#6825).
     pub picked_links: Vec<usize>,
     /// Folders picked in the feature history (features use the engine selection).
@@ -3037,8 +3040,10 @@ impl Entry {
             row_key: format!("s:{}", f.id),
             thing: Thing::Sketch(f.id),
             // A sketch's patterns and projections fold under it.
-            patterns: (crate::sketch_pattern_tree::has_patterns(app, f.id) || crate::sketch_link_tree::has_links(app, f.id))
-                .then(|| format!("s:{}/patterns", f.id)),
+            patterns: (crate::sketch_pattern_tree::has_patterns(app, f.id)
+                || crate::sketch_link_tree::has_links(app, f.id)
+                || crate::sketch_block_tree::has_blocks(app, f.id))
+            .then(|| format!("s:{}/patterns", f.id)),
             label: if lost {
                 solidcraft_ui_text::format("browser.sketch_attachment_lost", &[("name", &crate::i18n::tr_name(&f.name))])
             } else if active {
@@ -3800,6 +3805,7 @@ fn entry_row(
         let dim = !visible || parent_hidden;
         crate::sketch_pattern_tree::browser_rows(app, rows, *id, depth + 1, path.map(|path| (comp, path)), dim);
         crate::sketch_link_tree::browser_rows(app, rows, *id, depth + 1, dim);
+        crate::sketch_block_tree::browser_rows(app, rows, *id, depth + 1, path.map(|path| (comp, path)), dim);
     }
     if built_open && built_key.is_some() {
         features::body_rows(app, rows, acts, comp, path.unwrap_or_default(), &e.row_key, &built, depth + 1);
