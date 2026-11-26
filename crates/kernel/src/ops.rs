@@ -178,6 +178,45 @@ fn any_two_meet(boxes: &[solidcraft_geom::Aabb3]) -> bool {
     false
 }
 
+/// Candidate index pairs `[a, b]` (`a < b`) of `pieces` whose exact bounding boxes (each grown
+/// by its record tolerance) meet, swept along x. Pieces whose exact bounds are unavailable or
+/// non-finite are conservatively paired with every other piece.
+pub fn overlapping_piece_pairs(pieces: &[Body]) -> Vec<[usize; 2]> {
+    let mut boxed: Vec<(usize, solidcraft_geom::Aabb3)> = Vec::with_capacity(pieces.len());
+    let mut unboxed: Vec<usize> = Vec::new();
+    for (i, p) in pieces.iter().enumerate() {
+        match p.exact_bounds() {
+            Ok(b) if !b.is_empty() && b.min.is_finite() && b.max.is_finite() => {
+                boxed.push((i, b.inflated(p.record().tolerance)));
+            }
+            _ => unboxed.push(i),
+        }
+    }
+    boxed.sort_by(|(_, a), (_, b)| a.min.x.total_cmp(&b.min.x));
+    let mut candidates: Vec<[usize; 2]> = Vec::new();
+    for (k, &(i, ba)) in boxed.iter().enumerate() {
+        for &(j, bb) in boxed.iter().skip(k + 1) {
+            if bb.min.x > ba.max.x {
+                break;
+            }
+            if ba.meets(&bb) {
+                candidates.push([i.min(j), i.max(j)]);
+            }
+        }
+    }
+    for &u in &unboxed {
+        for other in 0..pieces.len() {
+            if other == u || (other < u && unboxed.contains(&other)) {
+                continue;
+            }
+            candidates.push([u.min(other), u.max(other)]);
+        }
+    }
+    candidates.sort_unstable();
+    candidates.dedup();
+    candidates
+}
+
 /// Bodies the caller knows are apart (no two meet or touch), as one body of several pieces,
 /// without any intersection work: [`union_apart`] without its check, for tools whose making
 /// shows they are apart. Each face and edge of the result is its piece's own (its history over

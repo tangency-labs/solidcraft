@@ -1325,7 +1325,7 @@ fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
     let r = swept(&b, &order, Blend::Round, &edges, &unequal);
     // not built there yet, with the kernel's reason and the corner's point
     assert!(
-        matches!(&r, Some(Error::TurnRefused { room: false, why, at: Some(_) })
+        matches!(&r, Some(Error::TurnRefused { room: false, why, at: Some(_), side_edge: None, least_radius: None })
             if why.starts_with("a swept turn is built between constant rounds of one radius")),
         "{r:?}"
     );
@@ -1335,12 +1335,24 @@ fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
     let (order, edges) = loop_edges(&p, floor, 5.0);
     let before = p.to_record().unwrap().0;
     let r = swept(&p, &order, Blend::Round, &edges, &[1.0]);
-    // no radius of the rounds passes the sharp concave edge: the kernel says what would
+    // no radius of the rounds passes the sharp concave edge: the kernel says what would, and
+    // names it as data, the pocket's upright edge at the corner and the rounds' radius 1
+    let Some(Error::TurnRefused {
+        room: true,
+        why,
+        at: Some([x, y, _]),
+        side_edge,
+        least_radius,
+    }) = &r
+    else {
+        panic!("{r:?}");
+    };
     assert!(
-        matches!(&r, Some(Error::TurnRefused { room: true, why, at: Some(_) })
-            if why.contains("round that edge at a radius of at least 1 first")),
-        "{r:?}"
+        why.contains("round that edge at a radius of at least 1 first"),
+        "{why}"
     );
+    assert_eq!(*least_radius, Some(1.0));
+    assert_eq!(*side_edge, Some(edge_at(&p, [*x, *y, 7.5])));
     assert_eq!(p.to_record().unwrap().0, before);
     blend_ordered(
         &p,
@@ -1442,6 +1454,59 @@ fn auto_turns_are_swept_where_built_and_mitred_where_not() {
     let v = c.volume(1e-10).unwrap();
     assert!(rel(v, 12500.0 + 40.0 * a + 8.0 * m) < 1e-9, "{v}");
     assert_eq!(c.counts().unwrap(), [15, 32, 20]);
+}
+
+/// [`Turn::Auto`] never refuses a round the mitre builds (stress corpus S3267, 0.50.0): a 60 x
+/// 40 x 25 block with a 4.8 x 4.8 notch 12.5 deep centred on its top's +Y edge, the top's outer
+/// loop rounded r 2.8. The notch's inner upright edges are concave under convex rounds, so the
+/// blend corner sweeps the turns there; but the notch's side edges are 2.4 long, shorter than
+/// the radius, and their rounds' rails, ended at the swept turn's section, are trimmed past it
+/// by the mitre at the rim. Auto builds the mitred blend instead. Every wall upright and every
+/// corner mitred, the top over a point at distance t inside the mitred offset outline drops by
+/// g(t) = r - sqrt(r^2 - (r - t)^2), and that outline's perimeter is L0 - 8 t (six convex right
+/// corners, two reflex ones, L0 = 204.8), so the rounds take off
+/// L0 r^2 (1 - pi/4) - 8 r^3 (5/6 - pi/4) from 60 40 25 - 4.8 2.4 12.5 = 59856.
+#[test]
+fn auto_turns_mitre_where_a_swept_turn_leaves_a_short_round_no_room() {
+    all_fixes();
+    let b = built(|k| {
+        let block = create_box(k, Vec3::new(-30.0, -20.0, 0.0), 60.0, 40.0, 25.0)?;
+        let notch = create_box(k, Vec3::new(-2.4, 17.6, 12.5), 4.8, 4.8, 12.5)?;
+        boolean_difference(k, block, notch)
+    });
+    let (record, order) = b.to_record().unwrap();
+    // the top's outer loop: every edge of the record at z = 25 that is not on the notch's floor
+    let top = |i: u32| (record.vertices[i as usize].point[2] - 25.0).abs() < 1e-9;
+    let edges: Vec<usize> = (0..record.edges.len())
+        .filter(|&i| {
+            let [s, t] = record.edges[i].vertices;
+            top(s) && top(t)
+        })
+        .collect();
+    assert_eq!(edges.len(), 8);
+    blend_ordered(
+        &b,
+        &order,
+        Blend::Round,
+        &edges,
+        &[2.8],
+        &[],
+        Corners::Filled,
+        BlendOptions {
+            turn: Turn::Auto,
+            ..BlendOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    let r: f64 = 2.8;
+    let want =
+        59856.0 - 204.8 * r * r * (1.0 - PI / 4.0) + 8.0 * r.powi(3) * (5.0 / 6.0 - PI / 4.0);
+    let v = b.volume(1e-10).unwrap();
+    assert!(rel(v, want) < 1e-9, "{v} against {want}");
+    // bottom, top, five sides (the +Y side split by the notch), the notch's three walls and
+    // floor, and eight rounds
+    assert_eq!(b.counts().unwrap()[0], 18);
 }
 
 /// tangency-labs/solidcraft#16897: an 80 x 60 x 10.5 plate with a 30 x 3 x 65 tab on it

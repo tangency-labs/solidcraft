@@ -726,6 +726,11 @@ impl std::fmt::Debug for OutlinePrep {
 /// ([`Body::outline_prepared`]).
 pub const OUTLINE_TRIM_SAMPLES: usize = 1024;
 
+/// The relative accuracy [`Body::face_area`] asks solidcore for. Its estimate is cautious: on a
+/// cut sphere 1e-6 already lands within 1e-15 of the exact area; 1e-8 keeps a margin for other
+/// surfaces at about 2 ms for a sphere face (#22556).
+pub const FACE_AREA_ACCURACY: f64 = 1e-8;
+
 impl Body {
     /// Whether this body's lazily placed record has been moved: a placement's geometry was
     /// needed exactly ([`crate::ops::transform_matrix`]). Derived from the move's own state, so
@@ -2312,6 +2317,26 @@ impl Body {
         }
     }
 
+    /// The area of face `face_index` from its exact surface and trim (#22556): solidcore's
+    /// boundary integral ([`solidcore_ops::Body::face_area`]), the measure the whole body's area
+    /// uses, at [`FACE_AREA_ACCURACY`]; no mesh. `None` for a mesh body or an index out of range.
+    ///
+    /// # Errors
+    ///
+    /// [`KernelError::Failed`] for the kernel's failure (a face it cannot integrate).
+    pub fn face_area(&self, face_index: usize) -> Result<Option<f64>> {
+        let Some(form) = self.ops_body() else { return Ok(None) };
+        let (body, order) = &*form;
+        if face_index >= self.record.faces.len() {
+            return Ok(None);
+        }
+        guard("face area", || match body.face_area(order, face_index, FACE_AREA_ACCURACY) {
+            Ok(a) => Ok(Some(a)),
+            Err(solidcore_ops::Error::Argument) => Ok(None),
+            Err(e) => Err(KernelError::Failed(format!("face area: {e}"))),
+        })
+    }
+
     /// The unit normal of face `face_index` at `point`, a point of that face (within the body's
     /// modelling tolerance): exact, from the face's own surface and trim
     /// ([`solidcore_ops::Body::face_normal_at_point`]), no mesh. It points out of the material,
@@ -2634,7 +2659,7 @@ impl Body {
         other.require_brep("contact test")?;
         let tol = (self.size().max(other.size()) * 1e-4).max(1e-6);
         let gap = 2.0 * tol;
-        if exact_boxes_separate(self, other, gap) {
+        if exact_boxes_separate(self, other, gap, tol) {
             return Ok(false);
         }
         let (a, b) = (self.mesh(&MeshTolerance::chord(tol))?, other.mesh(&MeshTolerance::chord(tol))?);
@@ -2655,7 +2680,7 @@ impl Body {
             other.require_brep("contact test")?;
             let tol = (size.max(other.size()) * 1e-4).max(1e-6);
             let gap = 2.0 * tol;
-            if exact_boxes_separate(self, other, gap) {
+            if exact_boxes_separate(self, other, gap, tol) {
                 contacts.push(false);
                 continue;
             }
@@ -2674,11 +2699,12 @@ impl Body {
     }
 }
 
-/// Whether `a` and `b`'s exact bounding boxes are separated by more than `gap` (plus their
-/// record tolerances), proving their fine meshes cannot meet within `gap` without meshing either.
-/// Checks cheap inner boxes first so overlapping bodies skip measuring `exact_bounds`.
-fn exact_boxes_separate(a: &Body, b: &Body, gap: f64) -> bool {
-    let margin = gap + a.record().tolerance + b.record().tolerance;
+/// Whether `a` and `b`'s exact bounding boxes are separated by more than `gap` plus both contact
+/// meshes' chord deviation (`2 * tol`) and record tolerances, proving their `tol`-chord meshes
+/// cannot meet within `gap` without meshing either. Checks cheap inner boxes first so overlapping
+/// bodies skip measuring `exact_bounds`.
+fn exact_boxes_separate(a: &Body, b: &Body, gap: f64, tol: f64) -> bool {
+    let margin = gap + 2.0 * tol + a.record().tolerance + b.record().tolerance;
     if !margin.is_finite() {
         return false;
     }

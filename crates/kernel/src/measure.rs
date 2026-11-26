@@ -339,18 +339,24 @@ mod tests {
         assert_eq!(*b.bounds.lock().unwrap(), None);
     }
 
-    /// Contact tests reject clearly apart bodies from their exact boxes without meshing either.
+    /// Contact tests reject clearly apart bodies from their exact boxes without meshing either,
+    /// while pairs within the contact-mesh chord margin (`gap + 2 * tol`) still run the mesh test.
     #[test]
     fn meets_rejects_apart_bodies_without_meshing() {
         let a = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap().keeping_meshes();
         let far = crate::box_solid(Vec3::new(50.0, 0.0, 0.0), Vec3::new(60.0, 10.0, 10.0)).unwrap().keeping_meshes();
+        // Size is ~17.32, so `tol = size * 1e-4 ≈ 0.00173`, `gap = 2 * tol ≈ 0.00346`, and
+        // `gap + 2 * tol ≈ 0.00693`. A 0.005 gap sits past `gap` yet inside the chord margin, so
+        // the exact-box prefilter must not skip meshing it.
+        let near_chord = crate::box_solid(Vec3::new(10.005, 0.0, 0.0), Vec3::new(20.005, 10.0, 10.0)).unwrap().keeping_meshes();
         let touching = crate::box_solid(Vec3::new(10.0, 0.0, 0.0), Vec3::new(20.0, 10.0, 10.0)).unwrap().keeping_meshes();
         assert!(!a.meets(&far).unwrap());
         assert_eq!(a.meets_each(std::slice::from_ref(&far)).unwrap(), vec![false]);
         assert_eq!(a.cached_mesh_count(), 0);
         assert_eq!(far.cached_mesh_count(), 0);
+        assert!(!a.meets(&near_chord).unwrap());
+        assert!(a.cached_mesh_count() > 0, "pair inside chord margin must not be skipped by exact-box prefilter");
         assert!(a.meets(&touching).unwrap());
-        assert!(a.cached_mesh_count() > 0);
         assert_eq!(a.meets_each(&[far, touching]).unwrap(), vec![false, true]);
     }
 
