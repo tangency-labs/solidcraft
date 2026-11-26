@@ -138,7 +138,7 @@ fn a_mirror_meets_its_body_when_the_copy_touches_or_overlaps_it() {
     assert_eq!(s.model.state().bodies.len(), 1, "nothing is made");
 }
 
-/// A 100 x 50 x 5 plate with a hole at the start of a straight path (10,10) â†’ (90,10).
+/// A 100 x 50 x 5 plate with a hole at the start of a straight path (10,10) → (90,10).
 fn plate_with_hole() -> Session {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 5, "corner": [0, 0, 0]}));
@@ -555,7 +555,7 @@ fn pattern_on_path_spacing_extent_and_flip() {
     // Flipped, the path runs from (90,10) back toward (10,10).
     let mut s = plate_with_hole();
     run(&mut s, "solid.pattern.path", json!({"features": ["Hole1"], "path_sketch": "Path", "path": ["l1"], "count": 2, "spacing": 30, "flip": true}));
-    // The copy moves by path(30) âˆ’ path(0) = (60,10) âˆ’ (90,10) = âˆ’30: off the plate side â†’ only 1 hole.
+    // The copy moves by path(30) − path(0) = (60,10) − (90,10) = −30: off the plate side → only 1 hole.
     assert!(rel(volume(&mut s), PLATE - HOLE) < 1e-4);
 }
 
@@ -625,7 +625,7 @@ fn rectangular_pattern_distance_types_place_the_copies() {
     let (got, _) =
         rectangular_offsets(json!({"dir1": [1, 0, 0], "distance1": "spacing_extent", "spacing1": 20, "extent1": 80, "copy_at_end1": true}));
     assert_offsets(&got, &x(&[20.0, 40.0, 60.0, 80.0]));
-    // Float noise must not drop or double the copy at the end: 0.3 / 0.1 is 2.9999â€¦
+    // Float noise must not drop or double the copy at the end: 0.3 / 0.1 is 2.9999…
     let (got, _) =
         rectangular_offsets(json!({"dir1": [1, 0, 0], "distance1": "spacing_extent", "spacing1": 0.1, "extent1": 0.3, "copy_at_end1": true}));
     assert_eq!(got.len(), 3, "{got:?}");
@@ -771,7 +771,7 @@ fn circular_pattern_about_a_construction_axis_follows_it() {
         }
         out
     };
-    // About x = 30: the cube at x 40â€¦42 also lands at 18â€¦20, and at y Â±(10â€¦12).
+    // About x = 30: the cube at x 40…42 also lands at 18…20, and at y ±(10…12).
     for (got, want) in span(&s).into_iter().zip([18.0, 42.0, -12.0, 12.0]) {
         assert!((got - want).abs() < 1e-6, "{got} vs {want}");
     }
@@ -1250,7 +1250,7 @@ fn assert_centres(got: &[[f64; 3]], want: &[[f64; 3]], what: &str) {
 }
 
 /// A ball on a half circle (radius 20 about the origin, from (20, 0) through (0, 20) to
-/// (âˆ’20, 0); 20Ï€ mm long), `out` mm outward from the circle at 45Â°.
+/// (−20, 0); 20π mm long), `out` mm outward from the circle at 45°.
 fn ball_on_half_circle(out: f64) -> Session {
     let mut s = Session::default();
     let at = 20.0 + out;
@@ -1273,7 +1273,7 @@ fn on_circle(r: f64, deg: f64) -> [f64; 3] {
 
 /// #6054: the start point says where along the path the original sits (a distance, or a fraction
 /// of the path's length), and the copies are measured on from there. The ball sits on the half
-/// circle at 45Â° (5Ï€ mm along it); copies 5Ï€ apart go to 90Â° and 135Â°.
+/// circle at 45° (5π mm along it); copies 5π apart go to 90° and 135°.
 #[test]
 fn path_pattern_start_point_measures_the_copies_from_the_original() {
     let pattern = |extra: Value| {
@@ -1289,14 +1289,14 @@ fn path_pattern_start_point_measures_the_copies_from_the_original() {
     assert_centres(&pattern(json!({"start": "5 * pi"})), &on_path, "start as a distance");
     assert_centres(&pattern(json!({"start_fraction": 0.25})), &on_path, "start as a fraction");
     // Without a start point the copies are measured from the path's start, (20, 0): the first
-    // moves by path(5Ï€) âˆ’ path(0) = (20 cos 45Â° âˆ’ 20, 20 sin 45Â°), off the circle.
+    // moves by path(5π) − path(0) = (20 cos 45° − 20, 20 sin 45°), off the circle.
     let ball = on_circle(20.0, 45.0);
     let moved = |deg: f64| {
         let (a, b) = (on_circle(20.0, deg), on_circle(20.0, 0.0));
         [ball[0] + a[0] - b[0], ball[1] + a[1] - b[1], 0.0]
     };
     assert_centres(&pattern(json!({})), &[moved(45.0), moved(90.0)], "no start point");
-    // Flipped, the path runs from (âˆ’20, 0): three quarters of it from there is the 45Â° point
+    // Flipped, the path runs from (−20, 0): three quarters of it from there is the 45° point
     // again, and the copies go on toward (20, 0).
     let flipped = pattern(json!({"start_fraction": 0.75, "flip": true, "count": 2}));
     assert_centres(&flipped, &[on_circle(20.0, 0.0)], "flipped");
@@ -1311,7 +1311,7 @@ fn path_pattern_start_point_measures_the_copies_from_the_original() {
     // Its parameters: the count, the spacing and the start point.
     let start = s.doc.features.last().and_then(|f| f.param_names.get(2).cloned()).unwrap_or_default();
     run(&mut s, "parameters.change", json!({"name": start, "expression": "10 * pi"}));
-    // The ball now stands for the 90Â° point, so its copy moves by path(15Ï€) âˆ’ path(10Ï€).
+    // The ball now stands for the 90° point, so its copy moves by path(15π) − path(10π).
     let (a, b) = (on_circle(20.0, 135.0), on_circle(20.0, 90.0));
     assert_centres(&copy_centres(&mut s, "Ball"), &[[ball[0] + a[0] - b[0], ball[1] + a[1] - b[1], 0.0]], "start edited");
 
@@ -1328,7 +1328,7 @@ fn path_pattern_start_point_measures_the_copies_from_the_original() {
     };
     refused(json!({"start": "21 * pi"}), "start point must lie on the path");
     refused(json!({"start": -1}), "start point must lie on the path");
-    refused(json!({"start_fraction": 1.5}), "0â€¦1 of the path's length");
+    refused(json!({"start_fraction": 1.5}), "0…1 of the path's length");
     refused(json!({"start": "15 * pi"}), "past the end of the path");
     refused(json!({"start": "5 * pi", "spacing": "-5 * pi"}), "past the start of the path");
     refused(json!({"start": 5, "start_fraction": 0.5}), "not both");
@@ -1355,8 +1355,8 @@ fn path_pattern_start_point_measures_the_copies_from_the_original() {
 }
 
 /// #6054: with Path orientation each copy keeps the original's place relative to the path.
-/// A ball 5 mm outward of the half circle at 45Â° stays 5 mm outward at 90Â° and 135Â°; with
-/// Identical orientation it keeps its offset (5 mm along 45Â°) instead.
+/// A ball 5 mm outward of the half circle at 45° stays 5 mm outward at 90° and 135°; with
+/// Identical orientation it keeps its offset (5 mm along 45°) instead.
 #[test]
 fn path_pattern_orientation_keeps_the_original_relation_to_an_arc() {
     let pattern = |orientation: &str| {
@@ -1380,8 +1380,8 @@ fn path_pattern_orientation_keeps_the_original_relation_to_an_arc() {
 /// #6054: on a path that leaves its sketch's plane the copies turn with the path's tangent and
 /// keep the original's relation to it. The path runs 10 mm along X and then 10 mm up Z (a 3D
 /// sketch on XY); a ball 5 mm above its start (square to the path, in the plane of its bend)
-/// sits, 5 mm up the second leg, 5 mm back from it along âˆ’X: the path turned a quarter about
-/// âˆ’Y, and so did the ball. Turning only about the sketch's normal did not turn it at all: it
+/// sits, 5 mm up the second leg, 5 mm back from it along −X: the path turned a quarter about
+/// −Y, and so did the ball. Turning only about the sketch's normal did not turn it at all: it
 /// ended up 5 mm further up the second leg, on the path.
 #[test]
 fn path_pattern_orientation_follows_a_3d_path() {
@@ -1402,7 +1402,7 @@ fn path_pattern_orientation_follows_a_3d_path() {
     // it), a ball 5 mm outward of its start. A rotation-minimising frame never rolls about the
     // path, so a quarter turn on the copy is still 5 mm from the path, square to it, and turned
     // from the outward direction about the path by the helix's torsion times the length run:
-    // aÂ·h / âˆš(rÂ² + hÂ²) at angle a. The turn about the sketch's normal alone left it about 2 mm
+    // a·h / √(r² + h²) at angle a. The turn about the sketch's normal alone left it about 2 mm
     // along the path, 4.5 mm from it.
     let (mut s, _) = ball_on_helix();
     let (r, h) = HELIX;
@@ -1426,7 +1426,7 @@ fn path_pattern_orientation_follows_a_3d_path() {
 
     // A design saved before the frame keeps what it built: its copy is turned about the
     // sketch's normal only, so the ball's 5 mm outward offset stays level. It sits 5 mm from the
-    // path's point at a quarter turn, (0, r, hÂ·Ï€/2), at that point's height, where the frame
+    // path's point at a quarter turn, (0, r, h·π/2), at that point's height, where the frame
     // tilts it with the path.
     let mut doc = (*s.doc).clone();
     for f in &mut doc.features {
@@ -1534,12 +1534,12 @@ fn patterns_of_a_blind_hole_drill_every_copy() {
         v0 - volume(&mut s)
     };
     let r = patterned(("solid.pattern.rectangular", json!({"features": ["Hole1"], "dir1": [1, 0, 0], "count1": 3, "spacing1": "15 mm"})));
-    assert!((r - 3.0 * one).abs() < 1e-3 * one, "{r} vs 3 Ã— {one}");
+    assert!((r - 3.0 * one).abs() < 1e-3 * one, "{r} vs 3 × {one}");
     let c = patterned((
         "solid.pattern.circular",
         json!({"features": ["Hole1"], "axis": {"origin": [25, 12, 0], "dir": [0, 0, 1]}, "count": 2, "angle": 360}),
     ));
-    assert!((c - 2.0 * one).abs() < 1e-3 * one, "{c} vs 2 Ã— {one}");
+    assert!((c - 2.0 * one).abs() < 1e-3 * one, "{c} vs 2 × {one}");
 }
 
 /// #14050: a through hole at a sketch point on a plane below the box drills up into it, and so
@@ -1562,7 +1562,7 @@ fn patterns_of_a_sketch_point_hole_below_the_box_drill_every_copy() {
         json!({"features": ["H1"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 20, "dir2": [0, 1, 0], "count2": 2, "spacing2": 20}),
     );
     let six = v0 - volume(&mut s);
-    assert!((six - 6.0 * one).abs() < 1e-3 * one, "{six} vs 6 Ã— {one}");
+    assert!((six - 6.0 * one).abs() < 1e-3 * one, "{six} vs 6 × {one}");
 }
 
 /// Feature patterns and mirrors reference features by id (#1134): a rename leaves the
@@ -1604,7 +1604,7 @@ fn editing_a_pattern_by_seed_name_resolves_it_to_the_id() {
 }
 
 /// Whether a job four times the size took at most about twice linear: `pair` times the small job,
-/// then the big one. Linear is 4Ã—, the old quadratic costs 16Ã— or more. The load of the other test
+/// then the big one. Linear is 4×, the old quadratic costs 16× or more. The load of the other test
 /// binaries can rise between the two runs (on a 16-core Mac under `cargo xtask test`, 32 circles
 /// took 4.7 s and 128 took 42 s, though both together take 18 s alone), so a pair that misses is
 /// measured again, up to three times. Load only ever slows a run, so each size keeps its fastest
@@ -1642,12 +1642,12 @@ fn scales_linearly_keeps_each_sizes_fastest_run() {
     assert!(scales_linearly(pairs(vec![(1, 4)])).is_ok());
     // A big run slowed by load, then a quiet pair.
     assert!(scales_linearly(pairs(vec![(1, 30), (1, 5)])).is_ok());
-    // A quadratic cost (16Ã—) whose later small runs a spike slowed: the fast first one still counts.
+    // A quadratic cost (16×) whose later small runs a spike slowed: the fast first one still counts.
     let r = scales_linearly(pairs(vec![(1, 16), (3, 16), (3, 16)]));
     assert!(r.as_ref().is_err_and(|e| e.contains("fastest 1.00 s and 16.00 s, limit 10.00 s")), "{r:?}");
 }
 
-/// A plate with `n` Ã˜2 circles drawn in one sketch (16 a row, 6 mm apart) and cut by one extrude:
+/// A plate with `n` Ø2 circles drawn in one sketch (16 a row, 6 mm apart) and cut by one extrude:
 /// how long the cut took. It runs on its own thread so a hang fails the test instead of CI.
 fn sketch_hole_cut(n: usize) -> std::time::Duration {
     use std::time::{Duration, Instant};
@@ -1677,7 +1677,7 @@ fn sketch_hole_cut(n: usize) -> std::time::Duration {
 
 /// Many holes drawn in one sketch and cut by one extrude (#368), the usual way to draw a vent
 /// field: 32 took 2 s and 128 took 60 s, though a feature pattern of the same holes is near
-/// linear since #261. Linear is 4Ã—. A ratio, not a time: CI runs every test binary at once and is
+/// linear since #261. Linear is 4×. A ratio, not a time: CI runs every test binary at once and is
 /// many times slower than a machine running this alone.
 #[test]
 fn one_extrude_of_many_sketch_circles_scales_linearly() {
@@ -1792,7 +1792,7 @@ fn copies_of_a_primitive_cut_only_its_targets() {
         assert_eq!(r["changed_bodies"], json!(["Plaque"]), "{id}");
         assert!(rel(body_volume(&mut s, "Voisin"), 60000.0) < 1e-9, "{id} cut Voisin");
         let removed = 60000.0 - body_volume(&mut s, "Plaque");
-        assert!(rel(removed, holes * PI * 9.0 * 10.0) < 1e-3, "{id}: {removed} mmÂ³ cut from Plaque");
+        assert!(rel(removed, holes * PI * 9.0 * 10.0) < 1e-3, "{id}: {removed} mm³ cut from Plaque");
     }
 }
 
@@ -1825,8 +1825,8 @@ fn copies_of_a_join_that_merged_its_targets_join_the_merged_body() {
 }
 
 /// #4593: a rib is the source of a pattern or mirror. Each copy is built again where it is, its
-/// walls run until they meet the body there. An 80 Ã— 80 Ã— 5 plate with a 16 Ã— 16 Ã— 30 boss in the
-/// middle; the rib's triangle (8, 5)-(8, 25)-(30, 5) in the XZ plane, 4 thick, is 880 mmÂ³.
+/// walls run until they meet the body there. An 80 × 80 × 5 plate with a 16 × 16 × 30 boss in the
+/// middle; the rib's triangle (8, 5)-(8, 25)-(30, 5) in the XZ plane, 4 thick, is 880 mm³.
 #[test]
 fn patterns_and_mirrors_of_a_rib() {
     use solidcore_record::Vec3;
@@ -1869,8 +1869,8 @@ fn patterns_and_mirrors_of_a_rib() {
 }
 
 /// #395: a pattern or mirror of features takes a pattern or mirror of features as a source: it
-/// copies what that one made (its copies, not its source). The issue's design: a 40 Ã— 30 Ã— 20
-/// box with a hole `H` at (âˆ’15, âˆ’10) and `Pat`, two more holes along x at 10 mm steps.
+/// copies what that one made (its copies, not its source). The issue's design: a 40 × 30 × 20
+/// box with a hole `H` at (−15, −10) and `Pat`, two more holes along x at 10 mm steps.
 #[test]
 fn patterns_and_mirrors_of_patterns_and_mirrors() {
     use solidcore_record::Vec3;
@@ -1964,7 +1964,7 @@ fn patterns_and_mirrors_of_patterns_and_mirrors() {
         // Measured on the body's mesh, like the other tests here: to 1e-5 of the whole body.
         let after = volume(&mut s);
         let want = before - added as f64 * hole;
-        assert!(rel(after, want) < 1e-5, "{what}: {after} mmÂ³, {added} more holes than {before} = {want}");
+        assert!(rel(after, want) < 1e-5, "{what}: {after} mm³, {added} more holes than {before} = {want}");
     }
 }
 
@@ -1990,7 +1990,7 @@ fn copies_of_a_to_object_extrude_follow_the_moved_face() {
     let thin = volume(&mut s);
     run(&mut s, "timeline.edit", json!({"feature":"Extrude1","set":{"extent.distance":"10 mm"}}));
     let thick = volume(&mut s);
-    assert!(rel(thick, 2.0 * thin) < 1e-6, "5 mm: {thin} mmÂ³, 10 mm: {thick} mmÂ³ (expected {})", 2.0 * thin);
+    assert!(rel(thick, 2.0 * thin) < 1e-6, "5 mm: {thin} mm³, 10 mm: {thick} mm³ (expected {})", 2.0 * thin);
 }
 
 /// The lid of #11792: a boss (`Extrude1`) joined to a half-ring, and a cut (`Extrude2`) that starts
@@ -2013,7 +2013,7 @@ fn mirror_of_a_boss_and_a_cut_from_its_face_makes_both_copies() {
     run(&mut s, "solid.mirror", json!({"features":["Extrude1","Extrude2"],"plane":"XZ"}));
     let both = volume(&mut s);
     let want = lid + (lid - ring);
-    assert!(rel(both, want) < 1e-6, "ring {ring} mmÂ³, lid {lid} mmÂ³, mirrored {both} mmÂ³ (expected {want})");
+    assert!(rel(both, want) < 1e-6, "ring {ring} mm³, lid {lid} mm³, mirrored {both} mm³ (expected {want})");
 }
 
 /// #15054: a boss (`Boss`) joined to a bar, and a cut (`Slot`) up to the boss's top that splits
@@ -2044,11 +2044,11 @@ fn copies_of_a_boss_and_a_cut_up_to_its_top_make_both_copies() {
         let r = run(&mut s, command, params);
         assert!(r["error"].is_null(), "{command}: {r}");
         let both = run(&mut s, "inspect.measure", json!({}))["bodies"][0].clone();
-        // The bar 80 Ã— 10 Ã— 10 and two bosses 30 Ã— 10 Ã— 5, each with a 10 mm slot through it.
+        // The bar 80 × 10 × 10 and two bosses 30 × 10 × 5, each with a 10 mm slot through it.
         let v = |m: &Value| m["volume_mm3"].as_f64().unwrap_or(f64::NAN);
         let want = 80.0 * 10.0 * 10.0 + 2.0 * (30.0 - 10.0) * 10.0 * 5.0;
         assert!(rel(v(&one), 80.0 * 10.0 * 10.0 + (30.0 - 10.0) * 10.0 * 5.0) < 1e-9, "{command}: one boss {one}");
-        assert!(rel(v(&both), want) < 1e-9, "{command}: {} mmÂ³, expected {want} mmÂ³ (bar {bar})", v(&both));
+        assert!(rel(v(&both), want) < 1e-9, "{command}: {} mm³, expected {want} mm³ (bar {bar})", v(&both));
         // The copy adds the faces, edges and vertices the boss and its slot added, apart from it.
         let count = |m: &Value, what: &str| m[what].as_i64().unwrap_or(-1);
         assert_eq!(both["kernel"]["shells"].as_i64(), Some(1), "{command}: {both}");
@@ -2062,7 +2062,7 @@ fn copies_of_a_boss_and_a_cut_up_to_its_top_make_both_copies() {
 /// #17692: a pocket cut up to the plate's top, then a chamfer round the pocket's mouth that cuts
 /// the top away where the cut's end was picked. The pattern comes after the chamfer and copies
 /// only the pocket: its copy ends at the plate's top, as the pocket does, so it is the same
-/// 22 Ã— 22 Ã— 5 pocket. The copy used to end at the chamfer's slope left at the pick and was
+/// 22 × 22 × 5 pocket. The copy used to end at the chamfer's slope left at the pick and was
 /// refused ("the profile reaches past the To face").
 #[test]
 fn a_copied_cut_up_to_a_face_a_later_chamfer_cut_away_at_the_pick_ends_at_that_face() {
@@ -2077,7 +2077,7 @@ fn a_copied_cut_up_to_a_face_a_later_chamfer_cut_away_at_the_pick_ends_at_that_f
     let r = run(&mut s, "solid.pattern.rectangular", json!({"features": ["Pocket"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 42}));
     assert!(r["error"].is_null() && r["warning"].is_null(), "{r}");
     let after = volume(&mut s);
-    assert!(rel(before - after, 22.0 * 22.0 * 5.0) < 1e-9, "the copy removed {} mmÂ³, expected {} mmÂ³", before - after, 22.0 * 22.0 * 5.0);
+    assert!(rel(before - after, 22.0 * 22.0 * 5.0) < 1e-9, "the copy removed {} mm³, expected {} mm³", before - after, 22.0 * 22.0 * 5.0);
 }
 
 /// #14305: in a component, a pattern or mirror of two cuts makes the copies of both. The first
@@ -2102,7 +2102,7 @@ fn copies_of_two_cuts_in_a_component_cut_its_body() {
         // The plate and each instance's two bores, radius 3 and 2, through its 5 mm.
         let want = 100.0 * 100.0 * 5.0 - (1.0 + copies) * PI * (9.0 + 4.0) * 5.0;
         let v = volume(&mut s);
-        assert!(rel(v, want) < 1e-6, "{command}: {v} mmÂ³, expected {want}");
+        assert!(rel(v, want) < 1e-6, "{command}: {v} mm³, expected {want}");
     }
 }
 
@@ -2124,10 +2124,10 @@ fn copies_of_a_cut_that_splits_the_body_in_a_component_leave_its_pieces_there() 
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch": "B", "through_all": true, "operation": "cut", "name": "CutB"}));
     run(&mut s, "solid.mirror", json!({"features": ["CutSlot", "CutB"], "plane": "YZ"}));
-    // The plate less two 4 Ã— 100 slots across it and four bores of radius 2, through its 5 mm.
+    // The plate less two 4 × 100 slots across it and four bores of radius 2, through its 5 mm.
     let want = 100.0 * 100.0 * 5.0 - 2.0 * 4.0 * 100.0 * 5.0 - 4.0 * PI * 4.0 * 5.0;
     let v = volume(&mut s);
-    assert!(rel(v, want) < 1e-6, "{v} mmÂ³, expected {want}");
+    assert!(rel(v, want) < 1e-6, "{v} mm³, expected {want}");
 }
 
 /// #14305: a chamfer among the copied features hands the disc back in its component, so a hole
@@ -2135,8 +2135,8 @@ fn copies_of_a_cut_that_splits_the_body_in_a_component_leave_its_pieces_there() 
 #[test]
 fn copies_of_a_chamfer_and_a_later_hole_in_a_component_cut_its_body() {
     let pi = std::f64::consts::PI;
-    // Per instance: the bore, Ï€Â·3Â²Â·10, one ring of the chamfer's triangle (Pappus, as below) and
-    // the pin hole, Ï€Â·2Â²Â·10. The six instances do not meet.
+    // Per instance: the bore, π·3²·10, one ring of the chamfer's triangle (Pappus, as below) and
+    // the pin hole, π·2²·10. The six instances do not meet.
     let instance = pi * 9.0 * 10.0 + 2.0 * pi * (3.0 + 0.5 / 3.0) * 0.125 + pi * 4.0 * 10.0;
     let want = pi * 900.0 * 10.0 - 6.0 * instance;
     for in_component in [false, true] {
@@ -2150,14 +2150,14 @@ fn copies_of_a_chamfer_and_a_later_hole_in_a_component_cut_its_body() {
         run(&mut s, "solid.hole", json!({"position": [0, 10, 10], "diameter": 4, "name": "Pin"}));
         run(&mut s, "solid.pattern.circular", json!({"features": ["Bore", "TopChamfer", "Pin"], "axis": "Z", "count": 6, "angle": 360}));
         let v = volume(&mut s);
-        assert!((v - want).abs() < 4e-7 * want, "component {in_component}: {v} mmÂ³, expected {want}");
+        assert!((v - want).abs() < 4e-7 * want, "component {in_component}: {v} mm³, expected {want}");
     }
 }
 
 const BOTH: [&str; 2] = ["BoxA", "BoxB"];
 
-/// Two 40 Ã— 40 Ã— 10 parts: BoxA in A at x âˆ’20..20, y âˆ’20..20, z 0..10, not placed, and BoxB in B
-/// at x âˆ’10..30, y âˆ’20..20, z 0..10 in its own frame, B turned `angle` degrees about Z and lifted
+/// Two 40 × 40 × 10 parts: BoxA in A at x −20..20, y −20..20, z 0..10, not placed, and BoxB in B
+/// at x −10..30, y −20..20, z 0..10 in its own frame, B turned `angle` degrees about Z and lifted
 /// `lift`.
 fn placed_parts(angle: f64, lift: f64) -> Session {
     let mut s = Session::default();
@@ -2184,7 +2184,7 @@ fn root_cut_into_a_placed_part(angle: f64, lift: f64, targets: &[&str]) -> Sessi
     s
 }
 
-/// BoxA and BoxB after a mirror of the cut across x = 5: one 8 Ã— 5 pocket at x 1..9, y 5..10 in
+/// BoxA and BoxB after a mirror of the cut across x = 5: one 8 × 5 pocket at x 1..9, y 5..10 in
 /// each where it is shown, 5 mm deep in B (z lift..lift + 5) and as deep in A as the cut reaches.
 fn assert_mirrored_into_both(s: &mut Session, angle: f64, lift: f64) {
     let (a, _, a_ends) = pockets(s, "BoxA");
@@ -2262,8 +2262,8 @@ fn a_mirrored_cut_into_a_turned_and_lifted_part_alone_removes_material_there() {
     assert!(rel(pockets(&mut s, "BoxA").0, 16000.0) < 1e-9);
 }
 
-/// #19451: a rectangular pattern of the cut 10 mm along âˆ’x copies it to x âˆ’9..âˆ’3 in the world, in
-/// a part turned and lifted too: two 6 Ã— 5 pockets, through BoxA and 5 mm deep in BoxB.
+/// #19451: a rectangular pattern of the cut 10 mm along −x copies it to x −9..−3 in the world, in
+/// a part turned and lifted too: two 6 × 5 pockets, through BoxA and 5 mm deep in BoxB.
 #[test]
 fn a_patterned_cut_into_a_turned_and_lifted_part_lands_at_its_world_copy() {
     let mut s = root_cut_into_a_placed_part(180.0, 20.0, &BOTH);
@@ -2310,8 +2310,8 @@ fn a_mirrored_rib_on_a_turned_and_lifted_part_stands_on_it_where_it_is_shown() {
     assert!(rel(b, 16000.0 + 2.0 * 30.0) < 1e-9, "{b}");
 }
 
-/// [`part_with_a_boss_and_a_round`] and MirrorPlane at x = âˆ’10, made in the root: where it is
-/// shown, Base is its own image across it, Boss at x âˆ’26..âˆ’20, y âˆ’10..âˆ’5.
+/// [`part_with_a_boss_and_a_round`] and MirrorPlane at x = −10, made in the root: where it is
+/// shown, Base is its own image across it, Boss at x −26..−20, y −10..−5.
 fn part_and_mirror_plane() -> Session {
     let mut s = part_with_a_boss_and_a_round();
     run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": -10, "name": "MirrorPlane"}));
@@ -2332,7 +2332,7 @@ fn part_with_a_boss(targets: &[&str]) -> Session {
     s
 }
 
-/// Part turned 180Â° about Z and lifted 20, and MirrorPlane at x = âˆ’10, both made in the root.
+/// Part turned 180° about Z and lifted 20, and MirrorPlane at x = −10, both made in the root.
 fn place_the_part(s: &mut Session) {
     run(s, "component.activate", json!({"component": "root"}));
     let turn = json!({"occurrence": "Part:1", "axis": [0, 0, 1], "angle": "180 deg", "origin": [0, 0, 0], "translate": [0, 0, 20]});
@@ -2342,7 +2342,7 @@ fn place_the_part(s: &mut Session) {
 }
 
 /// #19451: a root mirror or pattern of a join drawn in a part placed turned and lifted adds the
-/// world copy of the boss: its top at x 0..6 across x = âˆ’10, at x âˆ’6..0 20 along x. The copy was
+/// world copy of the boss: its top at x 0..6 across x = −10, at x −6..0 20 along x. The copy was
 /// made as if the part had no placement, turned with it, off Base.
 #[test]
 fn a_copied_join_in_a_turned_and_lifted_part_lands_at_its_world_copy() {
@@ -2362,7 +2362,7 @@ fn a_copied_join_in_a_turned_and_lifted_part_lands_at_its_world_copy() {
 }
 
 /// #19451: moving the part after the mirror moves the copied boss to the new world image: with
-/// Part 4 further along x, Boss's top is at x âˆ’19 and its image across x = âˆ’10 at x âˆ’1.
+/// Part 4 further along x, Boss's top is at x −19 and its image across x = −10 at x −1.
 #[test]
 fn a_mirrored_join_follows_its_part_moved_later() {
     let mut s = part_and_mirror_plane();
@@ -2375,7 +2375,7 @@ fn a_mirrored_join_follows_its_part_moved_later() {
 }
 
 /// #19451: a root mirror of a round in a part placed turned and lifted rounds the image of its
-/// edge where the part is shown, the upright edge at x 10, y âˆ’20, taking off what the round does.
+/// edge where the part is shown, the upright edge at x 10, y −20, taking off what the round does.
 /// The copy looked for the edge where the image would be in the part's own frame, off Base.
 #[test]
 fn a_mirrored_round_in_a_turned_and_lifted_part_rounds_the_image_of_its_edge() {
@@ -2407,7 +2407,7 @@ fn a_mirror_of_a_mirrored_round_in_a_turned_part_rounds_the_image_of_its_copy() 
 
 /// #19451: a root mirror or pattern of a join that names no body, drawn in a part placed turned
 /// and lifted, joins the part at the world copy of the boss, as the join did: Base takes the
-/// 150 mmÂ³ boss again and no body is made. The copy was a new body at the part's own coordinates.
+/// 150 mm³ boss again and no body is made. The copy was a new body at the part's own coordinates.
 #[test]
 fn a_copied_untargeted_join_in_a_turned_and_lifted_part_joins_the_part() {
     for (command, params, x) in [
@@ -2432,7 +2432,7 @@ fn a_copied_untargeted_join_in_a_turned_and_lifted_part_joins_the_part() {
 const BOSS_ROUND: f64 = (4.0 - PI) / 4.0 * 5.0;
 
 /// [`part_and_mirror_plane`] with an untargeted Boss and BossRound, 1 mm rounds of its two
-/// upright edges at x 26 (x âˆ’26 where it is shown), mirrored by Mirror across x = âˆ’10 with Boss,
+/// upright edges at x 26 (x −26 where it is shown), mirrored by Mirror across x = −10 with Boss,
 /// the two picked in the order of `features`.
 fn mirrored_untargeted_boss_and_its_rounds(features: [&str; 2]) -> Session {
     let mut s = part_with_a_boss(&[]);
@@ -2445,7 +2445,7 @@ fn mirrored_untargeted_boss_and_its_rounds(features: [&str; 2]) -> Session {
 
 /// #19451: a root mirror of an untargeted join in a part placed turned and lifted and of the
 /// rounds of the edges it made rounds the copy's edges: the boss's image at x 0..6 has rounds
-/// about x 5, y âˆ’9 and y âˆ’6, as the boss has about x âˆ’25.
+/// about x 5, y −9 and y −6, as the boss has about x −25.
 #[test]
 fn a_mirrored_untargeted_join_and_its_rounds_in_a_turned_part_land_together() {
     let mut s = mirrored_untargeted_boss_and_its_rounds(["Boss", "BossRound"]);
@@ -2475,7 +2475,7 @@ fn a_mirror_of_a_mirrored_untargeted_join_and_its_rounds_lands_every_copy() {
     }
 }
 
-/// The same mirror made in the part, across x = âˆ’10 where it is shown (its own x = 10), copies
+/// The same mirror made in the part, across x = −10 where it is shown (its own x = 10), copies
 /// the boss and the round in the part's frame, as before: the same copies.
 #[test]
 fn a_mirror_in_a_turned_part_of_its_own_features_copies_them_in_its_frame() {
@@ -2492,11 +2492,11 @@ fn a_mirror_in_a_turned_part_of_its_own_features_copies_them_in_its_frame() {
 }
 
 /// Base, a root body moved into Part by a transfer, with Pocket, an untargeted cut of x 0..6,
-/// y âˆ’15..âˆ’10 5 deep into its top, Boss, an untargeted join of x 20..26, y 5..10 on its top, 5
+/// y −15..−10 5 deep into its top, Boss, an untargeted join of x 20..26, y 5..10 on its top, 5
 /// high, and BossBlend, a 1 mm `blend` (`solid.fillet` or `solid.chamfer`) of the boss's upright
-/// edges at x 26, naming Base; then Part placed turned 180Â° about Z and lifted 20. Where it is
-/// shown, Base is at x âˆ’30..10, y âˆ’20..20, z 20..30, the pocket at x âˆ’6..0, y 10..15 and the
-/// boss at x âˆ’26..âˆ’20, y âˆ’10..âˆ’5.
+/// edges at x 26, naming Base; then Part placed turned 180° about Z and lifted 20. Where it is
+/// shown, Base is at x −30..10, y −20..20, z 20..30, the pocket at x −6..0, y 10..15 and the
+/// boss at x −26..−20, y −10..−5.
 fn transferred_part_with_a_blended_boss(blend: &str) -> Session {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-10, -20, 0], "body_name": "Base"}));
@@ -2526,7 +2526,7 @@ fn boss_blend(blend: &str) -> f64 {
     if blend == "solid.fillet" { BOSS_ROUND } else { 2.5 }
 }
 
-/// The x âˆ’ y = âˆ’8 plane where it is shown, square to Z: not one the part's turn leaves in place.
+/// The x − y = −8 plane where it is shown, square to Z: not one the part's turn leaves in place.
 fn diagonal_plane() -> Value {
     json!({"origin": [-8, 0, 0], "normal": [1, -1, 0]})
 }
@@ -2550,7 +2550,7 @@ fn assert_blended_copies(s: &mut Session, blend: &str, copies: usize, floors: &[
 /// #19451: a root mirror across a diagonal plane of a pocket, a boss and a blend of the boss's
 /// edges in a part placed turned, its body moved there by a transfer, makes each copy at its
 /// world image, the blend by its edges' names and by its picks: the pocket's image at x 2..7,
-/// y 2..8, the boss's at x âˆ’18..âˆ’13, y âˆ’18..âˆ’12, its rounds about y âˆ’17. Once the pocket's copy
+/// y 2..8, the boss's at x −18..−13, y −18..−12, its rounds about y −17. Once the pocket's copy
 /// had changed Base, the copies took Base for a root body: the boss's copy was made through the
 /// part's placement twice and the blend's looked for its edges at their image in the part's own
 /// frame, off Base, and blended the nearest body there.
@@ -2571,7 +2571,7 @@ fn a_mirrored_blend_in_a_transferred_turned_part_lands_at_its_world_image() {
 }
 
 /// #19451: a root mirror across XZ of that mirror makes every copy of its copies there too: a
-/// third pocket at x 2..7, y âˆ’8..âˆ’2, a third boss at x âˆ’18..âˆ’13, y 12..18 and its rounds about
+/// third pocket at x 2..7, y −8..−2, a third boss at x −18..−13, y 12..18 and its rounds about
 /// y 17. It looked for the blend's edges in the part's own frame, and refused the smooth edge it
 /// found there.
 #[test]
@@ -2611,7 +2611,7 @@ fn a_copied_untargeted_join_after_a_copied_body_joins_the_part() {
 
 /// #19451: a root mirror of a round in a part placed turned and lifted rounds the image of its
 /// edge on the body there, a root body: Twin, at x 20..60 where Base's image across x = 15 is,
-/// is rounded at its upright edge at x 60, y âˆ’20.
+/// is rounded at its upright edge at x 60, y −20.
 #[test]
 fn a_mirrored_round_in_a_turned_part_rounds_a_root_body_at_its_image() {
     let mut s = part_with_a_boss_and_a_round();
@@ -2625,7 +2625,7 @@ fn a_mirrored_round_in_a_turned_part_rounds_a_root_body_at_its_image() {
 
 /// #19451: a root mirror of a hole placed at a point picked on B's top, kept in BoxB's frame,
 /// drills the world image of the hole: bores ending at x 2 and x 8, y 7.5, z 25. The copy was
-/// drilled at the image in BoxB's own frame, x âˆ’12 where it is shown.
+/// drilled at the image in BoxB's own frame, x −12 where it is shown.
 #[test]
 fn a_mirrored_picked_hole_in_a_turned_and_lifted_part_lands_at_its_world_image() {
     let mut s = placed_parts(180.0, 20.0);
@@ -2683,7 +2683,7 @@ fn a_pattern_of_a_moved_copy_follows_the_part_its_second_copy_was_moved_into() {
 
 /// #20208 review: a mirror of a Thread of two holes on two plates threads each copy on its own
 /// plate, though the second plate's geometry is kept in another frame. PlateA at x 0..40, y 0..30
-/// and PlateB, made at x âˆ’40..0, y 50..80 and offset 40 along x, each have holes at x 10 and
+/// and PlateB, made at x −40..0, y 50..80 and offset 40 along x, each have holes at x 10 and
 /// x 30 where they are shown; the Thread is on the holes at x 10, the mirror across x = 20. The
 /// second face's copy was moved by the mirror in PlateB's own frame, to x 66.6 there, off it.
 #[test]
@@ -2728,8 +2728,8 @@ fn circular_pattern_of_a_hole_and_its_chamfers_copies_all_of_them() {
     assert!(rel(v0, v1) < 1e-9);
     run(&mut s, "solid.pattern.circular", json!({"features": ["Bore", "TopChamfer", "BottomChamfer"], "axis": "Z", "count": 6, "angle": 360}));
     let v = volume(&mut s);
-    // One chamfered hole takes its bore, Ï€Â·3Â²Â·10, and two rings of the chamfer's triangle,
-    // 0.5 Ã— 0.5 / 2, about the bore's axis at its centroid's radius 3 + 0.5/3 (Pappus). The
+    // One chamfered hole takes its bore, π·3²·10, and two rings of the chamfer's triangle,
+    // 0.5 × 0.5 / 2, about the bore's axis at its centroid's radius 3 + 0.5/3 (Pappus). The
     // copies, 20 apart on the radius 20, do not meet: the pattern takes five more.
     let pi = std::f64::consts::PI;
     let hole = pi * 9.0 * 10.0 + 2.0 * 2.0 * pi * (3.0 + 0.5 / 3.0) * 0.125;
@@ -2889,7 +2889,7 @@ fn editing_a_rolled_back_pattern_says_it_is_not_built() {
 }
 
 /// A 100 x 60 x 30 box shelled 5 mm (floor included) with a 20 x 11 boss joined to its +Y wall:
-/// 67,500 mmÂ³ hollow, 73,500 mmÂ³ with the boss, which adds 6,000 mmÂ³ (#6452).
+/// 67,500 mm³ hollow, 73,500 mm³ with the boss, which adds 6,000 mm³ (#6452).
 fn hollow_box_with_join_boss() -> Session {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
@@ -2987,7 +2987,7 @@ fn a_later_mirrored_extrusion_can_connect_an_earlier_copy() {
     let bodies = &s.model.state().bodies;
     assert_eq!(bodies.len(), 1);
     assert_eq!(bodies[0].body.lumps().unwrap().len(), 1);
-    // The plate is 448 mmÂ³. At z=3..4,
+    // The plate is 448 mm³. At z=3..4,
     // only the reflected x=-8..-4 strip adds material. At z=4..6 both 5-by-2
     // footprints add material.
     assert!(rel(volume(&mut s), 496.0) < 1e-9);
@@ -3136,7 +3136,7 @@ fn editing_a_body_pattern_keeps_source_material_and_appearance_on_copies() {
 /// #12199: a path whose curves are listed out of chain order is the same path as in chain order.
 #[test]
 fn pattern_on_path_orders_the_curves_into_one_chain() {
-    // Four lines: (10,10) â†’ (30,10) â†’ (30,30) â†’ (60,30) â†’ (60,10); 90 mm long.
+    // Four lines: (10,10) → (30,10) → (30,30) → (60,30) → (60,10); 90 mm long.
     let copies = |order: [&str; 4]| {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [9, 9, 0], "body_name": "Pin"}));
@@ -3170,7 +3170,7 @@ fn pattern_on_path_with_a_gap_is_still_refused() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [9, 9, 0], "body_name": "Pin"}));
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
-    // (10,10) â†’ (30,10), then a 20 mm gap, then (30,30) â†’ (60,30).
+    // (10,10) → (30,10), then a 20 mm gap, then (30,30) → (60,30).
     for (id, a, b) in [("l1", [10, 10], [30, 10]), ("l3", [30, 30], [60, 30])] {
         run(&mut s, "sketch.line", json!({"points": [a, b], "connect": false, "ids": [id]}));
     }
@@ -3251,7 +3251,7 @@ fn copies_of_a_tapped_hole_are_threaded() {
             assert!(r["error"].is_null(), "{copy}: {r}");
             if modeled {
                 let both = block - volume(&mut s);
-                assert!(rel(both, 2.0 * one) < 1e-6, "{copy}: the original removes {one} mmÂ³, both {both} mmÂ³");
+                assert!(rel(both, 2.0 * one) < 1e-6, "{copy}: the original removes {one} mm³, both {both} mm³");
             } else {
                 assert_eq!(s.world_state().unwrap().threads.len(), 2, "{copy}: the hole's thread and its copy's");
             }
@@ -3268,7 +3268,7 @@ fn copies_of_a_tapped_hole_are_threaded() {
         assert!(r.to_string().contains("1 of 2 cut copies remove no material"), "{r}");
         if modeled {
             let all = block - volume(&mut s);
-            assert!(rel(all, 2.0 * one) < 1e-6, "the original removes {one} mmÂ³, all {all} mmÂ³");
+            assert!(rel(all, 2.0 * one) < 1e-6, "the original removes {one} mm³, all {all} mm³");
         } else {
             assert_eq!(s.world_state().unwrap().threads.len(), 2, "the hole's thread and its one cutting copy's");
         }
@@ -3304,7 +3304,7 @@ fn mirror_of_two_holes_placed_from_edges_makes_both_copies() {
     run(&mut s, "solid.mirror", json!({"features": ["Hole1", "Hole2"], "plane": "YZ"}));
     let both = volume(&mut s);
     let want = plain - 2.0 * (plain - holed);
-    assert!(rel(both, want) < 1e-6, "plain {plain} mmÂ³, two holes {holed} mmÂ³, mirrored {both} mmÂ³ (expected {want})");
+    assert!(rel(both, want) < 1e-6, "plain {plain} mm³, two holes {holed} mm³, mirrored {both} mm³ (expected {want})");
 }
 
 /// #16912: the mirror or pattern copy of a curvature or spline fillet is the same fillet, not a
@@ -3376,7 +3376,7 @@ fn circular_pattern_of_a_groove_and_its_fillet_rounds_every_copy_alike() {
     }
     let v = |m: &Value| m["volume_mm3"].as_f64().unwrap_or(f64::NAN);
     let want = v(&plain) - 10.0 * (v(&plain) - v(&one));
-    assert!(rel(v(&all), want) < 1e-6, "ten rounded grooves: {} mmÂ³, expected {want} mmÂ³", v(&all));
+    assert!(rel(v(&all), want) < 1e-6, "ten rounded grooves: {} mm³, expected {want} mm³", v(&all));
 }
 
 /// Copies of a body made by a pattern are drawn from the body's own triangles and display plan,
@@ -3631,7 +3631,7 @@ fn a_mirror_of_a_per_edge_fillet_with_a_dropped_smooth_pick_keeps_each_edges_rad
 // #20119 broke.
 
 /// A body's volume, its face count and the ends of its pockets (planar faces square to Z under
-/// 1000 mmÂ²) as (area, centroid) where it is shown, in x order.
+/// 1000 mm²) as (area, centroid) where it is shown, in x order.
 fn pockets(s: &mut Session, body: &str) -> (f64, usize, Vec<(f64, [f64; 3])>) {
     let v = s.model.state().body(body).map_or(f64::NAN, |b| b.measure().unwrap().volume);
     let r = run(s, "model.faces", json!({"body": body}));
@@ -3648,9 +3648,9 @@ fn pockets(s: &mut Session, body: &str) -> (f64, usize, Vec<(f64, [f64; 3])>) {
 /// What a 2 mm round takes off an upright 10 mm edge of a box.
 const ROUND: f64 = (4.0 - PI) * 10.0;
 
-/// Part, placed turned 180Â° about Z and lifted 20, and in it Base, 40 Ã— 40 Ã— 10 at x âˆ’10..30,
-/// y âˆ’20..20, z 0..10, with Boss, a join of x 20..26, y 5..10 on its top, 5 high, and Round, a 2 mm
-/// round of its upright edge at x 30, y 20. Where it is shown, Base is at x âˆ’30..10, y âˆ’20..20,
+/// Part, placed turned 180° about Z and lifted 20, and in it Base, 40 × 40 × 10 at x −10..30,
+/// y −20..20, z 0..10, with Boss, a join of x 20..26, y 5..10 on its top, 5 high, and Round, a 2 mm
+/// round of its upright edge at x 30, y 20. Where it is shown, Base is at x −30..10, y −20..20,
 /// z 20..30.
 fn part_with_a_boss_and_a_round() -> Session {
     let mut s = Session::default();
@@ -4023,7 +4023,7 @@ fn pattern_and_mirror_copies_follow_seed_material_after_creation_and_respect_ove
 
     // Parameter-driven count increase inherits seed material without any timeline.edit.
     let mut param = Session::default();
-    run(&mut param, "parameters.add", json!({"name": "n", "expression": "2"}));
+    run(&mut param, "parameters.add", json!({"name": "n", "expression": "2", "unit": "none"}));
     run(&mut param, "solid.box", json!({"length": 8, "width": 8, "height": 8, "center": [0, 0, 4], "operation": "new", "body_name": "Block"}));
     run(&mut param, "solid.pattern.rectangular", json!({"bodies": ["Block"], "dir1": [1, 0, 0], "count1": "n", "spacing1": 20}));
     run(&mut param, "material.assign", json!({"bodies": ["Block"], "material": "Titanium"}));
