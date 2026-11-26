@@ -11,6 +11,7 @@
 pub use solidcore_ops::Error;
 pub use solidcore_ops::ErrorClass;
 pub use solidcore_ops::FailureCode;
+pub use solidcore_ops::board_drill;
 pub use solidcore_ops::cancel;
 pub use solidcore_ops::constraint;
 pub use solidcore_ops::face_pair;

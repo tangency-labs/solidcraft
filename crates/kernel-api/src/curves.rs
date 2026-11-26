@@ -17,6 +17,19 @@ use crate::Backend;
 #[error("{0}")]
 pub struct CurveRefused(pub String);
 
+/// Point and unit tangent sampled along a free curve at a given arc length.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CurveSample {
+    /// Parameter on the record's curve (radians on a circle or ellipse).
+    pub parameter: f64,
+    /// Point on the curve.
+    pub point: [f64; 3],
+    /// Unit tangent along the curve when the derivative is non-zero and finite.
+    pub tangent: Option<[f64; 3]>,
+    /// `true` when the requested distance reached past the interval's end.
+    pub past_end: bool,
+}
+
 /// The curves and fitting of one kernel ([`crate::OpKind::Curves`]).
 pub trait Curves: Backend {
     /// Where each piece (a curve over its interval) crosses `plane`, in the plane's coordinates.
@@ -37,6 +50,11 @@ pub trait Curves: Backend {
     fn arc_through(&self, points: [[f64; 3]; 3]) -> Result<Curve, CurveRefused>;
     /// The point of `curve` nearest the ray from `origin` along `direction`, within `tolerance`.
     fn closest_to_ray(&self, curve: &Curve, origin: [f64; 3], direction: [f64; 3], tolerance: f64) -> Result<Option<CurveRayPoint>, CurveRefused>;
+    /// Exact arc length of `curve` over `interval` (or its natural range when `None`).
+    fn arc_length(&self, curve: &Curve, interval: Option<[f64; 2]>) -> Result<f64, CurveRefused>;
+    /// Sample `curve` over `interval` (or its natural range when `None`) at `distance` arc length
+    /// from its start (or from its end when `from_end` is `true`).
+    fn point_at_arc_length(&self, curve: &Curve, interval: Option<[f64; 2]>, from_end: bool, distance: f64) -> Result<CurveSample, CurveRefused>;
     /// What a fit spline of cubic `pieces` certifies against the points `near` its fit points.
     fn fit_spline_bounds(&self, pieces: &[[[f64; 3]; 4]], near: &[(usize, [f64; 3])]) -> Result<FitSplineBounds, CurveRefused>;
     /// Splines through `p` (closed when `periodic`), each at most `limit` points.
