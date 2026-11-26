@@ -1122,13 +1122,13 @@ fn memory_policy_scales_concurrency_chunks_and_refuses_below_headroom_floor() {
     assert_eq!(clearance_worker_limit(1000, Some(16 * GB)), MAX_CLEARANCE_THREADS);
     assert_eq!(clearance_worker_limit(1000, Some(6 * GB)), 4);
     assert_eq!(clearance_worker_limit(1000, Some(3 * GB)), 2);
-    assert_eq!(clearance_worker_limit(1000, Some(1 * GB)), 1);
+    assert_eq!(clearance_worker_limit(1000, Some(GB)), 1);
     assert_eq!(clearance_worker_limit(0, Some(16 * GB)), 1);
     assert_eq!(clearance_worker_limit(3, Some(16 * GB)), 3);
 
     assert_eq!(chunk_size_for_memory(Some(16 * GB)), DEFAULT_CHUNK_PAIRS);
     assert_eq!(chunk_size_for_memory(Some(3 * GB)), 32);
-    assert_eq!(chunk_size_for_memory(Some(1 * GB)), 16);
+    assert_eq!(chunk_size_for_memory(Some(GB)), 16);
 
     assert_eq!(shape_cache_budget(Some(16 * GB)), MAX_SHAPE_CACHE_BYTES);
     assert_eq!(shape_cache_budget(Some(512 * MB)), 64 << 20);
