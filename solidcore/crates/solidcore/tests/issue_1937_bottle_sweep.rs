@@ -13,7 +13,7 @@ use solidcore::sweep::topology_sweep::{
 use solidcore::sweep::trans_sweep_geometry::TranslationalSweepGeometry;
 use solidcore::topology::api_files::read_brep_from_file;
 use solidcore::topology::brep::p10::TopologyEnv;
-use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+use solidcore::topology::brep::validation::{check_brep, CheckLevel, PointerCheck};
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::{Kernel, Vec3};
 #[test]
@@ -71,10 +71,10 @@ fn check_bottle() {
     drop(store);
     let after = check_brep(&mut k, &mut b, CheckLevel::Level0).unwrap();
     eprintln!("AFTER valid={} lines={:?}", after.is_valid(), after.lines());
-    assert_eq!(before.pointers_status, 1000);
+    assert_eq!(before.pointers, PointerCheck::Passed);
     assert_eq!(before.assert_valid, Some(true));
     assert_eq!(before.reports.reports().len(), 8);
-    assert_eq!(after.pointers_status, 1000);
+    assert_eq!(after.pointers, PointerCheck::Passed);
     assert!(after.pointer_reports.reports().is_empty());
     // These three reports are inherited input gaps, not sweep defects.
     let inherited: Vec<_> = before

@@ -1094,6 +1094,36 @@ fn dimension_tool_dimensions_a_holes_diameter() {
     assert_eq!(read["text"], "Ø12.00", "{read}");
 }
 
+/// #21034: the curve where two corner fillets meet is neither a line nor a face-on circle, and the
+/// engine measures neither a length nor a size for it. The tool says so and picks nothing, rather
+/// than sending a length the engine refuses. A 30×20×10 box, 1:1 front view centred at (140, 180):
+/// the curve's point (0.586, 0.586, 9.414) is on paper at (125.586, 184.414).
+#[test]
+fn dimension_tool_refuses_a_curve_it_cannot_dimension_with_a_reason() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width": 1400, "height": 900}));
+    h.app.run("solid.box", json!({"length": 30, "width": 20, "height": 10, "body_name": "Block"})).unwrap();
+    h.app.run("solid.fillet", json!({"edges": [[15, 0, 10], [0, 10, 10]], "radius": 2, "tangent_chain": false})).unwrap();
+    h.app.run("drawing.create", json!({})).unwrap();
+    h.app.run("drawing.view.base", json!({"sheet": "Sheet 1", "view": "front", "scale": "1:1", "position_mm": [140, 180]})).unwrap();
+    crate::drawing_workspace::enter(&mut h.app, true).unwrap();
+    settle(&mut h);
+    let sheet = solidcraft_engine::doc::ids::encode(h.app.session.drawing("drawing.inspect").unwrap().sheets[0].id);
+    let line = h.app.run("drawing.scene.line", json!({"sheet": sheet, "point_mm": [125.586, 184.414], "band_mm": 0.3})).unwrap();
+    assert_eq!(line["line"]["source"]["kind"], "edge", "{line}");
+    assert!(crate::drawing_workspace::start(&mut h.app, "drawing.dimension"));
+    h.frames(4);
+    let before = h.app.session.drawing("drawing.inspect").unwrap().dimensions.len();
+    click_paper(&mut h, 125.586, 184.414);
+    use crate::drawing_workspace::dimension::picked_shapes;
+    assert!(picked_shapes(&h.app).is_empty(), "{:?}", picked_shapes(&h.app));
+    let status = h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
+    assert!(status.contains("can't be dimensioned"), "{status}");
+    click_paper(&mut h, 100.0, 180.0);
+    assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().dimensions.len(), before, "nothing is placed");
+}
+
 /// A Ø12 rod 100 long along X, seen side on in a 1:2 front view centred at (140, 180) on A3: on paper
 /// its two outline lines (silhouettes, not edges) run from x = 115 to 165 at y = 177 and 183, and its
 /// ends, circles seen edge on, are the edges x = 115 and x = 165. The Dimension tool is on.
@@ -1153,18 +1183,43 @@ fn dimension_tool_dimensions_a_cylinders_diameter_from_its_two_outlines() {
     assert_eq!(read["text"], "Ø12.00", "{read}");
 }
 
-/// An outline line and an edge measure nothing the drawing has a dimension for, so the click after
-/// them adds nothing: the rod's outline, then its left end.
+/// An outline line and an edge measure nothing the drawing has a dimension for: the second pick is
+/// refused with a reason, the first kept, and no place on the sheet is asked for (#20181). The rod's
+/// outline, then its left end.
 #[test]
-fn dimension_tool_adds_nothing_for_an_outline_and_an_edge() {
+fn dimension_tool_refuses_an_outline_and_an_edge_saying_why() {
     use crate::drawing_workspace::dimension::{Shape, picked_shapes};
     let mut h = rod_dimensioning();
     let before = h.app.session.drawing("drawing.inspect").unwrap().dimensions.len();
     click_paper(&mut h, 140.0, 183.0);
     click_paper(&mut h, 115.0, 180.0);
-    assert!(matches!(picked_shapes(&h.app)[..], [Shape::Straight(_), Shape::Straight(_)]), "{:?}", picked_shapes(&h.app));
+    assert!(matches!(picked_shapes(&h.app)[..], [Shape::Straight(_)]), "only the outline stays picked: {:?}", picked_shapes(&h.app));
+    let status = h.app.status.as_ref().map(|(text, _, _)| text.clone()).unwrap_or_default();
+    assert_eq!(status, solidcraft_ui_text::tr("ui.drawing_dimension_tool.measures_nothing"));
     click_paper(&mut h, 100.0, 180.0);
-    assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().dimensions.len(), before, "nothing added");
+    assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().dimensions.len(), before + 1, "the outline alone still places its Ø");
+}
+
+/// A Ø between a cylinder's outline lines goes past one of its ends: with the pointer inside the
+/// rod's length, the tool says so before the click, in the engine's words without the command's
+/// name, rather than showing nothing (#20181).
+#[test]
+fn dimension_tool_says_why_it_cannot_place_before_the_click() {
+    use crate::drawing_workspace::dimension::refusal;
+    let mut h = rod_dimensioning();
+    let before = h.app.session.drawing("drawing.inspect").unwrap().dimensions.len();
+    click_paper(&mut h, 140.0, 183.0);
+    let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+    h.step(&json!({"move": [paper.left() + paper.width() * 140.0 / 420.0, paper.bottom() - paper.height() * 190.0 / 297.0]})).unwrap();
+    h.frames(2);
+    let why = refusal(&h.app).map(str::to_owned).unwrap_or_default();
+    assert!(why.contains("past one of them") && !why.contains("drawing.dimension.add"), "{why:?}");
+    // Past the left end it places, and the reason is gone.
+    h.step(&json!({"move": [paper.left() + paper.width() * 100.0 / 420.0, paper.bottom() - paper.height() * 180.0 / 297.0]})).unwrap();
+    h.frames(2);
+    assert_eq!(refusal(&h.app), None);
+    click_paper(&mut h, 100.0, 180.0);
+    assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().dimensions.len(), before + 1);
 }
 
 /// Esc drops the tool's picks first and keeps the tool, as in a sketch; the next Esc leaves it.
@@ -1279,6 +1334,67 @@ fn a_double_click_with_the_dimension_tool_in_hand_changes_no_mode() {
         assert!(crate::drawing_workspace::dimension::picked_shapes(&h.app).is_empty() && count(&h) == 1, "({x}, {y}): nothing picked or added");
         assert!(h.app.session.selection.is_empty(), "({x}, {y}): nothing selected");
     }
+}
+
+/// The part's overall size (#20123): the plate's bottom edge picked, then the panel's option set, and
+/// the dimension placed reads the plate's 100 between its two end faces, a `faces` dimension, where
+/// the edge alone is a `length`. The option is set directly (the checkbox's state); the harness's
+/// double-click is not a user's, so a double-click's own frames are covered by the frame unit test.
+#[test]
+fn the_overall_size_option_makes_the_dimension_the_parts_width() {
+    let (mut h, _) = plate_sheet();
+    // Drawing ids are not in the order they were made in, so the new dimension is the one that wasn't here.
+    let before = h.app.session.drawing("drawing.inspect").unwrap().dimensions[0].id;
+    assert!(crate::drawing_workspace::start(&mut h.app, "drawing.dimension"));
+    h.frames(4);
+    let [x, y] = on_screen(140.0, 175.0);
+    h.step(&json!({"move": [x, y]})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click": [x, y]})).unwrap();
+    h.frames(2);
+    assert_eq!(crate::drawing_workspace::dimension::picked_shapes(&h.app).len(), 1, "one pick");
+    assert!(crate::drawing_workspace::dimension::set_overall(&mut h.app, true), "a lone straight edge offers it");
+    h.step(&json!({"click": on_screen(300.0, 60.0)})).unwrap();
+    h.frames(2);
+    let dimensions = &h.app.session.drawing("drawing.inspect").unwrap().dimensions;
+    assert_eq!(dimensions.len(), 2, "the dimension was placed");
+    let placed = dimensions.iter().find(|d| d.id != before).expect("a new dimension").id;
+    let id = solidcraft_engine::doc::ids::encode(placed);
+    let read = h.app.run("drawing.dimension.inspect", json!({"dimension": id})).unwrap();
+    assert!(read["record"]["kind"].get("faces").is_some(), "{read}");
+    assert!((read["value"].as_f64().unwrap() - 100.0).abs() < 1e-6, "{read}");
+}
+
+/// The overall size is offered only for an edge that runs across or up the sheet (#20123): along it, as
+/// the view shows it, a slanted edge has no overall width or height, so the option isn't offered rather
+/// than placing the edge's own length with the option ticked.
+#[test]
+fn the_overall_option_is_offered_only_for_an_edge_across_or_up_the_sheet() {
+    use crate::drawing_workspace::dimension::overall_direction;
+    let at = |x, y| solidcore_record::Vec2::new(x, y);
+    assert_eq!(overall_direction(at(0.0, 0.0), at(10.0, 0.0)), Some("horizontal"));
+    assert_eq!(overall_direction(at(10.0, 5.0), at(0.0, 5.0)), Some("horizontal"), "either way along");
+    assert_eq!(overall_direction(at(3.0, 0.0), at(3.0, -7.0)), Some("vertical"));
+    assert_eq!(overall_direction(at(0.0, 0.0), at(10.0, 3.0)), None, "slanted");
+    assert_eq!(overall_direction(at(0.0, 0.0), at(5.0, 5.0)), None, "diagonal");
+}
+
+/// The frames a user's double-click gives the Dimension tool (#20123): the first click only picks (no
+/// double-click, so no toggle); the second, where egui answers `clicked` and `double_clicked` both, is
+/// the double-click alone (no click to place with), and only offers the option (a hint; it sets
+/// nothing) on a draft that offers it and on the edge it picked.
+#[test]
+fn a_double_click_offers_the_overall_option_only_on_the_picked_edge() {
+    use crate::drawing_workspace::dimension::Clicks;
+    let first = Clicks::of_frame(true, false);
+    let second = Clicks::of_frame(true, true);
+    assert_eq!((first.clicked, first.double), (true, false));
+    assert_eq!((second.clicked, second.double), (false, true), "the second click is the double-click alone");
+    assert!(!first.offers_overall(true, || true), "a first click never offers it");
+    assert!(second.offers_overall(true, || true));
+    assert!(!second.offers_overall(false, || true), "a draft that doesn't offer it");
+    assert!(!second.offers_overall(true, || false), "off the picked edge");
+    assert!(!Clicks::of_frame(false, false).offers_overall(true, || true), "a quiet frame");
 }
 
 /// A placed dimension's text drags, as a sketch dimension's does: it follows the pointer by the

@@ -1,0 +1,34 @@
+{
+  "en": {
+    "ui.break_link_done": "Link broken: {name} no longer follows its file.",
+    "ui.break_link_select_first": "Select a linked component to break its link first: click it in the view or the Browser."
+  },
+  "ar": {
+    "ui.break_link_done": "تم فك الارتباط: {name} لم يعد يتبع ملفه.",
+    "ui.break_link_select_first": "حدّد أولًا مكوّنًا مرتبطًا لفك ارتباطه: انقر عليه في العرض أو في المستعرض."
+  },
+  "de": {
+    "ui.break_link_done": "Verknüpfung getrennt: {name} folgt nicht mehr der Datei.",
+    "ui.break_link_select_first": "Zuerst eine verknüpfte Komponente auswählen, deren Verknüpfung getrennt werden soll: in der Ansicht oder im Browser anklicken."
+  },
+  "he": {
+    "ui.break_link_done": "הקישור נותק: {name} כבר לא עוקב אחרי הקובץ שלו.",
+    "ui.break_link_select_first": "בחרו קודם רכיב מקושר כדי לנתק את הקישור שלו: לחצו עליו בתצוגה או בעץ התכן."
+  },
+  "ja": {
+    "ui.break_link_done": "リンクを解除しました: {name} はファイルに追従しなくなりました。",
+    "ui.break_link_select_first": "先にリンクを解除するリンクされたコンポーネントを選択してください。ビューまたはブラウザでクリックします。"
+  },
+  "ko": {
+    "ui.break_link_done": "링크를 끊었습니다: {name}은(는) 더 이상 파일을 따르지 않습니다.",
+    "ui.break_link_select_first": "링크를 끊을 연결된 구성 요소를 먼저 선택하세요. 뷰 또는 브라우저에서 클릭하면 됩니다."
+  },
+  "vi": {
+    "ui.break_link_done": "Đã ngắt liên kết: {name} không còn theo tệp của nó nữa.",
+    "ui.break_link_select_first": "Hãy chọn trước một thành phần được liên kết để ngắt liên kết của nó: bấm vào nó trong khung nhìn hoặc trong Trình duyệt."
+  },
+  "zh": {
+    "ui.break_link_done": "已断开链接：{name} 不再跟随其文件。",
+    "ui.break_link_select_first": "请先选择要断开链接的链接组件：在视图或浏览器中点击它。"
+  }
+}

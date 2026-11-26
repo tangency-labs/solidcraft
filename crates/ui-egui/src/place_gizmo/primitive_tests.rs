@@ -356,7 +356,7 @@ fn marker_stands_a_new_cone_on_the_face() {
     let (name, kind) = last(&h);
     let FeatureKind::Cone { base, axis, .. } = &kind else { panic!("a Cone: {kind:?}") };
     assert!(point(&h, base).dist(Vec3::new(40.0, 25.0, 10.0)) < 0.5, "{:?}", point(&h, base));
-    assert!(axis.0.dist(Vec3::Z) < 1e-9, "{:?}", axis.0);
+    assert!(solidcraft_engine::doc::literal_dir(axis).is_some_and(|a| a.dist(Vec3::Z) < 1e-9), "{axis:?}");
     reopened_at(&mut h, &name, [40.0, 25.0, 10.0]);
 }
 
@@ -389,6 +389,61 @@ fn marker_stands_a_new_torus_on_the_face() {
 }
 
 #[test]
+fn coil_marker_follows_the_typed_axis_instead_of_the_placement_face() {
+    let mut h = plate();
+    start(&mut h, "solid.coil");
+    let d = h.app.dialog.as_mut().unwrap();
+    if let Kind::Primitive { at, .. } = &mut d.kind {
+        *at = Some((Vec3::ZERO, Some(Vec3::Z)));
+    }
+    for (value, expected) in [(json!("X"), Vec3::X), (json!("Y"), Vec3::Y), (json!([1, 1, 0]), Vec3::new(1.0, 1.0, 0.0).normalized().unwrap())] {
+        h.app.dialog.as_mut().unwrap().extra.insert("axis".into(), value);
+        let (_, direction) = frame(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        assert!(direction.dist(expected) < 1e-9);
+        let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        let sent: solidcraft_engine::schema::AxisDir = serde_json::from_value(commands[0].1["axis"].clone()).unwrap();
+        assert!(sent.0.dist(direction) < 1e-9);
+    }
+    assert!(drop_on(&mut h, [80.0, 25.0, 5.0]));
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(!d.extra.contains_key("axis"), "placing on a new face resets the typed axis");
+    assert!(frame(&h.app, d).unwrap().1.dist(Vec3::X) < 1e-9);
+}
+
+#[test]
+fn coil_marker_follows_typed_axis_references() {
+    let mut h = plate();
+    h.app.run("solid.cylinder", json!({"radius": 5, "height": 10, "axis": "Y", "base": [100, 0, 0], "body_name": "Shaft"})).unwrap();
+    start(&mut h, "solid.coil");
+    let d = h.app.dialog.as_mut().unwrap();
+    if let Kind::Primitive { at, .. } = &mut d.kind {
+        *at = Some((Vec3::new(20.0, 30.0, 10.0), Some(Vec3::Z)));
+    }
+    for (axis, base) in [
+        (json!({"type":"world","axis":"Y"}), Vec3::ZERO),
+        (json!({"dir":[0,2,0]}), Vec3::ZERO),
+        (json!({"face":[105,3,0],"body":"Shaft"}), Vec3::new(100.0, 0.0, 0.0)),
+    ] {
+        h.app.dialog.as_mut().unwrap().extra.insert("axis".into(), axis);
+        assert_eq!(frame(&h.app, h.app.dialog.as_ref().unwrap()), Some((base, Vec3::Y)));
+    }
+    // An edit dialog gives back a picked edge as the placement's edge; the marker reads it too.
+    let edge = h.app.session.model.state().body("Shaft").and_then(|body| {
+        let names = solidcraft_engine::doc::naming::edge_names(body);
+        names.into_iter().find_map(|name| {
+            solidcraft_engine::doc::construct::named_edge_pick(&h.app.session.model.state(), Vec3::new(105.0, 0.0, 0.0), &name)
+                .filter(|(_, _, point)| point.dist(Vec3::new(105.0, 0.0, 0.0)) < 1e-6)
+                .map(|_| name)
+        })
+    });
+    let edge = edge.expect("the Shaft's end circle has a name");
+    let axis = json!({"type":"placed_edge","body":"Shaft","path":[],"at":[105,0,0],"name":edge});
+    h.app.dialog.as_mut().unwrap().extra.insert("axis".into(), axis);
+    let (base, direction) = frame(&h.app, h.app.dialog.as_ref().unwrap()).expect("a marker");
+    assert!(base.dist(Vec3::new(100.0, 0.0, 0.0)) < 1e-6 && direction.dist(Vec3::Y) < 1e-9, "{base:?} {direction:?}");
+}
+
+#[test]
 fn marker_stands_a_new_coil_on_the_face() {
     let mut h = plate();
     start(&mut h, "solid.coil");
@@ -396,7 +451,7 @@ fn marker_stands_a_new_coil_on_the_face() {
     let (name, kind) = last(&h);
     let FeatureKind::Coil { base, axis, .. } = &kind else { panic!("a Coil: {kind:?}") };
     assert!(point(&h, base).dist(Vec3::new(40.0, 25.0, 10.0)) < 0.5, "{:?}", point(&h, base));
-    assert!(axis.0.dist(Vec3::Z) < 1e-9, "{:?}", axis.0);
+    assert!(solidcraft_engine::doc::literal_dir(axis).is_some_and(|a| a.dist(Vec3::Z) < 1e-9), "{axis:?}");
     reopened_at(&mut h, &name, [40.0, 25.0, 10.0]);
 }
 

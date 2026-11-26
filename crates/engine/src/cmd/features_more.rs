@@ -1,21 +1,22 @@
-//! Rib, Web, Emboss, Replace Face, Align and Remove.
+//! Rib, Web, Emboss, Dome, Replace Face, Align and Remove.
 
 use serde_json::Value;
 use solidcore_record::Vec3;
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::{AlignFrame, FeatureKind};
-use solidcraft_doc::{BodyName, SketchId};
-use solidcraft_doc::{Dir, FacePick, Position};
+use solidcraft_doc::{BodyName, Expr, SketchId};
+use solidcraft_doc::{Dir, DomeShape, FacePick, Position};
 use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use super::features::{
-    add_feature, axis_dir_param, check_expr, feature_sketch, length_operands, plane_param, point_param, profiles, typed_length_unit,
+    add_face_feature, add_feature, axis_expr_param, check_expr, feature_sketch, length_operands, plane_param, point_param, profiles,
+    typed_length_unit,
 };
-use crate::params::{bad, bool_, expr, req_expr, str_, string_list, vec3};
+use crate::params::{bad, bool_, expr, expr_problem, req_expr, str_, string_list, vec3};
 use crate::schema::align::AlignParams;
 use crate::schema::features::FeatureResult;
-use crate::schema::features_more::{BoundaryFillParams, CoilParams, EmbossParams, RemoveParams, ReplaceFaceParams, RibParams};
+use crate::schema::features_more::{BoundaryFillParams, CoilParams, DomeParams, EmbossParams, RemoveParams, ReplaceFaceParams, RibParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
@@ -26,6 +27,7 @@ const REMOVE_CONTRACT: TypedContract<RemoveParams> = TypedContract::new();
 const BOUNDARY_FILL_CONTRACT: TypedContract<BoundaryFillParams> = TypedContract::new();
 const COIL_CONTRACT: TypedContract<CoilParams> = TypedContract::new();
 const EMBOSS_CONTRACT: TypedContract<EmbossParams> = TypedContract::new();
+const DOME_CONTRACT: TypedContract<DomeParams> = TypedContract::new();
 const REPLACE_FACE_CONTRACT: TypedContract<ReplaceFaceParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -39,7 +41,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         ),
     CommandSpec::new("solid.coil", "Coil", crate::checked!("solid.coil", coil)).begins_edit().at("SOLID", "CREATE").icon("coil").contract(&COIL_CONTRACT).output(output_schema_for::<FeatureResult>).params(
         "diameter; two of revolutions (or turns), height, pitch; section_size; section?: circular|square; section_position?: inside|center|outside; \
-         base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (default Z); start_angle?; clockwise?: bool; \
+         base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z]|revolve axis reference (default Z; use {type: sketch_axis, axis: x|y} for the profile sketch's axis; picked references supply their base and stay linked); start_angle?; clockwise?: bool; reversed?: bool (grow against the axis; the hand set by clockwise is kept); \
          end_cut?: axial|square (the wire's ends in a plane through the axis, the default, or square to the wire); \
          sketch? (a sketch; its plane is the section plane, so its placement sets the radius and start phase), profiles? (default: all; one closed profile without holes); \
          operation?, targets?, name?, body_name?",
@@ -61,7 +63,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("emboss")
         .contract(&EMBOSS_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch, profiles?; depth; mode?: emboss|deboss; targets?; face?: world point [x,y,z] on the face to emboss: planar, a cylinder wall or another curved face (inferred when exactly one supported tangent cylinder matches the selected profiles)"),
+        .params("sketch, profiles?; depth; mode?: emboss|deboss; targets?; face?: world point [x,y,z] on the face to emboss: planar, a cylinder wall (on a partial outside wall, a profile running past the wall's edge carries on onto the face there when that face is a rectangle tangent to the wall; the profile must lie within the wall and those faces) or another curved face (inferred when exactly one supported tangent cylinder matches the selected profiles); offset_x?, offset_y?: length expr (a shift of the profiles along the sketch's x and y before they are laid on the face; the sketch is not changed); angle?: angle expr (a turn of the profiles, counter-clockwise in the sketch, about the middle of their bounds; the offsets are not turned with them)"),
+    CommandSpec::new("solid.dome", "Dome", crate::checked!("solid.dome", dome)).begins_edit()
+        .at("SOLID", "CREATE")
+        .icon("dome")
+        .contract(&DOME_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .from_selection(super::model_selection::body_faces)
+        .params(
+            "face: [x,y,z] on a planar face, or a face name from model.faces; height: expr (along the face's outward normal); shape?: elliptical|spherical (default elliptical: a quarter ellipse, on a circle a half ellipsoid; spherical: the sphere through the rim and the apex, on a circle); reverse?: bool (cut into the body: not supported yet, refused); body? (the face's body when the name alone does not say)",
+        ),
     CommandSpec::new("solid.replace_face", "Replace Face", crate::checked!("solid.replace_face", replace_face)).begins_edit()
         .contract(&REPLACE_FACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
@@ -96,7 +107,18 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
     let sketch = if profile_mode { Some(solidcraft_doc::SketchId(super::features::sketch_id(s, p.get("sketch"), cmd, "sketch")?)) } else { None };
     let profiles = if profile_mode { super::features::profiles(p, cmd)? } else { solidcraft_doc::ProfileSel::All };
     let base = point_param(s, p, "base", cmd)?.unwrap_or_else(|| solidcraft_doc::point_expr(Vec3::ZERO));
-    let axis = axis_dir_param(p, cmd)?;
+    let reference = p.get("axis").is_some_and(|v| {
+        super::features::axis_dir_form(v).is_err()
+            && (v.as_str().is_some_and(|name| !name.trim().is_empty())
+                || v.is_object() && ["origin", "dir", "curve", "edge", "face", "type"].iter().any(|key| v.get(*key).is_some()))
+    });
+    let (axis, axis_ref) = if let Some(geo) = coil_placed_edge(s, p.get("axis"), cmd)? {
+        (solidcraft_doc::dir_expr(Vec3::Z), Some(solidcraft_doc::AxisRef::Model { geo }))
+    } else if reference {
+        (solidcraft_doc::dir_expr(Vec3::Z), Some(super::features::axis_param(s, sketch.map_or(0, |id| id.0), p, cmd)?))
+    } else {
+        (axis_expr_param(s, p, cmd)?.0, None)
+    };
     let diameter = if profile_mode {
         None
     } else {
@@ -156,7 +178,9 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
         p,
         FeatureKind::Coil {
             base,
-            axis: Dir(axis),
+            axis,
+            axis_ref,
+            reversed: super::reversed_param(p, "reversed", cmd)?,
             sketch,
             profiles,
             diameter,
@@ -217,12 +241,36 @@ fn web(s: &mut Session, p: &Value) -> Result<Value> {
     rib_like(s, p, "solid.web", true)
 }
 
+/// `solid.dome`: a dome on one planar face of a body (#19532). The face is a point on it or a
+/// name, found on the body as `solid.shell`'s faces are.
+fn dome(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solid.dome";
+    let raw = p.get("face").ok_or_else(|| bad(cmd, "`face` must be a point [x, y, z] on the face or a face name"))?;
+    let face = super::face::face_ref(s, raw, str_(p, "body"), cmd)?;
+    let picked = super::face::faces_body(s, p, std::slice::from_ref(raw), &[face]);
+    let height = req_expr(cmd, p, "height")?;
+    check_expr(s, &height, Kind::Length, cmd, "height")?;
+    let shape = match str_(p, "shape").map(str::to_ascii_lowercase).as_deref() {
+        None | Some("elliptical") => DomeShape::Elliptical,
+        Some("spherical") => DomeShape::Spherical,
+        Some(m) => return Err(bad(cmd, format!("unknown shape `{m}` (elliptical or spherical)"))),
+    };
+    let reverse = bool_(p, "reverse").unwrap_or(false);
+    add_face_feature(&picked, s, p, FeatureKind::Dome { face: FacePick(face), height, shape, reverse, body: picked.body.clone().map(BodyName) })
+}
+
 fn emboss(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.emboss";
     let sketch = feature_sketch(s, p, cmd)?;
     let profiles = profiles(p, cmd)?;
     let depth = req_expr(cmd, p, "depth")?;
     check_expr(s, &depth, Kind::Length, cmd, "depth")?;
+    // #20386: where the profiles go, apart from where the sketch has them.
+    let placement = EmbossPlacement {
+        offset_x: placement_expr(s, p, "offset_x", Kind::Length)?,
+        offset_y: placement_expr(s, p, "offset_y", Kind::Length)?,
+        angle: placement_expr(s, p, "angle", Kind::Angle)?,
+    };
     let deboss = match str_(p, "mode").map(str::to_ascii_lowercase).as_deref() {
         None | Some("emboss") => false,
         Some("deboss") => true,
@@ -293,17 +341,62 @@ fn emboss(s: &mut Session, p: &Value) -> Result<Value> {
         targets = vec![name.to_owned()];
         Some(face)
     } else {
-        let inferred = infer_emboss_selection(s, sketch, &profiles, &depth, deboss, &targets)?;
+        let inferred = infer_emboss_selection(s, sketch, &profiles, &placement, &depth, deboss, &targets)?;
         if let Some(face) = &inferred {
             targets = vec![face.body.0.clone()];
         }
         inferred
     };
+    let EmbossPlacement { offset_x, offset_y, angle } = placement;
     add_feature(
         s,
         p,
-        FeatureKind::Emboss { sketch: SketchId(sketch), profiles, depth, deboss, targets: targets.into_iter().map(BodyName).collect(), face },
+        FeatureKind::Emboss {
+            sketch: SketchId(sketch),
+            profiles,
+            depth,
+            deboss,
+            targets: targets.into_iter().map(BodyName).collect(),
+            face,
+            offset_x,
+            offset_y,
+            angle,
+        },
     )
+}
+
+/// Where an Emboss puts its profiles, apart from where their sketch has them (#20386): a shift
+/// along the sketch's x and y and a turn about the middle of their bounds, each left out or an
+/// expression.
+struct EmbossPlacement {
+    offset_x: Option<Expr>,
+    offset_y: Option<Expr>,
+    angle: Option<Expr>,
+}
+
+/// An Emboss placement input: an expression of `kind`, or `None` when the call leaves it out or
+/// gives `null`. A value given that isn't a number or an expression is refused rather than read
+/// as left out.
+fn placement_expr(s: &Session, p: &Value, key: &str, kind: Kind) -> Result<Option<Expr>> {
+    let Some(given) = p.get(key).filter(|v| !v.is_null()) else { return Ok(None) };
+    let e = expr(p, key).ok_or_else(|| bad("solid.emboss", format!("`{key}` {}", expr_problem(Some(given)))))?;
+    check_expr(s, &e, kind, "solid.emboss", key)?;
+    Ok(Some(e))
+}
+
+impl EmbossPlacement {
+    /// `regions` as the feature will lay them on its face (`solidcraft_doc::emboss_placement`),
+    /// with the values the inputs give now. A bare length reads in the design's unit, as it is
+    /// saved.
+    fn place(&self, s: &Session, regions: Vec<solidcore_record::Region2>) -> Result<Vec<solidcore_record::Region2>> {
+        let cmd = "solid.emboss";
+        let now = |e: &Option<Expr>, kind: Kind| match e {
+            Some(e) => s.doc.eval(&s.doc.with_design_unit(e, kind), kind).map_err(|err| bad(cmd, err.to_string())),
+            None => Ok(0.0),
+        };
+        let shift = solidcore_record::Vec2::new(now(&self.offset_x, Kind::Length)?, now(&self.offset_y, Kind::Length)?);
+        solidcraft_doc::emboss_placement(regions, shift, now(&self.angle, Kind::Angle)?).map_err(|e| bad(cmd, e.to_string()))
+    }
 }
 
 fn emboss_selection(s: &Session, selected: &solidcraft_doc::ModelBody, at: Vec3) -> Result<solidcraft_doc::EmbossFace> {
@@ -351,6 +444,7 @@ fn infer_emboss_selection(
     s: &Session,
     sketch: u64,
     profiles: &solidcraft_doc::ProfileSel,
+    placement: &EmbossPlacement,
     depth: &str,
     deboss: bool,
     targets: &[String],
@@ -358,7 +452,8 @@ fn infer_emboss_selection(
     let cmd = "solid.emboss";
     let original = s.model.state();
     let ss = original.sketch(sketch).ok_or_else(|| bad(cmd, "the sketch is not evaluated"))?;
-    let regions = solidcraft_doc::select_profiles(ss, profiles).map_err(|e| bad(cmd, e.to_string()))?;
+    // The wall is the one the profiles lie on once the Emboss has placed them (#20386).
+    let regions = placement.place(s, solidcraft_doc::select_profiles(ss, profiles).map_err(|e| bad(cmd, e.to_string()))?)?;
     let sketch_owner = s.doc.feature(sketch).map(|f| f.component).ok_or_else(|| bad(cmd, "profile sketch no longer exists"))?;
     let d = s.doc.eval(&s.doc.with_design_unit(depth, Kind::Length), Kind::Length).map_err(|e| bad(cmd, e.to_string()))?;
     let world = s.world_state()?;
@@ -735,15 +830,34 @@ fn boundary_fill(s: &mut Session, p: &Value) -> Result<Value> {
     if cells.is_empty() || cells.len() > 1000 {
         return Err(bad(cmd, "`cells` must list 1…1000 points [x, y, z], one inside each cell"));
     }
+    // Planes that also bound the cells: origin planes or construction planes, by name.
+    let mut planes = Vec::new();
+    for name in string_list(cmd, p, "planes")? {
+        planes.push(super::features::plane_param(s, Some(&Value::String(name)), cmd)?);
+    }
+    if tools.len() + planes.len() > 64 {
+        return Err(bad(cmd, "`tools` and `planes` together must list at most 64"));
+    }
     let operation = super::features::operation(p, cmd)?;
     add_feature(
         s,
         p,
         FeatureKind::BoundaryFill {
             tools: tools.into_iter().map(BodyName).collect(),
+            planes,
             cells: cells.into_iter().map(Position).collect(),
             operation,
             remove_tools: bool_(p, "remove_tools").unwrap_or(false),
         },
     )
+}
+
+/// A Coil axis saved as the edge of a picked placement (`{type: placed_edge, …}`), checked to
+/// resolve as the Coil reads it; `None` for any other form of `axis`.
+pub(crate) fn coil_placed_edge(s: &Session, v: Option<&Value>, cmd: &str) -> Result<Option<solidcraft_doc::construct::GeoRef>> {
+    let Some(value) = v.filter(|axis| str_(axis, "type") == Some("placed_edge")) else { return Ok(None) };
+    let geo = super::construct::geo(s, Some(value), cmd, "axis")?;
+    solidcraft_doc::construct::model_axis_in(Some(&s.placed_document()), &s.model.state(), &geo, s.active_component)
+        .map_err(|error| bad(cmd, format!("`axis`: {error}")))?;
+    Ok(Some(geo))
 }

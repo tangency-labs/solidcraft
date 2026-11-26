@@ -245,7 +245,27 @@ pub fn is_sheet(k: &mut Kernel, b: &Brep) -> Result<bool> {
     if brep_shells(k, b)?.len() != 1 {
         return Ok(false);
     }
+    sheet_edges(b)
+}
 
+/// (Not upstream) [`is_sheet`] for a body of one or more separate sheets: only the infinite
+/// region (no solid one, whose shells would count too), at least one shell, at least one edge,
+/// and every edge lamina or manifold. A surface made from several profiles at once (a surface
+/// extrude of four circles) is one body of four sheets, each a shell of the infinite region.
+///
+/// # Errors
+///
+/// Those of `SmBrep::GetShells` ([`p1::shells`], the mark lock);
+/// [`SolidError::NotFound`] for a dangling id.
+pub fn is_sheets(k: &mut Kernel, b: &Brep) -> Result<bool> {
+    if brep_regions(b)?.len() != 1 || brep_shells(k, b)?.is_empty() {
+        return Ok(false);
+    }
+    sheet_edges(b)
+}
+
+/// [`is_sheet`]'s edge clause: at least one edge, and every edge lamina or manifold.
+fn sheet_edges(b: &Brep) -> Result<bool> {
     // sheets have edges that are all manifold or lamina
     let edges = brep_edges(b)?;
     if edges.is_empty() {
@@ -531,7 +551,7 @@ pub fn check_and_fix_uv_trim_curves(k: &Kernel, b: &mut Brep) -> Result<()> {
     }
     // not upstream: the check compares only a trim's ends with its edge's, so a kept trim
     // could stray from its edge inside by more than the edge tolerance
-    cover_kept_uv_trim_curves(k, b)
+    cover_kept_uv_trim_curves(k, b, true)
 }
 
 /// Not upstream: after [`check_and_fix_uv_trim_curves`]'s end check, every edge whose kept
@@ -561,7 +581,8 @@ pub fn check_and_fix_uv_trim_curves(k: &Kernel, b: &mut Brep) -> Result<()> {
 /// its fillet is the one made without the raise).
 ///
 /// A part file's read (`part_file::read_part_from_db`) runs no end check; each B-rep it
-/// builds is covered the same way.
+/// builds is covered the same way. `end_checked` says whether the end check ran
+/// ([`crate::topology::TrimCoverRaises::end_checked`]).
 ///
 /// Every distance is enclosed before any tolerance is raised, so a raise does not change
 /// what another use is measured against.
@@ -572,7 +593,7 @@ pub fn check_and_fix_uv_trim_curves(k: &Kernel, b: &mut Brep) -> Result<()> {
 /// [`edge::set_tolerance`].
 ///
 /// [`trim_distance_bound`]: crate::query::curve_surface_gap::polynomial_pieces::trim_distance_bound
-pub(crate) fn cover_kept_uv_trim_curves(k: &Kernel, b: &mut Brep) -> Result<()> {
+pub(crate) fn cover_kept_uv_trim_curves(k: &Kernel, b: &mut Brep, end_checked: bool) -> Result<()> {
     let mut raises = Vec::new();
     for eu in edgeuses(b, None)? {
         k.check_cancelled(COVER_OP)?;
@@ -580,7 +601,10 @@ pub(crate) fn cover_kept_uv_trim_curves(k: &Kernel, b: &mut Brep) -> Result<()> 
             raises.push((e, gap));
         }
     }
-    let mut record = crate::topology::TrimCoverRaises::default();
+    let mut record = crate::topology::TrimCoverRaises {
+        end_checked,
+        ..Default::default()
+    };
     // (every vertex tolerance as the read made it, to record those a raise cascades to)
     let vertices: Vec<_> = b.vertices().iter().map(|(v, r)| (v, r.tolerance)).collect();
     for (e, gap) in raises {
@@ -4043,9 +4067,12 @@ mod tests {
         }
     }
 
-    /// `Solids/fillet_ts.smb`: the trim of edge use 58 leaves edge 29 by about 2.14e-2 between
-    /// its ends (sampled; the edge's tolerance in the file is 1.86e-5), and the cover raises
-    /// the tolerance to the proved distance, which the dense sample stays under. Edge 27's
+    /// `Solids/fillet_ts.smb`: the trim of edge use 58 leaves edge 29 by about 2.63e-5 between
+    /// its ends (sampled), above the edge's tolerance in the file (1.86e-5), and the cover
+    /// raises the tolerance to the proved distance, which the dense sample stays under. (The
+    /// face keeps the file's B-spline surface, an exact copy of its analytic surface (WR-450,
+    /// #18923), so the trim is measured on the surface it was written on; when the analytic
+    /// surface replaced it, the same trim sat 2.14e-2 off.) Edge 27's
     /// trim lies on its edge with another parameterisation (3.1e-2 apart at equal
     /// parameters): its tolerance stays 1e-5.
     #[test]
@@ -4056,8 +4083,18 @@ mod tests {
         assert_eq!(eu1::edge(&b, eu).unwrap(), Some(e));
         let tol = edge::tolerance(&b, e).unwrap();
         let sampled = sampled_distance(&k, &b, eu, 1024);
-        assert!(sampled > 2e-2 && sampled <= tol, "{sampled:e} {tol:e}");
+        let (before, after) = b.trim_cover_raises().edges[&e];
+        assert_eq!(after.to_bits(), tol.to_bits());
+        assert!(
+            before < sampled && sampled <= tol,
+            "{before:e} {sampled:e} {tol:e}"
+        );
         assert!(tol <= sampled * 1.01, "{sampled:e} {tol:e}");
+        let bound = proved_distance(&k, &b, eu).unwrap();
+        assert!(
+            sampled <= bound && bound <= tol,
+            "{sampled:e} {bound:e} {tol:e}"
+        );
         let (eu, e) = (EdgeuseId::from_index(54), EdgeId::from_index(27));
         assert_eq!(eu1::edge(&b, eu).unwrap(), Some(e));
         assert_eq!(edge::tolerance(&b, e).unwrap(), 1e-5);
@@ -4202,14 +4239,14 @@ mod tests {
             cancel: Some(token),
             ..Kernel::default()
         };
-        let stopped = cover_kept_uv_trim_curves(&cancelled, &mut b);
+        let stopped = cover_kept_uv_trim_curves(&cancelled, &mut b, true);
         assert!(
             matches!(&stopped, Err(err) if err.is_cancelled()),
             "{stopped:?}"
         );
         assert_eq!(tolerances(&b), held);
         // (not cancelled, the same cover raises the edge again)
-        cover_kept_uv_trim_curves(&k, &mut b).unwrap();
+        cover_kept_uv_trim_curves(&k, &mut b, true).unwrap();
         assert_eq!(edge::tolerance(&b, e).unwrap(), after);
     }
 }

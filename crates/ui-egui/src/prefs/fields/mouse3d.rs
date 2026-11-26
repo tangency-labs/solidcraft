@@ -25,6 +25,9 @@ macro_rules! mouse3d_preferences {
             space_mouse_enabled: bool = true, PAGE_MOUSE3D => check("Navigate with the 3D mouse");
             /// Where the 3D mouse picture sits in the 3D view, when it is shown there (`space_mouse_in_view`).
             space_mouse_ghost_position: SpaceMouseGhost = SpaceMouseGhost::default(), PAGE_MOUSE3D;
+            /// Keep the horizon level during 3D mouse navigation, including free orbit.
+            /// Off by default to preserve the existing navigation behaviour.
+            space_mouse_horizon_lock: bool = false, PAGE_MOUSE3D => check_id("ui.3d_mouse_horizon_lock");
             /// Whether a picture of the connected 3D mouse, moving as it does, sits in the 3D view's lower
             /// left corner. Off by default.
             space_mouse_in_view: bool = false, PAGE_MOUSE3D => check_id("ui.3d_mouse_show_in_view");
@@ -32,6 +35,9 @@ macro_rules! mouse3d_preferences {
             /// the turn begins (else the middle of the bodies in view), marked by a faint ball; classic
             /// (off, the default) turns it around the view's centre, as it did before.
             space_mouse_model_pivot: bool = false, PAGE_MOUSE3D;
+            /// What the 3D mouse's cap moves: the model (object, the default, as before) or the camera
+            /// looking at the point the view turns around (target camera), which reverses every axis.
+            space_mouse_motion: SpaceMouseMotion = SpaceMouseMotion::default(), PAGE_MOUSE3D;
             /// The user turned the calibration offer off for good ("Never show again"). Unlike closing the
             /// card, which only records that device, this stops every offer, for every device: it is one flag,
             /// not kept per device key. Like the settings beside it, the dialog's Restore Defaults puts it back

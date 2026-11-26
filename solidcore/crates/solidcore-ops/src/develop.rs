@@ -21,11 +21,15 @@ use solidcore_convert::develop as cv;
 use solidcore_convert::{
     record_region2, record_seg2, record_vec2, record_vec3, region2, seg2, vec2, vec3,
 };
-use solidcore_record::develop::{Bend, Development, Lap, Mismatch, Rigid2, Rigid3, Sheet, Surface};
+use solidcore_record::develop::{
+    Anchor, Bead, BeadForm, BeadOutline, Bend, Development, Lap, Mismatch, Rigid2, Rigid3, Sheet,
+    Surface,
+};
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 
 pub use solidcore::develop::{
-    JointRefusal, PanelRefusal, Refusal, RuleRefusal, MAX_JOINTS, MAX_PANELS,
+    BeadAgainst, BeadRefusal, ContourRefusal, JointRefusal, PanelRefusal, Refusal, RuleRefusal,
+    MAX_JOINTS, MAX_PANELS, MIN_BEAD_RADIUS,
 };
 
 /// Lays the sheet out flat ([`solidcore::develop::develop`]): `anchors` says where some panels'
@@ -70,12 +74,57 @@ pub fn crossings(a: &[Seg2], b: &[Seg2]) -> Vec<(usize, f64, usize, f64, Vec2)> 
         .collect()
 }
 
+/// The surfaces of a contour flange's profile `segs`, `depth` into the material from them
+/// ([`solidcore::develop::offset_contour`]): each line shifted and each arc's radius changed,
+/// meeting again at every corner; the material lies right of the travel, or left when `flip`.
+/// Corners turning less than `smooth` radians meet on the common normal.
+///
+/// # Errors
+/// The kernel's [`ContourRefusal`]: why the shifted profile does not hold together.
+pub fn offset_contour(
+    segs: &[Seg2],
+    depth: f64,
+    thickness: f64,
+    flip: bool,
+    smooth: f64,
+) -> Result<Vec<Seg2>, ContourRefusal> {
+    k::offset_contour(&cv::segs(segs), depth, thickness, flip, smooth).map(|s| cv::record_segs(&s))
+}
+
 /// A curve through `points` in order ([`solidcore::develop::curve_through`]): a line where they
 /// lie on one, else a clamped cubic spline through every one of them.
 #[must_use]
 pub fn curve_through(points: &[Vec2]) -> Vec<Seg2> {
     let points: Vec<solidcore::math::Vec2> = points.iter().copied().map(vec2).collect();
     cv::record_segs(&k::curve_through(&points))
+}
+
+/// Where the flat is cut at one end of a bend's zone that a tear bend relief parts
+/// ([`solidcore::develop::tear_slit`]): along the zone's end from `from` (on the tangent line of
+/// the panel that runs on past it) toward `to` (on the tangent line of the panel that ends there),
+/// from `depth` back inside the panel that runs on out to the farthest corner of the ending
+/// panel's `outline` on the line square to its anchor `ends` at `at`, that panel laid in the flat
+/// by `place`. `None` when the zone's end has no way or no corner reaches past `from`.
+#[must_use]
+pub fn tear_slit(
+    from: Vec2,
+    to: Vec2,
+    depth: f64,
+    ends: &Anchor,
+    at: f64,
+    outline: &Loop2,
+    place: &Rigid2,
+) -> Option<[Vec2; 2]> {
+    k::tear_slit(
+        vec2(from),
+        vec2(to),
+        depth,
+        &cv::anchor(ends),
+        at,
+        &solidcore_convert::loop2(outline),
+        &cv::rigid2(place),
+    )
+    .map(|s| s.map(record_vec2))
 }
 
 /// A developed sheet folded ([`fold`]).
@@ -419,5 +468,182 @@ pub mod hermite {
     #[must_use]
     pub fn cubic(p0: Vec2, d0: Vec2, p3: Vec2, d3: Vec2, h: f64) -> Seg2 {
         record_seg2(&k::cubic(vec2(p0), vec2(d0), vec2(p3), vec2(d3), h))
+    }
+}
+
+impl Fold {
+    /// What bead `b` does to the folded solid of a sheet `t` thick
+    /// ([`solidcore::develop::bead_form`]): the footprint its panel's faces leave open, in the
+    /// flat, and its faces in space, each with what it is.
+    ///
+    /// # Errors
+    /// The kernel's [`BeadRefusal`]: a section that does not fit, or a panel with no place.
+    pub fn bead_form(&self, b: &Bead, t: f64) -> Result<BeadForm, BeadRefusal> {
+        k::bead_form(&self.inner, &cv::bead(b), t).map(|f| cv::record_bead_form(&f))
+    }
+
+    /// Bead `b` in the flat of a sheet `t` thick ([`solidcore::develop::bead_outline`]): its
+    /// footprint, its centreline, its crown, and how a note along it is written; with `mirror`,
+    /// in the flat as a flat pattern is read (mirrored across its x axis).
+    ///
+    /// # Errors
+    /// The kernel's [`BeadRefusal`]: a section that does not fit, or a panel with no place.
+    pub fn bead_outline(&self, b: &Bead, t: f64, mirror: bool) -> Result<BeadOutline, BeadRefusal> {
+        k::bead_outline(&self.inner, &cv::bead(b), t, mirror).map(|o| cv::record_bead_outline(&o))
+    }
+
+    /// Where a note `height` high along bead `b` stands in the flat of a sheet `t` thick
+    /// ([`solidcore::develop::bead_note`]): its anchor and its angle (radians); with `mirror`,
+    /// as a flat pattern is read.
+    ///
+    /// # Errors
+    /// The kernel's [`BeadRefusal`]: a section that does not fit, or a panel with no place.
+    pub fn bead_note(
+        &self,
+        b: &Bead,
+        t: f64,
+        mirror: bool,
+        height: f64,
+    ) -> Result<(Vec2, f64), BeadRefusal> {
+        k::bead_note(&self.inner, &cv::bead(b), t, mirror, height).map(|(p, a)| (record_vec2(p), a))
+    }
+
+    /// Where a straight line from `a` to `b`, drawn on the plane through `origin` with unit
+    /// normal `normal`, lies in planar panel `i`'s chart, in a sheet `t` thick
+    /// ([`solidcore::develop::line_in_chart`]): its ends, and whether the plane is the panel's
+    /// far face. None where the plane is neither of its faces, or the panel has no place.
+    #[must_use]
+    pub fn line_in_chart(
+        &self,
+        i: usize,
+        t: f64,
+        origin: Vec3,
+        normal: Vec3,
+        a: Vec3,
+        b: Vec3,
+    ) -> Option<(Vec2, Vec2, bool)> {
+        let place = self.inner.places.get(i).copied().flatten()?;
+        k::line_in_chart(&place, t, vec3(origin), vec3(normal), vec3(a), vec3(b))
+            .map(|(p, q, far)| (record_vec2(p), record_vec2(q), far))
+    }
+}
+
+/// Bead `b`'s footprint in its panel's chart, counter-clockwise, on a sheet `t` thick
+/// ([`solidcore::develop::bead_footprint`]).
+///
+/// # Errors
+/// The kernel's [`BeadRefusal`]: a section that does not fit.
+pub fn bead_footprint(b: &Bead, t: f64) -> Result<[Vec2; 4], BeadRefusal> {
+    k::bead_footprint(&cv::bead(b), t).map(|f| f.map(record_vec2))
+}
+
+/// Where bead `b`'s footprint, on a sheet `t` thick, lies against the outline `l` in its panel's
+/// chart, coming within `near` of it counting as meeting it
+/// ([`solidcore::develop::bead_against`]).
+///
+/// # Errors
+/// The kernel's [`BeadRefusal`]: a section that does not fit, or an outline it cannot place.
+pub fn bead_against(b: &Bead, t: f64, l: &Loop2, near: f64) -> Result<BeadAgainst, BeadRefusal> {
+    let l = solidcore::prism::profile::Loop2 {
+        segs: l.segs.iter().map(seg2).collect(),
+    };
+    k::bead_against(&cv::bead(b), t, &l, near)
+}
+
+/// Whether the segment from `a` to `b` lies wholly in `region`
+/// ([`solidcore::develop::segment_in_region`]). None where it cannot be decided.
+#[must_use]
+pub fn segment_in_region(region: &Region2, a: Vec2, b: Vec2) -> Option<bool> {
+    k::segment_in_region(&region2(region), vec2(a), vec2(b))
+}
+
+/// The flanks' angle (radians) of a bead `depth` deep and `width` wide that leaves a crown
+/// `crown_width` wide ([`solidcore::develop::bead_flank_angle`]).
+///
+/// # Errors
+/// The kernel's [`BeadRefusal`]: a crown width not at least 0 and less than the width.
+pub fn bead_flank_angle(depth: f64, width: f64, crown_width: f64) -> Result<f64, BeadRefusal> {
+    k::bead_flank_angle(depth, width, crown_width)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_tear_slit_on_record_values_is_the_kernels() {
+        // A flange 30 along its anchor and 20 out, laid in the flat 5 up from the base's tangent
+        // line; the zone's end at the anchor's length, from the base's tangent line to the
+        // flange's, cut 2 deep into the base.
+        let ends = Anchor {
+            panel: 1,
+            origin: Vec2::new(0.0, 0.0),
+            dir: Vec2::new(1.0, 0.0),
+        };
+        let outline = Loop2::polygon(&[
+            Vec2::new(0.0, 0.0),
+            Vec2::new(30.0, 0.0),
+            Vec2::new(30.0, 20.0),
+            Vec2::new(0.0, 20.0),
+        ]);
+        let place = Rigid2 {
+            cos: 1.0,
+            sin: 0.0,
+            shift: Vec2::new(0.0, 5.0),
+        };
+        let (from, to) = (Vec2::new(30.0, 0.0), Vec2::new(30.0, 5.0));
+        assert_eq!(
+            tear_slit(from, to, 2.0, &ends, 30.0, &outline, &place),
+            Some([Vec2::new(30.0, -2.0), Vec2::new(30.0, 25.0)])
+        );
+        assert_eq!(
+            tear_slit(from, from, 2.0, &ends, 30.0, &outline, &place),
+            None
+        );
+    }
+
+    /// A contour's surfaces come back as record segments: an L of two lines shifted 1 with the
+    /// material on the right meets at (9, 1); lines that turn back are the kernel's refusal.
+    #[test]
+    fn a_contour_offset_comes_back_as_record_segments() {
+        let at = |x: f64, y: f64| Vec2 { x, y };
+        let ell = [
+            Seg2::Line {
+                a: Vec2::ZERO,
+                b: at(10.0, 0.0),
+            },
+            Seg2::Line {
+                a: at(10.0, 0.0),
+                b: at(10.0, 10.0),
+            },
+        ];
+        let out = offset_contour(&ell, 1.0, 2.0, false, 1e-6);
+        assert_eq!(
+            out,
+            Ok(vec![
+                Seg2::Line {
+                    a: at(0.0, 1.0),
+                    b: at(9.0, 1.0)
+                },
+                Seg2::Line {
+                    a: at(9.0, 1.0),
+                    b: at(9.0, 10.0)
+                },
+            ])
+        );
+        let back = [
+            Seg2::Line {
+                a: Vec2::ZERO,
+                b: at(10.0, 0.0),
+            },
+            Seg2::Line {
+                a: at(10.0, 0.0),
+                b: Vec2::ZERO,
+            },
+        ];
+        assert_eq!(
+            offset_contour(&back, 1.0, 2.0, false, 1e-6),
+            Err(ContourRefusal::TurnsBack)
+        );
     }
 }

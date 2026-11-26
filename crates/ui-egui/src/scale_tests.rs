@@ -332,6 +332,8 @@ pub(crate) fn view_frame(
     let t = solidcraft_theme::Tokens::get();
     let none = || std::sync::Arc::new(std::sync::Mutex::new(None));
     crate::gpu::Frame {
+        selection_all: false,
+        hover_body: None,
         product: false,
         product_lights: None,
         upload_error: None,

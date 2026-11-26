@@ -4,6 +4,7 @@
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
+use solidcraft_geom::Vec3Geom;
 
 use crate::Session;
 
@@ -136,6 +137,193 @@ fn a_slanted_hole_stays_on_its_axis_when_its_face_moves() {
     // Lower: the same line enters further along.
     change(&mut s, "height", "12 mm");
     on_axis(&s, 12.0);
+}
+
+/// Where the flat bottom of a hole drilled from `start` along unit `dir` lies, read exactly: a ray
+/// parallel to the axis, 1 mm off it (inside the Ø6 bore), fired from 5 mm before the start, meets
+/// the bottom first.
+fn bore_bottom(s: &Session, start: Vec3, dir: Vec3) -> Vec3 {
+    let side = if dir.z.abs() < 0.9 { Vec3::new(0.0, 0.0, 1.0) } else { Vec3::new(1.0, 0.0, 0.0) };
+    let off = dir.cross(side).normalized().unwrap();
+    let from = start - dir * 5.0 + off;
+    let hits: Vec<Vec3> = s.model.state().bodies.iter().filter_map(|b| b.body.fire_ray(from, dir).unwrap()).map(|h| h.point).collect();
+    assert_eq!(hits.len(), 1, "one body under the hole: {hits:?}");
+    hits[0] - off
+}
+
+/// #20741: a hole on a curved face starts on the face's exact surface, not on the display mesh's
+/// facet under the pick. Each case is a place on the exact surface with a direction whose line
+/// meets the surface there: a Ø6 × 8 flat hole's bottom is then exactly 8 along the axis from it.
+/// Drilled from the facet instead, a radial hole in a Ø40 cylinder started up to 0.0235 mm inside
+/// the surface and went 8.0235 deep from it.
+#[test]
+fn a_hole_on_a_curved_face_starts_on_the_exact_surface() {
+    let deg = |a: f64| a.to_radians();
+    type Make = fn(&mut Session);
+    let cylinder: Make = |s| {
+        run(s, "solid.cylinder", json!({"radius": 20, "height": 40, "body_name": "Part"}));
+    };
+    // Radius 15 at z = 0 to 5 at z = 20: radius 10 at z = 10.
+    let cone: Make = |s| {
+        run(s, "solid.cone", json!({"radius": 15, "top_radius": 5, "height": 20, "body_name": "Part"}));
+    };
+    let sphere: Make = |s| {
+        run(s, "solid.sphere", json!({"radius": 20, "center": [0, 0, 0], "body_name": "Part"}));
+    };
+    let mut cases: Vec<(&str, Make, Vec3, Vec3)> = Vec::new();
+    for a in [1.3, 4.0, 7.7, 33.0] {
+        let (c, s) = (deg(a).cos(), deg(a).sin());
+        // Radial into the Ø40 cylinder at mid-height.
+        cases.push(("cylinder", cylinder, Vec3::new(20.0 * c, 20.0 * s, 20.0), Vec3::new(-c, -s, 0.0)));
+        // Radial (square to the cone's axis) into the cone at z = 10, where its radius is 10.
+        cases.push(("cone", cone, Vec3::new(10.0 * c, 10.0 * s, 10.0), Vec3::new(-c, -s, 0.0)));
+        // Towards the centre of the R20 sphere, 25° above its equator.
+        let (ce, se) = (deg(25.0).cos(), deg(25.0).sin());
+        let u = Vec3::new(ce * c, ce * s, se);
+        cases.push(("sphere", sphere, u * 20.0, -u));
+    }
+    for (what, make, start, dir) in cases {
+        let mut s = Session::default();
+        make(&mut s);
+        run(
+            &mut s,
+            "solid.hole",
+            json!({"position": [start.x, start.y, start.z], "direction": [dir.x, dir.y, dir.z], "diameter": 6, "depth": 8, "name": "Hole"}),
+        );
+        assert_eq!(said(&s, "Hole"), "", "{what} at {start:?}");
+        let bottom = bore_bottom(&s, start, dir);
+        let expected = start + dir * 8.0;
+        assert!(
+            bottom.dist(expected) < 1e-6,
+            "{what} at {start:?}: the bore's bottom is at {bottom:?}, not {expected:?}, 8 along the axis from the exact surface"
+        );
+    }
+}
+
+/// #20741 for holes at sketch points: from a sketch on the plane y = -30 in front of the Ø40
+/// cylinder about z, a point at x = 20 sin a drills along +y into the cylinder's side, which it
+/// meets at y = -20 cos a. Each Ø6 × 8 hole's flat bottom is 8 further, at y = 8 - 20 cos a.
+#[test]
+fn holes_at_sketch_points_start_on_a_curved_faces_exact_surface() {
+    let angles = [1.3_f64, 4.0, 7.7, 33.0];
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 40, "body_name": "Part"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, -30, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Pts"}));
+    // One point a quarter of the height up for each angle, apart so the bores stay clear.
+    let ids: Vec<String> = angles.iter().enumerate().map(|(i, _)| format!("p{i}")).collect();
+    let at: Vec<Vec3> = angles
+        .iter()
+        .enumerate()
+        .map(|(i, a)| Vec3::new(20.0 * a.to_radians().sin() * if i % 2 == 0 { 1.0 } else { -1.0 }, 0.0, 5.0 + 10.0 * i as f64))
+        .collect();
+    for (id, p) in ids.iter().zip(&at) {
+        run(&mut s, "sketch.point", json!({"point": [p.x, p.z], "id": id}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Pts", "points": ids, "diameter": 6, "depth": 8, "name": "Hole"}));
+    assert_eq!(said(&s, "Hole"), "");
+    let dir = Vec3::new(0.0, 1.0, 0.0);
+    for p in at {
+        let start = Vec3::new(p.x, -(400.0 - p.x * p.x).sqrt(), p.z);
+        let bottom = bore_bottom(&s, start, dir);
+        let expected = start + dir * 8.0;
+        assert!(bottom.dist(expected) < 1e-6, "the hole at x = {}: the bore's bottom is at {bottom:?}, not {expected:?}", p.x);
+    }
+}
+
+/// #20741 as reported: a place picked on the display mesh lies on a facet, a chord of the round
+/// face up to the display sag inside it (x = 19.97655 on the Ø40 cylinder). Given that place, a
+/// radial Ø6 × 8 hole still starts where its axis meets the exact surface, radius 20, and its
+/// bottom is at radius 12. Placed from 0.02345 mm to 0.001 mm inside the surface: within the
+/// body's display tolerance, so within reach of the face.
+#[test]
+fn a_hole_placed_on_a_curved_faces_display_facet_starts_on_the_exact_surface() {
+    for inside in [0.023_45, 0.02, 0.001] {
+        for a in [1.3_f64, 33.0] {
+            let (c, sn) = (a.to_radians().cos(), a.to_radians().sin());
+            let u = Vec3::new(c, sn, 0.0);
+            let placed = Vec3::new(0.0, 0.0, 20.0) + u * (20.0 - inside);
+            let dir = u * -1.0;
+            let mut s = Session::default();
+            run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 40, "body_name": "Part"}));
+            run(
+                &mut s,
+                "solid.hole",
+                json!({"position": [placed.x, placed.y, placed.z], "direction": [dir.x, dir.y, dir.z], "diameter": 6, "depth": 8, "name": "Hole"}),
+            );
+            assert_eq!(said(&s, "Hole"), "", "{inside} inside at {a}°");
+            let start = Vec3::new(0.0, 0.0, 20.0) + u * 20.0;
+            let bottom = bore_bottom(&s, start, dir);
+            let expected = Vec3::new(0.0, 0.0, 20.0) + u * 12.0;
+            assert!(
+                bottom.dist(expected) < 1e-6,
+                "placed {inside} inside at {a}°: the bore's bottom is at {bottom:?} (radius {}), not radius 12, 8 deep from the exact surface",
+                (bottom.x * bottom.x + bottom.y * bottom.y).sqrt()
+            );
+            // Where `hole_start` (the Edit Hole dialog's seed too) puts the place on the cylinder
+            // before the hole is cut.
+            run(&mut s, "timeline.suppress", json!({"feature": "Hole"}));
+            let f = s.doc.find_feature("Hole").unwrap().clone();
+            let start_at = solidcraft_doc::hole_start(&s.model.state(), &f, placed, dir);
+            assert!(start_at.dist(start) < 1e-6, "placed {inside} inside at {a}°: hole_start is {start_at:?}, not {start:?}");
+        }
+    }
+}
+
+/// The same place picked inside the surface, with an oblique axis (radial component 0.1, the rest
+/// along the face): the axis meets the exact surface about 0.19 mm behind the place, more than the
+/// 0.02 mm gap the place is inside the surface. The start is still where the axis meets it.
+#[test]
+fn an_oblique_axis_from_a_place_inside_a_curved_face_starts_on_the_exact_surface() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 40, "body_name": "Part"}));
+    let (u, w) = (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
+    let placed = Vec3::new(0.0, 0.0, 20.0) + u * 19.98;
+    let dir = (u * -0.1 + w * (1.0 - 0.01_f64).sqrt()).normalized().unwrap();
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"position": [placed.x, placed.y, placed.z], "direction": [dir.x, dir.y, dir.z], "diameter": 2, "depth": 2, "name": "Hole"}),
+    );
+    run(&mut s, "timeline.suppress", json!({"feature": "Hole"}));
+    let f = s.doc.find_feature("Hole").unwrap().clone();
+    let start = solidcraft_doc::hole_start(&s.model.state(), &f, placed, dir);
+    // The axis meets the cylinder where |(placed - axis) + t dir| = 20, the nearer root.
+    let rel = placed - Vec3::new(0.0, 0.0, 20.0);
+    let (b, c) = (rel.dot(dir), rel.dot(rel) - 400.0);
+    let t = -b - (b * b - c).sqrt();
+    let expected = placed + dir * t;
+    assert!(t.abs() > 0.1, "the meeting lies well beyond the 0.02 gap: {t}");
+    assert!(start.dist(expected) < 1e-6, "hole_start is {start:?}, not {expected:?}");
+}
+
+/// A hole whose axis runs along its face: placed on the Ø40 cylinder's side at 33° (z = 30), or
+/// exactly on its top rim (z = 40), drilled straight down. The axis lies on the side (a ruling),
+/// so the side meets it at no single place; the hole starts where it was placed, silently, with no
+/// note that the axis "could not be met". Ø6 × 8: the bore is empty 1 mm in from the rim
+/// over its depth and the body is solid 2 mm below its bottom.
+#[test]
+fn a_hole_whose_axis_runs_along_its_face_starts_where_it_was_placed_silently() {
+    let (c, sn) = (33f64.to_radians().cos(), 33f64.to_radians().sin());
+    let dir = Vec3::new(0.0, 0.0, -1.0);
+    for z in [30.0, 40.0] {
+        let placed = Vec3::new(20.0 * c, 20.0 * sn, z);
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 40, "body_name": "Part"}));
+        run(
+            &mut s,
+            "solid.hole",
+            json!({"position": [placed.x, placed.y, placed.z], "direction": [dir.x, dir.y, dir.z], "diameter": 6, "depth": 8, "name": "Hole"}),
+        );
+        assert_eq!(said(&s, "Hole"), "", "placed at z = {z}");
+        let (x, y) = (19.0 * c, 19.0 * sn);
+        assert!(!solid_at(&s, x, y, z - 1.0) && !solid_at(&s, x, y, z - 7.0), "placed at z = {z}: the bore is drilled");
+        assert!(solid_at(&s, x, y, z - 10.0), "placed at z = {z}: solid below the bore's bottom");
+        run(&mut s, "timeline.suppress", json!({"feature": "Hole"}));
+        let f = s.doc.find_feature("Hole").unwrap().clone();
+        let start_at = solidcraft_doc::hole_start(&s.model.state(), &f, placed, dir);
+        assert!(start_at.dist(placed) < 1e-9, "placed at z = {z}: hole_start is {start_at:?}, not {placed:?}");
+    }
 }
 
 // Hole centres on a sketch drill into the material whichever way the sketch plane faces. Base
@@ -682,7 +870,7 @@ fn a_saved_hole_turned_towards_a_touching_part_drills_its_own_part_when_opened()
 
 fn hole_direction(s: &Session, name: &str) -> Vec3 {
     match &s.doc.find_feature(name).unwrap().kind {
-        solidcraft_doc::FeatureKind::Hole { direction, .. } => direction.0,
+        solidcraft_doc::FeatureKind::Hole { direction, .. } => solidcraft_doc::literal_dir(direction).unwrap(),
         other => panic!("{name} is not a hole: {}", other.type_name()),
     }
 }

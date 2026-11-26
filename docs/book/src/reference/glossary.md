@@ -90,6 +90,20 @@ The part of the 2D Timeline that lists a design's joints in order, with a row fo
 - **Elsewhere:** joint track.
 - **For translators:** not an assembly, which is a design with several components.
 
+### base feature
+
+A timeline feature that holds bodies as fixed B-rep, with no steps that rebuild them.
+
+A base feature has no parameters to edit. Its bodies are changed by direct edits after it, such as
+Press Pull, Delete Face and Move Face.
+
+- **In SolidCraft:** the Import feature that `file.insert_step` adds, and the one Remove History
+  (`body.remove_history`) puts in place of the features that built only that body. Its B-rep is
+  kept in the design file as a STEP part of its own.
+- **Don't use:** dumb solid, frozen feature.
+- **Elsewhere:** base feature, dumb solid, imported body.
+- **For translators:** not a base flange of sheet metal, and not a base sketch.
+
 ### bill of materials
 
 The list of the components placed in a design or in one component, with the quantity of each.
@@ -166,6 +180,32 @@ A concentration or structured redistribution of light caused by reflection or re
 Variation of refractive index with wavelength that can separate colours along refracted paths.
 
 - **In SolidCraft:** Glass `model.dispersion`; the current renderer uses three representative wavelength bands.
+
+### centre line
+
+A patterned line that shows a feature's centre or axis in a drawing view.
+
+The initial command joins two named model points and extends beyond each end by a distance in
+paper millimetres. This selection and extent interface is proposed in issue #9419.
+
+- **In SolidCraft:** `drawing.center_line.add`, `drawing.center_line.inspect`, and the drawing's
+  `centre_lines` records.
+- **Don't use:** construction line (for this drawing annotation).
+- **Elsewhere:** centerline, centreline.
+- **For translators:** not a sketch construction entity and not an axis in the model.
+
+### centre mark
+
+Two crossing patterned lines that show the centre of a circular feature in a drawing view.
+
+A manual mark follows a named model edge. Its extension beyond the circle is measured in paper
+millimetres, so changing the view scale does not change that extension.
+
+- **In SolidCraft:** `drawing.center_mark.add`, `drawing.center_mark.inspect`, and the drawing's
+  `centre_marks` records.
+- **Don't use:** crosshair (for this saved drawing annotation).
+- **Elsewhere:** center mark, centermark.
+- **For translators:** a mark printed on the drawing, not the mouse pointer.
 
 ### component
 
@@ -457,6 +497,19 @@ them. The *first moments* are the mass times the centre of mass.
 - **Don't use:** rotational inertia, second moment of mass, mass moment.
 - **Elsewhere:** moment of inertia, inertia tensor, mass moment of inertia.
 - **For translators:** not the second moment of area of a cross-section, a different quantity.
+
+### motion model
+
+What a 3D mouse's cap moves: the model, or a camera that looks at the point the view turns about.
+
+With **Object** the model goes the way the cap is pushed, tilted or twisted. With **Target camera**
+the camera goes that way, so the model goes the other way along every axis.
+
+- **In SolidCraft:** the `space_mouse_motion` preference (`object`, `target_camera`);
+  Preferences › Input › 3D mouse › Motion model.
+- **Don't use:** navigation mode (the mouse mappings), camera mode.
+- **Elsewhere:** object mode, camera mode, target camera mode, navigation mode.
+- **For translators:** how the 3D mouse moves the view, not a 3D model and not a motion study.
 
 ### movable corridor
 
@@ -752,13 +805,19 @@ The ordered list of a design's features, which SolidCraft computes from first to
 
 How two rounds of a fillet continue where they turn round a sharp corner edge between them, such
 as the rounds along a boss's base at its upright edges: in a mitre, or swept round the corner
-edge as a torus.
+edge as a torus, where the rolling ball can pass the edge and the rounds are one radius round a
+straight edge square to them.
 
-- **In SolidCraft:** the `turn` parameter of `solid.fillet` and its design-file key, `mitre`
-  (the default) or `swept`; the Fillet dialog's Turns row.
+- **In SolidCraft:** the `turn` parameter of `solid.fillet` and its design-file key: `auto` (the
+  default for a new fillet, "Auto": swept where the swept turn is built, mitred
+  elsewhere), `mitre` (a fillet saved without the key, as older designs are) or `swept`; the
+  Fillet dialog's Turns row. A fillet at per-edge radii (`radii`) is the exception: it is
+  mitred when it names no turn, since a swept turn takes one radius, so a caller that wants
+  Auto there says `turn: auto`.
 - **Don't use:** corner (that is what fills a corner where three rounded edges meet, `corner`).
 - **Elsewhere:** mitred corner, swept corner, corner sweep.
-- **For translators:** "Mitre" and "Swept" name the two shapes, not a direction of travel.
+- **For translators:** "Mitre" and "Swept" name the two shapes, not a direction of travel;
+  "Auto" names the choice between them, made at each corner.
 
 ### view angles
 
@@ -819,7 +878,7 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | Instance | one copy a pattern makes | *pattern instance* | pattern commands |
 | | one placed copy of a component | *occurrence* | "Paste (Instance)" on `occurrence.copy` |
 | History | the undo and redo history | history | Undo, Redo |
-| | the list of features | *timeline* | "Feature history" (`ui.feature_history`), "Roll History Marker" |
+| | the list of features | *timeline* | "Feature history" (`ui.feature_history`), "Roll History Marker", "Remove History" (`body.remove_history`) |
 | Part | a standard part | *standard part* | `parts.*` |
 | | a body, an occurrence or the design | *body*, *occurrence*, *design* | catalogue texts that say "part" |
 | | a design property | *part number* | Design Properties |
@@ -832,6 +891,7 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
 | | a minimum distance field | clearance | the Interference and plastic rules dialogs |
 | | a hole sized for a bolt to pass through | clearance (hole) | the Hole dialog's Hole Tap Type, `ui.hole_clearance` |
+| | the room a Combine cut leaves round its tools | offset (Combine) | the Combine dialog's Offset, `ui.combine_offset` |
 | Fit | fit the view to the model | fit (view) | the view's Fit action, `ui.fit` |
 | | how much room a clearance hole leaves around the bolt | clearance fit | the Hole dialog's Fit, `ui.clearance_fit` |
 | Flat | a hole's flat bottom | flat bottom | the Hole dialog's tip |

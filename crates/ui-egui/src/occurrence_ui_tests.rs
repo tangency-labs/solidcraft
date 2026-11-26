@@ -314,7 +314,7 @@ fn fixture() -> (Harness, u64, u64, u64) {
 
 #[test]
 fn viewport_restores_isolated_occurrences_and_undo_restores_isolation() {
-    for label in ["Show All", "Unisolate"] {
+    for label in ["Show All", "Exit Isolation"] {
         let (mut h, _, first, second) = fixture();
         h.app.session.selection.clear();
         let menu_item =
@@ -421,6 +421,34 @@ fn save_mesh_browser_pick_uses_the_body_of_the_clicked_placement() {
     let commands = crate::dialogs_save_mesh::commands(k, &d.inputs).unwrap();
     assert_eq!(commands[0].1["bodies"], json!(expected));
     assert_ne!(expected, h.app.session.occurrence_bodies(&[first], true).unwrap());
+}
+
+/// #8120: Isolate on an occurrence menu becomes Unisolate and restores sibling placements.
+#[test]
+fn occurrence_isolate_offers_unisolate_beside_it() {
+    let (mut h, _, first, second) = fixture();
+    let first_body = h.app.session.occurrence_bodies(&[first], true).unwrap()[0].clone();
+    let second_body = h.app.session.occurrence_bodies(&[second], true).unwrap()[0].clone();
+    let target = Target::Occurrence { path: vec![second] };
+    let isolate = context_menu::items(&h.app, &target).into_iter().find(|i| i.label == "Isolate").expect("Isolate");
+    context_menu::run_item(&mut h.app, &isolate, egui::Pos2::ZERO);
+    assert!(!h.app.session.body_visible(&first_body));
+    assert!(h.app.session.body_visible(&second_body));
+
+    // The isolated placement: Isolate would change nothing, so Exit Isolation alone, with its key.
+    let own = context_menu::items(&h.app, &target);
+    assert!(!own.iter().any(|i| i.id == "ui.isolateOccurrence"), "no Isolate that changes nothing");
+    assert!(own.iter().any(|i| i.id == "ui.unisolate" && i.shortcut == "Ctrl+Shift+I"));
+    // The hidden placement keeps its own Isolate, then Exit Isolation.
+    let items = context_menu::items(&h.app, &Target::Occurrence { path: vec![first] });
+    let at = items.iter().position(|i| i.id == "ui.isolateOccurrence").expect("Isolate on the hidden placement");
+    assert_eq!(items[at].params.as_ref().unwrap()["path"], json!([first]), "this placement's own Isolate");
+    assert_eq!((items[at].shortcut.as_str(), items[at + 1].id.as_str(), items[at + 1].shortcut.as_str()), ("Ctrl+I", "ui.unisolate", "Ctrl+Shift+I"));
+    let unisolate = context_menu::items(&h.app, &target).into_iter().find(|i| i.label == "Exit Isolation").expect("Exit Isolation");
+    context_menu::run_item(&mut h.app, &unisolate, egui::Pos2::ZERO);
+    assert!(!context_menu::items(&h.app, &target).iter().any(|i| i.label == "Exit Isolation"), "gone once everything is back");
+    assert!(h.app.session.body_visible(&first_body) && h.app.session.body_visible(&second_body));
+    assert!(h.app.session.visibility.hidden_occurrences.is_empty());
 }
 
 #[test]
@@ -1103,4 +1131,62 @@ fn construction_features_keep_their_labels_and_styling() {
     assert_eq!(crate::viewport::component_origin_item(&h.app, &xz), Some("XZ"));
     // The design's own origin keeps its bare name: not a placement's item, feature or not.
     assert_eq!(crate::viewport::component_origin_item(&h.app, "XY"), None);
+}
+
+#[test]
+fn nested_component_move_with_capture_false_preserves_world_expression_and_rebuilds() {
+    let mut h = Harness::new();
+    h.app.run("parameters.add", json!({"name": "dx", "expression": "15 mm"})).unwrap();
+    let outer = h.app.run("component.create", json!({"name": "Outer", "grounded": false})).unwrap()["occurrence"].as_u64().unwrap();
+    let inner = h.app.run("component.create", json!({"name": "Inner", "grounded": false})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "InnerBox"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app.run("occurrence.move", json!({"occurrence": outer, "axis": [0, 0, 1], "angle": "90 deg"})).unwrap();
+
+    crate::dialogs_move::open_on_occurrence(&mut h.app, vec![outer, inner], false);
+    h.settle();
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.extra.insert("capture".into(), json!(false));
+        if let crate::dialogs::Kind::Move { x, .. } = &mut d.kind {
+            *x = "dx".into();
+        }
+    }
+    press_ok(&mut h);
+    assert!(h.app.session.pending_moves.contains_key(&inner));
+    let bounds = |h: &Harness| h.app.session.world_state().unwrap().body("InnerBox").unwrap().mesh().bounds();
+    let b1 = bounds(&h);
+    assert!((b1.min.x - 5.0).abs() < 1e-5 && (b1.max.x - 15.0).abs() < 1e-5, "moved along world +X: {b1:?}");
+
+    let cap = h.app.run("component.capture_position", json!({})).unwrap();
+    let cp_id = cap["feature"].as_u64().unwrap();
+    let solidcraft_engine::doc::FeatureKind::CapturePosition { moves, .. } = &h.app.session.doc.feature(cp_id).unwrap().kind else {
+        panic!("expected CapturePosition");
+    };
+    assert_eq!(moves[0].space, solidcraft_engine::doc::MoveSpace::World);
+    assert_eq!(moves[0].translate[0], "dx");
+
+    h.app.run("parameters.change", json!({"name": "dx", "expression": "30 mm"})).unwrap();
+    let b2 = bounds(&h);
+    assert!((b2.min.x - 20.0).abs() < 1e-5 && (b2.max.x - 30.0).abs() < 1e-5, "rebuilt along world +X: {b2:?}");
+}
+
+#[test]
+fn create_copy_on_component_with_expression_uses_solid_move() {
+    let (mut h, _, first, _) = fixture();
+    h.app.run("parameters.add", json!({"name": "dx", "expression": "20 mm"})).unwrap();
+    crate::dialogs_move::open_on_occurrence(&mut h.app, vec![first], false);
+    h.settle();
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.extra.insert("copy".into(), json!(true));
+        if let crate::dialogs::Kind::Move { x, .. } = &mut d.kind {
+            *x = "dx".into();
+        }
+    }
+    let cmds = crate::dialogs_move::commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(cmds.len(), 1);
+    assert_eq!(cmds[0].0, "solid.move");
+    assert_eq!(cmds[0].1["copy"], json!(true));
+    assert_eq!(cmds[0].1["translate"], json!(["dx", "0 mm", "0 mm"]));
 }

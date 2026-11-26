@@ -46,6 +46,7 @@ impl Walk for crate::newer_file::RawFeature {}
 impl Walk for ProfileSel {}
 impl Walk for std::collections::BTreeMap<String, String> {}
 impl Walk for crate::frame::Anchor {}
+impl Walk for crate::frame::UpAxis {}
 impl Walk for crate::frame::CornerType {}
 impl Walk for crate::frame::Side {}
 impl Walk for crate::frame::TrimEnd {}
@@ -69,6 +70,7 @@ impl Walk for crate::document::FilletTurn {}
 impl Walk for crate::document::MeshData {}
 impl Walk for crate::document::RevolveConvention {}
 impl Walk for crate::document::RailFit {}
+impl Walk for crate::document::DomeShape {}
 impl Walk for crate::document::CoilSection {}
 impl Walk for crate::document::CoilEndCut {}
 impl Walk for crate::document::ThinSide {}
@@ -79,10 +81,12 @@ impl Walk for crate::document::RuledMode {}
 impl Walk for crate::document::RuledCorners {}
 impl Walk for crate::document::ExtrudeConvention {}
 impl Walk for crate::document::FoldSide {}
+impl Walk for crate::document::OffsetEdges {}
 impl Walk for crate::thread_forms::ThreadForm {}
 impl Walk for crate::thread_forms::ThreadHand {}
 impl Walk for crate::thread_forms::ThreadTip {}
 impl Walk for crate::thread_forms::SteepFlank {}
+impl Walk for crate::MoveSpace {}
 // An Align frame's joint origin: picks in its component's coordinates, found by their names.
 impl Walk for Box<crate::joints::JointOrigin> {}
 
@@ -519,6 +523,7 @@ impl GeoRef {
             Self::Axis { name } | Self::ConstructPoint { name } => f(Ref::FeatureName(name)),
             Self::Plane { plane } => plane.walk_feature_refs(f, depth + 1),
             Self::Snap { of, .. } => of.walk_feature_refs(f, depth + 1),
+            Self::PlacedEdge { body, .. } => f(Ref::Body(body)),
             Self::Point { .. }
             | Self::Datum { .. }
             | Self::Origin
@@ -539,6 +544,7 @@ impl GeoRef {
             Self::Axis { name } | Self::ConstructPoint { name } => f(Ref::FeatureName(name)),
             Self::Plane { plane } => plane.walk_feature_refs_mut(f, depth + 1),
             Self::Snap { of, .. } => of.walk_feature_refs_mut(f, depth + 1),
+            Self::PlacedEdge { body, .. } => f(Ref::Body(body)),
             Self::Point { .. }
             | Self::Datum { .. }
             | Self::Origin
@@ -606,9 +612,54 @@ impl Walk for AxisDef {
     construct_geometry!();
 }
 
+/// A Scale's base point: its pick walks as a construction reference does; the bodies' centre has
+/// nothing to walk.
+impl Walk for crate::document::ScaleAbout {
+    fn walk_exprs<'a>(&'a self, f: &mut dyn FnMut(ExprItem<'a>)) {
+        if let crate::document::ScaleAbout::Pick { at } = self {
+            at.walk_exprs(f)
+        }
+    }
+    fn walk_exprs_mut<'a>(&'a mut self, f: &mut dyn FnMut(ExprItemMut<'a>)) {
+        if let crate::document::ScaleAbout::Pick { at } = self {
+            at.walk_exprs_mut(f)
+        }
+    }
+    fn walk_refs<'a>(&'a self, f: &mut dyn FnMut(RefItem<'a>)) {
+        if let crate::document::ScaleAbout::Pick { at } = self {
+            at.walk_feature_refs(f, 0)
+        }
+    }
+    fn walk_refs_mut<'a>(&'a mut self, f: &mut dyn FnMut(RefItemMut<'a>)) {
+        if let crate::document::ScaleAbout::Pick { at } = self {
+            at.walk_feature_refs_mut(f, 0)
+        }
+    }
+    fn walk_geometry<'a>(&'a self, f: &mut dyn FnMut(GeoItem<'a>)) {
+        if let crate::document::ScaleAbout::Pick { at } = self {
+            f(Geo::Construct(at))
+        }
+    }
+    fn walk_geometry_mut<'a>(&'a mut self, f: &mut dyn FnMut(GeoItemMut<'a>)) {
+        if let crate::document::ScaleAbout::Pick { at } = self {
+            f(Geo::Construct(at))
+        }
+    }
+}
+
 /// A feature's own reference to the model (a revolve's or circular pattern's axis on an edge or
 /// round face): walked like a construction axis's.
 impl Walk for GeoRef {
+    fn walk_refs<'a>(&'a self, f: &mut dyn FnMut(RefItem<'a>)) {
+        if let Self::PlacedEdge { body, .. } = self {
+            f(Ref::Body(body));
+        }
+    }
+    fn walk_refs_mut<'a>(&'a mut self, f: &mut dyn FnMut(RefItemMut<'a>)) {
+        if let Self::PlacedEdge { body, .. } = self {
+            f(Ref::Body(body));
+        }
+    }
     fn walk_exprs<'a>(&'a self, f: &mut dyn FnMut(ExprItem<'a>)) {
         plane_exprs(vec![self], f)
     }

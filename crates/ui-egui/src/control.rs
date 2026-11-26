@@ -279,6 +279,7 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
             | "view.ground_shadow"
             | "view.navigation_bar"
             | "view.browser"
+            | "view.parts_library"
             | "view.ribbon_tabs_only"
             | "view.toolbar_reset_all"
             | "view.next_tab"
@@ -286,6 +287,7 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
             | "view.layout"
             | "view.navigate"
             | "view.ambient_occlusion"
+            | "view.isolate_others"
             | "view.perspective"
             | "view.angle_readout"
             | "view.graphics_preset"
@@ -326,6 +328,11 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
 /// A batch step's command id.
 fn command(step: &Value) -> Option<&str> {
     step.get("command").or_else(|| step.get("id")).and_then(Value::as_str)
+}
+
+fn save_command(step: &Value) -> Option<&'static str> {
+    let id = solidcraft_engine::find_command(command(step)?)?.id;
+    matches!(id, "file.save" | "file.save_as").then_some(id)
 }
 
 /// A batch step's parameters: missing or null is no parameters.
@@ -398,6 +405,9 @@ fn batch(app: &mut SolveApp, q: params::Batch) -> Outcome {
     let steps = &q.commands;
     if steps.len() > MAX_BATCH {
         return err(format!("engine.batch: commands must be an array of at most {MAX_BATCH} steps"));
+    }
+    if app.services.persist_design.is_some() && steps.iter().any(|step| save_command(step).is_some()) {
+        return err("send file.save or file.save_as as a standalone command to wait for browser storage");
     }
     let panels = steps.iter().filter(|step| command(step).is_some_and(solidcraft_engine::panels::commands::is_command)).count();
     if panels > 0 {
@@ -508,6 +518,9 @@ fn script(app: &mut SolveApp, p: &Value) -> Outcome {
         Ok(steps) => steps,
         Err(e) => return err(e),
     };
+    if app.services.persist_design.is_some() && steps.iter().any(|step| save_command(step).is_some()) {
+        return err("send file.save or file.save_as as a standalone command to wait for browser storage");
+    }
     if let Some(c) = steps.iter().find_map(switches_design) {
         return err(format!("engine.script unavailable: {c} switches to another design (send it on its own)"));
     }
@@ -626,6 +639,26 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
     out
 }
 
+/// Save commands sent to a browser answer after the same host write as the toolbar.
+pub(crate) fn host_save(app: &mut SolveApp, req: &ControlRequest) -> bool {
+    if app.services.persist_design.is_none() || !matches!(req.method.as_str(), "engine.execute" | "command") {
+        return false;
+    }
+    let Some(id) = save_command(&req.params) else { return false };
+    let start = |app: &mut SolveApp| {
+        let scope = request_scope(app, &req.params)?;
+        let level = request_param_check(&req.method, &req.params)?;
+        let execute: params::Execute = params::parse(&req.params)?;
+        vfs::scoped(scope, || crate::save_job::start_host(app, id, execute.params(), Some(req.reply.clone()), level))
+    };
+    if let Err(e) = start(app)
+        && let Outcome::Done(reply) = err(e)
+    {
+        let _ = req.reply.send(reply);
+    }
+    true
+}
+
 fn handle_request(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> Outcome {
     let level = match request_param_check(&req.method, &req.params) {
         Ok(level) => level,
@@ -742,6 +775,10 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         }
         "ui.status_fixture" => wrap(crate::viewport_status_fixture::control(app, p)),
         "ui.workspace" => with(p, |q| ui_workspace(app, q)),
+        "ui.library" => match crate::parts_library::control(app, p) {
+            Ok(v) => ok(v),
+            Err(e) => err(e),
+        },
         "engine.execute" | "command" => with(p, |q: params::Execute| {
             let id = q.command.clone();
             wrap(execute(app, &id, q.params()))
@@ -999,6 +1036,7 @@ fn ui_edit_folder(app: &mut SolveApp, p: &Value) -> Outcome {
 fn ui_selection(app: &SolveApp) -> Outcome {
     ok(json!({
         "selection": app.session.selection,
+        "all_bodies": app.session.all_bodies_selected(),
         "dialog": app.dialog.as_ref().map(|d| d.inputs.iter().map(|i| json!({"label": i.label, "items": i.items})).collect::<Vec<_>>()),
         "hover": app.viewport.hover,
         "dimensions": crate::dim_view::drawn().into_iter().map(|(id, p)| json!({"id": id, "x": p.x, "y": p.y})).collect::<Vec<_>>(),
@@ -1069,6 +1107,7 @@ fn ui_browser(app: &SolveApp) -> Outcome {
         "occurrences": crate::browser::drawn_occurrences().iter().map(|(path, label, r, open)| json!({"path": path, "label": label, "y": r.center().y, "open": open})).collect::<Vec<_>>(),
         "rows": crate::browser::drawn_rows().iter().map(|(label, r, _, open)| json!({"label": label, "y": r.center().y, "open": open})).collect::<Vec<_>>(),
         "selection": app.session.selection,
+        "all_bodies": app.session.all_bodies_selected(),
         "picked_components": app.tree.picked_components,
     }))
 }
@@ -1155,6 +1194,10 @@ fn ui_inspect(app: &SolveApp) -> Outcome {
 
 /// `ui.file {path, insert?, units?}`: open or insert a file through the file loader.
 fn ui_file(app: &mut SolveApp, q: params::File) -> Outcome {
+    // ui.file is an interactive UI action; engine doc.open remains programmatic.
+    if !q.insert && crate::plugin_menu::offer_import(app, &q.path) {
+        return ok(json!({"busy": app.file_load.busy()}));
+    }
     // A control call never meets the unit dialog an STL or OBJ file asks a person: it names
     // `units` itself, or the file is in millimetres.
     let kind = if q.insert { crate::file_load::Kind::Insert } else { crate::file_load::Kind::Open };
@@ -1339,10 +1382,14 @@ fn ui_view(app: &mut SolveApp, ctx: &egui::Context, q: params::View) -> Outcome 
     app.cancel_view_animation();
     match v {
         "fit" => app.fit_view(),
-        "home" => {
-            app.cam.set_view(StandardView::Iso);
-            app.fit_view();
-        }
+        // The design's own Home view as it was set (#19972), else the iso view fitted.
+        "home" => match solidcraft_engine::view::home_view(&app.session) {
+            Some(home) => app.cam = home,
+            None => {
+                app.cam.set_view(StandardView::Iso);
+                app.fit_view();
+            }
+        },
         v => {
             if let Some(sv) = StandardView::parse(v) {
                 app.cam.set_view(sv);
@@ -2912,7 +2959,7 @@ pub(crate) mod tests {
         h.frames(3);
         assert_eq!(h.app.cam, after);
         assert!(h.ctx.input(|i| i.modifiers.is_none()));
-        assert!(h.app.session.selection.is_empty());
+        assert!(!h.app.session.has_selection());
         assert!(h.app.viewport.boxsel.is_none());
     }
 
@@ -4454,7 +4501,7 @@ pub(crate) mod tests {
         }
         s.execute("component.activate", &json!({"component": "root"})).unwrap();
         let mut h = crate::scenario::Harness::new();
-        h.app = SolveApp::new(s, Services::default());
+        *h.app = SolveApp::new(s, Services::default());
         h.frames(2);
         let before = h.app.cam;
         // Reading during an animated view change leaves it running (no frames run between).
@@ -4556,7 +4603,7 @@ pub(crate) mod tests {
         s.execute("joint.create", &json!({"type": "revolute", "a": at("A", 25), "b": at("B", 25), "flip": true, "name": "Hinge"})).unwrap();
         s.execute("joint.create", &json!({"type": "slider", "a": at("B", 55), "b": at("C", 55), "flip": true, "name": "Rail"})).unwrap();
         let mut h = crate::scenario::Harness::new();
-        h.app = SolveApp::new(s, Services::default());
+        *h.app = SolveApp::new(s, Services::default());
         let before = h.app.session.doc.clone();
         let drive = |h: &crate::scenario::Harness| match h.app.dialog.as_ref().map(|d| &d.kind) {
             Some(crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Drive { joint, values, .. })) => {
@@ -4591,7 +4638,7 @@ pub(crate) mod tests {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
         let mut h = crate::scenario::Harness::new();
-        h.app = SolveApp::new(s, Services::default());
+        *h.app = SolveApp::new(s, Services::default());
         let r = h.call("ui.start", json!({"command": "solid.fillet"}));
         let d = &r["result"]["dialog"];
         assert_eq!((&d["command"], &d["title"], &d["editing"]), (&json!("solid.fillet"), &json!("FILLET"), &Value::Null), "{r}");
