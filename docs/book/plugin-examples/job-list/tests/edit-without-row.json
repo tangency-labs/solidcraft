@@ -1,0 +1,9 @@
+{
+  "entry": "edit",
+  "description": "A double-click event without a row opens no form and says what to do.",
+  "params": {"panel": "jobs", "event": "edit", "path": "/jobs", "row": null, "value": null},
+  "expect": {
+    "error": "invalid_input",
+    "message": "select a job in the table first"
+  }
+}

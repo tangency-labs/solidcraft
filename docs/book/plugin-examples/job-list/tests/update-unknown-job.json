@@ -1,0 +1,9 @@
+{
+  "entry": "update",
+  "description": "Applying the form for a job the design does not have changes nothing.",
+  "params": {"id": "job9", "name": "Face", "tool": 40},
+  "expect": {
+    "error": "invalid_input",
+    "message": "no job `job9`"
+  }
+}

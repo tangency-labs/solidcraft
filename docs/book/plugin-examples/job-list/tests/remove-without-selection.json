@@ -1,0 +1,9 @@
+{
+  "entry": "remove",
+  "description": "Remove pressed with no row selected says what to do instead of removing anything.",
+  "params": {"panel": "jobs", "event": "press", "path": "remove", "row": null, "value": null},
+  "expect": {
+    "error": "invalid_input",
+    "message": "select a job in the table first"
+  }
+}
