@@ -3605,3 +3605,38 @@ fn merge_regions_preserves_narrow_slivers_and_steps() {
     let expected_area = std::f64::consts::PI * r * r;
     assert!((ps[0].area - expected_area).abs() < 1e-16, "area={} expected={expected_area}", ps[0].area);
 }
+
+/// An outline that folds back on itself for a few micrometres (an imported SVG's coast, #22630):
+/// two cubics cross a hair from the end they share, leaving a lobe 3.6 µm round and 6e-6 mm wide
+/// on average. Neither the outline's region nor any region of its own keeps it: a face bounded
+/// by it would have two coincident edges, which the kernel refuses, and extruded alone it is no
+/// closed solid.
+#[test]
+fn an_outline_folding_back_for_micrometres_has_no_spur_and_no_lobe_region() {
+    let mut sk = Sketch::new();
+    let cubic = |sk: &mut Sketch, a: usize, ctrl: [Vec2; 3]| -> usize {
+        let mut ids = vec![a];
+        ids.extend(ctrl.iter().map(|p| sk.add_point(*p, None).unwrap()));
+        let end = ids[3];
+        sk.add_curve(CurveKind::Spline { pts: ids, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
+        end
+    };
+    // The curves s193, s194 and s195 of the reporter's sketch, closed by two lines clear of them.
+    let start = sk.add_point(v(-4.40374, -7.86433), None).unwrap();
+    let a = cubic(&mut sk, start, [v(-4.52194, -7.73448), v(-3.75452, -7.79009), v(-3.69260, -7.70315)]);
+    let b = cubic(&mut sk, a, [v(-3.72686, -7.75118), v(-3.68916, -7.45021), v(-3.67333, -7.49464)]);
+    let c = cubic(&mut sk, b, [v(-3.78961, -7.16718), v(-4.31691, -7.50127), v(-4.44598, -7.18056)]);
+    let far = sk.add_point(v(-5.5, -7.5), None).unwrap();
+    sk.add_line_pts(c, far, None).unwrap();
+    sk.add_line_pts(far, start, None).unwrap();
+    let ps = find_profiles(&sk);
+    assert_eq!(ps.len(), 1, "{:?}", ps.iter().map(|p| (p.area, p.centroid)).collect::<Vec<_>>());
+    // The outline passes each of its corners once: no stretch out to the fold and back.
+    let starts: Vec<Vec2> = ps[0].region.outer.segs.iter().map(Seg2::start).collect();
+    for (i, p) in starts.iter().enumerate() {
+        for q in starts.iter().skip(i + 1) {
+            assert!(p.dist(*q) > 1e-6, "the outline comes back to {p:?}: {:?}", ps[0].region.outer.segs);
+        }
+    }
+    assert!(ps[0].area > 0.5, "{}", ps[0].area);
+}

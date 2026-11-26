@@ -130,6 +130,12 @@ struct Edge {
 /// chord fit, not a region of the drawing (see the loop tracing in `island_loops`).
 const SLIVER_AREA: f64 = 1e-3;
 const SLIVER_WIDTH: f64 = 1.5e-3;
+/// A lobe of a traced loop (a stretch back to the node it left) thinner on average than this
+/// (2 x area / perimeter, mm) has no width the solid can hold: its two sides lie within the
+/// kernel's intersection tolerance (2e-5 mm), so a face bounded by the loop has two coincident
+/// edges there and the kernel's check refuses it. An imported outline that folds back on itself
+/// for a few micrometres leaves such a lobe (#22630).
+const LOBE_WIDTH: f64 = 2e-5;
 
 /// Do two circles lie within `tol` of each other all the way round?
 fn same_circle(c: Vec2, r: f64, c2: Vec2, r2: f64, tol: f64) -> bool {
@@ -2216,6 +2222,10 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
     loop {
         loops.truncate(kept);
         let mut slivers: Vec<usize> = Vec::new();
+        // Half-edges whose twins lobes left out, and each loop kept with its half-edges and
+        // whether it is thinner than [`LOBE_WIDTH`].
+        let mut lobe_twins: HashSet<usize> = HashSet::new();
+        let mut traced: Vec<(usize, Vec<usize>, bool)> = Vec::new();
         let mut outgoing: Vec<Vec<usize>> = vec![Vec::new(); n];
         for (ei, a) in alive.iter().enumerate() {
             if !*a {
@@ -2316,6 +2326,8 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                 continue;
             }
             let keep = without_lobes_of_no_area(&segs, &edge_nodes);
+            // The lobe traced from its other side is a loop of its own: no region either (below).
+            lobe_twins.extend(hs.iter().zip(&keep).filter(|(_, k)| !**k).map(|(h, _)| h ^ 1));
             if keep.iter().any(|k| !k) {
                 fn kept<T>(v: &mut Vec<T>, keep: &[bool]) {
                     let mut k = keep.iter();
@@ -2362,8 +2374,20 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                 let c = edges.get(start / 2).map(|e| find(&mut comp, e.u)).unwrap_or(0);
                 let curve = edges.get(start / 2).map(|e| e.curve).unwrap_or(usize::MAX);
                 let complete = whole_graph_complete.then(|| complete_loop(&coverage_tags, &expected, sk)).flatten();
+                traced.push((loops.len(), hs, 2.0 * area.abs() < LOBE_WIDTH * perimeter));
                 loops.push(IslandLoop::new(lp, ids, c, complete, (1, curve, start)).with_alternates(alts));
             }
+        }
+        // A thin loop made only of the other sides of lobes another loop left out is that lobe
+        // seen from outside: no region of its own, so "all" doesn't build it alone (#22630).
+        let gone: HashSet<usize> =
+            traced.iter().filter(|(_, hs, thin)| *thin && !hs.is_empty() && hs.iter().all(|h| lobe_twins.contains(h))).map(|(i, _, _)| *i).collect();
+        if !gone.is_empty() {
+            let mut i = 0;
+            loops.retain(|_| {
+                i += 1;
+                !gone.contains(&(i - 1))
+            });
         }
         if pass == 0 && !slivers.is_empty() {
             for ei in slivers {
@@ -2380,7 +2404,8 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
 }
 
 /// Which half-edges of a traced loop stay: a lobe (a stretch back to the node it left) of no area
-/// is left out, as the lens two near-tangent crossings leave (#14182).
+/// is left out, as the lens two near-tangent crossings leave (#14182), and so is one thinner than
+/// [`LOBE_WIDTH`] in a loop that is not, as an outline folding back on itself leaves (#22630).
 fn without_lobes_of_no_area(segs: &[Seg2], edge_nodes: &[(usize, usize)]) -> Vec<bool> {
     let n = segs.len();
     let mut keep = vec![true; n];
@@ -2395,6 +2420,10 @@ fn without_lobes_of_no_area(segs: &[Seg2], edge_nodes: &[(usize, usize)]) -> Vec
     if starts.values().all(|s| s.len() < 2) {
         return keep;
     }
+    // Thin lobes go only from a loop that is not thin itself: a thin region (a flat curve over
+    // its chord, sampled into pieces that meet the chord) is made of such lobes and stays whole.
+    let loop_perimeter: f64 = segs.iter().map(Seg2::length).sum();
+    let wide_loop = 2.0 * area_about_start(segs).abs() >= LOBE_WIDTH * loop_perimeter;
     // The edges taken out so far: the search stops at the first of them, as the loop it walks does.
     let mut removed: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
     let mut i = 0;
@@ -2423,7 +2452,10 @@ fn without_lobes_of_no_area(segs: &[Seg2], edge_nodes: &[(usize, usize)]) -> Vec
         let lobe = back.and_then(|j| {
             let idx: Vec<usize> = (0..n).map(|d| (i + d) % n).take_while(|&k| k != j).collect();
             let lobe: Vec<Seg2> = idx.iter().filter_map(|&k| segs.get(k).copied()).collect();
-            (idx.len() < n && area_about_start(&lobe).abs() <= 1e-9).then_some(idx)
+            let area = area_about_start(&lobe);
+            let perimeter: f64 = lobe.iter().map(Seg2::length).sum();
+            let thin = wide_loop && 2.0 * area.abs() < LOBE_WIDTH * perimeter;
+            (idx.len() < n && (area.abs() <= 1e-9 || thin)).then_some(idx)
         });
         match lobe {
             Some(idx) => idx.into_iter().for_each(|k| {
