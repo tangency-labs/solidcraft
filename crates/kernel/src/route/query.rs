@@ -11,10 +11,13 @@ pub use solidcraft_kernel_api::query::{OutlineStretch, QueryRefused};
 use super::{Which, which};
 use crate::backend::Solidcore;
 
-/// A record ready for exact queries, in the kernel's own form. This build holds solidcore only.
+/// A record ready for exact queries, in the kernel's own form. This build holds solidcore only,
+/// so the form is solidcore's query named directly (`<Solidcore as Queries>::Query<'a>`, the same
+/// type): a projection would make `Query` invariant in `'a`, where a borrowed record's query is
+/// covariant.
 pub struct Query<'a> {
     record: &'a Brep,
-    form: <Solidcore as Queries>::Query<'a>,
+    form: solidcore_ops::query::Query<'a>,
 }
 
 impl std::fmt::Debug for Query<'_> {
