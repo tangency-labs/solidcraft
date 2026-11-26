@@ -72,6 +72,84 @@ pub(crate) fn tidy(app: &mut SolveApp) {
     }
 }
 
+/// A group saved at the last quit, waiting in this launch: each of its designs joins it as it opens.
+/// `id` is the group made for it, once its first design is open.
+#[derive(Clone, Debug)]
+pub(crate) struct PendingGroup {
+    saved: crate::tab_groups::RememberedGroup,
+    id: Option<u64>,
+}
+
+/// The groups to remember at quit: each group with designs open (its name, colour, folded state
+/// and the paths of its designs, in tab order), then the saved groups whose designs have not
+/// opened yet, so they are not lost by a launch that did not open them.
+pub(crate) fn remembered(app: &mut SolveApp) -> Vec<crate::tab_groups::RememberedGroup> {
+    let numbers = app.docs.tab_numbers();
+    let mut entries: Vec<(Option<u64>, crate::tab_groups::RememberedGroup)> = Vec::new();
+    for group in app.docs.groups.groups() {
+        let designs: Vec<String> = (0..numbers.len())
+            .filter(|&k| app.docs.groups.group_of(numbers[k]) == Some(group.id))
+            .filter_map(|k| documents::design_session(app, k)?.path.clone())
+            .collect();
+        if !designs.is_empty() {
+            let saved = crate::tab_groups::RememberedGroup {
+                name: group.name.clone(),
+                colour: group.colour.key().to_owned(),
+                collapsed: group.collapsed,
+                designs,
+            };
+            entries.push((Some(group.id), saved));
+        }
+    }
+    for pending in app.docs.pending_groups.iter().flatten() {
+        match pending.id.and_then(|id| entries.iter_mut().find(|(made, _)| *made == Some(id))) {
+            Some((_, saved)) => saved.designs.extend(pending.saved.designs.iter().cloned()),
+            None if !pending.saved.designs.is_empty() => entries.push((None, pending.saved.clone())),
+            None => {}
+        }
+    }
+    entries.into_iter().map(|(_, saved)| saved).take(crate::tab_groups::MAX_GROUPS).collect()
+}
+
+/// A design opened from `path`: when this launch brings groups back, it joins the saved group it
+/// was in. The first of a group's designs to open makes the group (named, coloured and folded as
+/// it was); the others join it next to it.
+pub(crate) fn design_opened(app: &mut SolveApp, path: &str) {
+    if app.docs.pending_groups.is_none() {
+        let pending = app
+            .preferences
+            .open_design_groups
+            .iter()
+            .take(crate::tab_groups::MAX_GROUPS)
+            .map(|saved| {
+                let mut saved = saved.clone();
+                saved.designs.truncate(documents::MAX_OPEN);
+                PendingGroup { saved, id: None }
+            })
+            .collect();
+        app.docs.pending_groups = Some(pending);
+    }
+    let Some(mut pending) = app.docs.pending_groups.take() else { return };
+    for entry in pending.iter_mut() {
+        let Some(at) = entry.saved.designs.iter().position(|p| documents::same_path(p, path)) else { continue };
+        entry.saved.designs.remove(at);
+        let Some(tab) = documents::index_of_path(app, path) else { continue };
+        match entry.id.filter(|id| app.docs.groups.get(*id).is_some()) {
+            Some(id) => {
+                add(app, id, tab);
+            }
+            None => {
+                if let Some(id) = create(app, tab, &entry.saved.name, GroupColour::from_key(&entry.saved.colour)) {
+                    app.docs.groups.set_collapsed(id, entry.saved.collapsed);
+                    entry.id = Some(id);
+                }
+            }
+        }
+    }
+    pending.retain(|entry| !entry.saved.designs.is_empty());
+    app.docs.pending_groups = Some(pending);
+}
+
 /// Put the design in tab `tab` in a new group named `name` (in `colour`, or the next one). Its id.
 pub fn create(app: &mut SolveApp, tab: usize, name: &str, colour: Option<GroupColour>) -> Option<u64> {
     let number = *app.docs.tab_numbers().get(tab)?;
@@ -147,13 +225,33 @@ fn start_rename(app: &mut SolveApp, group: u64) {
     }
 }
 
+/// The group of the design on screen, if it is in one and the strip shows a design (not the start
+/// page). That group always shows its designs.
+fn shown_group(app: &mut SolveApp) -> Option<u64> {
+    if app.home.open {
+        return None;
+    }
+    let tab = *app.docs.tab_numbers().get(app.docs.active)?;
+    app.docs.groups.group_of(tab)
+}
+
+/// Whether `group`'s designs are folded away this frame: it is folded, and it is not the group of
+/// the design on screen.
+fn folded(group: &crate::tab_groups::TabGroup, shown: Option<u64>) -> bool {
+    group.collapsed && shown != Some(group.id)
+}
+
 /// What the strip shows of the groups this frame, in its order: owned here so the strip can
 /// borrow it.
 pub(crate) struct StripGroups {
     /// Every group: its id, name, hover text, fill and colour.
     groups: Vec<(u64, String, String, egui::Color32, GroupColour)>,
+    /// Each group's designs are folded away this frame (see [`folded`]).
+    collapsed: Vec<bool>,
     /// Each tab's group: a place in `groups`.
     pub(crate) of_tab: Vec<Option<usize>>,
+    /// Each tab is folded away this frame: it is not drawn.
+    pub(crate) hidden: Vec<bool>,
     /// Each tab's own menu rows: (id, label).
     tab_rows: Vec<Vec<(String, String)>>,
     rename: String,
@@ -166,6 +264,7 @@ impl StripGroups {
     pub(crate) fn build(app: &mut SolveApp) -> Self {
         tidy(app);
         let (_, marks) = marks(app);
+        let shown = shown_group(app);
         let tr = |key: &str| solidcraft_ui_text::tr(key).to_string();
         let colour_names: Vec<String> = GroupColour::ALL.iter().map(|c| tr(c.message())).collect();
         let named = |group: &crate::tab_groups::TabGroup| {
@@ -181,7 +280,10 @@ impl StripGroups {
                 (group.id, group.name.clone(), tip, fill(group.colour), group.colour)
             })
             .collect();
+        let collapsed: Vec<bool> = app.docs.groups.groups().iter().map(|group| folded(group, shown)).collect();
         let of_tab: Vec<Option<usize>> = marks.iter().map(|mark| mark.and_then(|id| groups.iter().position(|g| g.0 == id))).collect();
+        let hidden: Vec<bool> =
+            marks.iter().map(|mark| mark.and_then(|id| app.docs.groups.get(id)).is_some_and(|group| folded(group, shown))).collect();
         let tab_rows = marks
             .iter()
             .map(|mark| {
@@ -198,7 +300,9 @@ impl StripGroups {
             .collect();
         StripGroups {
             groups,
+            collapsed,
             of_tab,
+            hidden,
             tab_rows,
             rename: tr("tab_group.rename"),
             colour: tr("tab_group.colour"),
@@ -224,7 +328,12 @@ impl StripGroups {
 
     /// The labels, with `menus` from [`Self::group_menus`].
     pub(crate) fn labels<'a>(&'a self, menus: &'a [Vec<TabMenuRow<'a>>]) -> Vec<GroupLabel<'a>> {
-        self.groups.iter().zip(menus).map(|((_, name, tip, fill, _), menu)| GroupLabel { name, fill: *fill, tip, menu }).collect()
+        self.groups
+            .iter()
+            .zip(menus)
+            .zip(&self.collapsed)
+            .map(|(((_, name, tip, fill, _), menu), collapsed)| GroupLabel { name, fill: *fill, tip, menu, collapsed: *collapsed })
+            .collect()
     }
 
     /// Each tab's own rows: new group, the other groups, out of its group.
@@ -301,6 +410,14 @@ pub(crate) fn handle(app: &mut SolveApp, groups: &StripGroups, action: &TabActio
             }
         }
         TabAction::GroupRenameDone | TabAction::GroupRenameCancelled => {}
+        TabAction::ToggleGroup(place) => {
+            // The state shown is the one turned over: a group folded for the design on screen
+            // shows open, and folds once another design is shown.
+            if let Some(group) = groups.id_at(*place) {
+                let shown = groups.collapsed.get(*place).copied().unwrap_or(false);
+                app.docs.groups.set_collapsed(group, !shown);
+            }
+        }
         _ => return false,
     }
     true
@@ -337,6 +454,9 @@ pub(crate) fn command(app: &mut SolveApp, command: &str, mut v: Value) -> Result
             if let Some(colour) = colour {
                 app.docs.groups.recolour(group, colour);
             }
+            if let Some(collapsed) = v.get("collapsed").and_then(Value::as_bool) {
+                app.docs.groups.set_collapsed(group, collapsed);
+            }
             Some(group)
         }
         "tab.group.ungroup" => {
@@ -364,7 +484,7 @@ fn list(app: &mut SolveApp) -> Value {
     let groups: &TabGroups = &app.docs.groups;
     let rows = groups.groups().iter().map(|group| {
         let tabs: Vec<usize> = (0..marks.len()).filter(|&k| marks[k] == Some(group.id)).collect();
-        json!({"id": group.id, "name": group.name, "colour": group.colour.key(), "tabs": tabs})
+        json!({"id": group.id, "name": group.name, "colour": group.colour.key(), "collapsed": group.collapsed, "tabs": tabs})
     });
     Value::Array(rows.collect())
 }
@@ -407,6 +527,36 @@ mod tests {
                 (g["name"].as_str().unwrap().to_owned(), g["colour"].as_str().unwrap().to_owned(), tabs)
             })
             .collect()
+    }
+
+    /// Folding a group hides its designs but keeps its label; the design on screen always shows its
+    /// tab, so the group it is in stays open. Its chevron and `tab.group.update` fold and show.
+    #[test]
+    fn a_folded_group_keeps_its_label_and_hides_its_other_designs() {
+        let mut h = three_designs();
+        let group = call(&mut h, "tab.group.create", json!({"tab": 0, "name": "Pair"}))["result"]["group"].as_u64().unwrap();
+        call(&mut h, "tab.group.add", json!({"group": group, "tab": 1}));
+        documents::switch(&mut h.app, 2);
+        h.frames(2);
+        assert!(crate::scenario::rect_of("tab:design:0").is_some() && crate::scenario::rect_of("tab:design:1").is_some());
+        h.step(&json!({"click": {"handle": "tab:group:0:toggle"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("tab:design:0").is_none(), "a folded design is not drawn");
+        assert!(crate::scenario::rect_of("tab:design:1").is_none(), "a folded design is not drawn");
+        assert!(crate::scenario::rect_of("tab:design:2").is_some(), "the design outside the group is");
+        assert!(crate::scenario::rect_of("tab:group:0").is_some(), "the label stays");
+        let reply = call(&mut h, "tab.group.list", json!({}));
+        assert_eq!(reply["result"]["groups"][0]["collapsed"], json!(true), "the group reports it is folded");
+        // Showing a design of the group shows its designs again, and the group stays open while it is shown.
+        documents::switch(&mut h.app, 1);
+        h.frames(2);
+        assert!(crate::scenario::rect_of("tab:design:0").is_some() && crate::scenario::rect_of("tab:design:1").is_some(), "its own group is open");
+        documents::switch(&mut h.app, 2);
+        h.frames(2);
+        assert!(crate::scenario::rect_of("tab:design:0").is_none(), "folded again once another design is shown");
+        call(&mut h, "tab.group.update", json!({"group": group, "collapsed": false}));
+        h.frames(2);
+        assert!(crate::scenario::rect_of("tab:design:0").is_some() && crate::scenario::rect_of("tab:design:1").is_some(), "the command shows them");
     }
 
     /// From a tab's menu: a new group, named in its label as soon as it is made; another design

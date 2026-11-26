@@ -237,6 +237,9 @@ impl LayoutFill {
 pub struct Documents {
     /// What the places of a layout without a view show ([`LayoutFill`]).
     pub(crate) layout_fill: LayoutFill,
+    /// The tab groups saved at the last quit that this launch is bringing back, from the first
+    /// design opened (`None` until then).
+    pub(crate) pending_groups: Option<Vec<crate::tab_group_ui::PendingGroup>>,
     slots: Vec<Option<DocSlot>>,
     pub active: usize,
     /// A tab waiting for the answer to "save changes?".
@@ -1321,6 +1324,7 @@ pub(crate) fn design_opened(app: &mut SolveApp, path: &str) {
     if let Some(dir) = solidcraft_engine::recovery::data_dir() {
         restore_views_in(app, path, &dir);
     }
+    crate::tab_group_ui::design_opened(app, path);
     if app.session.path.as_deref().is_some_and(|p| same_path(p, path))
         && let Some(kind) = crate::new_window::take_start_view().and_then(|key| ViewKind::from_key(&key))
     {
@@ -1894,6 +1898,17 @@ pub(crate) fn reuse_path(app: &mut SolveApp, path: &str) -> Result<bool, String>
     Ok(true)
 }
 
+/// The session of the design at tab index `k`: the shown one is in the app itself.
+pub(crate) fn design_session(app: &SolveApp, k: usize) -> Option<&solidcraft_engine::Session> {
+    if k == app.docs.active { Some(&app.session) } else { app.docs.slots.get(k).and_then(Option::as_ref).map(|slot| &slot.session) }
+}
+
+/// The tab index of the open design saved at `path`: the shown one first.
+pub(crate) fn index_of_path(app: &SolveApp, path: &str) -> Option<usize> {
+    let matches = |k: usize| design_session(app, k).and_then(|s| s.path.as_deref()).is_some_and(|p| same_path(p, path));
+    (0..app.docs.count()).find(|&k| k == app.docs.active && matches(k)).or_else(|| (0..app.docs.count()).find(|&k| matches(k)))
+}
+
 pub(crate) fn same_path(a: &str, b: &str) -> bool {
     if a == b {
         return true;
@@ -2463,6 +2478,7 @@ fn quit_step(app: &mut SolveApp) {
                 false => app.docs.slots.iter().map(|s| s.as_ref().map_or(&app.session, |d| &d.session)).collect(),
             };
             app.preferences.open_designs = sessions.into_iter().filter_map(|s| s.path.clone()).collect();
+            app.preferences.open_design_groups = crate::tab_group_ui::remembered(app);
         }
     }
 }
@@ -3161,7 +3177,8 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 .zip(&view_tabs)
                 .zip(group_parts.of_tab.iter().chain(std::iter::repeat(&None)))
                 .zip(tab_menus.iter().map(Vec::as_slice).chain(std::iter::repeat(&[][..])))
-                .map(|(((((((list_name, dirty), name), place), security), views), group), extra_menu)| crate::app_bar::DocTab {
+                .zip(group_parts.hidden.iter().copied().chain(std::iter::repeat(false)))
+                .map(|((((((((list_name, dirty), name), place), security), views), group), extra_menu), hidden)| crate::app_bar::DocTab {
                     name,
                     list_name,
                     dirty: *dirty,
@@ -3170,6 +3187,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                     views,
                     group: *group,
                     extra_menu,
+                    hidden,
                 })
                 .collect(),
             selected,

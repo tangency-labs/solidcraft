@@ -5,6 +5,7 @@
 
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
 use solidcraft_theme::AccentRamp;
 
 /// Longest group name, in characters (what `tab.group.update` takes too).
@@ -77,12 +78,28 @@ impl GroupColour {
 }
 
 /// One group: its id (unique for as long as the window is open), its name (may be empty: the
-/// label is then a coloured dot) and its colour.
+/// label is then a coloured dot), its colour, and whether its designs are folded away to the label.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TabGroup {
     pub id: u64,
     pub name: String,
     pub colour: GroupColour,
+    pub collapsed: bool,
+}
+
+/// A group as the last quit left it (the `open_design_groups` preference): its name, colour and
+/// folded state, and the paths of its designs that were open then, in tab order. The designs open
+/// again join it, so a group comes back with its designs after a restart.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RememberedGroup {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub colour: String,
+    #[serde(default)]
+    pub collapsed: bool,
+    #[serde(default)]
+    pub designs: Vec<String>,
 }
 
 /// The window's groups, in the order they were made, and which group each tab is in.
@@ -132,7 +149,7 @@ impl TabGroups {
         let id = self.next_id;
         self.next_id += 1;
         let colour = colour.unwrap_or_else(|| self.next_colour());
-        self.groups.push(TabGroup { id, name, colour });
+        self.groups.push(TabGroup { id, name, colour, collapsed: false });
         self.join(tab, Some(id));
         Some(id)
     }
@@ -171,6 +188,18 @@ impl TabGroups {
         match self.groups.iter_mut().find(|group| group.id == id) {
             Some(group) => {
                 group.colour = colour;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Fold the group `id`'s designs away to its label (or show them again). False when there is no
+    /// such group.
+    pub fn set_collapsed(&mut self, id: u64, collapsed: bool) -> bool {
+        match self.groups.iter_mut().find(|group| group.id == id) {
+            Some(group) => {
+                group.collapsed = collapsed;
                 true
             }
             None => false,
@@ -318,5 +347,20 @@ mod tests {
         assert_eq!(group_after_drop(&[a, None, None], 1), None, "beside a, not of it");
         assert_eq!(group_after_drop(&[b, a, None], 1), None, "beside b, not of it");
         assert_eq!(group_after_drop(&[], 3), None);
+    }
+
+    /// A group folds away and shows again, and keeps its folded state while designs join it.
+    #[test]
+    fn a_group_folds_and_shows_again_and_keeps_its_state_as_designs_join() {
+        let mut groups = TabGroups::default();
+        let id = groups.create(1, "Parts", None).unwrap();
+        assert!(!groups.get(id).unwrap().collapsed, "shown open when made");
+        assert!(groups.set_collapsed(id, true));
+        assert!(groups.get(id).unwrap().collapsed);
+        assert!(groups.join(2, Some(id)));
+        assert!(groups.get(id).unwrap().collapsed, "joining keeps it folded");
+        assert!(groups.set_collapsed(id, false));
+        assert!(!groups.get(id).unwrap().collapsed);
+        assert!(!groups.set_collapsed(99, true), "no such group");
     }
 }

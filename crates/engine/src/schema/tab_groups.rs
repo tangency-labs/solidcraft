@@ -69,6 +69,10 @@ pub struct TabGroupUpdateParams {
     pub name: Option<String>,
     #[serde(default)]
     pub colour: Option<TabGroupColour>,
+    /// True folds the group's designs away to its label, false shows them again. A group whose
+    /// design is on screen shows its designs until another is shown.
+    #[serde(default)]
+    pub collapsed: Option<bool>,
 }
 
 /// `tab.group.ungroup`: take a group away; its designs stay open.
@@ -91,6 +95,8 @@ pub struct TabGroupInfo {
     pub id: u64,
     pub name: String,
     pub colour: TabGroupColour,
+    /// Its designs are folded away to the label.
+    pub collapsed: bool,
     /// Its designs' tabs, 0 first, in strip order.
     pub tabs: Vec<u64>,
 }

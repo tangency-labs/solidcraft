@@ -451,6 +451,9 @@ const GROUP_PAD: f32 = 9.0;
 /// A named label's colour dot: its radius and the room it takes before the name.
 const GROUP_SWATCH: f32 = 3.5;
 const GROUP_SWATCH_ROOM: f32 = 12.0;
+/// The room a label's chevron takes at its right end, and the chevron's half-width.
+const GROUP_CHEVRON_ROOM: f32 = 14.0;
+const GROUP_CHEVRON: f32 = 3.5;
 /// How strongly a label's pill is tinted with its colour, at rest and under the pointer.
 const GROUP_TINT: f32 = 0.30;
 const GROUP_TINT_HOT: f32 = 0.45;
@@ -1400,6 +1403,8 @@ pub struct DocTab<'a> {
     pub group: Option<usize>,
     /// Rows its right-click menu has after the strip's own ([`TabStrip::menu`]): its group rows.
     pub extra_menu: &'a [TabMenuRow<'a>],
+    /// Folded away with its group: the group's label stays, the tab is not drawn and takes no room.
+    pub hidden: bool,
 }
 
 /// What a view's sub-tab says about its source.
@@ -1593,6 +1598,8 @@ pub struct GroupLabel<'a> {
     pub fill: egui::Color32,
     pub tip: &'a str,
     pub menu: &'a [TabMenuRow<'a>],
+    /// Its designs are folded away: the chevron points right, else down.
+    pub collapsed: bool,
 }
 
 /// The tab strip as the app describes it this frame.
@@ -1751,6 +1758,8 @@ pub enum TabAction {
     /// The name typed into a group's label was kept, or the edit given up.
     GroupRenameDone,
     GroupRenameCancelled,
+    /// The group at this place had its chevron clicked: fold its designs away, or show them.
+    ToggleGroup(usize),
 }
 
 /// A tab dragged along the strip: the tab and where along it the pointer grabbed it.
@@ -3494,9 +3503,10 @@ pub fn view_drag_active(ctx: &egui::Context, strip: egui::Id) -> bool {
 /// at [`GROUP_LABEL_MAX`].
 fn group_label_width(ui: &egui::Ui, name: &str) -> f32 {
     if name.is_empty() {
-        return GROUP_DOT;
+        return GROUP_DOT + GROUP_CHEVRON_ROOM;
     }
-    (text_width(ui, name, crate::type_face::semibold(Tokens::get().font_small)) + GROUP_SWATCH_ROOM + 2.0 * GROUP_PAD).min(GROUP_LABEL_MAX)
+    (text_width(ui, name, crate::type_face::semibold(Tokens::get().font_small)) + GROUP_SWATCH_ROOM + 2.0 * GROUP_PAD + GROUP_CHEVRON_ROOM)
+        .min(GROUP_LABEL_MAX)
 }
 
 /// The label of the tab group at place `g`, in `rect`: a pill tinted with its colour holding a dot
@@ -3518,10 +3528,11 @@ fn group_label(ui: &mut egui::Ui, strip: &mut TabStrip, g: usize, rect: Rect, me
     let painter = ui.painter();
     let hot = resp.hovered() || resp.has_focus();
     if label.name.is_empty() {
+        let dot = pos2(rect.left() + GROUP_DOT / 2.0, rect.center().y);
         if hot {
-            painter.circle_filled(rect.center(), 9.0, label.fill.gamma_multiply(GROUP_TINT));
+            painter.circle_filled(dot, 9.0, label.fill.gamma_multiply(GROUP_TINT));
         }
-        painter.circle_filled(rect.center(), 6.0, label.fill);
+        painter.circle_filled(dot, 6.0, label.fill);
     } else {
         // Tinted, so the name can be in the bar's own text colour on every group colour.
         painter.rect_filled(rect, 6u8, label.fill.gamma_multiply(if hot { GROUP_TINT_HOT } else { GROUP_TINT }));
@@ -3531,7 +3542,31 @@ fn group_label(ui: &mut egui::Ui, strip: &mut TabStrip, g: usize, rect: Rect, me
         let font = crate::type_face::semibold(Tokens::get().font_small);
         let galley = painter.layout_no_wrap(label.name.to_string(), font, ink);
         let at = pos2(rect.left() + GROUP_PAD + GROUP_SWATCH_ROOM, rect.center().y - galley.size().y / 2.0);
-        painter.with_clip_rect(rect.shrink2(vec2(GROUP_PAD - 2.0, 0.0))).galley(at, galley, ink);
+        // The name stops short of the chevron.
+        let clip = Rect::from_min_max(pos2(rect.left() + GROUP_PAD - 2.0, rect.top()), pos2(rect.right() - GROUP_CHEVRON_ROOM, rect.bottom()));
+        painter.with_clip_rect(clip).galley(at, galley, ink);
+    }
+    // The chevron folds the group's designs away to the label, or shows them again. It is its own
+    // click target, over the label's, so a click on it never starts a rename or opens the menu.
+    let chevron = Rect::from_min_max(pos2(rect.right() - GROUP_CHEVRON_ROOM, rect.top()), rect.right_bottom());
+    solidcraft_ui_registry::publish_target(&format!("{}{g}:toggle", h.group), chevron);
+    let c = chevron.center();
+    let (a, b, d) = if label.collapsed {
+        (
+            pos2(c.x - GROUP_CHEVRON / 2.0, c.y - GROUP_CHEVRON),
+            pos2(c.x + GROUP_CHEVRON / 2.0, c.y),
+            pos2(c.x - GROUP_CHEVRON / 2.0, c.y + GROUP_CHEVRON),
+        )
+    } else {
+        (
+            pos2(c.x - GROUP_CHEVRON, c.y - GROUP_CHEVRON / 2.0),
+            pos2(c.x + GROUP_CHEVRON, c.y - GROUP_CHEVRON / 2.0),
+            pos2(c.x, c.y + GROUP_CHEVRON / 2.0),
+        )
+    };
+    ui.painter().add(egui::Shape::convex_polygon(vec![a, b, d], Tokens::get().app_bar_text, Stroke::NONE));
+    if ui.interact(chevron, ui.scope_id().with(("doc_group_toggle", g)), Sense::click()).clicked() {
+        actions.push(TabAction::ToggleGroup(g));
     }
     if resp.has_focus() {
         paint_focus(ui.painter(), rect, 6);
@@ -3606,6 +3641,9 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
         .iter()
         .enumerate()
         .map(|(i, tab)| {
+            if tab.hidden {
+                return pre(i);
+            }
             if let Some(g) = geom.as_ref().filter(|_| i == strip.selected) {
                 return g.width + pre(i);
             }
@@ -3642,6 +3680,7 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
     // The shown tabs' widths, in strip order.
     let widths: Vec<f32> = (first..first + shown)
         .map(|i| match geom.as_ref() {
+            _ if strip.tabs.get(i).is_some_and(|tab| tab.hidden) => pre(i),
             Some(g) if i == strip.selected => g.width + pre(i),
             _ if fit_all => natural.get(i).copied().unwrap_or(w),
             _ => w + pre(i),
@@ -3702,6 +3741,10 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
                 let lr = Rect::from_min_size(pos2(slot_left, r.center().y - 11.0), vec2(label_w - GROUP_GAP, 22.0));
                 group_label(ui, strip, g, lr, &mut group_menu, &mut actions);
             }
+        }
+        // A folded tab keeps only its group's label, which is drawn above.
+        if tab.hidden {
+            continue;
         }
         // A tab never reaches back over its group's label, even with too little room for it.
         let tab_clip = ui.clip_rect();

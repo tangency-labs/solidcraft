@@ -1185,6 +1185,8 @@ struct TabsRig {
     /// The first two designs are in a tab group named "Parts" (or with no name, `unnamed`).
     grouped: std::cell::Cell<bool>,
     unnamed: std::cell::Cell<bool>,
+    /// The group is folded: its designs are hidden and its chevron points right.
+    collapsed: std::cell::Cell<bool>,
 }
 
 impl TabsRig {
@@ -1218,6 +1220,7 @@ impl TabsRig {
             focused: std::cell::Cell::new(false),
             grouped: std::cell::Cell::new(false),
             unnamed: std::cell::Cell::new(false),
+            collapsed: std::cell::Cell::new(false),
         };
         rig.frame(Vec::new());
         rig
@@ -1246,10 +1249,12 @@ impl TabsRig {
             views: &[],
             group: None,
             extra_menu: &[],
+            hidden: false,
         };
         let grouped = self.grouped.get();
-        fn in_group(grouped: bool, doc: DocTab<'_>) -> DocTab<'_> {
-            if grouped { DocTab { group: Some(0), extra_menu: &EXTRA_MENU, ..doc } } else { doc }
+        let hidden = self.collapsed.get();
+        fn in_group(grouped: bool, hidden: bool, doc: DocTab<'_>) -> DocTab<'_> {
+            if grouped { DocTab { group: Some(0), extra_menu: &EXTRA_MENU, hidden, ..doc } } else { doc }
         }
         let mut views = VIEWS;
         if self.detached {
@@ -1264,17 +1269,18 @@ impl TabsRig {
         } else {
             &[]
         };
-        let first = in_group(grouped, DocTab { views, ..tab(self.name) });
+        let first = in_group(grouped, hidden, DocTab { views, ..tab(self.name) });
         let groups = [GroupLabel {
             name: if self.unnamed.get() { "" } else { "Parts" },
             fill: egui::Color32::RED,
             tip: "Tab group: Parts",
             menu: &GROUP_MENU,
+            collapsed: self.collapsed.get(),
         }];
         let layout = self.layout.map(|(visible, window_count)| layout_test_data(visible, window_count));
         let (mut text, mut focused) = (self.text.borrow().clone(), self.focused.get());
         let mut strip = TabStrip {
-            tabs: if self.pop_out { vec![first] } else { vec![first, in_group(grouped, tab("Two")), tab("Three")] },
+            tabs: if self.pop_out { vec![first] } else { vec![first, in_group(grouped, hidden, tab("Two")), tab("Three")] },
             selected: 0,
             shown_selected: Some(0),
             pop_out: self.pop_out,
@@ -1705,6 +1711,24 @@ fn a_tab_groups_label_comes_before_its_tabs_with_its_menu() {
     rig.unnamed.set(true);
     rig.frame(Vec::new());
     assert!(rect("t:group:0").width() < label.width(), "a dot is narrower than a name");
+}
+
+/// A folded group keeps its label, with its chevron as a target of its own: its designs are not
+/// drawn, and a click on the chevron asks to show them.
+#[test]
+fn a_folded_group_draws_only_its_label_and_its_chevron_toggles_it() {
+    let rect = |name: &str| solidcraft_ui_registry::rect_of(name).unwrap_or_else(|| panic!("{name} is drawn"));
+    let rig = TabsRig::new();
+    rig.grouped.set(true);
+    rig.collapsed.set(true);
+    rig.frame(Vec::new());
+    let label = rect("t:group:0");
+    assert!(solidcraft_ui_registry::rect_of("t:tab:0").is_none(), "a folded design is not drawn");
+    assert!(solidcraft_ui_registry::rect_of("t:tab:1").is_none(), "a folded design is not drawn");
+    assert!(label.width() > 0.0, "the label stays");
+    let chevron = rect("t:group:0:toggle");
+    assert!(label.contains_rect(chevron) && chevron.right() <= label.right() + 0.5, "the chevron sits at the label's end");
+    assert_eq!(rig.press(rig.at("t:group:0:toggle"), egui::PointerButton::Primary), vec![TabAction::ToggleGroup(0)]);
 }
 
 /// The selected design's views show as sub-tabs inside its tab when it is in a group, after the
