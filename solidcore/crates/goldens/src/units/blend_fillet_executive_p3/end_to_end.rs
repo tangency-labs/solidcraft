@@ -3976,9 +3976,14 @@ mod wr459_sphere_rows {
     }
 
     /// The face's whole surface object, as `Debug` prints it (its kind and its owner,
-    /// tolerance and cache state).
+    /// tolerance and cache state), less the `fitted_net` field of every `Surface` in it
+    /// (the round's and its supports': whether the stored net is a fitted approximation
+    /// of a definition, which the certified line pass reads). The text main hashed
+    /// (a2b7ec60e2) has no such field, and it says nothing of the geometry.
     fn surface_text(b: &Brep, f: FaceId) -> String {
         format!("{:?}", b.face(f).unwrap().surface.as_ref().unwrap())
+            .replace(", fitted_net: false", "")
+            .replace(", fitted_net: true", "")
     }
 
     /// The face's surface geometry, as `Debug` prints its kind (the surface's type and

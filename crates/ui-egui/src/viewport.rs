@@ -39,6 +39,10 @@ mod removed_later_tests;
 #[path = "viewport_plane_target_tests.rs"]
 mod plane_target_tests;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "viewport_projected_shadow_tests.rs"]
+mod projected_shadow_tests;
+
 #[cfg(test)]
 #[path = "viewport_ground_tests.rs"]
 mod ground_tests;
@@ -1229,6 +1233,7 @@ fn sketch_scene_key_with(app: &SolveApp, proj: &Proj, model_key: u64) -> u64 {
     model_key.hash(&mut h);
     app.viewport.wireframe.generation().hash(&mut h);
     app.ui.ground_shadow.hash(&mut h);
+    app.preferences.ground_shadow_style.hash(&mut h);
     // Crossing the ground plane toggles ground shadow visibility even when no grid is shown.
     (app.cam.pitch > 0.0).hash(&mut h);
     // The ground shadow lies under the bodies where a joint drag draws them.
@@ -1848,7 +1853,7 @@ fn look_key(
     let name = b.definition_name();
     hash_look(doc.appearances.bodies.get(name), &mut h);
     hash_look(doc.appearances.components.get(&b.component), &mut h);
-    let material = doc.materials.get(name);
+    let material = doc.resolved_body_material(name);
     material.hash(&mut h);
     hash_look(material.and_then(|m| doc.material_look(m)).as_ref(), &mut h);
     faces.get(name).copied().unwrap_or(0).hash(&mut h);
@@ -3580,6 +3585,7 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         let geometry = shadow_geometry(app, &st);
         sc.shadow = geometry.bytes.as_ref().clone();
         sc.palette = geometry.palette;
+        sc.projected_shadow = geometry.projection;
     } else if let Ok(mut cache) = app.viewport.shadow.lock()
         && cache.as_ref().is_some_and(|c| !std::sync::Arc::ptr_eq(&c.state, &st))
     {
@@ -3897,6 +3903,7 @@ struct ShadowGeometry {
     state: std::sync::Arc<solidcraft_engine::doc::ModelState>,
     bytes: std::sync::Arc<Vec<u8>>,
     palette: std::sync::Arc<crate::gpu::Palette>,
+    projection: Option<std::sync::Arc<solidcraft_viewport_gpu::view::ground_shadow::Projection>>,
 }
 
 /// Changing sides of the ground only changes whether this small shadow is drawn; it never
@@ -3905,7 +3912,7 @@ fn shadow_geometry(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::M
     // With where a joint drag draws its moving bodies: the shadow lies under them there.
     let key = {
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (scene_key(app), joint_motions::key(app)).hash(&mut h);
+        (scene_key(app), joint_motions::key(app), app.preferences.ground_shadow_style).hash(&mut h);
         h.finish()
     };
     if let Some(geometry) =
@@ -3915,16 +3922,24 @@ fn shadow_geometry(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::M
     }
     let mut scene = GpuScene::default();
     ground_shadow(&mut scene, app, joint_motions::ground_boxes(app).unwrap_or_else(|| ground_boxes(app, st)));
-    let geometry = ShadowGeometry { key, state: st.clone(), bytes: std::sync::Arc::new(scene.shadow), palette: scene.palette };
+    let geometry = ShadowGeometry {
+        key,
+        state: st.clone(),
+        bytes: std::sync::Arc::new(scene.shadow),
+        palette: scene.palette,
+        projection: scene.projected_shadow,
+    };
     if let Ok(mut cache) = app.viewport.shadow.lock() {
         *cache = Some(geometry.clone());
     }
     geometry
 }
 
-/// Whether the view draws the ground shadow: turned on, not in Wireframe, seen from above.
+/// Whether the view includes ground-shadow data. Projected shadows handle their visible side on the GPU.
 fn ground_shadow_shown(app: &SolveApp) -> bool {
-    app.ui.ground_shadow && app.ui.visual_style != 2 && app.cam.pitch > 0.0
+    app.ui.ground_shadow
+        && app.ui.visual_style != 2
+        && (app.cam.pitch > 0.0 || app.preferences.ground_shadow_style == crate::prefs::GroundShadowStyle::Projected)
 }
 
 /// Each shown body's box in the camera's Z-up frame (the ground is its XY plane).
@@ -3980,6 +3995,7 @@ fn ground_height(app: &SolveApp, bounds: solidcraft_engine::geom::Aabb3) -> f64 
 
 /// A soft dark ellipse on the ground under each group of shown bodies (darkest in the middle).
 fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, framed: Vec<solidcraft_engine::geom::Aabb3>) {
+    let first = sc.shadow.len();
     let all = framed.iter().fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, b| a.union(b));
     if all.is_empty() {
         return;
@@ -3994,6 +4010,18 @@ fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, framed: Vec<solidcraft_engin
         }
         let at = |r: f64, a: f64| app.cam.from_frame(Vec3::new(c.x + rx * r * a.cos(), c.y + ry * r * a.sin(), z)).to_f32();
         shadow_ellipse(sc, dark, at);
+    }
+    if app.preferences.ground_shadow_style == crate::prefs::GroundShadowStyle::Projected
+        && let Some(mut projection) = solidcraft_viewport_gpu::view::ground_shadow::Projection::new(
+            solidcraft_engine::render::view_bounds(&all),
+            z,
+            &app.cam,
+            dark as f32 / 255.0 * 0.8,
+            Vec::new(),
+        )
+    {
+        projection.fallback = sc.shadow.split_off(first);
+        sc.projected_shadow = Some(std::sync::Arc::new(projection));
     }
 }
 
@@ -8682,7 +8710,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     let layer = ui.layer_id();
     let backdrop_from = ui.ctx().graphics_mut(|g| g.entry(layer).next_idx().0);
     let painter = ui.painter_at(paint);
-    solidcraft_viewport_egui::paint_background(&painter, paint, t.viewport_top, t.viewport_bottom);
+    solidcraft_viewport_egui::paint_background(&painter, paint, t.viewport_top, t.viewport_middle, t.viewport_bottom);
     crate::gpu::paint_background_picture(app, &painter, paint);
     // A plugin's background effect (`shaders@0.1`), when one is chosen.
     #[cfg(not(target_arch = "wasm32"))]
@@ -9029,8 +9057,9 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             && !app.viewport.draw_drag_handled
             && crate::dim_view::accept_outside_click(app);
         if resp.clicked() && !held && !reference_pick && !dim_accept && !joint_handle_pointer && !app.viewport.draw_drag_handled {
-            if crate::browser_canvas::click(app, &proj, p) {
-                // Calibrate Canvas: the click sets Point A or B on the image (#9108).
+            if crate::browser_canvas::click(app, &proj, p, add) {
+                // Calibrate Canvas: the click sets Point A or B on the image (#9108); Trace Region: it picks a
+                // region, Ctrl+click one more (#20798).
             } else if app.tool.is_some() {
                 crate::tools::on_click(app, &proj, p, mods.shift);
             } else if app.dialog.as_ref().is_some_and(|d| d.wants_picks()) {
@@ -11485,6 +11514,7 @@ pub(crate) fn scene_palette(dark: bool, mode: solidcraft_theme::ColorVision) -> 
     let rgb = |c: Color32| Rgb(c.r(), c.g(), c.b());
     solidcraft_engine::view::Palette {
         background: (rgb(t.viewport_top), rgb(t.viewport_bottom)),
+        background_middle: t.viewport_middle.map(rgb),
         grid: rgb(t.grid),
         grid_major: rgb(t.grid_major),
         edge: rgb(t.body_edge),
@@ -11745,14 +11775,12 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, focused_v
     // The compass returns a view action; its drag came from `axis_view_orbit` above.
     match crate::view_compass::show(ui, &compass) {
         Some(crate::view_compass::ViewAction::Snap { direction, .. }) => {
+            // The tip the view already looks from turns it round. The view itself comes from
+            // `view.navigate`, as for the custom navigator's faces, so both pick a view one way (#21480).
             let d = Vec3::from(direction);
-            let frame = app.cam.to_frame(d);
-            let dir = if app.cam.back().dot(d) > 0.9999 { -d } else { d };
-            let mut to = app.cam.looking_from(dir);
-            if frame.z.abs() > 0.5 {
-                to.yaw = nearest_quarter_turn(app.cam.yaw);
-            }
-            app.animate_turn(to);
+            let from = app.cam_anim.map_or(app.cam, |a| a.to);
+            let dir = if from.back().dot(d) > 0.9999 { -d } else { d };
+            navigator_controls::navigate(app, None, Some(from.to_frame(dir)));
         }
         Some(crate::view_compass::ViewAction::Home) => app.animate_view("home"),
         Some(crate::view_compass::ViewAction::TurnAround) => {
@@ -19856,6 +19884,42 @@ mod tests {
         assert!(!h.app.preferences.navigator_fit, "Navigation defaults restore the in-place turn");
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert_eq!(h.app.session.undo.len(), undo, "a view change edits nothing");
+    }
+
+    /// #21480: an axis tip turns the view the shortest way, as the custom navigator's faces do.
+    /// From Top, X keeps Y up the screen and swings Z to the side; the turn's axis keeps its place
+    /// on screen from any roll; the tip already looked from turns round about the screen's up axis;
+    /// from the isometric view, Top squares up.
+    #[test]
+    fn axis_tips_turn_the_view_the_shortest_way() {
+        use std::f64::consts::{FRAC_PI_2, PI};
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"axes", "look_at_anim":false}));
+        let front = Camera { yaw: 0.0, pitch: 0.0, roll: 0.0, ..h.app.cam };
+        let click = |h: &mut crate::scenario::Harness, from: Camera, axis: &str| -> Camera {
+            h.app.cam = from;
+            h.frames(2);
+            let p = crate::scenario::handle_at(axis).unwrap();
+            h.call("ui.click", json!({"x":p.x,"y":p.y}));
+            h.settle();
+            h.app.cam
+        };
+        let (r, u, b) = click(&mut h, Camera { pitch: FRAC_PI_2, ..front }, "axis_view:x").basis();
+        assert!(b.dist(Vec3::X) < 1e-6 && u.dist(Vec3::Y) < 1e-6 && r.dist(Vec3::Z * -1.0) < 1e-6, "{r:?} {u:?} {b:?}");
+        for roll in [0.0, FRAC_PI_2, PI, -FRAC_PI_2] {
+            let from = Camera { roll, ..front };
+            let (r0, u0, _) = from.basis();
+            // Z turns about world X and X about world Z; the Front tip, looked from, turns round.
+            for (axis, back, pivot) in [("axis_view:z", Vec3::Z, Vec3::X), ("axis_view:x", Vec3::X, Vec3::Z), ("axis_view:-y", Vec3::Y, u0)] {
+                let (r, u, b) = click(&mut h, from, axis).basis();
+                let msg = format!("{axis} from roll {roll}");
+                assert!(b.dist(back) < 1e-6, "{msg}: looks from {b:?}");
+                assert!((pivot.dot(r) - pivot.dot(r0)).abs() < 1e-6 && (pivot.dot(u) - pivot.dot(u0)).abs() < 1e-6, "{msg}: {r:?} {u:?}");
+            }
+        }
+        let iso = Camera { yaw: -PI / 4.0, pitch: 0.6155, roll: 0.0, ..front };
+        let (r, u, b) = click(&mut h, iso, "axis_view:z").basis();
+        assert!(b.dist(Vec3::Z) < 1e-6 && r.dist(Vec3::X) < 1e-6 && u.dist(Vec3::Y) < 1e-6, "{r:?} {u:?} {b:?}");
     }
 
     #[test]

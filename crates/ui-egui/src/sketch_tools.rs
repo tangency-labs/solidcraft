@@ -3159,6 +3159,8 @@ mod glyph_zoom_tests {
         for cmd in [
             "sketch.constraint.parallel",
             "sketch.constraint.coincident",
+            "sketch.constraint.horizontal",
+            "sketch.constraint.vertical",
             "sketch.constraint.horizontal_vertical",
             "sketch.constraint.curvature",
             "sketch.constrainer",

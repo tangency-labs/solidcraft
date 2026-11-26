@@ -15,6 +15,7 @@ use std::sync::{Arc, OnceLock};
 use solidcore_record::{Region2, Vec3};
 use solidcraft_kernel::Body;
 use solidcraft_kernel::history::{BodyHistory, Change, EdgeProv, FaceOrigin, FaceProv, History};
+use solidcraft_kernel::services::mesh::{FACE_ORDER_VERSION, ReconstructionKind};
 
 use crate::SolvedSketch;
 
@@ -608,6 +609,40 @@ pub(crate) fn part_role(origins: &[FaceOrigin], part: &str) -> Option<String> {
         [FaceOrigin::Profile { segment }] => Some(format!("{part}:side:{segment}")),
         _ => None,
     }
+}
+
+/// The faces of a deterministic mesh reconstruction, bound to its exact inputs. An ordinal
+/// alone is unsafe: another tolerance or an upstream mesh edit may reorder recovered faces.
+/// Identity uses the original shared-vertex positions and triangle indices, independent of display
+/// normals, split vertices and serde fields. The v6 encoding is little-endian: reconstruction
+/// kind (0 analytic, 1 faceted), the producer's u32 face-order version, tolerance bits, u64 vertex
+/// count, xyz f64 bit patterns, u64 triangle count, then each triangle's u32 indices.
+/// The producer versions face ordering; bump this domain when the input encoding changes.
+pub(crate) fn reconstructed_tool(body: Body, positions: &[Vec3], triangles: &[[u32; 3]], tolerance: f64, kind: ReconstructionKind) -> Traced {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    hash.update(b"solidcraft-mesh-reconstruction-v6");
+    hash.update([match kind {
+        ReconstructionKind::Analytic => 0,
+        ReconstructionKind::Faceted => 1,
+    }]);
+    hash.update(FACE_ORDER_VERSION.to_le_bytes());
+    hash.update(tolerance.to_le_bytes());
+    hash.update((positions.len() as u64).to_le_bytes());
+    for p in positions {
+        for coordinate in [p.x, p.y, p.z] {
+            hash.update(coordinate.to_bits().to_le_bytes());
+        }
+    }
+    hash.update((triangles.len() as u64).to_le_bytes());
+    for triangle in triangles {
+        for index in triangle {
+            hash.update(index.to_le_bytes());
+        }
+    }
+    let digest = format!("{:x}", hash.finalize());
+    let roles = (0..body.face_count()).map(|face| vec![format!("mesh:{digest}:face:{face}")]).collect();
+    Traced::made(body, Some(roles))
 }
 
 /// Faces named by their place in a body built as a whole (an imported part's faces in the
@@ -1245,9 +1280,21 @@ fn order_legacy_family(bodies: &mut [crate::ModelBody], members: &[usize], doc: 
 }
 
 /// Name the pieces a body fell into after their faces: of the bodies in `bodies` that are lumps
-/// of one body (made in the same step, from one stage), the one whose least face name sorts first
-/// takes the first of their body names, and so on. The kernel's shell order, which named them
-/// before, can swap when an upstream edit moves the cut; their faces' names follow history.
+/// of one body (made in the same step, from one stage), the one whose faces sort first takes the
+/// first of their body names, and so on. The kernel's shell order, which named them before, can
+/// swap when an upstream edit moves the cut; their faces' names follow history.
+///
+/// A piece's faces are told apart in two kinds: those of the body it was split from, as it was
+/// before the feature, and those the feature made (the walls it cut the pieces apart with, or a
+/// tool's). The pieces that hold faces of the body come first; of them, a lump the feature left
+/// as it was, then the others by the least name of the faces the feature made on them; each tie,
+/// and the pieces that hold none of the body's faces, by their least face name. An upstream edit
+/// can take away the face holding a piece's least name (a notch that eats the end of a bar),
+/// which handed the first name to another piece and a renamed piece's name to a sliver
+/// (#21552); the faces the feature made are named after the feature itself, so they stay where
+/// they are. A feature saved before then (`Feature::least_face_piece_order`), or one that split
+/// a body it made itself, orders its pieces by their least face name alone, as builds before
+/// then did.
 /// `origin` is the feature that made them, for naming their faces.
 pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::naming::NamingOrigin>) {
     let mut families: Vec<(*const Operand, Vec<usize>)> = Vec::new();
@@ -1273,20 +1320,21 @@ pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::n
         if !same && foreign > 1 {
             continue;
         }
-        let least = |b: &crate::ModelBody| {
-            let mut named = b.clone();
-            named.names = crate::naming::NameCell::traced(Some(origin.clone()), b.lineage());
-            crate::naming::face_names(&named).iter().min().cloned()
-        };
-        let keys: Option<Vec<(String, usize)>> = members.iter().map(|i| bodies.get(*i).and_then(least).map(|k| (k, *i))).collect();
+        // The faces the body had before the feature, by stem (`None`: order by the least face
+        // name alone).
+        let had = if origin.feature.least_face_piece_order { None } else { faces_before(bodies, &members, &origin.before) };
+        let key = |b: &crate::ModelBody| piece_key(b, origin, had.as_ref());
+        let keys: Option<Vec<(PieceKey, usize)>> = members.iter().map(|i| bodies.get(*i).and_then(key).map(|k| (k, *i))).collect();
         let Some(mut keys) = keys else { continue };
         keys.sort();
         // A name moves with the feature it belongs to: in a cut's family the first name is the
         // cut body's own feature's and the rest are the cut's, and `body.rename` stores a name in
         // the `body_names` of the feature a body says made it (#10438). So does the body a name
-        // past the first was split off, which gives that piece its material and look.
-        let names: Vec<(String, u64, Option<String>)> =
-            members.iter().filter_map(|i| bodies.get(*i).map(|b| (b.name.clone(), b.feature, b.split_from.clone()))).collect();
+        // past the first was split off, which gives that piece its material and look, and whether
+        // the name's owner is the body's component rather than its feature's (a root cut's piece
+        // of a placed part's body, #21156).
+        let names: Vec<(String, u64, Option<String>, bool)> =
+            members.iter().filter_map(|i| bodies.get(*i).map(|b| (b.name.clone(), b.feature, b.split_from.clone(), b.transferred))).collect();
         // The pieces take the family's places in that order too, so the state lists them as
         // their names run. The session pins a feature's body names in state order, and the next
         // evaluation hands them out in this order: listed in the kernel's order, the pieces
@@ -1295,13 +1343,57 @@ pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::n
         if moved.len() != members.len() || names.len() != members.len() {
             continue;
         }
-        for ((mut b, (name, feature, split_from)), place) in moved.into_iter().zip(names).zip(&members) {
+        for ((mut b, (name, feature, split_from, transferred)), place) in moved.into_iter().zip(names).zip(&members) {
             b.name = name;
             b.feature = feature;
             b.split_from = split_from;
+            b.transferred = transferred;
             if let Some(slot) = bodies.get_mut(*place) {
                 *slot = b;
             }
         }
     }
+}
+
+/// What [`order_lumps`] sorts a piece by: whether it holds none of the faces of the body it was
+/// split from (a mirrored copy, a tool's material a join split off: it comes after those that
+/// do), the least name of the faces the feature made on it (`None`, which sorts first, for a
+/// lump the feature left as it was), then its least face name. Where the body's faces are not
+/// known, only the least face name tells pieces apart.
+type PieceKey = (bool, Option<String>, String);
+
+/// The [`PieceKey`] of piece `b`, its faces named as `origin` names them; `had` holds the stems
+/// of the face names of the body it was split from, as it was before the feature
+/// ([`faces_before`]). `None` for a piece without faces.
+fn piece_key(b: &crate::ModelBody, origin: &Arc<crate::naming::NamingOrigin>, had: Option<&std::collections::BTreeSet<String>>) -> Option<PieceKey> {
+    let mut named = b.clone();
+    named.names = crate::naming::NameCell::traced(Some(origin.clone()), b.lineage());
+    let names = crate::naming::face_names(&named);
+    let Some(had) = had else { return names.iter().min().cloned().map(|least| (false, None, least)) };
+    // A piece of a face the body had keeps that face's name as its stem (`F1:+y#[…]`).
+    let mut least: Option<&String> = None;
+    let mut made: Option<&String> = None;
+    let mut has_kept = false;
+    for n in names.iter() {
+        if least.is_none_or(|l| n < l) {
+            least = Some(n);
+        }
+        if had.contains(crate::naming::strip_piece(n)) {
+            has_kept = true;
+        } else if made.is_none_or(|m| n < m) {
+            made = Some(n);
+        }
+    }
+    Some((!has_kept, made.filter(|_| has_kept).cloned(), least?.clone()))
+}
+
+/// The stems of the face names (`naming::strip_piece`) of the body that the pieces `members` of
+/// `bodies` were split from, as it was in `before`: the body a piece past the first says it was
+/// split off, else the one whose name a piece kept. `None` where it was no body then: the feature
+/// made it itself, and its faces are all the feature's.
+fn faces_before(bodies: &[crate::ModelBody], members: &[usize], before: &crate::ModelState) -> Option<std::collections::BTreeSet<String>> {
+    let family = || members.iter().filter_map(|i| bodies.get(*i));
+    let source =
+        family().find_map(|b| b.split_from.as_deref().and_then(|n| before.body(n))).or_else(|| family().find_map(|b| before.body(&b.name)))?;
+    Some(crate::naming::face_names(source).iter().map(|n| crate::naming::strip_piece(n).to_string()).collect())
 }

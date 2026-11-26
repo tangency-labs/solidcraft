@@ -211,6 +211,39 @@ pub fn loop_circle(lp: &Loop2) -> Option<(Vec2, f64)> {
     }
 }
 
+/// Whether `lp` holds `p` by the even-odd rule, decided exactly: `None` when `p` is on the
+/// loop or within rounding of it.
+pub fn loop_holds(lp: &Loop2, p: Vec2) -> Option<bool> {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.loop_holds(lp, p),
+    }
+}
+
+/// How far `p` is from `seg`, exactly, for a line or a circular arc: the foot clamped to a
+/// line's ends; on an arc the radial distance where `p` is within its angles, else the
+/// distance to the nearer end. `None` for a free-form segment or a point that is no number.
+pub fn segment_distance(seg: &Seg2, p: Vec2) -> Option<f64> {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.segment_distance(seg, p),
+    }
+}
+
+/// Whether the circles `a` and `b` (centre and radius) are one hole: their centres and their
+/// radii each less than `tol` apart.
+pub fn same_circle(a: (Vec2, f64), b: (Vec2, f64), tol: f64) -> bool {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.same_circle(a, b, tol),
+    }
+}
+
+/// Where a note `height` high stands to name the circle `at` (centre and radius), level with
+/// its centre and clear of its rim on the right: its lower left corner.
+pub fn note_beside(at: (Vec2, f64), height: f64) -> Vec2 {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.note_beside(at, height),
+    }
+}
+
 /// How far the box from `min` to `max` reaches along `axis` once placed by `placement`.
 pub fn extent_along(min: [f64; 3], max: [f64; 3], placement: &Matrix, axis: [f64; 3]) -> Result<f64, AxisRefusal> {
     match which(OpKind::Affine) {
