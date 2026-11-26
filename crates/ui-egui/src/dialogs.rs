@@ -144,6 +144,7 @@ pub fn extrude_taper_shown(direction: usize, thin: bool, symmetric_offset: bool)
     let both_ways = direction == 2 || two_sided(direction);
     !(thin && both_ways) && !(direction == 2 && symmetric_offset)
 }
+
 /// Thin Extrude wall locations, as `solid.extrude` names them, and their labels.
 const WALL_SIDES: [&str; 4] = ["center", "inside", "outside", "two_sides"];
 const WALL_LABELS: [&str; 4] = ["Center", "Inside", "Outside", "Two Sides"];

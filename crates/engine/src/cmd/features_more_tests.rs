@@ -2708,8 +2708,9 @@ fn a_tapered_foot_under_a_part_joins_as_drawn() {
 /// along the sketch normal and the walls are drafted from there, so the section at the start
 /// plane is the profile itself and the solid is the frustum over it, moved along the normal by
 /// the offset. Controls that build today: the same extrude with the taper and no offset, and
-/// with the offset and no taper. A taper with a symmetric offset is still refused, by name
-/// (two-sided and symmetric tapers build: `a_symmetric_taper_drafts_both_halves_from_the_start`).
+/// with the offset and no taper. A taper with a symmetric offset, and one on a thin wall with
+/// two sides, are still refused, by name (two-sided and symmetric tapers build:
+/// `a_symmetric_taper_drafts_both_halves_from_the_start`).
 #[test]
 fn a_drafted_extrude_starts_at_an_offset() {
     use solidcraft_kernel::{FaceSurface, face_surface, measure as measure_body};
@@ -2796,14 +2797,17 @@ fn a_drafted_extrude_starts_at_an_offset() {
         }
     }
 
-    // The extent that is still to come is refused, and says which it is.
-    for p in [json!({"distance":h,"direction":"symmetric","start_offset":off,"symmetric_offset":true,"taper":"6 deg"})] {
+    // The extents that are still to come are refused, and say which they are.
+    for (p, why) in [
+        (json!({"distance":h,"direction":"symmetric","start_offset":off,"symmetric_offset":true,"taper":"6 deg"}), "a taper with symmetric offset"),
+        (json!({"distance":h,"distance2":5,"thin":true,"thickness":1,"taper":"6 deg"}), "a taper on a thin extrude with two sides or symmetric"),
+    ] {
         let mut s = Session::default();
         run(&mut s, "sketch.create", json!({"plane":"XY"}));
         run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[w,d]}));
         run(&mut s, "sketch.finish", json!({}));
         let e = s.execute("solid.extrude", &p).unwrap_err().to_string();
-        assert!(e.contains("not supported yet: a taper with symmetric offset"), "{p}: {e}");
+        assert!(e.contains(&format!("not supported yet: {why}")), "{p}: {e}");
     }
 }
 
