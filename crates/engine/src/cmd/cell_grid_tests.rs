@@ -634,6 +634,24 @@ fn a_cell_sketch_must_hold_exactly_one_closed_profile() {
 }
 
 #[test]
+fn a_cell_sketch_bounded_by_an_ellipse_or_a_spline_is_refused_naming_the_curve_kind() {
+    // The sketch draws these as polylines; a cell is made of lines and arcs.
+    let mut s = l_plate();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 600, "name": "Oval"}));
+    run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [8, 0], "minor_radius": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    let e = sketched(&mut s, json!({"depth": 1, "cell_sketch": "Oval"})).unwrap_err().to_string();
+    assert!(e.contains("Oval") && e.contains("an ellipse"), "{e}");
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 700, "name": "Blob"}));
+    let ring = [[0, 0], [6, -2], [10, 3], [5, 8], [-2, 5]];
+    run(&mut s, "sketch.spline.fit_point", json!({"points": ring, "periodic": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    let e = sketched(&mut s, json!({"depth": 1, "cell_sketch": "Blob"})).unwrap_err().to_string();
+    assert!(e.contains("Blob") && e.contains("a spline"), "{e}");
+    assert!(s.doc.features.iter().all(|f| !matches!(f.kind, solidcraft_doc::FeatureKind::CellGrid { .. })));
+}
+
+#[test]
 fn a_sketched_cell_needs_its_sketch_and_its_pitch() {
     let mut s = l_plate();
     let mut p = json!({"sketch": "Field", "shape": "sketch", "cell_sketch": "Cell", "pitch_x": 20, "pitch_y": 20, "web": 2, "depth": 1});

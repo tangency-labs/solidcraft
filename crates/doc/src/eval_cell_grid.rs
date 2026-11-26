@@ -290,10 +290,12 @@ fn exact_reach(st: &ModelState, plane: &Plane, scope: &[String]) -> Result<f64> 
 
 /// The cell of a sketched grid: the one closed profile of the sketch, as a loop in the sketch's own
 /// coordinates. A sketch with no closed profile, several, or one with a hole is refused, naming
-/// the sketch.
+/// the sketch. So is one bounded by an ellipse, a spline or a conic: the sketch draws those as
+/// polylines, and a cell is exact.
 pub fn cell_profile(ss: &SolvedSketch) -> Result<solidcore_record::Loop2> {
     let chosen = select_profiles(ss, &ProfileSel::All)
         .map_err(|e| DocError::Invalid(format!("the cell sketch `{}` holds no closed profile: {e}", ss.name)))?;
+    refuse_free_form_cell(ss)?;
     let regions = solidcraft_sketch::merge_regions(&chosen);
     match regions.as_slice() {
         [one] if one.holes.is_empty() => Ok(one.outer.clone()),
@@ -308,4 +310,28 @@ pub fn cell_profile(ss: &SolvedSketch) -> Result<solidcore_record::Loop2> {
             many.len()
         ))),
     }
+}
+
+/// Refuses a cell sketch whose drawn profiles are bounded by a free-form curve. The curve kinds
+/// decide, not the polyline the sketch turns them into. The profiles are the ones "all" selects,
+/// so reference and construction curves, which bound none of them, do not count.
+fn refuse_free_form_cell(ss: &SolvedSketch) -> Result<()> {
+    let drawn = solidcraft_sketch::find_drawn_profiles(&ss.sketch);
+    let chosen = if drawn.is_empty() { ss.profiles.clone() } else { drawn };
+    let chosen = solidcraft_sketch::without_text_counters(&ss.sketch, chosen);
+    let bounding = chosen.iter().flat_map(|p| p.outer_curves.iter().chain(p.hole_curves.iter().flatten()));
+    for id in bounding {
+        let Some(curve) = ss.sketch.curves.iter().find(|c| &c.id == id) else { continue };
+        let kind = match curve.kind {
+            solidcraft_sketch::CurveKind::Ellipse { .. } => "an ellipse",
+            solidcraft_sketch::CurveKind::Spline { .. } => "a spline",
+            solidcraft_sketch::CurveKind::Conic { .. } => "a conic",
+            _ => continue,
+        };
+        return Err(DocError::Invalid(format!(
+            "the cell sketch `{}` is bounded by {kind} (`{id}`): a cell is made of lines and arcs, not free-form curves",
+            ss.name
+        )));
+    }
+    Ok(())
 }
