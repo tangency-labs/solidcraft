@@ -83,6 +83,7 @@ solidcraft-testkit = { path = "crates/testkit" }
 
 # foundation
 thiserror = "2"
+unicode-general-category = "1"
 serde = { version = "1", features = ["derive", "rc"] }
 # derive macros (crates/derive); already in the tree through serde_derive
 proc-macro2 = "1"

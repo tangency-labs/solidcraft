@@ -143,6 +143,8 @@ pub trait Frames: Backend {
     /// The section plane at the start of `first`, with the section anchored at `at` and turned
     /// by `turn`.
     fn stock_section_plane(&self, first: &PieceData, at: Vec2, turn: f64) -> Result<Plane, PathFailure>;
+    /// The section planes at both ends of `path`, using the sweep's transported frame.
+    fn stock_terminal_planes(&self, path: &[PieceData], at: Vec2, turn: f64) -> Result<[Plane; 2], PathFailure>;
     /// Whether `region`, anchored at `at` and turned by `turn`, clears every bend of `path`.
     fn check_bend_clearance(&self, path: &[PieceData], region: &Region2, at: Vec2, turn: f64) -> Result<(), PathFailure>;
 
