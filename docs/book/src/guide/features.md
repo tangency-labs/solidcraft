@@ -126,6 +126,15 @@ existing picks. With the setting off, picks only add profiles.
 or an edge and click one of the points that light up, its ends or its middle (a hole's centre
 too), the way Move's points are picked. So an extrude can end where two sketch lines meet.
 
+Scripts and MCP can end an extrusion at a construction plane or point, or start it there:
+`to: {plane: "Target"}` (or just the plane's name) and `to: {construct_point: "P1"}`, and the
+same for `from`. The extrusion follows the plane or the point when a parameter moves it. A
+plane parallel to the sketch ends the extrusion on it. A plane at a slant cuts the end along
+it, as a slanted face does. A plane the extrusion runs along gives no end, so it is refused. A
+point ends the extrusion on the plane through it, parallel to the sketch. The Extrude dialog
+doesn't offer these picks yet; editing such an extrusion in the dialog keeps its plane or
+point unless you pick another target.
+
 Dragging Extrude's distance arrow stops at flat faces parallel to the profile that lie over it,
 such as the far side of the block a cut goes into: once the arrow's tip comes within a few
 screen points of such a face, the distance becomes exactly that face's and the face is
