@@ -27,14 +27,10 @@ pub(crate) fn patch_area(body: &Body, mesh: &Mesh, patch: &[usize]) -> Option<f6
     }
 }
 
-/// The exact area of one face where its surface and edges give it without the display mesh: a
-/// flat face's and a piece of a sphere's (#22556). `None` for any other face.
+/// The exact area of one face, from its surface and trim by the kernel
+/// ([`Body::face_area`]), with no display mesh (#22556). `None` where the kernel gives none.
 pub(crate) fn face_area(body: &Body, face: usize) -> Option<f64> {
-    match solidcraft_kernel::face_surface(body, face)? {
-        FaceSurface::Plane { normal, point } => flat_patch(body, &[face], normal, point),
-        FaceSurface::Sphere { center, radius } => sphere(body, &[face], center, radius),
-        _ => None,
-    }
+    body.face_area(face).ok().flatten().filter(|a| a.is_finite())
 }
 
 /// Two orthonormal directions in a plane and a point on it: the plane's own 2D coordinates.
@@ -327,9 +323,8 @@ fn cylinder_band(body: &Body, mesh: &Mesh, patch: &[usize], origin: Vec3, axis: 
     Some(radius * low_turn * height)
 }
 
-/// The area of a patch of faces on one sphere: the sum of its faces' areas, each worked out
-/// from its edges by the kernel ([`solidcraft_kernel::sphere_face_area`]). A whole sphere has no
-/// edges but its seam: 4πr².
+/// The area of a patch of faces on one sphere: the sum of its faces' exact areas, each from
+/// the kernel ([`face_area`]).
 fn sphere(body: &Body, patch: &[usize], center: Vec3, radius: f64) -> Option<f64> {
     if !(radius.is_finite() && radius > 0.0) {
         return None;
@@ -340,7 +335,7 @@ fn sphere(body: &Body, patch: &[usize], center: Vec3, radius: f64) -> Option<f64
             FaceSurface::Sphere { center: c, radius: r } if (r - radius).abs() <= radius * 1e-6 && c.dist(center) <= radius * 1e-6 => {}
             _ => return None,
         }
-        total += solidcraft_kernel::sphere_face_area(body, face)?;
+        total += face_area(body, face)?;
     }
     (total.is_finite() && total > 0.0).then_some(total)
 }
