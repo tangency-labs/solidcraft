@@ -58,6 +58,7 @@ mod drawing_sheet;
 mod drawing_sketch;
 mod drawing_symbol;
 mod drawing_table;
+mod drawing_template_import;
 mod drawing_ui;
 mod drawing_view;
 mod edit;
@@ -734,6 +735,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(drawing_fill::COMMANDS.iter());
     v.extend(drawing_revision::COMMANDS.iter());
     v.extend(drawing_table::COMMANDS.iter());
+    v.extend(drawing_template_import::COMMANDS.iter());
     v.extend(drawing_scene::COMMANDS.iter());
     v.extend(drawing_sheet::COMMANDS.iter());
     v.extend(drawing_sketch::COMMANDS.iter());

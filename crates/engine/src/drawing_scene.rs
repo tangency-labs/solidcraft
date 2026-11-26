@@ -1884,6 +1884,17 @@ fn assemble<D: Borrow<Drawn>>(
     let size_mm = record.sheet.size_mm().map_err(|e| bad(CMD, e.to_string()))?;
     let layout = record.border.as_ref().map(|border| border.layout(&record.sheet)).transpose().map_err(|e| bad(CMD, e.to_string()))?;
     let mut border = layout.as_ref().map_or_else(Vec::new, |layout| layout.paper(record.id));
+    // The sheet format's line work goes with the border: under the views, one object with it.
+    if !record.format.strokes.is_empty() {
+        let thin = LineKind::Thin.width_mm(record.line_group.unwrap_or_default());
+        let items = record.format.strokes.iter().map(|s| Item::Stroke {
+            path: s.path.clone(),
+            closed: s.closed,
+            width_mm: s.width_mm.unwrap_or(thin),
+            pattern: None,
+        });
+        border.push(Group { object: record.id, kind: ObjectKind::DrawingBorder, items: items.collect() });
+    }
     // The block sits on the border. It joins with the border (its text's fonts too), so no view takes
     // its records, and its band paints it over the views.
     let block = match (&record.title_block, &layout) {
@@ -1893,6 +1904,10 @@ fn assemble<D: Borrow<Drawn>>(
             group.items.splice(0..0, logos.iter().cloned());
             group.items.extend(text.runs.iter().cloned().map(Item::Text));
             Some(group)
+        }
+        // No block: the sheet format's text, if any, is painted alone where the block would be.
+        _ if !text.runs.is_empty() => {
+            Some(Group { object: record.id, kind: ObjectKind::DrawingBorder, items: text.runs.iter().cloned().map(Item::Text).collect() })
         }
         _ => None,
     };
@@ -2092,7 +2107,11 @@ fn block_text(record: &Sheet, lettering: &Lettering, cells: &[CellText], wait: b
         (set.frame, pending) = (frame.runs, pending || laid.pending);
         set.fonts.extend(frame.fonts);
     }
-    Ok((set, pending))
+    // The sheet format's fixed text after the block's: painted with it, on top of the views.
+    let (runs, format_fonts, format_pending) = crate::drawing_note_paper::format_texts(&record.format.texts, &fonts);
+    set.runs.extend(runs);
+    set.fonts.extend(format_fonts);
+    Ok((set, pending || format_pending))
 }
 
 /// The tables of sheet `record` of `d`, read from `s`'s design and measured in `lettering`'s font

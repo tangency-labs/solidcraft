@@ -223,6 +223,7 @@ pub use svg::SvgDrawing;
 pub use svg::decode_svg;
 pub use svg::read_svg;
 pub use svg::read_svg_drawing;
+pub use svg::read_svg_with_fields;
 pub use svg::svg_nothing_to_import;
 pub use svg::svg_sheet;
 pub use svg_out::SvgShape;

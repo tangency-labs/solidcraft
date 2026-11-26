@@ -27,6 +27,7 @@ fn drawing(names: &[&str]) -> Drawing {
             documents: None,
             excluded: Excluded::default(),
             line_group: None,
+            format: Default::default(),
         }));
     }
     d
