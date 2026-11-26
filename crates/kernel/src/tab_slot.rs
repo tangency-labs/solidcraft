@@ -190,7 +190,8 @@ mod tests {
 
     fn one_lump_checked(b: &Body) {
         assert_eq!(b.lumps().unwrap().len(), 1);
-        let (o, _) = b.ops_body().unwrap();
+        let ops = b.ops_body().unwrap();
+        let o = &ops.0;
         let r = o.check(solidcore_ops::CheckLevel::All).unwrap();
         assert!(r.is_valid(), "{r:?}");
     }
