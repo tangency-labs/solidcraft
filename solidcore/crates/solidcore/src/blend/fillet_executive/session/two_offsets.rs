@@ -1035,7 +1035,7 @@ mod tests {
     mod setbacks {
         use super::*;
         use crate::geom::extent3d::Extent3d;
-        use crate::math::{Point3, PI};
+        use crate::math::{Point3, Vec3, PI};
         use crate::surface::surface::SurfaceKind;
         use crate::topology::{Brep, FaceId};
 
@@ -1231,6 +1231,117 @@ mod tests {
                 "{v} vs {} (bound {bound})",
                 v0 - removed
             );
+        }
+
+        /// zhuangzard's enclosure front (tangency-labs/solidcraft#13710), in x (width), y
+        /// (height) and z (depth, the front at z = 0): the side profile (depth, height) [0, 0],
+        /// [60, 0], [60, 40], [20, 40], [0, 15] swept 120 across, meeting the 100 x 40 front
+        /// outline whose top corners are rounds of 10 swept along the depth. The slanted face
+        /// runs from height 15 at the front to 40 at depth 20; the edges it shares with the top,
+        /// the two rounds and the two sides are one tangent chain.
+        fn enclosure_front(k: &mut Kernel) -> Brep {
+            use crate::curve::curve::Curve;
+            use crate::primitive::api_curves::{create_arc, create_line_segment};
+            use crate::sweep::api_brep::create_linear_sweep;
+            let line = |a: [f64; 3], b: [f64; 3]| {
+                Curve::from(
+                    create_line_segment(
+                        Point3::new(a[0], a[1], a[2]),
+                        Point3::new(b[0], b[1], b[2]),
+                    )
+                    .unwrap(),
+                )
+            };
+            // the side profile in the plane x = -60: (depth, height) -> (x, height, depth)
+            let side = [
+                [0.0, 0.0],
+                [60.0, 0.0],
+                [60.0, 40.0],
+                [20.0, 40.0],
+                [0.0, 15.0],
+            ];
+            let curves: Vec<Curve> = (0..side.len())
+                .map(|i| {
+                    let (a, b) = (side[i], side[(i + 1) % side.len()]);
+                    line([-60.0, a[1], a[0]], [-60.0, b[1], b[0]])
+                })
+                .collect();
+            let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+            let profile =
+                create_linear_sweep(k, &refs, Vec3::new(1.0, 0.0, 0.0), 120.0, true).unwrap();
+            // the front outline in the plane z = -10, its top corners rounds of 10
+            let z = -10.0;
+            let outline = [
+                line([-50.0, 0.0, z], [50.0, 0.0, z]),
+                line([50.0, 0.0, z], [50.0, 30.0, z]),
+                Curve::from(create_arc(Point3::new(40.0, 30.0, z), 10.0, 0.0, 90.0).unwrap()),
+                line([40.0, 40.0, z], [-40.0, 40.0, z]),
+                Curve::from(create_arc(Point3::new(-40.0, 30.0, z), 10.0, 90.0, 180.0).unwrap()),
+                line([-50.0, 30.0, z], [-50.0, 0.0, z]),
+            ];
+            let refs: Vec<Option<&Curve>> = outline.iter().map(Some).collect();
+            let front =
+                create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), 80.0, true).unwrap();
+            crate::boolean::api_brep::boolean_intersection(k, profile, front).unwrap()
+        }
+
+        /// Each round of the enclosure front's chain alone (a quarter of the cylinder of radius
+        /// 10 about (+-40, 30) along the depth, cut by the slanted plane: its edge an arc of an
+        /// ellipse) chamfered by setbacks 0.8 and 0.8: the circle of radius 0.8 about the edge
+        /// point, in the plane square to the edge, crosses the cylinder twice, once on the
+        /// round's face (the slanted plane's inner side, where (p - (0, 15, 0)) . (0, 20, -25)
+        /// < 0, as at the face's point (-40, 40, 30): -250) and once past the slant in the
+        /// material the cut removed. A station split seeded at its ends' mean uv found the
+        /// second (at s = 0.25 of the round's edge, foot 1 at z 18.67 against 20.2 beside it)
+        /// and the trace never closed its span. Every rail point on the round lies on the
+        /// face's side, to the face's certified bound and the rail's tolerance; the solid is
+        /// closed, with chamfers of setbacks (the round's, and its run-on past its smooth end
+        /// onto the side's edge).
+        #[test]
+        fn a_round_of_the_enclosure_front_chamfered_alone_keeps_its_feet_on_its_face() {
+            let d = [0.8, 0.8];
+            let n = Vec3::new(0.0, 20.0, -25.0).unitize().unwrap();
+            let o = Point3::new(0.0, 15.0, 0.0);
+            for side in [-1.0, 1.0] {
+                let mut k = fixed_kernel();
+                let mut b = enclosure_front(&mut k);
+                let slant = face_holding(&k, &b, |bx| {
+                    bx.min().z.abs() < 1e-6
+                        && (bx.max().z - 20.0).abs() < 1e-6
+                        && (bx.min().y - 15.0).abs() < 1e-6
+                        && (bx.max().y - 40.0).abs() < 1e-6
+                })[0];
+                let round: Vec<EdgeId> =
+                    crate::topology::face::p4::edges(&b, slant, None, false, None)
+                        .unwrap()
+                        .into_iter()
+                        .filter(|&e| {
+                            along_edge(&k, &b, e)
+                                .iter()
+                                .all(|p| p.x * side > 40.0 && p.y > 30.0)
+                        })
+                        .collect();
+                assert_eq!(round.len(), 1, "{side}");
+                chamfer_setbacks(&mut k, &mut b, &round, &[d], &[slant]).unwrap();
+                assert!(closed(&b), "{side}: not closed");
+                let faces = setback_faces(&k, &b);
+                assert!(!faces.is_empty(), "{side}");
+                let mut on_round = 0;
+                for &(f, bound) in &faces {
+                    for e in crate::topology::face::p4::edges(&b, f, None, false, None).unwrap() {
+                        let tol = edge::tolerance(&b, e).unwrap() + bound + 1e-9;
+                        for p in along_edge(&k, &b, e) {
+                            let r = ((p.x - 40.0 * side).powi(2) + (p.y - 30.0).powi(2)).sqrt();
+                            if (r - 10.0).abs() > tol || (p - o).dot(n).abs() <= tol {
+                                continue;
+                            }
+                            assert!((p - o).dot(n) <= tol, "{side}: {p:?} past the slant");
+                            on_round += 1;
+                        }
+                    }
+                }
+                assert!(on_round >= 9, "{side}: {on_round}");
+            }
         }
     }
 }

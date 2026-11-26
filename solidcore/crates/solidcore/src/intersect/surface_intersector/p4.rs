@@ -1586,8 +1586,16 @@ fn extend_stations<'s, V: IntersectorVirtuals<'s> + ?Sized>(
 }
 
 /// A station trace's new point in the span from `curr` to `next` (as [`split_span_with`]
-/// at the law's mean parameter): the solver's station at the mean s, from the mean uv
-/// points, its tangents along the trace, its curve parameter `curr`'s plus the chord.
+/// at the law's mean parameter): the solver's station at the mean s, its tangents along the
+/// trace, its curve parameter `curr`'s plus the chord.
+///
+/// Each foot's Newton is seeded at the foot's cubic Hermite prediction at the span's middle
+/// ([`hermite_uv`]: the ends' uv points and exact uv tangents), not at the mean of the ends'
+/// uv: across a curved edge's span the mean can lie nearer the setback circle's other
+/// crossing of the support (the mirror root, on the far side of the edge: on a round of
+/// radius 10 cut by a slanted plane, foot 1 at z 18.67 where its neighbours stand at 20.2),
+/// which the fold check does not tell apart. The root found is not checked to be the ends'
+/// branch: a mirrored station leaves a span that never passes the span test.
 ///
 /// # Errors
 ///
@@ -1603,9 +1611,10 @@ fn split_station_span<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     let c = v.intersector().point(curr)?.clone();
     let n = v.intersector().point(next)?.clone();
     let s = 0.5 * (c.user_doubles[0] + n.user_doubles[0]);
+    let chord = c.crv_pos().distance(n.crv_pos());
     let guesses = [
-        (c.uv_pos(SrfIndex::First) + n.uv_pos(SrfIndex::First)) / 2.0,
-        (c.uv_pos(SrfIndex::Second) + n.uv_pos(SrfIndex::Second)) / 2.0,
+        hermite_uv(&c, &n, SrfIndex::First, chord, 0.5),
+        hermite_uv(&c, &n, SrfIndex::Second, chord, 0.5),
     ];
     let mut p = v
         .station_point(k, s, guesses)?
@@ -1617,6 +1626,23 @@ fn split_station_span<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     p.curve_parameter = c.curve_parameter + c.crv_pos().distance(p.crv_pos());
     station_in_domains(v, &p, span)?;
     Ok(v.intersector_mut().alloc_point(p))
+}
+
+/// Foot `srf`'s cubic Hermite prediction at the share `t` of the span from `c` to `n`: its
+/// uv points and uv tangents (per unit foot-0 chord, along the trace) over the parameter
+/// `t * chord`, `chord` foot 0's.
+fn hermite_uv(c: &TsectPnt, n: &TsectPnt, srf: SrfIndex, chord: f64, t: f64) -> Point2 {
+    let (t2, t3) = (t * t, t * t * t);
+    let h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
+    let h10 = t3 - 2.0 * t2 + t;
+    let h01 = -2.0 * t3 + 3.0 * t2;
+    let h11 = t3 - t2;
+    let (a, b) = (c.uv_pos(srf), n.uv_pos(srf));
+    let (ta, tb) = (c.uv_deriv(srf), n.uv_deriv(srf));
+    Point2::new(
+        h00 * a.x + h10 * chord * ta.x + h01 * b.x + h11 * chord * tb.x,
+        h00 * a.y + h10 * chord * ta.y + h01 * b.y + h11 * chord * tb.y,
+    )
 }
 
 /// A station from the first to the last given point lies in both surfaces' domains (within
@@ -2830,6 +2856,32 @@ mod tests {
 
     fn unit() -> Extent2d {
         Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0)
+    }
+
+    /// A station with foot `srf` at `uv`, its uv tangent `t`.
+    fn foot_at(srf: SrfIndex, uv: [f64; 2], t: [f64; 2]) -> TsectPnt {
+        let mut p = TsectPnt::new();
+        *p.uv_pos_mut(srf) = Point2::new(uv[0], uv[1]);
+        *p.uv_deriv_mut(srf) = Point2::new(t[0], t[1]);
+        p
+    }
+
+    /// A station split's seed on a quarter of the unit circle in uv, from A (1, 0) with
+    /// tangent (0, 1) to B (0, 1) with tangent (-1, 0), per unit foot-0 chord sqrt(2): the
+    /// cubic Hermite middle (A + B) / 2 + chord (tA - tB) / 8 = (0.5 + sqrt(2) / 8) (1, 1) =
+    /// (0.6768, 0.6768), 0.030 inside the arc's middle (sqrt(1/2), sqrt(1/2)), where the
+    /// mean of the ends, (0.5, 0.5), is 0.293 inside it.
+    #[test]
+    fn a_split_station_is_seeded_at_its_feet_s_hermite_middle() {
+        let srf = SrfIndex::Second;
+        let a = foot_at(srf, [1.0, 0.0], [0.0, 1.0]);
+        let b = foot_at(srf, [0.0, 1.0], [-1.0, 0.0]);
+        let mid = hermite_uv(&a, &b, srf, 2.0_f64.sqrt(), 0.5);
+        let want = 0.5 + 2.0_f64.sqrt() / 8.0;
+        assert!(
+            (mid.x - want).abs() < 1e-15 && (mid.y - want).abs() < 1e-15,
+            "{mid:?}"
+        );
     }
 
     /// A closed curve 7 long, traced along part of it and extended past its end by the
