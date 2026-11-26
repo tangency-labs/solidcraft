@@ -21,6 +21,8 @@ use crate::schema::features::{
     PipeParams, PlaneAtAngleParams, PressPullParams, PressPullResult, RevolveParams, ScaleParams, ShellParams, SphereParams, TorusParams,
 };
 use crate::schema::features::{PatternCircularParams, PatternPathParams, PatternRectangularParams, PatternResult};
+use crate::schema::features::{ThreadFeatureResult, ThreadParams};
+use crate::schema::inspect::ModelThread;
 use crate::schema::split::{SplitBodyParams, SplitFaceParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -53,6 +55,7 @@ const OFFSET_FACE_CONTRACT: TypedContract<OffsetFaceParams> = TypedContract::new
 const SHELL_CONTRACT: TypedContract<ShellParams> = TypedContract::new();
 const DRAFT_CONTRACT: TypedContract<DraftParams> = TypedContract::new();
 const MIRROR_CONTRACT: TypedContract<MirrorParams> = TypedContract::new();
+const THREAD_CONTRACT: TypedContract<ThreadParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.extrude", "Extrude", crate::checked!("solid.extrude", extrude)).begins_edit()
@@ -358,9 +361,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&OFFSET_FACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("faces: [[x,y,z] points on faces (planar or curved), or face names from model.faces]; distance: expr (positive: outward); body?"),
-    CommandSpec::new("solid.thread", "Thread", thread).begins_edit()
+    CommandSpec::new("solid.thread", "Thread", crate::checked!("solid.thread", thread)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("thread")
+        .contract(&THREAD_CONTRACT)
+        .output(output_schema_for::<ThreadFeatureResult>)
         .params(concat!(
             "face: [x,y,z] on a cylindrical face OR faces: [{body, point:[x,y,z]}, ...] (1 to 1024 selected faces of the same component in one Thread feature; every plural face requires its body identity; exact world body names or unambiguous definition names; do not combine with face); ",
             "single_face_selection?: bool (default false; true requires exactly one entry in faces and keeps single-face replacement when editing); ",
@@ -5814,17 +5819,19 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let v = add_feature(s, p, kind)?;
     let st = s.model.state();
-    let feature = v.get("feature").and_then(Value::as_u64);
-    let threads: Vec<_> = st.threads.iter().filter(|t| Some(t.feature) == feature).collect();
-    let mut reply = json!({"feature": v.get("feature"), "name": v.get("name"), "thread": threads.first()});
-    if grouped {
-        reply["threads"] = json!(threads);
-    }
-    // A hole narrowed to the thread's minor diameter says so.
-    if let Some(w) = v.get("warning").filter(|w| !w.is_null()) {
-        reply["warning"] = w.clone();
-    }
-    Ok(reply)
+    let feature = v.get("feature").and_then(Value::as_u64).ok_or_else(|| EngineError::Internal(cmd.into(), "the new feature has no id".into()))?;
+    let name = v.get("name").and_then(Value::as_str).ok_or_else(|| EngineError::Internal(cmd.into(), "the new feature has no name".into()))?;
+    let threads: Vec<ModelThread> = st.threads.iter().filter(|t| t.feature == feature).map(ModelThread::from).collect();
+    let reply = ThreadFeatureResult {
+        feature,
+        name: name.to_string(),
+        thread: st.threads.iter().find(|t| t.feature == feature).map(ModelThread::from),
+        threads: grouped.then_some(threads),
+        // A hole narrowed to the thread's minor diameter says so.
+        warning: v.get("warning").and_then(Value::as_str).map(str::to_string),
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| EngineError::Internal(cmd.into(), e.to_string()))
 }
 
 fn pipe(s: &mut Session, p: &Value) -> Result<Value> {

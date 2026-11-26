@@ -222,6 +222,12 @@ target_point!(
     "must be a finite point [x,y,z]"
 );
 
+target_point!(
+    /// Thread's `from`: a [`Point3`], with the handler's message.
+    ThreadFromPoint,
+    "must be a point [x, y, z] near the end the thread starts at"
+);
+
 /// Extrude's `faces`: 1 to 1024 points on coplanar faces of one body, read as the handler reads
 /// them, with its messages.
 #[derive(Clone, Debug, PartialEq)]
