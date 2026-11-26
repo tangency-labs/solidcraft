@@ -665,9 +665,22 @@ fn blend_failure(
 
 /// The refusal of a swept turn the corners step noted at its vertex (the blend corner's
 /// classification with swept turns on): [`Error::TurnRefused`] with the kernel's reason, without
-/// the "Fillet Error:" that says only whose it is, and where it is; `None` for a note of another
-/// kind, or one that gives no reason.
-fn turn_refusal(s: &FilletSession<'_>) -> Option<Error> {
+/// the "Fillet Error:" that says only whose it is, and where it is, and, where the corners
+/// step's failure `e` is the kernel's typed refusal of a sharp side edge, that edge's index and
+/// the radius it is rounded at first; `None` for a note of another kind, one that gives no
+/// reason, or a failure `e` that is not the corners step's refusal (a later vertex's own
+/// failure, which an earlier vertex's note does not explain).
+fn turn_refusal(s: &FilletSession<'_>, e: &SolidError) -> Option<Error> {
+    if !matches!(
+        e,
+        SolidError::BlendRefused {
+            refusal: BlendRefusal::SweptTurnPastSharpEdge { .. },
+            ..
+        }
+    ) && !matches!(e.blend_failure(), Some(BlendFailure::CornerRefused))
+    {
+        return None;
+    }
     let info = s.error_info();
     let room = match info.code {
         c if c == FilletErrorType::NoRoom as i32 => true,
@@ -682,10 +695,27 @@ fn turn_refusal(s: &FilletSession<'_>) -> Option<Error> {
         .strip_prefix("Fillet Error:")
         .map_or(why, str::trim_start)
         .to_owned();
+    let (side_edge, least_radius) = match *e {
+        SolidError::BlendRefused {
+            refusal:
+                BlendRefusal::SweptTurnPastSharpEdge {
+                    side_edge,
+                    least_radius,
+                    ..
+                },
+            ..
+        } => (
+            s.target().edge_list().iter().position(|&x| x == side_edge),
+            Some(least_radius),
+        ),
+        _ => (None, None),
+    };
     Some(Error::TurnRefused {
         room,
         why,
         at: info.location.map(|p| [p.x, p.y, p.z]),
+        side_edge,
+        least_radius,
     })
 }
 
@@ -1050,10 +1080,9 @@ fn pass(
             .and_then(|()| s.create_corners(k, None))
             .map(|()| Ok(Vec::new()));
         // a swept turn the corners step refused, with the kernel's reason
-        let refused_turn = if p.turn == Turn::Swept && prepared_ok && step.is_err() {
-            turn_refusal(&s)
-        } else {
-            None
+        let refused_turn = match &step {
+            Err(e) if p.turn == Turn::Swept && prepared_ok => turn_refusal(&s, e),
+            _ => None,
         };
         stopped.roll_overs = s.roll_overs().to_vec();
         // a vertex the corners step made no corner for, noted before a later step notes its
@@ -1737,7 +1766,8 @@ pub fn blend(
 /// other than [`Blend::Round`], and for [`ChamferCorner::Facet`] with one other than
 /// [`Blend::Chamfer`]. A swept turn the kernel does not build is
 /// [`Error::TurnRefused`] with the kernel's reason and the corner's point: `room` at a sharp
-/// concave side edge (no radius of the rounds passes it), else where the blend corner does not
+/// concave side edge (no radius of the rounds passes it, with that edge and the radius it is
+/// rounded at first for the turn to pass), else where the blend corner does not
 /// build one yet. A refusal the kernel gives no reason for is as it classifies it
 /// ([`Error::NoRoom`], [`Error::CornerUnsupported`]).
 pub fn blend_ordered(
