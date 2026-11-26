@@ -483,7 +483,7 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
                 ui_kit::row(ui, label, |ui| copied |= ui_kit::copy_cell(ui, value, &name, false, &copy_hint));
             }
             if let Some(placement) = &placement {
-                show_placement(app, ui, placement);
+                copied |= show_placement(app, ui, placement, &copy_hint);
             }
             if let Some(first) = &first {
                 let name = format!("{first_label}: {first}");
@@ -530,29 +530,33 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 /// Position and rotation of an occurrence, in its parent or in the world, and a copy of the
-/// 3×4 matrix `occurrence.move` takes.
-fn show_placement(app: &SolveApp, ui: &mut egui::Ui, placement: &Value) {
+/// 3×4 matrix `occurrence.move` takes. Each value copies itself when clicked, as the rows above
+/// do; whether one was copied.
+fn show_placement(app: &SolveApp, ui: &mut egui::Ui, placement: &Value, copy_hint: &str) -> bool {
     let id = ui.make_persistent_id("sc_props_placement_frame");
-    let mut frame = ui.data(|d| d.get_temp(id).unwrap_or(0usize));
-    if frame > 1 {
-        frame = 0;
-    }
-    ui_kit::row(ui, solidcraft_ui_text::tr_label("Frame"), |ui| {
-        ui_kit::dropdown(ui, "sc_props_frame", &mut frame, &["In parent", "World"]);
+    let mut frame = ui.data(|d| d.get_temp(id).unwrap_or(0usize)).min(1);
+    let frames = [app.tr("ui.properties.frame_in_parent").to_string(), app.tr("ui.properties.frame_world").to_string()];
+    ui_kit::row(ui, app.tr("ui.properties.frame"), |ui| {
+        ui_kit::dropdown(ui, "sc_props_frame", &mut frame, &[frames[0].as_str(), frames[1].as_str()]);
     });
     ui.data_mut(|d| d.insert_temp(id, frame));
-    let Some(pose) = placement.get(if frame == 0 { "in_parent" } else { "world" }) else { return };
+    let Some(pose) = placement.get(if frame == 0 { "in_parent" } else { "world" }) else { return false };
+    let mut copied = false;
     let unit = crate::prefs::unit_scale(&app.session.doc.units).1;
     if let Some(p) = point(&pose["position"]) {
+        let label = app.tr("ui.properties.position");
         let text = format!("({}) {unit}", [p.x, p.y, p.z].map(|x| crate::prefs::show_mm_bare(app, x)).join(", "));
-        ui_kit::row(ui, solidcraft_ui_text::tr_label("Position"), |ui| ui_kit::text(ui, &text, ui_kit::Text::Cell));
+        let name = format!("{label}: {text}");
+        ui_kit::row(ui, label, |ui| copied |= ui_kit::copy_cell(ui, &text, &name, false, copy_hint));
     }
     if let (Some(axis), Some(angle)) = (point(&pose["axis"]), pose.get("angle_deg").and_then(Value::as_f64)) {
+        let label = app.tr("ui.properties.rotation");
         let a = [axis.x, axis.y, axis.z].map(|x| number_text(app, x)).join(", ");
-        let text = format!("({a}) · {}°", number_text(app, angle));
-        ui_kit::row(ui, solidcraft_ui_text::tr_label("Rotation"), |ui| ui_kit::text(ui, &text, ui_kit::Text::Cell));
+        let text = format!("{}° · ({a})", number_text(app, angle));
+        let name = format!("{label}: {text}");
+        ui_kit::row(ui, label, |ui| copied |= ui_kit::copy_cell(ui, &text, &name, false, copy_hint));
     }
-    let Some(text) = matrix_copy(&pose["matrix"]) else { return };
+    let Some(text) = matrix_copy(&pose["matrix"]) else { return copied };
     let copy_label = app.tr("ui.properties.copy_matrix").to_string();
     ui_kit::row(ui, "", |ui| {
         let button = ui_kit::button(ui, &copy_label, ui_kit::Button::Small);
@@ -561,6 +565,7 @@ fn show_placement(app: &SolveApp, ui: &mut egui::Ui, placement: &Value) {
             ui.ctx().copy_text(text.clone());
         }
     });
+    copied
 }
 
 /// The 3×4 matrix as `occurrence.move` takes it: three rows, translation in the last column.
@@ -857,6 +862,10 @@ mod tests {
         }
         let parent = format!("({}) mm", [0.0, -120.0, 0.0].map(|x| crate::prefs::show_mm_bare(&h.app, x)).join(", "));
         assert!(h.widget(&parent).is_some(), "{parent}");
+        // A quarter turn about +Y, the angle first.
+        let n = |x: f64| super::number_text(&h.app, x);
+        let turn = format!("{}° · ({}, {}, {})", n(90.0), n(0.0), n(1.0), n(0.0));
+        assert!(h.widget(&turn).is_some(), "{turn}");
         let copy = crate::scenario::handle_at("properties:copy_placement").expect("copy");
         let (request, _reply) = crate::control::ControlRequest::new("ui.click", json!({"x": copy.x, "y": copy.y}));
         crate::control::handle(&mut h.app, &h.ctx, &request);
