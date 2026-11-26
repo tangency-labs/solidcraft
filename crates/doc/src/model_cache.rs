@@ -1152,6 +1152,9 @@ impl SavedModel {
         if let (Some(heal), Some(out)) = (self.records.get("tolerance_heal"), records.as_object_mut()) {
             out.insert("tolerance_heal".into(), heal.clone());
         }
+        if let (Some(heals), Some(out)) = (self.records.get("import_heals"), records.as_object_mut()) {
+            out.insert("import_heals".into(), heals.clone());
+        }
         let kept: Vec<usize> = (0..self.bodies.len()).filter(|i| kernel_used.get(*i) == Some(&true)).collect();
         let bodies = kept.iter().filter_map(|i| self.bodies.get(*i).cloned()).collect();
         Some((SavedModel { records, bodies }, kept, used))

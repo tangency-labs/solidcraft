@@ -4549,6 +4549,11 @@ fn a_healed_import_keeps_its_model_cache_across_save_and_open() {
     // First save + adopt: the cache is written and adopted with the healed body.
     let saved = model.saved_if_checked(&doc).expect("healed import keeps its model cache");
     assert!(saved.records.get("import_heals").is_some());
+    // Thinning the cache preserves `import_heals` so adopting a thinned cache still succeeds.
+    let pieces: Vec<Vec<(usize, usize)>> = (0..saved.bodies.len()).map(|i| vec![(i, 1)]).collect();
+    let (thinned, _, _) = saved.thinned(&pieces, usize::MAX).expect("thinning succeeds");
+    assert_eq!(thinned.records.get("import_heals"), saved.records.get("import_heals"));
+    assert!(Model::adopt(&doc, &thinned).is_ok(), "adopt accepts thinned healed import cache");
     let mut adopted = Model::adopt(&doc, &saved).expect("adopt accepts healed import cache");
     assert!(adopted.is_current(&doc));
     assert!(adopted.has_import_heals());

@@ -2310,10 +2310,10 @@ fn missing_save_cache(
         "temporary component placements are active (for example an exploded view)".into()
     } else if s.model.state().bodies.is_empty() {
         "there are no evaluated bodies to cache".into()
-    } else if let Some(reason) = skip_reason.or_else(|| s.model.cache_skip_reason(&s.doc)) {
-        reason.into()
     } else if let Some(refusal) = solidcraft_io::take_last_cache_refusal() {
         refusal
+    } else if let Some(reason) = skip_reason.or_else(|| s.model.cache_skip_reason(&s.doc)) {
+        reason.into()
     } else {
         "the cache could not fit or be encoded within the design file budget".into()
     };
@@ -5625,9 +5625,13 @@ mod tests {
         let reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(bytes.as_slice()))?;
         assert!(!reader.has_model_cache());
 
-        let notice = missing_save_cache(&s, true, None, Some(&reader)).ok_or_else(|| EngineError::Other("expected notice".into()))?;
+        // Even if a background check was still running at the start of write_bytes and finished
+        // before encoding, an actual encoder refusal takes precedence over the stale skip reason.
+        let notice = missing_save_cache(&s, true, Some("a feature's geometry check was still running (a save once it ends keeps it)"), Some(&reader))
+            .ok_or_else(|| EngineError::Other("expected notice".into()))?;
         assert!(notice.contains("body 'GraphicsCore' in feature 'PCIe Board Import' could not be stored exactly"), "{notice}");
         assert!(!notice.contains("design file budget"), "must not mention budget: {notice}");
+        assert!(!notice.contains("still running"), "must not report stale check reason: {notice}");
         Ok(())
     }
 
