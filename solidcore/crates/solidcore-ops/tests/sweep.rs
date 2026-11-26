@@ -590,6 +590,28 @@ fn screw_sweep_joined_walls_are_the_pieces_solid() {
     assert!(rel(vp, vj) < 1e-9, "pieces {vp}, joined {vj}");
 }
 
+/// #22577: a thread's V along a whole rod, pitch 1.25 at SolidCraft's tolerance (a
+/// ten-thousandth of the pitch). 202 turns build: 404 half turns of three walls, and two caps.
+/// 1000 turns take more spans than the kernel allows, and the refusal is the kernel's, with
+/// its reason, not a bare argument error.
+#[test]
+fn screw_sweep_turns_are_bounded_by_its_spans() {
+    let thread = polygon(&[[7.2, 0.0, 0.5], [8.5, 0.0, 0.0], [8.5, 0.0, 1.0]]);
+    let sweep = |turns| screw_sweep(&thread, [0.0; 3], Z, 1.25, turns, None, 1.25e-4);
+    assert_eq!(sweep(202.0).unwrap().counts().unwrap()[0], 3 * 404 + 2);
+    let refusal = sweep(1000.0).err();
+    assert!(
+        matches!(
+            refusal,
+            Some(Error::Refused {
+                reason: "too many turns for the tolerance: more spans than a screw sweep takes",
+                ..
+            })
+        ),
+        "{refusal:?}"
+    );
+}
+
 macro_rules! cases {
     ($($m:ident),* $(,)?) => {$(
         #[test]
