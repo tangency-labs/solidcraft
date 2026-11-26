@@ -1989,13 +1989,33 @@ fn bspline_surface_3d(f: &In<'_>, c: &mut Cursor) -> Result<BSplineSurface> {
     s
 }
 
-/// An analytic face's surface on its NURBS form `nurbs`, as solidcore's record reader makes it
-/// (`solidcore::surface::face_surface`): the class and numbers the arrays name (`support`),
-/// proved on the form and holding it ([`AnalyticSupport::build`]), never numbers recomputed from
-/// the form's control points, which on a short arc carry the conditioning of a circle fitted
-/// to it (a 1° bend of a pipe, #22146). Numbers the form does not prove leave the face its exact
-/// NURBS, on the range and trims it already carries; so does a face with no `support` (its
-/// frame spans no plane).
+/// `SameNurbs`: equal sizes and orders, knots within rounding, weights within rounding of the
+/// coordinates' size (a weight is the cosine of an arc's half angle, found from the points: their
+/// rounding grows with the coordinates, 4e-12 at 320), control points within `tol`.
+pub(super) fn same_nurbs(a: &NurbSurface, b: &NurbSurface, tol: f64) -> bool {
+    let (mut fa, mut fb) = (Out::new(), Out::new());
+    if add_bspline_surface(&mut fa, a).is_err() || add_bspline_surface(&mut fb, b).is_err() {
+        return false;
+    }
+    for id in [FACE_NURBS_U_VERTEX_COUNT, FACE_NURBS_V_VERTEX_COUNT, FACE_NURBS_U_ORDER, FACE_NURBS_V_ORDER] {
+        if fa.i(id) != fb.i(id) {
+            return false;
+        }
+    }
+    let size = fa.r(FACE_NURBS_CVS).iter().fold(1.0_f64, |m, x| m.max(x.abs()));
+    let close = |x: &[f64], y: &[f64], t: f64| x.len() == y.len() && x.iter().zip(y).all(|(a, b)| (a - b).abs() <= t * a.abs().max(1.0));
+    close(fa.r(FACE_NURBS_U_KNOTS), fb.r(FACE_NURBS_U_KNOTS), 1e-12)
+        && close(fa.r(FACE_NURBS_V_KNOTS), fb.r(FACE_NURBS_V_KNOTS), 1e-12)
+        && close(fa.r(FACE_NURBS_WEIGHTS), fb.r(FACE_NURBS_WEIGHTS), 1e-12 * size)
+        && close(fa.r(FACE_NURBS_CVS), fb.r(FACE_NURBS_CVS), tol)
+}
+
+/// A torus face's surface on its NURBS form `nurbs`, as solidcore's record reader makes it
+/// (`solidcore::surface::face_surface`): the numbers the arrays carry (`support`), proved on the
+/// form and holding it ([`AnalyticSupport::build`]), not numbers fitted to the form's control
+/// points, whose circle on a short sweep is badly conditioned (a pipe's 1° bend, #22146). Numbers
+/// the form does not prove, or a frame that spans no plane (no `support`), leave the face its
+/// exact NURBS, on the range and trims it already carries.
 fn on_label(k: &Kernel, support: Option<&AnalyticSupport>, nurbs: BSplineSurface) -> Result<Surface> {
     let Some(support) = support else { return Ok(Surface::from(nurbs)) };
     match support.build(k, nurbs.copy()) {
@@ -2003,6 +2023,24 @@ fn on_label(k: &Kernel, support: Option<&AnalyticSupport>, nurbs: BSplineSurface
         Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => Err(sc("AnalyticSupport::build")(e)),
         Err(_) => Ok(Surface::from(nurbs)),
     }
+}
+
+/// `AnalyticOfNurbs`: the analytic surface of kind `ty` SMLib's own test finds in `nurbs`, kept
+/// only when its NURBS is `nurbs` (the face's trims are in its parameters). A torus is read on its
+/// own numbers instead ([`on_label`]).
+fn analytic_of_nurbs(k: &Kernel, nurbs: &BSplineSurface, ty: i64, tol: f64) -> Result<Option<Surface>> {
+    let found: Option<Surface> = if ty == SURFACE_CONE_I {
+        answer(Cone::is_nurb_surface_cone(k, nurbs, 1.0)).map_err(sc("SmCone::IsNurbSurfaceCone"))?.flatten().map(Surface::from)
+    } else if ty == SURFACE_SPHERE_I {
+        answer(Sphere::is_nurb_surface_sphere(k, nurbs, 1.0)).map_err(sc("SmSphere::IsNurbSurfaceSphere"))?.flatten().map(Surface::from)
+    } else if ty == SURFACE_CYLINDER_I {
+        answer(Cone::is_nurb_surface_cylinder(k, nurbs, 1.0)).map_err(sc("SmCylinder::IsNurbSurfaceCylinder"))?.flatten().map(Surface::from)
+    } else {
+        None
+    };
+    let Some(found) = found else { return Ok(None) };
+    let (Some(want), Some(part)) = (nurbs.gw_nurb(), bspline_surface_part(k, &found)?) else { return Ok(None) };
+    Ok(part.gw_nurb().is_some_and(|got| same_nurbs(want, got, tol)).then_some(found))
 }
 
 /// `Placement`: X the reference direction, Y the axis cross it (`SetCanonical`).
@@ -2281,40 +2319,31 @@ fn flat_to_brep_data(k: &Kernel, f: &In<'_>, s: &Shape) -> Result<BrepData> {
         undefined(&mut fd.topology);
 
         let mut surface: Surface = if form {
-            // an analytic face with its NURBS form: the class the arrays name, on its own numbers
-            // (`None`: a frame that spans no plane, which proves nothing)
-            let support = if ty == SURFACE_SPHERE_I {
-                let j = i_sphere;
-                i_sphere += 1;
-                let radius = get(f.r(FACE_SPHERE_RADIUS), j)?;
-                placement(get3(f.r(FACE_SPHERE_CENTER), j)?, get3(f.r(FACE_SPHERE_AXIS), j)?, get3(f.r(FACE_SPHERE_REF_DIRECTION), j)?)
-                    .ok()
-                    .map(|placement| AnalyticSupport::Sphere { placement, radius })
-            } else if ty == SURFACE_CYLINDER_I {
-                let j = i_cyl;
-                i_cyl += 1;
-                let radius = get(f.r(FACE_CYLINDER_RADIUS), j)?;
-                placement(get3(f.r(FACE_CYLINDER_ORIGIN), j)?, get3(f.r(FACE_CYLINDER_AXIS), j)?, get3(f.r(FACE_CYLINDER_REF_DIRECTION), j)?)
-                    .ok()
-                    .map(|placement| AnalyticSupport::Cylinder { placement, radius })
-            } else if ty == SURFACE_CONE_I {
-                let j = i_cone;
-                i_cone += 1;
-                let (base_radius, semi_angle_deg) = (get(f.r(FACE_CONE_RADIUS), j)?, rad2deg(get(f.r(FACE_CONE_SEMI_ANGLE), j)?));
-                placement(get3(f.r(FACE_CONE_ORIGIN), j)?, get3(f.r(FACE_CONE_AXIS), j)?, get3(f.r(FACE_CONE_REF_DIRECTION), j)?)
-                    .ok()
-                    .map(|placement| AnalyticSupport::Cone { placement, base_radius, semi_angle_deg })
-            } else if ty == SURFACE_TORUS_I {
+            // an analytic face with its NURBS form: that NURBS as the class the arrays name
+            i_sphere += usize::from(ty == SURFACE_SPHERE_I);
+            i_cyl += usize::from(ty == SURFACE_CYLINDER_I);
+            i_cone += usize::from(ty == SURFACE_CONE_I);
+            let nurbs = bspline_surface_3d(f, &mut nurbs_cursor)?;
+            if ty == SURFACE_TORUS_I {
+                // a torus on its own numbers, proved on its form (`None`: a frame that spans no
+                // plane, which proves nothing)
                 let j = i_torus;
                 i_torus += 1;
                 let (major_radius, minor_radius) = (get(f.r(FACE_TORUS_MAJOR_RADIUS), j)?, get(f.r(FACE_TORUS_MINOR_RADIUS), j)?);
-                placement(get3(f.r(FACE_TORUS_ORIGIN), j)?, get3(f.r(FACE_TORUS_AXIS), j)?, get3(f.r(FACE_TORUS_REF_DIRECTION), j)?)
+                let support = placement(get3(f.r(FACE_TORUS_ORIGIN), j)?, get3(f.r(FACE_TORUS_AXIS), j)?, get3(f.r(FACE_TORUS_REF_DIRECTION), j)?)
                     .ok()
-                    .map(|placement| AnalyticSupport::Torus { placement, major_radius, minor_radius })
+                    .map(|placement| AnalyticSupport::Torus { placement, major_radius, minor_radius });
+                on_label(k, support.as_ref(), nurbs)?
             } else {
-                return Err(Error::Solidcore(format!("flat arrays: face {i}: a NURBS form on a class that has none")));
-            };
-            on_label(k, support.as_ref(), bspline_surface_3d(f, &mut nurbs_cursor)?)?
+                match analytic_of_nurbs(k, &nurbs, ty, xsect)? {
+                    Some(analytic) => analytic,
+                    // A cone whose ends are closer along its axis than SMLib names a cone (a shoulder
+                    // a few ten-thousandths of a millimetre deep) is its NURBS form, exactly: the face
+                    // keeps that, on the range and trims it already carries.
+                    None if ty == SURFACE_CONE_I => Surface::from(nurbs),
+                    None => return Err(Error::Solidcore(format!("flat arrays: face {i}: a NURBS form that is not its analytic surface"))),
+                }
+            }
         } else if ty == SURFACE_SPHERE_I {
             let j = i_sphere;
             i_sphere += 1;
