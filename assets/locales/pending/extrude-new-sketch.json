@@ -26,5 +26,9 @@
   "vi": {
     "dialog.new_sketch_hint": "Vẽ một phác thảo mới cho tính năng này: chọn một mặt phẳng hoặc một mặt phẳng của vật thể. Hoàn tất phác thảo sẽ quay lại đây; nếu phác thảo chỉ có một biên dạng thì biên dạng đó được chọn, nếu có nhiều hơn thì bạn chọn những biên dạng mình muốn.",
     "dialog.new_sketch_return": "Hoàn tất phác thảo để quay lại {command}"
+  },
+  "fr": {
+    "dialog.new_sketch_hint": "Dessinez une nouvelle esquisse pour cette fonction : choisissez un plan ou une face plane. Lorsque vous terminez l’esquisse, vous revenez ici ; si l’esquisse ne contient qu’un seul profil, celui-ci est sélectionné automatiquement. S’il y en a plusieurs, choisissez ceux que vous souhaitez utiliser.",
+    "dialog.new_sketch_return": "Terminez l’esquisse pour revenir à {command}"
   }
 }

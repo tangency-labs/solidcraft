@@ -1160,11 +1160,14 @@ pub(super) fn same_drive(a: &DesignLink, b: &DesignLink) -> bool {
     a.parameters == b.parameters && a.parameters_by_name == b.parameters_by_name && a.parameters_kept == b.parameters_kept
 }
 
-/// Whether `link` can be passed values: only a link to a design file can. A linked STEP file has
-/// no parameters, and a design inserted from the session has no file to build again.
+/// Whether `link` can be passed values: only a link to a design file can. A linked STEP file and a file an
+/// importer reads have no parameters, and a design inserted from the session has no file to build again.
 fn takes_values(link: &DesignLink) -> std::result::Result<(), &'static str> {
     if link.step_names.is_some() {
         return Err("that component is linked to a STEP file, which has no parameters");
+    }
+    if link.importer.is_some() {
+        return Err("that component is linked to a file an importer reads, which has no parameters");
     }
     if link.path.is_empty() {
         return Err("that component's design has no file; save the design and insert it from its file to pass it values");
@@ -1315,7 +1318,7 @@ pub(super) fn design_parameters(s: &mut Session, p: &Value) -> Result<Value> {
             // A network or device path is judged from its text, as Insert Design judges it.
             super::link_refused(s.path.as_deref(), given).map_err(|e| bad(cmd, e.to_string()))?;
             let file = super::absolute(Path::new(given));
-            let bytes = super::read_link(&file, s.path.as_deref())?;
+            let bytes = super::read_link(&file, s.path.as_deref(), false)?;
             (file, bytes, None)
         }
         (None, Some(_)) => {

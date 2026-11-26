@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.show_window_controls": "Show window control buttons",
+    "prefs.show_window_controls_help": "Minimize, Maximize and Close at the right end of the title bar. Turn them off when the window manager handles the window, as a tiling one does; the title bar still moves the window."
+  },
+  "ar": {
+    "prefs.show_window_controls": "إظهار أزرار التحكم في النافذة",
+    "prefs.show_window_controls_help": "تصغير وتكبير وإغلاق في الطرف الأيمن من شريط العنوان. أوقفها عندما يتولى مدير النوافذ النافذة، كما يفعل مدير النوافذ المتجانبة؛ ويظل شريط العنوان يحرّك النافذة."
+  },
+  "de": {
+    "prefs.show_window_controls": "Fenstersteuerungsschaltflächen anzeigen",
+    "prefs.show_window_controls_help": "Minimieren, Maximieren und Schließen am rechten Ende der Titelleiste. Schalten Sie sie aus, wenn der Fenstermanager das Fenster steuert, wie es ein kachelnder Fenstermanager tut; die Titelleiste verschiebt das Fenster weiterhin."
+  },
+  "he": {
+    "prefs.show_window_controls": "הצג כפתורי שליטה בחלון",
+    "prefs.show_window_controls_help": "מזעור, הגדלה וסגירה בקצה הימני של שורת הכותרת. כבה אותם כשמנהל החלונות מטפל בחלון, כמו מנהל חלונות מרצף; שורת הכותרת עדיין מזיזה את החלון."
+  },
+  "ja": {
+    "prefs.show_window_controls": "ウィンドウ操作ボタンを表示",
+    "prefs.show_window_controls_help": "タイトルバー右端の最小化、最大化、閉じる。タイリング型のようにウィンドウマネージャーがウィンドウを管理する場合はオフにします。タイトルバーでは引き続きウィンドウを移動できます。"
+  },
+  "ko": {
+    "prefs.show_window_controls": "창 제어 단추 표시",
+    "prefs.show_window_controls_help": "제목 표시줄 오른쪽 끝의 최소화, 최대화, 닫기입니다. 타일링 창 관리자처럼 창 관리자가 창을 다룰 때는 끄십시오. 제목 표시줄로 창을 계속 옮길 수 있습니다."
+  },
+  "vi": {
+    "prefs.show_window_controls": "Hiện các nút điều khiển cửa sổ",
+    "prefs.show_window_controls_help": "Thu nhỏ, Phóng to và Đóng ở đầu bên phải thanh tiêu đề. Tắt chúng khi trình quản lý cửa sổ tự xử lý cửa sổ, như trình quản lý dạng lát gạch; thanh tiêu đề vẫn di chuyển được cửa sổ."
+  },
+  "zh": {
+    "prefs.show_window_controls": "显示窗口控制按钮",
+    "prefs.show_window_controls_help": "标题栏右端的最小化、最大化和关闭。当窗口管理器自行管理窗口时（如平铺式窗口管理器）可将其关闭；标题栏仍可移动窗口。"
+  }
+}

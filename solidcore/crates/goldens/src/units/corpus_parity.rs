@@ -351,7 +351,7 @@ fn measure_rust_roundtrip(path: &Path, accuracy: f64) -> Measured {
             surface_key: &|_: FaceId| ObjectKey(0),
         };
         let mut all = Vec::new();
-        let written = BrepData::from_brep(b, &env, &mut all)
+        let written = BrepData::from_brep(&k, b, &env, &mut all)
             .and_then(|mut data| data.write_to_file_with_nurbs(&k, FileType::Ascii));
         let bytes = match written {
             Ok(bytes) => bytes,

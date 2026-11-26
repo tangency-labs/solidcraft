@@ -224,7 +224,9 @@ pub struct WorkCounters {
     contact_stretch_certifications: Cell<u64>,
     uv_trim_builds: Cell<u64>,
     trim_deviation_bounds: Cell<u64>,
+    split_face_classifications: Cell<u64>,
     face_intersections: Cell<u64>,
+    same_parameter_bisections: Cell<u64>,
     band_face_solves: Cell<u64>,
     band_edge_solves: Cell<u64>,
 }
@@ -462,6 +464,18 @@ impl WorkCounters {
         self.trim_deviation_bounds.get()
     }
 
+    /// Points a boolean's imprint classifies on the two faces a face was just split into,
+    /// to tell which of them a definition still to be imprinted lies on
+    /// (`ProtoTopologyManager::update_faces`): one for each classification past the faces'
+    /// domain boxes. Upstream's `UpdateFaces` also classified every coincident proto edge
+    /// of every proto face on the split face, at every split of it, which grew with the
+    /// cube of the coincident edges of a union of crossing strips on one plane. Not the
+    /// fork's.
+    #[must_use]
+    pub fn split_face_classifications(&self) -> u64 {
+        self.split_face_classifications.get()
+    }
+
     /// Pairs of faces of the two B-reps a boolean intersected (`FaceIntersect`): the
     /// pairs of [`WorkCounters::face_pairs`] that neither the box test nor the exact tests
     /// of `intersect_topology` showed apart: a planar face's plane, the edges of two planar
@@ -470,6 +484,15 @@ impl WorkCounters {
     #[must_use]
     pub fn face_intersections(&self) -> u64 {
         self.face_intersections.get()
+    }
+
+    /// Same-parameter bounds on a carried trim's distance from its edge
+    /// (`query::curve_surface_gap::trim_same_parameter_gap_bound_within`, which gates a
+    /// boolean's carried trims) that the trim's structure did not answer at once, so that its
+    /// bisection ran: the costly ones. Not the fork's (#22034).
+    #[must_use]
+    pub fn same_parameter_bisections(&self) -> u64 {
+        self.same_parameter_bisections.get()
     }
 
     /// Intersections of a convex blend's section with a face of the part, run to learn whether
@@ -516,7 +539,9 @@ impl WorkCounters {
         self.contact_stretch_certifications.set(0);
         self.uv_trim_builds.set(0);
         self.trim_deviation_bounds.set(0);
+        self.split_face_classifications.set(0);
         self.face_intersections.set(0);
+        self.same_parameter_bisections.set(0);
         self.band_face_solves.set(0);
         self.band_edge_solves.set(0);
     }
@@ -545,10 +570,22 @@ impl WorkCounters {
             .set(self.trim_deviation_bounds.get().saturating_add(1));
     }
 
+    /// Counts one point classified on the two faces a face was split into.
+    pub(crate) fn add_split_face_classification(&self) {
+        self.split_face_classifications
+            .set(self.split_face_classifications.get().saturating_add(1));
+    }
+
     /// Counts one pair of faces intersected.
     pub(crate) fn add_face_intersection(&self) {
         self.face_intersections
             .set(self.face_intersections.get().saturating_add(1));
+    }
+
+    /// Counts one same-parameter bound that runs its bisection.
+    pub(crate) fn add_same_parameter_bisection(&self) {
+        self.same_parameter_bisections
+            .set(self.same_parameter_bisections.get().saturating_add(1));
     }
 
     /// Counts one edge or vertex asked whether it is a seam or a pole of a face.

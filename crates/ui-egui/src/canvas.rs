@@ -815,7 +815,13 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
                 .and_then(serde_json::Value::as_array)
                 .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
                 .unwrap_or_default();
-            solidcraft_engine::doc::through_all_distance(&state, &plane, 0.0, &targets).ok()
+            let reach = solidcraft_engine::doc::through_all_distance(&state, &plane, 0.0, &targets).ok()?;
+            // On the side the extrude goes: the kept Distance's sign picks it, as in the model.
+            let kept = match &d.kind {
+                Kind::Extrude { distance, .. } => crate::length_input::eval(&app.session.doc, distance, ValueKind::Length).ok(),
+                _ => None,
+            };
+            Some(solidcraft_engine::doc::through_all_side(reach, kept))
         })
     } else {
         None
@@ -884,12 +890,20 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         }
         return;
     }
+    // Plane at Angle: a handle on the preview square's edge turns the plane about its axis,
+    // and the angle box stays beside it for typing an exact value (#17290).
+    if matches!(d.kind, Kind::AnglePlane { .. }) {
+        draw_angle_plane(app, ui, painter, proj, d, bs, focus);
+        return;
+    }
     // Two sides: the second distance gets its own arrow, the other way from the first side.
     if let (Kind::Extrude { direction: crate::dialogs::TWO_SIDES | crate::dialogs::TWO_SIDES_REVERSED, distance2, .. }, Some(n)) = (&mut d.kind, dir)
     {
-        // Distance 2 stays on the side Direction gives it, whatever the sign of Distance 1. Only
-        // a reach computed from the model (To Object, Through All) sends it the other way.
-        let n2 = if sign < 0.0 { n } else { -n };
+        // Distance 2 stays on the side Direction gives it, whatever the sign of Distance 1. With
+        // All the first side is the through-all reach, and the model sends the second side the
+        // other way from it. (To Object's side is already in `sign`, and All is off with it.)
+        let first = all_span.map_or(sign, |reach| sign * reach);
+        let n2 = n * solidcraft_engine::doc::second_side(first, sign < 0.0, all_span.is_some());
         let before = distance2.clone();
         // While its text does not evaluate (cleared, or a `-` typed first) there is no arrow,
         // but the box stays below the base so the typing can be finished there.
@@ -2643,6 +2657,130 @@ fn draw_revolve(
         let dragging = *angle != angle_before;
         value_box(ui, solidcraft_ui_text::tr_label("Angle"), angle, box_at, focus || dragging, box_place(app, proj));
     }
+}
+
+/// The half side of the square the preview draws for a new plane, in millimetres: the preview
+/// draws the plane's own axes at ten times their length.
+const PREVIEW_PLANE_HALF: f64 = 10.0;
+
+/// What Plane at Angle turns about: the axis, and the circle its handle rides.
+struct AngleTurn {
+    /// The point on the axis the circle is centred on.
+    centre: Vec3,
+    /// The circle's own axes: where the handle stands at the angle 0, and a quarter turn on.
+    e1: Vec3,
+    e2: Vec3,
+    /// The axis the plane turns about, as a unit vector.
+    axis: Vec3,
+    /// How far the handle stands from the axis.
+    radius: f64,
+    /// The angle the plane stands at now, in radians.
+    angle: f64,
+}
+
+/// Plane at Angle's turn: the axis the plane turns about, and the circle its handle rides.
+///
+/// The base plane and the axis are read as the command reads them: the base is an origin
+/// plane or a construction plane by name, the axis a picked axis, a sketch line or an edge.
+/// A face as the base is captured by the engine in the authoring frame, so the square the
+/// preview draws is not one the handle can stand on: the angle box types the angle instead.
+fn angle_plane_turn(app: &SolveApp, d: &Dialog) -> Option<AngleTurn> {
+    let Kind::AnglePlane { angle, direction_only } = &d.kind else { return None };
+    let base = d.inputs.first().and_then(|i| i.items.first()).and_then(|sel| match sel {
+        Sel::Plane { name } => crate::dialogs::plane_by_name(&app.session, name),
+        _ => None,
+    })?;
+    let (axis_origin, axis_dir) = crate::dialogs::angle_axis(app, d)?;
+    // "Use axis direction only": the plane turns about a line in the base plane, through the
+    // pivot (the base's own origin when none is picked), as the engine reads it.
+    let (pivot, dir) = if *direction_only {
+        let n = base.normal();
+        let dir = (axis_dir - n * n.dot(axis_dir)).normalized()?;
+        let pivot = angle_pivot_point(app, d).unwrap_or(base.origin);
+        (pivot - n * n.dot(pivot - base.origin), dir)
+    } else {
+        (axis_origin, axis_dir.normalized()?)
+    };
+    let rad = crate::length_input::eval(&app.session.doc, angle, ValueKind::Angle).ok().filter(|v| v.is_finite())?;
+    // The square the preview draws: half a side of ten millimetres round the plane's origin,
+    // along the plane's own axes. The handle stands on the middle of one of its edges: the
+    // edge whose middle stands farthest from the axis, whose circle is the biggest and so
+    // the finest to drag. An edge along the axis would not move at all.
+    let mut best: Option<(f64, Vec3)> = None;
+    for edge in [base.x, base.y] {
+        let p = base.origin + edge * PREVIEW_PLANE_HALF;
+        let r = (p - pivot - dir * (p - pivot).dot(dir)).len();
+        if r > 1e-3 && best.is_none_or(|(old, _)| r > old) {
+            best = Some((r, p));
+        }
+    }
+    let (radius, p) = best?;
+    let centre = pivot + dir * (p - pivot).dot(dir);
+    let e1 = (p - centre) / radius;
+    Some(AngleTurn { centre, e1, e2: dir.cross(e1), axis: dir, radius, angle: rad })
+}
+
+/// The point the Plane at Angle dialog takes as the pivot, in world coordinates.
+fn angle_pivot_point(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
+    match crate::dialogs::angle_pivot(d)? {
+        Sel::Vertex { point, .. } => Some(*point),
+        Sel::SketchPoint { id } => {
+            let st = crate::open_meshing::session_world(&app.session);
+            sketch_point_at(app, &st, id)
+        }
+        Sel::ConstructionPoint { name } => {
+            solidcraft_engine::view::construction_points(&app.session).into_iter().find(|(_, n, _)| n == name).map(|(_, _, p)| p)
+        }
+        _ => None,
+    }
+}
+
+/// Plane at Angle: the handle that turns the plane about its axis (#17290). It stands on the
+/// edge of the square the preview draws, so the plane turns as the handle is dragged. The angle
+/// box stays where it was, beside the plane, for typing an exact value.
+fn draw_angle_plane(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog, bs: Pos2, focus: bool) {
+    let turn = angle_plane_turn(app, d);
+    let Kind::AnglePlane { angle, .. } = &mut d.kind else { return };
+    let before = angle.clone();
+    // The angle box stays where it has always been, beside the base anchor: the handle is
+    // added beside it, not in place of it (#17290).
+    let box_at = bs + vec2(16.0, -30.0);
+    let mut handle = None;
+    if let Some(turn) = turn {
+        // The circle the handle rides, so the sweep the plane makes is seen.
+        let points: Vec<Pos2> = (0..=48)
+            .filter_map(|i| {
+                let a = i as f64 * std::f64::consts::TAU / 48.0;
+                proj.to_screen(turn.centre + (turn.e1 * a.cos() + turn.e2 * a.sin()) * turn.radius)
+            })
+            .collect();
+        if points.len() > 1 {
+            painter.add(egui::Shape::line(points, Stroke::new(1.0, Tokens::get().origin_plane_edge.linear_multiply(0.35))));
+        }
+        handle = rotation_handle(
+            ui,
+            painter,
+            proj,
+            turn.centre,
+            turn.e1,
+            turn.e2,
+            turn.axis,
+            turn.radius,
+            turn.angle,
+            1.0,
+            0.0,
+            (-std::f64::consts::TAU, std::f64::consts::TAU),
+            "angle_plane",
+            angle,
+        );
+    }
+    // A box over a handle takes the press meant for the handle (#6608): the box moves aside.
+    let mut place = box_place(app, proj);
+    if let Some(end) = handle {
+        place.handles = Some(egui::Rect::from_center_size(end, vec2(28.0, 28.0)));
+    }
+    let dragging = *angle != before;
+    value_box(ui, "Angle", angle, box_at, focus || dragging, place);
 }
 
 fn revolve_convention(d: &Dialog) -> solidcraft_engine::doc::RevolveConvention {

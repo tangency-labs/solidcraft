@@ -324,6 +324,33 @@ pub struct CommandSchema {
     pub group: Option<String>,
 }
 
+/// The severity level of a message logged by a plugin guest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum LogLevel {
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl LogLevel {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Debug => "debug",
+            Self::Info => "info",
+            Self::Warn => "warn",
+            Self::Error => "error",
+        }
+    }
+}
+
+impl std::fmt::Display for LogLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// A named folder resolved by the app after user approval, never a guest-supplied root.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -434,6 +461,12 @@ pub trait PluginHost {
         Ok(())
     }
     fn log(&mut self, message: &str);
+    /// Receive a log message with its severity level from a plugin guest.
+    /// By default delegates to [`PluginHost::log`].
+    fn log_level(&mut self, level: LogLevel, message: &str) {
+        let _ = level;
+        self.log(message);
+    }
     fn progress(&mut self, fraction: f32, message: &str);
     /// Writes the running plugin's file `name` in the open design from its bytes, as they are
     /// (`storage@0.1`, the `storage` interface's `put-blob`); `append` adds them to its end. The
@@ -1076,7 +1109,14 @@ fn validate_kind(runtime: &RuntimeManifest, entry: &Entry) -> Result<()> {
         EntryKind::Command => Ok(()),
         EntryKind::Importer | EntryKind::Exporter => {
             let mut seen = BTreeSet::new();
-            let valid = |e: &String| (1..=16).contains(&e.len()) && e.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+            let is_alnum = |c: u8| c.is_ascii_lowercase() || c.is_ascii_digit();
+            let valid = |e: &String| {
+                let bytes = e.as_bytes();
+                (1..=16).contains(&bytes.len())
+                    && bytes.first().copied().is_some_and(is_alnum)
+                    && bytes.last().copied().is_some_and(is_alnum)
+                    && bytes.iter().all(|&c| is_alnum(c) || c == b'_')
+            };
             if entry.extensions.is_empty() || entry.extensions.len() > MAX_EXTENSIONS || !entry.extensions.iter().all(|e| valid(e) && seen.insert(e))
             {
                 return Err(invalid(

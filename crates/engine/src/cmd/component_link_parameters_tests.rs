@@ -94,6 +94,13 @@ fn a_link_refuses_what_it_cannot_set() {
     assert!(missing.contains("unknown parameter `nothing_here`"), "{missing}");
     assert!(s.doc.links.values().next().unwrap().parameters.is_empty(), "a refused set changes nothing");
 
+    // A file an importer plugin reads is taken as it is: its link is passed no values.
+    let record = solidcraft_doc::LinkImporter { format: "board".into(), plugin: Some("boards".into()), ..Default::default() };
+    s.doc_mut().links.values_mut().for_each(|link| link.importer = Some(record.clone()));
+    let imported = fails(&mut s, "component.link_parameters", json!({"component": "Plate", "set": {"h": "lift"}}));
+    assert!(imported.contains("a file an importer reads"), "{imported}");
+    s.doc_mut().links.values_mut().for_each(|link| link.importer = None);
+
     // A parameter a link uses can't go: the link's expression would no longer work out.
     run(&mut s, "component.link_parameters", json!({"component": "Plate", "set": {"h": "lift"}}));
     let deleted = fails(&mut s, "parameters.change", json!({"delete": "lift"}));

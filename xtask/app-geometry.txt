@@ -38,7 +38,6 @@ crates/doc/src/document.rs:AlignFrame::resolve normalized
 crates/doc/src/document.rs:Document::resolve_plane_in cross,dot,normalized
 crates/doc/src/document.rs:MeshData::eq triangles
 crates/doc/src/document.rs:MeshData::generate_crease_normals triangles
-crates/doc/src/document.rs:unit_direction normalized
 crates/doc/src/drawing/cutting_line.rs:CuttingLine::basis cross,dot
 crates/doc/src/drawing/cutting_line.rs:CuttingLine::first_way normalized
 crates/doc/src/drawing/cutting_line.rs:CuttingLine::planes cross,normalized
@@ -107,7 +106,6 @@ crates/doc/src/eval.rs:faces_near closest_on_triangle,cross,normalized,triangles
 crates/doc/src/eval.rs:feature_json triangles
 crates/doc/src/eval.rs:feature_tools_with_constructor atan2,cross,dot,normalized
 crates/doc/src/eval.rs:flat_to_end dot
-crates/doc/src/eval.rs:from_slope_height dot
 crates/doc/src/eval.rs:hole_depth_to dot
 crates/doc/src/eval.rs:hole_dir_into_face dot,normalized
 crates/doc/src/eval.rs:hole_run_on cross,dot
@@ -117,7 +115,6 @@ crates/doc/src/eval.rs:hole_threads dot
 crates/doc/src/eval.rs:hole_tools_reaching dot
 crates/doc/src/eval.rs:least_turn atan2,cross,dot
 crates/doc/src/eval.rs:level_along dot
-crates/doc/src/eval.rs:level_on dot
 crates/doc/src/eval.rs:level_start_reason dot
 crates/doc/src/eval.rs:line_in_sketch_plane dot,normalized
 crates/doc/src/eval.rs:mesh_content_digest triangles
@@ -132,7 +129,6 @@ crates/doc/src/eval.rs:path_points cross,normalized
 crates/doc/src/eval.rs:path_station normalized
 crates/doc/src/eval.rs:pattern_transforms atan2,cross,dot,normalized
 crates/doc/src/eval.rs:pick_lies_on_a_round_axis dot,normalized
-crates/doc/src/eval.rs:planes_cross_over atan2,normalized
 crates/doc/src/eval.rs:ray_face raycast
 crates/doc/src/eval.rs:replay normalized
 crates/doc/src/eval.rs:resolve_edges cross
@@ -145,7 +141,6 @@ crates/doc/src/eval.rs:same_extrude_from_face dot,normalized
 crates/doc/src/eval.rs:seg_at cross,normalized
 crates/doc/src/eval.rs:sketch_line_plane normalized
 crates/doc/src/eval.rs:slanted_plane dot
-crates/doc/src/eval.rs:slope_rise dot
 crates/doc/src/eval.rs:tangent_face_chain dot,normalized,triangles
 crates/doc/src/eval.rs:trim_between_planes dot
 crates/doc/src/eval.rs:trim_between_slopes dot
@@ -468,6 +463,7 @@ crates/engine/src/cmd/contact_sweep.rs:contact_mesh cross,dot,normalized,triangl
 crates/engine/src/cmd/contact_sweep.rs:segment_closest dot
 crates/engine/src/cmd/contact_sweep.rs:segment_hits_triangle cross,dot
 crates/engine/src/cmd/drawing_dimension.rs:diameter_by_default dot
+crates/engine/src/cmd/drawing_dimension.rs:short_edge_warning dot,normalized (warns that an edge is too short to dimension; builds no geometry)
 crates/engine/src/cmd/drawing_dimension.rs:side_by_default dot
 crates/engine/src/cmd/drawing_model_dimensions.rs:along dot
 crates/engine/src/cmd/drawing_model_dimensions.rs:arc_middle atan2
@@ -1210,6 +1206,7 @@ crates/ui-egui/src/browser_canvas.rs:on_image dot
 crates/ui-egui/src/canvas.rs:MoveRotation::point cross
 crates/ui-egui/src/canvas.rs:along dot
 crates/ui-egui/src/canvas.rs:anchor normalized
+crates/ui-egui/src/canvas.rs:angle_plane_turn cross,dot,normalized
 crates/ui-egui/src/canvas.rs:chamfer_face_dirs dot
 crates/ui-egui/src/canvas.rs:drag_arrow_to normalized
 crates/ui-egui/src/canvas.rs:draw dot,normalized

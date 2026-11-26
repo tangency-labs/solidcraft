@@ -497,7 +497,14 @@ fn tapered_extrudes() {
     let m = measure(&b).unwrap();
     assert!(rel(m.volume, v) < 5e-4, "{} vs {v}", m.volume);
     assert!(m.bbox.max.z < 1e-6 && m.bbox.min.z > -10.0 - 1e-6, "{:?}", m.bbox);
-    assert!(extrude_tapered(&Plane::XY, &c, 10.0, 1.0, -60f64.to_radians(), crate::DraftCorner::default()).is_err(), "closes the profile");
+    // Inward 60° over 10: the circle closes to its centre at 10 / tan 60° (5.77), before the top,
+    // so the solid is the cone to that apex, π r² h / 3 (#22149).
+    let b = extrude_tapered(&Plane::XY, &c, 10.0, 1.0, -60f64.to_radians(), crate::DraftCorner::default()).unwrap();
+    let h = 10.0 / 60f64.to_radians().tan();
+    let v = PI * 100.0 * h / 3.0;
+    let m = measure(&b).unwrap();
+    assert!(rel(m.volume, v) < 5e-4, "{} vs {v}", m.volume);
+    assert!(m.bbox.min.z > -1e-6 && (m.bbox.max.z - h).abs() < 1e-6, "{:?}", m.bbox);
     // The square with a 10 × 10 square hole, 30 up, 5° inward: every wall leans in toward the
     // material's outside, so the outer frustum narrows and the hole's widens; the solid is the
     // one frustum less the other, with each wall a face of its own (four out, four in, two caps).

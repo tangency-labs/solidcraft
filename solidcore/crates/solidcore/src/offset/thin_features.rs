@@ -27,7 +27,6 @@ use crate::boolean::api_brep::boolean_union;
 use crate::error::offset::OffsetFailure;
 use crate::error::{Reason, Result, SolidError};
 use crate::kernel::Kernel;
-use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::offset::offset_executive::p2::{shell_brep_simple, ShellOptions};
 use crate::offset::wall_room::{shell_wall_room, WallRoom};
 use crate::topology::edgeuse::{p1 as eu1, p2 as eu2};
@@ -64,6 +63,7 @@ fn feature_from(k: &Kernel, b: &mut Brep, seed: FaceId) -> Result<Option<Vec<Fac
     let mut found: BTreeSet<FaceId> = BTreeSet::from([seed]);
     let mut todo = vec![seed];
     while let Some(f) = todo.pop() {
+        let outer = crate::topology::face::p2::outer_faceuse(b, f)?;
         for e in face_edges(b, f)? {
             let faces = edge::faces(b, e, None)?;
             // the use of the edge on `f`'s face use that faces out of the material
@@ -72,9 +72,7 @@ fn feature_from(k: &Kernel, b: &mut Brep, seed: FaceId) -> Result<Option<Vec<Fac
                 let Some(fu) = eu1::faceuse(b, u)? else {
                     continue;
                 };
-                if eu1::face(b, u)? == Some(f)
-                    && eu1::faceuse_orientation(b, fu)? == OrientType::Same
-                {
+                if eu1::face(b, u)? == Some(f) && Some(fu) == outer {
                     on_f = Some(u);
                 }
             }
