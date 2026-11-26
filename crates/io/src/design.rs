@@ -2735,17 +2735,8 @@ mod tests {
         // shares `base`'s record and has `color == None, paint == None` yet encodes differently.
         let protected = painted.clone().with_paint(None);
 
-        let model = saved_model(vec![
-            base.clone(),
-            base.clone(),
-            base.clone(),
-            base.clone(),
-            base.clone(),
-            shared_placed,
-            colored,
-            painted,
-            protected,
-        ]);
+        let model =
+            saved_model(vec![base.clone(), base.clone(), base.clone(), base.clone(), base.clone(), shared_placed, colored, painted, protected]);
 
         let before = native_cache::ENCODED_UNIQUE.with(std::cell::Cell::get);
         let (manifest_bytes, payload_bytes) = native_cache::encode_model(&model, b"{}", usize::MAX)?;

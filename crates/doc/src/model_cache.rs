@@ -431,9 +431,8 @@ impl Writer {
             .iter()
             .map(|m| {
                 let mut record = serde_json::to_value(m).ok()?;
-                record["unmodified"] = json!(
-                    body_by_name.get(m.body.as_str()).is_some_and(|b| b.feature == m.feature && !b.transferred && m.is_unchanged(&b.body))
-                );
+                record["unmodified"] =
+                    json!(body_by_name.get(m.body.as_str()).is_some_and(|b| b.feature == m.feature && !b.transferred && m.is_unchanged(&b.body)));
                 Some(record)
             })
             .collect::<Option<Vec<_>>>()?;
@@ -1359,7 +1358,9 @@ impl Model {
                 pass1_cache = None;
             }
             if !result.skipped {
-                if !pose_only(f) && let Some(cache) = pass1_cache.as_mut() {
+                if !pose_only(f)
+                    && let Some(cache) = pass1_cache.as_mut()
+                {
                     cache_adopted_result(cache, eval_doc, &vals, f, &result, ctx, shared, &before, &import_digests);
                 }
                 exact = !result.unkept;
@@ -1429,7 +1430,10 @@ impl Model {
                     }
                     let prev_state = before;
                     before = r.state.clone();
-                    if i < marker && !f.suppressed && let Some(s) = cache_stepper.as_mut() {
+                    if i < marker
+                        && !f.suppressed
+                        && let Some(s) = cache_stepper.as_mut()
+                    {
                         s.advance(&mut cache_joints, &vals, f, &prev_state, &before);
                     }
                 }

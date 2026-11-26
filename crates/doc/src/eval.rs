@@ -6640,8 +6640,7 @@ impl CaptureStepper {
         loop {
             match (ai.next(), bi.next()) {
                 (None, None) => return false,
-                (Some(x), Some(y))
-                    if x.name == y.name && x.component == y.component && std::ptr::eq(x.body.record(), y.body.record()) => {}
+                (Some(x), Some(y)) if x.name == y.name && x.component == y.component && std::ptr::eq(x.body.record(), y.body.record()) => {}
                 _ => return true,
             }
         }
