@@ -1310,6 +1310,11 @@ pub enum FeatureKind {
         /// Hole keeps it.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         old_surface_start: bool,
+        /// Press-in hardware this hole is the mounting hole of (#17752): a self-clinching nut,
+        /// stud or standoff in a sheet. The hole is a plain through hole of the hardware's
+        /// size; it has no `thread` of its own, the hardware has the thread.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hardware: Option<Hardware>,
     },
     /// A thread on a cylindrical face. Cosmetic by default (no geometry change; drawn and
     /// exported as an annotation); `modeled` cuts the real helical ISO profile into the face.
@@ -1581,10 +1586,17 @@ pub enum FeatureKind {
         #[walk(length = ["-X margin", "+X margin", "-Y margin", "+Y margin", "-Z margin", "+Z margin"])]
         margins: Option<[Expr; 6]>,
     },
-    /// A tube along a chain of sketch curves (solid, or hollow with a wall thickness).
+    /// A tube along a chain of sketch curves, or along a chain of a body's edges (solid, or
+    /// hollow with a wall thickness).
     Pipe {
         path_sketch: SketchId,
         path: Vec<String>,
+        /// The path on a body's edges, instead of the curves of `path_sketch` (#16084): the body
+        /// and a point on each edge of the chain.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path_body: Option<BodyName>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        path_edges: Vec<Position>,
         #[walk(length = "Diameter")]
         diameter: Expr,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3545,6 +3557,9 @@ pub struct Component {
     /// Free text properties of the definition (material grade, finish, supplier…), by name.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub properties: std::collections::BTreeMap<String, String>,
+    /// Derives two drawing properties from the current name. Explicit properties take precedence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_split: Option<ComponentNameSplit>,
     /// Keeps this component's features (and its children's) out of the History bar (#10393).
     /// The features still rebuild and the component still shows in the Browser; imported copies
     /// whose features only exist to rebuild the copy can carry this flag.
@@ -3553,6 +3568,39 @@ pub struct Component {
     /// Mass values that replace those worked out from its bodies, for robot exports.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub physical_override: Option<PhysicalOverride>,
+}
+
+/// An opt-in rule for deriving two custom drawing properties from a component name.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComponentNameSplit {
+    /// Literal separator, with the first occurrence dividing the name.
+    pub separator: String,
+    /// Property that reads the text before the separator.
+    pub left_property: String,
+    /// Property that reads the text after the separator, including any further separators.
+    pub right_property: String,
+}
+
+impl ComponentNameSplit {
+    /// The property value for `key`, where both halves of the name contain text.
+    pub fn property<'a>(&self, name: &'a str, key: &str) -> Option<&'a str> {
+        if self.separator.is_empty() || self.left_property == self.right_property {
+            return None;
+        }
+        let (left, right) = name.split_once(self.separator.as_str())?;
+        let (left, right) = (left.trim(), right.trim());
+        if left.is_empty() || right.is_empty() {
+            return None;
+        }
+        if key == self.left_property {
+            Some(left)
+        } else if key == self.right_property {
+            Some(right)
+        } else {
+            None
+        }
+    }
 }
 
 /// What a body looks like to a simulator.
@@ -3736,6 +3784,20 @@ pub enum HoleKind {
     },
 }
 
+/// The press-in hardware a sheet metal hole is for (#17752), kept so that a drawing's hole
+/// callout or table can name it: its kind, its thread as written (`M3`), its length when it has
+/// one (a stud's or a standoff's) and the id of the part (`nut.m3`, see
+/// [`crate::hardware_catalog::HardwareSize::part`]) that a component can stand for it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct Hardware {
+    pub kind: crate::hardware_catalog::HardwareKind,
+    pub thread: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "Hardware length")]
+    pub length: Option<Expr>,
+    pub part: String,
+}
+
 /// A Single hole's reference edge (#37): a point on a straight edge of the hole's face, and the
 /// distance of the hole's centre from that edge's line, in the face's plane.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
@@ -3821,11 +3883,19 @@ pub enum PatternKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         axis_feature: Option<FeatureName>,
     },
-    /// Copies along a chain of sketch curves: instance k moves by path(s + k·spacing) − path(s),
-    /// measured along the path from its start, where s is the start point (0 by default).
+    /// Copies along a chain of sketch curves, or along a chain of a body's edges: instance k
+    /// moves by path(s + k·spacing) − path(s), measured along the path from its start, where s is
+    /// the start point (0 by default).
     Path {
         path_sketch: SketchId,
         path: Vec<String>,
+        /// The path on a body's edges, instead of the curves of `path_sketch` (#16084): the body
+        /// and a point on each edge of the chain. The path starts at the chain's end nearest
+        /// the first point; a closed chain starts at its point nearest the first point.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path_body: Option<BodyName>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        path_edges: Vec<Position>,
         #[walk(unitless = "Quantity")]
         count: Expr,
         /// Distance along the path between instances, or the whole extent when `extent`.
@@ -4490,6 +4560,13 @@ pub struct Feature {
     /// mean that numbering.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub kernel_piece_order: bool,
+    /// The pieces this feature splits a body into take its body names in the order of each
+    /// piece's least face name alone, as builds before #21552 named them, instead of first by
+    /// the faces the feature cut them apart with (`lineage::order_lumps`), which an upstream edit
+    /// does not take away. Set on the features of designs saved before then, whose stored body
+    /// names mean that order.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub least_face_piece_order: bool,
     /// This body Pattern reads its stored `body_names` in the order it makes its copies, as builds
     /// before #12114 read them, instead of by source and copy number. Set on the Patterns of
     /// several bodies in designs saved before then, whose stored names mean that order. The
@@ -4712,8 +4789,8 @@ pub struct DesignLink {
 
 /// The importer a linked source was read with: enough to read the file again, or to say what is
 /// missing when it can't. An importer plugin names its package, so a different or missing one is
-/// told apart. This build reads only records that name a plugin (Insert Design always writes
-/// one); a built-in reader for another format would add its own rule beside `format`.
+/// told apart. A record without a plugin is the built-in KiCad board reader's
+/// ([`LinkImporter::is_kicad`], with the board's options); any other is not read again.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct LinkImporter {
     /// What reads the file: an installed importer's id (`plugin.entry`), or a built-in format's.
@@ -4727,6 +4804,17 @@ pub struct LinkImporter {
     /// The options the importer was given, read again with the same ones. Null: none.
     #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
     pub options: serde_json::Value,
+}
+
+impl LinkImporter {
+    /// The `format` of the built-in KiCad board reader, which has no plugin.
+    pub const KICAD: &'static str = "kicad";
+
+    /// Whether this is the built-in KiCad reader's record: a board SolidCraft reads itself, with
+    /// the options it was opened with.
+    pub fn is_kicad(&self) -> bool {
+        self.plugin.is_none() && self.format == Self::KICAD
+    }
 }
 
 impl DesignLink {
@@ -5437,12 +5525,16 @@ impl Document {
 
     /// This design with `other`'s part properties, or `None` when they are this design's
     /// already (then nothing is copied). The part properties are the fields that change no
-    /// geometry: the design's metadata, each component's metadata and free properties, each
-    /// placement's bill of materials type and the saved item numbers. A field that joins them is
+    /// geometry: the design's metadata, each component's metadata, free properties and name split,
+    /// each placement's bill of materials type and the saved item numbers. A field that joins them is
     /// compared and copied here, and nowhere else.
     fn with_part_properties_of(&self, other: &Document) -> Option<Document> {
         let same = self.metadata == other.metadata
-            && self.components.iter().zip(&other.components).all(|(c, o)| c.metadata == o.metadata && c.properties == o.properties)
+            && self
+                .components
+                .iter()
+                .zip(&other.components)
+                .all(|(c, o)| c.metadata == o.metadata && c.properties == o.properties && c.name_split == o.name_split)
             && self.occurrences.iter().zip(&other.occurrences).all(|(c, o)| c.bom_type == o.bom_type)
             && self.assembly.item_numbers == other.assembly.item_numbers;
         if same {
@@ -5456,6 +5548,7 @@ impl Document {
         for (c, o) in out.components.iter_mut().zip(&other.components) {
             c.metadata.clone_from(&o.metadata);
             c.properties.clone_from(&o.properties);
+            c.name_split.clone_from(&o.name_split);
         }
         for (c, o) in out.occurrences.iter_mut().zip(&other.occurrences) {
             c.bom_type = o.bom_type;
@@ -5540,12 +5633,126 @@ impl Document {
         st
     }
 
+    /// The copy-lineage source(s) of `body` from the active feature that created it
+    /// (`Pattern`, `Mirror` without combine, or `Move` with `copy: true`).
+    ///
+    /// A multi-seed `Pattern` with `join: true` booleans all seeds and copies together before
+    /// splitting disconnected `lumps()`, so `body_names` has no per-seed slot mapping; unmerged
+    /// lumps resolve unanimously when every seed carries the same material.
+    fn copy_material_sources(&self, body: &str) -> CopyMaterialSources<'_> {
+        if body.is_empty() {
+            return CopyMaterialSources::None;
+        }
+        let limit = self.marker.unwrap_or(self.features.len()).min(self.features.len());
+        for f in self.features[..limit].iter().rev() {
+            if f.suppressed {
+                continue;
+            }
+            let Some(idx) = f.body_names.iter().position(|n| n == body) else {
+                continue;
+            };
+            let sources = match &f.kind {
+                FeatureKind::Pattern { bodies, components, occurrences, join, .. }
+                    if !bodies.is_empty() && components.is_empty() && occurrences.is_empty() =>
+                {
+                    if bodies.len() == 1 {
+                        (bodies[0].0.as_str() != body).then_some(CopyMaterialSources::Single(bodies[0].0.as_str()))
+                    } else if *join {
+                        (!bodies.iter().any(|b| b.0.as_str() == body)).then_some(CopyMaterialSources::Unanimous(bodies.as_slice()))
+                    } else if f.body_names.len().is_multiple_of(bodies.len()) {
+                        let per = f.body_names.len() / bodies.len();
+                        bodies.get(idx / per).map(|b| b.0.as_str()).filter(|s| *s != body).map(CopyMaterialSources::Single)
+                    } else {
+                        None
+                    }
+                }
+                FeatureKind::Mirror { bodies, combine: false, .. } if !bodies.is_empty() => {
+                    bodies.get(idx).map(|b| b.0.as_str()).filter(|s| *s != body).map(CopyMaterialSources::Single)
+                }
+                FeatureKind::Move { bodies, copy: true, .. } if !bodies.is_empty() => {
+                    bodies.get(idx).map(|b| b.0.as_str()).filter(|s| *s != body).map(CopyMaterialSources::Single)
+                }
+                _ => None,
+            };
+            return sources.unwrap_or(CopyMaterialSources::None);
+        }
+        CopyMaterialSources::None
+    }
+
+    /// The seed body `body` was copied from by the active feature that created it
+    /// (`Pattern`, `Mirror` without combine, or `Move` with `copy: true`), when that
+    /// lineage is unambiguous from pinned `body_names`. Multi-seed joined patterns merge all
+    /// seeds before splitting disconnected lumps and therefore have no single per-slot seed.
+    pub fn copy_seed_body(&self, body: &str) -> Option<&str> {
+        match self.copy_material_sources(body) {
+            CopyMaterialSources::Single(seed) => Some(seed),
+            CopyMaterialSources::None | CopyMaterialSources::Unanimous(_) => None,
+        }
+    }
+
+    /// Whether `body` was created by an active copy feature that inherits physical material
+    /// from its seed body (or unanimously from its seeds in a multi-seed joined pattern).
+    pub fn has_copy_material_lineage(&self, body: &str) -> bool {
+        !matches!(self.copy_material_sources(body), CopyMaterialSources::None)
+    }
+
+    /// The material explicitly assigned to `body` in [`Self::materials`], or inherited
+    /// from its copy-seed lineage (`Pattern`, `Mirror`, `Move` copy) when `body` has no
+    /// explicit assignment of its own.
+    ///
+    /// An explicit entry in [`Self::materials`] for `body` (including [`DEFAULT_MATERIAL`])
+    /// always takes precedence over any seed body's material.
+    pub fn resolved_body_material(&self, body: &str) -> Option<&str> {
+        if let Some(m) = self.materials.get(body) {
+            return Some(m.as_str());
+        }
+        let mut visited: Vec<&str> = Vec::new();
+        let mut budget = self.features.len().saturating_mul(8).max(64);
+        self.resolved_inherited_material(body, body, &mut visited, &mut budget)
+    }
+
+    fn resolved_inherited_material<'a>(&'a self, current: &str, root: &str, visited: &mut Vec<&'a str>, budget: &mut usize) -> Option<&'a str> {
+        if *budget == 0 || visited.len() >= self.features.len() {
+            return None;
+        }
+        *budget -= 1;
+        match self.copy_material_sources(current) {
+            CopyMaterialSources::None => None,
+            CopyMaterialSources::Single(seed) => self.resolve_seed_material(seed, root, visited, budget),
+            CopyMaterialSources::Unanimous(seeds) => {
+                let mut unanimous: Option<&'a str> = None;
+                for seed in seeds {
+                    let mat = self.resolve_seed_material(seed.0.as_str(), root, visited, budget)?;
+                    match unanimous {
+                        None => unanimous = Some(mat),
+                        Some(first) if !mat.eq_ignore_ascii_case(first) => return None,
+                        Some(_) => {}
+                    }
+                }
+                unanimous
+            }
+        }
+    }
+
+    fn resolve_seed_material<'a>(&'a self, seed: &'a str, root: &str, visited: &mut Vec<&'a str>, budget: &mut usize) -> Option<&'a str> {
+        if seed == root || visited.contains(&seed) {
+            return None;
+        }
+        if let Some(m) = self.materials.get(seed) {
+            return Some(m.as_str());
+        }
+        visited.push(seed);
+        let result = self.resolved_inherited_material(seed, root, visited, budget);
+        visited.pop();
+        result
+    }
+
     /// The material a body's mass is computed with, as the library or this design spells it:
-    /// its assigned material when that is known and has a usable density, else
-    /// [`DEFAULT_MATERIAL`]. The assignment as stored (`materials`) is left as it is.
+    /// its assigned material (or inherited copy-seed material) when that is known and has a
+    /// usable density, else [`DEFAULT_MATERIAL`]. The assignment as stored (`materials`) is
+    /// left as it is.
     pub fn body_material(&self, body: &str) -> String {
-        self.materials
-            .get(body)
+        self.resolved_body_material(body)
             .and_then(|m| self.material_name(m))
             .filter(|m| self.material_density(m).is_some())
             .unwrap_or_else(|| DEFAULT_MATERIAL.into())
@@ -5977,6 +6184,7 @@ impl Document {
             participants: Vec::new(),
             shell_piece_order: false,
             kernel_piece_order: false,
+            least_face_piece_order: false,
             pattern_names_in_order: false,
             inserted: false,
             link_faces: Vec::new(),
@@ -6807,6 +7015,12 @@ impl Document {
         }
         Ok(report)
     }
+}
+
+enum CopyMaterialSources<'a> {
+    None,
+    Single(&'a str),
+    Unanimous(&'a [BodyName]),
 }
 
 /// The built-in material library: (name, density), and each material's colour.

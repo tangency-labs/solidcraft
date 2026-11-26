@@ -1,0 +1,66 @@
+{
+  "en": {
+    "cmd.sketch.constraint.horizontal": "Horizontal",
+    "cmd.sketch.constraint.vertical": "Vertical",
+    "help.sketch.constraint.horizontal": "Makes a line, or the line between two points, horizontal.",
+    "help.sketch.constraint.vertical": "Makes a line, or the line between two points, vertical.",
+    "sketch.hint.constraint.horizontal": "Horizontal: pick a line, two points, or a point and a line; hold Shift to pick a line midpoint",
+    "sketch.hint.constraint.vertical": "Vertical: pick a line, two points, or a point and a line; hold Shift to pick a line midpoint"
+  },
+  "ar": {
+    "cmd.sketch.constraint.horizontal": "أفقي",
+    "cmd.sketch.constraint.vertical": "رأسي",
+    "help.sketch.constraint.horizontal": "يجعل خطًا، أو الخط بين نقطتين، أفقيًا.",
+    "help.sketch.constraint.vertical": "يجعل خطًا، أو الخط بين نقطتين، رأسيًا.",
+    "sketch.hint.constraint.horizontal": "أفقي: اختر خطًا، أو نقطتين، أو نقطة وخطًا؛ اضغط Shift مع الاستمرار لاختيار منتصف خط",
+    "sketch.hint.constraint.vertical": "رأسي: اختر خطًا، أو نقطتين، أو نقطة وخطًا؛ اضغط Shift مع الاستمرار لاختيار منتصف خط"
+  },
+  "de": {
+    "cmd.sketch.constraint.horizontal": "Horizontal",
+    "cmd.sketch.constraint.vertical": "Vertikal",
+    "help.sketch.constraint.horizontal": "Macht eine Linie oder die Verbindung zweier Punkte horizontal.",
+    "help.sketch.constraint.vertical": "Macht eine Linie oder die Verbindung zweier Punkte vertikal.",
+    "sketch.hint.constraint.horizontal": "Horizontal: Linie, zwei Punkte oder einen Punkt und eine Linie wählen; Umschalt halten, um die Mitte einer Linie zu wählen",
+    "sketch.hint.constraint.vertical": "Vertikal: Linie, zwei Punkte oder einen Punkt und eine Linie wählen; Umschalt halten, um die Mitte einer Linie zu wählen"
+  },
+  "he": {
+    "cmd.sketch.constraint.horizontal": "אופקי",
+    "cmd.sketch.constraint.vertical": "אנכי",
+    "help.sketch.constraint.horizontal": "גורם לישר, או לישר שבין שתי נקודות, להיות אופקי.",
+    "help.sketch.constraint.vertical": "גורם לישר, או לישר שבין שתי נקודות, להיות אנכי.",
+    "sketch.hint.constraint.horizontal": "אופקי: בחרו ישר, שתי נקודות או נקודה וישר; החזיקו Shift כדי לבחור את אמצע הישר",
+    "sketch.hint.constraint.vertical": "אנכי: בחרו ישר, שתי נקודות או נקודה וישר; החזיקו Shift כדי לבחור את אמצע הישר"
+  },
+  "ja": {
+    "cmd.sketch.constraint.horizontal": "水平",
+    "cmd.sketch.constraint.vertical": "垂直",
+    "help.sketch.constraint.horizontal": "直線、または2点を結ぶ線を水平にします。",
+    "help.sketch.constraint.vertical": "直線、または2点を結ぶ線を垂直にします。",
+    "sketch.hint.constraint.horizontal": "水平: 線分、2 点、または点と線分を選択します。Shift を押すと線分の中点を選択できます",
+    "sketch.hint.constraint.vertical": "垂直: 線分、2 点、または点と線分を選択します。Shift を押すと線分の中点を選択できます"
+  },
+  "ko": {
+    "cmd.sketch.constraint.horizontal": "수평",
+    "cmd.sketch.constraint.vertical": "수직",
+    "help.sketch.constraint.horizontal": "선이나 두 점을 잇는 선을 수평으로 만듭니다.",
+    "help.sketch.constraint.vertical": "선이나 두 점을 잇는 선을 수직으로 만듭니다.",
+    "sketch.hint.constraint.horizontal": "수평: 선, 두 점, 또는 점과 선을 선택합니다. Shift를 누르고 있으면 선의 중점을 선택합니다",
+    "sketch.hint.constraint.vertical": "수직: 선, 두 점, 또는 점과 선을 선택합니다. Shift를 누르고 있으면 선의 중점을 선택합니다"
+  },
+  "vi": {
+    "cmd.sketch.constraint.horizontal": "Nằm ngang",
+    "cmd.sketch.constraint.vertical": "Thẳng đứng",
+    "help.sketch.constraint.horizontal": "Làm một đường thẳng, hoặc đường nối hai điểm, nằm ngang.",
+    "help.sketch.constraint.vertical": "Làm một đường thẳng, hoặc đường nối hai điểm, thẳng đứng.",
+    "sketch.hint.constraint.horizontal": "Nằm ngang: chọn một đường thẳng, hai điểm, hoặc một điểm và một đường thẳng; giữ Shift để chọn trung điểm của đường thẳng",
+    "sketch.hint.constraint.vertical": "Thẳng đứng: chọn một đường thẳng, hai điểm, hoặc một điểm và một đường thẳng; giữ Shift để chọn trung điểm của đường thẳng"
+  },
+  "zh": {
+    "cmd.sketch.constraint.horizontal": "水平",
+    "cmd.sketch.constraint.vertical": "竖直",
+    "help.sketch.constraint.horizontal": "使一条直线或两点之间的连线水平。",
+    "help.sketch.constraint.vertical": "使一条直线或两点之间的连线竖直。",
+    "sketch.hint.constraint.horizontal": "水平：选择一条直线、两个点，或一个点和一条直线；按住 Shift 可选取直线中点",
+    "sketch.hint.constraint.vertical": "竖直：选择一条直线、两个点，或一个点和一条直线；按住 Shift 可选取直线中点"
+  }
+}
