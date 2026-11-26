@@ -3247,14 +3247,28 @@ mod tests {
             ("BEND_NOTES", 8, DxfLinetype::Continuous),
             ("PERFORATION", 3, DxfLinetype::Continuous),
             ("ROLL", 3, DxfLinetype::Continuous),
+            ("HARDWARE", 8, DxfLinetype::Continuous),
             ("FORM_UP", 1, DxfLinetype::Dashed),
             ("FORM_DOWN", 5, DxfLinetype::Dashed),
             ("POCKET_TOP_Z0.000000_TO_1.000000_MM", 3, DxfLinetype::Continuous),
         ] {
             every.declare_layer(name, color, linetype, None).unwrap();
         }
-        assert_eq!(every.layers().len(), 13);
+        assert_eq!(every.layers().len(), 14);
         write_dxf_file(&every).unwrap();
+
+        // A hardware note is text on its own layer, grey and continuous: nothing else is admitted there.
+        let mut note = DxfFile::for_flat_pattern_export(0, 1, 0).unwrap();
+        let hardware = note.declare_layer("HARDWARE", 8, DxfLinetype::Continuous, None).unwrap();
+        note.push(hardware, DxfShape::Text { at: Vec2::ZERO, height: 3.0, angle_deg: 0.0, text: "M3 nut".into() }, None).unwrap();
+        let written = write_dxf_file(&note).unwrap();
+        assert_eq!(entities(&written).iter().map(|e| field(&e.1, 8)).collect::<Vec<_>>(), ["HARDWARE"]);
+        let mut circle = DxfFile::for_flat_pattern_export(0, 1, 0).unwrap();
+        let hardware = circle.declare_layer("HARDWARE", 8, DxfLinetype::Continuous, None).unwrap();
+        circle.push(hardware, DxfShape::Circle { c: Vec2::ZERO, r: 1.0 }, None).unwrap();
+        assert!(write_dxf_file(&circle).unwrap_err().to_string().contains("declared producer"));
+        let mut dashed = DxfFile::for_flat_pattern_export(0, 1, 0).unwrap();
+        assert!(dashed.declare_layer("HARDWARE", 8, DxfLinetype::Dashed, None).unwrap_err().to_string().contains("declared producer"));
     }
 
     /// A flat pattern's file with every role's standard layer and one entity of its kind on each,

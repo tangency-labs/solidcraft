@@ -1644,7 +1644,7 @@ mod caller_circle_compatibility {
     }
     fn expect_arcs(lp: &Loop2) {
         assert!(super::super::loop_circle(lp).is_none());
-        assert!(solidcraft_kernel::services::prism::loop_circle(lp).is_none(), "generic recognition must remain strict");
+        assert!(solidcraft_kernel::affine::loop_circle(lp).is_none(), "generic recognition must remain strict");
         let json = serde_json::to_value(super::super::loop_shape(lp)).unwrap();
         assert!(json.get("circle").is_none());
         let segments = json["segments"].as_array().unwrap();
@@ -1666,7 +1666,7 @@ mod caller_circle_compatibility {
         assert!(center.dist(second) > 0.0 && center.dist(second) < 1e-9);
         assert!(other_radius > radius && other_radius - radius < 1e-9);
         let lp = halves(center, radius, second, other_radius);
-        assert!(solidcraft_kernel::services::prism::loop_circle(&lp).is_none(), "unequal stored supports remain unequal in generic geom");
+        assert!(solidcraft_kernel::affine::loop_circle(&lp).is_none(), "unequal stored supports remain unequal in generic geom");
         expect_circle(&lp, center, radius);
     }
     #[test]
@@ -1760,7 +1760,7 @@ fn legacy_caller_circle_keeps_an_admitted_sub_writer_precision_arc() {
         ],
     };
     assert_eq!(super::loop_circle(&lp), Some((center, 8.0)));
-    assert!(solidcraft_kernel::services::prism::loop_circle(&lp).is_none(), "the generic recognizer must retain exact centre identity");
+    assert!(solidcraft_kernel::affine::loop_circle(&lp).is_none(), "the generic recognizer must retain exact centre identity");
     let error = path_shapes(DxfPath::Closed(&lp), DxfPathStyle::Exact).unwrap_err();
     assert!(error.to_string().contains("arc endpoints collapse"));
 
@@ -1787,4 +1787,83 @@ fn legacy_caller_circle_keeps_an_admitted_sub_writer_precision_arc() {
         .expect("the real default flat-pattern exporter retains its whole-circle result");
     let es = entities(&dxf);
     assert_eq!((count(&es, "CIRCLE"), count(&es, "ARC"), count(&es, "LINE")), (1, 0, 0));
+}
+
+/// #17752: with `hardware_notes`, each press-in hardware hole is named in the DXF by a note beside
+/// it on layer HARDWARE (`M3 nut`, a stud's length after it), 3 mm high, level with the hole and
+/// just clear of its rim; layers on a single layer leave the notes out, and a sheet with no
+/// hardware has no such layer. Without the option there are no notes and no layer.
+#[test]
+fn a_press_in_hardware_hole_is_noted_beside_it_on_its_own_layer() {
+    let mut s = plate_with(&[]);
+    assert!(!layer_table(&export(&mut s, json!({"hardware_notes": true}))).contains_key("HARDWARE"), "no hardware, no layer");
+    run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [30, 30, 2.5]}));
+    run(&mut s, "sheet.hardware", json!({"kind": "stud", "thread": "M4", "length": "10 mm", "position": [70, 30, 2.5]}));
+    run(&mut s, "solid.hole", json!({"position": [50, 10, 2.5], "diameter": 3}));
+    let unasked = export(&mut s, json!({}));
+    assert!(!layer_table(&unasked).contains_key("HARDWARE") && entities(&unasked).iter().all(|e| e.0 != "TEXT"), "notes are asked for");
+    let dxf = export(&mut s, json!({"hardware_notes": true}));
+    let all = entities(&dxf);
+    let notes: Vec<&Entity> = all.iter().filter(|e| e.0 == "TEXT").collect();
+    assert!(notes.iter().all(|e| layer_of(e) == "HARDWARE"), "{notes:?}");
+    let mut texts: Vec<String> = notes.iter().map(|e| encoded_text(e)).collect();
+    texts.sort();
+    assert_eq!(texts, ["M3 nut", "M4 stud 10 mm"], "the plain hole has no note");
+    assert_eq!(layer_table(&dxf).get("HARDWARE"), Some(&(8, "Continuous".to_string())));
+    let circles: Vec<(Vec2, f64)> = all.iter().filter_map(|e| if let DxfShape::Circle { c, r } = &e.1 { Some((*c, *r)) } else { None }).collect();
+    assert_eq!(circles.len(), 3);
+    for note in &notes {
+        assert_eq!(note_layout(note), (3.0, 0.0));
+        let at = second_point(note);
+        let beside = circles.iter().any(|(c, r)| at.dist(*c + Vec2::new(r + 1.5, -1.5)) < 1e-9);
+        assert!(beside, "{} is beside no hole: {at:?} {circles:?}", encoded_text(note));
+    }
+    // The note's height is the caller's, as a bend note's is.
+    let tall = entities(&export(&mut s, json!({"hardware_notes": true, "note_height": 5})));
+    assert!(tall.iter().filter(|e| e.0 == "TEXT").all(|e| note_layout(e).0 == 5.0));
+    // On a single layer a note would sit with the cut contours: none.
+    let single = export(&mut s, json!({"hardware_notes": true, "layers": "single"}));
+    assert!(entities(&single).iter().all(|e| e.0 != "TEXT") && !layer_table(&single).contains_key("HARDWARE"));
+}
+
+/// The file for a shop (#17752): a sheet with press-in hardware, exported with the default options,
+/// gives what the same sheet gives with plain holes of the hardware's size and nothing else: the
+/// same layers and entities, the mounting holes as circles, no HARDWARE layer and no note texts.
+/// The hardware is only a property of the hole, so the sheet's STEP is the same too.
+#[test]
+fn a_sheet_with_press_in_hardware_exports_only_the_sheet_and_its_holes() {
+    let mut with = plate_with(&[]);
+    run(&mut with, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [30, 30, 2.5]}));
+    run(&mut with, "sheet.hardware", json!({"kind": "stud", "thread": "M4", "length": "10 mm", "position": [70, 30, 2.5]}));
+    let listed = run(&mut with, "sheet.flat_pattern", json!({}))["hardware"].as_array().cloned().unwrap_or_default();
+    let diameters: Vec<f64> = listed.iter().filter_map(|h| h["hole_diameter"].as_f64()).collect();
+    assert_eq!(diameters.len(), 2, "{listed:?}");
+    let mut without = plate_with(&[]);
+    for (d, at) in diameters.iter().zip([[30.0, 30.0, 2.5], [70.0, 30.0, 2.5]]) {
+        run(&mut without, "solid.hole", json!({"position": at, "diameter": d}));
+    }
+    let (dxf, plain) = (export(&mut with, json!({})), export(&mut without, json!({})));
+    assert_eq!(layer_table(&dxf), layer_table(&plain));
+    assert!(!layer_table(&dxf).contains_key("HARDWARE"));
+    let (a, b) = (entities(&dxf), entities(&plain));
+    let shapes = |es: &[Entity]| es.iter().map(|e| (e.0.clone(), e.1.clone(), e.2.clone())).collect::<Vec<_>>();
+    assert_eq!(shapes(&a), shapes(&b));
+    assert_eq!(count(&a, "CIRCLE"), 2, "the mounting holes are plain circles");
+    assert!(a.iter().all(|e| e.0 != "TEXT"), "no note texts");
+    assert!(!dxf.contains("nut") && !dxf.contains("stud") && !dxf.contains("HARDWARE"));
+    // STEP: the bodies are all it writes, and the hardware is not a body or a part of one. Its data
+    // section (the header holds the time) is the same as the plain sheet's.
+    let step = |s: &mut Session, name: &str| {
+        // The same file name in a folder of its own: the STEP product is named after the file.
+        let dir = std::env::temp_dir().join(format!("solidcraft-pih-{}-{name}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("sheet.step");
+        run(s, "file.export_step", json!({"path": path.to_string_lossy()}));
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        let _ = std::fs::remove_dir_all(&dir);
+        text.split_once("DATA;").map(|(_, data)| data.to_string()).unwrap_or(text)
+    };
+    let (with_step, plain_step) = (step(&mut with, "with"), step(&mut without, "plain"));
+    assert!(!with_step.is_empty());
+    assert_eq!(with_step, plain_step);
 }

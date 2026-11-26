@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "ui.insert_simplify": "تبسيط",
+    "ui.insert_simplify_tip": "يزيل الحواف التي يمكن للرسم متابعتها ضمن هذه المسافة (مقيسة على الرسم كما رُسم، فلا تتغير مع المقياس)، فيأتي الرسم الكثيف بمنحنيات أقل. تبقى الأقواس والدوائر والخطوط المنحنية والنص كما رُسمت."
+  },
+  "de": {
+    "ui.insert_simplify": "Vereinfachen",
+    "ui.insert_simplify_tip": "Entfernt Kanten, denen die Zeichnung in diesem Abstand folgen kann (gemessen an der Zeichnung selbst, also unabhängig vom Maßstab), sodass eine dichte Zeichnung mit weniger Kurven ankommt. Bögen, Kreise, Splines und Text bleiben wie gezeichnet."
+  },
+  "en": {
+    "ui.insert_simplify": "Simplify",
+    "ui.insert_simplify_tip": "Removes edges the drawing can follow within this distance (measured on the drawing as drawn, so it does not change with Scale), so a dense drawing comes in with fewer curves. Arcs, circles, splines and text stay as drawn."
+  },
+  "he": {
+    "ui.insert_simplify": "פישוט",
+    "ui.insert_simplify_tip": "מסיר קצוות שהשרטוט יכול לעקוב אחריהם בתוך המרחק הזה (נמדד על השרטוט כפי שצויר, ולכן אינו משתנה עם קנה המידה), כך ששרטוט צפוף מגיע עם פחות עקומות. קשתות, מעגלים, ספליינים וטקסט נשארים כפי שצוירו."
+  },
+  "ja": {
+    "ui.insert_simplify": "簡略化",
+    "ui.insert_simplify_tip": "この距離以内で図形がたどれる辺を削除します（距離は図形そのもので測るため、尺度を変えても変わりません）。密な図形をより少ない曲線で取り込みます。円弧・円・スプライン・文字は描かれたまま残ります。"
+  },
+  "ko": {
+    "ui.insert_simplify": "단순화",
+    "ui.insert_simplify_tip": "이 거리 안에서 도면이 따라갈 수 있는 모서리를 제거합니다(거리는 도면 자체에서 측정하므로 배율이 바뀌어도 같습니다). 밀집한 도면을 더 적은 곡선으로 가져옵니다. 호, 원, 스플라인, 텍스트는 그린 그대로 남습니다."
+  },
+  "vi": {
+    "ui.insert_simplify": "Đơn giản hóa",
+    "ui.insert_simplify_tip": "Bỏ các cạnh mà hình vẽ có thể đi theo trong khoảng cách này (đo trên chính hình vẽ, nên không đổi theo tỉ lệ), để hình dày đặc vào với ít đường cong hơn. Cung, đường tròn, đường spline và chữ giữ nguyên như đã vẽ."
+  },
+  "zh": {
+    "ui.insert_simplify": "简化",
+    "ui.insert_simplify_tip": "移除图形在此距离内可以沿循的边（距离按图形本身测量，不随比例变化），使密集图形以更少的曲线导入。圆弧、圆、样条和文字保持原样。"
+  }
+}

@@ -289,6 +289,9 @@ impl Writer {
         if b.transferred {
             r["transferred"] = json!(true);
         }
+        if let Ok(data) = b.round_member() {
+            r["round_member"] = serde_json::to_value(data).ok()?;
+        }
         if b.envelope {
             r["envelope"] = json!(true);
         }
@@ -544,6 +547,9 @@ impl Model {
                 heals.sort_by_key(|(id, _)| *id);
                 out.insert("import_heals".into(), json!(heals));
             }
+            if doc.features.iter().any(|f| matches!(f.kind, FeatureKind::FrameMember { .. } | FeatureKind::FrameCope { .. })) {
+                records["round_member_records"] = json!(1);
+            }
             Ok((SavedModel { records, bodies: w.bodies }, PendingChecks(pending)))
         })
         .ok()
@@ -658,6 +664,11 @@ impl SavedModel {
             }
             b.frame_member_line = r.get("frame_member_line").map(|v| text(Some(v)).map(Arc::from)).transpose()?;
             b.transferred = r.get("transferred").and_then(Json::as_bool).unwrap_or(false);
+            if let Some(record) = r.get("round_member") {
+                let data: crate::frame_cope::RoundMember = serde_json::from_value(record.clone()).map_err(|_| bad("saved model: round member"))?;
+                data.validate()?;
+                b.certify_round_member(data);
+            }
             b.envelope = r.get("envelope").and_then(Json::as_bool).unwrap_or(false);
             // Measured once here, so every state holding it adds it up for the cache's budget.
             b.bytes = b.body.retained_bytes();
@@ -1155,6 +1166,9 @@ impl SavedModel {
         if let (Some(heals), Some(out)) = (self.records.get("import_heals"), records.as_object_mut()) {
             out.insert("import_heals".into(), heals.clone());
         }
+        if let Some(version) = self.records.get("round_member_records") {
+            records["round_member_records"] = version.clone();
+        }
         let kept: Vec<usize> = (0..self.bodies.len()).filter(|i| kernel_used.get(*i) == Some(&true)).collect();
         let bodies = kept.iter().filter_map(|i| self.bodies.get(*i).cloned()).collect();
         Some((SavedModel { records, bodies }, kept, used))
@@ -1168,7 +1182,21 @@ impl Model {
     /// ([`Model::validation`]). Refused (an error) unless every feature's fingerprint is the one
     /// `doc` gives it now, and every record is well formed.
     pub fn adopt(doc: &Document, saved: &SavedModel) -> Result<Model> {
+        if doc.features.iter().any(|f| matches!(f.kind, FeatureKind::FrameMember { .. } | FeatureKind::FrameCope { .. }))
+            && saved.records.get("round_member_records").and_then(Json::as_u64) != Some(1)
+        {
+            return Err(bad("saved model: member records need reevaluation"));
+        }
         let mut states = saved.states()?;
+        // A saved/thinned stock marker proves only record presence, not eligibility. Inspect
+        // the originating feature before any retained certificate can be used for an export.
+        if states
+            .iter()
+            .flat_map(|state| &state.bodies)
+            .any(|body| body.round_member.is_some() && !doc.feature(body.feature).is_some_and(|f| crate::frame_cope::stock_eligible(&f.kind)))
+        {
+            return Err(bad("saved model: finished frame stock records need reevaluation"));
+        }
         let frame_bodies = Arc::new(std::sync::Mutex::new(FrameBodies::default()));
         for state in &mut states {
             Arc::make_mut(state).frame_bodies = Arc::downgrade(&frame_bodies);
@@ -1277,11 +1305,11 @@ impl Model {
                 unkept: state.is_none(),
                 state: state.unwrap_or_else(|| before.clone()),
             };
-            // A model saved before members were recorded (#4003) knows none in any state after
-            // its members: trims need them, so the design is evaluated again instead.
+            // A model saved before rebuildable ordinary members were recorded (#4003) needs
+            // reevaluation for trims. Auto and path bodies intentionally emit no such record.
             if !result.skipped
                 && !result.unkept
-                && matches!(f.kind, crate::FeatureKind::FrameMember { .. })
+                && super::frame_member::needs_trim_records(&result.state, &f.kind)?
                 && !result.state.frame_members.iter().any(|m| m.feature == f.id)
             {
                 return Err(bad("saved model: frame members"));

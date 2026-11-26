@@ -2689,12 +2689,44 @@ impl Session {
         // found on, before a change can move it (#17229).
         session.pin_dropped_link_names();
         let dropped = session.has_dropped_link_names();
-        if unpinned || dropped || !std::sync::Arc::ptr_eq(&before, &session.doc) {
+        if unpinned || dropped || !std::sync::Arc::ptr_eq(&before, &session.doc) || session.has_duplicate_rolled_back_body_names() {
             session.pin_rolled_back_body_names();
         }
         session.follow_design_token();
         session.saved = session.doc.clone();
         session
+    }
+
+    /// Whether a rolled-back design has stored body names past the marker that collide with
+    /// earlier stored names (e.g. linked or imported bodies saved before disambiguated names were
+    /// pinned), so [`Self::pin_rolled_back_body_names`] should pin their evaluated names on open.
+    fn has_duplicate_rolled_back_body_names(&self) -> bool {
+        let Some(marker) = self.doc.marker.filter(|&m| m < self.doc.features.len()) else {
+            return false;
+        };
+        let mut seen = std::collections::HashSet::new();
+        for (i, f) in self.doc.features.iter().enumerate() {
+            if f.suppressed {
+                continue;
+            }
+            let skip: Option<&[u64]> = match &f.kind {
+                solidcraft_doc::FeatureKind::Import { skip, .. } if !skip.is_empty() => Some(skip.as_slice()),
+                _ => None,
+            };
+            for (slot, name) in f.body_names.iter().enumerate() {
+                if skip.is_some_and(|s| s.contains(&(slot as u64))) {
+                    continue;
+                }
+                let trimmed = name.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if !seen.insert(trimmed) && i >= marker {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// Pin the names of the bodies the features after the timeline marker make, in a design
@@ -2720,12 +2752,14 @@ impl Session {
         // is the one it had at the geometry the design opened with, before an edit moves it.
         whole.pin_dropped_link_names();
         let link_pins = self.dropped_link_pins(&whole);
-        let pins: Vec<(u64, Vec<String>)> = whole
+        let pins: Vec<(u64, Vec<String>, bool)> = whole
             .doc
             .features
             .iter()
-            .filter(|f| self.doc.feature(f.id).is_some_and(|mine| mine.body_names != f.body_names))
-            .map(|f| (f.id, f.body_names.clone()))
+            .filter(|f| {
+                self.doc.feature(f.id).is_some_and(|mine| mine.body_names != f.body_names || mine.pattern_names_in_order != f.pattern_names_in_order)
+            })
+            .map(|f| (f.id, f.body_names.clone(), f.pattern_names_in_order))
             .collect();
         let reserve: Vec<String> = whole.doc.reserved_body_names.difference(&self.doc.reserved_body_names).cloned().collect();
         if pins.is_empty() && reserve.is_empty() && link_pins.is_empty() {
@@ -2733,12 +2767,13 @@ impl Session {
         }
         // As `pin_body_names` stores names: the bodies keep the names they have, so no result
         // changes and none is evaluated again.
-        let renamed: Vec<u64> = pins.iter().map(|(id, _)| *id).chain(link_pins.iter().map(|(id, ..)| *id)).collect();
+        let renamed: Vec<u64> = pins.iter().map(|(id, _, _)| *id).chain(link_pins.iter().map(|(id, ..)| *id)).collect();
         let keep = self.model.pinned_prefix(&self.doc, &renamed);
         let doc = self.doc_mut();
-        for (id, names) in pins {
+        for (id, names, in_order) in pins {
             if let Some(f) = doc.feature_mut(id) {
                 f.body_names = names;
+                f.pattern_names_in_order = in_order;
             }
         }
         store_link_names(doc, link_pins);
@@ -3613,12 +3648,12 @@ struct CadmpegChoices<'a> {
 fn usd_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, warnings: &mut Vec<String>) -> Vec<solidcraft_io::DecalPlan> {
     let mut decals = Vec::new();
     for d in shown_decals(doc, st, warnings) {
-        let Ok(to_component) = solidcraft_kernel::services::affine::inverse(&doc.component_transform(d.component)) else {
+        let Ok(to_component) = solidcraft_kernel::affine::inverse(&doc.component_transform(d.component)) else {
             warnings.push(format!("decal `{}`: its component's placement is degenerate: left out", d.name));
             continue;
         };
         let world = d.corners.map(|p| [p.x, p.y, p.z]);
-        let local = world.map(|p| solidcraft_kernel::services::affine::apply_point(&to_component, p));
+        let local = world.map(|p| solidcraft_kernel::affine::apply_point(&to_component, p));
         let sha256 = solidcraft_doc::render_resources::HdrId::of(&d.image).to_string();
         let image = solidcraft_io::SurfaceMap { sha256, bytes: std::sync::Arc::from(d.image) };
         decals.push(solidcraft_io::DecalPlan { name: d.name, component: d.component, local, world, image });
@@ -3630,12 +3665,12 @@ fn usd_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, w
 fn urdf_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, warnings: &mut Vec<String>) -> Vec<solidcraft_io::urdf::UrdfDecal> {
     let mut decals = Vec::new();
     for d in shown_decals(doc, st, warnings) {
-        let Ok(to_component) = solidcraft_kernel::services::affine::inverse(&doc.component_transform(d.component)) else {
+        let Ok(to_component) = solidcraft_kernel::affine::inverse(&doc.component_transform(d.component)) else {
             warnings.push(format!("decal `{}`: its component's placement is degenerate: left out", d.name));
             continue;
         };
         let corners = d.corners.map(|p| {
-            let [x, y, z] = solidcraft_kernel::services::affine::apply_point(&to_component, [p.x, p.y, p.z]);
+            let [x, y, z] = solidcraft_kernel::affine::apply_point(&to_component, [p.x, p.y, p.z]);
             solidcore_record::Vec3::new(x, y, z)
         });
         decals.push(solidcraft_io::urdf::UrdfDecal { name: d.name, component: d.component, corners, image: d.image });
