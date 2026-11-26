@@ -276,7 +276,6 @@ crates/doc/src/print_face.rs:Document::locate_print_face dot,normalized
 crates/doc/src/project.rs:arc_geom normalized
 crates/doc/src/project.rs:as_spline dot,normalized
 crates/doc/src/project.rs:at_vertices dot,normalized
-crates/doc/src/project.rs:cache_key triangles
 crates/doc/src/project.rs:circle3 cross,dot,normalized
 crates/doc/src/project.rs:closest_on_segment dot
 crates/doc/src/project.rs:closest_on_triangle cross,dot,normalized

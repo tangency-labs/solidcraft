@@ -40,6 +40,21 @@ const FACES_KEPT: usize = 4;
 /// were worked out on: by face, count each way and display quality.
 type IsoLines = (Option<Body>, std::collections::HashMap<(usize, usize, usize), Arc<[kernel::IsoLine]>>);
 
+/// O(1) weak identity of a body's lazy rigid mesh placement (if any), preventing ABA reuse
+/// without retaining the placement or triggering tessellation.
+#[derive(Clone)]
+pub(crate) struct PlacementCell(Option<std::sync::Weak<placed_mesh::PlacedMesh>>);
+
+impl PlacementCell {
+    pub(crate) fn matches(&self, body: &ModelBody) -> bool {
+        match (&self.0, &body.mesh_placement) {
+            (Some(stored), Some(live)) => std::sync::Weak::ptr_eq(stored, &Arc::downgrade(live)),
+            (None, None) => true,
+            _ => false,
+        }
+    }
+}
+
 /// A body in the evaluated model.
 #[derive(Clone, Debug)]
 pub struct ModelBody {
@@ -543,6 +558,29 @@ impl ModelBody {
     /// unchanged) and, while it is held, by no other body.
     pub fn display_identity(&self) -> Arc<dyn std::any::Any + Send + Sync> {
         self.mesh.clone()
+    }
+
+    /// Weak reference to this body's display mesh cell, for O(1) cache identity checks without
+    /// triggering tessellation or retaining computed meshes.
+    pub(crate) fn mesh_cell(&self) -> std::sync::Weak<OnceLock<Arc<Mesh>>> {
+        Arc::downgrade(&self.mesh)
+    }
+
+    /// Address key of this body's display mesh cell, for O(1) hashing without triggering
+    /// tessellation.
+    pub(crate) fn mesh_cell_id(&self) -> usize {
+        Arc::as_ptr(&self.mesh) as usize
+    }
+
+    /// Weak reference to this body's rigid mesh placement (when present), for O(1) cache identity
+    /// checks without triggering tessellation.
+    pub(crate) fn placement_cell(&self) -> PlacementCell {
+        PlacementCell(self.mesh_placement.as_ref().map(Arc::downgrade))
+    }
+
+    /// Address key of this body's rigid mesh placement (0 when none), for O(1) hashing.
+    pub(crate) fn placement_cell_id(&self) -> usize {
+        self.mesh_placement.as_ref().map_or(0, |placed| Arc::as_ptr(placed) as usize)
     }
 
     /// For a rigidly placed copy of another body (a placement of a component's body, a pattern
