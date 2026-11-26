@@ -9,6 +9,9 @@
 //! | [`SetbackFs::from_edgeuse`]           | none (the edge-use part of `SmVariableRadiusFS::SmVariableRadiusFS`, offsets 0) |
 //! | [`SetbackFs::load_jacobian`]          | none (`SmVariableRadiusFS::LoadJacobian`'s unknowns, the setbacks' equations) |
 //! | `impl FilletSolverOps for SetbackFs`  | none |
+//! | [`SetbackFs::station`], [`SetbackFs::station_through`], [`SetbackFs::station_point`], [`SetbackStation`] | none: the exact station at a given s |
+//! | [`SetbackFs::compute_uv_vectors`]     | none (`SmFilletSolver::ComputeUVVectors`'s job, each foot's own tangent) |
+//! | [`SetbackFs::check_not_folding`]      | none: the fold check |
 //!
 //! **The station** is [`super::super::fillet_section::setback_station`]'s: at a parameter s of
 //! the edge C (the extended edge curve, the solver's curve), foot i is the point `S_i` of
@@ -26,6 +29,13 @@
 //! **A clipped step** (a foot on its face's boundary iso-line) solves that foot on the line
 //! and s together, then the other foot at that s ([`SetbackFs::clipped_feet`]).
 //!
+//! **The exact station** at a given s ([`SetbackFs::station`]): both feet by `setback_foot`,
+//! each with its motion in s from the implicit function theorem on its own system
+//! (`SetbackFoot::per_s`, no difference quotient). A trace point's uv tangents are each
+//! foot's own per unit length of foot 0's motion ([`SetbackFs::compute_uv_vectors`]), not the
+//! base solver's drop of foot 0's tangent on both surfaces. Every station is checked not to
+//! fold: `∂S_i/∂s · C′ > 0`, else `NoRoom(SetbacksCross)` ([`SetbackFs::check_not_folding`]).
+//!
 //! Deviations: not upstream (no counterpart). Every loop has a fixed count
 //! ([`NEWTON_STEPS`]), no recursion.
 //!
@@ -37,14 +47,15 @@ use crate::blend::fillet_custom_solver::{
     offset_evaluate_1st, offset_evaluate_point, offset_local_point_solve, InitialValues,
     JacobianLoad, OffsetSurface,
 };
+use crate::blend::fillet_executive::p3::NoRoomReason;
 use crate::blend::fillet_geom::p1::{FilletBrep, FilletSolverId};
 use crate::blend::fillet_section::setback_station::{
-    setback_foot, setback_start, setback_tangent, EdgeJet,
+    foot_at, setback_foot, setback_start, setback_tangent, EdgeJet, SetbackFoot,
 };
 use crate::blend::fillet_solver::p1::{ExtensionCorners, FilletSolver, FilletSolverOps};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::Curve;
-use crate::error::blend::{SolverFailure, TraceFailure};
+use crate::error::blend::{BlendFailure, SolverFailure, TraceFailure};
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::extent2d::Extent2d;
@@ -85,6 +96,47 @@ pub struct SetbackFs {
     pub setbacks: [f64; 2],
     /// The edge's interval on its curve.
     pub edge_interval: Extent1d,
+}
+
+/// A station of the chamfer: the edge's parameter s, the edge's jet there and both feet, each
+/// with its motion in s ([`SetbackFoot::per_s`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SetbackStation {
+    /// The edge's parameter.
+    pub s: f64,
+    /// The edge's point and derivatives at s.
+    pub jet: EdgeJet,
+    /// The feet on supports 1 and 2 (rails 0 and 1).
+    pub feet: [SetbackFoot; 2],
+}
+
+impl SetbackStation {
+    /// Whether both feet's motions in s are finite.
+    fn motion_finite(&self) -> bool {
+        self.feet.iter().all(|f| {
+            f.uv_per_s.x.is_finite()
+                && f.uv_per_s.y.is_finite()
+                && f.per_s.x.is_finite()
+                && f.per_s.y.is_finite()
+                && f.per_s.z.is_finite()
+        })
+    }
+
+    /// Each foot's uv tangent per unit length of foot 0's motion, `∂(u, v)_i/∂s / |∂S_0/∂s|`,
+    /// negated where `direction` runs against foot 0's motion (`∂S_0/∂s · direction < 0`;
+    /// a direction square to it, or not finite, keeps s's). Foot 0's motion is not zero at a
+    /// station the fold check passed (`∂S_0/∂s · C′ > 0`).
+    #[must_use]
+    pub fn uv_tangents(&self, direction: Vec3) -> [Point2; 2] {
+        let forward = self.feet[0].per_s;
+        let sign = if forward.dot(direction) < 0.0 {
+            -1.0
+        } else {
+            1.0
+        };
+        let scale = sign / forward.length();
+        self.feet.map(|f| f.uv_per_s * scale)
+    }
 }
 
 fn at(x: &[f64], i: usize, op: &'static str) -> Result<f64> {
@@ -328,6 +380,23 @@ impl SetbackFs {
         guesses: [Point2; 2],
         domains: &[Extent2d; 2],
     ) -> Result<[Option<Point2>; 2]> {
+        Ok(self
+            .feet_from_edge(k, jet, guesses, domains)?
+            .map(|f| f.map(|f| f.uv)))
+    }
+
+    /// [`Self::feet_at`]'s feet whole: each foot [`setback_foot`]'s, with its motions.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluations and the solves.
+    fn feet_from_edge(
+        &self,
+        k: &Kernel,
+        jet: &EdgeJet,
+        guesses: [Point2; 2],
+        domains: &[Extent2d; 2],
+    ) -> Result<[Option<SetbackFoot>; 2]> {
         let solver = &self.curve_based.solver;
         let mut supports: Vec<Surface> = Vec::new();
         let mut edge_uv = guesses;
@@ -369,9 +438,226 @@ impl SetbackFs {
             let Some(start) = setback_start(k, support, uv, t, d)? else {
                 continue;
             };
-            *foot = setback_foot(k, support, jet, d, start)?.map(|f| f.uv);
+            *foot = setback_foot(k, support, jet, d, start)?;
         }
         Ok(feet)
+    }
+
+    /// Support `rail` as a surface (the offsets are 0: the face's own).
+    fn support(&self, rail: usize) -> Result<Surface> {
+        Ok(Surface::from(
+            self.curve_based.solver.rail(rail)?.surface.clone(),
+        ))
+    }
+
+    /// The exact station at the edge's parameter `s`: both feet by [`setback_foot`] at the
+    /// edge's jet there, each seeded from its guess in `guesses`, or, for a guess on the
+    /// edge (nearer `C(s)` than half its setback, as [`Self::load_initial_values`] judges
+    /// it, where `|S − C|` has no derivative), from the station's feet off the edge
+    /// ([`Self::feet_at`]'s). Each foot carries its motion in s from the implicit function
+    /// theorem on its own system ([`SetbackFoot::uv_per_s`], [`SetbackFoot::per_s`]), and
+    /// the stations are checked not to fold there ([`Self::check_not_folding`]). `None`
+    /// where a foot is not found or its motion is not finite.
+    ///
+    /// # Errors
+    ///
+    /// `NoRoom(SetbacksCross)` for a folding station; those of the evaluations and the
+    /// solves.
+    pub fn station(
+        &mut self,
+        k: &Kernel,
+        s: f64,
+        guesses: [Point2; 2],
+        domains: &[Extent2d; 2],
+    ) -> Result<Option<SetbackStation>> {
+        let jet = self.jet(k, s)?;
+        let mut off_edge: Option<[Option<SetbackFoot>; 2]> = None;
+        let mut feet: [Option<SetbackFoot>; 2] = [None, None];
+        for (rail, foot) in feet.iter_mut().enumerate() {
+            let support = self.support(rail)?;
+            let d = self.setbacks.get(rail).copied().unwrap_or(0.0);
+            let guess = guesses.get(rail).copied().unwrap_or(Point2::new(0.0, 0.0));
+            let on_edge = support.evaluate_point(k, guess)?.distance(jet.point) < 0.5 * d;
+            let seed = if on_edge {
+                if off_edge.is_none() {
+                    off_edge = Some(self.feet_from_edge(k, &jet, guesses, domains)?);
+                }
+                match off_edge.and_then(|f| f.get(rail).copied().flatten()) {
+                    Some(f) => f.uv,
+                    None => return Ok(None),
+                }
+            } else {
+                guess
+            };
+            *foot = setback_foot(k, &support, &jet, d, seed)?;
+        }
+        Self::checked_station(s, jet, feet)
+    }
+
+    /// The station at `s` through the feet `uvs` as they stand (no solve): each foot's
+    /// motion in s at them ([`SetbackFoot::per_s`]), checked not to fold. `None` where a
+    /// foot's system is singular there or its motion is not finite. The feet are taken as
+    /// the station's roots; the motion is the root's only within the solve's tolerance.
+    ///
+    /// # Errors
+    ///
+    /// `NoRoom(SetbacksCross)` for a folding station; those of the evaluations.
+    pub fn station_through(
+        &mut self,
+        k: &Kernel,
+        s: f64,
+        uvs: [Point2; 2],
+    ) -> Result<Option<SetbackStation>> {
+        let jet = self.jet(k, s)?;
+        let mut feet: [Option<SetbackFoot>; 2] = [None, None];
+        for (rail, foot) in feet.iter_mut().enumerate() {
+            let support = self.support(rail)?;
+            let d = self.setbacks.get(rail).copied().unwrap_or(0.0);
+            let uv = uvs.get(rail).copied().unwrap_or(Point2::new(0.0, 0.0));
+            *foot = foot_at(k, &support, &jet, d, uv)?;
+        }
+        Self::checked_station(s, jet, feet)
+    }
+
+    /// The station of `feet` at `s`: `None` without both feet or with a motion that is not
+    /// finite, else the station once it passes [`Self::check_not_folding`].
+    ///
+    /// # Errors
+    ///
+    /// `NoRoom(SetbacksCross)` for a folding station.
+    fn checked_station(
+        s: f64,
+        jet: EdgeJet,
+        feet: [Option<SetbackFoot>; 2],
+    ) -> Result<Option<SetbackStation>> {
+        let [Some(f0), Some(f1)] = feet else {
+            return Ok(None);
+        };
+        let station = SetbackStation {
+            s,
+            jet,
+            feet: [f0, f1],
+        };
+        if !station.motion_finite() {
+            return Ok(None);
+        }
+        Self::check_not_folding(&station)?;
+        Ok(Some(station))
+    }
+
+    /// The fold check (#13710): at every station each foot moves
+    /// forward along the edge, `∂S_i/∂s · C′ > 0`. At the root that is
+    /// `|C′|² − (S_i − C) · C″ > 0`, the foot short of the edge's polar line
+    /// ([`crate::blend::fillet_section::setback_station`]'s crossing); past it neighbouring
+    /// stations' planes meet inside the chamfer and its feet run backwards.
+    ///
+    /// # Errors
+    ///
+    /// `NoRoom(SetbacksCross)` where a foot does not move forward.
+    pub fn check_not_folding(station: &SetbackStation) -> Result<()> {
+        for foot in &station.feet {
+            // a NaN is refused too (motion_finite has rejected it first)
+            let forward = foot.per_s.dot(station.jet.d1);
+            if forward.is_nan() || forward <= 0.0 {
+                return Err(SolidError::blend(
+                    OP,
+                    BlendFailure::NoRoom(NoRoomReason::SetbacksCross),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// The edge's parameter of the trace point `point`: `user_doubles[0]`, where every
+    /// solve of this solver leaves s, when foot 0 is at its station there (its reach and its
+    /// square to the edge within the solver's 3D tolerance); else foot 0's station from the
+    /// drop ([`Self::station_of`]), as for a point no solve of this solver made.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluations and the drop.
+    fn station_parameter(&mut self, k: &Kernel, point: &TsectPnt) -> Result<f64> {
+        let tol = self.curve_based.solver.approx_tol_3d;
+        let foot0 = point.surface_pv[0][0][0];
+        let s = point.user_doubles[0];
+        if s.is_finite() {
+            let jet = self.jet(k, s)?;
+            let g = foot0 - jet.point;
+            let speed = jet.d1.length();
+            let d0 = self.setbacks[0];
+            if speed > 0.0 && (g.length() - d0).abs() <= tol && (g.dot(jet.d1) / speed).abs() <= tol
+            {
+                return Ok(s);
+            }
+        }
+        self.station_of(k, foot0)
+    }
+
+    /// `ComputeUVVectors` of a chamfer of setbacks: each foot's own uv tangent, from the
+    /// implicit derivative of its station system in s ([`Self::station_through`] at the
+    /// point's feet `uv_curve_pv[i][0]` and its s, [`Self::station_parameter`]), per unit
+    /// length of foot 0's motion (the trace's curve is rail 0, its tangent foot 0's unit
+    /// chord), oriented as the point's curve tangent `curve_pv[1]` runs along foot 0's
+    /// motion (with s where that tangent is not set or is square to it). Not the base
+    /// solver's drop of foot 0's tangent on both surfaces, which gives foot 1 foot 0's
+    /// speed (on a rim the feet run on circles of different radii). The point's surface
+    /// values are the caller's (`ComputeSurfaceValues`, as for the base).
+    ///
+    /// # Errors
+    ///
+    /// `NoRoom(SetbacksCross)` for a folding station; `RailTangentZero` at s where a foot's
+    /// system is singular at the point or its motion is not finite (the rails then have no
+    /// tangent there); those of the evaluations and the drop.
+    pub fn compute_uv_vectors(&mut self, k: &Kernel, point: &mut TsectPnt) -> Result<()> {
+        let s = self.station_parameter(k, point)?;
+        let uvs = [point.uv_curve_pv[0][0], point.uv_curve_pv[1][0]];
+        let Some(station) = self.station_through(k, s, uvs)? else {
+            return Err(SolidError::blend_solver(
+                OP,
+                SolverFailure::RailTangentZero { t: s },
+            ));
+        };
+        let [t0, t1] = station.uv_tangents(point.curve_pv[1]);
+        point.uv_curve_pv[0][1] = t0;
+        point.uv_curve_pv[1][1] = t1;
+        Ok(())
+    }
+
+    /// The trace point at the exact station at `s` ([`Self::station`], from `guesses`): the
+    /// surface values at the feet (`ComputeSurfaceValues`, its curve point foot 0), its
+    /// curve tangent foot 0's unit motion with s, its uv tangents each foot's own
+    /// ([`SetbackStation::uv_tangents`]), and s in `user_doubles[0]` and `[1]`. `None` where
+    /// the station is not found.
+    ///
+    /// # Errors
+    ///
+    /// `NoRoom(SetbacksCross)` for a folding station; those of the station and of
+    /// `ComputeSurfaceValues`.
+    pub fn station_point(
+        &mut self,
+        k: &Kernel,
+        s: f64,
+        guesses: [Point2; 2],
+        domains: &[Extent2d; 2],
+    ) -> Result<Option<TsectPnt>> {
+        let Some(station) = self.station(k, s, guesses, domains)? else {
+            return Ok(None);
+        };
+        let mut point = TsectPnt::new();
+        FilletSolver::compute_surface_values(
+            k,
+            self,
+            [station.feet[0].uv, station.feet[1].uv],
+            &mut point,
+        )?;
+        let forward = station.feet[0].per_s;
+        point.curve_pv[1] = forward * (1.0 / forward.length());
+        let [t0, t1] = station.uv_tangents(forward);
+        point.uv_curve_pv[0][1] = t0;
+        point.uv_curve_pv[1][1] = t1;
+        point.user_doubles[0] = s;
+        point.user_doubles[1] = s;
+        Ok(Some(point))
     }
 
     /// The base surface domains the solver's feet are sought over: each rail's natural
@@ -907,6 +1193,7 @@ impl FilletSolverOps for SetbackFs {
 mod tests {
     use super::*;
     use crate::blend::fillet_custom_solver::SurfaceId;
+    use crate::intersect::surface_intersector::p1::SrfIndex;
     use crate::nurbs::b_spline_curve::{BSplineCurveForm, CanonicalData, KnotType};
     use crate::nurbs::b_spline_surface::p1::CanonicalSurfaceData;
     use crate::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm};
@@ -939,16 +1226,22 @@ mod tests {
     /// The plate z = 0 over [-20, 20]^2 and three quarters of a wall of radius 8 standing on
     /// it, from -90 to 180 degrees (u = 1/3 + s/3 on the middle quarter, the edge's).
     fn supports() -> [Surface; 2] {
-        let w = 20.0;
+        plate_and_wall(20.0, 0.0, WALL, [0.0, HEIGHT])
+    }
+
+    /// The plate z = `plate_z` over [-w, w]^2 (u along x, v along y) and three quarters of
+    /// a wall of radius `r` about the z axis over `wall_z` (v = 0 to 1), from -90 to 180
+    /// degrees (u = 1/3 + s/3 on the middle quarter, [`quarter`]'s s).
+    fn plate_and_wall(w: f64, plate_z: f64, r: f64, wall_z: [f64; 2]) -> [Surface; 2] {
         let plate = Surface::from(
             BSplineSurface::create_canonical(&CanonicalSurfaceData {
                 u_degree: 1,
                 v_degree: 1,
                 control_points: &[
-                    Point3::new(-w, -w, 0.0),
-                    Point3::new(-w, w, 0.0),
-                    Point3::new(w, -w, 0.0),
-                    Point3::new(w, w, 0.0),
+                    Point3::new(-w, -w, plate_z),
+                    Point3::new(-w, w, plate_z),
+                    Point3::new(w, -w, plate_z),
+                    Point3::new(w, w, plate_z),
                 ],
                 form: BSplineSurfaceForm::Unspecified,
                 u_multiplicities: &[2, 2],
@@ -964,18 +1257,18 @@ mod tests {
         let (mut cps, mut ws) = (Vec::new(), Vec::new());
         let h = 0.5_f64.sqrt();
         for (p, wi) in [
-            (0.0, -WALL),
-            (WALL, -WALL),
-            (WALL, 0.0),
-            (WALL, WALL),
-            (0.0, WALL),
-            (-WALL, WALL),
-            (-WALL, 0.0),
+            (0.0, -r),
+            (r, -r),
+            (r, 0.0),
+            (r, r),
+            (0.0, r),
+            (-r, r),
+            (-r, 0.0),
         ]
         .into_iter()
         .zip([1.0, h, 1.0, h, 1.0, h, 1.0])
         {
-            for z in [0.0, HEIGHT] {
+            for z in wall_z {
                 cps.push(Point3::new(p.0, p.1, z));
                 ws.push(wi);
             }
@@ -1189,5 +1482,310 @@ mod tests {
                 want[rail]
             );
         }
+    }
+
+    // ---- the rim: closed forms for the exact station (#13710, step 1 of the station plan) ----
+    //
+    // The rim of a cylinder of radius R = 10 about the z axis whose top face is z = 20: the
+    // edge C(s) is the circle r = R at z = 20 ([`quarter`], s in [0, 1], not arc length). At s
+    // let e be the unit radial (C − (0, 0, 20)) / R and τ = z × e the circle's unit tangent
+    // (C′ = |C′| τ, the quarter running from (R, 0) to (0, R)). The plane through C(s) square
+    // to C′(s) is the vertical plane through the axis containing e; its half-plane r > 0 is
+    // spanned by e and z. Setbacks d = [1, 0.5]: foot 0 is on the top face d_0 from C towards
+    // the axis, foot 1 on the wall d_1 below C:
+    //   S_0 = (R − d_0) e + 20 z, (r, z) = (9, 20); S_1 = R e + (20 − d_1) z, (r, z) = (10, 19.5),
+    // the only points of each face in that half-plane at distance d_i from C (the top face's
+    // line through C along e meets the circle of radius d_0 at r = R ∓ d_0; into the face is
+    // towards the axis; the wall's vertical line meets it at z = 20 ∓ d_1, into the face is
+    // down). Both feet turn with e about the axis, at fixed (r, z): per unit arc length σ of the
+    // edge (dσ = R dθ) a foot at radius r moves r dθ = (r / R) dσ along τ, so
+    //   ∂S_0/∂σ = (9 / 10) τ = 0.9 τ, ∂S_1/∂σ = (10 / 10) τ = 1.0 τ,
+    // and per unit length of foot 0's motion foot 1 moves 1 / 0.9 along τ. Fold check: in arc
+    // length C′ = τ and C″ = −e / R; S_i − C = (r_i − R) e + (z_i − 20) z, so
+    // (S_i − C) · C″ = −(r_i − R) / R and ∂S_i/∂σ · C′ = |C′|² − (S_i − C) · C″
+    // = 1 + (r_i − R) / R = r_i / R: 0.9 and 1.0, positive. With d_0 = 12 > R foot 0 is past
+    // the axis, r_0 = R − d_0 = −2 (the top face spans [−25, 25]² so it holds that foot), and
+    // ∂S_0/∂σ · C′ = r_0 / R = −0.2 < 0: the stations fold (foot 0 runs backwards).
+
+    const RIM_R: f64 = 10.0;
+    const RIM_Z: f64 = 20.0;
+    const RIM_W: f64 = 25.0;
+
+    /// The solver of the rim (above), its offsets' sides from the faces' normals so the ball's
+    /// side is inside the material: the top face's into the wall (down), the wall's into the
+    /// top face (towards the axis).
+    fn rim(k: &Kernel, d: [f64; 2]) -> SetbackFs {
+        let [plate, wall] = plate_and_wall(RIM_W, RIM_Z, RIM_R, [0.0, RIM_Z]);
+        let mut curve_based = CurveBasedFs::new(1e-6, 0.1, 0.01);
+        curve_based.original = Some(Curve::from(quarter(RIM_R, RIM_Z)));
+        let np = plate
+            .evaluate_normal(k, Point2::new(0.5, 0.5), Side::Left, Side::Left)
+            .unwrap();
+        let plate_side = if np.z < 0.0 { 1.0 } else { -1.0 };
+        let nw = wall
+            .evaluate_normal(k, Point2::new(0.5, 0.5), Side::Left, Side::Left)
+            .unwrap();
+        let outward = Vec3::new(1.0, 1.0, 0.0);
+        let wall_side = if nw.dot(outward) > 0.0 { -1.0 } else { 1.0 };
+        curve_based.solver.orientations = [plate_side, wall_side];
+        curve_based.solver.surfaces = rail_slots(
+            extending_offset(k, 0.0, (plate, SurfaceId::Free(1))).unwrap(),
+            extending_offset(k, 0.0, (wall, SurfaceId::Free(2))).unwrap(),
+        );
+        SetbackFs {
+            curve_based,
+            setbacks: d,
+            edge_interval: Extent1d::from_min_max(0.0, 1.0),
+        }
+    }
+
+    /// The rim's edge point, unit radial e and unit tangent τ at s.
+    fn rim_frame(s: f64) -> (Point3, Vec3, Vec3) {
+        let c = quarter(RIM_R, RIM_Z).evaluate_point(s).unwrap();
+        let e = Vec3::new(c.x, c.y, 0.0) * (1.0 / RIM_R);
+        (c, e, Vec3::new(-e.y, e.x, 0.0))
+    }
+
+    /// The closed-form feet at s (above).
+    fn rim_feet(s: f64, d: [f64; 2]) -> [Point3; 2] {
+        let (_, e, _) = rim_frame(s);
+        [
+            e * (RIM_R - d[0]) + Vec3::Z * RIM_Z,
+            e * RIM_R + Vec3::Z * (RIM_Z - d[1]),
+        ]
+    }
+
+    /// The top face's parameters of a point on it.
+    fn plate_uv(p: Point3) -> Point2 {
+        Point2::new((p.x + RIM_W) / (2.0 * RIM_W), (p.y + RIM_W) / (2.0 * RIM_W))
+    }
+
+    /// Guesses near the feet (off the edge), and guesses on the edge (C(s)'s parameters on
+    /// both faces: the wall's middle quarter is [`quarter`]'s arc, u = (1 + s) / 3, v = 1).
+    fn rim_guesses(s: f64, d: [f64; 2]) -> [[Point2; 2]; 2] {
+        let (c, e, t) = rim_frame(s);
+        let want = rim_feet(s, d);
+        let near = [
+            plate_uv(want[0] + e * 0.05 + t * 0.03),
+            Point2::new((1.0 + s) / 3.0 + 0.002, (RIM_Z - d[1]) / RIM_Z - 0.01),
+        ];
+        let on_edge = [plate_uv(c), Point2::new((1.0 + s) / 3.0, 1.0)];
+        [near, on_edge]
+    }
+
+    /// The exact station on the rim: the feet are at (r, z) = (9, 20) and (10, 19.5) in the
+    /// station's half-plane through the axis (no component along τ), from guesses near them
+    /// and from guesses on the edge.
+    #[test]
+    fn rim_station_feet_are_the_setbacks_in_the_half_plane_through_the_axis() {
+        let k = Kernel::default();
+        let d = [1.0, 0.5];
+        let mut fs = rim(&k, d);
+        let domains = fs.trace_domains(&k).unwrap();
+        let want_rz = [(9.0, 20.0), (10.0, 19.5)];
+        for s in [0.0, 0.37, 0.5, 0.82, 1.0] {
+            let (_, e, t) = rim_frame(s);
+            for guesses in rim_guesses(s, d) {
+                let station = fs
+                    .station(&k, s, guesses, &domains)
+                    .unwrap()
+                    .expect("a station");
+                assert_eq!(station.s, s);
+                for (rail, &(r, z)) in want_rz.iter().enumerate() {
+                    let p = station.feet[rail].point;
+                    assert!((p.dot(e) - r).abs() < 1e-9, "s {s} rail {rail}: {p:?}");
+                    assert!((p.z - z).abs() < 1e-9, "s {s} rail {rail}: {p:?}");
+                    assert!(p.dot(t).abs() < 1e-9, "s {s} rail {rail}: {p:?}");
+                    let q = point(&k, &mut fs, rail, station.feet[rail].uv);
+                    assert!(q.distance(p) < 1e-12, "s {s} rail {rail}: {q:?} vs {p:?}");
+                }
+            }
+        }
+    }
+
+    /// Each foot's motion from the implicit derivative of its own system: per unit arc length
+    /// of the edge (`∂S/∂s / |C′(s)|`, `|C′|` the edge's own speed, the quarter not being in
+    /// arc length) 0.9 τ for foot 0 and 1.0 τ for foot 1, along the circles r = 9 and r = 10.
+    #[test]
+    fn rim_feet_move_along_their_circles_at_their_radius_over_the_rims() {
+        let k = Kernel::default();
+        let d = [1.0, 0.5];
+        let mut fs = rim(&k, d);
+        let domains = fs.trace_domains(&k).unwrap();
+        for s in [0.0, 0.37, 0.82] {
+            let (_, _, t) = rim_frame(s);
+            let station = fs
+                .station(&k, s, rim_guesses(s, d)[0], &domains)
+                .unwrap()
+                .expect("a station");
+            let speed = station.jet.d1.length();
+            for (rail, rate) in [(0, 0.9), (1, 1.0)] {
+                let foot = station.feet[rail];
+                let per_arc = foot.per_s * (1.0 / speed);
+                assert!(
+                    (per_arc - t * rate).length() < 1e-9,
+                    "s {s} rail {rail}: {per_arc:?} vs {rate} {t:?}"
+                );
+            }
+        }
+    }
+
+    /// The trace point at the exact station, and `ComputeUVVectors` on a point at the feet:
+    /// the curve tangent is τ (foot 0's unit motion), foot 0's uv tangent maps to τ and foot
+    /// 1's to τ / 0.9 (per unit foot-0 chord: foot 1 moves 1.0 per 0.9 of foot 0), so their
+    /// ratio is 1 / 0.9; a reversed curve tangent reverses both; a point whose
+    /// `user_doubles[0]` is not its station's s is answered at its foot 0's station.
+    #[test]
+    fn rim_uv_tangents_are_each_foots_own_per_unit_foot_0_chord() {
+        let k = Kernel::default();
+        let d = [1.0, 0.5];
+        let mut fs = rim(&k, d);
+        let domains = fs.trace_domains(&k).unwrap();
+        let s = 0.37;
+        let (_, _, t) = rim_frame(s);
+        let point0 = fs
+            .station_point(&k, s, rim_guesses(s, d)[1], &domains)
+            .unwrap()
+            .expect("a station point");
+        assert_eq!((point0.user_doubles[0], point0.user_doubles[1]), (s, s));
+        assert!(
+            (point0.curve_pv[1] - t).length() < 1e-9,
+            "{:?}",
+            point0.curve_pv
+        );
+        let want = rim_feet(s, d);
+        assert!(point0.curve_pv[0].distance(want[0]) < 1e-9);
+        let images = |fs: &mut SetbackFs, p: &TsectPnt| {
+            let mut out = [Vec3::ZERO; 2];
+            for (rail, slot) in out.iter_mut().enumerate() {
+                let uv = p.uv_curve_pv[rail];
+                let (_, pu, pv) =
+                    offset_evaluate_1st(&k, fs.curve_based.solver.rail_mut(rail).unwrap(), uv[0])
+                        .unwrap();
+                *slot = pu * uv[1].x + pv * uv[1].y;
+            }
+            out
+        };
+        let [i0, i1] = images(&mut fs, &point0);
+        assert!((i0 - t).length() < 1e-9, "{i0:?}");
+        assert!((i1 - t * (1.0 / 0.9)).length() < 1e-9, "{i1:?}");
+        assert!((i1.length() / i0.length() - 1.0 / 0.9).abs() < 1e-9);
+
+        // ComputeUVVectors at the same feet, the curve tangent reversed, s not left in the point
+        let mut p = TsectPnt::new();
+        FilletSolver::compute_surface_values(
+            &k,
+            &mut fs,
+            [point0.uv_curve_pv[0][0], point0.uv_curve_pv[1][0]],
+            &mut p,
+        )
+        .unwrap();
+        p.curve_pv[1] = -t;
+        p.user_doubles[0] = 0.0;
+        fs.compute_uv_vectors(&k, &mut p).unwrap();
+        let [j0, j1] = images(&mut fs, &p);
+        assert!((j0 + t).length() < 1e-9, "{j0:?}");
+        assert!((j1 + t * (1.0 / 0.9)).length() < 1e-9, "{j1:?}");
+
+        // and with its s and the tangent forward: the station point's own tangents
+        p.curve_pv[1] = t;
+        p.user_doubles[0] = s;
+        fs.compute_uv_vectors(&k, &mut p).unwrap();
+        for rail in 0..2 {
+            let (a, b) = (p.uv_curve_pv[rail][1], point0.uv_curve_pv[rail][1]);
+            assert!((a - b).length() < 1e-12 * (1.0 + b.length()), "rail {rail}");
+        }
+    }
+
+    /// The base solver's `PointOnPlaneSolve` on the plane through C(t) square to C′(t), from
+    /// the marcher's guesses on the edge: foot 0 is on that plane and at its station, which
+    /// on the rim is t's own (the plane is the station's, and foot 0 at r = 9 > 0 is on its
+    /// half-plane), so `user_doubles[0]` = t and the feet are the closed form's. The solve
+    /// reports found only with every residual within `conversion_tol (1 + |S_0|)`, about
+    /// `1e-13 · 21` ([`SetbackFs::load_jacobian`]), so 1e-9 holds them with margin.
+    #[test]
+    fn rim_point_on_plane_solve_is_the_station_at_the_planes_parameter() {
+        let k = Kernel::default();
+        let d = [1.0, 0.5];
+        let mut fs = rim(&k, d);
+        let domains = fs.trace_domains(&k).unwrap();
+        for t in [0.2, 0.37, 0.64] {
+            let jet = fs.jet(&k, t).unwrap();
+            let [_, on_edge] = rim_guesses(t, d);
+            let mut tsect = TsectPnt::new();
+            let found = FilletSolver::point_on_plane_solve(
+                &mut fs,
+                &k,
+                None,
+                jet.point,
+                jet.d1,
+                &domains[0],
+                &domains[1],
+                on_edge[0],
+                on_edge[1],
+                &mut tsect,
+            )
+            .unwrap();
+            assert!(found, "t {t}");
+            assert!(
+                (tsect.user_doubles[0] - t).abs() < 1e-9,
+                "t {t}: {:?}",
+                tsect.user_doubles
+            );
+            let want = rim_feet(t, d);
+            let p0 = point(&k, &mut fs, 0, tsect.uv_pos(SrfIndex::First));
+            let p1 = point(&k, &mut fs, 1, tsect.uv_pos(SrfIndex::Second));
+            assert!(
+                p0.distance(want[0]) < 1e-9,
+                "t {t}: {p0:?} vs {:?}",
+                want[0]
+            );
+            assert!(
+                p1.distance(want[1]) < 1e-9,
+                "t {t}: {p1:?} vs {:?}",
+                want[1]
+            );
+        }
+    }
+
+    /// The fold check: setbacks [12, 0.5] put foot 0 past the axis at r = −2, where
+    /// `∂S_0/∂σ · C′ = r_0 / R = −0.2 < 0` (above): the exact station and the station
+    /// through those feet are refused as crossing, not answered.
+    #[test]
+    fn rim_station_past_the_axis_is_refused_as_folding() {
+        let k = Kernel::default();
+        let d = [12.0, 0.5];
+        let mut fs = rim(&k, d);
+        let domains = fs.trace_domains(&k).unwrap();
+        let s = 0.37;
+        let want = rim_feet(s, d);
+        let (_, e, _) = rim_frame(s);
+        assert!((want[0].dot(e) + 2.0).abs() < 1e-12);
+        let guesses = [
+            plate_uv(want[0] + e * 0.05),
+            Point2::new((1.0 + s) / 3.0 + 0.002, (RIM_Z - d[1]) / RIM_Z - 0.01),
+        ];
+        let refused = |r: Result<Option<SetbackStation>>| {
+            let err = r.expect_err("refused as folding");
+            assert_eq!(
+                err.blend_failure(),
+                Some(&BlendFailure::NoRoom(NoRoomReason::SetbacksCross)),
+                "{err:?}"
+            );
+        };
+        refused(fs.station(&k, s, guesses, &domains));
+        let exact = [
+            plate_uv(want[0]),
+            Point2::new((1.0 + s) / 3.0, (RIM_Z - d[1]) / RIM_Z),
+        ];
+        refused(fs.station_through(&k, s, exact));
+        // the same feet's motion, unchecked: foot 0 runs backwards at r_0 / R of the edge's speed
+        let jet = fs.jet(&k, s).unwrap();
+        let support = fs.support(0).unwrap();
+        let foot = foot_at(&k, &support, &jet, d[0], exact[0])
+            .unwrap()
+            .unwrap();
+        let ratio = foot.per_s.dot(jet.d1) / jet.d1.length_squared();
+        assert!((ratio + 0.2).abs() < 1e-9, "{ratio}");
     }
 }

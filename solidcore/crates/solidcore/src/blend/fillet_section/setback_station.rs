@@ -98,6 +98,14 @@ pub struct SetbackFoot {
     /// `∂S/∂d`: the foot's motion per unit of setback at this station (the implicit function
     /// theorem on the foot's system).
     pub along: Vec3,
+    /// `∂(u, v)/∂s`: the foot's parameters' motion per unit of the edge's parameter at a
+    /// fixed setback (the implicit function theorem on the foot's system in s, no difference
+    /// quotient).
+    pub uv_per_s: Point2,
+    /// `∂S/∂s = S_u ∂u/∂s + S_v ∂v/∂s`: the foot's motion per unit of the edge's parameter.
+    /// At the root `∂S/∂s · C′ = |C′|² − (S − C) · C″` (the system's second row), positive
+    /// exactly where the foot is short of the edge's polar line (module docs).
+    pub per_s: Vec3,
 }
 
 /// The feet of a chord at one station, and the equal setback that puts them `chord` apart.
@@ -232,8 +240,16 @@ pub fn setback_foot(
 
 /// The foot at `uv`, the root of the foot's system for setback `d`, with its motion in d:
 /// `∂(u, v)/∂d = J⁻¹ (d, 0)` (the system's partial in d is `(−d, 0)`), so
-/// `∂S/∂d = S_u ∂u/∂d + S_v ∂v/∂d`.
-fn foot_at(
+/// `∂S/∂d = S_u ∂u/∂d + S_v ∂v/∂d`; and in the edge's parameter s:
+/// `∂(u, v)/∂s = J⁻¹ ((S − C) · C′, |C′|² − (S − C) · C″)` (the system's partial in s is
+/// `(−(S − C) · C′, (S − C) · C″ − |C′|²)`; its first entry vanishes at the root), so
+/// `∂S/∂s = S_u ∂u/∂s + S_v ∂v/∂s`. `None` where the system is singular at `uv` or the point
+/// or `∂S/∂d` is not finite (a `∂S/∂s` that is not finite is the caller's to judge).
+///
+/// # Errors
+///
+/// Those of the support's evaluation.
+pub(crate) fn foot_at(
     k: &Kernel,
     support: &Surface,
     edge: &EdgeJet,
@@ -248,11 +264,17 @@ fn foot_at(
     };
     let [du, dv] = times(&inverse, [d, 0.0]);
     let along = su * du + sv * dv;
+    let [us, vs] = times(
+        &inverse,
+        [g.dot(edge.d1), edge.d1.dot(edge.d1) - g.dot(edge.d2)],
+    );
     let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
     Ok((finite(s) && finite(along)).then_some(SetbackFoot {
         uv,
         point: s,
         along,
+        uv_per_s: Point2::new(us, vs),
+        per_s: su * us + sv * vs,
     }))
 }
 

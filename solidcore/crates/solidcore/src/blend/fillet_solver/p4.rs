@@ -5241,9 +5241,19 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         self.synced(r)
     }
 
-    /// `ComputeUVVectors` (`super::p1::compute_uv_vectors`).
-    fn compute_uv_vectors(&mut self, _k: &Kernel, point: &mut TsectPnt) -> Result<()> {
-        super::p1::compute_uv_vectors(point)
+    /// `ComputeUVVectors` (`super::p1::compute_uv_vectors`); for a chamfer of setbacks
+    /// (#13710) each foot's own uv tangent from its station's implicit derivative
+    /// ([`crate::blend::fillet_standard_solver::setback::SetbackFs::compute_uv_vectors`]).
+    fn compute_uv_vectors(&mut self, k: &Kernel, point: &mut TsectPnt) -> Result<()> {
+        if self.ops.setback_mut().is_none() {
+            return super::p1::compute_uv_vectors(point);
+        }
+        self.pre()?;
+        let r = match self.ops.setback_mut() {
+            Some(setback) => setback.compute_uv_vectors(k, point),
+            None => super::p1::compute_uv_vectors(point),
+        };
+        self.synced(r)
     }
 
     /// `StepSolve` (the stub of this file), writing into `flags`, `next` and
