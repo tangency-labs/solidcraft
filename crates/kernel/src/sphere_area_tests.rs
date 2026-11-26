@@ -88,4 +88,3 @@ fn a_face_has_the_same_area_on_a_ball_and_on_a_cavity() {
     assert_close(sphere_area(&ball_side), want);
     assert_close(sphere_area(&cavity_side), want);
 }
-
