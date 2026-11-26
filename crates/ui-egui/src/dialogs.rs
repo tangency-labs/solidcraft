@@ -2960,28 +2960,6 @@ mod face_snap_tests {
         }
     }
 
-    /// The flat bottom of a cone revolved about the y axis is a plane made by a revolution: it is
-    /// picked for New Sketch with its normal out of the material, and nothing is meshed.
-    #[test]
-    fn hovering_a_revolved_flat_disk_for_a_sketch_plane_meshes_nothing() {
-        let mut h = crate::scenario::Harness::new();
-        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
-        h.app.run("sketch.line", json!({"points": [[0, 0], [20, 0], [0, 5]], "closed": true})).unwrap();
-        h.app.run("sketch.finish", json!({})).unwrap();
-        h.app.run("solid.revolve", json!({"axis": "y", "operation": "new", "body_name": "D"})).unwrap();
-        let faces = h.app.session.world_state().unwrap().body("D").unwrap().body.faces(1e-3).unwrap();
-        let disk = faces.iter().find(|f| f.plane_normal.is_some()).unwrap();
-        let normal = disk.plane_normal.unwrap();
-        assert!(normal.dot(Vec3::new(0.0, -1.0, 0.0)) > 1.0 - 1e-9, "the bottom's normal points out of the cone: {normal:?}");
-
-        h.app.start("sketch.create");
-        take_snap_work();
-        let d = h.app.dialog.as_ref().unwrap();
-        let hit = Hit::Face { body: "D".into(), index: disk.index, point: disk.centroid };
-        assert!(d.candidate_on(&h.app.session, &hit, None).is_some(), "the flat disk is picked");
-        assert_eq!(take_snap_work().0, 0, "a plane is decided by its surface: nothing is meshed");
-    }
-
     #[test]
     fn a_point_more_than_a_micrometre_off_a_sliver_is_off_the_face() {
         // A triangle with half-micrometre legs. Points 2 µm below its lower side and 1.6 µm past

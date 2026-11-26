@@ -204,16 +204,26 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool, use_index
                 };
                 // A blend or a revolution the kernel finds flat is a plane too, as New Sketch's
                 // picker takes it (`Body::sketch_plane_of_face`); the other faces are as before.
-                let exact_plane = match known.map(SketchPlane::Flat).unwrap_or_else(|| body.body.sketch_plane_of_face(index)) {
-                    SketchPlane::Flat(plane) => plane,
-                    SketchPlane::NotFlat => {
-                        curved = true;
-                        continue;
-                    }
-                    SketchPlane::Undecided => {
-                        unread.get_or_insert_with(|| "the kernel was stopped before it decided this face".to_string());
-                        continue;
-                    }
+                let exact_plane = match known {
+                    Some(plane) => plane,
+                    None => match body.body.sketch_plane_of_face(index) {
+                        SketchPlane::Flat(plane) => {
+                            // A default placement anchors to the face's history, which a flat blend
+                            // or revolution gives no exact anchor for; a fixed plane takes the plane.
+                            if !fixed {
+                                return Err(bad(cmd, "this face is flat but has no exact plane it can follow; use a fixed plane"));
+                            }
+                            plane
+                        }
+                        SketchPlane::NotFlat => {
+                            curved = true;
+                            continue;
+                        }
+                        SketchPlane::Undecided => {
+                            unread.get_or_insert_with(|| "the kernel could not decide this face just now".to_string());
+                            continue;
+                        }
+                    },
                 };
                 let normal = exact_plane.normal();
                 let on_plane = exact_plane.origin;
