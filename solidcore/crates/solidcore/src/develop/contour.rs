@@ -1,5 +1,6 @@
 //! The surfaces of a contour flange's profile: the drawn profile of lines and circular arcs
-//! moved a depth through the sheet, end to end again.
+//! moved a depth through the sheet, end to end again; and a closed profile moved the same way,
+//! which also joins the corner where it closes (a lip's band edge).
 //!
 //! Not upstream (SolidCraft's contour flange orientation, #6790, moved into the kernel,
 //! docs/layers.md §1).
@@ -50,6 +51,35 @@ pub fn offset_contour(
     flip: bool,
     smooth: f64,
 ) -> Result<Vec<Seg2>, ContourRefusal> {
+    offset_profile(segs, depth, thickness, flip, smooth, false)
+}
+
+/// A closed profile `segs` moved `depth` across its plane, as [`offset_contour`] moves an open
+/// one, where the last piece ends where the first starts and meets it there at a corner like any
+/// other: at a sharp one beside an arc, both moved pieces end where the shifted curves cross
+/// nearest the corner. A lip's band edge is its face's loop moved this way.
+///
+/// # Errors
+/// A [`ContourRefusal`] naming why the shifted profile does not hold together.
+pub fn offset_closed_contour(
+    segs: &[Seg2],
+    depth: f64,
+    thickness: f64,
+    flip: bool,
+    smooth: f64,
+) -> Result<Vec<Seg2>, ContourRefusal> {
+    offset_profile(segs, depth, thickness, flip, smooth, true)
+}
+
+/// [`offset_contour`] for an open profile, [`offset_closed_contour`] for a `closed` one.
+fn offset_profile(
+    segs: &[Seg2],
+    depth: f64,
+    thickness: f64,
+    flip: bool,
+    smooth: f64,
+    closed: bool,
+) -> Result<Vec<Seg2>, ContourRefusal> {
     if depth == 0.0 {
         return Ok(segs.to_vec());
     }
@@ -57,13 +87,9 @@ pub fn offset_contour(
     // The way a surface lies from the profile at a point of travel `t`: away from the material.
     let away = |t: Vec2| t.normalized().map(|d| d.perp() * side);
     let short = || ContourRefusal::ZeroLength;
-    // The joints (indices into `at`) at sharp corners, where an arc beside them is cut anew.
-    let mut sharp = BTreeSet::new();
-    let mut at = Vec::new();
-    let first = segs.first().ok_or_else(short)?;
-    at.push(first.start() + away(first.start_tangent()).unwrap_or(Vec2::ZERO) * depth);
-    for pair in segs.windows(2) {
-        let [a, b] = pair else { continue };
+    // Where the shifted pieces meet at the corner where `a` ends and `b` starts, and whether an
+    // arc beside it is cut anew there (a sharp corner that is not two lines').
+    let joint = |a: &Seg2, b: &Seg2| -> Result<(Vec2, bool), ContourRefusal> {
         let (na, nb) = (
             away(a.end_tangent()).ok_or_else(short)?,
             away(b.start_tangent()).ok_or_else(short)?,
@@ -74,25 +100,53 @@ pub fn offset_contour(
         );
         let turn = da.cross(db).abs().atan2(da.dot(db));
         let corner = a.end();
-        at.push(if turn <= smooth {
-            corner + na * depth
+        Ok(if turn <= smooth {
+            (corner + na * depth, false)
         } else if matches!((a, b), (Seg2::Line { .. }, Seg2::Line { .. })) {
             let meet = 1.0 + na.dot(nb);
             if !(meet > 1e-9) {
                 return Err(ContourRefusal::TurnsBack);
             }
-            corner + (na + nb) * (depth / meet)
+            (corner + (na + nb) * (depth / meet), false)
         } else {
             let (oa, ob) = (
                 shifted(a, na, corner, depth, flip),
                 shifted(b, nb, corner, depth, flip),
             );
+            let x = shifted_crossing(oa, ob, corner).ok_or(ContourRefusal::CornersMiss)?;
+            (x, true)
+        })
+    };
+    // The joints (indices into `at`) at sharp corners, where an arc beside them is cut anew.
+    let mut sharp = BTreeSet::new();
+    let (first, last) = (
+        segs.first().ok_or_else(short)?,
+        segs.last().ok_or_else(short)?,
+    );
+    // An open profile's ends move square to it; a closed one's last piece meets its first at a
+    // corner, the start of the first piece and the end of the last (joints 0 and `segs.len()`).
+    let (begin, end) = if closed {
+        let (x, cut) = joint(last, first)?;
+        if cut {
+            sharp.extend([0, segs.len()]);
+        }
+        (x, x)
+    } else {
+        (
+            first.start() + away(first.start_tangent()).unwrap_or(Vec2::ZERO) * depth,
+            last.end() + away(last.end_tangent()).unwrap_or(Vec2::ZERO) * depth,
+        )
+    };
+    let mut at = vec![begin];
+    for pair in segs.windows(2) {
+        let [a, b] = pair else { continue };
+        let (x, cut) = joint(a, b)?;
+        if cut {
             sharp.insert(at.len());
-            shifted_crossing(oa, ob, corner).ok_or(ContourRefusal::CornersMiss)?
-        });
+        }
+        at.push(x);
     }
-    let last = segs.last().ok_or_else(short)?;
-    at.push(last.end() + away(last.end_tangent()).unwrap_or(Vec2::ZERO) * depth);
+    at.push(end);
     let mut out = Vec::new();
     for (i, seg) in segs.iter().enumerate() {
         let (Some(&from), Some(&to)) = (at.get(i), at.get(i + 1)) else {
@@ -145,23 +199,6 @@ pub fn offset_contour(
         });
     }
     Ok(out)
-}
-
-/// A closed profile `segs` moved `depth` across its plane, as [`offset_contour`] moves an open
-/// one, where the last piece ends where the first starts and meets it there at a corner like any
-/// other: at a sharp one beside an arc, both moved pieces end where the shifted curves cross
-/// nearest the corner. A lip's band edge is its face's loop moved this way.
-///
-/// # Errors
-/// A [`ContourRefusal`] naming why the shifted profile does not hold together.
-pub fn offset_closed_contour(
-    segs: &[Seg2],
-    depth: f64,
-    thickness: f64,
-    flip: bool,
-    smooth: f64,
-) -> Result<Vec<Seg2>, ContourRefusal> {
-    offset_contour(segs, depth, thickness, flip, smooth)
 }
 
 /// A drawn arc's radius once its surface lies `depth` from it, away from the material, and
@@ -494,6 +531,11 @@ mod tests {
         // Moved 6 inside, the line y = 6 misses the circle of radius 4.
         assert_eq!(
             offset_closed_contour(&quarter, 6.0, 0.0, false, SMOOTH),
+            Err(ContourRefusal::CornersMiss)
+        );
+        // A depth that is not a number moves the line nowhere, so it meets no circle either.
+        assert_eq!(
+            offset_closed_contour(&quarter, f64::NAN, 0.0, false, SMOOTH),
             Err(ContourRefusal::CornersMiss)
         );
     }
