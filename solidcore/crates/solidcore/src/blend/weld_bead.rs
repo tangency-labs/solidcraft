@@ -596,7 +596,7 @@ fn straight(curve: &Curve, start: Point3, end: Point3, tol: f64) -> Result<bool>
         CurveKind::BSpline(c) => c.control_polygon()?,
         _ => return Ok(false),
     };
-    if (end - start).length() <= tol || weights.iter().any(|&w| !(w > 0.0)) {
+    if (end - start).length() <= tol || !weights.iter().all(|&w| w > 0.0) {
         return Ok(false);
     }
     let dir = (end - start).unitize()?;
