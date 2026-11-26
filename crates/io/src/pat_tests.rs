@@ -2,10 +2,11 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 
 use crate::{IoError, PatImportOptions, PatUnits, read_pat};
-use solidcore_record::hatch::{Family, Pattern};
+use solidcore_record::profile::line_family::LineFamily;
 use solidcore_record::{Loop2, Region2, Vec2};
+use solidcraft_doc::drawing::hatch::Pattern;
 use solidcraft_geom::prelude::*;
-use solidcraft_kernel::services::hatch::{self, Mark};
+use solidcraft_kernel::services::profile::Mark;
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, SQRT_2};
 
 const UNIT: &str = "*UNIT,Original unit probe\n90,1,-2,0.5,4,2,-1,0\n\n";
@@ -15,7 +16,7 @@ fn read(text: &str) -> Vec<Pattern> {
     read_pat(text.as_bytes(), PatImportOptions::default()).unwrap()
 }
 
-fn family(text: &str, options: PatImportOptions) -> Family {
+fn family(text: &str, options: PatImportOptions) -> LineFamily {
     let mut patterns = read_pat(text.as_bytes(), options).unwrap();
     assert_eq!(patterns.len(), 1);
     let mut pattern = patterns.remove(0);
@@ -445,14 +446,14 @@ fn imported_diagonal_output(region: &Region2, options: PatImportOptions, spacing
     let direct = Pattern {
         name: "R45".into(),
         description: "Original 45 degree lines".into(),
-        families: vec![Family { angle: FRAC_PI_4, origin: Vec2::ZERO, delta_x: 0.0, delta_y: spacing, dashes: vec![] }],
+        families: vec![LineFamily { angle: FRAC_PI_4, origin: Vec2::ZERO, delta_x: 0.0, delta_y: spacing, dashes: vec![] }],
     };
     let imported = read_pat(DIAGONAL_PAT.as_bytes(), options).unwrap();
     assert_eq!(imported, vec![direct.clone()]);
     let patterns_before = imported.clone();
     let region_before = region.clone();
-    let marks = hatch::generate(&imported[0], region).unwrap();
-    assert_eq!(marks, hatch::generate(&direct, region).unwrap());
+    let marks = imported[0].marks(region).unwrap();
+    assert_eq!(marks, direct.marks(region).unwrap());
     assert_eq!(imported, patterns_before);
     assert_eq!(region, &region_before);
     marks
@@ -585,7 +586,7 @@ fn imported_decimal_spacing_reaches_generation_after_one_unit_conversion() {
             holes: vec![],
         };
         let saved_region = region.clone();
-        let marks = hatch::generate(&imported[0], &region).unwrap();
+        let marks = imported[0].marks(&region).unwrap();
         let expected: Vec<_> = (-last..=last)
             .map(|k| {
                 let y = (i128::from(k) * numerator) as f64 / denominator;

@@ -208,7 +208,11 @@ pub fn is_line_base(
                     pt_vec[1] = d;
                 }
             }
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             Err(_) => {}
         }
         pt1 = pt_vec[0];

@@ -6,7 +6,7 @@
 //!
 //! Nothing here computes: every answer is the kernel's, its numbers copied field by field.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use solidcore::hlr as k;
 use solidcore_convert::{record_seg2, record_vec3, vec3};
 use solidcore_record::brep::{Brep, Loop, Surface};
@@ -17,32 +17,15 @@ pub use k::{
     Visibility, Workers, MAX_COORDINATE, MAX_ITEMS, MAX_THREADS, MAX_TRIM_SAMPLES,
 };
 
-/// How exactly a drawn curve stands for its source.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum CurveAccuracy {
-    /// An analytic representation without fitting; not a certificate about the source or
-    /// topology.
-    Analytic,
-    /// A producer-established bound, not merely a requested fitting tolerance.
-    Bounded {
-        /// The bound (mm).
-        max_deviation_mm: f64,
-    },
-    /// A deviation measured at samples only, with no bound between them. Zero remains sampled.
-    Sampled {
-        /// The largest deviation measured (mm).
-        max_sample_deviation_mm: f64,
-    },
-}
+/// How exactly a drawn curve stands for its source: the record's data type
+/// ([`solidcore_record::CurveAccuracy`]).
+pub use solidcore_record::CurveAccuracy;
 
-impl CurveAccuracy {
-    /// The same accuracy for the curve scaled by `factor` (above 0): a deviation scales with it,
-    /// and an analytic curve stays analytic ([`k::CurveAccuracy::scaled`]).
-    #[must_use]
-    pub fn scaled(self, factor: f64) -> CurveAccuracy {
-        accuracy(kernel_accuracy(self).scaled(factor))
-    }
+/// The same accuracy for a curve scaled by `factor` (above 0): a deviation scales with it, and
+/// an analytic curve stays analytic ([`k::CurveAccuracy::scaled`]).
+#[must_use]
+pub fn scaled(accuracy: CurveAccuracy, factor: f64) -> CurveAccuracy {
+    self::accuracy(kernel_accuracy(accuracy).scaled(factor))
 }
 
 fn kernel_accuracy(a: CurveAccuracy) -> k::CurveAccuracy {
@@ -527,12 +510,21 @@ mod tests {
             centres.extend(at);
         };
         let (mut lines, mut arcs) = (0., 0.);
+        // The outline lines' length with the undecided pieces at their ends (covered, below).
+        let mut whole_lines = 0.;
         for l in &d.lines {
             assert!(
                 matches!(l.source, Source::Silhouette { .. }),
                 "{:?}",
                 l.source
             );
+            for p in &l.pieces {
+                for seg in &p.geometry {
+                    if let Seg2::Line { a, b } = *seg {
+                        whole_lines += dist(a, b);
+                    }
+                }
+            }
             for p in l.pieces.iter().filter(|p| !p.covered) {
                 assert_eq!(p.visibility, Visibility::Visible);
                 assert_eq!(p.accuracy, CurveAccuracy::Analytic);
@@ -591,7 +583,25 @@ mod tests {
         assert_eq!(centres.len(), 6, "arcs about corners {centres:?}");
         let sines = [13f64 / 14., 10. / 14., 5. / 14.].map(f64::sqrt);
         let hexagon = 2. * s * sines.iter().sum::<f64>();
-        assert!(near(lines, hexagon), "lines {lines}, hexagon {hexagon}");
+        // The rounds' outline lines run the hexagon's sides whole: with the pieces at their ends
+        // (MEASURED at size 1000: 1.1e-11 short with rounds built in closed form, exact
+        // cylinders; 4.1e-8 short with the fillet sessions' rounds).
+        assert!(
+            near(whole_lines, hexagon),
+            "lines {whole_lines} with their ends, hexagon {hexagon}"
+        );
+        // Each of the six lines ends on a ball corner tangent to its round, and where a ray
+        // along the view from the line hits that corner's face within its boundary band (twice
+        // its trims' sag plus 1e-7 of its box's diagonal, r sqrt 3: `hlr`'s classify) the
+        // piece is undecided and drawn covered. Near a tangent junction that holds up to about
+        // the band's width along the line (ARGUED: the ray grazes both faces there), so each of
+        // the 12 ends may leave out up to that much (MEASURED: 7e-8 to 3e-7 per end at size
+        // 1000, r 1).
+        let ends = 12. * (2. * chord + 1e-7 * 3f64.sqrt() * r);
+        assert!(
+            lines <= hexagon + 1e-6 && lines >= hexagon - ends - 1e-6,
+            "lines {lines}, hexagon {hexagon}, ends up to {ends}"
+        );
         // A face is closed to its trim's chords: a silhouette runs on to within twice their sag
         // (plus 1e-9 of the face's size, at most 4r) of them, and they lie within one sag of the
         // boundary. The rounds' outlines end exactly, at the ends of their charts; a corner's
@@ -614,5 +624,48 @@ mod tests {
         // A small round on a large body: the corners lie on their labels' spheres, which a fit
         // to samples of patches this far from the body's centre would not find.
         rounded_box_outline(1000., 1.);
+    }
+
+    /// A deviation scales with the curve; an analytic curve stays analytic and a sampled zero
+    /// stays sampled.
+    #[test]
+    fn accuracy_scales_with_the_curve() {
+        assert_eq!(
+            scaled(CurveAccuracy::Analytic, 0.5),
+            CurveAccuracy::Analytic
+        );
+        assert_eq!(
+            scaled(
+                CurveAccuracy::Sampled {
+                    max_sample_deviation_mm: 0.01
+                },
+                3.0
+            ),
+            CurveAccuracy::Sampled {
+                max_sample_deviation_mm: 0.03
+            }
+        );
+        assert_eq!(
+            scaled(
+                CurveAccuracy::Bounded {
+                    max_deviation_mm: 0.01
+                },
+                2.0
+            ),
+            CurveAccuracy::Bounded {
+                max_deviation_mm: 0.02
+            }
+        );
+        assert_eq!(
+            scaled(
+                CurveAccuracy::Sampled {
+                    max_sample_deviation_mm: 0.0
+                },
+                5.0
+            ),
+            CurveAccuracy::Sampled {
+                max_sample_deviation_mm: 0.0
+            }
+        );
     }
 }

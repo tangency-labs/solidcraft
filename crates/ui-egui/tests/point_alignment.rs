@@ -53,8 +53,24 @@ fn horizontal_vertical_uses_preselected_line_and_preserves_rejection() {
 #[test]
 fn horizontal_vertical_leaves_ambiguous_preselection_to_pick_tool() {
     use solidcraft_engine::Sel;
+    // A single preselected point seeds H/V point_picks so one more click aligns them.
+    {
+        let mut h = Harness::new();
+        h.app.session.execute("sketch.create", &json!({"plane":"XY"})).unwrap();
+        h.app.session.execute("sketch.circle.center", &json!({"center":[20,3],"radius":5})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.settle();
+        h.app.session.selection = vec![Sel::SketchPoint { id: "origin".into() }];
+        let undo = h.app.session.undo.len();
+        h.run(&json!([{"start":"sketch.constraint.horizontal_vertical"}])).unwrap();
+        assert_eq!(h.app.tool.as_ref().unwrap().point_picks, vec![json!("origin")]);
+        assert!(h.app.session.selection.is_empty());
+        assert_eq!(h.app.session.undo.len(), undo);
+        h.run(&json!([{"click":{"sketch":[20,3]}}])).unwrap();
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert!(h.app.tool.is_none());
+    }
     for selection in [
-        vec![Sel::SketchPoint { id: "origin".into() }],
         vec![Sel::SketchPoint { id: "origin".into() }, Sel::SketchCurve { id: "c1".into(), sketch: None }],
         vec![
             Sel::SketchPoint { id: "origin".into() },
@@ -65,12 +81,12 @@ fn horizontal_vertical_leaves_ambiguous_preselection_to_pick_tool() {
         let mut h = Harness::new();
         h.app.session.execute("sketch.create", &json!({"plane":"XY"})).unwrap();
         h.app.session.execute("sketch.circle.center", &json!({"center":[20,3],"radius":5})).unwrap();
-        h.app.session.selection = selection.clone();
+        h.app.session.selection = selection;
         let undo = h.app.session.undo.len();
         h.run(&json!([{"start":"sketch.constraint.horizontal_vertical"}])).unwrap();
         assert!(h.app.tool.as_ref().unwrap().point_picks.is_empty());
         assert_eq!(h.app.session.undo.len(), undo);
-        assert_eq!(h.app.session.selection, selection);
+        assert!(h.app.session.selection.is_empty());
         assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
     }
 }

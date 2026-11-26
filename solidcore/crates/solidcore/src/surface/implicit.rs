@@ -1640,9 +1640,11 @@ impl AnalyticSupport {
 
     /// The analytic surface on the NURB `form`: refused unless `form` lies on it
     /// ([`lies_on`]) and its placement's axes are orthonormal. A plane keeps its placement
-    /// as given; a cylinder, cone, sphere or torus is parametrised as the kernel recognises
-    /// it in `form` ([`recognise`]: the sweep angles, generator range, swap and inside-out
-    /// are the form's), must be of this support's kind, and carries this support's own
+    /// as given; a cylinder, cone or sphere is parametrised as the kernel recognises it in
+    /// `form` ([`recognise`]: the sweep angles, generator range, swap and inside-out are the
+    /// form's) and must be of this support's kind; a torus is parametrised as `form` is
+    /// about this support's own axis ([`Torus::of_support`], which fits nothing, so a tube
+    /// that shows a short arc is carried as any other). Each carries this support's own
     /// placement, radii and semi-angle on that parametrisation, so that
     /// [`AnalyticSupport::of`] reads the support back unchanged. It must evaluate as `form`
     /// at the form's own parameters ([`evaluates_as`]), which together with [`lies_on`] is
@@ -1682,9 +1684,9 @@ impl AnalyticSupport {
                 placement, uv_scale, domain, form,
             )));
         }
-        // a surface of revolution: the one the kernel recognises in the form, which must be
-        // this one, take the form as its NURB and evaluate as the form at the form's own
-        // parameters
+        // a surface of revolution: the one the kernel recognises in the form (a torus: the one
+        // the form is about the support's axis), which must be this one, take the form as its
+        // NURB and evaluate as the form at the form's own parameters
         let surface = self.on_form(k, &form)?;
         if implicit_ok && evaluates_as(k, &surface, &form)? {
             return Ok(surface);
@@ -1740,14 +1742,15 @@ impl AnalyticSupport {
     /// The largest ratio, over the form's Greville points, of this support's analytic
     /// surface's distance from `form` to the rounding [`evaluates_as`] derives there (#3185):
     /// at most 1 where [`Self::build`]'s parametrisation test passes. The surface is the one
-    /// `build` makes (the kernel's recognition of `form`, carrying this support's numbers);
+    /// `build` makes (`form`'s parametrisation, carrying this support's numbers);
     /// `lies_on` and the placement's axes are not checked here. `None` for a plane, or a
     /// surface the bound does not cover.
     ///
     /// # Errors
     ///
-    /// `InvalidInput` where the kernel recognises no surface of this kind in `form`; those of
-    /// the recognisers, the conversions and the evaluations.
+    /// `InvalidInput` where the kernel recognises no surface of this kind in `form`, or
+    /// `form` gives a torus no reading about this support's axis; those of the recognisers,
+    /// the conversions and the evaluations.
     pub fn parametrisation_margin(&self, k: &Kernel, form: &BSplineSurface) -> Result<Option<f64>> {
         if matches!(self, Self::Plane { .. }) {
             return Ok(None);
@@ -1756,11 +1759,27 @@ impl AnalyticSupport {
         evaluation_margin(k, &surface, form)
     }
 
-    /// The surface of revolution of this support's kind the kernel recognises in `form`,
-    /// carrying this support's own numbers and `form` as its NURB ([`Self::build`] after its
-    /// checks of the point set, before the parametrisation's).
+    /// The surface of revolution of this support's kind on `form`'s parametrisation, carrying
+    /// this support's own numbers and `form` as its NURB ([`Self::build`] after its checks of
+    /// the point set, before the parametrisation's). A cylinder, cone or sphere takes the
+    /// parametrisation the kernel recognises in `form`; a torus's is read off `form` about
+    /// this support's own axis ([`Torus::of_support`]).
     fn on_form(&self, k: &Kernel, form: &BSplineSurface) -> Result<Surface> {
         let form = form.copy();
+        // a torus's support says where its axis and its tube are, so its conventions are read
+        // off the form about that axis and nothing is fitted. Recognition fits a circle to
+        // each meridian, which a tube that shows a short arc does not fix: it finds no torus
+        // there, and would leave a support that is right to the last bit nothing to stand on.
+        if let Self::Torus {
+            placement,
+            major_radius,
+            minor_radius,
+        } = *self
+        {
+            return Torus::of_support(k, placement, major_radius, minor_radius, &form)?
+                .map(Surface::from)
+                .ok_or_else(not_form);
+        }
         let mut surface = recognise(k, self.kind(), &form)?.ok_or_else(not_form)?;
         // Recover the generator's height interval from its actual endpoints. The
         // recogniser supplies the swap and inside-out conventions, but its fitted
@@ -1789,8 +1808,8 @@ impl AnalyticSupport {
         // recomputes them from the control points and so reproduces a support's own numbers
         // only to rounding (#2554), and far from the world origin it reads a cylinder as a cone
         // of an angle of rounding -- `lies_on` above and `evaluates_as` below are what prove
-        // the two agree. A cylinder or cone takes a recognised cone's, a sphere a sphere's, a
-        // torus a torus's.
+        // the two agree. A cylinder or cone takes a recognised cone's, a sphere a sphere's (a
+        // torus returned above).
         // this support's own numbers on the recognised parametrisation, which the generator
         // and the sweep converter carry, so that `of` reads the support back unchanged
         match (surface.kind_mut(), *self) {
@@ -1818,16 +1837,6 @@ impl AnalyticSupport {
                 sp.base.position = placement;
                 sp.radius = radius;
                 sp.base.base = form.copy();
-            }
-            (
-                SurfaceKind::Torus(t),
-                Self::Torus {
-                    placement,
-                    major_radius,
-                    minor_radius,
-                },
-            ) => {
-                t.on_support(k, placement, major_radius, minor_radius, form.copy())?;
             }
             _ => return Err(not_form()),
         }
@@ -1913,7 +1922,11 @@ fn on_axis_from(
 /// [`SolidError::Unported`] and cancellation from the recognisers.
 fn recognise(k: &Kernel, kind: SupportKind, form: &BSplineSurface) -> Result<Option<Surface>> {
     let none_on_status = |r: Result<Option<Surface>>| match r {
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => Err(e),
         Err(_) => Ok(None),
         Ok(s) => Ok(s),
     };
@@ -2758,7 +2771,11 @@ impl AnalyticSupport {
         let test = Surface::from(form.copy());
         let recognised = match SurfOfRevolution::is_nurb_surface_surf_of_revolution(k, &test, 1.0) {
             Ok(Some(rev)) => rev,
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             Ok(None) | Err(_) => return Err(not_kind()),
         };
         let surface = Self::revolution_from_rows(k, &recognised, form)?.ok_or_else(not_kind)?;

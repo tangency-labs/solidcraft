@@ -708,6 +708,58 @@ fn send_to_slicer_writes_3mf_and_starts_the_program_with_it() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+#[cfg(unix)]
+#[test]
+fn send_to_slicer_can_keep_the_file_in_a_folder_numbered_or_replaced() {
+    use std::os::unix::fs::PermissionsExt;
+    let _turn = CHOSEN_PROGRAMS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut s = imported_box();
+    let dir = std::env::temp_dir().join(format!("solidcraft-slicer-copy-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("fake-slicer");
+    std::fs::write(&script, "#!/bin/sh\nexit 0\n").unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // Two folders deep and not there yet; and a folder whose name ends in a space is that folder.
+    let keep = dir.join("kept/inner");
+    let spaced = dir.join("spaced ");
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"Mesh"}]}));
+    crate::slicers::set_chosen_programs(&[script.to_string_lossy().into_owned()]);
+    let send = |s: &mut Session, extra: Value| {
+        let mut p = json!({"slicer": script, "wait": "no", "format": "stl", "copy_to": keep});
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        s.execute("file.send_to_slicer", &p)
+    };
+    let (first, second) = (send(&mut s, json!({})), send(&mut s, json!({})));
+    let (replace_a, replace_b) = (send(&mut s, json!({"copy_overwrite": true})), send(&mut s, json!({"copy_overwrite": true})));
+    crate::slicers::set_chosen_programs(&[]);
+    let (first, second, replace_a, replace_b) = (first.unwrap(), second.unwrap(), replace_a.unwrap(), replace_b.unwrap());
+    let name = |r: &Value| std::path::Path::new(r["path"].as_str().unwrap()).file_name().unwrap().to_string_lossy().into_owned();
+    // Each send is a new version in the folder the user chose, and the file is really there.
+    let stem = name(&first).trim_end_matches("-v1.stl").to_string();
+    assert_eq!((name(&first), first["version"].as_u64(), first["copy"].as_bool()), (format!("{stem}-v1.stl"), Some(1), Some(true)));
+    assert_eq!((name(&second), second["version"].as_u64()), (format!("{stem}-v2.stl"), Some(2)));
+    assert!(first["path"].as_str().unwrap().starts_with(keep.to_str().unwrap()));
+    assert!(!std::fs::read(first["path"].as_str().unwrap()).unwrap().is_empty());
+    // Overwriting keeps one file named after the design, and no version number.
+    assert_eq!((name(&replace_a), replace_a["version"].is_null()), (format!("{stem}.stl"), true));
+    assert_eq!(replace_a["path"], replace_b["path"]);
+    let files = std::fs::read_dir(&keep).unwrap().count();
+    assert_eq!(files, 3, "v1, v2 and the replaced one");
+    crate::slicers::set_chosen_programs(&[script.to_string_lossy().into_owned()]);
+    let in_spaced = send(&mut s, json!({"copy_to": spaced}));
+    crate::slicers::set_chosen_programs(&[]);
+    assert!(in_spaced.unwrap()["path"].as_str().unwrap().starts_with(spaced.to_str().unwrap()), "the folder keeps its spelling");
+    // Without `copy_to` the file still goes to the slicer folder.
+    crate::slicers::set_chosen_programs(&[script.to_string_lossy().into_owned()]);
+    let plain = s.execute("file.send_to_slicer", &json!({"slicer": script, "wait": "no", "format": "stl"}));
+    crate::slicers::set_chosen_programs(&[]);
+    let plain = plain.unwrap();
+    assert!(plain["copy"].is_null() && !plain["path"].as_str().unwrap().starts_with(keep.to_str().unwrap()));
+    std::fs::remove_dir_all(std::path::Path::new(plain["path"].as_str().unwrap()).parent().unwrap()).unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 type Uploads = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 
 /// A session whose "host" records what it is handed and answers `answer`.
@@ -925,4 +977,67 @@ fn open_names_an_unsupported_file_instead_of_the_design_readers_complaint() {
     std::fs::copy(&design, &copy).unwrap();
     assert!(s.execute("doc.open", &json!({"path": copy.to_string_lossy()})).is_ok());
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// The imported 10 x 20 x 30 mm mesh box with the solid `Block` beside it, x 20..40, and a
+/// rectangle from `p0` to `p1` sketched at z = 20, to cut 15 mm down (to z = 5).
+fn mesh_beside_block(p0: [f64; 2], p1: [f64; 2]) -> Session {
+    let mut s = imported_box();
+    run(&mut s, "solid.box", json!({"corner": [20, 0, 0], "length": 20, "width": 20, "height": 10, "operation": "new_body", "body_name": "Block"}));
+    cut_sketch(&mut s, p0, p1);
+    s
+}
+
+fn cut_sketch(s: &mut Session, p0: [f64; 2], p1: [f64; 2]) {
+    run(s, "sketch.create", json!({"plane": {"origin": [0, 0, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Cut"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": p0, "p1": p1}));
+    run(s, "sketch.finish", json!({}));
+}
+
+fn body_volume(s: &mut Session, name: &str) -> f64 {
+    run(s, "inspect.measure", json!({"bodies": [name]}))["total"]["volume_mm3"].as_f64().unwrap()
+}
+
+/// A cut that names no body skips a mesh body in its path and cuts the solids (#615).
+#[test]
+fn automatic_cut_over_a_solid_and_a_mesh_cuts_the_solid_and_keeps_the_mesh() {
+    let mut s = mesh_beside_block([5.0, 5.0], [30.0, 15.0]);
+    run(&mut s, "solid.extrude", json!({"sketch": "Cut", "distance": "-15 mm", "operation": "cut"}));
+    assert!(rel(body_volume(&mut s, "Block"), 4000.0 - 10.0 * 10.0 * 5.0) < 1e-6);
+    assert!(rel(body_volume(&mut s, "Mesh"), 6000.0) < 1e-6);
+    assert!(s.model.state().body("Mesh").unwrap().body.is_mesh());
+}
+
+/// A mesh body elsewhere in the design does not stop a cut that never meets it (#615).
+#[test]
+fn automatic_cut_clear_of_a_mesh_cuts_the_solid() {
+    let mut s = mesh_beside_block([25.0, 5.0], [35.0, 15.0]);
+    run(&mut s, "solid.extrude", json!({"sketch": "Cut", "distance": "-15 mm", "operation": "cut"}));
+    assert!(rel(body_volume(&mut s, "Block"), 4000.0 - 10.0 * 10.0 * 5.0) < 1e-6);
+    assert!(rel(body_volume(&mut s, "Mesh"), 6000.0) < 1e-6);
+}
+
+/// With only a mesh body to cut, the cut is refused with the way out: Convert Mesh (#615).
+#[test]
+fn automatic_cut_of_only_a_mesh_is_refused_naming_convert_mesh() {
+    let mut s = imported_box();
+    cut_sketch(&mut s, [2.0, 2.0], [8.0, 8.0]);
+    let before = s.doc.to_json();
+    let error = s.execute("solid.extrude", &json!({"sketch": "Cut", "distance": "-15 mm", "operation": "cut"})).unwrap_err().to_string();
+    assert!(error.contains("Convert Mesh"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
+    assert!(s.model.state().body("Mesh").unwrap().body.is_mesh());
+}
+
+/// A cut that names a mesh body is refused with the way out: Convert Mesh (#615).
+#[test]
+fn cut_naming_a_mesh_is_refused_naming_convert_mesh() {
+    let mut s = mesh_beside_block([5.0, 5.0], [30.0, 15.0]);
+    let before = s.doc.to_json();
+    let error = s
+        .execute("solid.extrude", &json!({"sketch": "Cut", "distance": "-15 mm", "operation": "cut", "targets": ["Block", "Mesh"]}))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("Convert Mesh"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
 }
