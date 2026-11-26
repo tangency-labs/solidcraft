@@ -967,10 +967,10 @@ impl Body {
         self.placing.identity.get_or_init(|| std::sync::Arc::new(<crate::history::History as crate::history::BodyHistory>::identity(self))).clone()
     }
 
-    /// A proved no-op: keep all geometry and construction metadata, with every entity kept
-    /// relative to this step's single input (not the inputs of the preceding step).
+    /// A proved no-op: keep the geometry with identity history over this step's input.
+    /// The preceding fillet's rounds refer to its own input, not to this one.
     pub(crate) fn unchanged_step(&self) -> Body {
-        Body { history: Some(self.kept_identity()), ..self.clone() }
+        Body { history: Some(self.kept_identity()), rounds: None, ..self.clone() }
     }
 
     /// Attach the history of the operation that made this body from `operands`, after checking

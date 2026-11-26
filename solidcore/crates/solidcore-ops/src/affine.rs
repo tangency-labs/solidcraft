@@ -39,6 +39,32 @@ fn taken(map: solidcore::Result<Transform>) -> Result<Matrix> {
     map.map(|t| t.m).map_err(|_| Error::Argument)
 }
 
+/// Signed volume scale, ignoring translation.
+pub fn linear_determinant(matrix: &Matrix) -> f64 {
+    Transform { m: *matrix }.linear_determinant()
+}
+
+/// Unit direction with the input's sense, even for very large or very small axes.
+pub fn directed_unit(axis: [f64; 3]) -> Option<[f64; 3]> {
+    vec3(axis).length_and_unit().map(|(_, v)| v.to_array())
+}
+
+/// Point carried by a displacement in the same frame.
+pub fn translated_point(point: [f64; 3], by: [f64; 3]) -> [f64; 3] {
+    (vec3(point) + vec3(by)).to_array()
+}
+
+/// Compose the two axis-angle turns in application order.
+pub fn compose_turn(
+    first: [f64; 3],
+    radians: f64,
+    world: [f64; 3],
+    turn: f64,
+) -> Option<([f64; 3], f64)> {
+    solidcore::math::compose_turn(vec3(first), radians, vec3(world), turn)
+        .map(|(axis, angle)| (axis.to_array(), angle))
+}
+
 /// The move by `by`.
 ///
 /// # Errors

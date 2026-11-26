@@ -335,6 +335,60 @@ fn transform_face_patterns_carry_the_pivot_and_mirror_the_rotation() {
     }
 }
 
+#[test]
+fn transform_face_edits_each_rebuilt_body_not_the_source_or_a_coincident_neighbour() {
+    for (command, params, count) in [
+        ("solid.pattern.rectangular", json!({"features":["Stock","Tilt"],"dir1":[1,0,0],"count1":3,"spacing1":30}), 4),
+        ("solid.mirror", json!({"features":["Tilt","Stock"],"plane":{"origin":[20,0,0],"normal":[1,0,0]}}), 3),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"operation":"new","body_name":"Block","name":"Stock"}));
+        run(&mut s, "solid.box", json!({"corner":[30,0,0],"length":10,"width":10,"height":10,"operation":"new","body_name":"Neighbour"}));
+        run(
+            &mut s,
+            "solid.transform_face",
+            json!({"body":"Block","face":[5,5,10],"translate":[0,0,2],"axis":[0,-1,0],"origin":[0,0,10],"angle":"45 deg","name":"Tilt"}),
+        );
+        run(&mut s, command, params);
+        no_errors(&s);
+        let measured = run(&mut s, "inspect.measure", json!({}));
+        let bodies = measured["bodies"].as_array().unwrap();
+        assert_eq!(bodies.len(), count, "{command}: {measured}");
+        for body in bodies {
+            // Each copy has the same area 100 and mean roof height (12 + 22)/2. The
+            // neighbour also holds the copied pick but must not receive any part of the edit.
+            let want = if body["name"] == "Neighbour" { 1000. } else { 1700. };
+            assert!((body["volume_mm3"].as_f64().unwrap() - want).abs() < 1e-6, "{command}: {body}");
+        }
+    }
+}
+
+#[test]
+fn transform_face_on_a_placed_move_copy_is_not_applied_twice_by_a_mirror() {
+    use solidcore_record::Vec3;
+
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name":"Part","grounded":false}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Blank"}));
+    run(&mut s, "solid.move", json!({"bodies":["Blank"],"translate":[20,0,0],"copy":true,"name":"Duplicate"}));
+    let duplicate = s.model.state().bodies.last().unwrap().name.clone();
+    run(&mut s, "solid.transform_face", json!({"body":duplicate,"face":[30,5,5],"translate":[2,0,0],"name":"Extend"}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    run(
+        &mut s,
+        "occurrence.move",
+        json!({"occurrence":"Part:1","axis":[0,0,1],"angle":"90 deg","origin":[0,0,0],"translate":[50,0,0],"capture":true}),
+    );
+    run(&mut s, "solid.mirror", json!({"features":["Duplicate","Extend"],"plane":"YZ","name":"Echo"}));
+    no_errors(&s);
+    let echo = s.doc.find_feature("Echo").unwrap().id;
+    let world = s.world_state().unwrap();
+    let copy = world.bodies.iter().find(|b| b.feature == echo).unwrap();
+    // The extended face is at local x=32, world y=32. The mirror changes x, not y.
+    assert!(world.body(&duplicate).unwrap().body.face_at_point(Vec3::new(45., 32., 5.)).unwrap().is_some());
+    assert!(copy.body.face_at_point(Vec3::new(-45., 32., 5.)).unwrap().is_some());
+}
+
 /// A plastic Boss keeps the history of the body it stands on (#494): the plate's faces still
 /// take attached sketches, and so does the boss's own top, which follows its height.
 #[test]

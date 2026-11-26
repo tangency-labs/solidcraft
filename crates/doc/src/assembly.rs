@@ -66,12 +66,7 @@ pub fn is_identity(m: &Mat) -> bool {
     m.iter().flatten().zip(IDENTITY.iter().flatten()).all(|(a, b)| (a - b).abs() < 1e-12)
 }
 
-/// Signed volume scale of the linear part. A negative value reverses the sense of a turn.
-pub(crate) fn linear_determinant(m: &Mat) -> f64 {
-    let a = |r: usize, c: usize| m[c][r];
-    a(0, 0) * (a(1, 1) * a(2, 2) - a(1, 2) * a(2, 1)) - a(0, 1) * (a(1, 0) * a(2, 2) - a(1, 2) * a(2, 0))
-        + a(0, 2) * (a(1, 0) * a(2, 1) - a(1, 1) * a(2, 0))
-}
+pub(crate) use solidcraft_kernel::affine::linear_determinant;
 
 /// Inverse of an affine transform.
 pub fn mat_inverse(m: &Mat) -> Option<Mat> {

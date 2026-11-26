@@ -10,6 +10,34 @@ pub use solidcraft_kernel_api::affine::{AffineRefused, AxisRefusal, Matrix, Offs
 use super::{Which, which};
 use crate::backend::Solidcore;
 
+/// Signed volume scale of the linear part.
+pub fn linear_determinant(matrix: &Matrix) -> f64 {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.linear_determinant(matrix),
+    }
+}
+
+/// Unit direction with the input's sense.
+pub fn directed_unit(axis: [f64; 3]) -> Option<[f64; 3]> {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.directed_unit(axis),
+    }
+}
+
+/// Point carried by a displacement in the same frame.
+pub fn translated_point(point: [f64; 3], by: [f64; 3]) -> [f64; 3] {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.translated_point(point, by),
+    }
+}
+
+/// Apply the first turn and then the world-space turn.
+pub fn compose_turn(first: [f64; 3], radians: f64, world: [f64; 3], turn: f64) -> Option<([f64; 3], f64)> {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.compose_turn(first, radians, world, turn),
+    }
+}
+
 /// The turn by `angle` radians, right-handed about `axis` (any length but none), about the
 /// line through `point` along it.
 pub fn rotation(point: [f64; 3], axis: [f64; 3], angle: f64) -> Result<Matrix, AffineRefused> {

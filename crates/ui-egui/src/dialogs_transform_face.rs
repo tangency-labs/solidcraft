@@ -5,6 +5,7 @@ use crate::SolveApp;
 use crate::gizmo::{self, Change};
 use solidcraft_engine::doc::{Feature, FeatureKind, ModelState, apply_point, apply_vector, is_identity, map_point_expr, map_vector_expr, naming};
 use solidcraft_engine::geom::prelude::*;
+use solidcraft_kernel::affine;
 use std::cell::RefCell;
 use std::sync::{Arc, Weak};
 
@@ -120,10 +121,7 @@ fn direction(axis: usize, custom: &[String; 3]) -> Option<Vec3> {
         return AXES.get(axis).copied();
     }
     let [x, y, z] = custom.each_ref().map(|s| crate::ui_kit::parse_number(s));
-    let dir = Vec3::new(x?, y?, z?);
-    // Scale before normalization: a finite nonzero direction has no minimum magnitude.
-    let scale = dir.x.abs().max(dir.y.abs()).max(dir.z.abs());
-    (dir.is_finite() && scale > 0.0).then(|| dir / scale)?.normalized()
+    affine::directed_unit([x?, y?, z?]).map(Vec3::from)
 }
 
 fn valid_length(v: f64) -> bool {
@@ -169,7 +167,8 @@ pub(crate) fn triad(app: &SolveApp, d: &Dialog) -> Option<gizmo::Triad> {
     let [pick] = super::sels(d, 0) else { return None };
     let at = pick_point(&app.session, pick)?;
     let pivot = if *explicit_pivot { lengths(&app.session, origin)? } else { at };
-    Some(gizmo::Triad::world(pivot + lengths(&app.session, translate)?, true, true))
+    let at = affine::translated_point(pivot.into(), lengths(&app.session, translate)?.into());
+    Some(gizmo::Triad::world(at.into(), true, true))
 }
 
 /// A handle reports the total motion since the press, not the change since the last frame.
@@ -199,8 +198,7 @@ impl DragStart {
         let Kind::TransformFace { translate, axis, custom_axis, angle, .. } = kind else { return };
         match (self, change) {
             (Self::Translate { fields, mm }, Change::Translate(delta)) => {
-                let p = *mm + delta;
-                let values = [p.x, p.y, p.z];
+                let values = affine::translated_point((*mm).into(), delta.into());
                 if !values.into_iter().all(valid_length) {
                     return;
                 }
@@ -227,37 +225,21 @@ impl DragStart {
                     angle.clone_from(start_angle);
                     return;
                 }
-                let result = if *direction == world || *direction == -world {
-                    // Only the angle changes. Keep a custom axis written along the same line.
-                    radians + turn * world.dot(*direction)
-                } else if *radians == 0.0 {
-                    *axis = ring;
-                    turn
-                } else {
-                    let (dir, total) = composed_turn(world, turn, *direction, *radians);
-                    *axis = 3;
-                    *custom_axis = [dir.x, dir.y, dir.z].map(|v| v.to_string());
-                    total
-                };
+                let Some((dir, result)) = affine::compose_turn((*direction).into(), *radians, world.into(), turn) else { return };
+                if *direction != world && *direction != -world {
+                    if *radians == 0.0 {
+                        *axis = ring;
+                    } else {
+                        *axis = 3;
+                        *custom_axis = dir.map(|v| v.to_string());
+                    }
+                }
                 let degrees = result.to_degrees();
                 *angle = if degrees.is_finite() { format!("{degrees} deg") } else { format!("{result} rad") };
             }
             _ => {}
         }
     }
-}
-
-/// Quaternion product in application order: the new world-space turn goes on the left.
-/// atan2 keeps the direction and angle well-conditioned near zero and half turns alike.
-fn composed_turn(axis: Vec3, turn: f64, previous_axis: Vec3, previous: f64) -> (Vec3, f64) {
-    let (s, c) = (turn * 0.5).sin_cos();
-    let (ps, pc) = (previous * 0.5).sin_cos();
-    let a = axis * s;
-    let b = previous_axis * ps;
-    let w = c * pc - a.dot(b);
-    let v = a * pc + b * c + a.cross(b);
-    let norm = v.x.hypot(v.y).hypot(v.z);
-    if norm == 0.0 { (axis, 0.0) } else { (v / norm, 2.0 * norm.atan2(w)) }
 }
 
 pub(crate) fn drag(app: &SolveApp, d: &mut Dialog, g: gizmo::Drag) {

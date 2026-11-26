@@ -14077,6 +14077,46 @@ impl FaceMotion {
     }
 }
 
+/// New bodies built by replaying `seed`'s creator, grouped by pattern instance. Names and
+/// positions alone cannot distinguish a copy from an unrelated coincident body.
+fn replayed_face_owners(st: &ModelState, pattern: u64, seed: &ModelBody) -> Vec<(usize, usize)> {
+    use crate::lineage::{Made, Operand};
+    let mut copies = Vec::new();
+    for (i, body) in st.bodies.iter().enumerate().filter(|(_, b)| b.feature == pattern) {
+        let Made::Traced(lineage) = &body.made else { continue };
+        for operand in &lineage.operands {
+            match operand.as_ref() {
+                Operand::CopiedTool { feature, instance, .. } if *feature == seed.feature => copies.push((*instance, i)),
+                Operand::Copy { body, instance } if body == &seed.name => copies.push((*instance, i)),
+                _ => {}
+            }
+        }
+    }
+    copies.sort_unstable();
+    copies.dedup();
+    copies
+}
+
+/// The native edit checks the face on a single output. For a multi-body constructor, check
+/// which of this instance's outputs contains the picked point before applying the edit.
+fn replayed_face_owner(st: &ModelState, copies: &[(usize, usize)], at: Vec3) -> Result<usize> {
+    if let [(_, i)] = copies {
+        return Ok(*i);
+    }
+    let mut hit = None;
+    for &(_, i) in copies {
+        if let Some(b) = st.bodies.get(i)
+            && b.body.face_at_point(at)?.is_some()
+        {
+            if hit.is_some() {
+                return Err(DocError::Invalid(format!("more than one copied body contains the face at {at}")));
+            }
+            hit = Some(i);
+        }
+    }
+    hit.ok_or_else(|| DocError::Invalid(format!("no copied body contains the face at {at}")))
+}
+
 /// Exact box of a cut tool, grown by twice its tolerance plus `extra_tol`: tools whose boxes are
 /// apart cannot meet or affect each other's surface probes. `None` for meshes or unmeasurable tools.
 fn tool_cut_box(body: &Body, extra_tol: f64) -> Option<solidcraft_geom::Aabb3> {
@@ -14629,6 +14669,9 @@ fn replay(
             continue;
         }
         if let FeatureKind::TransformFace { face, body, translate, rotate_axis, origin, angle } = &src.kind {
+            if let Some(batch) = pending.take() {
+                flush_cut_batch(doc, vals, f, st, named_from.as_ref(), own, batch, &mut missed, &mut total, warning)?;
+            }
             // Use the pick as resolved *before* this edit changed its supporting surface.
             let at = match st.named_faces.get(&src.id).and_then(|p| p.first()) {
                 Some(at) => *at,
@@ -14638,14 +14681,45 @@ fn replay(
                 },
             };
             let motion = FaceMotion::resolve(vals, at, translate, rotate_axis.0, origin.as_ref(), angle.as_ref())?;
-            let owner = st.bodies.iter_mut().find(|b| b.name == *body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
+            let (seed, owner) =
+                st.bodies.iter().enumerate().find(|(_, b)| b.name == *body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let frame = body_in(doc, own, owner);
-            for m in mats {
-                match &frame {
-                    Some(at) => motion.copied(&moved_in(m, at)?),
-                    None => motion.copied(m),
-                }
-                .apply(owner)?;
+            let maker = plan.iter().find(|(g, _, start)| g.id == owner.feature && start == first).map(|(g, _, _)| *g);
+            let whole_body = maker.is_some_and(|g| matches!(g.kind, FeatureKind::Move { copy: true, .. } | FeatureKind::FrameMember { .. }));
+            // These producers copy the current body, not its construction tool. An edit that
+            // has already run on it is already present on its rigid copies.
+            if whole_body && st.named_faces.contains_key(&src.id) {
+                continue;
+            }
+            let copies = maker.map_or_else(Vec::new, |_| replayed_face_owners(st, f.id, owner));
+            // For a rebuilt tool, start in its constructor's frame and use the same instance
+            // transform as build_replay_copies. A whole-body copy instead starts in the pattern frame.
+            let in_tool = if whole_body { frame } else { maker.and_then(|g| body_in(doc, g.component, owner)) };
+            let tool_frame = maker.and_then(|g| tools_component(doc, g)).and_then(|c| component_in(doc, own, c));
+            let tool_motion = in_tool.as_ref().map_or(motion, |at| motion.copied(at));
+            let new_body = whole_body || maker.and_then(feature_operation) == Some(Operation::NewBody);
+            for (k, m) in mats.iter().enumerate() {
+                let instance = first + k + 1;
+                let start = copies.partition_point(|(n, _)| *n < instance);
+                let end = copies.partition_point(|(n, _)| *n <= instance);
+                let (i, moved) = match copies.get(start..end).unwrap_or_default() {
+                    [] if !new_body => (
+                        seed,
+                        motion.copied(&match frame {
+                            Some(at) => moved_in(m, &at)?,
+                            None => *m,
+                        }),
+                    ),
+                    candidates => {
+                        let moved = tool_motion.copied(&match tool_frame {
+                            Some(at) => moved_in(m, &at)?,
+                            None => *m,
+                        });
+                        (replayed_face_owner(st, candidates, moved.at)?, moved)
+                    }
+                };
+                let target = st.bodies.get_mut(i).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
+                moved.apply(target)?;
             }
             continue;
         }
@@ -17405,7 +17479,11 @@ fn eval_feature_kind(
         }
         FeatureKind::TransformFace { face, body, translate, rotate_axis, origin, angle } => {
             let owner = st.bodies.iter_mut().find(|b| b.name == *body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
-            FaceMotion::resolve(vals, face.0, translate, rotate_axis.0, origin.as_ref(), angle.as_ref())?.apply(owner)
+            FaceMotion::resolve(vals, face.0, translate, rotate_axis.0, origin.as_ref(), angle.as_ref())?.apply(owner)?;
+            // Also record point-only picks from documents without a stored name: a copied
+            // body can already carry this completed edit when its creator is replayed.
+            st.named_faces.entry(f.id).or_insert_with(|| vec![face.0]);
+            Ok(())
         }
         FeatureKind::DeleteFace { faces, body, heal } => {
             let i = body_at(st, body, &crate::plain(faces))?;

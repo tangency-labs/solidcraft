@@ -529,9 +529,10 @@ pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
             }
             return;
         }
-        // Only the winning Move/Copy binding is contextual. Opening the form consumes the
-        // face selection, so a second press must also recognize the form it opened.
+        // With the contextual shortcut enabled, opening Transform Face consumes the face
+        // selection. Resolve its running form too, so the same binding can close it.
         let resolved = if id == "solid.move"
+            && app.preferences.move_shortcut_transforms_face
             && app.session.active_sketch.is_none()
             && !crate::render_workspace::active(app)
             && !crate::drawing_workspace::active(app)
@@ -843,6 +844,10 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::text(ui, app.tr(hint), ui_kit::Text::Hint("shortcut_capture_state"));
             }
         }
+        ui.add_enabled_ui(!app.keymap.read_only, |ui| {
+            ui_kit::checkbox(ui, app.tr("prefs.move_shortcut_transforms_face"), &mut app.preferences.move_shortcut_transforms_face)
+                .backing_on_hover_text(app.tr("prefs.move_shortcut_transforms_face_tip"));
+        });
         let q = if filtering { app.prefs_window.shell.filter.trim().to_lowercase() } else { app.keymap.filter.to_lowercase() };
         modifier_keys(app, ui, &q);
         let commands: Vec<_> = command_specs()
@@ -1238,8 +1243,27 @@ mod tests {
     }
 
     #[test]
+    fn transform_face_move_shortcut_keeps_the_owning_body_by_default() {
+        let (mut h, face, _) = move_shortcut_fixture();
+        h.app.session.selection = vec![face.clone()];
+        press(&mut h.app, "M", false);
+        let dialog = h.app.dialog.as_ref().unwrap();
+        assert_eq!(dialog.command(), Some("solid.move"));
+        assert_eq!(dialog.inputs[0].items, [Sel::Body { name: "Block".into() }]);
+        press(&mut h.app, "M", false);
+        assert!(h.app.dialog.is_none(), "the Move/Copy shortcut still ends Move/Copy");
+
+        h.app.session.selection = vec![face];
+        h.call("ui.start", json!({"command":TRANSFORM_FACE}));
+        assert_eq!(h.app.dialog.as_ref().unwrap().command(), Some(TRANSFORM_FACE));
+        press(&mut h.app, "M", false);
+        assert_eq!(h.app.dialog.as_ref().unwrap().command(), Some("solid.move"), "an explicit face edit does not take over the Move/Copy key");
+    }
+
+    #[test]
     fn transform_face_move_shortcut_is_not_replayed_by_an_occluded_window() {
         let (mut h, face, _) = move_shortcut_fixture();
+        h.app.preferences.move_shortcut_transforms_face = true;
         h.app.home.open = false;
         h.frames(2);
         h.ctx.options_mut(|options| options.max_passes = 1.try_into().unwrap());
@@ -1257,6 +1281,7 @@ mod tests {
     #[test]
     fn transform_face_move_shortcut_toggles_the_running_face_form_after_consuming_the_pick() {
         let (mut h, face, _) = move_shortcut_fixture();
+        h.app.preferences.move_shortcut_transforms_face = true;
         h.app.session.selection = vec![face.clone()];
         press(&mut h.app, "M", false);
         let dialog = h.app.dialog.as_ref().unwrap();
@@ -1282,6 +1307,7 @@ mod tests {
     #[test]
     fn transform_face_follows_the_configured_model_move_binding_only() {
         let (mut h, face, _) = move_shortcut_fixture();
+        h.app.preferences.move_shortcut_transforms_face = true;
         bind(&mut h.app, "solid.move", "Shift+M", false).unwrap();
         bind(&mut h.app, "solid.offset_face", "M", false).unwrap();
         h.app.session.selection = vec![face.clone()];
@@ -1311,6 +1337,7 @@ mod tests {
     #[test]
     fn transform_face_requires_exactly_one_face_and_does_not_override_explicit_move() {
         let (mut h, face, other) = move_shortcut_fixture();
+        h.app.preferences.move_shortcut_transforms_face = true;
         let body = Sel::Body { name: "Block".into() };
         for selection in [vec![], vec![body.clone()], vec![face.clone(), other], vec![face.clone(), body.clone()]] {
             h.app.session.selection = selection;

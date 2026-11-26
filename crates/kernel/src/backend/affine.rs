@@ -23,6 +23,22 @@ fn axis_refused(e: solidcore_ops::Error) -> AxisRefusal {
 }
 
 impl Affine for Solidcore {
+    fn linear_determinant(&self, matrix: &Matrix) -> f64 {
+        ops::linear_determinant(matrix)
+    }
+
+    fn directed_unit(&self, axis: [f64; 3]) -> Option<[f64; 3]> {
+        ops::directed_unit(axis)
+    }
+
+    fn translated_point(&self, point: [f64; 3], by: [f64; 3]) -> [f64; 3] {
+        ops::translated_point(point, by)
+    }
+
+    fn compose_turn(&self, first: [f64; 3], radians: f64, world: [f64; 3], turn: f64) -> Option<([f64; 3], f64)> {
+        ops::compose_turn(first, radians, world, turn)
+    }
+
     fn rotation(&self, point: [f64; 3], axis: [f64; 3], angle: f64) -> Result<Matrix, AffineRefused> {
         ops::rotation(point, axis, angle).map_err(refused)
     }

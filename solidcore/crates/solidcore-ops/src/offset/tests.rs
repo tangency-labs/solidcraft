@@ -845,6 +845,9 @@ fn the_top_moves_out() {
     assert!(rel(volume(&b), ABC + 2.0 * 600.0) < 1e-9);
 }
 
+// Definitions and certificates §5: at tens of mm, coordinates within this floor agree.
+const PART_SCALE_FLOOR_MM: f64 = 1e-10;
+
 /// The roof is z = 12 + y: a 45-degree turn around the line at y=0, z=10
 /// followed by a 2 mm lift. The volume is base area times mean height.
 #[test]
@@ -879,9 +882,9 @@ fn transform_face_tilt_meets_the_kept_sides() {
             assert!(record.vertices.iter().any(|v| v.point == [x, y, 0.0]));
             assert!(
                 record.vertices.iter().any(|v| {
-                    (v.point[0] - x).abs() <= 1e-12
-                        && (v.point[1] - y).abs() <= 1e-12
-                        && (v.point[2] - (12.0 + y)).abs() <= 22.0 * 1e-12
+                    (v.point[0] - x).abs() <= PART_SCALE_FLOOR_MM
+                        && (v.point[1] - y).abs() <= PART_SCALE_FLOOR_MM
+                        && (v.point[2] - (12.0 + y)).abs() <= PART_SCALE_FLOOR_MM
                 }),
                 "missing roof corner at ({x}, {y})"
             );
@@ -923,9 +926,12 @@ fn transform_face_translates_a_bore_without_resizing_it() {
             _ => None,
         })
         .expect("the bore must retain its cylindrical support");
-    assert!((radius - 2.0).abs() < 1e-12);
-    assert!((frame.origin[0] - 11.0).abs() < 1e-12 && (frame.origin[1] - 10.0).abs() < 1e-12);
-    assert!(frame.x_axis[2].abs() < 1e-12 && frame.y_axis[2].abs() < 1e-12);
+    assert!((radius - 2.0).abs() <= PART_SCALE_FLOOR_MM);
+    assert!((frame.origin[0] - 11.0).abs() <= PART_SCALE_FLOOR_MM);
+    assert!((frame.origin[1] - 10.0).abs() <= PART_SCALE_FLOOR_MM);
+    // Across either radius the rim must stay in its plane to the same linear floor.
+    assert!(radius * frame.x_axis[2].abs() <= PART_SCALE_FLOOR_MM);
+    assert!(radius * frame.y_axis[2].abs() <= PART_SCALE_FLOOR_MM);
     for x in [0.0, 30.0] {
         for y in [0.0, 20.0] {
             for z in [0.0, 10.0] {

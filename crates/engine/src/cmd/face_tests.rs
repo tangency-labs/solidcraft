@@ -607,6 +607,35 @@ fn transform_face_raises_one_named_cap_and_survives_undo_redo_and_reopen() {
 }
 
 #[test]
+fn transform_face_noop_on_a_fillet_reopens_from_the_saved_model() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Block"}));
+    run(&mut s, "solid.fillet", json!({"body":"Block","edges":[[5,10,10]],"radius":1}));
+    let rounded = s.model.state();
+    let block = rounded.body("Block").unwrap();
+    let (before, edges) = block.body.rounds().expect("fillet over the box");
+    let names = solidcraft_doc::naming::face_names(block);
+    let cap = block.body.face_at_point(Vec3::new(5., 5., 10.)).unwrap().unwrap();
+    let out = run(&mut s, "solid.transform_face", json!({"body":"Block","face":names[cap],"translate":[2,0,0]}));
+    assert!(out["error"].is_null(), "{out}");
+
+    let saved = s.model.saved(&s.doc).unwrap();
+    let bytes = solidcraft_io::write_design_container_with_cache(&s.doc, solidcraft_io::DesignCompression::Fast, None, Some(&saved)).unwrap();
+    let (doc, cache) = solidcraft_io::read_design_with_model(&bytes).unwrap();
+    let model = solidcraft_doc::Model::adopt(&doc, &cache.expect("evaluated bodies in the design")).unwrap();
+    let reopened = model.state();
+    let after = reopened.body("Block").unwrap();
+    assert_eq!(after.body.record(), block.body.record());
+    assert_eq!(solidcraft_doc::naming::face_names(after), names);
+    // The evaluator passes the original fillet through on a no-op. Its rounds still have
+    // the fillet history over the sharp box, not identity history over the rounded one.
+    let (sharp, restored_edges) = after.body.rounds().unwrap();
+    assert_eq!(sharp.record(), before.record());
+    assert_eq!(restored_edges, edges);
+    assert_eq!(after.body.history(), block.body.history());
+}
+
+#[test]
 fn transform_face_requires_an_unambiguous_owner() {
     let mut s = Session::default();
     flush_boxes(&mut s);
