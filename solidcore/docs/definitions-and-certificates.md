@@ -360,7 +360,7 @@ Every face is in one of three classes:
 | **refused** | no B is proved within the bound | none | the construction returns a typed error naming the cause and, where one exists, the size that builds |
 
 One kind is not in a class yet: a foot blend's section face (a weld bead's on curved faces,
-`blend::foot_blend`, #15129). Its feet are proved between its stations (Krawczyk on the foot
+`blend::foot_blend`). Its feet are proved between its stations (Krawczyk on the foot
 equations over each piece, `generic-blend.md` §2.5), each on the branch of its support's
 section that leaves the root along the face: a chain of Krawczyk boxes over the leg, `t` over
 the piece and the distance `ρ` from the root over each step (the first to an eighth of the leg,

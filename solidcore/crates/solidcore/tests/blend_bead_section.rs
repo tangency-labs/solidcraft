@@ -1109,7 +1109,7 @@ fn a_bead_apart_whose_toe_runs_past_its_face_is_refused_with_the_leg_that_fits()
     assert_eq!(err.kind(), ErrorKind::FilletTooLarge, "{err}");
     let fit = err.fit().unwrap();
     assert_eq!(fit.measure, FitMeasure::Leg, "{err}");
-    assert!(fit.size > 39.9 && fit.size <= 40.0 + 1e-6, "{err}");
+    assert!(fit.size > 40.0 - 1e-5 && fit.size <= 40.0 + 1e-6, "{err}");
     assert!(err.site().is_some_and(|s| s.face.is_some()), "{err:?}");
     let size = ChamferSize::Distances([fit.size, SETBACK]);
     assert!(
@@ -1846,7 +1846,7 @@ fn a_toe_past_its_face_is_refused_with_the_leg_that_fits() {
     assert_eq!(err.kind(), ErrorKind::FilletTooLarge, "{err}");
     let fit = err.fit().unwrap();
     assert_eq!(fit.measure, FitMeasure::Leg, "{err}");
-    assert!(fit.size > 39.9 && fit.size <= 40.0 + 1e-6, "{err}");
+    assert!(fit.size > 40.0 - 1e-5 && fit.size <= 40.0 + 1e-6, "{err}");
     assert!(err.site().is_some_and(|s| s.face.is_some()), "{err:?}");
     let size = ChamferSize::Distances([fit.size, 5.0]);
     assert!(
@@ -2009,10 +2009,47 @@ fn a_stitch_too_deep_names_the_least_depth_of_its_spans() {
     }
 }
 
+/// A tolerance the net cannot hold is refused once its stations have been doubled as often as
+/// they are (`SkinPastStationCap`), naming the tolerance asked, the bound reached and the
+/// stations made. The chord's certified net between planes carries its rounding in its bound,
+/// about 1e-10 of the part's size, so a tolerance of 1e-13 is out of its reach; the weld's own
+/// tolerance holds on the same joint.
+#[test]
+fn a_tolerance_the_net_cannot_hold_is_refused_at_the_station_cap() {
+    use solidcore::blend::foot_blend::{FootBlend, WELD_FIT_TOLERANCE};
+    let mut k = kernel();
+    let (mut b, at) = corner(&mut k, FRAC_PI_2);
+    let edge = pick(&k, &b, at);
+    let blend = FootBlend::of_edge(&k, &mut b, edge, None).unwrap();
+    let legs = [5.0; 2];
+    assert!(blend
+        .section_face(&k, legs, 0.0, WELD_FIT_TOLERANCE)
+        .is_ok());
+    let err = blend.section_face(&k, legs, 0.0, 1e-13).err().unwrap();
+    match err.blend_failure() {
+        Some(&BlendFailure::SkinPastStationCap {
+            asked,
+            reached,
+            stations,
+            rounds,
+        }) => {
+            println!("asked {asked}, reached {reached}, {stations} stations, {rounds} rounds");
+            assert!(
+                asked == 1e-13 && reached > asked && reached.is_finite(),
+                "{err}"
+            );
+            assert!(stations > 4 && rounds > 1, "{err}");
+        }
+        _ => panic!("{err:?}"),
+    }
+}
+
 /// A sagitta's fit is named only where the feet are proved: on a branch off the main tube's
 /// axis (main r 20, branch r 10 from (0, 6, 0) along (1, 0, 0.3)) the feet at legs of 4 are
 /// not, and a bead with a sagitta is refused without a sagitta to retry at, concave and
-/// convex. The part does not change.
+/// convex. The refusal is the station's own: its Newton does not converge at one of the
+/// joint's check stations (`StationDidNotConverge`, naming the station, the residual and the
+/// tolerance it had to reach). The part does not change.
 #[test]
 fn a_sagitta_s_fit_is_named_only_where_the_feet_are_proved() {
     use solidcore::error::FitMeasure;
@@ -2044,6 +2081,14 @@ fn a_sagitta_s_fit_is_named_only_where_the_feet_are_proved() {
                 .is_none_or(|fit| fit.measure != FitMeasure::Sagitta),
             "{err:?}"
         );
+        match err.blend_failure() {
+            Some(&BlendFailure::StationDidNotConverge {
+                residual: Some(residual),
+                tolerance,
+                ..
+            }) => assert!(residual > tolerance && tolerance > 0.0, "{err}"),
+            _ => panic!("{err:?}"),
+        }
     }
     assert!(smb(&k, &part) == before, "the tubes changed");
 }
@@ -2792,7 +2837,7 @@ fn a_part_without_some_uv_curves_is_only_read() {
     assert_eq!(err.kind(), ErrorKind::FilletTooLarge, "{err}");
     let fit = err.fit().unwrap();
     assert_eq!(fit.measure, FitMeasure::Leg, "{err}");
-    assert!(fit.size > 39.0 && fit.size <= 40.0 + 1e-6, "{err}");
+    assert!(fit.size > 40.0 - 1e-5 && fit.size <= 40.0 + 1e-6, "{err}");
 }
 
 // ---- the exact bead's refusals and the part left as it was ----
@@ -3148,7 +3193,7 @@ fn an_oversized_leg_is_refused_before_an_oversized_sagitta() {
     };
     let leg = fit(apart(&mut k, &mut b, 60.0, 100.0));
     assert_eq!(leg.measure, FitMeasure::Leg, "{leg:?}");
-    assert!(leg.size > 39.0 && leg.size <= 40.0, "{leg:?}");
+    assert!(leg.size > 40.0 - 1e-5 && leg.size <= 40.0, "{leg:?}");
     let h = fit(apart(&mut k, &mut b, leg.size, 100.0));
     assert_eq!(h.measure, FitMeasure::Sagitta, "{h:?}");
     assert!(apart(&mut k, &mut b, leg.size, h.size).is_ok(), "{h:?}");
