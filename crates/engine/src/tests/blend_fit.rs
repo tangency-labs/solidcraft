@@ -112,7 +112,7 @@ fn oversized_fillet_reports_smlib_fit_size_that_applies_cleanly() {
     assert!(volume(&mut s) < 24000.0 && volume(&mut s) > 20000.0, "{}", volume(&mut s));
 }
 
-// ---- fit: keep_edge : a concave round taller than its wall ends on
+// ---- fit: keep_edge: a concave round taller than its wall ends on
 // the wall's top edge ----
 
 /// A 20 x 20 plate, 2 thick (z from -2 to 0), with a rib 2 wide (x) and `h` high across it, its
@@ -172,7 +172,7 @@ fn keep_edge_round_on_a_single_wall_adds_the_circle_section() {
     }
 }
 
-/// both edges of a rib in one fillet, which the ordinary round refuses, are
+/// Both edges of a rib in one fillet, which the ordinary round refuses, are
 /// 840 + 2 * 20 * 0.3079642 = 852.3185690 mm3.
 #[test]
 fn keep_edge_round_on_both_edges_of_a_rib() {
