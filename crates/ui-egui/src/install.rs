@@ -131,6 +131,8 @@ mod tests {
         let offer = Rc::new(Cell::new(None));
         let prompts = Rc::new(Cell::new(0));
         let mut h = Harness::new();
+        h.call("ui.resize", json!({"width": 1600, "height": 1200}));
+        h.frames(3);
         host(&mut h, offer.clone(), prompts.clone());
         assert!(!file_menu_item(&mut h), "no offer, no menu item");
 
@@ -157,6 +159,8 @@ mod tests {
     fn safari_shows_its_steps() {
         let prompts = Rc::new(Cell::new(0));
         let mut h = Harness::new();
+        h.call("ui.resize", json!({"width": 1600, "height": 1200}));
+        h.frames(3);
         host(&mut h, Rc::new(Cell::new(Some(Offer::Steps(Steps::Dock)))), prompts.clone());
         assert!(file_menu_item(&mut h));
         assert_eq!(h.step(&json!({ "widget": solidcraft_ui_text::tr(ITEM) })), Ok(()));

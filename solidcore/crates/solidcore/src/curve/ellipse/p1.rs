@@ -2505,7 +2505,7 @@ impl Ellipse {
 
         // First ask SmBSplineCurve::Trim to compute the actual trim interval.
         self.base
-            .trim_with_zone_tol(k, trim_interval, TrimMode::IntervalOnly, zone_tol_3d)?;
+            .trim_with_zone_tol(trim_interval, TrimMode::IntervalOnly, zone_tol_3d)?;
 
         // all done when asked to stop here
         if mode == TrimMode::IntervalOnly {
@@ -2516,7 +2516,11 @@ impl Ellipse {
         let to_step = |e: &Self, t: f64| -> Result<f64> {
             match e.convert_t_from_nurbs_to_step(k, t) {
                 Ok(v) => Ok(v),
-                Err(err @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(err),
+                Err(
+                    err @ (SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }),
+                ) => Err(err),
                 Err(_) => Err(SolidError::invalid_input(
                     "curve::ellipse::p1::Ellipse::trim",
                     "trim end not convertible (upstream: uninitialised)",
@@ -2528,7 +2532,7 @@ impl Ellipse {
 
         // pass the call to Trim the BSpline - skip its Notify call
         self.base
-            .trim_with_zone_tol(k, trim_interval, TrimMode::Silent, zone_tol_3d)?;
+            .trim_with_zone_tol(trim_interval, TrimMode::Silent, zone_tol_3d)?;
 
         // store the angular interval paying attention to m_bInsideOut
         if self.inside_out {

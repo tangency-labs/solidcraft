@@ -515,6 +515,7 @@ mod tests {
             colors: Colors::default(),
             source_points: pts.len() as u64,
             units: "mm".into(),
+            up: Default::default(),
             transform: solidcraft_doc::IDENTITY,
             point_size: 2.0,
             color_by: ColorBy::File,

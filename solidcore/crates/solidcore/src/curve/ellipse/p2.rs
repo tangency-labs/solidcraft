@@ -2107,9 +2107,11 @@ impl Ellipse {
             let solutions2: Vec<Solution<O>> =
                 match line_global_point_solve(line, other_interval, *ip, tol * 10.0) {
                     Ok(s) => s,
-                    Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                        return Err(e)
-                    }
+                    Err(
+                        e @ (SolidError::Unported { .. }
+                        | SolidError::Cancelled { .. }
+                        | SolidError::OutOfFuel { .. }),
+                    ) => return Err(e),
                     Err(_) => return Ok(out),
                 };
 
@@ -2120,9 +2122,11 @@ impl Ellipse {
             let solutions1: Vec<Solution<O>> =
                 match ellipse_global_point_solve(k, self, interval, *ip, tol * 10.0) {
                     Ok(s) => s,
-                    Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                        return Err(e)
-                    }
+                    Err(
+                        e @ (SolidError::Unported { .. }
+                        | SolidError::Cancelled { .. }
+                        | SolidError::OutOfFuel { .. }),
+                    ) => return Err(e),
                     Err(_) => return Ok(out),
                 };
 
@@ -2250,17 +2254,21 @@ impl Ellipse {
         let on_line: Vec<Solution<()>> =
             match line_global_point_solve(line, line_interval, candidate, tol * 10.0) {
                 Ok(s) => s,
-                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                    return Err(e)
-                }
+                Err(
+                    e @ (SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }),
+                ) => return Err(e),
                 Err(_) => return Ok(None),
             };
         let on_ellipse: Vec<Solution<()>> =
             match ellipse_global_point_solve(k, self, interval, candidate, tol * 10.0) {
                 Ok(s) => s,
-                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                    return Err(e)
-                }
+                Err(
+                    e @ (SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }),
+                ) => return Err(e),
                 Err(_) => return Ok(None),
             };
         let mut best: Option<[f64; 3]> = None;

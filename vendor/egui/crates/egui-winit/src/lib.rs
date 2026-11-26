@@ -11,6 +11,7 @@
 
 #[cfg(target_os = "windows")]
 use std::collections::HashSet;
+use std::sync::Arc;
 
 #[cfg(feature = "accesskit")]
 pub use accesskit_winit;
@@ -2161,6 +2162,16 @@ fn process_viewport_command(
                 window.set_undecorated_shadow(!v && window.fullscreen().is_none());
             }
         }
+        ViewportCommand::TitlebarButtonsHidden(hidden) => {
+            #[cfg(target_os = "macos")]
+            {
+                use winit::platform::macos::WindowExtMacOS as _;
+
+                window.set_titlebar_buttons_hidden(hidden);
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = hidden;
+        }
         ViewportCommand::WindowLevel(l) => window.set_window_level(match l {
             egui::viewport::WindowLevel::AlwaysOnBottom => WindowLevel::AlwaysOnBottom,
             egui::viewport::WindowLevel::AlwaysOnTop => WindowLevel::AlwaysOnTop,
@@ -2270,6 +2281,19 @@ pub fn create_window(
     event_loop: &ActiveEventLoop,
     viewport_builder: &ViewportBuilder,
 ) -> Result<Window, winit::error::OsError> {
+    create_window_with_owner(egui_ctx, event_loop, viewport_builder, None)
+}
+
+/// Creates a window with an optional native owner.
+///
+/// # Errors
+/// Returns an error if the native window cannot be created.
+pub fn create_window_with_owner(
+    egui_ctx: &egui::Context,
+    event_loop: &ActiveEventLoop,
+    viewport_builder: &ViewportBuilder,
+    owner: Option<&Arc<Window>>,
+) -> Result<Window, winit::error::OsError> {
     profiling::function_scope!();
 
     let window_attributes = apply_monitor_to_window_attributes(
@@ -2277,6 +2301,11 @@ pub fn create_window(
         viewport_builder,
         event_loop,
     );
+
+    let window_attributes = match owner {
+        Some(owner) => window_attributes.with_owned_by(Arc::clone(owner)),
+        None => window_attributes,
+    };
 
     let window = event_loop.create_window(window_attributes)?;
     apply_viewport_builder_to_window(egui_ctx, &window, viewport_builder);
@@ -2337,6 +2366,7 @@ pub fn create_winit_window_attributes(
         minimize_button,
         maximize_button,
         window_level,
+        native_owner: _, // Applied during creation, with the live owner window.
 
         // macOS:
         fullsize_content_view: _fullsize_content_view,

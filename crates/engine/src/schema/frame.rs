@@ -25,7 +25,7 @@ use serde_json::{Map, Value, json};
 use solidcore_record::Vec2;
 use solidcraft_doc::Expr;
 use solidcraft_doc::frame::sizes::Family;
-use solidcraft_doc::frame::{self, Anchor, CornerOverride, CornerType, MAX_MEMBERS, MemberRef, Profile, ProfileSpec};
+use solidcraft_doc::frame::{self, Anchor, CornerOverride, CornerType, MAX_MEMBERS, MemberRef, Profile, ProfileSpec, UP_AXES, UpAxis};
 
 use super::check::{keyed, located, parse_issue, whole};
 use super::motion::require;
@@ -164,6 +164,32 @@ impl JsonSchema for AnchorParam {
             "description": "The profile point that is placed: its origin (the default; a built-in profile's centre), `center` (its bounding box's centre), `centroid`, or a corner or edge middle of its bounding box.",
             "type": "string",
             "enum": ANCHORS
+        })
+    }
+}
+
+/// The refusal of an `up` that is not a world axis.
+pub const UP_MESSAGE: &str = "`up` must be X, -X, Y, -Y, Z or -Z";
+
+/// The world axis a member takes as up, as `UpAxis` is spelled in JSON.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UpParam(pub UpAxis);
+
+impl<'de> Deserialize<'de> for UpParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        serde_json::from_value::<UpAxis>(Value::deserialize(d)?).map(UpParam).map_err(|_| D::Error::custom(whole(UP_MESSAGE)))
+    }
+}
+
+impl JsonSchema for UpParam {
+    fn schema_name() -> Cow<'static, str> {
+        "UpParam".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "The world axis that is up for a member's profile: Z (the default), or another axis for a part drawn with that axis up.",
+            "type": "string",
+            "enum": UP_AXES
         })
     }
 }
@@ -1232,6 +1258,11 @@ pub struct FrameMemberKeys {
     /// world X).
     #[serde(default)]
     pub angle: Option<MemberAngle>,
+    /// The world axis that is up for the profile: its y points that way as far as each line
+    /// allows, and lines along it are vertical members (their x along world X, or world Y when X
+    /// is up). Default: Z.
+    #[serde(default)]
+    pub up: Option<UpParam>,
     /// The profile mirrored across its y axis, before it turns. Default: false.
     #[serde(default)]
     pub mirror: Option<bool>,
@@ -1376,3 +1407,102 @@ pub struct TrimParams {
 #[cfg(test)]
 #[path = "frame_tests.rs"]
 mod tests;
+
+/// Which end of the original ordered member path a cope treats: required, never chosen by
+/// proximity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CopeEnd {
+    Start,
+    End,
+}
+
+/// `frame.export_cope_dxf`'s `seam`: unlike [`AngleExpr`], a bare number is radians, measured
+/// from the end's section x, as the handler and the template's closed form read it. Text is an
+/// angle expression. It accepts exactly what [`AngleExpr`] accepts; only the unit of a bare
+/// number differs.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SeamAngle(pub Expr);
+
+impl<'de> Deserialize<'de> for SeamAngle {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = json!({ "v": Value::deserialize(d)? });
+        params::expr(&v, "v").map(SeamAngle).ok_or_else(|| D::Error::custom(params::expr_problem(v.get("v"))))
+    }
+}
+
+impl JsonSchema for SeamAngle {
+    fn schema_name() -> Cow<'static, str> {
+        "SeamAngle".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "The seam's angle from the end's section x, right-handed about the inward axis: a number of radians, or an angle expression such as \"30 deg\".",
+            "anyOf": [
+                {"type": "number", "exclusiveMinimum": -1e9, "exclusiveMaximum": 1e9},
+                {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": not_blank_pattern()}
+            ]
+        })
+    }
+}
+
+/// `frame.cope`: cut a round-tube member's end to fit the outside of its mating members.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CopeParams {
+    pub member: String,
+    /// One to sixteen distinct straight round-tube mating members.
+    #[schemars(length(min = 1, max = 16))]
+    pub tools: Vec<String>,
+    /// start or end of the original ordered path.
+    pub end: CopeEnd,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// `frame.export_cope_dxf`: a retained cope as a 1:1 DXF template of the tube's outside.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CopeDxfParams {
+    pub member: String,
+    /// start or end of the original ordered path.
+    pub end: CopeEnd,
+    /// Default 0: the end's section x.
+    #[serde(default)]
+    pub seam: Option<SeamAngle>,
+    /// Millimetres, independent of the design's display units: 0.001..1, default 0.01.
+    #[serde(default)]
+    #[schemars(range(min = 0.001, max = 1.0))]
+    pub tolerance: Option<f64>,
+    /// Optional DXF destination; without it the reply contains the drawing text.
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+/// The reply of `frame.export_cope_dxf`: the physical datum, the profile and the drawing metadata.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct CopeDxfResult {
+    pub member: String,
+    pub end: String,
+    pub units: String,
+    pub scale: f64,
+    pub outer_diameter: f64,
+    pub circumference: f64,
+    pub seam: f64,
+    /// Original endpoint in the member component's coordinates.
+    pub origin: [f64; 3],
+    pub component: u64,
+    /// Positive axial direction into the surviving stock, in that component.
+    pub axis: [f64; 3],
+    pub seam_direction: [f64; 3],
+    pub wrap_direction: String,
+    pub tolerance: f64,
+    pub segments: usize,
+    pub max_segments: usize,
+    /// Open profile, from x=0 to x=circumference; the two seam copies have equal stations.
+    pub profile: Vec<[f64; 2]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dxf: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}

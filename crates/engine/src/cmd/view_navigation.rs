@@ -18,6 +18,7 @@ use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Sel, Session};
 
 const ZOOM_TOOL_CONTRACT: TypedContract<ZoomTool> = TypedContract::new();
+const GROUND_SHADOW_CONTRACT: TypedContract<crate::schema::view_navigation::GroundShadowParams> = TypedContract::new();
 const DISPLAY_TOGGLE_CONTRACT: TypedContract<DisplayToggleParams> = TypedContract::new();
 const NAVIGATION_BAR_CONTRACT: TypedContract<NavigationBarParams> = TypedContract::new();
 const FOCUS_CONTRACT: TypedContract<RenderFocus> = TypedContract::new();
@@ -35,11 +36,13 @@ const LAYOUT_CONTRACT: TypedContract<LayoutParams> = TypedContract::new();
 const HISTORY_LAYOUT_CONTRACT: TypedContract<HistoryLayoutParams> = TypedContract::new();
 const GRAPHICS_PRESET_CONTRACT: TypedContract<GraphicsPresetParams> = TypedContract::new();
 const AMBIENT_OCCLUSION_CONTRACT: TypedContract<AmbientOcclusionParams> = TypedContract::new();
+const ISOLATE_OTHERS_CONTRACT: TypedContract<crate::schema::view_navigation::IsolateOthersParams> = TypedContract::new();
 const PERSPECTIVE_CONTRACT: TypedContract<PerspectiveParams> = TypedContract::new();
 const NAVIGATE_CONTRACT: TypedContract<NavigateParams> = TypedContract::new();
 const TOOL_CONTRACT: TypedContract<ToolParams> = TypedContract::new();
 const VISUAL_STYLE_CONTRACT: TypedContract<VisualStyleParams> = TypedContract::new();
 const ORIGIN_AXES_ACROSS_VIEW_CONTRACT: TypedContract<crate::schema::view_navigation::OriginAxesAcrossViewParams> = TypedContract::new();
+const SCALE_BAR_CONTRACT: TypedContract<crate::schema::view_navigation::ScaleBarParams> = TypedContract::new();
 
 // Both existing request forms share the Browser command and its published schema.
 #[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
@@ -119,8 +122,8 @@ CommandSpec::new("view.grid", "Grid", crate::checked!("view.grid", grid))
     .params("on?: bool (omitted: toggle) → on?; show the viewport grid"),
 CommandSpec::new("view.ground_shadow", "Ground Shadow", crate::checked!("view.ground_shadow", ground_shadow))
     .icon("style").noundo().doc_only()
-    .contract(&DISPLAY_TOGGLE_CONTRACT).output(output_schema_for::<DisplayToggleResult>)
-    .params("on?: bool (omitted: toggle) → on?; show the ground shadow"),
+    .contract(&GROUND_SHADOW_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::GroundShadowReply>)
+    .params("mode: off|ellipse|projected; or on?: bool (omitted: toggle) → mode? or on?; display only, independent of ambient occlusion"),
 CommandSpec::new("view.navigation_bar", "Navigation Bar", crate::checked!("view.navigation_bar", navigation_bar))
     .icon("pan").noundo().doc_only()
     .contract(&NAVIGATION_BAR_CONTRACT).output(output_schema_for::<NavigationBarResult>)
@@ -132,6 +135,8 @@ CommandSpec::new("view.navigator", "Custom View Navigator", crate::checked!("vie
 CommandSpec::new("view.ribbon_tabs_only", "Ribbon Tabs Only", crate::checked!("view.ribbon_tabs_only", ribbon_tabs_only))
     .icon("chevron").noundo().doc_only().contract(&RIBBON_TABS_ONLY_CONTRACT).output(output_schema_for::<RibbonTabsOnly>)
     .params("on?: bool (omitted: switch) → on?; fold the ribbon to its tab row, a tab click shows its panels over the view (window setting)"),
+CommandSpec::new("view.parts_library", "Parts library", parts_library)
+    .icon("folder").noundo().doc_only().params("visible?: bool (omitted: toggle) → visible?; show the parts library card (window setting)"),
 CommandSpec::new("view.toolbar_reset_all", "Reset All Toolbar Tabs", crate::checked!("view.toolbar_reset_all", toolbar_reset_all))
     .icon("restore").noundo().doc_only().contract(&TOOLBAR_RESET_ALL_CONTRACT).output(output_schema_for::<ToolbarResetAll>)
     .params("{} → {}; put the buttons of every toolbar tab back to their defaults (window setting; hidden tabs stay hidden); never asks"),
@@ -179,10 +184,14 @@ CommandSpec::new("view.graphics_preset", "Graphics Preset", crate::checked!("vie
     .icon("settings").noundo().doc_only().contract(&GRAPHICS_PRESET_CONTRACT).output(output_schema_for::<GraphicsPresetResult>).params("preset: performance|quality → preset, enabled, display_quality, supersampling, supersampling_adaptive; Quality: AO, Fine, adaptive 2x SSAA; Performance: no AO, Normal, no SSAA"),
 CommandSpec::new("view.ambient_occlusion", "Ambient Occlusion", crate::checked!("view.ambient_occlusion", ambient_occlusion))
     .icon("settings").noundo().doc_only().contract(&AMBIENT_OCCLUSION_CONTRACT).output(output_schema_for::<AmbientOcclusionResult>).params("enabled: bool → enabled; apply soft contact shading in the GPU viewport"),
+CommandSpec::new("view.isolate_others", "Show Isolated-Away Parts", crate::checked!("view.isolate_others", isolate_others))
+    .icon("isolate").noundo().doc_only().contract(&ISOLATE_OTHERS_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::IsolateOthersResult>).params("show?: hidden|transparent|wireframe, pick?: bool (at least one) → what was set; how the view shows the parts an Isolate hid: not at all, see-through, or as their edges, and whether a click on them selects them (pick: true) or goes through them; display only, never opens a dialog"),
 CommandSpec::new("view.origin_axes_across_view", "Origin Axes Across the Whole View", crate::checked!("view.origin_axes_across_view", origin_axes_across_view))
     .icon("origin").noundo().doc_only().contract(&ORIGIN_AXES_ACROSS_VIEW_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::OriginAxesAcrossViewResult>).params("enabled: bool → enabled; extend the origin axes across the view, or keep the short axes when false; display only, never opens a dialog"),
 CommandSpec::new("view.perspective", "Perspective view", crate::checked!("view.perspective", perspective))
     .icon("perspective").noundo().doc_only().contract(&PERSPECTIVE_CONTRACT).output(output_schema_for::<PerspectiveResult>).params("enabled: bool → enabled; draw the view in perspective, or orthographic when false; a sketch being edited is always shown orthographic"),
+CommandSpec::new("view.scale_bar", "Scale Bar", crate::checked!("view.scale_bar", scale_bar))
+    .icon("measure").noundo().doc_only().contract(&SCALE_BAR_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::ScaleBarResult>).params("enabled: bool → enabled; show a bar in the view's bottom left corner and the round length it stands for in the design's units (at the view's centre in perspective), or hide it when false; display only, never opens a dialog"),
 CommandSpec::new("view.angle_readout", "View Angles", crate::checked!("view.angle_readout", angle_readout))
     .icon("camera").noundo().doc_only().contract(&ANGLE_READOUT_CONTRACT).output(crate::schema::output_schema_for::<crate::schema::view_navigation::AngleReadoutResult>).params("enabled: bool → enabled; show the view's pitch, yaw and roll (degrees, as view.apply's camera in radians) and Ortho or Persp under the orientation gizmo; display only, never opens a dialog"),
 CommandSpec::new("view.navigate", "Navigate View", crate::checked!("view.navigate", navigate))
@@ -191,7 +200,7 @@ CommandSpec::new("view.navigate", "Navigate View", crate::checked!("view.navigat
     .doc_only()
     .contract(&NAVIGATE_CONTRACT)
     .output(output_schema_for::<NavigateResult>)
-    .params("camera: Camera; direction?: [x,y,z] in the camera's up-axis frame; or action: left|right|up|down|clockwise|counterclockwise|home|fit, degrees?: 0..180 (how far left|right|up|down turn; default 90), fit?: bool (frame the whole model from the new direction as well, as home does; default false); or motion: pan|orbit|zoom, delta?: [dx,dy] (pixels, each ±10000), free_orbit?: bool (orbit through poles, default false), viewport?: [width,height] (1..1000000, required for pan or pivot), pivot?: [x,y,z], factor?: 0.05..20 (required for zoom), anchor?: [x,y,z] → camera, fit, continuous?"),
+    .params("camera: Camera; direction?: [x,y,z] in the camera's up-axis frame; or action: left|right|up|down|clockwise|counterclockwise|turn_around|home|fit, degrees?: 0..180 (how far left|right|up|down turn; default 90), fit?: bool (frame the whole model from the new direction as well, as home does; default false); or motion: pan|orbit|zoom, delta?: [dx,dy] (pixels, each ±10000), free_orbit?: bool (orbit through poles, default false), viewport?: [width,height] (1..1000000, required for pan or pivot), pivot?: [x,y,z], factor?: 0.05..20 (required for zoom), anchor?: [x,y,z] → camera, fit, continuous?"),
 CommandSpec::new("view.normal_to", "Normal to Selection", crate::checked!("view.normal_to", normal_to))
         .icon("camera")
         .noundo()
@@ -420,10 +429,20 @@ fn grid(_s: &mut Session, p: &Value) -> Result<Value> {
     view_toggle(p, "view.grid", "on")
 }
 fn ground_shadow(_s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(mode) = p.get("mode") {
+        view_params(p, "view.ground_shadow", &["mode"])?;
+        return match mode.as_str() {
+            Some(mode @ ("off" | "ellipse" | "projected")) => Ok(json!({"mode":mode})),
+            _ => Err(bad("view.ground_shadow", "mode must be off, ellipse or projected")),
+        };
+    }
     view_toggle(p, "view.ground_shadow", "on")
 }
 fn navigation_bar(_s: &mut Session, p: &Value) -> Result<Value> {
     view_toggle(p, "view.navigation_bar", "visible")
+}
+fn parts_library(_s: &mut Session, p: &Value) -> Result<Value> {
+    view_toggle(p, "view.parts_library", "visible")
 }
 
 /// `view.browser`: the Browser tree panel is a window setting, so the engine only checks the
@@ -640,11 +659,10 @@ fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
             .filter(|v| v.is_finite() && v.len() <= 2.0)
             .and_then(|v| v.normalized())
             .ok_or_else(|| bad(cmd, "direction must be a finite nonzero vector of length at most 2"))?;
-        let heading = cam.yaw;
-        cam = cam.looking_from(cam.from_frame(dir));
-        if dir.x.abs() < 1e-9 && dir.y.abs() < 1e-9 {
-            cam.yaw = square_heading(heading);
-        }
+        // The view turns the shortest way, so how the screen is turned carries over; a view
+        // along an axis squares up to a quarter turn (#21480).
+        let along_an_axis = [dir.x, dir.y, dir.z].iter().filter(|c| c.abs() > 1e-9).count() == 1;
+        cam = cam.turned_to(cam.from_frame(dir), along_an_axis);
     } else {
         use std::f64::consts::FRAC_PI_2;
         let (r, u, b) = cam.basis();
@@ -680,6 +698,7 @@ fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
             Some("down") => cam = turn(-u, x),
             Some("clockwise") => cam.roll = (cam.roll + FRAC_PI_2).rem_euclid(std::f64::consts::TAU),
             Some("counterclockwise") => cam.roll = (cam.roll - FRAC_PI_2).rem_euclid(std::f64::consts::TAU),
+            Some("turn_around") => cam.rotate_in_view(solidcore_record::Vec3::new(0.0, std::f64::consts::PI, 0.0)),
             Some("home") => {
                 cam.set_view(StandardView::Iso);
                 fit = true;
@@ -743,24 +762,6 @@ fn continuous(mut cam: Camera, p: &Value) -> Result<Value> {
     typed_reply(cmd, NavigateResult { camera: cam, fit: false, continuous: Some(true), param_warnings: Vec::new() })
 }
 
-/// At a halfway tie prefer the heading nearer the front plan view.
-pub(crate) fn square_heading(yaw: f64) -> f64 {
-    if !yaw.is_finite() {
-        return 0.0;
-    }
-    let q = std::f64::consts::FRAC_PI_2;
-    let lo = (yaw / q).floor() * q;
-    let hi = lo + q;
-    if ((yaw - lo) - (hi - yaw)).abs() < 1e-6 {
-        let off_front = |a: f64| ((a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI).abs();
-        if off_front(lo) <= off_front(hi) { lo } else { hi }
-    } else if yaw - lo < hi - yaw {
-        lo
-    } else {
-        hi
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -798,6 +799,7 @@ mod tests {
             ("view.grid", "on"),
             ("view.ground_shadow", "on"),
             ("view.navigation_bar", "visible"),
+            ("view.parts_library", "visible"),
         ] {
             assert_eq!(s.execute(id, &json!({})).unwrap(), json!({}));
             assert_eq!(s.execute(id, &Value::Null).unwrap(), json!({}));
@@ -821,6 +823,7 @@ mod tests {
             "view.grid",
             "view.ground_shadow",
             "view.navigation_bar",
+            "view.parts_library",
         ] {
             for params in [json!(true), json!(1), json!("orbit"), json!([]), json!({"unexpected":true})] {
                 assert!(s.execute(id, &params).is_err(), "{id}: {params}");
@@ -1227,6 +1230,70 @@ mod tests {
         }
     }
 
+    /// #21480: a direction chosen on a navigator turns the view the shortest way, so how the
+    /// screen is turned carries over. A direction along an axis squares up; a slanted one keeps
+    /// the exact tilt. The issue's case: from Front rolled 90°, Top keeps world X where it was.
+    #[test]
+    fn a_chosen_direction_turns_the_view_the_shortest_way() {
+        use std::f64::consts::{FRAC_PI_2, PI};
+        let mut s = Session::default();
+        let mut look = |cam: Camera, dir: [f64; 3]| -> Camera {
+            let result = navigate(&mut s, &json!({"camera": cam, "direction": dir})).unwrap();
+            serde_json::from_value(result["camera"].clone()).unwrap()
+        };
+        let rolled = Camera { yaw: 0.0, pitch: 0.0, roll: FRAC_PI_2, ..Default::default() };
+        // Rolled on its side, world X runs up the screen, and still does after the turn.
+        let (_, up, _) = rolled.basis();
+        assert!(up.cross(Vec3::X).len() < 1e-9, "{up:?}");
+        let (_, u, b) = look(rolled, [0.0, 0.0, 1.0]).basis();
+        assert!(b.dist(Vec3::Z) < 1e-9 && u.dist(up) < 1e-9, "{u:?} {b:?}");
+        for up in [UpAxis::Z, UpAxis::Y] {
+            for (yaw, pitch) in [(0.0, 0.0), (-0.785, 0.615), (0.4, FRAC_PI_2), (2.0, -FRAC_PI_2)] {
+                for roll in [0.0, FRAC_PI_2, PI, 0.3, -0.7] {
+                    let cam = Camera { up, yaw, pitch, roll, ..Default::default() };
+                    for dir in [[0.0, 0.0, 1.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [1.0, 1.0, 1.0], [0.0, 0.3, -0.9]] {
+                        let along_an_axis = dir.iter().filter(|c| **c != 0.0).count() == 1;
+                        let to = look(cam, dir);
+                        let want = cam.turned_to(cam.from_frame(Vec3::new(dir[0], dir[1], dir[2])), along_an_axis);
+                        assert_eq!(to, want, "{dir:?} from {cam:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn turn_around_reverses_the_view_about_screen_up_without_editing_the_design() {
+        for up in [UpAxis::Z, UpAxis::Y] {
+            for (yaw, pitch, roll) in [
+                (0.0, 0.0, 0.0),
+                (0.8, 0.6, 0.4),
+                (-0.5, -0.3, 1.7),
+                (0.7, std::f64::consts::FRAC_PI_2, 0.3),
+                (-0.4, -std::f64::consts::FRAC_PI_2, -0.8),
+            ] {
+                let mut s = Session::default();
+                let before = s.doc.to_json();
+                let cam = Camera { up, yaw, pitch, roll, target: Vec3::new(10.0, 20.0, 30.0), distance: 123.0, fov: 0.6 };
+                let (right, screen_up, back) = cam.basis();
+                for fit in [false, true] {
+                    let result = s.execute("view.navigate", &json!({"camera":cam,"action":"turn_around","fit":fit})).unwrap();
+                    assert_eq!(result["fit"], fit);
+                    let to: Camera = serde_json::from_value(result["camera"].clone()).unwrap();
+                    let (turned_right, turned_up, turned_back) = to.basis();
+                    assert!(turned_right.dist(-right) < 1e-9 && turned_back.dist(-back) < 1e-9, "{cam:?} -> {to:?}");
+                    assert!(turned_up.dist(screen_up) < 1e-9, "screen up stays fixed: {cam:?} -> {to:?}");
+                    assert_eq!((to.target, to.distance, to.fov, to.up), (cam.target, cam.distance, cam.fov, cam.up));
+                    let again = s.execute("view.navigate", &json!({"camera":to,"action":"turn_around"})).unwrap();
+                    let again: Camera = serde_json::from_value(again["camera"].clone()).unwrap();
+                    assert!(again.basis().0.dist(right) < 1e-9 && again.back().dist(back) < 1e-9);
+                }
+                assert_eq!(s.doc.to_json(), before);
+                assert!(s.undo.is_empty());
+            }
+        }
+    }
+
     #[test]
     fn arrows_roll_and_home_are_programmatic_and_reject_hostile_input() {
         let mut s = Session::default();
@@ -1302,6 +1369,23 @@ mod tests {
     }
 }
 
+fn isolate_others(_s: &mut Session, p: &Value) -> Result<Value> {
+    use crate::schema::view_navigation::{IsolateOthersResult, IsolateShow};
+    let cmd = "view.isolate_others";
+    let show = match p.get("show") {
+        None => None,
+        Some(v) => Some(serde_json::from_value::<IsolateShow>(v.clone()).map_err(|_| bad(cmd, "show must be hidden, transparent or wireframe"))?),
+    };
+    let pick = match p.get("pick") {
+        None => None,
+        Some(v) => Some(v.as_bool().ok_or_else(|| bad(cmd, "pick must be true or false"))?),
+    };
+    if show.is_none() && pick.is_none() {
+        return Err(bad(cmd, "give show, pick or both"));
+    }
+    typed_reply(cmd, IsolateOthersResult { show, pick, param_warnings: Vec::new() })
+}
+
 fn ambient_occlusion(_s: &mut Session, p: &Value) -> Result<Value> {
     let enabled = p.get("enabled").and_then(Value::as_bool).ok_or_else(|| bad("view.ambient_occlusion", "enabled must be a boolean"))?;
     typed_reply("view.ambient_occlusion", AmbientOcclusionResult { enabled, param_warnings: Vec::new() })
@@ -1326,6 +1410,13 @@ fn origin_axes_across_view(_s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "view.origin_axes_across_view";
     let enabled = p.get("enabled").and_then(Value::as_bool).ok_or_else(|| bad(cmd, "`enabled` must be a boolean"))?;
     typed_reply(cmd, crate::schema::view_navigation::OriginAxesAcrossViewResult { enabled, param_warnings: Vec::new() })
+}
+
+/// The scale bar in the view's bottom left corner (#375): an application preference, not a design edit.
+fn scale_bar(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.scale_bar";
+    let enabled = p.get("enabled").and_then(Value::as_bool).ok_or_else(|| bad(cmd, "`enabled` must be a boolean"))?;
+    typed_reply(cmd, crate::schema::view_navigation::ScaleBarResult { enabled, param_warnings: Vec::new() })
 }
 
 fn next_tab(_s: &mut Session, _p: &Value) -> Result<Value> {
@@ -1362,6 +1453,41 @@ mod ambient_occlusion_tests {
     }
 
     #[test]
+    fn scale_bar_validates_without_editing_design_history_or_camera() {
+        for param_check in crate::schema::ParamCheck::ALL {
+            let mut s = Session { param_check, ..Session::default() };
+            let design = s.doc.to_json();
+            for enabled in [true, false] {
+                assert_eq!(s.execute("view.scale_bar", &json!({"enabled": enabled})).unwrap(), json!({"enabled": enabled}));
+            }
+            for params in [json!({}), json!({"enabled": 1}), json!({"enabled": "true"}), json!({"enabled": null})] {
+                assert!(s.execute("view.scale_bar", &params).is_err(), "{param_check:?}: {params}");
+            }
+            assert_eq!(s.doc.to_json(), design);
+            assert!(s.undo.is_empty() && s.camera.is_none());
+        }
+    }
+
+    /// #8120: how the view shows what an Isolate hid is a display setting: it validates its
+    /// choice and changes neither the design nor its history.
+    #[test]
+    fn isolate_others_validates_display_setting_without_editing_design_or_history() {
+        let mut s = Session::default();
+        let before = s.doc.to_json();
+        for show in ["hidden", "transparent", "wireframe"] {
+            assert_eq!(s.execute("view.isolate_others", &json!({"show": show})).unwrap(), json!({"show": show}));
+        }
+        for pick in [true, false] {
+            assert_eq!(s.execute("view.isolate_others", &json!({"pick": pick})).unwrap(), json!({"pick": pick}));
+        }
+        for p in [json!({}), json!({"show": "ghost"}), json!({"show": 1}), json!({"show": null}), json!({"pick": "yes"})] {
+            assert!(s.execute("view.isolate_others", &p).is_err(), "{p}");
+        }
+        assert_eq!(s.doc.to_json(), before);
+        assert!(s.undo.is_empty());
+    }
+
+    #[test]
     fn angle_readout_validates_display_setting_without_editing_design_or_history() {
         let mut s = Session::default();
         let before = s.doc.to_json();
@@ -1374,6 +1500,25 @@ mod ambient_occlusion_tests {
         assert_eq!(s.doc.to_json(), before);
         assert!(s.undo.is_empty());
         assert!(s.camera.is_none(), "a display setting leaves the view where it is");
+    }
+    #[test]
+    fn ground_shadow_modes_validate_without_editing_the_design_or_history() {
+        use crate::schema::ParamCheck;
+        for param_check in [ParamCheck::Off, ParamCheck::Warn, ParamCheck::Strict] {
+            let mut s = Session { param_check, ..Session::default() };
+            let before = s.doc.to_json();
+            for mode in ["off", "ellipse", "projected"] {
+                assert_eq!(s.execute("view.ground_shadow", &json!({"mode":mode})).unwrap(), json!({"mode":mode}));
+            }
+            for params in
+                [json!({"mode":true}), json!({"mode":2}), json!({"mode":"height_bands"}), json!({"mode":null}), json!({"mode":"projected","on":true})]
+            {
+                assert!(s.execute("view.ground_shadow", &params).is_err());
+            }
+            assert_eq!(s.execute("view.ground_shadow", &Value::Null).unwrap(), json!({}));
+            assert_eq!(s.doc.to_json(), before);
+            assert!(s.undo.is_empty());
+        }
     }
     #[test]
     fn validates_display_setting_without_editing_design_or_history() {
