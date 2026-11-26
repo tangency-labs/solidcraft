@@ -3451,7 +3451,7 @@ fn a_sketch_on_the_construction_plane_of_another_component_lies_on_it() {
 fn reconstructed_mesh_roles_keep_the_versioned_binary_identity() {
     let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(1., 1., 1.)).unwrap();
     let positions = [Vec3::new(0., -0., 0.), Vec3::X, Vec3::Y];
-    use solidcraft_kernel::services::mesh::ReconstructionKind::{Analytic, Faceted};
+    use solidcraft_kernel::mesh::ReconstructionKind::{Analytic, Faceted};
     for (kind, digest) in [
         (Analytic, "2b85ddcdb826582a9d392dd981499209eb69c06ae3f6ebacaca0c02a4e29a278"),
         (Faceted, "3cbe2d7ca4e75f8b65845f9d84844cfe94e5236c8235692f6badf053aa649856"),
