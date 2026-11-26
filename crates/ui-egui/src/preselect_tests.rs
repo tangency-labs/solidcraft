@@ -2091,7 +2091,7 @@ fn modeled_thread_survives_timeline_double_click_and_ok() {
             // Both ends of the shaft are free: a length starts from the end picked.
             let top = crate::dialogs::edge_sel(&h.app.session, Vec3::new(4.0, 0.0, 4.0)).unwrap();
             let d = h.app.dialog.as_mut().unwrap();
-            d.inputs.iter_mut().find(|i| i.label == "Start end (optional)").unwrap().items = vec![top];
+            d.inputs.iter_mut().find(|i| i.label == "Start side (optional)").unwrap().items = vec![top];
         }
         if h.app.dialog.as_ref().unwrap().previews() {
             wait_feature_preview(&mut h);
@@ -3274,6 +3274,29 @@ fn extend_dialog_goes_up_to_a_picked_face_or_plane() {
     assert!(matches!(up_to(&h), Some(solidcraft_engine::doc::ExtendTo::Plane(_))));
     let (lo, hi) = x_span(&h);
     assert!(lo.abs() < 1e-6 && (hi - 24.0).abs() < 1e-6, "the sheet runs from 0 to 24: {lo} to {hi}");
+
+    // Without the YZ extension, the edge at x = 24 up to the whole box: its near face, at x = 30
+    // (no sheet trimmed by an extension is extended up to anything yet). Editing shows the body.
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.frames(4);
+    open(&mut h, Vec3::new(24.0, 5.0, 0.0));
+    choose(&mut h, "To Object");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        let active = d.active;
+        assert!(d.inputs[active].accept & crate::selection::BODIES != 0, "To Object takes a body");
+        d.inputs[active].items = vec![Sel::Body { name: "Block".into() }];
+    }
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert!(matches!(up_to(&h), Some(solidcraft_engine::doc::ExtendTo::Body(b)) if b.as_ref() == "Block"));
+    let (lo, hi) = x_span(&h);
+    assert!((lo - 5.0).abs() < 1e-6 && (hi - 30.0).abs() < 1e-6, "the sheet runs from 5 to 30: {lo} to {hi}");
+    let name = h.app.session.doc.features.last().unwrap().name.clone();
+    h.step(&json!({"call":"ui.editFeature","params":{"feature": name}})).unwrap();
+    h.frames(4);
+    let picked = h.app.dialog.as_ref().unwrap().inputs.iter().find(|i| i.label == "To Object").and_then(|i| i.items.first().cloned());
+    assert!(matches!(picked, Some(Sel::Body { name }) if name == "Block"), "editing shows the body");
 }
 
 /// A trim whose curves are projected along the surface's normal is made by a script (the
@@ -4651,10 +4674,7 @@ fn editing_a_point_along_an_edge_takes_a_newly_picked_edge() {
     assert!(at(&h).is_some_and(|p| p.dist(Vec3::new(40.0, 15.0, 20.0)) < 1e-6), "the point moves to the new edge: {:?}", at(&h));
 }
 
-/// #3001: Convert Mesh opens a dialog instead of failing with "select a mesh body". With the
-/// mesh selected first it takes it, and OK rebuilds it as faces.
-#[test]
-fn convert_mesh_asks_for_the_body_and_converts_the_selected_one() {
+fn mesh_conversion_harness() -> crate::scenario::Harness {
     use solidcraft_engine::doc::{Document, FeatureKind, MeshData};
     let body = solidcraft_engine::kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
     let mesh = body.mesh(&solidcraft_engine::kernel::MeshTolerance::chord(0.01)).unwrap();
@@ -4675,6 +4695,14 @@ fn convert_mesh_asks_for_the_body_and_converts_the_selected_one() {
     .unwrap();
     let mut h = crate::scenario::Harness::new();
     h.app.session = Session::new(doc);
+    h
+}
+
+/// #3001: Convert Mesh opens a dialog instead of failing with "select a mesh body". With the
+/// mesh selected first it takes it, and OK rebuilds it as faces.
+#[test]
+fn convert_mesh_asks_for_the_body_and_converts_the_selected_one() {
+    let mut h = mesh_conversion_harness();
     h.app.start("mesh.convert");
     h.frames(1);
     let status = h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
@@ -4682,14 +4710,87 @@ fn convert_mesh_asks_for_the_body_and_converts_the_selected_one() {
     assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::MeshConvert { .. })));
     crate::dialogs::cancel(&mut h.app);
 
+    h.app.apply_off_thread = Some(std::time::Duration::ZERO);
     h.app.session.selection = vec![Sel::Body { name: "Mesh".into() }];
     h.app.start("mesh.convert");
     h.frames(1);
     assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![Sel::Body { name: "Mesh".into() }]);
     h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.applying.is_none(), "new mesh conversions apply synchronously");
     assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
     let state = h.app.session.model.state();
     assert!(!state.body("Mesh").unwrap().body.is_mesh(), "rebuilt as faces");
+}
+
+/// Direct calls, previews and dialog apply all use the one source-bound naming scheme.
+#[test]
+fn mesh_conversion_direct_and_dialog_commands_use_source_bound_names() {
+    let mut direct = mesh_conversion_harness();
+    direct.app.run("mesh.convert", json!({"body":"Mesh"})).unwrap();
+    let state = direct.app.session.model.state();
+    assert!(solidcraft_engine::doc::naming::face_names(state.body("Mesh").unwrap()).iter().all(|name| name.contains(":mesh:")));
+    let saved = direct.app.session.doc.to_json();
+    let cold = Session::new(solidcraft_engine::doc::Document::from_json(&saved).unwrap());
+    assert_eq!(
+        solidcraft_engine::doc::naming::face_names(cold.model.state().body("Mesh").unwrap()),
+        solidcraft_engine::doc::naming::face_names(state.body("Mesh").unwrap())
+    );
+
+    let mut dialog = mesh_conversion_harness();
+    dialog.app.apply_off_thread = Some(std::time::Duration::ZERO);
+    dialog.app.session.selection = vec![Sel::Body { name: "Mesh".into() }];
+    dialog.app.start("mesh.convert");
+    dialog.frames(1);
+    let commands = crate::dialogs::apply_commands(&dialog.app, dialog.app.dialog.as_ref().unwrap()).unwrap();
+    let preview = crate::dialogs::preview_commands(&dialog.app, dialog.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands, preview);
+    assert_eq!(commands[0].0, "mesh.convert");
+    assert_eq!(commands[0].1, json!({"body":"Mesh","tolerance":"0.05 mm"}));
+    dialog.step(&json!({"key":"Enter"})).unwrap();
+    assert!(dialog.app.applying.is_none(), "Convert Mesh applies synchronously");
+    assert!(dialog.app.dialog.is_none());
+    let state = dialog.app.session.model.state();
+    assert!(solidcraft_engine::doc::naming::face_names(state.body("Mesh").unwrap()).iter().all(|name| name.contains(":mesh:")));
+}
+
+/// Repeated OK on an unsupported open mesh keeps the dialog and the imported design.
+#[test]
+fn failed_convert_mesh_submissions_keep_the_dialog_and_original_mesh() {
+    use solidcraft_engine::doc::{Document, FeatureKind, MeshData};
+    let mut doc = Document::default();
+    doc.add_feature(
+        FeatureKind::MeshImport {
+            file: "open-tetrahedron.stl".into(),
+            meshes: vec![MeshData {
+                name: "Mesh".into(),
+                positions: vec![0., 0., 0., 8., 0., 0., 0., 8., 0., 0., 0., 8.].into(),
+                triangles: vec![0, 2, 1, 0, 1, 3, 0, 3, 2].into(),
+                color: None,
+                corner_normals: Default::default(),
+            }],
+        },
+        Some("Imported open mesh"),
+    )
+    .unwrap();
+    doc.features.last_mut().unwrap().body_names = vec!["Mesh".into()];
+    let mut h = crate::scenario::Harness::new();
+    h.app.session = Session::new(doc);
+    h.app.apply_off_thread = Some(std::time::Duration::ZERO);
+    h.app.session.selection = vec![Sel::Body { name: "Mesh".into() }];
+    let before = h.app.session.doc.to_json();
+    h.app.start("mesh.convert");
+    h.frames(1);
+    for _ in 0..3 {
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(h.app.applying.is_none(), "each retry applies synchronously");
+        let dialog = h.app.dialog.as_ref().expect("failed conversion stays open");
+        assert!(dialog.error.as_ref().is_some_and(|e| e.contains("mesh conversion")), "{:?}", dialog.error);
+        assert_eq!(h.app.session.doc.to_json(), before);
+        assert!(h.app.session.model.state().body("Mesh").unwrap().body.is_mesh());
+    }
+    crate::dialogs::cancel(&mut h.app);
+    h.frames(1);
+    assert!(h.app.dialog.is_none());
 }
 
 /// #3745: hovering a large body never waits for its pick index. A long modelled thread's mesh
@@ -4927,6 +5028,39 @@ fn a_pipe_cuts_from_its_window_and_keeps_the_cut_when_edited() {
     let (edit, p) = apply_commands(&app, &d).unwrap().remove(0);
     assert_eq!(edit, "timeline.redefine");
     assert_eq!(p["params"]["operation"], "cut", "{p}");
+}
+
+/// #18344: the Pipe window has a Type row, so a hollow pipe is a choice and not a word in the
+/// Wall field. The wall the window holds is the pipe's wall: a thickness typed in it is never
+/// dropped, and a tube without a thickness is refused.
+#[test]
+fn a_pipe_is_hollow_when_its_window_says_so() {
+    let mut app = app_with(json!([
+        {"command": "sketch.create", "params": {"plane": "XY", "name": "Path"}},
+        {"command": "sketch.circle.center", "params": {"center": [0, 0], "radius": 20, "id": "c"}},
+        {"command": "sketch.finish", "params": {}},
+    ]));
+    let mut d = start(&mut app, vec![Sel::SketchCurve { id: "c".into(), sketch: None }], "solid.pipe");
+    assert!(matches!(d.kind, Kind::Pipe { hollow: 0, .. }), "{:?}", d.kind);
+    // A solid pipe has no wall.
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert!(cmds[0].1.get("wall").is_none(), "{:?}", cmds[0].1);
+    // A hollow one has one.
+    let Kind::Pipe { hollow, wall, .. } = &mut d.kind else { panic!("{:?}", d.kind) };
+    *hollow = 1;
+    *wall = "2 mm".into();
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].1["wall"], "2 mm", "{:?}", cmds[0].1);
+    // A hollow pipe with no wall is refused: it would be a solid rod.
+    let Kind::Pipe { wall, .. } = &mut d.kind else { panic!("{:?}", d.kind) };
+    wall.clear();
+    assert!(apply_commands(&app, &d).is_err(), "a hollow pipe without a wall");
+    // A thickness the window holds is the pipe's wall, and it is never dropped.
+    let Kind::Pipe { hollow, wall, .. } = &mut d.kind else { panic!("{:?}", d.kind) };
+    *hollow = 0;
+    *wall = "2 mm".into();
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].1["wall"], "2 mm", "{:?}", cmds[0].1);
 }
 
 #[test]

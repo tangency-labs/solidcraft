@@ -3544,3 +3544,64 @@ fn curves_stop_at_the_cap_and_circle_radii_are_checked() {
     assert_eq!(sk.add_curve(CurveKind::Line { a, b }, None), Err(SketchError::TooLarge));
     assert_eq!(sk.points.len(), points, "a refused curve adds no points");
 }
+
+/// Merging regions that include or border a narrow sliver (width between `MERGE_TOL` and
+/// `ENDPOINT_JOIN_TOL`) must never cancel the sliver's opposite sides against each other, nor
+/// jump across its short step edges when chaining the merged boundary.
+#[test]
+fn merge_regions_preserves_narrow_slivers_and_steps() {
+    for d in [1.3169768e-5, 5e-5, 9.9e-5] {
+        // (1) A narrow sliver profile alone stays a 4-segment rectangle.
+        let mut sk = Sketch::new();
+        rect(&mut sk, [v(0.0, 0.0), v(d, 0.0), v(d, 2.0), v(0.0, 2.0)]);
+        let ps = find_profiles(&sk);
+        assert_eq!(ps.len(), 1);
+        let m = merge_regions(&[ps[0].region.clone()]);
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].outer.segs.len(), 4, "d={d:e}: {m:?}");
+        assert!(m[0].holes.is_empty(), "d={d:e}: {m:?}");
+        assert!((m[0].area() - 2.0 * d).abs() < 1e-11, "d={d:e}: area={}", m[0].area());
+
+        // (2) Outer wall ring enclosing an inner pocket + shelf shifted left by `d`:
+        let mut sk = Sketch::new();
+        rect(&mut sk, [v(-16.5, -47.5), v(16.5, -47.5), v(16.5, 47.5), v(-16.5, 47.5)]);
+        rect(&mut sk, [v(-14.625, -45.375), v(14.625, -45.375), v(14.625, 45.375), v(-14.625, 45.375)]);
+        rect(&mut sk, [v(-14.625 - d, -1.0), v(14.625 - d, -1.0), v(14.625 - d, 1.0), v(-14.625 - d, 1.0)]);
+        let ps = find_profiles(&sk);
+        assert_eq!(ps.len(), 4);
+
+        // (2a) Selecting all profiles except the sliver produces the outer box with one clean
+        // 4-segment sliver hole (never two 1-segment line holes).
+        let without_sliver: Vec<_> = ps.iter().filter(|p| p.area > 1e-2).map(|p| p.region.clone()).collect();
+        let merged1 = merge_regions(&without_sliver);
+        assert_eq!(merged1.len(), 1, "d={d:e}: {merged1:?}");
+        assert_eq!(merged1[0].outer.segs.len(), 4, "d={d:e}: {merged1:?}");
+        assert_eq!(merged1[0].holes.len(), 1, "d={d:e}: {merged1:?}");
+        assert_eq!(merged1[0].holes[0].segs.len(), 4, "d={d:e}: {:?}", merged1[0].holes);
+        assert!((merged1[0].area() - (33.0 * 95.0 - 2.0 * d)).abs() < 1e-8);
+
+        // (2b) Selecting the wall ring alone merges its 3 adjacent inner holes into 1 clean
+        // 8-segment stepped hole loop (never a diagonal + 1-segment line hole).
+        let merged9 = merge_regions(&[ps[0].region.clone()]);
+        assert_eq!(merged9.len(), 1, "d={d:e}: {merged9:?}");
+        assert_eq!(merged9[0].outer.segs.len(), 4, "d={d:e}: {merged9:?}");
+        assert_eq!(merged9[0].holes.len(), 1, "d={d:e}: {merged9:?}");
+        assert_eq!(merged9[0].holes[0].segs.len(), 8, "d={d:e}: {:?}", merged9[0].holes[0]);
+        let hole = &merged9[0].holes[0].segs;
+        for i in 0..hole.len() {
+            assert!(hole[i].end().dist(hole[(i + 1) % hole.len()].start()) <= 1e-12, "d={d:e}: hole corner {i} open: {hole:?}");
+        }
+        assert!((merged9[0].area() - (33.0 * 95.0 - 29.25 * 90.75 - 2.0 * d)).abs() < 1e-8);
+    }
+
+    // (3) A full circle cut at one point with radius in (MERGE_TOL, tol / TAU] stays a closed
+    // profile (matching `has_width`, which keeps circles wider than `MERGE_TOL`).
+    let mut sk = Sketch::new();
+    let r = 1.2e-6;
+    sk.add_circle(v(0.0, 0.0), r, None, None).unwrap();
+    sk.add_line(v(r, -1.0), v(r, 1.0), None, None, None).unwrap();
+    let ps = find_profiles(&sk);
+    assert_eq!(ps.len(), 1, "tiny circle touched at one point should stay a profile: {ps:?}");
+    let expected_area = std::f64::consts::PI * r * r;
+    assert!((ps[0].area - expected_area).abs() < 1e-16, "area={} expected={expected_area}", ps[0].area);
+}

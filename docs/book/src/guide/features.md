@@ -54,7 +54,7 @@ the same for any feature.
 
 | Panel | Features |
 |---|---|
-| Create | extrude (one side, two sides, symmetric, taper, start offset, to a distance or through all; new body, join, cut, intersect; thin walls along curves), revolve, sweep, loft, box, cylinder, sphere, torus, coil, pipe, rib, web, emboss, hole (simple, counterbore, countersink, tapped; on faces, at distances from edges, or at sketch points), thread, rectangular/circular/path patterns, mirror |
+| Create | extrude (one side, two sides, symmetric, taper, start offset, to a distance or through all; new body, join, cut, intersect; thin walls along curves), revolve, sweep, loft, box, cylinder, sphere, torus, coil, pipe, rib, web, emboss, hole (simple, counterbore, countersink, tapped; on faces, at distances from edges, or at sketch points), thread, shaft spline, rectangular/circular/path patterns, mirror |
 | Modify | press pull, fillet, chamfer, shell, draft, scale, combine, split body, offset face, replace face, move/copy, align, remove |
 | Construct | offset plane (at a distance or through a point), plane at angle, plane along path |
 | Inspect | measure, section analysis, interference, compare bodies, curvature comb and map, zebra, draft, minimum radius, isocurves, centre of mass |
@@ -213,6 +213,14 @@ chosen instances. A new Emboss without an explicit face infers a unique eligible
 select the face when the target is ambiguous. Older saved features without a face retain their
 planar placement.
 
+**Offset X**, **Offset Y** and **Angle** in the Emboss dialog place the profiles on the face
+without editing the sketch. The offsets move them along the sketch's own x and y; the angle turns
+them counter-clockwise in the sketch, about the middle of the box round the picked profiles, and
+the offsets are not turned with them. On a cylinder wall an offset along the direction the sketch
+runs round the wall slides the profiles round it by that arc length, and one along the axis slides
+them along it. Each takes an expression, so a parameter can drive it; an empty field leaves the
+profiles where the sketch has them. The profiles must still lie wholly on the face once placed.
+
 A **Hole** with **Single** placement can also sit at distances from up to two straight edges of
 its face. After picking the face, click **Reference 1** and pick an edge, then pick a second one
 into **Reference 2**. Each edge gets a **Distance** row, measured from where you picked; the
@@ -276,6 +284,25 @@ defaults to countersink.
 The **Thread** feature's **Hand** is **Right** (the default), **Left**, or **Both** (a right- and
 a left-handed groove crossing, as on a reversing screw). Scripts use `hand: "left"` (or `"right"`,
 `"both"`) on `solid.thread`; omitted, a thread is right-handed. Tapped holes are right-handed.
+
+**Shaft Spline** (MODEL › CREATE, in the Create menu) is one History feature that cuts a spline into a
+picked round shaft or bore, or, with nothing picked, makes a new splined shaft, a hub or both. Pick
+the outside of a shaft to cut the spline into it, a bore to cut the hub's teeth, or both to cut a
+pair that fits. The **Type** is Involute, Straight-sided or Serration. The dialog draws the teeth as
+you change them and says in words when the numbers make no spline. By default the shaft's diameter
+follows the spline's numbers (more teeth of one size make a larger shaft); **Fixed diameter** keeps
+the shaft's own size and works the spline's size out from it. A round face has two ends, so each
+picked part takes a second pick, **Shaft start** or **Bore start**: the face the teeth start from (the
+part's end, a shoulder or a chamfer). **Length** is measured along the picked round face from that
+end. **Round the ends** makes each tooth space end in the curve a
+cutter of the given diameter leaves. **End chamfer** (shaft) and **Entry chamfer** (hub) are cut by
+the spline itself, so they follow the size and the tooth count; each takes the Chamfer tool's types
+(Equal Distance at 45 degrees, Two Distances, Distance and Angle). A **Master spline** (a tooth left
+out, or a wide tooth) lets the hub go on one way only. The numbers that size the teeth stay at the
+top of the dialog, and the rest is in groups that open and close: **Tooth form**, **Fit** (the
+clearances), **Tip corners**, **Chamfers**, **Groove end**, **Master spline**, **Hub** and **As
+made** (what the clearances come to). Scripts use `shaft_spline.insert`. How the numbers work is in the
+[shaft spline details](https://github.com/tangency-labs/solidcraft/blob/main/docs/shaft-splines.md).
 
 Fillets and chamfers handle straight edges between planar faces, whole smooth loops, runs of
 neighbouring edges with mitred or spherical corners, and closed chains of curved edges (a rolling
@@ -367,6 +394,13 @@ Scripts use `inspect.section`: a `plane` replaces the section, `add: true` adds 
 plane ids, `folder: false` and `folder: true` hide and show the Analysis folder, and `clear: true`
 removes them all. `offset` moves the cut against the plane's normal,
 so a positive offset cuts more away; `at` is a world coordinate on a named plane's axis.
+
+A design can keep several named sections and switch between them. In the Section Analysis
+dialog, **Saved sections** lists them: click one to show it in place of the section on show,
+type a name and press **Save as…** to keep the section on show, **Rename** or **×** to rename or
+delete one. They are saved with the design. Scripts use `inspect.section.save` (`name`),
+`inspect.section.show` and `inspect.section.delete` (each by `section`),
+`inspect.section.rename` (`section` and the new `name`) and `inspect.section.list`.
 
 ## Comparing two bodies
 

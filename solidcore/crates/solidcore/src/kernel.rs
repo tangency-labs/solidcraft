@@ -221,12 +221,35 @@ pub struct WorkCounters {
     blends_recertified: Cell<u64>,
     vertex_drops: Cell<u64>,
     seam_tests: Cell<u64>,
+    line_scratch_boxes: Cell<u64>,
+    line_roots_added: Cell<u64>,
+    line_leaves_not_run: Cell<u64>,
+    line_leaves_finished: Cell<u64>,
+    line_leaves_at_limit: Cell<u64>,
+    line_roots_unshown: Cell<u64>,
+    line_exclusion_boxes: Cell<u64>,
+    line_exclusions_out_of_budget: Cell<u64>,
+    line_solves: Cell<u64>,
+    line_solves_at_limit: Cell<u64>,
+    line_searches_reused: Cell<u64>,
+    line_components: Cell<u64>,
+    line_strips: Cell<u64>,
+    line_strip_boxes: Cell<u64>,
+    line_strips_at_limit: Cell<u64>,
+    line_drop_enclosures: Cell<u64>,
+    line_boxes_dropped: Cell<u64>,
+    line_boxes_dropped_across: Cell<u64>,
     contact_stretch_certifications: Cell<u64>,
     uv_trim_builds: Cell<u64>,
     trim_deviation_bounds: Cell<u64>,
+    split_face_classifications: Cell<u64>,
     face_intersections: Cell<u64>,
+    same_parameter_bisections: Cell<u64>,
     band_face_solves: Cell<u64>,
     band_edge_solves: Cell<u64>,
+    shells: Cell<u64>,
+    booleans: Cell<u64>,
+    apart_unions: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -395,6 +418,134 @@ impl WorkCounters {
         self.ball_certified_roots.get()
     }
 
+    /// Parameter boxes the certified pass of the line/surface leaf solve enclosed
+    /// (`surface::surface::certified_line`), over all leaves. Not the fork's.
+    #[must_use]
+    pub fn line_scratch_boxes(&self) -> u64 {
+        self.line_scratch_boxes.get()
+    }
+
+    /// Crossings the certified pass of the line/surface leaf solve added: certified
+    /// roots that the leaf solve's guesses had not found. Not the fork's.
+    #[must_use]
+    pub fn line_roots_added(&self) -> u64 {
+        self.line_roots_added.get()
+    }
+
+    /// Leaves whose certified pass did not run: nothing could be proved of the line or the
+    /// leaf's domain (`certified_line::Stop::NotRun`). Not the fork's.
+    #[must_use]
+    pub fn line_leaves_not_run(&self) -> u64 {
+        self.line_leaves_not_run.get()
+    }
+
+    /// Leaves whose certified pass decided, excluded or left every box
+    /// (`certified_line::Stop::Finished`). Not the fork's.
+    #[must_use]
+    pub fn line_leaves_finished(&self) -> u64 {
+        self.line_leaves_finished.get()
+    }
+
+    /// Leaves whose certified pass stopped at its bound on boxes
+    /// (`certified_line::MAX_SCRATCH_BOXES`) with boxes still to visit
+    /// (`certified_line::Stop::AtLimit`). Not the fork's.
+    #[must_use]
+    pub fn line_leaves_at_limit(&self) -> u64 {
+        self.line_leaves_at_limit.get()
+    }
+
+    /// Certified roots the pass did not report because the gap at the point to report
+    /// was not enclosed within the tolerance. Not the fork's.
+    #[must_use]
+    pub fn line_roots_unshown(&self) -> u64 {
+        self.line_roots_unshown.get()
+    }
+
+    /// Enclosures the exclusion phases of the certified line pass made, over all leaves
+    /// (`certified_line`, "The exclusion phase"). Not the fork's.
+    #[must_use]
+    pub fn line_exclusion_boxes(&self) -> u64 {
+        self.line_exclusion_boxes.get()
+    }
+
+    /// Exclusion phases that stopped at their budget, keeping what they had not decided.
+    /// Not the fork's.
+    #[must_use]
+    pub fn line_exclusions_out_of_budget(&self) -> u64 {
+        self.line_exclusions_out_of_budget.get()
+    }
+
+    /// Line/surface solves the certified pass searched (a solve of a kind whose net is the
+    /// surface, its line not of zero length). Not the fork's.
+    #[must_use]
+    pub fn line_solves(&self) -> u64 {
+        self.line_solves.get()
+    }
+
+    /// Of [`WorkCounters::line_solves`], those with a leaf whose pass stopped at its bound.
+    /// Not the fork's.
+    #[must_use]
+    pub fn line_solves_at_limit(&self) -> u64 {
+        self.line_solves_at_limit.get()
+    }
+
+    /// Line/surface solves that took the certified pass's search their operation had made
+    /// on the same inputs (`certified_line::LinePasses`) instead of searching: not counted
+    /// in [`WorkCounters::line_solves`]. Not the fork's.
+    #[must_use]
+    pub fn line_searches_reused(&self) -> u64 {
+        self.line_searches_reused.get()
+    }
+
+    /// Components of what the certified passes of a solve kept (`certified_line`,
+    /// "Components"), over all solves. Not the fork's.
+    #[must_use]
+    pub fn line_components(&self) -> u64 {
+        self.line_components.get()
+    }
+
+    /// Culled strips the certified line pass enclosed: leaves and subtrees the traversal
+    /// culled by the line's distance or parameter (`certified_line`, "Culled strips"). Not
+    /// the fork's.
+    #[must_use]
+    pub fn line_strips(&self) -> u64 {
+        self.line_strips.get()
+    }
+
+    /// Enclosures the culled strips made, over all strips. Not the fork's.
+    #[must_use]
+    pub fn line_strip_boxes(&self) -> u64 {
+        self.line_strip_boxes.get()
+    }
+
+    /// Culled strips that ran out of their budget, keeping what they left undecided. Not the
+    /// fork's.
+    #[must_use]
+    pub fn line_strips_at_limit(&self) -> u64 {
+        self.line_strips_at_limit.get()
+    }
+
+    /// Side enclosures the solves' drops made (`certified_line`, "The drop"). Not the
+    /// fork's.
+    #[must_use]
+    pub fn line_drop_enclosures(&self) -> u64 {
+        self.line_drop_enclosures.get()
+    }
+
+    /// Boxes with no root the solves' drops proved farther than the tolerance and dropped.
+    /// Not the fork's.
+    #[must_use]
+    pub fn line_boxes_dropped(&self) -> u64 {
+        self.line_boxes_dropped.get()
+    }
+
+    /// Of [`WorkCounters::line_boxes_dropped`], those in sets that read another leaf's
+    /// records across a leaf's border. Not the fork's.
+    #[must_use]
+    pub fn line_boxes_dropped_across(&self) -> u64 {
+        self.line_boxes_dropped_across.get()
+    }
+
     /// Curved intersection pieces classified as running along a face edge
     /// (`CurveClassification::classify_edge_interval`, WR-305): each one certified within the
     /// intersection tolerance of it as a whole (`curve_runs_along`, or the worst-first bound of
@@ -462,6 +613,18 @@ impl WorkCounters {
         self.trim_deviation_bounds.get()
     }
 
+    /// Points a boolean's imprint classifies on the two faces a face was just split into,
+    /// to tell which of them a definition still to be imprinted lies on
+    /// (`ProtoTopologyManager::update_faces`): one for each classification past the faces'
+    /// domain boxes. Upstream's `UpdateFaces` also classified every coincident proto edge
+    /// of every proto face on the split face, at every split of it, which grew with the
+    /// cube of the coincident edges of a union of crossing strips on one plane. Not the
+    /// fork's.
+    #[must_use]
+    pub fn split_face_classifications(&self) -> u64 {
+        self.split_face_classifications.get()
+    }
+
     /// Pairs of faces of the two B-reps a boolean intersected (`FaceIntersect`): the
     /// pairs of [`WorkCounters::face_pairs`] that neither the box test nor the exact tests
     /// of `intersect_topology` showed apart: a planar face's plane, the edges of two planar
@@ -470,6 +633,15 @@ impl WorkCounters {
     #[must_use]
     pub fn face_intersections(&self) -> u64 {
         self.face_intersections.get()
+    }
+
+    /// Same-parameter bounds on a carried trim's distance from its edge
+    /// (`query::curve_surface_gap::trim_same_parameter_gap_bound_within`, which gates a
+    /// boolean's carried trims) that the trim's structure did not answer at once, so that its
+    /// bisection ran: the costly ones. Not the fork's (#22034).
+    #[must_use]
+    pub fn same_parameter_bisections(&self) -> u64 {
+        self.same_parameter_bisections.get()
     }
 
     /// Intersections of a convex blend's section with a face of the part, run to learn whether
@@ -486,6 +658,30 @@ impl WorkCounters {
     #[must_use]
     pub fn band_edge_solves(&self) -> u64 {
         self.band_edge_solves.get()
+    }
+
+    /// Shells made of a whole body (`offset::offset_executive::p2::shell_brep_simple`), built
+    /// or refused: an inward shell refused for a thin feature makes one more for each step
+    /// that takes features off (`offset::thin_features`), each as costly as the first. Not
+    /// the fork's (solidcore#3353).
+    #[must_use]
+    pub fn shells(&self) -> u64 {
+        self.shells.get()
+    }
+
+    /// Booleans of two B-reps run (`boolean::api_brep`'s `merge_boolean_by`, under every
+    /// two-B-rep entry point): a union of many bodies runs one for each pair of operands it
+    /// intersects. Not the fork's.
+    #[must_use]
+    pub fn booleans(&self) -> u64 {
+        self.booleans.get()
+    }
+
+    /// Unions of two solids proved apart made side by side, without a boolean
+    /// (`boolean::apart::union_apart`). Not the fork's.
+    #[must_use]
+    pub fn apart_unions(&self) -> u64 {
+        self.apart_unions.get()
     }
 
     /// Zeroes every count (`SmWorkCounters::Reset`).
@@ -509,6 +705,24 @@ impl WorkCounters {
         self.classification_snapshots.set(0);
         self.orient_boxes.set(0);
         self.ball_certified_roots.set(0);
+        self.line_scratch_boxes.set(0);
+        self.line_roots_added.set(0);
+        self.line_leaves_not_run.set(0);
+        self.line_leaves_finished.set(0);
+        self.line_leaves_at_limit.set(0);
+        self.line_roots_unshown.set(0);
+        self.line_exclusion_boxes.set(0);
+        self.line_exclusions_out_of_budget.set(0);
+        self.line_solves.set(0);
+        self.line_solves_at_limit.set(0);
+        self.line_searches_reused.set(0);
+        self.line_components.set(0);
+        self.line_strips.set(0);
+        self.line_strip_boxes.set(0);
+        self.line_strips_at_limit.set(0);
+        self.line_drop_enclosures.set(0);
+        self.line_boxes_dropped.set(0);
+        self.line_boxes_dropped_across.set(0);
         self.curved_edge_runs.set(0);
         self.blends_recertified.set(0);
         self.vertex_drops.set(0);
@@ -516,9 +730,14 @@ impl WorkCounters {
         self.contact_stretch_certifications.set(0);
         self.uv_trim_builds.set(0);
         self.trim_deviation_bounds.set(0);
+        self.split_face_classifications.set(0);
         self.face_intersections.set(0);
+        self.same_parameter_bisections.set(0);
         self.band_face_solves.set(0);
         self.band_edge_solves.set(0);
+        self.shells.set(0);
+        self.booleans.set(0);
+        self.apart_unions.set(0);
     }
 
     /// Counts one intersection of a blend's section with a face.
@@ -533,6 +752,22 @@ impl WorkCounters {
             .set(self.band_edge_solves.get().saturating_add(1));
     }
 
+    /// Counts one shell of a whole body.
+    pub(crate) fn add_shell(&self) {
+        self.shells.set(self.shells.get().saturating_add(1));
+    }
+
+    /// Counts one boolean of two B-reps.
+    pub(crate) fn add_boolean(&self) {
+        self.booleans.set(self.booleans.get().saturating_add(1));
+    }
+
+    /// Counts one union of two solids made side by side.
+    pub(crate) fn add_apart_union(&self) {
+        self.apart_unions
+            .set(self.apart_unions.get().saturating_add(1));
+    }
+
     /// Counts one UV trim curve built.
     pub(crate) fn add_uv_trim_build(&self) {
         self.uv_trim_builds
@@ -545,10 +780,22 @@ impl WorkCounters {
             .set(self.trim_deviation_bounds.get().saturating_add(1));
     }
 
+    /// Counts one point classified on the two faces a face was split into.
+    pub(crate) fn add_split_face_classification(&self) {
+        self.split_face_classifications
+            .set(self.split_face_classifications.get().saturating_add(1));
+    }
+
     /// Counts one pair of faces intersected.
     pub(crate) fn add_face_intersection(&self) {
         self.face_intersections
             .set(self.face_intersections.get().saturating_add(1));
+    }
+
+    /// Counts one same-parameter bound that runs its bisection.
+    pub(crate) fn add_same_parameter_bisection(&self) {
+        self.same_parameter_bisections
+            .set(self.same_parameter_bisections.get().saturating_add(1));
     }
 
     /// Counts one edge or vertex asked whether it is a seam or a pole of a face.
@@ -678,6 +925,101 @@ impl WorkCounters {
     pub(crate) fn add_ball_certified_root(&self) {
         self.ball_certified_roots
             .set(self.ball_certified_roots.get().saturating_add(1));
+    }
+
+    /// Counts one leaf's certified line pass: the boxes it enclosed, the roots it left
+    /// unreported, and how it ended.
+    pub(crate) fn add_line_pass(
+        &self,
+        boxes: u64,
+        unshown: u64,
+        stop: crate::surface::surface::certified_line::Stop,
+    ) {
+        use crate::surface::surface::certified_line::Stop;
+        self.line_scratch_boxes
+            .set(self.line_scratch_boxes.get().saturating_add(boxes));
+        self.line_roots_unshown
+            .set(self.line_roots_unshown.get().saturating_add(unshown));
+        let leaves = match stop {
+            Stop::NotRun => &self.line_leaves_not_run,
+            Stop::Finished => &self.line_leaves_finished,
+            Stop::AtLimit => &self.line_leaves_at_limit,
+        };
+        leaves.set(leaves.get().saturating_add(1));
+    }
+
+    /// Counts one leaf's exclusion phase: the enclosures it made, and whether it stopped
+    /// at its budget.
+    pub(crate) fn add_line_exclusion(&self, boxes: u64, out_of_budget: bool) {
+        self.line_exclusion_boxes
+            .set(self.line_exclusion_boxes.get().saturating_add(boxes));
+        if out_of_budget {
+            self.line_exclusions_out_of_budget
+                .set(self.line_exclusions_out_of_budget.get().saturating_add(1));
+        }
+    }
+
+    /// Counts one culled strip: the enclosures it made, and whether it ran out of its
+    /// budget.
+    pub(crate) fn add_line_strip(
+        &self,
+        boxes: u64,
+        stop: crate::surface::surface::certified_line::Stop,
+    ) {
+        use crate::surface::surface::certified_line::Stop;
+        self.line_strips
+            .set(self.line_strips.get().saturating_add(1));
+        self.line_strip_boxes
+            .set(self.line_strip_boxes.get().saturating_add(boxes));
+        if stop == Stop::AtLimit {
+            self.line_strips_at_limit
+                .set(self.line_strips_at_limit.get().saturating_add(1));
+        }
+    }
+
+    /// Counts one solve's drop: its side enclosures and the boxes it dropped.
+    pub(crate) fn add_line_drops(&self, drops: &crate::surface::surface::certified_line::Drops) {
+        let n = |x: usize| u64::try_from(x).unwrap_or(u64::MAX);
+        self.line_drop_enclosures.set(
+            self.line_drop_enclosures
+                .get()
+                .saturating_add(n(drops.enclosures)),
+        );
+        self.line_boxes_dropped.set(
+            self.line_boxes_dropped
+                .get()
+                .saturating_add(n(drops.no_root.saturating_add(drops.edge))),
+        );
+        self.line_boxes_dropped_across.set(
+            self.line_boxes_dropped_across
+                .get()
+                .saturating_add(n(drops.across)),
+        );
+    }
+
+    /// Counts one solve the certified line pass searched: its components, and whether a
+    /// leaf of it stopped at its bound.
+    pub(crate) fn add_line_solve(&self, components: u64, at_limit: bool) {
+        self.line_solves
+            .set(self.line_solves.get().saturating_add(1));
+        self.line_components
+            .set(self.line_components.get().saturating_add(components));
+        if at_limit {
+            self.line_solves_at_limit
+                .set(self.line_solves_at_limit.get().saturating_add(1));
+        }
+    }
+
+    /// Counts one solve that took a kept search of the certified line pass.
+    pub(crate) fn add_line_search_reused(&self) {
+        self.line_searches_reused
+            .set(self.line_searches_reused.get().saturating_add(1));
+    }
+
+    /// Counts one crossing the certified line pass added.
+    pub(crate) fn add_line_root(&self) {
+        self.line_roots_added
+            .set(self.line_roots_added.get().saturating_add(1));
     }
 
     /// Counts one curved piece certified to run along a face edge.
@@ -1022,7 +1364,9 @@ pub struct Kernel {
     /// curve value, and `CoincidenceCheck` a memo of each surface's boundary curves in
     /// the surface value (`true` by default; a caller sets it), and whether
     /// the check's other result-invariant shortcuts are taken (the B-spline curve
-    /// analyses' bounds and memo, #2568; face test 37's winding hulls). The memos and
+    /// analyses' bounds and memo, #2568; face test 37's winding hulls), and whether a
+    /// line solve takes the certified pass's search its operation kept on the same inputs
+    /// (`surface::surface::certified_line::LinePasses`). The memos and
     /// shortcuts never change a result, only the time; `false` builds and runs
     /// everything in full, to check that.
     pub memoize_curve_caches: bool,

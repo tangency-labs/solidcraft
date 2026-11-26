@@ -170,6 +170,13 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                     let tool = kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?);
                     kernel::extend_surface(&mb.body, &crate::plain(edges), &at(kernel::ExtendLimit::UpTo(&tool)))?
                 }
+                Some(crate::ExtendTo::Body(target)) => {
+                    if target == body {
+                        return Err(DocError::Invalid("a surface can't extend up to itself".into()));
+                    }
+                    let tb = st.body(target).ok_or_else(|| DocError::Unknown(format!("body `{target}`")))?;
+                    kernel::extend_surface(&mb.body, &crate::plain(edges), &at(kernel::ExtendLimit::UpToBody(&tb.body)))?
+                }
                 Some(crate::ExtendTo::Face(t)) => {
                     let tb = st.body(&t.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", t.body)))?;
                     let face = crate::appearance::face_index_at(tb, t.point.0)
@@ -329,22 +336,49 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
                 f,
             )?;
-            if extent.through_all || extent.taper.is_some() || extent.from.is_some() || extent.symmetric_offset {
-                return Err(DocError::Invalid(
-                    "not supported yet: a surface extrude through all, from an object, with a taper, or with symmetric offset".into(),
-                ));
+            if extent.through_all || extent.through_all2 || extent.to2.is_some() || extent.from.is_some() || extent.symmetric_offset {
+                return Err(DocError::Invalid("not supported yet: a surface extrude through all, from an object, or with symmetric offset".into()));
             }
             if *to_next && extent.to.is_some() {
                 return Err(DocError::Invalid("a surface extrude goes To Next or To Object, not both".into()));
             }
             let off = extent.start_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
+            // A taper of 0 is the straight sheet, as it is a straight solid extrude.
+            let taper = extent.taper.as_deref().map(|e| val(vals, e, Kind::Angle)).transpose()?.filter(|t| *t != 0.0);
+            if let Some(taper) = taper {
+                if extent.to.is_some() || *to_next || extent.distance2.is_some() || extent.direction == crate::Direction::Symmetric {
+                    return Err(DocError::Invalid(
+                        "not supported yet: a surface extrude with a taper to an object, to next, two-sided or symmetric".into(),
+                    ));
+                }
+                // The profile is the section at the start (the sketch plane moved by the start
+                // offset); the walls lean from there to the far end.
+                let d = val(vals, &extent.distance, Kind::Length)?;
+                let reach = if extent.direction == crate::Direction::Negative { -d } else { d };
+                let regions = tapered_sheet_regions(&ss, profiles.as_ref(), curves)?;
+                let mut notes = Vec::new();
+                let corners = regions
+                    .iter()
+                    .map(|r| match extent.corner {
+                        Some(c) => Ok(c),
+                        None => draft_corner_for(&ss, r, reach.abs(), taper, &mut notes),
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                for note in notes {
+                    append_warning(warning, note);
+                }
+                let body = kernel::extrude_sheet_tapered(&ss.plane, &regions, &corners, off, off + reach, taper)?;
+                let chains: Vec<Vec<Seg2>> = regions.into_iter().flat_map(|r| std::iter::once(r.outer).chain(r.holes)).map(|lp| lp.segs).collect();
+                push_sheet(st, f, crate::lineage::ChainRoles { sketch: &ss, chains: &chains }.tool(body));
+                return Ok(());
+            }
             let chains = sheet_chains(&ss, profiles.as_ref(), curves)?;
             let body = match extent.to {
                 Some(to) => sheet_to_object(doc, vals, f, st, &ss, &chains, extent, to.0, off)?,
                 None if *to_next => sheet_to_next(doc, f, st, &ss, &chains, extent, off)?,
                 None => {
                     let d = val(vals, &extent.distance, Kind::Length)?;
-                    let (a, b) = extent_sides(vals, extent, d, extent.direction)?;
+                    let (a, b) = extent_sides(vals, extent, d, extent.direction, None)?;
                     kernel::extrude_sheet(&ss.plane, &chains, a + off, b + off)?
                 }
             };
@@ -738,7 +772,7 @@ fn sheet_to_object(
         if (end - start).abs() < 1e-9 {
             return Err(DocError::Invalid("the To object is where the surface extrude starts".into()));
         }
-        let (a, b) = extent_sides(vals, extent, end - start, crate::Direction::Positive)?;
+        let (a, b) = extent_sides(vals, extent, end - start, crate::Direction::Positive, None)?;
         return Ok(kernel::extrude_sheet(plane, chains, a + start, b + start)?);
     };
     if to_offset.abs() > 1e-9 {
@@ -1092,6 +1126,33 @@ fn sheet_chains(ss: &SolvedSketch, profiles: Option<&ProfileSel>, curves: &[Stri
     Ok(chains)
 }
 
+/// What a tapered surface extrude sweeps: the picked profiles, then each chain of the picked
+/// curves as a profile of its own. A chain that does not close is refused: its wall would have no
+/// inside to lean from.
+fn tapered_sheet_regions(ss: &SolvedSketch, profiles: Option<&ProfileSel>, curves: &[String]) -> Result<Vec<Region2>> {
+    let mut regions: Vec<Region2> = Vec::new();
+    if let Some(sel) = profiles {
+        regions.extend(solidcraft_sketch::merge_regions(&select_profiles(ss, sel)?));
+    }
+    for chain in curve_chains(ss, curves)? {
+        if !chain.first().zip(chain.last()).is_some_and(|(first, last)| chain_ends_meet(first.start(), last.end())) {
+            return Err(DocError::Invalid(
+                "a taper needs a closed profile: the picked curves do not close into a loop (extrude them without a taper, or close them)".into(),
+            ));
+        }
+        regions.push(Region2 { outer: solidcore_record::Loop2 { segs: chain }, holes: Vec::new() });
+    }
+    if regions.is_empty() {
+        return Err(DocError::Invalid("pick the profiles or curves".into()));
+    }
+    Ok(regions)
+}
+
+/// Whether two ends of sketch curves are one point, as [`curve_chains`] joins them.
+fn chain_ends_meet(p: Vec2, q: Vec2) -> bool {
+    p.dist(q) <= 1e-6
+}
+
 /// Most sketch curves one feature chains.
 const MAX_CHAIN_CURVES: usize = 1000;
 /// Stations a blend samples each of its two boundaries at: enough that the boundary it fits is
@@ -1116,7 +1177,7 @@ pub(super) fn curve_chains(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<Vec<
         .filter(|p| !p.is_empty())
         .collect();
     let reversed = |p: Vec<Seg2>| -> Vec<Seg2> { p.iter().rev().map(Seg2::reversed).collect() };
-    let near = |p: Vec2, q: Vec2| p.dist(q) <= 1e-6;
+    let near = chain_ends_meet;
     let mut chains = Vec::new();
     while let Some(mut chain) = pieces.pop_front() {
         while let (Some(head), Some(tail)) = (chain.first().map(Seg2::start), chain.last().map(Seg2::end)) {

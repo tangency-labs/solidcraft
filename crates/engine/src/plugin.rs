@@ -117,6 +117,13 @@ pub struct AppState {
     /// Where `plugin.install` writes and `plugin.list` looks; `None`: the per-user
     /// `plugins` folder ([`crate::recovery::data_dir`]).
     pub plugins_dir: Option<PathBuf>,
+    /// Folders the user allowed linked files to be read from (Preferences, General), set by the host
+    /// and never by a design. A file an importer plugin reads for a link outside the design's own
+    /// folder is read only from one of these.
+    pub link_folders: Vec<PathBuf>,
+    /// Files a caller named to Insert Design in this session: its own choice, so Update Links may
+    /// read them again whatever their folder. Never saved with a design.
+    pub linked_files: BTreeSet<PathBuf>,
     /// The plugin whose run is under way, when it keeps data in designs (`storage@0.1`): the only
     /// one that may change plugin data, and only its own. Set by the host for that run alone.
     pub storage_caller: Option<storage::StorageCaller>,
@@ -323,6 +330,18 @@ fn input_only_command(id: &str) -> bool {
 
 /// Both the manifest and the user must approve a folder for the intended access.
 /// Writers retain the existing requirement that both read and write are approved.
+/// Whether a plugin run's scratch session `computed` changed what [`Session::accept_computed`]
+/// takes into `live`: the design, the sketch being edited, pending moves or what is shown (#22153).
+fn changed_by(live: &Session, computed: &Session) -> bool {
+    !std::sync::Arc::ptr_eq(&live.doc, &computed.doc)
+        || live.active_sketch != computed.active_sketch
+        || live.sketching_view != computed.sketching_view
+        || !computed.sketch_finish_events.is_empty()
+        || computed.edit_start_sequence != 0
+        || live.pending_moves != computed.pending_moves
+        || live.visibility != computed.visibility
+}
+
 fn approved_file_folders(granted: &[FileGrant], requested: &[craft_plugin::FilePermission], write: bool) -> Vec<PathBuf> {
     granted
         .iter()
@@ -445,6 +464,18 @@ pub(super) fn package_hash(manifest: &[u8], component: &[u8]) -> String {
     format!("{:x}", digest.finalize())
 }
 
+/// Who a plugin's storage reads and writes are for during its run: the plugin itself, when it has
+/// the storage capability and says which data format it writes.
+#[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn storage_caller(manifest: &Manifest, rt: &RuntimeManifest) -> Option<storage::StorageCaller> {
+    rt.data_format.filter(|_| manifest.granted_capabilities().iter().any(|c| c.starts_with("storage@"))).map(|data_format| storage::StorageCaller {
+        id: manifest.id.clone(),
+        name: manifest.name.clone(),
+        version: manifest.version.clone(),
+        data_format,
+    })
+}
+
 /// The shared hook path for a dialog worker and plugin.run. Hook code receives a scratch host
 /// with no file or edit grants. Complete calls propagate execution failures; a form retains its
 /// declarative state and shows a quiet note instead.
@@ -486,9 +517,12 @@ fn update_dialog_with_schema(
     }
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
     let result = {
+        // The hook reads the plugin's own data the way its entry does: `storage.get {}` is its own
+        // (#22038). It runs as a read entry, so a write is still refused.
         let mut scratch = session.scratch();
         scratch.plugin_state.user.user_storage_caller =
             package.manifest.granted_capabilities().iter().any(|c| c.starts_with("user-storage@")).then(|| package.manifest.id.clone());
+        scratch.plugin_state.storage_caller = storage_caller(&package.manifest, rt);
         let host = SolidCraftHost {
             session: scratch,
             input_folders: Vec::new(),
@@ -596,15 +630,7 @@ fn run_package(
             package.manifest.granted_capabilities().iter().any(|c| c.starts_with("user-storage@")).then(|| package.manifest.id.clone());
         // Only `doc.info` reads it, and only with `doc`: skip the dirty check for every other run.
         scratch.plugin_state.caller_design = groups.contains("doc").then(|| session.doc_info());
-        scratch.plugin_state.storage_caller = rt
-            .data_format
-            .filter(|_| package.manifest.granted_capabilities().iter().any(|c| c.starts_with("storage@")))
-            .map(|data_format| storage::StorageCaller {
-                id: package.manifest.id.clone(),
-                name: package.manifest.name.clone(),
-                version: package.manifest.version.clone(),
-                data_format,
-            });
+        scratch.plugin_state.storage_caller = storage_caller(&package.manifest, rt);
         let host = SolidCraftHost {
             session: scratch,
             input_folders,
@@ -632,13 +658,7 @@ fn run_package(
         let value = result?;
         session.plugin_state.user.pending_user_settings = host.session.plugin_state.user.pending_user_settings.clone();
         session.plugin_state.panels.clone_from(&host.session.plugin_state.panels);
-        if !std::sync::Arc::ptr_eq(&session.doc, &host.session.doc)
-            || session.active_sketch != host.session.active_sketch
-            || session.sketching_view != host.session.sketching_view
-            || !host.session.sketch_finish_events.is_empty()
-            || host.session.edit_start_sequence != 0
-            || session.pending_moves != host.session.pending_moves
-        {
+        if changed_by(session, &host.session) {
             session.accept_computed(host.session)?;
         } else {
             session.plugin_state.link_changes = host.session.plugin_state.link_changes;
@@ -687,8 +707,8 @@ pub use package::{remove, store_grants, validate_grants};
 
 pub use export::{describe as describe_exporters, export_file, exporter_for, exporters};
 pub use import::{
-    FormatSlot, ImportDialog, Importer, describe as describe_importers, file_facts, format_slots, import_dialog, import_file, importer_for,
-    importers, open_filters,
+    FormatSlot, ImportDialog, ImportedBytes, Importer, ImporterStatus, describe as describe_importers, file_facts, format_slots, import_design_bytes,
+    import_dialog, import_file, importer_for, importer_status, importers, open_filters,
 };
 pub use messages::PluginFailure;
 #[cfg(test)]
@@ -974,13 +994,7 @@ impl PluginHost for SolidCraftHost {
         computed.redo.clear();
         self.session.plugin_state.panels.clone_from(&computed.plugin_state.panels);
         // Session::execute(plugin.run) owns the one outer undo step.
-        if !std::sync::Arc::ptr_eq(&self.session.doc, &computed.doc)
-            || self.session.active_sketch != computed.active_sketch
-            || self.session.sketching_view != computed.sketching_view
-            || !computed.sketch_finish_events.is_empty()
-            || computed.edit_start_sequence != 0
-            || self.session.pending_moves != computed.pending_moves
-        {
+        if changed_by(&self.session, &computed) {
             self.session
                 .accept_computed(computed)
                 .map_err(|error| HostError::InvalidInput { field: "transaction".into(), reason: error.to_string() })?;

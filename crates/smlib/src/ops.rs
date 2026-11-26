@@ -138,6 +138,28 @@ impl Brep {
         r
     }
 
+    /// [`Brep::boolean_tagged`] of operands each either read (`Ok`) or handed over by the caller,
+    /// who never reads it again (`Err`): a handed-over operand is tagged itself rather than a copy
+    /// of it, so the boolean skips that copy, and its result is the one [`Brep::boolean_tagged`]
+    /// gives. While a trace or a failure dump folder needs the operands as they came in, every
+    /// operand is read, as by [`Brep::boolean_tagged`].
+    pub fn boolean_tagged_owned(a: std::result::Result<&Brep, Brep>, b: std::result::Result<&Brep, Brep>, op: BooleanOp) -> Result<Option<Brep>> {
+        if trace::on() || core::dump::dumping() {
+            let a = match &a {
+                Ok(x) => *x,
+                Err(x) => x,
+            };
+            let b = match &b {
+                Ok(x) => *x,
+                Err(x) => x,
+            };
+            return a.boolean_tagged(b, op);
+        }
+        let a = a.map(Brep::core).map_err(|x| x.body);
+        let b = b.map(Brep::core).map_err(|x| x.body);
+        core::boolean::boolean_tagged_owned(a, b, op).map(|r| r.map(Brep::made_core))
+    }
+
     /// The union of `breps` in one call: they are unioned pairwise, level by level, so none takes
     /// part in more than about log2(n) unions. The result is as [`Brep::boolean`]'s; operands
     /// tagged each with its own number ([`Brep::tagged`]) give a result whose [`Brep::history`]
@@ -399,6 +421,15 @@ impl Brep {
         }
         let r = core::merge::merge_faces(self.core(), keep, tolerance).map(Brep::made_core);
         trace::made("merge_faces", &[self], &r, || json!({"keep": trace::picks(self, PickKind::Edge, keep, tolerance)}));
+        r
+    }
+
+    /// Like [`Brep::merge_faces`], keeping the edges at indices `keep` (in SMLib's edge order)
+    /// directly instead of picking them by 3D proximity. Has no [`MAX_POINTS`] cap and avoids the
+    /// quadratic closest-point pick loop when keeping thousands of split-line edges.
+    pub fn merge_faces_keeping_edges(&self, keep: &[usize]) -> Result<Brep> {
+        let r = core::merge::merge_faces_keeping_edges(self.core(), keep).map(Brep::made_core);
+        trace::made("merge_faces_keeping_edges", &[self], &r, || json!({"keep_edges": keep.len()}));
         r
     }
 

@@ -150,7 +150,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("plane_tangent")
         .contract(&PLANE_TANGENT_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("face: ref (cylinder, cone, sphere or torus); at?: [x,y,z] where it touches (default: the face pick); reference?: plane or planar face ref (the plane touches where the face turns towards it: parallel to it, on the side of `at`); angle?: expr (with reference, default 0 deg: turned that far about the face's axis; not on a sphere); name?"),
+        .params("face: ref (any face: a cylinder, cone, sphere or torus, or another curved face such as a loft's, a sweep's or a patch's); at?: [x,y,z] where it touches (the point of the face nearest it; default: the face pick); reference?: plane or planar face ref (on a cylinder, cone, sphere or torus only: the plane touches where the face turns towards it: parallel to it, on the side of `at`); angle?: expr (with reference, default 0 deg: turned that far about the face's axis; not on a sphere); name?"),
     CommandSpec::new("construct.plane.along_path", "Plane Along Path", crate::checked!("construct.plane.along_path", plane_along)).begins_edit()
         .at("SOLID", "CONSTRUCT")
         .icon("plane_along_path")

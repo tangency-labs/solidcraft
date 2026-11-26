@@ -700,6 +700,27 @@ pub(crate) fn decode(
             unplaced.join(", ")
         )));
     }
+    let bad_base: Vec<String> = d
+        .occurrences
+        .iter()
+        .filter(|o| o.base_transform.as_ref().is_some_and(|m| !crate::is_placement(m)))
+        .map(|o| format!("`{}`", o.name))
+        .collect();
+    if !bad_base.is_empty() {
+        return Err(DocError::Invalid(format!(
+            "damaged design: {} an invalid base placement: {}",
+            if bad_base.len() == 1 { "an occurrence has" } else { "occurrences have" },
+            bad_base.join(", ")
+        )));
+    }
+    for j in &d.assembly.joints {
+        if j.base_values.as_ref().is_some_and(|v| v.len() > 64) || j.base_exprs.len() > 64 {
+            return Err(DocError::Invalid(format!("damaged design: joint `{}` has too many base values", j.name)));
+        }
+        if j.base_values.as_ref().is_some_and(|v| v.iter().any(|x| !x.is_finite() || x.abs() > MAX_REAL)) {
+            return Err(DocError::Invalid(format!("damaged design: joint `{}` has an out-of-range base value", j.name)));
+        }
+    }
     if !all_unique(d.features.iter().map(|f| f.id))
         || !all_unique(d.components.iter().map(|c| c.id))
         || !all_unique(d.occurrences.iter().map(|o| o.id))
@@ -742,6 +763,40 @@ pub(crate) fn decode(
             && !crate::is_placement(frame)
         {
             return Err(DocError::Invalid(format!("damaged design: feature `{}` has an invalid profile frame", feature.name)));
+        }
+        if let crate::FeatureKind::CapturePosition { moves, joints } = &feature.kind {
+            if moves.len() > crate::MAX_PLACEMENTS || joints.len() > crate::MAX_PLACEMENTS {
+                return Err(DocError::Invalid(format!("damaged design: feature `{}` has too many captured entries", feature.name)));
+            }
+            for m in moves {
+                if let Some(rot) = &m.rotation
+                    && (!crate::is_placement(rot) || rot[3][..3].iter().any(|v| v.abs() >= 1e-9))
+                {
+                    return Err(DocError::Invalid(format!("damaged design: feature `{}` has an invalid captured rotation", feature.name)));
+                }
+                if let Some(axis) = m.rotate_axis
+                    && axis.iter().any(|v| !v.is_finite())
+                {
+                    return Err(DocError::Invalid(format!("damaged design: feature `{}` has an invalid rotation axis", feature.name)));
+                }
+                if let Some(path) = &m.path
+                    && path.len() > crate::MAX_PLACEMENT_DEPTH + 1
+                {
+                    return Err(DocError::Invalid(format!(
+                        "damaged design: feature `{}` has a placement path deeper than {}",
+                        feature.name,
+                        crate::MAX_PLACEMENT_DEPTH
+                    )));
+                }
+            }
+            for cj in joints {
+                if cj.values.len() > 64 || cj.exprs.len() > 64 {
+                    return Err(DocError::Invalid(format!("damaged design: feature `{}` has too many captured joint values", feature.name)));
+                }
+                if cj.values.iter().any(|v| !v.is_finite() || v.abs() > MAX_REAL) {
+                    return Err(DocError::Invalid(format!("damaged design: feature `{}` has an out-of-range captured joint value", feature.name)));
+                }
+            }
         }
     }
     crate::format_offsets::validate_typed(&d)?;
@@ -1866,6 +1921,7 @@ mod tests {
             corner_relief_shape: shape.map(Into::into),
             corner_relief: size.map(Into::into),
             height_from: None,
+            bend_relief_shape: None,
         };
         let saved = |document: &Document| -> Value { serde_json::from_str(&document.to_json()).unwrap() };
         // A flange that follows the rule saves neither key, and a design of format 23 opens as it was.
@@ -2082,6 +2138,9 @@ mod tests {
                         to_offset: Some("offset + 1 mm".into()),
                         from: Some(crate::FacePick(solidcore_record::Vec3::new(0.0, 0.0, 5.0))),
                         to_body_apart: false,
+                        through_all2: false,
+                        to2: None,
+                        to_offset2: None,
                         from_level: false,
                         picked_placements: Vec::new(),
                         one_sided_direction: None,
@@ -2389,7 +2448,7 @@ mod tests {
         legacy["format"] = Value::from("solidcraft/6");
         let original_table = legacy["configs"].clone();
         let upgraded = read(&legacy.to_string()).unwrap();
-        d.features.iter_mut().for_each(|f| (f.shell_piece_order, f.kernel_piece_order) = (true, true));
+        d.features.iter_mut().for_each(|f| (f.shell_piece_order, f.kernel_piece_order, f.least_face_piece_order) = (true, true, true));
         assert_eq!(upgraded, d, "the identity migration preserves the complete design");
         assert_eq!(serde_json::to_value(&upgraded.configs).unwrap(), original_table);
         assert_eq!(upgraded.format, format_string(FORMAT));
@@ -2448,10 +2507,11 @@ mod tests {
         pieces_in_shell_order(&mut features);
         for f in features.as_array_mut().into_iter().flatten() {
             f["kernel_piece_order"] = Value::Bool(true);
+            f["least_face_piece_order"] = Value::Bool(true);
         }
         let params = legacy["params"].clone();
         let upgraded = read(&legacy.to_string()).unwrap();
-        d.features.iter_mut().for_each(|f| (f.shell_piece_order, f.kernel_piece_order) = (true, true));
+        d.features.iter_mut().for_each(|f| (f.shell_piece_order, f.kernel_piece_order, f.least_face_piece_order) = (true, true, true));
         assert_eq!(upgraded, d);
         let upgraded_json: Value = serde_json::from_str(&upgraded.to_json()).unwrap();
         assert_eq!(upgraded_json["features"], features);
@@ -3051,6 +3111,7 @@ mod tests {
             parent,
             name: format!("{cname}:{k}"),
             transform,
+            base_transform: None,
             grounded: false,
             expressed_moves: Vec::new(),
             bom_type: None,
@@ -3114,7 +3175,17 @@ mod tests {
     }
 
     fn occurrence(id: u64, component: u64, parent: u64, name: String) -> crate::Occurrence {
-        crate::Occurrence { id, component, parent, name, transform: crate::IDENTITY, grounded: false, expressed_moves: Vec::new(), bom_type: None }
+        crate::Occurrence {
+            id,
+            component,
+            parent,
+            name,
+            transform: crate::IDENTITY,
+            base_transform: None,
+            grounded: false,
+            expressed_moves: Vec::new(),
+            bom_type: None,
+        }
     }
 
     /// A small design with components to place while loading. Components share a name or have

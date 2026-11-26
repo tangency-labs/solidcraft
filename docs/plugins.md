@@ -559,6 +559,38 @@ themselves; to show words instead, list the options as `oneOf`, each `{"const": 
 ]}
 ```
 
+### Headings, folding sections, units and help links
+
+A long dialog can be grouped and explained with four annotations. They change only how the dialog
+is drawn: input checks, tool schemas and the values the plugin receives stay the same.
+
+```json
+"input_schema": {"type": "object", "x-solidcraft-field-order": "declared", "x-solidcraft-sections": "collapsible",
+  "properties": {
+    "units": {"type": "string", "enum": ["mm", "in"], "default": "mm", "x-solidcraft-section": "Carcass"},
+    "width": {"type": "number", "title": "Width", "default": 600, "x-solidcraft-unit-from": "units",
+              "x-solidcraft-help": "https://example.com/woodwork/width"},
+    "drawers": {"type": "integer", "title": "Drawers", "default": 2, "x-solidcraft-section": "Drawers"}
+  }}
+```
+
+- `x-solidcraft-section` on a field draws a heading above it, or a divider line when it is `""`.
+  The heading belongs to its field, so it hides when a condition hides that field. Headings follow
+  the dialog's field order, so use them with `"x-solidcraft-field-order": "declared"`.
+- `"x-solidcraft-sections": "collapsible"` on the root lets each heading fold away the fields under
+  it, down to the next heading or divider. Sections start open each time the dialog
+  opens. Folded fields keep their values and are still sent. A folded field with an error is
+  still drawn.
+- `x-solidcraft-unit-from` on a number field names a string choice in the same schema. The
+  choice's current value (for example `mm` or `in`) is drawn after the number instead of `unit`.
+- `x-solidcraft-help` on a field adds a "More about this field" link under it, opening the page
+  in the browser. It must be an https URL with a domain name (not an IP address), and nothing opens
+  until the link is clicked.
+
+The manifest is refused when a heading is not text or is longer than 80 characters, when
+`x-solidcraft-sections` is anything but `"collapsible"`, when `x-solidcraft-unit-from` is not on a
+number field naming another field that is a string choice, or when a help link is not an https URL with a domain name.
+
 ### Font fields
 
 Mark a string property with `"x-solidcraft-font": true` to offer installed font families in the
@@ -871,8 +903,9 @@ at most 1024 bytes of printable text; input and reply are at most 1 MiB each.
 
 Declarative conditions run first, then the validated patch, then the same input check used by
 programmatic calls. The hook never edits: it runs as a read entry, with no edit command or file
-write grants, in a fresh sandbox. Its independent budgets are at most 10,000,000 fuel, 16 MiB
-memory and 250 ms, further capped by the entry's approved runtime limits and host ceilings.
+write grants, in a fresh sandbox. It reads the design with the read commands (`component.list`
+maps bodies to components) and the plugin's own data with `storage.get {}`. Its independent
+budgets are at most 10,000,000 fuel, 16 MiB memory and 250 ms, further capped by the entry's approved runtime limits and host ceilings.
 Compilation and execution happen on the command worker, outside the window thread.
 
 The dialog debounces changes for 120 ms. It remains interactive while waiting and drops replies
@@ -1056,10 +1089,12 @@ A command entry that takes a while, such as computing a toolpath, declares `"job
 "entries": [{"name": "pocket", "job": true, "input_schema": {"type": "object", "properties": {}}}]
 ```
 
-- **Time.** A job runs for up to ten minutes, a fixed limit. The runtime's
-  `deadline_ms` (at most 30 seconds) still applies to the plugin's other entries. Fuel and memory
-  limits are the same as for any entry. Each job has a limit of 1,048,576 host calls, including
-  progress reports.
+- **Time.** A job runs for up to ten minutes, a fixed limit. Like every entry's deadline, the ten
+  minutes count only the time the plugin's own code runs, not the time the app spends answering
+  its host calls. The runtime's `deadline_ms` (at most 30 seconds unless a user raises it in
+  Preferences > Plugins) still applies to the plugin's other entries. Fuel and memory limits are
+  the same as for any entry. Each job has at least 1,048,576 host calls, including progress
+  reports; a `host_calls` the plugin asks for above that, within the user's ceiling, is honoured.
 - **Where it shows.** Every plugin run started from its dialog or by an agent runs on a worker and
   is a row in the operations panel at the bottom right of the view, named for the plugin and the
   entry ("Gears: Pocket"). The step the plugin reports with `control.progress(fraction, message)`
@@ -1440,7 +1475,8 @@ values always take precedence. Automated imports therefore do not depend on earl
   it, returning the command's JSON reply (or `{"error": "..."}` when the command fails). Staging
   again starts a new design; `evaluate.reset` discards it, and nothing outlives the import. The
   session reads no files, not even fonts or linked designs, and runs no command that writes; its
-  time counts against the import's deadline, and Cancel stops the import between commands. A
+  native evaluation time does not count against the guest compute deadline. Cancel stops the
+  import between commands. A
   design the app can't open, a command outside the list or a reply over 1 MiB is an error for that
   call only, so the importer can report its history as unchecked instead of failing.
 - **Failures.** A failure fails that one import, named with the plugin and the file ("Sample
@@ -1467,7 +1503,8 @@ values always take precedence. Automated imports therefore do not depend on earl
   compiles it again on one background thread; later files use its faster code, and it is what goes
   into the cache, so the next session loads it at once. Nothing waits for it. Fuel, memory, the
   deadline and Cancel hold the same under both compilers.
-- **Limits.** An importer's component may be up to 64 MiB, its deadline up to 10 minutes, and its
+- **Limits.** An importer's component may be up to 64 MiB, its guest compute deadline up to
+  10 minutes under default host policy (or more with a raised `max_deadline_ms`), and its
   `stack_kib` up to 64 MiB (a command may ask for at most 1 MiB). Its fuel and memory must fit the user's default limits in Preferences › Plugins
   unless the user approved more for this exact package at install. Build it for `wasm32-unknown-unknown` and wrap it with
   `wasm-tools component new`: the host links no WASI, so a component that imports any is refused.
@@ -1527,13 +1564,15 @@ message catalog (`plugin_error.*`) in the window's language; the command line an
 | `invalid-input` from the plugin | Sample could not open broken.smp: (its reason) |
 | More memory than plugins may use | Sample could not open big.smp: it asks for 2048 MiB of memory, and plugins may use 128 MiB. Install the plugin again and allow its memory request, or raise Max plugin memory (MiB) in Preferences › Plugins (in solidcraft-cli, max_memory_mib in the --plugin-limits file). |
 | More fuel than plugins may use | ... it asks for N fuel, and plugins may use M. Install the plugin again and allow its fuel request, or raise Max plugin fuel in Preferences › Plugins (in solidcraft-cli, max_fuel in the --plugin-limits file). |
-| It ran out of fuel, memory, stack or time | ... it used all N fuel it asks for and was stopped. Ask its author to raise its fuel limit. (memory in MiB, stack in KiB, time in seconds) |
+| More command host calls than plugins may use | ... it asks for N host calls, and plugins may use M. Raise Max plugin host calls in Preferences › Plugins (in solidcraft-cli, max_host_calls in the --plugin-limits file). |
+| More guest compute time than plugins may use | ... it asks for N ms of guest time, and plugins may use M ms. Raise Max plugin guest time (ms) in Preferences › Plugins (in solidcraft-cli, max_deadline_ms in the --plugin-limits file). |
+| It ran out of fuel, memory, host calls, stack or guest compute time | ... it used all N fuel it asks for and was stopped. Ask its author to raise its fuel limit. (memory in MiB, host calls as a count, stack in KiB, time in seconds) |
 | Its design is over 256 MiB | ... the design it made is larger than 256 MiB, the most a plugin can hand over. |
 | A trap | ... it stopped on an error inside the plugin (details). Report this to its author. |
 
 `plugin.inspect` words `limits_error` the same way. The structured kinds are `unsupported`
-(`reason`), `over_ceiling` (`limit` is `fuel` or `memory_mib`, with `requested` and `allowed`) and
-`exhausted` (`limit` is `fuel`, `memory_mib`, `stack_kib`, `deadline_ms` or `design_mib`, with
+(`reason`), `over_ceiling` (`limit` is `fuel`, `memory_mib`, `host_calls` or `deadline_ms`, with `requested` and `allowed`) and
+`exhausted` (`limit` is `fuel`, `memory_mib`, `host_calls`, `stack_kib`, `deadline_ms` or `design_mib`, with
 `allowed`). The engine's own numbers for a stopped run (fuel used and left) go to the debug log.
 
 ## Plugin data in a design

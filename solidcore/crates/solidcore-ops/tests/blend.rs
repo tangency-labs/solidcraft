@@ -25,6 +25,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::Kernel;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::{edge_closest_point, face_bounding_box};
+use solidcore::surface::ball_patch::{BallPatch, ON_SPHERE_REL_TOL};
 use solidcore::surface::procedural_blend::{BlendRef, ProceduralBlend};
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::topology::api_files::write_brep_to_file;
@@ -46,6 +47,121 @@ use solidcore_ops::{
 /// The block's top front edge, 30 long, between the top (z = 10) and the front (y = 0).
 fn top_front(b: &Body) -> usize {
     edge_at(b, [15.0, 0.0, 10.0])
+}
+
+#[test]
+fn unequal_upright_and_bottom_rounds_close_all_four_corners() {
+    use solidcore_ops::continuity::ContinuityTolerances;
+    use solidcore_ops::PointClass::{Inside, Outside};
+    use solidcore_record::brep::Surface;
+
+    all_fixes();
+    let picks = [
+        ([25.0, 0.0, 0.0], 0.5),
+        ([50.0, 25.0, 0.0], 0.5),
+        ([25.0, 50.0, 0.0], 0.5),
+        ([0.0, 25.0, 0.0], 0.5),
+        ([0.0, 0.0, 7.5], 2.0),
+        ([0.0, 50.0, 7.5], 2.0),
+        ([50.0, 0.0, 7.5], 2.0),
+        ([50.0, 50.0, 7.5], 2.0),
+    ];
+    let round = |picks: &[([f64; 3], f64)]| {
+        let body = make_box([0.0; 3], [50.0, 50.0, 15.0]).unwrap();
+        let (edges, radii): (Vec<_>, Vec<_>) = picks
+            .iter()
+            .map(|&(point, radius)| (edge_at(&body, point), radius))
+            .unzip();
+        blend(&body, Blend::Round, &edges, &radii, &[], Corners::Filled).unwrap();
+        body.check_solid().unwrap();
+        assert!(body.check(CheckLevel::All).unwrap().is_valid());
+        // The diagonal of an R2 upright crosses at 2 - sqrt(2) from both walls.
+        let upright = 2.0 - 2.0_f64.sqrt();
+        for (x, y) in [(0.0, 0.0), (0.0, 50.0), (50.0, 0.0), (50.0, 50.0)] {
+            let inward = |d: f64| [(x - d).abs(), (y - d).abs(), 7.5];
+            assert_eq!(
+                body.classify_point(inward(upright - 0.001)).unwrap(),
+                Outside
+            );
+            assert_eq!(
+                body.classify_point(inward(upright + 0.001)).unwrap(),
+                Inside
+            );
+        }
+        // Away from the corner, the R0.5 rim crosses at 0.5 - 0.5 / sqrt(2).
+        let rim = 0.5 - 0.5 / 2.0_f64.sqrt();
+        for (d, side) in [(rim - 0.001, Outside), (rim + 0.001, Inside)] {
+            for point in [
+                [25.0, d, d],
+                [25.0, 50.0 - d, d],
+                [d, 25.0, d],
+                [50.0 - d, 25.0, d],
+            ] {
+                assert_eq!(body.classify_point(point).unwrap(), side);
+            }
+        }
+        let (record, order) = body.to_record().unwrap();
+        let patches: Vec<_> = record
+            .faces
+            .iter()
+            .map(|face| {
+                matches!(
+                    face.surface,
+                    Surface::Spline { .. } | Surface::RationalSpline { .. }
+                )
+            })
+            .collect();
+        // Each of four three-round corners has three outer and three inner fill patches.
+        assert_eq!(patches.iter().filter(|&&is_patch| is_patch).count(), 4 * 6);
+        let seams: Vec<_> = record
+            .edges
+            .iter()
+            .enumerate()
+            .filter_map(|(index, edge)| {
+                edge.uses
+                    .iter()
+                    .any(|u| patches[u.face as usize])
+                    .then_some(index)
+            })
+            .collect();
+        // Nine seams are between patches. Nine meet the rounds or the three support planes.
+        assert_eq!(seams.len(), 4 * 18);
+        let vertices: std::collections::BTreeSet<_> = seams
+            .iter()
+            .flat_map(|&edge| record.edges[edge].vertices)
+            .collect();
+        // Each set of six patches is a disk, so V = E - F + 1.
+        assert_eq!(vertices.len(), 4 * (18 - 6 + 1));
+        let report = body
+            .continuity_report(
+                &order,
+                &seams,
+                9,
+                ContinuityTolerances {
+                    gap_mm: 1e-3,
+                    angle_rad: 1.0_f64.to_radians(),
+                    curvature_per_mm: 0.0,
+                    curvature_change_per_mm2: 0.0,
+                    curvature_change_rate_per_mm3: 0.0,
+                },
+            )
+            .unwrap();
+        assert!(report.unmeasured.is_empty(), "{:?}", report.unmeasured);
+        assert_eq!(report.seams.len(), seams.len());
+        for seam in report.seams {
+            assert_eq!(seam.stations.len(), 9, "edge {}", seam.edge);
+            assert!(
+                seam.order_at_stations.is_some_and(|order| order >= 1),
+                "{seam:?}"
+            );
+        }
+        body.volume(1e-10).unwrap()
+    };
+    let forward = round(&picks);
+    let mut reversed = picks;
+    reversed.reverse();
+    let backward = round(&reversed);
+    assert!(rel(forward, backward) < 1e-9, "{forward} vs {backward}");
 }
 
 /// Closed forms recorded in
@@ -1911,6 +2027,9 @@ fn a_records_procedural_blend_is_certified_once_on_a_kernel() {
 /// numerically (SolidCraft's `variable_radius_with_a_corner_through_a_middle_point` for the
 /// peak, the fork's capi cases for the others, as `wr685_law_corners` holds them), to that
 /// test's 1e-4 relative; each keeps the law's radius at its start and is one sound body.
+/// Each case runs on the box as made and on the box read back from its record, as SolidCraft
+/// hands its bodies to the kernel (#22021): there the pieces' nets lie near their definitions
+/// but not on them, and a dip's zone is still the corner ball's sphere.
 #[test]
 fn a_variable_round_with_a_corner_in_its_law_is_its_balls_union() {
     // box size, the edge's middle, its start, the start's rail ends, knots, radii, removed, faces
@@ -1927,7 +2046,7 @@ fn a_variable_round_with_a_corner_in_its_law_is_its_balls_union() {
     all_fixes();
     let peak = [0.0, 0.0, 0.5, 1.0, 1.0];
     let dip_then_peak = [0.0, 0.0, 0.25, 0.75, 1.0, 1.0];
-    let cases: [Case<'_>; 4] = [
+    let cases: [Case<'_>; 5] = [
         // 2 -> 4 -> 2 on the 10 x 20 x 30 box's top edge x = 10, z = 30, from y = 0
         (
             [10.0, 20.0, 30.0],
@@ -1945,6 +2064,18 @@ fn a_variable_round_with_a_corner_in_its_law_is_its_balls_union() {
             [10.0, 20.0, 20.0],
             [0.0, 20.0, 20.0],
             [[0.0, 16.0, 20.0], [0.0, 20.0, 16.0]],
+            &peak,
+            &[4.0, 2.0, 4.0],
+            39.542073,
+            9,
+        ),
+        // the same law on the cube's upright edge x = 20, y = 0, from z = 0 (#22021): the
+        // edge above turned onto it by the cube's symmetry
+        (
+            [20.0; 3],
+            [20.0, 0.0, 10.0],
+            [20.0, 0.0, 0.0],
+            [[16.0, 0.0, 0.0], [20.0, 4.0, 0.0]],
             &peak,
             &[4.0, 2.0, 4.0],
             39.542073,
@@ -1972,21 +2103,53 @@ fn a_variable_round_with_a_corner_in_its_law_is_its_balls_union() {
             10,
         ),
     ];
-    for (size, middle, from, rails, knots, radii, want, faces) in cases {
-        let b = make_box([0.0; 3], size).unwrap();
+    let runs = cases
+        .into_iter()
+        .flat_map(|case| [(case, false), (case, true)]);
+    for ((size, middle, from, rails, knots, radii, want, faces), read_back) in runs {
+        let cube = make_box([0.0; 3], size).unwrap();
+        let b = if read_back {
+            Body::from_record(&cube.to_record().unwrap().0, true)
+                .unwrap()
+                .0
+        } else {
+            cube
+        };
         let e = edge_at(&b, middle);
         let start = vertex_at(&b, from);
-        fillet_variable(&b, e, start, 1, knots, radii).unwrap();
+        fillet_variable(&b, e, start, 1, knots, radii)
+            .unwrap_or_else(|e| panic!("{radii:?} from {from:?}, read back {read_back}: {e:?}"));
         let removed = size[0] * size[1] * size[2] - volume(&b);
-        eprintln!("{radii:?} from {from:?}: removed {removed}, want {want}");
+        eprintln!("{radii:?} from {from:?}, read back {read_back}: removed {removed}, want {want}");
         assert!(
             (removed - want).abs() <= 1e-4 * want,
             "{radii:?} from {from:?}: removed {removed}, want {want}"
         );
         assert_eq!(b.counts().unwrap()[0], faces, "{radii:?} from {from:?}");
-        // the round's end at its start is a section of the law's first radius
+        // the round's end at its start is a section of the law's first radius (read back, the
+        // round's nets lie near its definitions: a vertex there within its own tolerance)
         for p in rails {
-            vertex_at(&b, p);
+            if !read_back {
+                vertex_at(&b, p);
+                continue;
+            }
+            let (_, brep) = kernel_copy(&b);
+            let q = Vec3::new(p[0], p[1], p[2]);
+            let (off, tol) = brep
+                .vertex_list()
+                .iter()
+                .map(|&v| {
+                    use solidcore::topology::vertex::{point, tolerance};
+                    let at = point(&brep, v).unwrap();
+                    (at.distance(q), tolerance(&brep, v).unwrap())
+                })
+                .min_by(|a, b| a.0.total_cmp(&b.0))
+                .unwrap();
+            eprintln!("{radii:?} from {from:?}: rail end {p:?} {off:e} off, tolerance {tol:e}");
+            assert!(
+                off <= tol,
+                "{radii:?} from {from:?}: rail end {p:?} {off:e} off, tolerance {tol:e}"
+            );
         }
         assert!(b.check(CheckLevel::All).unwrap().is_valid());
         // every face the split makes is the round's definition, not a trace of it: each piece
@@ -2021,8 +2184,33 @@ fn a_variable_round_with_a_corner_in_its_law_is_its_balls_union() {
                     });
                     pieces.push(law);
                 }
-                // (the copy keeps the zone's ball patch, not the corner definition beside it)
-                None if surface_kind_name(s) == "ball-patch" => zones += 1,
+                // (the copy keeps the zone's ball patch, not the corner definition beside it):
+                // the ball of one of the law's dips, its net on that ball's sphere
+                None if surface_kind_name(s) == "ball-patch" => {
+                    let SurfaceKind::BallPatch(bp) = s.kind() else {
+                        panic!("{radii:?} from {from:?}: a ball patch named so is one");
+                    };
+                    let (centre, radius) = (bp.centre(), bp.radius());
+                    let dip_ball = (1..radii.len() - 1).any(|i| {
+                        let ball = piece_round.from
+                            + piece_round.along * corners[i]
+                            + piece_round.inward * radii[i];
+                        radii[i] < radii[i - 1]
+                            && radii[i] < radii[i + 1]
+                            && centre.distance(ball) < 1e-6
+                            && (radius - radii[i]).abs() < 1e-6
+                    });
+                    assert!(
+                        dip_ball,
+                        "{radii:?} from {from:?}: a zone on ({centre:?}, {radius})"
+                    );
+                    assert!(
+                        BallPatch::is_on_sphere(bp.net(), centre, radius, ON_SPHERE_REL_TOL)
+                            .unwrap(),
+                        "{radii:?} from {from:?}: a zone's net off its sphere"
+                    );
+                    zones += 1;
+                }
                 _ => panic!("{radii:?} from {from:?}: {:?}", surface_kind_name(s)),
             }
         }
@@ -7579,4 +7767,131 @@ fn open_frustum_end_refusal_names_the_interior_peak_that_fits() {
         None,
         true,
     );
+}
+
+/// A rectangle `2w` by `2h` about the origin extruded `height` with every wall leaning in by
+/// `taper` degrees: a frustum whose top is `2(w - height tan(taper))` by
+/// `2(h - height tan(taper))`.
+fn leaning_block(w: f64, h: f64, taper: f64, height: f64) -> Body {
+    let p = [[-w, -h], [w, -h], [w, h], [-w, h]];
+    let profile: Vec<Curve> = (0..4)
+        .map(|i| {
+            let (a, b) = (p[i], p[(i + 1) % 4]);
+            Curve::Line {
+                start: [a[0], a[1], 0.0],
+                end: [b[0], b[1], 0.0],
+            }
+        })
+        .collect();
+    let draft = taper.to_radians();
+    extrude(
+        &profile,
+        [0.0, 0.0, 1.0],
+        height,
+        draft,
+        DraftCorner::default(),
+        true,
+    )
+    .unwrap()
+}
+
+/// What a round of radius `size` (`round`) or an equal-distance chamfer of `size` takes off
+/// the top end edge of [`leaning_block`], of length `l`, its walls leaning `taper` radians.
+///
+/// In the section square to the edge (the edge at the origin O, the top running off along
+/// u1 = (-1, 0), the end wall down along u2 = (sin taper, -cos taper)) the faces' normals
+/// differ by a = 90 degrees - taper. A round touches both faces t = r tan(a/2) from O, its
+/// centre C r / cos(a/2) from O on the bisector; its section is the kite O T1 C T2 less the
+/// sector C T1 T2 of angle a, whose centroid lies 2 r sin(a/2) / (3 a/2) from C towards O. A
+/// chamfer's section is the triangle O (d u1) (d u2). Each is a section S of area A whose
+/// points lie a depth z (A `z_bar` in all) below the top.
+///
+/// Along the edge the section is cut by the two long walls, which lean out by taper: at
+/// depth z they stand l/2 + z tan(taper) either side of the edge's middle. The cut takes
+/// the integral over S of (l + 2 z tan(taper)), which is A l + 2 tan(taper) A `z_bar`, in
+/// closed form, whatever the ends' slant (the walls are planes, and S lies inside them).
+fn leaning_end_cut(round: bool, size: f64, l: f64, taper: f64) -> f64 {
+    let a = std::f64::consts::FRAC_PI_2 - taper;
+    let (u1, u2) = ([-1.0, 0.0], [taper.sin(), -taper.cos()]);
+    // area and first moment of depth of a triangle
+    let triangle = |p: [f64; 2], q: [f64; 2], r: [f64; 2]| {
+        let area = ((q[0] - p[0]) * (r[1] - p[1]) - (r[0] - p[0]) * (q[1] - p[1])).abs() / 2.0;
+        (area, -area * (p[1] + q[1] + r[1]) / 3.0)
+    };
+    let o = [0.0, 0.0];
+    let (area, moment) = if round {
+        let t = size * (a / 2.0).tan();
+        let bisector = [u1[0] + u2[0], u1[1] + u2[1]];
+        let n = bisector[0].hypot(bisector[1]);
+        let b = [bisector[0] / n, bisector[1] / n];
+        let oc = size / (a / 2.0).cos();
+        let c = [oc * b[0], oc * b[1]];
+        let (a1, m1) = triangle(o, [t * u1[0], t * u1[1]], c);
+        let (a2, m2) = triangle(o, [t * u2[0], t * u2[1]], c);
+        let sector = size * size * a / 2.0;
+        let centroid = c[1] - b[1] * 2.0 * size * (a / 2.0).sin() / (3.0 * a / 2.0);
+        (a1 + a2 - sector, m1 + m2 + sector * centroid)
+    } else {
+        let d = size;
+        triangle(o, [d * u1[0], d * u1[1]], [d * u2[0], d * u2[1]])
+    };
+    area * l + 2.0 * taper.tan() * moment
+}
+
+/// #22336: a round or a chamfer on the short end edge of a ridge whose walls lean out below
+/// it. The round's foot on the end wall lies below the edge, where the long walls stand
+/// farther apart, so the round runs past each end of the edge by
+/// r tan((90 degrees - taper) / 2) sin(taper) (a chamfer d sin(taper)) before the long walls
+/// trim it. The fillet surface and the faces it is traced on were continued past the edge by
+/// a multiple of the edge's length (twice it after the rail-end retries), so a blend that
+/// reaches farther than twice the edge's length failed with "failure to calculate
+/// intersection of fillet surface with side face". Each row of the issue's table, just under
+/// and above its old cutoff and at 1.5 times it, and the issue's own r 14 and d 6 (with the
+/// r 13.5 and d 5.6 that built before), give the frustum less [`leaning_end_cut`]: seven
+/// faces, fifteen edges and ten vertices, valid.
+#[test]
+fn a_short_ridge_end_rounds_and_chamfers_past_twice_its_length() {
+    all_fixes();
+    // (half width, half depth, taper in degrees, height, the round's old cutoff)
+    let rows = [
+        (30.0_f64, 21.0_f64, 45.0_f64, 20.0_f64, 13.6569_f64),
+        (30.0, 22.0, 45.0, 20.0, 27.3137),
+        (31.0, 17.5, 34.0, 25.0, 8.5735),
+        (31.0, 17.5, 33.5, 25.0, 12.852),
+        (31.0, 17.5, 34.3, 25.0, 5.9939),
+    ];
+    let mut cases = vec![
+        (rows[0], true, 13.5),
+        (rows[0], true, 14.0),
+        (rows[0], false, 5.6),
+        (rows[0], false, 6.0),
+    ];
+    for row in rows {
+        let (_, h, taper, height, cutoff) = row;
+        let l = 2.0 * (h - height * taper.to_radians().tan());
+        // a chamfer's old cutoff: d sin(taper) = 2 l
+        let chamfer_cutoff = 2.0 * l / taper.to_radians().sin();
+        for f in [0.95, 1.05, 1.5] {
+            cases.push((row, true, f * cutoff));
+            cases.push((row, false, f * chamfer_cutoff));
+        }
+    }
+    for ((w, h, taper, height, _), round, size) in cases {
+        let lean = taper.to_radians();
+        let (top_w, top_h) = (w - height * lean.tan(), h - height * lean.tan());
+        // the prismatoid: h/6 (bottom + top + 4 middle)
+        let middle = (w + top_w) * (h + top_h);
+        let frustum = height / 6.0 * (4.0 * w * h + 4.0 * top_w * top_h + 4.0 * middle);
+        let body = leaning_block(w, h, taper, height);
+        let edge = edge_at(&body, [top_w, 0.0, height]);
+        let kind = if round { Blend::Round } else { Blend::Chamfer };
+        let case = format!("{w} x {h}, taper {taper}, {kind:?} {size}");
+        blend(&body, kind, &[edge], &[size], &[], Corners::Filled)
+            .unwrap_or_else(|e| panic!("{case}: {e:?}"));
+        assert!(body.check(CheckLevel::All).unwrap().is_valid(), "{case}");
+        assert_eq!(body.counts().unwrap(), [7, 15, 10], "{case}");
+        let expected = frustum - leaning_end_cut(round, size, 2.0 * top_h, lean);
+        let v = volume(&body);
+        assert!(rel(v, expected) < 1e-9, "{case}: {v} {expected}");
+    }
 }
