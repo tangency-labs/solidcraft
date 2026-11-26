@@ -217,3 +217,36 @@ fn positioned_shared_buttons_center_text_and_respect_disabled_clicks_in_both_the
     }
     solidcraft_theme::set_dark(previous);
 }
+
+/// A ghost button has no frame until the pointer is over it: its explicit fill and stroke used to
+/// override `frame(false)` and draw a bordered box at rest (#22395).
+#[test]
+fn a_ghost_button_has_no_frame_at_rest_and_highlights_on_hover() {
+    use egui::{Event, Pos2, RawInput, Rect, Shape, vec2};
+    let ctx = crate::test_support::context();
+    solidcraft_theme::apply(&ctx);
+    let rect = Rect::from_min_size(egui::pos2(40.0, 40.0), vec2(24.0, 24.0));
+    let frames = |events: Vec<Event>| {
+        let mut output =
+            ctx.run_ui(RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(200.0, 120.0))), events, ..Default::default() }, |ui| {
+                button_at(ui, "ghost", rect, "…", Button::Ghost);
+            });
+        output.textures_delta.clear();
+        output
+            .shapes
+            .iter()
+            .filter(|clipped| match &clipped.shape {
+                Shape::Rect(frame) => frame.rect.intersects(rect) && (frame.fill.a() > 0 || frame.stroke.width > 0.0 && frame.stroke.color.a() > 0),
+                _ => false,
+            })
+            .count()
+    };
+    for _ in 0..2 {
+        assert_eq!(frames(vec![Event::PointerMoved(egui::pos2(180.0, 100.0))]), 0, "a ghost button at rest draws no frame");
+    }
+    let mut hovered = 0;
+    for _ in 0..2 {
+        hovered = frames(vec![Event::PointerMoved(rect.center())]);
+    }
+    assert!(hovered > 0, "a hovered ghost button still highlights");
+}
