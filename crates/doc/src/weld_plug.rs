@@ -101,15 +101,22 @@ pub enum PlugFace {
     Convex {
         /// The rise in the middle above the flush face.
         height: f64,
-        /// The dome's meridian.
-        shape: DomeShape,
+        /// The dome's meridian; `None`: spherical on a round hole, elliptical on any other (Q126).
+        shape: Option<DomeShape>,
     },
-    /// Dished by `depth` in the middle (the dome's elliptical shape, turned down).
+    /// Dished by `depth` in the middle: the dome turned down.
     Concave {
         /// The dip in the middle below the flush face.
         depth: f64,
+        /// The dish's meridian; `None`: spherical on a round hole, elliptical on any other (Q126).
+        shape: Option<DomeShape>,
     },
 }
+
+/// The convex height or concave depth a weld tool proposes when the user has used none before
+/// (Q126; the last one used is the tool's to keep). No standard gives a plug weld's crown: ISO 5817
+/// only caps excess weld metal (level B: 1 mm + 0.1 b, at most 5 mm).
+pub const PROPOSED_CROWN: f64 = 1.0;
 
 /// How deep the weld fills the hole.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -186,7 +193,7 @@ pub fn plug_weld(top: (&Body, &Order), below: (&Body, &Order), wall: usize, styl
     let sizes_ok = match style.face {
         PlugFace::Flush => true,
         PlugFace::Convex { height, .. } => positive(height),
-        PlugFace::Concave { depth } => positive(depth),
+        PlugFace::Concave { depth, .. } => positive(depth),
     } && match style.fill {
         PlugFill::Full => true,
         PlugFill::Partial { depth } => positive(depth),
@@ -236,10 +243,10 @@ pub fn plug_weld(top: (&Body, &Order), below: (&Body, &Order), wall: usize, styl
         PlugFace::Convex { height, shape } => {
             let (_, fo) = fill.to_record()?;
             let face = square_face_at(&fill, &fo, hole.up, hole.at, level)?.ok_or(PlugRefusal::NoTopFace)?;
-            dome(&fill, &fo, face, height, shape, false)?
+            domed(&fill, &fo, face, height, shape)?
         }
-        PlugFace::Concave { depth } if depth >= level => return Err(PlugRefusal::TooDeep { max: level }),
-        PlugFace::Concave { depth } => {
+        PlugFace::Concave { depth, .. } if depth >= level => return Err(PlugRefusal::TooDeep { max: level }),
+        PlugFace::Concave { depth, shape } => {
             // a prism of the weld's top outline, its lower face domed down, taken out of the fill
             let (record, fo) = fill.to_record()?;
             let face = square_face_at(&fill, &fo, hole.up, hole.at, level)?.ok_or(PlugRefusal::NoTopFace)?;
@@ -247,7 +254,7 @@ pub fn plug_weld(top: (&Body, &Order), below: (&Body, &Order), wall: usize, styl
             let tool = sweep::extrude(&curves(&record, &outline)?, hole.up, thickness, 0.0, DraftCorner::Curvature, true)?;
             let (_, too) = tool.to_record()?;
             let low = square_face_at(&tool, &too, hole.up, hole.at, level)?.ok_or(PlugRefusal::NoTopFace)?;
-            let dished = dome(&tool, &too, low, depth, DomeShape::Elliptical, false)?;
+            let dished = domed(&tool, &too, low, depth, shape)?;
             boolean(fill, dished, BooleanOp::Subtract)?.ok_or(PlugRefusal::NotClosed)?
         }
     };
@@ -371,6 +378,20 @@ fn floor_under(t: &Copied, b: &Copied, hole: &Hole, tol: f64) -> Result<f64> {
         }
     }
     Ok(gap)
+}
+
+/// The dome of `height` on record face `face` of `body` in `shape`; with none, spherical where the
+/// face is a circle (the dome itself says when it is not) and elliptical otherwise.
+fn domed(body: &Body, order: &Order, face: usize, height: f64, shape: Option<DomeShape>) -> Result<Body> {
+    let Some(shape) = shape else {
+        return match dome(body, order, face, height, DomeShape::Spherical, false) {
+            Err(solidcraft_kernel::services::Error::Dome(DomeRefusal::SphericalNeedsCircle)) => {
+                Ok(dome(body, order, face, height, DomeShape::Elliptical, false)?)
+            }
+            r => Ok(r?),
+        };
+    };
+    Ok(dome(body, order, face, height, shape, false)?)
 }
 
 /// The face of `body` square to `up` at `level` above `at`.

@@ -119,15 +119,24 @@ fn a_countersunk_and_a_counterbored_hole_are_filled_by_their_walls() {
 fn convex_and_concave_faces_add_and_take_the_dome() {
     let (top, below) = (upper(0.0, vec![round_hole()]), lower(60.0));
     let h = 1.5;
-    let sphere = PlugStyle { face: PlugFace::Convex { height: h, shape: DomeShape::Spherical }, ..PlugStyle::default() };
-    close(volume(&weld(&top, &below, IN, X, sphere).unwrap()), ROUND * T + PI * h * (3.0 * 36.0 + h * h) / 6.0);
-    let dish = PlugStyle { face: PlugFace::Concave { depth: h }, ..PlugStyle::default() };
-    close(volume(&weld(&top, &below, IN, X, dish).unwrap()), ROUND * T - 2.0 / 3.0 * ROUND * h);
+    let cap = PI * h * (3.0 * 36.0 + h * h) / 6.0;
+    // no shape given: spherical on a round hole (Q126), the same as asking for it
+    for shape in [None, Some(DomeShape::Spherical)] {
+        let sphere = PlugStyle { face: PlugFace::Convex { height: h, shape }, ..PlugStyle::default() };
+        close(volume(&weld(&top, &below, IN, X, sphere).unwrap()), ROUND * T + cap);
+    }
+    let dish = PlugStyle { face: PlugFace::Concave { depth: h, shape: None }, ..PlugStyle::default() };
+    close(volume(&weld(&top, &below, IN, X, dish).unwrap()), ROUND * T - cap);
+    let ellipse = PlugStyle { face: PlugFace::Concave { depth: h, shape: Some(DomeShape::Elliptical) }, ..PlugStyle::default() };
+    close(volume(&weld(&top, &below, IN, X, ellipse).unwrap()), ROUND * T - 2.0 / 3.0 * ROUND * h);
     // any star-shaped outline: (2/3) A h on the slot
     let area = 28.0 * 12.0 + ROUND;
     let slot = upper(0.0, vec![stadium(40.0, 12.0)]);
-    let ellipse = PlugStyle { face: PlugFace::Convex { height: h, shape: DomeShape::Elliptical }, ..PlugStyle::default() };
-    close(volume(&weld(&slot, &below, IN, X, ellipse).unwrap()), area * T + 2.0 / 3.0 * area * h);
+    // no shape given: elliptical on any outline that is not a circle (Q126)
+    for shape in [None, Some(DomeShape::Elliptical)] {
+        let ellipse = PlugStyle { face: PlugFace::Convex { height: h, shape }, ..PlugStyle::default() };
+        close(volume(&weld(&slot, &below, IN, X, ellipse).unwrap()), area * T + 2.0 / 3.0 * area * h);
+    }
 }
 
 #[test]
@@ -138,7 +147,7 @@ fn an_l_shaped_slot_fills_flush_but_takes_no_dome() {
     let (top, below) = (upper(0.0, vec![prism(&outline, T + 2.0)]), lower(60.0));
     let at = [3.0, 3.0, 4.0];
     close(volume(&weld(&top, &below, at, X, PlugStyle::default()).unwrap()), (20.0 * 6.0 + 6.0 * 14.0) * T);
-    let convex = PlugStyle { face: PlugFace::Convex { height: 1.0, shape: DomeShape::Elliptical }, ..PlugStyle::default() };
+    let convex = PlugStyle { face: PlugFace::Convex { height: PROPOSED_CROWN, shape: None }, ..PlugStyle::default() };
     assert!(matches!(weld(&top, &below, at, X, convex), Err(PlugRefusal::Dome(DomeRefusal::NotStar))));
 }
 
@@ -169,7 +178,7 @@ fn a_slot_open_at_the_part_s_edge_and_depths_past_the_top_are_refused() {
     let top = upper(0.0, vec![round_hole()]);
     let deep = PlugStyle { fill: PlugFill::Partial { depth: T }, ..PlugStyle::default() };
     assert_eq!(weld(&top, &below, IN, X, deep).unwrap_err(), PlugRefusal::TooDeep { max: T });
-    let dish = PlugStyle { face: PlugFace::Concave { depth: T }, ..PlugStyle::default() };
+    let dish = PlugStyle { face: PlugFace::Concave { depth: T, shape: None }, ..PlugStyle::default() };
     assert!(matches!(weld(&top, &below, IN, X, dish), Err(PlugRefusal::TooDeep { .. })));
     let bad = PlugStyle { fill: PlugFill::Partial { depth: f64::NAN }, ..PlugStyle::default() };
     assert!(matches!(weld(&top, &below, IN, X, bad), Err(PlugRefusal::Invalid(_))));
