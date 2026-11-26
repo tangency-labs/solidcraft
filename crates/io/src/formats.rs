@@ -176,6 +176,14 @@ const KICAD_IMPORT: &[OptionSpec] = &[
         kind: OptionKind::Choice { choices: &[("none", "None"), ("overlay", "Overlay on the board"), ("mesh", "Modeled")], default: 1 },
     },
     OptionSpec { param: "silkscreen", label: "Include silkscreen", kind: OptionKind::Bool { default: true } },
+    OptionSpec {
+        param: "holes",
+        label: "Holes",
+        kind: OptionKind::Choice {
+            choices: &[("none", "None"), ("mounting", "Mounting holes"), ("pads", "Mounting and pad holes"), ("all", "All, with vias")],
+            default: 1,
+        },
+    },
     OptionSpec { param: "color", label: "Board color", kind: OptionKind::Color { default: [13, 84, 46] } },
     OptionSpec {
         param: "thickness",
@@ -208,6 +216,7 @@ const URDF_OPTIONS: &[OptionSpec] = &[
         kind: OptionKind::Number { default: 10.0, min: 0.0, max: 1e9, unit: "", from_file: None },
     },
     OptionSpec { param: "images", label: "Pictures as textured visuals", kind: OptionKind::Bool { default: false } },
+    OptionSpec { param: "mimic", label: "Couple motion links", kind: OptionKind::Bool { default: false } },
 ];
 
 const SDF_OPTIONS: &[OptionSpec] = &[
@@ -427,6 +436,14 @@ pub static FORMATS: &[FormatSpec] = &[
         role: Role::Artifact,
         import: None,
         export: Some(ExportSpec { command: "file.export", format: None, options: SDF_OPTIONS, scope: ExportScope::Design, lossless: false }),
+    },
+    FormatSpec {
+        id: "mjcf",
+        label: "MuJoCo model (MJCF)",
+        extensions: &["xml"],
+        role: Role::Artifact,
+        import: None,
+        export: Some(ExportSpec { command: "file.export", format: Some("mjcf"), options: &[], scope: ExportScope::Design, lossless: false }),
     },
     FormatSpec {
         id: "design-json",

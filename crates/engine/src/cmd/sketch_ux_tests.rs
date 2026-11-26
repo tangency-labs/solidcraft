@@ -245,8 +245,9 @@ fn projected_geometry_counts_as_fixed() {
     let id = sk.curves[ci].id.clone();
     assert!(sk.curve_locked(ci));
     let r = run(&mut s, "sketch.constraint.fix", json!({"entity": id}));
-    // Already fixed: the toggle unfixes, which projected geometry ignores.
+    // Already fixed: the toggle unfixes, which projected geometry ignores, and says why.
     assert_eq!(r["result"]["changed"], 0);
+    assert!(r["result"]["note"].as_str().is_some_and(|n| n.contains("Break Link")), "{r}");
     assert!(sketch(&s).curve_locked(ci));
 }
 
@@ -1415,7 +1416,12 @@ fn a_circle_centred_on_a_dragged_end_does_not_set_the_step() {
     run(&mut s, "sketch.constraint.fix", json!({"entities": ["la.start"]}));
     run(&mut s, "sketch.dimension", json!({"entities": ["la"], "value": 20}));
     run(&mut s, "sketch.circle.center", json!({"center": [120, 100], "radius": 0.01}));
-    assert!(sketch(&s).constraints.iter().any(|c| matches!(c.kind, solidcraft_sketch::ConstraintKind::Coincident { .. })));
+    let sk = sketch(&s);
+    assert_eq!(sk.resolve_point("la.end"), sk.resolve_point("c1.center"), "circle centre merges into la.end");
+    assert!(
+        !sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_sketch::ConstraintKind::Coincident { .. })),
+        "shared centre needs no Coincident constraint"
+    );
     let steps = drag_steps(&s, "la.end", [120.0, 100.0], [120.0, 101.0]);
     eprintln!("1 mm drag next to a 0.01 mm circle on the end: {steps} steps");
     assert_eq!(steps, 1);
@@ -2891,7 +2897,7 @@ fn move_points_moves_each_point_to_its_own_target() {
 fn move_points_refuses_a_near_that_two_points_answer() {
     let mut s = new_sketch();
     run(&mut s, "sketch.point", json!({"point": [10, 0]}));
-    run(&mut s, "sketch.point", json!({"point": [10, 0]}));
+    run(&mut s, "sketch.point", json!({"point": [10, 0], "connect": false}));
     let e = s.execute("sketch.move_points", &json!({"moves": [{"near": [10, 0], "to": [12, 0]}]})).unwrap_err().to_string();
     assert!(e.contains("as close"), "{e}");
 }

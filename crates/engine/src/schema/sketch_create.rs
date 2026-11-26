@@ -81,6 +81,15 @@ pub enum ConstructionMethod {
     Bisector,
 }
 
+/// `sketch.crosshairs`: a fixed horizontal and vertical construction line through the sketch's
+/// origin (#22234).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CrosshairsParams {
+    /// The sketch (default: the one being edited).
+    pub sketch: Option<SketchRef>,
+}
+
 /// The curves and constraints created, together with the sketch solve.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ConstructionLineResult {
@@ -160,6 +169,19 @@ fn spline_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error>
         Value::String(s) => Ok(s),
         _ => Err(serde::de::Error::custom("must be a spline id")),
     }
+}
+
+/// Expose an editable control point spline’s polygon as construction segments.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SplineControlPolygonParams {
+    /// The spline's curve id.
+    #[serde(deserialize_with = "spline_id")]
+    pub curve: String,
+    /// The sketch (default: the one being edited).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub sketch: Option<SketchRef>,
 }
 
 /// Give a fit point spline a tangent handle at each fit point, where the curve already runs.
@@ -1229,6 +1251,9 @@ pub struct ControlPointSplineParams {
     /// Make it construction geometry. Default: false.
     #[serde(default)]
     pub construction: Option<bool>,
+    /// Create the spline's selectable construction sides in the same edit. Default: false.
+    #[serde(default)]
+    pub control_polygon: Option<bool>,
     /// The sketch (default: the one being edited).
     #[serde(default)]
     pub sketch: Option<SketchTarget>,
@@ -1505,20 +1530,30 @@ fn text_align_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({"type": "string", "pattern": word_pattern(&["left", "center", "centre", "right"])})
 }
 
-fn text_letter_spacing<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    nullable(d, |v| v.as_f64().and_then(params::finite).map_or_else(|| refuse("`letter_spacing` must be a length in mm"), Ok))
+/// A text's `letter_spacing`: a number of mm, or an expression.
+fn text_letter_spacing<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+    nullable(d, |v| if text_number_form(&v) { Ok(v) } else { refuse("`letter_spacing` must be a length in mm, or an expression") })
 }
 
 fn text_letter_spacing_schema(_: &mut SchemaGenerator) -> Schema {
-    json_schema!({"type": "number", "exclusiveMinimum": -1e9, "exclusiveMaximum": 1e9})
+    json_schema!({"anyOf": [{"type": "number", "exclusiveMinimum": -1e9, "exclusiveMaximum": 1e9}, expression_string()]})
 }
 
-fn text_line_spacing<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    nullable(d, |v| v.as_f64().and_then(params::finite).filter(|s| *s > 0.0).map_or_else(|| refuse("`line_spacing` must be a positive factor"), Ok))
+/// A text's `line_spacing`: a factor above 0, or an expression.
+fn text_line_spacing<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+    nullable(d, |v| {
+        if !text_number_form(&v) {
+            return refuse("`line_spacing` must be a positive factor, or an expression");
+        }
+        match v.as_f64() {
+            Some(s) if s <= 0.0 => refuse("`line_spacing` must be a positive factor"),
+            _ => Ok(v),
+        }
+    })
 }
 
 fn text_line_spacing_schema(_: &mut SchemaGenerator) -> Schema {
-    json_schema!({"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1e9})
+    json_schema!({"anyOf": [{"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1e9}, expression_string()]})
 }
 
 fn text_path<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
@@ -1587,15 +1622,16 @@ pub struct TextKeys {
     #[serde(default, deserialize_with = "text_align", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "text_align_schema")]
     pub align: Option<String>,
-    /// Extra space between letters, in mm. Default: 0. When editing, kept when left out.
+    /// Extra space between letters: a number of mm or an expression. Default: 0. When editing,
+    /// kept when left out.
     #[serde(default, deserialize_with = "text_letter_spacing", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "text_letter_spacing_schema")]
-    pub letter_spacing: Option<f64>,
-    /// The line distance as a multiple of the font's (above 0). Default: 1. When editing, kept
-    /// when left out.
+    pub letter_spacing: Option<Value>,
+    /// The line distance as a multiple of the font's (above 0), or an expression. Default: 1.
+    /// When editing, kept when left out.
     #[serde(default, deserialize_with = "text_line_spacing", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "text_line_spacing_schema")]
-    pub line_spacing: Option<f64>,
+    pub line_spacing: Option<Value>,
     /// A curve id of the sketch the baseline follows; empty: none. `at` and `angle` then do not
     /// place the text, and the curve becomes construction, a guide the letters stand on. When
     /// editing, kept when left out.
@@ -1786,6 +1822,12 @@ pub struct TextExpressions {
     /// The angle.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub angle: Option<String>,
+    /// The letter spacing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub letter_spacing: Option<String>,
+    /// The line spacing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line_spacing: Option<String>,
     /// The words (`text_expression`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
@@ -1836,7 +1878,7 @@ pub struct TextEditsResult {
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum EditTextResult {
-    One(TextResult),
+    One(Box<TextResult>),
     Many(TextEditsResult),
 }
 

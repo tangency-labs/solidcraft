@@ -224,6 +224,18 @@ fn tri_vertex(local: vec3<f32>, n: vec3<f32>, c: u32) -> TOut {
     return o;
 }
 
+/// The bit of a placement's palette word that marks the whole hovered body (`HOVER_FLAG` in
+/// view.rs): never part of a palette index.
+const HOVER_FLAG: u32 = 0x80000000u;
+
+/// A placement's colour: its palette entry's, with the hover tint added (as `hover_color` adds
+/// it) when its word carries `HOVER_FLAG`.
+fn placement_color(word: u32, e: vec2<u32>) -> vec4<f32> {
+    let c = unpack_color(e.x);
+    if ((word & HOVER_FLAG) != 0u) { return vec4<f32>(c.rgb + u.tint.rgb, c.a); }
+    return c;
+}
+
 /// Shared triangles (in their part's own frame) drawn at one placement: the rows of its rigid
 /// move (`r0`..`r2`, a point's coordinates are their dot products with (p, 1)) and its colour,
 /// then moved like the rest of its scene (`placed`: a dragged component's layer).
@@ -235,10 +247,11 @@ fn vs_tri_inst(
     @location(3) r0: vec4<f32>,
     @location(4) r1: vec4<f32>,
     @location(5) r2: vec4<f32>,
-    @location(6) c: u32,
+    @location(6) word: u32,
     @location(9) s: u32,
 ) -> TOut {
     let q = vec4<f32>(p, 1.0);
+    let c = word & ~HOVER_FLAG;
     let e = palette_entry(c);
     let m = placement_motion(s, e);
     let wp = placed_by(m, vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
@@ -246,7 +259,7 @@ fn vs_tri_inst(
     var o: TOut;
     o.pos = face_pushed(u.vp * vec4<f32>(wp, 1.0));
     o.n = turned_by(m, pn);
-    o.c = unpack_color(e.x);
+    o.c = placement_color(word, e);
     o.h = finish_h(c, e.y & 255u);
     o.wp = wp;
     return o;
@@ -271,16 +284,17 @@ fn vs_tri_inst_flat(
     @location(3) r0: vec4<f32>,
     @location(4) r1: vec4<f32>,
     @location(5) r2: vec4<f32>,
-    @location(6) c: u32,
+    @location(6) word: u32,
     @location(9) s: u32,
 ) -> FOut {
     let q = vec4<f32>(p, 1.0);
+    let c = word & ~HOVER_FLAG;
     let e = palette_entry(c);
     let wp = placed_by(placement_motion(s, e), vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
     var o: FOut;
     o.pos = face_pushed(u.vp * vec4<f32>(wp, 1.0));
     o.rp = wp - u.eye.xyz;
-    o.c = unpack_color(e.x);
+    o.c = placement_color(word, e);
     o.h = finish_h(c, e.y & 255u);
     return o;
 }
@@ -528,10 +542,21 @@ fn solid(i: TOut, front: bool) -> vec4<f32> {
     let fw = fwidth(ndv);
     if (clipped(i.wp)) { discard; }
     if (!front && sectioned()) { return cap_color(i); }
-    if (u.ana.x > 0.5 && length(i.n) > 0.5) {
+    // Under surface analysis a selected face shows the selection tint (the one-body highlight's
+    // own pass draws it over the analysis); with every shown body selected, every face does.
+    if (u.ana.x > 0.5 && length(i.n) > 0.5 && u.sel.w < 0.5) {
         return analysis(i, k);
     }
-    let c = lit(i, occlusion(i));
+    // Every shown body is selected: an exact copy of what the highlight pipeline's one-body tint
+    // computes (`fs_hl_selected`: `lit_color(i, 1.0, vec4(u.sel.rgb, i.c.a), false)`), so the two
+    // tints agree instead of merely looking similar. One uniform, no per-body highlight entry.
+    // A branch on a uniform, not `select()`, which would light every fragment twice.
+    var c: vec4<f32>;
+    if (u.sel.w > 0.5) {
+        c = lit_color(i, 1.0, vec4<f32>(u.sel.rgb, i.c.a), false);
+    } else {
+        c = lit(i, occlusion(i));
+    }
     // Silhouettes (styles with edges): where a curved surface turns away from the eye, a line
     // about 1.5 px wide, on the visible surface only (depth-correct).
     if (u.screen.w > 0.5 && length(i.n) > 0.5 && fw > 1e-6) {

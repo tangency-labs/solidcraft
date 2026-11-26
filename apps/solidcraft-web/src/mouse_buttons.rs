@@ -114,6 +114,10 @@ pub struct Tracker {
     right_menu: RightMenu,
     /// Pending confirmation timer id created when a secondary press ended without `contextmenu`.
     pending_menu_check: Option<u64>,
+    /// Shift was held during the current or most recent right-click. Only then may a missing
+    /// `contextmenu` mean the browser took the click (Firefox's Shift+right-click, #20011): a
+    /// plain right-click whose `contextmenu` comes late is still the page's (#21302).
+    right_shift: bool,
 }
 
 /// The most stylus touches waiting for a frame.
@@ -208,6 +212,7 @@ impl Tracker {
                     self.right_click_id = self.right_click_id.wrapping_add(1);
                     self.right_menu = RightMenu::Pressed { id: self.right_click_id };
                     self.pending_menu_check = None;
+                    self.right_shift = false;
                 } else if !secondary && self.secondary_down {
                     self.finish_secondary_press();
                 }
@@ -274,12 +279,26 @@ impl Tracker {
         self.right_menu == RightMenu::AwaitingContextMenu { id }
     }
 
-    /// Mark right-click `id` as taken by the browser if it is still awaiting `contextmenu`.
+    /// Note whether Shift is held, from a pointer event of the current right-click (#21302).
+    pub fn note_shift(&mut self, shift: bool) {
+        if matches!(self.right_menu, RightMenu::Pressed { .. } | RightMenu::AwaitingContextMenu { .. }) {
+            self.right_shift |= shift;
+        }
+    }
+
+    /// Mark right-click `id` as taken by the browser if it is still awaiting `contextmenu` and
+    /// was made with Shift held, the click Firefox takes for itself (#20011). Without Shift the
+    /// browser takes no click, so a `contextmenu` that is only late (a slow frame on a large
+    /// design) leaves the click the page's and its menu open (#21302).
     pub fn confirm_menu_missing(&mut self, id: u64) -> bool {
-        if self.awaiting_menu(id) {
+        if !self.awaiting_menu(id) {
+            return false;
+        }
+        if self.right_shift {
             self.right_menu = RightMenu::Taken;
             true
         } else {
+            self.right_menu = RightMenu::Idle;
             false
         }
     }
@@ -430,7 +449,9 @@ mod web {
                         if source == "pen" && web_sys::MouseEvent::button(e) == 0 && name != "pointermove" {
                             tracker.note_pen(e.pointer_id(), name == "pointerdown", down_on_canvas, at());
                         }
-                        (tracker.note(Happened::Pointer { buttons: e.buttons(), down_on_canvas }), tracker.take_pending_menu_check())
+                        let changed = tracker.note(Happened::Pointer { buttons: e.buttons(), down_on_canvas });
+                        tracker.note_shift(e.shift_key());
+                        (changed, tracker.take_pending_menu_check())
                     };
                     if changed {
                         ctx.request_repaint();
@@ -805,6 +826,7 @@ mod tests {
         let mut t = Tracker::default();
         assert_eq!(t.menu(), BrowserMenu::Offered, "no click yet: the page may open its menu");
         t.note(pointer(0b10, true));
+        t.note_shift(true);
         assert_eq!(t.menu(), BrowserMenu::Offered, "menus stay allowed during press for radial holds and Windows release");
         t.note(pointer(0, false));
         let id = t.take_pending_menu_check().expect("release without contextmenu schedules a post-release check");
@@ -820,6 +842,7 @@ mod tests {
     fn a_move_keeps_the_browser_having_taken_the_click() {
         let mut t = Tracker::default();
         t.note(pointer(0b10, true));
+        t.note_shift(true);
         assert_eq!(t.menu(), BrowserMenu::Offered);
         t.note(pointer(0b10, false));
         assert_eq!(t.menu(), BrowserMenu::Offered, "moving while held keeps menus allowed");
@@ -849,6 +872,7 @@ mod tests {
         // Even once `Taken` is latched, a left press clears it.
         t.note(pointer(0, false));
         t.note(pointer(0b10, true));
+        t.note_shift(true);
         t.note(pointer(0, false));
         let id2 = t.take_pending_menu_check().unwrap();
         assert!(t.confirm_menu_missing(id2));
@@ -895,11 +919,39 @@ mod tests {
         let mut t = Tracker::default();
         t.note(pointer(0b10, true));
         t.note(pointer(0, false));
+        t.note_shift(true);
         let id = t.take_pending_menu_check().unwrap();
         t.note(Happened::Lost);
         assert!(t.confirm_menu_missing(id));
         assert_eq!(t.take_menu(), BrowserMenu::Taken);
         assert_eq!(t.take_menu(), BrowserMenu::Offered);
+    }
+
+    /// #21302: a right-click without Shift is never one the browser took. On a large design a
+    /// slow frame can hold `contextmenu` past the confirmation, and the Browser panel's menu
+    /// then said the browser took the click; the click stays the page's, its menu open.
+    #[test]
+    fn a_late_contextmenu_without_shift_leaves_the_click_the_pages() {
+        let mut t = Tracker::default();
+        t.note(pointer(0b10, true));
+        t.note_shift(false);
+        t.note(pointer(0, false));
+        t.note_shift(false);
+        let id = t.take_pending_menu_check().expect("release schedules confirmation");
+        assert!(!t.confirm_menu_missing(id), "no Shift: the browser took nothing");
+        assert_eq!(t.take_menu(), BrowserMenu::Offered);
+        // Shift from an earlier right-click does not carry over to the next one.
+        t.note(pointer(0b10, true));
+        t.note_shift(true);
+        t.note(pointer(0, false));
+        let id = t.take_pending_menu_check().unwrap();
+        assert!(t.confirm_menu_missing(id));
+        assert_eq!(t.take_menu(), BrowserMenu::Taken);
+        t.note(pointer(0b10, true));
+        t.note(pointer(0, false));
+        let id = t.take_pending_menu_check().unwrap();
+        assert!(!t.confirm_menu_missing(id), "this click had no Shift");
+        assert_eq!(t.menu(), BrowserMenu::Offered);
     }
 
     /// A stale confirmation id from an earlier right-click cannot mark a newer click as taken.

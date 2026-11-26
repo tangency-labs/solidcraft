@@ -154,13 +154,17 @@ pub fn ago_between(now: u64, secs: u64) -> String {
 }
 
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
-    // File view presents the same entries inline, without a second window covering them.
-    if app.home.open || app.recoverable.is_empty() {
+    if app.recoverable.is_empty() {
         app.recovery_discard_all = false;
         return;
     }
+    // Asked from this window or from File view's recovery banner.
     if app.recovery_discard_all {
         confirm_discard_all(app, ctx);
+        return;
+    }
+    // File view presents the same entries inline, without a second window covering them.
+    if app.home.open {
         return;
     }
     let mut act: Option<(Entry, bool)> = None;

@@ -22,5 +22,8 @@
   },
   "zh": {
     "help.frame.trim": "将框架构件修剪或延伸至其他构件、平面面或平面，并可设置焊接间隙。用于在框架中创建对接接头。"
+  },
+  "fr": {
+    "help.frame.trim": "Ajuste ou prolonge les éléments de structure jusqu’à d’autres éléments, des faces planes ou des plans, avec un jeu de soudure facultatif. Utilisez cette fonction pour réaliser des assemblages bout à bout."
   }
 }

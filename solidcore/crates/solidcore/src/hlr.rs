@@ -5,8 +5,8 @@
 //!
 //! Supported: planes, and cylinders, cones, spheres and tori whether stored as analytic records,
 //! rigidly placed revolutions of lines and circles or spline patches (recognised to 1e-9 relative
-//! and then trimmed and intersected in their own chart). Other spline and rigidly placed revolution
-//! faces are freeform:
+//! and then trimmed and intersected in their own chart; a ball corner is its patch on its label's
+//! sphere). Other spline and rigidly placed revolution faces are freeform:
 //! unless [`Options::freeform`] is set they are listed in [`Drawing::unsupported`], their
 //! silhouettes are not drawn and anything they could hide is reported uncertain.
 //!
@@ -335,11 +335,16 @@ pub fn prepare_cancellable(
             return Err(HlrError::Cancelled);
         }
         let mut surface = S3::of_face(f)?;
-        // A flat spline patch is a plane: trimmed and intersected as one.
-        if let Some(plane) = surface.flat(1e-9) {
-            surface = plane;
-        }
-        let analytic = surface.analytic(1e-9);
+        let analytic = match surface::ball_sphere(f)? {
+            Some(sphere) => sphere,
+            None => {
+                // A flat spline patch is a plane: trimmed and intersected as one.
+                if let Some(plane) = surface.flat(1e-9) {
+                    surface = plane;
+                }
+                surface.analytic(1e-9)
+            }
+        };
         // Trim and intersect recognised spline surfaces in their own analytic chart.
         if matches!(surface, S3::Nurbs(_)) {
             let axis = match analytic {
