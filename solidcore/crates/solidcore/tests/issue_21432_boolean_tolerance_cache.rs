@@ -13,6 +13,7 @@ use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
+use solidcore::mass::integrator::properties::brep_volume_default;
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::primitive::api_curves::{create_circle, create_line_segment};
@@ -34,6 +35,7 @@ use solidcore::topology::face::p2 as face2;
 use solidcore::topology::vertexuse as vu1;
 use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId, VertexId, VertexuseId};
 use solidcore::{EntityRef, Kernel};
+use std::f64::consts::PI;
 
 /// A `side` by `side` by 10 plate with an `n` by `n` grid of circular holes of
 /// radius 3 spaced by 20, swept linearly along +Z with caps.
@@ -209,6 +211,12 @@ fn untouched_holes_are_not_remeasured_after_copy_and_corner_cut() {
     )
     .unwrap();
     assert!(full.is_valid(), "{:?}", full.lines());
+    let volume = brep_volume_default(&k, &mut cut_real, 1e-7).unwrap();
+    let expected_volume = 10.0 * (80.0 * 80.0 - 16.0 * PI * 9.0 - PI * 1.5 * 1.5 / 4.0);
+    assert!(
+        (volume - expected_volume).abs() <= 1e-6 * expected_volume,
+        "expected corner-cut plate volume ~{expected_volume}, got {volume}"
+    );
 
     // Now place a sub-tolerance sentinel in `max_edge_face_gap.gap_3d` on every edge use
     // belonging to a cylindrical hole wall (none of which touch the corner cut at (0, 0)).
