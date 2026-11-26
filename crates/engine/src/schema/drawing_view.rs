@@ -1417,11 +1417,11 @@ pub enum LineSourceResult {
     Silhouette { face: usize },
 }
 
-impl From<solidcraft_geom::hlr::Source> for LineSourceResult {
-    fn from(source: solidcraft_geom::hlr::Source) -> Self {
+impl From<solidcraft_kernel::hlr::Source> for LineSourceResult {
+    fn from(source: solidcraft_kernel::hlr::Source) -> Self {
         match source {
-            solidcraft_geom::hlr::Source::Edge { edge, tangent } => LineSourceResult::Edge { edge, tangent },
-            solidcraft_geom::hlr::Source::Silhouette { face } => LineSourceResult::Silhouette { face },
+            solidcraft_kernel::hlr::Source::Edge { edge, tangent } => LineSourceResult::Edge { edge, tangent },
+            solidcraft_kernel::hlr::Source::Silhouette { face } => LineSourceResult::Silhouette { face },
         }
     }
 }

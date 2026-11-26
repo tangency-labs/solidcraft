@@ -969,9 +969,8 @@ fn paste_new_of_a_mesh_import_with_one_label_on_all_objects_moves_the_copy_of_ea
 }
 
 /// A construction axis through a nested placement's origin datum is copied with its datum path
-/// rebuilt through the copy (the source's ancestors are not in the occurrence map); an axis
-/// whose datum names a placement outside the copied tree refuses the copy - the reference could
-/// not follow, and a dangling one would resolve against whatever then sits at those ids.
+/// rebuilt through the copy. References to another tree in the same document keep that tree's
+/// datum paths.
 #[test]
 fn cloned_datum_references_follow_the_copy() {
     let mut s = Session::default();
@@ -1000,20 +999,188 @@ fn cloned_datum_references_follow_the_copy() {
         }
         other => panic!("expected a datum reference, got {other:?}"),
     }
-    // An axis whose datum names a placement outside the copied tree refuses the copy. Outside is
-    // made at the root: `component.create` places under the active component (the paste left
-    // Parent active), and a datum key names its placement from the root, so a placement inside
-    // Parent would be unreachable to the resolver and inside the copy's map at once.
+    // Make a second tree at the root so its origin datums lie outside the copied subtree.
     run(&mut s, "component.activate", json!({"component": 0}));
     let outside = component(&mut s, "Outside");
-    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "operation": "new"}));
     let outside_occ = s.doc.occurrence_of(outside).unwrap().id;
     run(&mut s, "component.activate", json!({"component": "Parent"}));
     run(&mut s, "construct.axis.two_points", json!({"a": format!("o:{outside_occ}/origin/O"), "b": {"point": [12, 0, 0]}, "name": "OutsideAxis"}));
+    run(&mut s, "construct.plane.offset", json!({"base": format!("o:{outside_occ}/origin/XY"), "offset": 2, "name": "OutsidePlane"}));
+    let copied = run(&mut s, "component.paste_new", json!({"component": parent, "translate": [40, 0, 0]}))["component"].as_u64().unwrap();
+    use solidcraft_doc::construct::{AxisDef, DatumItem, GeoRef};
+    use solidcraft_doc::{FeatureKind, PlaneRef};
+    let features = || s.doc.features.iter().filter(|f| f.component == copied);
     assert!(
-        s.execute("component.paste_new", &json!({"component": parent, "translate": [40, 0, 0]})).is_err(),
-        "a datum into another tree cannot follow the copy"
+        features().any(|f| matches!(
+            &f.kind,
+            FeatureKind::ConstructionAxis { def: AxisDef::TwoPoints { a: GeoRef::Datum { datum }, .. } }
+                if datum.path == [outside_occ] && datum.item == DatumItem::O
+        )),
+        "the copied axis keeps the outside origin point"
     );
+    assert!(
+        features().any(|f| matches!(
+            &f.kind,
+            FeatureKind::ConstructionPlane { plane: PlaneRef::Offset { base, .. } }
+                if matches!(&**base, PlaneRef::Datum { datum } if datum.path == [outside_occ] && datum.item == DatumItem::XY)
+        )),
+        "the copied plane keeps the outside origin plane"
+    );
+}
+
+#[test]
+fn pasted_coil_and_datum_keep_the_selected_ancestor_occurrences() {
+    use solidcraft_doc::construct::{AxisDef, GeoRef};
+    use solidcraft_doc::{AxisRef, FeatureKind};
+
+    for (repeated, different_parent, second_assembly) in [(false, false, false), (true, false, false), (true, true, false), (true, false, true)] {
+        let mut s = Session::default();
+        let assembly = component(&mut s, "Assembly");
+        let assembly_occ = s.doc.occurrence_of(assembly).unwrap().id;
+        let parent = component(&mut s, "Parent");
+        let parent_occ = s.doc.occurrence_of(parent).unwrap().id;
+        let leaf = component(&mut s, "Leaf");
+        let leaf_occ = s.doc.occurrence_of(leaf).unwrap().id;
+        let box_id = box2(&mut s);
+        run(&mut s, "component.activate", json!({"component":assembly}));
+        let selected = if repeated {
+            run(&mut s, "occurrence.copy", json!({"component":parent,"parent":assembly,"translate":[80,0,0]}))["occurrence"].as_u64().unwrap()
+        } else {
+            parent_occ
+        };
+        let path = [assembly_occ, selected, leaf_occ];
+        let edge = format!("F{box_id}:-x|F{box_id}:-y");
+        run(
+            &mut s,
+            "solid.coil",
+            json!({"axis":{"type":"placed_edge","body":"Cube","path":path,"author_path":[assembly_occ],"at":[0,0,1],"name":edge},
+                   "diameter":12,"section_size":1,"pitch":4,"revolutions":1,"body_name":"Winding"}),
+        );
+        run(&mut s, "construct.axis.two_points", json!({"a":format!("o:{assembly_occ}/{selected}/{leaf_occ}/origin/O"),"b":{"point":[0,0,12]}}));
+        run(&mut s, "component.activate", json!({"component":"root"}));
+        let (cloned, mut author) = if different_parent {
+            let target = component(&mut s, "Target");
+            let target_occ = s.doc.occurrence_of(target).unwrap().id;
+            let cloned = run(&mut s, "component.paste_new", json!({"component":assembly,"parent":target,"translate":[20,0,0]}));
+            (cloned, vec![target_occ])
+        } else if second_assembly {
+            let source = run(&mut s, "occurrence.copy", json!({"component":assembly,"parent":0,"translate":[0,35,0]}));
+            let occurrence = source["occurrence"].as_u64().unwrap();
+            let cloned =
+                run(&mut s, "component.paste_new", json!({"component":assembly,"occurrence":occurrence,"path":[occurrence],"translate":[20,0,0]}));
+            (cloned, Vec::new())
+        } else {
+            (copy(&mut s, assembly), Vec::new())
+        };
+        let owner = cloned["component"].as_u64().unwrap();
+        let root = cloned["occurrence"].as_u64().unwrap();
+        author.push(root);
+        let cloned_parent = s.doc.occurrences.iter().filter(|o| o.parent == owner).nth(usize::from(repeated)).unwrap();
+        let cloned_leaf = s.doc.occurrences.iter().find(|o| o.parent == cloned_parent.component).unwrap();
+        let expected = [author.as_slice(), &[cloned_parent.id, cloned_leaf.id]].concat();
+        let mut features = s.doc.features.iter().filter(|f| f.component == owner);
+        let FeatureKind::Coil { axis_ref: Some(AxisRef::Model { geo: GeoRef::PlacedEdge { path, author_path, .. } }), .. } =
+            &features.next().unwrap().kind
+        else {
+            panic!("expected the copied Coil");
+        };
+        assert_eq!(path, &expected);
+        assert_eq!(author_path, &author);
+        let FeatureKind::ConstructionAxis { def: AxisDef::TwoPoints { a: GeoRef::Datum { datum }, .. } } = &features.next().unwrap().kind else {
+            panic!("expected the copied datum axis");
+        };
+        assert_eq!(datum.path, expected);
+    }
+}
+
+/// A Child placed in a Parent that is placed twice, copied from the Parent's second placement:
+/// the copy sits in that placement, so its Coil edge and datum go through it, as its faces do,
+/// not through the Parent's first placement.
+#[test]
+fn pasted_coil_and_datum_go_through_the_parents_second_placement() {
+    use solidcraft_doc::construct::{AxisDef, GeoRef};
+    use solidcraft_doc::{AxisRef, FeatureKind};
+
+    let mut s = Session::default();
+    let parent = component(&mut s, "Parent");
+    let first = s.doc.occurrence_of(parent).unwrap().id;
+    let child = component(&mut s, "Child");
+    let leaf = s.doc.occurrence_of(child).unwrap().id;
+    let box_id = box2(&mut s);
+    let second = run(&mut s, "occurrence.copy", json!({"component":parent,"translate":[50,0,0]}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "component.activate", json!({"component":child,"occurrence":leaf,"path":[second,leaf]}));
+    let edge = format!("F{box_id}:-x|F{box_id}:-y");
+    run(
+        &mut s,
+        "solid.coil",
+        json!({"axis":{"type":"placed_edge","body":"Cube","path":[second,leaf],"author_path":[second,leaf],"at":[0,0,1],"name":edge},
+               "diameter":12,"section_size":1,"pitch":4,"revolutions":1,"body_name":"Winding"}),
+    );
+    run(&mut s, "construct.axis.two_points", json!({"a":format!("o:{second}/{leaf}/origin/O"),"b":{"point":[0,0,12]}}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    let copied = run(&mut s, "component.paste_new", json!({"component":child,"occurrence":leaf,"path":[second,leaf],"translate":[10,0,0]}));
+    let (owner, new_leaf) = (copied["component"].as_u64().unwrap(), copied["occurrence"].as_u64().unwrap());
+    let expected = vec![second, new_leaf];
+    assert_ne!(first, second);
+    let mut features = s.doc.features.iter().filter(|f| f.component == owner);
+    let mut kinds = features.by_ref().map(|f| &f.kind).filter(|k| matches!(k, FeatureKind::Coil { .. } | FeatureKind::ConstructionAxis { .. }));
+    let Some(FeatureKind::Coil { axis_ref: Some(AxisRef::Model { geo: GeoRef::PlacedEdge { path, author_path, .. } }), .. }) = kinds.next() else {
+        panic!("expected the copied Coil");
+    };
+    assert_eq!((path, author_path), (&expected, &expected));
+    let Some(FeatureKind::ConstructionAxis { def: AxisDef::TwoPoints { a: GeoRef::Datum { datum }, .. } }) = kinds.next() else {
+        panic!("expected the copied datum axis");
+    };
+    assert_eq!(datum.path, expected);
+}
+
+#[test]
+fn pasted_move_keeps_its_placed_edge_in_another_component() {
+    use solidcraft_doc::FeatureKind;
+    use solidcraft_doc::construct::GeoRef;
+
+    let mut s = Session::default();
+    let external = component(&mut s, "External");
+    let external_path = vec![s.doc.occurrence_of(external).unwrap().id];
+    let anchor = run(&mut s, "solid.box", json!({"length":2,"width":2,"height":2,"body_name":"Anchor"}))["feature"].as_u64().unwrap();
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    let part = component(&mut s, "Part");
+    let part_occurrence = s.doc.occurrence_of(part).unwrap().id;
+    run(&mut s, "solid.box", json!({"base":[12,0,0],"length":2,"width":2,"height":2,"body_name":"Work"}));
+    let moved = run(&mut s, "solid.move", json!({"bodies":["Work"],"axis":[0,0,1],"angle":"20 deg"}))["feature"].as_u64().unwrap();
+    let name = format!("F{anchor}:-x|F{anchor}:-y");
+    let mut doc = (*s.doc).clone();
+    let FeatureKind::Move { rotate_about, .. } = &mut doc.feature_mut(moved).unwrap().kind else { panic!("expected a Move") };
+    *rotate_about = Some(GeoRef::PlacedEdge {
+        body: "Anchor".into(),
+        path: external_path.clone(),
+        author_path: vec![part_occurrence],
+        at: [0., 0., 1.].into(),
+        name: name.clone(),
+    });
+    // Exercise the persisted placed edge, including evaluation before and after the copy.
+    let mut s = Session::new(doc);
+    let result = s.model.result(moved).unwrap();
+    assert!(result.error.is_none() && result.warning.is_none(), "{result:?}");
+    let cloned = run(&mut s, "component.paste_new", json!({"component":part}));
+    let owner = cloned["component"].as_u64().unwrap();
+    let root = cloned["occurrence"].as_u64().unwrap();
+    let (feature, edge) = s
+        .doc
+        .features
+        .iter()
+        .find_map(|feature| match &feature.kind {
+            FeatureKind::Move { rotate_about: Some(edge), .. } if feature.component == owner => Some((feature, edge)),
+            _ => None,
+        })
+        .unwrap();
+    let GeoRef::PlacedEdge { body, path, author_path, name: copied_name, .. } = edge else { panic!("expected a placed edge") };
+    assert_eq!(body.as_ref(), "Anchor");
+    assert_eq!(path, &external_path);
+    assert_eq!(author_path, &[root]);
+    assert_eq!(copied_name, &name);
+    let result = s.model.result(feature.id).unwrap();
+    assert!(result.error.is_none() && result.warning.is_none(), "{result:?}");
 }
 
 /// Paste New of an imported assembly: the copy's parts are held by a rigid group of its own,

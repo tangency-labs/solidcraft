@@ -38,5 +38,10 @@
     "cmd.sheet_tab": "凸片",
     "help.sheet.tab": "用在钣金平面上绘制的封闭草图，为该面板添加一块与板厚相同的平板材料，并并入其轮廓。用于安装耳、凸耳或插舌，也可加在已折弯的侧壁上。",
     "ui.sheet_tab_title": "凸片"
+  },
+  "fr": {
+    "cmd.sheet_tab": "Languette",
+    "help.sheet.tab": "Ajoute une pièce de matériau plane à une tôle à partir d’une esquisse fermée sur l’une de ses faces planes. Elle est fusionnée au panneau sur toute l’épaisseur de la tôle. Utilisez cette fonction pour créer une patte de fixation, un ergot ou une languette, y compris sur une paroi déjà pliée.",
+    "ui.sheet_tab_title": "LANGUETTE"
   }
 }
