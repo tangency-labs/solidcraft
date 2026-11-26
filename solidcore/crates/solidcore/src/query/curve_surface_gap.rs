@@ -219,8 +219,8 @@ fn trim_bound_key(
     floor: f64,
     [enough, over]: [f64; 2],
     budget: Option<usize>,
-    fitted: bool,
     collapse_unproved: bool,
+    any_within_enough: bool,
     eval_flags: u64,
 ) -> Option<TrimBoundKey> {
     if pair.net.ends.apex.is_some() {
@@ -248,8 +248,8 @@ fn trim_bound_key(
         | (u64::from(pair.net.ends.v) << 1)
         | (u64::from(pair.net.offset.is_some()) << 2)
         | (u64::from(budget.is_some()) << 3)
-        | (u64::from(fitted) << 4)
-        | (u64::from(collapse_unproved) << 5)
+        | (u64::from(collapse_unproved) << 4)
+        | (u64::from(any_within_enough) << 5)
         | (eval_flags << 6);
     bits.extend([
         r0.to_bits(),
@@ -4517,7 +4517,9 @@ impl MovedTrimPair {
     /// Bounds the pair before the move using its already-extracted [`TrimPair`]. With a piece
     /// `budget`, enables endpoint short-circuiting (`collapse_unproved`), returning
     /// [`TrimBoundOutcome::BudgetStopped`] if the cap stops the bisection while all evaluated
-    /// endpoints stay within `limits[0]`.
+    /// endpoints stay within `limits[0]`. `any_within_enough` is true only when the caller
+    /// treats every proved bound at most `limits[0]` identically (allowing the same-parameter
+    /// structured and identity-correspondence fast paths).
     pub(crate) fn bound_before(
         &self,
         k: &Kernel,
@@ -4527,6 +4529,7 @@ impl MovedTrimPair {
         floor: f64,
         limits: [f64; 2],
         budget: Option<usize>,
+        any_within_enough: bool,
     ) -> Result<TrimBoundOutcome> {
         if !(floor.is_finite() && floor >= 0.0) {
             return Ok(TrimBoundOutcome::Unproved);
@@ -4542,6 +4545,7 @@ impl MovedTrimPair {
             budget,
             Correspondence::Fitted,
             budget.is_some(),
+            any_within_enough,
             true,
             &self.before,
         )
@@ -4557,6 +4561,7 @@ impl MovedTrimPair {
         floor: f64,
         limits: [f64; 2],
         budget: Option<usize>,
+        any_within_enough: bool,
     ) -> Result<TrimBoundOutcome> {
         if !(floor.is_finite() && floor >= 0.0) {
             return Ok(TrimBoundOutcome::Unproved);
@@ -4572,6 +4577,7 @@ impl MovedTrimPair {
             budget,
             Correspondence::Fitted,
             budget.is_some(),
+            any_within_enough,
             true,
             &self.after,
         )
@@ -4638,20 +4644,6 @@ pub(crate) fn moved_pair_data(
 /// the symmetric `LᵀL - I` is at most its Frobenius norm, enclosed. `None` unless finite.
 pub(crate) fn affine_linear_norm_upper(m: [[f64; 4]; 4]) -> Option<f64> {
     let [[a, b, c, _], [d, e, f, _], [g, h, i, _], _] = m;
-    // Exact identity linear part (pure translation): `‖I‖ = 1` exactly, without interval
-    // widening.
-    if a == 1.0
-        && b == 0.0
-        && c == 0.0
-        && d == 0.0
-        && e == 1.0
-        && f == 0.0
-        && g == 0.0
-        && h == 0.0
-        && i == 1.0
-    {
-        return Some(1.0);
-    }
     let col = |x: f64, y: f64, z: f64| V3 {
         x: Ivl::from(x),
         y: Ivl::from(y),
@@ -4864,6 +4856,7 @@ pub(crate) fn trim_image_gap_bound_for_move(
         budget,
         Correspondence::Fitted,
         false,
+        false,
         true,
         &pair,
     )?;
@@ -4906,6 +4899,7 @@ fn trim_gap_bound_with(
         correspondence,
         false,
         false,
+        false,
         &pair,
     )?;
     let bound = match outcome {
@@ -4923,8 +4917,10 @@ fn trim_gap_bound_with(
 }
 
 /// [`trim_gap_bound_with`] once the pair's exact data are made: `collapse_unproved` forwards
-/// to [`bisect_core`], and `count_move_pieces` adds evaluated pieces to
-/// [`crate::kernel::WorkCounters::move_trim_bisection_pieces`].
+/// to [`bisect_core`], `any_within_enough` enables fast proofs (`structured_pair_bound` at equal
+/// parameters and identity-correspondence bisection) that are only valid when the caller treats
+/// every proved bound at most `enough` identically, and `count_move_pieces` adds evaluated
+/// pieces to [`crate::kernel::WorkCounters::move_trim_bisection_pieces`].
 fn bound_trim_pair(
     k: &Kernel,
     surface: &Surface,
@@ -4936,6 +4932,7 @@ fn bound_trim_pair(
     budget: Option<usize>,
     correspondence: Correspondence,
     collapse_unproved: bool,
+    any_within_enough: bool,
     count_move_pieces: bool,
     pair: &TrimPair,
 ) -> Result<TrimBoundOutcome> {
@@ -4961,8 +4958,9 @@ fn bound_trim_pair(
         }
         // (#22467: a same-parameter structured bound also bounds the Hausdorff distance and
         // covers end rows/columns of higher-degree nets such as ball patches and spheres as
-        // well as sub-interval lines.)
-        if fitted {
+        // well as sub-interval lines; only used when the caller treats all bounds <= `enough`
+        // identically so exact bound values for other callers stay bit-for-bit unchanged.)
+        if fitted && any_within_enough {
             if let Some(bound) = structured_pair_bound(surface, cn, c_slack, wn, net, range, true) {
                 if meets(bound) {
                     return Ok(TrimBoundOutcome::Proved(bound));
@@ -4992,10 +4990,10 @@ fn bound_trim_pair(
     let Some(to_surface) = bisection_residual(surface, net) else {
         return Ok(TrimBoundOutcome::Unproved);
     };
-    // (#22467: pure exact-input memoisation of `bound_trim_pair` for NURBS-evaluated pairs.
+    // (#22467: pure exact-input memoisation of `bound_trim_pair` for NURBS-evaluated move pairs.
     // Every input that affects the outcome is encoded in `memo_key` bit for bit, so clearing
     // `k.caches` or turning off `k.memoize_curve_caches` never changes any result.)
-    let memo_key = if k.memoize_curve_caches && fitted {
+    let memo_key = if k.memoize_curve_caches && fitted && count_move_pieces {
         pure_nurbs_flags(surface, curve, uv).and_then(|eval_flags| {
             trim_bound_key(
                 pair,
@@ -5004,8 +5002,8 @@ fn bound_trim_pair(
                 floor,
                 [enough, over],
                 budget,
-                fitted,
                 collapse_unproved,
+                any_within_enough,
                 eval_flags,
             )
         })
@@ -5045,7 +5043,12 @@ fn bound_trim_pair(
     // within the budget, fall through to [`reparametrisation`] unchanged.)
     let target = enough.min(over);
     let id_budget = budget.map_or(IDENTITY_FAST_PIECES, |b| b.min(IDENTITY_FAST_PIECES));
-    if fitted && enough.is_finite() && target > c_slack && id_budget >= FIRST_PIECES {
+    if fitted
+        && any_within_enough
+        && enough.is_finite()
+        && target > c_slack
+        && id_budget >= FIRST_PIECES
+    {
         let enough_gap = (Ivl::from(target) - Ivl::from(c_slack)).lo;
         if enough_gap > 0.0 {
             let id = identity_psi(range);
@@ -7102,7 +7105,7 @@ mod tests {
             assert!(pieces <= FIRST_PIECES, "{pieces} pieces");
             // the bisection alone shows the same: within `enough` (only the value differs,
             // and the contract leaves any value up to `enough`)
-            let cut = std::cell::Cell::new(0);
+            let cut = Cell::new(0);
             let alone =
                 bisected_face_gap_bound(&k, &b, *f, circle, *range, 1e-8, within, &cut).unwrap();
             assert!(alone.is_some_and(|g| g <= 1e-5), "{alone:?}");
@@ -7129,7 +7132,7 @@ mod tests {
             let (g, pieces) =
                 curve_face_gap_bound_within_counted(&k, &b, *f, &off, *range, 1e-8, within)
                     .unwrap();
-            let cut = std::cell::Cell::new(0);
+            let cut = Cell::new(0);
             let alone =
                 bisected_face_gap_bound(&k, &b, *f, &off, *range, 1e-8, within, &cut).unwrap();
             assert_eq!(g.map(f64::to_bits), alone.map(f64::to_bits));
@@ -7197,7 +7200,7 @@ mod tests {
         let within = [1e-5, f64::INFINITY];
         let (g, pieces) =
             curve_face_gap_bound_within_counted(&k, &b, *f, circle, *range, 1e-8, within).unwrap();
-        let cut = std::cell::Cell::new(0);
+        let cut = Cell::new(0);
         let alone =
             bisected_face_gap_bound(&k, &b, *f, circle, *range, 1e-8, within, &cut).unwrap();
         assert_eq!(g.map(f64::to_bits), alone.map(f64::to_bits));

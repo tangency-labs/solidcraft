@@ -2228,6 +2228,20 @@ pub(crate) fn cover_moved_trims(
 /// `MAX_PIECES` and proves the full bound.
 const MOVE_COVER_PIECES: usize = 128;
 
+/// Whether the upper 3x3 linear block of `m` is the exact identity (a pure translation).
+fn is_identity_linear(m: [[f64; 4]; 4]) -> bool {
+    let [[a, b, c, _], [d, e, f, _], [g, h, i, _], _] = m;
+    a == 1.0
+        && b == 0.0
+        && c == 0.0
+        && d == 0.0
+        && e == 1.0
+        && f == 0.0
+        && g == 0.0
+        && h == 0.0
+        && i == 1.0
+}
+
 /// [`cover_moved_trims`] for one edge: `m` is the move's matrix, `norm` its `‖A‖` and `limit`
 /// the B-rep check's edge tolerance limit.
 fn cover_moved_edge(
@@ -2246,6 +2260,7 @@ fn cover_moved_edge(
     // (each of a sum's or product's roundings is at most one `EPSILON` relative: `4 EPSILON`
     // rounds the few here up)
     let up = |x: f64| x * (1.0 + 4.0 * f64::EPSILON);
+    let pure_translation = is_identity_linear(m);
     let rec = b.edge(edge.e)?;
     let tol = rec.tolerance;
     let range = [rec.interval.min(), rec.interval.max()];
@@ -2281,67 +2296,39 @@ fn cover_moved_edge(
         if let Some(moved) = moved {
             let room = moved.room();
             // (a pure translation with zero rounding room cannot enlarge any covered distance)
-            if norm == 1.0 && room == 0.0 {
+            if pure_translation && room == 0.0 {
                 continue;
             }
             // (a distance before the move within `covered` stays within `T` after it)
-            let covered = if norm == 1.0 {
-                (Ivl::from(tol) - Ivl::from(room)).lo
-            } else {
-                ((Ivl::from(tol) - Ivl::from(room)) / Ivl::from(norm)).lo
-            };
-            if covered >= tol {
-                continue;
-            }
+            let covered = ((Ivl::from(tol) - Ivl::from(room)) / Ivl::from(norm)).lo;
             // (the raise `‖A‖ B0 + room` is wanted to [`TRIM_BOUND_FLOOR`] of itself, not
             // of `T`: where `room` passes `T`, a `B0` cut finer than a thousandth of
             // `room` changes the raise by less, and a floor of `T` cuts each piece of a
             // tightly lowered edge down to its own rounding)
-            let floor = TRIM_BOUND_FLOOR * tol.max(room);
-            // (while `covered > floor`, cap bisection to [`MOVE_COVER_PIECES`] so trims that
-            // never enclose — such as a ball corner's collapsed-pole trims — do not spend
-            // `MAX_PIECES`; any endpoint past `covered` lifts the cap to `MAX_PIECES`. Where
-            // `room` itself threatens `T` (`covered <= floor`), run uncapped.)
-            let budget = (covered > floor).then_some(MOVE_COVER_PIECES);
+            let bound_floor = TRIM_BOUND_FLOOR * tol.max(room);
+            // (while `covered > bound_floor`, every bound <= `covered` skips without using its
+            // value, and capping bisection to [`MOVE_COVER_PIECES`] stops trims that never close
+            // — such as a ball corner's collapsed-pole trims — from spending `MAX_PIECES`,
+            // lifting the cap to `MAX_PIECES` as soon as any endpoint exceeds `covered`, as
+            // `keep_trim_covered` in `topology::face::p2` caps at `KEEP_COVERED_PIECES` and
+            // raises nothing when stopped. Where `room` itself threatens `T`
+            // (`covered <= bound_floor`), run uncapped and without the within-`enough` fast
+            // paths so `b0`'s exact value matches upstream.)
+            let can_fast_cover = covered > bound_floor;
+            let budget = can_fast_cover.then_some(MOVE_COVER_PIECES);
             let b0 = match moved.bound_before(
                 k,
                 &t.surface,
                 &edge.curve,
                 &t.trim,
-                floor,
-                [covered.max(floor), tol],
+                bound_floor,
+                [covered.max(bound_floor), tol],
                 budget,
+                can_fast_cover,
             )? {
                 TrimBoundOutcome::Proved(b0) if b0.is_finite() => b0,
-                TrimBoundOutcome::BudgetStopped => {
-                    // (#22467: the capped pre-move bisection stopped while every evaluated
-                    // endpoint stayed within `covered`, so the trim may have been covered
-                    // before the move (`dist_before <= tol`). A covered trim moves to at most
-                    // `‖A‖ tol + room`: try proving the moved trim within `tol` under the
-                    // same cap and otherwise raise conservatively to `‖A‖ tol + room`, so no
-                    // covered trim is left uncovered by the cap.)
-                    let conservative = up((Ivl::from(norm) * Ivl::from(tol) + Ivl::from(room)).hi);
-                    if conservative.is_finite() && conservative > tol {
-                        let direct_floor = (conservative - tol).min(TRIM_BOUND_FLOOR * tol);
-                        match moved.bound_after(
-                            k,
-                            &surface,
-                            &curve,
-                            &trim,
-                            direct_floor,
-                            [tol, conservative],
-                            budget,
-                        )? {
-                            TrimBoundOutcome::Proved(b1) if b1.is_finite() && b1 <= tol => {}
-                            TrimBoundOutcome::Proved(b1) if b1.is_finite() => {
-                                need = need.max(b1.min(conservative));
-                            }
-                            _ => need = need.max(conservative),
-                        }
-                    }
-                    continue;
-                }
-                TrimBoundOutcome::ExceedsOver
+                TrimBoundOutcome::BudgetStopped
+                | TrimBoundOutcome::ExceedsOver
                 | TrimBoundOutcome::Unproved
                 | TrimBoundOutcome::Proved(_) => continue,
             };
@@ -2361,8 +2348,16 @@ fn cover_moved_edge(
             // `‖A‖ B0 + room` 6.931683163276889e-3, proved directly within
             // 6.9316831631875565e-3, so not raised.)
             let direct_floor = (raise - tol).min(TRIM_BOUND_FLOOR * tol);
-            let direct =
-                moved.bound_after(k, &surface, &curve, &trim, direct_floor, [tol, raise], None)?;
+            let direct = moved.bound_after(
+                k,
+                &surface,
+                &curve,
+                &trim,
+                direct_floor,
+                [tol, raise],
+                None,
+                true,
+            )?;
             match direct {
                 TrimBoundOutcome::Proved(b1) if b1.is_finite() && b1 <= tol => {}
                 TrimBoundOutcome::Proved(b1) if b1.is_finite() => need = need.max(b1.min(raise)),
@@ -4589,19 +4584,17 @@ mod tests {
         }
     }
 
-    /// #22467: a pure translation has exact linear norm `1.0`, leaves covered edge tolerances
-    /// bit-for-bit invariant across `Caches::clear()` and `memoize_curve_caches = false`, and
-    /// reuses exact-input memo entries on repeated identical moves without re-bisecting.
+    /// #22467: a round-trip pure translation leaves covered edge tolerances bit-for-bit
+    /// invariant across `Caches::clear()` and `memoize_curve_caches = false`, and reuses
+    /// exact-input memo entries on repeated identical moves without re-bisecting.
     #[test]
     fn a_round_trip_translation_reuses_cached_trim_bounds() {
-        use crate::query::curve_surface_gap::affine_linear_norm_upper;
-
         let mut to_origin = Axis2Placement::IDENTITY;
         to_origin.translate(Vec3::new(-2000.3, 0.1, -0.2));
-        assert_eq!(affine_linear_norm_upper(to_origin.matrix()), Some(1.0));
+        assert!(is_identity_linear(to_origin.matrix()));
         let mut back = Axis2Placement::IDENTITY;
         back.translate(Vec3::new(2000.3, -0.1, 0.2));
-        assert_eq!(affine_linear_norm_upper(back.matrix()), Some(1.0));
+        assert!(is_identity_linear(back.matrix()));
 
         let run = |clear_between: bool, memoize: bool| -> Vec<(EdgeId, f64)> {
             let (mut k, mut b, edges) = sphere_edges(Point3::new(2000.0, 0.0, 0.0));
