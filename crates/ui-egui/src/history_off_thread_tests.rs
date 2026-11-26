@@ -553,6 +553,15 @@ fn switching_from_a_sketch_to_a_feature_defers_a_new_command_until_restoration()
     assert_eq!(marker(&h), None);
     assert_eq!(h.app.dialog.as_ref().unwrap().editing, None);
     let undo = h.app.session.undo.len();
+    // Wait for the box's preview, as a person does: the window's height changes while it
+    // computes, and a click aimed at OK a frame earlier can miss it.
+    for _ in 0..3000 {
+        if !h.app.preview.busy && h.app.applying.is_none() {
+            break;
+        }
+        h.frames(1);
+        std::thread::sleep(Duration::from_millis(10));
+    }
     h.frames(2);
     h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
     for _ in 0..500 {
