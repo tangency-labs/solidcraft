@@ -289,3 +289,22 @@ fn with_no_cut_given_the_stretch_cuts_clear_of_a_hole_in_the_middle() {
     });
     assert_eq!(at.as_deref(), Some("22.5 mm"));
 }
+
+#[test]
+fn a_stretch_step_reopens_and_changes_through_redefine() {
+    // Editing a Stretch step from the timeline sends `timeline.redefine` with `solid.stretch`:
+    // it must count as a command that makes a feature.
+    let mut s = block();
+    run(&mut s, "solid.stretch", json!({"body": "Block", "direction": "+x", "distance": 15}));
+    assert!((size(&s).1.x - 55.0).abs() < 1e-6);
+    let id = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Stretch { .. })).map(|f| f.id).unwrap();
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": id, "command": "solid.stretch", "params": {"body": "Block", "direction": "-x", "at": 10, "distance": 34}}),
+    );
+    // The left side moves now: 34 mm out past x = 0, the right side stays at 40.
+    let (min, max, _) = size(&s);
+    assert!((min.x + 34.0).abs() < 1e-6 && (max.x - 40.0).abs() < 1e-6, "{min:?} {max:?}");
+    assert_eq!(s.doc.features.iter().filter(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Stretch { .. })).count(), 1);
+}
