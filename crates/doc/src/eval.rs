@@ -15924,7 +15924,10 @@ fn eval_sketch(
             (doc.resolve_plane_in(vals, &*construction_planes_in_frame(doc, st, f.component, other)?, 0, f.component, Some(&fst))?, None)
         }
     };
-    let mut sk = sketch.clone();
+    let mut sk = {
+        let _sp = solidcraft_profile::span("sketch", "clone");
+        sketch.clone()
+    };
     // A text's outlines are rebuilt from its numbers when the links are refreshed: the
     // ones its expressions give come first.
     doc.apply_text_values(vals, &mut sk)?;
@@ -15935,17 +15938,25 @@ fn eval_sketch(
         _ => doc.component_transform(f.component),
     };
     let placed = crate::project::Placed { raw: st, component: f.component };
-    let mut warns =
-        crate::project::refresh_sketch_links_with(doc, vals, placed, &fst, &plane, &mut sk, anchor, lost_names, Some(&(f.component, link_frame)))?;
+    let mut warns = {
+        let _sp = solidcraft_profile::span("sketch", "links");
+        crate::project::refresh_sketch_links_with(doc, vals, placed, &fst, &plane, &mut sk, anchor, lost_names, Some(&(f.component, link_frame)))?
+    };
     drop(fst);
-    sk.refresh_offsets()?;
+    {
+        let _sp = solidcraft_profile::span("sketch", "offsets");
+        sk.refresh_offsets()?;
+    }
     if let Some(w) = face_warning {
         warns.insert(0, w);
     }
     // The stored sketch is solved for its stored values, with its links where they
     // were stored: a link that moved must not change the side a dimension from it is on.
     let stored = sk.driving_values();
-    let mut report = doc.solve_sketch(vals, &mut sk, &stored, Some(sketch))?;
+    let mut report = {
+        let _sp = solidcraft_profile::span("sketch", "solve");
+        doc.solve_sketch(vals, &mut sk, &stored, Some(sketch))?
+    };
     doc.discount_traces(f.id, &sk, &mut report);
     if !report.keeps_orientation() {
         warns.insert(0, report.failure(|f| format!("the sketch constraints conflict ({f})")));
@@ -15963,13 +15974,22 @@ fn eval_sketch(
     sk.validate_periodic_splines()?;
     // A group of touching curves too large to search whole says so, rather than
     // leaving profiles out silently (#6896).
-    let search = solidcraft_sketch::find_profiles_checked(&sk);
+    let search = {
+        let _sp = solidcraft_profile::span("sketch", "profiles");
+        solidcraft_sketch::find_profiles_checked(&sk)
+    };
     if search.incomplete {
         append_warning(warning, profiles_cut_short_note());
     }
     let profiles = search.profiles;
-    let profiles_3d = solidcraft_sketch::find_planar_3d_profiles(&sk, plane);
-    let ends = solidcraft_sketch::loose_ends(&sk);
+    let profiles_3d = {
+        let _sp = solidcraft_profile::span("sketch", "profiles3d");
+        solidcraft_sketch::find_planar_3d_profiles(&sk, plane)
+    };
+    let ends = {
+        let _sp = solidcraft_profile::span("sketch", "ends");
+        solidcraft_sketch::loose_ends(&sk)
+    };
     st.sketches.retain(|s| s.feature != f.id);
     st.sketches.push(Arc::new(SolvedSketch { feature: f.id, name: f.name.clone(), plane, sketch: sk, report, profiles, profiles_3d, ends }));
     Ok(())
