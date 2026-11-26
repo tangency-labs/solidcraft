@@ -48,6 +48,7 @@ pub use face_anchor::FaceAttachmentStatus;
 pub mod format;
 mod format_offsets;
 pub mod frame;
+pub mod frame_cope;
 pub mod frame_corners;
 pub mod frame_layout;
 mod frame_multi_trim;

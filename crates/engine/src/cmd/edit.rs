@@ -3156,6 +3156,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "frame.gusset"
                 | "frame.member"
                 | "frame.trim"
+                | "frame.cope"
                 | "frame.plate"
                 | "component.capture_position"
         );

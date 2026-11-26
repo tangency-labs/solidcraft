@@ -225,7 +225,7 @@ impl DesktopNativeAdapter {
     }
 
     /// The outer screen rectangle a panel's window opens at when a drag puts its
-    /// corner at `corner`: at `size` (see `app::drop_window_size`) within
+    /// corner at `corner`: at the caller-supplied `size` within
     /// `bounds`, kept on the monitor under it exactly as `builder` keeps it.
     pub fn landing(&self, ctx: &egui::Context, instance: &InstanceId, corner: egui::Pos2, size: Size, bounds: (Size, Size)) -> Option<egui::Rect> {
         let mut state = self.0.borrow_mut();
