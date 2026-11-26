@@ -366,6 +366,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_target("prefs:cut_preview_tint", cut_tint.rect);
             let hidden_edges = setting::show_selected_hidden_edges(app, ui).backing_on_hover_text(app.tr("prefs.show_selected_hidden_edges_help"));
             crate::scenario::publish_target("prefs:show_selected_hidden_edges", hidden_edges.rect);
+            hover_edge_rows(app, ui);
             let reference =
                 setting::reference_geometry_through_bodies(app, ui).backing_on_hover_text(app.tr("settings.reference_geometry_through_bodies_help"));
             crate::scenario::publish_target("dialog:Show reference geometry through bodies", reference.rect);
@@ -646,4 +647,38 @@ fn safe_graphics_row(app: &mut SolveApp, ui: &mut egui::Ui) {
     {
         app.set_status(error, true);
     }
+}
+
+/// The colour and width of the edge under the pointer, the edge a click would take (#22042):
+/// the theme's colour or one of the user's, and a width from 1 to 6 points.
+fn hover_edge_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let t = Tokens::get();
+    let labels = [app.tr("prefs.hover_edge_colour_theme").to_string(), app.tr("prefs.hover_edge_colour_custom").to_string()];
+    let colour_label = app.tr("prefs.hover_edge_colour").to_string();
+    let width_label = app.tr("prefs.hover_edge_width").to_string();
+    let widest = ui_kit::ContentWidth::label(ui, &colour_label).max(ui_kit::ContentWidth::label(ui, &width_label));
+    let label_width = (t.form_label_width + t.space_24).max(widest + t.space_4);
+    // A block, not a row: the swatch goes on its own line under the choice, and a row is one line high.
+    ui_kit::settings_block(ui, &colour_label, label_width, |ui| {
+        let mut selected = usize::from(app.preferences.hover_edge_colour.is_some());
+        if ui_kit::settings_segments(ui, &colour_label, &mut selected, &[labels[0].as_str(), labels[1].as_str()]) {
+            app.preferences.hover_edge_colour = (selected == 1).then_some(crate::prefs::HOVER_EDGE_CUSTOM);
+        }
+        if let Some(mut rgb) = app.preferences.hover_edge_colour {
+            let response = ui_kit::color_field(ui, &mut rgb);
+            crate::scenario::publish_target("prefs:hover_edge_colour_picker", response.rect);
+            if response.changed() {
+                app.preferences.hover_edge_colour = Some(rgb);
+            }
+        }
+    });
+    ui_kit::settings_block(ui, &width_label, label_width, |ui| {
+        let response = ui_kit::slider(
+            ui,
+            &mut app.preferences.hover_edge_width,
+            crate::prefs::HOVER_EDGE_WIDTH,
+            ui_kit::Slider { step: Some(0.5), format: |v| format!("{v:.1} pt"), ..Default::default() },
+        );
+        crate::scenario::publish_target("prefs:hover_edge_width", response.rect);
+    });
 }

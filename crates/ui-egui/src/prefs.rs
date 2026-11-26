@@ -914,6 +914,10 @@ pub const DIMENSION_STEP_DEG: std::ops::RangeInclusive<f64> = 0.001..=180.0;
 
 /// How far a sketch dimension's text may be scaled (Preferences › Sketch › Dimension text size).
 pub const DIMENSION_TEXT_SCALE: std::ops::RangeInclusive<f32> = 0.5..=2.5;
+/// The widths Preferences › Graphics offers for the edge under the pointer, in points.
+pub const HOVER_EDGE_WIDTH: std::ops::RangeInclusive<f32> = 1.0..=6.0;
+/// The colour Custom starts from for the edge under the pointer: a bright orange.
+pub const HOVER_EDGE_CUSTOM: [u8; 3] = [0xFF, 0x8C, 0x00];
 
 /// How far the origin planes' squares may be scaled (Preferences › Design › Origin › Origin plane
 /// size, #21191).
@@ -1265,6 +1269,17 @@ pub fn perspective_fov(p: &Prefs) -> f64 {
 /// outside the accepted range (a hand edit). Applies in the open sketch and to Show Dimensions.
 pub fn dimension_text_scale(p: &Prefs) -> f32 {
     if accepted::dimension_text_scale(p) { p.dimension_text_scale } else { 1.0 }
+}
+
+/// The colour of the edge under the pointer: the preference, or the theme's hover colour.
+pub fn hover_edge_colour(p: &Prefs) -> egui::Color32 {
+    p.hover_edge_colour.map_or_else(|| Tokens::get().hover_edge, |[r, g, b]| egui::Color32::from_rgb(r, g, b))
+}
+
+/// How wide the edge under the pointer is drawn: the preference, or 2 when a saved value is
+/// outside the accepted range (a hand edit).
+pub fn hover_edge_width(p: &Prefs) -> f32 {
+    if accepted::hover_edge_width(p) { p.hover_edge_width } else { 2.0 }
 }
 
 /// The factor the origin planes' squares are drawn at, of the size they take on screen by default:
@@ -4159,6 +4174,9 @@ pub fn migrate(mut p: Prefs) -> Prefs {
     if !accepted::dimension_text_scale(&p) {
         p.dimension_text_scale = Prefs::default().dimension_text_scale;
     }
+    if !accepted::hover_edge_width(&p) {
+        p.hover_edge_width = Prefs::default().hover_edge_width;
+    }
     if !accepted::origin_plane_scale(&p) {
         p.origin_plane_scale = Prefs::default().origin_plane_scale;
     }
@@ -4458,6 +4476,9 @@ fn prepare_preferences(
     }
     if !accepted::dimension_text_scale(&new) {
         return Err("`dimension_text_scale` must be 0.5…2.5".into());
+    }
+    if !accepted::hover_edge_width(&new) {
+        return Err("`hover_edge_width` must be 1…6".into());
     }
     if !accepted::origin_plane_scale(&new) {
         return Err("`origin_plane_scale` must be 0.5…4".into());
@@ -7569,6 +7590,8 @@ mod tests {
             ("browser_components_open", json!(true), PAGE_LAYOUT),
             ("browser_rows_start_closed", json!(true), PAGE_LAYOUT),
             ("quick_measure", json!(true), PAGE_GRAPHICS),
+            ("hover_edge_colour", json!([255, 140, 0]), PAGE_GRAPHICS),
+            ("hover_edge_width", json!(4.0), PAGE_GRAPHICS),
             ("origin_plane_names", json!("top_front_right"), PAGE_DESIGN),
             ("origin_plane_scale", json!(2.0), PAGE_DESIGN),
             ("direct_interaction", json!(true), PAGE_TOOLS),

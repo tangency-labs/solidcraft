@@ -6911,6 +6911,9 @@ fn highlight_geometry_key_with(app: &SolveApp, model_key: u64, selected: &[Sel])
     hover_drawn(&crate::snap_wake::lit_face(app)).hash(&mut h);
     hovered_body(app).hash(&mut h);
     app.preferences.show_selected_hidden_edges.hash(&mut h);
+    // The edge under the pointer is drawn in the colour and width Preferences › Graphics sets.
+    app.preferences.hover_edge_colour.hash(&mut h);
+    crate::prefs::hover_edge_width(&app.preferences).to_bits().hash(&mut h);
     app.viewport.hover_feature.hash(&mut h);
     app.viewport.hover_bodies.hash(&mut h);
     crate::select_other::hovered_body(app).hash(&mut h);
@@ -7392,6 +7395,12 @@ fn light_whole_body(
         return true;
     }
     false
+}
+
+/// The palette entries of the edge under the pointer: the theme's hover colours, or the colour
+/// Preferences › Graphics sets for it with the theme's halo (#22042).
+fn hovered_edge_colours(app: &SolveApp, sc: &mut GpuScene, t: &Tokens) -> EdgeColours {
+    EdgeColours::new(sc, crate::prefs::hover_edge_colour(&app.preferences), t.hover_edge_halo)
 }
 
 /// How wide an edge lit in `hover_edge_lit` is drawn: thin, the colour sets it apart.
@@ -8130,7 +8139,12 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         Some(Hit::Edge { body, index, mid, .. }) if !moving(body) => {
             if let Some(b) = st.body(body) {
                 // Lit over the drawn edges (finer away from Normal display quality).
-                let (lit, w) = if lights_hovered_edge(app) { (lit_edge_colours(&mut feedback, &t), LIT_EDGE_W) } else { (hover_edge, 2.0) };
+                // In the colour and width Preferences › Graphics sets (#22042), the theme's and 2 by default.
+                let (lit, w) = if lights_hovered_edge(app) {
+                    (lit_edge_colours(&mut feedback, &t), LIT_EDGE_W)
+                } else {
+                    (hovered_edge_colours(app, &mut feedback, &t), crate::prefs::hover_edge_width(&app.preferences))
+                };
                 let m = drawn(b);
                 // Measure measures the piece picked of an edge a seam splits: light that piece.
                 let pieces = if measuring_mesh_edges(app) { m.circular_rim(*index) } else { edge_pieces(b, &m, *index) };
@@ -18114,6 +18128,35 @@ mod tests {
         assert!(has(&app, t.hover_edge_lit), "the face's edges are lit");
         app.preferences.hover_edge_lit = false;
         assert!(!has(&app, t.hover_edge_lit), "off: the face lights up as before");
+    }
+
+    /// The edge under the pointer is drawn in the colour and width Preferences › Graphics sets
+    /// (#22042): by default the theme's hover colour at 2 points, as before; a custom colour
+    /// replaces it, and a wider setting widens the same lines.
+    #[test]
+    fn the_hovered_edge_takes_the_colour_and_width_set_in_preferences() {
+        let mut app = cylinder_app();
+        let st = app.session.world_state().unwrap();
+        let b = &st.bodies[0];
+        let m = b.mesh();
+        let top = m.edges.iter().position(|e| e.len() > 3 && e.iter().all(|p| (p.z - 20.0).abs() < 1e-6)).unwrap();
+        let mid = polyline_mid(&m.edges[top]);
+        app.viewport.hover = Some(Hit::Edge { body: b.name.clone(), index: top, mid, point: mid });
+        let t = Tokens::get();
+        let orange = Color32::from_rgb(0xFF, 0x8C, 0x00);
+        let has = |app: &SolveApp, c: Color32| build_highlight(app).palette.entries().contains(&c4(c));
+        assert_eq!((app.preferences.hover_edge_colour, app.preferences.hover_edge_width), (None, 2.0), "the defaults");
+        assert!(has(&app, t.hover_edge) && !has(&app, orange), "the theme's hover colour by default");
+        let before = build_highlight(&app).merged().lines;
+        app.preferences.hover_edge_colour = Some(crate::prefs::HOVER_EDGE_CUSTOM);
+        assert!(has(&app, orange), "the colour set");
+        app.preferences.hover_edge_colour = None;
+        app.preferences.hover_edge_width = 5.0;
+        let wide = build_highlight(&app).merged().lines;
+        assert_eq!(wide.len(), before.len(), "the same edge");
+        assert_ne!(wide, before, "drawn wider");
+        app.preferences.hover_edge_width = f32::NAN;
+        assert_eq!(build_highlight(&app).merged().lines, before, "a width outside 1…6 (a hand edit) draws as by default");
     }
 
     /// A click on a face of a wall in pieces takes the whole wall (`grouped_selection`), so every
