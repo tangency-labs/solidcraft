@@ -1124,7 +1124,7 @@ fn parallel_glb_export_matches_serial_byte_for_byte() {
             .add_feature(
                 FeatureKind::Box {
                     corner: point_expr(Vec3::new(0.0, 0.0, 0.0)),
-                    length: format!("{}", 10 + i * 2),
+                    length: format!("{}", 10 + i * 2).into(),
                     width: "14".into(),
                     height: "18".into(),
                     operation: Operation::NewBody,
