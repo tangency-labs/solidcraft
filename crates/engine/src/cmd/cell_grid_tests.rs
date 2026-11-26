@@ -725,13 +725,18 @@ fn a_sketched_cell_turned_flipped_or_given_an_origin_is_still_planned_exactly() 
     let expect = 100.0 * 100.0 * 3.0 - 23.0 * l_area() * 1.5;
     assert!((volume(&s) - expect).abs() < 1e-3, "{} vs {expect}", volume(&s));
     // Flipped (alternate cells mirrored) and turned cells keep the area of every cell: the planner
-    // checks them exactly, so the volume is a whole number of cell areas.
-    for extra in [json!({"flip": true}), json!({"cell_angle": 90})] {
+    // checks them exactly, so the volume is a whole number of cell areas, and the count follows
+    // from the cell's spans about its origin (2.9107 left and 5.0893 right of it, 3.5036 below and
+    // 5.9964 above) on the 30 pitch from the anchor (3, 4), rows j = 0..=3 and columns i = 0..=3,
+    // 16 cells as they are. Mirrored when i + j is odd, a cell reaches 2.09 left of x = 0 in
+    // column 0, so rows 1 and 3 lose it: 14. Turned by 90 degrees, a cell spans x -5.9964..3.5036
+    // about its origin, so column 0 starts at -2.99 and goes: 3 columns of 4 rows, 12.
+    for (extra, count) in [(json!({"flip": true}), 14.0), (json!({"cell_angle": 90}), 12.0)] {
         let mut t = l_plate();
         sketched(&mut t, with(json!({"depth": 1.5, "pitch_x": 30, "pitch_y": 30, "stagger": 0}), extra.clone())).unwrap();
         let removed = 100.0 * 100.0 * 3.0 - volume(&t);
         let cells = removed / (l_area() * 1.5);
-        assert!((cells - cells.round()).abs() < 1e-6 && cells >= 1.0, "{extra}: {cells} cells");
+        assert!((cells - count).abs() < 1e-6, "{extra}: {cells} cells, not {count}");
     }
 }
 
