@@ -574,6 +574,9 @@ fn compute_all(s: &mut Session, _p: &Value) -> Result<Value> {
     s.model = solidcraft_doc::Model::new();
     // and nothing taken from the rows built before (`config.activate`)
     s.row_models.clear();
+    if let Ok(mut cache) = s.clearance_cache.lock() {
+        cache.clear();
+    }
     s.set_validation(validation);
     s.refresh();
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
@@ -1102,6 +1105,10 @@ fn move_many(s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad(cmd, "a folder cannot be moved into itself or one of its descendants"));
     }
+    let slot = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?;
+    let active = active_param(p, cmd)?;
+    let allow = allow_errors(p, cmd)?;
+    s.pin_timeline_body_names();
     let nested = group_feature_ids(&s.doc, &groups);
     features.retain(|feature| !nested.contains(feature));
     let moving: Vec<u64> =
@@ -1117,9 +1124,6 @@ fn move_many(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     sort_group_features(&mut next);
-    let slot = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?;
-    let active = active_param(p, cmd)?;
-    let allow = allow_errors(p, cmd)?;
     let (next, ordered, broken, checked) = reorder_features(s, next, &moving, slot, active, allow, cmd)?;
     if next != *s.doc {
         if let Some(model) = checked {
@@ -1926,22 +1930,24 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     // A one-sided extrude made symmetric remembers the way it went, so what was picked on its
     // start cap is still found on the cap facing the same way.
     solidcraft_doc::keep_one_sided_direction(&s.model, &f, &mut nf);
-    let copy_sources = match &nf.kind {
-        FeatureKind::Pattern { bodies, components, occurrences, .. } if !bodies.is_empty() && components.is_empty() && occurrences.is_empty() => {
+    let copy_sources_of = |kind: &FeatureKind| match kind {
+        FeatureKind::Pattern { bodies, components, occurrences, join, .. }
+            if !bodies.is_empty() && components.is_empty() && occurrences.is_empty() && (!*join || bodies.len() == 1) =>
+        {
             Some(solidcraft_doc::plain(bodies))
         }
+        FeatureKind::Mirror { bodies, combine: false, .. } if !bodies.is_empty() => Some(solidcraft_doc::plain(bodies)),
         FeatureKind::Move { bodies, copy: true, .. } if !bodies.is_empty() => Some(solidcraft_doc::plain(bodies)),
         _ => None,
     };
-    let sources_changed = match (&f.kind, &nf.kind) {
-        (FeatureKind::Pattern { bodies: old, .. }, FeatureKind::Pattern { bodies: new, .. })
-        | (FeatureKind::Move { bodies: old, .. }, FeatureKind::Move { bodies: new, .. }) => old != new,
-        _ => false,
-    };
-    let existing_copies: std::collections::HashSet<String> = if copy_sources.is_some() && !sources_changed {
-        s.model.state().bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect()
+    let copy_sources = copy_sources_of(&nf.kind);
+    let previous_copy_sources: std::collections::HashMap<String, String> = if copy_sources.is_some() {
+        copy_sources_of(&f.kind)
+            .and_then(|old_sources| super::features::copy_pairs_for(s, id, &old_sources))
+            .map(|pairs| pairs.into_iter().collect())
+            .unwrap_or_default()
     } else {
-        std::collections::HashSet::new()
+        std::collections::HashMap::new()
     };
     let mut capture_removed_joints = std::collections::BTreeSet::new();
     let mut capture_edited = false;
@@ -2038,8 +2044,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(EngineError::Other(e));
     }
     if let Some(sources) = copy_sources {
-        let preserve = (!sources_changed).then_some(&existing_copies);
-        let _ = super::features::copy_keeps_appearance_for(s, id, &sources, preserve, cmd);
+        let _ = super::features::copy_keeps_appearance_for(s, id, &sources, Some(&previous_copy_sources), cmd);
     }
     reply(cmd, TimelineEditResult { feature: id, recomputed: s.model.last_recomputed, restored: s.model.last_restored, param_warnings: Vec::new() })
 }
@@ -2644,15 +2649,28 @@ fn boundary_walks(record: &solidcore_record::brep::Brep, uses: &BTreeMap<usize, 
     walks
 }
 
-/// Features that worked in `before` and fail in `after`: (name, error).
-fn newly_broken(before: &solidcraft_doc::Model, after: &solidcraft_doc::Model) -> Vec<(String, String)> {
+/// Features that worked in `before` and fail in `after`: (name, error). When `include_left_out`
+/// is true, body patterns that newly leave out a source body they copied before are reported too
+/// (so a timeline reorder cannot silently drop pattern copies with a warning and zero errors).
+fn newly_broken(before: &solidcraft_doc::Model, after: &solidcraft_doc::Model, include_left_out: bool) -> Vec<(String, String)> {
     after
         .results
         .iter()
         .filter_map(|r| {
-            let e = r.error.clone()?;
-            let was_ok = before.result(r.id).is_some_and(|b| b.error.is_none() && !b.skipped);
-            was_ok.then(|| (r.name.clone(), e))
+            let prev = before.result(r.id).filter(|b| b.error.is_none() && !b.skipped)?;
+            if let Some(e) = r.error.clone() {
+                return Some((r.name.clone(), e));
+            }
+            if !include_left_out || r.skipped {
+                return None;
+            }
+            let prev_left = prev.state.pattern_left_out(r.id);
+            let after_left = r.state.pattern_left_out(r.id);
+            if after_left.iter().any(|s| !prev_left.contains(s)) {
+                let reason = r.warning.clone().unwrap_or_else(|| "a patterned body could not be copied".into());
+                return Some((r.name.clone(), reason));
+            }
+            None
         })
         .collect()
 }
@@ -2669,8 +2687,18 @@ pub(super) fn newly_broken_in_history(
     after_doc: &solidcraft_doc::Document,
     after: &solidcraft_doc::Model,
 ) -> Vec<(String, String)> {
+    newly_broken_in_history_with_left_out(before_doc, before, after_doc, after, false)
+}
+
+fn newly_broken_in_history_with_left_out(
+    before_doc: &solidcraft_doc::Document,
+    before: &solidcraft_doc::Model,
+    after_doc: &solidcraft_doc::Document,
+    after: &solidcraft_doc::Model,
+    include_left_out: bool,
+) -> Vec<(String, String)> {
     if (before_doc.marker.is_none() && after_doc.marker.is_none()) || only_constraints_changed(before_doc, before, after_doc, after) {
-        return newly_broken(before, after);
+        return newly_broken(before, after, include_left_out);
     }
     let whole = |doc: &solidcraft_doc::Document, model: &solidcraft_doc::Model| {
         let mut doc = doc.clone();
@@ -2686,10 +2714,10 @@ pub(super) fn newly_broken_in_history(
     // history before it needn't be built again (#9917: each build ran every boolean after the
     // marker, half a minute on a large design).
     let after = whole(after_doc, after);
-    if after.results.iter().all(|r| r.error.is_none()) {
+    if after.results.iter().all(|r| r.error.is_none() && (!include_left_out || r.state.pattern_left_out(r.id).is_empty())) {
         return Vec::new();
     }
-    newly_broken(&whole(before_doc, before), &after)
+    newly_broken(&whole(before_doc, before), &after, include_left_out)
 }
 
 /// Whether `after_doc` differs from `before_doc` only in sketch constraints and dimensions (and
@@ -2751,16 +2779,19 @@ pub(super) fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
         let note = Some(format!("nothing moved: {why}"));
         return reply(cmd, TimelineReordered { feature: id, position: to, from, moved: false, note, broken: None, param_warnings: Vec::new() });
     }
+    // Pin evaluated body names (including disambiguated suffixes) before reordering so moving a
+    // later same-named component or import earlier does not renumber existing bodies.
+    s.pin_timeline_body_names();
     let mut next = (*s.doc).clone();
     let f = next.features.remove(from);
     let name = f.name.clone();
     next.features.insert(to, f);
     sort_group_features(&mut next);
     require_contiguous_groups(&next, cmd)?;
-    // Everything that evaluated before must still evaluate.
+    // Everything in the history that evaluated before must still evaluate.
     let mut after = s.model.clone();
     after.evaluate(&next);
-    let broken = newly_broken(&s.model, &after);
+    let broken = newly_broken_in_history_with_left_out(&s.doc, &s.model, &next, &after, true);
     // `allow_errors`: made anyway, with what it broke said (#5962).
     let allow = allow_errors(p, cmd)?;
     if !broken.is_empty() && !allow {
@@ -2858,6 +2889,7 @@ fn reorder_many(s: &mut Session, p: &Value) -> Result<Value> {
     let slot = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?;
     let active = active_param(p, cmd)?;
     let allow = allow_errors(p, cmd)?;
+    s.pin_timeline_body_names();
     let (next, ordered, broken, checked) = reorder_features(s, (*s.doc).clone(), &ids, slot, active, allow, cmd)?;
     if next != *s.doc {
         if let Some(model) = checked {
@@ -2913,7 +2945,7 @@ fn reorder_features(
     // evaluated again from an empty model (#6186).
     let mut after = s.model.clone();
     after.evaluate(&next);
-    let broken = if unchanged { Vec::new() } else { newly_broken_in_history(&s.doc, &s.model, &next, &after) };
+    let broken = if unchanged { Vec::new() } else { newly_broken_in_history_with_left_out(&s.doc, &s.model, &next, &after, true) };
     if !broken.is_empty() && !allow_errors {
         let list: Vec<String> = broken.iter().map(|(name, error)| format!("{name} ({error})")).collect();
         return Err(bad(cmd, format!("moving the selected features there breaks {}", list.join("; "))));

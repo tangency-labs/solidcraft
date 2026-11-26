@@ -125,17 +125,16 @@ pub(crate) fn run_ordered(
 
 /// Bring a tagged operation's result back, with its checked geometry and native origins.
 fn finish_run(name: &str, b: &Body, sb: &Brep, ob: Option<Order>, r: Brep) -> Result<(Body, Option<History>)> {
-    use crate::validation::{Checked, Step};
+    use crate::validation::Step;
     let step = crate::validation::step();
-    if step == Step::Check {
-        let check = r.check(CheckLevel::All).map_err(|e| failed(name, "check", e))?;
-        if !check.is_valid() {
-            let input = sb.check(CheckLevel::All).is_ok_and(|c| !c.is_valid());
-            let what = if input { "SMLib's check refuses the result (the body already fails it)" } else { "SMLib's check refuses the result" };
-            return Err(failed(name, what, check));
-        }
-    }
     let (body, or) = body_from_smlib_ordered(&r)?;
+    if step == Step::Check
+        && let crate::validation::DecodedCheck::Refused(detail) = crate::validation::check_decoded(&format!("SMLib {name}"), body.record())?
+    {
+        let input = sb.check(CheckLevel::All).is_ok_and(|c| !c.is_valid());
+        let what = if input { "SMLib's check refuses the result (the body already fails it)" } else { "SMLib's check refuses the result" };
+        return Err(failed(name, what, detail));
+    }
     let history = match (ob, or) {
         (Some(ob), Some(or)) => r.history().map_err(|e| failed(name, "history", e))?.history(&[ob], &or).map(Some).unwrap_or_else(|e| {
             log::debug!(target: "smlib", "{name} history: {e}");
@@ -143,7 +142,7 @@ fn finish_run(name: &str, b: &Body, sb: &Brep, ob: Option<Order>, r: Brep) -> Re
         }),
         _ => None,
     };
-    let body = if step == Step::Defer { body.left_unchecked(&format!("SMLib {name}"), Checked::AsIs, r, &[b]) } else { body };
+    let body = if step == Step::Defer { body.left_unchecked(&format!("SMLib {name}"), &[b]) } else { body };
     Ok((body, history))
 }
 

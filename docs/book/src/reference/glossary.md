@@ -423,6 +423,13 @@ a new row takes the next number at its level. A row listed under another reads a
 - **Elsewhere:** item number, item, find number, balloon number.
 - **For translators:** a label, not a quantity or a count; not a part number.
 
+### lay
+
+The predominant pattern or direction of marks left on a manufactured surface.
+
+- **In SolidCraft:** `solidcraft_geom::surface_texture::Lay`, used by a surface texture indication.
+- **For translators:** use the manufacturing sense of direction and pattern.
+
 ### leader
 
 The line from a note to what it points at on the model. It is worked out from where that thing is
@@ -832,6 +839,16 @@ flange slope.
 - **Don't use:** catalogue profile, library profile (for the size).
 - **Elsewhere:** standard section, section size, section designation.
 - **For translators:** a steel section's size by name, not a dimension and not a standard part.
+
+### surface texture indication
+
+A drawing requirement for the small-scale shape of a manufactured surface, expressed by
+parameters and a production-process symbol.
+
+- **In SolidCraft:** `solidcraft_geom::surface_texture::Indication`; the record retains its
+  standard, parameter limits, lay, process note and all-round intent.
+- **Don't use:** appearance, render material.
+- **For translators:** describes manufactured geometry and acceptance requirements.
 
 ### thin-film interference
 

@@ -278,6 +278,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "features: [names] | bodies: [names]; ",
             "path_sketch: sketch; ",
             "path: [curve ids in order]; ",
+            "path_body?: body name; path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves, starting at the chain's end nearest the first point, or a closed chain at its point nearest the first point); ",
             "count; ",
             "spacing (between instances) | distance (first to last); ",
             "start?: expr (start point: how far along the path the original sits, the copies measured on from there; default 0, the path's start) | start_fraction?: expr (the start point as 0…1 of the path's length, kept as the path changes); ",
@@ -324,7 +325,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("pipe")
         .contract(&PIPE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("path_sketch: sketch; path: [curve ids in order]; diameter: expr; wall?: expr (hollow); operation?, targets?, name?, body_name?"),
+        .params("path_sketch: sketch; path: [curve ids in order]; path_body?: body name; path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves); diameter: expr; wall?: expr (hollow); operation?, targets?, name?, body_name?"),
     CommandSpec::new("solid.bounding_solid", "Bounding Solid", crate::checked!("solid.bounding_solid", bounding_solid)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("bounding_solid")
@@ -1358,8 +1359,11 @@ type FaceProfile = (u64, Option<ProfileSel>, Option<String>);
 /// physical material and appearance, so it is still made of what the body was. A piece that
 /// already has its own (kept under its name from before) keeps it.
 fn carry_looks(s: &mut Session, pieces: &[(String, String)]) {
+    let inherited_material = |doc: &solidcraft_doc::Document, from: &str| {
+        doc.resolved_body_material(from).filter(|m| *m != solidcraft_doc::DEFAULT_MATERIAL).map(str::to_string)
+    };
     let needs = |piece: &str, from: &str| {
-        (!s.doc.materials.contains_key(piece) && s.doc.materials.contains_key(from))
+        (!s.doc.materials.contains_key(piece) && inherited_material(&s.doc, from).is_some())
             || (!s.doc.appearances.bodies.contains_key(piece) && s.doc.appearances.bodies.contains_key(from))
     };
     if !pieces.iter().any(|(piece, from)| needs(piece, from)) {
@@ -1368,7 +1372,7 @@ fn carry_looks(s: &mut Session, pieces: &[(String, String)]) {
     let doc = s.doc_mut();
     for (piece, from) in pieces {
         if !doc.materials.contains_key(piece)
-            && let Some(material) = doc.materials.get(from).cloned()
+            && let Some(material) = inherited_material(doc, from)
         {
             doc.materials.insert(piece.clone(), material);
         }
@@ -3355,38 +3359,53 @@ fn copy_keeps_appearance(s: &mut Session, reply: &Value, sources: &[String], cmd
     copy_keeps_appearance_for(s, id, sources, None, cmd)
 }
 
-/// Copy each source body's body-level appearance and physical material onto its copies created by
-/// feature `id`. Bodies in `preserve` keep any explicit assignment they already have (#21245).
+/// Pair each copy body made by feature `id` with its seed body name in `sources`, reading the
+/// feature's own evaluation result (so later features that consume or join a copy do not break
+/// alignment) and skipping sources the pattern left out.
+pub(super) fn copy_pairs_for(s: &Session, id: u64, sources: &[String]) -> Option<Vec<(String, String)>> {
+    let state = s.model.result(id).filter(|r| r.error.is_none() && !r.skipped).map(|r| r.state.clone()).unwrap_or_else(|| s.model.state());
+    let left_out = state.pattern_left_out(id);
+    let active_sources: Vec<&String> = sources.iter().enumerate().filter(|(i, _)| !left_out.contains(i)).map(|(_, src)| src).collect();
+    let copies: Vec<String> = state.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
+    let each = copies.len().checked_div(active_sources.len()).filter(|each| *each > 0 && each * active_sources.len() == copies.len())?;
+    let mut pairs = Vec::with_capacity(copies.len());
+    for (source, group) in active_sources.into_iter().zip(copies.chunks(each)) {
+        for copy in group {
+            pairs.push((copy.clone(), source.clone()));
+        }
+    }
+    Some(pairs)
+}
+
+/// Copy each source body's body-level appearance and collision shape onto its copies created by
+/// feature `id`. Physical material is inherited dynamically via
+/// [`solidcraft_doc::Document::resolved_body_material`], so copies only carry an entry in
+/// `doc.materials` when explicitly overridden; re-seeding a copy clears any stale override from
+/// its previous seed so it and its downstream copies inherit from the new seed.
 pub(super) fn copy_keeps_appearance_for(
     s: &mut Session,
     id: u64,
     sources: &[String],
-    preserve: Option<&std::collections::HashSet<String>>,
+    previous_sources: Option<&std::collections::HashMap<String, String>>,
     cmd: &str,
 ) -> Result<()> {
-    let copies: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
-    let each = copies.len().checked_div(sources.len()).filter(|each| *each > 0 && each * sources.len() == copies.len());
-    let Some(each) = each else {
+    let Some(pairs) = copy_pairs_for(s, id, sources) else {
         return Err(bad(cmd, "the copy did not make the same number of bodies for each body it copied"));
     };
-    for (source, copies) in sources.iter().zip(copies.chunks(each)) {
-        for copy in copies {
-            if preserve.is_some_and(|existing| existing.contains(copy)) {
-                continue;
-            }
-            if let Some(look) = s.doc.appearances.bodies.get(source).cloned() {
+    for (copy, source) in pairs {
+        let same_source = previous_sources.and_then(|prev| prev.get(&copy)).is_some_and(|old| old == &source);
+        if !(same_source && s.doc.appearances.bodies.contains_key(&copy)) {
+            if let Some(look) = s.doc.appearances.bodies.get(&source).cloned() {
                 s.doc_mut().appearances.bodies.insert(copy.clone(), look);
-            } else {
-                s.doc_mut().appearances.bodies.remove(copy);
+            } else if !same_source {
+                s.doc_mut().appearances.bodies.remove(&copy);
             }
-            if let Some(material) = s.doc.materials.get(source).cloned() {
-                s.doc_mut().materials.insert(copy.clone(), material);
-            } else {
-                s.doc_mut().materials.remove(copy);
-            }
-            if let Some(shape) = s.doc.collision_shapes.get(source).copied() {
-                s.doc_mut().collision_shapes.insert(copy.clone(), shape);
-            }
+        }
+        if !same_source && s.doc.materials.contains_key(&copy) {
+            s.doc_mut().materials.remove(&copy);
+        }
+        if !same_source && let Some(shape) = s.doc.collision_shapes.get(&source).copied() {
+            s.doc_mut().collision_shapes.insert(copy, shape);
         }
     }
     Ok(())
@@ -3491,7 +3510,7 @@ fn finish_pattern(
         // The pattern is added either way: when it made no copies (the feature failed to
         // evaluate) or an uneven number of them, there is nothing to tell the copies apart by
         // and they keep no look, as before. (Appearance copy from main.)
-        if !copied.is_empty() {
+        if !copied.is_empty() && (!join || copied.len() == 1) {
             let _ = copy_keeps_appearance(s, &reply, &copied, "pattern");
         }
         if let Some(note) = warning {
@@ -3747,11 +3766,17 @@ fn pattern_circ(s: &mut Session, p: &Value) -> Result<Value> {
 fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.pattern.path";
     let (features, bodies) = pattern_sources(s, p, cmd)?;
-    let path_sketch = sketch_id(s, p.get("path_sketch").or_else(|| p.get("sketch")), cmd, "path_sketch")?;
-    let path = string_list(cmd, p, "path")?;
-    if path.is_empty() || path.len() > 1000 {
-        return Err(bad(cmd, "`path` must list 1…1000 curve ids"));
-    }
+    // The path is a chain of a body's edges (#16084) or the curves of a sketch.
+    let (path_sketch, path, path_body, path_edges) = if p.get("path_body").is_some_and(|b| !b.is_null()) {
+        one_sketch_path(s, p, cmd)?
+    } else {
+        let path_sketch = sketch_id(s, p.get("path_sketch").or_else(|| p.get("sketch")), cmd, "path_sketch")?;
+        let path = string_list(cmd, p, "path")?;
+        if path.is_empty() || path.len() > 1000 {
+            return Err(bad(cmd, "`path` must list 1…1000 curve ids"));
+        }
+        (path_sketch, path, None, Vec::new())
+    };
     let count = req_expr(cmd, p, "count")?;
     check_count(s, &count, cmd, "count")?;
     let (spacing, extent) = match (expr(p, "spacing"), expr(p, "distance")) {
@@ -3788,6 +3813,8 @@ fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
     let pattern = solidcraft_doc::PatternKind::Path {
         path_sketch: SketchId(path_sketch),
         path,
+        path_body,
+        path_edges,
         count,
         spacing,
         extent,
@@ -3827,9 +3854,10 @@ fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(reply)
 }
 
-/// Copies are made of what the bodies they were made from are: each takes its source's physical
-/// material and body/face appearances, unless it has its own (kept under its name from before). The copies
-/// are the bodies feature `reply` made, in the order of `sources`, as
+/// Copies are made of what the bodies they were made from are: each takes its source's body and
+/// face appearances, unless it has its own (kept under its name from before). Physical material is
+/// inherited dynamically via [`solidcraft_doc::Document::resolved_body_material`]. The copies are
+/// the bodies feature `reply` made, in the order of `sources`, as
 /// [`super::print_face::copies_keep_print_faces`] takes them.
 fn copies_keep_looks(s: &mut Session, reply: &Value, sources: &[String]) -> Result<()> {
     let Some(id) = reply.get("feature").and_then(Value::as_u64) else { return Ok(()) };
@@ -3884,20 +3912,12 @@ fn copies_keep_looks(s: &mut Session, reply: &Value, sources: &[String]) -> Resu
             });
         }
     }
-    let needs = |copy: &str, from: &str| {
-        (!s.doc.materials.contains_key(copy) && s.doc.materials.contains_key(from))
-            || (!s.doc.appearances.bodies.contains_key(copy) && s.doc.appearances.bodies.contains_key(from))
-    };
+    let needs = |copy: &str, from: &str| !s.doc.appearances.bodies.contains_key(copy) && s.doc.appearances.bodies.contains_key(from);
     if faces.is_empty() && !pairs.iter().any(|(copy, from)| needs(copy, from)) {
         return Ok(());
     }
     let doc = s.doc_mut();
     for (copy, from) in pairs {
-        if !doc.materials.contains_key(&copy)
-            && let Some(material) = doc.materials.get(&from).cloned()
-        {
-            doc.materials.insert(copy.clone(), material);
-        }
         if !doc.appearances.bodies.contains_key(&copy)
             && let Some(look) = doc.appearances.bodies.get(&from).cloned()
         {
@@ -4263,12 +4283,16 @@ pub(crate) fn explicit_plane(o: &Value, origin: Vec3) -> Option<solidcore_record
 /// explicit plane `{origin, x_dir, y_dir}` / `{origin, normal}`. Every command that takes a
 /// plane reads it here.
 pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<solidcraft_doc::PlaneRef> {
+    plane_param_named(s, v, cmd, "plane")
+}
+
+pub(super) fn plane_param_named(s: &Session, v: Option<&Value>, cmd: &str, key: &str) -> Result<solidcraft_doc::PlaneRef> {
     use solidcraft_doc::PlaneRef;
     const WANT: &str = PLANE_FORMS;
     let construction = |r: &str| match s.doc.find_feature(r) {
         Some(f) if matches!(f.kind, FeatureKind::ConstructionPlane { .. }) => Ok(PlaneRef::Construction { feature: f.id.into(), placement: None }),
-        Some(f) => Err(bad(cmd, format!("`{}` is not a construction plane (a plane is {WANT})", f.name))),
-        None => Err(bad(cmd, format!("no plane `{r}` (a plane is {WANT})"))),
+        Some(f) => Err(bad(cmd, format!("`{key}`: `{}` is not a construction plane (a plane is {WANT})", f.name))),
+        None => Err(bad(cmd, format!("`{key}`: no plane `{r}` (a plane is {WANT})"))),
     };
     match v {
         Some(Value::String(n)) if solidcore_record::Plane::named(n.trim()).is_some() => {
@@ -4278,7 +4302,7 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
                 return Err(bad(
                     cmd,
                     format!(
-                        "plane `{}` is ambiguous: an origin-plane alias and a construction plane; use `{}` for the origin plane, construction plane feature id {}, or an explicit {{origin, normal}} plane",
+                        "`{key}`: plane `{}` is ambiguous: an origin-plane alias and a construction plane; use `{}` for the origin plane, construction plane feature id {}, or an explicit {{origin, normal}} plane",
                         n.trim(),
                         origin_plane_alias(n).unwrap_or("XY"),
                         f.id
@@ -4301,7 +4325,7 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
         }
         Some(Value::Number(id)) => match id.as_u64() {
             Some(id) => construction(&id.to_string()),
-            None => Err(bad(cmd, format!("`plane` must be {WANT}"))),
+            None => Err(bad(cmd, format!("`{key}` must be {WANT}"))),
         },
         Some(o @ Value::Object(_)) => {
             // The origin's coordinates are numbers or length expressions; expressions are kept,
@@ -4312,13 +4336,13 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
             };
             let at = |e: &str| s.doc.eval(e, Kind::Length).unwrap_or(0.0);
             let here = Vec3::new(at(&origin[0]), at(&origin[1]), at(&origin[2]));
-            let plane = explicit_plane(o, here).ok_or_else(|| bad(cmd, "plane needs x_dir and y_dir, or normal"))?;
+            let plane = explicit_plane(o, here).ok_or_else(|| bad(cmd, format!("`{key}` needs x_dir and y_dir, or normal")))?;
             if origin.iter().all(|e| solidcraft_doc::expr::is_literal(e)) {
                 return Ok(PlaneRef::Custom { plane });
             }
             Ok(PlaneRef::Placed { origin, x_dir: plane.x, y_dir: plane.y })
         }
-        _ => Err(bad(cmd, format!("`plane` must be {WANT}"))),
+        _ => Err(bad(cmd, format!("`{key}` must be {WANT}"))),
     }
 }
 
@@ -5338,7 +5362,7 @@ fn draft(s: &mut Session, p: &Value) -> Result<Value> {
     let picked = faces_body(s, p, &faces);
     let angle = req_expr(cmd, p, "angle")?;
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
-    let neutral = plane_param(s, p.get("neutral"), cmd)?;
+    let neutral = plane_param_named(s, p.get("neutral"), cmd, "neutral")?;
     let (vals, _) = s.doc.param_values();
     let pl = s.doc.resolve_plane_in(&vals, &neutral, 0, s.active_component, Some(&s.model.state()))?;
     let pull = p.get("pull").and_then(vec3).unwrap_or_else(|| pl.normal());
@@ -5464,6 +5488,21 @@ pub(super) fn sweep_path(s: &Session, p: &Value, cmd: &str) -> Result<(u64, Vec<
         })
         .collect::<Result<Vec<_>>>()?;
     Ok((path_sketch, path, None, Vec::new()))
+}
+
+/// [`sweep_path`] for a feature whose path is curves of its path sketch only (Pipe, Pattern
+/// on Path): each entry as its curve id. A curve of another sketch is refused.
+fn one_sketch_path(s: &Session, p: &Value, cmd: &str) -> Result<(u64, Vec<String>, Option<BodyName>, Vec<Position>)> {
+    let (path_sketch, path, path_body, path_edges) = sweep_path(s, p, cmd)?;
+    let path = path
+        .into_iter()
+        .map(|e| match e {
+            solidcraft_doc::PathEntry::OfPathSketch(id) => Ok(id),
+            solidcraft_doc::PathEntry::OfSketch { sketch, curve } if sketch.0 == path_sketch => Ok(curve),
+            solidcraft_doc::PathEntry::OfSketch { .. } => Err(bad(cmd, "the path's curves must all be in `path_sketch`")),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok((path_sketch, path, path_body, path_edges))
 }
 
 /// The points on the edges of a sweep's path (`path_edges`), one on each edge of the chain.
@@ -5841,11 +5880,8 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn pipe(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.pipe";
-    let path_sketch = sketch_id(s, p.get("path_sketch"), cmd, "path_sketch")?;
-    let path = string_list(cmd, p, "path")?;
-    if path.is_empty() {
-        return Err(bad(cmd, "`path` must list curve ids"));
-    }
+    // The path is a chain of a body's edges (#16084) or the curves of a sketch, as a sweep's.
+    let (path_sketch, path, path_body, path_edges) = one_sketch_path(s, p, cmd)?;
     let diameter = req_expr(cmd, p, "diameter")?;
     check_expr(s, &diameter, Kind::Length, cmd, "diameter")?;
     let wall = expr(p, "wall");
@@ -5860,6 +5896,8 @@ fn pipe(s: &mut Session, p: &Value) -> Result<Value> {
         FeatureKind::Pipe {
             path_sketch: SketchId(path_sketch),
             path,
+            path_body,
+            path_edges,
             diameter,
             wall,
             operation: operation(p, cmd)?,

@@ -1477,7 +1477,7 @@ fn fit_reach(segments: &[(String, Vec3, Vec3)], regions: &[Region2], placed: &dy
                 .as_chunks::<4>()
                 .0
                 .iter()
-                .filter_map(|r| solidcraft_kernel::services::section_corners::exit_through_box(end, toward, r.map(|q| plane.to_world(q))));
+                .filter_map(|r| solidcraft_kernel::planar::exit_through_box(end, toward, r.map(|q| plane.to_world(q))));
             exits.reduce(f64::max)
         })
         .fold(0.0, f64::max);
