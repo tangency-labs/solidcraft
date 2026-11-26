@@ -97,7 +97,7 @@ struct PanelState {
 }
 
 fn panel_id() -> egui::Id {
-    egui::Id::new("shop_presets_panel")
+    egui::Id::unique("shop_presets_panel")
 }
 
 /// The presets section of the Shop Check window, under its Shop row: save the shop shown as a
