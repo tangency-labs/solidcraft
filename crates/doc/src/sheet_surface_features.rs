@@ -2982,7 +2982,7 @@ const CURVE_REACH: f64 = 1e-3;
 
 /// How wide (mm) a piece the planar booleans leave must be to be one: where two of their edges
 /// coincide they leave slivers of no width, about their tolerance (1e-9 mm) across.
-const SLIVER: f64 = 1e-8;
+pub(crate) const SLIVER: f64 = 1e-8;
 
 /// One stretch of an edge to bend (see [`SurfaceSheet::flanges_on`]), worked out on the sheet as
 /// it was before any stretch of the edge moved it: its bend's angle and side, the virtual sharp
@@ -3129,7 +3129,7 @@ fn overlap(a: &[(f64, f64)], b: &[(f64, f64)], tol: f64) -> bool {
 }
 
 /// How wide a region is on average: twice its area over the length of its loops.
-fn width(r: &Region2) -> f64 {
+pub(crate) fn width(r: &Region2) -> f64 {
     let around: f64 = std::iter::once(&r.outer).chain(&r.holes).flat_map(|l| &l.segs).map(|s| s.length()).sum();
     if around > 0.0 { 2.0 * r.area() / around } else { 0.0 }
 }

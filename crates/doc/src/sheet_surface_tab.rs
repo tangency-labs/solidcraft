@@ -89,7 +89,9 @@ impl SurfaceSheet {
 
     /// Joins `profile` (panel `i`'s chart) to panel `i`'s outline. Where it meets the sheet's
     /// cuts across joints (see [`Cut`]), it also gives back what they took there, as it fills a
-    /// hole cut inside its panel (see [`Self::fill_cuts`]).
+    /// hole cut inside its panel (see [`Self::fill_cuts`]). A tab that cannot fill them so, but
+    /// that joins the outline as a tab did before it could (the cuts keeping what they took),
+    /// keeps that result: a design that built then builds the same now.
     fn tab_on(&mut self, i: usize, profile: &[Region2]) -> Result<()> {
         let region = self.sheet.panels.get(i).map(|p| p.region.clone()).ok_or_else(|| DocError::Invalid("tab".into()))?;
         // The sheet's cuts across joints that the profile meets, each in panel `i`'s chart:
@@ -98,6 +100,8 @@ impl SurfaceSheet {
         let mut met: Vec<(usize, Region2)> = Vec::new();
         if let Some((dev, back)) = dev.as_ref().and_then(|d| Some((d, d.placements.get(i).copied().flatten()?.inverse()))) {
             for (k, c) in self.sheet.cuts.iter().enumerate() {
+                // Every cut's panel has its place: the development refuses a sheet with a cut on
+                // a panel it does not lay out.
                 let Some(there) = dev.placements.get(c.panel).copied().flatten() else { continue };
                 let cut = there.then(&back).region(&c.region);
                 let inside = solidcraft_kernel::planar_regions_boolean(profile, std::slice::from_ref(&cut), BoolOp::Intersect, 1e-9)?;
@@ -106,71 +110,94 @@ impl SurfaceSheet {
                 }
             }
         }
-        let met_cuts: Vec<Region2> = met.iter().map(|(_, c)| c.clone()).collect();
         // The panel's joints: each runs along a line of its chart, the panel's material on one
         // side (an `a` anchor's on its left, a `b` anchor's on its right, see
         // [`solidcraft_develop::Anchor`]). Across the line, along its length, is the bend's zone
-        // or the next panel: no part of this one. Only what the cuts the profile meets leave of a
-        // bend counts: where they took it away, the tab may fill the gap (see
-        // [`Self::fill_cuts`], which checks what it fills).
+        // or the next panel: no part of this one. These are the strips across them, along what
+        // `cuts` (panel `i`'s chart) leave of each bend: where a cut took a bend away, the tab
+        // may fill the gap (see [`Self::fill_cuts`], which checks what it fills).
         let reach = {
             let b = region.outer.polyline(1e-3).bounds();
             let p = profile.iter().map(|r| r.outer.polyline(1e-3).bounds()).fold(b, |x, y| x.union(&y));
             (p.size().len() + p.min.len() + p.max.len() + 1.0) * 4.0
         };
-        for joint in &self.sheet.joints {
-            let (length, bend) = match &joint.kind {
-                JointKind::Bend(b) => (b.length, true),
-                JointKind::Rip(r) => (r.edges.0.first().zip(r.edges.0.last()).map_or(0.0, |(p, q)| p.dist(*q)), false),
-                JointKind::Seam => continue,
-            };
-            for (an, away) in [(&joint.a, -1.0), (&joint.b, 1.0)] {
-                if an.panel != i {
-                    continue;
-                }
-                let left = if bend && !met_cuts.is_empty() {
-                    crate::sheet_surface_convert::left_along(an, length, &met_cuts, 1e-6)
-                } else {
-                    vec![(0.0, length)]
+        let across = |cuts: &[Region2]| {
+            let mut strips = Vec::new();
+            for joint in &self.sheet.joints {
+                let (length, bend) = match &joint.kind {
+                    JointKind::Bend(b) => (b.length, true),
+                    JointKind::Rip(r) => (r.edges.0.first().zip(r.edges.0.last()).map_or(0.0, |(p, q)| p.dist(*q)), false),
+                    JointKind::Seam => continue,
                 };
-                let across = an.dir.perp() * away;
-                for (from, to) in left {
-                    let (p, q) = (an.origin + an.dir * from, an.origin + an.dir * to);
-                    let strip = Loop2::polygon(&[p, q, q + across * reach, p + across * reach]).ccw();
-                    let inside =
-                        solidcraft_kernel::planar_regions_boolean(profile, &[Region2 { outer: strip, holes: Vec::new() }], BoolOp::Intersect, 1e-9)?;
-                    if area(&inside) > 1e-6 {
-                        return err(TAB_IN_BEND);
+                for (an, away) in [(&joint.a, -1.0), (&joint.b, 1.0)] {
+                    if an.panel != i {
+                        continue;
+                    }
+                    let left =
+                        if bend && !cuts.is_empty() { crate::sheet_surface_convert::left_along(an, length, cuts, 1e-6) } else { vec![(0.0, length)] };
+                    let across = an.dir.perp() * away;
+                    for (from, to) in left {
+                        let (p, q) = (an.origin + an.dir * from, an.origin + an.dir * to);
+                        strips.push(Region2 { outer: Loop2::polygon(&[p, q, q + across * reach, p + across * reach]).ccw(), holes: Vec::new() });
                     }
                 }
             }
-        }
-        let joined = solidcraft_kernel::planar_regions_boolean(std::slice::from_ref(&region), profile, BoolOp::Union, 1e-9)?;
-        let [one] = <[Region2; 1]>::try_from(joined).map_err(|_| DocError::Invalid(TAB_APART.into()))?;
-        let one = oriented(one);
-        match dev.as_ref().filter(|_| !met.is_empty()) {
-            Some(dev) => self.fill_cuts(i, profile, one, dev, &met)?,
-            None => {
-                let added = solidcraft_kernel::planar_regions_boolean(std::slice::from_ref(&one), std::slice::from_ref(&region), BoolOp::Cut, 1e-9)?;
-                if area(&added) <= 1e-6 * area(std::slice::from_ref(&region)).max(1.0) {
-                    return err(TAB_ADDS_NOTHING);
-                }
-                // Folded, what the tab adds must stay clear of the sheet's other pieces.
-                let others: Vec<solidcraft_geom::Aabb3> = self
-                    .pieces_in_space()
-                    .map(|(_, boxes)| boxes)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|(panel, _)| *panel != Some(i))
-                    .map(|(_, b)| b)
-                    .collect();
-                self.clear_folded(i, &added, &others)?;
-                if let Some(p) = self.sheet.panels.get_mut(i) {
-                    p.region = one;
+            strips
+        };
+        let whole = across(&[]);
+        let filled = match dev.as_ref().filter(|_| !met.is_empty()) {
+            None => return self.join_outline(i, profile, &region, &whole),
+            Some(dev) => {
+                let met_cuts: Vec<Region2> = met.iter().map(|(_, c)| c.clone()).collect();
+                let mut work = self.clone();
+                work.fill_cuts(i, profile, &region, (&across(&met_cuts), &whole), dev, &met).map(|()| work)
+            }
+        };
+        match filled {
+            Ok(work) => {
+                *self = work;
+                Ok(())
+            }
+            Err(e) => {
+                let mut plain = self.clone();
+                match plain.join_outline(i, profile, &region, &whole) {
+                    Ok(()) => {
+                        *self = plain;
+                        Ok(())
+                    }
+                    Err(_) => Err(e),
                 }
             }
         }
-        // Flat, the panel must not run onto another.
+    }
+
+    /// Joins `profile` (panel `i`'s chart) to panel `i`'s outline `region`, as it is: no part of
+    /// it in the `strips` across the panel's joints (see [`Self::tab_on`]).
+    fn join_outline(&mut self, i: usize, profile: &[Region2], region: &Region2, strips: &[Region2]) -> Result<()> {
+        clear_of(profile, strips)?;
+        let one = joined(region, profile)?;
+        let added = solidcraft_kernel::planar_regions_boolean(std::slice::from_ref(&one), std::slice::from_ref(region), BoolOp::Cut, 1e-9)?;
+        if area(&added) <= 1e-6 * area(std::slice::from_ref(region)).max(1.0) {
+            return err(TAB_ADDS_NOTHING);
+        }
+        // Folded, what the tab adds must stay clear of the sheet's other pieces.
+        let others: Vec<solidcraft_geom::Aabb3> = self
+            .pieces_in_space()
+            .map(|(_, boxes)| boxes)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(panel, _)| *panel != Some(i))
+            .map(|(_, b)| b)
+            .collect();
+        self.clear_folded(i, &added, &others)?;
+        if let Some(p) = self.sheet.panels.get_mut(i) {
+            p.region = one;
+        }
+        self.flat_apart()
+    }
+
+    /// Flat, no piece of the sheet may run onto another.
+    fn flat_apart(&self) -> Result<()> {
         let dev = self.develop().map_err(|e| DocError::Invalid(e.to_string()))?;
         let pieces = crate::sheet_surface::pieces(&dev, &mut crate::sheet::FlatWork::new())?;
         let regions: Vec<Region2> = pieces.into_iter().map(|(_, r)| r).collect();
@@ -206,23 +233,39 @@ impl SurfaceSheet {
         Ok(())
     }
 
-    /// The tab `profile` (panel `i`'s chart), which meets the sheet's cuts across joints `met`
-    /// (each its place in the sheet's cuts and its region in panel `i`'s chart): panel `i`'s
-    /// outline becomes `one`, and each of those cuts loses what the profile covers of it, so that
-    /// a tab fills what an earlier cut across a bend took, as it fills a hole cut inside its
-    /// panel. What it gives back of a bend's zone rides flat with the panel, as a piece of zone
-    /// the cuts leave joined to that panel only does (see [`crate::sheet_surface::Piece::Tab`]).
-    /// The flat it makes is checked against the one before, exactly, and refused unless:
-    /// - the profile touches material of the panel's (its own or a piece of zone riding with
-    ///   it), as it would touch the panel's outline;
-    /// - no other piece of the flat changes: what the tab gives back must not bend with what is
-    ///   left of a bend, nor join the next panel;
+    /// The tab `profile` (panel `i`'s chart, outline `region`), which meets the sheet's cuts
+    /// across joints `met` (each its place in the sheet's cuts and its region in panel `i`'s
+    /// chart): each of those cuts loses what the profile covers of it, so that a tab fills what an
+    /// earlier cut across a bend took, as it fills a hole cut inside its panel. What it gives back
+    /// of a bend's zone rides flat with the panel, as a piece of zone the cuts leave joined to that
+    /// panel only does (see [`crate::sheet_surface::Piece::Tab`]); the rest of the profile joins
+    /// the outline. `strips` are the strips across the panel's joints (see [`Self::tab_on`]):
+    /// along what the met cuts leave of each bend, where no part of the profile may lie, and along
+    /// each whole joint, past which what the profile covers of a cut is given back to the cut's
+    /// pieces only, never to the outline as well. The profile must touch or overlap the outline,
+    /// as any tab's must. The flat it makes is checked against the one before, exactly, and
+    /// refused unless:
+    /// - what it joins touches material the panel has built (its own, or a piece of zone riding
+    ///   with it): no part of it floats in a gap;
+    /// - what it gives back ends before the far side of each bend it fills, and no other piece of
+    ///   the flat changes: what it gives back must not bend with what is left of a bend, nor join
+    ///   the next panel;
     /// - all of what it gives back rides with the panel, none of it cut away again;
     /// - it adds material;
-    /// - folded, what it adds stays clear of the sheet's other pieces.
-    fn fill_cuts(&mut self, i: usize, profile: &[Region2], one: Region2, dev: &Development, met: &[(usize, Region2)]) -> Result<()> {
+    /// - folded, what it adds stays clear of the sheet's other pieces, and flat, no piece runs
+    ///   onto another.
+    fn fill_cuts(
+        &mut self,
+        i: usize,
+        profile: &[Region2],
+        region: &Region2,
+        strips: (&[Region2], &[Region2]),
+        dev: &Development,
+        met: &[(usize, Region2)],
+    ) -> Result<()> {
+        clear_of(profile, strips.0)?;
+        let tiny = 1e-6 * area(std::slice::from_ref(&joined(region, profile)?)).max(1.0);
         let here = dev.placements.get(i).copied().flatten().ok_or_else(|| DocError::Invalid(TAB_OFF_SHEET.into()))?;
-        let tiny = 1e-6 * area(std::slice::from_ref(&one)).max(1.0);
         let others: Vec<solidcraft_geom::Aabb3> = self
             .piece_boxes_in_space()
             .map(|(_, boxes)| boxes)
@@ -241,6 +284,32 @@ impl SurfaceSheet {
                 return err(TAB_APART);
             }
         }
+        let taken = crate::sheet_surface::planar_union(met.iter().map(|(_, c)| c.clone()).collect(), &mut FlatWork::new())?;
+        let back = solidcraft_kernel::planar_regions_boolean(profile, &taken, BoolOp::Intersect, 1e-9)?;
+        // What it gives back past a joint's line belongs to the pieces the cuts took it from:
+        // the outline there would lie on them in the flat (past the trim, which ends a thickness
+        // past the line, short of a bend's far side). A profile that runs on past what the cuts
+        // took there lies on what is left past the line: it joins the outline whole, and the
+        // checks below refuse it, as they refuse whatever runs past a cut.
+        let past = solidcraft_kernel::planar_regions_boolean(&back, strips.1, BoolOp::Intersect, 1e-9)?;
+        let outline =
+            if area(&past) > tiny { solidcraft_kernel::planar_regions_boolean(profile, &past, BoolOp::Cut, 1e-9)? } else { profile.to_vec() };
+        let one = match outline.is_empty() {
+            true => region.clone(),
+            false => joined(region, &outline).or_else(|_| joined(region, profile))?,
+        };
+        // Past the far side of a bend it fills, what it gives back runs along the line where the
+        // bend's other panel begins in the flat.
+        for zone in &dev.zones {
+            let far = match zone.panels {
+                [a, _] if a == i => zone.far,
+                [_, b] if b == i => zone.near,
+                _ => continue,
+            };
+            if back.iter().any(|r| crate::sheet_surface::along(&here.region(r), far)) {
+                return err(TAB_PAST_BEND);
+            }
+        }
         let mut cuts = Vec::with_capacity(self.sheet.cuts.len());
         for (k, c) in self.sheet.cuts.iter().enumerate() {
             let there = dev.placements.get(c.panel).copied().flatten();
@@ -251,7 +320,14 @@ impl SurfaceSheet {
             let onto = here.then(&there.inverse());
             let cover: Vec<Region2> = profile.iter().map(|r| oriented(onto.region(r))).collect();
             let left = solidcraft_kernel::planar_regions_boolean(std::slice::from_ref(&c.region), &cover, BoolOp::Cut, 1e-9)?;
-            cuts.extend(left.into_iter().filter(|r| r.area().abs() > tiny).map(|r| Cut { panel: c.panel, region: oriented(r) }));
+            // What is left of the cut, however small, stays cut; only the booleans' slivers of no
+            // width, where the profile's edge lies along the cut's, are none.
+            cuts.extend(
+                left.into_iter()
+                    .map(oriented)
+                    .filter(|r| crate::sheet_surface_features::width(r) > crate::sheet_surface_features::SLIVER)
+                    .map(|r| Cut { panel: c.panel, region: r }),
+            );
         }
         self.sheet.cuts = cuts;
         if let Some(p) = self.sheet.panels.get_mut(i) {
@@ -274,8 +350,6 @@ impl SurfaceSheet {
         }
         // All it gives back rides with the panel.
         let after = crate::sheet_surface::planar_union(riding, &mut FlatWork::new())?;
-        let taken = crate::sheet_surface::planar_union(met.iter().map(|(_, c)| c.clone()).collect(), &mut FlatWork::new())?;
-        let back = solidcraft_kernel::planar_regions_boolean(profile, &taken, BoolOp::Intersect, 1e-9)?;
         let lost = solidcraft_kernel::planar_regions_boolean(&back, &after, BoolOp::Cut, 1e-9)?;
         if area(&lost) > tiny {
             return err(TAB_CUT_AWAY);
@@ -284,8 +358,29 @@ impl SurfaceSheet {
         if area(&added) <= tiny {
             return err(TAB_ADDS_NOTHING);
         }
-        self.clear_folded(i, &added, &others)
+        self.clear_folded(i, &added, &others)?;
+        self.flat_apart()
     }
+}
+
+/// No part of `profile` lies in `strips`, the strips across its panel's joints (see
+/// [`SurfaceSheet::tab_on`]).
+fn clear_of(profile: &[Region2], strips: &[Region2]) -> Result<()> {
+    for strip in strips {
+        let inside = solidcraft_kernel::planar_regions_boolean(profile, std::slice::from_ref(strip), BoolOp::Intersect, 1e-9)?;
+        if area(&inside) > 1e-6 {
+            return err(TAB_IN_BEND);
+        }
+    }
+    Ok(())
+}
+
+/// `region` joined with `profile`, which must make one region: the profile touches or overlaps
+/// the outline.
+fn joined(region: &Region2, profile: &[Region2]) -> Result<Region2> {
+    let joined = solidcraft_kernel::planar_regions_boolean(std::slice::from_ref(region), profile, BoolOp::Union, 1e-9)?;
+    let [one] = <[Region2; 1]>::try_from(joined).map_err(|_| DocError::Invalid(TAB_APART.into()))?;
+    Ok(oriented(one))
 }
 
 /// The pieces of `dev`'s flat that ride with panel `i` (its own and the pieces of zone left

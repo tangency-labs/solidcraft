@@ -273,3 +273,95 @@ fn tabs_a_cut_bend_cannot_take_are_refused() {
     top_rectangle(&mut s, "Gap", [45.0, 50.0], [55.0, 59.0]);
     refused(&mut s, json!({"sketch": "Gap"}), solidcraft_doc::sheet::TAB_IN_BEND);
 }
+
+/// Where the bend of [`gap_part`]'s flange ends on the flange's side in the flat: its tangent line
+/// on the base, y = 56, and its allowance, pi / 2 x (2 + 0.4 x 2).
+const GAP_FAR: f64 = 56.0 + std::f64::consts::FRAC_PI_2 * 2.8;
+
+/// A cut made in the flat: the sheet unfolded, a box through it from `a` to `b` (the flat's
+/// coordinates, the base's own), and refolded.
+fn flat_cut(s: &mut Session, a: [f64; 2], b: [f64; 2]) {
+    run(s, "sheet.unfold", json!({}));
+    run(s, "solid.box", json!({"corner": [a[0], a[1], -1], "length": b[0] - a[0], "width": b[1] - a[1], "height": 4, "operation": "cut"}));
+    run(s, "sheet.refold", json!({}));
+}
+
+/// A closed polygon sketch `name` on the base's top face (z = 2), through `points`.
+fn top_polygon(s: &mut Session, name: &str, points: &[[f64; 2]]) {
+    run(s, "sketch.create", json!({"plane": {"origin": [0, 0, 2], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": name}));
+    let mut closed = points.to_vec();
+    closed.extend(points.first().copied());
+    run(s, "sketch.line", json!({"points": closed}));
+    run(s, "sketch.finish", json!({}));
+}
+
+/// A gap tab may end past the flange's outer face (y = 60), where the base's own trim ends, as
+/// long as it ends short of the bend's far side (#22259): what it gives back there is the bend's,
+/// riding flat with the base, not the base's outline as well. 10 x 1 of the base and 10 x 4.2 of
+/// the bend, through 2 mm: +104.
+#[test]
+fn a_gap_tab_may_end_past_the_flanges_outer_face() {
+    let mut s = Session::default();
+    gap_part(&mut s, true);
+    let cut = volume(&mut s);
+    top_rectangle(&mut s, "Gap", [45.0, 50.0], [55.0, 60.2]);
+    run(&mut s, "sheet.tab", json!({"sketch": "Gap"}));
+    assert!((volume(&mut s) - cut - 104.0).abs() < 1e-3, "{}", volume(&mut s) - cut);
+    assert_eq!(flat(&mut s)["outline"].as_array().map(Vec::len), Some(1));
+    // Flat with the base, 0.1 mm past the flange's outer face, under where the cut stopped it.
+    assert!(contains(&s, [50.0, 60.1, 1.0]));
+    assert!(!contains(&s, [50.0, 60.1, 3.0]));
+}
+
+/// What a tab leaves of a cut it fills stays cut, however small (#22259): here a 0.05 x 0.1
+/// corner of the cut that the tab's outline goes round. The tab gives back 0.05 x 0.4 and
+/// 4.95 x 0.5 of the base, and 10 x 4 of base and bend: 42.495 mm2, through 2 mm.
+#[test]
+fn a_tab_leaves_what_it_does_not_cover_of_a_cut_however_small() {
+    let mut s = Session::default();
+    gap_part(&mut s, true);
+    let cut = volume(&mut s);
+    let lobe = [[40.0, 55.1], [40.05, 55.1], [40.05, 50.0], [55.0, 50.0], [55.0, 59.0], [45.0, 59.0], [45.0, 55.5], [40.0, 55.5]];
+    top_polygon(&mut s, "Round", &lobe);
+    run(&mut s, "sheet.tab", json!({"sketch": "Round"}));
+    assert!((volume(&mut s) - cut - 84.99).abs() < 1e-3, "{}", volume(&mut s) - cut);
+    assert!(!contains(&s, [40.025, 55.05, 1.0]));
+    assert!(contains(&s, [40.025, 55.3, 1.0]));
+}
+
+/// A gap tab that ends on the bend's far side, or that runs past it where the cut stopped there,
+/// is refused as running past the bend (#22259), not as reaching into it.
+#[test]
+fn a_gap_tab_to_the_bends_far_side_is_refused_as_past_it() {
+    let mut s = Session::default();
+    gap_part(&mut s, true);
+    top_rectangle(&mut s, "OnFar", [45.0, 50.0], [55.0, GAP_FAR]);
+    refused(&mut s, json!({"sketch": "OnFar"}), solidcraft_doc::sheet::TAB_PAST_BEND);
+    // A cut in the flat that takes the bend over x 40..60 and stops at its far side.
+    let mut s = Session::default();
+    gap_part(&mut s, false);
+    flat_cut(&mut s, [40.0, 55.0], [60.0, GAP_FAR]);
+    top_rectangle(&mut s, "Into", [45.0, 50.0], [55.0, 65.0]);
+    refused(&mut s, json!({"sketch": "Into"}), solidcraft_doc::sheet::TAB_PAST_BEND);
+}
+
+/// A tab over a cut across the bend at its end that cannot fill it, because what it would give
+/// back joins the bend that is left, keeps the result it had before tabs filled such cuts: the
+/// tab joins the outline and the cut keeps what it took (#22259). Past the base's side it adds
+/// 10 x 7.5, less the bend relief that opens there (the rule's: 2 wide, from 1 inside the
+/// tangent line y = 56): 75 - 2 x 2.5 = 70 mm2, through 2 mm. A tab that stops short of the bend
+/// that is left fills the cut under it as well, 10 x 2.5 more.
+#[test]
+fn a_tab_that_cannot_fill_a_cut_at_a_bends_end_keeps_its_result() {
+    for (to, more) in [(20.0, 0.0), (10.0, 25.0)] {
+        let mut s = Session::default();
+        gap_part(&mut s, false);
+        flat_cut(&mut s, [-1.0, 55.0], [20.0, GAP_FAR + 2.0]);
+        let cut = volume(&mut s);
+        top_rectangle(&mut s, "Side", [-10.0, 50.0], [to, 57.5]);
+        run(&mut s, "sheet.tab", json!({"sketch": "Side"}));
+        assert!((volume(&mut s) - cut - 2.0 * (70.0 + more)).abs() < 1e-3, "{to}: {}", volume(&mut s) - cut);
+        assert!(contains(&s, [-5.0, 52.0, 1.0]));
+        assert_eq!(contains(&s, [5.0, 55.5, 1.0]), more > 0.0, "{to}");
+    }
+}
