@@ -14,9 +14,9 @@ mod smlib {
 
     use crate::body::Body;
     use crate::history::History;
-    use crate::native::{body_from_smlib_ordered, smlib_operand_ordered, smlib_shared_operand_ordered};
+    use crate::native::{body_from_smlib_ordered, smlib_operand_ordered, smlib_operand_to_consume, smlib_shared_operand_ordered};
     use crate::ops::BoolOp;
-    use crate::validation::{Checked, Step};
+    use crate::validation::Step;
     use crate::{KernelError, Result, record};
 
     fn failed(what: &str, e: impl crate::Cause) -> KernelError {
@@ -54,7 +54,7 @@ mod smlib {
                 Err(e) => log::debug!(target: "smlib", "boolean with touching solids shared: {e}"),
             }
         }
-        combine(a, b, smlib_operand_ordered(a)?, smlib_operand_ordered(b)?, op)
+        combine(a, b, smlib_operand_to_consume(a)?, smlib_operand_to_consume(b)?, op)
     }
 
     /// [`boolean`] of `a` and `b` as SMLib's `sa` and `sb`, each with its numbering.
@@ -64,10 +64,43 @@ mod smlib {
             BoolOp::Cut => BooleanOp::Subtract,
             BoolOp::Intersect => BooleanOp::Intersect,
         };
-        // The operands tagged and combined, the tagged copies consumed (solidcore#3359).
-        let Some(r) = sa.boolean_tagged(&sb, kind).map_err(|e| failed("operation", e))? else { return Ok(None) };
-        let step = checked(&r, &[&sa, &sb])?;
+        // The operands tagged and combined, the tagged copies consumed (solidcore#3359). Where the
+        // step is not checked now, an operand made for this operation alone (not a body's kept
+        // form) is handed over and tagged itself, not copied first: nothing reads it after.
+        let step = crate::validation::step();
+        let (r, check_operands) = if step == Step::Check {
+            let Some(r) = sa.boolean_tagged(&sb, kind).map_err(|e| failed("operation", e))? else { return Ok(None) };
+            (r, Some((sa, sb)))
+        } else {
+            let taken = |s: &mut Option<std::sync::Arc<solidcraft_smlib::Brep>>| match s.take().map(std::sync::Arc::try_unwrap) {
+                Some(Ok(owned)) => Some(Err(owned)),
+                Some(Err(shared)) => {
+                    *s = Some(shared);
+                    None
+                }
+                None => None,
+            };
+            let (mut ka, mut kb) = (Some(sa), Some(sb));
+            let (oa, ob) = (taken(&mut ka), taken(&mut kb));
+            let a_in = match (oa, ka.as_deref()) {
+                (Some(owned), _) => owned,
+                (None, Some(shared)) => Ok(shared),
+                (None, None) => return Err(KernelError::Internal("SMLib boolean: an operand went missing".into())),
+            };
+            let b_in = match (ob, kb.as_deref()) {
+                (Some(owned), _) => owned,
+                (None, Some(shared)) => Ok(shared),
+                (None, None) => return Err(KernelError::Internal("SMLib boolean: an operand went missing".into())),
+            };
+            let Some(r) = solidcraft_smlib::Brep::boolean_tagged_owned(a_in, b_in, kind).map_err(|e| failed("operation", e))? else {
+                return Ok(None);
+            };
+            (r, None)
+        };
         let (body, or) = body_from_smlib_ordered(&r)?;
+        if let Some((sa, sb)) = check_operands {
+            checked_decoded(body.record(), &[&sa, &sb])?;
+        }
         let history = match (oa, ob, or) {
             (Some(oa), Some(ob), Some(or)) => r.history().map_err(|e| failed("history", e))?.history(&[oa, ob], &or).map(Some).unwrap_or_else(|e| {
                 log::debug!(target: "smlib", "boolean history: {e}");
@@ -75,7 +108,7 @@ mod smlib {
             }),
             _ => None,
         };
-        Ok(Some(left(with_history(body, history, a, b), step, r, &[a, b])))
+        Ok(Some(left(with_history(body, history, a, b), step, &[a, b])))
     }
 
     /// The union of `bodies` in one SMLib call, each tagged as its own operand, checked once:
@@ -121,8 +154,11 @@ mod smlib {
         let operand_refs: Vec<&solidcraft_smlib::Brep> = operands.iter().map(|s| &**s).collect();
         // The operands tagged each as its own and united, the tagged copies consumed (solidcore#3359).
         let r = solidcraft_smlib::Brep::union_all_tagged(&operand_refs).map_err(|e| failed("operation", e))?;
-        let step = checked(&r, &operand_refs)?;
+        let step = crate::validation::step();
         let (body, or) = body_from_smlib_ordered(&r)?;
+        if step == Step::Check {
+            checked_decoded(body.record(), &operand_refs)?;
+        }
         let history = match (orders, or) {
             (Some(orders), Some(or)) => r.history().map_err(|e| failed("history", e))?.history(&orders, &or).map(Some).unwrap_or_else(|e| {
                 log::debug!(target: "smlib", "union history: {e}");
@@ -130,34 +166,24 @@ mod smlib {
             }),
             _ => None,
         };
-        Ok(left(body.with_checked_history(history, &record::counts(bodies)), step, r, bodies))
+        Ok(left(body.with_checked_history(history, &record::counts(bodies)), step, bodies))
     }
 
-    /// `body`, decoded from `r`, the result of combining `operands`, keeping `r` for the check at
-    /// the end of its feature when the step left it there.
-    fn left(body: Body, step: Step, r: solidcraft_smlib::Brep, operands: &[&Body]) -> Body {
-        if step == Step::Defer { body.left_unchecked("SMLib boolean", Checked::Combined, r, operands) } else { body }
+    /// `body`, the result of combining `operands`, marking its check for the end of its feature
+    /// when the step left it there.
+    fn left(body: Body, step: Step, operands: &[&Body]) -> Body {
+        if step == Step::Defer { body.left_unchecked("SMLib boolean", operands) } else { body }
     }
 
-    /// An error when SMLib's check refuses `r`, the result of combining `operands`, where the
-    /// evaluation's validation mode checks each step (left to the feature's end, or not checked,
-    /// otherwise: `crate::validation`): what was done with the check.
-    fn checked(r: &solidcraft_smlib::Brep, operands: &[&solidcraft_smlib::Brep]) -> Result<Step> {
-        let step = crate::validation::step();
-        if step != Step::Check {
-            return Ok(step);
-        }
-        // Solids touching each other along an edge or at a vertex come back as one non-manifold
-        // body, which the export splits into separate solids: SMLib's check is of those, imported
-        // as given (its check of the touching arrangement itself refuses the radial order of
-        // faces round an edge they share).
-        let check = crate::validation::check_result(r, Checked::Combined).map_err(|e| KernelError::Failed(format!("SMLib boolean: {e}")))?;
-        if check.is_valid() {
-            return Ok(step);
-        }
+    /// An error when SMLib's check refuses `record` as [`Body::smlib`] imports it (for a
+    /// non-manifold result, already the separate solids export split it into; #22138).
+    fn checked_decoded(record: &solidcore_record::brep::Brep, operands: &[&solidcraft_smlib::Brep]) -> Result<()> {
+        let crate::validation::DecodedCheck::Refused(detail) = crate::validation::check_decoded("SMLib boolean", record)? else {
+            return Ok(());
+        };
         // Each operand is checked as a copy: a check edits the body it is given, and an operand may
         // be its body's own form, shared (`crate::native::smlib_operand_ordered`).
-        Err(failed(&crate::validation::refuses(operands.iter().map(|s| s.try_clone().and_then(|c| c.check_owned(CheckLevel::All)))), check))
+        Err(failed(&crate::validation::refuses(operands.iter().map(|s| s.try_clone().and_then(|c| c.check_owned(CheckLevel::All)))), detail))
     }
 
     /// `body` with `history` where it describes `body` made from `a` and `b`.

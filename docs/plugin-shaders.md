@@ -1,4 +1,4 @@
-# Plugin shaders: view backgrounds (`shaders@0.1`)
+# Plugin shaders: view backgrounds and tints (`shaders@0.2`)
 
 A plugin can draw the background behind the model in the 3D view: a sky, a picture that turns with
 the camera, a pattern that moves. It ships a small WGSL fragment shader as text. SolidCraft checks the
@@ -108,18 +108,42 @@ most 8192 pixels on a side (or the graphics card's limit), and builds its mipmap
 
 ## The manifest
 
-`capabilities` must list `"shaders@0.1"`. Each entry of `shaders`:
+`capabilities` must list `"shaders@0.2"` (or `"shaders@0.1"`, for backgrounds with no settings, chosen
+pictures or state grid, as before). Each entry of `shaders`:
 
 | Field | Required | Meaning |
 |---|---|---|
 | `id` | yes | Lowercase letters, digits and `-`, unique in the plugin. The preference names it `<plugin-id>/<id>`. |
 | `name` | yes | What people pick it by, 1 to 80 characters. |
-| `kind` | yes | `"background"`, the only kind in 0.1. |
+| `kind` | yes | `"background"`, or `"tint"` ([Tints](#tints), 0.2). |
 | `source` | yes | A `.wgsl` file name in the plugin's folder (lowercase, no folders). |
-| `textures` | no | Up to 4 pictures: `{"name": "<wgsl name>", "file": "<file>.png"}` or `.jpg`. |
+| `textures` | no | Up to 4 pictures: `{"name": "<wgsl name>", "file": "<file>.png"}` or `.jpg`, and/or `"choose": "<label>"` for a picture the person picks (see below). |
 | `animated` | no | `true`: redrawn about 30 times a second while shown (10 behind another window), with `sc.time` running. `false` (the default): drawn again only when the view turns or resizes or the theme changes; `sc.time` is 0. |
+| `settings` | no | 0.2: up to 4 sliders on the plugin's card, `{"id", "name", "min", "max", "default"}`; the shader reads their values, in order, as `sc.settings.x` to `.w`. |
+| `state` | no | 0.2, backgrounds: `{"width": w, "height": h}`, 1 to 1024 texels a side: a grid the shader keeps from frame to frame. Needs `animated: true`, and then a `fn state` (below). |
 
 A plugin declares at most 8 shaders. A plugin with shaders and no `runtime` is fine.
+
+### Pictures the person chooses
+
+A texture with `choose` is picked by the person, not only shipped. The label (1 to 40 printable
+characters) is shown on the plugin's card under the background's switch, with the picked file's
+name (or "Default") and Choose… and Clear buttons:
+
+```json
+"textures": [{"name": "picture", "choose": "Picture", "file": "default.png"}]
+```
+
+`file` is optional for a chosen texture: it is the picture used until the person picks one, and
+a chosen picture that cannot be read or decoded falls back to it, with one status line naming it. A texture needs `file`,
+`choose`, or both. The pictures are kept in the preferences as `background_shader_pictures`
+(`"plugin/shader/<texture name>"` to an absolute path, at most 64 entries, paths of at most 1024
+characters), and `ui.prefs` sets them the same way, except from a request whose file access is
+confined: the picture is read again on later frames, so such a request can only remove pictures.
+A picture belongs to the texture's name, so reordering the textures in an update keeps each
+picture with its texture. Choosing a picture loads the background again. Removing a plugin, or
+deleting its folder, drops its pictures; turning it off keeps them.
+A chosen picture needs `shaders@0.2`, and only a background's textures may be chosen.
 
 ## What a shader can use
 
@@ -156,6 +180,9 @@ for the screen. To do maths on screen values, raise to `1.0 / 2.2` first and to 
 | `top`, `bottom` | `vec4<f32>` | The theme's view background at its top and bottom. |
 | `accent`, `text` | `vec4<f32>` | The theme's accent and text colours. |
 | `dark` | `f32` | 1 for a dark view background, 0 for a light one. |
+| `frame` | `f32` | 0.2, with a `state` grid: the step this frame, 0 on the first and after a reset; 0 without a grid. |
+| `state_size` | `vec2<f32>` | 0.2: the `state` grid's size in texels; 0 without a grid. |
+| `settings` | `vec4<f32>` | 0.2: the values of the shader's `settings` sliders, in order; 0 past the last. |
 
 Samplers: `sc_clamp` (clamps at the edges) and `sc_repeat` (wraps), both linear with mipmaps.
 Textures: each `textures` entry is a `texture_2d<f32>` by its `name`.
@@ -199,6 +226,39 @@ the status bar ("Couldn't draw the background effect dusk/dusk: ...") and is not
 the choice changes, the app restarts, or (when it was turned off) its plugin is turned on again.
 Nothing is drawn halfway.
 
+## A grid that remembers: `state`
+
+A background that needs memory (drops that slide, trails that fade, anything that depends on the
+last frame) asks for a grid with `"state"`. The host keeps two copies of the grid, both starting
+zeroed, and every frame it runs your `fn state` over every texel:
+
+```wgsl
+fn state(px: ScStatePixel) -> vec4<f32>
+```
+
+`px.texel` is the texel's integer position (`vec2<u32>`, from the top left) and `px.uv` its centre,
+0..1 across the grid. Read last frame's grid with `textureLoad(sc_state_prev, vec2<i32>(px.texel), 0)`
+and return this frame's value (four floats, stored as half floats, not converted). `sc.frame` is
+the step: 0 on the first frame and after a reset, counting up after that. `sc.state_size` is the
+grid's size.
+
+Then `background` reads the new grid with `textureLoad(sc_state, ...)`, the same way, and draws
+from it. The order each frame is: step, then background, then the grids swap. Both grids are
+cleared when the shader is chosen again or turned off and on, or when the graphics device is lost;
+a resize of the view keeps them, since they are in grid coordinates.
+
+`fn state` is budgeted like `background`: every loop and call
+spends the same 1024 per pixel. With a grid, the names `sc_state` and `sc_state_prev` belong to the host, and a `"state"` without
+`fn state` is refused. A shader with no `"state"` is unchanged: `fn state` and `sc_` names are its
+own, and using `ScStatePixel` or `sc_state` without declaring them is refused with a note to add `"state"`.
+
+The step runs once per frame the shader is drawn, so its speed depends on the frame rate (30 a
+second in focus, 10 behind another window). Write the rules per frame, not per second, and use
+`sc.time` for anything that must keep pace with the clock.
+
+[`plugin-examples/trails/`](plugin-examples/trails/) is the smallest state shader: a spot circles
+the view and leaves a trail that fades.
+
 ## Testing a shader
 
 - `plugin.install {"path": "dusk.zip", "dry_run": true}` checks the package and compiles the
@@ -210,9 +270,53 @@ Nothing is drawn halfway.
   [`crates/craft-plugin/src/shader.rs`](../crates/craft-plugin/src/shader.rs) (`PRELUDE`) after
   your source.
 
+## Tints
+
+A shader of kind `tint` colours the ribbon's command icons, its button blocks and the panels each
+frame. The host draws nothing of its own: with no tint switched on (`tint_shader`, empty by
+default), they look as they always do and no shader runs. Each tint has a **Tint** switch on its
+plugin's card; one tint is on at a time, and only while its plugin is.
+
+```wgsl
+fn tint(r: ScRegion) -> vec4<f32>
+```
+
+The host asks about every region it draws and calls `tint` once for each, in a compute shader (so
+sample textures with `textureSampleLevel`):
+
+| `ScRegion` field | Type | Meaning |
+|---|---|---|
+| `kind` | `u32` | `SC_ICON`, `SC_BUTTON` or `SC_PANEL`. |
+| `rect` | `vec4<f32>` | Left, top, right, bottom, in points from the window's top left. |
+| `position` | `vec2<f32>` | The point asked about: an icon's or button's centre, or a point on a panel's grid (at most 48 points apart, its corners included). |
+| `base` | `vec4<f32>` | The region's own colour, linear: the theme's accent for an icon, the fill for a button or panel. |
+| `enabled` | `f32` | 1 for an enabled control, less for a disabled one. |
+
+`sc` is the same `ScHost`, with `size` the window's size in pixels and no camera (`right`, `up`
+and `forward` are 0).
+
+It returns a linear colour and how strongly it shows, alpha 0 to 1. Alpha 0 leaves the region as
+it is. An **icon**'s coloured parts take the colour at that strength, keeping their shading, and its
+whites and greys stay as they are; a **button** gets the colour filled over its block; a **panel**
+gets it laid over its fill, blended smoothly between the points asked about, inside its corners.
+
+The answers are read back for a later frame, so a tint follows a region a frame late; a region not
+answered yet (just opened or scrolled) takes the nearest answer of its kind. At most 8192 regions
+are asked about in a frame. An animated tint runs about 30 times a second; a still one runs when
+what it colours moves or changes.
+
+[`plugin-examples/accent-sweep`](plugin-examples/accent-sweep) sweeps a band of the theme's accent
+across the icons and buttons, with its width and speed as settings.
+
+## Panels
+
+`"kind": "panel"` (`shaders@0.2`) draws the background of every see-through panel from what is
+behind it: the 3D view and the panels under it, sharp and blurred. The app draws no look of its own
+there, and with none chosen the panels draw as before. See [plugin panels](plugin-panels.md).
+
 ## Versions
 
+`shaders@0.2` adds tints, settings, chosen pictures and state grids; `shaders@0.1` plugins install and draw as before.
 `shaders@0.1` is version 0.1 of the capability. While it is 0.x, a later minor version may change
 it, and SolidCraft then asks you to update the plugin rather than drawing it wrongly. The amendment
-in RFC 0015 lists what is planned next (glass panel materials, a previous-frame texture for effects
-with memory).
+in RFC 0015 lists what is planned next (glass panel materials).

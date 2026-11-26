@@ -803,7 +803,10 @@ fn copy_trim_cover_raises(
     b: &mut Brep,
     reverse_map: &CopyBrepMap<EntityRef>,
 ) -> Result<()> {
-    let mut record = crate::topology::TrimCoverRaises::default();
+    let mut record = crate::topology::TrimCoverRaises {
+        end_checked: src.trim_cover_raises().end_checked,
+        ..Default::default()
+    };
     for (&e, &(before, after)) in &src.trim_cover_raises().edges {
         if let Some(EntityRef::Edge(c)) = reverse_map.get_at(Some(EntityRef::Edge(e)))? {
             if b.edge(c)?.tolerance.to_bits() == after.to_bits() {
@@ -2374,6 +2377,9 @@ fn merge_brep_in(
 
     // for faces and their loops
     let faces = p1::faces(other, None)?;
+    // Faces whose surface kind changes under `add_analytics` may change UV
+    // parameterisation, so their surface-dependent gap caches are left reset.
+    let mut reparameterized_faces = std::collections::BTreeSet::new();
     for &f in &faces {
         let fu1 = other
             .face(f)?
@@ -2425,6 +2431,12 @@ fn merge_brep_in(
         } else {
             face_surf.copy(k)?
         };
+        if add_analytics
+            && core::mem::discriminant(face_surf.kind())
+                != core::mem::discriminant(new_surface.kind())
+        {
+            reparameterized_faces.insert(f);
+        }
         let owner = (env.key_of)(EntityRef::Face(new_f));
         *new_surface.owner_mut() = Some(owner);
         let (rect, dom, ftol) = (
@@ -2817,10 +2829,60 @@ fn merge_brep_in(
             let vu = src
                 .vertexuse
                 .and_then(|x| mapped(EntityRef::Vertexuse(x), &map, as_vertexuse));
+            // Preserve valid cached gaps across exact geometry copies (#21432),
+            // remapping entity ids to the destination B-rep so callers (such as
+            // `update_tolerances_after_boolean` after a copy) do not re-measure
+            // untouched edges.
+            let keep_face_cache = reparameterized_faces.is_empty()
+                || eu1::face(other, eu)
+                    .ok()
+                    .flatten()
+                    .is_none_or(|f| !reparameterized_faces.contains(&f));
+            let max_edge_face_gap = if keep_face_cache {
+                src.max_edge_face_gap
+                    .edgeuse
+                    .and_then(|u| mapped(EntityRef::Edgeuse(u), &map, as_edgeuse))
+                    .map(|mapped_eu| {
+                        let mut gap = src.max_edge_face_gap;
+                        gap.edgeuse = Some(mapped_eu);
+                        gap
+                    })
+            } else {
+                None
+            };
+            let edge_ccw_edge_gap = if src.edge_ccw_edge_gap.is_init()
+                && src.edge_ccw_edge_gap.edgeuse0 == Some(eu)
+                && src.edge_ccw_edge_gap.edgeuse1 == src.ccw
+            {
+                match (
+                    src.edge_ccw_edge_gap
+                        .edgeuse0
+                        .and_then(|u| mapped(EntityRef::Edgeuse(u), &map, as_edgeuse)),
+                    src.edge_ccw_edge_gap
+                        .edgeuse1
+                        .and_then(|u| mapped(EntityRef::Edgeuse(u), &map, as_edgeuse)),
+                ) {
+                    (Some(e0), Some(e1)) => {
+                        let mut gap = src.edge_ccw_edge_gap;
+                        gap.edgeuse0 = Some(e0);
+                        gap.edgeuse1 = Some(e1);
+                        Some(gap)
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            };
             let x = b.edgeuse_mut(new_eu)?;
             x.ccw = ccw;
             x.cw = cw;
             x.vertexuse = vu;
+            if let Some(gap) = max_edge_face_gap {
+                x.max_edge_face_gap = gap;
+            }
+            if let Some(gap) = edge_ccw_edge_gap {
+                x.edge_ccw_edge_gap = gap;
+            }
         }
         // the edge record's vertex pair (`GetVertex` reads it through the edge uses)
         let new_e = mapped(EntityRef::Edge(e), &map, |x| match x {
@@ -2848,6 +2910,52 @@ fn merge_brep_in(
         });
         if let (Some(va), Some(vc)) = (va, vc) {
             b.edge_mut(new_e)?.vertices = [va, vc];
+        }
+    }
+
+    // vertexuses: cached gaps and UV point (remapped now that every vertex use is in `map`)
+    for &v in &vertices {
+        for vu in vertex::vertexuses(other, v)? {
+            let new_vu = mapped(EntityRef::Vertexuse(vu), &map, as_vertexuse)
+                .ok_or_else(|| null_deref("unmapped vertex use"))?;
+            let src = other.vertexuse(vu)?;
+            let keep_face_cache = reparameterized_faces.is_empty()
+                || vertexuse::faceuse(other, vu)
+                    .ok()
+                    .flatten()
+                    .and_then(|fu| other.faceuse(fu).ok()?.face)
+                    .is_none_or(|f| !reparameterized_faces.contains(&f));
+            let vertex_edge_gap = src
+                .vertex_edge_gap
+                .vertexuse
+                .and_then(|u| mapped(EntityRef::Vertexuse(u), &map, as_vertexuse))
+                .map(|mapped_vu| {
+                    let mut gap = src.vertex_edge_gap;
+                    gap.vertexuse = Some(mapped_vu);
+                    gap
+                });
+            let vertex_face_gap = if keep_face_cache {
+                src.vertex_face_gap
+                    .vertexuse
+                    .and_then(|u| mapped(EntityRef::Vertexuse(u), &map, as_vertexuse))
+                    .map(|mapped_vu| {
+                        let mut gap = src.vertex_face_gap;
+                        gap.vertexuse = Some(mapped_vu);
+                        gap
+                    })
+            } else {
+                None
+            };
+            let x = b.vertexuse_mut(new_vu)?;
+            if let Some(gap) = vertex_edge_gap {
+                x.vertex_edge_gap = gap;
+            }
+            if let Some(gap) = vertex_face_gap {
+                x.vertex_face_gap = gap;
+            }
+            if keep_face_cache {
+                x.uv_point = src.uv_point;
+            }
         }
     }
 
@@ -3736,8 +3844,13 @@ pub fn collapse_zero_area_two_edge_faces_among(
         if ends != edge::start_end_vertices(b, gone)? || ends.0 == ends.1 || ends.0.is_none() {
             continue;
         }
-        // the loop has no area
-        let area = crate::topology::face::p3::compute_loop_orientation(k, b, f, l, None, false);
+        // the loop has no area; a test that could not answer reads as area, except that a
+        // cancellation (or an unported status) stops the collapse, never swallowed (#21915)
+        let area =
+            match crate::topology::face::p3::compute_loop_orientation(k, b, f, l, None, false) {
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                area => area,
+            };
         if !matches!(area, Ok(OrientType::Unknown)) {
             continue;
         }
@@ -3921,31 +4034,31 @@ pub fn split_disconnected_shells(k: &mut Kernel, b: &mut Brep) -> Result<()> {
 /// Not upstream: the shells of bounded region `r` after [`split_disconnected_shells`] split
 /// one of them, regrouped into regions as their nesting says. A region is bounded by one
 /// outer shell and the voids that lie directly inside it. A void is a face-use shell the
-/// region does not lie inside (its face uses face out of it, so
+/// region does not lie inside (closed, its face uses facing out of it, so
 /// [`crate::topology::Shell::is_inner_shell`], which is true for the shell holding its
 /// region, as [`shell::order_region_shells`] reads it, is false). A void lying directly
 /// inside another of `r`'s shells that is not one ([`shell::is_inner_shell_of`]) bounds
-/// that shell's region; every other shell is the outer shell of a solid of its own, as solids touching
-/// along a curve are, and as a shell is whose nesting the ray tests cannot decide. The
-/// region of the group holding `r`'s first shell stays `r`; each other group gets a new
-/// region with `r`'s void flag. Each group's outer shell is listed first, its voids after
-/// it in `r`'s order.
+/// that shell's region; every other shell is the outer shell of a solid of its own, as
+/// solids touching along a curve are. The region of the group holding `r`'s first shell
+/// stays `r`; each other group gets a new region with `r`'s void flag. Each group's outer
+/// shell is listed first, its voids after it in `r`'s order.
 ///
 /// # Errors
 ///
-/// Those of the ray tests (an [`SolidError::Unported`] or cancelled call), the list edits
-/// and dangling ids.
+/// Those of the ray tests: [`crate::topology::Shell::is_inner_shell`]'s (its `SM_ERR` for
+/// a shell its rays cannot classify, [`SolidError::Unported`], a cancelled call), and a
+/// [`TopologyFailure::VoidOwnerUndecided`] for a void that no outer shell holds where a
+/// nesting test was unsure (`SM_UNSURE`): which solid it bounds is not decided, so the
+/// region is not regrouped on a guess. Those of the list edits and dangling ids.
 fn regroup_split_region(k: &mut Kernel, b: &mut Brep, r: RegionId) -> Result<()> {
     let shells = region_shells(b, r)?;
-    // a void of the region: a face-use shell the region does not lie inside
+    // a void of the region: a closed face-use shell the region does not lie inside (an
+    // open shell encloses nothing, so it is no void)
     let mut void = Vec::new();
     for &s in &shells {
         let is_void = b.shell(s)?.is_faceuse_shell()
-            && match crate::topology::Shell::is_inner_shell(k, b, s) {
-                Ok(holds_the_region) => !holds_the_region,
-                Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(_) => false,
-            };
+            && b.shell(s)?.is_closed(b, s)?
+            && !crate::topology::Shell::is_inner_shell(k, b, s)?;
         void.push(is_void);
     }
     // each shell's outer shell: itself, or the outer shell a void lies directly inside
@@ -3954,16 +4067,32 @@ fn regroup_split_region(k: &mut Kernel, b: &mut Brep, r: RegionId) -> Result<()>
         if !void.get(i).copied().unwrap_or(false) {
             continue;
         }
+        let mut held_by = None;
+        let mut unsure = false;
         for (j, &t) in shells.iter().enumerate() {
             if i == j || void.get(j).copied().unwrap_or(true) {
                 continue;
             }
-            if shell::is_inner_shell_of(k, b, s, Some(t))? == TRUE {
+            let nested = shell::is_inner_shell_of(k, b, s, Some(t))?;
+            if nested == TRUE {
+                held_by = Some(j);
+                break;
+            }
+            unsure |= nested == crate::error::SM_UNSURE;
+        }
+        match held_by {
+            Some(j) => {
                 if let Some(slot) = outer.get_mut(i) {
                     *slot = j;
                 }
-                break;
             }
+            None if unsure => {
+                return Err(SolidError::topology(
+                    OP,
+                    TopologyFailure::VoidOwnerUndecided,
+                ))
+            }
+            None => {}
         }
     }
     let keep = outer.first().copied().unwrap_or(0);
