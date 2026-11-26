@@ -1026,8 +1026,8 @@ pub fn gn_evaluate_vn<T: GnScalar>(
     let mut wv = VSer::constant(zero);
     let mut d = Ser::constant(zero_s);
     let mut w = Ser::constant(zero_s);
-    let mut pu: Vec<Ser<T>> = Vec::with_capacity(top + 1);
-    let mut pv: Vec<Ser<T>> = Vec::with_capacity(top + 1);
+    let mut pu: Vec<Ser<T>> = Vec::new();
+    let mut pv: Vec<Ser<T>> = Vec::new();
     pu.push(Ser::constant(T::of(1.0)));
     pv.push(Ser::constant(T::of(1.0)));
     for _ in 1..=top {
