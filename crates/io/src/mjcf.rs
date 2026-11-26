@@ -224,6 +224,12 @@ impl<V: Fn(&UrdfJoint) -> f64> Writer<'_, V> {
         j.source.is_some_and(|(id, _)| self.balls.contains(&id))
     }
 
+    /// Whether `couplings` writes a constraint that moves `f` with the joint driving it: not when
+    /// either is a ball joint, which has no values to couple.
+    fn coupled(&self, f: &UrdfJoint) -> bool {
+        f.mimic.and_then(|m| self.model.joints.get(m.joint)).is_some_and(|d| !self.is_ball(f) && !self.is_ball(d))
+    }
+
     /// Motion links, and joints whose limits leave them one value. A `joint` constraint holds
     /// `y - y₀ = a₀ + a₁ (x - x₀)`, where `x₀` and `y₀` are the joints' `ref`. MuJoCo sets how
     /// stiff it is without `a₁`: below 1 (a rack's 0.005 m per radian) the constraint is so soft
@@ -347,7 +353,7 @@ impl<V: Fn(&UrdfJoint) -> f64> Writer<'_, V> {
             // A follower moves with its driver and a held joint not at all: a motor would fight
             // the constraint that keeps them so.
             let held = j.limit.is_some_and(|(lo, hi)| lo == hi);
-            if j.mimic.is_none() && !held {
+            if !self.coupled(j) && !held {
                 let range = j.dynamics.effort.map(|e| format!(" ctrlrange=\"{} {}\"", num(-e), num(e))).unwrap_or_default();
                 self.actuators += &format!("    <motor name=\"{0}\" joint=\"{0}\"{range}/>\n", attr(&j.name));
             }

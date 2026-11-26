@@ -428,6 +428,17 @@ fn mjcf_gives_no_motor_to_a_follower_a_held_joint_or_a_ball() {
     assert!(!p.xml.contains("<actuator>"), "{}", p.xml);
 }
 
+/// A link driven by a ball joint is left out, so the joint it would drive keeps its motor: without
+/// the link it moves on its own.
+#[test]
+fn mjcf_keeps_the_motor_of_a_joint_whose_link_is_left_out() {
+    let mut s = fan(&["ball", "revolute"]);
+    link(&mut s, "J0", "J1", 2.0, 0.0);
+    let p = package(&s);
+    assert!(!p.xml.contains("<equality>"), "{}", p.xml);
+    assert_eq!(Model::read(&p.xml).names("motor"), ["J1"]);
+}
+
 /// A 10 mm cube that collides as a box is drawn by its mesh and collides as its half sizes, 5 mm.
 #[test]
 fn mjcf_writes_collision_shapes() {
