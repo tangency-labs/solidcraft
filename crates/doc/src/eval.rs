@@ -11106,13 +11106,8 @@ fn feature_tools_with_constructor(
             // The face names follow `face_points`: To, then From.
             let name = |k: usize| f.face_names.get(k).map(String::as_str);
             let (to_name, from_name) = if extent.to.is_some() { (name(0), name(1)) } else { (None, name(0)) };
-            // To / From Object on a construction plane or point is found where it is now (#8527).
-            // It has no face: its point stands for the level through it, and a slanted plane for
-            // the end itself.
-            let ctx = crate::construct::Ctx { doc, vals, st: &tst, depth: 0, component: f.component };
-            let to_at = extent.to_ref.as_ref().map(|r| reference_end(&ctx, r, &ss.plane)).transpose()?;
-            let from_at = extent.from_ref.as_ref().map(|r| reference_end(&ctx, r, &ss.plane)).transpose()?;
-            let to_face = extent.to.filter(|_| to_at.is_none()).and_then(|p| object_face_at_level(&tst, to_name, p.0, &ss.plane));
+            // To / From Object on a construction plane or point has no face (#8527).
+            let to_face = extent.to.filter(|_| extent.to_ref.is_none()).and_then(|p| object_face_at_level(&tst, to_name, p.0, &ss.plane));
             // A vertex or an edge point where a plane the extrusion runs along meets another face:
             // its own level is the end (#12968), not the surface of one of the faces there.
             let to_end_face = to_face.filter(|face| !extent.to.is_some_and(|p| on_edge_without_cap(&tst, *face, p.0, n)));
@@ -11124,7 +11119,12 @@ fn feature_tools_with_constructor(
                 let c = pts.iter().fold(Vec2::default(), |a, p| a + *p) * (1.0 / pts.len().max(1) as f64);
                 ss.plane.to_world(c)
             };
-            let from_face = extent.from.filter(|_| from_at.is_none()).and_then(|p| object_face_at_level(&tst, from_name, p.0, &ss.plane));
+            // To / From Object on a construction plane or point is found where it is now (#8527):
+            // its point stands for the level through it, and a slanted plane for the end itself.
+            let ctx = crate::construct::Ctx { doc, vals, st: &tst, depth: 0, component: f.component };
+            let to_at = extent.to_ref.as_ref().map(|r| reference_end(&ctx, r, &ss.plane, centre, &regions)).transpose()?;
+            let from_at = extent.from_ref.as_ref().map(|r| reference_end(&ctx, r, &ss.plane, centre, &regions)).transpose()?;
+            let from_face = extent.from.filter(|_| extent.from_ref.is_none()).and_then(|p| object_face_at_level(&tst, from_name, p.0, &ss.plane));
             let from = match (&from_at, extent.from) {
                 (Some(ReferenceEnd::Level(h)), _) => *h,
                 (Some(ReferenceEnd::Slanted(pl)), _) => level_on(&ss.plane, centre, pl)?,
@@ -15642,20 +15642,20 @@ impl ReferenceEnd {
     }
 }
 
-/// [`ReferenceEnd`] of `r` for an extrude on `plane` (#8527). A plane the extrusion runs along
-/// never meets it, so it is refused.
-fn reference_end(ctx: &crate::construct::Ctx, r: &crate::ObjectRef, plane: &Plane) -> Result<ReferenceEnd> {
-    let n = plane.normal();
+/// [`ReferenceEnd`] of `r` for profiles `regions` around `centre` on `plane` (#8527). A plane
+/// that keeps one level over the profiles is parallel to the sketch. A plane the extrusion runs
+/// along never meets the profiles, so it is refused.
+fn reference_end(ctx: &crate::construct::Ctx, r: &crate::ObjectRef, plane: &Plane, centre: Vec3, regions: &[Region2]) -> Result<ReferenceEnd> {
     Ok(match crate::construct::object_at(ctx, r)? {
         crate::construct::ObjectAt::Point(q) => ReferenceEnd::Level(level_along(plane, q)),
         crate::construct::ObjectAt::Plane(pl) => {
-            let along = pl.normal().dot(n);
-            if along.abs() < 1e-9 {
+            let Ok(level) = level_on(plane, centre, &pl) else {
                 return Err(DocError::Invalid(
                     "the plane runs along the extrusion, so it gives no end; pick a plane parallel to the sketch or at a slant to it".into(),
                 ));
-            }
-            if pl.normal().cross(n).len() < 1e-9 { ReferenceEnd::Level(level_along(plane, pl.origin)) } else { ReferenceEnd::Slanted(pl) }
+            };
+            let (lo, hi) = kernel::plane_rise(plane, &pl, regions)?;
+            if hi - lo < 1e-9 { ReferenceEnd::Level(level) } else { ReferenceEnd::Slanted(pl) }
         }
     })
 }

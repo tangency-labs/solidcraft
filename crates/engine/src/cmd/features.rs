@@ -1909,8 +1909,9 @@ fn object_point(s: &Session, v: &Value, base: Vec3, n: Vec3) -> Option<Vec3> {
     match solidcraft_doc::construct::object_at_in(&s.doc, &vals, &s.model.state(), s.active_component, &r).ok()? {
         ObjectAt::Point(q) => Some(q),
         ObjectAt::Plane(pl) => {
-            let along = pl.normal().dot(n);
-            (along.abs() > 1e-9).then(|| base + n * ((pl.origin - base).dot(pl.normal()) / along))
+            let sketch = solidcore_record::Plane::from_normal(base, n)?;
+            let level = solidcraft_kernel::level_on_plane(&sketch, base, &pl).ok()?;
+            Some(base + n * level)
         }
     }
 }
