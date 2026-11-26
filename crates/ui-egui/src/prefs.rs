@@ -4184,6 +4184,12 @@ pub(crate) fn migrate_gruvbox(p: &mut Prefs) {
 /// those instead of dropping them.
 fn limit_disabled_plugins(mut p: Prefs) -> Prefs {
     let defaults = solidcraft_engine::plugin::HostLimits::default();
+    if p.plugin_max_deadline_ms == 0 {
+        p.plugin_max_deadline_ms = defaults.max_deadline_ms;
+    }
+    if p.plugin_max_host_calls == 0 {
+        p.plugin_max_host_calls = defaults.max_host_calls;
+    }
     if p.plugin_max_fuel == 0 {
         p.plugin_max_fuel = defaults.max_fuel;
     }
@@ -4428,7 +4434,9 @@ fn prepare_preferences(
         return Err("`origin_plane_scale` must be 0.5…4".into());
     }
     let new = migrate(new);
-    crate::plugins::host_limits(&new).validate().map_err(|e| format!("plugin_max_fuel / plugin_max_memory_mib: {e}"))?;
+    crate::plugins::host_limits(&new)
+        .validate()
+        .map_err(|e| format!("plugin_max_fuel / plugin_max_memory_mib / plugin_max_host_calls / plugin_max_deadline_ms: {e}"))?;
     if !UNITS.contains(&new.default_units.as_str()) {
         return Err(format!("units must be one of {}", UNITS.join(", ")));
     }
