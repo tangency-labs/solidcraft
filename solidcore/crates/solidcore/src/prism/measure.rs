@@ -980,8 +980,8 @@ pub enum FaceRun {
 ///   (`cylinder_of`): `slope = (room / (4 size) - 1032ε) / (1 + 1e-12)`, the 8ε for the cross
 ///   product's and `d`'s rounding.
 ///
-/// `room` is the zone less the definition's distance. A band of no width (a face too large for
-/// the zone) is kept: nothing is inside it.
+/// `room` is the zone less the definition's distance, rounded down. A band of no width (a face too
+/// large for the zone) is kept: nothing is inside it.
 #[must_use]
 pub fn face_run(k: &Kernel, b: &Brep, f: FaceId, zone: f64) -> FaceRun {
     let Some(surface) = b.face(f).ok().and_then(|face| face.surface.as_ref()) else {
@@ -2161,16 +2161,18 @@ mod straight_tests {
         }
     }
 
-    /// brett19 on #22066 (review of 39d1970a): bands that meet only inside the widening to what
-    /// `face_straying` accepts are not proved to have none. A plane's strip and a cylinder's disc
-    /// missing each other by 3e-13 at slopes of 2e-7 and 1e-6 (inside `accepted`'s margins), and
-    /// by 5e-5 at slopes of 0.01 and 0.05 (inside the chart's factor `g`): undecided, not
-    /// refused. Without the widening, without `g` and the rounding terms, or without the
-    /// certificate, one of them is decided.
+    /// brett19 on #22066 (reviews of 39d1970a and ea07889d): bands the search cannot settle are
+    /// never proved to have none. A plane's strip and a cylinder's disc missing each other by
+    /// 3e-13 at slopes of 2e-7 and 1e-6 meet only inside the widening to what `face_straying`
+    /// accepts (`accepted`'s margins): undecided, and no direction is inside both. At slopes of 0.01
+    /// and 0.05, 5e-5 apart, they meet on the unit sphere (the witness below) but not in the chart's
+    /// unnormalised rows, where `enough` takes `|d| >= 1`: undecided, or a direction found inside
+    /// both, never decided with none inside. Without the widening, without `g` and the rounding
+    /// terms, or without the certificate, one of them is decided with none inside.
     #[test]
     fn bands_that_meet_only_inside_the_widening_are_undecided() {
-        for (slope, t, gap) in [(2e-7, 1e-6, 3e-13), (0.01, 0.05, 5e-5)] {
-            let runs = [
+        let runs = |slope: f64, t: f64, gap: f64| {
+            [
                 FaceRun::Plane {
                     normal: v(0.0, 1.0, slope + t + gap).unitize().unwrap(),
                     slope,
@@ -2179,14 +2181,22 @@ mod straight_tests {
                     axis: v(0.0, 0.0, 1.0),
                     slope: t,
                 },
-            ];
-            let got = straight_candidates(&runs);
-            assert!(!got.complete, "{slope} {t} {gap}: {got:?}");
-            assert!(
-                got.directions.iter().all(|c| !inside(c.0, &runs)),
-                "{got:?}"
-            );
-        }
+            ]
+        };
+        let tight = runs(2e-7, 1e-6, 3e-13);
+        let got = straight_candidates(&tight);
+        assert!(!got.complete, "{got:?}");
+        assert!(
+            got.directions.iter().all(|c| !inside(c.0, &tight)),
+            "{got:?}"
+        );
+        let wide = runs(0.01, 0.05, 5e-5);
+        assert!(inside(v(0.0, -0.05, (1.0_f64 - 0.0025).sqrt()), &wide));
+        let got = straight_candidates(&wide);
+        assert!(
+            !got.complete || got.directions.iter().any(|c| inside(c.0, &wide)),
+            "{got:?}"
+        );
     }
 
     /// brett19 on #22066 (review of 39d1970a): a cylinder whose axis is 70° off the plane pair's
