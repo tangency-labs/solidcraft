@@ -9,8 +9,8 @@ use crate::{DEFAULT_MATERIAL, DocError, Document, Result};
 
 #[path = "config_rules.rs"]
 mod rules;
-pub use rules::*;
 pub(crate) use rules::validate_rules_value;
+pub use rules::*;
 #[path = "config_styles.rs"]
 mod styles;
 pub use styles::*;

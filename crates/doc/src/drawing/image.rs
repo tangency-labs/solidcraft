@@ -423,11 +423,8 @@ pub(super) fn take_back_typed(
                 continue;
             }
             let image_id = ids::decode(&image_s).ok_or_else(|| DocError::Invalid(format!("invalid logo image id `{image_s}`")))?;
-            if let Some(CellKind::Text(text)) = Arc::make_mut(sheet)
-                .title_block
-                .as_mut()
-                .and_then(|block| block.cells.iter_mut().find(|c| c.name == cell_name))
-                .map(|c| &mut c.kind)
+            if let Some(CellKind::Text(text)) =
+                Arc::make_mut(sheet).title_block.as_mut().and_then(|block| block.cells.iter_mut().find(|c| c.name == cell_name)).map(|c| &mut c.kind)
             {
                 text.image = Some(image_id);
                 used.insert(image_id);
@@ -442,11 +439,8 @@ pub(super) fn take_back_typed(
             id: Option<String>,
         }
         for item in items {
-            let needed = serde_json::from_str::<IdPeek>(item.get())
-                .ok()
-                .and_then(|p| p.id)
-                .and_then(|s| ids::decode(&s))
-                .is_some_and(|id| used.contains(&id));
+            let needed =
+                serde_json::from_str::<IdPeek>(item.get()).ok().and_then(|p| p.id).and_then(|s| ids::decode(&s)).is_some_and(|id| used.contains(&id));
             if !needed {
                 continue;
             }

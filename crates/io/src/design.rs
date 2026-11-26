@@ -1369,12 +1369,7 @@ fn read_document_within<R: Read + Seek>(reader: &mut PackageReader<R>, record_bo
 
 /// Fast, zero-DOM container document reader for designs this build knows: extracts only the tiny
 /// blob-reference fields from `document.json` without allocating a whole-document `Value` tree.
-fn read_known_document<R: Read + Seek>(
-    reader: &mut PackageReader<R>,
-    bytes: &[u8],
-    text: &str,
-    record_bodies: usize,
-) -> Result<Document> {
+fn read_known_document<R: Read + Seek>(reader: &mut PackageReader<R>, bytes: &[u8], text: &str, record_bodies: usize) -> Result<Document> {
     check_hdr_manifest(bytes)?;
     check_texture_manifest(bytes)?;
     let refs = extract_container_refs(bytes)?;

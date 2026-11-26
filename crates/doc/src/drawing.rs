@@ -516,9 +516,7 @@ impl Drawing {
             return Err(DocError::Invalid(format!("drawing too large (at most {} MiB)", MAX_DRAWING_BYTES >> 20)));
         }
         let header = crate::json_budget::peek_header(&DRAWING, s, false)?;
-        if DRAWING.newer(header.version, header.applied.as_deref()).is_some()
-            || DRAWING.needs_upgrade(header.version, header.applied.as_deref())
-        {
+        if DRAWING.newer(header.version, header.applied.as_deref()).is_some() || DRAWING.needs_upgrade(header.version, header.applied.as_deref()) {
             let v = crate::json_budget::from_str_bounded(s, crate::json_budget::MAX_VALUE_MEMORY_BYTES)
                 .map_err(|e| DocError::Invalid(format!("not a SolidCraft drawing: {e}")))?;
             return Self::read_value(v, Some(s));

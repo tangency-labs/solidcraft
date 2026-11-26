@@ -3522,12 +3522,20 @@ mod tests {
         assert_eq!(reopened, d);
 
         // Streaming depth & float range checks preserve exact error contracts.
-        let deep = format!(r#"{{"format":"{}","format_pending":{},"name":"Deep","params":[],"features":[],"x":{}1{}}}"#,
-            format_string(FORMAT), serde_json::to_string(&pending_names()).unwrap(), "[".repeat(70), "]".repeat(70));
+        let deep = format!(
+            r#"{{"format":"{}","format_pending":{},"name":"Deep","params":[],"features":[],"x":{}1{}}}"#,
+            format_string(FORMAT),
+            serde_json::to_string(&pending_names()).unwrap(),
+            "[".repeat(70),
+            "]".repeat(70)
+        );
         assert_eq!(read(&deep).unwrap_err().to_string(), "damaged design: nested too deeply");
 
-        let huge_float = format!(r#"{{"format":"{}","format_pending":{},"name":"Huge","params":[],"features":[],"x":1e10}}"#,
-            format_string(FORMAT), serde_json::to_string(&pending_names()).unwrap());
+        let huge_float = format!(
+            r#"{{"format":"{}","format_pending":{},"name":"Huge","params":[],"features":[],"x":1e10}}"#,
+            format_string(FORMAT),
+            serde_json::to_string(&pending_names()).unwrap()
+        );
         let why = read(&huge_float).unwrap_err().to_string();
         assert!(why.starts_with("damaged design: the number ") && why.ends_with(" is out of range"), "{why}");
 

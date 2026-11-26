@@ -182,7 +182,10 @@ impl<'de> Visitor<'de> for NumberDepthAnchorSeed<'_> {
                 })?;
             }
         }
-        if is_face_type && let Some(raw) = raw_anchor && raw.get() != "null" {
+        if is_face_type
+            && let Some(raw) = raw_anchor
+            && raw.get() != "null"
+        {
             let anchor = from_str_bounded(raw.get(), 64 * 1024)
                 .map_err(|_| fail::<A::Error>(self.error, DocError::Invalid("face anchor must be an object".into())))?;
             if let Err(err) = crate::face_anchor::validate_face_anchor_json(&anchor) {
@@ -196,9 +199,7 @@ impl<'de> Visitor<'de> for NumberDepthAnchorSeed<'_> {
 fn check_slice_numbers_and_anchors(s: &str, depth: usize, check_anchors: bool, anchor_visited: &mut usize) -> Result<()> {
     let mut error = None;
     let mut de = serde_json::Deserializer::from_str(s);
-    let res = NumberDepthAnchorSeed { depth, check_anchors, anchor_visited, error: &mut error }
-        .deserialize(&mut de)
-        .and_then(|()| de.end());
+    let res = NumberDepthAnchorSeed { depth, check_anchors, anchor_visited, error: &mut error }.deserialize(&mut de).and_then(|()| de.end());
     if let Some(err) = error {
         return Err(err);
     }
@@ -714,7 +715,10 @@ impl<'de> Visitor<'de> for FeatureItemSeed<'_> {
             }
         }
 
-        if feature_type.as_deref() == Some("face") && let Some(raw) = raw_anchor && raw.get() != "null" {
+        if feature_type.as_deref() == Some("face")
+            && let Some(raw) = raw_anchor
+            && raw.get() != "null"
+        {
             let anchor = from_str_bounded(raw.get(), 64 * 1024)
                 .map_err(|_| fail::<A::Error>(self.error, DocError::Invalid("face anchor must be an object".into())))?;
             if let Err(err) = crate::face_anchor::validate_face_anchor_json(&anchor) {
@@ -731,7 +735,9 @@ impl<'de> Visitor<'de> for FeatureItemSeed<'_> {
                 }
             }
             Some("emboss") => {
-                if let Some(raw) = face && raw.get() != "null" {
+                if let Some(raw) = face
+                    && raw.get() != "null"
+                {
                     let target = from_str_bounded(raw.get(), MAX_SMALL_VALUE_BYTES).map_err(|_| {
                         fail::<A::Error>(
                             self.error,
@@ -2009,8 +2015,8 @@ impl<'de> Visitor<'de> for SketchLinksSeed<'_, 'de> {
                     }
                     if let Some(pins) = check.sketch_placements {
                         let invalid = || DocError::Invalid("damaged design: invalid captured sketch projection placement".into());
-                        let valid_pins = serde_json::from_str::<Vec<&RawValue>>(pins.get())
-                            .is_ok_and(|list| list.len() <= crate::project::MAX_SKETCH_PLACEMENTS);
+                        let valid_pins =
+                            serde_json::from_str::<Vec<&RawValue>>(pins.get()).is_ok_and(|list| list.len() <= crate::project::MAX_SKETCH_PLACEMENTS);
                         if !valid_pins {
                             self.summary.versioned_err = Some(invalid());
                             continue;
@@ -2090,10 +2096,7 @@ impl<'de> Visitor<'de> for SketchWiresSeed<'_, 'de> {
         let mut count = 0usize;
         let mut ids = BTreeSet::new();
         let mut work = 0usize;
-        while seq
-            .next_element_seed(WireItemSeed { summary: self.summary, ids: &mut ids, work: &mut work, error: self.error })?
-            .is_some()
-        {
+        while seq.next_element_seed(WireItemSeed { summary: self.summary, ids: &mut ids, work: &mut work, error: self.error })?.is_some() {
             count += 1;
             if count > 20_000 && self.summary.wires_err.is_none() {
                 self.summary.wires_err = Some(DocError::Invalid("damaged design: 3D curve arrays, ids or coordinate spaces are invalid".into()));

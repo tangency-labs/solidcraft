@@ -12,8 +12,8 @@ use std::fmt;
 
 use serde::de::{self, DeserializeSeed, Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::ser::{
-    self, Serialize, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple, SerializeTupleStruct, SerializeTupleVariant,
-    Serializer,
+    self, Serialize, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple, SerializeTupleStruct,
+    SerializeTupleVariant, Serializer,
 };
 use serde_json::{Map, Value, value::RawValue};
 
