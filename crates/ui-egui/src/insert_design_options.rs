@@ -77,8 +77,10 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 let width = ui.available_width();
                 ui_kit::bounded_dropdown_menu(ui, "insert_design_configuration", current, width, |ui| {
                     for (index, name) in labels.iter().enumerate() {
-                        let response = ui.selectable_value(&mut ask.selected, index, *name).backing_on_hover_text(*name);
+                        let response = ui_kit::list_picker(ui, &format!("insert_design_configuration:{index}"), name, ask.selected == index)
+                            .backing_on_hover_text(*name);
                         if response.clicked() {
+                            ask.selected = index;
                             ui.close();
                             restore_focus = !response.clicked_by(egui::PointerButton::Primary);
                         }
