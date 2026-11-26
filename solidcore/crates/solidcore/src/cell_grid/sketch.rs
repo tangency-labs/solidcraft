@@ -314,9 +314,10 @@ struct Prepared {
 
 /// Whether the clip left the cell as it was: one piece, an outer loop, made only of the cell's own
 /// edges, so that no edge of the field or a keep-out entered it. A piece's edge is the cell's own
-/// when its middle lies within [`EPS`] of the cell's outline, so a notch is seen by its depth, not
-/// by the share of the cell's area it takes. A loss of more than a rounding of the area (1e-9 of
-/// it) is a change at once.
+/// when both its ends and its middle lie within [`EPS`] of one and the same piece of the cell's
+/// outline (a middle near some other piece, such as a thin spike's tip, proves nothing), so a notch
+/// is seen by its depth, not by the share of the cell's area it takes. A loss of more than a
+/// rounding of the area (1e-9 of it) is a change at once.
 fn unchanged(pieces: &[(Vec<Prim>, f64)], cell: &[Prim], area: f64) -> bool {
     let [(prims, piece_area)] = pieces else {
         return false;
@@ -324,9 +325,11 @@ fn unchanged(pieces: &[(Vec<Prim>, f64)], cell: &[Prim], area: f64) -> bool {
     if !((piece_area - area).abs() <= 1e-9 * area) {
         return false;
     }
-    prims
-        .iter()
-        .all(|p| cell.iter().any(|c| c.distance(p.mid()) <= EPS))
+    prims.iter().all(|p| {
+        let marks = [p.start(), p.mid(), p.end()];
+        cell.iter()
+            .any(|c| marks.iter().all(|m| c.distance(*m) <= EPS))
+    })
 }
 
 /// What two neighbouring outlines that meet or nest do.
@@ -400,7 +403,9 @@ fn offsets(a: Vec2, b: Vec2, l: f64) -> Result<Vec<(i64, i64)>, CellGridError> {
         if !(n >= 1.0) {
             continue;
         }
-        if !(out.len() as f64 + n <= MAX_OFFSETS as f64) {
+        // The cell itself is in its own row's range and is not a neighbour.
+        let neighbours = if dj == 0 { n - 1.0 } else { n };
+        if !(out.len() as f64 + neighbours <= MAX_OFFSETS as f64) {
             return Err(too_many());
         }
         for di in (lo as i64..).take(n as usize) {

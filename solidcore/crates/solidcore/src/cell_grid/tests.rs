@@ -3084,6 +3084,78 @@ fn a_notch_a_keep_out_takes_from_a_large_cell_drops_it_though_it_is_a_tiny_share
 }
 
 #[test]
+fn a_clip_edge_with_its_middle_near_a_spike_of_the_cell_is_not_the_cells_own() {
+    // A 1e5 square cell with a slot from its top to 5e-7 above y = 0, and its bottom at -1e-5. A
+    // whole keep-out (-1, -1) to (100001, 0) cuts a strip 1e-5 deep off the bottom, leaving the
+    // clip edge y = 0 from x = 0 to 1e5. Its middle (5e4, 0) is 5e-7 (under EPS) from the slot's
+    // tip, but its ends are 1e-5 from the bottom side, so it is not on one piece of the outline:
+    // the cell was cut and, the keep-out being whole, it goes. The pitch is so large that this is
+    // the only cell in the field.
+    let line = |a: (f64, f64), b: (f64, f64)| Seg2::Line {
+        a: v(a.0, a.1),
+        b: v(b.0, b.1),
+    };
+    let pts = [
+        (0.0, -1e-5),
+        (1e5, -1e-5),
+        (1e5, 1e5),
+        (50100.0, 1e5),
+        (50100.0, 100.0),
+        (50000.0, 5e-7),
+        (49900.0, 100.0),
+        (49900.0, 1e5),
+        (0.0, 1e5),
+    ];
+    let profile = Loop2 {
+        segs: (0..pts.len())
+            .filter_map(|k| Some(line(*pts.get(k)?, *pts.get((k + 1) % pts.len())?)))
+            .collect(),
+    };
+    let cell = sk_cell(profile, Some(v(0.0, 0.0)), 3e5, 3e5, 0.0);
+    let spec = CellGridSpec {
+        anchor: v(0.0, 0.0),
+        ..sk_spec(Clip::Whole)
+    };
+    let field = [
+        rect(-5.0, -5.0, 100010.0, 100010.0),
+        rect(-1.0, -1.0, 100001.0, 0.0),
+    ];
+    let plan = sk_run(&field, &cell, &spec);
+    assert!(plan.cells.is_empty(), "{:?}", plan.cells.len());
+}
+
+#[test]
+fn the_neighbour_budget_leaves_out_the_cell_itself() {
+    // A strip 0.5 wide and 999.8 tall on pitch 1 along the row and 1001 between rows, the web 0.5:
+    // the reach is sqrt(499.9^2 + 0.25^2) = 499.9, so neighbours are looked for within
+    // l = 2 * 499.9 + 0.5 = 1000.3 mm, which holds the columns -1000..=1000 of the cell's own row
+    // (the next row is 1001 off): 2000 neighbours, exactly the limit, so it is planned: the
+    // columns i = 0..=9 are whole in [0, 10] x [0, 1000].
+    let strip =
+        |height: f64, pitch_y: f64| sk_cell(rect(0.0, 0.0, 0.5, height), None, 1.0, pitch_y, 0.0);
+    let spec = CellGridSpec {
+        web: 0.5,
+        anchor: v(0.25, 499.9),
+        ..sk_spec(Clip::Whole)
+    };
+    let plan = sk_run(
+        &[rect(0.0, 0.0, 10.0, 1000.0)],
+        &strip(999.8, 1001.0),
+        &spec,
+    );
+    assert_eq!((plan.whole, plan.partial), (10, 0));
+    // 1000.8 tall (l = 1001.3: columns -1001..=1001, 2002 neighbours) on rows 2000 apart: refused.
+    match plan_sketch(
+        &[rect(0.0, 0.0, 10.0, 1000.0)],
+        &strip(1000.8, 2000.0),
+        &spec,
+    ) {
+        Err(CellGridError::Layout(m)) => assert!(m.contains("neighbouring cells"), "{m}"),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
 fn rows_a_pitch_apart_with_few_neighbours_in_reach_are_planned() {
     // A strip cell 2098 x 0.5 on rows 1 mm apart, each row shifted 2100 along (pitch_x 1e6, stagger
     // 0.0021). The reach is 1049 mm, so neighbours are looked for within 2100 mm: 2100 rows, but
