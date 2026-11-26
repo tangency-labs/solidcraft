@@ -511,11 +511,11 @@ pub fn paint_assembly_section(
     p.text(
         pos2(banner_rect.left() + 24.0, banner_rect.center().y),
         Align2::LEFT_CENTER,
-        "ASSEMBLY & JOINTS",
+        solidcraft_ui_text::tr("timeline.2d_assembly_header"),
         FontId::proportional(t.font_small),
         t.text,
     );
-    let count_text = format!("{} Joints", num_joints);
+    let count_text = solidcraft_ui_text::format("timeline.2d_joints", &[("count", &num_joints.to_string())]);
     let badge_rect = Rect::from_center_size(pos2(banner_rect.left() + 175.0, banner_rect.center().y), vec2(56.0, 16.0));
     p.rect_filled(badge_rect, 3.0, purple_accent.gamma_multiply(0.2));
     p.rect_stroke(badge_rect, 3.0, Stroke::new(1.0, purple_accent.gamma_multiply(0.4)), StrokeKind::Inside);
@@ -524,7 +524,10 @@ pub fn paint_assembly_section(
     // Right side: Active summary and quick transport buttons
     if banner_rect.width() > 320.0 {
         let active_joints = app.session.doc.assembly.joints.iter().take(marker_step.min(num_joints)).filter(|j| !j.suppressed).count();
-        let active_summary = format!("Active: {} / {}", active_joints, num_joints);
+        let active_summary = solidcraft_ui_text::format(
+            "timeline.2d_active",
+            &[("active", &active_joints.to_string()), ("total", &num_joints.to_string())],
+        );
         p.text(
             pos2(banner_rect.right() - 85.0, banner_rect.center().y),
             Align2::RIGHT_CENTER,
@@ -927,7 +930,11 @@ pub fn paint_splitter(
 
 /// The longest title of a collapsed track strip that fits in `room` points, measured by `width`; none when even the short one does not fit (the strip's tooltip still names the track).
 pub(crate) fn collapsed_strip_title(is_modeling: bool, room: f32, width: impl Fn(&str) -> f32) -> Option<&'static str> {
-    let titles: [&'static str; 2] = if is_modeling { ["Modeling Features", "Modeling"] } else { ["Assembly & Joints", "Assembly"] };
+    let titles = if is_modeling {
+        [solidcraft_ui_text::tr("timeline.2d_modeling_title"), solidcraft_ui_text::tr("timeline.2d_modeling_short")]
+    } else {
+        [solidcraft_ui_text::tr("timeline.2d_assembly_title"), solidcraft_ui_text::tr("timeline.2d_assembly_short")]
+    };
     titles.into_iter().find(|title| width(title) <= room)
 }
 
@@ -992,9 +999,9 @@ pub fn paint_collapsed_strip(
         state.modeling_split_ratio = if is_modeling { 0.65 } else { 0.5 };
         ui.ctx().request_repaint();
     }
-    resp.on_hover_text(if is_modeling {
-        "Modeling Track contracted. Click to restore split view."
+    resp.on_hover_text(solidcraft_ui_text::tr(if is_modeling {
+        "timeline.2d_modeling_collapsed"
     } else {
-        "Assembly Track contracted. Click to restore split view."
-    });
+        "timeline.2d_assembly_collapsed"
+    }));
 }
