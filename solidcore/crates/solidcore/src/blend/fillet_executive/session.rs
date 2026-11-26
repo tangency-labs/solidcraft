@@ -8092,6 +8092,16 @@ impl SessionObjects<'_> {
 
         // set FilletSideEdge->Curves
         for edge in [gaps.edge1, gaps.edge2] {
+            // (not upstream) A cap edge along the extended side edge from a rail's end on the
+            // end face's surface waits for the blend's trace, which places that end
+            // (`calc_rail_int_end_surface`, the fork's WR-697); the corner's edges are computed
+            // again after it. Computing it now refused the corner ("an end vertex of the edge
+            // is not processed"): a chamfer on a slanted side's edge ending where an upright
+            // meets it. Left without a curve, the coincidence test below takes the whole edge,
+            // as upstream.
+            if self.pseudo.extended_edge_awaits_rail(edge)? {
+                continue;
+            }
             let SessionObjects {
                 target,
                 pseudo,
