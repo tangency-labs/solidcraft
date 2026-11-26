@@ -60,8 +60,6 @@
     "ui.drawing_settings.updates": "更新"
   },
   "ko": {
-    "cmd.drawing_set": "도면 설정",
-    "ui.drawing_panel.auto": "자동",
     "ui.drawing_settings.deferred": "지연",
     "ui.drawing_settings.deferred_help": "지연된 뷰는 도면을 업데이트할 때까지 마지막 선을 유지합니다.",
     "ui.drawing_settings.drawing_immediate": "도면 변경은 즉시 적용됩니다. 각 변경은 한 번에 실행 취소할 수 있습니다.",

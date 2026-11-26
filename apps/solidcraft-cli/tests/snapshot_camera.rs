@@ -393,8 +393,8 @@ fn a_transparent_snapshot_clears_the_background_and_keeps_the_model_opaque() {
     s.execute("view.apply", &json!({"camera": side_camera()})).unwrap();
     let cam = s.camera.unwrap();
     let guides = solidcraft_engine::view::Guides { grid: false, axes: false };
-    let mut scene = solidcraft_engine::view::scene_with_guides(&s, &cam, &s.section, guides).unwrap();
-    let canvas = solidcraft_viewport::render_transparent(&mut scene, &cam, SIZE.0 as usize, SIZE.1 as usize);
+    let scene = solidcraft_engine::view::scene_with_guides(&s, &cam, &s.section, guides).unwrap();
+    let canvas = solidcraft_viewport::render_transparent(&scene, &cam, SIZE.0 as usize, SIZE.1 as usize);
     let expected = solidcraft_viewport::png(canvas.w, canvas.h, canvas.rgba).unwrap();
     assert_eq!(std::fs::read(dir.0.join("cpu-clear.png")).unwrap(), expected);
 }
@@ -446,6 +446,42 @@ fn a_strict_policy_never_falls_to_the_cpu() {
     assert_eq!(reply["renderer"], report["renderer"], "{reply} vs {report}");
     let (_, cpu) = survey("cpu");
     assert_eq!((cpu["lands_on"].clone(), cpu["renderer"].clone()), (json!("cpu"), json!("cpu")), "{cpu}");
+}
+
+/// Linux machines without a Vulkan ICD still find llvmpipe over OpenGL under the software policy (#22109).
+#[test]
+fn linux_software_policy_finds_opengl_llvmpipe_without_vulkan_icd() {
+    if !cfg!(target_os = "linux") {
+        return;
+    }
+    let o = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli"))
+        .args(["gpu", "--policy", "software"])
+        .env("VK_DRIVER_FILES", "/nonexistent")
+        .env("LIBGL_ALWAYS_SOFTWARE", "1")
+        .env_remove("WGPU_BACKEND")
+        .output()
+        .unwrap();
+    if !o.status.success() {
+        let stderr = String::from_utf8_lossy(&o.stderr);
+        if stderr.contains("No OpenGL context") || stderr.contains("libGL.so") || stderr.contains("libEGL.so") {
+            // Environment lacks OpenGL runtime libraries entirely (e.g. minimal container).
+            return;
+        }
+        panic!(
+            "gpu --policy software failed unexpectedly: exit {:?}\nstdout: {}\nstderr: {}",
+            o.status.code(),
+            String::from_utf8_lossy(&o.stdout),
+            stderr
+        );
+    }
+    let reply: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(reply["policy"], "software");
+    assert_eq!(reply["renderer"], "gpu-software");
+    assert_eq!(reply["lands_on"], "software");
+    let backends = reply["backends"].as_str().unwrap();
+    assert!(backends.contains("GL"), "{backends}");
+    let adapters = reply["adapters"].as_array().unwrap();
+    assert!(adapters.iter().any(|a| a["backend"] == "Gl" && a["tier"] == "software"), "{adapters:?}");
 }
 
 #[test]

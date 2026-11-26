@@ -26,6 +26,7 @@
 //! | [`place_ball_contacts`]      | `SmBlendCorner::PlaceBallContacts` (`CalcCornerVertGeom`'s Ball part) |
 //! | [`ball_corner_edge_geom`]    | `SmBlendCorner::BuildBallSurface` (`CalcCornerEdgeGeom`'s Ball part) |
 //! | [`create_ball_patch`]        | `SmBlendCorner::CreateBallPatch`                      |
+//! | [`ball_triangle_face`]       | — (not the fork's: the one-patch corner for a caller that knows the ball) |
 //! | `ball_centre` (private)      | `SmBlendCorner::BallCentre`                           |
 //! | `ball_face_quadric` (private) | `sm_BallFaceQuadric`                                 |
 //! | `BallImplicit`, `ball_inverse`, `ball_certified_root` (private) | `SmBallImplicit`, `sm_BallInverse`, `sm_BallCertifiedRoot` |
@@ -1219,6 +1220,42 @@ fn fan_centre(dirs: &[Vec3; 3]) -> Option<Vec3> {
         .iter()
         .all(|&(a, b)| mid.dot(a.cross(b)) * turn > EFF_ZERO);
     inside.then_some(mid)
+}
+
+/// The corner of three equal rounds as [`ball_corner_edge_geom`] makes it where its triangle
+/// is one patch: the ball of `radius` about `centre` between the contacts in the unit
+/// directions `dirs`, its pole at contact 0, carrying its sphere ([`BallPatch`]), its normal
+/// out of the material (towards the centre where the rounds add material, `adds_material`).
+/// For a construction that knows the ball already (the closed-form rounds between planes,
+/// [`crate::blend::exact_round`]). `None` where the triangle is not one patch (a fan's) or
+/// neither turn of the patch faces the material's way.
+///
+/// # Errors
+///
+/// Those of the patch's construction and evaluation.
+pub fn ball_triangle_face(
+    k: &Kernel,
+    centre: Point3,
+    radius: f64,
+    dirs: &[Vec3; 3],
+    adds_material: bool,
+) -> Result<Option<Surface>> {
+    if !far_side(dirs, 0)?.is_some_and(|far| far.is_one_arc()) {
+        return Ok(None);
+    }
+    for turn in 0..2 {
+        let (net, _, _) = ball_triangle_patch(centre, radius, dirs, 0, turn == 1)?;
+        let patch = Surface::from(net.clone());
+        let mid = patch.natural_uv_domain_with_nurb(k)?.evaluate(0.5, 0.5);
+        let at = patch.evaluate_point(k, mid)?;
+        let normal = patch.evaluate_normal(k, mid, Side::Left, Side::Left)?;
+        if (normal.dot(at - centre) < 0.0) == adds_material {
+            return Ok(Some(Surface::from(BallPatch::create(
+                &net, centre, radius,
+            )?)));
+        }
+    }
+    Ok(None)
 }
 
 /// `sm_BallTrianglePatch` (the fork's a6243fa): the ball's triangle between the

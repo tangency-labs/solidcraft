@@ -30,8 +30,12 @@
 //! volume (parts are held by value), where upstream also edits a volume the object does
 //! not own. Composite edges do not exist in the arena model (`sEdges` is the edge
 //! alone). The NURBs of analytic surfaces without one are made before the infinite region
-//! search (`make_missing_nurbs`), where upstream's bounding box makes them lazily. The
-//! debug drawing code is omitted. No recursion is introduced here.
+//! search (`make_missing_nurbs`), where upstream's bounding box makes them lazily. Each
+//! face keeps its UV domain across
+//! `ReplaceSurface` (upstream's `SetSurface` gives it the new surface's whole natural
+//! domain), as `Transform` keeps it when it moves a surface in place: the mirrored surface
+//! keeps the face's parameters. The debug drawing code is omitted. No recursion is
+//! introduced here.
 //!
 //! [`transform_matrix`] runs upstream's steps and branches in order: the low-work
 //! test (where its `AngleBetween` fails, `degenerate_low_work_transform` applies
@@ -173,6 +177,12 @@ fn mirror_in(
             face,
             notifications.as_deref_mut(),
         ))?;
+        // Not upstream: the face's UV domain, which `SetSurface` resets to its new surface's
+        // natural domain. The mirrored surface is the NURB with its control points reflected,
+        // in the same parameters, and its analytic copy keeps them too (it proves the same
+        // points at the same parameters, or stays an exact copy, WR-450). So the face keeps
+        // the rectangle it had, as `Transform` keeps it when it moves a surface in place.
+        let domain = b.face(face)?.uv_domain;
         let tmp_surface = b
             .face(face)?
             .surface
@@ -194,6 +204,8 @@ fn mirror_in(
             true,
             notifications.as_deref_mut(),
         )?;
+        // (the face's own domain back, before its UV trims are made again)
+        b.face_mut(face)?.uv_domain = domain;
 
         // for every Face using pSurface - remove UVTrimCurves, swap Faceuse shells
         for f in modified {
@@ -338,9 +350,6 @@ fn degenerate_low_work_transform(
         fixes: k.fixes,
         memoize_curve_caches: k.memoize_curve_caches,
         cancel: k.cancel.clone(),
-        // (the caller's replay seam, test only: the trial calls through it)
-        #[cfg(feature = "wr57-replay")]
-        replay: k.replay.clone(),
         ..Kernel::default()
     };
     let mut copy = b.clone_standing_for_self()?;
@@ -955,6 +964,67 @@ mod tests {
         mirror(&mut k, &mut b, &plane).unwrap();
         for (&v, p) in vertices.iter().zip(&before) {
             assert!((b.vertex(v).unwrap().point - *p).length() < 1e-12);
+        }
+    }
+
+    /// A reflection keeps each face's UV domain, as a rotation does. A box (x 6 to 8, y ±0.25,
+    /// z 2 to 4.5) less a whole torus (radii 7 and 1 about z, its centre circle at z = 4)
+    /// leaves the torus a face over a sliver of its surface; mirrored in y = 0
+    /// (`SmBrep::Transform` of diag(1, −1, 1)), its surface is the torus's NURB with its
+    /// control points reflected, in the same parameters, so the face's rectangle is the same
+    /// one. `SetSurface` gave it the new surface's whole natural domain.
+    #[test]
+    fn a_reflection_keeps_each_faces_uv_domain() {
+        use crate::boolean::api_brep::boolean_difference;
+        use crate::mass::integrator::properties::brep_volume_default;
+        use crate::primitive::api_primitives::create_torus;
+        use crate::topology::face::p1::calculate_uv_domain_from_uv_trim_curves;
+
+        let mut k = Kernel {
+            fixes: crate::kernel::UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let block = create_box(&mut k, Vec3::new(6.0, -0.25, 2.0), 2.0, 0.5, 2.5).unwrap();
+        let torus = create_torus(&mut k, Vec3::new(0.0, 0.0, 4.0), 7.0, 1.0).unwrap();
+        let mut b = boolean_difference(&mut k, block, torus).unwrap();
+        let faces = p1::faces(&b, None).unwrap();
+        let before: Vec<_> = faces
+            .iter()
+            .map(|&f| b.face(f).unwrap().uv_domain)
+            .collect();
+        // the groove's face covers a sliver of its surface
+        let narrow = faces.iter().zip(&before).any(|(&f, d)| {
+            let s = b.face(f).unwrap().surface.as_ref().unwrap();
+            let n = s.natural_uv_domain_with_nurb(&k).unwrap();
+            d.size().x < 0.1 * n.size().x
+        });
+        assert!(narrow, "no face narrower than its surface: {before:?}");
+        let volume = brep_volume_default(&k, &mut b, 1e-8).unwrap();
+
+        let matrix = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, -1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        transform_matrix(&mut k, &mut b, &matrix, true).unwrap();
+        assert!(level2_valid(&mut k, &mut b));
+        let mirrored = brep_volume_default(&k, &mut b, 1e-8).unwrap();
+        assert!(
+            (mirrored - volume).abs() <= 1e-9 * volume,
+            "{mirrored} {volume}"
+        );
+        for (&f, d) in faces.iter().zip(&before) {
+            assert_eq!(b.face(f).unwrap().uv_domain, *d, "face {f:?}");
+            // and the rectangle holds the face's UV trims, made again on the new surface
+            let trims = calculate_uv_domain_from_uv_trim_curves(&k, &mut b, f, true, false, false)
+                .unwrap()
+                .domain;
+            let tol = 1e-9 * d.size().length();
+            assert!(
+                d.contains_point(trims.min(), tol) && d.contains_point(trims.max(), tol),
+                "face {f:?}: trims {trims:?} outside {d:?}"
+            );
         }
     }
 

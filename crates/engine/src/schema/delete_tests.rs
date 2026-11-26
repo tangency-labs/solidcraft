@@ -18,7 +18,18 @@ fn matches(schema: schemars::Schema, r: &Value) {
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<SelectionDeleteParams>(),
-        &["all_bodies", "canvases", "components", "contents", "dry_run", "items", "joints", "occurrences", "point_clouds"],
+        &[
+            "all_bodies",
+            "canvases",
+            "components",
+            "contents",
+            "dry_run",
+            "items",
+            "joints",
+            "occurrences",
+            "point_clouds",
+            "preserve_projection_link",
+        ],
     );
 }
 
@@ -274,4 +285,39 @@ fn a_misspelt_key_is_reported_in_warn_and_refused_in_strict() {
     s.param_check = ParamCheck::Strict;
     let error = s.execute("selection.delete", &json!({"items": [], "dryrun": true})).err().map(|e| e.to_string()).unwrap_or_default();
     assert!(error.contains("`dryrun`"), "{error}");
+}
+
+#[test]
+fn projection_preservation_is_an_optional_boolean_and_invalid_values_are_atomic() {
+    for schema in [input_schema_for::<SelectionDeleteParams>(), input_schema_for::<crate::schema::sketch_session::DeleteParams>()] {
+        let key = if schema.as_value()["properties"].get("items").is_some() { "items" } else { "entities" };
+        let root = schema.as_value();
+        let mut p = if key == "items" { json!({"items":[{"type":"sketch_curve","id":"l1"}]}) } else { json!({"entities":["l1"]}) };
+        assert!(conforms(root, root, &p));
+        for policy in [json!(false), json!(true)] {
+            p["preserve_projection_link"] = policy;
+            assert!(conforms(root, root, &p));
+        }
+        for policy in [Value::Null, json!("true"), json!(1)] {
+            p["preserve_projection_link"] = policy;
+            assert!(!conforms(root, root, &p));
+        }
+    }
+    for level in [ParamCheck::Off, ParamCheck::Strict] {
+        let mut s = Session { param_check: level, ..Default::default() };
+        run(&mut s, "sketch.create", json!({"plane":"XY"}));
+        let line = run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}))["curves"][0].clone();
+        for command in ["sketch.delete", "selection.delete"] {
+            for policy in [Value::Null, json!("true"), json!(1)] {
+                let before = s.doc.to_json();
+                let p = if command == "sketch.delete" {
+                    json!({"entities":[line],"preserve_projection_link":policy})
+                } else {
+                    json!({"items":[{"type":"sketch_curve","id":line}],"preserve_projection_link":policy,"dry_run":true})
+                };
+                assert!(s.execute(command, &p).is_err());
+                assert_eq!(s.doc.to_json(), before);
+            }
+        }
+    }
 }

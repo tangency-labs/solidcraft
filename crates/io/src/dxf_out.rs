@@ -426,8 +426,8 @@ pub(super) fn admit_bulged(vertices: &[DxfVertex], closed: bool) -> Result<()> {
     }
     let check = |from: DxfVertex, to: Vec2| -> Result<()> {
         if from.bulge != 0.0
-            && solidcraft_kernel::services::path_export::bulge_arc(
-                solidcraft_kernel::services::path_export::Vertex { at: from.at, bulge: from.bulge },
+            && solidcraft_kernel::services::dxf::export::bulge_arc(
+                solidcraft_kernel::services::dxf::export::Vertex { at: from.at, bulge: from.bulge },
                 to,
             )
             .is_none()
@@ -469,8 +469,8 @@ fn sample_bulged(vertices: &[DxfVertex], closed: bool, out: &mut Vec<Vec2>) -> R
 }
 
 fn sample_bulged_edge(from: DxfVertex, to: Vec2, out: &mut Vec<Vec2>) -> Result<()> {
-    let points = solidcraft_kernel::services::path_export::bulged_edge_points(
-        solidcraft_kernel::services::path_export::Vertex { at: from.at, bulge: from.bulge },
+    let points = solidcraft_kernel::services::dxf::export::bulged_edge_points(
+        solidcraft_kernel::services::dxf::export::Vertex { at: from.at, bulge: from.bulge },
         to,
     )
     .map_err(|error| IoError::Invalid(error.reason))?;
@@ -948,17 +948,17 @@ fn shape_preflight(shape: &DxfShape) -> Result<()> {
         DxfShape::Polyline { points } => points.len() >= 2 && points.len() <= MAX_DXF_FILE_VALUES && points.iter().all(|p| p.is_finite()),
         DxfShape::Circle { c, r } => c.is_finite() && r.is_finite() && *r > 0.0,
         DxfShape::Arc { c, r, a0, a1 } => {
-            c.is_finite() && r.is_finite() && *r > 0.0 && solidcraft_kernel::services::export_geometry::arc_fields_finite(*a0, *a1)
+            c.is_finite() && r.is_finite() && *r > 0.0 && solidcraft_kernel::services::dxf::export::arc_fields_finite(*a0, *a1)
         }
         DxfShape::Ellipse { c, major, ratio, t0, t1 } => {
             c.is_finite()
-                && solidcraft_kernel::services::export_geometry::axis_nonzero(*major)
+                && solidcraft_kernel::services::dxf::export::axis_nonzero(*major)
                 && ratio.is_finite()
                 && *ratio > 0.0
                 && *ratio <= 1.0
                 && t0.is_finite()
                 && t1.is_finite()
-                && solidcraft_kernel::services::export_geometry::finite_span(*t0, *t1)
+                && solidcraft_kernel::services::dxf::export::finite_span(*t0, *t1)
         }
         DxfShape::Spline { degree, knots, ctrl, weights } => {
             let degree = usize::from(*degree);
@@ -984,7 +984,7 @@ fn shape_preflight(shape: &DxfShape) -> Result<()> {
         }
         DxfShape::Text { at, height, angle_deg, text } | DxfShape::AlignedText { at, height, angle_deg, text, .. } => {
             text_encode::writable(text)?;
-            at.is_finite() && height.is_finite() && *height > 0.0 && solidcraft_kernel::services::export_geometry::finite_degrees(*angle_deg)
+            at.is_finite() && height.is_finite() && *height > 0.0 && solidcraft_kernel::services::dxf::export::finite_degrees(*angle_deg)
         }
     };
     if !finite {
@@ -1130,7 +1130,7 @@ fn shape_emission_preflight(shape: &DxfShape) -> Result<()> {
         DxfShape::Circle { r, .. } => positive(emitted_length(*r)?)?,
         DxfShape::Arc { r, a0, a1, .. } => {
             positive(emitted_length(*r)?)?;
-            if !solidcraft_kernel::services::export_geometry::distinct_degrees(emitted_number(*a0)?, emitted_number(*a1)?) {
+            if !solidcraft_kernel::services::dxf::export::distinct_degrees(emitted_number(*a0)?, emitted_number(*a1)?) {
                 return Err(collapse());
             }
         }
@@ -1173,7 +1173,7 @@ fn shape_emission_preflight(shape: &DxfShape) -> Result<()> {
 
 fn extend_extents(extents: Option<(Vec2, Vec2)>, point: Vec2) -> (Vec2, Vec2) {
     extents.map_or((point, point), |(lo, hi)| {
-        let b = solidcraft_kernel::services::export_geometry::union_bounds(lo, hi, point, point);
+        let b = solidcraft_kernel::services::dxf::export::union_bounds(lo, hi, point, point);
         (b.min, b.max)
     })
 }
@@ -3247,14 +3247,28 @@ mod tests {
             ("BEND_NOTES", 8, DxfLinetype::Continuous),
             ("PERFORATION", 3, DxfLinetype::Continuous),
             ("ROLL", 3, DxfLinetype::Continuous),
+            ("HARDWARE", 8, DxfLinetype::Continuous),
             ("FORM_UP", 1, DxfLinetype::Dashed),
             ("FORM_DOWN", 5, DxfLinetype::Dashed),
             ("POCKET_TOP_Z0.000000_TO_1.000000_MM", 3, DxfLinetype::Continuous),
         ] {
             every.declare_layer(name, color, linetype, None).unwrap();
         }
-        assert_eq!(every.layers().len(), 13);
+        assert_eq!(every.layers().len(), 14);
         write_dxf_file(&every).unwrap();
+
+        // A hardware note is text on its own layer, grey and continuous: nothing else is admitted there.
+        let mut note = DxfFile::for_flat_pattern_export(0, 1, 0).unwrap();
+        let hardware = note.declare_layer("HARDWARE", 8, DxfLinetype::Continuous, None).unwrap();
+        note.push(hardware, DxfShape::Text { at: Vec2::ZERO, height: 3.0, angle_deg: 0.0, text: "M3 nut".into() }, None).unwrap();
+        let written = write_dxf_file(&note).unwrap();
+        assert_eq!(entities(&written).iter().map(|e| field(&e.1, 8)).collect::<Vec<_>>(), ["HARDWARE"]);
+        let mut circle = DxfFile::for_flat_pattern_export(0, 1, 0).unwrap();
+        let hardware = circle.declare_layer("HARDWARE", 8, DxfLinetype::Continuous, None).unwrap();
+        circle.push(hardware, DxfShape::Circle { c: Vec2::ZERO, r: 1.0 }, None).unwrap();
+        assert!(write_dxf_file(&circle).unwrap_err().to_string().contains("declared producer"));
+        let mut dashed = DxfFile::for_flat_pattern_export(0, 1, 0).unwrap();
+        assert!(dashed.declare_layer("HARDWARE", 8, DxfLinetype::Dashed, None).unwrap_err().to_string().contains("declared producer"));
     }
 
     /// A flat pattern's file with every role's standard layer and one entity of its kind on each,
