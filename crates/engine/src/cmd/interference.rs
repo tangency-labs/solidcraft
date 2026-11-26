@@ -538,7 +538,7 @@ fn run_ordered(jobs: Vec<Job>, budget: std::time::Duration) -> (Vec<Option<Done>
             while !should_stop() {
                 let k = next.fetch_add(1, Ordering::Relaxed);
                 let Some(job) = jobs.get(k) else { break };
-                let done = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check(job, &should_stop))).unwrap_or_else(|_| Done {
+                let done = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check(job, should_stop))).unwrap_or_else(|_| Done {
                     outcome: Outcome::Unchecked("internal error while checking this pair".into()),
                     ms: 0.0,
                     kernel: KernelTimes::default(),
@@ -584,7 +584,7 @@ fn run_ordered(jobs: Vec<Job>, budget: std::time::Duration) -> (Vec<Option<Done>
 /// The jobs one after another on this thread, none started past `deadline`.
 fn run_here(jobs: &[Job], deadline: web_time::Instant) -> Vec<Option<Done>> {
     let expired = || web_time::Instant::now() >= deadline;
-    jobs.iter().map(|job| (!expired()).then(|| check(job, &expired))).collect()
+    jobs.iter().map(|job| (!expired()).then(|| check(job, expired))).collect()
 }
 
 #[cfg(test)]

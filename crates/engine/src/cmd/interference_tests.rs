@@ -454,7 +454,7 @@ fn result_only_check_refusal_falls_back_when_sane_and_stays_unchecked_otherwise(
         measure: |&v: &f64| Ok(sane_measure(v)),
         check_checked_bounds: |_: &MassMeasure| None,
         check_unchecked_bounds: |_: &MassMeasure| None,
-        accept_unchecked_volume: |v| v > 0.0 && v >= 0.001,
+        accept_unchecked_volume: |v| v >= 0.001,
         is_disjoint: || false,
         is_cancelled: || false,
     });
@@ -471,7 +471,7 @@ fn result_only_check_refusal_falls_back_when_sane_and_stays_unchecked_otherwise(
         measure: |&v: &f64| Ok(sane_measure(v)),
         check_checked_bounds: |_: &MassMeasure| None,
         check_unchecked_bounds: |_: &MassMeasure| None,
-        accept_unchecked_volume: |v| v > 0.0 && v >= 0.001,
+        accept_unchecked_volume: |v| v >= 0.001,
         is_disjoint: || false,
         is_cancelled: || false,
     });
@@ -484,7 +484,7 @@ fn result_only_check_refusal_falls_back_when_sane_and_stays_unchecked_otherwise(
         measure: |&v: &f64| Ok(sane_measure(v)),
         check_checked_bounds: |_: &MassMeasure| None,
         check_unchecked_bounds: |_: &MassMeasure| Some("more than the smaller body".into()),
-        accept_unchecked_volume: |v| v > 0.0 && v >= 0.001,
+        accept_unchecked_volume: |v| v >= 0.001,
         is_disjoint: || false,
         is_cancelled: || false,
     });
@@ -502,7 +502,7 @@ fn result_only_check_refusal_falls_back_when_sane_and_stays_unchecked_otherwise(
             measure: |&v: &f64| Ok(sane_measure(v)),
             check_checked_bounds: |_: &MassMeasure| None,
             check_unchecked_bounds: |_: &MassMeasure| None,
-            accept_unchecked_volume: |v| v > 0.0 && v >= 0.001,
+            accept_unchecked_volume: |v| v >= 0.001,
             is_disjoint: || false,
             is_cancelled: || false,
         });
