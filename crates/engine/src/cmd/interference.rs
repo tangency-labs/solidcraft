@@ -261,7 +261,7 @@ fn check_pair(
         a,
         b,
         solidcraft_kernel::measure_mass,
-        |m| (m.volume > threshold).then(|| impossible_overlap_cached(m.volume, &m.bbox, (a_idx, a), (b_idx, b), masses)).flatten(),
+        |m| (m.volume > threshold).then(|| impossible_overlap_cached(m, (a_idx, a), (b_idx, b), masses)).flatten(),
         |v| v > threshold,
         false,
         should_stop,
@@ -554,26 +554,29 @@ fn cached_mass(cache: &[MassSlot], idx: usize, body: &Body) -> Option<(f64, Aabb
 
 /// [`impossible_overlap`] reusing per-body [`solidcraft_kernel::measure_mass`] results in `masses`.
 pub(crate) fn impossible_overlap_cached(
-    volume: f64,
-    bbox: &Aabb3,
+    m: &solidcraft_kernel::MassMeasure,
     (a_idx, a): (usize, &Body),
     (b_idx, b): (usize, &Body),
     masses: &[MassSlot],
 ) -> Option<String> {
     let (va, ba) = cached_mass(masses, a_idx, a)?;
     let (vb, bb) = cached_mass(masses, b_idx, b)?;
-    overlap_out_of_bounds(volume, bbox, (va, &ba), (vb, &bb))
+    overlap_out_of_bounds(m.volume, &m.bbox, (va, &ba), (vb, &bb))
+        .or_else(|| whole_body_overlap_contradicted(m.volume, &m.bbox, m.centroid, (va, vb), a, b))
 }
 
-/// Why a shared part of `a` and `b` measured as `volume` within `bbox` can't be theirs: a part
-/// shared by two bodies is no bigger than the smaller one and lies inside both of their boxes.
-/// A boolean that misreads a pin seated in its bore can hand back the whole larger body (#21553);
-/// that is reported as not checked, never as an overlap. `None`: the part fits (or a body can't
-/// be measured, and the overlap stands as measured).
+/// Why a shared part of `a` and `b` measured as `m` can't be theirs: a part shared by two bodies
+/// is no bigger than the smaller one, lies inside both of their boxes, and — when it claims to
+/// equal the entire smaller body — cannot have every sampled interior point of that body classify
+/// strictly outside the other body. A boolean that misreads a pin seated in its bore or a disk
+/// seated in a pocket can hand back a whole body (#21553); that is reported as not checked, never
+/// as an overlap. `None`: the part fits (or a body can't be measured, and the overlap stands as
+/// measured).
 #[allow(dead_code)]
-pub(crate) fn impossible_overlap(volume: f64, bbox: &Aabb3, a: &Body, b: &Body) -> Option<String> {
+pub(crate) fn impossible_overlap(m: &solidcraft_kernel::MassMeasure, a: &Body, b: &Body) -> Option<String> {
     let (ma, mb) = (solidcraft_kernel::measure_mass(a).ok()?, solidcraft_kernel::measure_mass(b).ok()?);
-    overlap_out_of_bounds(volume, bbox, (ma.volume, &ma.bbox), (mb.volume, &mb.bbox))
+    overlap_out_of_bounds(m.volume, &m.bbox, (ma.volume, &ma.bbox), (mb.volume, &mb.bbox))
+        .or_else(|| whole_body_overlap_contradicted(m.volume, &m.bbox, m.centroid, (ma.volume, mb.volume), a, b))
 }
 
 /// Strict sanity check for a temporary overlap measured without SMLib's `CheckLevel::All` gate.
@@ -585,6 +588,93 @@ fn unchecked_overlap_invalid(m: &solidcraft_kernel::MassMeasure, a: &Body, b: &B
         return Some("could not measure operands to verify unchecked overlap".into());
     };
     unchecked_overlap_out_of_bounds(m, (ma.volume, &ma.bbox), (mb.volume, &mb.bbox))
+        .or_else(|| whole_body_overlap_contradicted(m.volume, &m.bbox, m.centroid, (ma.volume, mb.volume), a, b))
+}
+
+/// Verifies a claimed whole-body overlap (`volume >= 0.999 * min(va, vb)`) via exact point
+/// classification: if the boolean claims that essentially all of the smaller body sits inside the
+/// other body, at least one sampled interior point of the smaller body must not classify strictly
+/// [`solidcraft_kernel::PointClass::Outside`] the enclosing body.
+///
+/// Catches false whole-body containment when a body sits inside a pocket or hole of another body
+/// while leaving genuine whole-body embeddings (including 99.9%+ partial embeddings and non-convex
+/// bodies whose centroid lies outside themselves) untouched.
+fn whole_body_overlap_contradicted(
+    volume: f64,
+    bbox: &Aabb3,
+    centroid: solidcore_record::Vec3,
+    (va, vb): (f64, f64),
+    a: &Body,
+    b: &Body,
+) -> Option<String> {
+    let smaller_vol = va.abs().min(vb.abs());
+    if !smaller_vol.is_finite() || smaller_vol <= 0.0 || volume < smaller_vol * (1.0 - 1e-3) {
+        return None;
+    }
+    let (inner, outer) = if va.abs() <= vb.abs() { (a, b) } else { (b, a) };
+    if inner.is_mesh() || outer.is_mesh() || inner.is_surface() || outer.is_surface() {
+        return None;
+    }
+    let candidates = whole_body_sample_points(bbox, centroid);
+    if candidates.is_empty() {
+        return None;
+    }
+    let inner_classes = inner.classify_points(&candidates).ok()?;
+    let interior: Vec<solidcore_record::Vec3> =
+        candidates.into_iter().zip(inner_classes).filter_map(|(p, c)| (c == solidcraft_kernel::PointClass::Inside).then_some(p)).collect();
+    if interior.is_empty() {
+        return None;
+    }
+    let outer_classes = outer.classify_points(&interior).ok()?;
+    if outer_classes.iter().all(|&c| c == solidcraft_kernel::PointClass::Outside) {
+        return Some(
+            "not checked: the shared part equals the whole smaller body, yet its interior points classify outside the other body; the boolean misread this pair"
+                .into(),
+        );
+    }
+    None
+}
+
+/// Candidate interior probe points for [`whole_body_overlap_contradicted`]: the overlap centroid,
+/// the bounding-box center, and axial/diagonal quarter-offsets inside `bbox`.
+fn whole_body_sample_points(bbox: &Aabb3, centroid: solidcore_record::Vec3) -> Vec<solidcore_record::Vec3> {
+    let mut out = Vec::with_capacity(16);
+    let push = |out: &mut Vec<solidcore_record::Vec3>, p: solidcore_record::Vec3| {
+        if p.is_finite()
+            && !out.iter().any(|q| {
+                let d = *q - p;
+                d.x * d.x + d.y * d.y + d.z * d.z <= 1e-18
+            })
+        {
+            out.push(p);
+        }
+    };
+    if centroid.is_finite() {
+        push(&mut out, centroid);
+    }
+    if !bbox.is_empty() && bbox.min.is_finite() && bbox.max.is_finite() {
+        let center = bbox.center();
+        let q = bbox.size() * 0.25;
+        push(&mut out, center);
+        for d in [
+            solidcore_record::Vec3::new(q.x, 0.0, 0.0),
+            solidcore_record::Vec3::new(-q.x, 0.0, 0.0),
+            solidcore_record::Vec3::new(0.0, q.y, 0.0),
+            solidcore_record::Vec3::new(0.0, -q.y, 0.0),
+            solidcore_record::Vec3::new(0.0, 0.0, q.z),
+            solidcore_record::Vec3::new(0.0, 0.0, -q.z),
+        ] {
+            push(&mut out, center + d);
+        }
+        for sx in [-1.0, 1.0] {
+            for sy in [-1.0, 1.0] {
+                for sz in [-1.0, 1.0] {
+                    push(&mut out, solidcore_record::Vec3::new(center.x + sx * q.x, center.y + sy * q.y, center.z + sz * q.z));
+                }
+            }
+        }
+    }
+    out
 }
 
 /// [`unchecked_overlap_invalid`] on the measured numbers.

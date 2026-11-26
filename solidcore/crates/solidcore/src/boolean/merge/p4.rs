@@ -1509,7 +1509,7 @@ fn classify_remaining(
                 // Upstream deliberately/repeatedly uses sFaceEdges[0] in the
                 // primary pass; the other pass uses j and a different fraction.
                 // (inside the loop over `edges`, so the list has a first edge)
-                let selected = if reverse {
+                let selected = if reverse || source_k.fixes.ray_fire_nearest_solution {
                     edge_id
                 } else {
                     edges.first().copied().unwrap_or(edge_id)

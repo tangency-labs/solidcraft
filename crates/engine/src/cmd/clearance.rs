@@ -887,9 +887,10 @@ fn intersect_pair(
     };
     let record_overlap = |m: solidcraft_kernel::MassMeasure, out: &mut PairResult| {
         if m.volume > 0.0
-            && let Some(why) = super::interference::impossible_overlap_cached(m.volume, &m.bbox, (ia, ka), (ib, kb), masses)
+            && let Some(why) = super::interference::impossible_overlap_cached(&m, (ia, ka), (ib, kb), masses)
         {
             out.unchecked = Some(why);
+            fallback_distance(out);
             return;
         }
         out.overlap = Some((m.volume, m.area, m.bbox, m.centroid));

@@ -1596,3 +1596,101 @@ fn reframed_intersect_recovers_empty_and_overlap_and_tracks_unchecked_count() {
     assert_eq!(r["unchecked_count"], 2, "{r}");
     assert_eq!(r["unchecked"].as_array().map(Vec::len), Some(2), "{r}");
 }
+
+/// A Ø12 x 2 disk nested two sub-assembly levels deep, seated inside a Ø12.4 x 4.2 pocket of a
+/// housing (0.2 mm radial clearance, bottom at z = 3.0 above pocket floor z = 0.8, top coplanar
+/// with the housing top at z = 5.0) far from the origin at (688.2, 656.8), must report zero
+/// overlaps and exact 0.2 mm clearance against both an identity instance and a 180°-rotated
+/// instance of the housing — while a genuinely embedded disk inside a solid block reports its
+/// full volume (π * 6² * 2 mm³).
+#[test]
+fn nested_disk_in_pocket_far_from_origin_has_no_overlap_at_identity_or_180_deg() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-clearance-pocket-disk-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let housing_path = dir.join("housing.sc");
+    let disk_path = dir.join("disk.sc");
+    let inner_sa_path = dir.join("inner_subasm.sc");
+    let outer_sa_path = dir.join("outer_subasm.sc");
+
+    let (cx, cy) = (688.2, 656.8);
+
+    // 1. Save Housing part: 450 x 50 x 5 block with Ø12.4 x 4.2 pocket at (cx, cy), z = 0.8..5.0.
+    {
+        let mut s = Session::default();
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 450, "width": 50, "height": 5, "corner": [cx - 25.0, cy - 25.0, 0.0], "operation": "new", "body_name": "Housing"}),
+        );
+        run(&mut s, "solid.cylinder", json!({"radius": 6.2, "height": 5.2, "base": [cx, cy, 0.8], "operation": "cut", "targets": ["Housing"]}));
+        run(&mut s, "file.save", json!({"path": housing_path.to_string_lossy()}));
+    }
+
+    // 2. Save Disk part: Ø12 x 2 at origin, rotated so its seam lies on the lower half.
+    {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 6.0, "height": 2.0, "base": [0, 0, 0], "operation": "new", "body_name": "Disk"}));
+        run(&mut s, "solid.move", json!({"bodies": ["Disk"], "axis": [0, 0, 1], "angle": "180 deg"}));
+        run(&mut s, "file.save", json!({"path": disk_path.to_string_lossy()}));
+    }
+
+    // 3. Build 2-level nested sub-assembly: OuterSubAsm -> InnerSubAsm -> two Disk instances
+    //    (one seated at (cx, cy, 3.0) for the identity housing, one at (-cx, -cy, 3.0) for the
+    //    180°-rotated housing).
+    {
+        let mut inner = Session::default();
+        run(&mut inner, "component.insert_design", json!({"path": disk_path.to_string_lossy(), "name": "DiskPos", "translate": [cx, cy, 3.0]}));
+        run(&mut inner, "component.insert_design", json!({"path": disk_path.to_string_lossy(), "name": "DiskNeg", "translate": [-cx, -cy, 3.0]}));
+        run(&mut inner, "file.save", json!({"path": inner_sa_path.to_string_lossy()}));
+    }
+    {
+        let mut outer = Session::default();
+        run(&mut outer, "component.insert_design", json!({"path": inner_sa_path.to_string_lossy(), "name": "InnerSubAsm"}));
+        run(&mut outer, "file.save", json!({"path": outer_sa_path.to_string_lossy()}));
+    }
+
+    // 4. Assemble OuterSubAsm at identity + Housing twice (identity and rotated 180° about Z).
+    let mut asm = Session::default();
+    let sa_ins = run(&mut asm, "component.insert_design", json!({"path": outer_sa_path.to_string_lossy(), "name": "OuterSubAsm"}));
+    let h_id_ins = run(&mut asm, "component.insert_design", json!({"path": housing_path.to_string_lossy(), "name": "HousingId"}));
+    let rot180 = json!([-1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1, 0]);
+    let h_rot_ins = run(&mut asm, "component.insert_design", json!({"path": housing_path.to_string_lossy(), "name": "HousingRot", "matrix": rot180}));
+    let sa_bodies: Vec<String> = sa_ins["bodies"].as_array().unwrap().iter().filter_map(|v| v.as_str().map(String::from)).collect();
+    let housing_bodies = vec![h_id_ins["bodies"][0].as_str().unwrap().to_string(), h_rot_ins["bodies"][0].as_str().unwrap().to_string()];
+    assert_eq!(sa_bodies.len(), 2, "{sa_ins}");
+    let rebuilt = run(&mut asm, "timeline.compute_all", json!({}));
+    assert_eq!(rebuilt["errors"], 0, "{rebuilt}");
+
+    let r = run(&mut asm, "inspect.clearance", json!({"bodies": sa_bodies, "against": housing_bodies, "clearance": 1.0, "min_volume": 0.001}));
+    assert_eq!(r["unchecked"], json!([]), "{r}");
+    assert_eq!(r["overlaps"], json!([]), "pocket-seated disks must not report false whole-body overlap: {r}");
+    let near = r["near"].as_array().cloned().unwrap_or_default();
+    assert_eq!(near.len(), 2, "both identity and 180°-rotated housings should report 0.2 mm radial clearance: {r}");
+    for entry in &near {
+        assert!((f(&entry["distance_mm"]) - 0.2).abs() < 1e-4, "expected 0.2 mm radial clearance: {r}");
+    }
+
+    // 5. Contrast: a Ø12 x 2 disk truly embedded in a solid block (no pocket) reports its full
+    //    volume π * 6² * 2.
+    let mut embedded = Session::default();
+    run(
+        &mut embedded,
+        "solid.box",
+        json!({"length": 60, "width": 60, "height": 5, "corner": [cx - 30.0, cy - 30.0, 0.0], "operation": "new", "body_name": "SolidBlock"}),
+    );
+    run(
+        &mut embedded,
+        "solid.cylinder",
+        json!({"radius": 6.0, "height": 2.0, "base": [cx, cy, 3.0], "operation": "new", "body_name": "EmbeddedDisk"}),
+    );
+    let r = run(&mut embedded, "inspect.clearance", json!({"clearance": 1.0, "min_volume": 0.001}));
+    assert_eq!(r["unchecked"], json!([]), "{r}");
+    let overlaps = r["overlaps"].as_array().cloned().unwrap_or_default();
+    assert_eq!(overlaps.len(), 1, "{r}");
+    let want_vol = std::f64::consts::PI * 36.0 * 2.0;
+    assert!((f(&overlaps[0]["volume_mm3"]) - want_vol).abs() < 1e-2, "expected full disk volume {want_vol}: {r}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
