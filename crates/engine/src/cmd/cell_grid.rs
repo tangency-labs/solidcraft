@@ -16,7 +16,7 @@ use crate::{Result, Session};
 
 const CELL_GRID_CONTRACT: TypedContract<CellGridParams> = TypedContract::new();
 
-const HELP_HEAD: &str = "size: expr (a cell's inscribed diameter); web: expr (the wall between cells); depth: expr (or through_all: true); shape?: hexagon|square|triangle|circle|polygon (default hexagon); sides?: expr (polygon cells, 3 to 64; default 8); dot_grid?: hexagonal|square (where circle and polygon cells sit; default hexagonal); angle?: expr (the grid's rotation about the anchor; angle 45 deg with square cells gives a diamond layout); anchor?: [x,y,z] (a cell's centre, projected onto the sketch plane; default the sketch origin: grids with the same anchor, angle, size and web line up); clip?: whole|snap|free (cells the field's edge crosses: only whole cells; cells cut along the grid's own lines; cells trimmed to the edge as drawn; default snap); keepout_clip?: whole|snap|free (the same for the edges of loops inside the field, the keep-outs; default: the value of clip, so one mode serves every loop; a cell that meets both kinds is dropped if either is whole, else trimmed if either is free); snap_inset?: expr (with clip snap, a whole number of lattice lines each straight field edge moves in after it snaps, so the edge cells are whole and the rim thicker by whole grid rows; default 0; keep-outs are not moved); margin?: expr (with clip whole, the least clearance from a cell to every edge of the field and its keep-outs, measured exactly; default 0, a cell may touch an edge); direction?: positive|negative|symmetric (default positive); sketch?: id|name (default: active or last sketch; its closed profiles hold the field: a loop inside another is a keep-out); profiles?: as solid.extrude; targets?: [body]; mode?: cut|raised (default cut; raised adds the cells as material standing `depth` from the sketch plane in `direction`, joined to the targets, or a new body if there is none; not with through_all; the sketch plane is where they stand, so the sketch on the face they rise from and direction away from the body); name?. Cuts or raises at most ";
+const HELP_HEAD: &str = "size: expr (a cell's inscribed diameter); web: expr (the wall between cells); depth: expr (or through_all: true); shape?: hexagon|square|triangle|circle|polygon|voronoi (default hexagon; voronoi: irregular convex cells round the hexagonal grid's centres, each moved by a pseudo-random offset); sides?: expr (polygon cells, 3 to 64; default 8); dot_grid?: hexagonal|square (where circle and polygon cells sit; default hexagonal); angle?: expr (the grid's rotation about the anchor; angle 45 deg with square cells gives a diamond layout); anchor?: [x,y,z] (a cell's centre, projected onto the sketch plane; default the sketch origin: grids with the same anchor, angle, size and web line up); clip?: whole|snap|free (cells the field's edge crosses: only whole cells; cells cut along the grid's own lines; cells trimmed to the edge as drawn; default snap); keepout_clip?: whole|snap|free (the same for the edges of loops inside the field, the keep-outs; default: the value of clip, so one mode serves every loop; a cell that meets both kinds is dropped if either is whole, else trimmed if either is free); snap_inset?: expr (with clip snap, a whole number of lattice lines each straight field edge moves in after it snaps, so the edge cells are whole and the rim thicker by whole grid rows; default 0; keep-outs are not moved); seed?: expr (voronoi cells: a whole number picking the pattern; default 0); irregularity?: expr (voronoi cells: how far the centres move, 0 to 1; default 0.7); corner_radius?: expr (voronoi cells: rounds each corner; default 0, sharp); margin?: expr (with clip whole, the least clearance from a cell to every edge of the field and its keep-outs, measured exactly; default 0, a cell may touch an edge); direction?: positive|negative|symmetric (default positive); sketch?: id|name (default: active or last sketch; its closed profiles hold the field: a loop inside another is a keep-out); profiles?: as solid.extrude; targets?: [body]; mode?: cut|raised (default cut; raised adds the cells as material standing `depth` from the sketch plane in `direction`, joined to the targets, or a new body if there is none; not with through_all; the sketch plane is where they stand, so the sketch on the face they rise from and direction away from the body); name?. Cuts or raises at most ";
 const HELP_TAIL: &str = " cells in one operation; not for sheet metal (use sheet.perforate). The faces cut have no stable names yet";
 const HELP_LEN: usize = HELP_HEAD.len() + decimal_len(MAX_CUT_CELLS) + HELP_TAIL.len();
 const HELP_BYTES: [u8; HELP_LEN] = help_bytes();
@@ -92,7 +92,7 @@ fn cell_grid(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.cell_grid";
     let sketch = feature_sketch(s, p, cmd)?;
     let mode: CellGridMode = keyword(p, "mode", cmd, CellGridMode::Cut, "cut or raised")?;
-    let shape = keyword(p, "shape", cmd, solidcore_record::cell_grid::CellShape::Hexagon, "hexagon, square, triangle, circle or polygon")?;
+    let shape = keyword(p, "shape", cmd, solidcore_record::cell_grid::CellShape::Hexagon, "hexagon, square, triangle, circle, polygon or voronoi")?;
     let dot_grid = keyword(p, "dot_grid", cmd, solidcore_record::cell_grid::DotGrid::Hexagonal, "hexagonal or square")?;
     let clip = keyword(p, "clip", cmd, solidcore_record::cell_grid::Clip::Snap, "whole, snap or free")?;
     let keepout_clip = match p.get("keepout_clip").filter(|v| !v.is_null()) {
@@ -124,6 +124,43 @@ fn cell_grid(s: &mut Session, p: &Value) -> Result<Value> {
     } else if p.get("sides").is_some_and(|v| !v.is_null()) {
         return Err(bad(cmd, "`sides` must be a number or an expression"));
     }
+    let seed = expr(p, "seed");
+    if let Some(e) = &seed {
+        check_expr(s, e, Kind::Unitless, cmd, "seed")?;
+        let n = s.doc.eval(e, Kind::Unitless).map_err(|err| bad(cmd, format!("seed: {err}")))?;
+        let most = f64::from(u32::MAX);
+        if !(n.is_finite() && n.fract() == 0.0 && (0.0..=most).contains(&n)) {
+            return Err(bad(cmd, format!("`seed` must be a whole number from 0 to {most}, not {n}")));
+        }
+    } else if p.get("seed").is_some_and(|v| !v.is_null()) {
+        return Err(bad(cmd, "`seed` must be a number or an expression"));
+    }
+    let irregularity = expr(p, "irregularity");
+    if let Some(e) = &irregularity {
+        check_expr(s, e, Kind::Unitless, cmd, "irregularity")?;
+        let n = s.doc.eval(e, Kind::Unitless).map_err(|err| bad(cmd, format!("irregularity: {err}")))?;
+        if !(n.is_finite() && (0.0..=1.0).contains(&n)) {
+            return Err(bad(cmd, format!("`irregularity` must be from 0 to 1, not {n}")));
+        }
+    } else if p.get("irregularity").is_some_and(|v| !v.is_null()) {
+        return Err(bad(cmd, "`irregularity` must be a number or an expression"));
+    }
+    let corner_radius = match expr(p, "corner_radius") {
+        Some(e) => {
+            check_expr(s, &e, Kind::Length, cmd, "corner_radius")?;
+            // A bare number means the design's unit.
+            let typed: solidcraft_doc::Expr = s.doc.with_design_unit(&e, Kind::Length).into();
+            let v = s.doc.eval(&typed, Kind::Length).map_err(|err| bad(cmd, format!("corner_radius: {err}")))?;
+            if !(v.is_finite() && v >= 0.0) {
+                return Err(bad(cmd, format!("`corner_radius` must be 0 or more, not {v} mm")));
+            }
+            Some(e)
+        }
+        None if p.get("corner_radius").is_some_and(|v| !v.is_null()) => {
+            return Err(bad(cmd, "`corner_radius` must be a number or an expression"));
+        }
+        None => None,
+    };
     let size = size_param(s, p, "size", cmd)?;
     let web = size_param(s, p, "web", cmd)?;
     let angle = expr(p, "angle");
@@ -193,6 +230,9 @@ fn cell_grid(s: &mut Session, p: &Value) -> Result<Value> {
             clip,
             keepout_clip,
             snap_inset,
+            seed,
+            irregularity,
+            corner_radius,
             margin,
             depth,
             through_all,

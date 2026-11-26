@@ -19,7 +19,7 @@ use solidcraft_engine::{
 };
 
 /// The command's keywords, in the order of the choice rows.
-const SHAPES: [&str; 5] = ["hexagon", "square", "triangle", "circle", "polygon"];
+const SHAPES: [&str; 6] = ["hexagon", "square", "triangle", "circle", "polygon", "voronoi"];
 const DOT_GRIDS: [&str; 2] = ["hexagonal", "square"];
 const CLIPS: [&str; 3] = ["whole", "snap", "free"];
 /// The keep-outs' clip: the first choice leaves `keepout_clip` out (the same as the field's clip),
@@ -307,6 +307,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             CellShape::Triangle => 2,
             CellShape::Circle => 3,
             CellShape::Polygon => 4,
+            CellShape::Voronoi => 5,
         },
         sides: sides.as_ref().map_or(defaults.sides, |e| shown_expr(e, ValueKind::Unitless)),
         dot_grid: usize::from(*dot_grid == DotGrid::Square),
