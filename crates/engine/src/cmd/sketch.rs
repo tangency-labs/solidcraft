@@ -3664,6 +3664,11 @@ fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
         {
             return Err(bad(cmd, "a line's two ends can't be coincident: the line would shrink to a point"));
         }
+        // Ordinary calls keep consistent redundant constraints, as on other fixed geometry.
+        // Callers can explicitly request the stricter policy without changing that default.
+        if str_(p, "if_redundant").is_some_and(|m| m.eq_ignore_ascii_case("refuse")) && only_projections(sk, &k) {
+            return Err(bad(cmd, PROJECTED_ONLY));
+        }
         // Midpoint already englobes PointOnCurve on the same point and line; avoid duplicates.
         if let ConstraintKind::PointOnCurve { p: q, c } = k
             && let Some(existing) = sk.constraints.iter().find(|con| {
