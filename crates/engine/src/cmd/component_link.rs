@@ -24,8 +24,8 @@ use super::design_link::{
 use crate::params::{bad, str_, vec3};
 use crate::schema::component_link::{
     BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, DesignInserted, ExtractParams, ExtractResult, InsertDesignParams,
-    InsertDesignResult, JointDiagnostic, LinkFailure, LinkInfo, LinkSource, LinksParams, LinksResult, RelinkParams, RelinkResult,
-    ReplaceWithLinkParams, ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult,
+    InsertDesignResult, JointDeviation, JointDiagnostic, LinkFailure, LinkInfo, LinkSource, LinksParams, LinksResult, MovedOccurrence, RelinkParams,
+    RelinkResult, ReplaceWithLinkParams, ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -81,7 +81,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&RELINK_CONTRACT)
         .output(output_schema_for::<RelinkResult>)
         .params(
-        "component: id or name of a linked component; path: a saved design (.sc or .json); configuration?: row name or id, null to follow the saved source state (omitted: keep the selection for the same file, otherwise follow the new file) — replaces the source and linked bodies for all its occurrences, preserving identities and placements; names?: \"keep\" (default) leaves the body names as relinking always did (replaced only when the new source has another number of bodies), \"sync\" takes the new source's body names, renames what other features, materials and appearances keep under the old names with them, and gives the linked feature the source design's name when it still has its component's (component and placement names stay yours; only for the whole component, a placement relinked on its own shows a component made from the new source); occurrence?: one of its placements — when it has others, only that placement comes to show the design, as a placement of the component already linked to it or of a new one under the same parent, keeping its position and joints (component is then the one it shows, previous_component the one it showed); returns path, previous_path, warnings, joint_errors and joint_conflicts",
+        "component: id or name of a linked component; path: a saved design (.sc or .json); configuration?: row name or id, null to follow the saved source state (omitted: keep the selection for the same file, otherwise follow the new file) — replaces the source and linked bodies for all its occurrences, preserving identities and placements; names?: \"keep\" (default) leaves the body names as relinking always did (replaced only when the new source has another number of bodies), \"sync\" takes the new source's body names, renames what other features, materials and appearances keep under the old names with them, and gives the linked feature the source design's name when it still has its component's (component and placement names stay yours; only for the whole component, a placement relinked on its own shows a component made from the new source); occurrence?: one of its placements — when it has others, only that placement comes to show the design, as a placement of the component already linked to it or of a new one under the same parent, keeping its position and joints (component is then the one it shows, previous_component the one it showed); returns path, previous_path, warnings, joint_errors, joint_conflicts, joint_deviations and moved_occurrences",
     ),
     CommandSpec::new("component.break_link", "Break Link", crate::checked!("component.break_link", break_link))
         .icon("break")
@@ -3385,6 +3385,8 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
         || link_meshes(s, comp, link.feature) != meshes.as_slice();
     let path = stored(s.path.as_deref(), &file);
     let mut warnings = sf.warnings;
+    let relink_joints_before = snapshot_relink_joints(s, comp, None);
+    let poses_before = snapshot_occurrence_poses(s);
     if geometry_changed
         && s.doc
             .assembly
@@ -3464,9 +3466,12 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     let (_, kept) = inherit_metadata(s, comp, &metadata);
     warnings.extend(kept);
     s.refresh();
-    // Report the solver's diagnostics. A resolved joint can still describe the wrong
-    // connection after a source edit; the reminder above does not depend on solve errors.
-    let (joint_errors, joint_conflicts) = joint_diagnostics(s, &mut warnings);
+    // Report the solver's diagnostics and any per-joint frame deviations or occurrence pose
+    // displacements caused by the relink. A resolved joint can still bind to the wrong face
+    // when a new source reuses the same carried face name; the deviation check catches that.
+    let (mut joint_errors, joint_conflicts) = joint_diagnostics(s, &mut warnings);
+    let joint_deviations = relink_joint_deviations(s, &relink_joints_before, &mut warnings, &mut joint_errors);
+    let moved_occurrences = relink_moved_occurrences(s, &poses_before, &mut warnings);
     // A link to a design that came from this session had no file: it names none.
     let previous_path = if link.path.is_empty() { String::new() } else { stored(s.path.as_deref(), &resolve(s.path.as_deref(), &link.path)) };
     reply(
@@ -3482,6 +3487,8 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
             warnings,
             joint_errors,
             joint_conflicts,
+            joint_deviations,
+            moved_occurrences,
             param_warnings: Vec::new(),
         },
     )
@@ -3539,6 +3546,157 @@ fn joint_diagnostics(s: &Session, warnings: &mut Vec<String>) -> (Vec<JointDiagn
     (rows(&sol.errors), rows(&sol.conflicts))
 }
 
+/// Thresholds for reporting joint frame deviations and occurrence pose shifts after `component.relink`.
+const RELINK_SHIFT_TOL_MM: f64 = 1e-3;
+const RELINK_ANGLE_TOL_DEG: f64 = 0.1;
+/// Normal/axis rotation (degrees) at or above which a re-resolved face is flagged as incompatible
+/// (e.g., a perpendicular or opposite face carrying the same carried link face name).
+const RELINK_INCOMPATIBLE_ANGLE_DEG: f64 = 45.0;
+
+/// A resolved joint side on a linked component (or single placement), captured before `component.relink`.
+struct RelinkJointSnapshot {
+    joint_id: u64,
+    joint_name: String,
+    is_a: bool,
+    before: solidcraft_doc::Mat,
+}
+
+/// Snapshot every unsuppressed joint side whose snap resolves on `comp` (or on `occurrence` alone
+/// when relinking one placement of several).
+fn snapshot_relink_joints(s: &Session, comp: u64, occurrence: Option<u64>) -> Vec<RelinkJointSnapshot> {
+    let st = s.model.state();
+    let matches_side = |side: &solidcraft_doc::joints::JointOrigin| match occurrence {
+        Some(occ) => side.part() == occ || side.occurrences().any(|id| id == occ),
+        None => s.doc.occurrences.iter().any(|x| x.id == side.part() && s.doc.component_within(x.component, comp)),
+    };
+    let mut out = Vec::new();
+    for j in &s.doc.assembly.joints {
+        if j.suppressed {
+            continue;
+        }
+        for (is_a, side) in [(true, &j.a), (false, &j.b)] {
+            if matches_side(side)
+                && let Ok(before) = solidcraft_doc::joints::resolve_origin(&s.doc, &st, side)
+            {
+                out.push(RelinkJointSnapshot { joint_id: j.id, joint_name: j.name.clone(), is_a, before });
+            }
+        }
+    }
+    out
+}
+
+/// Snapshot every occurrence's world transform before `component.relink`.
+fn snapshot_occurrence_poses(s: &Session) -> Vec<(u64, String, solidcraft_doc::Mat)> {
+    s.doc.occurrences.iter().map(|o| (o.id, o.name.clone(), solidcraft_doc::joints::occurrence_world(&s.doc, o.id))).collect()
+}
+
+/// How far two resolved origin frames differ: (origin shift mm, Z-axis angle deg).
+fn frame_deviation(before: &solidcraft_doc::Mat, after: &solidcraft_doc::Mat) -> (f64, f64) {
+    use solidcore_record::Vec3;
+    let shift = Vec3::new(after[3][0] - before[3][0], after[3][1] - before[3][1], after[3][2] - before[3][2]).len();
+    let bz = Vec3::new(before[2][0], before[2][1], before[2][2]);
+    let az = Vec3::new(after[2][0], after[2][1], after[2][2]);
+    let angle_deg = bz.cross(az).len().atan2(bz.dot(az)).to_degrees();
+    (shift, angle_deg)
+}
+
+/// How far two rigid world transforms differ: (translation mm, rotation deg).
+fn pose_delta(a: &solidcraft_doc::Mat, b: &solidcraft_doc::Mat) -> (f64, f64) {
+    use solidcore_record::Vec3;
+    let t = Vec3::new(a[3][0] - b[3][0], a[3][1] - b[3][1], a[3][2] - b[3][2]).len();
+    let c = |i: usize, k: usize| (0..3).map(|n| a[i][n] * b[k][n]).sum::<f64>();
+    let sin2 = Vec3::new(c(1, 2) - c(2, 1), c(2, 0) - c(0, 2), c(0, 1) - c(1, 0)).len();
+    let angle_deg = sin2.atan2(c(0, 0) + c(1, 1) + c(2, 2) - 1.0).to_degrees();
+    (t, angle_deg)
+}
+
+/// Per-joint frame deviations after `component.relink`: records every snapshotted joint side that
+/// still resolves but whose origin shifted or normal/axis rotated, adds explicit warnings, and
+/// flags sharply rotated (incompatible) face re-bindings in `joint_errors`.
+fn relink_joint_deviations(
+    s: &Session,
+    before: &[RelinkJointSnapshot],
+    warnings: &mut Vec<String>,
+    joint_errors: &mut Vec<JointDiagnostic>,
+) -> Vec<JointDeviation> {
+    let st = s.model.state();
+    let mut out = Vec::new();
+    for entry in before {
+        let Some(j) = s.doc.assembly.joints.iter().find(|j| j.id == entry.joint_id) else { continue };
+        let side = if entry.is_a { &j.a } else { &j.b };
+        let Ok(after) = solidcraft_doc::joints::resolve_origin(&s.doc, &st, side) else { continue };
+        let (origin_shift_mm, normal_angle_deg) = frame_deviation(&entry.before, &after);
+        let shifted = origin_shift_mm > RELINK_SHIFT_TOL_MM;
+        let tilted = normal_angle_deg > RELINK_ANGLE_TOL_DEG;
+        if !shifted && !tilted {
+            continue;
+        }
+        let incompatible = normal_angle_deg >= RELINK_INCOMPATIBLE_ANGLE_DEG;
+        let side_label = if entry.is_a { "a" } else { "b" };
+        let face = side.snap.face_names().into_iter().next().cloned();
+        let face_note = face.as_deref().map_or_else(String::new, |f| format!(", face `{f}`"));
+        if incompatible {
+            let detail = format!(
+                "side {side_label}{face_note} resolved to an incompatible face (origin shifted by {origin_shift_mm:.2} mm, normal rotated by {normal_angle_deg:.1}°); check and re-pick its face"
+            );
+            warnings.push(format!("joint {}: {detail}", entry.joint_name));
+            if !joint_errors.iter().any(|e| e.joint == entry.joint_id) {
+                joint_errors.push(JointDiagnostic { joint: entry.joint_id, name: entry.joint_name.clone(), why: detail });
+            }
+        } else if shifted && tilted {
+            warnings.push(format!(
+                "joint {} (side {side_label}{face_note}): resolved face shifted by {origin_shift_mm:.2} mm and tilted by {normal_angle_deg:.1}° after relink",
+                entry.joint_name
+            ));
+        } else if shifted {
+            warnings.push(format!(
+                "joint {} (side {side_label}{face_note}): resolved face shifted by {origin_shift_mm:.2} mm after relink",
+                entry.joint_name
+            ));
+        } else {
+            warnings.push(format!(
+                "joint {} (side {side_label}{face_note}): resolved face tilted by {normal_angle_deg:.1}° after relink",
+                entry.joint_name
+            ));
+        }
+        out.push(JointDeviation {
+            joint: entry.joint_id,
+            name: entry.joint_name.clone(),
+            side: side_label.to_string(),
+            face,
+            origin_shift_mm,
+            normal_angle_deg,
+            incompatible,
+        });
+    }
+    out
+}
+
+/// Occurrences whose solved world pose shifted or rotated after `component.relink`.
+fn relink_moved_occurrences(s: &Session, before: &[(u64, String, solidcraft_doc::Mat)], warnings: &mut Vec<String>) -> Vec<MovedOccurrence> {
+    let mut out = Vec::new();
+    for (id, old_name, before_world) in before {
+        let Some(occ) = s.doc.occurrences.iter().find(|o| o.id == *id) else { continue };
+        let after_world = solidcraft_doc::joints::occurrence_world(&s.doc, *id);
+        let (translation_mm, rotation_deg) = pose_delta(before_world, &after_world);
+        let moved = translation_mm > RELINK_SHIFT_TOL_MM;
+        let rotated = rotation_deg > RELINK_ANGLE_TOL_DEG;
+        if !moved && !rotated {
+            continue;
+        }
+        let name = if occ.name.is_empty() { old_name.clone() } else { occ.name.clone() };
+        if moved && rotated {
+            warnings.push(format!("occurrence {name} moved by {translation_mm:.2} mm and rotated by {rotation_deg:.1}° after relink"));
+        } else if moved {
+            warnings.push(format!("occurrence {name} moved by {translation_mm:.2} mm after relink"));
+        } else {
+            warnings.push(format!("occurrence {name} rotated by {rotation_deg:.1}° after relink"));
+        }
+        out.push(MovedOccurrence { occurrence: *id, name, translation_mm, rotation_deg });
+    }
+    out
+}
+
 /// The placement `occurrence` of `comp` to relink on its own: `None` when none is given, or when
 /// it is the only placement, which a relink of the whole component covers.
 fn lone_placement(s: &Session, p: &Value, comp: u64, cmd: &str) -> Result<Option<u64>> {
@@ -3568,6 +3726,8 @@ fn relink_placement(
     }
     let parent = s.doc.occurrences.iter().find(|o| o.id == occurrence).map_or(0, |o| o.parent);
     let old = s.model.state();
+    let relink_joints_before = snapshot_relink_joints(s, comp, Some(occurrence));
+    let poses_before = snapshot_occurrence_poses(s);
     // A pattern or mirror of this placement can stop working: the reply names each feature that does.
     let failing_before: std::collections::BTreeSet<u64> = s.model.results.iter().filter(|r| r.error.is_some()).map(|r| r.id).collect();
     let made = insert_design(s, &json!({"path": given, "parent": parent, "reuse": true, "configuration": configuration.map(|c| c.row)}))?;
@@ -3607,7 +3767,9 @@ fn relink_placement(
             .filter(|r| !failing_before.contains(&r.id))
             .filter_map(|r| r.error.as_ref().map(|e| format!("`{}` worked before this relink and fails now: {e}", r.name))),
     );
-    let (joint_errors, joint_conflicts) = joint_diagnostics(s, &mut warnings);
+    let (mut joint_errors, joint_conflicts) = joint_diagnostics(s, &mut warnings);
+    let joint_deviations = relink_joint_deviations(s, &relink_joints_before, &mut warnings, &mut joint_errors);
+    let moved_occurrences = relink_moved_occurrences(s, &poses_before, &mut warnings);
     reply(
         cmd,
         RelinkResult {
@@ -3621,6 +3783,8 @@ fn relink_placement(
             warnings,
             joint_errors,
             joint_conflicts,
+            joint_deviations,
+            moved_occurrences,
             param_warnings: Vec::new(),
         },
     )
