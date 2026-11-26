@@ -12,3 +12,4 @@ A Draft is discussed in the pull request that adds it. Once accepted, the work i
 | [0015](0015-plugin-ui-workspaces.md) | Plugin panels, workspaces and viewport content | Draft |
 | [0016](0016-failure-signatures.md) | Failure signatures and reproducible reports | Draft |
 | [0017](0017-workshop.md) | The Workshop: a marketplace for plugins, generators and themes | Draft |
+| [0019](0019-global-search.md) | One global search, and declarations that make plugins findable before they are installed | Draft |

@@ -4631,6 +4631,7 @@ fn capture_position_20644_isolation_for_to_object_mirror_pattern_plane_and_joint
                 placements: vec![vec![occ_b]],
                 components: Vec::new(),
                 occurrences: Vec::new(),
+                join: false,
             },
             Some("PatternPre"),
         )

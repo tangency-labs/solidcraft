@@ -66,6 +66,35 @@ pub(crate) fn boolean_tagged(a: &Body, b: &Body, op: BooleanOp) -> Result<Option
     call::ops_on("SmApiBoolean", &operands(&[a, b]), || ops::boolean(ta, tb, operation(op)))
 }
 
+/// [`boolean_tagged`] of operands each either read (`Ok`) or handed over by the caller, who never
+/// reads it again (`Err`): a handed-over operand is tagged itself instead of a copy of it
+/// ([`super::history::tag_owned`]), the copy [`boolean_tagged`] would make of it skipped. The
+/// tagged bodies are the same either way, so the result is. Bodies are handed over only while no
+/// failure dump folder is set ([`super::dump::dumping`]); a failure's dump gets the read operands.
+pub(crate) fn boolean_tagged_owned(a: std::result::Result<&Body, Body>, b: std::result::Result<&Body, Body>, op: BooleanOp) -> Result<Option<Body>> {
+    let read: Vec<&Body> = [&a, &b].into_iter().filter_map(|x| x.as_ref().ok().copied()).collect();
+    let owned: Vec<&Body> = [&a, &b].into_iter().filter_map(|x| x.as_ref().err()).collect();
+    usable("SmApiBoolean", &read)?;
+    usable("SmApiBoolean", &owned)?;
+    let tag = |x: &std::result::Result<&Body, Body>, n: usize| -> Option<Result<Body>> { x.as_ref().ok().map(|x| super::history::tag(x, n)) };
+    let (ta, tb) = (tag(&a, 0), tag(&b, 1));
+    let inputs: Vec<(&'static str, &Body)> = [(OPERANDS.first(), &a), (OPERANDS.get(1), &b)]
+        .into_iter()
+        .filter_map(|(name, x)| x.as_ref().ok().map(|x| (name.copied().unwrap_or("operand"), *x)))
+        .collect();
+    let ta = match (ta, a) {
+        (Some(t), _) => t?,
+        (None, Err(owned)) => super::history::tag_owned(owned, 0)?,
+        (None, Ok(_)) => return Err(Error::Argument),
+    };
+    let tb = match (tb, b) {
+        (Some(t), _) => t?,
+        (None, Err(owned)) => super::history::tag_owned(owned, 1)?,
+        (None, Ok(_)) => return Err(Error::Argument),
+    };
+    call::ops_on("SmApiBoolean", &inputs, || ops::boolean(ta, tb, operation(op)))
+}
+
 /// The kernel's operation for [`merged`].
 fn kernel_operation(op: BooleanOp) -> BooleanOperation {
     match op {

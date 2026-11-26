@@ -55,11 +55,27 @@ fn display_segs(sketch: &Sketch, index: usize, plane: &Plane, proj: &Proj) -> Ve
 }
 
 pub fn curve_with_budget(sketch: &Sketch, index: usize, plane: &Plane, proj: &Proj, ppp: f32, budget: &mut SamplingBudget) -> SampledPath {
+    curve_with_budget_placed(sketch, index, plane, proj, ppp, budget, None)
+}
+
+/// [`curve_with_budget`], with each piece moved by `placed` first: a drawing preview put down by
+/// the Insert SVG/DXF window's placement without importing the drawing again. Sampling happens
+/// after the move, so the curve is drawn as the import would put it, perspective and all.
+pub fn curve_with_budget_placed(
+    sketch: &Sketch,
+    index: usize,
+    plane: &Plane,
+    proj: &Proj,
+    ppp: f32,
+    budget: &mut SamplingBudget,
+    placed: Option<&dyn Fn(solidcore_record::Seg2) -> solidcore_record::Seg2>,
+) -> SampledPath {
     let segments = display_segs(sketch, index, plane, proj);
     let mut local = SamplingBudget::new(budget.remaining_vertices.min(4096), budget.remaining_nodes.min(65_536));
     let initial = local.clone();
     let mut out = SampledPath { parts: Vec::new(), quality: SamplingQuality::Complete, vertex_count: 0 };
     for segment in segments {
+        let segment = placed.map_or(segment, |f| f(segment));
         let sampled = sample_segment(&segment, plane, &pixel_view(proj, ppp), &mut local);
         if sampled.quality != SamplingQuality::Complete {
             out.quality = sampled.quality;

@@ -152,11 +152,14 @@ impl Document {
                 }
                 for link in &mut sketch.links {
                     if let solidcraft_sketch::LinkSource::Text { exprs, .. } = &mut link.source {
-                        for e in [&mut exprs.x, &mut exprs.y, &mut exprs.height].into_iter().flatten() {
+                        for e in [&mut exprs.x, &mut exprs.y, &mut exprs.height, &mut exprs.letter_spacing].into_iter().flatten() {
                             found.take(e, Reads::Typed(Kind::Length));
                         }
                         if let Some(e) = exprs.angle.as_mut() {
                             found.take(e, Reads::Typed(Kind::Angle));
+                        }
+                        if let Some(e) = exprs.line_spacing.as_mut() {
+                            found.take(e, Reads::Typed(Kind::Unitless));
                         }
                     }
                 }
