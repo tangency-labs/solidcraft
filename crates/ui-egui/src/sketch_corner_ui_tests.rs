@@ -1083,8 +1083,10 @@ fn corner_candidates_agree_with_engine_spatial_curve_filter() {
             let sk = &state.sketch(sketch).unwrap().sketch;
             let hit = Hit::SketchCurve { sketch, id: id.clone(), straight: true, point: solidcore_record::Vec3::ZERO };
             let offered = candidate(h.app.dialog.as_ref().unwrap(), &h.app.session, &hit).is_some();
-            assert_eq!(offered, !sk.is_spatial_corner_curve(id), "{cmd}: {id}");
-            assert_eq!(offered, id == "side", "{cmd}: {id}");
+            // Fillet takes a drawn 3D line, to round the corner it makes with another (#21319).
+            let fillet_line = cmd == "sketch.fillet" && *id == line;
+            assert_eq!(offered, !sk.is_spatial_corner_curve(id) || fillet_line, "{cmd}: {id}");
+            assert_eq!(offered, id == "side" || fillet_line, "{cmd}: {id}");
         }
         h.app.dialog = None;
     }
@@ -1126,6 +1128,41 @@ fn line_arc_fillet_preview_and_apply_work_in_both_pick_orders() {
             ss.sketch.radius(i).is_some_and(|r| (r - 3.0).abs() < 1e-7) && ss.sketch.center(i).is_some_and(|c| c.dist(want) < 1e-6)
         }));
     }
+}
+
+/// #21319: the Fillet tool takes two drawn 3D lines, previews the round, and rounds the corner
+/// they share with a 3D arc tangent to both, in one undo step.
+#[test]
+fn fillet_tool_rounds_the_corner_of_two_picked_3d_lines() {
+    use solidcraft_engine::sketch::WireConstraintKind;
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.options", json!({"sketch_3d":true})).unwrap();
+    h.app.run("sketch.line3d", json!({"points":[[0,0,0],[100,0,0],[100,60,40]]})).unwrap();
+    h.app.run("view.fit", json!({})).unwrap();
+    h.settle();
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"start":"sketch.fillet"})).unwrap();
+    h.frames(2);
+    for point in [[40, 0, 0], [100, 30, 20]] {
+        h.step(&json!({"click":{"world":point}})).unwrap();
+        h.frames(2);
+    }
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 2, "{:?}", h.app.status);
+    set_size(&mut h.app, "20 mm");
+    // The preview draws the arc and the two shortened lines.
+    h.step(&json!({"until":{"count":{"name":"sketch_preview_curves","value":3}}})).unwrap();
+    apply(&mut h);
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.status);
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    let st = h.app.session.world_state().unwrap();
+    let ss = st.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+    assert!(ss.report.wires_ok());
+    let arc = ss.sketch.wires.iter().find(|w| w.arc.is_some()).expect("a 3D arc rounds the corner");
+    assert!(arc.arc.is_some_and(|a| (a.radius - 20.0).abs() < 1e-6), "{arc:?}");
+    let tangents =
+        ss.sketch.wire_constraints.iter().filter(|c| matches!(&c.kind, WireConstraintKind::Tangent { arc: on, .. } if *on == arc.id)).count();
+    assert_eq!(tangents, 2, "{:?}", ss.sketch.wire_constraints);
 }
 
 /// An ellipse's axis is never a side of a Fillet or Chamfer corner (the engine refuses it), so a
@@ -1472,5 +1509,112 @@ fn a_rectangle_whose_first_corner_lost_its_curve_to_undo_is_still_drawn() {
         assert!(!h.app.status.as_ref().is_some_and(|s| s.2), "{tool}: {:?}", h.app.status);
         assert_eq!(sk.curves.len(), 1 + lines, "{tool}: the rectangle beside the line that stayed: {:?}", sk.curves);
         assert!(h.app.tool.as_ref().is_some_and(|t| t.pts.is_empty()), "{tool}: ready for the next rectangle");
+    }
+}
+
+/// A sketch on XY with the lines `keep` (y = 30) and `base` (y = 0), the tool `tool` clicked at
+/// each of `before`, then the Undo button (it runs `edit.undo` and leaves the tool on), which
+/// takes `base` away.
+fn clicked_then_undone(tool: &str, before: &[[i32; 3]]) -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,30],[60,30]],"ids":["keep"]})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[60,0]],"ids":["base"]})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    h.step(&json!({"start":tool})).unwrap();
+    for at in before {
+        h.step(&json!({"move":{"world":at}})).unwrap();
+        h.step(&json!({"click":{"world":at}})).unwrap();
+    }
+    let pts = h.app.tool.as_ref().unwrap().pts.clone();
+    assert!(pts.last().and_then(|p| p.1.as_deref()).is_some_and(|snap| snap.starts_with("on:base:")), "{tool}: {pts:?}");
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.settle();
+    let sid = h.app.session.active_sketch.unwrap();
+    assert!(h.app.session.model.state().sketch(sid).unwrap().sketch.curve_index("base").is_none(), "{tool}: Undo took the line");
+    assert_eq!(h.app.tool.as_ref().map(|t| t.pts.len()), Some(before.len()), "{tool}: the clicks are still placed");
+    h
+}
+
+/// The Undo button between a shape's clicks can take away the curve a stored click snapped to
+/// (#21835). The next clicks then still draw the shape, through the places clicked, and the tool
+/// goes on: a circle or an arc from its centre, the centre or start on the removed line, and the
+/// other shapes that send a stored snap again.
+#[test]
+fn a_shape_whose_stored_click_lost_its_curve_to_undo_is_still_drawn() {
+    let cases: [(&str, &[[i32; 3]], &[[i32; 3]], usize); 6] = [
+        ("sketch.circle.center", &[[20, 0, 0]], &[[40, 20, 0]], 1),
+        ("sketch.arc.center_point", &[[20, 0, 0]], &[[40, 15, 0], [10, 20, 0]], 1),
+        ("sketch.arc.center_point", &[[20, 15, 0], [20, 0, 0]], &[[35, 15, 0]], 1),
+        ("sketch.circle.three_point", &[[20, 0, 0]], &[[40, 20, 0], [5, 20, 0]], 1),
+        ("sketch.arc.three_point", &[[20, 0, 0]], &[[45, 20, 0], [30, 15, 0]], 1),
+        ("sketch.rectangle.edge_center", &[[20, 0, 0]], &[[40, 8, 0], [40, 20, 0]], 4),
+    ];
+    let mut failed = Vec::new();
+    for (tool, before, after, added) in cases {
+        let mut h = clicked_then_undone(tool, before);
+        for at in after {
+            h.step(&json!({"move":{"world":at}})).unwrap();
+            h.step(&json!({"click":{"world":at}})).unwrap();
+        }
+        let sid = h.app.session.active_sketch.unwrap();
+        let curves = h.app.session.model.state().sketch(sid).unwrap().sketch.curves.len();
+        let error = h.app.status.as_ref().filter(|s| s.2).map(|s| s.0.clone());
+        let ready = h.app.tool.as_ref().is_some_and(|t| t.pts.is_empty());
+        if error.is_some() || curves != 1 + added || !ready {
+            failed.push(format!("{tool} after {} click(s): {curves} curves, ready {ready}, {error:?}", before.len()));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// Redo after that Undo brings the line back, and the circle's centre clicked on it is held on it
+/// again: the stored snap is only set aside while its curve is gone.
+#[test]
+fn a_circle_centre_snapped_to_a_line_undone_and_redone_stays_on_it() {
+    let mut h = clicked_then_undone("sketch.circle.center", &[[20, 0, 0]]);
+    h.app.run("edit.redo", json!({})).unwrap();
+    h.settle();
+    h.step(&json!({"move":{"world":[40, 20, 0]}})).unwrap();
+    h.step(&json!({"click":{"world":[40, 20, 0]}})).unwrap();
+    let sid = h.app.session.active_sketch.unwrap();
+    let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+    assert!(!h.app.status.as_ref().is_some_and(|s| s.2), "{:?}", h.app.status);
+    assert_eq!(sk.curves.len(), 3, "{:?}", sk.curves);
+    let held = held_on(&sk, "base");
+    assert!(held.iter().any(|p| p.dist(Vec2::new(20.0, 0.0)) < 0.5), "the centre is held on the line: {held:?}");
+}
+
+/// The Edge-Center Rectangle's second click snapped onto a line, a little off a sketch axis, and
+/// the Undo button then took that line away: the rectangle is drawn with its edge the way it was
+/// clicked and previewed, not nudged onto the axis.
+#[test]
+fn an_edge_center_rectangle_whose_edge_end_lost_its_curve_to_undo_keeps_its_clicked_direction() {
+    let mut h = clicked_then_undone("sketch.rectangle.edge_center", &[[-15, 2, 0], [55, 0, 0]]);
+    let pts = h.app.tool.as_ref().unwrap().pts.clone();
+    assert!(pts[0].1.is_none(), "the middle is a free click: {pts:?}");
+    let clicked = (pts[1].0 - pts[0].0).normalized().unwrap();
+    let off_axis = clicked.y.atan2(clicked.x).to_degrees().abs();
+    assert!((1.0..2.0).contains(&off_axis), "the edge is clicked {off_axis} degrees off the X axis");
+    h.step(&json!({"move":{"world":[40, 15, 0]}})).unwrap();
+    h.step(&json!({"click":{"world":[40, 15, 0]}})).unwrap();
+    assert!(!h.app.status.as_ref().is_some_and(|s| s.2), "{:?}", h.app.status);
+    let sid = h.app.session.active_sketch.unwrap();
+    let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+    let keep = sk.curve_index("keep").unwrap();
+    let sides: Vec<Vec2> = sk
+        .curves
+        .iter()
+        .enumerate()
+        .filter_map(|(i, c)| match c.kind {
+            CurveKind::Line { a, b } if i != keep => (sk.point(b)? - sk.point(a)?).normalized(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sides.len(), 4, "{:?}", sk.curves);
+    for side in &sides {
+        let (along, across) = (side.dot(clicked).abs(), side.dot(clicked.perp()).abs());
+        assert!(along.min(across) < 1e-6, "a side runs along {side:?}, the edge was clicked along {clicked:?}");
     }
 }

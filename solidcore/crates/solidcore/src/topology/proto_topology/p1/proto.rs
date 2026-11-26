@@ -4217,6 +4217,18 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         tolerance: f64,
         region: Option<&DeclaredContact>,
     ) -> Result<Option<ProtoVertexId>> {
+        self.find_proto_vertex_within_if(k, position, tolerance, region, |_| Ok(true))
+    }
+
+    /// The closest reachable proto vertex satisfying an additional incidence predicate.
+    pub(crate) fn find_proto_vertex_within_if(
+        &self,
+        k: &Kernel,
+        position: Point3,
+        tolerance: f64,
+        region: Option<&DeclaredContact>,
+        compatible: impl Fn(ProtoVertexId) -> Result<bool>,
+    ) -> Result<Option<ProtoVertexId>> {
         let point = DeclaredContact::of_point(position, tolerance);
         let region = region.unwrap_or(&point);
         let mut ret_val = None;
@@ -4253,7 +4265,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             {
                 continue;
             }
-            if this_dist < min_dist {
+            if this_dist < min_dist && compatible(id)? {
                 ret_val = Some(id);
                 min_dist = this_dist;
             }
@@ -4281,6 +4293,36 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// [`ProtoTopologyManager::combine_proto_vertex`] and the removal (passed on, as the
     /// combine of `SplitIntersectingProtoEdges`).
     pub fn combine_proto_vertices_not_proved_apart(&mut self, k: &Kernel) -> Result<()> {
+        self.combine_proto_vertices_if(k, |_, _, _| Ok(true))
+    }
+
+    /// Coalesces reachable events whose native vertex/face incidences are compatible.
+    pub(crate) fn combine_proto_vertices_with_incidence(
+        &mut self,
+        k: &Kernel,
+        geometry: &impl super::super::p2::ProtoBrep<O>,
+    ) -> Result<()> {
+        self.combine_proto_vertices_if(k, |this, of, id| {
+            for &def in this.pv(Some(of))?.vertex_definitions() {
+                let def = this.vd(def)?;
+                if this.proto_vertex_incidence_conflicts(
+                    k,
+                    geometry,
+                    id,
+                    [def.brep_point_classif(1), def.brep_point_classif(2)],
+                )? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        })
+    }
+
+    fn combine_proto_vertices_if(
+        &mut self,
+        k: &Kernel,
+        compatible: impl Fn(&Self, ProtoVertexId, ProtoVertexId) -> Result<bool>,
+    ) -> Result<()> {
         // sweeps over the regions until one combines nothing (each combine removes a
         // listed proto vertex, so there are at most as many as proto vertices)
         let mut combined = true;
@@ -4289,7 +4331,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             let mut i = 0;
             while let Some(&(of, region)) = self.regions.get(i) {
                 let other = if self.pvs.contains(&of) {
-                    self.proto_vertex_not_apart_from(k, of, &region)?
+                    self.proto_vertex_not_apart_from(k, of, &region, |id| compatible(self, of, id))?
                 } else {
                     None
                 };
@@ -4319,6 +4361,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         k: &Kernel,
         of: ProtoVertexId,
         region: &DeclaredContact,
+        compatible: impl Fn(ProtoVertexId) -> Result<bool>,
     ) -> Result<Option<ProtoVertexId>> {
         let centre = region.a + (region.b - region.a) * 0.5;
         for &id in &self.pvs {
@@ -4336,6 +4379,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     .iter()
                     .any(|(at, r)| *at == id && region.overlaps(k, r))
             {
+                if !compatible(id)? {
+                    continue;
+                }
                 return Ok(Some(id));
             }
         }
@@ -4749,6 +4795,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 Err(
                     e @ (SolidError::Unported { .. }
                     | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }
                     | SolidError::InvalidInput { .. }
                     | SolidError::PortInvariant { .. }),
                 ) => return Err(e),

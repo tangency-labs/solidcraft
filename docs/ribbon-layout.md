@@ -10,14 +10,14 @@ SKETCH appears during sketch editing; with Preferences › Interface › **Keep 
 
 | Tab | Section | Command ids, in menu order |
 |---|---|---|
-| MODEL | SKETCH | **`sketch.create`**, `sketch.edit`, `sketch.line3d`, `sketch.spline3d`, `sketch.point3d`, `sketch.move3d` |
+| MODEL | SKETCH | **`sketch.create`**, `sketch.create3d`, `sketch.edit`, `sketch.line3d`, `sketch.arc3d`, `sketch.spline3d`, `sketch.spline3d.control_point`, `sketch.point3d` |
 | MODEL | CREATE | **`solid.extrude`**, **`solid.revolve`**, **`solid.hole`**, `solid.sweep`, `solid.loft`, `solid.box`, `solid.cylinder`, `solid.sphere`, `solid.torus`, `solid.cone`, `solid.pipe`, `solid.bounding_solid`, `solid.thread`, `solid.boundary_fill`, `solid.coil`, `solid.rib`, `solid.web`, `solid.emboss`, `plastic.boss`, `plastic.lip`, `plastic.snap_fit`, `plastic.rest` |
 | MODEL | MODIFY | **`solid.fillet`**, **`solid.chamfer`**, **`solid.shell`**, **`solid.press_pull`**, `sheet.convert`, `solid.combine`, `solid.scale`, `solid.offset_face`, `solid.draft`, `solid.split_face`, `solid.split_body`, `solid.replace_face`, `solid.remove`, `timeline.delete`, `face.delete` |
 | MODEL | ARRANGE | **`solid.move`**, **`solid.mirror`**, **`solid.pattern.rectangular`**, `solid.align`, `solid.pattern.circular`, `solid.pattern.path` |
 | MODEL | CONFIGURE | **`parameters.change`**, **`config.table`**, `config.configure` |
 | MODEL | CONSTRUCT | **`construct.plane.offset`**, `construct.plane.at_angle`, `construct.axis.through_cylinder`, `construct.axis.normal_to_face`, `construct.axis.two_planes`, `construct.axis.two_points`, `construct.axis.edge`, `construct.point.vertex`, `construct.point.two_edges`, `construct.point.three_planes`, `construct.point.center`, `construct.point.edge_plane`, `construct.point.along_path`, `construct.plane.midplane`, `construct.plane.two_edges`, `construct.plane.three_points`, `construct.plane.tangent`, `construct.plane.along_path`, `construct.plane.perpendicular` |
 | SURFACE | SKETCH | **`sketch.create`** |
-| SURFACE | CREATE | **`surface.extrude`**, **`surface.revolve`**, **`surface.sweep`**, **`surface.loft`**, `surface.boundary`, `surface.patch`, `surface.offset`, `surface.ruled`, `surface.blend` |
+| SURFACE | CREATE | **`surface.extrude`**, **`surface.revolve`**, **`surface.sweep`**, **`surface.loft`**, `surface.boundary`, `surface.patch`, `surface.offset`, `surface.midsurface`, `surface.ruled`, `surface.blend` |
 | SURFACE | EDIT | **`surface.trim`**, **`surface.untrim`**, **`surface.extend`**, **`surface.stitch`**, `surface.unstitch`, `surface.reverse_normal`, `surface.fair`, `surface.fillet`, `surface.match` |
 | SURFACE | CONVERT | **`surface.thicken`**, **`mesh.convert`** |
 | ASSEMBLE | COMPONENTS | **`component.create`**, **`component.from_bodies`**, **`component.insert_design`**, **`parts.library`** |
@@ -28,7 +28,7 @@ SKETCH appears during sketch editing; with Preferences › Interface › **Keep 
 | INSERT | FILES | **`file.insert_step`**, **`file.insert_mesh`**, **`component.insert_design`**, `file.save_mesh` |
 | INSERT | IMAGES | **`canvas.insert`**, **`canvas.decal`**, **`canvas.edit`** |
 | INSERT | 2D | **`sketch.insert_dxf`**, **`sketch.insert_svg`** |
-| INSERT | LIBRARY | **`parts.fastener`**, **`parts.library`**, **`parts.resize`**, `parts.insert` |
+| INSERT | LIBRARY | **`parts.fastener`**, **`parts.library`**, **`parts.resize`**, `parts.insert`, `pulley.insert` |
 | INSERT | LINKS | **`component.update_links`**, **`component.break_link`** |
 | INSPECT | MEASURE | **`inspect.measure`**, **`inspect.center_of_mass`**, **`component.properties`** |
 | INSPECT | SECTION | **`inspect.section`** |
@@ -45,11 +45,11 @@ SKETCH appears during sketch editing; with Preferences › Interface › **Keep 
 | SKETCH | CREATE | **`sketch.line`**, **`sketch.rectangle.two_point`**, **`sketch.circle.center`**, **`sketch.arc.three_point`**, `sketch.infinite`, `sketch.rectangle.three_point`, `sketch.rectangle.rounded`, `sketch.rectangle.center`, `sketch.circle.two_point`, `sketch.circle.three_point`, `sketch.arc.center_point`, `sketch.polygon.inscribed`, `sketch.polygon.circumscribed`, `sketch.polygon.edge`, `sketch.slot.center_to_center`, `sketch.slot.overall`, `sketch.point`, `sketch.line.midpoint`, `sketch.arc.tangent`, `sketch.circle.two_tangent`, `sketch.circle.three_tangent`, `sketch.slot.center_point`, `sketch.slot.arc_three_point`, `sketch.slot.arc_center`, `sketch.ellipse`, `sketch.spline.fit_point`, `sketch.spline.control_point`, `sketch.spline.control_point_5`, `sketch.conic`, `sketch.centerline`, `sketch.text`, `sketch.equation_curve` |
 | SKETCH | MODIFY | **`sketch.trim`**, **`sketch.offset`**, **`sketch.fillet`**, `sketch.copy`, `sketch.cut`, `sketch.paste`, `sketch.blend_curve`, `sketch.chamfer.equal_distance`, `sketch.chamfer.distance_angle`, `sketch.chamfer.two_distance`, `sketch.extend`, `sketch.break`, `sketch.scale`, `sketch.move` |
 | SKETCH | PATTERN | **`sketch.mirror`**, **`sketch.pattern.circular`**, **`sketch.pattern.rectangular`** |
-| SKETCH | CONSTRAIN | **`sketch.dimension`**, **`sketch.constraint.horizontal_vertical`**, **`sketch.constraint.coincident`**, **`sketch.constraint.tangent`**, **`sketch.constraint.equal`**, **`sketch.constraint.parallel`**, **`sketch.constraint.perpendicular`**, `sketch.construction`, `sketch.constrainer`, `sketch.constraint.fix`, `sketch.constraint.midpoint`, `sketch.constraint.concentric`, `sketch.constraint.collinear`, `sketch.constraint.symmetry`, `sketch.constraint.curvature`, `sketch.constraint.polygon`, `sketch.auto_constrain`, `sketch.auto_constrain_from_datum` |
+| SKETCH | CONSTRAIN | **`sketch.dimension`**, **`sketch.constraint.horizontal_vertical`**, **`sketch.constraint.coincident`**, **`sketch.constraint.tangent`**, **`sketch.constraint.equal`**, **`sketch.constraint.parallel`**, **`sketch.constraint.perpendicular`**, `sketch.constraint.horizontal`, `sketch.constraint.vertical`, `sketch.construction`, `sketch.constrainer`, `sketch.constraint.fix`, `sketch.constraint.midpoint`, `sketch.constraint.concentric`, `sketch.constraint.collinear`, `sketch.constraint.symmetry`, `sketch.constraint.curvature`, `sketch.constraint.polygon`, `sketch.auto_constrain`, `sketch.auto_constrain_from_datum` |
 | SKETCH | REFERENCE | **`sketch.project`**, `sketch.intersect`, `sketch.include_3d`, `sketch.project_to_surface`, `sketch.intersection_curve`, `sketch.spun_profile`, `sketch.isoparametric_curve`, `sketch.fit_curves_to_section`, `sketch.insert_dxf`, `sketch.insert_svg`, `canvas.insert` |
 | SKETCH | FINISH SKETCH | **`sketch.finish`**, `sketch.finish_auto_constrain` |
 | SHEET METAL | SKETCH | **`sketch.create`** |
-| SHEET METAL | CREATE | **`sheet.flange`**, **`sheet.hem`**, **`sheet.fold`**, **`sheet.perforate`**, `sheet.convert`, `sheet.recognize` |
+| SHEET METAL | CREATE | **`sheet.flange`**, **`sheet.hem`**, **`sheet.fold`**, **`sheet.perforate`**, `sheet.hardware`, `sheet.convert`, `sheet.recognize` |
 | SHEET METAL | FLAT | **`sheet.unfold`**, **`sheet.refold`**, **`sheet.flat_pattern`** |
 | SHEET METAL | OUTPUT | **`sheet.export_dxf`**, **`sheet.export_bend_table`** |
 | SHEET METAL | RULES | **`sheet.manage_rules`** |
@@ -79,7 +79,7 @@ Explicit command-id lists override the default placement mapping. Shared command
 | SHEET METAL / CREATE | SHEET METAL / FLAT | `sheet.flat_pattern` |
 | SHEET METAL / MODIFY | MANAGE / RULES | `sheet.manage_rules` |
 | SHEET METAL / MODIFY | SHEET METAL / FLAT | `sheet.unfold`, `sheet.refold` |
-| SKETCH / CONSTRAINTS | SKETCH / CONSTRAIN | `sketch.constraint.horizontal_vertical`, `sketch.constraint.coincident`, `sketch.constraint.tangent`, `sketch.constraint.equal`, `sketch.constraint.parallel`, `sketch.constraint.perpendicular`, `sketch.constraint.fix`, `sketch.constraint.midpoint`, `sketch.constraint.concentric`, `sketch.constraint.collinear`, `sketch.constraint.symmetry`, `sketch.constraint.curvature`, `sketch.constraint.polygon`, `sketch.auto_constrain`, `sketch.auto_constrain_from_datum` |
+| SKETCH / CONSTRAINTS | SKETCH / CONSTRAIN | `sketch.constraint.horizontal_vertical`, `sketch.constraint.coincident`, `sketch.constraint.tangent`, `sketch.constraint.equal`, `sketch.constraint.parallel`, `sketch.constraint.perpendicular`, `sketch.constraint.fix`, `sketch.constraint.midpoint`, `sketch.constraint.concentric`, `sketch.constraint.collinear`, `sketch.constraint.symmetry`, `sketch.constraint.horizontal`, `sketch.constraint.vertical`, `sketch.constraint.curvature`, `sketch.constraint.polygon`, `sketch.auto_constrain`, `sketch.auto_constrain_from_datum` |
 | SKETCH / CREATE | SKETCH / CONSTRAIN | `sketch.dimension`, `sketch.construction`, `sketch.constrainer` |
 | SKETCH / CREATE | SKETCH / CREATE | `sketch.line`, `sketch.rectangle.two_point`, `sketch.rectangle.three_point`, `sketch.rectangle.rounded`, `sketch.rectangle.center`, `sketch.circle.center`, `sketch.circle.two_point`, `sketch.circle.three_point`, `sketch.arc.three_point`, `sketch.arc.center_point`, `sketch.polygon.inscribed`, `sketch.polygon.circumscribed`, `sketch.polygon.edge`, `sketch.slot.center_to_center`, `sketch.slot.overall`, `sketch.point`, `sketch.line.midpoint`, `sketch.arc.tangent`, `sketch.circle.two_tangent`, `sketch.circle.three_tangent`, `sketch.slot.center_point`, `sketch.slot.arc_three_point`, `sketch.slot.arc_center`, `sketch.ellipse`, `sketch.spline.fit_point`, `sketch.spline.control_point`, `sketch.spline.control_point_5`, `sketch.conic`, `sketch.centerline`, `sketch.text`, `sketch.equation_curve` |
 | SKETCH / CREATE | SKETCH / REFERENCE | `sketch.project`, `sketch.intersect`, `sketch.include_3d`, `sketch.project_to_surface`, `sketch.intersection_curve`, `sketch.spun_profile`, `sketch.isoparametric_curve`, `sketch.fit_curves_to_section` |
@@ -113,7 +113,7 @@ Explicit command-id lists override the default placement mapping. Shared command
 | SOLID / MODIFY | MODEL / MODIFY | `solid.fillet`, `solid.chamfer`, `solid.combine`, `solid.scale`, `solid.offset_face`, `solid.shell`, `solid.draft`, `solid.split_face`, `solid.split_body`, `solid.press_pull`, `solid.replace_face`, `solid.remove`, `timeline.delete`, `face.delete` |
 | SOLID / POSITION | ASSEMBLE / POSITION | `component.capture_position`, `component.revert_position` |
 | SURFACE / CREATE | SURFACE / CONVERT | `surface.thicken` |
-| SURFACE / CREATE | SURFACE / CREATE | `surface.boundary`, `surface.patch`, `surface.extrude`, `surface.revolve`, `surface.sweep`, `surface.loft`, `surface.offset`, `surface.ruled`, `surface.blend` |
+| SURFACE / CREATE | SURFACE / CREATE | `surface.boundary`, `surface.patch`, `surface.extrude`, `surface.revolve`, `surface.sweep`, `surface.loft`, `surface.offset`, `surface.midsurface`, `surface.ruled`, `surface.blend` |
 | SURFACE / INSPECT | INSPECT / SURFACE QUALITY | `inspect.continuity` |
 | SURFACE / MODIFY | SURFACE / EDIT | `surface.stitch`, `surface.extend`, `surface.trim`, `surface.untrim`, `surface.unstitch`, `surface.reverse_normal`, `surface.fair`, `surface.fillet`, `surface.match` |
 | WELDMENTS / CREATE | WELDMENTS / CREATE | `frame.member` |
@@ -124,7 +124,7 @@ Explicit command-id lists override the default placement mapping. Shared command
 - Save As Mesh (`file.save_mesh`), previously MESH / MODIFY, is in INSERT / FILES. The existing File menu continues to offer it.
 - The selection filter, previously in SELECT on multiple tabs including UTILITIES, is in VIEW / SELECT. This is a populated control group, although it has no command ids.
 - MODEL’s Pattern button uses the existing `solid.pattern.rectangular` command; Circular and Path stay in its menu. No generic pattern command is registered.
-- There is no separate New 3D Sketch command. MODEL / SKETCH lists the existing 3D line, spline, point and move-point commands. Infinite Line (`sketch.infinite`) is in SKETCH / CREATE.
+- 3D Sketch (`sketch.create3d`, #19426) starts a 3D sketch with no plane to choose and opens 3D Line in it. MODEL / SKETCH also lists the 3D line, arc, spline, control point spline and point commands, which need a 3D sketch open. Infinite Line (`sketch.infinite`) is in SKETCH / CREATE.
 - Physical Properties maps to the existing `component.properties` command. Material data checks map to `material.properties.validate`. Calibrate maps to the existing canvas editor (`canvas.edit`).
 - VIEW / VIEWS lists the existing named-view and navigation commands. Display, Show, Agent and Window are omitted: their requested settings have no engine commands. No Fit or Orientation commands were invented.
 - RENDER / IMAGE exposes the already registered `render.start`, which previously had no visible panel. The Render workspace and its existing SCENE command are preserved.

@@ -10,25 +10,25 @@ use solidcraft_io::urdf::{CollisionGeom, Step, UrdfModel, UrdfOptions, UrdfPacka
 
 use crate::Session;
 
-fn run(s: &mut Session, id: &str, p: Value) -> Value {
+pub(super) fn run(s: &mut Session, id: &str, p: Value) -> Value {
     match s.execute(id, &p) {
         Ok(v) => v,
         Err(e) => panic!("{id} {p}: {e}"),
     }
 }
 
-fn occ(s: &Session, component: &str) -> u64 {
+pub(super) fn occ(s: &Session, component: &str) -> u64 {
     let c = s.doc.find_component(component).unwrap_or(0);
     s.doc.occurrence_of(c).map(|o| o.id).unwrap_or(0)
 }
 
-fn ground(s: &mut Session, component: &str, grounded: bool) {
+pub(super) fn ground(s: &mut Session, component: &str, grounded: bool) {
     let o = occ(s, component);
     run(s, "occurrence.ground", json!({"occurrence": o, "grounded": grounded}));
 }
 
 /// A hinge leaf: a 40 x 30 x 3 plate and an r4 knuckle along X at y = 33, z = 4.
-fn leaf(s: &mut Session, name: &str) {
+pub(super) fn leaf(s: &mut Session, name: &str) {
     run(s, "component.activate", json!({"component": "root"}));
     run(s, "component.create", json!({"name": name}));
     run(s, "solid.box", json!({"length": 40, "width": 30, "height": 3, "corner": [0, 0, 0]}));
@@ -36,7 +36,7 @@ fn leaf(s: &mut Session, name: &str) {
 }
 
 /// LeafA (grounded) and LeafB on a revolute joint "Hinge" without limits.
-fn hinge() -> Session {
+pub(super) fn hinge() -> Session {
     let mut s = Session::default();
     leaf(&mut s, "LeafA");
     leaf(&mut s, "LeafB");
@@ -50,7 +50,7 @@ fn hinge() -> Session {
 }
 
 /// 10 mm cubes in components A (grounded, at the origin) and B (at x = 20).
-fn two_cubes() -> Session {
+pub(super) fn two_cubes() -> Session {
     let mut s = Session::default();
     for (name, x) in [("A", 0), ("B", 20)] {
         run(&mut s, "component.activate", json!({"component": "root"}));
@@ -62,7 +62,7 @@ fn two_cubes() -> Session {
 }
 
 /// B's bottom face on A's top face.
-fn joint(s: &mut Session, kind: &str, name: &str, limits: Value) {
+pub(super) fn joint(s: &mut Session, kind: &str, name: &str, limits: Value) {
     run(s, "joint.create", json!({"type": kind, "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "limits": limits, "name": name}));
 }
 
@@ -96,7 +96,7 @@ fn assert_fk(m: &UrdfModel, s: &Session, what: &str) {
     assert_eq!(seen, placements.len() - 1, "{what}: a link per placement");
 }
 
-fn temp(tag: &str) -> PathBuf {
+pub(super) fn temp(tag: &str) -> PathBuf {
     let d = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-urdf-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     let _ = std::fs::create_dir_all(&d);
@@ -661,6 +661,7 @@ fn urdf_warns_when_placements_are_cut_off() {
             parent: if k == 1 { 0 } else { 999 + k },
             name: format!("C{k}:1"),
             transform: solidcraft_doc::IDENTITY,
+            base_transform: None,
             grounded: false,
             bom_type: None,
             expressed_moves: Vec::new(),
@@ -678,6 +679,7 @@ fn urdf_warns_when_placements_are_cut_off() {
             parent,
             name: name.into(),
             transform: solidcraft_doc::IDENTITY,
+            base_transform: None,
             grounded: false,
             bom_type: None,
             expressed_moves: Vec::new(),
@@ -820,7 +822,7 @@ fn hand_edited_dynamics_are_ignored_with_a_warning() {
 }
 
 /// A grounded cube and `kinds.len()` more, each on a joint to it named `J0`, `J1`...
-fn fan(kinds: &[&str]) -> Session {
+pub(super) fn fan(kinds: &[&str]) -> Session {
     let mut s = Session::default();
     run(&mut s, "component.create", json!({"name": "Hub"}));
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0]}));
@@ -836,7 +838,7 @@ fn fan(kinds: &[&str]) -> Session {
 }
 
 /// `b = ratio · a + offset` in stored units (rad, mm), between values 0 of two joints.
-fn link(s: &mut Session, a: &str, b: &str, ratio: f64, offset: f64) {
+pub(super) fn link(s: &mut Session, a: &str, b: &str, ratio: f64, offset: f64) {
     let id = |s: &Session, n: &str| s.doc.assembly.joints.iter().find(|j| j.name == n).map_or(0, |j| j.id);
     let (a, b) = (id(s, a), id(s, b));
     s.doc_mut().assembly.links.push(joints::MotionLink { a, ia: 0, b, ib: 0, ratio, offset, coupling: None, lift: Vec::new() });
@@ -1041,7 +1043,7 @@ fn a_follower_limit_the_driver_can_exceed_warns() {
 }
 
 /// `two_cubes` on a revolute joint, with a flagged origin "tool0" on the top of B.
-fn tool_frame() -> Session {
+pub(super) fn tool_frame() -> Session {
     let mut s = two_cubes();
     joint(&mut s, "revolute", "Turn", json!([]));
     let b = occ(&s, "B");
@@ -1650,6 +1652,63 @@ fn file_export_urdf_takes_the_mimic_choice() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Triangles in every binary STL file of `dir`, and the volume (mm³) they hold.
+fn stl_triangles_and_volume(dir: &std::path::Path) -> (u32, f64) {
+    let (mut count, mut volume) = (0, 0.0);
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        if e.path().extension().is_some_and(|x| x == "stl") {
+            let bytes = std::fs::read(e.path()).unwrap_or_default();
+            count += bytes.get(80..84).map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+            volume += stl_volume(&bytes).unwrap_or(f64::NAN) * 1e9;
+        }
+    }
+    (count, volume)
+}
+
+/// A screw for a simulator (#20393): a Ø3 × 14 mm shank under a Ø5.5 × 1.65 mm head. The
+/// standard meshes follow it to 1/5000 of its size, a few thousand triangles more than a
+/// simulator needs; `chord` gives every link mesh one tolerance in mm, and `quality` is taken too.
+#[test]
+fn file_export_urdf_takes_the_mesh_chord() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"diameter": 3, "height": 14, "body_name": "Screw"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 5.5, "height": 1.65, "base": [0, 0, 14], "operation": "join", "targets": ["Screw"]}));
+    s.param_check = crate::schema::ParamCheck::Strict;
+    let exact = std::f64::consts::PI * (1.5f64.powi(2) * 14.0 + 2.75f64.powi(2) * 1.65);
+    let export = |s: &mut Session, tag: &str, extra: Value| {
+        let dir = temp(tag);
+        let mut p = json!({"path": dir.join("screw.urdf").to_string_lossy()});
+        if let (Some(p), Value::Object(extra)) = (p.as_object_mut(), extra) {
+            p.extend(extra);
+        }
+        run(s, "file.export_urdf", p);
+        let out = stl_triangles_and_volume(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        out
+    };
+    let (standard, standard_volume) = export(&mut s, "chord-standard", json!({}));
+    let (coarse, coarse_volume) = export(&mut s, "chord-coarse", json!({"chord": 0.05}));
+    let (fine, _) = export(&mut s, "chord-fine", json!({"quality": "fine"}));
+    eprintln!("screw link meshes: standard {standard}, fine {fine}, chord 0.05 {coarse} triangles");
+    assert!(coarse > 0 && coarse * 10 < standard, "chord 0.05: {coarse} triangles, standard {standard}");
+    assert!(fine > standard, "fine: {fine} triangles, standard {standard}");
+    // Facets stand at most 0.05 mm inside the round faces: the volume lost is under that much
+    // all over the area of the round faces (and the head's ring).
+    let round = std::f64::consts::PI * (3.0 * 14.0 + 5.5 * 1.65 + 2.75f64.powi(2) - 1.5f64.powi(2));
+    for (what, v) in [("standard", standard_volume), ("chord 0.05", coarse_volume)] {
+        assert!(v <= exact * (1.0 + 1e-6) && v > exact - 0.05 * round, "{what}: {v} mm³, exact {exact}");
+    }
+    let dir = temp("chord-refused");
+    for p in [json!({"chord": 0.0005}), json!({"chord": 0.05, "quality": "fine"})] {
+        let mut p = p;
+        p["path"] = json!(dir.join("screw.urdf").to_string_lossy());
+        let e = s.execute("file.export_urdf", &p).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains("chord"), "{p}: {e}");
+    }
+    assert_eq!(std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0), 0, "nothing written");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // Robot exports read back as any URDF reader reads them. Each design is exported with
 // `file.export` as the desktop dialog does it (motion links as `<mimic>`), the written file is
 // read with a general XML reader, and the expected values are worked out by hand, never taken
@@ -1658,11 +1717,11 @@ fn file_export_urdf_takes_the_mimic_choice() {
 // dynamics, and where a dropped ball first touches each collision shape.
 
 /// Lengths in m: the URDF's own units.
-type M4 = [[f64; 4]; 4];
+pub(super) type M4 = [[f64; 4]; 4];
 
 const I4: M4 = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
 
-fn m4_mul(a: &M4, b: &M4) -> M4 {
+pub(super) fn m4_mul(a: &M4, b: &M4) -> M4 {
     let mut out = [[0.0; 4]; 4];
     for (r, row) in out.iter_mut().enumerate() {
         for (c, v) in row.iter_mut().enumerate() {
@@ -1672,7 +1731,7 @@ fn m4_mul(a: &M4, b: &M4) -> M4 {
     out
 }
 
-fn m4_apply(m: &M4, p: [f64; 3]) -> [f64; 3] {
+pub(super) fn m4_apply(m: &M4, p: [f64; 3]) -> [f64; 3] {
     std::array::from_fn(|r| m[r][0] * p[0] + m[r][1] * p[1] + m[r][2] * p[2] + m[r][3])
 }
 
@@ -1680,7 +1739,7 @@ fn m4_turn(m: &M4, v: [f64; 3]) -> [f64; 3] {
     std::array::from_fn(|r| m[r][0] * v[0] + m[r][1] * v[1] + m[r][2] * v[2])
 }
 
-fn m4_shift(v: [f64; 3]) -> M4 {
+pub(super) fn m4_shift(v: [f64; 3]) -> M4 {
     let mut m = I4;
     for r in 0..3 {
         m[r][3] = v[r];
@@ -1689,7 +1748,7 @@ fn m4_shift(v: [f64; 3]) -> M4 {
 }
 
 /// Rotation by `angle` about the unit `axis` (Rodrigues).
-fn m4_rot(axis: [f64; 3], angle: f64) -> M4 {
+pub(super) fn m4_rot(axis: [f64; 3], angle: f64) -> M4 {
     let [x, y, z] = axis;
     let (s, c) = angle.sin_cos();
     let t = 1.0 - c;

@@ -107,6 +107,8 @@ mod issue_948_ruled_skin_difference;
 mod issue_968_drafted_pocket_floor_cut;
 #[path = "../loft_rails.rs"]
 mod loft_rails;
+#[path = "../prism_fill.rs"]
+mod prism_fill;
 #[path = "../screw_sweep.rs"]
 mod screw_sweep;
 #[path = "../skin_parallel_sections.rs"]

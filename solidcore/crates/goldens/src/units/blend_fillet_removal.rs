@@ -23,7 +23,6 @@
 
 use serde::{Deserialize, Serialize};
 use solidcore::blend::fillet_removal::delete_fillet_face;
-use solidcore::kernel::Kernel;
 use solidcore::topology::brep::p1 as bp1;
 use solidcore::topology::Brep;
 use solidcore::Result as SolidResult;
@@ -99,7 +98,7 @@ impl UnitDiff for Runner {
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         // the Rust reader's B-rep of the same file, its geometry owners named by the
         // Rust reader (no C++ export or owner reaches the Rust side)
         let mut b = match crate::own_reader::read_file_rebuild(&mut k, &path(&i)?, i.rebuild)? {
@@ -214,7 +213,7 @@ mod exact_only_tests {
         (usize, usize, Vec<[f64; 3]>),
         (usize, usize, Vec<[f64; 3]>),
     ) {
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let mut b = read(&mut k, file);
         let f = bp1::faces(&b, None).unwrap()[index];
         let before = snapshot(&b);
@@ -232,7 +231,7 @@ mod exact_only_tests {
         let mut refused = Vec::new();
         let mut exact = 0;
         for file in FILES {
-            let mut k = Kernel::default();
+            let mut k = crate::runner_kernel();
             let count = bp1::faces(&read(&mut k, file), None).unwrap().len();
             for index in 0..count {
                 let (error, not_exact, before, after) = remove(file, index, true);
@@ -275,7 +274,6 @@ mod exact_only_tests {
 mod ring_test_tests {
     use super::{geometry, path, Inputs};
     use solidcore::blend::fillet_removal::{delete_fillet_face, FilletRemoval};
-    use solidcore::kernel::Kernel;
     use solidcore::topology::brep::p1 as bp1;
     use solidcore::topology::face::p2 as face2;
 
@@ -287,7 +285,7 @@ mod ring_test_tests {
             file: "Solids/nurb_fillet.smb".into(),
             ..Inputs::default()
         };
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let mut b = crate::own_reader::read_file_rebuild(&mut k, &path(&i).unwrap(), false)
             .unwrap()
             .unwrap();

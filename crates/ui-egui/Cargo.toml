@@ -15,19 +15,21 @@ default = ["usage-stats"]
 usage-stats = ["dep:getrandom", "solidcraft-engine/usage-stats"]
 
 [dependencies]
+craft-plugin = { workspace = true }
 solidcraft-viewport-egui = { workspace = true }
 solidcraft-viewport-gpu = { workspace = true }
 solidcraft-viewport = { workspace = true }
 solidcraft-views = { workspace = true }
 solidcore-record = { workspace = true }
-solidcore-ops = { workspace = true }
-solidcore-tess = { workspace = true }
+solidcraft-kernel = { workspace = true }
 solidcraft-engine = { workspace = true }
 solidcraft-control = { workspace = true }
 solidcraft-control-egui = { workspace = true }
 # The UI kit and its components (ribbon, app bar, history bar, navigation bar, view compass,
 # preferences window, start page, window chrome, theme files), drawn from SolidCraft's data.
 solidcraft-ui-kit = { workspace = true }
+# App-neutral panel placement core.
+solidcraft-panel-layout = { workspace = true }
 # SolidCraft's look, installed into the kit: its icon set, glyphs, interface faces and built-in themes.
 solidcraft-look = { workspace = true }
 # The widget registry (handles, rects, counts) the UI kit publishes into.
@@ -84,17 +86,21 @@ syn = { workspace = true, features = ["visit"] }
 # The catalog guard reads every UI source file as Rust tokens; already in the tree through
 # crates/derive and the workspace lockfile.
 proc-macro2 = { workspace = true }
+# Prints the colour guard's parsed source without its test-only items; already in the tree
+# through syn and crates/derive.
+quote = { workspace = true }
 
 # Pictures pasted into the agent chat; already in the tree, with the same features, through
 # egui-winit's clipboard.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 arboard = { version = "3.6", default-features = false, features = ["image-data"] }
+fontdb = { workspace = true }
 lopdf = { version = "0.45", default-features = false }
+# Waits for wgpu error scopes when a plugin background effect is built.
+pollster = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 wat = "1"
-# The offscreen viewport render test opens a device without a window.
-pollster = { workspace = true }
 
 [build-dependencies]
 serde_json = { workspace = true }

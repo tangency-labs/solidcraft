@@ -14,6 +14,9 @@ Raise sketch text or a logo out of a face, or sink it in: an engraved part numbe
 | Target Face (optional) | The face the profiles go on. Leave it empty to use the face under the sketch. | The outside of a shaft, to wrap a rectangular label area around it. |
 | Depth | How deep the profiles sink in, or how high they stand out. It starts at 1 in the design's unit. | 0.005 in to 0.010 in for engraving. |
 | Type | Emboss raises the profiles out of the face. Deboss sinks them into it. It starts at Emboss. | Deboss for an engraved part number. |
+| Offset X | Moves the profiles along the sketch's X before they go on the face. The sketch itself stays as it is. Empty means no move. On a cylinder it slides them around the wall when the sketch's X runs around it. | 0.5 in to nudge a part number away from a hole. |
+| Offset Y | The same along the sketch's Y. On a cylinder it slides them along the axis when the sketch's Y runs along it. | -0.25 in to drop a label lower on the face. |
+| Angle | Turns the profiles counter-clockwise, as you look at the sketch, about the middle of the box around them. The offsets keep to the sketch's X and Y. Empty means no turn. | 90 deg to run a label up the face instead of across it. |
 
 #### Try it: engrave a part number
 
@@ -29,6 +32,8 @@ Raise sketch text or a logo out of a face, or sink it in: an engraved part numbe
 - **Do** pick a text height and font your engraving tool can cut. Strokes thinner than the tool's tip get lost.
 - **Do** change the Depth from its default. It starts at 1 in the design's unit, far too deep for a marking.
 - **Do** type the unit with the number when the print uses another unit. In a millimetre design, typing 0.010 in enters 0.254 mm.
+- **Do** use Offset X, Offset Y and Angle to put the profiles where you want them on the face, instead of redrawing the sketch. They take a parameter name too, so one sketch can mark several places or follow a dimension.
+- **Don't** move the profiles off the face. With a Target Face picked, the whole of each profile must still lie on it, or the Emboss is refused. On a flat face with no Target Face picked, this isn't checked: a profile moved past the edge is still built, and a raised one hangs past the part.
 
 #### See also
 
