@@ -3870,6 +3870,19 @@ fn placements_of_one_part_moved_together_each_go_the_way_asked() {
     assert!(about(turned.min.x, 0.0) && about(turned.max.x, 30.0) && about(turned.min.y, 100.0) && about(turned.max.y, 120.0), "{turned:?}");
 }
 
+/// A Move of placements only has no body Move to carry or leave constructions with, so it says
+/// so rather than dropping `carry` without a word (#20139 review).
+#[test]
+fn placements_moved_alone_refuse_carry() {
+    let mut s = Session::default();
+    let (a, b) = twice_placed_blade(&mut s);
+    run(&mut s, "construct.axis.two_points", json!({"a": {"point": [0, 0, 0]}, "b": {"point": [0, 0, 10]}, "name": "Pole"}));
+    let document = s.doc.to_json();
+    let error = s.execute("solid.move", &json!({"bodies": [a, b], "translate": [10, 0, 0], "carry": ["Pole"]})).unwrap_err();
+    assert!(error.to_string().contains("`carry` needs a body to move"), "{error}");
+    assert_eq!(s.doc.to_json(), document);
+}
+
 /// The same part inserted from a STEP assembly, where a rigid group holds the placements in the
 /// imported component: the move goes to the placement of the whole import, once.
 #[test]

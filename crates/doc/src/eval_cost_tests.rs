@@ -6684,6 +6684,8 @@ fn parallel_pattern_mirror_fillet_scale_move_and_cut_are_deterministic() {
             angle: None,
             copy: true,
             copy_frames: vec![frame, frame],
+            carry: Vec::new(),
+            leave: Vec::new(),
         },
         None,
     )
