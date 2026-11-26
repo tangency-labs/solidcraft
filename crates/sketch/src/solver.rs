@@ -236,13 +236,19 @@ fn layout(sk: &Sketch, hold: &Hold) -> Layout {
         })
         .collect();
     let points = n;
+    // While a block is open, the radii outside its contents stay as they are, as the points do.
+    let open = sk.open_contents().map(|(_, curves)| curves);
     let rvar = sk
         .curves
         .iter()
         .enumerate()
         .map(|(i, c)| match c.kind {
             CurveKind::Circle { .. } | CurveKind::Ellipse { .. }
-                if c.link.is_none() && !c.fixed && !hold.radii.contains(&i) && !sk.offset_circle_follows_source(i) =>
+                if c.link.is_none()
+                    && !c.fixed
+                    && !hold.radii.contains(&i)
+                    && !sk.offset_circle_follows_source(i)
+                    && open.as_ref().is_none_or(|inside| inside.get(i).copied().unwrap_or(false)) =>
             {
                 n += 1;
                 Some(n - 1)

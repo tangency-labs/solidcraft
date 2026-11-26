@@ -1637,3 +1637,121 @@ fn blocks_are_made_edited_exploded_and_deleted_from_the_ribbon_menu_glyph_and_br
     assert!(sk.curve_index(made["axis"].as_str().unwrap()).is_none(), "and its axis");
     assert_eq!(sk.blocks.len(), 1, "the other block stays");
 }
+
+/// Sketch blocks (#4069): a closed block is selected whole. A click on any of its curves or
+/// points selects all its members; a window takes it when it takes every member and a crossing
+/// box when it touches one. With a constraint tool running, a member's point is picked on its own,
+/// as a reference to geometry outside the block; a constraint wholly inside the block is refused.
+/// Edit Contents opens it from a member's menu, its Browser row's menu and a double-click on a
+/// member; while it is open the Sketch Palette names it and its Close Block button closes it.
+#[test]
+fn a_closed_block_is_selected_whole_and_its_contents_are_edited_from_each_menu() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Blocks"})).unwrap();
+    let sid = h.app.session.active_sketch.unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[20,0],[20,10],[0,10],[0,0]],"ids":["b1","b2","b3","b4"],"infer":false})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[40,0],[40,10]],"ids":["lone"],"infer":false})).unwrap();
+    let block = h.app.run("sketch.block", json!({"curves":["b1","b2","b3","b4"],"name":"Dove"})).unwrap()["block"].as_str().unwrap().to_string();
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.view", json!({"view": "fit"}));
+    h.settle();
+    let members = ["b1", "b2", "b3", "b4"];
+    let picked = |h: &Harness| -> Vec<String> {
+        h.app
+            .session
+            .selection
+            .iter()
+            .filter_map(|s| match s {
+                Sel::SketchCurve { id, .. } => Some(id.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let whole = |h: &Harness| members.iter().all(|m| picked(h).iter().any(|p| p == m)) && h.app.session.selection.len() == members.len();
+
+    // A click on a member curve, or on a member point, selects the whole block.
+    for at in [[5.0, 0.0, 0.0], [20.0, 10.0, 0.0], [10.0, 0.0, 0.0]] {
+        h.app.session.selection.clear();
+        h.step(&json!({"click":{"world":at}})).unwrap();
+        assert!(whole(&h), "a click at {at:?} selects the whole block: {:?}", h.app.session.selection);
+    }
+    h.app.session.selection.clear();
+    h.step(&json!({"click":{"world":[40, 3, 0]}})).unwrap();
+    assert_eq!(picked(&h), ["lone"], "a curve outside the block is picked alone");
+
+    // A window takes the block only with every member inside it; a crossing box takes it whole.
+    h.app.session.selection.clear();
+    h.step(&json!({"drag":[{"world":[-5,-5,0]},{"world":[12,15,0]}]})).unwrap();
+    assert!(!picked(&h).iter().any(|p| members.contains(&p.as_str())), "a window over part of the block takes none of it: {:?}", picked(&h));
+    h.app.session.selection.clear();
+    h.step(&json!({"drag":[{"world":[-5,-5,0]},{"world":[25,15,0]}]})).unwrap();
+    assert!(members.iter().all(|m| picked(&h).iter().any(|p| p == m)), "a window round it takes it: {:?}", picked(&h));
+    h.app.session.selection.clear();
+    h.step(&json!({"drag":[{"world":[15,15,0]},{"world":[5,-5,0]}]})).unwrap();
+    assert!(members.iter().all(|m| picked(&h).iter().any(|p| p == m)), "a crossing box over part of it takes it whole: {:?}", picked(&h));
+    h.app.session.selection.clear();
+
+    // With Coincident running, a member's point is picked on its own: the block's corner goes onto
+    // the line outside it.
+    h.app.start("sketch.constraint.coincident");
+    h.step(&json!({"click":{"world":[20, 10, 0]}})).unwrap();
+    h.step(&json!({"click":{"world":[40, 3, 0]}})).unwrap();
+    {
+        let sk = h.app.session.doc.sketch(sid).unwrap();
+        let corners: Vec<usize> = sk.blocks[0].points.iter().filter_map(|(p, _)| sk.point_index(p)).collect();
+        assert!(
+            sk.constraints.iter().any(|c| c.kind.indices().0.iter().any(|p| corners.contains(p)) && !sk.is_held(&c.id)),
+            "a constraint from a member point to the line outside: {:?} ({:?})",
+            sk.constraints,
+            h.app.status
+        );
+    }
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.app.tool = None;
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.settle();
+    let inside = h.app.run("sketch.constraint.parallel", json!({"a":"b1","b":"b3"})).unwrap_err();
+    assert!(inside.contains("Edit Contents"), "{inside}");
+
+    let open = |h: &Harness| h.app.session.doc.sketch(sid).unwrap().blocks.iter().find(|b| b.id == block).is_some_and(|b| b.is_open());
+    // A member's menu: Edit Contents, then Close Block while it is open.
+    h.app.session.selection = members.iter().map(|id| Sel::SketchCurve { id: (*id).into(), sketch: None }).collect();
+    let menu = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+    let contents = menu.iter().find(|i| i.id == "ui.editContents" && i.enabled).expect("a member's menu offers Edit Contents");
+    crate::context_menu::run_item(&mut h.app, contents, egui::pos2(0.0, 0.0));
+    assert!(open(&h), "{:?}", h.app.status);
+    h.app.session.selection = vec![Sel::SketchCurve { id: "b1".into(), sketch: None }];
+    let menu = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+    assert!(menu.iter().any(|i| i.id == "ui.editBlock" && !i.enabled), "Edit Block waits for the block to close");
+    let close = menu.iter().find(|i| i.id == "ui.closeBlock" && i.enabled).expect("Close Block while it is open");
+    crate::context_menu::run_item(&mut h.app, close, egui::pos2(0.0, 0.0));
+    assert!(!open(&h), "{:?}", h.app.status);
+
+    // The Browser row's menu opens it; the Sketch Palette names it, and its button closes it.
+    let row = crate::context_menu::items(&h.app, &crate::context_menu::Target::SketchBlock { sketch: sid, block: block.clone() });
+    let contents = row.iter().find(|i| i.id == "ui.editContents" && i.enabled).expect("the row's menu offers Edit Contents");
+    crate::context_menu::run_item(&mut h.app, contents, egui::pos2(0.0, 0.0));
+    assert!(open(&h));
+    h.frames(4);
+    assert!(crate::scenario::rect_of("sketch_palette:open_block").is_some_and(|r| r.width() > 0.0), "the palette names the open block");
+    // A double-click on the open block's glyph opens nothing: Edit Block waits for Close Block.
+    if let Some(at) = crate::scenario::handle_at(&format!("sketch:block-glyph:{block}")) {
+        crate::sketch_block_canvas::double_click(&mut h.app, at);
+    }
+    assert!(h.app.dialog.is_none(), "no Edit Block while the block is open");
+    // While it is open, a member is picked on its own.
+    h.app.session.selection.clear();
+    h.step(&json!({"click":{"world":[5, 0, 0]}})).unwrap();
+    assert_eq!(picked(&h), ["b1"], "a member of the open block is picked alone");
+    h.step(&json!({"click":{"handle":"sketch_palette:close_block"}})).unwrap();
+    assert!(!open(&h), "Close Block in the palette closes it: {:?}", h.app.status);
+
+    // A double-click on a member opens it.
+    h.app.session.selection.clear();
+    h.frames(30);
+    h.step(&json!({"click":{"world":[5, 0, 0]},"double":true})).unwrap();
+    assert!(open(&h), "a double-click on a member opens Edit Contents: {:?}", h.app.status);
+    h.app.run("sketch.block_close", json!({})).unwrap();
+}

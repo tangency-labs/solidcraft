@@ -561,7 +561,12 @@ pub(super) fn edit_solved<T>(
             big,
         )
     });
+    // A closed block keeps its shape, and an open one keeps everything outside it still.
+    let guard = super::sketch_block::BlockGuard::new(&sk);
     let (out, left) = f(&mut sk, &mut doc)?;
+    if let Some(guard) = &guard {
+        guard.check(&sk, "")?;
+    }
     // A block the edit left without members goes with its axis (positions kept by index for a
     // drag's reference stay as they are).
     if !matches!(left, Left::MovedFrom(_)) {
@@ -1629,6 +1634,8 @@ fn finish_sketch(s: &mut Session, p: &Value) -> Result<Value> {
 /// the sketch leaves them apart (#15414): one Undo then takes back one change of the sketch,
 /// not the whole session the person had drawn.
 pub(crate) fn finish_model_edit(s: &mut Session, restore: bool, fold: bool) -> Result<Value> {
+    // Leaving the sketch closes the block open in it, in the edit's last step.
+    super::sketch_block::close_on_leaving(s);
     let id = s.active_sketch.take();
     s.sketching_view = None;
     let profiles = id.and_then(|i| s.model.state().sketch(i).map(|ss| ss.profiles.len())).unwrap_or(0);
@@ -1697,6 +1704,7 @@ fn complete_edit_step(step: &mut crate::Snapshot, marker: Option<usize>) {
     use std::sync::Arc;
     let doc = Arc::make_mut(&mut step.doc);
     doc.marker = marker.filter(|m| *m < doc.features.len());
+    super::sketch_block::close_open_blocks(doc);
     step.active_sketch = None;
     step.sketching_view = None;
     step.sketch_restore_marker = None;
@@ -1746,6 +1754,7 @@ fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usiz
         if snap.active_sketch == Some(entry.sketch) {
             let doc = Arc::make_mut(&mut snap.doc);
             doc.marker = marker.filter(|m| *m < doc.features.len());
+            super::sketch_block::close_open_blocks(doc);
             snap.active_sketch = None;
             snap.sketching_view = None;
             snap.sketch_restore_marker = None;
@@ -5180,6 +5189,7 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
                 return Err(bad(cmd, format!("unknown sketch entity `{id}`")));
             }
         }
+        super::sketch_block::refuse_open_axis(sk, &curves, &points, cmd)?;
         // A block whose axis goes is exploded first, while its axis still gives its size.
         let exploding: Vec<String> = sk
             .blocks

@@ -1,7 +1,10 @@
 //! A sketch's blocks are children of their sketch, beside its patterns and projections: one row
 //! per block. A click selects its members while the sketch is edited (Delete then deletes the
-//! block with them), a double-click opens Edit Block, and its menu has Explode Block and Delete
-//! Block.
+//! block with them), a double-click opens Edit Block, and its menu has Edit Contents, Explode
+//! Block and Delete Block. A closed block is taken whole: a click on any of its curves or points
+//! selects all its members, and a box selects all of them or none.
+
+use std::collections::HashSet;
 
 use serde_json::json;
 use solidcraft_engine::Sel;
@@ -140,4 +143,130 @@ pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, sketch: u64, depth: us
         }
         act(app, sketch, occurrence, entry, (response.double, response.clicked, response.secondary));
     }
+}
+
+/// Open block `block` of the sketch being edited to edit its contents in place (Edit Contents).
+/// The constraints it held that no longer hold where it is, and were removed, are named.
+pub(crate) fn edit_contents(app: &mut SolveApp, block: &str) {
+    match app.run("sketch.block_open", json!({"block": block})) {
+        Ok(reply) => {
+            let _ = app.run("select.clear", json!({}));
+            notice(app, block, &reply["dropped"], "ui.block_open_dropped_one", "ui.block_open_dropped_other");
+        }
+        Err(error) => app.set_status(error, true),
+    }
+}
+
+/// Close the block open for editing its contents (Close Block). The curves that could not join
+/// it are named.
+pub(crate) fn close_contents(app: &mut SolveApp, block: &str) {
+    let name = block_label(app, block);
+    match app.run("sketch.block_close", json!({"block": block})) {
+        Ok(reply) => notice_named(app, &name, &reply["left_out"], "ui.block_close_left_out_one", "ui.block_close_left_out_other"),
+        Err(error) => app.set_status(error, true),
+    }
+}
+
+/// Block `block`'s label in the sketch being edited.
+fn block_label(app: &SolveApp, block: &str) -> String {
+    app.session
+        .active_sketch
+        .and_then(|id| app.session.doc.sketch(id).ok())
+        .and_then(|sk| sk.blocks.iter().find(|b| b.id == block).map(label))
+        .unwrap_or_else(|| block.to_string())
+}
+
+/// A status message naming the ids in `ids` (a reply's list), when there are any.
+fn notice(app: &mut SolveApp, block: &str, ids: &serde_json::Value, one: &str, other: &str) {
+    let name = block_label(app, block);
+    notice_named(app, &name, ids, one, other);
+}
+
+fn notice_named(app: &mut SolveApp, name: &str, ids: &serde_json::Value, one: &str, other: &str) {
+    let ids: Vec<&str> = ids.as_array().into_iter().flatten().filter_map(serde_json::Value::as_str).collect();
+    if ids.is_empty() {
+        return;
+    }
+    let text = solidcraft_ui_text::format(
+        if ids.len() == 1 { one } else { other },
+        &[("name", name), ("count", &ids.len().to_string()), ("ids", &ids.join(", "))],
+    );
+    app.set_status(text, false);
+}
+
+/// The closed block of the sketch being edited that the picked curve or point `sel` belongs to.
+fn closed_block_of<'a>(sk: &'a solidcraft_engine::sketch::Sketch, sel: &Sel) -> Option<&'a solidcraft_engine::sketch::SketchBlock> {
+    match sel {
+        Sel::SketchCurve { id, sketch: None } | Sel::SketchPoint { id } | Sel::SketchMidpoint { id } => sk.closed_block_with(id),
+        _ => None,
+    }
+}
+
+/// The member curves of `block`, as a selection.
+fn member_sels(block: &solidcraft_engine::sketch::SketchBlock) -> impl Iterator<Item = Sel> + '_ {
+    block.curves.iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None })
+}
+
+/// `items` (what a click picks) with each curve or point of a closed block of the sketch being
+/// edited put in place of all the block's members: a click takes a block whole, never one of its
+/// members. A block open for editing its contents is not taken whole.
+pub(crate) fn whole_blocks(session: &solidcraft_engine::Session, items: Vec<Sel>) -> Vec<Sel> {
+    let Some(sk) = session.active_sketch.and_then(|id| session.doc.sketch(id).ok()) else { return items };
+    if sk.blocks.iter().all(|b| b.is_open()) {
+        return items;
+    }
+    let mut taken = HashSet::new();
+    let mut out = Vec::with_capacity(items.len());
+    for sel in items {
+        match closed_block_of(sk, &sel) {
+            Some(block) => {
+                if taken.insert(block.id.as_str()) {
+                    out.extend(member_sels(block));
+                }
+            }
+            None => out.push(sel),
+        }
+    }
+    out
+}
+
+/// What a box over the sketch being edited takes (`items`), with the closed blocks taken whole or
+/// not at all: a window or a lasso (`crossing` false) takes a block when it takes every one of
+/// its shown curves, a crossing box when it takes any of its curves or points.
+pub(crate) fn box_blocks(session: &solidcraft_engine::Session, items: Vec<Sel>, crossing: bool) -> Vec<Sel> {
+    let Some(sk) = session.active_sketch.and_then(|id| session.doc.sketch(id).ok()) else { return items };
+    if sk.blocks.iter().all(|b| b.is_open()) {
+        return items;
+    }
+    let curves: HashSet<&str> = items
+        .iter()
+        .filter_map(|s| match s {
+            Sel::SketchCurve { id, sketch: None } => Some(id.as_str()),
+            _ => None,
+        })
+        .collect();
+    let mut touched: HashSet<&str> = HashSet::new();
+    let mut out: Vec<Sel> = Vec::with_capacity(items.len());
+    for sel in &items {
+        match closed_block_of(sk, sel) {
+            Some(block) => {
+                touched.insert(block.id.as_str());
+            }
+            None => out.push(sel.clone()),
+        }
+    }
+    let index: std::collections::HashMap<&str, usize> = sk.curves.iter().enumerate().map(|(i, c)| (c.id.as_str(), i)).collect();
+    for block in sk.blocks.iter().filter(|b| touched.contains(b.id.as_str())) {
+        let shown = |id: &String| index.get(id.as_str()).is_some_and(|i| solidcraft_engine::view::sketch_curve_visible(sk, *i));
+        if crossing || block.curves.iter().filter(|id| shown(id)).all(|id| curves.contains(id.as_str())) {
+            out.extend(member_sels(block));
+        }
+    }
+    out
+}
+
+/// The label of the block open in the sketch being edited, and its id.
+pub(crate) fn open_block(app: &SolveApp) -> Option<(String, String)> {
+    let sk = app.session.active_sketch.and_then(|id| app.session.doc.sketch(id).ok())?;
+    sk.open_block_now().map(|b| (label(b), b.id.clone()))
 }

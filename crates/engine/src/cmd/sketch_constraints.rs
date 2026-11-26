@@ -224,8 +224,17 @@ fn run_auto(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, p: &Value, datu
     // A block keeps its shape: a relation among its members, or with its axis, would only lock
     // its pose.
     let blocks = sk.block_members_now(true);
+    // A block open for editing its contents: only relations among its contents, which hold it
+    // in shape once it closes; everything else stays where it is while it is open.
+    let open = sk.open_contents();
+    let outside_open = |k: &ConstraintKind| {
+        open.as_ref().is_some_and(|(points, curves)| {
+            let (ps, cs) = k.indices();
+            !(ps.iter().all(|p| points.get(*p).copied().unwrap_or(false)) && cs.iter().all(|c| curves.get(*c).copied().unwrap_or(false)))
+        })
+    };
     let mut attempt = |sk: &mut Sketch, doc: &mut solidcraft_doc::Document, k: ConstraintKind, dim: bool, dof: &mut usize| {
-        if *dof == 0 || trials >= MAX_TRIALS || blocks.hold(&k) {
+        if *dof == 0 || trials >= MAX_TRIALS || blocks.hold(&k) || outside_open(&k) {
             return;
         }
         trials += 1;
@@ -339,6 +348,7 @@ fn auto_constrain_datum(s: &mut Session, p: &Value) -> Result<Value> {
 }
 fn auto_constrain_finish(s: &mut Session, p: &Value) -> Result<Value> {
     let r = auto(s, p, "sketch.finish_auto_constrain")?;
+    super::sketch_block::close_on_leaving(s);
     s.active_sketch = None;
     s.sketching_view = None;
     s.revision += 1;

@@ -28,6 +28,11 @@ constraints: one coincident and one parallel.
 come back where they still hold. A turned or resized block can leave some that don't: those are
 removed, and Explode reports them.
 
+**Edit Contents** opens a block to change its curves in place without exploding it, and **Close
+Block** keeps the new shape in the same block (see "Editing a block in place"). Outside Edit
+Contents a block is picked whole: a click on any of its curves selects the block, never one curve
+of it.
+
 ## Name
 
 "Group" is taken twice already:
@@ -150,7 +155,8 @@ Without this, every coincident, horizontal or dimension inside an imported or ha
 profile would turn redundant the moment the block exists, and the sketch would fill with
 redundancy marks.
 
-Held constraints are drawn faded and can't be edited until the block is exploded.
+Held constraints are drawn faded, can't be selected and can't be edited until the block is
+opened with Edit Contents or exploded.
 
 There is one exception. In **Free** scale, a driving length dimension between members is
 allowed after Make Block. It sets the size and takes the fourth freedom, which is the "a separate
@@ -159,6 +165,13 @@ over-constraint check (`crates/engine/src/cmd/sketch.rs:3272-3296`), because it 
 its residual is not zero.
 
 Constraints between a member and outside geometry stay driving: they are what places the block.
+
+Any other constraint wholly inside a closed block is refused, whichever command adds it (or makes
+a driven dimension driving): "`k12` would lie wholly inside block Dovetail, which keeps its shape:
+open the block with Edit Contents to change its shape". The check is one place, after the edit in
+`edit_solved` (`cmd/sketch_block.rs`, `refuse_inside_closed`), and looks only at the constraints
+the edit added or made driving. A Fix, a driven (reference) dimension and a free block's length
+dimension are not refused.
 
 ### Over-constraint and the refusals that come for free
 
@@ -270,9 +283,11 @@ These are ordinary engine commands with I/O schemas, so MCP, scripting and undo 
 | `sketch.block` | `sketch`, `curves: [id]` (or from the selection), `scale?: "fixed" \| "free"` (default fixed), `origin?: point id`, `name?` | `block` id, `axis` line id, `origin` point id, `held: [constraint id]`, `dof` |
 | `sketch.explode_block` | `sketch`, `block` | `curves`, `restored: [constraint id]` |
 | `sketch.block_edit` | `sketch`, `block`, `scale?`, `name?`, `add?: [curve id]`, `remove?: [curve id]` | as `sketch.block` |
+| `sketch.block_open` ("Edit Contents") | `sketch`, `block` | `block`, `restored`, `dropped`, `closed?` (the block that was open before) |
+| `sketch.block_close` ("Close Block") | `sketch`, `block?` (default the open one) | `block`, `held`, `added`, `left_out?`, `removed?`, `dof` |
 
 `sketch.block_edit` re-captures (u, v) from the current shape. In the UI it is reached by
-**Edit Block** after Explode or after any change to the members.
+**Edit Block**; it is refused while the block is open.
 
 How each existing command treats a block member:
 
@@ -280,11 +295,13 @@ How each existing command treats a block member:
   - Deleting a member removes it from the block.
   - Deleting the axis line, or giving the block's id, explodes the block first.
   - Deleting the last member deletes the block and its axis.
-- **Trim, Extend, Break, Fillet, Chamfer, Offset** refuse a member. They go through `curve_by_id`
-  (`sketch_modify.rs:206-229`), which already refuses links and offset outputs. The new message
-  is: "`l12` is part of block Dovetail: explode it, edit, then make the block again."
+- **Trim, Extend, Break, Fillet, Chamfer, Offset** refuse a member of a closed block. They go
+  through `curve_by_id` (`sketch_modify.rs:206-229`), which already refuses links and offset
+  outputs. The message is: "`l12` is part of block Dovetail, which keeps its shape: open it with
+  Edit Contents to change it." While the block is open they take its members.
 - **Move/Copy, Transform, Scale** (`sketch_modify.rs:4836`, `:5130`):
   - Picking any member moves the whole block once, the way text does (`sketch_modify.rs:4904-4917`).
+    A member of the open block moves on its own.
   - The move goes to O and X, and the solve carries the members.
   - Scale on a Fixed block changes L0. That is the only way to resize a rigid block, and it is
     undoable.
@@ -296,6 +313,125 @@ How each existing command treats a block member:
   would pin its position.
 - **Pattern** of a whole block: phase 5. Until then, a pattern refuses members ("patterns of
   blocks are not supported yet").
+
+## Editing a block in place (Edit Contents)
+
+A block can be opened to change its curves without exploding it. Opening and closing are commands
+of their own (`sketch.block_open`, `sketch.block_close`), so each is one undo step, and every edit
+made while the block is open is its own step.
+
+### Opening
+
+`Sketch::open_block` (`crates/sketch/src/block.rs`):
+
+- **Held constraints drive again** where they hold: a free block's plain dimensions are first scaled
+  to its size. A held direction of a member line in the sketch (Horizontal, Vertical, a line angle
+  with a plain value) that no longer holds because the block turned becomes the same direction
+  relative to the axis, as the line lies now: Parallel or Perpendicular to the axis, or an angle to
+  it. It keeps its id, and is held in that form when the block closes. The others that no longer
+  hold (a resized block's parameter-driven dimensions, a turned block's distances along X or Y) are
+  removed and reported as `dropped`; the UI says so in the status line. The block keeps no `held`
+  list while it is open.
+- **The frame leaves the solve.** `frame_rows` skips an open block, so its members move freely.
+- **Everything outside stays still.** `Sketch::open_contents` says which points and curves are the
+  block's contents: its members, its own points, and every curve and point made since it opened.
+  `locked_points` locks every other point, the axis ends included, and the solver's layout keeps
+  every other radius, so a constraint from outside onto the axis or a member cannot move the block,
+  and an edit inside it cannot move anything outside it. A point shared by a member and an outside
+  curve is locked too: an ellipse member whose axis lines (which share its centre and major point)
+  are not members cannot move while the block is open, nor a member line joined end to end with an
+  outside one at a shared point.
+- **Nothing outside changes either.** Every sketch edit runs through one guard
+  (`sketch_block::BlockGuard`, in `edit_solved` and in a sheet sketch's `edit_sheet`). While a block
+  is open it refuses an edit that changes, moves, removes or puts in a block any curve or point
+  outside the contents, the axis included, or that adds, changes or removes a constraint naming
+  nothing inside the block or naming its axis (`Sketch::outside_change`): "`l6` is outside block
+  Dovetail, which is open for editing its contents: close the block first". Deleting the axis is
+  refused the same way. Commands that only read outside geometry as a reference are taken: a
+  dimension or a coincident from a member onto outside geometry, a mirror of members across an
+  outside line, a copy of an outside curve (the copy is new, and joins the block).
+- **What it remembers** (`SketchBlock::open: BlockOpen`): the constraints wholly inside it that
+  drove when it opened (`driving`, a free block's size), the curves and points outside it
+  (`outside`, `points`), and its own points (`own`).
+- **One block is open at a time.** Opening another one closes the open one first.
+
+While a block is open every sketch tool works on its members: trim, fillet, dimensions, dragging a
+single point, new curves, deleting members. `block_refusal` and the held-constraint refusals pass
+an open block, Move/Copy moves its members on their own, AutoConstrain adds only relations among
+its contents, and an open block that loses every member stays until it closes.
+
+### Closing
+
+`Sketch::close_block` captures the new shape into the same block:
+
+- **Members:** the members still there, then every curve not in `outside` (and not the axis), in
+  sketch order. A curve that can't be a member (text, a projection, an offset output, pattern
+  geometry) stays in the sketch outside the block and is reported as `left_out`, and the UI says so;
+  the curves of a block made while it was open stay that block's and are not reported. Splines
+  bring their guide lines. A point on no curve made while it was open joins as a member on its own
+  (`SketchBlock::loose`). A block left with no curve goes with its axis.
+- **The frame:** (u, v) and radii are captured from where the curves are now, relative to the axis,
+  which did not move. A fixed block's L0 stays the axis length.
+- **Held again:** every constraint wholly inside the block, except those in `driving`. Inside means
+  every point and curve it names is a member, a member's point or the axis, and one of them a
+  member: a relation between a member and the axis is held too, while one on the axis alone (a
+  placing horizontal) is not.
+- **Outside constraints** onto the axis or member points are left as they are; they held while the
+  block was open, so the closed block is placed as before.
+
+### Open state: saved, and closed on leaving
+
+The open state lives in the sketch (`SketchBlock::open`), so undo and redo restore it with the rest
+of the design, and it is saved with the design when the design is saved while the sketch is edited.
+That keeps every file consistent: an open block holds nothing and its contents are where they were
+drawn. It never outlives the sketch's edit:
+
+- **Leaving the sketch** closes it. The one place that makes sure, whatever ended the edit (Finish,
+  Finish with AutoConstrain, a sheet sketch's Finish, an undo or a redo that left the sketch), is
+  `Session::execute`: after every outermost command, `sketch_block::close_unedited` closes the
+  blocks open in any model or drawing sketch not being edited, in that command's step.
+  `finish_model_edit` also closes the block first, so a folded edit's step holds the closed block,
+  and the history steps a finished edit leaves (`complete_edit_step`, and the redo steps of
+  `finish_edit_history`) are closed too.
+- **Opening a design** closes it (`format.rs` `decode`, beside the other load-time repairs), in the
+  model's sketches and in drawings' sketches: no sketch is edited in a design just opened. There it
+  closes with the members the file lists (`close_open_blocks_as_saved`), so stale or hostile `open`
+  data cannot pull other curves into the block.
+
+A session-only state was the alternative. It would need a capture on every save, autosave and crash
+report; a design written without it would reopen with its open block's old shape and empty `held`
+list, and lose the edits. The last release ignores blocks entirely and makes every held constraint
+drive, which is what an open block already does, so saving the state costs older releases nothing.
+
+### Members are locked outside Edit Contents
+
+- **Picking:** a click on a member curve or a member point of a closed block selects all its
+  members, as the glyph and the Browser row do (`sketch_block_tree::whole_blocks`, applied in
+  `viewport::select`, which also serves Select Other). Dragging a member moves the whole block, as
+  the solver's frame rows always did.
+- **References:** a running tool (Coincident, Dimension, a drawing tool) and a dialog's inputs pick
+  a member's point or curve on its own, as a reference to geometry outside the block. A constraint
+  made that way wholly inside the block, or between a member and the block's axis, is refused (see
+  "Constraints inside a block").
+- **Copy and Paste** of an open block's curves paste a block that holds what the open block will
+  hold when it closes.
+- **Box selection:** a closed block is taken whole or not at all. A window or a lasso takes it when
+  it takes every one of its shown curves; a crossing box takes it when it touches any of its curves
+  or points (`sketch_block_tree::box_blocks`). An open block's curves are boxed one by one.
+- **Held constraints and dimensions** can't be picked, boxed or edited in place outside Edit
+  Contents; a double-click on a held dimension says which block holds it.
+
+### UI
+
+- **Edit Contents** sits in the block's menus (a member's right-click, the glyph's and the Browser
+  row's), and a double-click on a member of a closed block opens it. A double-click on the glyph or
+  the row opens Edit Block on a closed block and nothing on an open one. While the block is open
+  the item is **Close Block**, and Edit Block is off.
+- `sketch.inspect` reports a point as `fixed` only when it is fixed in the sketch, not when an open
+  block holds it still.
+- **While open:** the Sketch Palette starts with "Editing block *name*" and a **Close Block**
+  button; the block's contents are drawn in the block colour and the rest of the sketch in the
+  colour of a sketch not being edited.
 
 ## Insert as block (#22102)
 
@@ -330,14 +466,16 @@ How each existing command treats a block member:
 - **Ribbon:** Make Block in `SKETCH › CONSTRAIN` (`crates/ui-egui/src/workspace.rs:750-764`) and
   Modify, with a `c_block` icon (an original master in `crates/look/icons/design/svg/model/`, with
   an attribution row).
-- **Right-click on a member:** Explode Block, Edit Block, and Select Block (selects every member).
+- **Right-click on a member:** Edit Block, Edit Contents (Close Block while open), Select Block
+  (selects every member) and Explode Block.
   They sit in `sketch_entity_items` (`context_menu.rs:1805`) beside Edit Sketch Pattern and
   Explode Text. Two or more curves in no block offer Make Block instead, just before Merge Lines.
 - **Browser:** each block is a row under its sketch, the way patterns and projections are listed
   (`sketch_pattern_tree.rs`, `sketch_link_tree.rs`, hooked in at `browser.rs:3035`).
   - Click selects the members.
   - Double-click opens Edit Block.
-  - Right-click opens the block's menu: Edit Block, Select Block, Explode Block and Delete Block.
+  - Right-click opens the block's menu: Edit Block, Edit Contents, Select Block, Explode Block and
+    Delete Block.
   - Delete after a click deletes the block with its members and its axis, as Delete Block does,
     in one undoable step. Explode Block is only the menu item.
 - **Canvas:**
@@ -351,7 +489,8 @@ How each existing command treats a block member:
   - Members and the axis drawn in the block colour (theme token `sketch_block`) while they are not
     fully constrained; once fully constrained they take the fully constrained colour like any
     other geometry. A light outline shows while the pointer is over a member or the glyph.
-  - Held constraints faded.
+  - Held constraints faded, and not picked.
+  - A click on a member selects the whole block; a double-click opens Edit Contents.
 - **Strings:** new keys in `assets/locales/pending/sketch-blocks.json` (the required locales) and a
   glossary entry for *block*.
 
@@ -360,7 +499,8 @@ How each existing command treats a block member:
 `crates/doc/src/format/pending/sketch-blocks.rs` holds a `//!` note only, with no `step`. It
 records what each side of the change sees:
 
-- **What is saved:** `blocks` on the sketch, plus one construction line per block.
+- **What is saved:** `blocks` on the sketch, plus one construction line per block, and `open` on
+  a block saved while it was open for Edit Contents (closed again when the design opens).
 - **Older designs:** they have no blocks, so nothing changes for them.
 - **The last release opening a new design:** it keeps `blocks` and writes it back, but doesn't
   solve it. There every held constraint drives. A block that was turned or resized conflicts with
@@ -378,6 +518,8 @@ records what each side of the change sees:
 | A 300-point block solves within the existing budget | `crates/engine/src/cmd/sketch_perf_tests.rs` |
 | Hostile params (empty lists, unknown ids, an axis as a member, NaN origin) never panic | the existing `hostile_params_never_panic` coverage |
 | Seed: frame ties, rigid pair cluster | `crates/sketch/src/construct_tests.rs`, `decompose_tests.rs` |
+| Edit Contents: open, edit, close; curves joining and leaving; a free block; undo and redo; leaving the sketch and opening a design with a block open; refusals | `crates/sketch/src/tests.rs`, `crates/engine/src/cmd/sketch_constraints_tests.rs` |
+| A block picked whole by a click and a box; member points picked by a constraint tool; Edit Contents from each menu, a double-click and the palette's Close Block | `crates/ui-egui/src/sketch_modify_ui_tests.rs` |
 
 ## Phases (one PR each, one topic each)
 
@@ -392,10 +534,11 @@ records what each side of the change sees:
 4. **Exact seeding** and the large-block performance budget.
    - **4b.** Members nothing else reads are left out of the solve, so a block of any size solves
      and drags without being fixed.
+   - **4c.** Editing a block in place (Edit Contents and Close Block), and members locked outside
+     it (see "Editing a block in place").
 5. **Later:**
    - one block per DXF `BLOCK`
    - patterns of blocks
-   - editing a block in place without exploding it
    - shared definitions with linked instances, if wanted, as a separate proposal
 
 ## Decisions

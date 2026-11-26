@@ -728,6 +728,16 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
     let Some(d) = id.and_then(|id| DRAWN.with(|d| d.borrow().iter().find(|x| x.id == id).cloned())) else {
         return false;
     };
+    // A dimension a closed block holds changes only with Edit Contents.
+    let holder = app
+        .session
+        .active_sketch
+        .and_then(|s| app.session.doc.sketch(s).ok())
+        .and_then(|sk| sk.blocks.iter().find(|b| b.held.contains(&d.id)).map(crate::sketch_block_tree::label));
+    if let Some(name) = holder {
+        app.set_status(solidcraft_ui_text::format("ui.block_held_dimension", &[("name", &name)]), false);
+        return true;
+    }
     let (param, expr, driven) = match d.param {
         Some(param) => {
             let expr = app.session.doc.param(&param).map(|p| p.expr.clone()).unwrap_or_default();

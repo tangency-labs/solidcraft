@@ -444,6 +444,9 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut slice_changed = false;
     let mut tie = false;
     let mut start = None;
+    // A block open for editing its contents: its name, and Close Block.
+    let open_block = crate::sketch_block_tree::open_block(app);
+    let mut close_block = false;
     let feature = active_feature(app);
     // The Canvas and Decal tools' mode (#18405): whether the image they place on this sketch's
     // plane gets a construction rectangle in it to follow. A tool's mode, so it is here and not
@@ -471,6 +474,16 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     };
     let draw_body = |ui: &mut egui::Ui| {
         let t = Tokens::get();
+        if let Some((name, _)) = &open_block {
+            let text = solidcraft_ui_text::format("ui.block_open_banner", &[("name", name)]);
+            let banner = ui.label(egui::RichText::new(text).strong().color(t.sketch_block)).backing_on_hover_text(app.tr("ui.block_open_tip"));
+            crate::scenario::publish_rect("sketch_palette:open_block", banner.rect);
+            let button = crate::ui_kit::button(ui, app.tr_command("sketch.block_close", "Close Block"), crate::ui_kit::Button::Primary);
+            crate::panel_runtime::register_content_focus(ui.ctx(), &button);
+            crate::scenario::publish_handle("sketch_palette:close_block", button.rect.center());
+            close_block = button.clicked();
+            ui.separator();
+        }
         let status_label = crate::ui_kit::text(ui, &status, crate::ui_kit::Text::Report("sketch_constraints", !solved));
         let meter = crate::ui_kit::progress(ui, "sketch_palette", fraction);
         crate::scenario::publish_target("sketch_palette:status_header", status_label.rect.union(meter.rect).intersect(ui.clip_rect()));
@@ -646,6 +659,9 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if tie && let Err(error) = app.run("sketch.loose_ends.tie", json!({})) {
         app.set_status(error, true);
+    }
+    if close_block && let Some((_, block)) = &open_block {
+        crate::sketch_block_tree::close_contents(app, block);
     }
     if look {
         if app.universal_panel_host_enabled() {

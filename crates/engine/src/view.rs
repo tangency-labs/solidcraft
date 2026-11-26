@@ -693,15 +693,23 @@ fn sketch_lines_in(
     let mut out = Vec::new();
     let in_block: std::collections::HashSet<&str> =
         sk.blocks.iter().flat_map(|b| b.curves.iter().chain(std::iter::once(&b.axis))).map(String::as_str).collect();
+    // While a block is open for editing its contents, they take the block's colour and the rest
+    // of the sketch the colour of a sketch not being edited.
+    let open = if active { sk.open_contents().map(|(_, curves)| curves) } else { None };
     for (i, c) in sk.curves.iter().enumerate() {
         if !sketch_curve_visible(sk, i) {
             continue;
         }
         let determined_now = determined.get(i).copied().unwrap_or(false);
+        let opened = open.as_ref().map(|inside| inside.get(i).copied().unwrap_or(false));
         let col = if c.link.is_some() && !sk.is_text_curve(i) {
             if sk.is_lost_curve(i) { p.sketch_lost } else { p.sketch_projected }
         } else if c.fixed {
             p.sketch_locked
+        } else if opened == Some(true) {
+            p.sketch_block
+        } else if opened == Some(false) {
+            p.sketch_done
         } else if active && !determined_now && in_block.contains(c.id.as_str()) {
             p.sketch_block
         } else if c.centerline {

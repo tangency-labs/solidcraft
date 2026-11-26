@@ -1,6 +1,9 @@
 use serde_json::{Value, json};
 
-use super::{BlockEditParams, BlockParams, BlockResult, ExplodeBlockParams, ExplodeBlockResult};
+use super::{
+    BlockCloseParams, BlockCloseResult, BlockEditParams, BlockOpenParams, BlockOpenResult, BlockParams, BlockResult, ExplodeBlockParams,
+    ExplodeBlockResult,
+};
 use crate::Session;
 use crate::schema::tests::{assert_keys, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
@@ -21,6 +24,8 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<BlockParams>(), &["curves", "name", "origin", "scale", "sketch"]);
     assert_keys(input_schema_for::<ExplodeBlockParams>(), &["block", "sketch"]);
     assert_keys(input_schema_for::<BlockEditParams>(), &["add", "block", "name", "remove", "scale", "sketch"]);
+    assert_keys(input_schema_for::<BlockOpenParams>(), &["block", "sketch"]);
+    assert_keys(input_schema_for::<BlockCloseParams>(), &["block", "sketch"]);
 }
 
 /// A call that fails today gets the same message in strict.
@@ -40,6 +45,12 @@ fn strict_keeps_todays_errors() {
         ("sketch.block_edit", json!({"block": "blk9"})),
         ("sketch.block_edit", json!({"block": "blk9", "scale": "big"})),
         ("sketch.block_edit", json!({"block": "blk9", "add": 3})),
+        ("sketch.block_open", json!({"block": "blk9"})),
+        ("sketch.block_open", json!({"block": 9})),
+        ("sketch.block_open", json!({})),
+        ("sketch.block_close", json!({})),
+        ("sketch.block_close", json!({"block": "blk9"})),
+        ("sketch.block_close", json!({"block": 9})),
     ] {
         let error = |level: ParamCheck| {
             let mut s = Session { param_check: level, ..Session::default() };
@@ -67,6 +78,10 @@ fn block_commands_reply_with_their_schemas() {
     matches(output_schema_for::<BlockResult>(), &made, false);
     let edited = run(&mut s, "sketch.block_edit", json!({"block": made["block"], "scale": "fixed", "remove": ["c1"]}));
     matches(output_schema_for::<BlockResult>(), &edited, false);
+    let opened = run(&mut s, "sketch.block_open", json!({"block": made["block"]}));
+    matches(output_schema_for::<BlockOpenResult>(), &opened, false);
+    let closed = run(&mut s, "sketch.block_close", json!({}));
+    matches(output_schema_for::<BlockCloseResult>(), &closed, false);
     let exploded = run(&mut s, "sketch.explode_block", json!({"block": made["block"]}));
     matches(output_schema_for::<ExplodeBlockResult>(), &exploded, false);
     let again = run(&mut s, "sketch.block", json!({"curves": "c1", "sketch": "Profile", "colour": "red"}));

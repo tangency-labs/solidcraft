@@ -1792,8 +1792,22 @@ impl Sketch {
             || self.curves.iter().any(|c| c.fixed && c.kind.uses(i))
     }
 
-    /// [`Sketch::point_locked`] for every point at once: the points every solve keeps as they are.
+    /// The points every solve keeps as they are: [`Sketch::fixed_points`], and while a block is
+    /// open for editing its contents, every point outside it.
     pub fn locked_points(&self) -> Vec<bool> {
+        let mut out = self.fixed_points();
+        // While a block is open, everything outside its contents stays where it is.
+        if let Some((free, _)) = self.open_contents() {
+            for (o, f) in out.iter_mut().zip(free) {
+                *o |= !f;
+            }
+        }
+        out
+    }
+
+    /// [`Sketch::point_locked`] for every point at once: fixed, fixed by a constraint, a point of
+    /// a fixed curve, or linked.
+    pub fn fixed_points(&self) -> Vec<bool> {
         let mut out: Vec<bool> = self.points.iter().map(|p| p.fixed || p.link.is_some()).collect();
         let mut set = |i: usize| {
             if let Some(x) = out.get_mut(i) {
@@ -2048,16 +2062,20 @@ impl Sketch {
             }
         }
         let locked = self.locked_points();
+        let open = self.open_contents().map(|(_, curves)| curves);
         let free = |v: usize| {
             if seed.get(v).copied().unwrap_or(true) {
                 return false;
             }
             match v.checked_sub(n) {
                 None => !locked.get(v).copied().unwrap_or(true),
-                Some(c) => self
-                    .curves
-                    .get(c)
-                    .is_some_and(|x| matches!(x.kind, CurveKind::Circle { .. } | CurveKind::Ellipse { .. }) && x.link.is_none() && !x.fixed),
+                Some(c) => {
+                    open.as_ref().is_none_or(|inside| inside.get(c).copied().unwrap_or(false))
+                        && self
+                            .curves
+                            .get(c)
+                            .is_some_and(|x| matches!(x.kind, CurveKind::Circle { .. } | CurveKind::Ellipse { .. }) && x.link.is_none() && !x.fixed)
+                }
             }
         };
         let curve_nodes = |c: usize| {

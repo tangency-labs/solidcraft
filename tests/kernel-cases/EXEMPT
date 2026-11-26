@@ -422,7 +422,9 @@ sketch.arc.tangent                2D sketch only (the sketch solver and engine t
 sketch.auto_constrain             2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.auto_constrain_from_datum  2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.block                      2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.block_close                2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.block_edit                 2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.block_open                 2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.break                      2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.break_link                 2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.cancel                     2D sketch only (the sketch solver and engine tests); no kernel operation

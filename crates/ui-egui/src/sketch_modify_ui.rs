@@ -527,6 +527,10 @@ pub fn edit_block(app: &mut SolveApp, id: &str) -> bool {
     let Some(sid) = app.session.active_sketch else { return false };
     let state = crate::open_meshing::session_world(&app.session);
     let Some(block) = state.sketch(sid).and_then(|s| s.sketch.blocks.iter().find(|b| b.id == id)) else { return false };
+    // An open block is changed in place; Edit Block waits for Close Block.
+    if block.is_open() {
+        return true;
+    }
     let kind =
         Mod::Block { name: block.name.clone().unwrap_or_default(), free: block.scale == solidcraft_engine::sketch::BlockScale::Free, editing: true };
     let members = block.curves.iter().map(|c| Sel::SketchCurve { id: c.clone(), sketch: None }).collect();

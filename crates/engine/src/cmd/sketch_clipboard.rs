@@ -291,6 +291,8 @@ fn clip_of(doc: &Document, sk: &Sketch, id: u64, ids: &[String], whole: bool, cm
             whole_blocks.push((b, ClipBlock { curves, axis, scale: b.scale, name: b.name.clone(), held: Vec::new() }));
         }
     }
+    // What each block copied whole holds, an open block's as it will when it closes.
+    let holds: BTreeMap<&str, Vec<String>> = whole_blocks.iter().map(|(b, _)| (b.id.as_str(), sk.would_hold(b))).collect();
     // Where each copied constraint went in the clipboard, by its id.
     let mut copied: BTreeMap<&str, usize> = BTreeMap::new();
     for c in &sk.constraints {
@@ -304,7 +306,7 @@ fn clip_of(doc: &Document, sk: &Sketch, id: u64, ids: &[String], whole: bool, cm
         // comes only where it holds, as Explode Block keeps it.
         let mut kind = match sk.held_kind_now(&c.id) {
             Some(kind) => {
-                let in_whole = whole_blocks.iter().any(|(b, _)| b.held.contains(&c.id));
+                let in_whole = whole_blocks.iter().any(|(b, _)| holds.get(b.id.as_str()).is_some_and(|h| h.contains(&c.id)));
                 if !in_whole && solidcraft_sketch::kind_residual(sk, &kind) > solidcraft_sketch::CONSISTENT {
                     continue;
                 }
@@ -329,7 +331,7 @@ fn clip_of(doc: &Document, sk: &Sketch, id: u64, ids: &[String], whole: bool, cm
         clip.constraints.push(ClipConstraint { kind, param, driven: c.driven, text: c.text });
     }
     for (b, mut block) in whole_blocks {
-        block.held = b.held.iter().filter_map(|h| copied.get(h.as_str()).copied()).collect();
+        block.held = holds.get(b.id.as_str()).into_iter().flatten().filter_map(|h| copied.get(h.as_str()).copied()).collect();
         clip.blocks.push(block);
     }
     for t in &texts {

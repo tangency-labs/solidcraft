@@ -492,7 +492,8 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
             }
         })
         .collect();
-    let locked = sk.locked_points();
+    // Fixed in the sketch, not what a block open for editing its contents holds still.
+    let locked = sk.fixed_points();
     let points: Vec<SketchPoint> = sk
         .points
         .iter()

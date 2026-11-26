@@ -4467,10 +4467,12 @@ fn entities(sk: &Sketch, p: &Value, cmd: &str) -> Result<(Vec<usize>, Vec<usize>
     Ok((cs, ps))
 }
 
-/// `cs` with every curve of each block a curve of `cs` or a point of `ps` belongs to: its
-/// members, and its axis with `axes`. Returns those blocks' ids.
+/// `cs` with every curve of each closed block a curve of `cs` or a point of `ps` belongs to: its
+/// members, and its axis with `axes`. Returns those blocks' ids. The curves of a block open for
+/// editing its contents move on their own.
 fn with_blocks(sk: &Sketch, cs: &mut Vec<usize>, ps: &[usize], axes: bool) -> Vec<String> {
-    let blocks = sk.blocks_touching(cs, ps);
+    let mut blocks = sk.blocks_touching(cs, ps);
+    blocks.retain(|id| sk.blocks.iter().any(|b| b.id == *id && !b.is_open()));
     for c in sk.block_curves(&blocks, axes) {
         if !cs.contains(&c) {
             cs.push(c);
@@ -4479,11 +4481,15 @@ fn with_blocks(sk: &Sketch, cs: &mut Vec<usize>, ps: &[usize], axes: bool) -> Ve
     blocks
 }
 
-/// The blocks all of whose members are among the curves `cs`, with their axes taken out of `cs`:
-/// their copies get axes of their own.
+/// The closed blocks all of whose members are among the curves `cs`, with their axes taken out
+/// of `cs`: their copies get axes of their own.
 fn whole_blocks(sk: &Sketch, cs: &mut Vec<usize>) -> Vec<String> {
-    let whole: Vec<String> =
-        sk.blocks.iter().filter(|b| b.curves.iter().all(|c| sk.curve_index(c).is_some_and(|i| cs.contains(&i)))).map(|b| b.id.clone()).collect();
+    let whole: Vec<String> = sk
+        .blocks
+        .iter()
+        .filter(|b| !b.is_open() && b.curves.iter().all(|c| sk.curve_index(c).is_some_and(|i| cs.contains(&i))))
+        .map(|b| b.id.clone())
+        .collect();
     let axes: Vec<usize> = sk.blocks.iter().filter(|b| whole.contains(&b.id)).filter_map(|b| sk.curve_index(&b.axis)).collect();
     cs.retain(|c| !axes.contains(c));
     whole

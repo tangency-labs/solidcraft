@@ -78,7 +78,7 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
         }
         let (mut cs, mut ps) = entities(sk, &params, cmd)?;
         if !sk.blocks_touching(&cs, &ps).is_empty() {
-            return Err(bad(cmd, "not supported yet: patterns of blocks (explode the block first)"));
+            return Err(bad(cmd, "not supported yet: patterns of a block's curves (explode the block to pattern its curves)"));
         }
         cs.sort_unstable();
         cs.dedup();

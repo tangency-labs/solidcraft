@@ -2263,8 +2263,9 @@ fn explode_and_delete_turn_a_block_back_into_plain_geometry() {
 }
 
 /// In a free block one length dimension between members sets the size; a second that disagrees
-/// is refused. In a rigid block a relation that agrees with the shape is redundant and one that
-/// does not is refused; neither ever names the block.
+/// is refused. A closed block keeps its shape: any other constraint wholly inside it is refused
+/// and points to Edit Contents, and is taken while the block is open (and held once it closes);
+/// a reference dimension inside it is taken.
 #[test]
 fn a_block_takes_one_size_when_free_and_none_when_rigid() {
     let mut s = new_sketch();
@@ -2279,11 +2280,18 @@ fn a_block_takes_one_size_when_free_and_none_when_rigid() {
     let mut s = new_sketch();
     let made = plate_block(&mut s, "fixed");
     let block = made["block"].as_str().unwrap();
-    let parallel = run(&mut s, "sketch.constraint.parallel", json!({"a": "l1", "b": "l3"}));
-    assert_eq!(parallel["redundant"], json!(true), "{parallel}");
-    assert!(!parallel.to_string().contains(block), "{parallel}");
+    let edit_contents = "which keeps its shape: open the block with Edit Contents to change its shape";
+    let parallel = refused(&mut s, "sketch.constraint.parallel", json!({"a": "l1", "b": "l3"}));
+    assert!(parallel.contains("block Plate") && parallel.contains(edit_contents), "{parallel}");
     let length = refused(&mut s, "sketch.dimension", json!({"entities": ["l3"], "value": 45}));
-    assert!(length.contains("over-constrain") && !length.contains(block), "{length}");
+    assert!(length.contains(edit_contents), "{length}");
+    let reference = run(&mut s, "sketch.dimension", json!({"entities": ["l3"], "driven": true}));
+    assert_eq!(reference["driven"], json!(true), "{reference}");
+    run(&mut s, "sketch.block_open", json!({"block": block}));
+    let parallel = run(&mut s, "sketch.constraint.parallel", json!({"a": "l1", "b": "l3"}));
+    let id = parallel["constraint"].as_str().unwrap().to_string();
+    let closed = run(&mut s, "sketch.block_close", json!({}));
+    assert!(ids(&closed["held"]).contains(&id), "a constraint added while open is held once it closes: {closed}");
 }
 
 /// Members cannot be trimmed, filleted, offset or patterned on their own; what cannot be a
@@ -2292,11 +2300,14 @@ fn a_block_takes_one_size_when_free_and_none_when_rigid() {
 fn block_members_refuse_edits_that_would_change_them_alone() {
     let mut s = new_sketch();
     plate_block(&mut s, "fixed");
-    let why = "`l1` is part of block Plate: explode it, edit, then make the block again";
+    let why = "`l1` is part of block Plate, which keeps its shape: open it with Edit Contents to change it";
     assert!(refused(&mut s, "sketch.trim", json!({"curve": "l1", "at": [20, 5]})).contains(why));
     assert!(refused(&mut s, "sketch.fillet", json!({"a": "l1", "b": "l2", "radius": 2})).contains("is part of block Plate"));
     assert!(refused(&mut s, "sketch.offset", json!({"curves": ["l1"], "distance": 2})).contains(why));
-    assert!(refused(&mut s, "sketch.pattern.circular", json!({"entities": ["c1"], "center": [0, 0], "count": 3})).contains("patterns of blocks"));
+    assert!(
+        refused(&mut s, "sketch.pattern.circular", json!({"entities": ["c1"], "center": [0, 0], "count": 3}))
+            .contains("patterns of a block's curves")
+    );
     run(&mut s, "sketch.line", json!({"points": [[100, 0], [120, 0]], "infer": false}));
     let lines = sketch(&s).curves.iter().filter(|c| c.link.is_none()).count();
     assert!(refused(&mut s, "sketch.block", json!({"curves": ["l2"]})).contains("already part of block Plate"));
@@ -2318,6 +2329,307 @@ fn block_members_refuse_edits_that_would_change_them_alone() {
     refused(&mut s, "sketch.explode_block", json!({"block": "l6"}));
     refused(&mut s, "sketch.block_edit", json!({"block": "nope"}));
     assert_eq!(sketch(&s).curves.iter().filter(|c| c.link.is_none()).count(), lines, "refusals change nothing");
+}
+
+/// Placed "Plate" (fixed): its origin coincident with the sketch origin and its axis horizontal,
+/// and an outside line whose end is coincident with the member point `l3.start` (the top right
+/// corner). Returns (block id, axis id, the ids of those three constraints, the outside line).
+fn placed_plate(s: &mut Session) -> (String, String, Vec<String>, String) {
+    let made = plate_block(s, "fixed");
+    let (block, axis, origin) =
+        (made["block"].as_str().unwrap().to_string(), made["axis"].as_str().unwrap().to_string(), made["origin"].as_str().unwrap().to_string());
+    let mut placing = Vec::new();
+    placing.push(run(s, "sketch.constraint.coincident", json!({"a": origin, "b": "origin"}))["constraint"].as_str().unwrap().to_string());
+    placing.push(
+        run(s, "sketch.constraint.horizontal_vertical", json!({"line": axis, "mode": "horizontal"}))["constraint"].as_str().unwrap().to_string(),
+    );
+    let line = ids(&run(s, "sketch.line", json!({"points": [[60, 40], [45, 30]], "infer": false}))["curves"])[0].clone();
+    placing.push(
+        run(s, "sketch.constraint.coincident", json!({"a": "l3.start", "b": format!("{line}.end")}))["constraint"].as_str().unwrap().to_string(),
+    );
+    (block, axis, placing, line)
+}
+
+/// The axis ends and the outside line's ends, which an open block holds still.
+fn held_still(s: &Session, axis: &str, line: &str) -> Vec<Vec2> {
+    [format!("{axis}.start"), format!("{axis}.end"), format!("{line}.start"), format!("{line}.end")].iter().map(|p| at(s, p)).collect()
+}
+
+/// #4069 Edit Contents: a block opened in place keeps its place while a dimension inside it
+/// changes; closing it captures the new shape into the same block, its axis and the outside
+/// constraints (onto the axis and onto a member point) unchanged and satisfied, the constraints
+/// inside it held again. Trim and Fillet are refused on a closed block and taken on an open one;
+/// a curve drawn while it is open joins it, and a member deleted leaves it.
+#[test]
+fn a_block_is_edited_in_place_and_closes_into_the_same_block() {
+    let mut s = new_sketch();
+    let (block, axis, placing, line) = placed_plate(&mut s);
+    let before = held_still(&s, &axis, &line);
+    let placed_dof = run(&mut s, "sketch.solve", json!({}))["dof"].clone();
+    let held = sketch(&s).blocks[0].held.clone();
+    let opened = run(&mut s, "sketch.block_open", json!({"block": block}));
+    assert_eq!(ids(&opened["restored"]), held, "{opened}");
+    assert!(ids(&opened["dropped"]).is_empty() && opened.get("closed").is_none(), "{opened}");
+    assert!(sketch(&s).blocks[0].is_open());
+    // The dimension of l1 (40) changes while the block is open.
+    let param = sketch(&s).constraints.iter().find(|c| c.kind.value() == Some(40.0)).and_then(|c| c.param.clone()).unwrap();
+    run(&mut s, "parameters.change", json!({"name": param, "expression": "30 mm"}));
+    assert!((at(&s, "l1.start").dist(at(&s, "l1.end")) - 30.0).abs() < 1e-6, "the shape changes");
+    assert_eq!(held_still(&s, &axis, &line), before, "nothing outside moves, nor the axis");
+    let closed = run(&mut s, "sketch.block_close", json!({}));
+    assert_eq!(closed["block"], json!(block), "{closed}");
+    assert!(closed.get("removed").is_none() && ids(&closed["added"]).is_empty(), "{closed}");
+    let sk = sketch(&s);
+    assert_eq!(sk.blocks.len(), 1);
+    assert!(!sk.blocks[0].is_open() && sk.blocks[0].axis == axis);
+    let mut now = sk.blocks[0].held.clone();
+    let mut was = held.clone();
+    now.sort();
+    was.sort();
+    assert_eq!(now, was, "the constraints inside are held again");
+    assert!(placing.iter().all(|id| sk.constraints.iter().any(|c| c.id == *id) && !sk.is_held(id)), "the outside constraints stay");
+    assert!(closed["sketch"]["solved"].as_bool().unwrap(), "{closed}");
+    assert_eq!(run(&mut s, "sketch.solve", json!({}))["dof"], placed_dof, "placed as before");
+    assert_eq!(held_still(&s, &axis, &line), before);
+    assert!((at(&s, "l1.start").dist(at(&s, "l1.end")) - 30.0).abs() < 1e-6, "the new shape is kept");
+    assert!(at(&s, format!("{line}.end").as_str()).dist(at(&s, "l3.start")) < 1e-9, "the outside coincident still holds");
+
+    // Trim and Fillet: refused while closed, taken while open; what they make joins the block.
+    let why = "open it with Edit Contents to change it";
+    assert!(refused(&mut s, "sketch.fillet", json!({"a": "l1", "b": "l2", "radius": 2})).contains(why));
+    run(&mut s, "sketch.block_open", json!({"block": block}));
+    let fillet = run(&mut s, "sketch.fillet", json!({"a": "l1", "b": "l2", "radius": 2}));
+    assert!(fillet["sketch"]["solved"].as_bool().unwrap(), "{fillet}");
+    let drawn = ids(&run(&mut s, "sketch.line", json!({"points": [[-15, 5], [5, 5]], "infer": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.delete", json!({"entities": ["c1"]}));
+    let closed = run(&mut s, "sketch.block_close", json!({"block": block}));
+    let added = ids(&closed["added"]);
+    assert!(added.contains(&drawn) && added.len() >= 2, "the fillet's arc and the line join: {closed}");
+    let sk = sketch(&s);
+    assert!(added.iter().all(|c| sk.blocks[0].curves.contains(c)) && !sk.blocks[0].curves.iter().any(|c| c == "c1"));
+    assert!(!sk.blocks[0].curves.contains(&line));
+    assert!(refused(&mut s, "sketch.trim", json!({"curve": drawn, "at": [-12.5, 5]})).contains(why));
+    run(&mut s, "sketch.block_open", json!({"block": block}));
+    run(&mut s, "sketch.trim", json!({"curve": drawn, "at": [-12.5, 5]}));
+    run(&mut s, "sketch.block_close", json!({}));
+    assert_eq!(held_still(&s, &axis, &line), before);
+}
+
+/// A free block opened and closed keeps the length that sizes it driving; Undo and Redo step
+/// over Edit Contents, an edit inside and Close Block one at a time; finishing the sketch with a
+/// block open closes it with what was drawn; a design saved with a block open opens with it
+/// closed, with only the members it lists.
+#[test]
+fn a_free_block_and_undo_redo_and_leaving_the_sketch_with_a_block_open() {
+    let mut s = new_sketch();
+    let made = plate_block(&mut s, "free");
+    let block = made["block"].as_str().unwrap().to_string();
+    let param = run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": 80}))["param"].as_str().unwrap().to_string();
+    let size = sketch(&s).constraints.iter().find(|c| c.param.as_deref() == Some(param.as_str())).unwrap().id.clone();
+    run(&mut s, "sketch.block_open", json!({"block": block}));
+    assert_eq!(sketch(&s).blocks[0].open.as_ref().unwrap().driving, vec![size.clone()]);
+    let closed = run(&mut s, "sketch.block_close", json!({}));
+    assert!(!ids(&closed["held"]).contains(&size), "{closed}");
+    assert_eq!(closed["dof"], json!(3), "{closed}");
+
+    // Undo and redo, one step each.
+    let shape = |s: &Session| (sketch(s).blocks.clone(), sketch(s).curves.len());
+    let start = shape(&s);
+    run(&mut s, "sketch.block_open", json!({"block": block}));
+    let opened = shape(&s);
+    run(&mut s, "sketch.delete", json!({"entities": ["c1"]}));
+    let deleted = shape(&s);
+    run(&mut s, "sketch.block_close", json!({}));
+    let end = shape(&s);
+    for want in [&deleted, &opened, &start] {
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(&shape(&s), want);
+    }
+    for want in [&opened, &deleted, &end] {
+        run(&mut s, "edit.redo", json!({}));
+        assert_eq!(&shape(&s), want);
+    }
+    assert!(!sketch(&s).blocks[0].curves.iter().any(|c| c == "c1"));
+
+    // Saved while open: opened closed, with the members it lists; what was drawn stays plain.
+    run(&mut s, "sketch.block_open", json!({"block": block}));
+    let drawn = ids(&run(&mut s, "sketch.line", json!({"points": [[20, 10], [25, 12]], "infer": false}))["curves"])[0].clone();
+    let saved = s.doc.to_json();
+    let reopened = solidcraft_doc::Document::from_json(&saved).unwrap();
+    let back = reopened.sketch(s.active_sketch.unwrap()).unwrap();
+    assert!(!back.blocks[0].is_open() && !back.blocks[0].curves.contains(&drawn) && back.curve_index(&drawn).is_some(), "{:?}", back.blocks[0]);
+
+    // Finishing the sketch closes the open block, with what was drawn in it.
+    let id = s.active_sketch.unwrap();
+    run(&mut s, "sketch.finish", json!({}));
+    let sk = s.doc.sketch(id).unwrap();
+    assert!(!sk.blocks[0].is_open() && sk.blocks[0].curves.contains(&drawn), "{:?}", sk.blocks[0]);
+}
+
+/// While a block is open everything outside it stays as it is: a command that would change,
+/// consume or move an outside curve, point or constraint, or the block's axis, is refused and
+/// says to close the block first; one that only reads outside geometry as a reference is taken.
+/// Curves and points made while it is open, a copy of an outside curve included, join it; a
+/// curve of a block made while it is open stays that block's and is not reported. A relation
+/// between a member and the axis of a closed block is refused.
+#[test]
+fn an_open_block_keeps_the_outside_still_and_takes_what_is_made_in_it() {
+    let mut s = new_sketch();
+    let (block, axis, _, line) = placed_plate(&mut s);
+    let close_first = "is open for editing its contents: close the block first";
+    assert!(refused(&mut s, "sketch.constraint.parallel", json!({"a": "l1", "b": axis})).contains("Edit Contents"), "a member and the axis");
+    run(&mut s, "sketch.block_open", json!({"block": block}));
+    let before = s.doc.to_json();
+    let middle = (at(&s, &format!("{line}.start")) + at(&s, &format!("{line}.end"))) * 0.5;
+    for (id, p) in [
+        ("sketch.break", json!({"curve": line, "points": [[middle.x, middle.y]]})),
+        ("sketch.delete", json!({"entities": [line]})),
+        ("sketch.move", json!({"entities": [line], "translate": [5, 0]})),
+        ("sketch.construction", json!({"curves": [line], "value": true})),
+        ("sketch.constraint.horizontal_vertical", json!({"line": line, "mode": "horizontal"})),
+        ("sketch.move", json!({"entities": [axis], "translate": [5, 0]})),
+        ("sketch.delete", json!({"entities": [axis]})),
+        ("sketch.block", json!({"curves": [line]})),
+    ] {
+        let why = refused(&mut s, id, p.clone());
+        assert!(why.contains(close_first), "{id} {p}: {why}");
+    }
+    assert_eq!(s.doc.to_json(), before, "the refusals change nothing");
+    // Read as references: a dimension from a member point to an outside point.
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1.start", format!("{line}.start")], "driven": true}));
+    // Made while open: a copy of the outside line, a lone point, and a block of its own.
+    run(&mut s, "sketch.copy", json!({"entities": [line]}));
+    let pasted = ids(&run(&mut s, "sketch.paste", json!({"at": [0, -30]}))["curves"]);
+    let point = run(&mut s, "sketch.point", json!({"point": [0, -5]}))["point"].as_str().unwrap().to_string();
+    let inner = ids(&run(&mut s, "sketch.line", json!({"points": [[-5, -40], [5, -40]], "infer": false}))["curves"]);
+    let inner_block = run(&mut s, "sketch.block", json!({"curves": inner}));
+    let closed = run(&mut s, "sketch.block_close", json!({}));
+    let sk = sketch(&s);
+    let b = sk.blocks.iter().find(|b| b.id == block).unwrap();
+    assert!(pasted.iter().all(|c| b.curves.contains(c)), "the pasted copy joins: {closed}");
+    assert!(b.loose.contains(&point) && b.points.iter().any(|(p, _)| *p == point), "the lone point joins: {:?}", b.loose);
+    assert!(!b.curves.contains(&line) && !b.curves.iter().any(|c| inner.contains(c)), "{:?}", b.curves);
+    let reported = closed.get("left_out").map(ids).unwrap_or_default();
+    assert!(
+        !reported.iter().any(|c| inner.contains(c) || Some(c.as_str()) == inner_block["axis"].as_str()),
+        "another block's curves are not left out: {closed}"
+    );
+    assert!(closed["sketch"]["solved"].as_bool().unwrap(), "{closed}");
+}
+
+/// Edit Contents on a turned block keeps the directions its lines had: a held Horizontal or
+/// Vertical that no longer holds becomes Parallel or Perpendicular to the block's axis and is
+/// held again when the block closes; nothing is dropped. Copy and Paste take an open block's
+/// curves as a block holding what it will hold.
+#[test]
+fn a_turned_block_keeps_its_directions_on_the_axis_and_an_open_block_copies() {
+    let mut s = new_sketch();
+    let made = plate_block(&mut s, "fixed");
+    let block = made["block"].as_str().unwrap().to_string();
+    let axis = made["axis"].as_str().unwrap().to_string();
+    // Turned by a constraint, so its held horizontals and verticals stay as they were.
+    let slope = ids(&run(&mut s, "sketch.line", json!({"points": [[-80, -40], [6.6, 10]], "infer": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.constraint.fix", json!({"entities": [slope]}));
+    run(&mut s, "sketch.constraint.parallel", json!({"a": slope, "b": axis}));
+    let directions: Vec<String> = sketch(&s)
+        .constraints
+        .iter()
+        .filter(|c| matches!(c.kind, ConstraintKind::Horizontal { .. } | ConstraintKind::Vertical { .. }) && sketch(&s).is_held(&c.id))
+        .map(|c| c.id.clone())
+        .collect();
+    assert!(!directions.is_empty(), "the rectangle's horizontals and verticals are held");
+    let opened = run(&mut s, "sketch.block_open", json!({"block": block}));
+    assert!(ids(&opened["dropped"]).is_empty(), "{opened}");
+    let sk = sketch(&s);
+    let a = sk.curve_index(&axis).unwrap();
+    for id in &directions {
+        let c = sk.constraints.iter().find(|c| c.id == *id).unwrap();
+        assert!(
+            matches!(c.kind, ConstraintKind::Parallel { b, .. } | ConstraintKind::Perpendicular { b, .. } if b == a),
+            "{id} is on the axis now: {:?}",
+            c.kind
+        );
+    }
+    // Copy and Paste of the open block's curves.
+    run(&mut s, "sketch.copy", json!({"entities": ["l1", "l2", "l3", "l4", "c1"]}));
+    let pasted = run(&mut s, "sketch.paste", json!({"at": [100, 0]}));
+    assert_eq!(sketch(&s).blocks.len(), 2, "{pasted}");
+    run(&mut s, "sketch.block_close", json!({"block": block}));
+    let sk = sketch(&s);
+    let b = sk.blocks.iter().find(|b| b.id == block).unwrap();
+    assert!(directions.iter().all(|id| b.held.contains(id)), "held again on closing: {:?}", b.held);
+}
+
+/// Every way of leaving a sketch closes its open block: Finish with AutoConstrain, a redo of a
+/// step undone while the sketch was edited after it was finished, and a sheet sketch's Finish.
+/// A drawing's sketch saved with a block open opens with it closed.
+#[test]
+fn every_way_out_of_a_sketch_closes_its_open_block() {
+    // Finish with AutoConstrain.
+    let mut s = new_sketch();
+    let made = plate_block(&mut s, "fixed");
+    let id = s.active_sketch.unwrap();
+    run(&mut s, "sketch.block_open", json!({"block": made["block"]}));
+    run(&mut s, "sketch.finish_auto_constrain", json!({}));
+    assert!(s.active_sketch.is_none() && s.doc.sketch(id).unwrap().blocks.iter().all(|b| !b.is_open()));
+
+    // A redo after Finish of a step undone while editing (with a later feature, so the edit rolls
+    // the timeline back and Finish folds its steps).
+    let mut s = new_sketch();
+    let made = plate_block(&mut s, "fixed");
+    let id = s.active_sketch.unwrap();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.edit", json!({"sketch": id}));
+    run(&mut s, "sketch.block_open", json!({"block": made["block"]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [5, 5]], "infer": false}));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "sketch.finish", json!({}));
+    let _ = s.execute("edit.redo", &json!({}));
+    assert!(s.active_sketch.is_none(), "the redo stays out of the sketch");
+    assert!(s.doc.sketch(id).unwrap().blocks.iter().all(|b| !b.is_open()), "no block is left open outside its sketch's edit");
+
+    // A sheet sketch.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 5}));
+    let drawing = run(&mut s, "drawing.create", json!({"name": "Sheet"}));
+    run(&mut s, "drawing.sketch.create", json!({"owner": drawing["sheets"][0]["id"]}));
+    let lines = ids(&run(&mut s, "sketch.line", json!({"points": [[10, 10], [70, 10], [70, 40]], "infer": false}))["curves"]);
+    let block = run(&mut s, "sketch.block", json!({"curves": lines}))["block"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.block_open", json!({"block": block}));
+    let open_in = |doc: &solidcraft_doc::Document| doc.drawings.iter().flat_map(|d| d.sketches.iter()).any(|r| r.sketch.open_block_now().is_some());
+    assert!(open_in(&s.doc), "the sheet sketch's block is open");
+    let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert!(!open_in(&reopened), "a drawing's sketch saved with a block open opens with it closed");
+    run(&mut s, "sketch.finish", json!({}));
+    assert!(!open_in(&s.doc), "finishing the sheet sketch closes its block");
+}
+
+/// Edit Contents and Close Block refuse what they cannot take, without changing anything.
+#[test]
+fn edit_contents_and_close_block_refuse_bad_parameters() {
+    let mut s = new_sketch();
+    let made = plate_block(&mut s, "fixed");
+    let block = made["block"].as_str().unwrap();
+    let before = s.doc.to_json();
+    for (id, p) in [
+        ("sketch.block_open", json!({})),
+        ("sketch.block_open", json!({"block": 5})),
+        ("sketch.block_open", json!({"block": "nope"})),
+        ("sketch.block_open", json!({"block": "l1"})),
+        ("sketch.block_close", json!({})),
+        ("sketch.block_close", json!({"block": 3})),
+        ("sketch.block_close", json!({"block": "nope"})),
+        ("sketch.block_close", json!({"block": block})),
+    ] {
+        refused(&mut s, id, p);
+    }
+    assert_eq!(s.doc.to_json(), before, "refusals change nothing");
+    run(&mut s, "sketch.block_open", json!({"block": block}));
+    assert!(refused(&mut s, "sketch.block_edit", json!({"block": block, "name": "X"})).contains("close it first"));
+    let again = run(&mut s, "sketch.block_open", json!({"block": block}));
+    assert!(again.get("closed").is_none(), "opening the open block again changes nothing: {again}");
 }
 
 /// Move, Transform and Scale take the whole block when any member is picked; Scale resizes a
@@ -2493,7 +2805,7 @@ fn block_members_and_held_dimensions_refuse_changes_that_would_do_nothing_or_bre
     let why = refused(&mut s, "sketch.toggle_driven", json!({"constraint": dimension.id}));
     assert!(why.contains("held by block Plate"), "{why}");
     let why = refused(&mut s, "parameters.change", json!({"name": dimension.param, "expression": "45 mm"}));
-    assert!(why.contains("explode the block"), "{why}");
+    assert!(why.contains("open the block with Edit Contents"), "{why}");
 }
 
 /// A pasted copy of a whole sized free block keeps the size: the length that drove in the source

@@ -1769,11 +1769,19 @@ fn sketch_block_row_items(app: &SolveApp, sketch: u64, block: &str) -> Vec<Item>
     v
 }
 
-/// Edit Block, Select Block and Explode Block for block `block` of `sketch`.
+/// Edit Block, Edit Contents (Close Block while it is open), Select Block and Explode Block for
+/// block `block` of `sketch`.
 fn block_items(app: &SolveApp, sketch: u64, block: &str, editing: bool) -> Vec<Item> {
     let one = json!({"sketch": sketch, "block": block});
+    let open = app.session.doc.sketch(sketch).ok().and_then(|sk| sk.blocks.iter().find(|b| b.id == block)).is_some_and(|b| b.is_open());
+    let contents = if open {
+        act("ui.closeBlock", "Close Block", "c_block").with(one.clone()).on(editing)
+    } else {
+        act("ui.editContents", "Edit Contents", "c_block").with(one.clone())
+    };
     vec![
-        act("ui.editBlock", "Edit Block", "c_block").with(one.clone()),
+        act("ui.editBlock", "Edit Block", "c_block").with(one.clone()).on(!open),
+        contents,
         act("ui.selectBlock", "Select Block", "c_block").with(one).on(editing),
         cmd(app, "sketch.explode_block", "Explode Block").with(json!({"block": block})).on(editing),
     ]
@@ -2344,6 +2352,21 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 if app.session.active_sketch == Some(sketch) {
                     crate::sketch_modify_ui::edit_block(app, block);
                 }
+            }
+        }
+        "ui.editContents" => {
+            if let (Some(sketch), Some(block)) = (p.get("sketch").and_then(Value::as_u64), p.get("block").and_then(Value::as_str)) {
+                if app.session.active_sketch != Some(sketch) {
+                    app.edit_sketch(sketch);
+                }
+                if app.session.active_sketch == Some(sketch) {
+                    crate::sketch_block_tree::edit_contents(app, block);
+                }
+            }
+        }
+        "ui.closeBlock" => {
+            if let Some(block) = p.get("block").and_then(Value::as_str) {
+                crate::sketch_block_tree::close_contents(app, block);
             }
         }
         "ui.selectBlock" => {

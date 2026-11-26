@@ -53,8 +53,10 @@ mod wire;
 mod wire_fillet;
 mod wire_solve;
 
+pub use block::BlockClosed;
 pub use block::BlockMade;
 pub use block::BlockMembers;
+pub use block::BlockOpen;
 pub use block::BlockScale;
 pub use block::MAX_BLOCK_CURVES;
 pub use block::MAX_BLOCK_NAME;

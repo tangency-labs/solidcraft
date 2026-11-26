@@ -157,6 +157,7 @@ pub use shaft_spline::shaft_spline_preview;
 pub use sketch::dimension_roles;
 pub(crate) use sketch::face::face_pick_form;
 pub(crate) use sketch::finish_model_edit;
+pub(crate) use sketch_block::close_unedited;
 pub use sketch_construction::ConstructionLine;
 pub use sketch_construction::construction_line_choice;
 pub use sketch_construction::construction_line_mode;

@@ -2980,6 +2980,145 @@ fn a_block_refuses_what_cannot_be_a_member() {
     assert!(refused(&mut sk, std::slice::from_ref(&made.axis)).contains("axis"));
 }
 
+/// A placed rigid block of [`block_profile`] with its origin on the rectangle's first corner
+/// (coincident with the sketch origin, axis horizontal), and an outside line whose end is
+/// coincident with the rectangle's top right corner: (sketch, sides, circle, made, outside line).
+fn placed_block_with_outside_line() -> (Sketch, [usize; 4], usize, BlockMade, usize) {
+    let mut sk = Sketch::new();
+    let (l, c) = block_profile(&mut sk);
+    let mut ids = block_ids(&sk, &l);
+    ids.push(sk.curves[c].id.clone());
+    let CurveKind::Line { a: corner, .. } = sk.curves[l[0]].kind else { panic!("a line") };
+    let made = sk.make_block(&ids, BlockScale::Fixed, Some(corner), Some("Plate".into())).unwrap();
+    let o = sk.point_index(&made.origin).unwrap();
+    sk.add_constraint(ConstraintKind::Coincident { p: o, q: 0 }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Horizontal { l: sk.curve_index(&made.axis).unwrap() }, None).unwrap();
+    let outside = sk.add_line(v(80.0, 40.0), v(60.0, 30.0), None, None, None).unwrap();
+    let (_, end) = line_ends(&sk, outside);
+    let (top_right, _) = line_ends(&sk, l[2]);
+    sk.add_constraint(ConstraintKind::Coincident { p: end, q: top_right }, None).unwrap();
+    let rep = solve(&mut sk);
+    assert!(rep.ok() && rep.dof == 2, "only the outside line's start is free: {rep:?}");
+    (sk, l, c, made, outside)
+}
+
+fn line_ends(sk: &Sketch, l: usize) -> (usize, usize) {
+    let CurveKind::Line { a, b } = sk.curves[l].kind else { panic!("a line") };
+    (a, b)
+}
+
+/// #4069: a block opened to edit its contents stays where it is: its axis and everything outside
+/// it hold still, its held constraints drive and a dimension inside it can change; closing it
+/// captures the new shape into the same block, the outside constraints unchanged and satisfied.
+#[test]
+fn a_block_opened_for_its_contents_keeps_its_place_and_closes_into_the_same_block() {
+    let (mut sk, l, c, made, outside) = placed_block_with_outside_line();
+    let axis = sk.curve_index(&made.axis).unwrap();
+    let (o, x) = line_ends(&sk, axis);
+    let still = |sk: &Sketch| [sk.points[o].pos, sk.points[x].pos, sk.points[line_ends(sk, outside).0].pos, sk.points[line_ends(sk, outside).1].pos];
+    let before = still(&sk);
+    let placing: Vec<String> = sk.constraints.iter().filter(|k| !sk.is_held(&k.id)).map(|k| k.id.clone()).collect();
+    let l0 = sk.blocks[0].length;
+    let (released, closed) = sk.open_block(&made.block).unwrap();
+    assert!(closed.is_none());
+    assert_eq!(released.restored, made.held, "every held constraint drives again");
+    assert!(sk.blocks[0].is_open() && sk.blocks[0].held.is_empty() && sk.frame_rows().is_empty());
+    assert!(sk.block_refusal(&made.held[0]).is_none() && sk.block_refusal(&sk.curves[l[0]].id).is_none(), "members can be edited");
+    let length = sk.constraints.iter_mut().find(|k| matches!(k.kind, ConstraintKind::Length { value, .. } if value == 40.0)).unwrap();
+    length.kind.set_value(30.0);
+    let rep = solve(&mut sk);
+    assert!(rep.ok(), "{rep:?}");
+    assert_eq!(still(&sk), before, "the axis and the outside line do not move");
+    let (a, b) = line_pts(&sk, l[0]);
+    assert!((a.dist(b) - 30.0).abs() < 1e-9, "the dimension inside changed the shape");
+    let shut = sk.close_block(&made.block).unwrap();
+    let again = shut.made.unwrap();
+    assert_eq!((again.block.as_str(), again.axis.as_str()), (made.block.as_str(), made.axis.as_str()), "the same block and axis");
+    let mut held = again.held.clone();
+    held.sort();
+    let mut was = made.held.clone();
+    was.sort();
+    assert_eq!(held, was, "the constraints inside are held again");
+    assert!(shut.added.is_empty() && shut.left_out.is_empty());
+    assert!(!sk.blocks[0].is_open() && sk.blocks[0].length == l0, "a fixed block keeps its axis length");
+    assert!(placing.iter().all(|id| sk.constraints.iter().any(|k| k.id == *id) && !sk.is_held(id)), "the outside constraints stay");
+    let rep = solve(&mut sk);
+    assert!(rep.ok() && rep.dof == 2, "placed again as before: {rep:?}");
+    assert_eq!(still(&sk), before);
+    let (a, b) = line_pts(&sk, l[0]);
+    assert!((a.dist(b) - 30.0).abs() < 1e-9, "the new shape is kept");
+    assert!((sk.radius(c).unwrap() - 5.0).abs() < 1e-9);
+    assert!(sk.close_block(&made.block).unwrap_err().to_string().contains("not open"));
+}
+
+/// Curves drawn while a block is open join it when it closes, deleted members leave it, and a
+/// block whose every curve was deleted goes with its axis; a free block's driving size stays
+/// driving; opening another block closes the open one; the open state saves and loads, and
+/// closing every open block (as opening a design does) captures it.
+#[test]
+fn curves_drawn_or_deleted_while_a_block_is_open_join_or_leave_it() {
+    let (mut sk, l, c, made, outside) = placed_block_with_outside_line();
+    sk.open_block(&made.block).unwrap();
+    let (_, top_right) = line_ends(&sk, l[1]);
+    let new = sk.add_line(v(0.0, 0.0), v(20.0, 30.0), Some(top_right), None, None).unwrap();
+    let new_id = sk.curves[new].id.clone();
+    let circle = sk.curves[c].id.clone();
+    let outside = sk.curves[outside].id.clone();
+    sk.remove_curves(&[c]);
+    let rep = solve(&mut sk);
+    assert!(rep.ok(), "{rep:?}");
+    let saved = serde_json::to_string(&sk).unwrap();
+    let mut back: Sketch = serde_json::from_str(&saved).unwrap();
+    assert!(back.blocks[0].is_open(), "the open state is saved");
+    let mut as_saved = back.clone();
+    as_saved.close_open_blocks_as_saved();
+    assert!(!as_saved.blocks[0].is_open() && !as_saved.blocks[0].curves.contains(&new_id), "a design opened takes in nothing unlisted");
+    back.close_open_blocks();
+    let shut = sk.close_block(&made.block).unwrap();
+    assert_eq!(shut.added, vec![new_id.clone()]);
+    assert!(sk.blocks[0].curves.contains(&new_id) && !sk.blocks[0].curves.contains(&circle), "{:?}", sk.blocks[0].curves);
+    assert!(sk.blocks[0].radii.is_empty());
+    assert_eq!(back.blocks, sk.blocks, "closing on load captures the same block");
+    assert!(!sk.blocks[0].curves.contains(&outside));
+    assert!(solve(&mut sk).ok());
+
+    // Every member deleted while open: the block stays open, and goes with its axis on closing.
+    let (mut sk, l, c, made, _) = placed_block_with_outside_line();
+    sk.open_block(&made.block).unwrap();
+    sk.remove_curves(&[l[0], l[1], l[2], l[3], c]);
+    assert!(sk.blocks[0].is_open() && sk.blocks[0].curves.is_empty());
+    let shut = sk.close_block(&made.block).unwrap();
+    assert!(shut.made.is_none() && sk.blocks.is_empty() && sk.curve_index(&made.axis).is_none());
+
+    // A free block's driving size keeps driving; the rest is held again.
+    let mut sk = Sketch::new();
+    let (l, c) = block_profile(&mut sk);
+    let mut ids = block_ids(&sk, &l);
+    ids.push(sk.curves[c].id.clone());
+    let made = sk.make_block(&ids, BlockScale::Free, None, None).unwrap();
+    let size = sk.add_constraint(ConstraintKind::Length { l: l[0], value: 80.0 }, None).unwrap();
+    assert_eq!(solve(&mut sk).dof, 3);
+    let (released, _) = sk.open_block(&made.block).unwrap();
+    assert!(released.dropped.is_empty(), "the held dimensions are scaled to the block's size first: {released:?}");
+    assert_eq!(sk.blocks[0].open.as_ref().unwrap().driving, vec![size.clone()]);
+    assert!(solve(&mut sk).ok());
+    let shut = sk.close_block(&made.block).unwrap();
+    assert!(!shut.made.unwrap().held.contains(&size));
+    let rep = solve(&mut sk);
+    assert!(rep.ok() && rep.dof == 3, "{rep:?}");
+    assert!((sk.blocks[0].length - 40.0).abs() < 1e-9, "the free block's length is its size now: {}", sk.blocks[0].length);
+
+    // Opening another block closes the open one first.
+    let mut sk = Sketch::new();
+    let (l, c) = block_profile(&mut sk);
+    let first = sk.make_block(&block_ids(&sk, &l[..2]), BlockScale::Fixed, None, None).unwrap();
+    let second = sk.make_block(&block_ids(&sk, &[l[2], l[3], c]), BlockScale::Fixed, None, None).unwrap();
+    sk.open_block(&first.block).unwrap();
+    let (_, closed) = sk.open_block(&second.block).unwrap();
+    assert_eq!(closed, Some(first.block.clone()));
+    assert!(!sk.blocks[0].is_open() && sk.blocks[1].is_open() && sk.open_block_now().is_some_and(|b| b.id == second.block));
+}
+
 /// Blocks are saved with the sketch and read back as they were; a sketch without one saves as
 /// before.
 #[test]

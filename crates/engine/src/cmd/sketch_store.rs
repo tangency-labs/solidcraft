@@ -126,7 +126,11 @@ pub(super) fn edit_sheet<T>(
     let design = s.doc.clone();
     let mut candidate = s.drawing(cmd)?.solve_sheet_sketch(&design, entry.sketch)?.sketch;
     let mut source = (*design).clone();
+    let guard = super::sketch_block::BlockGuard::new(&candidate);
     let out = change(&mut candidate, &mut source)?;
+    if let Some(guard) = &guard {
+        guard.check(&candidate, cmd)?;
+    }
     if source != *design {
         return Err(bad(cmd, "a sheet sketch cannot change the source design or its parameters"));
     }

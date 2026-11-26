@@ -155,6 +155,80 @@ pub struct BlockEditParams {
     pub remove: Option<NameList>,
 }
 
+/// Open a block to edit its contents in place, without exploding it: it stays where it is (its
+/// axis, and everything outside it, is held where it is while it is open), the constraints it
+/// holds drive again, and its curves can be changed with every sketch tool. Curves drawn while
+/// it is open join it when it closes. Another open block is closed first.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct BlockOpenParams {
+    /// The sketch: its feature id or name. Default: the one being edited.
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+    /// The block's id.
+    #[serde(default)]
+    pub block: Option<String>,
+}
+
+/// What `sketch.block_open` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BlockOpenResult {
+    /// The id of the block now open.
+    pub block: String,
+    /// The ids of the constraints it held that drive again.
+    pub restored: Vec<String>,
+    /// The ids of the constraints it held that did not hold where the geometry is (a turned
+    /// block's horizontals, a resized block's dimensions driven by parameters), and were removed.
+    pub dropped: Vec<String>,
+    /// The id of the block that was open before and was closed first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed: Option<String>,
+    /// The sketch's solve: `{solved, dof}`.
+    pub sketch: Value,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Close the block open for editing its contents: its new shape is captured into the same
+/// block, relative to its axis, which did not move. The curves drawn while it was open join it,
+/// and the constraints wholly inside it are held again.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct BlockCloseParams {
+    /// The sketch: its feature id or name. Default: the one being edited.
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+    /// The block's id. Default: the sketch's open block.
+    #[serde(default)]
+    pub block: Option<String>,
+}
+
+/// What `sketch.block_close` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BlockCloseResult {
+    /// The block's id.
+    pub block: String,
+    /// The block had no curve left, and went with its axis.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub removed: bool,
+    /// The ids of the constraints the block holds now.
+    pub held: Vec<String>,
+    /// The ids of the curves drawn while it was open that became members.
+    pub added: Vec<String>,
+    /// The ids of the curves drawn while it was open that cannot be members (text, projected
+    /// curves, offset outputs, pattern geometry, curves of another block): they stay outside it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub left_out: Vec<String>,
+    /// The sketch's degrees of freedom after the command.
+    pub dof: usize,
+    /// The sketch's solve: `{solved, dof}`.
+    pub sketch: Value,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 #[cfg(test)]
 #[path = "sketch_block_tests.rs"]
 mod tests;

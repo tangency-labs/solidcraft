@@ -3423,6 +3423,10 @@ impl Session {
             }
             e => e,
         });
+        // A sketch nobody edits keeps no block open, however its edit ended: in the same step.
+        if outermost && r.is_ok() && self.replacements == replacements {
+            cmd::close_unedited(self);
+        }
         // A value typed as `name = expression` defines the user parameter `name` (#4071), in the
         // same undo step; a refused definition fails the command, which leaves the design as it was.
         let r = match r {
