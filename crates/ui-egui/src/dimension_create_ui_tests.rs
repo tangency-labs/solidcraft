@@ -69,6 +69,54 @@ fn dimension_editor_names_and_reference_picks_drive_new_and_existing_dimensions(
     crate::dim_view::cancel();
 }
 
+#[test]
+fn dimensioning_another_sketchs_curve_requires_the_projection_ui_option() {
+    use solidcraft_engine::sketch::ConstraintKind;
+    for enhanced in [false, true] {
+        crate::dim_view::cancel();
+        let mut h = Harness::new();
+        h.app.ui.project_link_tools = enhanced;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[-10,-10],[-10,10]],"infer":false})).unwrap();
+        h.app.finish_sketch();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        // Both sketches contain l1, at different places.
+        h.app.run("sketch.line", json!({"points":[[20,20],[60,40]],"infer":false})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.distance = 120.0;
+        h.app.cam.target = solidcore_record::Vec3::new(15.0, 10.0, 0.0);
+        h.settle();
+        h.step(&json!({"start":"sketch.dimension"})).unwrap();
+        // An off-midpoint line pick measures its angle to the next line. A midpoint pick
+        // intentionally measures a point-to-line distance instead.
+        h.step(&json!({"click":{"world":[30,25,0]}})).unwrap();
+        let tool = h.app.tool.as_ref().unwrap();
+        assert_eq!(tool.picks, vec!["l1"]);
+        assert!(tool.point_picks.is_empty(), "the first pick is the line, not its midpoint");
+        let before = h.app.session.doc.to_json();
+        h.step(&json!({"click":{"world":[-10,0,0]}})).unwrap();
+        let sid = h.app.session.active_sketch.unwrap();
+        if enhanced {
+            assert_eq!(h.app.session.doc.sketch(sid).unwrap().links.len(), 1, "the foreign line is projected");
+            assert!(crate::dim_view::editing(), "the two lines give a dimension draft: {:?}", h.app.status);
+            type_value(&mut h, "70 deg");
+            h.step(&json!({"key":"Enter"})).unwrap();
+            let sk = h.app.session.doc.sketch(sid).unwrap();
+            let local = sk.curve_index("l1").unwrap();
+            let projected = sk.link_curves(&sk.links[0].id)[0];
+            assert_ne!(local, projected, "the foreign l1 has its own projected identity");
+            let angle = sk.constraints.iter().find_map(|c| {
+                let ConstraintKind::Angle { a, b, value, .. } = c.kind else { return None };
+                ((a == local && b == projected) || (a == projected && b == local)).then_some(value)
+            });
+            assert!(angle.is_some_and(|value| (value.to_degrees() - 70.0).abs() < 1e-6), "the angle uses both lines: {:?}", h.app.status);
+        } else {
+            assert_eq!(h.app.session.doc.to_json(), before, "the foreign l1 is not projected or mistaken for the local l1");
+        }
+        crate::dim_view::cancel();
+    }
+}
+
 /// Two dimensioned lines, editing `d2` with `typed` in its value field.
 fn editing_d2(typed: &str) -> Harness {
     let mut h = line([20., 0.]);

@@ -3714,20 +3714,6 @@ pub(crate) fn saved_for_close(app: &mut SolveApp) {
     batch_step(app);
 }
 
-/// Snapshots for file guards on a worker; the file-operation lock keeps tabs unchanged.
-pub(crate) fn file_guard_sessions(app: &SolveApp) -> Vec<Session> {
-    std::iter::once(&app.session)
-        .chain(app.docs.slots.iter().flatten().map(|slot| &slot.session))
-        .map(|session| {
-            // The guard reads only paths and links, never model geometry or undo state.
-            let mut copy = Session::default();
-            copy.doc = session.doc.clone();
-            copy.path = session.path.clone();
-            copy
-        })
-        .collect()
-}
-
 /// Files in any open tab, including linked parts, must not disappear underneath it.
 pub(crate) fn uses_file(app: &SolveApp, path: &str) -> bool {
     solidcraft_engine::session_uses_file(&app.session, path)

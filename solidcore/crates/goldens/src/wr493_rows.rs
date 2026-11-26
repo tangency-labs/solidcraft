@@ -426,6 +426,9 @@ fn sphere_diff_3cylinders_rows_are_their_sums() {
     let mut beyond = Vec::new();
     let mut failures = Vec::new();
     for (case, old_mass, n, old_geometry) in SPHERE_DIFF_3CYLINDERS {
+        if WR459_MOVED.contains(&case) {
+            continue;
+        }
         let mut output = run(&blend_fillet_executive_p3::Runner, case);
         // (#20179's five classified trims taken off, proved in
         // `sphere_diff_3cylinders_rows_move_only_by_the_classified_trims`)
@@ -499,14 +502,37 @@ fn sphere_diff_3cylinders_rows_are_their_sums() {
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
-    assert_eq!(beyond, BEYOND_ROUNDING.to_vec(), "{beyond:#?}");
+    let want: Vec<_> = BEYOND_ROUNDING
+        .iter()
+        .filter(|(case, _)| !WR459_MOVED.contains(case))
+        .copied()
+        .collect();
+    assert_eq!(beyond, want, "{beyond:#?}");
 }
+
+/// The [`SPHERE_DIFF_3CYLINDERS`] rows whose topology the retirement of
+/// `fillet_cleanup_keeps_target_faces` (WR-459) changes: the clean-up keeps the target's own
+/// faces, so their result geometry has more records than main's (1142 against 1044 in
+/// `e1-r0.1`) and main's blocks and mass here no longer describe the same body. They are
+/// skipped by [`sphere_diff_3cylinders_rows_are_their_sums`] (their `BEYOND_ROUNDING`
+/// entries with them) and checked in
+/// `units::blend_fillet_executive_p3::end_to_end::wr459_sphere_rows`.
+const WR459_MOVED: [&str; 4] = [
+    "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
+    "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
+    "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
+    "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
+];
 
 /// The two `sphere_diff_3cylinders` cases whose result geometry moves beyond rounding,
 /// mirror images of each other, and the round edge (in `p1::edges` order) whose end moves
-/// (see [`sphere_diff_r05_round_end_gaps_swap_between_the_mirror_cases`]).
-const E1_R05: (&str, usize) = ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 37);
-const E4_R05: (&str, usize) = ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 36);
+/// (see [`sphere_diff_r05_round_end_gaps_swap_between_the_mirror_cases`]). WR-459's
+/// retirement keeps the target's own faces, which splits the round into two edges with the
+/// same start (4.000000000004889e-3) in both bodies: the moving one is now edge 41 in
+/// `e1-r0.5` (37 before) and edge 40 in `e4-r0.5` (36 before), found by that start and its
+/// two end values below; the other one (e1: 38, e4: 41) ends at the near value on both sides.
+const E1_R05: (&str, usize) = ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 41);
+const E4_R05: (&str, usize) = ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 40);
 
 /// The result-geometry blocks of `case` that move beyond their sums' rounding bounds: the
 /// blocks holding the moved round edge (`e1-r0.5` block 3; `e4-r0.5` blocks 2 and 3) and,
@@ -530,8 +556,8 @@ fn geometry_beyond_rounding(case: &str) -> &'static [usize] {
 /// each one round edge's interval end moves beyond rounding, between 70.64830969562033 and
 /// 70.6483087419461. At the first value the curve's end lies 2.11e-8 from its end vertex,
 /// at the second 9.85e-7. Main has the near end in `e1-r0.5` and the far end in `e4-r0.5`;
-/// this branch has them the other way round. So `e1-r0.5`'s edge 37 is FARTHER from its
-/// vertex (9.85e-7 against 2.11e-8) and `e4-r0.5`'s edge 36 CLOSER (2.11e-8 against
+/// this branch has them the other way round. So `e1-r0.5`'s edge 41 (37 before WR-459) is FARTHER from its
+/// vertex (9.85e-7 against 2.11e-8) and `e4-r0.5`'s edge 40 (36) CLOSER (2.11e-8 against
 /// 9.85e-7). Every gap is inside the edge's tolerance (4e-5) and the end vertex's
 /// (asserted on both sides). The gaps are evaluated in floating point, good to
 /// about 1e-13 here (argued from the curve's size, not derived), so each ranking holds with

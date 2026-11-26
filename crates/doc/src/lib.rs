@@ -19,6 +19,7 @@ pub use body_transfer::valid_transfer_matrix;
 pub use body_transfer::validate_body_transfer;
 pub mod canvas;
 mod clipboard;
+pub use clipboard::ClonePlacements;
 pub use clipboard::clone_expression;
 pub use clipboard::remap_topology;
 pub use clipboard::remap_topology_faces;

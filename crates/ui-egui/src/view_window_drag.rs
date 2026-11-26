@@ -657,6 +657,18 @@ fn native_preview_scale(ctx: &Context) -> Option<f32> {
     })
 }
 
+fn native_preview_builder(position: Pos2, size: egui::Vec2, visible: bool, owner: egui::ViewportId) -> egui::ViewportBuilder {
+    crate::window_chrome::popout_viewport(egui::ViewportBuilder::default(), owner)
+        .with_title("SolidCraft")
+        .with_decorations(false)
+        .with_resizable(false)
+        .with_active(false)
+        .with_taskbar(false)
+        .with_position(position)
+        .with_inner_size(size)
+        .with_visible(visible)
+}
+
 /// The source retains pointer capture. The preview is a top-level surface with no controls
 /// or focus, sized and positioned from the same desktop rectangle as the drop command.
 pub(crate) fn show_native_preview(app: &SolveApp, ctx: &Context) {
@@ -669,16 +681,7 @@ pub(crate) fn show_native_preview(app: &SolveApp, ctx: &Context) {
     let position = (window.outline.min.to_vec2() / pixels_per_point).to_pos2();
     let size = window.outline.size() / pixels_per_point;
     let ready = native_scale.is_some();
-    let builder = egui::ViewportBuilder::default()
-        .with_title("SolidCraft")
-        .with_decorations(false)
-        .with_resizable(false)
-        .with_active(false)
-        .with_taskbar(false)
-        .with_always_on_top()
-        .with_position(position)
-        .with_inner_size(size)
-        .with_visible(ready);
+    let builder = native_preview_builder(position, size, ready, drag.viewport);
     if !ready {
         // Negotiate the native surface in a hidden deferred viewport first. Keep
         // the source-window preview if the integration cannot make this window.
@@ -1060,6 +1063,15 @@ fn morph(ctx: &Context, view: u64, origin: Rect, goal: Rect, form: Form, pointer
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_view_drag_preview_uses_its_owner_for_stacking() {
+        let owner = egui::ViewportId::from_hash_of("drag owner");
+        let builder = native_preview_builder(Pos2::ZERO, vec2(320.0, 240.0), true, owner);
+        assert_eq!(builder.native_owner, Some(owner));
+        assert_eq!(builder.window_level, None);
+        assert_eq!(builder.active, Some(false));
+    }
 
     #[test]
     fn starting_a_view_drag_draws_immediately_without_requesting_a_screenshot() {

@@ -246,12 +246,21 @@ fn intersect_dialog_filters_geometry_or_whole_bodies_and_controls_projection_lin
         d.inputs[0].items = vec![Sel::Body { name: "Post".into() }];
     }
     let d = h.app.dialog.as_ref().unwrap();
-    assert_eq!(apply_commands(&h.app, d).unwrap(), vec![("sketch.intersect".into(), json!({"refs":[{"body":"Post"}],"projection_link":false}))]);
+    assert_eq!(
+        apply_commands(&h.app, d).unwrap(),
+        vec![("sketch.intersect".into(), json!({"strict_occurrence_references":false,"refs":[{"body":"Post"}],"projection_link":false}))]
+    );
     // A model edge is cut with the plane too (#10484).
     let d = h.app.dialog.as_mut().unwrap();
     d.inputs[0].items = vec![Sel::Edge { body: "Post".into(), index: 0, point: solidcore_record::Vec3::new(0.0, 0.0, 10.0) }];
     let cmds = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
-    assert_eq!(cmds, vec![("sketch.intersect".into(), json!({"refs":[{"edge":[0.0,0.0,10.0],"body":"Post"}],"projection_link":false}))]);
+    assert_eq!(
+        cmds,
+        vec![(
+            "sketch.intersect".into(),
+            json!({"strict_occurrence_references":false,"refs":[{"edge":[0.0,0.0,10.0],"body":"Post"}],"projection_link":false})
+        )]
+    );
 }
 
 /// Intersect takes the lines of another sketch (#10484): a rectangle on XY, a sketch on a plane
@@ -276,7 +285,13 @@ fn intersect_dialog_takes_a_line_of_another_sketch() {
     let [Sel::ExternalSketchCurve { sketch, id }] = d.inputs[0].items.as_slice() else { panic!("the side is picked: {:?}", d.inputs[0].items) };
     assert_eq!(*sketch, rectangle);
     let cmds = apply_commands(&h.app, d).unwrap();
-    assert_eq!(cmds, vec![("sketch.intersect".into(), json!({"refs":[{"sketch":rectangle,"curve":id}],"projection_link":true}))]);
+    assert_eq!(
+        cmds,
+        vec![(
+            "sketch.intersect".into(),
+            json!({"strict_occurrence_references":false,"refs":[{"sketch":rectangle,"curve":id}],"projection_link":true})
+        )]
+    );
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
     h.settle();
     assert!(h.app.dialog.is_none());
@@ -343,7 +358,10 @@ fn project_dialog_keeps_geometry_targets_and_can_project_whole_bodies_unlinked()
         d.inputs[0].items = vec![Sel::Body { name: "Plate".into() }];
     }
     let d = h.app.dialog.as_ref().unwrap();
-    assert_eq!(apply_commands(&h.app, d).unwrap(), vec![("sketch.project".into(), json!({"refs":[{"body":"Plate"}],"projection_link":false}))]);
+    assert_eq!(
+        apply_commands(&h.app, d).unwrap(),
+        vec![("sketch.project".into(), json!({"strict_occurrence_references":false,"refs":[{"body":"Plate"}],"projection_link":false}))]
+    );
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
     h.settle();
     assert!(h.app.dialog.is_none());
@@ -376,7 +394,10 @@ fn project_dialog_takes_a_point_of_another_sketch_13246() {
     let d = h.app.dialog.as_ref().unwrap();
     assert_eq!(d.inputs[0].items, vec![Sel::ExternalSketchPoint { sketch: first, id: "pt".into() }], "the point is picked");
     let cmds = apply_commands(&h.app, d).unwrap();
-    assert_eq!(cmds, vec![("sketch.project".into(), json!({"refs":[{"sketch":first,"point":"pt"}],"projection_link":true}))]);
+    assert_eq!(
+        cmds,
+        vec![("sketch.project".into(), json!({"strict_occurrence_references":false,"refs":[{"sketch":first,"point":"pt"}],"projection_link":true}))]
+    );
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
     h.settle();
     assert!(h.app.dialog.is_none());
@@ -404,7 +425,10 @@ fn project_dialog_takes_a_construction_point() {
         d.inputs[0].items = vec![point];
     }
     let d = h.app.dialog.as_ref().unwrap();
-    assert_eq!(apply_commands(&h.app, d).unwrap(), vec![("sketch.project".into(), json!({"refs":[{"point":"Point1"}],"projection_link":true}))]);
+    assert_eq!(
+        apply_commands(&h.app, d).unwrap(),
+        vec![("sketch.project".into(), json!({"strict_occurrence_references":false,"refs":[{"point":"Point1"}],"projection_link":true}))]
+    );
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
     h.settle();
     let sketch = h.app.session.active_sketch.expect("Project leaves the sketch active");
@@ -1079,4 +1103,88 @@ fn project_box_beside_the_model_still_takes_curves_of_other_sketches_14927() {
     h.call("ui.camera", json!({"target":[65,35,0],"distance":180}));
     h.step(&json!({"drag": [{"world": [55, 35, 0]}, {"world": [85, 45, 0]}]})).unwrap();
     assert_eq!(external_curves(&h, first), vec![lone], "{:?}", h.app.dialog.as_ref().unwrap().inputs[0].items);
+}
+
+/// Dialog previews and deferred submissions carry the same explicit policy and displayed path.
+/// Execute their JSON directly on the engine to prove it does not need UI session state.
+#[test]
+fn projection_dialog_preview_and_apply_keep_explicit_policy_and_displayed_copy() {
+    for enhanced in [false, true] {
+        for command in ["sketch.project", "sketch.intersect"] {
+            let mut h = Harness::new();
+            h.app.ui.project_link_tools = enhanced;
+            let a1 = h.app.run("component.create", json!({"name":"A"})).unwrap()["occurrence"].as_u64().unwrap();
+            let source =
+                h.app.run("sketch.create", json!({"plane":if command == "sketch.intersect" {"XZ"} else {"XY"}})).unwrap()["sketch"].as_u64().unwrap();
+            h.app.run("sketch.line", json!({"points":[[2,-5],[2,5]],"ids":["source"]})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+            let a2 = h.app.run("occurrence.copy", json!({"occurrence":a1})).unwrap()["occurrence"].as_u64().unwrap();
+            h.app.run("occurrence.move", json!({"occurrence":a2,"translate":[50,0,0]})).unwrap();
+            h.app.run("component.activate", json!({"component":0})).unwrap();
+            h.app.run("component.create", json!({"name":"B"})).unwrap();
+            let receiver = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+            let mut d = Dialog::for_command(&h.app, command).unwrap();
+            d.inputs[0].items = vec![Sel::ExternalSketchCurve { sketch: source, id: "source".into() }];
+            let commands = apply_commands(&h.app, &d).unwrap();
+            assert_eq!(preview_commands(&h.app, &d).unwrap(), commands);
+            assert_eq!(commands.len(), 1);
+            assert_eq!(commands[0].0, command);
+            assert_eq!(commands[0].1["strict_occurrence_references"], enhanced);
+            if enhanced {
+                assert_eq!(commands[0].1["refs"][0]["path"], json!([a1]));
+            } else {
+                assert!(commands[0].1["refs"][0].get("path").is_none());
+            }
+            let reply = h.app.session.execute(&commands[0].0, &commands[0].1).unwrap();
+            let link = reply["links"][0]["link"].as_str().unwrap();
+            let expected = enhanced.then_some(vec![a1]);
+            assert_eq!(h.app.session.doc.sketch(receiver).unwrap().link(link).unwrap().placement.as_ref().map(|p| p.source.clone()), expected);
+            h.app.run("sketch.finish", json!({})).unwrap();
+            let mut reopened = solidcraft_engine::Session::default();
+            reopened.doc = solidcraft_engine::doc::format::read(&h.app.session.doc.to_json()).unwrap().into();
+            reopened.refresh();
+            let st = reopened.model.state();
+            let stored = st.sketch(receiver).unwrap().sketch.link(link).unwrap();
+            assert_eq!(stored.placement.as_ref().map(|p| p.source.clone()), expected);
+            assert!(!stored.lost);
+        }
+    }
+}
+
+/// Project owns this opt-in; neither saving preferences nor an older preference enables it.
+#[test]
+fn project_link_tools_are_a_session_option_in_the_project_panel() {
+    let mut h = fixture();
+    assert!(!h.app.ui.project_link_tools);
+    let before = h.app.session.doc.to_json();
+    h.app.start("sketch.project");
+    h.frames(4);
+    assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::SketchProject { .. }));
+    h.step(&json!({"click":{"handle":"project:link-tools"}})).unwrap();
+    assert!(h.app.ui.project_link_tools);
+    assert_eq!(h.app.session.doc.to_json(), before, "choosing a UI policy edits no design");
+    assert_eq!(h.call("ui.set", json!({"showGrid":false}))["ok"], true);
+    assert!(h.app.ui.project_link_tools, "other UI changes retain the session option");
+    assert_eq!(h.call("ui.set", json!({"projectLinkTools":"yes"}))["ok"], false);
+    assert!(h.app.ui.project_link_tools, "a malformed update keeps the previous option");
+    assert_eq!(h.call("ui.prefs", json!({"projection_workflow_ui":true}))["ok"], false);
+
+    let exported = h.app.prefs();
+    let prefs: Value = serde_json::from_str(&exported).unwrap();
+    assert!(prefs["preferences"].get("projection_workflow_ui").is_none());
+    assert!(prefs.get("projectLinkTools").is_none());
+    assert!(prefs["preferences"].get("project_link_tools").is_none());
+    let mut restored = crate::SolveApp::new(Default::default(), Default::default());
+    restored.load_prefs(&exported);
+    assert!(!restored.ui.project_link_tools);
+    restored.load_prefs(r#"{"preferences":{"projection_workflow_ui":true}}"#);
+    assert!(!restored.ui.project_link_tools, "the removed preference cannot enable Project's option");
+
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.ui.project_link_tools, "the choice lasts for the session after closing Project");
+    h.app.start("sketch.project");
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"project:link-tools"}})).unwrap();
+    assert!(!h.app.ui.project_link_tools);
+    assert_eq!(h.app.session.doc.to_json(), before);
 }

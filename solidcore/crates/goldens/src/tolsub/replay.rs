@@ -84,11 +84,12 @@
 //! `stubs4-delete-edge-sphere_diff_3cylinders-e1/e4-r0.1/r0.5`, keep main's committed line
 //! to the bit, but with the cover's raises put back their edges hold #18166's lazily raised
 //! tolerances (lower, each a proved bound) instead of main's, so the put-back row is no
-//! longer main's: they are not replayed with the cover's raises put back. They are checked
-//! instead as rows that did not move ([`KEPT_MAIN_ROW`]): run as is, each is main's committed
-//! line to the bit (its hash, taken from main's expected file, which holds these four lines
-//! unchanged) and this branch's committed line. (The hashes their [`TRIM_COVER`] entries held
-//! were of an older main's run, not of the line main now commits.)
+//! longer main's: they are not replayed with the cover's raises put back. They were checked
+//! instead as rows that did not move (run as is, each was main's committed line to the bit
+//! and this branch's committed line), until the retirement of
+//! `fillet_cleanup_keeps_target_faces` (WR-459) moved all four (the clean-up keeps the
+//! target's own faces); that check is deleted, and the rows are checked in
+//! `units::blend_fillet_executive_p3::end_to_end::wr459_sphere_rows`.
 //!
 //! #20179 (the point test asks the face whether to test) adds five UV trims to the result
 //! body of six `blend.fillet_executive_p3` `sphere_diff_3cylinders` rows: their put-back
@@ -684,69 +685,6 @@ fn put_back_joined(out: &mut crate::Output, raised: &[Raised]) -> Vec<(f64, usiz
         }
     }
     wrong
-}
-
-/// Rows #18166 took out of [`TRIM_COVER`] that it does not move (see the module docs): unit,
-/// case, and the hash of main's committed line (`origin/main` ee673a19bf's expected file).
-/// #18490 moves these four rows (the round sits on the sphere drop's finer trims), so each
-/// hash is of the row with that change, from Linux CI.
-/// Each hash is of the line without the `fillet_point_step` key, which recorded the retired
-/// step latch (#18916). The drop tracer's clamped-sliver rule (a span whose clamped UV image
-/// is one point within the drop's tolerances is left out) moves all four in their
-/// `mass_properties` only, so each hash is of the row with that rule;
-/// `tests/drop_clamped_sliver_moved_mass_rows.rs` classifies each moved entry against a certified enclosure.
-const KEPT_MAIN_ROW: &[(&str, &str, u64)] = &[
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0x751d_c931_5b45_292d,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0x5132_edc0_4baf_f026,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0xc413_26f0_108d_e3f1,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0xd7e9_450b_63e6_d0d1,
-    ),
-];
-
-/// Each [`KEPT_MAIN_ROW`] row, run as is, is main's committed line to the bit and this
-/// branch's committed line.
-#[test]
-fn rows_the_lazy_raise_keeps_are_main_s() {
-    let mut failures = Vec::new();
-    for &(unit_id, name, main_hash) in KEPT_MAIN_ROW {
-        assert!(
-            !TRIM_COVER.iter().any(|r| r.0 == unit_id && r.1 == name)
-                && !DATA.iter().any(|r| r.0 == unit_id && r.1 == name),
-            "{unit_id} {name}: replayed as well"
-        );
-        let u = unit(unit_id);
-        let all = cases(u.as_ref());
-        let golden = read(&default_dir(), unit_id).unwrap();
-        let case = all
-            .get(name)
-            .unwrap_or_else(|| panic!("{unit_id}: no case {name}"));
-        let line = run(u.as_ref(), case);
-        if hash(&line) != main_hash {
-            failures.push(format!(
-                "{unit_id} {name}: not main's line ({:#018x})",
-                hash(&line)
-            ));
-        }
-        if golden.get(name) != Some(&line) {
-            failures.push(format!("{unit_id} {name}: not the committed line"));
-        }
-    }
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// Writes, per `unit<TAB>case` line of `$TOLSUB_CASES`, one JSON line to `$TOLSUB_OUT`:

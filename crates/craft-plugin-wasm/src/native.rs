@@ -1285,10 +1285,23 @@ static CACHE: Cache = Cache::new();
 fn cache() -> &'static Cache {
     #[cfg(test)]
     {
-        thread_local! {
-            static OWN: &'static Cache = Box::leak(Box::new(Cache::new()));
+        /// Waits out the test's background Cranelift compile when the test's thread ends. Each test
+        /// runs in a process of its own under CI, so a compile still running would otherwise race
+        /// the process's exit: libgcc's exit-time teardown of its unwind-frame table then meets
+        /// Wasmtime registering or releasing that compile's frames, and the process aborts after
+        /// the test has passed.
+        struct Own(&'static Cache);
+        impl Drop for Own {
+            fn drop(&mut self) {
+                while self.0.optimizing.load(Ordering::Acquire) {
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+            }
         }
-        OWN.with(|cache| *cache)
+        thread_local! {
+            static OWN: Own = Own(Box::leak(Box::new(Cache::new())));
+        }
+        OWN.with(|own| own.0)
     }
     #[cfg(not(test))]
     {

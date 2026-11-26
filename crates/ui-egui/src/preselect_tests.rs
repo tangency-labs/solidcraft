@@ -3004,6 +3004,120 @@ fn ruled_surface_dialog_takes_edges_a_face_and_a_direction() {
 }
 
 #[test]
+fn trim_dialog_accepts_a_whole_multiface_cutting_sheet() {
+    let mut app = app_with(json!([
+        {"command":"sketch.create","params":{"plane":"XY","name":"CutterProfile"}},
+        {"command":"sketch.line","params":{"points":[[-5,3],[5,3],[15,7]],"ids":["c1","c2"]}},
+        {"command":"sketch.finish","params":{}},
+        {"command":"surface.extrude","params":{"sketch":"CutterProfile","curves":["c1","c2"],"start_offset":-5,"distance":10,"body_name":"Cutter"}},
+        {"command":"sketch.create","params":{"plane":"XY","name":"FloorProfile"}},
+        {"command":"sketch.rectangle.two_point","params":{"p0":[0,0],"p1":[10,10]}},
+        {"command":"sketch.finish","params":{}},
+        {"command":"surface.patch","params":{"sketch":"FloorProfile","body_name":"Floor"}}
+    ]));
+    let cutter = app.session.world_state().unwrap().body("Cutter").unwrap().clone();
+    assert_eq!(cutter.body.face_count(), 2);
+    let mut d = start(&mut app, vec![], "surface.trim");
+    assert_ne!(d.inputs[1].accept & crate::selection::BODIES, 0, "the Browser can pick the entire cutting sheet");
+    d.inputs[0].items = vec![Sel::Body { name: "Floor".into() }];
+    d.active = 1;
+    d.pick(&app.session, Sel::Body { name: "Cutter".into() });
+    assert_eq!(d.inputs[1].items, vec![Sel::Body { name: "Cutter".into() }]);
+    d.inputs[2].items = vec![Sel::Face { body: "Floor".into(), index: 0, point: Vec3::new(2.0, 1.0, 0.0) }];
+    let (id, params) = apply_commands(&app, &d).unwrap().remove(0);
+    assert_eq!(id, "surface.trim");
+    assert_eq!(params["tool"], json!({"body":"Cutter"}));
+    assert!(params.get("plane").is_none());
+    d.inputs[1].items = vec![Sel::Face { body: "Cutter".into(), index: 0, point: Vec3::new(0.0, 3.0, 0.0) }];
+    let face_params = apply_commands(&app, &d).unwrap().remove(0).1;
+    assert!(face_params.get("plane").is_some(), "a picked planar face still uses its extended plane");
+    assert!(face_params.get("tool").is_none());
+    app.session.execute(&id, &params).unwrap();
+    let feature = app.session.doc.features.last().unwrap().id;
+    let restored = crate::dialogs::for_feature(&app, feature, None).unwrap();
+    assert_eq!(restored.inputs[1].items, vec![Sel::Body { name: "Cutter".into() }]);
+    let edited = apply_commands(&app, &restored).unwrap();
+    assert_eq!(edited[0].1["params"]["tool"], json!({"body":"Cutter"}));
+}
+
+#[test]
+fn trim_dialog_shows_why_ok_is_disabled() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.start("surface.trim");
+    h.frames(3);
+    assert!(crate::scenario::rect_of("dialog:trim_missing_input").is_some());
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // Review captures use the existing real viewport renderer; normal regression runs need no GPU.
+        if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() {
+            return;
+        }
+        let Some(dir) = std::env::var_os("SOLIDCRAFT_SCENARIO_SHOTS").map(std::path::PathBuf::from) else { return };
+        let dir = dir.join("viewport");
+        std::fs::create_dir_all(&dir).unwrap();
+        for (width, height) in [(1280, 720), (640, 480)] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":width,"height":height}));
+            for (command, params) in [
+                ("sketch.create", json!({"plane":"XY","name":"FloorProfile"})),
+                ("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})),
+                ("sketch.finish", json!({})),
+                ("surface.patch", json!({"sketch":"FloorProfile","body_name":"Floor"})),
+                ("sketch.create", json!({"plane":"XY","name":"CutterProfile"})),
+                ("sketch.line", json!({"points":[[-5,3],[5,3],[15,7]],"ids":["c1","c2"]})),
+                ("sketch.finish", json!({})),
+                ("surface.extrude", json!({"sketch":"CutterProfile","curves":["c1","c2"],"start_offset":-5,"distance":10,"body_name":"Cutter"})),
+            ] {
+                h.app.run(command, params).unwrap();
+            }
+            h.app.session.selection.clear();
+            h.app.run("view.fit", json!({})).unwrap();
+            h.app.start("surface.trim");
+            h.ctx = egui::Context::default();
+            crate::fonts::setup_bundled_fonts(&h.ctx);
+            solidcraft_theme::apply(&h.ctx);
+            let mut gpu = crate::gpu::EguiFixture::new(&mut h.app, [width, height]).expect("review captures require the actual viewport renderer");
+            let paint = |gpu: &mut crate::gpu::EguiFixture, h: &mut crate::scenario::Harness| {
+                gpu.frame(&h.ctx, vec![], |ui| {
+                    h.app.logic(ui.ctx());
+                    h.app.ui(ui);
+                })
+            };
+            for state in ["missing", "ready"] {
+                if state == "ready" {
+                    let dialog = h.app.dialog.as_mut().unwrap();
+                    dialog.inputs[0].items = vec![Sel::Body { name: "Floor".into() }];
+                    dialog.active = 1;
+                    dialog.pick(&h.app.session, Sel::Body { name: "Cutter".into() });
+                    dialog.inputs[2].items = vec![Sel::Face { body: "Floor".into(), index: 0, point: Vec3::new(2.0, 1.0, 0.0) }];
+                }
+                for _ in 0..8 {
+                    paint(&mut gpu, &mut h);
+                }
+                if state == "ready" {
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+                    while std::time::Instant::now() < deadline {
+                        paint(&mut gpu, &mut h);
+                        if !h.app.preview.busy && (h.app.preview.active || h.app.preview.error.is_some()) {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    assert!(h.app.preview.active && !h.app.preview.busy, "preview did not complete: {:?}", h.app.preview.error);
+                    assert!(h.app.preview.error.is_none(), "{:?}", h.app.preview.error);
+                }
+                let pixels = paint(&mut gpu, &mut h);
+                assert!(gpu.viewport_callbacks > 0, "the real viewport must be drawn");
+                assert_eq!(crate::scenario::count_of("dialog:ok:enabled"), Some(f64::from(state == "ready")));
+                image::RgbaImage::from_raw(width, height, pixels).unwrap().save(dir.join(format!("trim-{width}-{height}-{state}.png"))).unwrap();
+            }
+        }
+    }
+}
+
+#[test]
 fn trim_dialog_takes_curves_several_keep_points_and_another_surface() {
     // Two 20 × 10 sheets crossing at x = 0 / z = 0 and a sketch line x = 3 on XY.
     let mut app = app_with(json!([

@@ -25,8 +25,9 @@
 //! directory): every case whose committed row differs from main's. A row the retirement
 //! moves by less than the goldens' comparator keeps main's committed line, so it is not
 //! listed (its run is not that line to the bit). Of `blend.fillet_executive_p3`'s moved rows
-//! the ten `sphere_diff_3cylinders` rows and `stubs4-sphere_plane-e3-r0.5` are listed
-//! (`REFIT_UNITS` that unit alone, these rows kept). Its other moved row,
+//! the ten `sphere_diff_3cylinders` rows and `stubs4-sphere_plane-e3-r0.5` were listed
+//! (`REFIT_UNITS` that unit alone, these rows kept); WR-459's retirement took out the four
+//! `e1`/`e4` rows (see [`DATA`]), leaving seven. Its other moved row,
 //! `source-file-box_w_slot-all-edges`, is not listed: there the seam rebuilds main's run of
 //! the case bit for bit (measured on main at 0b321cbaa4), but main's committed line is not
 //! main's own run to the bit (`mass_properties` up to 1.7e-10 relative off, within the
@@ -177,7 +178,7 @@ replay_tests! {
     edgeuse_p2_rows_move_only_through_the_kept_nurb: "topology.edgeuse_p2", 8;
     vertex_rows_move_only_through_the_kept_nurb: "topology.vertex", 1;
     standard_solver_p1_rows_move_only_through_the_kept_nurb: "blend.fillet_standard_solver_p1", 1;
-    fillet_executive_p3_rows_move_only_through_the_kept_nurb: "blend.fillet_executive_p3", 11;
+    fillet_executive_p3_rows_move_only_through_the_kept_nurb: "blend.fillet_executive_p3", 7;
 }
 
 /// `topology.vertex` `surf_sphere150_rebuild_v3_gaps` (`max_up_dim_gap_3d` with its list):

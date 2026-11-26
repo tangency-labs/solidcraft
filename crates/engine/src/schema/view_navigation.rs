@@ -698,6 +698,8 @@ pub enum NavigateAction {
     Down,
     Clockwise,
     Counterclockwise,
+    /// Turn half a turn about the screen's vertical axis, retaining screen up.
+    TurnAround,
     /// The isometric view, framed on the whole model.
     Home,
     /// Frame the whole model.
@@ -830,7 +832,7 @@ pub struct NavigateParams {
     pub direction: Option<Vec3>,
     /// A turn without `direction`: left, right, up or down turn the view `degrees`, clockwise and
     /// counterclockwise roll it a quarter turn, home shows the isometric view framed, fit frames
-    /// the model.
+    /// the model. Turn Around turns half a turn about screen up.
     #[serde(default, deserialize_with = "navigate_action", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "NavigateAction")]
     pub action: Option<NavigateAction>,

@@ -21,7 +21,7 @@ fn invalid(message: &str) -> IoError {
 }
 
 // The kernel reports geometry refusals; file-format wording belongs to IO.
-pub(super) fn export_error(error: solidcraft_kernel::services::path_export::PathRefusal) -> IoError {
+pub(super) fn export_error(error: solidcraft_kernel::services::dxf::export::PathRefusal) -> IoError {
     let message = match error.reason.as_str() {
         "bounds must be finite and ordered" => "DXF bounds must be finite and ordered".to_string(),
         "nonfinite point" => "nonfinite DXF point".to_string(),
@@ -51,7 +51,7 @@ impl DxfGeometryBounds {
     }
 
     fn union(self, other: Self) -> Self {
-        let b = solidcraft_kernel::services::export_geometry::union_bounds(self.min, self.max, other.min, other.max);
+        let b = solidcraft_kernel::services::dxf::export::union_bounds(self.min, self.max, other.min, other.max);
         Self { min: b.min, max: b.max }
     }
 }
@@ -65,7 +65,7 @@ fn positive(value: f64) -> Result<f64> {
 }
 
 fn supporting_circle(c: Vec2, r: f64) -> Result<DxfGeometryBounds> {
-    let b = solidcraft_kernel::services::export_geometry::supporting_circle(c, r).map_err(export_error)?;
+    let b = solidcraft_kernel::services::dxf::export::supporting_circle(c, r).map_err(export_error)?;
     Ok(DxfGeometryBounds { min: b.min, max: b.max })
 }
 
@@ -82,7 +82,7 @@ fn valid_text(at: Vec2, height: f64, angle_deg: f64) -> Result<()> {
 }
 
 fn point_bounds(points: &[Vec2]) -> Result<DxfGeometryBounds> {
-    let b = solidcraft_kernel::services::export_geometry::point_bounds(points).map_err(export_error)?;
+    let b = solidcraft_kernel::services::dxf::export::point_bounds(points).map_err(export_error)?;
     Ok(DxfGeometryBounds { min: b.min, max: b.max })
 }
 
@@ -97,7 +97,7 @@ fn valid_polyline(points: &[Vec2]) -> Result<()> {
 }
 
 fn ellipse_bounds(c: Vec2, major: Vec2, ratio: f64, t0: f64, t1: f64) -> Result<DxfGeometryBounds> {
-    let b = solidcraft_kernel::services::export_geometry::ellipse_bounds(c, major, ratio, t0, t1).map_err(export_error)?;
+    let b = solidcraft_kernel::services::dxf::export::ellipse_bounds(c, major, ratio, t0, t1).map_err(export_error)?;
     Ok(DxfGeometryBounds { min: b.min, max: b.max })
 }
 
@@ -233,7 +233,7 @@ where
 }
 
 fn transformed_point(point: Vec2, scale: f64, translation: Vec2) -> Result<Vec2> {
-    solidcraft_kernel::services::export_geometry::transformed_point(point, scale, translation).map_err(export_error)
+    solidcraft_kernel::services::dxf::export::transformed_point(point, scale, translation).map_err(export_error)
 }
 
 fn transformed_shape(shape: &DxfShape, scale: f64, translation: Vec2) -> Result<DxfShape> {
@@ -285,7 +285,7 @@ fn transformed_shape(shape: &DxfShape, scale: f64, translation: Vec2) -> Result<
         DxfShape::Circle { c, r } => {
             positive(*r)?;
             let c = transformed_point(*c, scale, translation)?;
-            let r = solidcraft_kernel::services::export_geometry::scaled_positive(*r, scale).map_err(export_error)?;
+            let r = solidcraft_kernel::services::dxf::export::scaled_positive(*r, scale).map_err(export_error)?;
             supporting_circle(c, r)?;
             Ok(DxfShape::Circle { c, r })
         }
@@ -296,7 +296,7 @@ fn transformed_shape(shape: &DxfShape, scale: f64, translation: Vec2) -> Result<
         DxfShape::Ellipse { c, major, ratio, t0, t1 } => {
             ellipse_bounds(*c, *major, *ratio, *t0, *t1)?;
             let c = transformed_point(*c, scale, translation)?;
-            let major = solidcraft_kernel::services::export_geometry::scaled_axis(*major, scale).map_err(export_error)?;
+            let major = solidcraft_kernel::services::dxf::export::scaled_axis(*major, scale).map_err(export_error)?;
             ellipse_bounds(c, major, *ratio, *t0, *t1)?;
             Ok(DxfShape::Ellipse { c, major, ratio: *ratio, t0: *t0, t1: *t1 })
         }
@@ -311,14 +311,14 @@ fn transformed_shape(shape: &DxfShape, scale: f64, translation: Vec2) -> Result<
             valid_arc(*a0, *a1)?;
             positive(*r)?;
             let c = transformed_point(*c, scale, translation)?;
-            let r = solidcraft_kernel::services::export_geometry::scaled_positive(*r, scale).map_err(export_error)?;
+            let r = solidcraft_kernel::services::dxf::export::scaled_positive(*r, scale).map_err(export_error)?;
             supporting_circle(c, r)?;
             Ok(DxfShape::Arc { c, r, a0: *a0, a1: *a1 })
         }
         DxfShape::Text { at, height, angle_deg, text } => {
             valid_text(*at, *height, *angle_deg)?;
             let at = transformed_point(*at, scale, translation)?;
-            let height = solidcraft_kernel::services::export_geometry::scaled_positive(*height, scale).map_err(export_error)?;
+            let height = solidcraft_kernel::services::dxf::export::scaled_positive(*height, scale).map_err(export_error)?;
             let mut copy = String::new();
             copy.try_reserve(text.len()).map_err(|_| invalid("DXF text allocation failed"))?;
             copy.push_str(text);
@@ -327,7 +327,7 @@ fn transformed_shape(shape: &DxfShape, scale: f64, translation: Vec2) -> Result<
         DxfShape::AlignedText { at, height, angle_deg, text, horizontal, vertical } => {
             valid_text(*at, *height, *angle_deg)?;
             let at = transformed_point(*at, scale, translation)?;
-            let height = solidcraft_kernel::services::export_geometry::scaled_positive(*height, scale).map_err(export_error)?;
+            let height = solidcraft_kernel::services::dxf::export::scaled_positive(*height, scale).map_err(export_error)?;
             let mut copy = String::new();
             copy.try_reserve(text.len()).map_err(|_| invalid("DXF text allocation failed"))?;
             copy.push_str(text);

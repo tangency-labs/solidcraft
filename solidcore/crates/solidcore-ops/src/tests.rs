@@ -239,8 +239,8 @@ fn first_point(b: &Body) -> [f64; 3] {
 }
 
 #[test]
-fn source_chord_coordinates_cross_the_import_geometry_seam() {
-    use crate::import_geometry::chord_coordinates;
+fn source_chord_coordinates_cross_the_affine_seam() {
+    use crate::affine::chord_coordinates;
     use solidcore_record::Vec2;
 
     assert_eq!(

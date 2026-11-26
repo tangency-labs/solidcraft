@@ -162,6 +162,8 @@ pub(crate) enum Sides {
     /// It may not: the rounds of splitting ran out ([`MAX_SPLIT_ROUNDS`]); where that leaves
     /// it short, the face is named ([`crate::ShapeLimit::Rounds`]).
     Exhausted,
+    /// An incident edge reached the node limit during optional shaping.
+    EdgeNodes,
 }
 
 /// Rounds of putting the boundary sides the mesh path's shaping splits on their edges and
@@ -323,13 +325,22 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
     let mut slots: Vec<Option<Result<(FacePlan, PlanStats)>>> = faces.iter().map(|_| None).collect();
     // The faces whose shaping split only sides on no edge: planned with their sides whole.
     let mut kept = vec![false; faces.len()];
+    let mut capped = vec![false; faces.len()];
     let mut todo: Vec<usize> = (0..faces.len()).collect();
     for round in 0..=MAX_SPLIT_ROUNDS {
         let last = round == MAX_SPLIT_ROUNDS;
         let done = crate::par::map("face tessellation", &todo, curved >= PARALLEL_FACES, |&fi| {
             let purpose = match shape {
                 Some(shape) => {
-                    let sides = if last { Sides::Exhausted } else if kept.get(fi).copied().unwrap_or(true) { Sides::Kept } else { Sides::Split };
+                    let sides = if capped.get(fi) == Some(&true) {
+                        Sides::EdgeNodes
+                    } else if last {
+                        Sides::Exhausted
+                    } else if kept.get(fi).copied().unwrap_or(true) {
+                        Sides::Kept
+                    } else {
+                        Sides::Split
+                    };
                     Purpose::Mesh(Shape { sides, ..shape })
                 }
                 None => Purpose::Display,
@@ -364,9 +375,19 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
         let (mut moved, mut lost): (Vec<usize>, Vec<usize>) = (Vec::new(), Vec::new());
         for (e, ts) in &split {
             let fs = edge_faces.get(*e).map_or(&[][..], Vec::as_slice);
-            let inserted = nodes.get_mut(*e).map_or(Ok(()), |n| edges::insert_at(b, *e, n, ts));
+            let inserted = nodes.get_mut(*e).map_or(Ok(true), |n| edges::insert_at(b, *e, n, ts));
             match inserted {
-                Ok(()) => moved.extend(fs),
+                Ok(true) => moved.extend(fs),
+                Ok(false) => {
+                    // Shape refinement is optional. Replan both sides against the same,
+                    // unchanged boundary, even if another incident edge moves this round.
+                    for &fi in fs {
+                        if let Some(limit) = capped.get_mut(fi) {
+                            *limit = true;
+                        }
+                    }
+                    again.extend(fs);
+                }
                 // An edge that cannot take the nodes leaves out the faces it bounds, naming it.
                 Err(why) => {
                     for &fi in fs {
@@ -397,6 +418,7 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
                     again.push(fi);
                 }
                 Err(e) => {
+                    lost.push(fi);
                     if let Some(slot) = slots.get_mut(fi) {
                         *slot = Some(Err(e));
                     }
@@ -717,12 +739,18 @@ fn boundary(
     // most the chord tolerance, finer than which the mesh resolves nothing (a vertex tolerance
     // as large as the surface's features would make a pole of every node near one).
     let mut reach: f64 = 0.0;
-    for oe in face_edges(face) {
-        let (Some(edge), Some([p0, p1])) = (b.edges.get(oe.edge as usize), oe.pcurve.interval()) else { continue };
-        let tol = edge.vertices.get(usize::from(!oe.forward)).and_then(|v| b.vertices.get(*v as usize)).map_or(0.0, |v| v.tolerance.min(rules.tol));
-        let Some(q) = solidcore_convert::curve2(&oe.pcurve).eval(if oe.forward { p0 } else { p1 }).map(|q| map.to_eval(q)) else { continue };
-        if tol.is_finite() && tol > reach && (0..2).any(|d| s.pole(q, d, tol)) {
-            reach = tol;
+    // A positive-radius cylinder has no geometric poles. Its NURBS can be a very
+    // short axial extrusion: the vertex tolerance may cover its entire width
+    // without collapsing any of its generators. Keep the exact pole check on
+    // its parameterization, but do not promote nearby points to poles.
+    if !matches!(face.surface, brep::Surface::Cylinder { radius, .. } if radius.is_finite() && radius > 0.0) {
+        for oe in face_edges(face) {
+            let (Some(edge), Some([p0, p1])) = (b.edges.get(oe.edge as usize), oe.pcurve.interval()) else { continue };
+            let tol = edge.vertices.get(usize::from(!oe.forward)).and_then(|v| b.vertices.get(*v as usize)).map_or(0.0, |v| v.tolerance.min(rules.tol));
+            let Some(q) = solidcore_convert::curve2(&oe.pcurve).eval(if oe.forward { p0 } else { p1 }).map(|q| map.to_eval(q)) else { continue };
+            if tol.is_finite() && tol > reach && (0..2).any(|d| s.pole(q, d, tol)) {
+                reach = tol;
+            }
         }
     }
     let pole_along = |q: [f64; 2], d: usize| s.pole(q, d, reach);
@@ -2341,6 +2369,7 @@ fn plan_face(
             Sides::Split => None,
             Sides::Kept => Some(crate::ShapeLimit::SidesOnNoEdge),
             Sides::Exhausted => Some(crate::ShapeLimit::Rounds),
+            Sides::EdgeNodes => Some(crate::ShapeLimit::EdgeNodes),
         };
         let shaping = shape::Rules {
             min_angle: shape.min_angle.to_radians(),

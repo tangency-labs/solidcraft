@@ -49,6 +49,11 @@ use solidcraft_theme::Tokens;
 pub mod caption;
 pub mod native_menu;
 
+/// Associate a native pop-out with the SolidCraft viewport that opened it.
+pub fn popout_viewport(builder: ViewportBuilder, owner: egui::ViewportId) -> ViewportBuilder {
+    builder.with_native_owner(owner)
+}
+
 /// One caption button: as wide as the native Windows ones.
 pub const BUTTON_WIDTH: f32 = 46.0;
 /// The three caption buttons together.

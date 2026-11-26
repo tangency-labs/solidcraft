@@ -1180,7 +1180,9 @@ mod local_operation {
 
     include!("operand_trim_rows/local_operation.rs");
 
-    /// Every `topology.brep_local_operation` row the copy moves (65): certified as the
+    /// Every `topology.brep_local_operation` row the copy moves (64: `gen0030` is not
+    /// listed, because main and this branch both refuse its edit and put its input back, so
+    /// it no longer moves, tangency-labs/solidcraft#21301): certified as the
     /// module docs say; none farther, and looser only the listed
     /// [`super::RAISED_TO_A_LOOSE_BOUND`] tolerances (counted). The rows were recorded before the kept-trim cover
     /// (#19295), which can raise these reads' edge tolerances. Each case runs with any
@@ -1228,18 +1230,21 @@ mod local_operation {
              proved bound, #19784) {looser}",
             ROWS.len()
         );
-        assert_eq!(ROWS.len(), 65);
+        assert_eq!(ROWS.len(), 64);
         assert_eq!(looser, super::RAISED_TO_A_LOOSE_BOUND.len());
     }
 
     /// A trim off its edge's tolerance on an edge no moved value touches passes only as
-    /// main's own trim (#19318). `box_face0_in` moves no value; the first two trimmed uses of
-    /// its first edge with two swap their trims (each now in the other face's parameters),
-    /// so neither lies on its edge, and neither is main's (main's record holds no trim).
+    /// main's own trim (#19318). `gen0002` moves no value (its row lists none, its `main` and
+    /// `new` digests are equal, it is not in [`crate::wr495_rows`]' rows or this unit's
+    /// trim-tolerance ledger, and `OFF_TRIMS` lists none of its trims); the first two trimmed
+    /// uses of its first edge with two swap their trims (each now in the other face's
+    /// parameters), so neither lies on its edge, and neither is main's. (`box_face0_in`
+    /// served until WR-495's exact mate left its result with no trimmed edge use, #21301.)
     #[test]
     #[should_panic(expected = "not main's")]
     fn an_off_trim_that_is_not_main_s_fails() {
-        let case = crate::case::regression_case(&Runner, "box_face0_in");
+        let case = crate::case::regression_case(&Runner, "gen0002");
         let out = Runner.run_rust(&case).unwrap();
         let (_, mut bodies) = result_breps(&case).unwrap();
         let (_, b) = &mut bodies[0];
@@ -1260,17 +1265,7 @@ mod local_operation {
         let t1 = b.edgeuse(u1).unwrap().uv_trim_curve.clone();
         b.edgeuse_mut(u0).unwrap().uv_trim_curve = t1;
         b.edgeuse_mut(u1).unwrap().uv_trim_curve = t0;
-        super::certify_body(
-            "box_face0_in",
-            &out,
-            "",
-            b,
-            Some(&mut raw),
-            &[],
-            &[],
-            true,
-            &[],
-        );
+        super::certify_body("gen0002", &out, "", b, Some(&mut raw), &[], &[], true, &[]);
     }
 }
 

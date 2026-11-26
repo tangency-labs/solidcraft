@@ -21,6 +21,7 @@ The PR workflow in detail: `.agents/skills/solidcraft-file-pr/SKILL.md` (writing
   feature under another number, and PRs that change the files you will change
   (`gh pr list ... --json number,title,files`). If someone has it, comment on their PR or issue
   instead of opening a second one: two PRs for one change cannot both land.
+- **Search before you start.** Scan ALL issues and PRs, open and closed, for similar work (`gh issue list` and `gh pr list --state all --search`). New features are discussed on Discord, then get an issue. Kernel functionality goes in `solidcore/`, and features call its API (CONTRIBUTING.md, "Kernel work goes in solidcore/"); work begun before 0.40 is ported onto today's code first.
 - **Claim with a draft PR.** `gh pr list -R tangency-labs/solidcraft --state open --search "#N"`; if none,
   branch from the latest `origin/main`, `git commit --allow-empty -m "claim: #N"`, push, and open a
   draft PR titled `<summary> (#N)`. The lowest-numbered open PR for an issue wins; close yours if it

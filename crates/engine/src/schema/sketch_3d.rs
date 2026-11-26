@@ -558,7 +558,54 @@ impl JsonSchema for PlaneName {
     }
 }
 
-/// Hold 3D points on an origin plane.
+/// The plane a 3D constraint is held to (#10616): an origin plane (`xy`, `yz` or `xz`), a
+/// construction plane's name, or `{face: [x,y,z], body?}`, the planar model face through that
+/// point. The handler resolves it; a name that is no plane is its to refuse.
+#[derive(Clone, Debug)]
+pub struct PlaneTarget(pub Value);
+
+impl<'de> Deserialize<'de> for PlaneTarget {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let ok = match &v {
+            Value::String(name) => !name.is_empty(),
+            Value::Object(o) => {
+                o.keys().all(|k| k == "face" || k == "body")
+                    && o.get("face")
+                        .and_then(Value::as_array)
+                        .is_some_and(|a| a.len() == 3 && a.iter().all(|x| x.as_f64().is_some_and(f64::is_finite)))
+                    && o.get("body").is_none_or(Value::is_string)
+            }
+            _ => false,
+        };
+        if ok { Ok(PlaneTarget(v)) } else { Err(D::Error::custom("must be xy, yz or xz, a construction plane's name, or {face: [x,y,z], body?}")) }
+    }
+}
+
+impl JsonSchema for PlaneTarget {
+    fn schema_name() -> Cow<'static, str> {
+        "PlaneTarget".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "An origin plane (xy, yz or xz), a construction plane's name, or {face: [x,y,z], body?}: the planar model face through that point.",
+            "oneOf": [
+                {"type": "string", "minLength": 1},
+                {
+                    "type": "object",
+                    "properties": {
+                        "face": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                        "body": {"type": "string"}
+                    },
+                    "required": ["face"],
+                    "additionalProperties": false
+                }
+            ]
+        })
+    }
+}
+
+/// Hold 3D points on a plane.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct OnPlaneParams {
@@ -568,8 +615,9 @@ pub struct OnPlaneParams {
     /// Several 3D point refs, each held on the plane.
     #[serde(default)]
     pub points: Option<Vec<String>>,
-    /// The origin plane of the sketch's 3D space.
-    pub plane: PlaneName,
+    /// The plane: an origin plane of the sketch's 3D space, a construction plane, or a planar
+    /// model face.
+    pub plane: PlaneTarget,
     /// The sketch (default: the one being edited).
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SketchRef")]

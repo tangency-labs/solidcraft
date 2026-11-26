@@ -459,6 +459,59 @@ fn finish_editing_is_a_model_tab_button_only_while_a_part_is_edited_in_place() {
 }
 
 #[test]
+fn finish_editing_stays_reachable_with_plugins_at_every_window_width() {
+    use crate::plugin_menu::tests::{entry, listed};
+
+    let mut f = assembly("ribbon-plugins");
+    let mut h = crate::scenario::Harness::new();
+    h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
+    h.app.home.open = false;
+    h.app.plugin_menu.loaded = true;
+    let mut gears = listed("gears", vec![entry("spur", "edit", json!([]))]);
+    gears.name = "Gears".into();
+    h.app.plugin_menu.listed = vec![gears];
+    double_click_component(&mut h.app, json!({"component": f.plate}));
+    settle(&mut h.app);
+    for enabled in [false, true] {
+        h.app.preferences.disabled_plugins.clear();
+        if !enabled {
+            h.app.preferences.disabled_plugins.insert("gears".into());
+        }
+        for width in [1600, 1280, 1000, 700] {
+            h.call("ui.resize", json!({"width":width, "height":720}));
+            h.frames(3);
+            let exit = crate::scenario::rect_of("panel:MODEL:FINISH EDITING").expect("Finish Editing stays on the ribbon");
+            let button = crate::scenario::rect_of("button:component.finish_edit").expect("Finish Edit stays reachable");
+            assert!(exit.contains_rect(button), "width {width}, plugin enabled {enabled}: {exit:?}, {button:?}");
+            let plugins = crate::scenario::rect_of("panel:MODEL:PLUGINS");
+            if enabled && width >= 1000 {
+                assert!(plugins.is_some(), "the enabled plugin is on the wide ribbon");
+            } else if !enabled {
+                assert!(plugins.is_none(), "a disabled plugin has no ribbon group");
+            }
+            if let Some(plugins) = plugins {
+                assert!(plugins.right() < exit.left(), "Plugins must precede Finish Editing at width {width}");
+            }
+        }
+    }
+    // The reordered group still opens its own menu, and Finish Edit still leaves the part.
+    h.call("ui.resize", json!({"width":1600, "height":720}));
+    h.frames(3);
+    let listed = h.app.plugin_menu.listed.clone();
+    h.step(&json!({"click":{"handle":"panel:MODEL:PLUGINS"}})).unwrap();
+    assert!(h.app.plugin_menu.open, "the Plugins label opens the plugin menu after reordering");
+    h.step(&json!({"key":"Escape"})).unwrap();
+    // Opening the menu rereads installed packages; keep this test's synthetic plugin.
+    h.app.plugin_menu.listed = listed;
+    h.call("ui.resize", json!({"width":700, "height":720}));
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"button:component.finish_edit"}})).unwrap();
+    settle(&mut h.app);
+    assert!(h.app.edit_in_place.active.is_none());
+    assert_eq!(h.app.docs.count(), 1);
+}
+
+#[test]
 fn the_back_button_finishes_the_edit_unless_a_dialog_is_open() {
     let mut f = assembly("back");
     back(&mut f.app);

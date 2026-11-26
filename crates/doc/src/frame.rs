@@ -35,6 +35,12 @@ pub mod sizes;
 pub const MAX_MEMBERS: usize = 1000;
 /// The largest profile dimension (mm).
 pub const MAX_PROFILE_SIZE: f64 = 10_000.0;
+
+/// Is `v` a finite length within [`MAX_PROFILE_SIZE`] either way: a coordinate of a member's
+/// `locate`, or an offset from its anchor, the engine takes.
+pub fn within_profile_size(v: f64) -> bool {
+    v.is_finite() && v.abs() <= MAX_PROFILE_SIZE
+}
 /// The smallest profile dimension (mm): walls and sides thinner than this are refused, and so
 /// are radii smaller than this but not 0.
 pub const MIN_PROFILE_DIMENSION: f64 = 0.01;
@@ -350,8 +356,8 @@ impl crate::walk::Walk for ProfileSpec {
 
 pub use crate::eval::frame_member::{
     LaterPieces, SectionView, corner_at_point, corner_point, default_order, default_orders, group_member_names, is_crossing, is_member_line,
-    is_member_wire, member_line_ids, member_names, member_of_body, member_parts, member_segments, member_turns, members_cross, members_of_bodies,
-    overlap_parent, section_view,
+    is_member_wire, located_point, member_line_ids, member_names, member_of_body, member_parts, member_segments, member_turns, members_cross,
+    members_of_bodies, overlap_parent, section_view,
 };
 pub use crate::frame_corners::{CornerOverride, CornerType, MAX_GAP, MemberRef, checked_gap, read_coped};
 pub use crate::frame_plate::{PlateHoles, PlateMember, PlateShape, plate_member, plate_region};

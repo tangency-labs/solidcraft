@@ -762,12 +762,15 @@ fn the_chat_pops_out_into_its_own_window_and_docks_back() {
 fn the_window_place_is_given_once_when_it_opens() {
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
     app.preferences.agent_chat_window = Some([1967.0, 160.0, 569.0, 686.0]);
-    let first = panel::window_builder(&app.session.doc.name, app.agent_chat.window_placed, &panel::AgentPanelPrefs::read(&app.preferences));
+    let owner = egui::ViewportId::from_hash_of("chat owner");
+    let first = panel::window_builder(&app.session.doc.name, app.agent_chat.window_placed, &panel::AgentPanelPrefs::read(&app.preferences), owner);
+    assert_eq!(first.native_owner, Some(owner));
     assert_eq!(first.position, Some(egui::pos2(1967.0, 160.0)));
     assert_eq!(first.inner_size, Some(egui::vec2(569.0, 686.0)));
     app.agent_chat.window_placed = true;
     app.preferences.agent_chat_window = Some([1967.0, 160.0, 569.0, 687.0]);
-    let later = panel::window_builder(&app.session.doc.name, app.agent_chat.window_placed, &panel::AgentPanelPrefs::read(&app.preferences));
+    let later = panel::window_builder(&app.session.doc.name, app.agent_chat.window_placed, &panel::AgentPanelPrefs::read(&app.preferences), owner);
+    assert_eq!(later.native_owner, Some(owner));
     assert_eq!((later.position, later.inner_size), (None, None), "nothing to move or resize once it is open");
     assert!(later.title.is_some());
     // Docked or closed, the next pop-out opens at the saved place again.

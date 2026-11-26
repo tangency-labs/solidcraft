@@ -31,8 +31,6 @@ pub(super) struct Saved {
     pub out_len: usize,
     pub reuse: bool,
     pub prev_fp: u64,
-    /// The features' own inputs so far, without where they are placed (#17310).
-    pub geo: u64,
     pub recomputed: usize,
     pub restored: usize,
     pub poses: HashMap<u64, u64>,
@@ -315,7 +313,6 @@ mod tests {
             out_len: 0,
             reuse: false,
             prev_fp: 0,
-            geo: 0,
             recomputed: 0,
             restored: 0,
             poses: HashMap::new(),
