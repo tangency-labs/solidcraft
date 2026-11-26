@@ -578,11 +578,12 @@ mod tests {
         let saved = super::remembered(&mut h.app);
         let pair = crate::tab_groups::RememberedGroup { name: "Pair".into(), colour: "green".into(), collapsed: true, designs: paths[..2].to_vec() };
         assert_eq!(saved, vec![pair.clone()], "the group and its two designs are remembered");
-        // The next launch: the saved designs open again, the second first, and join the group.
+        // The next launch: the saved designs open again, in the tab order they were saved in, and
+        // each joins the group.
         let mut again = Harness::new();
         again.app.home.open = false;
         again.app.preferences.open_design_groups = saved;
-        for path in [&paths[1], &paths[0]] {
+        for path in [&paths[0], &paths[1]] {
             again.app.open_path(path);
             super::design_opened(&mut again.app, path);
         }
