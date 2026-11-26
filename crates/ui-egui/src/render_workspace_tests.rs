@@ -9198,7 +9198,7 @@ fn live_image_imported_mesh_keeps_selected_and_hovered_face_and_body_feedback() 
     )
     .unwrap();
     let mut h = Harness::new();
-    h.app = SolveApp::new(Session::new(doc), crate::Services::default());
+    *h.app = SolveApp::new(Session::new(doc), crate::Services::default());
     // This context's texture deltas must reach the real GPU renderer, rather than
     // being discarded by the scenario harness's renderer-free frames.
     h.ctx = crate::fonts::test_context();

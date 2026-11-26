@@ -11,7 +11,7 @@ pub(crate) fn capture_prompt(app: &mut SolveApp, ctx: &egui::Context) {
     if app.tree.capture_prompt.is_none() {
         return;
     }
-    let n = app.session.pending_moves.len();
+    let n = app.session.uncaptured_position_count();
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_capture_prompt"), "capture", solidcraft_ui_text::tr_label("Capture Position"))
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, -80.0))
         .actions("Capture Position", "Cancel", Some("Revert"))

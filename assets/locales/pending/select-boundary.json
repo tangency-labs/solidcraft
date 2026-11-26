@@ -1,0 +1,10 @@
+{
+  "en": { "cmd.select.boundary": "Select Boundary" },
+  "ar": { "cmd.select.boundary": "تحديد الحد" },
+  "de": { "cmd.select.boundary": "Begrenzung auswählen" },
+  "he": { "cmd.select.boundary": "בחירת גבול" },
+  "ja": { "cmd.select.boundary": "境界を選択" },
+  "ko": { "cmd.select.boundary": "경계 선택" },
+  "vi": { "cmd.select.boundary": "Chọn biên" },
+  "zh": { "cmd.select.boundary": "选择边界" }
+}

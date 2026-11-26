@@ -31,14 +31,15 @@ pub(super) struct Saved {
     pub out_len: usize,
     pub reuse: bool,
     pub prev_fp: u64,
-    /// The features' own inputs so far, without where they are placed (#17310).
-    pub geo: u64,
     pub recomputed: usize,
     pub restored: usize,
     pub poses: HashMap<u64, u64>,
     pub moved: Vec<(u64, Vec<ModelBody>)>,
     pub failed: HashMap<u64, (String, String)>,
     pub rolled_results: HashMap<u64, (u64, FeatureResult)>,
+    pub occurrence_transforms: Option<Vec<crate::Mat>>,
+    pub joint_states: Option<Vec<(Vec<f64>, Vec<Option<String>>)>>,
+    pub resolved_joints: std::collections::BTreeMap<u64, crate::CapturedJoint>,
 }
 
 /// How a feature whose check refused its bodies ends: as the check in line ended it.
@@ -315,13 +316,15 @@ mod tests {
             out_len: 0,
             reuse: false,
             prev_fp: 0,
-            geo: 0,
             recomputed: 0,
             restored: 0,
             poses: HashMap::new(),
             moved: Vec::new(),
             failed: HashMap::new(),
             rolled_results: HashMap::new(),
+            occurrence_transforms: None,
+            joint_states: None,
+            resolved_joints: Default::default(),
         }
     }
 

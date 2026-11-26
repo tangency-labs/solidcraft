@@ -32,7 +32,7 @@
 {"case":"adv_testpoint_pole_4","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[0.0,6e+20,-5e+20]],"n":25}}}
 {"case":"adv_trace2_breaks_below","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[78.2264159720452,78.2264159720452,2279.910411211589]],"n":58}}}
 {"case":"adv_trace2_crossing","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[14097.226415972045,14097.226415972045,787216.4104112115]],"n":63}}}
-{"case":"adv_trace2_start_outside","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[36.79748378391067,56.79748378391067,977.9789537065125]],"n":57}}}
+{"case":"adv_trace2_start_outside","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[56.79748378391067,76.79748378391068,1827.9789537065126]],"n":57}}}
 {"case":"boundary_degenerate_interval_on_surface","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[6.5,6e+20,-5e+20]],"n":30}}}
 {"case":"gen0000","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[25.279443539390876,28.8487781728788,1252.1881658394252]],"n":108}}}
 {"case":"gen0001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":157}}}

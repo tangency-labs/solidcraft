@@ -1798,6 +1798,7 @@ fn run_rust_op_in(
                 wrap_in_offsets(k, b, &faces, d)?;
             }
             let (s, _) = status(bp3::turn_to_nurbs(k, b, &mut env))?;
+            crate::dump::body(k, "uv_trims", b);
             out.push(s);
             for e in edges {
                 put_curve(&mut out, must(b.edge(e))?.curve.as_ref())?;

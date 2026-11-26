@@ -9,6 +9,7 @@
 //! | [`OffsetExecutive`] accessors | `GetInset`, `GetTangencyTolDegrees`, `GetExtendConvexEdges`, `GetOffsetBrep`, `GetShellFaces`, setters |
 //! | `notify_edge_and_vertices` (private) | `sm_NotifyEdgeAndVertices` |
 //! | [`OffsetExecutive::replace_implicit_offsets`] | `ReplaceImplicitOffsets` |
+//! | [`certified_offset_surface`] | none (the net `ReplaceImplicitOffsets` puts in an offset face's place, certified; WR-718) |
 //! | [`OffsetExecutive::remove_excess_faces`] | `RemoveExcessFaces` |
 //! | `forget_seconds`, `forget_firsts`, `removed_faces_edgeuses` (private) | `sm_ForgetSeconds`, `sm_ForgetFirsts`, `RemoveExcessFaces`' `sGone` |
 //! | [`OffsetExecutive::get_create_extended_surface`] | `GetCreateExtendedSurface` |
@@ -122,6 +123,7 @@ use crate::offset::offset_geometry_creation::{OffsetGeometryCreation, SsiData};
 
 use super::edgeuse::{CapNotifications, MarkSource};
 use super::p2::OffsetNotifications;
+use crate::surface::offset_surface::OffsetSurface;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p1::{self as bp1, SetRegionVoidType};
@@ -1030,38 +1032,10 @@ impl OffsetExecutive {
             else {
                 continue;
             };
-            // get SmOffsetSurface base (use extended surface if there is one)
-            let base = offset
-                .extended_base_surface()
-                .unwrap_or_else(|| offset.base_surface());
-            // make sure base surface is an SmBSplineSurface (`SM_CAST_PTR`, which every
-            // subclass passes: plane, extrusion, revolution, cone, sphere, torus); its
-            // B-spline part with the NURB `GetOrCreateGwNurbPointer` makes when missing
-            let Some(nurb) = crate::topology::brep::p3::with_nurb(kernel, base)? else {
-                // a kind with no B-spline form (an offset surface: an offset of an offset)
-                return Err(failed(OffsetFailure::OffsetBaseKindUnsupported {
-                    surface_type: base.type_code(),
-                }));
-            };
-            // Not upstream (WR-718, #2350 S1): the offset certified within the tolerance
-            // at every parameter, in the base's parametrisation, where upstream fits
-            // NLib's `N_SrfOffset` and checks it at samples (the cancel token polled
-            // inside, #2136 / #2372)
-            let base_nurb = present(
-                nurb.gw_nurb(),
-                "the base's B-spline form has no NURB, though `with_nurb` makes it from the \
-                 surface's own exact definition where it is missing",
-            )?;
-            let made = crate::offset::construction::sheets::certified_offset(
-                kernel,
-                base_nurb,
-                offset.offset_distance(),
-                approximation_tol_3d,
-            )?;
-            let approximation =
-                crate::nurbs::b_spline_surface::p1::BSplineSurface::from_nurb(made.surface, false);
+            let (approximation, _) =
+                certified_offset_surface(kernel, offset, approximation_tol_3d)?;
             // remember face/surface pair
-            fix.push((f, Surface::from(approximation)));
+            fix.push((f, approximation));
         }
 
         // for every face that had an approximate surface built for an exact offset
@@ -3280,6 +3254,52 @@ fn defect(why: &'static str, status: i32) -> SolidError {
     Failure::new(OP, OffsetFailure::Defect { why })
         .with_status(status)
         .into_error()
+}
+
+/// The certified B-spline of the implicit offset surface `offset`: a bicubic B-spline within
+/// `tolerance` of the exact offset of its extended (else its own) base at every parameter, in
+/// the base's parametrisation, with the certified bound of that distance
+/// ([`crate::offset::construction::sheets::certified_offset`]; not upstream, WR-718: upstream
+/// fits NLib's `N_SrfOffset` and checks it at samples). What
+/// [`OffsetExecutive::replace_implicit_offsets`] puts in an offset face's place, and what an
+/// export that cannot keep the offset writes for it (#21926). The base must have a B-spline
+/// form (`SM_CAST_PTR` to `SmBSplineSurface`, which every subclass passes: plane, extrusion,
+/// revolution, cone, sphere, torus); its NURB is made where it is missing
+/// (`GetOrCreateGwNurbPointer`).
+///
+/// # Errors
+///
+/// [`OffsetFailure::OffsetBaseKindUnsupported`] (`SM_ERR`) for a base with no B-spline form
+/// (an offset surface: an offset of an offset); those of `certified_offset` (the cancel token
+/// is polled inside, #2136 / #2372).
+pub fn certified_offset_surface(
+    kernel: &Kernel,
+    offset: &OffsetSurface,
+    tolerance: f64,
+) -> Result<(Surface, f64)> {
+    // get SmOffsetSurface base (use extended surface if there is one)
+    let base = offset
+        .extended_base_surface()
+        .unwrap_or_else(|| offset.base_surface());
+    let Some(nurb) = crate::topology::brep::p3::with_nurb(kernel, base)? else {
+        return Err(failed(OffsetFailure::OffsetBaseKindUnsupported {
+            surface_type: base.type_code(),
+        }));
+    };
+    let base_nurb = present(
+        nurb.gw_nurb(),
+        "the base's B-spline form has no NURB, though `with_nurb` makes it from the \
+         surface's own exact definition where it is missing",
+    )?;
+    let made = crate::offset::construction::sheets::certified_offset(
+        kernel,
+        base_nurb,
+        offset.offset_distance(),
+        tolerance,
+    )?;
+    let approximation =
+        crate::nurbs::b_spline_surface::p1::BSplineSurface::from_nurb(made.surface, false);
+    Ok((Surface::from(approximation), made.bound))
 }
 
 /// The failure of p1 for `cause`, with the cause's status (that of the site it replaced).

@@ -274,7 +274,7 @@ fn same_points(a: &[Vec3], b: &[Vec3]) -> bool {
 fn sample(s: &Session, t: &MotionTrace) -> Result<Vec<Vec3>> {
     let at = local(s, t)?;
     let mut scratch = seeded(s, t);
-    scratch.pending_moves.clear();
+    scratch.clear_pending_moves();
     let world = placed_world(&scratch, &t.occurrence)?;
     let p = params(t, apply_point(&world, at));
     let (mut points, _) = super::sample_trace(&scratch, &p, CMD)?;

@@ -5,6 +5,9 @@ use std::ffi::c_void;
 
 use windows_sys::core::{IUnknown, GUID, HRESULT};
 use windows_sys::Win32::Foundation::{BOOL, HWND, POINTL};
+
+// SolidCraft: IDropTarget's `pt` is a POINTL passed by value, not a pointer to one (winit 0.30
+// declared `*const POINTL`, harmless only while nothing read it).
 use windows_sys::Win32::System::Com::{
     IAdviseSink, IDataObject, IEnumFORMATETC, IEnumSTATDATA, FORMATETC, STGMEDIUM,
 };
@@ -72,13 +75,13 @@ pub struct IDropTargetVtbl {
         This: *mut IDropTarget,
         pDataObj: *const IDataObject,
         grfKeyState: u32,
-        pt: *const POINTL,
+        pt: POINTL,
         pdwEffect: *mut u32,
     ) -> HRESULT,
     pub DragOver: unsafe extern "system" fn(
         This: *mut IDropTarget,
         grfKeyState: u32,
-        pt: *const POINTL,
+        pt: POINTL,
         pdwEffect: *mut u32,
     ) -> HRESULT,
     pub DragLeave: unsafe extern "system" fn(This: *mut IDropTarget) -> HRESULT,
@@ -86,7 +89,7 @@ pub struct IDropTargetVtbl {
         This: *mut IDropTarget,
         pDataObj: *const IDataObject,
         grfKeyState: u32,
-        pt: *const POINTL,
+        pt: POINTL,
         pdwEffect: *mut u32,
     ) -> HRESULT,
 }

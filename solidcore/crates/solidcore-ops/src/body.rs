@@ -480,6 +480,15 @@ impl Body {
         })
     }
 
+    /// The body's own tolerance, the kernel's: how near two of its points must be to be one
+    /// point.
+    ///
+    /// # Errors
+    /// Those of [`with_body`].
+    pub fn tolerance(&self) -> Result<f64> {
+        read_body("tolerance", self, |_, b| Ok(b.tolerance()))
+    }
+
     /// The enclosed volume (`SmApiBrepComputeVolume`) at `relative_accuracy`, as the kernel's
     /// contract takes it (ops passes it on as given).
     ///
