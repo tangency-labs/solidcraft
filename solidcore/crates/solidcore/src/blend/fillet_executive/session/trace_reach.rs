@@ -82,7 +82,7 @@ fn leaving_tangent(
     let dir = if at_start { raw } else { -raw };
     match dir.unitize() {
         Ok(unit) => Ok(Some(unit)),
-        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(None),
     }
 }
@@ -99,6 +99,11 @@ fn oblique_end_reach(
     d_rail: f64,
     radius: f64,
 ) -> Result<f64> {
+    // Side edges collinear with the reversed filleted-edge tangent (within `EFF_ZERO_RAD`,
+    // 1e-4 deg) are tangent continuations handled by smooth/tangent propagation rather than
+    // oblique corner intersections; cap `cot(theta)` for near-collinear numerical jitter so
+    // the projection stays finite and bounded (exact down to ~0.057 deg).
+    const MIN_SLOPE_SIN: f64 = 1.0e-3;
     if edge::is_closed(target, edge_id)? {
         return Ok(0.0);
     }
@@ -109,11 +114,6 @@ fn oblique_end_reach(
         return Ok(0.0);
     }
     let [face0, face1] = edge_faces;
-    // Side edges collinear with the reversed filleted-edge tangent (within `EFF_ZERO_RAD`,
-    // 1e-4 deg) are tangent continuations handled by smooth/tangent propagation rather than
-    // oblique corner intersections; cap `cot(theta)` for near-collinear numerical jitter so
-    // the projection stays finite and bounded (exact down to ~0.057 deg).
-    const MIN_SLOPE_SIN: f64 = 1.0e-3;
     let mut max_along = 0.0_f64;
     for v in [start_v, end_v] {
         let Some(t_fil) = leaving_tangent(k, target, edge_id, v)? else {
