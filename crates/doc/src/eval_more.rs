@@ -1318,6 +1318,7 @@ pub(super) fn sheet_eval(
             corner_relief_shape,
             corner_relief,
             bend_relief_shape,
+            offset,
         } if surface_flange_sheet(st, body, f, edges).is_some() => {
             // The sheet with a free edge at the first pick; else, for an edge split into
             // segments, the one with a curved edge there, where the split is refused for what it
@@ -1338,6 +1339,10 @@ pub(super) fn sheet_eval(
                 Some(name) => sheet::HeightFrom::parse(name)
                     .ok_or_else(|| DocError::Invalid(format!("unknown flange height datum `{name}` (outer, inner or tangent)")))?,
                 None => sheet::HeightFrom::Outer,
+            };
+            let offset = match offset {
+                Some(e) => val(vals, e, Kind::Length)?,
+                None => 0.0,
             };
             // Each edge's own height and angle, else the feature's, and the stretches it bends in:
             // the whole edge, or each run of its segments (see `segment_runs`). Every segment is
@@ -1419,7 +1424,7 @@ pub(super) fn sheet_eval(
             let mut square = Vec::with_capacity(picks.len());
             for (k, (edge, runs)) in picks.into_iter().enumerate() {
                 // One bend for each run: a split edge's butt where its runs meet.
-                let (joints, sides) = sk.flanges_on(edge, &runs, rr, position, from).map_err(named(k))?;
+                let (joints, sides) = sk.flanges_on(edge, &runs, rr, position, offset, from).map_err(named(k))?;
                 square.push(sides);
                 if let Some((relief, size)) = own {
                     for &joint in &joints {
