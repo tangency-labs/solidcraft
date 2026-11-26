@@ -22,9 +22,9 @@ fn rot(v: Vec3, k: Vec3, ang: f64) -> Vec3 {
 /// [`KernelError::Invalid`] naming the cause and what fits.
 pub fn require_plane_through_axis(plane: &Plane, axis_origin: Vec3, axis: Vec3) -> Result<()> {
     let arr = |v: Vec3| [v.x, v.y, v.z];
-    let normal = plane.x.cross(plane.y);
-    let (tilt, offset) = solidcore_ops::axial_section::line_plane_deviation(arr(plane.origin), arr(normal), arr(axis_origin), arr(axis))
-        .ok_or_else(|| KernelError::Invalid("the coil's profile plane or axis".into()))?;
+    let (tilt, offset) =
+        solidcore_ops::axial_section::line_plane_deviation(arr(plane.origin), arr(plane.x), arr(plane.y), arr(axis_origin), arr(axis))
+            .ok_or_else(|| KernelError::Invalid("the coil's profile plane or axis".into()))?;
     if !(tilt <= 1e-9) {
         return Err(KernelError::Invalid(
             "the coil's profile must be on a plane through its axis; this plane is across it: sketch the profile on a plane that contains the axis"
