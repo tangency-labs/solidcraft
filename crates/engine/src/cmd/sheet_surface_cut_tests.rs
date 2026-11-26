@@ -1755,7 +1755,6 @@ fn a_hole_is_measured_from_its_rim_to_the_edge() {
 #[test]
 fn a_countersink_is_said_not_to_be_checked_for_one_thickness() {
     let mut s = plate();
-    let cone = json!({"type": "countersink", "cs_diameter": "7.85", "cs_angle": "120 deg"});
     let said = |s: &mut Session| {
         let reply = run(s, "sheet.check_shop", json!({"shop": "sendcutsend"}));
         reply["not_checked"]
@@ -1767,8 +1766,8 @@ fn a_countersink_is_said_not_to_be_checked_for_one_thickness() {
     };
     run(&mut s, "solid.hole", json!({"position": [50, 30, T], "diameter": 6}));
     assert!(!said(&mut s), "a plain hole thins nothing");
-    run(&mut s, "solid.hole", json!({"position": [20, 30, T], "diameter": 3.35, "hole": cone}));
-    assert!(said(&mut s));
+    run(&mut s, "solid.hole", json!({"position": [20, 30, T], "type": "countersink", "diameter": 3.35, "cs_diameter": 7.85, "cs_angle": "90 deg"}));
+    assert!(said(&mut s), "{}", run(&mut s, "sheet.check_shop", json!({"shop": "sendcutsend"})));
 }
 
 /// A perforation field's holes are not measured for spacing: the two spacing rules say so, and the
