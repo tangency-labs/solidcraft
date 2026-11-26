@@ -333,3 +333,58 @@ fn a_board_opened_as_meshes_is_read_again_as_meshes() {
     assert_eq!(s.doc.features.iter().filter(|f| f.component == component).count(), 1, "still no solid board beside the meshes");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
+
+/// A design received from someone else, saved at `design` in `dir`, whose one KiCad link names
+/// the project `x.kicad_pro` beside it: the session never opened the board, so only the trust
+/// checks decide whether Update Links reads it.
+fn received_project_link(dir: &std::path::Path, board: &std::path::Path) -> Session {
+    let mut opener = Session::default();
+    run(&mut opener, "doc.open", json!({"path": board.to_string_lossy()}));
+    let mut s = Session { doc: opener.doc.clone(), path: Some(dir.join("design.sc").to_string_lossy().into_owned()), ..Default::default() };
+    std::fs::write(dir.join("x.kicad_pro"), "{}").unwrap();
+    let component = *s.doc.links.keys().next().expect("the board is linked");
+    let link = s.doc_mut().links.get_mut(&component).unwrap();
+    link.path = "x.kicad_pro".into();
+    link.file_sha256 = Some("an older board".into());
+    s
+}
+
+#[cfg(unix)]
+#[test]
+fn a_linked_project_whose_board_points_outside_the_design_folder_is_refused() {
+    let outside = board_file("live-link-outside", 2.0);
+    let dir = std::env::temp_dir().join(format!("solidcraft-kicad-live-link-received-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::os::unix::fs::symlink(&outside, dir.join("x.kicad_pcb")).unwrap();
+    let mut s = received_project_link(&dir, &outside);
+    let features = s.doc.features.len();
+    let before = volume(&mut s);
+    let said = match s.execute("component.update_links", &json!({})) {
+        Ok(out) => out.to_string(),
+        Err(e) => e.to_string(),
+    };
+    assert!(said.contains("not allowed"), "{said}");
+    assert_eq!(s.doc.features.len(), features, "{said}");
+    assert!((volume(&mut s) - before).abs() < 1e-9, "{said}");
+    assert_eq!(s.doc.links.values().next().unwrap().file_sha256.as_deref(), Some("an older board"), "nothing was read");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(outside.parent().unwrap());
+}
+
+#[test]
+fn a_linked_project_reads_the_board_beside_it_again() {
+    let board = board_file("live-link-project", 2.0);
+    let dir = board.parent().unwrap().to_path_buf();
+    let mut s = received_project_link(&dir, &board);
+    std::fs::rename(&board, dir.join("x.kicad_pcb")).unwrap();
+    rewrite_board(&dir.join("x.kicad_pcb"), 30.5);
+    let done = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(done["updated"].as_array().map(Vec::len), Some(1), "{done}");
+    let got = volume(&mut s);
+    // The wider board, 30.5 x 10 x 2 mm, whatever thin copper it carries.
+    assert!((got - 30.5 * 10.0 * 2.0).abs() < 0.5, "{got}");
+    let digest = solidcraft_doc::DesignLink::file_digest(&std::fs::read(dir.join("x.kicad_pcb")).unwrap());
+    assert_eq!(s.doc.links.values().next().unwrap().file_sha256.as_deref(), Some(digest.as_str()));
+    let _ = std::fs::remove_dir_all(&dir);
+}

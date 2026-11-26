@@ -1413,6 +1413,12 @@ fn read_board(path: &str, options: &solidcraft_io::KicadOptions, paths: &KicadPa
     let board_path = board_path.to_string_lossy().into_owned();
     let bytes =
         solidcraft_io::vfs::read(&board_path, solidcraft_io::MAX_KICAD_BYTES).map_err(|e| EngineError::Other(format!("{board_path}: {e}")))?;
+    board_from_bytes(board_path, bytes, options, paths)
+}
+
+/// A KiCad board from the `bytes` of the `.kicad_pcb` at `board_path`, already read (and, for a
+/// link, already judged) by the caller: the board file is not opened again.
+fn board_from_bytes(board_path: String, bytes: Vec<u8>, options: &solidcraft_io::KicadOptions, paths: &KicadPaths) -> Result<KicadRead> {
     let model_dir = std::path::Path::new(&board_path).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
     let libraries = paths.libraries();
     let access = KicadModelAccess { board: board_path.as_str(), libraries: &libraries };
@@ -1525,14 +1531,15 @@ pub(super) struct KicadReplaced {
     pub warnings: Vec<String>,
 }
 
-/// Read the `.kicad_pcb` at `path` again with the `options` record a link kept, and put its
+/// Build the `.kicad_pcb` at `board`, whose `bytes` the caller read (once, after its trust
+/// checks on that very file), with the `options` record a link kept, and put its
 /// bodies in the linked component `comp` in place of the ones it has: its features, the
 /// components and placements made below it, and what refers to them go, and the board is built
 /// again in `comp`, which keeps its own placements, its name and its link (whose feature moves to
 /// the new one). Nothing changes when the board can't be read or built.
-pub(super) fn replace_kicad(s: &mut Session, comp: u64, path: &str, record: &Value) -> Result<KicadReplaced> {
+pub(super) fn replace_kicad(s: &mut Session, comp: u64, board: &str, bytes: Vec<u8>, record: &Value) -> Result<KicadReplaced> {
     let options = kicad_options(record, "component.update_links")?;
-    let KicadRead { imported, bytes, refused, .. } = read_board(path, &options, &KicadPaths::current())?;
+    let KicadRead { imported, bytes, refused, .. } = board_from_bytes(board.to_string(), bytes, &options, &KicadPaths::current())?;
     let old_name = s.doc.links.get(&comp).and_then(|l| s.doc.feature(l.feature)).map(|f| f.name.clone());
     let warnings = imported.feature.warnings.clone();
     let before = DesignSnapshot::of(s);

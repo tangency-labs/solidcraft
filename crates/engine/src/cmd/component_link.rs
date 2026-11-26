@@ -885,15 +885,21 @@ fn update_kicad_link(
 ) -> std::result::Result<(bool, Vec<String>), String> {
     link_refused(s.path.as_deref(), &link.path).map_err(|e| e.to_string())?;
     let file = resolve(s.path.as_deref(), &link.path);
-    if let Some(why) = importer_file_refusal(s, &file) {
+    // The board the import reads: a `.kicad_pro` stands for its same-stem `.kicad_pcb`. That file,
+    // not the one the link names, is judged (its place and every link in its path) and read, once,
+    // and the import builds from those bytes.
+    let board = solidcraft_io::kicad_board_path(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+    let shown = board.to_string_lossy().into_owned();
+    solidcraft_io::vfs::check_design_path(&shown, s.path.as_deref()).map_err(|e| e.to_string())?;
+    if let Some(why) = importer_file_refusal(s, &file).or_else(|| importer_file_refusal(s, &board)) {
         return Err(why);
     }
-    let bytes = read_link(&file, s.path.as_deref(), true).map_err(|e| e.to_string())?;
+    let bytes = read_link(&board, s.path.as_deref(), true).map_err(|e| e.to_string())?;
     let read = DesignLink::file_digest(&bytes);
     if link.file_sha256.as_deref() == Some(read.as_str()) {
         return Ok((false, Vec::new()));
     }
-    let done = super::file::replace_kicad(s, comp, &file.to_string_lossy(), &importer.options).map_err(|e| e.to_string())?;
+    let done = super::file::replace_kicad(s, comp, &shown, bytes, &importer.options).map_err(|e| e.to_string())?;
     if let Some(kept) = s.doc_mut().links.get_mut(&comp) {
         kept.file_sha256 = Some(done.digest);
     }
