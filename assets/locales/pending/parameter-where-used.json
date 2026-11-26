@@ -1,0 +1,51 @@
+{
+  "en": {
+    "Where used": "Where used",
+    "Sketches": "Sketches",
+    "Features": "Features",
+    "Parameters": "Parameters",
+    "Not used": "Not used"
+  },
+  "de": {
+    "Where used": "Verwendet in",
+    "Sketches": "Skizzen",
+    "Features": "Features",
+    "Parameters": "Parameter",
+    "Not used": "Nicht verwendet"
+  },
+  "es": {
+    "Where used": "Dónde se usa",
+    "Sketches": "Bocetos",
+    "Features": "Operaciones",
+    "Parameters": "Parámetros",
+    "Not used": "Sin usar"
+  },
+  "fr": {
+    "Where used": "Où est-il utilisé",
+    "Sketches": "Esquisses",
+    "Features": "Fonctions",
+    "Parameters": "Paramètres",
+    "Not used": "Non utilisé"
+  },
+  "it": {
+    "Where used": "Dove è usato",
+    "Sketches": "Schizzi",
+    "Features": "Funzioni",
+    "Parameters": "Parametri",
+    "Not used": "Non usato"
+  },
+  "ja": {
+    "Where used": "使用箇所",
+    "Sketches": "スケッチ",
+    "Features": "フィーチャー",
+    "Parameters": "パラメーター",
+    "Not used": "未使用"
+  },
+  "zh": {
+    "Where used": "使用位置",
+    "Sketches": "草图",
+    "Features": "特征",
+    "Parameters": "参数",
+    "Not used": "未使用"
+  }
+}

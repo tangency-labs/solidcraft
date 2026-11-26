@@ -84,6 +84,121 @@ pub struct ParamsDialog {
     pub checks: u32,
     /// Each section band starts open and remembers its state while the dialog is open.
     bands: std::collections::HashMap<String, bool>,
+    /// What uses the parameter whose Where used list is open (#20879), read once per revision of
+    /// the design: (revision, parameter, its users).
+    used: Option<(u64, String, Arc<WhereUsed>)>,
+}
+
+/// What uses a parameter, as its Where used list shows it (#20879): the sketches and the other
+/// features that rebuild when it changes (`parameters.users`' `drives`), and the parameters whose
+/// expressions read it.
+#[derive(Debug, Default, PartialEq)]
+struct WhereUsed {
+    sketches: Vec<(u64, String)>,
+    features: Vec<(u64, String)>,
+    parameters: Vec<String>,
+}
+
+impl WhereUsed {
+    fn read(app: &mut SolveApp, name: &str) -> WhereUsed {
+        let reply = app.session.execute("parameters.users", &json!({"name": name})).unwrap_or_default();
+        let mut out = WhereUsed::default();
+        for driven in reply["drives"].as_array().into_iter().flatten() {
+            let (Some(id), Some(feature)) = (driven["id"].as_u64(), driven["name"].as_str()) else { continue };
+            let sketch = app.session.doc.feature(id).is_some_and(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::Sketch { .. }));
+            if sketch { &mut out.sketches } else { &mut out.features }.push((id, feature.to_string()));
+        }
+        for user in reply["users"].as_array().into_iter().flatten() {
+            if user["type"] == "parameter"
+                && let Some(parameter) = user["name"].as_str()
+                && !out.parameters.iter().any(|p| p == parameter)
+            {
+                out.parameters.push(parameter.to_string());
+            }
+        }
+        out
+    }
+
+    fn is_empty(&self) -> bool {
+        self.sketches.is_empty() && self.features.is_empty() && self.parameters.is_empty()
+    }
+}
+
+/// The parameter's users, read again only when the design or the parameter changes.
+fn where_used(app: &mut SolveApp, d: &mut ParamsDialog, name: &str) -> Arc<WhereUsed> {
+    let revision = app.session.revision;
+    if let Some((rev, cached, used)) = &d.used
+        && *rev == revision
+        && cached == name
+    {
+        return used.clone();
+    }
+    let used = Arc::new(WhereUsed::read(app, name));
+    d.used = Some((revision, name.to_string(), used.clone()));
+    used
+}
+
+/// A row's Where used button and its list (#20879): choosing a sketch or feature selects it, so it
+/// lights in the viewport and the Browser; Select All selects them all; choosing a parameter
+/// filters the window to it, to follow a chain of parameters.
+fn where_used_menu(app: &mut SolveApp, d: &mut ParamsDialog, ui: &mut egui::Ui, name: &str) -> egui::Response {
+    let side = solidcraft_theme::Tokens::get().control_height;
+    let menu = ui_kit::Menu::button_with(
+        ui,
+        |ui, _| {
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(side, side), egui::Sense::hover());
+            crate::scenario::publish_handle(&format!("param:used:{name}"), rect.center());
+            ui_kit::icon_button_at(ui, rect, "link", "Where used")
+        },
+        |ui| {
+            let used = where_used(app, d, name);
+            if used.is_empty() {
+                ui_kit::menu::button_enabled(ui, solidcraft_ui_text::tr_label("Not used"), "", false);
+                return;
+            }
+            let select = |app: &mut SolveApp, ids: Vec<u64>| {
+                let items: Vec<_> = ids.into_iter().map(|id| solidcraft_engine::Sel::Feature { id }).collect();
+                let _ = app.run("select.set", json!({ "items": items }));
+            };
+            for (heading, list) in [("Sketches", &used.sketches), ("Features", &used.features)] {
+                if list.is_empty() {
+                    continue;
+                }
+                ui_kit::Menu::heading(ui, heading);
+                for (id, feature) in list {
+                    let row = ui_kit::menu::button(ui, feature, "");
+                    crate::scenario::publish_handle(&format!("param:used:{name}:{feature}"), row.rect.center());
+                    if row.clicked() {
+                        select(app, vec![*id]);
+                        ui.close();
+                    }
+                }
+            }
+            let all: Vec<u64> = used.sketches.iter().chain(&used.features).map(|(id, _)| *id).collect();
+            if all.len() > 1 {
+                ui_kit::Menu::separator(ui);
+                let row = ui_kit::menu::button(ui, solidcraft_ui_text::tr_label("Select All"), "");
+                crate::scenario::publish_handle(&format!("param:used:{name}:all"), row.rect.center());
+                if row.clicked() {
+                    select(app, all);
+                    ui.close();
+                }
+            }
+            if !used.parameters.is_empty() {
+                ui_kit::Menu::heading(ui, "Parameters");
+                for parameter in &used.parameters {
+                    let row = ui_kit::menu::button(ui, parameter, "");
+                    crate::scenario::publish_handle(&format!("param:used:{name}:{parameter}"), row.rect.center());
+                    if row.clicked() {
+                        d.filter = parameter.clone();
+                        d.reset_scroll = true;
+                        ui.close();
+                    }
+                }
+            }
+        },
+    );
+    menu.response
 }
 
 impl ParamsDialog {
@@ -667,7 +782,7 @@ fn parameter_columns(name_floor: f32, unit_width: f32) -> Vec<ui_kit::GridColumn
         GridColumn::new("expression", "Expression", 1.5, CellKind::Expression).flex().edit_on_click(),
         GridColumn::new("value", "Value", 1.1, CellKind::ReadOnly).flex(),
         GridColumn::new("comment", "Comment", 1.0, CellKind::Text).flex().edit_on_click(),
-        GridColumn::new("actions", "Actions", 0.0, CellKind::Custom).icon_only().min_content_width(ui_kit::table_row_height()),
+        GridColumn::new("actions", "Actions", 0.0, CellKind::Custom).icon_only().min_content_width(2.0 * ui_kit::table_row_height()),
     ]
 }
 
@@ -795,13 +910,21 @@ impl ui_kit::GridSource for ParamGrid<'_> {
                 }
                 Some(response)
             }
-            ACTIONS if r.source == "user" => {
-                let response = ui_kit::bin_button(ui, "Delete");
-                if response.clicked() {
-                    self.d.error = self.app.run("parameters.delete", json!({"name": r.name})).err();
-                }
-                Some(response)
-            }
+            ACTIONS => Some(
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    let used = where_used_menu(self.app, self.d, ui, &r.name);
+                    if r.source != "user" {
+                        return used;
+                    }
+                    let response = ui_kit::bin_button(ui, "Delete");
+                    if response.clicked() {
+                        self.d.error = self.app.run("parameters.delete", json!({"name": r.name})).err();
+                    }
+                    response
+                })
+                .inner,
+            ),
             _ => None,
         }
     }
@@ -1956,6 +2079,53 @@ mod tests {
         h.step(&json!({"start":"parameters.change"})).unwrap();
         h.frames(3);
         h
+    }
+
+    /// #20879: a parameter's Where used list names the sketch and the features that rebuild when it
+    /// changes, and the parameters that read it. Choosing a feature selects it; Select All selects
+    /// them all; choosing a parameter filters the window to it. An unused parameter says so.
+    #[test]
+    fn where_used_lists_what_a_parameter_drives_and_selects_it() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("parameters.add", json!({"name":"w","expression":"10 mm"})).unwrap();
+        h.app.run("parameters.add", json!({"name":"depth","expression":"w * 2"})).unwrap();
+        h.app.run("parameters.add", json!({"name":"spare","expression":"5 mm"})).unwrap();
+        let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Outline"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.circle.center", json!({"center":[40,0],"radius":2})).unwrap();
+        h.app.run("sketch.dimension", json!({"entities":["c1"],"type":"radius","value":"w"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let box_reply = h.app.run("solid.box", json!({"length":"w","width":10,"height":"depth"})).unwrap();
+        let (block, block_name) = (box_reply["feature"].as_u64().unwrap(), box_reply["name"].as_str().unwrap().to_string());
+        let used = WhereUsed::read(&mut h.app, "w");
+        assert_eq!(used.sketches, vec![(sketch, "Outline".to_string())], "{used:?}");
+        assert!(used.features.iter().any(|(id, _)| *id == block), "{used:?}");
+        // `depth` reads it, as do the sketch's dimension parameters.
+        assert!(used.parameters.iter().any(|p| p == "depth"), "{used:?}");
+        assert!(WhereUsed::read(&mut h.app, "spare").is_empty());
+
+        h.step(&json!({"start":"parameters.change"})).unwrap();
+        h.frames(3);
+        let open = |h: &mut crate::scenario::Harness| {
+            h.step(&json!({"click":{"handle":"param:used:w"}})).unwrap();
+            h.frames(2);
+        };
+        open(&mut h);
+        h.step(&json!({"click":{"handle":format!("param:used:w:{block_name}")}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Feature { id: block }]);
+        open(&mut h);
+        h.step(&json!({"click":{"handle":"param:used:w:all"}})).unwrap();
+        h.frames(2);
+        let selected = &h.app.session.selection;
+        assert!(
+            selected.contains(&solidcraft_engine::Sel::Feature { id: block }) && selected.contains(&solidcraft_engine::Sel::Feature { id: sketch }),
+            "{selected:?}"
+        );
+        open(&mut h);
+        h.step(&json!({"click":{"handle":"param:used:w:depth"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.params.as_ref().map(|d| d.filter.as_str()), Some("depth"));
     }
 
     fn expression(h: &crate::scenario::Harness, name: &str) -> String {
