@@ -1,8 +1,9 @@
 //! The router's planar helpers ([`solidcraft_kernel_api::Planar`]), as `solidcraft_kernel::planar`:
 //! the arcs a sketch tool draws from its picks, the turn between two path directions, a frame
-//! section's corners, and paper strokes.
+//! section's corners, paper strokes, where a board's drilled hole reaches, and a sketch plane's
+//! normal and points as a sketch solver holds them.
 
-use solidcore_record::{Loop2, Plane, Vec3};
+use solidcore_record::{Loop2, Plane, Vec2, Vec3};
 use solidcraft_kernel_api::{OpKind, Planar};
 
 pub use solidcraft_kernel_api::planar::PlanarRefused;
@@ -137,10 +138,71 @@ pub fn projected_endpoints_are_distinct(basis: Plane, ends: [Vec3; 2]) -> bool {
     }
 }
 
+/// The direction from `from` to `to`, in radians anticlockwise from +X; `0` where the points
+/// coincide or a coordinate is not finite.
+#[must_use]
+pub fn direction_angle(from: [f64; 2], to: [f64; 2]) -> f64 {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.direction_angle(from, to),
+    }
+}
+
+/// Whether a drilled hole touches or crosses any of the closed `loops`: a stadium centred at
+/// `center`, `size[0]` wide along `angle` (radians anticlockwise from +X) and `size[1]` across; a
+/// non-finite or negative input reaches nothing.
+#[must_use]
+pub fn hole_reaches_loops(center: [f64; 2], size: [f64; 2], angle: f64, loops: &[Vec<[f64; 2]>]) -> bool {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.hole_reaches_loops(center, size, angle, loops),
+    }
+}
+
+/// The three points a sketch solver holds a circle by, in the orthonormal frame `x`, `y` about
+/// `c`, at `radius` and starting `from` radians.
+#[must_use]
+pub fn circle_points(c: Vec3, x: Vec3, y: Vec3, radius: f64, from: f64) -> [Vec3; 3] {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.circle_points(c, x, y, radius, from),
+    }
+}
+
+/// The three points a sketch solver holds a 2D arc's circle by, through its sketch `plane`: its
+/// centre `c` and the arc's start `start`, in sketch coordinates.
+#[must_use]
+pub fn arc_circle_points(c: [f64; 2], start: [f64; 2], plane: &Plane) -> [Vec3; 3] {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.arc_circle_points(c, start, plane),
+    }
+}
+
+/// Whether two planes lie on the same support, whichever way each faces.
+#[must_use]
+pub fn same_plane(a: &Plane, b: &Plane) -> bool {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.same_plane(a, b),
+    }
+}
+
+/// The normal of an orthonormal plane.
+#[must_use]
+pub fn plane_normal(plane: &Plane) -> Vec3 {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.plane_normal(plane),
+    }
+}
+
+/// Sketch point `point` in space, through its orthonormal plane.
+#[must_use]
+pub fn plane_point(plane: &Plane, point: Vec2) -> Vec3 {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.plane_point(plane, point),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcore_ops::{joint_turn as turn, paper_gaps, sketch_arc};
+    use solidcore_ops::{board_drill, constraint, joint_turn as turn, paper_gaps, sketch_arc};
 
     #[test]
     fn routed_planar_helpers_are_solidcores() {
@@ -151,6 +213,21 @@ mod tests {
         assert_eq!(tangent_arc_centre(a, b, [0.0, 1.0]), sketch_arc::tangent_arc_centre(a, b, [0.0, 1.0]));
         assert_eq!(joint_turn([1.0, 0.0], [0.0, 1.0]).ok(), turn::joint_turn([1.0, 0.0], [0.0, 1.0]).ok());
         assert_eq!(straight_length(a, b), paper_gaps::straight_length(a, b));
+        assert_eq!(direction_angle([0.0, 0.0], [1.0, 1.0]), board_drill::direction_angle([0.0, 0.0], [1.0, 1.0]));
+        let square = vec![vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]]];
+        for c in [[5.0, 5.0], [9.5, 5.0], [0.0, 5.0]] {
+            assert_eq!(hole_reaches_loops(c, [2.0, 1.0], 0.0, &square), board_drill::hole_reaches_loops(c, [2.0, 1.0], 0.0, &square));
+        }
+        let xy = Plane::XY;
+        let tilted = Plane { origin: Vec3::new(1.0, 2.0, 3.0), x: Vec3::new(0.0, 1.0, 0.0), y: Vec3::new(0.0, 0.0, 1.0) };
+        for plane in [&xy, &tilted] {
+            assert_eq!(plane_normal(plane), constraint::plane_normal(plane));
+            assert_eq!(plane_point(plane, Vec2::new(2.0, -1.0)), constraint::plane_point(plane, Vec2::new(2.0, -1.0)));
+            assert_eq!(arc_circle_points([1.0, 1.0], [3.0, 1.0], plane), constraint::arc_circle_points([1.0, 1.0], [3.0, 1.0], plane));
+            assert_eq!(same_plane(plane, &tilted), constraint::same_plane(plane, &tilted));
+        }
+        let (o, x, y) = (Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
+        assert_eq!(circle_points(o, x, y, 2.5, 0.3), constraint::circle_points(o, x, y, 2.5, 0.3));
         // a refusal carries solidcore's words whole
         let words = turn::joint_turn([0.0, 0.0], [0.0, 1.0]).unwrap_err().to_string();
         assert_eq!(joint_turn([0.0, 0.0], [0.0, 1.0]), Err(PlanarRefused(words)));

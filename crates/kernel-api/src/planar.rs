@@ -1,8 +1,9 @@
 //! Planar helpers ([`Planar`]): the arcs a sketch tool draws from its picks, the turn between
-//! two path directions, a frame section's corners, and paper strokes. Plain numbers and the
-//! record's values in, plain numbers out.
+//! two path directions, a frame section's corners, paper strokes, where a board's drilled hole
+//! reaches, and a sketch plane's normal and points as a sketch solver holds them. Plain numbers
+//! and the record's values in, plain numbers out.
 
-use solidcore_record::{Loop2, Plane, Vec3};
+use solidcore_record::{Loop2, Plane, Vec2, Vec3};
 
 use crate::Backend;
 
@@ -54,4 +55,23 @@ pub trait Planar: Backend {
     fn straight_length(&self, a: [f64; 2], b: [f64; 2]) -> f64;
     /// Whether a line's endpoints project to distinct points in the view plane `basis`.
     fn projected_endpoints_are_distinct(&self, basis: Plane, ends: [Vec3; 2]) -> bool;
+    /// The direction from `from` to `to`, in radians anticlockwise from +X; `0` where the points
+    /// coincide or a coordinate is not finite.
+    fn direction_angle(&self, from: [f64; 2], to: [f64; 2]) -> f64;
+    /// Whether a drilled hole touches or crosses any of the closed `loops`: a stadium centred at
+    /// `center`, `size[0]` wide along `angle` (radians anticlockwise from +X) and `size[1]`
+    /// across; a non-finite or negative input reaches nothing.
+    fn hole_reaches_loops(&self, center: [f64; 2], size: [f64; 2], angle: f64, loops: &[Vec<[f64; 2]>]) -> bool;
+    /// The three points a sketch solver holds a circle by, in the orthonormal frame `x`, `y` about
+    /// `c`, at `radius` and starting `from` radians.
+    fn circle_points(&self, c: Vec3, x: Vec3, y: Vec3, radius: f64, from: f64) -> [Vec3; 3];
+    /// The three points a sketch solver holds a 2D arc's circle by, through its sketch `plane`:
+    /// its centre `c` and the arc's start `start`, in sketch coordinates.
+    fn arc_circle_points(&self, c: [f64; 2], start: [f64; 2], plane: &Plane) -> [Vec3; 3];
+    /// Whether two planes lie on the same support, whichever way each faces.
+    fn same_plane(&self, a: &Plane, b: &Plane) -> bool;
+    /// The normal of an orthonormal plane.
+    fn plane_normal(&self, plane: &Plane) -> Vec3;
+    /// Sketch point `point` in space, through its orthonormal plane.
+    fn plane_point(&self, plane: &Plane, point: Vec2) -> Vec3;
 }
