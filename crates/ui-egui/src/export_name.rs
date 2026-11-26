@@ -94,6 +94,16 @@ pub(crate) fn default_for_bodies(app: &crate::SolveApp, bodies: &[String]) -> St
     bodies.first().cloned().unwrap_or_else(|| safe_design_name(app))
 }
 
+/// An explicit component export offers the component's name, not its first body's name.
+/// Keep the ordinary body and root-design defaults when no component is targeted.
+pub(crate) fn default_for_component_export(app: &crate::SolveApp, component: Option<u64>, bodies: &[String]) -> String {
+    if let Some(component) = component.filter(|id| *id != 0).and_then(|id| app.session.doc.components.iter().find(|c| c.id == id)) {
+        let names = Names { design: &component.name, body: None, source: None, metadata: &app.session.doc.metadata };
+        return stem("{design}", &names, &safe_design_name(app));
+    }
+    default_for_bodies(app, bodies)
+}
+
 /// Sanitize the design name before using it as a filename fallback. Explicit templates
 /// already go through `stem` and retain their existing behaviour.
 fn safe_design_name(app: &crate::SolveApp) -> String {
