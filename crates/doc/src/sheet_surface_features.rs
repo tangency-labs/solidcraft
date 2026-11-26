@@ -1821,7 +1821,7 @@ impl SurfaceSheet {
                         }
                         // Only what the sheet's cuts leave of a bend can be in the way: where a cut
                         // took the bend away, the fold may run past its line (#17543).
-                        let left = left_along(an, length, sheet_cuts, tol);
+                        let left = crate::sheet_surface_convert::left_along(an, length, sheet_cuts, tol);
                         let left = if left.is_empty() { vec![(0.0, length)] } else { left };
                         let at = |x: f64| side(an.origin + an.dir * x);
                         let (s, e) = left.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &(a, b)| {
@@ -2225,6 +2225,19 @@ impl SurfaceSheet {
     /// panel's material, each bend's zone, each loose piece), the panel's index for a panel's.
     #[allow(clippy::type_complexity)]
     pub(crate) fn pieces_in_space(&self) -> Option<(Vec<(usize, Rigid3, Region2)>, Vec<(Option<usize>, solidcraft_geom::Aabb3)>)> {
+        let (panels, boxes) = self.piece_boxes_in_space()?;
+        let own = |piece: Option<crate::sheet_surface::Piece>| match piece {
+            Some(crate::sheet_surface::Piece::Panel(i)) => Some(i),
+            _ => None,
+        };
+        Some((panels, boxes.into_iter().map(|(piece, b)| (own(piece), b)).collect()))
+    }
+
+    /// [`Self::pieces_in_space`], with each box's piece of the flat (`None` for a loose piece).
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn piece_boxes_in_space(
+        &self,
+    ) -> Option<(Vec<(usize, Rigid3, Region2)>, Vec<(Option<crate::sheet_surface::Piece>, solidcraft_geom::Aabb3)>)> {
         let dev = self.develop().ok()?;
         let frames = crate::sheet_surface_cuts::frames(self, &dev).ok()?;
         let fold = if self.unfolded { None } else { Some(crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places).ok()?) };
@@ -2246,7 +2259,7 @@ impl SurfaceSheet {
                 crate::sheet_surface::Piece::Panel(i) | crate::sheet_surface::Piece::Tab(_, i) => {
                     let (Some(frame), Some(Some(at))) = (frames.get(i).copied().flatten(), dev.placements.get(i)) else { return None };
                     let own = at.inverse().region(region);
-                    boxes.push((matches!(piece, crate::sheet_surface::Piece::Panel(_)).then_some(i), slab(&frame, &own)));
+                    boxes.push((Some(*piece), slab(&frame, &own)));
                     if matches!(piece, crate::sheet_surface::Piece::Panel(_)) && matches!(self.sheet.panels.get(i)?.surface, Surface::Plane) {
                         panels.push((i, frame, own));
                     }
@@ -2259,7 +2272,7 @@ impl SurfaceSheet {
                         Some(fold) => bent_box(&fold.bends.get(zone.joint).copied().flatten()?, region, t),
                         None => slab(&self.flat, region),
                     };
-                    boxes.push((None, b));
+                    boxes.push((Some(*piece), b));
                 }
             }
         }
@@ -2952,20 +2965,6 @@ fn runs_along(r: &Region2, a: Vec2, b: Vec2) -> bool {
         }
         _ => false,
     })
-}
-
-/// The stretches of a joint's anchor `an`, `length` long, that none of `cuts` (in its panel's
-/// chart) takes, as lengths along it from its origin: what a cut across a bend leaves of it. A
-/// stretch no longer than `tol` is none.
-fn left_along(an: &Anchor, length: f64, cuts: &[Region2], tol: f64) -> Vec<(f64, f64)> {
-    let mut left: Vec<(f64, f64)> = vec![(0.0, length)];
-    for c in cuts {
-        let inside = crate::sheet_surface_convert::crossings_across(c, (an.origin, an.dir));
-        for &[lo, hi] in inside.as_chunks::<2>().0 {
-            left = left.into_iter().flat_map(|(a, b)| [(a, b.min(lo)), (a.max(hi), b)]).filter(|(a, b)| b - a > tol).collect();
-        }
-    }
-    left
 }
 
 /// How far (mm) a rip's cut may differ along it and still be one cut, as the development takes it.

@@ -183,3 +183,93 @@ fn hostile_tab_params_never_panic() {
         }
     }
 }
+
+/// Issue #22259's part: the 2 mm rule (R 2, K 0.4), a 100 x 60 base, a 90 degree flange 20 high
+/// on its y = 60 edge, and, where `cut`, a box cut [40, 55, -1] 20 x 6 x 7 that takes the whole
+/// bend over x 40..60 with the base's last millimetre and the flange's first 2 mm. Volume:
+/// 11200 + 100 x 3 pi + 3200 = 15342.478, less 40 + 60 pi + 80 for the cut = 15033.982.
+fn gap_part(s: &mut Session, cut: bool) {
+    run(s, "sheet.manage_rules", json!({"name": "S2", "thickness": "2 mm", "bend_radius": "2 mm", "k_factor": "0.4", "active": true}));
+    run(s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "sheet.flange", json!({"sketch": "Base"}));
+    run(s, "sheet.flange", json!({"edges": [[50, 60, 2]], "height": 20, "angle": "90 deg"}));
+    if cut {
+        run(s, "solid.box", json!({"corner": [40, 55, -1], "length": 20, "width": 6, "height": 7, "operation": "cut"}));
+    }
+}
+
+/// A rectangle sketch `name` on the base's top face (z = 2), from `a` to `b`.
+fn top_rectangle(s: &mut Session, name: &str, a: [f64; 2], b: [f64; 2]) {
+    run(s, "sketch.create", json!({"plane": {"origin": [0, 0, 2], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": name}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": a, "p1": b}));
+    run(s, "sketch.finish", json!({}));
+}
+
+/// A tab in the gap where a cut took the bend away (#22259) fills what the cut took there, as a
+/// tab fills a hole cut inside its panel: what it gives back of the bend rides flat with the
+/// base. The flange's inner face is y = 58, the bend's tangent line on the base y = 56, and its
+/// allowance pi / 2 x (2 + 0.4 x 2) = 4.398, so the flat is 56 + 4.398 + 16 = 76.398 long.
+#[test]
+fn a_tab_fills_the_gap_a_cut_took_out_of_a_bend() {
+    let mut s = Session::default();
+    gap_part(&mut s, true);
+    let cut = volume(&mut s);
+    assert!((cut - 15033.982).abs() < 1e-3, "{cut}");
+    // To the flange's inner face and beyond it, short of where the bend's far side began:
+    // 10 x 1 of the base and 10 x 3 of the bend, flat, through 2 mm.
+    top_rectangle(&mut s, "Gap", [45.0, 50.0], [55.0, 59.0]);
+    let r = run(&mut s, "sheet.tab", json!({"sketch": "Gap"}));
+    assert_eq!(r["changed_bodies"], json!(["Body1"]));
+    assert_eq!(s.model.state().bodies.len(), 1);
+    let with = volume(&mut s);
+    assert!((with - cut - 80.0).abs() < 1e-3, "{}", with - cut);
+    let f = flat(&mut s);
+    assert_eq!(f["outline"].as_array().map(Vec::len), Some(1), "one piece: {}", f["outline"]);
+    let size = f["flat_size_mm"].as_array().cloned().unwrap_or_default();
+    let size: Vec<f64> = size.iter().filter_map(Value::as_f64).collect();
+    assert!(size.len() == 3 && (size[0] - 100.0).abs() < 1e-6 && (size[1] - 76.398).abs() < 1e-3, "{size:?}");
+    // Folded, it lies flat with the base: in the wall's thickness, not standing up with it.
+    assert!(contains(&s, [50.0, 58.5, 1.0]));
+    assert!(!contains(&s, [50.0, 59.5, 1.0]));
+    // Undo, redo and reopening keep it.
+    run(&mut s, "edit.undo", json!({}));
+    assert!((volume(&mut s) - cut).abs() < 1e-6);
+    run(&mut s, "edit.redo", json!({}));
+    assert!((volume(&mut s) - with).abs() < 1e-6);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap_or_else(|e| panic!("{e}")));
+    reopened.refresh();
+    assert!(reopened.model.results.iter().all(|r| r.error.is_none()), "{:?}", reopened.model.results);
+    assert!((volume(&mut reopened) - with).abs() < 1e-6);
+
+    // Clear of the bend that is left, up to the flange's inner face: 16 x 1 and 16 x 2.
+    let mut s = Session::default();
+    gap_part(&mut s, true);
+    top_rectangle(&mut s, "Short", [42.0, 55.0], [58.0, 58.0]);
+    run(&mut s, "sheet.tab", json!({"sketch": "Short"}));
+    assert!((volume(&mut s) - cut - 96.0).abs() < 1e-3, "{}", volume(&mut s) - cut);
+}
+
+/// What a tab in that gap cannot fill yet is refused, the design as it was (#22259): past the
+/// bend's far side, where the flat would join the flange; touching the bend that is left, which
+/// would bend with it; on into the flange; and apart from the base. With no cut, the bend is
+/// whole, and the same tab reaches into it.
+#[test]
+fn tabs_a_cut_bend_cannot_take_are_refused() {
+    let mut s = Session::default();
+    gap_part(&mut s, true);
+    for (name, a, b, want) in [
+        ("Far", [45.0, 55.0], [55.0, 62.0], solidcraft_doc::sheet::TAB_PAST_BEND),
+        ("Wide", [40.0, 55.0], [60.0, 57.5], solidcraft_doc::sheet::TAB_IN_BEND),
+        ("Long", [45.0, 50.0], [55.0, 70.0], solidcraft_doc::sheet::TAB_PAST_BEND),
+        ("Apart", [45.0, 57.0], [55.0, 58.0], solidcraft_doc::sheet::TAB_APART),
+    ] {
+        top_rectangle(&mut s, name, a, b);
+        refused(&mut s, json!({"sketch": name}), want);
+    }
+    let mut s = Session::default();
+    gap_part(&mut s, false);
+    top_rectangle(&mut s, "Gap", [45.0, 50.0], [55.0, 59.0]);
+    refused(&mut s, json!({"sketch": "Gap"}), solidcraft_doc::sheet::TAB_IN_BEND);
+}
