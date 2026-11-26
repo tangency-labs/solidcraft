@@ -988,12 +988,26 @@ fn dense_trimmed_periodic_bspline_face_plans_at_display_tolerance() {
     assert!(refused.is_empty(), "refused: {refused:?}");
     assert!(!mesh.triangles.is_empty());
 
-    // Reusable Curve2Eval agrees with Curve2::eval on a dense 361-point pcurve.
-    let pts: Vec<[f64; 2]> = (0..nu).map(|i| [i as f64 / (nu - 1) as f64, 0.5 + 0.1 * (i as f64 * 0.1).sin()]).collect();
+    // Reusable Curve2Eval agrees with Curve2::eval and independent closed-form coordinates on a
+    // dense 361-point cubic pcurve (by Marsden's identity, u(t) = t and v(t) = 0.25 + 0.5 * t^2).
+    let pts: Vec<[f64; 2]> = (0..nu)
+        .map(|i| {
+            let (k1, k2, k3) = (ku[i + 1], ku[i + 2], ku[i + 3]);
+            let greville = (k1 + k2 + k3) / 3.0;
+            let quad = (k1 * k2 + k1 * k3 + k2 * k3) / 3.0;
+            [greville, 0.25 + 0.5 * quad]
+        })
+        .collect();
     let pc = solidcore::eval::Curve2::Spline { knots: ku, points: pts };
     let ev = pc.evaluator().expect("evaluator");
     for k in 0..=20 {
         let t = k as f64 / 20.0;
-        assert_eq!(ev.eval(t), pc.eval(t), "t = {t}");
+        let p = ev.eval(t).expect("evaluates");
+        assert_eq!(Some(p), pc.eval(t), "t = {t}");
+        let expected = [t, 0.25 + 0.5 * t * t];
+        assert!(
+            (p[0] - expected[0]).abs() < 1e-12 && (p[1] - expected[1]).abs() < 1e-12,
+            "t = {t}: got {p:?}, expected {expected:?}"
+        );
     }
 }

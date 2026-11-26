@@ -365,17 +365,15 @@ fn nurbs_derivs(degree: [usize; 2], knots: &[Vec<f64>; 2], count: [usize; 2], ct
     for (b, (&nv0, &nv1)) in bv[0].iter().zip(&bv[1]).take(pv + 1).enumerate() {
         let start = (v0 + b).checked_mul(nu)?.checked_add(u0)?;
         let row = ctrl.get(start..start + pu + 1)?;
-        let (mut rs, mut rsu) = ([0.0; 4], [0.0; 4]);
         for ((&nu0, &nu1), c) in bu[0].iter().zip(&bu[1]).take(pu + 1).zip(row) {
-            for ((rsd, rsud), &cd) in rs.iter_mut().zip(rsu.iter_mut()).zip(c.iter()) {
-                *rsd += nu0 * cd;
-                *rsud += nu1 * cd;
+            let w00 = nu0 * nv0;
+            let w10 = nu1 * nv0;
+            let w01 = nu0 * nv1;
+            for (((sd, sud), svd), &cd) in s.iter_mut().zip(s_u.iter_mut()).zip(s_v.iter_mut()).zip(c.iter()) {
+                *sd += w00 * cd;
+                *sud += w10 * cd;
+                *svd += w01 * cd;
             }
-        }
-        for (((sd, sud), svd), (&rsd, &rsud)) in s.iter_mut().zip(s_u.iter_mut()).zip(s_v.iter_mut()).zip(rs.iter().zip(&rsu)) {
-            *sd += nv0 * rsd;
-            *sud += nv0 * rsud;
-            *svd += nv1 * rsd;
         }
     }
     let (p, du) = rational(s, s_u)?;
@@ -668,4 +666,26 @@ mod tests {
         }
     }
 
+    #[test]
+    fn nurbs_derivs_extreme_homogeneous_controls_stay_finite() {
+        // Degree (2, 2) flat unit square scaled homogeneously by M = 1e308:
+        // at (u, v) = (0.05, 0.5), N'_0(u) = -1.9 so `nu1 * M` overflows f64::MAX (~1.797e308),
+        // whereas per-term `(nu1 * nv0) * M` stays finite because max(nv0) = 0.5.
+        let m = 1e308;
+        let knots = [vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]];
+        let mut ctrl = Vec::with_capacity(9);
+        for j in 0..3u8 {
+            let y = 0.5 * f64::from(j);
+            for i in 0..3u8 {
+                let x = 0.5 * f64::from(i);
+                ctrl.push([x * m, y * m, 0.0, m]);
+            }
+        }
+        let surf = EvalSurface::nurbs([2, 2], knots, [3, 3], ctrl);
+        let (p, du, dv) = surf.derivs(0.05, 0.5).expect("extreme homogeneous controls stay finite");
+        assert!(p.is_finite() && du.is_finite() && dv.is_finite(), "p={p:?} du={du:?} dv={dv:?}");
+        assert!(close(p, Vec3::new(0.05, 0.5, 0.0), 1e-12), "{p:?}");
+        assert!(close(du, Vec3::new(1.0, 0.0, 0.0), 1e-12), "{du:?}");
+        assert!(close(dv, Vec3::new(0.0, 1.0, 0.0), 1e-12), "{dv:?}");
+    }
 }
