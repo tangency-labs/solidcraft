@@ -742,6 +742,12 @@ fn collect_link_source_prereqs(
             collect_link_source_prereqs(a, prereqs, name_to_id, body_producers);
             collect_link_source_prereqs(b, prereqs, name_to_id, body_producers);
         }
+        LinkSource::FaceOffset { body, from, .. } => {
+            if let Some(&id) = body_producers.get(body.as_str()) {
+                prereqs.insert(id);
+            }
+            collect_link_source_prereqs(from, prereqs, name_to_id, body_producers);
+        }
         _ => {}
     }
 }

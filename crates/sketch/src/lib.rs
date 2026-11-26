@@ -117,6 +117,7 @@ pub use fonts::set_font_file_check;
 pub use freeform_offset::FreeformOffset;
 pub use freeform_offset::FreeformOffsetOutput;
 pub use freeform_offset::OFFSET_TOLERANCE;
+pub use link::FACE_OFFSET_TOLERANCE;
 pub use link::Link;
 pub use link::LinkGeom;
 pub use link::LinkKind;

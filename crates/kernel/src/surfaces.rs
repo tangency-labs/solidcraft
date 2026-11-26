@@ -579,6 +579,16 @@ pub fn copy_faces(body: &Body, at: &[Vec3]) -> Result<Body> {
     taken(body, r, &chosen.into_iter().map(|f| (f, false)).collect::<Vec<_>>())
 }
 
+/// Face `face` of a body alone, as a surface body of one face (its edges and vertices only).
+pub(crate) fn face_sheet(body: &Body, face: usize) -> Result<Body> {
+    body.require_brep("face sheet")?;
+    let r = body.record();
+    if face >= r.faces.len() {
+        return Err(invalid("the body has no such face"));
+    }
+    taken(body, r, &[(face, false)])
+}
+
 /// A body's faces taken apart: each picked face (by points on it; every face when none are given)
 /// its own surface body, and the faces left, if any, one surface body. A solid comes apart into
 /// surfaces. Histories are over `[body]`: each face is the body's.

@@ -2907,6 +2907,23 @@ pub fn offset_on_surface(
     side: OffsetSide,
     tolerance: f64,
 ) -> Result<SurfaceOffset> {
+    let range = own_range(curve).ok_or(Error::Argument)?;
+    offset_on_surface_over(curve, range, sheet, distance, side, tolerance)
+}
+
+/// [`offset_on_surface`] of `curve` over `range` of its record parameter only (a part of it: an
+/// edge's interval on its curve). The offset's own parameter runs over the same range.
+///
+/// # Errors
+/// As [`offset_on_surface`]; [`Error::Argument`] also for a range not finite and increasing.
+pub fn offset_on_surface_over(
+    curve: &Curve,
+    range: [f64; 2],
+    sheet: &solidcore_record::brep::Brep,
+    distance: f64,
+    side: OffsetSide,
+    tolerance: f64,
+) -> Result<SurfaceOffset> {
     use solidcore::curve::geodesic_offset::{geodesic_offset, Side};
     let positive = |x: f64| x.is_finite() && x > 0.0;
     if !positive(distance) || !coord_ok(&[distance]) || !positive(tolerance) {
@@ -2917,7 +2934,10 @@ pub fn offset_on_surface(
     {
         return Err(Error::Argument);
     }
-    let range = own_range(curve).ok_or(Error::Argument)?;
+    let [lo, hi] = range;
+    if !(lo.is_finite() && hi.is_finite() && lo < hi) {
+        return Err(Error::Argument);
+    }
     let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
     let side = match side {
         OffsetSide::Left => Side::Left,

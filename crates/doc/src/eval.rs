@@ -2991,6 +2991,10 @@ impl PlacementReads {
                 self.link(doc, st, a);
                 self.link(doc, st, b);
             }
+            L::FaceOffset { body, from, .. } => {
+                self.body(doc, st, body);
+                self.link(doc, st, from);
+            }
             // In the sketch's own frame: the component's origin, axes and planes, its own axes, text.
             // A construction point is kept in its own component's frame: the sketch reads where
             // that component is placed (#12075).
@@ -3330,6 +3334,10 @@ fn link_reads(st: &ModelState, source: &solidcraft_sketch::LinkSource, read: &mu
         L::Intersection { a, b } => {
             link_reads(st, a, read)?;
             link_reads(st, b, read)
+        }
+        L::FaceOffset { body: b, from, .. } => {
+            body(b, read)?;
+            link_reads(st, from, read)
         }
         // Kept in its own component's frame, which these reads do not follow: key on the whole model.
         L::ConstructionPoint { .. } => None,

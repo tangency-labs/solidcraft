@@ -201,7 +201,7 @@ fn edge_owner(st: &solidcraft_doc::ModelState, at: Vec3) -> Result<String> {
 }
 
 /// Parse one reference.
-fn source(s: &Session, v: &Value, cmd: &str) -> Result<LinkSource> {
+pub(super) fn source(s: &Session, v: &Value, cmd: &str) -> Result<LinkSource> {
     match ref_form(v).map_err(|why| bad(cmd, why))? {
         RefForm::Name(name) => match name.to_ascii_lowercase().as_str() {
             "origin" => Ok(LinkSource::Origin),
@@ -577,6 +577,12 @@ fn rename_link_body(source: &mut LinkSource, renames: &std::collections::HashMap
         LinkSource::Intersection { a, b } => {
             rename_link_body(a, renames);
             rename_link_body(b, renames);
+        }
+        LinkSource::FaceOffset { body, from, .. } => {
+            if let Some(new) = renames.get(body.as_str()) {
+                body.clone_from(new);
+            }
+            rename_link_body(from, renames);
         }
         _ => {}
     }
@@ -1108,7 +1114,7 @@ pub(super) fn project_entities(s: &mut Session, p: &Value, cmd: &str) -> Result<
 }
 
 /// Add one link from `src` to the active sketch and report it.
-fn one_link(s: &mut Session, cmd: &str, kind: LinkKind, src: LinkSource) -> Result<LinkMade> {
+pub(super) fn one_link(s: &mut Session, cmd: &str, kind: LinkKind, src: LinkSource) -> Result<LinkMade> {
     let id = sketch_store::active(s).ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
     sketch_store::update(s, id, |s, doc, sk| {
         refresh(s, doc, id, sk);

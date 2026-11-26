@@ -748,6 +748,12 @@ pub(super) fn build(
                         pending.push(a);
                         pending.push(b);
                     }
+                    L::FaceOffset { body, from, .. } => {
+                        if !bodies.contains_key(body) {
+                            notices.push(format!("{} retains external linked body {body}", feature.name));
+                        }
+                        pending.push(from);
+                    }
                     L::Plane { name } if source.find_feature(name).is_some() && !names.contains_key(name) => {
                         notices.push(format!("{} retains external linked plane {name}", feature.name));
                     }
