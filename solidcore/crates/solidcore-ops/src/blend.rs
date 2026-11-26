@@ -39,6 +39,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use solidcore::blend::apart_volumes::apart_volumes_fit;
 use solidcore::blend::band_room::law_fits_band;
 use solidcore::blend::blend_corner::rollover::{
     chain_off_seams, concave_chain, concave_chain_ends, has_end_arc, is_concave_chain, seams_back,
@@ -378,6 +379,13 @@ struct Stopped {
     mitred: Vec<EdgeId>,
     /// The Roll-over corners the corners step refused, with [`RollOverStep::Classify`].
     roll_overs: Vec<RollOver>,
+    /// Asked by the caller (#2784): the edges fall in at least two groups that share no
+    /// vertex ([`vertex_groups`]), so the session notes the bands-meet event
+    /// (`FilletSession::set_groups_apart`).
+    ask_apart: bool,
+    /// The session refused for bands that meet across a face while no blend adds material
+    /// (`FilletSession::bands_meet_apart`): the event [`build_apart`] builds.
+    apart: bool,
 }
 
 /// The kernel's reason for a blend too large, as ops names it; `None` for the reasons it does
@@ -1058,6 +1066,7 @@ fn pass(
         let corner =
             step.is_ok() && s.error_info().code == FilletErrorType::CornerUnsupported as i32;
         s.set_overflow_first(p.overflow.is_some());
+        s.set_groups_apart(stopped.ask_apart);
         s.set_classify_only(p.overflow.is_some_and(|o| o.classify_only));
         if let Ok(Ok(_)) = step {
             step = corners(&mut s, p.section, p.setbacks);
@@ -1073,6 +1082,7 @@ fn pass(
             Ok(Ok(set_back)) => match s.do_filleting(k, None) {
                 Ok(()) => s.corner_patch_faces().map(|marked| Ok((set_back, marked))),
                 Err(e) => {
+                    stopped.apart = stopped.ask_apart && s.bands_meet_apart();
                     if p.overflow.is_some()
                         && s.error_info().code == FilletErrorType::OverflowFirst as i32
                     {
@@ -1320,6 +1330,7 @@ fn overflow_first(
     edges: &[EdgeId],
     sizes: &[f64],
     section: fn(&[f64]) -> Section<'_>,
+    kind: Blend,
     turn: Turn,
     mitred: &[EdgeId],
     dropped: &mut [bool],
@@ -1404,15 +1415,34 @@ fn overflow_first(
         }
     }
     if lead.is_empty() || rest.is_empty() {
-        // a single pass: its rounds go together
+        // a single pass: its rounds go together; where their bands meet across a face in
+        // groups that share no vertex, the event's construction (#2784), else the refusal
         let sizes: Vec<f64> = sizes.to_vec();
-        let one = pass_or_refuse(
+        let options = BlendOptions {
+            turn,
+            chamfer_corner: ChamferCorner::Mitre,
+            contract,
+        };
+        let mut stopped = Stopped {
+            ask_apart: asks_apart(&fresh, &again, &[], Corners::Filled, turn, options)?,
+            ..Stopped::default()
+        };
+        let one = pass(
             k,
             &mut fresh,
             together(&again, section(&sizes), turn, &[], contract),
+            &mut stopped,
         )?;
-        if let Err(e) = one {
-            return Ok(Err(e));
+        if let Err(refused) = one {
+            if stopped.apart && build_apart(k, &mut fresh, kind, &again, &sizes, options)?.is_some()
+            {
+                untagged(&mut fresh)?;
+                return Ok(Ok(fresh));
+            }
+            return Ok(Err(match refused {
+                Refused::Corner(corner) => Error::CornerRefused { corner },
+                Refused::Error(e) => e,
+            }));
         }
         untagged(&mut fresh)?;
         return Ok(Ok(fresh));
@@ -1842,6 +1872,229 @@ fn blend_impl(
     })?
 }
 
+/// The attribute id of [`MadeBy`]: ops' own, next below [`PICKED_ID`].
+const MADE_BY_ID: u64 = ids::USER_1 - 2;
+
+/// What made a face of one group's blend in [`blends_apart`], put on it before the groups'
+/// bodies are intersected and handed on through the boolean, so afterwards the faces carrying
+/// it are the blend's faces in the result.
+#[derive(Debug, Clone, PartialEq)]
+struct MadeBy(BlendFaceKind);
+
+impl AttributeHandlers for MadeBy {}
+
+/// The volume of a kernel body (to 1e-9 relative).
+fn volume_of(k: &Kernel, b: &mut Brep) -> solidcore::Result<f64> {
+    let store = solidcore::geom::attribute::AttributeStore::default();
+    let attrs = solidcore::mass::integrator::properties::PropertyAttributes {
+        store: &store,
+        key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
+    };
+    solidcore::mass::integrator::properties::brep_volume(k, b, 1e-9, &attrs)
+}
+
+/// An error that must end the operation as it is (a cancel, the kernel out of memory), never
+/// be read as a refusal that the blend's own refusal stands for.
+fn ends_the_operation(e: &SolidError) -> bool {
+    e.is_cancelled() || e.is_defect()
+}
+
+/// Not upstream (#2784): each pick's group among `picked`, the groups being the picks joined
+/// by shared vertices (each named by its least index), from the topology alone.
+///
+/// # Errors
+/// The kernel's, reading the edges' vertices.
+fn vertex_groups(b: &Brep, picked: &[EdgeId]) -> solidcore::Result<Vec<usize>> {
+    let ends: Vec<[Option<VertexId>; 2]> = picked
+        .iter()
+        .map(|&e| edge::start_end_vertices(b, e).map(|(s, t)| [s, t]))
+        .collect::<solidcore::Result<_>>()?;
+    let mut group: Vec<usize> = (0..picked.len()).collect();
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for (i, ei) in ends.iter().enumerate() {
+            for (j, ej) in ends.iter().enumerate() {
+                let (Some(&gi), Some(&gj)) = (group.get(i), group.get(j)) else {
+                    continue;
+                };
+                if gi != gj && ei.iter().flatten().any(|v| ej.contains(&Some(*v))) {
+                    let low = gi.min(gj);
+                    for g in &mut group {
+                        if *g == gi || *g == gj {
+                            *g = low;
+                        }
+                    }
+                    changed = true;
+                }
+            }
+        }
+    }
+    Ok(group)
+}
+
+/// Not upstream (#2784): whether a pass of `picked` asks the session for the bands-meet event
+/// ([`Stopped::ask_apart`]): a plain constant blend (no setback, filled corners, mitred turns)
+/// of edges in at least two groups that share no vertex ([`vertex_groups`]). The topology
+/// alone decides it, before anything is built.
+///
+/// # Errors
+/// The kernel's, reading the edges' vertices.
+fn asks_apart(
+    b: &Brep,
+    picked: &[EdgeId],
+    back: &[(VertexId, f64)],
+    corners: Corners,
+    turn: Turn,
+    options: BlendOptions,
+) -> solidcore::Result<bool> {
+    if picked.len() < 2
+        || !back.is_empty()
+        || corners != Corners::Filled
+        || turn != Turn::Mitre
+        || options.chamfer_corner != ChamferCorner::Mitre
+    {
+        return Ok(false);
+    }
+    let mut groups = vertex_groups(b, picked)?;
+    groups.sort_unstable();
+    groups.dedup();
+    Ok(groups.len() > 1)
+}
+
+/// Not upstream (#2784): the construction of the bands-meet event ([`Stopped::apart`]):
+/// blends whose bands meet across a face they share, on edges in groups that share no vertex,
+/// none adding material (both rims of a disc blended by half its height or more, the two end
+/// edges of a narrow post rounded past half its width). Each group's blend takes off what it
+/// takes alone, so the body left is the intersection of the bodies each group leaves on its
+/// own, the face the bands cover gone and the blends meeting in a ridge (half-spaces, for
+/// chamfers): the removal of the edges and faces a large blend sweeps over (US patent
+/// 5,615,317), here by the booleans.
+///
+/// Each group is blended alone on a copy that keeps the body's ids and its faces' definitions,
+/// its faces tagged ([`MadeBy`]); the copies are intersected, and the result is taken only
+/// where its volume is what that construction gives ([`apart_volumes_fit`]: no group adds
+/// material, the result between what each leaves and what all take off). The blend's faces in the
+/// result go to the session log. `None` (the caller's refusal stands) where a group is refused
+/// alone, or the intersection is empty or not taken.
+///
+/// # Errors
+/// A cancel and the kernel's defects; the kernel's errors from the body's queries.
+fn build_apart(
+    k: &mut Kernel,
+    b: &mut Brep,
+    kind: Blend,
+    picked: &[EdgeId],
+    sizes: &[f64],
+    options: BlendOptions,
+) -> solidcore::Result<Option<Blended>> {
+    let group = vertex_groups(b, picked)?;
+    let mut ids = group.clone();
+    ids.sort_unstable();
+    ids.dedup();
+    let order = b.edge_list().to_vec();
+    let v0 = volume_of(k, b)?;
+    let outer = k.blend_face_log.take();
+    let mut bodies = Vec::new();
+    let mut volumes = Vec::new();
+    for id in ids {
+        k.check_cancelled("blend")?;
+        let mut alone = b.clone_standing_for_self_keeping_definitions()?;
+        let mut indices = Vec::new();
+        let mut each = Vec::new();
+        for (n, (&e, &g)) in picked.iter().zip(&group).enumerate() {
+            if g != id {
+                continue;
+            }
+            let Some(at) = order.iter().position(|&o| o == e) else {
+                k.blend_face_log = outer;
+                return Ok(None);
+            };
+            indices.push(at);
+            each.push(
+                sizes
+                    .get(n)
+                    .or_else(|| sizes.first())
+                    .copied()
+                    .unwrap_or(0.0),
+            );
+        }
+        k.blend_face_log = Some(BlendFaceLog::default());
+        let ran = blend_on_body(
+            k,
+            &mut alone,
+            None,
+            kind,
+            &indices,
+            &each,
+            &[],
+            Corners::Filled,
+            options,
+        );
+        let log = k.blend_face_log.take();
+        match ran {
+            Ok(Ok(_)) => {}
+            Ok(Err(_)) => {
+                k.blend_face_log = outer;
+                return Ok(None);
+            }
+            Err(error) => {
+                k.blend_face_log = outer;
+                return Err(error);
+            }
+        }
+        for made in log.iter().flat_map(|l| l.sessions.iter().flatten()) {
+            if alone.face_list().contains(&made.face) {
+                alone.add_attribute(
+                    EntityRef::Face(made.face),
+                    Attribute::application(MADE_BY_ID, Behavior::Copy, MadeBy(made.kind)),
+                )?;
+            }
+        }
+        volumes.push(volume_of(k, &mut alone)?);
+        bodies.push(alone);
+    }
+    k.blend_face_log = outer;
+    let mut bodies = bodies.into_iter();
+    let Some(mut result) = bodies.next() else {
+        return Ok(None);
+    };
+    for next in bodies {
+        k.check_cancelled("blend")?;
+        match crate::boolean::intersection_in(k, result, next, options.contract) {
+            Ok(Some(r)) => result = r,
+            Err(error) if ends_the_operation(&error) => return Err(error),
+            Ok(None) | Err(_) => return Ok(None),
+        }
+    }
+    let v = volume_of(k, &mut result)?;
+    if !apart_volumes_fit(v0, &volumes, v) || !is_manifold_solid(&result)? {
+        return Ok(None);
+    }
+    // the blend's faces in the result, as its log gives them to the caller, the tags off
+    let mut made = Vec::new();
+    for f in result.face_list().to_vec() {
+        let tag = result
+            .entity_attributes(EntityRef::Face(f))
+            .into_iter()
+            .find(|(_, a)| a.attribute_id() == MADE_BY_ID)
+            .and_then(|(h, a)| a.application_value::<MadeBy>().map(|m| (h, m.0)));
+        if let Some((h, kind)) = tag {
+            result.remove_attribute(EntityRef::Face(f), h)?;
+            made.push(MadeBlendFace { face: f, kind });
+        }
+    }
+    if let Some(log) = k.blend_face_log.as_mut() {
+        log.sessions.push(made);
+    }
+    *b = result;
+    Ok(Some(Blended {
+        dropped: vec![false; picked.len()],
+        holes: Vec::new(),
+        made: Vec::new(),
+    }))
+}
+
 /// [`blend_impl`] on the kernel's body: every pass, its corners and refusals, the body
 /// finished as the result.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
@@ -1949,8 +2202,22 @@ fn blend_on_body(
                 roll_over: RollOverStep::No,
                 contract,
             };
-            if let Err(e) = pass_or_refuse(k, b, p)? {
-                return Ok(Err(e));
+            let mut stopped = Stopped {
+                ask_apart: asks_apart(b, &picked, &back, corners, turn, options)?,
+                ..Stopped::default()
+            };
+            if let Err(refused) = pass(k, b, p, &mut stopped)? {
+                // chamfers whose bands meet across a face, in groups that share no vertex:
+                // the event's construction (#2784); else the refusal stands
+                if stopped.apart {
+                    if let Some(apart) = build_apart(k, b, kind, &picked, each, options)? {
+                        return Ok(Ok(apart));
+                    }
+                }
+                return Ok(Err(match refused {
+                    Refused::Corner(corner) => Error::CornerRefused { corner },
+                    Refused::Error(e) => e,
+                }));
             }
             return Ok(done(k, b, expect, contract)?.map(|()| Blended {
                 dropped,
@@ -2010,7 +2277,10 @@ fn blend_on_body(
     };
     // the input's edge order, for the asked edges' places in a copy of it
     let input_order = b.edge_list().to_vec();
-    let mut stopped = Stopped::default();
+    let mut stopped = Stopped {
+        ask_apart: asks_apart(b, &picked, &back, corners, turn, options)?,
+        ..Stopped::default()
+    };
     let p = Pass {
         edges: &picked,
         section: section(each),
@@ -2027,6 +2297,14 @@ fn blend_on_body(
         contract,
     };
     let made = pass(k, b, p, &mut stopped)?;
+    // bands of groups of edges that share no vertex meet across a face (#2784): the event's
+    // construction, each group apart and the bodies intersected ([`build_apart`]); where it
+    // gives no body, the first call's refusal stands
+    if stopped.apart && made.is_err() {
+        if let Some(apart) = build_apart(k, b, kind, &picked, each, options)? {
+            return Ok(Ok(Blended { dropped, ..apart }));
+        }
+    }
     // the blend corner's Roll-over (#10876): the corners step refused it; it is built in two
     // passes on a copy of the untouched input; where they do not build or do not finish,
     // everything below runs as before (`b`, `made`, `stopped` and `fresh` as the first call
@@ -2140,6 +2418,7 @@ fn blend_on_body(
             &picked,
             each,
             section,
+            kind,
             turn,
             &mitred,
             &mut dropped,

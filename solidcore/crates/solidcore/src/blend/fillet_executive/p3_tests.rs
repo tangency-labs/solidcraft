@@ -812,6 +812,8 @@ fn state() -> FilletExecutive<Handle> {
         open_ends: Vec::new(),
         overflow_first: false,
         classify_only: false,
+        groups_apart: false,
+        bands_meet_apart: false,
         roll_over_pass: false,
         overflow_edges: Vec::new(),
         mitred_edges: Vec::new(),

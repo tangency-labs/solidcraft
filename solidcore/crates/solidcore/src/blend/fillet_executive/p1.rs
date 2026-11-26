@@ -852,6 +852,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             open_ends: Vec::new(),
             overflow_first: false,
             classify_only: false,
+            groups_apart: false,
+            bands_meet_apart: false,
             roll_over_pass: false,
             overflow_edges: Vec::new(),
             mitred_edges: Vec::new(),
@@ -1028,6 +1030,19 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     /// `CreateFilletBrep`.
     pub fn set_classify_only(&mut self, value: bool) {
         self.classify_only = value;
+    }
+
+    /// Not upstream (#2784): the caller builds blends whose bands meet across a face apart,
+    /// group by group ([`FilletExecutive::groups_apart`]); before `CreateFilletBrep`.
+    pub fn set_groups_apart(&mut self, value: bool) {
+        self.groups_apart = value;
+    }
+
+    /// Not upstream (#2784): whether the refusal recorded is the bands-meet event of
+    /// [`FilletExecutive::bands_meet_apart`].
+    #[must_use]
+    pub const fn bands_meet_apart(&self) -> bool {
+        self.bands_meet_apart
     }
 
     /// Not upstream (#10876): the session is the blend corner's Roll-over's second pass

@@ -853,6 +853,17 @@ pub struct FilletExecutive<O> {
     /// [`Self::overflow_edges`] the edges whose blends overflow (possibly none). Acts only
     /// with the flags of [`Self::overflow_first`].
     pub classify_only: bool,
+    /// Not upstream (#2784; `false` from the constructor): the caller found the edges in at
+    /// least two groups that share no vertex, and builds blends whose bands meet across a
+    /// face apart, group by group ([`Self::bands_meet_apart`]). Set by
+    /// `FilletSession::set_groups_apart`.
+    pub groups_apart: bool,
+    /// Not upstream (#2784): with [`Self::groups_apart`], the refusal recorded is that of
+    /// bands that meet across a curved face they share (`FaceConsumed` from the bands, or
+    /// `BandsOverlap`) while no blend adds material: the event in which each group's blend
+    /// takes off what it takes alone, so the body is the intersection of what each group
+    /// leaves. The refusal, with its size, stands for when that construction gives no body.
+    pub bands_meet_apart: bool,
     /// Not upstream (#10876; `false` from the constructor): the session is the blend
     /// corner's Roll-over's second pass, the concave chain
     /// ([`crate::blend::blend_corner::rollover`]): its concave overflow across the cliff is
@@ -2498,6 +2509,8 @@ pub struct BandFit<O> {
     pub face: Option<O>,
     /// An interior point of the shared face, when it is named.
     pub at: Option<Point3>,
+    /// Not upstream (#2784): the shared face is curved (its surface is not a plane).
+    pub curved: bool,
 }
 
 /// Where a solver's convex blend would cut the part
@@ -3644,14 +3657,17 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             // located there as `refuse_overlapping_bands` locates it. A polygon taken whole
             // keeps its own event's size.
             let mut site = None;
+            let mut bands_meet = false;
             if no_polygon {
                 for fit in access.creation_bands_meet(k, &solvers)? {
+                    bands_meet |= fit.curved;
                     if self.fit_radius < 0.0 || fit.size < self.fit_radius {
                         self.note_fit_radius(fit.size, Some(fit.edge), fit.kind);
                         site = Some(fit);
                     }
                 }
             }
+            self.bands_meet_apart = bands_meet && self.blends_take_material(k, access)?;
             let refused = self.record_no_room(
                 NoRoomReason::FaceConsumed,
                 "Fillet Error: the blends take the whole of a face they roll on, some at an angle to it (the blend is larger than the faces allow)",
@@ -3815,12 +3831,15 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         if !access.geometry_bands_clear_other_rails(k, &self.solvers)? {
             let solvers = self.solvers.clone();
             let mut site = None;
+            let mut curved = false;
             for fit in access.creation_bands_meet(k, &solvers)? {
+                curved |= fit.curved;
                 if self.fit_radius < 0.0 || fit.size < self.fit_radius {
                     self.note_fit_radius(fit.size, Some(fit.edge), fit.kind);
                     site = Some(fit);
                 }
             }
+            self.bands_meet_apart = curved && self.blends_take_material(k, access)?;
             let refused = self.record_no_room(
                 NoRoomReason::BandsOverlap,
                 "Fillet Error: a blend's rail runs inside the band another blend takes off a face they share (the blends are larger than the face allows)",
@@ -3836,6 +3855,29 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             return refused;
         }
         Ok(())
+    }
+
+    /// Not upstream (#2784): with [`Self::groups_apart`], whether every blend takes material
+    /// off (none is concave), so that each group's blend takes off what it takes alone and the
+    /// body left is the intersection of what each group leaves ([`Self::bands_meet_apart`]).
+    /// `false` without [`Self::groups_apart`], asking nothing of the geometry.
+    ///
+    /// # Errors
+    /// Those of the material test.
+    fn blends_take_material(
+        &self,
+        k: &mut Kernel,
+        access: &mut impl BrepCreationAccess<O>,
+    ) -> Result<bool> {
+        if !self.groups_apart {
+            return Ok(false);
+        }
+        for &solver in &self.solvers {
+            if access.geometry_blend_adds_material(k, solver)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// Ease each round into its curvature-continuous section before the setbacks that ask

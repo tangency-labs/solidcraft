@@ -4834,6 +4834,11 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
                         let Some(face) = fa.filter(|f| Some(*f) == fb) else {
                             continue;
                         };
+                        // Not the fork's (#2784): whether the shared face is curved
+                        let curved = !crate::topology::face::p2::surface(self.target, face)?
+                            .is_some_and(|s| {
+                                matches!(s.kind(), crate::surface::surface::SurfaceKind::Plane(_))
+                            });
                         let planar = planar_bands::supports(
                             self.target,
                             self.solver(ia)?,
@@ -4889,6 +4894,7 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
                                         EntityRef::Face(fit.face),
                                     )),
                                     at: Some(fit.at),
+                                    curved,
                                 }));
                             }
                             let meet = fit_size::bands_meet_at(
@@ -4911,6 +4917,7 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
                                     EntityRef::Face(face),
                                 )),
                                 at: None,
+                                curved,
                             }))
                         })();
                         if let Some(slot) = self.solvers.get_mut(ia.0 as usize) {
