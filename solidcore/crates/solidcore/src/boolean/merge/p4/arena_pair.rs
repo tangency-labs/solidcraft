@@ -1869,6 +1869,48 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
             crate::topology::brep::p4::delete_vertex(k, b, &mut delete, vid(vertex))
         })
     }
+
+    fn brep_delete_faces_batch(
+        &mut self,
+        k: &mut Kernel,
+        faces: &[H],
+        keep_wires: Option<&[H]>,
+    ) -> crate::Result<Option<(Vec<H>, Vec<H>)>> {
+        let Some(&first) = faces.first() else {
+            return Ok(Some((Vec::new(), Vec::new())));
+        };
+        let mut face_ids = Vec::new();
+        for &f in faces {
+            if f.kind != K_FACE {
+                return Err(invalid("face is not in the B-rep"));
+            }
+            if f.b != first.b {
+                return Ok(None);
+            }
+            face_ids.push(fid(f));
+        }
+        let brep = hd(first.b, K_BREP, 0);
+        let keep_ids: Option<Vec<EdgeId>> = keep_wires.map(|ws| {
+            ws.iter()
+                .filter(|e| e.kind == K_EDGE && e.b == brep.b)
+                .map(|&e| eid(e))
+                .collect()
+        });
+        let (edges, verts) = self.with_edit_env(brep, |b, env| {
+            crate::topology::brep::p3::delete_faces_batch(k, b, env, &face_ids, keep_ids.as_deref())
+        })?;
+        let is_other = brep.b == 1;
+        Ok(Some((
+            edges
+                .into_iter()
+                .map(|e| encode(EntityRef::Edge(e), is_other))
+                .collect(),
+            verts
+                .into_iter()
+                .map(|v| encode(EntityRef::Vertex(v), is_other))
+                .collect(),
+        )))
+    }
 }
 
 impl ArenaPair<'_> {

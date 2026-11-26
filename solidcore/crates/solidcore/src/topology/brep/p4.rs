@@ -389,6 +389,7 @@ fn sync_faceuse_links(b: &mut Brep, s: ShellId) -> Result<()> {
 
 /// `SmOwningTopology::PostInsert` of a face use at the end of a shell's list (the
 /// arena model's face list of the shell follows).
+#[cfg(test)]
 fn shell_post_insert_faceuse(b: &mut Brep, s: ShellId, fu: FaceuseId) -> Result<()> {
     let members = &mut b.shell_mut(s)?.members;
     match members {
@@ -1539,7 +1540,6 @@ fn wire_split_shell(
     eu_mate: EdgeuseId,
     body: Option<ObjectRef>,
 ) -> Result<()> {
-    const OP: &str = OP_DELETE_EDGE;
     // Not upstream: whether the shell still joins `v1` to `v2`, asked first with a walk
     // that ends at `v2` (`shell_traversal_to_vertices`). When it does, and the shell's
     // head is not one of the edge uses going away, the whole walk below would change
@@ -1622,11 +1622,8 @@ fn wire_split_shell(
                 b.edgeuse_mut(x)?.owner = EdgeuseOwner::Shell(Some(new_shell));
             }
         }
-        // transfer faceuses from the old shell to the new shell
-        for &fu in &faceuses2 {
-            shell_remove_faceuse(b, shell, fu, OP)?;
-            shell_post_insert_faceuse(b, new_shell, fu)?;
-        }
+        // transfer faceuses from the old shell to the new shell in one pass
+        shell::shell_move_faceuses(b, shell, new_shell, &faceuses2)?;
     }
     // when pShell points to a deleted edgeuse (wireshell case) or is a wireshell
     // after a shell split, ensure it has a valid first edge

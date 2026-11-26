@@ -2848,6 +2848,19 @@ pub(crate) fn with_object_context<T>(
 /// [`SolidError::NotFound`] for a dangling id; those of the notification's
 /// [`SolidError::Unported`] and of `ClearAttributes`.
 pub fn destroy(k: &mut Kernel, b: &mut Brep, e: EdgeId, env: &mut NotifyEnv<'_>) -> Result<()> {
+    destroy_unlisted(k, b, e, env)?;
+    b.remove_from_edge_list(e);
+    Ok(())
+}
+
+/// [`destroy`] without removing `e` from `b.edge_list`; the caller must call
+/// `Brep::retain_edge_list` once the batch finishes.
+pub(crate) fn destroy_unlisted(
+    k: &mut Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    env: &mut NotifyEnv<'_>,
+) -> Result<()> {
     b.edge(e)?;
     let this = (env.key_of)(EntityRef::Edge(e));
     let notified = with_object_context(k, env, |n| {
@@ -2870,7 +2883,7 @@ pub fn destroy(k: &mut Kernel, b: &mut Brep, e: EdgeId, env: &mut NotifyEnv<'_>)
         notified
     });
     notified?;
-    b.remove_edge_record(e)?;
+    b.remove_edge_record_unlisted(e)?;
     env.attributes.clear_attributes(this.key)
 }
 
