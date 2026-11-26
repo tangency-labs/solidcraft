@@ -248,7 +248,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, p: &mut Place) {
     // An SVG's pixels are read at this resolution: a file drawn at 72 dpi comes in at the size it
     // was drawn at with 72 (#20240). The file's own size follows it.
     if !p.command.ends_with("dxf") {
-        form_row(ui, "Resolution", |ui| {
+        form_row(ui, solidcraft_ui_text::tr("ui.insert_drawing.resolution"), |ui| {
             let r = crate::ui_kit::number_field(ui, &mut p.dpi, 1.0..=10000.0, 1.0, " dpi");
             crate::scenario::publish_handle("dialog:insert:dpi", r.rect.center());
             if r.changed() && p.dpi.is_finite() && p.dpi >= 1.0 {
