@@ -3,23 +3,44 @@ use super::*;
 use egui::{FontId, vec2};
 use solidcraft_engine::geom::weld;
 
-pub(super) fn record(state: &WeldPanelState) -> weld::Result<weld::Weld> {
+pub(crate) fn record(state: &WeldPanelState) -> weld::Result<weld::Weld> {
     let (kind, value) = match state.weld_type {
         WeldType::Fillet => (weld::Kind::Fillet, if state.size_by_leg { &state.size.z } else { &state.size.a }),
-        WeldType::Groove => (weld::Kind::SingleVButt, &state.size.s),
+        WeldType::Butt => (weld::Kind::SingleVButt, &state.size.s),
         _ => return Err(weld::Invalid("unsupported panel type")),
     };
-    let value = crate::ui_kit::parse_number(value).ok_or(weld::Invalid("size is not a number"))?;
-    let size = match kind {
-        weld::Kind::Fillet if state.size_by_leg => weld::Size::Leg(value),
-        weld::Kind::Fillet => weld::Size::Throat(value),
-        _ => weld::Size::ButtPenetration(value),
+    let size = if kind == weld::Kind::SingleVButt && value.trim().is_empty() {
+        None // Empty s is full penetration, preserving contour, side and process.
+    } else {
+        let value = crate::ui_kit::parse_number(value).ok_or(weld::Invalid("size is not a number"))?;
+        Some(match kind {
+            weld::Kind::Fillet if state.size_by_leg => weld::Size::Leg(value),
+            weld::Kind::Fillet => weld::Size::Throat(value),
+            _ => weld::Size::ButtPenetration(value),
+        })
+    };
+    // The geometry subset supports counted chain fillets with length < centre pitch.
+    // Keep valid saved spans even where that subset cannot represent them.
+    let spans = if state.spans && kind == weld::Kind::Fillet && !state.staggered && !state.all_around {
+        state
+            .span_count
+            .trim()
+            .parse::<u16>()
+            .ok()
+            .filter(|n| (2..=10000).contains(n))
+            .zip(crate::ui_kit::parse_number(&state.span_length))
+            .zip(crate::ui_kit::parse_number(&state.span_pitch))
+            .filter(|((_, l), e)| {
+                (weld::MIN_DIMENSION_MM..=weld::MAX_DIMENSION_MM).contains(l) && *e <= weld::MAX_DIMENSION_MM && *e >= *l + weld::MIN_DIMENSION_MM
+            })
+    } else {
+        None
     };
     let side = weld::WeldSide {
         kind,
-        size: Some(size),
-        length_mm: None,
-        intermittent: None,
+        size,
+        length_mm: spans.map(|((_, l), _)| l),
+        intermittent: spans.map(|((n, _), e)| weld::Intermittent { count: Some(n), pitch_mm: e }),
         contour: Some(match state.face {
             Face::Flat => weld::Contour::Flush,
             Face::Convex => weld::Contour::Convex,
@@ -38,7 +59,7 @@ pub(super) fn record(state: &WeldPanelState) -> weld::Result<weld::Weld> {
         other_side,
         all_round: state.all_around,
         field: state.field_weld,
-        tail: super::sections::look::process_number(state.process).map(str::to_owned),
+        tail: (!state.process.is_empty()).then(|| state.process.clone()),
     };
     record.validate()?;
     Ok(record)
@@ -46,16 +67,13 @@ pub(super) fn record(state: &WeldPanelState) -> weld::Result<weld::Weld> {
 
 /// The weld sits on the far side of the joint: the symbol goes above the dashed line.
 fn on_other_side(state: &WeldPanelState) -> bool {
-    match state.weld_type {
-        WeldType::Groove => state.root_side == 1,
-        _ => state.flip_side,
-    }
+    state.side == 1
 }
 
 fn basic(state: &WeldPanelState) -> Option<weld::Weld> {
     let kind = match state.weld_type {
         WeldType::Fillet => weld::Kind::Fillet,
-        WeldType::Groove => weld::Kind::SingleVButt,
+        WeldType::Butt => weld::Kind::SingleVButt,
         _ => return None,
     };
     let side = Some(weld::WeldSide { kind, size: None, length_mm: None, intermittent: None, contour: None });

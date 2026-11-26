@@ -10,7 +10,6 @@ use solidcraft_theme::Tokens;
 #[derive(Clone, Debug, Default)]
 pub struct WeldDialog {
     pub panel: WeldPanelState,
-    pub symbol: Option<solidcraft_engine::geom::weld::Weld>,
 }
 
 pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<crate::selection::SelInput>)> {
@@ -30,6 +29,8 @@ pub fn params(state: &WeldDialog) -> Result<Value, String> {
     if [&p.picks.line, &p.picks.groove, &p.picks.point, &p.picks.hole, &p.picks.ring, &p.picks.area].iter().any(|p| !p.is_empty()) {
         return Err(solidcraft_ui_text::tr("ui.weld.create.local_picks").into());
     }
+    let weld_type =
+        p.weld_type.info().label.strip_prefix("ui.weld.type.").ok_or_else(|| solidcraft_ui_text::tr("ui.weld.create.invalid_type").to_string())?;
     let mut size = serde_json::Map::new();
     for (key, value) in [
         ("a", &p.size.a),
@@ -39,48 +40,51 @@ pub fn params(state: &WeldDialog) -> Result<Value, String> {
         ("s", &p.size.s),
         ("d", &p.size.d),
         ("fill", &p.size.fill),
-        ("collar", &p.size.collar),
+        ("l", &p.size.l),
+        ("e", &p.size.e),
         ("t", &p.size.t),
         ("w", &p.size.w),
     ] {
-        if !value.trim().is_empty() {
+        let visible = p.weld_type != crate::weld_panel::WeldType::Fillet || p.advanced_open || key == if p.size_by_leg { "z" } else { "a" };
+        if visible && solidcraft_engine::doc::weld::size_keys(weld_type).contains(&key) && !value.trim().is_empty() {
             size.insert(key.into(), json!(value));
         }
     }
-    let weld_type =
-        p.weld_type.info().label.strip_prefix("ui.weld.type.").ok_or_else(|| solidcraft_ui_text::tr("ui.weld.create.invalid_type").to_string())?;
-    Ok(json!({
+    let ends = ["square", "tapered", "rounded"].get(p.ends).copied();
+    let spot_look = ["marks", "ball", "marks_ball", "marks_pin", "pin", "dent"].get(p.spot_look).copied();
+    let mut result = json!({
         "weld_type":weld_type, "picks":{}, "size":size,
         "face":match p.face {Face::Flat=>"flat",Face::Convex=>"convex",Face::Concave=>"concave"},
         "size_by_leg":p.size_by_leg,
         "blend_toes":p.blend_toes,
         "sheet_picked":p.sheet_picked,
         "tangent_chain":p.tangent_chain,
-        "flip_side":p.flip_side,
-        "spans":p.spans,
+        "spans":if p.spans {
+            let count = p.span_count.trim().parse::<u32>().map_err(|_| solidcraft_ui_text::tr("ui.weld.create.invalid_spans").to_string())?;
+            Some(json!({"count":count,"length_mm":p.span_length,"pitch_mm":p.span_pitch}))
+        } else {None},
         "both_sides":p.both_sides,
         "staggered":p.staggered,
         "sharp_mitre":p.sharp_mitre,
         "merge_crossing":p.merge_crossing,
         "different_halves":p.different_halves,
-        "tack":p.tack,
         "field_weld":p.field_weld,
         "all_around":p.all_around,
         "passes_shown":p.passes_shown,
         "penetration_shown":p.penetration_shown,
-        "root_side":p.root_side,
-        "ends":p.ends,
+        "side":if p.side == 1 {"other"} else {"arrow"},
+        "ends":ends,
         "process":p.process,
-        "texture":p.texture,
-        "spot_look":p.spot_look,
-        "reference_plane":p.reference_plane,
-        "pattern_count":p.pattern_count,
-        "pattern_pitch":p.pattern_pitch,
-        "edge_distance":p.edge_distance,
-        "density":p.density,
-        "overlap":p.overlap,
-        "symbol":state.symbol
-    }))
+        "spot_look":spot_look,
+        "reference_plane":"sketch",
+        "density":(!p.density.trim().is_empty()).then_some(&p.density),
+        "overlap":(!p.overlap.trim().is_empty()).then_some(&p.overlap),
+        "symbol":crate::weld_panel::symbol::record(p).ok()
+    });
+    if let Some(object) = result.as_object_mut() {
+        object.retain(|key, value| key == "symbol" || !value.is_null());
+    }
+    Ok(result)
 }
 
 /// Handle the same events for the live host and headless lifecycle tests.

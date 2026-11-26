@@ -90,8 +90,8 @@ fn plug_paints_filled_hole_and_fill_dimension() {
 }
 
 #[test]
-fn stud_paints_two_collar_welds() {
-    check_figure(SizeFigure::Stud, &["collar"]);
+fn stud_paints_diameter_and_two_welds() {
+    check_figure(SizeFigure::Stud, &["d"]);
 }
 
 #[test]

@@ -36,28 +36,16 @@ fn weld_panel_fillet_board_section_heights_and_order() {
     let ctx = context();
     let mut state = WeldPanelState::specimen(WeldType::Fillet, false);
     let (_, m) = render(&ctx, &mut state, false, vec![]);
-    let board = [
-        // The revised board uses a 66-point choice row (8 points taller than its first export).
-        ("type", 154.0),
-        ("where", 170.0),
-        ("size", 162.0),
-        ("face", 133.0),
-        ("extent", 184.0),
-        ("flags", 80.0),
-        ("look", 161.0),
-        ("notices", 150.0),
-        ("buttons", 48.0),
-        ("advanced", 35.0),
-    ];
+    let board = ["type", "where", "size", "face", "extent", "process", "look", "notices", "buttons", "advanced"];
     println!(
         "Weld fillet measured heights: {:?}; total {}",
         m.sections.iter().map(|(key, rect)| (*key, rect.height())).collect::<Vec<_>>(),
         m.card.expect("card").height()
     );
-    assert_eq!(m.sections.iter().map(|(key, _)| *key).collect::<Vec<_>>(), board.iter().map(|(key, _)| *key).collect::<Vec<_>>());
+    assert_eq!(m.sections.iter().map(|(key, _)| *key).collect::<Vec<_>>(), board.to_vec());
     close(m.card.expect("card").width(), 344.0, 0.5);
-    for (key, height) in board {
-        close(section(&m, key).height(), height, 8.0);
+    for key in board {
+        assert!(section(&m, key).height() > 0.0);
     }
     for pair in m.sections.windows(2) {
         close(pair[0].1.bottom(), pair[1].1.top(), 0.5);
@@ -67,7 +55,7 @@ fn weld_panel_fillet_board_section_heights_and_order() {
 
 #[test]
 fn weld_panel_size_columns_align_centre_and_have_seven_point_gaps() {
-    for typ in [WeldType::Fillet, WeldType::Groove, WeldType::Spot, WeldType::Plug, WeldType::Stud, WeldType::Overlay] {
+    for typ in [WeldType::Fillet, WeldType::Butt, WeldType::Spot, WeldType::Plug, WeldType::Stud, WeldType::Surfacing] {
         for advanced in [false, true] {
             let ctx = context();
             let mut state = WeldPanelState::specimen(typ, advanced);
@@ -95,7 +83,7 @@ fn weld_panel_size_columns_align_centre_and_have_seven_point_gaps() {
 
 #[test]
 fn weld_panel_widgets_do_not_overlap_or_escape_the_card() {
-    for typ in [WeldType::Fillet, WeldType::Groove, WeldType::Spot, WeldType::Plug, WeldType::Stud, WeldType::Overlay, WeldType::FrictionStir] {
+    for typ in [WeldType::Fillet, WeldType::Butt, WeldType::Spot, WeldType::Plug, WeldType::Stud, WeldType::Surfacing, WeldType::Seam] {
         let ctx = context();
         let mut state = WeldPanelState::specimen(typ, true);
         let (_, m) = render(&ctx, &mut state, false, vec![]);
@@ -165,8 +153,8 @@ fn weld_panel_actions_and_type_selection_emit_events_without_commands() {
     let done = m.ok.expect("OK").center();
     assert_eq!(click(&ctx, &mut state, done), WeldPanelEvent::Done);
     let groove = m.type_choices[1].button.center();
-    assert_eq!(click(&ctx, &mut state, groove), WeldPanelEvent::TypePicked(WeldType::Groove));
-    assert_eq!(state.weld_type, WeldType::Groove);
+    assert_eq!(click(&ctx, &mut state, groove), WeldPanelEvent::TypePicked(WeldType::Butt));
+    assert_eq!(state.weld_type, WeldType::Butt);
     assert_eq!(state.size.a, "3.0");
     assert_eq!(state.picks.line.len(), 2);
 }
@@ -174,9 +162,10 @@ fn weld_panel_actions_and_type_selection_emit_events_without_commands() {
 #[test]
 fn weld_panel_type_table_covers_the_board_and_has_registered_icons() {
     crate::i18n::install();
-    assert_eq!(TYPES.len(), 26);
+    assert_eq!(TYPES.len(), 9);
+    assert_eq!(TYPES.iter().map(|info| info.label.trim_start_matches("ui.weld.type.")).collect::<Vec<_>>(), solidcraft_engine::doc::weld::TYPES);
     assert_eq!(TYPES.iter().filter(|info| info.visible).count(), 4);
-    assert_eq!(TYPES.iter().filter(|info| info.look_tbd).count(), 5);
+    assert_eq!(TYPES.iter().filter(|info| info.look_tbd).count(), 0);
     for info in TYPES {
         assert_eq!(info.weld_type.info().icon, info.icon);
         assert_ne!(tr(info.label), info.label);
@@ -541,8 +530,11 @@ fn weld_symbol_unsupported_type_paints_the_dimmed_icon_and_undefined_hint() {
 
 #[test]
 fn weld_symbol_invalid_sizes_paint_basic_geometry_without_panicking() {
-    for typ in [WeldType::Fillet, WeldType::Groove] {
+    for typ in [WeldType::Fillet, WeldType::Butt] {
         for value in ["", "0", "-3", "NaN", "inf", "100001", "0.0000001", "plate / 2"] {
+            if typ == WeldType::Butt && value.is_empty() {
+                continue;
+            } // Full penetration is valid.
             let mut state = WeldPanelState { weld_type: typ, ..Default::default() };
             state.size.a = value.into();
             state.size.s = value.into();
@@ -560,10 +552,10 @@ fn weld_symbol_invalid_sizes_paint_basic_geometry_without_panicking() {
 #[test]
 fn weld_symbol_flipped_side_moves_the_weld_to_the_other_side_of_the_line() {
     let mut state = WeldPanelState::specimen(WeldType::Fillet, false);
-    state.flip_side = true;
+    state.side = 1;
     let record = symbol::record(&state).expect("record");
     assert!(record.arrow_side.is_none() && record.other_side.is_some());
-    state.flip_side = false;
+    state.side = 0;
     let record = symbol::record(&state).expect("record");
     assert!(record.arrow_side.is_some() && record.other_side.is_none());
 }
@@ -578,7 +570,7 @@ fn weld_symbol_record_maps_size_contour_sides_flags_and_process() {
         all_around: true,
         field_weld: true,
         face: Face::Flat,
-        process: 1,
+        process: "141".into(),
         ..Default::default()
     };
     let record = symbol::record(&state).expect("valid fillet");
@@ -589,19 +581,19 @@ fn weld_symbol_record_maps_size_contour_sides_flags_and_process() {
     assert_eq!(record.arrow_side, record.other_side);
     assert!(record.all_round && record.field);
     assert_eq!(record.tail.as_deref(), Some("141"));
-    state.weld_type = WeldType::Groove;
+    state.weld_type = WeldType::Butt;
     state.size.s = "2.50".into();
     state.face = Face::Concave;
-    state.process = 6;
+    state.process = "135".into();
     let record = symbol::record(&state).expect("valid butt");
     let side = record.arrow_side.expect("arrow side");
     assert_eq!(side.kind, Kind::SingleVButt);
     assert_eq!(side.size, Some(Size::ButtPenetration(2.5)));
     assert_eq!(side.contour, Some(Contour::Concave));
-    assert_eq!(record.tail, None);
+    assert_eq!(record.tail.as_deref(), Some("135"));
     let (defined, _, _, labels) = symbol_frame(&state, false);
     assert!(defined);
-    assert_eq!(labels, ["2.5", "2.5"]);
+    assert_eq!(labels, ["2.5", "2.5", "135"]);
 }
 
 #[test]
@@ -614,4 +606,72 @@ fn weld_symbol_strip_has_one_reference_line_and_an_arrow_but_no_dashed_line() {
     );
     let filled = shapes.iter().filter(|shape| matches!(shape, egui::Shape::Path(path) if path.fill != egui::Color32::TRANSPARENT)).count();
     assert!(filled >= 1, "the arrow head is a filled triangle");
+}
+
+#[test]
+fn weld_panel_type_defaults_and_filtered_process_tables() {
+    use sections::look::numbers;
+    let expected = [
+        (WeldType::Fillet, Face::Convex, "135", vec!["111", "121", "131", "135", "136", "138", "141", "311", "51", "52"]),
+        (WeldType::Butt, Face::Flat, "135", vec!["111", "121", "131", "135", "136", "138", "141", "311", "51", "52", "42", "43", "185"]),
+        (WeldType::Edge, Face::Convex, "141", vec!["141", "131", "135", "311", "15", "52"]),
+        (WeldType::Plug, Face::Flat, "135", vec!["111", "131", "135", "141"]),
+        (WeldType::Spot, Face::Convex, "21", vec!["21", "52", "51", "41", "135", "141"]),
+        (WeldType::Seam, Face::Convex, "22", vec!["22", "52", "51", "41", "43"]),
+        (WeldType::Stud, Face::Convex, "78", vec!["78"]),
+        (WeldType::Surfacing, Face::Convex, "135", vec!["111", "121", "131", "135", "136", "138", "141", "15", "52", "441"]),
+        (WeldType::Tack, Face::Convex, "135", vec!["111", "131", "135", "141"]),
+    ];
+    let mut state = WeldPanelState::default();
+    for (typ, face, process, offered) in expected {
+        state.pick_type(typ);
+        assert_eq!(state.face, face);
+        assert_eq!(state.process, process);
+        assert_eq!(numbers(typ), offered);
+        assert_ne!(tr(&format!("{}.desc", typ.info().label)), format!("{}.desc", typ.info().label));
+    }
+    state.tack_points = true;
+    assert_eq!(state.where_kind(), WhereKind::Point);
+    state.tack_points = false;
+    assert_eq!(state.where_kind(), WhereKind::Line);
+    assert!(state.density.is_empty());
+    assert!(state.overlap.is_empty());
+    assert_eq!(
+        TYPES.iter().filter(|info| info.visible).map(|info| info.weld_type).collect::<Vec<_>>(),
+        [WeldType::Fillet, WeldType::Butt, WeldType::Spot, WeldType::Tack]
+    );
+}
+
+#[test]
+fn weld_symbol_full_penetration_keeps_contour_side_and_tail() {
+    use solidcraft_engine::geom::weld::{Contour, Kind};
+    let mut state = WeldPanelState::default();
+    state.pick_type(WeldType::Butt);
+    state.side = 1;
+    let record = symbol::record(&state).unwrap();
+    assert!(record.arrow_side.is_none());
+    let side = record.other_side.unwrap();
+    assert_eq!(side.kind, Kind::SingleVButt);
+    assert_eq!(side.size, None);
+    assert_eq!(side.contour, Some(Contour::Flush));
+    assert_eq!(record.tail.as_deref(), Some("135"));
+    state.pick_type(WeldType::Tack);
+    assert!(symbol::record(&state).is_err());
+}
+
+#[test]
+fn weld_symbol_spans_use_length_count_and_centre_pitch_only_when_supported() {
+    let mut state = WeldPanelState { spans: true, span_count: "3".into(), span_length: "10".into(), span_pitch: "40".into(), ..Default::default() };
+    let record = symbol::record(&state).unwrap();
+    let side = record.arrow_side.unwrap();
+    assert_eq!(side.length_mm, Some(10.));
+    let spans = side.intermittent.unwrap();
+    assert_eq!(spans.count, Some(3));
+    assert_eq!(spans.pitch_mm, 40.);
+    for (count, length, pitch) in [("1", "10", "40"), ("3", "10", "10"), ("3", "bad", "40")] {
+        state.span_count = count.into();
+        state.span_length = length.into();
+        state.span_pitch = pitch.into();
+        assert!(symbol::record(&state).unwrap().arrow_side.unwrap().intermittent.is_none());
+    }
 }

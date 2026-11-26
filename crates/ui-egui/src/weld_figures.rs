@@ -194,9 +194,10 @@ impl Drawing<'_> {
         ]);
         self.weld(&[pos2(90., 88.), pos2(90., 66.), pos2(112., 88.)]);
         self.weld(&[pos2(70., 88.), pos2(70., 66.), pos2(48., 88.)]);
-        self.extension(pos2(48., 88.), pos2(48., 54.));
-        self.dimension(pos2(48., 58.), pos2(70., 58.), false);
-        self.text(pos2(66., 49.), "collar", 1.);
+        self.extension(pos2(70., 28.), pos2(70., 10.));
+        self.extension(pos2(90., 28.), pos2(90., 10.));
+        self.dimension(pos2(70., 16.), pos2(90., 16.), false);
+        self.text(pos2(80., 8.), "d", 0.5);
     }
 
     fn overlay(&self) {

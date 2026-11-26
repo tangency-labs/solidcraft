@@ -1,24 +1,83 @@
 //! Process textures and the six spot appearance specimens.
 use super::*;
 
-const PROCESSES: &[(&str, Option<&str>)] = &[
-    ("ui.weld.process.mig", Some("135")),
-    ("ui.weld.process.tig", Some("141")),
-    ("ui.weld.process.stick", Some("111")),
-    ("ui.weld.process.saw", Some("121")),
-    ("ui.weld.process.laser", Some("52")),
-    ("ui.weld.process.fsw", Some("43")),
-    ("ui.weld.process.unset", None),
+// Name, stable ISO 4063 number, process family. Checked-only proposals are excluded.
+const PROCESSES: &[(&str, &str, &str)] = &[
+    ("ui.weld.process.stick", "111", "ui.weld.process.group.arc"),
+    ("ui.weld.process.saw", "121", "ui.weld.process.group.arc"),
+    ("ui.weld.process.131", "131", "ui.weld.process.group.arc"),
+    ("ui.weld.process.135", "135", "ui.weld.process.group.arc"),
+    ("ui.weld.process.136", "136", "ui.weld.process.group.arc"),
+    ("ui.weld.process.138", "138", "ui.weld.process.group.arc"),
+    ("ui.weld.process.tig", "141", "ui.weld.process.group.arc"),
+    ("ui.weld.process.15", "15", "ui.weld.process.group.arc"),
+    ("ui.weld.process.185", "185", "ui.weld.process.group.arc"),
+    ("ui.weld.process.51", "51", "ui.weld.process.group.beam"),
+    ("ui.weld.process.laser", "52", "ui.weld.process.group.beam"),
+    ("ui.weld.process.21", "21", "ui.weld.process.group.resistance"),
+    ("ui.weld.process.22", "22", "ui.weld.process.group.resistance"),
+    ("ui.weld.process.41", "41", "ui.weld.process.group.solid"),
+    ("ui.weld.process.42", "42", "ui.weld.process.group.solid"),
+    ("ui.weld.process.fsw", "43", "ui.weld.process.group.solid"),
+    ("ui.weld.process.441", "441", "ui.weld.process.group.solid"),
+    ("ui.weld.process.78", "78", "ui.weld.process.group.stud"),
+    ("ui.weld.process.311", "311", "ui.weld.process.group.gas"),
 ];
 
-pub(in crate::weld_panel) fn process_number(process: usize) -> Option<&'static str> {
-    PROCESSES.get(process).and_then(|(_, number)| *number)
+pub(in crate::weld_panel) fn numbers(kind: WeldType) -> &'static [&'static str] {
+    match kind {
+        WeldType::Fillet => &["111", "121", "131", "135", "136", "138", "141", "311", "51", "52"],
+        WeldType::Butt => &["111", "121", "131", "135", "136", "138", "141", "311", "51", "52", "42", "43", "185"],
+        WeldType::Edge => &["141", "131", "135", "311", "15", "52"],
+        WeldType::Plug | WeldType::Tack => &["111", "131", "135", "141"],
+        WeldType::Spot => &["21", "52", "51", "41", "135", "141"],
+        WeldType::Seam => &["22", "52", "51", "41", "43"],
+        WeldType::Stud => &["78"],
+        WeldType::Surfacing => &["111", "121", "131", "135", "136", "138", "141", "15", "52", "441"],
+    }
+}
+
+pub(super) fn process(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens, m: &mut Measurements) {
+    section(ui, t, m, "process", |ui, _| {
+        kit::hint_field(ui, &mut state.process_search, tr("ui.weld.process.search"));
+        let current = PROCESSES.iter().find(|(_, number, _)| *number == state.process).map_or(state.process.as_str(), |(id, _, _)| tr(id)).to_owned();
+        let query = state.process_search.to_lowercase();
+        kit::dropdown_menu(ui, "process", &current, |ui| {
+            let mut group = "";
+            for (name, number, family) in PROCESSES {
+                if !numbers(state.weld_type).contains(number) || !(number.contains(&query) || tr(name).to_lowercase().contains(&query)) {
+                    continue;
+                }
+                if group != *family {
+                    kit::section_heading(ui, tr(family));
+                    group = family;
+                }
+                if kit::button(ui, tr(name), if state.process == *number { Button::SmallSelected } else { Button::Normal }).clicked() {
+                    state.process = (*number).into();
+                    ui.close();
+                }
+            }
+        });
+    });
+}
+
+fn texture_index(number: &str) -> Option<usize> {
+    match number {
+        "111" => Some(2),
+        "121" => Some(3),
+        "131" | "135" | "136" | "138" => Some(0),
+        "141" => Some(1),
+        "51" | "52" => Some(4),
+        "42" | "43" => Some(5),
+        _ => None,
+    }
 }
 
 fn texture(ui: &mut Ui, state: &WeldPanelState, t: &Tokens) {
     let (rect, _) = ui.allocate_exact_size(vec2(t.form_label_width + t.space_24 * 2.0 + t.space_2, t.control_height - t.space_2), Sense::hover());
     let bead = rect.shrink2(vec2(t.space_2, t.space_3));
-    if state.weld_type.info().look_tbd || state.process == 6 {
+    let texture = texture_index(&state.process);
+    if texture.is_none() {
         // The board deliberately reserves an unfilled slot when its look is undecided.
         let stroke = t.control_border_stroke(t.accent);
         ui.painter().extend(kit::dashed_line(&[bead.left_top(), bead.right_top()], ui.clip_rect(), stroke, t.space_4, t.space_3));
@@ -29,7 +88,7 @@ fn texture(ui: &mut Ui, state: &WeldPanelState, t: &Tokens) {
     }
     ui.painter().rect_filled(bead, bead.height() / 2.0, t.accent);
     ui.painter().rect_stroke(bead, bead.height() / 2.0, t.control_border_stroke(t.icon), egui::StrokeKind::Inside);
-    let step = match state.texture {
+    let step = match texture.unwrap_or(0) {
         1 => t.space_8 + t.space_2,
         2 => t.space_14,
         3 => t.space_6,
@@ -42,7 +101,7 @@ fn texture(ui: &mut Ui, state: &WeldPanelState, t: &Tokens) {
             .map(|i| {
                 let phase = i as f32 / 8.0;
                 pos2(
-                    x + if state.texture == 3 { 0.0 } else { (phase * std::f32::consts::PI).sin() * t.space_3 },
+                    x + if texture == Some(3) { 0.0 } else { (phase * std::f32::consts::PI).sin() * t.space_3 },
                     bead.top() + t.space_2 + phase * (bead.height() - t.space_4),
                 )
             })
@@ -50,7 +109,7 @@ fn texture(ui: &mut Ui, state: &WeldPanelState, t: &Tokens) {
         ui.painter().add(egui::Shape::line(points, egui::Stroke::new(1.0, t.on_accent.gamma_multiply(0.6))));
         x += step;
     }
-    if state.texture == 5 {
+    if texture == Some(5) {
         ui.painter().circle(
             Rect::from_min_size(bead.max - vec2(t.space_16, bead.height()), vec2(t.space_16, bead.height())).center(),
             t.space_4,
@@ -97,12 +156,6 @@ pub(super) fn show(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens, m: &mut 
             }
             label(ui, "ui.weld.spot.two_sheets", t, true);
         } else {
-            let options: Vec<_> = PROCESSES.iter().map(|(id, _)| tr(id)).collect();
-            let before = state.process;
-            kit::dropdown(ui, "process", &mut state.process, &options);
-            if state.process != before {
-                state.texture = state.process;
-            }
             ui.horizontal(|ui| {
                 ui.add_sized(
                     vec2(t.form_label_width + t.space_6, t.control_height),

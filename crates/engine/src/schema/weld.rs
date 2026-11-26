@@ -11,6 +11,45 @@ mod tests {
     };
     use serde_json::json;
     #[test]
+    fn weld_named_settings_spans_and_type_sizes() {
+        let mut s = Session::default();
+        for typ in solidcraft_doc::weld::TYPES {
+            let result = s.execute("weld.create", &json!({"weld_type":typ})).unwrap();
+            assert!(result["id"].is_u64());
+            s.doc.welds.last().unwrap().settings.validate().unwrap();
+        }
+        assert_eq!(s.doc.welds.len(), 9);
+        for invalid in [
+            json!({"weld_type":"groove"}),
+            json!({"weld_type":"fillet","process":"MAG"}),
+            json!({"weld_type":"fillet","process":"1234"}),
+            json!({"weld_type":"fillet","process":"１２"}),
+            json!({"weld_type":"fillet","side":"left"}),
+            json!({"weld_type":"fillet","ends":"round"}),
+            json!({"weld_type":"spot","spot_look":"unknown"}),
+            json!({"weld_type":"fillet","reference_plane":"0"}),
+            json!({"weld_type":"butt","size":{"a":3}}),
+            json!({"weld_type":"fillet","size":{"d":5}}),
+            json!({"weld_type":"fillet","spans":{"count":1.5,"length_mm":10,"pitch_mm":40}}),
+            json!({"weld_type":"fillet","spans":{"count":0,"length_mm":10,"pitch_mm":40}}),
+            json!({"weld_type":"fillet","spans":{"count":10001,"length_mm":10,"pitch_mm":40}}),
+            json!({"weld_type":"fillet","spans":{"count":2,"length_mm":0,"pitch_mm":40}}),
+            json!({"weld_type":"fillet","spans":{"count":2,"length_mm":10,"pitch_mm":-1}}),
+        ] {
+            let before = s.doc.clone();
+            assert!(matches!(s.execute("weld.create", &invalid), Err(crate::EngineError::BadParams { .. })), "{invalid}");
+            assert_eq!(s.doc, before);
+        }
+        s.execute("weld.create", &json!({"weld_type":"butt","size":{"h":"1 mm"},"process":"135","side":"other","ends":"rounded"})).unwrap();
+        let record = s.doc.welds.last().unwrap();
+        assert!(record.settings.density.is_none());
+        assert_eq!(record.settings.size.len(), 1);
+        assert_eq!(record.settings.side, "other");
+        s.execute("weld.create", &json!({"weld_type":"fillet","spans":{"count":2,"length_mm":"1 cm","pitch_mm":"40 mm"}})).unwrap();
+        let spans = s.doc.welds.last().unwrap().settings.spans.as_ref().unwrap();
+        assert_eq!((spans.count, spans.length_mm, spans.pitch_mm), (2, 10., 40.));
+    }
+    #[test]
     fn weld_schemas_match_keys_and_replies() {
         crate::schema::tests::assert_strict_keeps_todays_errors(&[
             ("weld.create", json!({"weld_type":"unknown"})),
@@ -25,37 +64,30 @@ mod tests {
                 "both_sides",
                 "density",
                 "different_halves",
-                "edge_distance",
                 "ends",
                 "face",
                 "field_weld",
-                "flip_side",
                 "merge_crossing",
                 "overlap",
                 "passes_shown",
-                "pattern_count",
-                "pattern_pitch",
                 "penetration_shown",
                 "picks",
                 "process",
                 "reference_plane",
-                "root_side",
                 "sharp_mitre",
                 "sheet_picked",
+                "side",
                 "size",
                 "size_by_leg",
                 "spans",
                 "spot_look",
                 "staggered",
                 "symbol",
-                "tack",
                 "tangent_chain",
-                "texture",
                 "weld_type",
             ],
         );
-        let mut s = Session::default();
-        s.param_check = ParamCheck::Warn;
+        let mut s = Session { param_check: ParamCheck::Warn, ..Default::default() };
         let schema = serde_json::to_value(output_schema_for::<WeldCreated>()).unwrap();
         for p in [json!({"weld_type":"fillet"}), json!({"weld_type":"spot","size":{"d":"5 mm"},"picks":{"point":[{"point":{"x":0,"y":0,"z":0}}]}})] {
             let r = s.execute("weld.create", &p).unwrap();
@@ -82,15 +114,15 @@ use std::collections::BTreeMap;
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct WeldCreateParams {
-    /// Type id from the weld panel (fillet, groove, spot, plug, etc.).
+    /// Type id: fillet, butt, edge, plug, spot, seam, stud, surfacing or tack.
     pub weld_type: String,
     /// Pick groups: line, groove, point, hole, ring or area. Default: empty.
     #[serde(default)]
     pub picks: Option<BTreeMap<String, Vec<WeldPickParams>>>,
-    /// Named positive sizes in mm or length expressions: a,z,z1,h,s,d,fill,collar,t,w. Default: panel sizes.
+    /// Named positive sizes in mm or length expressions: a,z,z1,h,s,d,fill,w,t,l,e. Default: the chosen type’s basic size.
     #[serde(default)]
     pub size: Option<BTreeMap<String, LengthExpr>>,
-    /// Face: flat, convex or concave. Default: convex.
+    /// Face: flat, convex or concave. Default: flat for butt/plug, convex otherwise.
     #[serde(default)]
     pub face: Option<String>,
     /// size by leg. Default: false.
@@ -105,12 +137,9 @@ pub struct WeldCreateParams {
     /// tangent chain. Default: false.
     #[serde(default)]
     pub tangent_chain: Option<bool>,
-    /// flip side. Default: false.
+    /// Optional intermittent elements: count, length_mm and pitch_mm.
     #[serde(default)]
-    pub flip_side: Option<bool>,
-    /// spans. Default: false.
-    #[serde(default)]
-    pub spans: Option<bool>,
+    pub spans: Option<WeldSpansParams>,
     /// both sides. Default: false.
     #[serde(default)]
     pub both_sides: Option<bool>,
@@ -126,9 +155,6 @@ pub struct WeldCreateParams {
     /// different halves. Default: false.
     #[serde(default)]
     pub different_halves: Option<bool>,
-    /// tack. Default: false.
-    #[serde(default)]
-    pub tack: Option<bool>,
     /// field weld. Default: false.
     #[serde(default)]
     pub field_weld: Option<bool>,
@@ -141,43 +167,40 @@ pub struct WeldCreateParams {
     /// penetration shown. Default: false.
     #[serde(default)]
     pub penetration_shown: Option<bool>,
-    /// Root side: 0 is arrow side, 1 is other side. Default: 0.
+    /// Semantic side: arrow (default) or other.
     #[serde(default)]
-    pub root_side: Option<usize>,
-    /// End treatment: 0 square, 1 tapered, 2 rounded. Default: 0.
+    pub side: Option<String>,
+    /// End treatment: square (default), tapered or rounded.
     #[serde(default)]
-    pub ends: Option<usize>,
-    /// Process: 0 MIG, 1 TIG, 2 stick, 3 submerged arc, 4 laser, 5 friction stir, 6 unset. Default: 0.
+    pub ends: Option<String>,
+    /// Optional ISO 4063 number as 1-3 ASCII digits, e.g. "135".
     #[serde(default)]
-    pub process: Option<usize>,
-    /// Texture specimen index (0..=6), following the process choices. Default: 0.
+    pub process: Option<String>,
+    /// Spot appearance: marks, ball, marks_ball, marks_pin, pin or dent.
     #[serde(default)]
-    pub texture: Option<usize>,
-    /// Spot appearance specimen index (0..=5). Default: 0.
+    pub spot_look: Option<String>,
+    /// Reference plane: sketch.
     #[serde(default)]
-    pub spot_look: Option<usize>,
-    /// Reference plane choice index. Currently only 0 (off) is supported. Default: 0.
-    #[serde(default)]
-    pub reference_plane: Option<usize>,
-    /// pattern count (unitless). Default: 4.
-    #[serde(default)]
-    pub pattern_count: Option<NumberExpr>,
-    /// Centre-to-centre pattern pitch in mm. Default: 40.
-    #[serde(default)]
-    pub pattern_pitch: Option<LengthExpr>,
-    /// edge distance (mm). Default: 12.
-    #[serde(default)]
-    pub edge_distance: Option<LengthExpr>,
-    /// Material density in kg/m³, as a number or unitless expression. Default: 7850.
+    pub reference_plane: Option<String>,
+    /// Material density in kg/m³, as a number or unitless expression. Omitted: no mass.
     #[serde(default)]
     pub density: Option<NumberExpr>,
-    /// overlap (mm). Default: 1.5.
+    /// Optional overlap (mm); omitted follows h.
     #[serde(default)]
     pub overlap: Option<LengthExpr>,
-    /// Optional manual welding symbol; validated using the geometry record's rules.
+    /// Welding symbol built from the settings; validated using the geometry record's rules.
     #[serde(default)]
     #[schemars(with = "Option<SymbolSchema>")]
     pub symbol: Option<solidcraft_geom::weld::Weld>,
+}
+
+/// Intermittent elements; dimensions accept length expressions in mm.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WeldSpansParams {
+    pub count: u32,
+    pub length_mm: LengthExpr,
+    pub pitch_mm: LengthExpr,
 }
 
 /// A fixed point, or an edge/face with a body name and exact topology index.

@@ -39,6 +39,70 @@ mod weld_tests {
         assert!(old.welds.is_empty());
     }
     #[test]
+    fn weld_butt_full_penetration_round_trip() {
+        let mut weld = record();
+        weld.settings.weld_type = "butt".into();
+        weld.settings.size = [("h".into(), 1.)].into_iter().collect();
+        weld.settings.face = "flat".into();
+        weld.settings.process = Some("135".into());
+        let symbol = weld.symbol.as_mut().unwrap();
+        symbol.tail = Some("135".into());
+        let side = symbol.arrow_side.as_mut().unwrap();
+        side.kind = solidcraft_geom::weld::Kind::SingleVButt;
+        side.size = None;
+        side.contour = Some(solidcraft_geom::weld::Contour::Flush);
+        let mut doc = Document::new("Butt");
+        doc.welds.push(weld);
+        let back = crate::format::read(&serde_json::to_string(&doc).unwrap()).unwrap();
+        assert_eq!(back.welds, doc.welds);
+        assert!(back.welds[0].settings.density.is_none());
+    }
+    #[test]
+    fn weld_settings_validate_names_sizes_and_spans() {
+        use crate::weld::{WeldSettings, WeldSpans};
+        let settings = WeldSettings::default();
+        assert!(settings.validate().is_ok());
+        assert_eq!(settings.size.keys().map(String::as_str).collect::<Vec<_>>(), ["a"]);
+        for (field, value) in [
+            ("weld_type", "groove"),
+            ("process", "MAG"),
+            ("process", ""),
+            ("process", "1234"),
+            ("process", "１２"),
+            ("side", "left"),
+            ("ends", "round"),
+            ("spot_look", "unknown"),
+            ("reference_plane", "0"),
+            ("face", "unknown"),
+        ] {
+            let mut raw = serde_json::to_value(&settings).unwrap();
+            raw[field] = serde_json::json!(value);
+            let bad: WeldSettings = serde_json::from_value(raw).unwrap();
+            assert!(bad.validate().is_err(), "{field}={value}");
+        }
+        for typ in crate::weld::TYPES {
+            let mut settings = settings.clone();
+            settings.weld_type = (*typ).into();
+            for key in crate::weld::SIZE_KEYS {
+                settings.size = [((*key).into(), 1.)].into_iter().collect();
+                assert_eq!(settings.validate().is_ok(), crate::weld::size_keys(typ).contains(key), "{typ}/{key}");
+            }
+        }
+        for (count, length_mm, pitch_mm, valid) in [
+            (1, 1., 1., true),
+            (10000, 1., 2., true),
+            (0, 1., 2., false),
+            (10001, 1., 2., false),
+            (2, 0., 2., false),
+            (2, 1., -1., false),
+            (2, f64::NAN, 2., false),
+            (2, 1., f64::INFINITY, false),
+        ] {
+            let settings = WeldSettings { spans: Some(WeldSpans { count, length_mm, pitch_mm }), ..Default::default() };
+            assert_eq!(settings.validate().is_ok(), valid);
+        }
+    }
+    #[test]
     fn weld_graphics_refuse_hostile_saved_records() {
         let mut doc = Document::new("Welds");
         doc.welds.push(record());

@@ -7,7 +7,7 @@ use solidcraft_theme::Tokens;
 #[path = "weld_panel_sections.rs"]
 mod sections;
 #[path = "weld_panel/symbol.rs"]
-mod symbol;
+pub(crate) mod symbol;
 #[cfg(test)]
 #[path = "weld_panel_tests.rs"]
 mod tests;
@@ -45,31 +45,14 @@ macro_rules! types {
     }
 }
 types! {
-    Groove, "groove", "weld_type_groove", Line, true, false, false, 0;
-    GrooveFillet, "groove_fillet", "weld_type_groove_fillet", Line, false, true, false, 0;
-    RootGap, "root_gap", "weld_type_root_gap", Line, false, true, false, 0;
+    Butt, "butt", "weld_type_groove", Line, true, false, false, 0;
     Edge, "edge", "weld_type_edge", Line, false, true, false, 0;
-    FlangedButt, "flanged_butt", "weld_type_flanged_butt", Line, false, true, false, 0;
-    FlangedCorner, "flanged_corner", "weld_type_flanged_corner", Line, false, true, false, 0;
-    BeadLine, "bead_line", "weld_type_bead_line", Line, false, true, false, 0;
-    SeamOnly, "seam_only", "weld_type_seam_only", Line, false, true, false, 0;
-    Rip, "rip", "weld_type_sheet_rip", Line, false, true, false, 0;
-    Spot, "spot", "weld_type_spot", Point, true, false, false, 1;
-    Projection, "projection", "weld_type_projection", Point, false, true, false, 1;
-    FusionSpot, "fusion_spot", "weld_type_fusion_spot", Point, false, true, false, 1;
-    Stake, "stake", "weld_type_stake", Point, false, true, false, 1;
-    Plug, "plug", "weld_type_plug_slot", Hole, true, true, false, 1;
-    Stud, "stud", "weld_type_stud", Ring, false, true, false, 1;
-    ResistanceSeam, "res_seam", "weld_type_resistance_seam", Line, false, true, false, 2;
-    FusionSeam, "fusion_seam", "weld_type_fusion_seam", Line, false, true, false, 2;
-    Overlay, "overlay", "weld_type_overlay", Area, false, true, false, 3;
-    Friction, "friction", "weld_type_friction", Ring, false, true, false, 4;
-    FrictionStir, "fsw", "weld_type_friction_stir", Line, false, true, false, 4;
-    Ultrasonic, "ultrasonic", "weld_type_ultrasonic", Point, false, true, true, 4;
-    Explosion, "explosion", "weld_type_explosion", Area, false, true, true, 4;
-    Diffusion, "diffusion", "weld_type_diffusion", Area, false, true, true, 4;
-    Magnetic, "magnetic", "weld_type_magnetic_pulse", Ring, false, true, true, 4;
-    Cold, "cold", "weld_type_cold_pressure", Point, false, true, true, 4;
+    Plug, "plug", "weld_type_plug_slot", Hole, false, true, false, 1;
+    Spot, "spot", "weld_type_spot", Point, true, false, false, 2;
+    Seam, "seam", "weld_type_resistance_seam", Line, false, true, false, 0;
+    Stud, "stud", "weld_type_stud", Ring, false, true, false, 3;
+    Surfacing, "surfacing", "weld_type_overlay", Area, false, true, false, 4;
+    Tack, "tack", "weld_flag_tack", Line, true, true, false, 0;
 }
 
 impl WeldType {
@@ -106,7 +89,8 @@ pub struct SizeValues {
     pub s: String,
     pub d: String,
     pub fill: String,
-    pub collar: String,
+    pub l: String,
+    pub e: String,
     pub t: String,
     pub w: String,
 }
@@ -120,7 +104,8 @@ impl Default for SizeValues {
             s: String::new(),
             d: "5.0".into(),
             fill: "20".into(),
-            collar: "3.0".into(),
+            l: "5".into(),
+            e: "40".into(),
             t: "2.0".into(),
             w: "6.0".into(),
         }
@@ -183,15 +168,14 @@ pub struct WeldPanelState {
     pub picks: Picks,
     pub size: SizeValues,
     pub size_by_leg: bool,
-    pub root_side: usize,
+    pub side: usize,
     pub face: Face,
     pub blend_toes: bool,
     pub sheet_picked: bool,
     pub tangent_chain: bool,
-    pub flip_side: bool,
-    pub pattern_count: String,
-    pub pattern_pitch: String,
-    pub edge_distance: String,
+    pub span_count: String,
+    pub span_pitch: String,
+    pub span_length: String,
     pub spans: bool,
     pub both_sides: bool,
     pub staggered: bool,
@@ -199,11 +183,10 @@ pub struct WeldPanelState {
     pub sharp_mitre: bool,
     pub merge_crossing: bool,
     pub different_halves: bool,
-    pub tack: bool,
     pub field_weld: bool,
     pub all_around: bool,
-    pub process: usize,
-    pub texture: usize,
+    pub process: String,
+    pub process_search: String,
     pub spot_look: usize,
     pub passes_shown: bool,
     pub penetration_shown: bool,
@@ -213,6 +196,7 @@ pub struct WeldPanelState {
     pub reference_plane: usize,
     pub notices: Vec<WeldNotice>,
     pub type_picker_open: bool,
+    pub tack_points: bool,
 }
 
 impl Default for WeldPanelState {
@@ -223,15 +207,14 @@ impl Default for WeldPanelState {
             picks: Picks::default(),
             size: SizeValues::default(),
             size_by_leg: false,
-            root_side: 0,
+            side: 0,
             face: Face::Convex,
             blend_toes: false,
             sheet_picked: false,
             tangent_chain: false,
-            flip_side: false,
-            pattern_count: "4".into(),
-            pattern_pitch: "40".into(),
-            edge_distance: "12".into(),
+            span_count: "4".into(),
+            span_pitch: "40".into(),
+            span_length: "10".into(),
             spans: false,
             both_sides: false,
             staggered: false,
@@ -239,25 +222,45 @@ impl Default for WeldPanelState {
             sharp_mitre: false,
             merge_crossing: true,
             different_halves: false,
-            tack: false,
             field_weld: false,
             all_around: false,
-            process: 0,
-            texture: 0,
+            process: "135".into(),
+            process_search: String::new(),
             spot_look: 0,
             passes_shown: false,
             penetration_shown: false,
             advanced_open: false,
-            density: "7850".into(),
-            overlap: "1.5".into(),
+            density: String::new(),
+            overlap: String::new(),
             reference_plane: 0,
             notices: Vec::new(),
             type_picker_open: false,
+            tack_points: false,
         }
     }
 }
 
 impl WeldPanelState {
+    pub fn where_kind(&self) -> WhereKind {
+        if self.weld_type == WeldType::Tack && self.tack_points { WhereKind::Point } else { self.weld_type.info().kind }
+    }
+    pub fn pick_type(&mut self, weld_type: WeldType) {
+        self.weld_type = weld_type;
+        self.process_search.clear();
+        self.face = match weld_type {
+            WeldType::Butt | WeldType::Plug => Face::Flat,
+            _ => Face::Convex,
+        };
+        self.process = match weld_type {
+            WeldType::Edge => "141",
+            WeldType::Spot => "21",
+            WeldType::Seam => "22",
+            WeldType::Stud => "78",
+            _ => "135",
+        }
+        .into();
+    }
+
     /// Board specimens; real callers supply their own references and notices.
     pub fn specimen(weld_type: WeldType, advanced: bool) -> Self {
         let labels = |ids: &[&str]| ids.iter().map(|id| tr(id).to_owned()).collect();
@@ -265,23 +268,20 @@ impl WeldPanelState {
             weld_type,
             advanced_open: advanced,
             sheet_picked: advanced,
-            tack: advanced,
             picks: Picks {
                 line: labels(&["ui.weld.pick.edge1", "ui.weld.pick.edge2"]),
                 groove: labels(&["ui.weld.pick.plate_a", "ui.weld.pick.plate_b"]),
                 point: labels(&["ui.weld.pick.point1", "ui.weld.pick.point2", "ui.weld.pick.point3"]),
                 hole: labels(&["ui.weld.pick.slot1"]),
-                ring: labels(&["ui.weld.pick.slot1", "ui.weld.pick.foot"]),
+                ring: labels(&["ui.weld.pick.foot"]),
                 area: labels(&["ui.weld.pick.face1", "ui.weld.pick.face2"]),
             },
             ..Self::default()
         };
+        state.pick_type(weld_type);
         match weld_type {
             WeldType::Fillet => state.notices = WeldNotice::fillet_samples(),
-            WeldType::Groove => {
-                state.face = Face::Flat;
-                state.process = 1;
-                state.texture = 1;
+            WeldType::Butt => {
                 state.notices = vec![
                     WeldNotice {
                         kind: NoticeKind::Refusal,
@@ -292,21 +292,6 @@ impl WeldPanelState {
                 ];
             }
             WeldType::Spot => state.notices.push(WeldNotice { kind: NoticeKind::Refusal, message: "ui.weld.notice.sheets", action: None }),
-            WeldType::Plug => {
-                state.face = Face::Flat;
-            }
-            WeldType::Stud => {
-                state.size.fill = "4".into();
-                state.process = 6;
-            }
-            WeldType::Overlay => {
-                state.process = 3;
-                state.texture = 3;
-            }
-            WeldType::FrictionStir => {
-                state.process = 5;
-                state.texture = 5;
-            }
             _ => {}
         }
         state

@@ -4,36 +4,38 @@ use solidcraft_geom::weld::{MAX_DIMENSION_MM, MIN_DIMENSION_MM, Weld};
 use std::collections::{BTreeMap, BTreeSet};
 pub const MAX_WELDS: usize = 1000;
 pub const MAX_PICKS: usize = 256;
-pub const TYPES: &[&str] = &[
-    "fillet",
-    "groove",
-    "groove_fillet",
-    "root_gap",
-    "edge",
-    "flanged_butt",
-    "flanged_corner",
-    "bead_line",
-    "seam_only",
-    "rip",
-    "spot",
-    "projection",
-    "fusion_spot",
-    "stake",
-    "plug",
-    "stud",
-    "res_seam",
-    "fusion_seam",
-    "overlay",
-    "friction",
-    "fsw",
-    "ultrasonic",
-    "explosion",
-    "diffusion",
-    "magnetic",
-    "cold",
-];
+pub const TYPES: &[&str] = &["fillet", "butt", "edge", "plug", "spot", "seam", "stud", "surfacing", "tack"];
 pub const PICK_KINDS: &[&str] = &["line", "groove", "point", "hole", "ring", "area"];
-pub const SIZE_KEYS: &[&str] = &["a", "z", "z1", "h", "s", "d", "fill", "collar", "t", "w"];
+pub const SIZE_KEYS: &[&str] = &["a", "z", "z1", "h", "s", "d", "fill", "w", "t", "l", "e"];
+/// Size names belonging to the chosen type.
+pub fn size_keys(weld_type: &str) -> &'static [&'static str] {
+    match weld_type {
+        "fillet" => &["a", "z", "z1"],
+        "butt" => &["h", "s"],
+        "edge" | "seam" => &["w"],
+        "plug" => &["fill"],
+        "spot" | "stud" => &["d"],
+        "surfacing" => &["t"],
+        "tack" => &["l", "e"],
+        _ => &[],
+    }
+}
+/// Intermittent elements; pitch is measured centre to centre in millimetres.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WeldSpans {
+    pub count: u32,
+    pub length_mm: f64,
+    pub pitch_mm: f64,
+}
+impl WeldSpans {
+    pub fn validate(&self) -> Result<(), String> {
+        if !(1..=10000).contains(&self.count) || ![self.length_mm, self.pitch_mm].into_iter().all(|v| v.is_finite() && v > 0.) {
+            return Err("spans need count 1..=10000 and positive finite length and pitch".into());
+        }
+        Ok(())
+    }
+}
 /// Fixed points or exact topology references in the body/index form used by other commands.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -77,67 +79,52 @@ pub struct WeldSettings {
     pub blend_toes: bool,
     pub sheet_picked: bool,
     pub tangent_chain: bool,
-    pub flip_side: bool,
-    pub spans: bool,
+    pub spans: Option<WeldSpans>,
     pub both_sides: bool,
     pub staggered: bool,
     pub sharp_mitre: bool,
     pub merge_crossing: bool,
     pub different_halves: bool,
-    pub tack: bool,
     pub field_weld: bool,
     pub all_around: bool,
     pub passes_shown: bool,
     pub penetration_shown: bool,
-    pub root_side: usize,
-    pub ends: usize,
-    pub process: usize,
-    pub texture: usize,
-    pub spot_look: usize,
-    pub reference_plane: usize,
-    pub pattern_count: f64,
-    pub pattern_pitch: f64,
-    pub edge_distance: f64,
-    pub density: f64,
-    pub overlap: f64,
+    pub side: String,
+    pub ends: String,
+    pub process: Option<String>,
+    pub spot_look: String,
+    pub reference_plane: String,
+    pub density: Option<f64>,
+    pub overlap: Option<f64>,
 }
 impl Default for WeldSettings {
     fn default() -> Self {
         Self {
             weld_type: "fillet".into(),
             picks: BTreeMap::new(),
-            size: [("a", 3.), ("z", 4.2), ("z1", 3.), ("h", 1.), ("d", 5.), ("fill", 20.), ("collar", 3.), ("t", 2.), ("w", 6.)]
-                .into_iter()
-                .map(|(k, v)| (k.into(), v))
-                .collect(),
+            size: [("a".into(), 3.)].into_iter().collect(),
             face: "convex".into(),
             size_by_leg: false,
             blend_toes: false,
             sheet_picked: false,
             tangent_chain: false,
-            flip_side: false,
-            spans: false,
+            spans: None,
             both_sides: false,
             staggered: false,
             sharp_mitre: false,
             merge_crossing: true,
             different_halves: false,
-            tack: false,
             field_weld: false,
             all_around: false,
             passes_shown: false,
             penetration_shown: false,
-            root_side: 0,
-            ends: 0,
-            process: 0,
-            texture: 0,
-            spot_look: 0,
-            reference_plane: 0,
-            pattern_count: 4.0,
-            pattern_pitch: 40.0,
-            edge_distance: 12.0,
-            density: 7850.0,
-            overlap: 1.5,
+            side: "arrow".into(),
+            ends: "square".into(),
+            process: None,
+            spot_look: "marks".into(),
+            reference_plane: "sketch".into(),
+            density: None,
+            overlap: None,
         }
     }
 }
@@ -151,7 +138,7 @@ impl WeldSettings {
         }
         if self.size.is_empty()
             || self.size.len() > SIZE_KEYS.len()
-            || self.size.iter().any(|(k, v)| !SIZE_KEYS.contains(&k.as_str()) || !dimension(*v))
+            || self.size.iter().any(|(k, v)| !size_keys(&self.weld_type).contains(&k.as_str()) || !dimension(*v))
         {
             return Err("size values must be between 1e-6 and 100000 mm with known size keys".into());
         }
@@ -164,29 +151,24 @@ impl WeldSettings {
         for pick in self.picks.values().flatten() {
             pick.validate()?;
         }
-        if self.root_side > 1 {
-            return Err("invalid root_side".into());
+        for (name, value, allowed) in [
+            ("side", self.side.as_str(), &["arrow", "other"][..]),
+            ("ends", self.ends.as_str(), &["square", "tapered", "rounded"][..]),
+            ("spot_look", self.spot_look.as_str(), &["marks", "ball", "marks_ball", "marks_pin", "pin", "dent"][..]),
+            ("reference_plane", self.reference_plane.as_str(), &["sketch"][..]),
+        ] {
+            if !allowed.contains(&value) {
+                return Err(format!("unknown {name}"));
+            }
         }
-        if self.ends > 2 {
-            return Err("invalid ends".into());
+        if self.process.as_ref().is_some_and(|p| !(1..=3).contains(&p.len()) || !p.bytes().all(|b| b.is_ascii_digit())) {
+            return Err("process must be 1-3 ASCII digits".into());
         }
-        if self.process > 6 {
-            return Err("invalid process".into());
+        if let Some(spans) = &self.spans {
+            spans.validate()?;
         }
-        if self.texture > 6 {
-            return Err("invalid texture".into());
-        }
-        if self.spot_look > 5 {
-            return Err("invalid spot_look".into());
-        }
-        if self.reference_plane != 0 {
-            return Err("invalid reference_plane".into());
-        }
-        if !self.pattern_count.is_finite() || self.pattern_count.fract() != 0. || !(1.0..=10000.0).contains(&self.pattern_count) {
-            return Err("pattern count must be an integer between 1 and 10000".into());
-        }
-        if ![self.pattern_pitch, self.edge_distance, self.overlap, self.density].into_iter().all(dimension) {
-            return Err("weld values must be finite and between 1e-6 and 100000".into());
+        if [self.density, self.overlap].into_iter().flatten().any(|v| !dimension(v)) {
+            return Err("density and overlap must be finite and between 1e-6 and 100000".into());
         }
         Ok(())
     }

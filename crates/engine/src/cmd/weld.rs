@@ -12,7 +12,7 @@ const DELETE: TypedContract<WeldDeleteParams> = TypedContract::new();
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("weld.create", "Weld", crate::checked!("weld.create", create)).begins_edit()
         .at("WELDMENTS", "CREATE").icon("weld").contract(&CREATE).output(output_schema_for::<WeldCreated>)
-        .params("weld_type: panel type id; picks?: grouped point or body/index edge/face references; size?: {a,z,z1,h,s,d,fill,collar,t,w: length expr}; face?, extent/sides, flags, look; symbol?: manual weld symbol → id, number"),
+        .params("weld_type: fillet|butt|edge|plug|spot|seam|stud|surfacing|tack; size?: type-specific {a,z,z1,h,s,d,fill,w,t,l,e: length expr}; picks?: grouped exact references; side?: arrow|other; process?: ISO 4063 text; density?, overlap?: optional expressions; spans?: {count,length_mm,pitch_mm}; ends?, spot_look?, reference_plane?: names; symbol?: settings symbol → id, number"),
     CommandSpec::new("weld.delete", "Delete Weld", crate::checked!("weld.delete", delete))
         .icon("delete").contract(&DELETE).output(output_schema_for::<WeldDeleted>).params("id: weld graphic identity → deleted"),
 ];
@@ -51,6 +51,22 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
     }
+    // Omitted sizes use just the chosen type's basic fields, never the fillet default.
+    if !raw.contains_key("size") {
+        let sizes = match raw.get("weld_type").and_then(Value::as_str) {
+            Some("butt") => serde_json::json!({"h":1}),
+            Some("edge" | "seam") => serde_json::json!({"w":6}),
+            Some("plug") => serde_json::json!({"fill":20}),
+            Some("spot" | "stud") => serde_json::json!({"d":5}),
+            Some("surfacing") => serde_json::json!({"t":2}),
+            Some("tack") => serde_json::json!({"l":5,"e":40}),
+            _ => serde_json::json!({"a":3}),
+        };
+        raw.insert("size".into(), sizes);
+    }
+    if !raw.contains_key("face") && raw.get("weld_type").and_then(Value::as_str).is_some_and(|t| matches!(t, "butt" | "plug")) {
+        raw.insert("face".into(), serde_json::json!("flat"));
+    }
     if let Some(size) = raw.get("size") {
         let values = size.as_object().ok_or_else(|| bad(CMD, "size must be an object"))?;
         if values.len() > solidcraft_doc::weld::SIZE_KEYS.len() {
@@ -64,20 +80,12 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
         }
         raw.insert("size".into(), Value::Object(evaluated));
     }
-    if raw.contains_key("pattern_count") {
-        let expr = req_expr(CMD, p, "pattern_count")?;
-        let value = s.doc.eval(&expr, Kind::Unitless).map_err(|e| bad(CMD, e.to_string()))?;
-        raw.insert("pattern_count".into(), serde_json::json!(value));
-    }
-    if raw.contains_key("pattern_pitch") {
-        let expr = req_expr(CMD, p, "pattern_pitch")?;
-        let value = s.doc.eval(&expr, Kind::Length).map_err(|e| bad(CMD, e.to_string()))?;
-        raw.insert("pattern_pitch".into(), serde_json::json!(value));
-    }
-    if raw.contains_key("edge_distance") {
-        let expr = req_expr(CMD, p, "edge_distance")?;
-        let value = s.doc.eval(&expr, Kind::Length).map_err(|e| bad(CMD, e.to_string()))?;
-        raw.insert("edge_distance".into(), serde_json::json!(value));
+    if let Some(spans) = raw.get_mut("spans") {
+        for key in ["length_mm", "pitch_mm"] {
+            let expr = req_expr(CMD, spans, key)?;
+            let value = s.doc.eval(&expr, Kind::Length).map_err(|e| bad(CMD, e.to_string()))?;
+            spans[key] = serde_json::json!(value);
+        }
     }
     if raw.contains_key("density") {
         let expr = req_expr(CMD, p, "density")?;

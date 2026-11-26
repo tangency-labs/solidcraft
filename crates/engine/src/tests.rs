@@ -71,11 +71,11 @@ mod weld_tests {
         for id in solidcraft_doc::weld::TYPES {
             s.execute("weld.create", &json!({"weld_type":id})).unwrap();
         }
-        assert_eq!(s.doc.welds.len(), 26);
+        assert_eq!(s.doc.welds.len(), solidcraft_doc::weld::TYPES.len());
         let id = s.doc.welds[0].id;
         assert_eq!(s.execute("weld.delete", &json!({"id":id})).unwrap()["deleted"], id);
         s.execute("edit.undo", &json!({})).unwrap();
-        assert_eq!(s.doc.welds.len(), 26);
+        assert_eq!(s.doc.welds.len(), solidcraft_doc::weld::TYPES.len());
         assert_eq!(s.doc.welds[0].id, id);
     }
     #[test]

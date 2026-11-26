@@ -45,7 +45,7 @@ pub(super) fn show(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens, m: &mut 
                 }
                 SizeFigure::Fillet
             }
-            WeldType::Groove => {
+            WeldType::Butt => {
                 rows.push(SizeRow { name: "h", value: &mut values.h, hint: None });
                 rows.push(SizeRow { name: "s", value: &mut values.s, hint: Some("ui.weld.size.full_depth") });
                 SizeFigure::Groove
@@ -59,23 +59,21 @@ pub(super) fn show(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens, m: &mut 
                 SizeFigure::Plug
             }
             WeldType::Stud => {
-                rows.push(SizeRow { name: "collar", value: &mut values.collar, hint: None });
-                rows.push(SizeRow { name: "fill", value: &mut values.fill, hint: None });
+                rows.push(SizeRow { name: "d", value: &mut values.d, hint: None });
                 SizeFigure::Stud
             }
-            WeldType::Overlay => {
+            WeldType::Surfacing => {
                 rows.push(SizeRow { name: "t", value: &mut values.t, hint: None });
                 SizeFigure::Overlay
             }
-            _ => {
+            WeldType::Tack => {
+                rows.push(SizeRow { name: "l", value: &mut values.l, hint: None });
+                rows.push(SizeRow { name: "e", value: &mut values.e, hint: None });
+                SizeFigure::Fillet
+            }
+            WeldType::Edge | WeldType::Seam => {
                 rows.push(SizeRow { name: "w", value: &mut values.w, hint: None });
-                match state.weld_type.info().kind {
-                    WhereKind::Line => SizeFigure::Fillet,
-                    WhereKind::Point => SizeFigure::Spot,
-                    WhereKind::Hole => SizeFigure::Plug,
-                    WhereKind::Ring => SizeFigure::Stud,
-                    WhereKind::Area => SizeFigure::Overlay,
-                }
+                SizeFigure::Fillet
             }
         };
         let fw = figure_width(t);
@@ -86,8 +84,7 @@ pub(super) fn show(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens, m: &mut 
             .map(|row| row.hint.map(|id| ui.painter().layout(tr(id).into(), FontId::proportional(t.font_small), t.form_dim, column_width)))
             .collect();
         let heights: Vec<_> = hints.iter().map(|hint| t.control_height + hint.as_ref().map_or(0.0, |g| t.space_2 + g.size().y)).collect();
-        let root_height = if state.weld_type == WeldType::Groove { t.space_16 + t.space_2 + t.control_height + row_gap } else { 0.0 };
-        let fields_height = heights.iter().sum::<f32>() + row_gap * rows.len().saturating_sub(1) as f32 + root_height;
+        let fields_height = heights.iter().sum::<f32>() + row_gap * rows.len().saturating_sub(1) as f32;
         let figure_height = fw * 120.0 / 176.0;
         let (body, _) = ui.allocate_exact_size(vec2(ui.available_width(), figure_height.max(fields_height)), Sense::hover());
         m.content = Some(body);
@@ -113,18 +110,6 @@ pub(super) fn show(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens, m: &mut 
             }
             m.fields.push(rect);
             y += height + row_gap;
-        }
-        if state.weld_type == WeldType::Groove {
-            let rect = Rect::from_min_size(pos2(column.left(), y), vec2(column_width, root_height));
-            let mut root = child(ui, rect, "root");
-            root.spacing_mut().item_spacing.y = t.space_2;
-            label(&mut root, "ui.weld.root_side", t, true);
-            kit::segmented(
-                &mut root,
-                &mut state.root_side,
-                &[tr("ui.weld.arrow"), tr("ui.weld.other")],
-                kit::Segments { compact: true, ..Default::default() },
-            );
         }
     });
 }

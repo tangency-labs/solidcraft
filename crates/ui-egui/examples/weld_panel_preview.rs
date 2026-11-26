@@ -21,7 +21,7 @@ impl Preview {
             dark: std::env::var_os("WELD_PREVIEW_DARK").is_some(),
             cards: [
                 WeldPanelState::specimen(WeldType::Fillet, false),
-                WeldPanelState::specimen(WeldType::Groove, false),
+                WeldPanelState::specimen(WeldType::Butt, false),
                 WeldPanelState::specimen(WeldType::Spot, false),
                 advanced,
             ],
