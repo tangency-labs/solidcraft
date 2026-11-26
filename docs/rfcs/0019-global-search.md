@@ -167,6 +167,10 @@ item's code. A stale snapshot shows its "as of" date.
 Each declared entry (a generator, a command) carries its own one-line description, used in its search row
 and in the MCP tool list (today every entry reuses the plugin's description).
 
+### 3.7 Provenance
+
+Rows for generators and Workshop items show the item's provenance badge: **Checked** (an automatic spec check against the datasheet), **Reviewed** (plus an independent named reviewer) or **Drawing-matched** (plus a match against the vendor's drawing). The declaration carries the badge level, and the Workshop index build sets it from the generated `PROVENANCE` record, so a manifest cannot claim more than was verified ([RFC 0017](0017-workshop.md), section 2.3.1). Nothing below **Checked** is published, so nothing below it is listed or found. Provenance does not change ranking; it is shown on the row beside the tier badge.
+
 ## 4. Phases
 
 1. **Global search over installed things** (no manifest change): the registry, the built-in sources,
