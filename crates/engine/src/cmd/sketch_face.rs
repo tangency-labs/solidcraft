@@ -5,6 +5,7 @@ use serde_json::Value;
 use solidcore_record::Plane;
 use solidcraft_doc::{EmbossFace, PlaneRef, apply_point, apply_vector, mat_inverse, mat_mul};
 use solidcraft_geom::prelude::*;
+use solidcraft_kernel::SketchPlane;
 
 pub(in crate::cmd) fn is_face(p: &Value) -> bool {
     p.get("plane").and_then(|plane| plane.get("face")).is_some()
@@ -196,13 +197,23 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool, use_index
                 if requested_index.is_some_and(|requested| requested != index) {
                     continue;
                 }
-                let Some(exact_plane) = (if fixed {
+                let known = if fixed {
                     body.body.planar_face(index).or_else(|| body.body.face_plane(index))
                 } else {
                     body.body.face_plane(index).or_else(|| body.body.planar_face(index))
-                }) else {
-                    curved = true;
-                    continue;
+                };
+                // A blend or a revolution the kernel finds flat is a plane too, as New Sketch's
+                // picker takes it (`Body::sketch_plane_of_face`); the other faces are as before.
+                let exact_plane = match known.map(SketchPlane::Flat).unwrap_or_else(|| body.body.sketch_plane_of_face(index)) {
+                    SketchPlane::Flat(plane) => plane,
+                    SketchPlane::NotFlat => {
+                        curved = true;
+                        continue;
+                    }
+                    SketchPlane::Undecided => {
+                        unread.get_or_insert_with(|| "the kernel was stopped before it decided this face".to_string());
+                        continue;
+                    }
                 };
                 let normal = exact_plane.normal();
                 let on_plane = exact_plane.origin;
