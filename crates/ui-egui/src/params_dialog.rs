@@ -1632,7 +1632,12 @@ impl ui_kit::Expressions for DocExpressions {
 
     fn unit_is_prefix(&self, unit: &str) -> bool {
         let unit = if unit == "μ" { "µ" } else { unit };
-        !unit.is_empty() && solidcraft_engine::doc::expr::UNITS.iter().any(|(name, _, _)| *name != unit && name.starts_with(unit))
+        // Only a unit the typing can still reach with letters counts: `mm` is complete although
+        // `mm²` and `mm³` start with it.
+        !unit.is_empty()
+            && solidcraft_engine::doc::expr::UNITS
+                .iter()
+                .any(|(name, _, _)| name.strip_prefix(unit).is_some_and(|rest| !rest.is_empty() && rest.chars().all(char::is_alphabetic)))
     }
 
     fn complete(&self, ui: &mut egui::Ui, response: &egui::Response, text: &mut String) -> bool {

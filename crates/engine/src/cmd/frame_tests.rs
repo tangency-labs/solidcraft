@@ -5460,19 +5460,20 @@ fn multi_trim_undoes() {
 
 #[test]
 fn the_gap_follows_its_parameter() {
-    // Review Focus 3. A mitred end set back by gap g loses g/√2 of length (half of g square to the 45° plane): the
+    // Review Focus 3. The parameter is `gap` because `g` is the gram unit.
+    // A mitred end set back by gap g loses g/√2 of length (half of g square to the 45° plane): the
     // frame's gap g everywhere, and 2g at the corner (0, 0) set with `frame.multi_trim`.
     let mut s = Session::default();
-    run(&mut s, "parameters.add", json!({"name": "g", "expression": "2 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "2 mm"}));
     rectangle_frame(&mut s);
     let (bottom, left) = (line_at_y(&s, "Frame", 0.0), line_at_x(&s, "Frame", 0.0));
     let (top, right) = (line_at_y(&s, "Frame", 400.0), line_at_x(&s, "Frame", 600.0));
     let names = json!({bottom.clone(): "B", left.clone(): "L", top: "T", right: "R"});
-    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": bar45(), "corner": "mitre", "gap": "g", "names": names, "name": "Rect"}));
-    run(&mut s, "frame.multi_trim", json!({"feature": "Rect", "members": [bottom, left], "kind": "mitre", "gap": "2 * g"}));
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": bar45(), "corner": "mitre", "gap": "gap", "names": names, "name": "Rect"}));
+    run(&mut s, "frame.multi_trim", json!({"feature": "Rect", "members": [bottom, left], "kind": "mitre", "gap": "2 * gap"}));
     let r2 = 2f64.sqrt();
     for g in [2.0, 4.0] {
-        run(&mut s, "parameters.change", json!({"name": "g", "expression": format!("{g} mm")}));
+        run(&mut s, "parameters.change", json!({"name": "gap", "expression": format!("{g} mm")}));
         let got = blrt(&mut s);
         for (k, (l, ends)) in [(600.0, 3.0 * g), (400.0, 3.0 * g), (600.0, 2.0 * g), (400.0, 2.0 * g)].into_iter().enumerate() {
             assert!(rel(got[k], 2025.0 * (l - ends / r2)) < 1e-6, "g {g}, {k}: {got:?}");
