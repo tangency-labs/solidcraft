@@ -3168,7 +3168,7 @@ pub fn side_along(
             let binormal =
                 evaluate_binormal(k, b, eu, t, true, &BinormalOptions::default())?.binormal;
             let len = mid.length() * binormal.length();
-            if !(len > 0.0) {
+            if len.is_nan() || len <= 0.0 {
                 continue;
             }
             let c = mid.dot(binormal) / len;
