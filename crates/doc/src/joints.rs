@@ -3046,6 +3046,22 @@ fn bounded_step(damped: &linalg::Mat, g: &[f64], x: &[f64], bounds: &[(f64, f64)
     last
 }
 
+/// Why joint `j` can move neither of its parts when both are held in place, the root or grounded
+/// occurrences (`None` otherwise): "both its parts are grounded (Bin:1, Cover:1), so it can move
+/// neither".
+pub fn both_held(doc: &Document, j: &Joint) -> Option<String> {
+    let (a, b) = (j.a.occurrence, j.b.occurrence);
+    let grounded = |o: u64| doc.occurrences.iter().any(|x| x.id == o && x.grounded);
+    if a == b || !(a == 0 || grounded(a)) || !(b == 0 || grounded(b)) {
+        return None;
+    }
+    let name = |o: u64| {
+        if o == 0 { "the root".to_string() } else { doc.occurrences.iter().find(|x| x.id == o).map_or_else(|| o.to_string(), |x| x.name.clone()) }
+    };
+    let held = if a == 0 || b == 0 { "held in place" } else { "grounded" };
+    Some(format!("both its parts are {held} ({}, {}), so it can move neither", name(a), name(b)))
+}
+
 /// Place occurrences from the joint graph.
 pub fn solve(doc: &Document, st: &ModelState) -> Solution {
     solve_holding(doc, st, &BTreeMap::new())
@@ -3114,11 +3130,11 @@ pub fn solve_holding_with_analysis(doc: &Document, st: &ModelState, held: &Held,
         // Measured at the joint, where the loop solver closes it.
         let (dt, da) = mismatch(&mat_mul(&want, &frames.b), &mat_mul(tb, &frames.b));
         if dt > CONFLICT_MM || da > CONFLICT_RAD {
-            sol.conflicts.push((
-                j.id,
-                j.name.clone(),
-                format!("off by {dt:.4} mm and {:.3}° from the placement the other joints give", da.to_degrees()),
-            ));
+            // Two grounded parts (or a grounded part and the root) close a loop with nothing on
+            // it to move: that, not the other joints, is why it doesn't hold (#12867).
+            let why = both_held(doc, j)
+                .unwrap_or_else(|| format!("off by {dt:.4} mm and {:.3}° from the placement the other joints give", da.to_degrees()));
+            sol.conflicts.push((j.id, j.name.clone(), why));
         } else if stuck.contains(id) {
             // It meets there, but the loop would have to come apart on the way (a rocker
             // driven a full turn ends where it started).

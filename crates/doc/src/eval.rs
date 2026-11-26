@@ -2107,8 +2107,8 @@ fn fingerprint(doc: &Document, prev: u64, f: &Feature, vals: &BTreeMap<String, V
         ("tolerance heal", "off").hash(&mut h);
     }
     // An import whose checks healed its parts is the healed import ([`ImportDigests::heals`]).
-    if let Some(heals) = steps.heals(f.id) {
-        heals.digest().hash(&mut h);
+    if let Some(digest) = steps.heal_digest(f.id) {
+        digest.hash(&mut h);
     }
     if matches!(f.kind, FeatureKind::FrameMember { .. }) {
         // Older cached member bodies do not have line provenance; rebuild them once.
@@ -2129,6 +2129,33 @@ fn fingerprint(doc: &Document, prev: u64, f: &Feature, vals: &BTreeMap<String, V
     h.finish()
 }
 
+/// The healed state of an import feature in [`ImportDigests`].
+#[derive(Clone, Debug)]
+enum ImportHeal {
+    /// Healed bodies in memory, produced by SMLib's background check in this process.
+    Bodies(Arc<kernel::ImportHeals>),
+    /// Only the heal digest, restored from a saved model cache. The adopted states already hold
+    /// the healed bodies; if the import feature itself must be evaluated again, this entry is
+    /// dropped first so it evaluates cleanly and its check heals it again.
+    Digest(u64),
+}
+
+impl ImportHeal {
+    fn digest(&self) -> u64 {
+        match self {
+            ImportHeal::Bodies(h) => h.digest(),
+            ImportHeal::Digest(d) => *d,
+        }
+    }
+
+    fn bodies(&self) -> Option<&Arc<kernel::ImportHeals>> {
+        match self {
+            ImportHeal::Bodies(h) => Some(h),
+            ImportHeal::Digest(_) => None,
+        }
+    }
+}
+
 /// Content digests for embedded imports. Shared, unchanged arrays/text are read once;
 /// feature metadata is still fingerprinted on every evaluation. Rebuilding this map prunes
 /// removed features and never trusts an address without retaining and checking its Arc.
@@ -2142,7 +2169,7 @@ struct ImportDigests {
     /// first shown: [`Model::settle_import_checks`]), by import feature, with the digest of the
     /// text they were read from: the import is then its healed bodies, and its fingerprint (and
     /// so every fingerprint after it) says so. Kept while the feature's text is the same.
-    heals: std::collections::HashMap<u64, (u64, Arc<kernel::ImportHeals>)>,
+    heals: std::collections::HashMap<u64, (u64, ImportHeal)>,
     /// Evaluated with the tolerance heal preference off: imports and Repair features say so in
     /// their fingerprints ([`fingerprint`]), so turning the preference either way evaluates them
     /// again. Nothing is added with it on, so the fingerprints saved before it stand.
@@ -2204,9 +2231,19 @@ impl ImportDigests {
         out
     }
 
-    /// The heals the import `id` is evaluated with, if its checks healed its parts.
+    /// The heals the import `id` is evaluated with, if its checks healed its parts in memory.
     fn heals(&self, id: u64) -> Option<&Arc<kernel::ImportHeals>> {
-        self.heals.get(&id).map(|(_, heals)| heals)
+        self.heals.get(&id).and_then(|(_, heals)| heals.bodies())
+    }
+
+    /// The digest of the heals applied to import `id` (whether in memory or restored from a cache).
+    fn heal_digest(&self, id: u64) -> Option<u64> {
+        self.heals.get(&id).map(|(_, heals)| heals.digest())
+    }
+
+    /// Whether `id` only carries a heal digest restored from a saved model cache (no bodies in memory).
+    fn has_digest_only_heal(&self, id: u64) -> bool {
+        self.heals.get(&id).is_some_and(|(_, heals)| matches!(heals, ImportHeal::Digest(_)))
     }
 
     fn get(&self, id: u64, step: &Arc<str>) -> Option<u64> {
@@ -4995,7 +5032,7 @@ impl Model {
             // The read that brings healed parts in checks and heals the file again: that run ends
             // with the heals the model already has, and is not news.
             let heals = run.heals();
-            let known = heals.as_ref().is_some_and(|h| digests.heals(r.id).is_some_and(|k| k.digest() == h.digest()));
+            let known = heals.as_ref().is_some_and(|h| digests.heal_digest(r.id) == Some(h.digest()));
             // With the heal preference off, a run that healed (begun while it was on) is not taken,
             // nor its notes (the heal's note over the part as read): the run is dropped, so no
             // view of the report shows them, and the import is read again.
@@ -5009,7 +5046,7 @@ impl Model {
                 && !known
                 && let Some((_, text)) = digests.steps.get(&r.id)
             {
-                digests.heals.insert(r.id, (*text, heals));
+                digests.heals.insert(r.id, (*text, ImportHeal::Bodies(heals)));
                 stale_from = Some(stale_from.map_or(i, |s| s.min(i)));
             }
             let fresh = !known && run.issues().is_some_and(|i| !i.is_empty()) && !told.iter().any(|(id, t)| *id == r.id && t == run);
@@ -5036,6 +5073,7 @@ impl Model {
     }
 
     /// Some import is its bodies as its checks healed them ([`Self::settle_import_checks`]).
+    #[cfg(test)]
     pub(crate) fn has_import_heals(&self) -> bool {
         !self.import_digests.heals.is_empty()
     }
@@ -5483,7 +5521,7 @@ impl Model {
                 };
                 // Opening was cancelled: the rest is skipped and the result discarded.
                 let cancelled = watched.step(i);
-                let fp = chain_fingerprint(eval_doc, &vals, f, prev_fp, rolled_back, &self.import_digests, Some(&state));
+                let mut fp = chain_fingerprint(eval_doc, &vals, f, prev_fp, rolled_back, &self.import_digests, Some(&state));
                 prev_fp = fp;
                 let pose = pose_only(f).then(|| placement_digest(eval_doc, f, Some(&state)));
                 if let Some(pose) = pose {
@@ -5585,7 +5623,7 @@ impl Model {
                     continue;
                 }
                 // The same feature on the same inputs: its earlier result.
-                let key = EvalKey::new(eval_doc, &vals, f, fp, ctx, shared_ctx, &state, &self.import_digests);
+                let mut key = EvalKey::new(eval_doc, &vals, f, fp, ctx, shared_ctx, &state, &self.import_digests);
                 // A check that refused this feature's bodies on these inputs after its evaluation
                 // returned: it fails as it would have failed there.
                 if let Some(c) = carried.as_ref().filter(|c| c.id == f.id && c.key == key.whole) {
@@ -5675,15 +5713,31 @@ impl Model {
                 }
                 // Or what it changed when what it reads was as it is now, made again on the rest of the
                 // model as it is now. Never in place of a result a check refused.
+                let (hit_relative, reused) = {
+                    let reads = key.reads.as_ref().filter(|_| {
+                        !self.no_cache && checks.refused_at(i).is_none() && param_names(f).iter().all(|n| !self.param_errors.contains_key(n))
+                    });
+                    let relative = reads.and(key.relative);
+                    let change_at = |k: u64| self.cache.lock().ok().and_then(|mut m| m.change(k));
+                    let by_relative = relative.and_then(change_at).and_then(|c| state.with_relative(&c.state, f.id).map(|next| (next, c)));
+                    let hit_relative = by_relative.is_some();
+                    let reused = by_relative
+                        .or_else(|| reads.and_then(|(k, _)| change_at(*k)).and_then(|c| state.with_change(&c.state, f.id).map(|next| (next, c))));
+                    (hit_relative, reused)
+                };
+                // An import restored from a saved model cache carries only its heal digest, not
+                // the healed bodies in memory. If the import itself must be evaluated again, drop
+                // that digest so it evaluates unhealed and its check can heal and settle it anew.
+                if reused.is_none() && self.import_digests.has_digest_only_heal(f.id) {
+                    self.import_digests.heals.remove(&f.id);
+                    fp = chain_fingerprint(eval_doc, &vals, f, prev_fp_in, rolled_back, &self.import_digests, Some(&state));
+                    prev_fp = fp;
+                    key = EvalKey::new(eval_doc, &vals, f, fp, ctx, shared_ctx, &state, &self.import_digests);
+                }
                 let reads = key.reads.as_ref().filter(|_| {
                     !self.no_cache && checks.refused_at(i).is_none() && param_names(f).iter().all(|n| !self.param_errors.contains_key(n))
                 });
                 let relative = reads.and(key.relative);
-                let change_at = |k: u64| self.cache.lock().ok().and_then(|mut m| m.change(k));
-                let by_relative = relative.and_then(change_at).and_then(|c| state.with_relative(&c.state, f.id).map(|next| (next, c)));
-                let hit_relative = by_relative.is_some();
-                let reused = by_relative
-                    .or_else(|| reads.and_then(|(k, _)| change_at(*k)).and_then(|c| state.with_change(&c.state, f.id).map(|next| (next, c))));
                 // Each feature computed is a profiler span named after its kind.
                 let _feature_span = solidcraft_profile::span("feature", f.kind.type_name());
                 let before = state.clone();
@@ -6839,7 +6893,49 @@ fn absorb_sheet_cuts(
             *slot = sk;
         }
     }
+    note_press_in_hardware(doc, before, after, f, warning);
     Ok(())
+}
+
+/// Press-in hardware a hole made in a sheet (#17752): what the sheet can't hold is a warning,
+/// never an error (a change of gauge or of a bend must not break the timeline), and the holes it
+/// cut are kept as the hardware's, for the flat pattern. Every sheet the feature changed is read,
+/// whether it was cut straight into (a hole's prism) or built again from the body.
+fn note_press_in_hardware(doc: &Document, before: &ModelState, after: &mut ModelState, f: &Feature, warning: &mut Option<String>) {
+    let hardware = match crate::sheet_hardware::hardware_source(doc, f, 0) {
+        crate::sheet_hardware::Source::One(hardware) => hardware,
+        crate::sheet_hardware::Source::None => return,
+        // Copies of a hardware hole beside a plain hole, or of different hardware: each copy is cut, none is
+        // recorded as hardware (a plain hole's copy is no nut), and that is said.
+        crate::sheet_hardware::Source::Mixed => {
+            let changed = after
+                .surface_sheets
+                .iter()
+                .any(|sk| before.surface_sheets.iter().find(|b| b.body == sk.body).is_none_or(|o| o.regions != sk.regions));
+            if changed {
+                append_warning(
+                    warning,
+                    format!(
+                        "{} copies holes for different press-in hardware, or a plain hole with it: the copies are not recorded as hardware (copy each kind in a pattern of its own)",
+                        f.name
+                    ),
+                );
+            }
+            return;
+        }
+    };
+    let length = hardware.length.as_ref().and_then(|e| doc.eval(e, Kind::Length).ok());
+    for sk in after.surface_sheets.iter_mut() {
+        let old = before.surface_sheets.iter().find(|b| b.body == sk.body);
+        if old.is_some_and(|o| o.regions == sk.regions) {
+            continue;
+        }
+        for note in crate::sheet_hardware::findings(old, sk, hardware) {
+            append_warning(warning, note);
+        }
+        let marks = crate::sheet_hardware::marks(old, sk, f.id, hardware, length);
+        sk.hardware.extend(marks);
+    }
 }
 
 /// Whether feature `f` takes material away (see [`absorb_sheet_cuts`]): a hole, a chamfer or
@@ -8739,7 +8835,15 @@ fn blend_bodies(st: &ModelState, f: &Feature, body: &Option<crate::BodyName>, pt
 /// The edges `idx` of blend `f` found on body `mb`: by name, where the edge was stored with one.
 /// A name that no longer finds exactly its edge fails the blend, asking for the edge to be picked
 /// again; so does a name a build stored for the wrong body (see `trusted_edge_name`).
-fn blend_edges_on(mb: &ModelBody, f: &Feature, edges: &[crate::Position], idx: &[usize], warning: &mut Option<String>) -> Result<Vec<Vec3>> {
+/// `placed`: an earlier feature can have moved the body whole ([`bodies_placed_before`]).
+fn blend_edges_on(
+    mb: &ModelBody,
+    f: &Feature,
+    edges: &[crate::Position],
+    idx: &[usize],
+    placed: bool,
+    warning: &mut Option<String>,
+) -> Result<Vec<Vec3>> {
     let pick = |i: usize| edges.get(i).map(|p| p.0).unwrap_or(Vec3::ZERO);
     if !f.edge_names.iter().any(|n| !n.is_empty()) {
         let pts: Vec<Vec3> = idx.iter().map(|i| pick(*i)).collect();
@@ -8765,12 +8869,14 @@ fn blend_edges_on(mb: &ModelBody, f: &Feature, edges: &[crate::Position], idx: &
             }
             continue;
         };
-        // The body changed since the pick: the pick may now sit at an end of the edge.
-        let moved = f.edge_refs.get(i).is_some_and(|r| {
+        // The body changed since the pick: the pick may now sit at an end of the edge. `None`: no
+        // box was saved with the pick.
+        let moved_since = f.edge_refs.get(i).map(|r| {
             let now = mb.mesh().bounds();
             let tight = (mb.body.size() * 2e-3).max(1e-3);
             now.min.dist(r.min) > tight || now.max.dist(r.max) > tight
         });
+        let moved = moved_since.unwrap_or(false);
         let named = trusted_edge_name(f, i, p);
         let Some(hit) = named.and_then(|n| crate::name_lookup::locate_projected_edge(mb, n, p).ok()) else {
             // #21997: the saved whole closed edge can now exist as the pieces a whole-turn
@@ -8782,6 +8888,14 @@ fn blend_edges_on(mb: &ModelBody, f: &Feature, edges: &[crate::Position], idx: &
             out.extend(pieces.iter().map(|hit| if moved { off_the_ends(mb, hit.edge, hit.point) } else { hit.point }));
             notes.push(format!("the saved edge `{stored}` now exists as {} pieces; every piece is blended", pieces.len()));
             continue;
+        };
+        // On the body the pick was made on, a pick off the named edge and on one named alike but for
+        // its faces' tie numbers is that edge: the numbers moved, not the edge (#22230). An
+        // unchanged box does not show the body unmoved where an earlier feature places it whole.
+        let hit = match (hit.on_point, moved_since) {
+            (false, Some(false)) if !placed => crate::name_lookup::retied_edge(mb, &mb.mesh(), stored, hit.edge, p)
+                .map_or(hit, |edge| crate::name_lookup::EdgeHit { edge, point: p, verified: false, on_point: true }),
+            _ => hit,
         };
         if let Some(note) = hit.note(stored) {
             notes.push(note);
@@ -8796,6 +8910,19 @@ fn blend_edges_on(mb: &ModelBody, f: &Feature, edges: &[crate::Position], idx: &
         *warning = Some(notes.join("; "));
     }
     Ok(out)
+}
+
+/// Whether a feature of `doc` before `f` (or `f` not found in it) places bodies whole: a Move
+/// or an Align, or a pattern or mirror of bodies. Such a step can move a body and keep its box
+/// (half a turn about an axis through the box's centre), so the box saved with a pick does not
+/// show that the body has not moved since (#22230).
+fn bodies_placed_before(doc: &Document, f: &Feature) -> bool {
+    let Some(end) = doc.feature_index(f.id) else { return true };
+    doc.features.iter().take(end).filter(|g| !g.suppressed).any(|g| match &g.kind {
+        FeatureKind::Move { .. } | FeatureKind::Align { .. } => true,
+        FeatureKind::Pattern { bodies, .. } | FeatureKind::Mirror { bodies, .. } => !bodies.is_empty(),
+        _ => false,
+    })
 }
 
 /// A point on edge `edge` of a body for the kernel to find it by: `p`, unless it lies at an end
@@ -10711,8 +10838,7 @@ fn feature_tools_with_constructor(
                     if (to - start).abs() < 1e-9 {
                         return Err(DocError::Invalid("the To object is where the extrude starts".into()));
                     }
-                    let moved = |p: &Plane, d: f64| Plane { origin: p.origin + n * d, ..*p };
-                    let (from_plane, to_plane) = (moved(fp, start_offset), moved(tp, to - h));
+                    let (from_plane, to_plane) = (kernel::plane_raised(&ss.plane, fp, start_offset)?, kernel::plane_raised(&ss.plane, tp, to - h)?);
                     // Planes that cross over the profiles would leave out the part of them where
                     // the To plane lies before the From one, chosen by where the middle falls.
                     if planes_cross_over(&from_plane, &to_plane, &ss.plane, &regions, to - start)? {
@@ -10991,7 +11117,7 @@ fn feature_tools_with_constructor(
                     tools = trim_between_planes(tools, fp, tp, n, d.signum())?;
                 } else if let Some(fp) = &from_slope {
                     let shift = off - from;
-                    tools = trim_between_slopes(tools, fp, n, lo + shift, hi + shift)?;
+                    tools = trim_between_slopes(tools, fp, &ss.plane, lo + shift, hi + shift)?;
                 }
             }
             // A cut or a join by profiles apart in the sketch (the letters of a text): each tool
@@ -16265,16 +16391,18 @@ fn slope_rise(slope: &Plane, plane: &Plane, regions: &[Region2], level: f64) -> 
     Ok(((lo - level).min(0.0), (hi - level).max(0.0)))
 }
 
-/// Each tool's part between `slope` moved `lo` and `hi` along `n` (the extrusion direction).
-fn trim_between_slopes(tools: Vec<Traced>, slope: &Plane, n: Vec3, lo: f64, hi: f64) -> Result<Vec<Traced>> {
-    let with_normal = n.dot(slope.normal()) > 0.0;
-    let moved = |d: f64| Plane { origin: slope.origin + n * d, ..*slope };
+/// Each tool's part between `slope` moved `lo` and `hi` along `plane`'s normal (the extrusion
+/// direction): the planes [`kernel::plane_raised`] moves it to, each cut on the side
+/// [`kernel::slab_sides`] keeps.
+fn trim_between_slopes(tools: Vec<Traced>, slope: &Plane, plane: &Plane, lo: f64, hi: f64) -> Result<Vec<Traced>> {
+    let (bottom, top) = (kernel::plane_raised(plane, slope, lo)?, kernel::plane_raised(plane, slope, hi)?);
+    let (past_bottom, short_of_top) = kernel::slab_sides(plane.normal(), &bottom, &top)?;
     let mut out = Vec::new();
     for t in &tools {
         // The two ends are named as a two-sided extrude's caps are, by the end they close:
         // both may lie on one side of the sketch plane, so their height can't tell them apart.
-        let Some(above) = half_space_traced(t, &moved(lo), with_normal, "bottom")? else { continue };
-        if let Some(part) = half_space_traced(&above, &moved(hi), !with_normal, "top")? {
+        let Some(above) = half_space_traced(t, &bottom, past_bottom, "bottom")? else { continue };
+        if let Some(part) = half_space_traced(&above, &top, short_of_top, "top")? {
             out.push(part);
         }
     }
@@ -16286,16 +16414,15 @@ fn trim_between_slopes(tools: Vec<Traced>, slope: &Plane, n: Vec3, lo: f64, hi: 
 
 /// Each tool's part past `from` and short of `to` along `n` times `sign` (the way the extrude
 /// runs; `n` is the sketch's normal): an extrude From one flat face To another (#18825). The ends
-/// are named as [`trim_between_slopes`] names them, `bottom` the one lower along `n`.
+/// are named as [`trim_between_slopes`] names them, `bottom` the one lower along `n`. Each cut
+/// keeps the side of its plane [`kernel::slab_sides`] gives.
 fn trim_between_planes(tools: Vec<Traced>, from: &Plane, to: &Plane, n: Vec3, sign: f64) -> Result<Vec<Traced>> {
-    let travel = n * sign;
+    let (past_from, short_of_to) = kernel::slab_sides(n * sign, from, to)?;
     let (from_cap, to_cap) = if sign > 0.0 { ("bottom", "top") } else { ("top", "bottom") };
     let mut out = Vec::new();
     for t in &tools {
-        // Past `from`: the side its normal points to when the travel runs with it. Short of `to`:
-        // the side its normal points to when the travel runs against it.
-        let Some(past) = half_space_traced(t, from, travel.dot(from.normal()) > 0.0, from_cap)? else { continue };
-        if let Some(part) = half_space_traced(&past, to, travel.dot(to.normal()) < 0.0, to_cap)? {
+        let Some(past) = half_space_traced(t, from, past_from, from_cap)? else { continue };
+        if let Some(part) = half_space_traced(&past, to, short_of_to, to_cap)? {
             out.push(part);
         }
     }
@@ -17626,10 +17753,11 @@ fn eval_feature_kind(
             let mut radius_of: BTreeMap<(usize, [u64; 3]), (usize, f64)> = BTreeMap::new();
             // (pick, the blended edge's middle, its radius), for pattern and mirror copies.
             let mut by_pick: Vec<(usize, Vec3, f64)> = Vec::new();
+            let placed = bodies_placed_before(doc, f);
             for (ti, idx) in &groups {
                 let Some(mb) = st.bodies.get(*ti) else { return Err(DocError::Invalid("body".into())) };
                 let mut w = None;
-                let resolved = blend_edges_on(mb, f, edges, idx, &mut w)?;
+                let resolved = blend_edges_on(mb, f, edges, idx, placed, &mut w)?;
                 if let Some(all) = &each_r {
                     if resolved.len() != idx.len() {
                         return Err(DocError::Invalid(

@@ -213,6 +213,7 @@ pub use shape::is_on_circle_rim;
 pub use shape::nearest_crossing;
 pub use shape::nearest_curve_intersection;
 pub use shape::point_on_segment_within;
+pub use shape::turned_to_axis;
 pub use shape::unit_direction;
 pub use solver::Analysis;
 pub use solver::CONSISTENT;

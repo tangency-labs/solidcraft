@@ -444,6 +444,13 @@ a new row takes the next number at its level. A row listed under another reads a
 - **Elsewhere:** item number, item, find number, balloon number.
 - **For translators:** a label, not a quantity or a count; not a part number.
 
+### lay
+
+The predominant pattern or direction of marks left on a manufactured surface.
+
+- **In SolidCraft:** `solidcraft_geom::surface_texture::Lay`, used by a surface texture indication.
+- **For translators:** use the manufacturing sense of direction and pattern.
+
 ### layout (pattern)
 
 How Pattern on Face lays its copies out on the faces it is given.
@@ -745,6 +752,14 @@ design, which then keeps a copy of its own. It is an app setting, not part of a 
 - **Elsewhere:** rule library, sheet metal style library.
 - **For translators:** "personal" as in the user's own, not private or confidential.
 
+### press-in hardware
+
+A nut, stud or standoff that is pressed into a punched hole in sheet metal and holds there without welding or a loose nut.
+
+- **In SolidCraft:** `sheet.hardware` cuts its mounting hole and records it in a Hole's `hardware` (`kind`: `nut`, `flush_nut`, `stud`, `standoff`; `thread`; `length`; `part`); sizes in `docs/hardware-catalogue.md`.
+- **Don't use:** insert, and a maker's product names.
+- **For translators:** a fastener fixed in the sheet itself, not a loose screw or a standard part inserted as a component (`parts.fastener`).
+
 ### print face
 
 The flat face of a body that lies on the print bed when the body is sent to a slicer.
@@ -903,6 +918,16 @@ flange slope.
 - **Don't use:** catalogue profile, library profile (for the size).
 - **Elsewhere:** standard section, section size, section designation.
 - **For translators:** a steel section's size by name, not a dimension and not a standard part.
+
+### surface texture indication
+
+A drawing requirement for the small-scale shape of a manufactured surface, expressed by
+parameters and a production-process symbol.
+
+- **In SolidCraft:** `solidcraft_geom::surface_texture::Indication`; the record retains its
+  standard, parameter limits, lay, process note and all-round intent.
+- **Don't use:** appearance, render material.
+- **For translators:** describes manufactured geometry and acceptance requirements.
 
 ### thin-film interference
 
