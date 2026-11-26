@@ -2971,6 +2971,75 @@ fn voronoi_cells_are_convex_inside_the_field_and_a_web_apart() {
     }
 }
 
+/// The hexagonal distance of lattice cell `(di, dj)` from cell `(0, 0)`: its ring.
+fn ring_of(di: i64, dj: i64) -> i64 {
+    di.abs().max(dj.abs()).max((di + dj).abs())
+}
+
+#[test]
+fn only_the_first_rings_of_sites_are_near_enough_to_cut_a_voronoi_cell() {
+    let lat = voronoi(0, 1.0, Clip::Free).lattice().unwrap();
+    let p = lat.p;
+    // At irregularity 1 a site is up to half a pitch from its centre, and a site cuts a cell
+    // only when nearer its site than twice the farthest a point of a cell can be.
+    let moved = p / 2.0;
+    let cuts_within = 2.0 * (p / 3f64.sqrt() + moved);
+    let nearest_in_ring = |ring: i64| {
+        let reach = ring + 2;
+        (-reach..=reach)
+            .flat_map(|di| (-reach..=reach).map(move |dj| (di, dj)))
+            .filter(|&(di, dj)| ring_of(di, dj) == ring)
+            .map(|(di, dj)| lat.center(di, dj).distance(lat.center(0, 0)))
+            .fold(f64::INFINITY, f64::min)
+    };
+    for ring in 1..=8 {
+        let nearest = nearest_in_ring(ring);
+        // The bound of the module docs: a ring is no nearer than its hexagon's sides.
+        assert!(
+            nearest >= ring as f64 * p * 3f64.sqrt() / 2.0 - 1e-9,
+            "ring {ring}: {nearest}"
+        );
+        let can_cut = nearest - 2.0 * moved < cuts_within;
+        assert_eq!(can_cut, ring <= voronoi::RINGS, "ring {ring}: {nearest}");
+    }
+}
+
+#[test]
+fn voronoi_cells_at_full_irregularity_are_cut_by_the_first_rings_alone() {
+    let tol = 1e-9;
+    for web in [0.001, W] {
+        for seed in 0..40 {
+            let spec = CellGridSpec {
+                web,
+                ..voronoi(seed, 1.0, Clip::Free)
+            };
+            let lat = spec.lattice().unwrap();
+            let far = lat.p / 3f64.sqrt() + lat.p / 2.0;
+            for i in -6..=6 {
+                for j in -6..=6 {
+                    let near = voronoi::cell_polygon(&lat, &spec, i, j);
+                    let wide = voronoi::cell_polygon_within(&lat, &spec, i, j, 8);
+                    let (Some((s, near)), Some((_, wide))) = (near, wide) else {
+                        panic!("seed {seed} cell ({i}, {j}): no cell");
+                    };
+                    assert!(
+                        (poly_area(&near) - poly_area(&wide)).abs() < tol,
+                        "seed {seed} cell ({i}, {j}): a site past ring {} cuts it",
+                        voronoi::RINGS
+                    );
+                    for q in &near {
+                        assert!(
+                            wide.iter().any(|v| v.distance(*q) < tol),
+                            "seed {seed} cell ({i}, {j}): corner {q:?}"
+                        );
+                        assert!(s.distance(*q) <= far + tol, "seed {seed} cell ({i}, {j})");
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn voronoi_cells_with_rounded_corners_are_smaller_and_as_many() {
     let field = [rect(0.0, 0.0, 40.0, 30.0)];

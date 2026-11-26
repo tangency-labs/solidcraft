@@ -12,10 +12,21 @@
 //! # A cell
 //! The points nearer its site than any other site, less half a web along every side: the site's
 //! starting square cut by one half-plane per neighbouring site, the bisector moved half a web
-//! towards the site. Every point of a cell is within `p / sqrt 3 + p / 2 < 1.08 p` of its site (as
-//! far as the farthest point of the plane from the lattice, and the site's move), so only sites
-//! within `2.16 p` cut it; a site of the fourth ring of neighbours is at least `2 sqrt 3 p - p` away,
-//! so the first [`RINGS`] rings are all of them.
+//! towards the site.
+//!
+//! # Which sites cut a cell
+//! A site is at most `d = irregularity * p / 2 <= p / 2` from its lattice centre, and no point of
+//! the plane is farther than `p / sqrt 3` from the nearest lattice centre. So every point has a
+//! site within `r = p / sqrt 3 + d`, and every point of a cell is within `r` of its own site. A
+//! bisector that meets the cell is therefore within `r` of the site: only sites nearer than
+//! `2 r <= 2.155 p` give the cell a side. Moving every bisector by the same half web adds no
+//! side: a point of the cell half a web or more from all its sides is that far from every other
+//! bisector too.
+//!
+//! The lattice centres of ring `k` (hexagonal distance `k`) are at least `k p sqrt 3 / 2` from
+//! the cell's centre, so their sites are at least `k p sqrt 3 / 2 - 2 d` from its site. At
+//! irregularity 1 that is `1.598 p` for ring 3, near enough to cut, and `2.464 p` for ring 4, too
+//! far: the first [`RINGS`] rings are all of them, at every irregularity.
 //!
 //! # Clipping
 //! A voronoi cell has no lattice lines: `Free` trims the cell to the field as drawn, `Whole` and
@@ -35,8 +46,9 @@ use super::{
     lattice_loops, points_to_prims, push, CellGridError, CellGridPlan, CellGridSpec, CellKind, Clip,
 };
 
-/// Rings of lattice neighbours a cell is cut against (see the module docs).
-const RINGS: i64 = 3;
+/// Rings of lattice neighbours a cell is cut against: enough at irregularity 1, the largest (see
+/// the module docs).
+pub(crate) const RINGS: i64 = 3;
 /// The starting square of a cell reaches this many pitches from its site, beyond every cut.
 const START_REACH: f64 = 4.0;
 /// Smallest area (mm²) of an opening kept.
@@ -83,6 +95,17 @@ pub(crate) fn cell_polygon(
     i: i64,
     j: i64,
 ) -> Option<(Vec2, Vec<Vec2>)> {
+    cell_polygon_within(lat, spec, i, j, RINGS)
+}
+
+/// [`cell_polygon`] cut against the sites of the first `rings` rings of neighbours.
+pub(crate) fn cell_polygon_within(
+    lat: &Lattice,
+    spec: &CellGridSpec,
+    i: i64,
+    j: i64,
+    rings: i64,
+) -> Option<(Vec2, Vec<Vec2>)> {
     let s = site(lat, spec, i, j);
     let reach = START_REACH * lat.p;
     let mut poly = vec![
@@ -91,11 +114,11 @@ pub(crate) fn cell_polygon(
         s + Vec2::new(reach, reach),
         s + Vec2::new(-reach, reach),
     ];
-    for di in -RINGS..=RINGS {
-        for dj in -RINGS..=RINGS {
+    for di in -rings..=rings {
+        for dj in -rings..=rings {
             // The hexagonal distance of the neighbour: its ring.
             let ring = di.abs().max(dj.abs()).max((di + dj).abs());
-            if ring == 0 || ring > RINGS {
+            if ring == 0 || ring > rings {
                 continue;
             }
             let t = site(lat, spec, i.checked_add(di)?, j.checked_add(dj)?);
